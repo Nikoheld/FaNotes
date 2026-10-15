@@ -75,8 +75,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -111,6 +114,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
@@ -342,6 +346,7 @@ fun FaNotesTheme(
         muted = Color(android.graphics.Color.parseColor(chrome.muted ?: palette.muted)),
         success = Color(android.graphics.Color.parseColor(chrome.success ?: palette.success)),
         warning = Color(android.graphics.Color.parseColor(chrome.warning ?: palette.warning)),
+        soft = Color(android.graphics.Color.parseColor(chrome.soft ?: palette.soft)),
     )
     val accent = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccent(accentHex)))
     val onAccent = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.accentInk(accentHex)))
@@ -1306,6 +1311,10 @@ private fun VaultPane(
                     dragPath = dragPath,
                     dropDest = dropDest,
                     onRowBounds = { box -> rowBounds[node.path] = box },
+                    onEmptyBounds = { path, box ->
+                        val key = "\u0000empty:$path"
+                        if (box == null) rowBounds.remove(key) else rowBounds[key] = box
+                    },
                     onDragStart = { path, folder ->
                         dragPath = path
                         dragFolder = folder
@@ -1365,6 +1374,7 @@ private fun NoteRow(
     dragPath: String?,
     dropDest: String?,
     onRowBounds: (TreeRowBox) -> Unit,
+    onEmptyBounds: (String, TreeRowBox?) -> Unit,
     onDragStart: (String, Boolean) -> Unit,
     onDrag: (String, Boolean, Float, Float) -> Unit,
     onDragEnd: () -> Unit,
@@ -1638,19 +1648,68 @@ private fun NoteRow(
         }
     }
     if (openFolder && node.children.isEmpty()) {
+        val actionInteraction = remember(node.path) { androidx.compose.foundation.interaction.MutableInteractionSource() }
+        val actionHot by actionInteraction.collectIsHoveredAsState()
+        val actionPressed by actionInteraction.collectIsPressedAsState()
+        val actionActive = actionHot || actionPressed
+        androidx.compose.runtime.DisposableEffect(node.path) {
+            onDispose { onEmptyBounds(node.path, null) }
+        }
         Row(
-            Modifier.padding(start = ((depth + 1) * 12).dp, top = 2.dp, bottom = 2.dp),
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = ch.fasrv.fanotes.desk.TREE_EMPTY_MIN_DP.dp)
+                .then(
+                    if (dropHere) {
+                        Modifier.border(
+                            1.dp,
+                            MaterialTheme.colorScheme.primary.copy(alpha = ch.fasrv.fanotes.desk.TREE_DROP_BORDER_ALPHA),
+                        )
+                    } else {
+                        Modifier
+                    },
+                )
+                .background(
+                    if (dropHere) MaterialTheme.colorScheme.primary.copy(alpha = ch.fasrv.fanotes.desk.TREE_DROP_ALPHA)
+                    else Color.Transparent,
+                )
+                .onGloballyPositioned {
+                    val bounds = it.boundsInRoot()
+                    onEmptyBounds(
+                        node.path,
+                        TreeRowBox(node.path, true, TreeBox(bounds.left, bounds.top, bounds.right, bounds.bottom)),
+                    )
+                }
+                .padding(start = ch.fasrv.fanotes.desk.treeEmptyIndentDp(depth).dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.TREE_EMPTY_GAP_DP.dp),
         ) {
-            Text("Leer", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
             Text(
-                "Unterordner anlegen",
+                "Leer",
                 fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .padding(start = 8.dp)
-                    .clickable(onClickLabel = "Unterordner anlegen") { onCreateFolderIn(node.path) },
+                fontStyle = FontStyle.Italic,
+                color = LocalStatusInk.current.muted,
             )
+            Box(
+                Modifier
+                    .height(ch.fasrv.fanotes.desk.TREE_EMPTY_ACTION_DP.dp)
+                    .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.TREE_EMPTY_ACTION_RADIUS_DP.dp))
+                    .background(if (actionActive) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+                    .clickable(
+                        interactionSource = actionInteraction,
+                        indication = null,
+                        onClickLabel = "Unterordner anlegen",
+                    ) { onCreateFolderIn(node.path) }
+                    .padding(horizontal = ch.fasrv.fanotes.desk.TREE_EMPTY_ACTION_PAD_DP.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "Unterordner anlegen",
+                    fontSize = 12.sp,
+                    fontStyle = FontStyle.Normal,
+                    color = if (actionActive) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft,
+                )
+            }
         }
     }
     if (openFolder) {
@@ -1663,6 +1722,7 @@ private fun NoteRow(
                 dragPath = dragPath,
                 dropDest = dropDest,
                 onRowBounds = onRowBounds,
+                onEmptyBounds = onEmptyBounds,
                 onDragStart = onDragStart,
                 onDrag = onDrag,
                 onDragEnd = onDragEnd,

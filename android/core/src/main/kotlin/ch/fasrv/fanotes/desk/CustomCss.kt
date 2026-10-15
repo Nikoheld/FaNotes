@@ -45,6 +45,7 @@ data class CustomChrome(
     val success: String? = null,
     val warning: String? = null,
     val muted: String? = null,
+    val soft: String? = null,
 )
 
 fun parseCustomChrome(css: String?): CustomChrome {
@@ -68,6 +69,7 @@ fun parseCustomChrome(css: String?): CustomChrome {
     var success: String? = null
     var warning: String? = null
     var muted: String? = null
+    var soft: String? = null
     for (match in CUSTOM_PROPERTY.findAll(source)) {
         val name = match.groupValues[1].lowercase()
         val raw = match.groupValues[2].trim()
@@ -90,12 +92,13 @@ fun parseCustomChrome(css: String?): CustomChrome {
             "success" -> cssColor(raw)?.let { success = it }
             "warning" -> cssColor(raw)?.let { warning = it }
             "text-muted" -> cssColor(raw)?.let { muted = it }
+            "text-soft" -> cssColor(raw)?.let { soft = it }
         }
     }
     return CustomChrome(
         accent, accentSecondary, background, surface, text, radiusDp, sidebarDp, panelDp,
         contentWidthPx, editorFontPx, previewFontPx, lineHeight, rowHeightDp,
-        danger, success, warning, muted,
+        danger, success, warning, muted, soft,
     )
 }
 

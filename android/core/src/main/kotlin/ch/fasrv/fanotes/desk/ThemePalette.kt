@@ -18,15 +18,16 @@ data class ThemePalette(
     val success: String,
     val warning: String,
     val muted: String,
+    val soft: String,
 )
 
 val THEME_PALETTES = listOf(
-    ThemePalette("dark", "Dunkel", "Graphit", true, "#191919", "#202020", "#333333", "#ededec", "#ff8d90", "#2f2f2f", "#5dcc78", "#e7b34a", "#b3b3ae"),
-    ThemePalette("light", "Hell", "Papier", false, "#ffffff", "#f7f6f3", "#ebeae6", "#37352f", "#c03543", "#ffffff", "#1f7a48", "#8a5a12", "#5e5c57"),
-    ThemePalette("midnight", "Mitternacht", "Schiefer", true, "#17181b", "#1e1f23", "#32343a", "#e8e9ec", "#ff8d90", "#2a2c31", "#5dcc78", "#e7b34a", "#b0b2b8"),
-    ThemePalette("forest", "Wald", "Stein", true, "#171a18", "#1e221f", "#323833", "#e7ebe8", "#ff8d90", "#2a2f2c", "#5dcc78", "#e7b34a", "#aeb5b0"),
-    ThemePalette("aurora", "Aurora", "Nebel", true, "#18181c", "#1f1f24", "#34343c", "#e8e8ed", "#ff8d90", "#2c2c33", "#5dcc78", "#e7b34a", "#afafb7"),
-    ThemePalette("sepia", "Studierzimmer", "Warm", false, "#fbfaf7", "#f4f1ea", "#ebe6dc", "#37352f", "#c03543", "#fffdf8", "#1f7a48", "#8a5a12", "#615c54"),
+    ThemePalette("dark", "Dunkel", "Graphit", true, "#191919", "#202020", "#333333", "#ededec", "#ff8d90", "#2f2f2f", "#5dcc78", "#e7b34a", "#b3b3ae", "#cfcfca"),
+    ThemePalette("light", "Hell", "Papier", false, "#ffffff", "#f7f6f3", "#ebeae6", "#37352f", "#c03543", "#ffffff", "#1f7a48", "#8a5a12", "#5e5c57", "#4e4c47"),
+    ThemePalette("midnight", "Mitternacht", "Schiefer", true, "#17181b", "#1e1f23", "#32343a", "#e8e9ec", "#ff8d90", "#2a2c31", "#5dcc78", "#e7b34a", "#b0b2b8", "#c8c9ce"),
+    ThemePalette("forest", "Wald", "Stein", true, "#171a18", "#1e221f", "#323833", "#e7ebe8", "#ff8d90", "#2a2f2c", "#5dcc78", "#e7b34a", "#aeb5b0", "#c6ccc8"),
+    ThemePalette("aurora", "Aurora", "Nebel", true, "#18181c", "#1f1f24", "#34343c", "#e8e8ed", "#ff8d90", "#2c2c33", "#5dcc78", "#e7b34a", "#afafb7", "#c7c7ce"),
+    ThemePalette("sepia", "Studierzimmer", "Warm", false, "#fbfaf7", "#f4f1ea", "#ebe6dc", "#37352f", "#c03543", "#fffdf8", "#1f7a48", "#8a5a12", "#615c54", "#514d46"),
 )
 
 data class ThemeChoice(val id: String, val label: String, val detail: String)
