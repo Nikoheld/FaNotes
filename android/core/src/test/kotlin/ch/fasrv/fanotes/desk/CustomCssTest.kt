@@ -32,6 +32,7 @@ class CustomCssTest {
               --bg-elevated: #f7f6f3;
               --text: #252630;
               --sidebar-width: 240px;
+              --right-panel-width: 320px;
               --content-width: 900px;
               --editor-size: 18px;
               --preview-size: 20px;
@@ -49,6 +50,9 @@ class CustomCssTest {
         assertEquals("#252630", chrome.text)
         assertEquals(14, chrome.radiusDp)
         assertEquals(240, chrome.sidebarDp)
+        assertEquals(320, chrome.panelDp)
+        assertEquals(220, parseCustomChrome(":root { --right-panel-width: 10px; }").panelDp)
+        assertEquals(430, parseCustomChrome(":root { --right-panel-width: 900px; }").panelDp)
         assertEquals(900, chrome.contentWidthPx)
         assertEquals(18, chrome.editorFontPx)
         assertEquals(20, chrome.previewFontPx)

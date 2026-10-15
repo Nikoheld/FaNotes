@@ -35,6 +35,7 @@ data class CustomChrome(
     val text: String? = null,
     val radiusDp: Int? = null,
     val sidebarDp: Int? = null,
+    val panelDp: Int? = null,
     val contentWidthPx: Int? = null,
     val editorFontPx: Int? = null,
     val previewFontPx: Int? = null,
@@ -53,6 +54,7 @@ fun parseCustomChrome(css: String?): CustomChrome {
     var text: String? = null
     var radiusDp: Int? = null
     var sidebarDp: Int? = null
+    var panelDp: Int? = null
     var contentWidthPx: Int? = null
     var editorFontPx: Int? = null
     var previewFontPx: Int? = null
@@ -70,6 +72,7 @@ fun parseCustomChrome(css: String?): CustomChrome {
             "text" -> cssColor(raw)?.let { text = it }
             "radius" -> cssPx(raw, 0, 40)?.let { radiusDp = it }
             "sidebar-width" -> cssPx(raw, 160, 520)?.let { sidebarDp = it }
+            "right-panel-width" -> cssPx(raw, 220, 430)?.let { panelDp = it }
             "content-width" -> cssPx(raw, 320, 1400)?.let { contentWidthPx = it }
             "editor-size" -> cssPx(raw, 10, 40)?.let { editorFontPx = it }
             "preview-size" -> cssPx(raw, 10, 40)?.let { previewFontPx = it }
@@ -78,7 +81,7 @@ fun parseCustomChrome(css: String?): CustomChrome {
         }
     }
     return CustomChrome(
-        accent, accentSecondary, background, surface, text, radiusDp, sidebarDp,
+        accent, accentSecondary, background, surface, text, radiusDp, sidebarDp, panelDp,
         contentWidthPx, editorFontPx, previewFontPx, lineHeight, rowHeightDp,
     )
 }
