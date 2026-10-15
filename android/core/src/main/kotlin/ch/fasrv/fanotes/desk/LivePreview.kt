@@ -46,6 +46,7 @@ data class LiveMark(
     val continues: Boolean = false,
     val readingScales: List<Float> = emptyList(),
     val readingHeadings: List<Boolean> = emptyList(),
+    val readingKinds: List<String> = emptyList(),
 )
 
 /**
@@ -167,10 +168,11 @@ fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int): List
                 host.to,
                 LiveKind.DETAILS_SUMMARY,
                 block.summary,
-                reading.joinToString("\n") { it.text },
+                reading.joinToString("\n") { if (it.kind == "rule") "—" else it.text },
                 open = block.open,
                 readingScales = reading.map { it.scale },
                 readingHeadings = reading.map { it.heading },
+                readingKinds = reading.map { it.kind },
             )
         }
     }
@@ -205,7 +207,7 @@ fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int): List
  * Reading text for an open details card. The source stays in the note and is
  * hidden, the same way the desktop card renders the body with MarkdownPreview.
  */
-data class DetailsReadingLine(val text: String, val scale: Float, val heading: Boolean)
+data class DetailsReadingLine(val text: String, val scale: Float, val heading: Boolean, val kind: String = "paragraph")
 
 /** `.cm-live-details-content .markdown-preview { font-size: .96em }`. */
 const val DETAILS_CARD_FONT = 0.96f
@@ -224,11 +226,29 @@ fun detailsCardEm(kind: PaperKind): Float = when (kind) {
 
 fun detailsCardScale(kind: PaperKind): Float = detailsCardEm(kind) * DETAILS_CARD_FONT
 
+/** Block kind drawn inside an open details card, matching the desktop preview. */
+fun detailsReadingKind(kind: PaperKind): String = when (kind) {
+    PaperKind.H1, PaperKind.H2, PaperKind.H3, PaperKind.H4, PaperKind.H5, PaperKind.H6 -> "heading"
+    PaperKind.BULLET -> "bullet"
+    PaperKind.NUMBER -> "number"
+    PaperKind.QUOTE -> "quote"
+    PaperKind.TASK -> "task"
+    PaperKind.RULE -> "rule"
+    PaperKind.CODE -> "code"
+    PaperKind.MATH -> "math"
+    PaperKind.IMAGE -> "image"
+    else -> "paragraph"
+}
+
 fun detailsReadingLines(body: String): List<DetailsReadingLine> {
     val lines = aiPreviewLines(body).mapNotNull { line ->
-        val text = aiPreviewLineText(line)
-        if (text.isBlank()) null
-        else DetailsReadingLine(text, detailsCardScale(line.kind), aiPreviewHeading(line.kind))
+        if (line.kind == PaperKind.RULE) {
+            return@mapNotNull DetailsReadingLine("", detailsCardScale(line.kind), false, "rule")
+        }
+        val plain = aiPreviewLineText(line)
+        if (plain.isBlank()) return@mapNotNull null
+        val text = if (line.kind == PaperKind.BULLET) "• $plain" else plain
+        DetailsReadingLine(text, detailsCardScale(line.kind), aiPreviewHeading(line.kind), detailsReadingKind(line.kind))
     }
     return if (lines.isEmpty()) {
         listOf(DetailsReadingLine("Dieser Klappbereich ist leer.", DETAILS_CARD_FONT, false))
@@ -237,7 +257,10 @@ fun detailsReadingLines(body: String): List<DetailsReadingLine> {
     }
 }
 
-fun detailsReading(body: String): String = detailsReadingLines(body).joinToString("\n") { it.text }
+fun detailsReading(body: String): String {
+    val visible = detailsReadingLines(body).filter { it.kind != "rule" && it.text.isNotBlank() }
+    return if (visible.isEmpty()) "Dieser Klappbereich ist leer." else visible.joinToString("\n") { it.text }
+}
 
 /** Adds or removes the `open` attribute on the details block covering [offset]. */
 fun toggleDetailsOpen(text: String, offset: Int): String? {
