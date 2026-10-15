@@ -168,7 +168,9 @@ class InkSurfaceView @JvmOverloads constructor(
     var onPlaceBox: (String, Int, Double, Double) -> Unit = { _, _, _, _ -> }
     var onPlaceHighlight: (String, ch.fasrv.fanotes.desk.WorksheetHighlight) -> Unit = { _, _ -> }
     var onRemoveHighlight: (String) -> Unit = {}
-    var onPlaceSection: (Double) -> Unit = { _ -> }
+    var onPlaceSection: (Double) -> String = { "" }
+    var onSectionChrome: (Boolean) -> Unit = {}
+    var sectionGuideY: Float = Float.NaN
     var noteLinkStyle: String = "symbol"
     var selectedLinkId: String? = null
     var onPlaceLink: (Int, Double, Double) -> Unit = { _, _, _ -> }
@@ -511,6 +513,10 @@ class InkSurfaceView @JvmOverloads constructor(
     }
 
     override fun onHoverEvent(event: MotionEvent): Boolean {
+        if (placingSection) {
+            sectionGuideY = screenToNorm(event.x, event.y).second.toFloat()
+            invalidate()
+        }
         if (event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return super.onHoverEvent(event)
         if (event.actionMasked == MotionEvent.ACTION_HOVER_EXIT) {
             hoverX = Float.NaN
@@ -532,6 +538,10 @@ class InkSurfaceView @JvmOverloads constructor(
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (placingSection) {
+            sectionGuideY = screenToNorm(event.x, event.y).second.toFloat()
+            invalidate()
+        }
         velocity?.addMovement(event)
         val action = event.actionMasked
         val index = event.actionIndex
@@ -696,8 +706,13 @@ class InkSurfaceView @JvmOverloads constructor(
                 inkPointer = MotionEvent.INVALID_POINTER_ID
             }
             placingSection -> {
-                onPlaceSection(y)
                 placingSection = false
+                sectionGuideY = Float.NaN
+                val notice = onPlaceSection(y)
+                onSectionChrome(false)
+                if (notice.isNotEmpty()) {
+                    onInkNotice(ch.fasrv.fanotes.ink.InkNotice(if (notice == ch.fasrv.fanotes.ink.SECTION_PLACE_DONE) "success" else "info", notice))
+                }
                 onPenActive(false)
                 inkPointer = MotionEvent.INVALID_POINTER_ID
             }
@@ -1107,6 +1122,16 @@ class InkSurfaceView @JvmOverloads constructor(
             textPaint.color = accentColor
             textPaint.textSize = 18f * resources.displayMetrics.density
             canvas.drawText(if (section.collapsed) "▸" else "▾", pageLeft + 8f, bottom - 8f, textPaint)
+            textPaint.color = Color.parseColor("#252630")
+        }
+        if (placingSection && !sectionGuideY.isNaN()) {
+            val guide = pageTop + (sectionGuideY * current.document.sourceHeight * scale).toFloat()
+            ruling.color = accentColor
+            ruling.alpha = 180
+            canvas.drawLine(pageLeft, guide, pageLeft + pageWidth, guide, ruling)
+            textPaint.color = accentColor
+            textPaint.textSize = 14f * resources.displayMetrics.density
+            canvas.drawText(ch.fasrv.fanotes.ink.SECTION_GUIDE_LABEL, pageLeft + 12f, guide - 6f, textPaint)
             textPaint.color = Color.parseColor("#252630")
         }
         linkMarks.forEach { link ->

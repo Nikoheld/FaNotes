@@ -1133,7 +1133,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
         if (textMode != text) setTextMode(text)
         syncPill.text = if (syncBusy && !syncLabel.contains('/')) "Startet…" else syncLabel
-        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|${ink.placingSymbol}|${ink.symbolSize}|${ink.symbolRotation}|${ink.symbolOpacity}|${ink.symbolCategory}|$paper|$fingerDraws|$text|$canUndo|$canRedo|$dark|$followPen"
+        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|${ink.placingSymbol}|${ink.placingSection}|${ink.symbolSize}|${ink.symbolRotation}|${ink.symbolOpacity}|${ink.symbolCategory}|$paper|$fingerDraws|$text|$canUndo|$canRedo|$dark|$followPen"
         if (signature != toolSignature) {
             toolSignature = signature
             rebuildTools(tool, style, paper, fingerDraws, canUndo, canRedo)
@@ -1337,7 +1337,15 @@ class NotePageView(context: Context) : FrameLayout(context) {
             toolSignature = ""
             if (!followPen) setChromeOpen(true) else applyChromeVisibility()
         })
-        tools.addView(chip("Abschnitt") { ink.placingSection = true })
+        tools.addView(chip(if (ink.placingSection) "Abschnitt · an" else "Abschnitt") {
+            val next = !ink.placingSection
+            ink.placingSection = next
+            ink.sectionGuideY = Float.NaN
+            ink.onSectionChrome(next)
+            if (next) ink.onInkNotice(ch.fasrv.fanotes.ink.InkNotice("info", ch.fasrv.fanotes.ink.SECTION_PLACE_HINT))
+            ink.invalidate()
+            post { rebuildTools(tool, style, paper, fingerDraws, canUndo, canRedo) }
+        })
         tools.addView(chip("Lasso") { onTool(ch.fasrv.fanotes.ink.InkTool.LASSO) })
         tools.addView(chip("Verknüpfung") {
             ink.placingLink = true

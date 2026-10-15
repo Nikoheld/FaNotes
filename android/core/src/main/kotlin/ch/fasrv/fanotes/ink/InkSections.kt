@@ -9,6 +9,11 @@ import java.util.UUID
 
 /** Header band height on the 900-wide sheet. Matches `SECTION_HEADER_PX`. */
 const val SECTION_HEADER_PX = 72.0
+const val SECTION_PLACE_HINT = "Auf das Blatt tippen, wo der Abschnitt beginnen soll · Esc bricht ab."
+const val SECTION_PLACE_BLOCKED = "Hier ist bereits ein Abschnittstitel."
+const val SECTION_PLACE_DONE = "Abschnitt eingefügt · Titel in die Kopfzeile schreiben, Pfeil klappt den Inhalt ein."
+const val SECTION_PLACE_CANCELLED = "Abschnitt nicht eingefügt."
+const val SECTION_GUIDE_LABEL = "Neuer Abschnitt"
 const val SECTION_BODY_MARGIN_PX = 108.0
 
 data class HiddenSectionInk(
@@ -36,6 +41,10 @@ fun withSections(document: InkDocument, sections: List<InkSection>): InkDocument
     else extras.put("sections", JsonValue.Arr(sections.map { it.toJson() }.toMutableList()))
     return document.copy(extras = extras)
 }
+
+/** Done when a header was added, blocked when the tap landed on an existing title. */
+fun sectionInsertNotice(before: InkDocument, after: InkDocument): String =
+    if (sectionsOf(after).size == sectionsOf(before).size) SECTION_PLACE_BLOCKED else SECTION_PLACE_DONE
 
 fun insertSection(document: InkDocument, y: Double): InkDocument {
     val sections = sectionsOf(document).toMutableList()
