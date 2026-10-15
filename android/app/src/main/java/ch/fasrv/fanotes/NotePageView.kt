@@ -146,7 +146,22 @@ class NotePageView(context: Context) : FrameLayout(context) {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(s: android.text.Editable?) {
                 if (lineNumbers.visibility == VISIBLE || foldMarks.visibility == VISIBLE) placeEditor()
-                if (!writing) onVisibleMarkdown(editBefore, s?.toString().orEmpty())
+                if (!writing) {
+                    val next = s?.toString().orEmpty()
+                    val replacement = ch.fasrv.fanotes.desk.markdownEnterReplacement(editBefore, next)
+                        ?: ch.fasrv.fanotes.desk.markdownBackspaceReplacement(editBefore, next)
+                    if (replacement != null) {
+                        writing = true
+                        editor.setText(replacement.text)
+                        editor.setSelection(replacement.cursor.coerceIn(0, replacement.text.length))
+                        writing = false
+                        val origin = editBefore
+                        editBefore = replacement.text
+                        onVisibleMarkdown(origin, replacement.text)
+                    } else {
+                        onVisibleMarkdown(editBefore, next)
+                    }
+                }
                 if (previewReady) paintLivePreview()
             }
         })
