@@ -128,6 +128,24 @@ class InkSession(document: InkDocument) {
         return stroke
     }
 
+    fun placeSymbol(x: Double, y: Double, style: StrokeStyle, symbolId: String, now: String): InkStroke? {
+        if (artSymbol(symbolId) == null) return null
+        val stroke = InkStroke(
+            points = listOf(StrokePoint(x, y, 0.0, 0.5, 0.0, 0.0, "pen")),
+            baseWidth = ART_SYMBOL_SIZE,
+            pressureEnabled = false,
+            color = style.color,
+            purpose = "art",
+            brush = "fineliner",
+            opacity = 1.0,
+            colorEffect = style.colorEffect,
+            symbolId = symbolId,
+        )
+        pushUndo()
+        document = document.copy(strokes = document.strokes + stroke, updatedAt = now)
+        return stroke
+    }
+
     fun endStroke(style: StrokeStyle, now: String): InkStroke? {
         val points = livePoints
         livePoints = emptyList()
@@ -316,6 +334,7 @@ fun brushOpacity(brush: String?): Double? = when (brush) {
     "marker" -> 0.55
     "highlighter" -> 0.35
     "watercolor" -> 0.45
+    "spray" -> 0.7
     else -> null
 }
 
@@ -325,6 +344,8 @@ fun brushWidthScale(brush: String?): Double = when (brush) {
     "highlighter" -> 3.4
     "calligraphy" -> 1.15
     "paintbrush" -> 1.35
+    "watercolor" -> 1.2
+    "spray" -> 1.6
     else -> 1.0
 }
 

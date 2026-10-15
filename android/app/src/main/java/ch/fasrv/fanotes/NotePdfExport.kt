@@ -274,6 +274,16 @@ private fun drawMarkdown(
 
 private fun drawStroke(canvas: Canvas, stroke: InkStroke, sourceWidth: Double, sourceHeight: Double, scale: Float, paint: Paint, smoothing: Float) {
     if (stroke.points.isEmpty()) return
+    paint.color = parsePdfColor(stroke.color)
+    paint.alpha = 255
+    if (stroke.symbolId != null) {
+        drawArtSymbol(canvas, paint, stroke, scale, sourceWidth, sourceHeight)
+        return
+    }
+    if (stroke.brush == "spray") {
+        drawSpray(canvas, paint, stroke, scale, sourceWidth, sourceHeight)
+        return
+    }
     val outline = ribbonOutline(stroke, sourceWidth, sourceHeight, smoothing.toDouble())
     val path = Path()
     smoothOutline(path, outline, scale)

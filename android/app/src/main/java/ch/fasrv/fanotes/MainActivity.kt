@@ -211,11 +211,14 @@ private val Papers = listOf(
     "millimeter" to "mm",
 )
 private val Brushes = listOf(
-    "fineliner" to "Fein",
-    "pencil" to "Blei",
+    "fineliner" to "Fineliner",
+    "pencil" to "Bleistift",
     "marker" to "Marker",
+    "paintbrush" to "Pinsel",
+    "calligraphy" to "Kalligrafie",
     "highlighter" to "Textmarker",
-    "calligraphy" to "Feder",
+    "watercolor" to "Aquarell",
+    "spray" to "Spray",
 )
 
 @Composable

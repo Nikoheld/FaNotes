@@ -49,6 +49,8 @@ data class InkStroke(
     val brush: String? = null,
     val opacity: Double? = null,
     val colorEffect: String? = null,
+    val symbolId: String? = null,
+    val symbolRotation: Double = 0.0,
     /** Fields this client does not edit, preserved on save. */
     val extras: JsonValue.Obj = JsonValue.Obj(),
 )
@@ -94,6 +96,10 @@ fun InkStroke.toJson(): JsonValue.Obj {
     if (brush != null) obj.put("brush", jsonString(brush))
     if (opacity != null) obj.put("opacity", jsonNumber(opacity))
     if (colorEffect != null) obj.put("colorEffect", jsonString(colorEffect))
+    if (symbolId != null) {
+        obj.put("symbolId", jsonString(symbolId))
+        obj.put("symbolRotation", jsonNumber(symbolRotation))
+    }
     return obj
 }
 
@@ -109,6 +115,7 @@ fun StrokePoint.toJson(): JsonValue.Obj = JsonValue.Obj().also { obj ->
 
 private val KNOWN_STROKE_KEYS = setOf(
     "points", "baseWidth", "pressureEnabled", "color", "purpose", "brush", "opacity", "colorEffect",
+    "symbolId", "symbolRotation",
 )
 
 fun parseInkDocument(value: JsonValue.Obj?, title: String, paperStyle: String, now: String): InkDocument {
@@ -170,6 +177,8 @@ internal fun parseStroke(obj: JsonValue.Obj): InkStroke? {
         brush = obj.string("brush"),
         opacity = obj.double("opacity"),
         colorEffect = obj.string("colorEffect"),
+        symbolId = obj.string("symbolId")?.takeIf { artSymbol(it) != null },
+        symbolRotation = obj.double("symbolRotation")?.takeIf { it.isFinite() } ?: 0.0,
         extras = extras,
     )
 }
