@@ -42,4 +42,26 @@ class EditorHistoryTest {
         assertNull(editorHistoryCommand(true, false, true, false, "z"))
         assertNull(editorHistoryCommand(false, false, false, false, "z"))
     }
+
+    @Test
+    fun caretRunsStepBackAsOneSelection() {
+        val history = EditorHistory()
+        history.noteSelection(0, 0, 20, 0)
+        history.noteSelection(4, 4, 20, 10)
+        history.noteSelection(5, 5, 20, 30)
+        history.noteSelection(8, 8, 20, 80)
+        assertEquals(0 to 0, history.undoSelection(8, 8, 20))
+        assertEquals(8 to 8, history.redoSelection(0, 0, 20))
+        history.noteSelection(4, 9, 20, 900)
+        assertEquals(8 to 8, history.undoSelection(4, 9, 20))
+        val typed = EditorHistory()
+        typed.noteSelection(0, 0, 4, 0)
+        typed.noteSelection(4, 4, 4, 10)
+        typed.record("wort", "wort!", 4, 5, 40)
+        assertEquals(4 to 4, typed.undoSelection(5, 5, 5))
+        assertEquals("undo-selection", editorSelectionCommand(true, false, false, false, "u"))
+        assertEquals("redo-selection", editorSelectionCommand(false, false, true, false, "u"))
+        assertEquals("redo-selection", editorSelectionCommand(true, true, false, false, "u"))
+        assertNull(editorSelectionCommand(true, false, true, false, "u"))
+    }
 }
