@@ -106,7 +106,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.SolidColor
@@ -350,6 +349,7 @@ fun FaNotesTheme(
         success = Color(android.graphics.Color.parseColor(chrome.success ?: palette.success)),
         warning = Color(android.graphics.Color.parseColor(chrome.warning ?: palette.warning)),
         soft = Color(android.graphics.Color.parseColor(chrome.soft ?: palette.soft)),
+        panelActive = Color(android.graphics.Color.parseColor(palette.panelActive)),
     )
     val accent = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccent(accentHex)))
     val onAccent = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.accentInk(accentHex)))
@@ -1397,7 +1397,6 @@ private fun NoteRow(
     val actionsOpen = ch.fasrv.fanotes.desk.treeRowShowsActions(rowHovered, node.path == treeFocus)
     val accentHex = "#%06x".format(MaterialTheme.colorScheme.primary.toArgb() and 0xFFFFFF)
     val textHex = "#%06x".format(MaterialTheme.colorScheme.onSurface.toArgb() and 0xFFFFFF)
-    val mutedHex = "#%06x".format(LocalStatusInk.current.muted.toArgb() and 0xFFFFFF)
     Row(
         Modifier
             .fillMaxWidth()
@@ -1417,21 +1416,9 @@ private fun NoteRow(
                     dropHere -> Modifier.background(
                         MaterialTheme.colorScheme.primary.copy(alpha = ch.fasrv.fanotes.desk.TREE_DROP_ALPHA),
                     )
-                    node.path == selected -> Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
-                    rowHovered && folder -> Modifier.background(
-                        Brush.horizontalGradient(
-                            listOf(
-                                Color(
-                                    android.graphics.Color.parseColor(
-                                        ch.fasrv.fanotes.desk.folderDotInk(folderColor, accentHex),
-                                    ),
-                                ).copy(alpha = ch.fasrv.fanotes.desk.TREE_FOLDER_HOVER_ALPHA),
-                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = ch.fasrv.fanotes.desk.TREE_HOVER_ALPHA),
-                            ),
-                        ),
-                    )
+                    node.path == selected -> Modifier.background(LocalStatusInk.current.panelActive)
                     rowHovered -> Modifier.background(
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = ch.fasrv.fanotes.desk.TREE_HOVER_ALPHA),
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = ch.fasrv.fanotes.desk.treeHoverAlpha(folder)),
                     )
                     else -> Modifier
                 },
@@ -1443,7 +1430,7 @@ private fun NoteRow(
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (node.path == selected || inSplit) {
+        if (ch.fasrv.fanotes.desk.treeRowShowsMark() && (node.path == selected || inSplit)) {
             Box(
                 Modifier
                     .padding(end = 4.dp)
@@ -1524,7 +1511,7 @@ private fun NoteRow(
                     else -> Icons.Filled.Description
                 },
                 contentDescription = null,
-                tint = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.fileIconInk(accentHex, mutedHex))),
+                tint = LocalStatusInk.current.muted,
                 modifier = Modifier.size(ch.fasrv.fanotes.desk.TREE_ICON_DP.dp),
             )
         }
@@ -1539,13 +1526,13 @@ private fun NoteRow(
                 ),
             )
             ch.fasrv.fanotes.desk.rowIsSplitCompanion(node.path, selected, splitPath) ->
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                LocalStatusInk.current.soft
             else -> MaterialTheme.colorScheme.onSurface
         }
         Text(
             node.name,
             maxLines = 1,
-            fontSize = 12.sp,
+            fontSize = ch.fasrv.fanotes.desk.TREE_LABEL_SP.sp,
             fontWeight = if (folder) androidx.compose.ui.text.font.FontWeight(ch.fasrv.fanotes.desk.FOLDER_NAME_WEIGHT) else FontWeight.Normal,
             color = nameInk,
             modifier = Modifier

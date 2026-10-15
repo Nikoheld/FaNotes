@@ -111,6 +111,51 @@ fun previewImageChrome() = PreviewImageChrome(12f, 1.4f, 1f)
 /** Code and display math keep their lines and scroll sideways, like `pre` and KaTeX. */
 fun previewBlockScrolls(kind: String): Boolean = kind == "code" || kind == "math"
 
+/** `--border` is 9% of the text color. `--border-strong` is 16%. */
+const val PREVIEW_BORDER_ALPHA = 0.09f
+const val PREVIEW_BORDER_STRONG_ALPHA = 0.16f
+
+/** A preview link rests on a 1px rule at 45% of the readable accent. */
+const val PREVIEW_LINK_UNDERLINE = 0.45f
+
+/**
+ * Quote after the later chrome pass. The accent wash becomes `--bg-elevated`,
+ * the bar becomes `--border-strong`, and the corner is 6px.
+ */
+data class PreviewQuoteChrome(
+    val marginEm: Float,
+    val padYEm: Float,
+    val padXEm: Float,
+    val barDp: Float,
+    val radiusDp: Float,
+)
+
+fun previewQuoteChrome() = PreviewQuoteChrome(1.25f, 0.7f, 1.15f, 3f, 6f)
+
+/** The rule keeps its 2.2em margin. The later pass paints it as a solid border. */
+data class PreviewRuleChrome(val marginEm: Float, val heightDp: Float)
+
+fun previewRuleChrome() = PreviewRuleChrome(2.2f, 1f)
+
+/** Fenced code after the later pass: elevated fill, body text, 6px corners. */
+data class PreviewFenceChrome(val padYEm: Float, val padXEm: Float, val radiusDp: Float, val borderDp: Float)
+
+fun previewFenceChrome() = PreviewFenceChrome(1f, 1.1f, 6f, 1f)
+
+/** Display math keeps the KaTeX card. The later pass does not restyle it. */
+data class PreviewMathChrome(
+    val marginEm: Float,
+    val padEm: Float,
+    val radiusDp: Float,
+    val accentWash: Float,
+    val secondaryWash: Float,
+    val borderAlpha: Float,
+)
+
+fun previewMathChrome() = PreviewMathChrome(1.45f, 1.05f, 12f, 0.075f, 0.05f, 0.1f)
+
+fun previewBlockTop(marginEm: Float, first: Boolean) = if (first) 0f else marginEm
+
 /** Display math is centered. A code block stays at the start of the line. */
 fun previewBlockCenters(kind: String): Boolean = kind == "math"
 

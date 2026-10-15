@@ -168,8 +168,12 @@ fun listFollowsSelection(reduceMotion: Boolean): String = if (reduceMotion) "ins
 /** File-tree row height from the desktop `--row-height`. */
 fun chromeRowHeightDp(compact: Boolean, overrideDp: Int? = null) = overrideDp ?: if (compact) 27 else 31
 
-/** File-tree row from the stylesheet: 7px corners, 13px per level, and a 2×17 accent mark. */
-const val TREE_ROW_RADIUS_DP = 7
+/**
+ * File-tree row after the later chrome pass: 4px corners and a 14px label.
+ * The earlier 7px radius and the accent mark are replaced there.
+ */
+const val TREE_ROW_RADIUS_DP = 4
+const val TREE_LABEL_SP = 14
 const val TREE_DEPTH_DP = 13
 const val TREE_MARK_WIDTH_DP = 2
 const val TREE_MARK_HEIGHT_DP = 17
@@ -185,15 +189,22 @@ const val TREE_FOLDER_DOT_DP = 3
 const val TREE_FOLDER_DOT_INSET_DP = 5
 const val TREE_FOLDER_DOT_ALPHA = 0.72f
 
-/** Row hover is 74% of `--panel-hover`. A folder adds an 8% color wash on the left. */
+/** A note hover is 74% of `--panel-hover`. A folder hover is the solid panel color. */
 const val TREE_HOVER_ALPHA = 0.74f
-const val TREE_FOLDER_HOVER_ALPHA = 0.08f
+
+fun treeHoverAlpha(folder: Boolean) = if (folder) 1f else TREE_HOVER_ALPHA
 
 /** Inline actions appear on hover or keyboard focus, the same as the desktop row. */
 fun treeRowShowsActions(hovered: Boolean, focused: Boolean) = hovered || focused
 
-/** The color pip hides while those actions are open. */
-fun treeFolderShowsDot(folder: Boolean, actionsOpen: Boolean) = folder && !actionsOpen
+/** The later chrome pass sets the folder pip to 0×0, so a folder never shows it. */
+fun treeFolderShowsDot(folder: Boolean, actionsOpen: Boolean): Boolean {
+    if (folder && actionsOpen) return false
+    return false
+}
+
+/** The later chrome pass removes the active and split accent bars. */
+fun treeRowShowsMark() = false
 
 /** Empty expanded folder from `.file-tree__folder-empty` and `.file-tree__empty-subfolder`. */
 const val TREE_EMPTY_MIN_DP = 26
