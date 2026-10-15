@@ -96,6 +96,8 @@ class SafVault(private val context: Context, private val tree: Uri) : VaultIo {
         return current
     }
 
+    fun documentUri(path: String): android.net.Uri? = locate(normalize(path), create = false)?.uri
+
     private fun mimeFor(name: String) = when (name.substringAfterLast('.', "").lowercase()) {
         "md", "markdown" -> "text/markdown"
         "pdf" -> "application/pdf"

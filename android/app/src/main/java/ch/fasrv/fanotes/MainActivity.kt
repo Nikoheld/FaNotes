@@ -1,6 +1,8 @@
 package ch.fasrv.fanotes
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -418,6 +420,32 @@ fun FaNotesScreen(
                 { model.navigateHistory(-1) },
                 { model.navigateHistory(1) },
                 { model.openInSplit(it) },
+                split,
+                { from, to, side -> model.moveOpenTab(from, to, side) },
+                { model.togglePinTab(it) },
+                { anchor, scope -> model.closeTabs(scope, anchor) },
+                { path ->
+                    val copied = runCatching {
+                        context.getSystemService(ClipboardManager::class.java)
+                            .setPrimaryClip(ClipData.newPlainText("Pfad", path))
+                    }.isSuccess
+                    model.message.value = if (copied) "Pfad kopiert." else "Der Pfad konnte nicht kopiert werden."
+                },
+                { path ->
+                    if (!model.selectedFolderVault()) {
+                        model.message.value = "Diese Notiz liegt im Tablet-Vault und hat keinen Ordner im Dateimanager."
+                    } else {
+                        val uri = model.revealInFolder(path)
+                        if (uri == null) {
+                            model.message.value = "Der Eintrag wurde nicht gefunden."
+                        } else {
+                            val intent = Intent(Intent.ACTION_VIEW).setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            runCatching { context.startActivity(intent) }.onFailure {
+                                model.message.value = "Der Dateimanager konnte den Eintrag nicht öffnen."
+                            }
+                        }
+                    }
+                },
             )
         } else {
             DeskRibbon(destination, true, { model.showDestination(it) }, { model.paletteOpen.value = true }, { model.updateDesk("focus", "off") }, { model.openDaily() })

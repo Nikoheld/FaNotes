@@ -141,6 +141,14 @@ class WorkspaceNavTest {
         assertSame(pinnedFirst, reorderTabs(pinnedFirst, "b", "a"))
         assertSame(pinnedFirst, reorderTabs(pinnedFirst, "b", null))
         assertEquals(listOf("d", "b", "a", "c"), reorderTabs(pinnedFirst, "d", "b").map { it.path })
+        val open = listOf(DeskTab("a"), DeskTab("b"), DeskTab("c"))
+        assertEquals(listOf("b", "a", "c"), moveTab(open, "a", "b", "after").map { it.path })
+        assertEquals(listOf("a", "c", "b"), moveTab(open, "c", "a", "after").map { it.path })
+        assertEquals(listOf("b", "c", "a"), moveTab(open, "a", null, "after").map { it.path })
+        assertEquals(listOf("b", "a", "c"), moveTab(open, "b", "a", "after").map { it.path })
+        val mixed = listOf(DeskTab("a", pinned = true), DeskTab("b"), DeskTab("c"))
+        assertSame(mixed, moveTab(mixed, "b", "a", "before"))
+        assertEquals(listOf("a", "c", "b"), moveTab(mixed, "c", "b", "before").map { it.path })
         assertEquals(
             listOf("b" to true, "a" to false),
             togglePinnedTab(listOf(DeskTab("a"), DeskTab("b")), "b").map { it.path to it.pinned },

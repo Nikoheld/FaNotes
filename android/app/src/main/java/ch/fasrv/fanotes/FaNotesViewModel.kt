@@ -97,6 +97,7 @@ import ch.fasrv.fanotes.desk.sortPinnedFirst
 import ch.fasrv.fanotes.desk.stepNoteHistory
 import ch.fasrv.fanotes.desk.tabsToClose
 import ch.fasrv.fanotes.desk.togglePinnedTab
+import ch.fasrv.fanotes.desk.moveTab
 import ch.fasrv.fanotes.desk.parentFolderOf
 import ch.fasrv.fanotes.desk.splitPanePath
 import ch.fasrv.fanotes.desk.swappedSplit
@@ -1915,11 +1916,25 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         persistWorkspace()
     }
 
-    fun closeTabs(scope: String) {
-        val anchor = open.value?.path ?: return
+    fun closeTabs(scope: String, anchor: String? = open.value?.path) {
+        val path = anchor ?: return
+        if (path !in openTabs.value) return
         val tabs = openTabs.value.map { DeskTab(it, it in pinnedTabs.value) }
-        tabsToClose(tabs, anchor, scope).forEach { closeTab(it) }
+        tabsToClose(tabs, path, scope).forEach { closeTab(it) }
     }
+
+    fun moveOpenTab(from: String, to: String?, side: String) {
+        val current = openTabs.value.map { DeskTab(it, it in pinnedTabs.value) }
+        val next = moveTab(current, from, to, side)
+        if (next.map { it.path } == openTabs.value) return
+        openTabs.value = next.map { it.path }
+        pinnedTabs.value = next.filter { it.pinned }.map { it.path }.toSet()
+        persistWorkspace()
+    }
+
+    fun selectedFolderVault(): Boolean = graph.vault is SafVault
+
+    fun revealInFolder(path: String): android.net.Uri? = (graph.vault as? SafVault)?.documentUri(path)
 
     fun reopenClosedTab() {
         val existing = flatNotes().map { it.path }.toSet()

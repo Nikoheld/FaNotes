@@ -234,6 +234,19 @@ fun reorderTabs(tabs: List<DeskTab>, fromPath: String, toPath: String?): List<De
     return without.toMutableList().apply { add(insertAt, moving) }
 }
 
+/**
+ * Drop a dragged tab before or after another tab.
+ * `toPath` null means the end of the strip. A pinned tab cannot leave its block.
+ */
+fun moveTab(tabs: List<DeskTab>, fromPath: String, toPath: String?, side: String): List<DeskTab> {
+    if (toPath == null) return reorderTabs(tabs, fromPath, null)
+    if (side == "before") return reorderTabs(tabs, fromPath, toPath)
+    val toIndex = tabs.indexOfFirst { it.path == toPath }
+    val after = tabs.getOrNull(toIndex + 1)
+    val insertBefore = if (after != null && after.path != fromPath) after.path else if (after != null) toPath else null
+    return reorderTabs(tabs, fromPath, insertBefore)
+}
+
 fun togglePinnedTab(tabs: List<DeskTab>, path: String): List<DeskTab> =
     sortPinnedFirst(tabs.map { tab -> if (tab.path == path) tab.copy(pinned = !tab.pinned) else tab })
 
