@@ -2093,6 +2093,12 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val aiStatus = MutableStateFlow("")
     val aiModels = MutableStateFlow<List<ch.fasrv.fanotes.desk.AiListedModel>>(emptyList())
     val paletteOpen = MutableStateFlow(false)
+    val paletteNotes = MutableStateFlow(false)
+
+    fun showPalette(notes: Boolean) {
+        paletteNotes.value = notes
+        paletteOpen.value = true
+    }
     val linkPlacing = MutableStateFlow(false)
     val linkSelected = MutableStateFlow(false)
     val clearLinkRequest = MutableStateFlow(0)
