@@ -5,6 +5,7 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.text.Editable
 import android.text.Spanned
+import android.text.style.BackgroundColorSpan
 import android.text.style.CharacterStyle
 import android.text.style.LineHeightSpan
 import android.text.style.MetricAffectingSpan
@@ -15,6 +16,7 @@ import android.text.style.TypefaceSpan
 import ch.fasrv.fanotes.desk.LiveKind
 import ch.fasrv.fanotes.desk.LiveMark
 import ch.fasrv.fanotes.desk.livePreviewMarks
+import ch.fasrv.fanotes.desk.selectionMatchRanges
 
 /** A span the live preview owns, so the next pass can remove only its own marks. */
 interface LivePreviewSpan
@@ -32,6 +34,13 @@ fun applyLivePreview(editable: Editable, selectionStart: Int, selectionEnd: Int,
         val end = mark.end.coerceIn(start, length)
         if (start == end) continue
         editable.setSpan(spanFor(mark, accent), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    }
+    val matches = selectionMatchRanges(editable.toString(), selectionStart, selectionEnd) ?: return
+    for ((start, end) in matches) {
+        val from = start.coerceIn(0, length)
+        val to = end.coerceIn(from, length)
+        if (from == to) continue
+        editable.setSpan(SelectionMatchSpan(), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
 }
 
@@ -103,6 +112,8 @@ internal open class SwapSpan(private val drawn: String) : ReplacementSpan(), Liv
 }
 
 internal class TaskSpan(drawn: String) : SwapSpan(drawn)
+
+private class SelectionMatchSpan : BackgroundColorSpan(0x8099FF77.toInt()), LivePreviewSpan
 
 private class CollapseSpan : LineHeightSpan, LivePreviewSpan {
     override fun chooseHeight(text: CharSequence, start: Int, end: Int, spanstartv: Int, lineHeight: Int, fm: Paint.FontMetricsInt) {
