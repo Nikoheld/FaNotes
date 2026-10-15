@@ -97,7 +97,12 @@ import ch.fasrv.fanotes.desk.sortPinnedFirst
 import ch.fasrv.fanotes.desk.stepNoteHistory
 import ch.fasrv.fanotes.desk.tabsToClose
 import ch.fasrv.fanotes.desk.togglePinnedTab
+import ch.fasrv.fanotes.desk.expandedFoldersJson
 import ch.fasrv.fanotes.desk.moveTab
+import ch.fasrv.fanotes.desk.parseExpandedFolders
+import ch.fasrv.fanotes.desk.remapExpandedFolders
+import ch.fasrv.fanotes.desk.revealExpandedFolders
+import ch.fasrv.fanotes.desk.toggleExpandedFolder
 import ch.fasrv.fanotes.desk.parentFolderOf
 import ch.fasrv.fanotes.desk.splitPanePath
 import ch.fasrv.fanotes.desk.swappedSplit
@@ -293,6 +298,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 refreshBook(note)
                 if (fromHistory == null) noteTrail.value = visitNote(noteTrail.value, path)
                 rememberLastOpen(path)
+                revealFolders(path)
                 persistWorkspace()
                 recordBug("note", path)
             } catch (error: Exception) {
@@ -1825,6 +1831,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     val destination = MutableStateFlow("notes")
     val openTabs = MutableStateFlow<List<String>>(emptyList())
+    val expandedFolders = MutableStateFlow(parseExpandedFolders(graph.readExpandedFolders(graph.vaultId)))
     val pinnedTabs = MutableStateFlow<Set<String>>(emptySet())
     val noteTrail = MutableStateFlow(NoteTrail())
     val closedTabs = MutableStateFlow<List<String>>(emptyList())
@@ -2020,6 +2027,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         pinnedTabs.value = pinned
         openTabs.value = sortPinnedFirst(tabs.map { DeskTab(it, it in pinned) }).map { it.path }
         closedTabs.value = closedTabs.value.map { remapPath(it, from, to) ?: it }
+        val folders = remapExpandedFolders(expandedFolders.value, from, to)
+        if (folders != expandedFolders.value) {
+            expandedFolders.value = folders
+            persistExpandedFolders()
+        }
         tagIndex.value = tagIndex.value.mapKeys { (path, _) -> remapPath(path, from, to) ?: path }
         remapPaperCameras(from, to)
         deskSettings.value["last-open"]?.let { saved -> remapPath(saved, from, to)?.let { updateDesk("last-open", it) } }
@@ -2061,6 +2073,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun adoptWorkspace() {
+        expandedFolders.value = parseExpandedFolders(graph.readExpandedFolders(graph.vaultId))
         noteTrail.value = NoteTrail()
         closedTabs.value = emptyList()
         open.value = null
@@ -2082,6 +2095,24 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private fun rememberLastOpen(path: String) {
         if (path.isEmpty() || deskSettings.value["last-open"] == path) return
         updateDesk("last-open", path)
+    }
+
+    fun toggleFolder(path: String) {
+        val next = toggleExpandedFolder(expandedFolders.value, path)
+        if (next == expandedFolders.value) return
+        expandedFolders.value = next
+        persistExpandedFolders()
+    }
+
+    private fun revealFolders(path: String) {
+        val next = revealExpandedFolders(expandedFolders.value, path)
+        if (next == expandedFolders.value) return
+        expandedFolders.value = next
+        persistExpandedFolders()
+    }
+
+    private fun persistExpandedFolders() {
+        graph.writeExpandedFolders(graph.vaultId, expandedFoldersJson(expandedFolders.value))
     }
 
     private fun persistWorkspace() {
