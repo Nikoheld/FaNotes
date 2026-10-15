@@ -1344,9 +1344,13 @@ private fun PageSurface(
             page.onPdfPage = { model.notePdfPage(it) }
             page.onSymbolSize = { model.setArtSymbolSize(it) }
             page.onSymbolRotation = { model.setArtSymbolRotation(it) }
+            page.onSymbolOpacity = { model.setArtSymbolOpacity(it) }
+            page.onSymbolCategory = { model.setArtSymbolCategory(it) }
             page.onSymbolPose = { model.canvasToken.value += 1 }
             page.ink.symbolSize = ch.fasrv.fanotes.ink.artSymbolSizeSetting(model.effectiveDesk()["symbol-size"])
             page.ink.symbolRotation = ch.fasrv.fanotes.ink.artSymbolRotationSetting(model.effectiveDesk()["symbol-rotation"])
+            page.ink.symbolOpacity = ch.fasrv.fanotes.ink.artSymbolOpacitySetting(model.effectiveDesk()["symbol-opacity"])
+            page.ink.symbolCategory = ch.fasrv.fanotes.ink.artSymbolCategorySetting(model.effectiveDesk()["symbol-category"])
             page.ink.linkMarks = links
             page.ink.worksheetBoxes = boxes
             page.ink.worksheetHighlights = highlights

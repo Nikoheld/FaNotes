@@ -46,6 +46,15 @@ class ArtSymbolsTest {
         val stamped = session.placeSymbol(0.2, 0.3, StrokeStyle(), "star", "2026-01-01T00:00:00.000Z", 41.0, 12.0)
         assertEquals(42.0, stamped?.baseWidth)
         assertEquals(10.0, stamped?.symbolRotation)
+        assertEquals("star", nextArtSymbol("book", "symbols"))
+        assertEquals("laptop", nextArtSymbol("pencil", "school"))
+        assertNull(nextArtSymbol("laptop", "school"))
+        assertEquals("symbols", nextArtSymbolCategory("school"))
+        assertEquals(0.12, snapArtSymbolOpacity(0.0))
+        assertEquals(1.0, snapArtSymbolOpacity(2.0))
+        assertEquals(0.12, stepArtSymbolOpacity(1.0, 1))
+        val faded = session.placeSymbol(0.2, 0.4, StrokeStyle(), "heart", "2026-01-01T00:00:00.000Z", opacity = 0.55)
+        assertEquals(0.55, faded?.opacity)
     }
 
     @Test

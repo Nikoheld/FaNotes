@@ -672,6 +672,14 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         updateDesk("symbol-rotation", ch.fasrv.fanotes.ink.snapArtSymbolRotation(value).toInt().toString())
     }
 
+    fun setArtSymbolOpacity(value: Double) {
+        updateDesk("symbol-opacity", ch.fasrv.fanotes.ink.snapArtSymbolOpacity(value).toString())
+    }
+
+    fun setArtSymbolCategory(value: String) {
+        updateDesk("symbol-category", ch.fasrv.fanotes.ink.artSymbolCategorySetting(value))
+    }
+
     fun setPaper(styleId: String) {
         session.setPaperStyle(styleId, isoNow())
         noteChanged()

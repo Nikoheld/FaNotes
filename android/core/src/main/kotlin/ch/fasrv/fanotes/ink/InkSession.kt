@@ -136,6 +136,7 @@ class InkSession(document: InkDocument) {
         now: String,
         size: Double = ART_SYMBOL_SIZE,
         rotation: Double = 0.0,
+        opacity: Double = 1.0,
     ): InkStroke? {
         if (artSymbol(symbolId) == null) return null
         val stroke = InkStroke(
@@ -145,7 +146,7 @@ class InkSession(document: InkDocument) {
             color = style.color,
             purpose = "art",
             brush = "fineliner",
-            opacity = 1.0,
+            opacity = snapArtSymbolOpacity(opacity),
             colorEffect = style.colorEffect,
             symbolId = symbolId,
             symbolRotation = snapArtSymbolRotation(rotation),

@@ -80,12 +80,59 @@ val ART_SYMBOLS = listOf(
 
 fun artSymbol(id: String?): ArtSymbol? = ART_SYMBOLS.firstOrNull { it.id == id }
 
-/** Null turns placement off after the last symbol. */
-fun nextArtSymbol(current: String?): String? {
-    if (current == null) return ART_SYMBOLS.first().id
-    val index = ART_SYMBOLS.indexOfFirst { it.id == current }
-    if (index < 0 || index == ART_SYMBOLS.lastIndex) return null
-    return ART_SYMBOLS[index + 1].id
+/** Desktop opacity slider: 12–100 percent. */
+fun snapArtSymbolOpacity(value: Double): Double {
+    if (!value.isFinite()) return 1.0
+    val percent = kotlin.math.floor(value.coerceIn(0.12, 1.0) * 100.0 + 0.5).toInt().coerceIn(12, 100)
+    return percent / 100.0
+}
+
+fun artSymbolOpacitySetting(raw: String?): Double = snapArtSymbolOpacity(raw?.toDoubleOrNull() ?: 1.0)
+
+fun stepArtSymbolOpacity(current: Double, direction: Int): Double {
+    if (direction == 0) return snapArtSymbolOpacity(current)
+    val percent = (snapArtSymbolOpacity(current) * 100.0).toInt() + direction
+    val wrapped = when {
+        percent > 100 -> 12
+        percent < 12 -> 100
+        else -> percent
+    }
+    return wrapped / 100.0
+}
+
+val ART_SYMBOL_CATEGORIES = listOf(
+    "all" to "Alle",
+    "school" to "Schule",
+    "symbols" to "Zeichen",
+    "everyday" to "Alltag",
+)
+
+fun artSymbolCategorySetting(raw: String?): String =
+    ART_SYMBOL_CATEGORIES.firstOrNull { it.first == raw }?.first ?: "all"
+
+fun artSymbolCategoryLabel(category: String?): String =
+    ART_SYMBOL_CATEGORIES.firstOrNull { it.first == artSymbolCategorySetting(category) }?.second ?: "Alle"
+
+fun nextArtSymbolCategory(category: String?): String {
+    val current = artSymbolCategorySetting(category)
+    val index = ART_SYMBOL_CATEGORIES.indexOfFirst { it.first == current }
+    return ART_SYMBOL_CATEGORIES[(index + 1) % ART_SYMBOL_CATEGORIES.size].first
+}
+
+fun artSymbolsIn(category: String?): List<ArtSymbol> {
+    val id = artSymbolCategorySetting(category)
+    return if (id == "all") ART_SYMBOLS else ART_SYMBOLS.filter { it.category == id }
+}
+
+/** Null turns placement off after the last symbol in the category. */
+fun nextArtSymbol(current: String?, category: String? = null): String? {
+    val list = artSymbolsIn(category)
+    if (list.isEmpty()) return null
+    if (current == null) return list.first().id
+    val index = list.indexOfFirst { it.id == current }
+    if (index < 0) return if (artSymbolCategorySetting(category) == "all") null else list.first().id
+    if (index == list.lastIndex) return null
+    return list[index + 1].id
 }
 
 data class SprayDot(val x: Double, val y: Double, val radius: Double, val alpha: Double)

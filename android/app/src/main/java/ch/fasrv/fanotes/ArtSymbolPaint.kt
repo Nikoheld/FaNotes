@@ -14,6 +14,7 @@ fun drawArtSymbol(canvas: Canvas, paint: Paint, stroke: InkStroke, scale: Float,
     val symbol = artSymbol(stroke.symbolId) ?: return
     val point = stroke.points.firstOrNull() ?: return
     val previousStyle = paint.style
+    val previousAlpha = paint.alpha
     val previousWidth = paint.strokeWidth
     val previousCap = paint.strokeCap
     val previousJoin = paint.strokeJoin
@@ -24,6 +25,7 @@ fun drawArtSymbol(canvas: Canvas, paint: Paint, stroke: InkStroke, scale: Float,
     canvas.scale(symbolScale, symbolScale)
     canvas.translate(-12f, -12f)
     paint.style = Paint.Style.STROKE
+    paint.alpha = ((stroke.opacity ?: 1.0) * 255.0).toInt().coerceIn(0, 255)
     paint.strokeWidth = 1.75f
     paint.strokeCap = Paint.Cap.ROUND
     paint.strokeJoin = Paint.Join.ROUND
@@ -33,6 +35,7 @@ fun drawArtSymbol(canvas: Canvas, paint: Paint, stroke: InkStroke, scale: Float,
     }
     canvas.restore()
     paint.style = previousStyle
+    paint.alpha = previousAlpha
     paint.strokeWidth = previousWidth
     paint.strokeCap = previousCap
     paint.strokeJoin = previousJoin
