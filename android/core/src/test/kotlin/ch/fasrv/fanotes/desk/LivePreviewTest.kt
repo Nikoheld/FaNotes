@@ -313,6 +313,42 @@ class LivePreviewTest {
     }
 
     @Test
+    fun detailsCardsLinkWwwAndMailAddresses() {
+        val www = detailsPlain("Siehe www.example.com.", autolinks = true)
+        assertEquals("Siehe www.example.com.", www.first)
+        val site = www.second.single()
+        assertEquals("www.example.com", www.first.substring(site.start, site.end))
+        assertEquals("http://www.example.com", site.target)
+        val path = detailsPlain("(www.example.com/a_(b))", autolinks = true)
+        val wrapped = path.second.single()
+        assertEquals("www.example.com/a_(b)", path.first.substring(wrapped.start, wrapped.end))
+        assertEquals("http://www.example.com/a_(b)", wrapped.target)
+        val mail = detailsPlain("Schreib ada@example.com!", autolinks = true)
+        val address = mail.second.single()
+        assertEquals("ada@example.com", mail.first.substring(address.start, address.end))
+        assertEquals("mailto:ada@example.com", address.target)
+        val angle = detailsPlain("An <ada@example.com>", autolinks = true)
+        assertEquals("An ada@example.com", angle.first)
+        assertEquals("mailto:ada@example.com", angle.second.single().target)
+        val secure = detailsPlain("Siehe https://www.example.com/a.", autolinks = true)
+        assertEquals("https://www.example.com/a", secure.second.single().target)
+        val labeled = detailsPlain("[www.example.com](https://example.com)", autolinks = true)
+        assertEquals("www.example.com", labeled.first)
+        assertEquals("https://example.com", labeled.second.single().target)
+        assertTrue(detailsPlain("www.example", autolinks = true).second.none { it.kind == "link" })
+        assertTrue(detailsPlain("nichtwww.example.com", autolinks = true).second.none { it.kind == "link" })
+        assertTrue(detailsPlain("ada@localhost", autolinks = true).second.none { it.kind == "link" })
+        val coded = detailsPlain("`www.example.com` und `ada@example.com`", autolinks = true)
+        assertEquals(listOf("code", "code"), coded.second.map { it.kind })
+        assertTrue(detailsPlain("www.example.com und ada@example.com").second.isEmpty())
+        val card = detailsReadingLines("Siehe www.example.com/docs und ada@example.com")
+        assertEquals(
+            listOf("http://www.example.com/docs", "mailto:ada@example.com"),
+            card.single().inlines.map { it.target },
+        )
+    }
+
+    @Test
     fun detailsListsKeepThePreviewMarker() {
         assertEquals("1. ", detailsNumberMarker("1. Eins"))
         assertEquals("12. ", detailsNumberMarker("12. Zwei"))

@@ -59,15 +59,20 @@ fun detailsPlain(text: String, collapseImages: Boolean = true, autolinks: Boolea
         innerAtOf: (MatchResult) -> Int,
         targetOf: (MatchResult) -> String = { "" },
         skipInsideCode: Boolean = false,
+        endTrim: (MatchResult) -> Int = { 0 },
+        accept: (MatchResult) -> Boolean = { true },
     ) {
         val found = ArrayList<MatchResult>()
         var guard = 0
         for (match in pattern.findAll(value)) {
+            val trim = endTrim(match).coerceIn(0, match.value.length)
             val from = match.range.first
-            val to = match.range.last + 1
+            val to = match.range.last + 1 - trim
+            if (to <= from) continue
             if (from < guard) continue
             if (skipInsideCode && marks.any { it.kind == "code" && from >= it.start && to <= it.end }) continue
             if (kind == "link" && marks.any { it.kind == "link" && from >= it.start && to <= it.end }) continue
+            if (!accept(match)) continue
             found += match
             guard = to
         }
@@ -77,8 +82,9 @@ fun detailsPlain(text: String, collapseImages: Boolean = true, autolinks: Boolea
         val added = ArrayList<DetailsInline>()
         var cursor = 0
         for (match in found) {
+            val trim = endTrim(match).coerceIn(0, match.value.length)
             val from = match.range.first
-            val to = match.range.last + 1
+            val to = match.range.last + 1 - trim
             builder.append(value, cursor, from)
             val inner = innerOf(match)
             val newStart = builder.length
@@ -106,7 +112,35 @@ fun detailsPlain(text: String, collapseImages: Boolean = true, autolinks: Boolea
     rewrite(MATH, "math", { it.groupValues[1] }, { 1 }, skipInsideCode = true)
     if (autolinks) {
         rewrite(ANGLE_LINK, "link", { it.groupValues[1] }, { 1 }, { it.groupValues[1] }, skipInsideCode = true)
+        rewrite(
+            ANGLE_EMAIL,
+            "link",
+            { it.groupValues[1] },
+            { 1 },
+            { "mailto:${it.groupValues[1]}" },
+            skipInsideCode = true,
+        )
         rewrite(BARE_URL, "link", { it.value }, { 0 }, { it.value }, skipInsideCode = true)
+        rewrite(
+            WWW_RUN,
+            "link",
+            { it.value.dropLast(autolinkEndTrim(it.value)) },
+            { 0 },
+            { "http://${it.value.dropLast(autolinkEndTrim(it.value))}" },
+            skipInsideCode = true,
+            endTrim = { autolinkEndTrim(it.value) },
+            accept = { wwwAutolinkOk(it.value) },
+        )
+        rewrite(
+            EMAIL_RUN,
+            "link",
+            { it.value.dropLast(autolinkEndTrim(it.value)) },
+            { 0 },
+            { "mailto:${it.value.dropLast(autolinkEndTrim(it.value))}" },
+            skipInsideCode = true,
+            endTrim = { autolinkEndTrim(it.value) },
+            accept = { emailAutolinkOk(it.value) },
+        )
     }
     rewrite(ITALIC_STAR, "emphasis", { it.groupValues[1] }, { 1 })
     rewrite(ITALIC_UNDER, "emphasis", { it.groupValues[1] }, { 1 })
@@ -153,6 +187,51 @@ private val STRIKE = Regex("""~~(?=\S)(.+?\S)~~""")
 private val CODE = Regex("""(`+)([^`\n]+?)\1""")
 private val MATH = Regex("""(?<!\$)\$([^$\n]+?)\$(?!\$)""")
 private val ANGLE_LINK = Regex("""<((?:https?://|mailto:)[^>\s]+)>""")
+private val ANGLE_EMAIL = Regex("""<([A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)>""")
 private val BARE_URL = Regex("""(?<![A-Za-z0-9_/<])https?://[^\s<>]+?(?=[.,;:!?)]*(?:\s|$))""")
+private val WWW_RUN = Regex("""(?<![A-Za-z0-9_/])www\.[^\s<]+""")
+private val EMAIL_RUN = Regex("""(?<![A-Za-z0-9_@./])[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+""")
+private const val AUTOLINK_TRAIL = "?!.,:*_~'\"”’"
+
+/** Drops the punctuation GFM leaves outside a www or email autolink. */
+private fun autolinkEndTrim(raw: String): Int {
+    var end = raw.length
+    while (end > 0 && raw[end - 1] in AUTOLINK_TRAIL) end--
+    var opens = 0
+    var closes = 0
+    for (index in 0 until end) {
+        when (raw[index]) {
+            '(' -> opens++
+            ')' -> closes++
+        }
+    }
+    while (closes > opens && end > 0 && raw[end - 1] == ')') {
+        end--
+        closes--
+    }
+    return raw.length - end
+}
+
+private fun wwwAutolinkOk(raw: String): Boolean {
+    val body = raw.dropLast(autolinkEndTrim(raw))
+    if (!body.startsWith("www.")) return false
+    val host = body.removePrefix("www.").takeWhile { it != '/' && it != '?' && it != '#' }
+    if (host.isEmpty() || host.startsWith('.') || host.endsWith('.') || host.endsWith('-')) return false
+    val labels = host.split('.')
+    if (labels.size < 2) return false
+    return labels.all { label ->
+        label.isNotEmpty() && !label.startsWith('-') && !label.endsWith('-') &&
+            label.all { it.isLetterOrDigit() || it == '-' }
+    }
+}
+
+private fun emailAutolinkOk(raw: String): Boolean {
+    val body = raw.dropLast(autolinkEndTrim(raw))
+    val at = body.indexOf('@')
+    if (at <= 0 || body.indexOf('@', at + 1) >= 0) return false
+    val domain = body.substring(at + 1)
+    return domain.contains('.') && !domain.startsWith('.') && !domain.endsWith('.')
+}
+
 private val ITALIC_STAR = Regex("""(?<!\*)\*(?!\*)(\S(?:.*?\S)?)\*(?!\*)""")
 private val ITALIC_UNDER = Regex("""(?<!_)_(?!_)(\S(?:.*?\S)?)_(?!_)""")
