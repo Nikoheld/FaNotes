@@ -87,6 +87,10 @@ fun homeworkStats(tasks: List<HomeworkTask>, today: LocalDate = LocalDate.now())
     )
 }
 
+/** Drop one entry and keep the rest in order, the same as the desktop delete button. */
+fun removeHomeworkTask(tasks: List<HomeworkTask>, id: String): List<HomeworkTask> =
+    tasks.filter { it.id != id }
+
 /** Offen, Hausaufgaben, Termine, Erledigt, Alle — the desktop filter row. */
 fun visibleHomeworkTasks(tasks: List<HomeworkTask>, filter: String): List<HomeworkTask> = tasks.filter { task ->
     when (filter) {

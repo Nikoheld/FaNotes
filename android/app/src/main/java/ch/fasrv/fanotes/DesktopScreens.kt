@@ -77,6 +77,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -644,7 +645,7 @@ fun HomeworkScreen(model: FaNotesViewModel) {
             }) { Text("Termin") }
         }
         Text(
-            "Offen ${stats.open} · Überfällig ${stats.overdue} · Heute ${stats.today} · Termine ${stats.appointments}",
+            "${stats.open} offen · ${stats.overdue} überfällig · ${stats.today} heute · ${stats.appointments} Termine · ${stats.done} erledigt",
             modifier = Modifier.padding(top = 8.dp),
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
@@ -699,7 +700,15 @@ fun HomeworkScreen(model: FaNotesViewModel) {
                                 fontWeight = if (day.date == LocalDate.now()) FontWeight.Bold else FontWeight.Normal,
                             )
                             items.take(if (planner == "week") 8 else 3).forEach { task ->
-                                Text(task.title, fontSize = 10.sp, maxLines = 1, color = if (task.done) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f) else MaterialTheme.colorScheme.onSurface)
+                                val clock = task.dueTime?.takeIf { it.isNotBlank() }
+                                Text(
+                                    if (clock == null) task.title else "$clock · ${task.title}",
+                                    fontSize = 10.sp,
+                                    maxLines = 1,
+                                    fontWeight = if (task.priority == "high") FontWeight.Bold else FontWeight.Normal,
+                                    textDecoration = if (task.done) TextDecoration.LineThrough else null,
+                                    color = if (task.done) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f) else MaterialTheme.colorScheme.onSurface,
+                                )
                             }
                             val hidden = items.size - (if (planner == "week") 8 else 3)
                             if (hidden > 0) Text("+$hidden", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
@@ -718,16 +727,26 @@ fun HomeworkScreen(model: FaNotesViewModel) {
             if (items.isEmpty()) return@forEach
             Text("$label ${items.size}", modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.SemiBold)
             items.forEach { task ->
-                Row(Modifier.fillMaxWidth().clickable { model.toggleHomework(task.id) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (task.done) "☑" else "☐", modifier = Modifier.padding(end = 8.dp))
-                    Column {
-                        Text(task.title, fontWeight = if (task.priority == "high") FontWeight.Bold else FontWeight.Normal)
+                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f).clickable { model.toggleHomework(task.id) }) {
+                        Text(task.title, fontWeight = if (task.priority == "high") FontWeight.Bold else FontWeight.Normal, textDecoration = if (task.done) TextDecoration.LineThrough else null)
                         Text(
-                            listOf(task.subject, task.dueDate, task.dueTime, if (task.kind == "appointment") "Termin" else "Aufgabe").filter { !it.isNullOrBlank() }.joinToString(" · "),
+                            listOf(
+                                if (task.done) "☑" else "☐",
+                                task.subject,
+                                task.dueDate ?: "Kein Termin",
+                                task.dueTime,
+                                if (task.kind == "appointment") "Termin" else "Aufgabe",
+                                if (task.priority == "high") "Wichtig" else null,
+                            ).filter { !it.isNullOrBlank() }.joinToString(" · "),
                             fontSize = 12.sp,
                             color = if (bucket == "overdue") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                         )
+                        if (task.notes.isNotBlank()) {
+                            Text(task.notes, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f))
+                        }
                     }
+                    TextButton(onClick = { model.removeHomework(task.id) }) { Text("Löschen") }
                 }
             }
         }

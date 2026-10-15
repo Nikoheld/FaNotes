@@ -2517,6 +2517,14 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         publishHomeworkCalendar(next)
     }
 
+    fun removeHomework(id: String) {
+        val next = homework.value.copy(tasks = ch.fasrv.fanotes.desk.removeHomeworkTask(homework.value.tasks, id))
+        if (next.tasks.size == homework.value.tasks.size) return
+        homework.value = next
+        persistSpecial(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, "Hausaufgaben", serializeHomeworkMarkdown(next))
+        publishHomeworkCalendar(next)
+    }
+
     fun loadCalendar() {
         viewModelScope.launch {
             val loaded = withContext(Dispatchers.IO) { calendarWithHomework() }
