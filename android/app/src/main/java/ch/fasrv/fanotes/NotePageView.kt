@@ -56,6 +56,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private val editor = object : EditText(context) {
         private var detailsDownX = 0f
         private var detailsDownY = 0f
+        private var tabFocusMode = false
         private val activeLinePaint = Paint()
 
         override fun onDraw(canvas: Canvas) {
@@ -133,6 +134,21 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 }
             }
             if (tags?.onKey(keyCode, event) == true) return true
+            if (ch.fasrv.fanotes.desk.togglesEditorTabFocus(
+                    event.isCtrlPressed,
+                    event.isShiftPressed,
+                    event.isAltPressed,
+                    event.isMetaPressed,
+                    if (keyCode == KeyEvent.KEYCODE_M) "m" else "",
+                )
+            ) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    tabFocusMode = !tabFocusMode
+                    @Suppress("DEPRECATION")
+                    announceForAccessibility(ch.fasrv.fanotes.desk.editorTabFocusAnnouncement(tabFocusMode))
+                }
+                return true
+            }
             if (event.isAltPressed && !event.isCtrlPressed && !event.isMetaPressed &&
                 (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN)
             ) {
@@ -343,7 +359,13 @@ class NotePageView(context: Context) : FrameLayout(context) {
                     return true
                 }
             }
-            if (keyCode == KeyEvent.KEYCODE_TAB && !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed) {
+            if (keyCode == KeyEvent.KEYCODE_TAB && ch.fasrv.fanotes.desk.editorIndentsOnTab(
+                    tabFocusMode,
+                    event.isCtrlPressed,
+                    event.isAltPressed,
+                    event.isMetaPressed,
+                )
+            ) {
                 if (event.action == KeyEvent.ACTION_DOWN) indentSelection(event.isShiftPressed)
                 return true
             }
