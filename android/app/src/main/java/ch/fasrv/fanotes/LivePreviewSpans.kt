@@ -56,6 +56,7 @@ import ch.fasrv.fanotes.desk.SYNTAX_ATOM_ARGB
 import ch.fasrv.fanotes.desk.SYNTAX_COMMENT_ARGB
 import ch.fasrv.fanotes.desk.SYNTAX_ESCAPE_ARGB
 import ch.fasrv.fanotes.desk.SourceSyntax
+import ch.fasrv.fanotes.desk.DetailsInline
 import ch.fasrv.fanotes.desk.detailsImageFrame
 import ch.fasrv.fanotes.desk.detailsImageMargin
 import ch.fasrv.fanotes.desk.detailsImageRadius
@@ -202,6 +203,7 @@ private fun spanFor(
         mark.readingHeadings,
         mark.readingKinds,
         mark.readingSources,
+        mark.readingInlines,
         images,
         imageColumnPx,
     )
@@ -229,6 +231,7 @@ internal class DetailsSummarySpan(
     private val readingHeadings: List<Boolean> = emptyList(),
     private val readingKinds: List<String> = emptyList(),
     private val readingSources: List<String> = emptyList(),
+    private val readingInlines: List<List<DetailsInline>> = emptyList(),
     private val images: Map<String, Bitmap> = emptyMap(),
     private val imageColumnPx: Float = 0f,
 ) : ReplacementSpan(), LineBackgroundSpan, LivePreviewSpan {
@@ -316,6 +319,7 @@ internal class DetailsSummarySpan(
                     cursor += frameH + margin
                     return@forEachIndexed
                 }
+                val lineInlines = readingInlines.getOrElse(index) { emptyList() }
                 val scale = readingScales.getOrElse(index) { 1f }
                 val heading = readingHeadings.getOrElse(index) { false }
                 val kind = readingKinds.getOrElse(index) { "paragraph" }
@@ -338,14 +342,23 @@ internal class DetailsSummarySpan(
                         paint.color = accent
                         canvas.drawRect(textX, cursor + lineMetrics.ascent, textX + box.border * 2f, cursor + lineMetrics.descent, paint)
                         paint.color = PAPER_MATH_INK
-                        canvas.drawText(line, textX + previousSize * 0.7f, cursor, paint)
+                        drawRichText(canvas, paint, line, textX + previousSize * 0.7f, cursor, lineInlines, paint.typeface)
                     }
                     "bullet" -> {
                         val mark = "• "
                         paint.color = accent
                         canvas.drawText(mark, textX, cursor, paint)
                         paint.color = PAPER_MATH_INK
-                        canvas.drawText(line.removePrefix(mark), textX + paint.measureText(mark), cursor, paint)
+                        val rest = line.removePrefix(mark)
+                        drawRichText(
+                            canvas,
+                            paint,
+                            rest,
+                            textX + paint.measureText(mark),
+                            cursor,
+                            shiftInlines(lineInlines, mark.length),
+                            paint.typeface,
+                        )
                     }
                     "table" -> {
                         val cells = line.split('\u001f')
@@ -366,10 +379,18 @@ internal class DetailsSummarySpan(
                             canvas.drawRect(left, top, left + span, bottom, paint)
                             paint.style = Paint.Style.FILL
                             paint.color = PAPER_MATH_INK
-                            canvas.drawText(cell, left + previousSize * 0.25f, cursor, paint)
+                            drawRichText(
+                                canvas,
+                                paint,
+                                cell,
+                                left + previousSize * 0.25f,
+                                cursor,
+                                cellInlines(lineInlines, cells, cellIndex),
+                                paint.typeface,
+                            )
                         }
                     }
-                    else -> canvas.drawText(line, textX, cursor, paint)
+                    else -> drawRichText(canvas, paint, line, textX, cursor, lineInlines, paint.typeface)
                 }
                 cursor += lineMetrics.descent
             }
@@ -401,6 +422,111 @@ internal class DetailsSummarySpan(
         }
         paint.textSize = saved
         return height
+    }
+
+    private fun shiftInlines(marks: List<DetailsInline>, by: Int): List<DetailsInline> {
+        if (by == 0) return marks
+        return marks.mapNotNull { mark ->
+            val end = mark.end - by
+            if (end <= 0) return@mapNotNull null
+            mark.copy(start = (mark.start - by).coerceAtLeast(0), end = end)
+        }
+    }
+
+    private fun cellInlines(marks: List<DetailsInline>, cells: List<String>, index: Int): List<DetailsInline> {
+        var origin = 0
+        for (cell in 0 until index) origin += cells[cell].length + 1
+        val end = origin + cells.getOrElse(index) { "" }.length
+        return marks.mapNotNull { mark ->
+            if (mark.end <= origin || mark.start >= end) return@mapNotNull null
+            mark.copy(
+                start = (mark.start - origin).coerceAtLeast(0),
+                end = (mark.end - origin).coerceAtMost(end - origin),
+            )
+        }.filter { it.end > it.start }
+    }
+
+    private fun drawRichText(
+        canvas: Canvas,
+        paint: Paint,
+        text: String,
+        x: Float,
+        y: Float,
+        marks: List<DetailsInline>,
+        baseFace: Typeface?,
+    ) {
+        if (text.isEmpty()) return
+        if (marks.isEmpty()) {
+            canvas.drawText(text, x, y, paint)
+            return
+        }
+        val cuts = sortedSetOf(0, text.length)
+        for (mark in marks) {
+            if (mark.start in 0..text.length) cuts += mark.start
+            if (mark.end in 0..text.length) cuts += mark.end
+        }
+        val points = cuts.toList()
+        val baseColor = paint.color
+        val baseSize = paint.textSize
+        val baseStrike = paint.isStrikeThruText
+        var cursor = x
+        for (index in 0 until points.size - 1) {
+            val from = points[index]
+            val to = points[index + 1]
+            if (to <= from) continue
+            val segment = text.substring(from, to)
+            val active = marks.filter { it.start < to && it.end > from }
+            val strong = active.any { it.kind == "strong" }
+            val emphasis = active.any { it.kind == "emphasis" }
+            val code = active.any { it.kind == "code" }
+            val strike = active.any { it.kind == "strike" }
+            val link = active.any { it.kind == "link" }
+            val bold = strong || ((baseFace?.style ?: 0) and Typeface.BOLD) != 0
+            paint.isStrikeThruText = strike
+            paint.typeface = when {
+                code -> Typeface.MONOSPACE
+                bold && emphasis -> Typeface.create(baseFace, Typeface.BOLD_ITALIC)
+                bold -> Typeface.create(baseFace, Typeface.BOLD)
+                emphasis -> Typeface.create(baseFace, Typeface.ITALIC)
+                else -> baseFace
+            }
+            if (code) {
+                val box = paperCodeBox(baseSize)
+                paint.textSize = box.textPx
+                val width = paint.measureText(segment)
+                val metrics = paint.fontMetrics
+                val rect = RectF(cursor, y + metrics.ascent - box.padY, cursor + width + box.padX * 2f, y + metrics.descent + box.padY)
+                paint.style = Paint.Style.FILL
+                paint.color = PAPER_CODE_BACKGROUND
+                canvas.drawRoundRect(rect, box.radius, box.radius, paint)
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = box.border
+                paint.color = PAPER_RULE_ARGB
+                canvas.drawRoundRect(rect, box.radius, box.radius, paint)
+                paint.style = Paint.Style.FILL
+                paint.color = paperCodeInkArgb(accent)
+                canvas.drawText(segment, cursor + box.padX, y, paint)
+                cursor += width + box.padX * 2f
+            } else {
+                paint.textSize = baseSize
+                paint.style = Paint.Style.FILL
+                paint.color = if (link) accent else baseColor
+                canvas.drawText(segment, cursor, y, paint)
+                val width = paint.measureText(segment)
+                if (link) {
+                    val offset = paperLinkUnderlineOffset(textSizePx)
+                    val thickness = (textSizePx / 16f).coerceAtLeast(1f)
+                    paint.color = paperLinkUnderlineArgb(accent)
+                    canvas.drawRect(cursor, y + offset, cursor + width, y + offset + thickness, paint)
+                }
+                cursor += width
+            }
+        }
+        paint.textSize = baseSize
+        paint.color = baseColor
+        paint.typeface = baseFace
+        paint.isStrikeThruText = baseStrike
+        paint.style = Paint.Style.FILL
     }
 
     private fun imageSlot(index: Int): Bitmap? {

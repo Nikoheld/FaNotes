@@ -51,6 +51,7 @@ data class LiveMark(
     val readingHeadings: List<Boolean> = emptyList(),
     val readingKinds: List<String> = emptyList(),
     val readingSources: List<String> = emptyList(),
+    val readingInlines: List<List<DetailsInline>> = emptyList(),
 )
 
 /**
@@ -178,6 +179,7 @@ fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int): List
                 readingHeadings = reading.map { it.heading },
                 readingKinds = reading.map { it.kind },
                 readingSources = reading.map { it.source },
+                readingInlines = reading.map { it.inlines },
             )
         }
     }
@@ -218,6 +220,7 @@ data class DetailsReadingLine(
     val heading: Boolean,
     val kind: String = "paragraph",
     val source: String = "",
+    val inlines: List<DetailsInline> = emptyList(),
 )
 
 /** `.cm-live-details-content .markdown-preview { font-size: .96em }`. */
@@ -285,6 +288,22 @@ fun detailsReadingKind(kind: PaperKind): String = when (kind) {
     else -> "paragraph"
 }
 
+private fun shiftDetailsInlines(marks: List<DetailsInline>, by: Int): List<DetailsInline> =
+    if (by == 0) marks else marks.map { it.copy(start = it.start + by, end = it.end + by) }
+
+private fun styledTableRow(cells: List<String>): Pair<String, List<DetailsInline>> {
+    val text = StringBuilder()
+    val marks = ArrayList<DetailsInline>()
+    cells.forEachIndexed { index, cell ->
+        if (index > 0) text.append('\u001f')
+        val (plain, inlines) = detailsPlain(cell)
+        val origin = text.length
+        marks += inlines.map { it.copy(start = it.start + origin, end = it.end + origin) }
+        text.append(plain)
+    }
+    return text.toString() to marks
+}
+
 fun detailsReadingLines(body: String): List<DetailsReadingLine> {
     val lines = aiPreviewLines(body).flatMap { line ->
         when (line.kind) {
@@ -299,16 +318,45 @@ fun detailsReadingLines(body: String): List<DetailsReadingLine> {
                 ),
             )
             PaperKind.TABLE -> tableRows(line.text).mapIndexedNotNull { index, cells ->
-                val text = cells.joinToString("\u001f") { stripPreviewMarkers(it) }
-                if (text.isBlank()) null
-                else DetailsReadingLine(text, detailsCardScale(line.kind), index == 0, "table")
+                val row = styledTableRow(cells)
+                if (row.first.isBlank()) null
+                else DetailsReadingLine(row.first, detailsCardScale(line.kind), index == 0, "table", inlines = row.second)
+            }
+            PaperKind.CODE, PaperKind.MATH -> {
+                if (line.text.isBlank()) emptyList()
+                else listOf(DetailsReadingLine(line.text, detailsCardScale(line.kind), false, detailsReadingKind(line.kind)))
+            }
+            PaperKind.TASK -> {
+                val done = line.text.startsWith("x|")
+                val (plain, marks) = detailsPlain(line.text.substringAfter('|'))
+                val prefix = if (done) "☑ " else "☐ "
+                val text = prefix + plain
+                if (text.isBlank()) emptyList()
+                else listOf(
+                    DetailsReadingLine(
+                        text,
+                        detailsCardScale(line.kind),
+                        false,
+                        "task",
+                        inlines = shiftDetailsInlines(marks, prefix.length),
+                    ),
+                )
             }
             else -> {
-                val plain = aiPreviewLineText(line)
+                val (plain, marks) = detailsPlain(line.text)
                 if (plain.isBlank()) emptyList()
                 else {
-                    val text = if (line.kind == PaperKind.BULLET) "• $plain" else plain
-                    listOf(DetailsReadingLine(text, detailsCardScale(line.kind), aiPreviewHeading(line.kind), detailsReadingKind(line.kind)))
+                    val bullet = line.kind == PaperKind.BULLET
+                    val text = if (bullet) "• $plain" else plain
+                    listOf(
+                        DetailsReadingLine(
+                            text,
+                            detailsCardScale(line.kind),
+                            aiPreviewHeading(line.kind),
+                            detailsReadingKind(line.kind),
+                            inlines = if (bullet) shiftDetailsInlines(marks, 2) else marks,
+                        ),
+                    )
                 }
             }
         }
