@@ -27,6 +27,45 @@ fun workspaceBackground(raw: String?): String = when (raw) {
     else -> "clean"
 }
 
+/** One radial glow from the desktop shell background. [stop] is where it fades out. */
+data class BackdropOrb(
+    val x: Float,
+    val y: Float,
+    val alpha: Float,
+    val stop: Float,
+    val secondary: Boolean = false,
+)
+
+/** Paper rules are 24px apart at 2.7% of the accent. The workspace dots sit on an 18px grid. */
+const val PAPER_LINE_STEP = 24f
+const val PAPER_LINE_ALPHA = 0.027f
+const val PAPER_DOT_STEP = 18f
+const val PAPER_DOT_ALPHA = 0.12f
+const val PAPER_DOT_RADIUS = 0.65f
+
+fun backdropOrbs(kind: String): List<BackdropOrb> = when (kind) {
+    "gradient" -> listOf(BackdropOrb(0.82f, -0.2f, 0.09f, 0.35f))
+    "mesh" -> listOf(
+        BackdropOrb(0.09f, 0.04f, 0.14f, 0.30f),
+        BackdropOrb(0.88f, 0.86f, 0.13f, 0.32f, secondary = true),
+    )
+    else -> emptyList()
+}
+
+/** Distance to the farthest corner, the default size of a CSS radial gradient. */
+fun farthestCorner(width: Float, height: Float, x: Float, y: Float): Float {
+    if (width <= 0f || height <= 0f) return 0f
+    val corners = arrayOf(0f to 0f, width to 0f, 0f to height, width to height)
+    var best = 0f
+    for ((cornerX, cornerY) in corners) {
+        val dx = cornerX - x
+        val dy = cornerY - y
+        val distance = kotlin.math.sqrt(dx * dx + dy * dy)
+        if (distance > best) best = distance
+    }
+    return best
+}
+
 fun uiFontId(raw: String?): String {
     val value = raw?.trim().orEmpty()
     if (value.isEmpty()) return "inter"
