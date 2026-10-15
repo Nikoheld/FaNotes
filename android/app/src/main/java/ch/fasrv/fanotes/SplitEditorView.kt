@@ -16,6 +16,7 @@ import android.widget.EditText
 import ch.fasrv.fanotes.desk.editorLineNumberLabels
 import ch.fasrv.fanotes.desk.findDetailsBlocks
 import ch.fasrv.fanotes.desk.copyMarkdownLines
+import ch.fasrv.fanotes.desk.toggleMarkdownComment
 import ch.fasrv.fanotes.desk.indentMarkdownLines
 import ch.fasrv.fanotes.desk.moveMarkdownLines
 import ch.fasrv.fanotes.desk.pasteUrlAsMarkdownLink
@@ -172,6 +173,14 @@ class SplitEditorView(context: Context) : EditText(context) {
                     moveMarkdownLines(text?.toString().orEmpty(), selectionStart, selectionEnd, forward)
                 }
                 applyLineEdit(edit)
+            }
+            return true
+        }
+        if (event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed &&
+            (keyCode == KeyEvent.KEYCODE_SLASH || event.unicodeChar == '/'.code)
+        ) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                applyLineEdit(toggleMarkdownComment(text?.toString().orEmpty(), selectionStart, selectionEnd))
             }
             return true
         }

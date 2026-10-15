@@ -21,6 +21,7 @@ import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import ch.fasrv.fanotes.desk.copyMarkdownLines
+import ch.fasrv.fanotes.desk.toggleMarkdownComment
 import ch.fasrv.fanotes.desk.indentMarkdownLines
 import ch.fasrv.fanotes.desk.moveMarkdownLines
 import ch.fasrv.fanotes.desk.pasteUrlAsMarkdownLink
@@ -89,11 +90,21 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 }
                 return true
             }
+            if (event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed &&
+                (keyCode == KeyEvent.KEYCODE_SLASH || event.unicodeChar == '/'.code)
+            ) {
+                if (event.action == KeyEvent.ACTION_DOWN) toggleComment()
+                return true
+            }
             if (keyCode == KeyEvent.KEYCODE_TAB && !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed) {
                 if (event.action == KeyEvent.ACTION_DOWN) indentSelection(event.isShiftPressed)
                 return true
             }
             return super.onKeyPreIme(keyCode, event)
+        }
+
+        fun toggleComment() {
+            applyLineEdit(toggleMarkdownComment(text?.toString().orEmpty(), selectionStart, selectionEnd))
         }
 
         fun moveSelection(forward: Boolean) {
@@ -588,6 +599,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
         editor.moveSelection(forward)
     }
 
+    private fun commentLines() {
+        if (!textMode) setTextMode(true)
+        editor.toggleComment()
+    }
+
     private fun format(action: String) {
         val start = editor.selectionStart.coerceAtLeast(0)
         val end = editor.selectionEnd.coerceAtLeast(start)
@@ -709,6 +725,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             tools.addView(chip("Ausrücken") { indentLines(true) })
             tools.addView(chip("Zeile hoch") { moveLines(false) })
             tools.addView(chip("Zeile runter") { moveLines(true) })
+            tools.addView(chip("Kommentar") { commentLines() })
         }
         tools.addView(guideChip("Lineal", DraftingKind.RULER))
         tools.addView(guideChip("Geodreieck", DraftingKind.SET_SQUARE))
