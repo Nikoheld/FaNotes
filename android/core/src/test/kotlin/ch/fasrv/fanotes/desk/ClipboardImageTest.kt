@@ -24,5 +24,11 @@ class ClipboardImageTest {
         assertEquals("Bild.png", clipboardImageFileName("text/plain"))
         assertTrue(pasteImageOntoSheet(editorFocused = false))
         assertFalse(pasteImageOntoSheet(editorFocused = true))
+        assertEquals("Bild.png", droppedImageFile("image/png"))
+        assertEquals("Bild.jpg", droppedImageFile("image/jpeg; charset=binary"))
+        assertEquals("Bild.webp", droppedImageFile("image/webp"))
+        assertNull(droppedImageFile("text/plain"))
+        assertNull(droppedImageFile("application/pdf"))
+        assertNull(droppedImageFile(null))
     }
 }

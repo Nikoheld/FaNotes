@@ -22,3 +22,9 @@ fun clipboardImageFileName(mime: String?): String = when (clipboardImageMime(mim
 
 /** True when the paste target is not the note's text field, so the image goes on the sheet. */
 fun pasteImageOntoSheet(editorFocused: Boolean): Boolean = !editorFocused
+
+/** A dropped file becomes a worksheet only when it is a paper image. The name is Bild plus the type. */
+fun droppedImageFile(mime: String?): String? {
+    val type = clipboardImageMime(mime) ?: return null
+    return clipboardImageFileName(type)
+}
