@@ -97,6 +97,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onClear: () -> Unit = {}
     var onFinger: (Boolean) -> Unit = {}
     var onMath: () -> Unit = {}
+    var onUnfoldHeading: (Int) -> Unit = {}
     var onPdfPage: (Int) -> Unit = {}
     var onSymbolSize: (Double) -> Unit = {}
     var onSymbolRotation: (Double) -> Unit = {}
@@ -297,6 +298,18 @@ class NotePageView(context: Context) : FrameLayout(context) {
     }
 
     private fun revealSourceOffset(sourceOffset: Int) {
+        val line = ch.fasrv.fanotes.desk.lineNumberAt(sourceMarkdown, sourceOffset)
+        val hiding = ch.fasrv.fanotes.desk.foldedHeadingHidingLine(sourceMarkdown, foldedLines, line)
+        if (hiding != null) {
+            foldedLines = foldedLines - hiding
+            onUnfoldHeading(hiding)
+            val visible = ch.fasrv.fanotes.desk.markdownWithFolds(sourceMarkdown, foldedLines)
+            val cursor = editor.selectionStart.coerceAtLeast(0).coerceAtMost(visible.length)
+            writing = true
+            editor.setText(visible)
+            editor.setSelection(cursor)
+            writing = false
+        }
         val offset = ch.fasrv.fanotes.desk.visibleOffsetForSource(sourceMarkdown, foldedLines, sourceOffset)
             .coerceIn(0, editor.text?.length ?: 0)
         if (!textMode) setTextMode(true)
