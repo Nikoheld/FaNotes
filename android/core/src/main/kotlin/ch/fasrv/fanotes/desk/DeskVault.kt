@@ -38,28 +38,41 @@ fun parseHomeworkMarkdown(markdown: String): HomeworkDocument {
         val parsed = parseJson(markdown.substring(start + HOMEWORK_START.length, end).trim()) as? JsonValue.Obj
             ?: return HomeworkDocument(emptyList())
         val tasks = parsed.array("tasks")?.items.orEmpty().mapNotNull { item ->
-            val obj = item as? JsonValue.Obj ?: return@mapNotNull null
-            val title = obj.string("title")?.trim().orEmpty()
-            if (title.isEmpty()) return@mapNotNull null
-            HomeworkTask(
-                id = obj.string("id")?.take(80) ?: UUID.randomUUID().toString(),
-                title = title.take(240),
-                notes = obj.string("notes").orEmpty().take(4000),
-                subject = obj.string("subject")?.trim().orEmpty().take(80),
-                dueDate = obj.string("dueDate")?.takeIf { Regex("""\d{4}-\d{2}-\d{2}""").matches(it) },
-                dueTime = obj.string("dueTime")?.takeIf { Regex("""\d{2}:\d{2}""").matches(it) },
-                done = obj.bool("done") == true,
-                kind = if (obj.string("kind") == "appointment") "appointment" else "homework",
-                priority = if (obj.string("priority") == "high") "high" else "normal",
-                createdAt = obj.string("createdAt").orEmpty(),
-                updatedAt = obj.string("updatedAt").orEmpty(),
-            )
+            (item as? JsonValue.Obj)?.let(::homeworkTaskFromJson)
         }
         val published = parsed.array("publishedIds")?.items.orEmpty().mapNotNull { (it as? JsonValue.Str)?.value }
         HomeworkDocument(tasks, published)
     } catch (_: Exception) {
         HomeworkDocument(emptyList())
     }
+}
+
+/** One task from the homework note or the publish API. Blank titles are dropped. */
+fun homeworkTaskFromJson(obj: JsonValue.Obj): HomeworkTask? {
+    val title = obj.string("title")?.trim().orEmpty()
+    if (title.isEmpty()) return null
+    return HomeworkTask(
+        id = obj.string("id")?.trim()?.take(80)?.ifBlank { null } ?: UUID.randomUUID().toString(),
+        title = title.take(240),
+        notes = obj.string("notes").orEmpty().take(4000),
+        subject = obj.string("subject")?.trim().orEmpty().take(80),
+        dueDate = obj.string("dueDate")?.takeIf { Regex("""\d{4}-\d{2}-\d{2}""").matches(it) },
+        dueTime = obj.string("dueTime")?.takeIf { Regex("""\d{2}:\d{2}""").matches(it) },
+        done = obj.bool("done") == true,
+        kind = if (obj.string("kind") == "appointment") "appointment" else "homework",
+        priority = if (obj.string("priority") == "high") "high" else "normal",
+        createdAt = obj.string("createdAt").orEmpty(),
+        updatedAt = obj.string("updatedAt").orEmpty(),
+    )
+}
+
+/** GET `/api/v1/homework/:channel` body. Null when the payload has no task list. */
+fun homeworkTasksFromApiJson(json: String): List<HomeworkTask>? = try {
+    val parsed = parseJson(json) as? JsonValue.Obj ?: return null
+    val tasks = parsed.array("tasks") ?: return null
+    tasks.items.mapNotNull { (it as? JsonValue.Obj)?.let(::homeworkTaskFromJson) }
+} catch (_: Exception) {
+    null
 }
 
 fun serializeHomeworkMarkdown(document: HomeworkDocument): String {
