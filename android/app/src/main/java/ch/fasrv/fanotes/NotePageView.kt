@@ -2,6 +2,9 @@ package ch.fasrv.fanotes
 
 import android.content.Context
 import android.graphics.Typeface
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputConnectionWrapper
 import android.graphics.drawable.GradientDrawable
 import android.text.InputType
 import android.text.TextUtils
@@ -16,6 +19,7 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
+import ch.fasrv.fanotes.desk.pasteUrlAsMarkdownLink
 import ch.fasrv.fanotes.ink.DraftingKind
 import ch.fasrv.fanotes.ink.InkTool
 import ch.fasrv.fanotes.ink.StrokeStyle
@@ -50,6 +54,38 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 }
             }
             return super.onTouchEvent(event)
+        }
+
+        override fun onTextContextMenuItem(id: Int): Boolean {
+            if ((id == android.R.id.paste || id == android.R.id.pasteAsPlainText) && applyPastedLink(clipboardPlainText(context))) {
+                return true
+            }
+            return super.onTextContextMenuItem(id)
+        }
+
+        override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
+            val base = super.onCreateInputConnection(outAttrs) ?: return null
+            return object : InputConnectionWrapper(base, true) {
+                override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
+                    if (writing) return true
+                    val pasted = text?.toString().orEmpty()
+                    if (pasted.length > 1 && applyPastedLink(pasted)) return true
+                    return super.commitText(text, newCursorPosition)
+                }
+            }
+        }
+
+        private fun applyPastedLink(pasted: String?): Boolean {
+            if (pasted.isNullOrEmpty() || writing) return false
+            val edit = pasteUrlAsMarkdownLink(text?.toString().orEmpty(), selectionStart, selectionEnd, pasted) ?: return false
+            val origin = text?.toString().orEmpty()
+            writing = true
+            setText(edit.text)
+            setSelection(edit.selectionStart, edit.selectionEnd)
+            writing = false
+            editBefore = edit.text
+            onVisibleMarkdown(origin, edit.text)
+            return true
         }
     }
     private val lineNumbers = TextView(context)
