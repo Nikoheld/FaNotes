@@ -34,8 +34,10 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -83,8 +85,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -2221,6 +2227,10 @@ fun AiScreen(model: FaNotesViewModel) {
             } else {
                 val link = MaterialTheme.colorScheme.primary
                 val muted = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
+                val palette = ch.fasrv.fanotes.desk.themePalette(settings["theme"], androidx.compose.foundation.isSystemInDarkTheme())
+                val codeInk = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.previewCodeInk(settings["accent-secondary"], palette.text)))
+                val codeFill = Color(android.graphics.Color.parseColor(palette.panelStrong))
+                val codeBorder = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
                 val lines = ch.fasrv.fanotes.desk.aiPreviewReading(result)
                 fun jumpTo(target: Int) {
                     val y = previewAnchors[target] ?: return
@@ -2234,7 +2244,12 @@ fun AiScreen(model: FaNotesViewModel) {
                 fun Modifier.previewFootnote(lineIndex: Int): Modifier = previewAnchor(lineIndex).pointerInput(lines, lineIndex, calmMotion) {
                     detectTapGestures { offset ->
                         val layout = previewLayouts[lineIndex] ?: return@detectTapGestures
-                        val target = ch.fasrv.fanotes.desk.footnoteJumpIndex(lines, lineIndex, layout.getOffsetForPosition(offset)) ?: return@detectTapGestures
+                        val line = lines[lineIndex]
+                        val (expanded, expandedMarks) = ch.fasrv.fanotes.desk.expandFieldSeparators(line.text, line.inlines)
+                        val display = ch.fasrv.fanotes.desk.previewCodeDisplay(expanded, expandedMarks)
+                        val shown = layout.getOffsetForPosition(offset)
+                        val source = if (expanded == line.text) ch.fasrv.fanotes.desk.previewSourceOffset(display.sourceAt, shown) else shown
+                        val target = ch.fasrv.fanotes.desk.footnoteJumpIndex(lines, lineIndex, source) ?: return@detectTapGestures
                         jumpTo(target)
                     }
                 }
@@ -2248,7 +2263,7 @@ fun AiScreen(model: FaNotesViewModel) {
                             rows += lines[index]
                             index += 1
                         }
-                        PreviewTable(rows, base, link, Modifier.previewAnchor(start)) { number ->
+                        PreviewTable(rows, base, link, codeInk, codeFill, codeBorder, Modifier.previewAnchor(start)) { number ->
                             ch.fasrv.fanotes.desk.footnoteDefinitionIndex(lines, number)?.let(::jumpTo)
                         }
                         continue
@@ -2279,12 +2294,19 @@ fun AiScreen(model: FaNotesViewModel) {
                                     .fillMaxHeight()
                                     .background(MaterialTheme.colorScheme.outline),
                             )
-                            Text(
-                                previewAnnotated(line, base, link),
-                                modifier = Modifier.previewFootnote(lineIndex).padding(horizontal = 12.dp, vertical = 8.dp),
-                                onTextLayout = { previewLayouts[lineIndex] = it },
-                                fontSize = (base * line.scale).sp,
+                            PreviewRich(
+                                line.text,
+                                line.inlines,
+                                base,
+                                line.scale,
+                                link,
+                                codeInk,
+                                codeFill,
+                                codeBorder,
+                                line.kind,
+                                Modifier.previewFootnote(lineIndex).padding(horizontal = 12.dp, vertical = 8.dp),
                                 color = muted,
+                                onTextLayout = { previewLayouts[lineIndex] = it },
                             )
                         }
                         "code", "math" -> if (line.text.isNotEmpty()) {
@@ -2303,14 +2325,21 @@ fun AiScreen(model: FaNotesViewModel) {
                             )
                         }
                         else -> if (line.text.isNotEmpty() || line.kind == "image") {
-                            Text(
-                                previewAnnotated(line, base, link),
-                                modifier = Modifier.previewFootnote(lineIndex),
-                                onTextLayout = { previewLayouts[lineIndex] = it },
-                                fontSize = (base * line.scale).sp,
+                            PreviewRich(
+                                line.text,
+                                line.inlines,
+                                base,
+                                line.scale,
+                                link,
+                                codeInk,
+                                codeFill,
+                                codeBorder,
+                                line.kind,
+                                Modifier.previewFootnote(lineIndex),
+                                color = if (line.kind == "footnote") muted else MaterialTheme.colorScheme.onSurface,
                                 fontWeight = if (line.heading) FontWeight.Bold else FontWeight.Normal,
                                 fontFamily = if (line.kind == "code" || line.kind == "math") FontFamily.Monospace else FontFamily.Default,
-                                color = if (line.kind == "footnote") muted else MaterialTheme.colorScheme.onSurface,
+                                onTextLayout = { previewLayouts[lineIndex] = it },
                             )
                         }
                     }
@@ -2325,6 +2354,9 @@ private fun PreviewTable(
     rows: List<ch.fasrv.fanotes.desk.DetailsReadingLine>,
     base: Int,
     link: Color,
+    codeInk: Color,
+    codeFill: Color,
+    codeBorder: Color,
     modifier: Modifier = Modifier,
     onFootnote: (Int) -> Unit = {},
 ) {
@@ -2355,23 +2387,31 @@ private fun PreviewTable(
                             .background(if (row.heading) header else Color.Transparent),
                     ) {
                         val cellKey = "$rowIndex:$cellIndex"
-                        Text(
-                            previewMarks(cell.text, cell.inlines, base, scale, link),
+                        PreviewRich(
+                            cell.text,
+                            cell.inlines,
+                            base,
+                            scale,
+                            link,
+                            codeInk,
+                            codeFill,
+                            codeBorder,
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp).pointerInput(cell.text, cell.inlines) {
                                 detectTapGestures { offset ->
                                     val laid = cellLayouts[cellKey] ?: return@detectTapGestures
+                                    val display = ch.fasrv.fanotes.desk.previewCodeDisplay(cell.text, cell.inlines)
+                                    val source = ch.fasrv.fanotes.desk.previewSourceOffset(display.sourceAt, laid.getOffsetForPosition(offset))
                                     val number = ch.fasrv.fanotes.desk.footnoteNumberAtOffset(
                                         cell.text,
                                         cell.inlines,
-                                        laid.getOffsetForPosition(offset),
+                                        source,
                                     ) ?: return@detectTapGestures
                                     onFootnote(number)
                                 }
                             },
-                            onTextLayout = { cellLayouts[cellKey] = it },
                             textAlign = align,
                             fontWeight = if (row.heading) FontWeight.Bold else FontWeight.Normal,
-                            fontSize = (base * scale).sp,
+                            onTextLayout = { cellLayouts[cellKey] = it },
                         )
                         if (cellIndex < cells.lastIndex) {
                             Box(Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(1.dp).background(border))
@@ -2382,6 +2422,85 @@ private fun PreviewTable(
             if (rowIndex < rows.lastIndex) Box(Modifier.fillMaxWidth().height(1.dp).background(border))
         }
     }
+}
+
+@Composable
+private fun PreviewRich(
+    text: String,
+    marks: List<ch.fasrv.fanotes.desk.DetailsInline>,
+    base: Int,
+    scale: Float,
+    link: Color,
+    codeInk: Color,
+    codeFill: Color,
+    codeBorder: Color,
+    markerKind: String = "paragraph",
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    fontWeight: FontWeight? = null,
+    fontFamily: FontFamily? = null,
+    textAlign: TextAlign = TextAlign.Start,
+    onTextLayout: (TextLayoutResult) -> Unit = {},
+) {
+    val (expanded, expandedMarks) = ch.fasrv.fanotes.desk.expandFieldSeparators(text, marks)
+    val display = ch.fasrv.fanotes.desk.previewCodeDisplay(
+        expanded,
+        expandedMarks,
+        ch.fasrv.fanotes.desk.previewMarkerEnd(expanded, markerKind),
+    )
+    val annotated = previewMarks(display.text, display.marks, base, scale, link, display.markerEnd)
+    val box = ch.fasrv.fanotes.desk.previewCodeBox(base * scale)
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val chips = display.slots.associate { slot ->
+        val measured = measurer.measure(
+            slot.label,
+            style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = box.textPx.sp),
+        )
+        val extraW = with(density) { (box.padX.dp * 2 + box.border.dp * 2).toPx() }
+        val extraH = with(density) { (box.padY.dp * 2 + box.border.dp * 2).toPx() }
+        slot.id to InlineTextContent(
+            Placeholder(
+                width = with(density) { (measured.size.width + extraW).toSp() },
+                height = with(density) { (measured.size.height + extraH).toSp() },
+                placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter,
+            ),
+        ) {
+            Text(
+                slot.label,
+                color = codeInk,
+                fontFamily = FontFamily.Monospace,
+                fontSize = box.textPx.sp,
+                modifier = Modifier
+                    .border(box.border.dp, codeBorder, RoundedCornerShape(box.radius.dp))
+                    .background(codeFill, RoundedCornerShape(box.radius.dp))
+                    .padding(horizontal = box.padX.dp, vertical = box.padY.dp),
+            )
+        }
+    }
+    val shown = buildAnnotatedString {
+        var slot = 0
+        display.text.forEach { char ->
+            if (char == '\uFFFC' && slot < display.slots.size) {
+                appendInlineContent(display.slots[slot].id, "\uFFFC")
+                slot += 1
+            } else {
+                append(char)
+            }
+        }
+        annotated.spanStyles.forEach { addStyle(it.item, it.start, it.end) }
+    }
+    Text(
+        shown,
+        modifier = modifier,
+        color = color,
+        fontSize = (base * scale).sp,
+        fontWeight = fontWeight,
+        fontFamily = fontFamily,
+        textAlign = textAlign,
+        inlineContent = chips,
+        onTextLayout = onTextLayout,
+    )
 }
 
 private fun previewAnnotated(
