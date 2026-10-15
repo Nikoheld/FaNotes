@@ -262,4 +262,18 @@ class LivePreviewTest {
         assertEquals("strong", card.readingInlines.single().single().kind)
         assertEquals(0 to 6, card.readingInlines.single().single().let { it.start to it.end })
     }
+
+    @Test
+    fun paperTextKeepsImageMarksAndDropsTheOtherMarkers() {
+        val line = "Siehe **fett**, ~~weg~~, `code` und [Seite](https://x)"
+        val (plain, marks) = detailsPlain(line, collapseImages = false)
+        assertEquals("Siehe fett, weg, code und Seite", plain)
+        assertEquals("fett", plain.substring(marks.first { it.kind == "strong" }.let { it.start until it.end }))
+        assertEquals("weg", plain.substring(marks.first { it.kind == "strike" }.let { it.start until it.end }))
+        assertEquals("code", plain.substring(marks.first { it.kind == "code" }.let { it.start until it.end }))
+        assertEquals("https://x", marks.first { it.kind == "link" }.target)
+        assertEquals("Siehe !alt", detailsPlain("Siehe ![alt](bild.png)", collapseImages = false).first)
+        assertEquals("Siehe alt", detailsPlain("Siehe ![alt](bild.png)").first)
+        assertEquals("a * b", detailsPlain("a * b", collapseImages = false).first)
+    }
 }

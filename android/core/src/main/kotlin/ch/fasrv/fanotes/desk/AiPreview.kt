@@ -49,7 +49,7 @@ data class DetailsInline(val start: Int, val end: Int, val kind: String, val tar
  * Strips the same markers as the preview and remembers where bold, italic,
  * strike, code, and links land in the text the card draws.
  */
-fun detailsPlain(text: String): Pair<String, List<DetailsInline>> {
+fun detailsPlain(text: String, collapseImages: Boolean = true): Pair<String, List<DetailsInline>> {
     var value = text
     var marks = emptyList<DetailsInline>()
     fun rewrite(
@@ -93,7 +93,7 @@ fun detailsPlain(text: String): Pair<String, List<DetailsInline>> {
         value = builder.toString()
         marks = remapped + added
     }
-    rewrite(IMAGE, "", { it.groupValues[1] }, { 2 })
+    if (collapseImages) rewrite(IMAGE, "", { it.groupValues[1] }, { 2 })
     rewrite(WIKI, "link", { it.groupValues[2].ifBlank { it.groupValues[1] } }, ::wikiInnerAt, { it.groupValues[1] })
     rewrite(LINK, "link", { it.groupValues[1] }, { 1 }, ::linkTarget)
     rewrite(BOLD, "strong", { it.groupValues[2] }, { it.groupValues[1].length })
