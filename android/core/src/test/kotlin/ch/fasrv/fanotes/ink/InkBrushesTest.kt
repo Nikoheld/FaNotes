@@ -41,4 +41,15 @@ class InkBrushesTest {
         assertEquals(24.042, quad.y, 0.01)
         assertTrue(corner.last() is MarkerCommand.Line)
     }
+
+    @Test
+    fun theCalligraphyNibSlantsLikeTheDesktopBroadPen() {
+        val offset = calligraphyNibOffset(10.0)
+        assertEquals(kotlin.math.cos(CALLIGRAPHY_ANGLE) * 5.0, offset.x, 1e-9)
+        assertEquals(kotlin.math.sin(CALLIGRAPHY_ANGLE) * 5.0, offset.y, 1e-9)
+        assertTrue(offset.y < 0.0)
+        assertEquals(5.0, calligraphyDotRadii(10.0).first, 1e-9)
+        assertEquals(1.6, calligraphyDotRadii(10.0).second, 1e-9)
+        assertEquals(0.5, calligraphyDotRadii(1.0).second, 1e-9)
+    }
 }
