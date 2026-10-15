@@ -13,49 +13,45 @@ import androidx.compose.ui.unit.dp
  */
 fun Modifier.workspaceBackdrop(kind: String, base: Color, accent: Color, secondary: Color): Modifier = drawBehind {
     drawRect(base)
-    when (kind) {
-        "gradient" -> drawCircle(
+    for (orb in ch.fasrv.fanotes.desk.backdropOrbs(kind)) {
+        val center = Offset(size.width * orb.x, size.height * orb.y)
+        val radius = ch.fasrv.fanotes.desk.farthestCorner(size.width, size.height, center.x, center.y)
+        if (radius <= 0f) continue
+        val color = (if (orb.secondary) secondary else accent).copy(alpha = orb.alpha)
+        drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(accent.copy(alpha = 0.09f), Color.Transparent),
-                center = Offset(size.width * 0.82f, size.height * -0.2f),
-                radius = size.maxDimension * 0.55f,
+                colorStops = arrayOf(0f to color, orb.stop to Color.Transparent, 1f to Color.Transparent),
+                center = center,
+                radius = radius,
             ),
-            radius = size.maxDimension * 0.55f,
-            center = Offset(size.width * 0.82f, size.height * -0.2f),
+            radius = radius,
+            center = center,
         )
-        "mesh" -> {
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(accent.copy(alpha = 0.14f), Color.Transparent),
-                    center = Offset(size.width * 0.09f, size.height * 0.04f),
-                    radius = size.maxDimension * 0.42f,
-                ),
-                radius = size.maxDimension * 0.42f,
-                center = Offset(size.width * 0.09f, size.height * 0.04f),
-            )
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(secondary.copy(alpha = 0.13f), Color.Transparent),
-                    center = Offset(size.width * 0.88f, size.height * 0.86f),
-                    radius = size.maxDimension * 0.42f,
-                ),
-                radius = size.maxDimension * 0.42f,
-                center = Offset(size.width * 0.88f, size.height * 0.86f),
-            )
+    }
+    if (kind != "paper") return@drawBehind
+    val hair = 1.dp.toPx()
+    val line = accent.copy(alpha = ch.fasrv.fanotes.desk.PAPER_LINE_ALPHA)
+    val lineStep = ch.fasrv.fanotes.desk.PAPER_LINE_STEP.dp.toPx()
+    var x = 0f
+    while (x < size.width) {
+        drawLine(line, Offset(x, 0f), Offset(x, size.height), strokeWidth = hair)
+        x += lineStep
+    }
+    var y = 0f
+    while (y < size.height) {
+        drawLine(line, Offset(0f, y), Offset(size.width, y), strokeWidth = hair)
+        y += lineStep
+    }
+    val dot = accent.copy(alpha = ch.fasrv.fanotes.desk.PAPER_DOT_ALPHA)
+    val dotStep = ch.fasrv.fanotes.desk.PAPER_DOT_STEP.dp.toPx()
+    val dotRadius = ch.fasrv.fanotes.desk.PAPER_DOT_RADIUS.dp.toPx()
+    var dotY = dotStep / 2f
+    while (dotY < size.height) {
+        var dotX = dotStep / 2f
+        while (dotX < size.width) {
+            drawCircle(dot, dotRadius, Offset(dotX, dotY))
+            dotX += dotStep
         }
-        "paper" -> {
-            val step = 24.dp.toPx()
-            val line = accent.copy(alpha = 0.07f)
-            var x = step
-            while (x < size.width) {
-                drawLine(line, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1.dp.toPx())
-                x += step
-            }
-            var y = step
-            while (y < size.height) {
-                drawLine(line, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
-                y += step
-            }
-        }
+        dotY += dotStep
     }
 }
