@@ -22,6 +22,7 @@ import kotlin.math.round
  * note counts here; the file is rewritten on the next save, same as desktop.
  */
 const val PAGE_STATS_VERSION = 2
+const val ACTIVITY_GAP_MS = 5_000L
 private const val MM_PER_SOURCE_PX = 210.0 / 900.0
 private val DAY = Regex("""\d{4}-\d{2}-\d{2}""")
 
@@ -469,6 +470,53 @@ private fun documentStatsFrom(value: JsonValue.Obj?): DocumentStats {
 
 private fun count(obj: JsonValue.Obj?, key: String) = obj?.double(key)?.toInt()?.coerceAtLeast(0) ?: 0
 private fun countLong(obj: JsonValue.Obj?, key: String) = obj?.double(key)?.toLong()?.coerceAtLeast(0) ?: 0L
+
+/**
+ * One typing change. Time accumulates only inside a 5 second burst, matching
+ * the desktop `recordEditActivity` gap.
+ */
+fun recordKeystroke(stats: PageStats, nowMs: Long, lastTypedAtMs: Long?): PageStats {
+    val gap = if (lastTypedAtMs != null && nowMs - lastTypedAtMs in 0..ACTIVITY_GAP_MS) nowMs - lastTypedAtMs else 0L
+    return stats.copy(
+        typingKeystrokes = stats.typingKeystrokes + 1,
+        typingMs = stats.typingMs + gap,
+        modifiedAt = isoNow(nowMs),
+    )
+}
+
+/**
+ * A finished stroke. Its own duration is always handwriting time. The pause
+ * since the previous pen-up counts only when it is inside the same burst.
+ */
+fun recordInkActivity(
+    stats: PageStats,
+    points: Int,
+    lengthMm: Double,
+    durationMs: Long,
+    nowMs: Long,
+    lastStrokeEndedAtMs: Long?,
+): PageStats {
+    val duration = durationMs.coerceAtLeast(0)
+    val startedAt = nowMs - duration
+    val gap = if (lastStrokeEndedAtMs != null && startedAt - lastStrokeEndedAtMs in 0..ACTIVITY_GAP_MS) {
+        startedAt - lastStrokeEndedAtMs
+    } else {
+        0L
+    }
+    return stats.copy(
+        inkStrokes = stats.inkStrokes + 1,
+        inkPoints = stats.inkPoints + points.coerceAtLeast(0),
+        inkLengthMm = round1(stats.inkLengthMm + lengthMm.coerceAtLeast(0.0)),
+        inkPenDownMs = stats.inkPenDownMs + duration,
+        inkMs = stats.inkMs + gap + duration,
+        modifiedAt = isoNow(nowMs),
+    )
+}
+
+fun recordInkErased(stats: PageStats, removed: Int, nowMs: Long): PageStats {
+    if (removed <= 0) return stats
+    return stats.copy(strokesErased = stats.strokesErased + removed, modifiedAt = isoNow(nowMs))
+}
 
 fun addDwell(stats: PageStats, elapsedMs: Long, weekday: Int): PageStats {
     if (elapsedMs <= 0) return stats

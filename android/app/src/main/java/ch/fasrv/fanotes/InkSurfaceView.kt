@@ -130,6 +130,8 @@ class InkSurfaceView @JvmOverloads constructor(
             invalidateTiles()
         }
     var onChanged: () -> Unit = {}
+    var onStroke: (ch.fasrv.fanotes.ink.InkStroke) -> Unit = {}
+    var onErased: (Int) -> Unit = {}
     var onPageGrew: (Double, Double, Double, Double, Double, Double) -> Unit = { _, _, _, _, _, _ -> }
     var onPenSample: (Double, Double) -> Unit = { _, _ -> }
     var onSwipeNote: (Int) -> Unit = {}
@@ -622,8 +624,9 @@ class InkSurfaceView @JvmOverloads constructor(
         val sectionHit = sectionsOf(current.document).firstOrNull { y >= it.top && y < it.bodyTop && x < 0.08 }
         when {
             !eraser && placingSymbol != null -> {
-                current.placeSymbol(x, y, style, placingSymbol!!, nowIso())
+                val stamped = current.placeSymbol(x, y, style, placingSymbol!!, nowIso())
                 invalidateTiles()
+                if (stamped != null) onStroke(stamped)
                 onChanged()
                 onPenActive(false)
                 inkPointer = MotionEvent.INVALID_POINTER_ID
@@ -763,7 +766,10 @@ class InkSurfaceView @JvmOverloads constructor(
         when {
             erasing -> {
                 erasing = false
+                val before = current.document.strokes.size
                 current.endErase()
+                val removed = before - current.document.strokes.size
+                if (removed > 0) onErased(removed)
             }
             selecting -> {
                 selecting = false
@@ -808,11 +814,13 @@ class InkSurfaceView @JvmOverloads constructor(
                 if (scribble != null && current.dropStrokes(scribble.indexes.toSet(), nowIso())) {
                     current.cancelStroke()
                     invalidateTiles()
+                    onErased(scribble.indexes.size)
                     onChanged()
                 } else {
                     val stroke = current.endStroke(style, nowIso())
                     if (stroke != null) {
                         invalidateTiles(stroke)
+                        onStroke(stroke)
                         onChanged()
                     }
                 }

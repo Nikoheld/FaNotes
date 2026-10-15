@@ -64,4 +64,25 @@ class PageStatsTest {
         assertEquals(12.0, merged.double("customCounter"))
         assertEquals(5.0, merged.obj("typing")?.double("ms"))
     }
+
+    @Test
+    fun typingAndInkTimeStayInsideTheDesktopBurst() {
+        val start = emptyPageStats(0)
+        val first = recordKeystroke(start, 1_000, null)
+        val second = recordKeystroke(first, 2_000, 1_000)
+        val later = recordKeystroke(second, 9_000, 2_000)
+        assertEquals(3, later.typingKeystrokes)
+        assertEquals(1_000, later.typingMs)
+        val stroke = recordInkActivity(start, points = 2, lengthMm = 210.0, durationMs = 100, nowMs = 5_000, lastStrokeEndedAtMs = null)
+        assertEquals(1, stroke.inkStrokes)
+        assertEquals(2, stroke.inkPoints)
+        assertEquals(210.0, stroke.inkLengthMm)
+        assertEquals(100, stroke.inkPenDownMs)
+        assertEquals(100, stroke.inkMs)
+        val follow = recordInkActivity(stroke, points = 1, lengthMm = 0.0, durationMs = 50, nowMs = 5_400, lastStrokeEndedAtMs = 5_000)
+        assertEquals(150, follow.inkPenDownMs)
+        assertEquals(500, follow.inkMs)
+        val erased = recordInkErased(follow, 2, 6_000)
+        assertEquals(2, erased.strokesErased)
+    }
 }
