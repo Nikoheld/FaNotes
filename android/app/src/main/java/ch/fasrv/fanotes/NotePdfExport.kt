@@ -11,14 +11,17 @@ import android.graphics.pdf.PdfDocument
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
+import ch.fasrv.fanotes.desk.AnchoredBox
+import ch.fasrv.fanotes.desk.AnchoredHighlight
 import ch.fasrv.fanotes.desk.NoteLinkMark
 import ch.fasrv.fanotes.desk.PDF_PAGE_HEIGHT_PT
 import ch.fasrv.fanotes.desk.PDF_PAGE_MARGIN_PT
 import ch.fasrv.fanotes.desk.PDF_PAGE_WIDTH_PT
 import ch.fasrv.fanotes.desk.PageFrame
-import ch.fasrv.fanotes.desk.WorksheetBox
-import ch.fasrv.fanotes.desk.WorksheetHighlight
+import ch.fasrv.fanotes.desk.boxOnFrame
+import ch.fasrv.fanotes.desk.highlightFrameToSheet
 import ch.fasrv.fanotes.desk.highlightToSheet
+import ch.fasrv.fanotes.desk.layoutWorksheetColumn
 import ch.fasrv.fanotes.desk.noteLinkAppearanceToken
 import ch.fasrv.fanotes.desk.noteLinkToSheet
 import ch.fasrv.fanotes.desk.pdfPageSlices
@@ -43,8 +46,8 @@ fun writeNotePdf(
     markdown: String,
     document: InkDocument,
     backdrops: List<BackdropSlice>,
-    boxes: List<WorksheetBox>,
-    highlights: List<WorksheetHighlight>,
+    boxes: List<AnchoredBox>,
+    highlights: List<AnchoredHighlight>,
     links: List<NoteLinkMark>,
     fontSizePx: Float = 16f,
     lineHeight: Float = 1.72f,
@@ -55,13 +58,28 @@ fun writeNotePdf(
 ) {
     val sourceWidth = document.sourceWidth.coerceAtLeast(1.0)
     val sourceHeight = document.sourceHeight.coerceAtLeast(1.0)
-    val slices = pdfPageSlices(sourceWidth, sourceHeight)
+    val worksheetAspects = backdrops.mapNotNull { slice ->
+        val bitmap = slice.bitmap ?: return@mapNotNull null
+        if (slice.worksheetId.isEmpty() || bitmap.isRecycled || bitmap.width <= 0 || bitmap.height <= 0) return@mapNotNull null
+        slice.worksheetId to bitmap.height.toDouble() / bitmap.width.toDouble()
+    }
+    val placements = if (worksheetAspects.isEmpty()) {
+        emptyList()
+    } else {
+        layoutWorksheetColumn(sourceWidth, pdfTextBottom(markdown, fontSizePx, lineHeight, contentWidthPx, document.originY), worksheetAspects)
+    }
+    val virtualHeight = max(sourceHeight, placements.maxOfOrNull { it.top + it.height + 36.0 } ?: 0.0)
+    val slices = pdfPageSlices(sourceWidth, virtualHeight)
     val contentWidth = (PDF_PAGE_WIDTH_PT - PDF_PAGE_MARGIN_PT * 2).toFloat()
     val scale = (contentWidth / sourceWidth).toFloat()
     val pageWidth = (sourceWidth * scale).toFloat()
-    val pageHeight = (sourceHeight * scale).toFloat()
-    val frames = backdrops.mapIndexed { index, slice ->
-        PageFrame(index + 1, slice.topPagePx.toDouble(), slice.heightPagePx.toDouble(), slice.widthPagePx.toDouble())
+    val pageHeight = (virtualHeight * scale).toFloat()
+    val frames = if (placements.isNotEmpty()) {
+        emptyList()
+    } else {
+        backdrops.mapIndexed { index, slice ->
+            PageFrame(index + 1, slice.topPagePx.toDouble(), slice.heightPagePx.toDouble(), slice.widthPagePx.toDouble())
+        }
     }
     val paper = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; style = Paint.Style.FILL }
     val ruling = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
@@ -95,12 +113,20 @@ fun writeNotePdf(
                 ((slice.sourceTop + slice.sourceHeight) * scale).toFloat(),
             )
             canvas.drawRect(0f, 0f, pageWidth, pageHeight, paper)
-            backdrops.forEach { backdrop -> drawBackdrop(canvas, backdrop, scale) }
-            if (backdrops.none { it.bitmap != null }) drawRuling(canvas, document.paperStyle, pageWidth, pageHeight, scale, ruling)
+            if (placements.isEmpty()) backdrops.forEach { backdrop -> drawBackdrop(canvas, backdrop, scale) }
+            else drawWorksheetColumn(canvas, backdrops, placements, scale)
+            if (backdrops.none { it.bitmap != null }) {
+                drawRuling(canvas, document.paperStyle, pageWidth, (sourceHeight * scale).toFloat(), scale, ruling)
+            }
             drawMarkdown(canvas, markdown, scale, text, document.originX, document.originY, fontSizePx, lineHeight, contentWidthPx, showLineNumbers)
-            highlights.forEach { mark ->
-                val rect = highlightToSheet(mark, frames, sourceWidth, sourceHeight)
-                highlightPaint.color = parsePdfColor(mark.color)
+            highlights.forEach { anchored ->
+                val rect = if (placements.isEmpty()) {
+                    highlightToSheet(anchored.mark, frames, sourceWidth, sourceHeight)
+                } else {
+                    val frame = placements.firstOrNull { it.id == anchored.worksheetId } ?: return@forEach
+                    highlightFrameToSheet(anchored.mark, frame, sourceWidth, sourceHeight)
+                }
+                highlightPaint.color = parsePdfColor(anchored.mark.color)
                 highlightPaint.alpha = 96
                 canvas.drawRect(
                     (rect.x * sourceWidth * scale).toFloat(),
@@ -111,10 +137,16 @@ fun writeNotePdf(
                 )
             }
             document.strokes.forEach { stroke -> drawStroke(canvas, stroke, sourceWidth, sourceHeight, scale, ink, smoothing) }
-            boxes.forEach { box ->
+            boxes.forEach { anchored ->
+                val (x, y) = if (placements.isEmpty()) {
+                    anchored.box.x to anchored.box.y
+                } else {
+                    val frame = placements.firstOrNull { it.id == anchored.worksheetId } ?: return@forEach
+                    boxOnFrame(anchored.box, frame, sourceWidth, sourceHeight)
+                }
                 text.color = Color.parseColor("#202333")
-                text.textSize = (box.fontSize * scale).toFloat().coerceAtLeast(8f)
-                canvas.drawText(box.text, (box.x * sourceWidth * scale).toFloat(), (box.y * sourceHeight * scale).toFloat(), text)
+                text.textSize = (anchored.box.fontSize * scale).toFloat().coerceAtLeast(8f)
+                canvas.drawText(anchored.box.text, (x * sourceWidth * scale).toFloat(), (y * sourceHeight * scale).toFloat(), text)
             }
             links.forEach { link ->
                 val sheet = noteLinkToSheet(link, frames, sourceWidth, sourceHeight)
@@ -134,6 +166,61 @@ fun writeNotePdf(
         pdf.writeTo(output)
     } finally {
         pdf.close()
+    }
+}
+
+private fun pdfTextBottom(
+    markdown: String,
+    fontSizePx: Float,
+    lineHeight: Float,
+    contentWidthPx: Float,
+    originY: Double,
+): Double {
+    val body = pdfPaperText(markdown)
+    if (body.isEmpty()) return max(0.0, originY)
+    val paint = TextPaint(Paint.ANTI_ALIAS_FLAG)
+    paint.textSize = fontSizePx
+    val layout = StaticLayout.Builder.obtain(body, 0, body.length, paint, contentWidthPx.toInt().coerceAtLeast(1))
+        .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+        .setIncludePad(false)
+        .setLineSpacing(0f, lineHeight)
+        .build()
+    return TEXT_PAD_Y.toDouble() + originY + layout.height.toDouble()
+}
+
+private fun drawWorksheetColumn(
+    canvas: Canvas,
+    backdrops: List<BackdropSlice>,
+    placements: List<ch.fasrv.fanotes.desk.WorksheetPlacement>,
+    scale: Float,
+) {
+    val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Color.parseColor("#2E3848")
+        alpha = 46
+        strokeWidth = max(0.6f, scale)
+    }
+    val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; style = Paint.Style.FILL }
+    val label = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#282A34")
+        textSize = 11f
+    }
+    for (place in placements) {
+        val slice = backdrops.firstOrNull { it.worksheetId == place.id } ?: continue
+        val bitmap = slice.bitmap ?: continue
+        if (bitmap.isRecycled) continue
+        val dest = RectF(
+            (place.left * scale).toFloat(),
+            (place.top * scale).toFloat(),
+            ((place.left + place.width) * scale).toFloat(),
+            ((place.top + place.height) * scale).toFloat(),
+        )
+        canvas.drawRect(dest, fill)
+        canvas.drawBitmap(bitmap, null, dest, null)
+        canvas.drawRect(dest, edge)
+        if (slice.label.isNotEmpty()) {
+            canvas.drawText(slice.label, dest.left, (place.captionTop * scale).toFloat() + 12f, label)
+        }
     }
 }
 

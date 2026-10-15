@@ -6,6 +6,7 @@ import ch.fasrv.fanotes.ink.StrokePoint
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class NoteStoreTest {
@@ -33,5 +34,29 @@ class NoteStoreTest {
         assertTrue(vault.exists(".fanotes/assets/${again.inkId}.json"))
         val tree = store.tree()
         assertEquals(listOf("Lecture"), tree.map { it.name })
+    }
+
+    @Test
+    fun deleteWorksheetRemovesItsImageAndRefusesAPathOutsideTheFolder() {
+        val root = Files.createTempDirectory("fanotes-sheets")
+        val vault = DirectoryVault(root)
+        val store = NoteStore(vault)
+        val kept = store.storeImageWorksheet("Bleibt.png", byteArrayOf(4, 5), "image/png")
+        val dropped = store.storeImageWorksheet("Weg.png", byteArrayOf(1, 2, 3), "image/png")
+        val record = ".fanotes/worksheets/${dropped.id}.json"
+        val escaped = vault.read(record)!!.decodeToString().replace(
+            ".fanotes/worksheets/${dropped.id}.png",
+            "../keep.txt",
+        )
+        vault.write(record, escaped.encodeToByteArray())
+        vault.write("keep.txt", byteArrayOf(9))
+        store.deleteWorksheet(dropped.id)
+        assertFalse(vault.exists(record))
+        assertTrue(vault.exists(".fanotes/worksheets/${dropped.id}.png"))
+        assertTrue(vault.exists("keep.txt"))
+        assertTrue(vault.exists(".fanotes/worksheets/${kept.id}.png"))
+        store.deleteWorksheet(kept.id)
+        assertFalse(vault.exists(".fanotes/worksheets/${kept.id}.json"))
+        assertFalse(vault.exists(".fanotes/worksheets/${kept.id}.png"))
     }
 }

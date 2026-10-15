@@ -318,15 +318,6 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 noteLinks.value = moved
             }
         }
-        if (worksheetBoxes.value.isNotEmpty()) {
-            worksheetBoxes.value = worksheetBoxes.value.map { box ->
-                box.copy(
-                    x = keepMarkOnPage(box.x, prevWidth, nextWidth, padX),
-                    y = keepMarkOnPage(box.y, prevHeight, nextHeight, padY),
-                )
-            }
-            boxesNeedSave = true
-        }
         noteChanged()
     }
 
@@ -509,10 +500,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 val document = session.document
                 val text = markdown.value
                 val boxes = if (boxesNeedSave) worksheetBoxes.value else emptyList()
-                val worksheetId = note.worksheets.firstOrNull()
                 boxesNeedSave = false
                 val saved = withContext(Dispatchers.IO) {
-                    if (worksheetId != null && boxes.isNotEmpty()) writeMovedBoxes(worksheetId, boxes)
+                    boxes.groupBy { it.worksheetId }.forEach { (id, group) ->
+                        if (id.isNotEmpty() && group.isNotEmpty()) writeMovedBoxes(id, group.map { it.box })
+                    }
                     val written = graph.store.save(note, document, text)
                     written to listNoteHistory(graph.vault, historyPathFor(written))
                 }
@@ -678,7 +670,15 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     fun importBytes(name: String, bytes: ByteArray, pdf: Boolean) {
         viewModelScope.launch {
             val note = open.value
-            if (!pdf && note != null && note.kind == NoteKind.MARKDOWN) {
+            if (!pdf) {
+                if (note == null) {
+                    message.value = "Öffne zuerst eine Notiz, dann Bild einfügen."
+                    return@launch
+                }
+                if (note.kind != NoteKind.MARKDOWN) {
+                    message.value = "Arbeitsblätter gehören in Markdown-Notizen. Eine PDF-Notiz ist bereits das Dokument selbst."
+                    return@launch
+                }
                 val mime = if (name.endsWith(".png", true)) "image/png" else "image/jpeg"
                 val stored = withContext(Dispatchers.IO) { graph.store.storeImageWorksheet(name, bytes, mime) }
                 val next = ch.fasrv.fanotes.famd.attachWorksheet(markdown.value, stored.id)
@@ -692,10 +692,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 graph.engine.notifyLocalChange()
                 return@launch
             }
-            val path = withContext(Dispatchers.IO) {
-                if (pdf) graph.store.importPdf("", name, bytes)
-                else graph.store.importImageWorksheet("", name, bytes, if (name.endsWith(".png", true)) "image/png" else "image/jpeg")
-            }
+            val path = withContext(Dispatchers.IO) { graph.store.importPdf("", name, bytes) }
             refreshTree()
             openPath(path, force = true)
             graph.engine.notifyLocalChange()
@@ -788,8 +785,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     val noteLinks = MutableStateFlow<List<ch.fasrv.fanotes.desk.NoteLinkMark>>(emptyList())
-    val worksheetBoxes = MutableStateFlow<List<ch.fasrv.fanotes.desk.WorksheetBox>>(emptyList())
-    val worksheetHighlights = MutableStateFlow<List<WorksheetHighlight>>(emptyList())
+    val worksheetBoxes = MutableStateFlow<List<ch.fasrv.fanotes.desk.AnchoredBox>>(emptyList())
+    val worksheetHighlights = MutableStateFlow<List<ch.fasrv.fanotes.desk.AnchoredHighlight>>(emptyList())
     val bookPane = MutableStateFlow<BookPaneState?>(null)
 
     fun refreshOverlays() {
@@ -797,9 +794,14 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val links = ch.fasrv.fanotes.desk.parseNoteLinkMarks(note?.payload)
             val overlay = withContext(Dispatchers.IO) {
-                val worksheet = note?.worksheets?.firstOrNull() ?: return@withContext emptyList<ch.fasrv.fanotes.desk.WorksheetBox>() to emptyList()
-                val raw = graph.vault.read(".fanotes/worksheets/$worksheet.json")?.decodeToString().orEmpty()
-                parseWorksheetBoxes(raw) to parseWorksheetHighlights(raw)
+                val boxes = mutableListOf<ch.fasrv.fanotes.desk.AnchoredBox>()
+                val marks = mutableListOf<ch.fasrv.fanotes.desk.AnchoredHighlight>()
+                for (worksheet in note?.worksheets.orEmpty()) {
+                    val raw = graph.vault.read(".fanotes/worksheets/$worksheet.json")?.decodeToString() ?: continue
+                    parseWorksheetBoxes(raw).forEach { boxes += ch.fasrv.fanotes.desk.AnchoredBox(worksheet, it) }
+                    parseWorksheetHighlights(raw).forEach { marks += ch.fasrv.fanotes.desk.AnchoredHighlight(worksheet, it) }
+                }
+                boxes to marks
             }
             noteLinks.value = links
             worksheetBoxes.value = overlay.first
@@ -807,21 +809,54 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun addWorksheetHighlight(mark: WorksheetHighlight) {
-        val worksheet = open.value?.worksheets?.firstOrNull() ?: return
+    fun addWorksheetHighlight(worksheetId: String, mark: WorksheetHighlight) {
+        if (open.value?.worksheets?.contains(worksheetId) != true) return
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { mutateHighlights(worksheet) { it + mark } }
+            withContext(Dispatchers.IO) { mutateHighlights(worksheetId) { it + mark } }
             refreshOverlays()
             graph.engine.notifyLocalChange()
         }
     }
 
     fun removeWorksheetHighlight(id: String) {
-        val worksheet = open.value?.worksheets?.firstOrNull() ?: return
+        val sheets = open.value?.worksheets.orEmpty()
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { mutateHighlights(worksheet) { marks -> marks.filter { it.id != id } } }
+            withContext(Dispatchers.IO) {
+                for (worksheet in sheets) {
+                    val raw = graph.vault.read(".fanotes/worksheets/$worksheet.json")?.decodeToString() ?: continue
+                    if (parseWorksheetHighlights(raw).none { it.id == id }) continue
+                    mutateHighlights(worksheet) { marks -> marks.filter { it.id != id } }
+                }
+            }
             refreshOverlays()
             graph.engine.notifyLocalChange()
+        }
+    }
+
+    fun removeWorksheet(id: String) {
+        val note = open.value ?: return
+        if (id !in note.worksheets) return
+        val label = backdrop.value.firstOrNull { it.worksheetId == id }?.label?.ifBlank { null } ?: "Arbeitsblatt"
+        askConfirm(
+            ch.fasrv.fanotes.desk.PendingConfirm(
+                "Arbeitsblatt entfernen",
+                "„$label“ wirklich aus dieser Notiz entfernen? Die PDF-/Bilddatei wird aus dem Vault gelöscht.",
+                "Entfernen",
+            ),
+        ) {
+            viewModelScope.launch {
+                val current = open.value ?: return@launch
+                val next = ch.fasrv.fanotes.famd.detachWorksheet(markdown.value, id)
+                markdown.value = next
+                val updated = current.copy(markdown = next, worksheets = ch.fasrv.fanotes.famd.worksheetIdsFromMarkdown(next))
+                open.value = updated
+                withContext(Dispatchers.IO) { graph.store.deleteWorksheet(id) }
+                loadBackdrop(updated)
+                refreshOverlays()
+                noteChanged()
+                message.value = "„$label“ wurde aus der Notiz entfernt."
+                graph.engine.notifyLocalChange()
+            }
         }
     }
 
@@ -1132,7 +1167,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun updateWorksheetBox(id: String, text: String) {
-        val worksheet = open.value?.worksheets?.firstOrNull() ?: return
+        val worksheet = worksheetBoxes.value.firstOrNull { it.box.id == id }?.worksheetId
+            ?: open.value?.worksheets?.firstOrNull() ?: return
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 val raw = graph.vault.read(".fanotes/worksheets/$worksheet.json")?.decodeToString() ?: return@withContext
@@ -1241,15 +1277,24 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun renderWorksheet(note: OpenNote): List<BackdropSlice> {
-        val id = note.worksheets.firstOrNull() ?: return emptyList()
-        val record = graph.vault.read(".fanotes/worksheets/$id.json")?.decodeToString() ?: return emptyList()
-        val json = parseJson(record) as? JsonValue.Obj ?: return emptyList()
-        val source = json.string("sourceRelativePath") ?: return emptyList()
-        val bytes = graph.vault.read(source) ?: return emptyList()
-        val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return emptyList()
-        return listOf(
-            BackdropSlice(0f, note.document.sourceHeight.toFloat(), note.document.sourceWidth.toFloat(), bitmap),
-        )
+        val slices = ArrayList<BackdropSlice>()
+        for (id in note.worksheets) {
+            val record = graph.vault.read(".fanotes/worksheets/$id.json")?.decodeToString() ?: continue
+            val json = parseJson(record) as? JsonValue.Obj ?: continue
+            val source = json.string("sourceRelativePath") ?: continue
+            val bytes = graph.vault.read(source) ?: continue
+            val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: continue
+            val title = json.string("title").orEmpty().ifBlank { "Arbeitsblatt" }
+            slices += BackdropSlice(
+                topPagePx = 0f,
+                heightPagePx = bitmap.height.toFloat(),
+                widthPagePx = bitmap.width.toFloat(),
+                bitmap = bitmap,
+                worksheetId = id,
+                label = title,
+            )
+        }
+        return slices
     }
 
     val destination = MutableStateFlow("notes")

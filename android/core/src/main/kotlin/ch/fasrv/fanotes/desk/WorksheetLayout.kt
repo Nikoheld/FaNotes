@@ -1,0 +1,105 @@
+package ch.fasrv.fanotes.desk
+
+import kotlin.math.max
+import kotlin.math.min
+
+/** The desktop worksheet column sits in the text inset, under the markdown. */
+const val WORKSHEET_COLUMN_INSET = 72.0
+const val WORKSHEET_PAGE_GAP = 24.0
+const val WORKSHEET_AFTER_TEXT = 18.0
+const val WORKSHEET_CAPTION = 28.0
+
+data class WorksheetPlacement(
+    val id: String,
+    val left: Double,
+    val captionTop: Double,
+    val top: Double,
+    val width: Double,
+    val height: Double,
+)
+
+data class AnchoredHighlight(val worksheetId: String, val mark: WorksheetHighlight)
+
+data class AnchoredBox(val worksheetId: String, val box: WorksheetBox)
+
+/**
+ * Stacks image worksheets the way the desktop paper does: content-column width,
+ * natural aspect, a caption, then 24px before the next sheet.
+ * [aspects] is worksheet id to image height / width.
+ */
+fun layoutWorksheetColumn(
+    pageWidth: Double,
+    textBottom: Double,
+    aspects: List<Pair<String, Double>>,
+): List<WorksheetPlacement> {
+    if (!pageWidth.isFinite() || pageWidth < 1.0) return emptyList()
+    val inset = min(WORKSHEET_COLUMN_INSET, max(0.0, (pageWidth - 120.0) / 2.0))
+    val width = (pageWidth - inset * 2.0).coerceAtLeast(1.0)
+    var cursor = max(0.0, if (textBottom.isFinite()) textBottom else 0.0) + WORKSHEET_AFTER_TEXT
+    val placed = ArrayList<WorksheetPlacement>(aspects.size)
+    for ((id, rawAspect) in aspects) {
+        if (id.isBlank()) continue
+        val aspect = if (rawAspect.isFinite()) rawAspect.coerceIn(0.05, 8.0) else 1.0
+        val height = width * aspect
+        val caption = cursor
+        val top = caption + WORKSHEET_CAPTION
+        placed += WorksheetPlacement(id, inset, caption, top, width, height)
+        cursor = top + height + WORKSHEET_PAGE_GAP
+    }
+    return placed
+}
+
+/** A page-local highlight drawn on one worksheet image, in 0–1 of the whole sheet. */
+fun highlightFrameToSheet(
+    mark: WorksheetHighlight,
+    frame: WorksheetPlacement,
+    sourceWidth: Double,
+    sourceHeight: Double,
+): SheetRect {
+    if (sourceWidth <= 0.0 || sourceHeight <= 0.0 || frame.width <= 0.0 || frame.height <= 0.0) {
+        return SheetRect(mark.x, mark.y, mark.width, mark.height)
+    }
+    return SheetRect(
+        x = (frame.left + mark.x * frame.width) / sourceWidth,
+        y = (frame.top + mark.y * frame.height) / sourceHeight,
+        width = (mark.width * frame.width) / sourceWidth,
+        height = (mark.height * frame.height) / sourceHeight,
+    )
+}
+
+/** A drag on the sheet becomes a page-1 highlight on this image, or null when the centre misses it. */
+fun highlightOnFrame(
+    sheetX: Double,
+    sheetY: Double,
+    sheetWidth: Double,
+    sheetHeight: Double,
+    frame: WorksheetPlacement,
+    sourceWidth: Double,
+    sourceHeight: Double,
+    id: String,
+): WorksheetHighlight? {
+    if (sheetWidth < 0.012 || sheetHeight < 0.008 || sourceWidth <= 0.0 || sourceHeight <= 0.0) return null
+    if (frame.width <= 0.0 || frame.height <= 0.0) return null
+    val centerX = (sheetX + sheetWidth / 2.0) * sourceWidth
+    val centerY = (sheetY + sheetHeight / 2.0) * sourceHeight
+    if (centerX < frame.left || centerX > frame.left + frame.width || centerY < frame.top || centerY > frame.top + frame.height) {
+        return null
+    }
+    val localX = ((sheetX * sourceWidth - frame.left) / frame.width).coerceIn(0.0, 1.0)
+    val localY = ((sheetY * sourceHeight - frame.top) / frame.height).coerceIn(0.0, 1.0)
+    val localW = ((sheetWidth * sourceWidth) / frame.width).coerceIn(0.008, 1.0)
+    val localH = ((sheetHeight * sourceHeight) / frame.height).coerceIn(0.008, 1.0)
+    if (localW < 0.012 || localH < 0.008) return null
+    return WorksheetHighlight(id, 1, localX, localY, localW, localH)
+}
+
+/** Text-box anchor on its own worksheet image, as 0–1 of the sheet. */
+fun boxOnFrame(
+    box: WorksheetBox,
+    frame: WorksheetPlacement,
+    sourceWidth: Double,
+    sourceHeight: Double,
+): Pair<Double, Double> {
+    if (sourceWidth <= 0.0 || sourceHeight <= 0.0 || frame.width <= 0.0 || frame.height <= 0.0) return box.x to box.y
+    return (frame.left + box.x * frame.width) / sourceWidth to (frame.top + box.y * frame.height) / sourceHeight
+}
