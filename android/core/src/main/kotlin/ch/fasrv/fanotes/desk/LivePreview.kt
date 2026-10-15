@@ -35,6 +35,39 @@ data class LiveMark(
     val body: String = "",
 )
 
+/**
+ * Other copies of the current selection, as the desktop editor highlights them.
+ * Case-sensitive and non-overlapping. A match that touches the selection is left
+ * to the selection itself. More than [limit] other copies means no highlight,
+ * which is what CodeMirror does once the match list overflows.
+ */
+fun selectionMatchRanges(
+    text: String,
+    selectionStart: Int,
+    selectionEnd: Int,
+    limit: Int = 100,
+): List<Pair<Int, Int>>? {
+    if (limit < 0) return emptyList()
+    val from = minOf(selectionStart, selectionEnd).coerceIn(0, text.length)
+    val to = maxOf(selectionStart, selectionEnd).coerceIn(from, text.length)
+    if (to - from < 1) return emptyList()
+    val query = text.substring(from, to)
+    if (query.isEmpty()) return emptyList()
+    val hits = ArrayList<Pair<Int, Int>>()
+    var cursor = 0
+    while (cursor <= text.length) {
+        val index = text.indexOf(query, cursor)
+        if (index < 0) break
+        val end = index + query.length
+        if (end <= from || index >= to) {
+            hits += index to end
+            if (hits.size > limit) return null
+        }
+        cursor = end.coerceAtLeast(cursor + 1)
+    }
+    return hits
+}
+
 /** One `<details>` block, in the same shape the desktop editor folds into a widget. */
 data class DetailsBlock(
     val from: Int,

@@ -81,4 +81,15 @@ class LivePreviewTest {
         assertEquals("- [x] Oben\n- [x] Unten", toggleTaskMarker(second, second.indexOf("Unten") - 2))
         assertEquals("- [ ] Oben\n- [ ] Unten", toggleTaskMarker(second, 0))
     }
+
+    @Test
+    fun otherCopiesOfTheSelectionAreMarkedUntilThereAreTooMany() {
+        val text = "beta Beta beta"
+        assertEquals(listOf(10 to 14), selectionMatchRanges(text, 0, 4))
+        assertEquals(emptyList(), selectionMatchRanges(text, 5, 5))
+        assertEquals(emptyList(), selectionMatchRanges("aaaa", 1, 3))
+        val many = "a".repeat(102)
+        assertEquals(null, selectionMatchRanges(many, 0, 1))
+        assertEquals(100, selectionMatchRanges("a".repeat(101), 0, 1)?.size)
+    }
 }
