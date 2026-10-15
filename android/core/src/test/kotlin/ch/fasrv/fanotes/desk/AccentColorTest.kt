@@ -30,6 +30,7 @@ class AccentColorTest {
         assertEquals("#707176", ensureReadableColor("#ffffff", PAPER_CONTRAST_SURFACES))
         assertEquals(0xFF2A6F97.toInt(), paperAccentReadableArgb(0xFF2A6F97.toInt()))
         assertEquals(0xFF846F3B.toInt(), paperAccentReadableArgb(0xFFBA9B4A.toInt()))
+        assertEquals("#fafbfc", paperTableFill("#2a6f97"))
         assertEquals("#295f80", paperCodeInk("#2a6f97"))
         assertEquals("#6f5f39", paperCodeInk("#ba9b4a"))
         assertEquals("#8e5117", paperCodeInk("#d9730d"))

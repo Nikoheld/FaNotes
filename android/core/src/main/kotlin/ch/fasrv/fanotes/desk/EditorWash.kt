@@ -18,6 +18,22 @@ const val PAPER_QUOTE_INK = 0xFF555866.toInt()
 /** `.unified-paper --border` at 14% opacity, used under a level-1 heading. */
 const val PAPER_RULE_ARGB = 0x24232633
 
+/** `.unified-paper --border-strong` at 25% opacity, the table rule's bottom edge. */
+const val PAPER_RULE_STRONG_ARGB = 0x40232633
+
+const val TABLE_PAD_PX = 10
+const val TABLE_RULE_PX = 3
+
+fun tablePadPx(textSizePx: Float): Int {
+    val scale = if (textSizePx <= 0f) 1.0 else textSizePx / 16.0
+    return kotlin.math.floor(TABLE_PAD_PX * scale + 0.5).toInt().coerceAtLeast(1)
+}
+
+fun tableRulePx(textSizePx: Float): Int {
+    val scale = if (textSizePx <= 0f) 1.0 else textSizePx / 16.0
+    return kotlin.math.floor(TABLE_RULE_PX * scale + 0.5).toInt().coerceAtLeast(1)
+}
+
 const val QUOTE_BAR_PX = 3
 const val QUOTE_GAP_PX = 13
 

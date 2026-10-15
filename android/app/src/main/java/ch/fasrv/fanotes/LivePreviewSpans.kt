@@ -24,6 +24,10 @@ import ch.fasrv.fanotes.desk.LiveMark
 import ch.fasrv.fanotes.desk.PAPER_CODE_BACKGROUND
 import ch.fasrv.fanotes.desk.PAPER_QUOTE_INK
 import ch.fasrv.fanotes.desk.PAPER_RULE_ARGB
+import ch.fasrv.fanotes.desk.PAPER_RULE_STRONG_ARGB
+import ch.fasrv.fanotes.desk.paperTableFillArgb
+import ch.fasrv.fanotes.desk.tablePadPx
+import ch.fasrv.fanotes.desk.tableRulePx
 import ch.fasrv.fanotes.desk.paperCodeBox
 import ch.fasrv.fanotes.desk.paperCodeInkArgb
 import ch.fasrv.fanotes.desk.livePreviewMarks
@@ -91,6 +95,8 @@ private fun spanFor(mark: LiveMark, readable: Int, accent: Int, textSizePx: Floa
     LiveKind.MATH -> MathSpan()
     LiveKind.LINK -> LinkSpan(readable)
     LiveKind.DETAILS_SUMMARY -> DetailsSummarySpan(mark.label, mark.body)
+    LiveKind.TABLE_ROW -> TableRowSpan(paperTableFillArgb(accent), textSizePx)
+    LiveKind.TABLE_RULE -> TableRuleSpan(textSizePx)
 }
 
 internal class DetailsSummarySpan(private val summary: String, private val body: String) : ReplacementSpan(), LivePreviewSpan {
@@ -203,6 +209,87 @@ private class HeadingSpan(private val proportion: Float, private val baseTextPx:
  * Desktop paper quote: a 3px accent bar, 13px of space, a 7% accent wash,
  * and the paper's soft text colour.
  */
+internal class TableRowSpan(private val fill: Int, private val textSizePx: Float) :
+    LeadingMarginSpan, LineBackgroundSpan, LivePreviewSpan {
+    private val pad = tablePadPx(textSizePx)
+    private val hairline = (textSizePx / 16f).coerceAtLeast(1f)
+
+    override fun getLeadingMargin(first: Boolean) = pad
+
+    override fun drawLeadingMargin(
+        canvas: Canvas,
+        paint: Paint,
+        x: Int,
+        dir: Int,
+        top: Int,
+        baseline: Int,
+        bottom: Int,
+        text: CharSequence,
+        start: Int,
+        end: Int,
+        first: Boolean,
+        layout: Layout,
+    ) = Unit
+
+    override fun drawBackground(
+        canvas: Canvas,
+        paint: Paint,
+        left: Int,
+        right: Int,
+        top: Int,
+        baseline: Int,
+        bottom: Int,
+        text: CharSequence,
+        start: Int,
+        end: Int,
+        lineNumber: Int,
+    ) {
+        if (right <= left) return
+        val previous = paint.color
+        paint.color = fill
+        canvas.drawRect(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat(), paint)
+        paint.color = PAPER_RULE_ARGB
+        canvas.drawRect(left.toFloat(), top.toFloat(), left + hairline, bottom.toFloat(), paint)
+        canvas.drawRect(right - hairline, top.toFloat(), right.toFloat(), bottom.toFloat(), paint)
+        paint.color = previous
+    }
+}
+
+internal class TableRuleSpan(private val textSizePx: Float) : LineHeightSpan, LineBackgroundSpan, LivePreviewSpan {
+    private val bar = tableRulePx(textSizePx)
+    private val hairline = (textSizePx / 16f).coerceAtLeast(1f)
+
+    override fun chooseHeight(text: CharSequence, start: Int, end: Int, spanstartv: Int, lineHeight: Int, fm: Paint.FontMetricsInt) {
+        fm.ascent = 0
+        fm.top = 0
+        fm.descent = bar
+        fm.bottom = bar
+    }
+
+    override fun drawBackground(
+        canvas: Canvas,
+        paint: Paint,
+        left: Int,
+        right: Int,
+        top: Int,
+        baseline: Int,
+        bottom: Int,
+        text: CharSequence,
+        start: Int,
+        end: Int,
+        lineNumber: Int,
+    ) {
+        if (right <= left) return
+        val previous = paint.color
+        paint.color = PAPER_RULE_ARGB
+        canvas.drawRect(left.toFloat(), top.toFloat(), left + hairline, bottom.toFloat(), paint)
+        canvas.drawRect(right - hairline, top.toFloat(), right.toFloat(), bottom.toFloat(), paint)
+        paint.color = PAPER_RULE_STRONG_ARGB
+        canvas.drawRect(left.toFloat(), bottom - hairline, right.toFloat(), bottom.toFloat(), paint)
+        paint.color = previous
+    }
+}
+
 internal class PaperRuleSpan(private val baseTextPx: Float) : LineBackgroundSpan, LivePreviewSpan {
     override fun drawBackground(
         canvas: Canvas,
