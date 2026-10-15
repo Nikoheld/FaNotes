@@ -2,6 +2,7 @@ package ch.fasrv.fanotes.desk
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class EditorWashTest {
     @Test
@@ -13,6 +14,13 @@ class EditorWashTest {
         assertEquals(0x122A6F97, quoteWashArgb(0xFF2A6F97.toInt()))
         assertEquals(3 to 16, quoteMargins(16f))
         assertEquals(6 to 32, quoteMargins(32f))
+        val code = paperCodeBox(16f)
+        assertEquals(14.4f, code.textPx, 0.01f)
+        assertEquals(5.184f, code.padX, 0.01f)
+        assertEquals(1.44f, code.padY, 0.01f)
+        assertEquals(5f, code.radius, 0.01f)
+        assertEquals(1f, code.border, 0.01f)
+        assertTrue(paperCodeBox(32f).textPx > code.textPx)
     }
 
     @Test

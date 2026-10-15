@@ -21,6 +21,24 @@ const val PAPER_RULE_ARGB = 0x24232633
 const val QUOTE_BAR_PX = 3
 const val QUOTE_GAP_PX = 13
 
+data class PaperCodeBox(val textPx: Float, val padX: Float, val padY: Float, val radius: Float, val border: Float)
+
+/**
+ * Inline code chip from the paper stylesheet: 0.9em type, 0.36em side
+ * padding, 0.1em vertical padding, and a 5px corner.
+ */
+fun paperCodeBox(textSizePx: Float): PaperCodeBox {
+    val base = if (textSizePx <= 0f) 16f else textSizePx
+    val text = base * 0.9f
+    return PaperCodeBox(
+        textPx = text,
+        padX = text * 0.36f,
+        padY = text * 0.1f,
+        radius = (5f * base / 16f).coerceAtLeast(1f),
+        border = (base / 16f).coerceAtLeast(1f),
+    )
+}
+
 /** Bar width and total leading margin for a quote, scaled with the editor font. */
 fun quoteMargins(textSizePx: Float): Pair<Int, Int> {
     val scale = if (textSizePx <= 0f) 1.0 else textSizePx / 16.0

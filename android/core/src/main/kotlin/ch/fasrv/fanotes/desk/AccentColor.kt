@@ -55,6 +55,24 @@ fun ensureReadableColor(foreground: String, backgrounds: List<String>, target: D
 /** Accent used for rules and links on the white paper sheet. */
 fun paperAccentReadable(raw: String?): String = ensureReadableColor(normalizeAccent(raw), PAPER_CONTRAST_SURFACES)
 
+/** Paper body text from `.unified-paper --text`. */
+const val PAPER_TEXT = "#252630"
+
+/** Paper chip fill from `.unified-paper --bg-elevated`. */
+const val PAPER_CODE_BACKGROUND = 0xFFF3F4F7.toInt()
+
+/**
+ * Inline code on the paper sheet: 78% of the readable accent mixed with the
+ * paper text, matching `color-mix` in the desktop stylesheet.
+ */
+fun paperCodeInk(raw: String?): String = mixColors(paperAccentReadable(raw), PAPER_TEXT, 0.78)
+
+fun paperCodeInkArgb(accent: Int): Int = colorArgb(paperCodeInk("#%06x".format(accent and 0xFFFFFF)))
+
+/** `firstWeight` of [first] and the rest of [second], in sRGB. */
+fun mixColors(first: String, second: String, firstWeight: Double): String =
+    mixHex(second, first, firstWeight.coerceIn(0.0, 1.0))
+
 fun paperAccentReadableArgb(accent: Int): Int = colorArgb(paperAccentReadable("#%06x".format(accent and 0xFFFFFF)))
 
 fun colorArgb(hex: String): Int = (0xFF000000.toInt()) or hex.removePrefix("#").toInt(16)
