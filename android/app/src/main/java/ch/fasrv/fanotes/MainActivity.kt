@@ -156,6 +156,7 @@ class MainActivity : ComponentActivity() {
                 desk["theme"] ?: if (androidx.compose.foundation.isSystemInDarkTheme()) "dark" else "light",
                 desk["accent"].orEmpty(),
                 desk["accent-secondary"].orEmpty(),
+                desk["ui-font"].orEmpty(),
             ) {
                 FaNotesScreen(
                     model = model,
@@ -215,7 +216,15 @@ private val Brushes = listOf(
 )
 
 @Composable
-fun FaNotesTheme(themeName: String, accentHex: String = ch.fasrv.fanotes.desk.DEFAULT_ACCENT, accentSecondaryHex: String = ch.fasrv.fanotes.desk.DEFAULT_ACCENT_SECONDARY, content: @Composable () -> Unit) {
+fun FaNotesTheme(
+    themeName: String,
+    accentHex: String = ch.fasrv.fanotes.desk.DEFAULT_ACCENT,
+    accentSecondaryHex: String = ch.fasrv.fanotes.desk.DEFAULT_ACCENT_SECONDARY,
+    uiFont: String = "inter",
+    content: @Composable () -> Unit,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val family = androidx.compose.ui.text.font.FontFamily(loadUiTypeface(context, uiFont))
     val accent = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccent(accentHex)))
     val onAccent = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.accentInk(accentHex)))
     val secondary = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccentSecondary(accentSecondaryHex)))
@@ -225,7 +234,28 @@ fun FaNotesTheme(themeName: String, accentHex: String = ch.fasrv.fanotes.desk.DE
         "sepia" -> lightColorScheme(primary = accent, onPrimary = onAccent, secondary = secondary, onSecondary = onSecondary, onSurface = Color(0xFF3E3428), background = Color(0xFFF4EFE4), surface = Color(0xFFEFE6D6), surfaceVariant = Color(0xFFE4D7C3))
         else -> darkColorScheme(primary = accent, onPrimary = onAccent, secondary = secondary, onSecondary = onSecondary, onSurface = Color(0xFFEDEDEC), background = Color(0xFF191919), surface = Color(0xFF202020), surfaceVariant = Color(0xFF2A2A2A))
     }
-    MaterialTheme(colorScheme = scheme, content = content)
+    MaterialTheme(colorScheme = scheme, typography = chromeTypography(family), content = content)
+}
+
+private fun chromeTypography(family: androidx.compose.ui.text.font.FontFamily): androidx.compose.material3.Typography {
+    val base = androidx.compose.material3.Typography()
+    return base.copy(
+        displayLarge = base.displayLarge.copy(fontFamily = family),
+        displayMedium = base.displayMedium.copy(fontFamily = family),
+        displaySmall = base.displaySmall.copy(fontFamily = family),
+        headlineLarge = base.headlineLarge.copy(fontFamily = family),
+        headlineMedium = base.headlineMedium.copy(fontFamily = family),
+        headlineSmall = base.headlineSmall.copy(fontFamily = family),
+        titleLarge = base.titleLarge.copy(fontFamily = family),
+        titleMedium = base.titleMedium.copy(fontFamily = family),
+        titleSmall = base.titleSmall.copy(fontFamily = family),
+        bodyLarge = base.bodyLarge.copy(fontFamily = family),
+        bodyMedium = base.bodyMedium.copy(fontFamily = family),
+        bodySmall = base.bodySmall.copy(fontFamily = family),
+        labelLarge = base.labelLarge.copy(fontFamily = family),
+        labelMedium = base.labelMedium.copy(fontFamily = family),
+        labelSmall = base.labelSmall.copy(fontFamily = family),
+    )
 }
 
 @Composable
@@ -302,7 +332,19 @@ fun FaNotesScreen(
     }
 
     val focus = desk["focus"] == "on"
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    val chromeBackground = ch.fasrv.fanotes.desk.workspaceBackground(desk["background"])
+    val compact = ch.fasrv.fanotes.desk.compactChrome(desk["compact"])
+    val glass = ch.fasrv.fanotes.desk.glassChrome(desk["glass"])
+    Column(
+        Modifier
+            .fillMaxSize()
+            .workspaceBackdrop(
+                chromeBackground,
+                MaterialTheme.colorScheme.background,
+                MaterialTheme.colorScheme.primary,
+                MaterialTheme.colorScheme.secondary,
+            ),
+    ) {
         if (!focus) {
             DeskRibbon(
                 destination = destination,
@@ -352,6 +394,7 @@ fun FaNotesScreen(
                     onToggleLocal = { model.toggleLocalFolder(it) },
                     colors = model.folderColors.collectAsStateWithLifecycle().value,
                     onFolderColor = { model.cycleFolderColor(it) },
+                    compact = compact,
                     conflicts = sync.conflicts,
                     onResolve = { conflict, choice -> model.resolveConflict(conflict, choice) },
                 )
@@ -479,7 +522,7 @@ fun FaNotesScreen(
     if (bugReportOpen) BugReportDialog(model)
     val confirm by model.confirmRequest.collectAsStateWithLifecycle()
     confirm?.let { request ->
-        FaNotesConfirmDialog(request, onConfirm = { model.acceptConfirm() }, onDismiss = { model.dismissConfirm() })
+        FaNotesConfirmDialog(request, onConfirm = { model.acceptConfirm() }, onDismiss = { model.dismissConfirm() }, glass = glass)
     }
     if (mathOpen) {
         AlertDialog(
@@ -651,6 +694,7 @@ private fun VaultPane(
     onFolderColor: (String) -> Unit,
     conflicts: List<ch.fasrv.fanotes.sync.SyncConflict>,
     onResolve: (ch.fasrv.fanotes.sync.SyncConflict, String) -> Unit,
+    compact: Boolean = false,
 ) {
     Column(modifier.background(MaterialTheme.colorScheme.surface).padding(16.dp)) {
         Text("FaNotes", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
@@ -717,7 +761,7 @@ private fun VaultPane(
         }
         LazyColumn(Modifier.weight(1f).padding(top = 8.dp)) {
             items(tree, key = { it.path }) { node ->
-                NoteRow(node, selected, colors, onOpen, onDelete, onRename, onMove, onFolderColor, localFolders, onToggleLocal, depth = 0)
+                NoteRow(node, selected, colors, onOpen, onDelete, onRename, onMove, onFolderColor, localFolders, onToggleLocal, compact, depth = 0)
             }
         }
         TextButton(onClick = onOpenVault) { Text("Vault-Ordner öffnen") }
@@ -737,17 +781,19 @@ private fun NoteRow(
     onFolderColor: (String) -> Unit,
     localFolders: List<String>,
     onToggleLocal: (String) -> Unit,
+    compact: Boolean,
     depth: Int,
 ) {
     val folderColor = colors[node.path]
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = (depth * 12).dp, top = 2.dp, bottom = 2.dp)
+            .padding(start = (depth * 12).dp)
+            .height(ch.fasrv.fanotes.desk.chromeRowHeightDp(compact).dp)
             .clip(RoundedCornerShape(10.dp))
             .background(if (node.path == selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent)
             .clickable { if (node.kind == NoteKind.FOLDER) onFolderColor(node.path) else onOpen(node.path) }
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
@@ -780,7 +826,7 @@ private fun NoteRow(
         }
     }
     if (node.kind == NoteKind.FOLDER) {
-        node.children.forEach { NoteRow(it, selected, colors, onOpen, onDelete, onRename, onMove, onFolderColor, localFolders, onToggleLocal, depth + 1) }
+        node.children.forEach { NoteRow(it, selected, colors, onOpen, onDelete, onRename, onMove, onFolderColor, localFolders, onToggleLocal, compact, depth + 1) }
     }
 }
 
@@ -1002,6 +1048,7 @@ private fun SplitPane(
                 view.contentWidthPx = metrics.contentWidthPx.toFloat()
                 view.readableLineLength = metrics.readableLineLength
                 view.setEditorFont(metrics.editorFontId)
+                view.applyWorkspaceKind(model.deskSettings.value["background"].orEmpty())
                 view.showLineNumbers = metrics.showLineNumbers
                 view.accentSecondary = android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccentSecondary(model.deskSettings.value["accent-secondary"]))
                 view.zoomMax = metrics.zoomMax.toFloat()
@@ -1209,6 +1256,7 @@ private fun PageSurface(
             page.ink.strokeSmoothing = pen.smoothing.toFloat()
             page.ink.tabletButtons = model.deskSettings.value["tablet-buttons"].orEmpty()
             page.ink.accentSecondary = android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccentSecondary(model.deskSettings.value["accent-secondary"]))
+            page.setWorkspace(model.deskSettings.value["background"].orEmpty())
             page.ink.onPlaceHighlight = { model.addWorksheetHighlight(it) }
             page.ink.onRemoveHighlight = { model.removeWorksheetHighlight(it) }
             page.onFinger = { model.fingerDraws.value = it }

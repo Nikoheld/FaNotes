@@ -77,6 +77,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         clipChildren = true
         clipToPadding = true
         setBackgroundColor(0xFFE8E6E1.toInt())
+        ink.setBackgroundColor(android.graphics.Color.TRANSPARENT)
         addView(ink, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         editor.background = null
         editor.setTextColor(0xFF252630.toInt())
@@ -480,6 +481,12 @@ class NotePageView(context: Context) : FrameLayout(context) {
         syncPill.layoutParams = params
         syncPill.background = rounded(if (dark) 0xFF2A2A2A.toInt() else 0xFFE7E4DE.toInt(), dp(8))
         syncPill.setOnClickListener { onSync() }
+    }
+
+    fun setWorkspace(kind: String) {
+        val next = ch.fasrv.fanotes.desk.workspaceBackground(kind)
+        setBackgroundColor(if (next == "clean") 0xFFE8E6E1.toInt() else android.graphics.Color.TRANSPARENT)
+        ink.applyWorkspaceKind(next)
     }
 
     private fun placeEditor() {

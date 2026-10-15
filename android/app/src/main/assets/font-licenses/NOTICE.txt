@@ -11,3 +11,21 @@ SIL Open Font License 1.1. The license terms are the same text as JetBrainsMono-
 IBM Plex Mono
 Copyright 2017 IBM Corp. All rights reserved.
 SIL Open Font License 1.1. The license terms are the same text as JetBrainsMono-OFL.txt.
+
+Interface fonts, matching the desktop surface menu. Each is SIL Open Font License 1.1.
+The license terms are the same text as JetBrainsMono-OFL.txt.
+
+Inter
+Copyright 2020 The Inter Project Authors.
+
+DM Sans
+Copyright 2014 The DM Sans Project Authors.
+
+IBM Plex Sans
+Copyright 2019 IBM Corp. All rights reserved.
+
+Source Sans 3
+Copyright 2020 Adobe. All rights reserved.
+
+Atkinson Hyperlegible
+Copyright 2020 Braille Institute of America, Inc.

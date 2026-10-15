@@ -15,3 +15,15 @@ fun loadEditorTypeface(context: Context, fontId: String): Typeface {
     }
     return ResourcesCompat.getFont(context, res) ?: Typeface.MONOSPACE
 }
+
+/** Loads the desktop interface face. Inter is the factory default. */
+fun loadUiTypeface(context: Context, fontId: String): Typeface {
+    val res = when (ch.fasrv.fanotes.desk.uiFontId(fontId)) {
+        "dm" -> R.font.dm_sans_regular
+        "plex" -> R.font.ibm_plex_sans_regular
+        "source" -> R.font.source_sans_3_regular
+        "atkinson" -> R.font.atkinson_hyperlegible_regular
+        else -> R.font.inter_regular
+    }
+    return ResourcesCompat.getFont(context, res) ?: Typeface.SANS_SERIF
+}
