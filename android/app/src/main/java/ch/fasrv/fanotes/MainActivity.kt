@@ -128,6 +128,7 @@ import ch.fasrv.fanotes.sync.SyncStatus
 import ch.fasrv.fanotes.vault.NoteKind
 import ch.fasrv.fanotes.vault.VaultNode
 import kotlin.math.abs
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 
 class MainActivity : ComponentActivity() {
@@ -1913,6 +1914,7 @@ private fun PageSurface(
         modifier: Modifier,
 ) {
     var bound by remember { mutableStateOf("") }
+    var inkNotice by remember { mutableStateOf<ch.fasrv.fanotes.ink.InkNotice?>(null) }
     val links by model.noteLinks.collectAsStateWithLifecycle()
     val boxes by model.worksheetBoxes.collectAsStateWithLifecycle()
     val highlights by model.worksheetHighlights.collectAsStateWithLifecycle()
@@ -1921,14 +1923,16 @@ private fun PageSurface(
     val foldedHeadings by model.foldedHeadings.collectAsStateWithLifecycle()
     val clearLink by model.clearLinkRequest.collectAsStateWithLifecycle()
     var appliedClear by remember { mutableStateOf(0) }
+    Box(modifier) {
     AndroidView(
-        modifier = modifier,
+        modifier = Modifier.matchParentSize(),
         factory = { context ->
             NotePageView(context).apply {
                 attachSession(model.session)
                 ink.onChanged = { model.noteChanged() }
                 ink.onStroke = { model.recordFinishedStroke(it) }
                 ink.onErased = { model.recordErasedStrokes(it) }
+                ink.onInkNotice = { inkNotice = it }
                 ink.onPageGrew = { prevWidth, prevHeight, nextWidth, nextHeight, padX, padY ->
                     model.pageGrew(prevWidth, prevHeight, nextWidth, nextHeight, padX, padY)
                 }
@@ -1943,6 +1947,7 @@ private fun PageSurface(
             page.ink.onChanged = { model.noteChanged() }
             page.ink.onStroke = { model.recordFinishedStroke(it) }
             page.ink.onErased = { model.recordErasedStrokes(it) }
+            page.ink.onInkNotice = { inkNotice = it }
             page.ink.onPageGrew = { prevWidth, prevHeight, nextWidth, nextHeight, padX, padY ->
                 model.pageGrew(prevWidth, prevHeight, nextWidth, nextHeight, padX, padY)
             }
@@ -2081,6 +2086,8 @@ private fun PageSurface(
             model.takeReveal(current)?.let { page.ink.revealY(it) }
         },
     )
+    InkNoticeBanner(inkNotice, { inkNotice = null }, Modifier.align(Alignment.TopCenter).fillMaxWidth())
+    }
 }
 
 private fun syncDetail(state: ch.fasrv.fanotes.sync.SyncPublicState): String {
@@ -2118,14 +2125,17 @@ private fun InkCanvas(
     modifier: Modifier,
 ) {
     var bound by remember { mutableStateOf("") }
+    var inkNotice by remember { mutableStateOf<ch.fasrv.fanotes.ink.InkNotice?>(null) }
+    Box(modifier) {
     AndroidView(
-        modifier = modifier,
+        modifier = Modifier.matchParentSize(),
         factory = { context ->
             InkSurfaceView(context).apply {
                 session = model.session
                 onChanged = { model.noteChanged() }
                 onStroke = { model.recordFinishedStroke(it) }
                 onErased = { model.recordErasedStrokes(it) }
+                onInkNotice = { inkNotice = it }
                 onSwipeNote = { model.swipe(it) }
                 onEdgeHistory = { model.navigateHistory(it) }
             }
@@ -2139,6 +2149,7 @@ private fun InkCanvas(
             view.onChanged = { model.noteChanged() }
             view.onStroke = { model.recordFinishedStroke(it) }
             view.onErased = { model.recordErasedStrokes(it) }
+            view.onInkNotice = { inkNotice = it }
             view.onSwipeNote = { model.swipe(it) }
             view.onEdgeHistory = { model.navigateHistory(it) }
             val current = path ?: ""
@@ -2152,6 +2163,25 @@ private fun InkCanvas(
             }
         },
     )
+    InkNoticeBanner(inkNotice, { inkNotice = null }, Modifier.align(Alignment.TopCenter).fillMaxWidth())
+    }
+}
+
+@Composable
+private fun InkNoticeBanner(notice: ch.fasrv.fanotes.ink.InkNotice?, onClose: () -> Unit, modifier: Modifier = Modifier) {
+    val current = notice ?: return
+    androidx.compose.runtime.LaunchedEffect(current) {
+        val wait = ch.fasrv.fanotes.ink.inkNoticeAutoClearDelayMs(current) ?: return@LaunchedEffect
+        delay(wait)
+        onClose()
+    }
+    Row(
+        modifier.padding(12.dp).background(MaterialTheme.colorScheme.surface, androidx.compose.foundation.shape.RoundedCornerShape(8.dp)).padding(start = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(current.text, modifier = Modifier.weight(1f), fontSize = 13.sp)
+        TextButton(onClick = onClose) { Text("Schließen") }
+    }
 }
 
 @Composable

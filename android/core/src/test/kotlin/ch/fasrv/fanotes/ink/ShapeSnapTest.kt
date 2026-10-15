@@ -43,5 +43,33 @@ class ShapeSnapTest {
             StrokePoint(0.2 + (index % 5) * 0.04, 0.2 + (index % 3) * 0.07, index.toDouble(), 0.4, 0.0, 0.0, "pen")
         }
         assertNull(snapStrokeToShape(scribble, 1000.0, 800.0, 50))
+        assertTrue(strokeLooksLikeShape(points, 1000.0, 800.0, 50))
+        assertEquals("Kreis erkannt · Stift heben übernimmt die saubere Form.", shapeRecognizedNotice("circle"))
+    }
+
+    @Test
+    fun aHoldHintsBeforeItSnapsAndAMoveRestartsTheClock() {
+        val profile = shapeSnapProfile(50)
+        assertEquals(700, profile.dwellMs)
+        assertEquals(260, profile.hintMs)
+        val watch = ShapeSnapWatch()
+        watch.begin(0)
+        assertEquals(260L, watch.onSample(0, 12.0, canArm = true, profile))
+        val hint = watch.onDue(260, profile, looksLikeShape = true)
+        assertTrue(hint.showHint)
+        assertTrue(!hint.trySnap)
+        assertEquals(440L, hint.waitMs)
+        val early = watch.onDue(400, profile, looksLikeShape = true)
+        assertTrue(!early.trySnap)
+        assertEquals(300L, early.waitMs)
+        val snap = watch.onDue(700, profile, looksLikeShape = true)
+        assertTrue(snap.trySnap)
+        assertEquals(null, watch.noteSnap(success = true, 700))
+        watch.begin(1_000)
+        assertEquals(260L, watch.onSample(1_000, 8.0, canArm = true, profile))
+        assertEquals(260L, watch.onSample(1_100, 4.0, canArm = true, profile))
+        val restarted = watch.onDue(1_360, profile, looksLikeShape = false)
+        assertTrue(!restarted.showHint)
+        assertEquals(440L, restarted.waitMs)
     }
 }

@@ -18,6 +18,8 @@ import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.AttributeSet
 import android.view.GestureDetector
@@ -60,10 +62,17 @@ import ch.fasrv.fanotes.ink.rulerWidth
 import ch.fasrv.fanotes.ink.sampleCompassCircle
 import ch.fasrv.fanotes.ink.scaleTicks
 import ch.fasrv.fanotes.ink.inkStrokeAllowsShapeSnap
+import ch.fasrv.fanotes.ink.FORM_DETECT_NOTICE_TEXT
+import ch.fasrv.fanotes.ink.FORM_TAKEN_NOTICE_TEXT
+import ch.fasrv.fanotes.ink.InkNotice
+import ch.fasrv.fanotes.ink.SCRIBBLE_ERASE_NOTICE_TEXT
+import ch.fasrv.fanotes.ink.ShapeSnapWatch
 import ch.fasrv.fanotes.ink.detectScribbleErase
-import ch.fasrv.fanotes.ink.isStrokeDwelling
 import ch.fasrv.fanotes.ink.sectionsOf
+import ch.fasrv.fanotes.ink.shapeRecognizedNotice
+import ch.fasrv.fanotes.ink.shapeSnapProfile
 import ch.fasrv.fanotes.ink.snapStrokeToShape
+import ch.fasrv.fanotes.ink.strokeLooksLikeShape
 import ch.fasrv.fanotes.ink.setSquareApexSign
 import ch.fasrv.fanotes.ink.setSquareSize
 import ch.fasrv.fanotes.ink.shortestAngleDelta
@@ -131,6 +140,7 @@ class InkSurfaceView @JvmOverloads constructor(
     var onChanged: () -> Unit = {}
     var onStroke: (ch.fasrv.fanotes.ink.InkStroke) -> Unit = {}
     var onErased: (Int) -> Unit = {}
+    var onInkNotice: (InkNotice) -> Unit = {}
     var onPageGrew: (Double, Double, Double, Double, Double, Double) -> Unit = { _, _, _, _, _, _ -> }
     var onPenSample: (Double, Double) -> Unit = { _, _ -> }
     var onSwipeNote: (Int) -> Unit = {}
@@ -290,6 +300,11 @@ class InkSurfaceView @JvmOverloads constructor(
     private var guideDrag: GuideDrag? = null
     private var snapLock: DraftingSnapLock? = null
     private var shapeSnapped = false
+    private var didShapeSnap = false
+    private var scribbleHintShown = false
+    private val shapeWatch = ShapeSnapWatch()
+    private val shapeHandler = Handler(Looper.getMainLooper())
+    private val shapeDue = Runnable { onShapeDue() }
     private val guideFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = Color.parseColor("#D7E4F2") }
     private val guideEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -751,6 +766,9 @@ class InkSurfaceView @JvmOverloads constructor(
             }
             else -> {
                 shapeSnapped = false
+                didShapeSnap = false
+                shapeWatch.begin(SystemClock.uptimeMillis())
+                clearShapeWatch()
                 val raw = pageNorm(event.getX(index), event.getY(index))
                 val hit = snapToDraftingTools(raw.first, raw.second, visibleTools(), sessionWidth(), sessionHeight(), null, sheetDisplay())
                 snapLock = hit?.let { DraftingSnapLock(it.kind, it.edgeIndex) }
@@ -797,8 +815,15 @@ class InkSurfaceView @JvmOverloads constructor(
             if (!shapeSnapped) {
                 for (h in 0 until history) addGrownSample(current, penSample(event, index, h))
                 val samplePoint = penSample(event, index)
+                val previous = current.livePoints.lastOrNull()
                 if (addGrownSample(current, samplePoint)) onPenSample(samplePoint.x, samplePoint.y)
-                if (isStrokeDwelling(current.livePoints, sessionWidth(), sessionHeight())) trySnapLive()
+                val distance = if (previous == null) 1.0 else {
+                    hypot(
+                        (samplePoint.x - previous.x) * sessionWidth(),
+                        (samplePoint.y - previous.y) * sessionHeight(),
+                    )
+                }
+                armShapeWatch(distance)
                 predicted = if (shapeSnapped) emptyList() else predict(event)
             }
         }
@@ -856,10 +881,16 @@ class InkSurfaceView @JvmOverloads constructor(
             }
             cancel -> {
                 shapeSnapped = false
+                didShapeSnap = false
+                clearShapeWatch()
                 current.cancelStroke()
             }
             else -> {
-                if (!shapeSnapped) trySnapLive()
+                val profile = shapeSnapProfile(shapeSnapSensitivity)
+                val heldLongEnough = SystemClock.uptimeMillis() - shapeWatch.lastMoveAtMs >= profile.dwellMs
+                clearShapeWatch()
+                if (heldLongEnough && !shapeSnapped) trySnapLive()
+                val tookShape = didShapeSnap
                 shapeSnapped = false
                 val live = current.livePoints
                 val scribble = if (inkTool == InkTool.PEN && live.size >= 8) {
@@ -878,12 +909,17 @@ class InkSurfaceView @JvmOverloads constructor(
                     invalidateTiles()
                     onErased(scribble.indexes.size)
                     onChanged()
+                    if (!scribbleHintShown) {
+                        scribbleHintShown = true
+                        onInkNotice(InkNotice("success", SCRIBBLE_ERASE_NOTICE_TEXT))
+                    }
                 } else {
                     val stroke = current.endStroke(style, nowIso())
                     if (stroke != null) {
                         invalidateTiles(stroke)
                         onStroke(stroke)
                         onChanged()
+                        if (tookShape) onInkNotice(InkNotice("success", FORM_TAKEN_NOTICE_TEXT))
                     }
                 }
             }
@@ -1819,13 +1855,62 @@ class InkSurfaceView @JvmOverloads constructor(
         recycle()
     }
 
-    private fun trySnapLive() {
-        val current = session ?: return
-        if (!inkStrokeAllowsShapeSnap("handwriting", null)) return
-        if (style.brush in setOf("marker", "highlighter", "watercolor", "spray", "paintbrush")) return
-        val snapped = snapStrokeToShape(current.livePoints, sessionWidth(), sessionHeight(), shapeSnapSensitivity) ?: return
+    private fun trySnapLive(): Boolean {
+        val current = session ?: return false
+        if (!shapeCanArm()) return false
+        val snapped = snapStrokeToShape(current.livePoints, sessionWidth(), sessionHeight(), shapeSnapSensitivity) ?: return false
         current.replaceLive(snapped.points)
         shapeSnapped = true
+        didShapeSnap = true
+        onInkNotice(InkNotice("success", shapeRecognizedNotice(snapped.kind)))
+        return true
+    }
+
+    private fun shapeCanArm(): Boolean {
+        if (inkTool != InkTool.PEN) return false
+        if (!inkStrokeAllowsShapeSnap("handwriting", null)) return false
+        if (style.brush in setOf("marker", "highlighter", "watercolor", "spray", "paintbrush")) return false
+        val points = session?.livePoints.orEmpty()
+        return points.size >= shapeSnapProfile(shapeSnapSensitivity).minPoints
+    }
+
+    private fun armShapeWatch(distancePx: Double) {
+        val profile = shapeSnapProfile(shapeSnapSensitivity)
+        val wait = shapeWatch.onSample(SystemClock.uptimeMillis(), distancePx, shapeCanArm(), profile)
+        scheduleShapeWatch(wait)
+    }
+
+    private fun scheduleShapeWatch(waitMs: Long?) {
+        shapeHandler.removeCallbacks(shapeDue)
+        if (waitMs != null) shapeHandler.postDelayed(shapeDue, waitMs)
+    }
+
+    private fun clearShapeWatch() {
+        shapeHandler.removeCallbacks(shapeDue)
+        shapeWatch.clear()
+    }
+
+    private fun onShapeDue() {
+        val current = session ?: return
+        if (shapeSnapped) return
+        val now = SystemClock.uptimeMillis()
+        val profile = shapeSnapProfile(shapeSnapSensitivity)
+        val looks = strokeLooksLikeShape(current.livePoints, sessionWidth(), sessionHeight(), shapeSnapSensitivity)
+        val due = shapeWatch.onDue(now, profile, looks)
+        if (due.showHint) onInkNotice(InkNotice("info", FORM_DETECT_NOTICE_TEXT))
+        val wait = if (due.trySnap) {
+            val snapped = trySnapLive()
+            shapeWatch.noteSnap(snapped, SystemClock.uptimeMillis())
+        } else {
+            due.waitMs
+        }
+        scheduleShapeWatch(wait)
+        if (due.trySnap || due.showHint) invalidate()
+    }
+
+    override fun onDetachedFromWindow() {
+        clearShapeWatch()
+        super.onDetachedFromWindow()
     }
 
     private fun penSample(event: MotionEvent, index: Int, historical: Int = -1): StrokePoint {
