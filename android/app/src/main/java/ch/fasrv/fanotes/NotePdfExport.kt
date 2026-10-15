@@ -19,6 +19,9 @@ import ch.fasrv.fanotes.desk.PDF_PAGE_MARGIN_PT
 import ch.fasrv.fanotes.desk.PDF_PAGE_WIDTH_PT
 import ch.fasrv.fanotes.desk.PageFrame
 import ch.fasrv.fanotes.desk.boxOnFrame
+import ch.fasrv.fanotes.desk.worksheetCardHeightPx
+import ch.fasrv.fanotes.desk.worksheetCharsPerLine
+import ch.fasrv.fanotes.desk.wrapBoxLines
 import ch.fasrv.fanotes.desk.highlightFrameToSheet
 import ch.fasrv.fanotes.desk.highlightToSheet
 import ch.fasrv.fanotes.desk.WorksheetPageSpec
@@ -145,9 +148,27 @@ fun writeNotePdf(
                     val frame = placements.firstOrNull { it.id == anchored.worksheetId && it.page == anchored.box.page.coerceAtLeast(1) } ?: return@forEach
                     boxOnFrame(anchored.box, frame, sourceWidth, sourceHeight)
                 }
-                text.color = Color.parseColor("#202333")
-                text.textSize = (anchored.box.fontSize * scale).toFloat().coerceAtLeast(8f)
-                canvas.drawText(anchored.box.text, (x * sourceWidth * scale).toFloat(), (y * sourceHeight * scale).toFloat(), text)
+                val sx = (x * sourceWidth * scale).toFloat()
+                val sy = (y * sourceHeight * scale).toFloat()
+                val frameWidth = if (placements.isEmpty()) sourceWidth else {
+                    placements.firstOrNull { it.id == anchored.worksheetId && it.page == anchored.box.page.coerceAtLeast(1) }?.width ?: sourceWidth
+                }
+                val boxWidth = (anchored.box.width * frameWidth * scale).toFloat().coerceAtLeast(48f * scale)
+                val fontSize = (anchored.box.fontSize * scale).toFloat().coerceAtLeast(8f)
+                val chars = worksheetCharsPerLine(boxWidth, fontSize, scale)
+                val lines = wrapBoxLines(anchored.box.text.ifEmpty { "Text" }, chars)
+                val lineHeight = fontSize * 1.35f
+                val boxHeight = worksheetCardHeightPx(anchored.box.text, boxWidth, fontSize, scale)
+                val top = sy - boxHeight + 8f * scale
+                val card = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(184, 255, 255, 255) }
+                canvas.drawRect(sx, top, sx + boxWidth, sy + 8f * scale, card)
+                text.color = if (anchored.box.text.isEmpty()) Color.parseColor("#747887") else Color.parseColor("#202333")
+                text.textSize = fontSize
+                var baseline = top + 6f * scale + fontSize
+                for (line in lines) {
+                    canvas.drawText(line, sx + 6f * scale, baseline, text)
+                    baseline += lineHeight
+                }
             }
             links.forEach { link ->
                 val sheet = noteLinkToSheet(link, frames, sourceWidth, sourceHeight)
