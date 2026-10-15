@@ -1226,13 +1226,25 @@ class InkSurfaceView @JvmOverloads constructor(
         }
         val passes = ch.fasrv.fanotes.ink.brushPasses(stroke.brush)
         val baseAlpha = if (stroke.purpose == "art") (stroke.opacity ?: 1.0) else 1.0
-        for (pass in passes) {
-            canvas.save()
+        for ((passIndex, pass) in passes.withIndex()) {
             if (pass.jitter > 0.0) {
-                val jx = (ch.fasrv.fanotes.ink.seededUnit(1) - 0.5) * pass.jitter * scale
-                val jy = (ch.fasrv.fanotes.ink.seededUnit(2) - 0.5) * pass.jitter * scale
-                canvas.translate(jx.toFloat(), jy.toFloat())
+                inkPaint.color = parseColor(stroke.color)
+                drawPencilGrain(
+                    canvas,
+                    inkPaint,
+                    stroke,
+                    sessionWidth(),
+                    sessionHeight(),
+                    scale,
+                    strokeSmoothing.toDouble(),
+                    passIndex,
+                    pass.jitter,
+                    pass.widthFactor,
+                    (baseAlpha * pass.alpha * 255.0).toInt().coerceIn(0, 255),
+                )
+                continue
             }
+            canvas.save()
             val outline = ribbonOutline(
                 stroke,
                 sessionWidth(),

@@ -382,13 +382,25 @@ private fun drawStroke(canvas: Canvas, stroke: InkStroke, sourceWidth: Double, s
     }
     val passes = ch.fasrv.fanotes.ink.brushPasses(stroke.brush)
     val baseAlpha = if (stroke.purpose == "art") (stroke.opacity ?: 1.0) else 1.0
-    for (pass in passes) {
-        canvas.save()
+    for ((passIndex, pass) in passes.withIndex()) {
         if (pass.jitter > 0.0) {
-            val jx = (ch.fasrv.fanotes.ink.seededUnit(1) - 0.5) * pass.jitter * scale
-            val jy = (ch.fasrv.fanotes.ink.seededUnit(2) - 0.5) * pass.jitter * scale
-            canvas.translate(jx.toFloat(), jy.toFloat())
+            paint.color = parsePdfColor(stroke.color)
+            drawPencilGrain(
+                canvas,
+                paint,
+                stroke,
+                sourceWidth,
+                sourceHeight,
+                scale,
+                smoothing.toDouble(),
+                passIndex,
+                pass.jitter,
+                pass.widthFactor,
+                (baseAlpha * pass.alpha * 255.0).toInt().coerceIn(0, 255),
+            )
+            continue
         }
+        canvas.save()
         val outline = ribbonOutline(stroke, sourceWidth, sourceHeight, smoothing.toDouble(), widthFactor = pass.widthFactor)
         val path = Path()
         smoothOutline(path, outline, scale)

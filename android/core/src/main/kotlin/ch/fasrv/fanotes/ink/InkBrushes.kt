@@ -145,3 +145,71 @@ fun calligraphyNibOffset(nibWidth: Double): CalligraphyOffset {
 /** Dot radii: full nib across, 16% along the slant, at least half a pixel. */
 fun calligraphyDotRadii(nibWidth: Double): Pair<Double, Double> =
     nibWidth / 2.0 to max(0.5, nibWidth * 0.16)
+
+/**
+ * One pencil-grain segment in page pixels. Desktop `paintPassSegments` strokes
+ * each sample on its own, shifted by `passOffset`.
+ */
+data class GrainSegment(
+    val startX: Double,
+    val startY: Double,
+    val controlX: Double?,
+    val controlY: Double?,
+    val endX: Double,
+    val endY: Double,
+    val width: Double,
+)
+
+/** Per-segment grain shift in page pixels. Seed matches `passOffset` in `inkStrokePaint.ts`. */
+fun pencilJitterOffset(textureSeed: Int, segmentIndex: Int, passIndex: Int, jitter: Double): Pair<Double, Double> {
+    if (jitter == 0.0) return 0.0 to 0.0
+    val seed = textureSeed + segmentIndex * 53 + (passIndex - 1) * 2
+    return (seededUnit(seed) - 0.5) * jitter to (seededUnit(seed + 1) - 0.5) * jitter
+}
+
+fun pencilGrainSegments(
+    points: List<StrokePoint>,
+    pageWidth: Double,
+    pageHeight: Double,
+    smoothing: Double,
+    baseWidth: Double,
+    pressureEnabled: Boolean,
+    widthFactor: Double,
+    textureSeed: Int,
+    passIndex: Int,
+    jitter: Double,
+    scale: Double,
+): List<GrainSegment> {
+    if (points.size < 2 || scale <= 0.0) return emptyList()
+    val blend = smoothing.coerceIn(0.0, 0.92)
+    val factor = blend * 0.35
+    val tail = blend * 0.4
+    val segments = ArrayList<GrainSegment>(points.size - 1)
+    for (index in 1 until points.size) {
+        val (offsetX, offsetY) = pencilJitterOffset(textureSeed, index, passIndex, jitter)
+        val previous = points[index - 1]
+        val point = points[index]
+        val previousX = previous.x * pageWidth
+        val previousY = previous.y * pageHeight
+        val pointX = point.x * pageWidth
+        val pointY = point.y * pageHeight
+        val pressure = ((previous.pressure) + point.pressure) / 2.0
+        val width = max(1.0, pressureWidth(baseWidth, pressure, pressureEnabled) * scale) * widthFactor / scale
+        val startX = previousX + offsetX
+        val startY = previousY + offsetY
+        if (smoothing > 0.0 && index < points.lastIndex) {
+            val next = points[index + 1]
+            val midX = pointX * (1.0 - factor) + ((pointX + next.x * pageWidth) / 2.0) * factor
+            val midY = pointY * (1.0 - factor) + ((pointY + next.y * pageHeight) / 2.0) * factor
+            segments += GrainSegment(startX, startY, pointX + offsetX, pointY + offsetY, midX + offsetX, midY + offsetY, width)
+        } else if (smoothing > 0.0 && index >= 2) {
+            val before = points[index - 2]
+            val controlX = previousX + (previous.x - before.x) * pageWidth * tail + offsetX
+            val controlY = previousY + (previous.y - before.y) * pageHeight * tail + offsetY
+            segments += GrainSegment(startX, startY, controlX, controlY, pointX + offsetX, pointY + offsetY, width)
+        } else {
+            segments += GrainSegment(startX, startY, null, null, pointX + offsetX, pointY + offsetY, width)
+        }
+    }
+    return segments
+}
