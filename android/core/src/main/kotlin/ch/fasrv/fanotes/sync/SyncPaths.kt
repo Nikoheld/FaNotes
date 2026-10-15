@@ -49,6 +49,10 @@ fun pathIsSyncExcluded(path: String, prefixes: List<String>): Boolean {
     return prefixes.any { prefix -> normalized == prefix || normalized.startsWith("$prefix/") }
 }
 
+/** Folder action in the file tree. A local-only folder offers to sync again. */
+fun localFolderAction(excluded: Boolean): String =
+    if (excluded) "Wieder synchronisieren" else "Nur auf diesem Gerät"
+
 /** Add or remove one folder from the newline-separated local-only list. */
 fun toggleSyncPrefix(value: String, folder: String): String {
     val prefixes = syncPrefixesFromSetting(value)

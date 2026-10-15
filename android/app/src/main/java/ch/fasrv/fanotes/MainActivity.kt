@@ -112,6 +112,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.fasrv.fanotes.desk.solveMathExpression
+import ch.fasrv.fanotes.sync.localFolderAction
 import ch.fasrv.fanotes.sync.pathIsSyncExcluded
 import ch.fasrv.fanotes.sync.syncPrefixesFromSetting
 import ch.fasrv.fanotes.desk.collectVaultTags
@@ -1425,7 +1426,7 @@ private fun NoteRow(
         if (node.kind == NoteKind.FOLDER) {
             val local = pathIsSyncExcluded(node.path, localFolders)
             Text(
-                if (local) "Lokal" else "Nur hier",
+                localFolderAction(local),
                 fontSize = 11.sp,
                 color = if (local) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                 modifier = Modifier.clickable { onToggleLocal(node.path) }.padding(horizontal = 6.dp),

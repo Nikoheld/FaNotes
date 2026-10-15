@@ -159,7 +159,11 @@ fun DeskRibbon(
             }
         }
         Text("Suchen…", modifier = Modifier.padding(start = 8.dp).clickable(onClick = onPalette).padding(6.dp), fontSize = 13.sp)
-        Text("Heute", modifier = Modifier.clickable(onClick = onDaily).padding(6.dp), fontSize = 13.sp)
+        Text(
+            "Tagesnotiz",
+            modifier = Modifier.clickable(onClickLabel = "Heutige Tagesnotiz öffnen", onClick = onDaily).padding(6.dp),
+            fontSize = 13.sp,
+        )
         Text(if (focus) "Fokus aus" else "Fokus", modifier = Modifier.clickable(onClick = onFocus).padding(6.dp), fontSize = 13.sp)
     }
 }

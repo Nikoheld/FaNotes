@@ -10,6 +10,8 @@ class FolderSyncTest {
     fun localFoldersAreParsedToggledAndMatchedAsPrefixes() {
         assertEquals(listOf("Physik/Buch"), syncPrefixesFromSetting("Physik/Buch, ../x\nPhysik/Buch"))
         assertEquals(emptyList(), syncPrefixesFromSetting(" \n ../secret "))
+        assertEquals("Nur auf diesem Gerät", localFolderAction(false))
+        assertEquals("Wieder synchronisieren", localFolderAction(true))
         assertEquals("Physik/Buch", toggleSyncPrefix("", "/Physik/Buch/"))
         assertEquals("", toggleSyncPrefix("Physik/Buch", "Physik/Buch"))
         assertEquals("Physik/Buch\nChemie", toggleSyncPrefix("Physik/Buch", "Chemie"))
