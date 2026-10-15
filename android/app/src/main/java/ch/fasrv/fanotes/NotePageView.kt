@@ -1702,6 +1702,16 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 }
             }
         }
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            val deleting = event.keyCode == KeyEvent.KEYCODE_DEL || event.keyCode == KeyEvent.KEYCODE_FORWARD_DEL
+            val id = ink.selectedLinkId
+            if (ch.fasrv.fanotes.desk.noteLinkDeleteKey(deleting, findFocus() is android.widget.EditText, id != null) && id != null) {
+                ink.onRemoveLink(id)
+                ink.selectedLinkId = null
+                ink.publishLinkChrome()
+                return true
+            }
+        }
         if (event.action == KeyEvent.ACTION_DOWN &&
             event.isCtrlPressed && !event.isShiftPressed && !event.isAltPressed && !event.isMetaPressed &&
             event.keyCode == KeyEvent.KEYCODE_V &&

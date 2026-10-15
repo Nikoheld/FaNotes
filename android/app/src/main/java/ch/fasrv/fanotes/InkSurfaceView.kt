@@ -413,6 +413,8 @@ class InkSurfaceView @JvmOverloads constructor(
     private val predictor = if (Build.VERSION.SDK_INT >= 34) MotionPredictor(context) else null
 
     init {
+        isFocusable = true
+        isFocusableInTouchMode = true
         setBackgroundColor(Color.parseColor("#E6E1D6"))
         if (Build.VERSION.SDK_INT >= 35) {
             requestedFrameRate = 120f
@@ -823,6 +825,7 @@ class InkSurfaceView @JvmOverloads constructor(
                 linkHit(x, y)?.let { link ->
                     selectedLinkId = link.id
                     publishLinkChrome()
+                    requestFocus()
                     onOpenLink(link.targetPath)
                     onPenActive(false)
                     inkPointer = MotionEvent.INVALID_POINTER_ID

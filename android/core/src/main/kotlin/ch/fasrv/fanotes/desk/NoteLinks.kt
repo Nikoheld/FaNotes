@@ -73,6 +73,13 @@ fun activateNoteLink(link: NoteLinkMark?): String? {
     return target
 }
 
+/**
+ * Delete or Backspace removes the selected note link when the caret is not in
+ * a text field. The desktop window handler uses the same rule.
+ */
+fun noteLinkDeleteKey(pressed: Boolean, textEntryFocused: Boolean, linkSelected: Boolean): Boolean =
+    pressed && linkSelected && !textEntryFocused
+
 fun removeNoteLink(links: List<NoteLinkMark>, id: String): List<NoteLinkMark> {
     val list = links.mapNotNull { sanitizeNoteLink(it.id, it.sourcePath, it.targetPath, it.page, it.x, it.y, it.style, it.label) }
     val key = id.trim()

@@ -3,6 +3,7 @@ package ch.fasrv.fanotes.desk
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
@@ -51,5 +52,9 @@ class NoteLinksTest {
         assertEquals(emptyList(), removeNoteLink(remaining, keep.id))
         assertFailsWith<NoteLinkException> { removeNoteLink(listOf(keep), "nl-missing") }
         assertFailsWith<NoteLinkException> { removeNoteLink(listOf(keep), "") }
+        assertTrue(noteLinkDeleteKey(pressed = true, textEntryFocused = false, linkSelected = true))
+        assertFalse(noteLinkDeleteKey(pressed = true, textEntryFocused = true, linkSelected = true))
+        assertFalse(noteLinkDeleteKey(pressed = false, textEntryFocused = false, linkSelected = true))
+        assertFalse(noteLinkDeleteKey(pressed = true, textEntryFocused = false, linkSelected = false))
     }
 }
