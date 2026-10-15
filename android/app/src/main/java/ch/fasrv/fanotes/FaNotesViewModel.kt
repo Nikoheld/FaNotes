@@ -582,9 +582,14 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         goToPdfPage(page)
     }
 
+    val pdfSearchFocus = MutableStateFlow(0)
     val pdfZoom = MutableStateFlow(1.0)
     val pdfZoomMode = MutableStateFlow("custom")
     val pdfCameraCommand = MutableStateFlow<Pair<Int, String>?>(null)
+
+    fun focusPdfSearch() {
+        pdfSearchFocus.value += 1
+    }
 
     fun requestPdfCamera(command: String) {
         val token = (pdfCameraCommand.value?.first ?: 0) + 1

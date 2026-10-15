@@ -163,6 +163,7 @@ class InkSurfaceView @JvmOverloads constructor(
     private var reportedPdfPage = 0
     var onPdfPage: (Int) -> Unit = {}
     var onPdfZoom: (Float, String) -> Unit = { _, _ -> }
+    var onPageFocus: () -> Unit = {}
     var pageFrames: List<ch.fasrv.fanotes.desk.PageFrame> = emptyList()
         set(value) {
             field = value
@@ -604,6 +605,7 @@ class InkSurfaceView @JvmOverloads constructor(
         val now = SystemClock.uptimeMillis()
         when (action) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                if (action == MotionEvent.ACTION_DOWN) onPageFocus()
                 pendingCamera = null
                 val sample = sample(event, index, PointerAction.DOWN)
                 palm = touchPalmState(palm, sample)

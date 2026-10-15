@@ -2889,6 +2889,11 @@ fun PdfSearchBar(model: FaNotesViewModel) {
     val hits by model.pdfSearchHits.collectAsStateWithLifecycle()
     val index by model.pdfSearchIndex.collectAsStateWithLifecycle()
     val busy by model.pdfSearchBusy.collectAsStateWithLifecycle()
+    val focusToken by model.pdfSearchFocus.collectAsStateWithLifecycle()
+    val searchFocus = remember { FocusRequester() }
+    androidx.compose.runtime.LaunchedEffect(focusToken) {
+        if (focusToken > 0) runCatching { searchFocus.requestFocus() }
+    }
     val status = when {
         busy -> "Sucht …"
         query.trim().isEmpty() -> ""
@@ -2900,7 +2905,7 @@ fun PdfSearchBar(model: FaNotesViewModel) {
             OutlinedTextField(
                 query,
                 { model.updatePdfSearch(it) },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).focusRequester(searchFocus),
                 singleLine = true,
                 label = { Text("Im PDF suchen …") },
             )

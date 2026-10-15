@@ -694,7 +694,13 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onSymbolPose: () -> Unit = {}
     var onRestyleLink: (String, String) -> Unit = { _, _ -> }
 
+    var pdfNote = false
+    var onPdfKey: (String) -> Unit = {}
+
     init {
+        isFocusable = true
+        isFocusableInTouchMode = true
+        ink.onPageFocus = { if (pdfNote) requestFocus() }
         tags = HtmlTagAssist(editor) { block ->
             val origin = editor.text?.toString().orEmpty()
             val cursor = editor.selectionEnd.coerceAtLeast(0)
@@ -1185,6 +1191,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             editor.clearFocus()
             val imm = context.getSystemService(InputMethodManager::class.java)
             imm.hideSoftInputFromWindow(windowToken, 0)
+            if (pdfNote) requestFocus()
         }
     }
 
@@ -1622,6 +1629,31 @@ class NotePageView(context: Context) : FrameLayout(context) {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (pdfNote && !editor.hasFocus() && event.action == KeyEvent.ACTION_DOWN) {
+            val name = when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_DOWN -> "down"
+                KeyEvent.KEYCODE_PAGE_DOWN -> "page-down"
+                KeyEvent.KEYCODE_DPAD_UP -> "up"
+                KeyEvent.KEYCODE_PAGE_UP -> "page-up"
+                KeyEvent.KEYCODE_MOVE_HOME -> "home"
+                KeyEvent.KEYCODE_MOVE_END -> "end"
+                KeyEvent.KEYCODE_F -> "f"
+                else -> null
+            }
+            if (name != null) {
+                val action = ch.fasrv.fanotes.desk.pdfViewerKey(
+                    name,
+                    event.isCtrlPressed,
+                    event.isMetaPressed,
+                    event.isAltPressed,
+                    event.isShiftPressed,
+                )
+                if (action != null) {
+                    onPdfKey(action)
+                    return true
+                }
+            }
+        }
         if (event.action == KeyEvent.ACTION_DOWN &&
             event.isCtrlPressed && !event.isShiftPressed && !event.isAltPressed && !event.isMetaPressed &&
             event.keyCode == KeyEvent.KEYCODE_V &&
