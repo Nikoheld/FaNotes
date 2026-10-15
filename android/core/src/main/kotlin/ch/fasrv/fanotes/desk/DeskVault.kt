@@ -7,6 +7,7 @@ import ch.fasrv.fanotes.json.jsonString
 import ch.fasrv.fanotes.json.parseJson
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.Locale
 import java.util.UUID
 
 /** Homework note shared with the desktop client (`Hausaufgaben.md`). */
@@ -272,21 +273,63 @@ fun applyReview(markdown: String, cardId: String, grade: String, today: String):
     return embedCards(markdown, next)
 }
 
-data class SearchHit(val path: String, val line: Int, val text: String, val anchorY: Double? = null)
+data class SearchHit(
+    val path: String,
+    val line: Int,
+    val text: String,
+    val anchorY: Double? = null,
+    val title: String = "",
+    val matches: Int = 1,
+    val kind: String = "note",
+)
 
+/**
+ * One row per file, the way the desktop vault search lists notes and PDFs.
+ * The excerpt is the text around the first match, or the filename when only
+ * the path matches.
+ */
 fun searchVault(files: List<Pair<String, String>>, query: String): List<SearchHit> {
-    val needle = query.trim()
+    val needle = query.trim().lowercase(Locale.GERMAN)
     if (needle.length < 2) return emptyList()
-    val hits = mutableListOf<SearchHit>()
+    val notes = mutableListOf<SearchHit>()
+    val pdfs = mutableListOf<SearchHit>()
     for ((path, text) in files) {
-        if (!path.endsWith(".md", true) && !path.endsWith(".markdown", true)) continue
-        text.replace("\r\n", "\n").lineSequence().forEachIndexed { index, line ->
-            if (line.contains(needle, ignoreCase = true) && !line.trimStart().startsWith("<!--")) {
-                hits += SearchHit(path, index + 1, line.trim().take(180))
-            }
+        val markdown = path.endsWith(".md", true) || path.endsWith(".markdown", true)
+        val pdf = path.endsWith(".pdf", true) && !path.startsWith(".")
+        if (!markdown && !pdf) continue
+        val content = text.replace("\r\n", "\n")
+        val contentLower = content.lowercase(Locale.GERMAN)
+        val pathLower = path.lowercase(Locale.GERMAN)
+        val index = if (markdown) contentLower.indexOf(needle) else -1
+        val pathMatch = pathLower.contains(needle)
+        if (index < 0 && !pathMatch) continue
+        val excerpt = when {
+            pdf -> "PDF · $path"
+            index >= 0 -> content
+                .substring((index - 60).coerceAtLeast(0), (index + needle.length + 120).coerceAtMost(content.length))
+                .replace(Regex("[#*_`]"), "")
+            else -> "Dateiname · $path"
         }
+        val haystack = "$path\n$content".lowercase(Locale.GERMAN)
+        val count = haystack.split(needle).size - 1
+        val line = if (index < 0) 1 else content.take(index).count { it == '\n' } + 1
+        val hit = SearchHit(
+            path,
+            line,
+            excerpt.take(180),
+            title = searchHitTitle(path),
+            matches = count.coerceAtLeast(1),
+            kind = "note",
+        )
+        if (pdf) pdfs += hit else notes += hit
     }
-    return hits.take(200)
+    return (notes + pdfs).take(250)
+}
+
+fun searchHitTitle(path: String): String {
+    val name = path.substringAfterLast('/')
+    val dot = name.lastIndexOf('.')
+    return if (dot > 0) name.substring(0, dot) else name
 }
 
 fun dailyNotePath(
