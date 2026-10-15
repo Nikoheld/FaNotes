@@ -200,6 +200,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         ink.editorFontPx = metrics.fontSizePx.toFloat()
         ink.editorLineHeight = metrics.lineHeight.toFloat()
         ink.contentWidthPx = metrics.contentWidthPx.toFloat()
+        ink.readableLineLength = metrics.readableLineLength
         ink.zoomMax = metrics.zoomMax.toFloat()
         ink.zoomSpeed = metrics.zoomSpeed
         sourceMarkdown = markdown

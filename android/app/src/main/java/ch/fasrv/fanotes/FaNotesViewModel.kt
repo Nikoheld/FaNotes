@@ -580,7 +580,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                             it, visible, document, pages, boxes, marks, links,
                             fontSizePx = metrics.fontSizePx.toFloat(),
                             lineHeight = metrics.lineHeight.toFloat(),
-                            contentWidthPx = metrics.contentWidthPx.toFloat(),
+                            contentWidthPx = ch.fasrv.fanotes.desk.effectiveContentWidth(
+                                metrics.contentWidthPx,
+                                document.sourceWidth.toFloat(),
+                                metrics.readableLineLength,
+                            ),
                             smoothing = ch.fasrv.fanotes.desk.penSettings(deskSettings.value).smoothing.toFloat(),
                         )
                     }

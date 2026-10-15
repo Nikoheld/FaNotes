@@ -11,6 +11,7 @@ data class EditorMetrics(
     val zoomMax: Double,
     val autosaveMs: Long,
     val zoomSpeed: Int,
+    val readableLineLength: Boolean,
 )
 
 fun editorMetrics(settings: Map<String, String>): EditorMetrics = EditorMetrics(
@@ -20,7 +21,18 @@ fun editorMetrics(settings: Map<String, String>): EditorMetrics = EditorMetrics(
     zoomMax = clampInt(settings["zoom-max"], 325, 50, 600) / 100.0,
     autosaveMs = clampInt(settings["autosave"], 750, 250, 3000).toLong(),
     zoomSpeed = clampViewZoomSpeed(settings["zoom-speed"]),
+    readableLineLength = settings["readable-lines"] != "off",
 )
+
+/**
+ * Desktop `--content-width`: the setting when readable lines are on, otherwise
+ * the page column inside the text pads.
+ */
+fun effectiveContentWidth(contentWidthPx: Int, pageWidthPx: Float, readable: Boolean, padX: Float = 72f): Float {
+    val page = (pageWidthPx - padX * 2f).coerceAtLeast(120f)
+    if (!readable) return page
+    return contentWidthPx.toFloat().coerceAtMost(page).coerceAtLeast(120f)
+}
 
 const val VIEW_ZOOM_SPEED_DEFAULT = 5
 
