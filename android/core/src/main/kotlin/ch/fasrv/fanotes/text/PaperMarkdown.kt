@@ -7,7 +7,7 @@ package ch.fasrv.fanotes.text
  */
 enum class PaperKind { H1, H2, H3, H4, PARAGRAPH, BULLET, NUMBER, TASK, QUOTE, CODE, MATH, RULE, TABLE, SPACER }
 
-data class PaperLine(val kind: PaperKind, val text: String)
+data class PaperLine(val kind: PaperKind, val text: String, val sourceLine: Int = -1)
 
 private val COMMENT = Regex("""<!--[\s\S]*?-->""")
 private val BULLET = Regex("""^\s*[-*+]\s+""")
@@ -21,6 +21,8 @@ fun paperLines(markdown: String): List<PaperLine> {
     val out = ArrayList<PaperLine>(lines.size)
     var inCode = false
     var inMath = false
+    var codeStart = -1
+    var mathStart = -1
     val code = StringBuilder()
     val math = StringBuilder()
     var index = 0
@@ -29,11 +31,12 @@ fun paperLines(markdown: String): List<PaperLine> {
         val fence = raw.trimStart().startsWith("```")
         if (fence) {
             if (inCode) {
-                out += PaperLine(PaperKind.CODE, code.toString().trimEnd())
+                out += PaperLine(PaperKind.CODE, code.toString().trimEnd(), codeStart)
                 code.clear()
                 inCode = false
             } else {
                 inCode = true
+                codeStart = index
             }
             index += 1
             continue
@@ -46,11 +49,12 @@ fun paperLines(markdown: String): List<PaperLine> {
         }
         if (raw.trim() == "$$") {
             if (inMath) {
-                out += PaperLine(PaperKind.MATH, math.toString().trimEnd())
+                out += PaperLine(PaperKind.MATH, math.toString().trimEnd(), mathStart)
                 math.clear()
                 inMath = false
             } else {
                 inMath = true
+                mathStart = index
             }
             index += 1
             continue
@@ -62,37 +66,38 @@ fun paperLines(markdown: String): List<PaperLine> {
             continue
         }
         if (isTableRow(raw)) {
+            val tableStart = index
             val rows = ArrayList<List<String>>()
             while (index < lines.size && isTableRow(lines[index])) {
                 val cells = tableCells(lines[index])
                 if (cells.isNotEmpty() && !cells.all { TABLE_RULE.matches(it) }) rows += cells
                 index += 1
             }
-            if (rows.isNotEmpty()) out += PaperLine(PaperKind.TABLE, encodeTable(rows))
+            if (rows.isNotEmpty()) out += PaperLine(PaperKind.TABLE, encodeTable(rows), tableStart)
             continue
         }
         val trimmed = raw.trim()
         val task = TASK.find(raw)
         when {
-            trimmed.isEmpty() -> out += PaperLine(PaperKind.SPACER, "")
-            trimmed.startsWith("###### ") -> out += PaperLine(PaperKind.H4, trimmed.drop(7).trim())
-            trimmed.startsWith("##### ") -> out += PaperLine(PaperKind.H4, trimmed.drop(6).trim())
-            trimmed.startsWith("#### ") -> out += PaperLine(PaperKind.H4, trimmed.drop(5).trim())
-            trimmed.startsWith("### ") -> out += PaperLine(PaperKind.H3, trimmed.drop(4).trim())
-            trimmed.startsWith("## ") -> out += PaperLine(PaperKind.H2, trimmed.drop(3).trim())
-            trimmed.startsWith("# ") -> out += PaperLine(PaperKind.H1, trimmed.drop(2).trim())
-            trimmed.startsWith("> ") -> out += PaperLine(PaperKind.QUOTE, trimmed.drop(2).trim())
-            trimmed == ">" -> out += PaperLine(PaperKind.QUOTE, "")
-            trimmed == "---" || trimmed == "***" || trimmed == "___" -> out += PaperLine(PaperKind.RULE, "")
-            task != null -> out += PaperLine(PaperKind.TASK, "${if (task.groupValues[1].equals("x", true)) "x" else " "}|${task.groupValues[2]}")
-            NUMBER.containsMatchIn(raw) -> out += PaperLine(PaperKind.NUMBER, raw.trim())
-            BULLET.containsMatchIn(raw) -> out += PaperLine(PaperKind.BULLET, BULLET.replace(raw, "").trim())
-            else -> out += PaperLine(PaperKind.PARAGRAPH, raw.trimEnd())
+            trimmed.isEmpty() -> out += PaperLine(PaperKind.SPACER, "", index)
+            trimmed.startsWith("###### ") -> out += PaperLine(PaperKind.H4, trimmed.drop(7).trim(), index)
+            trimmed.startsWith("##### ") -> out += PaperLine(PaperKind.H4, trimmed.drop(6).trim(), index)
+            trimmed.startsWith("#### ") -> out += PaperLine(PaperKind.H4, trimmed.drop(5).trim(), index)
+            trimmed.startsWith("### ") -> out += PaperLine(PaperKind.H3, trimmed.drop(4).trim(), index)
+            trimmed.startsWith("## ") -> out += PaperLine(PaperKind.H2, trimmed.drop(3).trim(), index)
+            trimmed.startsWith("# ") -> out += PaperLine(PaperKind.H1, trimmed.drop(2).trim(), index)
+            trimmed.startsWith("> ") -> out += PaperLine(PaperKind.QUOTE, trimmed.drop(2).trim(), index)
+            trimmed == ">" -> out += PaperLine(PaperKind.QUOTE, "", index)
+            trimmed == "---" || trimmed == "***" || trimmed == "___" -> out += PaperLine(PaperKind.RULE, "", index)
+            task != null -> out += PaperLine(PaperKind.TASK, "${if (task.groupValues[1].equals("x", true)) "x" else " "}|${task.groupValues[2]}", index)
+            NUMBER.containsMatchIn(raw) -> out += PaperLine(PaperKind.NUMBER, raw.trim(), index)
+            BULLET.containsMatchIn(raw) -> out += PaperLine(PaperKind.BULLET, BULLET.replace(raw, "").trim(), index)
+            else -> out += PaperLine(PaperKind.PARAGRAPH, raw.trimEnd(), index)
         }
         index += 1
     }
-    if (inCode && code.isNotEmpty()) out += PaperLine(PaperKind.CODE, code.toString().trimEnd())
-    if (inMath && math.isNotEmpty()) out += PaperLine(PaperKind.MATH, math.toString().trimEnd())
+    if (inCode && code.isNotEmpty()) out += PaperLine(PaperKind.CODE, code.toString().trimEnd(), codeStart)
+    if (inMath && math.isNotEmpty()) out += PaperLine(PaperKind.MATH, math.toString().trimEnd(), mathStart)
     return out
 }
 

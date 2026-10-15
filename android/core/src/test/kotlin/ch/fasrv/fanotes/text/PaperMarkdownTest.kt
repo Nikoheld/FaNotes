@@ -43,5 +43,16 @@ class PaperMarkdownTest {
         val lines = paperLines("Text\n\n```\nalpha\nbeta\n```\n")
         val code = lines.first { it.kind == PaperKind.CODE }
         assertEquals("alpha\nbeta", code.text)
+        assertEquals(2, code.sourceLine)
+    }
+
+    @Test
+    fun aTaskRemembersTheSourceLineACheckboxToggles() {
+        val note = "Text\n\n```\nalpha\n```\n- [ ] Offen\n- [x] Fertig"
+        val tasks = paperLines(note).filter { it.kind == PaperKind.TASK }
+        assertEquals(listOf(5, 6), tasks.map { it.sourceLine })
+        val marked = "A\n<!-- fanotes-ink:abc -->\n- [ ] B"
+        assertEquals(2, paperLines(marked).first { it.kind == PaperKind.TASK }.sourceLine)
+        assertEquals("- [x] B", ch.fasrv.fanotes.desk.toggleTask(marked, 2).substringAfterLast('\n'))
     }
 }

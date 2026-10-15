@@ -158,6 +158,14 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
         applyChromeColors()
         previewReady = true
+        ink.onTogglePaperTask = { line ->
+            val next = ch.fasrv.fanotes.desk.toggleTask(ink.markdown, line)
+            if (next != ink.markdown) {
+                ink.markdown = next
+                ink.invalidate()
+                onMarkdown(next)
+            }
+        }
     }
 
     /** A tap on a details summary writes the desktop `open` attribute into the note. */
