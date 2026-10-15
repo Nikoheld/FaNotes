@@ -2085,6 +2085,7 @@ private fun PageSurface(
                 ink.onStroke = { model.recordFinishedStroke(it) }
                 ink.onErased = { model.recordErasedStrokes(it) }
                 ink.onInkNotice = { inkNotice = it }
+                ink.onDismissInkNotice = { inkNotice = null }
                 ink.onPageGrew = { prevWidth, prevHeight, nextWidth, nextHeight, padX, padY ->
                     model.pageGrew(prevWidth, prevHeight, nextWidth, nextHeight, padX, padY)
                 }
@@ -2100,6 +2101,7 @@ private fun PageSurface(
             page.ink.onStroke = { model.recordFinishedStroke(it) }
             page.ink.onErased = { model.recordErasedStrokes(it) }
             page.ink.onInkNotice = { inkNotice = it }
+            page.ink.onDismissInkNotice = { inkNotice = null }
             page.ink.onPageGrew = { prevWidth, prevHeight, nextWidth, nextHeight, padX, padY ->
                 model.pageGrew(prevWidth, prevHeight, nextWidth, nextHeight, padX, padY)
             }

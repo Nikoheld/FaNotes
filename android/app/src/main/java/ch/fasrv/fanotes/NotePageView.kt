@@ -1455,18 +1455,14 @@ class NotePageView(context: Context) : FrameLayout(context) {
         tools.addView(chip("Mathe") { onMath() })
         val textChip = chip(if (ink.placingText) "Auf Seite platzieren" else "Textfeld") {}
         val mark = chip(if (ink.placingHighlight) "Markieren ●" else "Markieren") {}
-        textChip.setOnClickListener {
-            ink.placingText = !ink.placingText
-            if (ink.placingText) ink.placingHighlight = false
-            textChip.text = if (ink.placingText) "Auf Seite platzieren" else "Textfeld"
-            mark.text = if (ink.placingHighlight) "Markieren ●" else "Markieren"
+        ink.onWorksheetTool = { text, highlight ->
+            textChip.text = if (text) "Auf Seite platzieren" else "Textfeld"
+            mark.text = if (highlight) "Markieren ●" else "Markieren"
+            val hint = ch.fasrv.fanotes.desk.worksheetPlaceHint(text, highlight)
+            if (hint == null) ink.onDismissInkNotice() else ink.onInkNotice(ch.fasrv.fanotes.ink.InkNotice("info", hint))
         }
-        mark.setOnClickListener {
-            ink.placingHighlight = !ink.placingHighlight
-            if (ink.placingHighlight) ink.placingText = false
-            mark.text = if (ink.placingHighlight) "Markieren ●" else "Markieren"
-            textChip.text = if (ink.placingText) "Auf Seite platzieren" else "Textfeld"
-        }
+        textChip.setOnClickListener { ink.armWorksheetText(!ink.placingText) }
+        mark.setOnClickListener { ink.armWorksheetHighlight(!ink.placingHighlight) }
         tools.addView(textChip)
         tools.addView(mark)
         tools.addView(chip("+", description = "Hineinzoomen") { ink.zoomByStep(1) })

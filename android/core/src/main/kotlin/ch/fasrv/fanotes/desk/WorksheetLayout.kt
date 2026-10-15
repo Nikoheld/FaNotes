@@ -146,3 +146,13 @@ fun boxOnFrame(
     if (sourceWidth <= 0.0 || sourceHeight <= 0.0 || frame.width <= 0.0 || frame.height <= 0.0) return box.x to box.y
     return (frame.left + box.x * frame.width) / sourceWidth to (frame.top + box.y * frame.height) / sourceHeight
 }
+
+const val WORKSHEET_TEXT_HINT = "Klicke an die Stelle des Arbeitsblatts, an der du tippen möchtest."
+const val WORKSHEET_HIGHLIGHT_HINT = "Ziehe einen Rahmen über den Text, den du markieren möchtest."
+
+/** Hint shown while a worksheet tool is armed. Highlight wins if both are on. */
+fun worksheetPlaceHint(placingText: Boolean, placingHighlight: Boolean): String? = when {
+    placingHighlight -> WORKSHEET_HIGHLIGHT_HINT
+    placingText -> WORKSHEET_TEXT_HINT
+    else -> null
+}
