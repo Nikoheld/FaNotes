@@ -22,6 +22,7 @@ enum class LiveKind {
     EMPHASIS,
     STRIKE,
     CODE,
+    CODE_FENCE,
     LINK,
     MATH,
     MATH_BLOCK,
@@ -178,6 +179,15 @@ fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int): List
             val line = lines[number - 1]
             val kind = if (index == visibleBody.lastIndex) LiveKind.DETAILS_END else LiveKind.DETAILS_BODY
             marks += LiveMark(line.from, line.to, kind)
+        }
+    }
+    for (block in codeFenceBlocks(text)) {
+        if (to >= block.from && from <= block.to) continue
+        if ((block.openLine..block.closeLine).any { it in hidden }) continue
+        for (number in block.openLine..block.closeLine) {
+            val line = lines[number - 1]
+            if (line.to > line.from) marks += LiveMark(line.from, line.to, LiveKind.CODE_FENCE)
+            hidden += number
         }
     }
     for (block in displayMathBlocks(text)) {
@@ -464,6 +474,44 @@ private fun headingKind(level: Int) = when (level) {
     5 -> LiveKind.H5
     else -> LiveKind.H6
 }
+
+data class CodeFenceBlock(val from: Int, val to: Int, val openLine: Int, val closeLine: Int)
+
+/** Fenced code, including an unclosed fence through the end of the note. */
+fun codeFenceBlocks(text: String): List<CodeFenceBlock> {
+    if (text.isEmpty()) return emptyList()
+    val lines = documentLines(text)
+    val blocks = ArrayList<CodeFenceBlock>()
+    var index = 0
+    while (index < lines.size) {
+        val opener = FENCE_OPEN.matchEntire(lines[index].text)
+        if (opener == null) {
+            index += 1
+            continue
+        }
+        val marker = opener.groupValues[1]
+        var close = lines.lastIndex
+        var candidate = index + 1
+        while (candidate < lines.size) {
+            if (isClosingFence(lines[candidate].text, marker[0], marker.length)) {
+                close = candidate
+                break
+            }
+            candidate += 1
+        }
+        val endLine = lines[close]
+        blocks += CodeFenceBlock(lines[index].from, endLine.to, lines[index].number, endLine.number)
+        index = close + 1
+    }
+    return blocks
+}
+
+private fun isClosingFence(line: String, char: Char, length: Int): Boolean {
+    val match = Regex("""^ {0,3}(${Regex.escape(char.toString())}{$length,})\s*$""").matchEntire(line) ?: return false
+    return match.groupValues[1].all { it == char }
+}
+
+private val FENCE_OPEN = Regex("""^ {0,3}(`{3,}|~{3,})[^`~]*$""")
 
 private val HEADING = Regex("""^(\s*)(#{1,6})\s+""")
 private val QUOTE = Regex("""^(\s*)>\s?""")

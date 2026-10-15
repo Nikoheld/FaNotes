@@ -106,6 +106,7 @@ private fun spanFor(mark: LiveMark, readable: Int, accent: Int, textSizePx: Floa
     LiveKind.EMPHASIS -> EmphasisSpan()
     LiveKind.STRIKE -> StrikeSpan()
     LiveKind.CODE -> PaperCodeSpan(paperCodeInkArgb(accent), textSizePx)
+    LiveKind.CODE_FENCE -> CodeFenceSpan()
     LiveKind.MATH -> PaperInlineMathSpan(textSizePx)
     LiveKind.MATH_BLOCK -> PaperMathBlockSpan(mark.label, paperMathFillArgb(accent), paperMathBorderArgb(accent), textSizePx)
     LiveKind.LINK -> LinkSpan(readable, textSizePx)
@@ -652,6 +653,40 @@ private class StrikeSpan : CharacterStyle(), LivePreviewSpan {
  * Desktop paper inline code: a rounded chip, a hairline rule, monospace
  * at 0.9em, and ink mixed from the readable accent.
  */
+/**
+ * A fenced code block off the caret: monospace at 0.9em on the paper code fill.
+ * The fence characters stay so the block can still be recognised.
+ */
+internal class CodeFenceSpan : MetricAffectingSpan(), LineBackgroundSpan, LivePreviewSpan {
+    override fun updateDrawState(paint: android.text.TextPaint) = apply(paint)
+    override fun updateMeasureState(paint: android.text.TextPaint) = apply(paint)
+
+    private fun apply(paint: android.text.TextPaint) {
+        paint.textSize *= 0.9f
+        paint.typeface = Typeface.MONOSPACE
+    }
+
+    override fun drawBackground(
+        canvas: Canvas,
+        paint: Paint,
+        left: Int,
+        right: Int,
+        top: Int,
+        baseline: Int,
+        bottom: Int,
+        text: CharSequence,
+        start: Int,
+        end: Int,
+        lineNumber: Int,
+    ) {
+        if (right <= left) return
+        val previous = paint.color
+        paint.color = PAPER_CODE_BACKGROUND
+        canvas.drawRect(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat(), paint)
+        paint.color = previous
+    }
+}
+
 internal class PaperCodeSpan(private val ink: Int, private val textSizePx: Float) : ReplacementSpan(), LivePreviewSpan {
     private val box = paperCodeBox(textSizePx)
 
