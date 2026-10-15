@@ -420,6 +420,7 @@ fun FaNotesScreen(
     val unsaved by model.unsaved.collectAsStateWithLifecycle()
     val splitUnsaved by model.splitUnsaved.collectAsStateWithLifecycle()
     val palette by model.paletteOpen.collectAsStateWithLifecycle()
+    val paletteNotes by model.paletteNotes.collectAsStateWithLifecycle()
     val bugReportOpen by model.bugReportOpen.collectAsStateWithLifecycle()
     val confirm by model.confirmRequest.collectAsStateWithLifecycle()
     val linkPlacing by model.linkPlacing.collectAsStateWithLifecycle()
@@ -476,7 +477,8 @@ fun FaNotesScreen(
             "back" -> model.navigateHistory(-1)
             "forward" -> model.navigateHistory(1)
             "reopen-tab" -> model.reopenClosedTab()
-            "quick-open", "palette" -> model.paletteOpen.value = true
+            "quick-open" -> model.showPalette(notes = true)
+            "palette" -> model.showPalette(notes = false)
             "split" -> model.toggleSplit()
             "split-swap" -> model.swapSplit()
             "close-tab" -> model.closeCurrentTab()
@@ -606,7 +608,7 @@ fun FaNotesScreen(
                 destination = destination,
                 focus = false,
                 onDestination = { model.showDestination(it) },
-                onPalette = { model.paletteOpen.value = true },
+                onPalette = { model.showPalette(notes = false) },
                 onFocus = { model.updateDesk("focus", "on") },
                 onDaily = { model.openDaily() },
             )
@@ -656,7 +658,7 @@ fun FaNotesScreen(
                 },
             )
         } else {
-            DeskRibbon(destination, true, { model.showDestination(it) }, { model.paletteOpen.value = true }, { model.updateDesk("focus", "off") }, { model.openDaily() })
+            DeskRibbon(destination, true, { model.showDestination(it) }, { model.showPalette(notes = false) }, { model.updateDesk("focus", "off") }, { model.openDaily() })
         }
         val panels = ch.fasrv.fanotes.desk.noteWorkspacePanels(
             focus = focus,
@@ -811,7 +813,8 @@ fun FaNotesScreen(
         AlertDialog(onDismissRequest = { model.paletteOpen.value = false }, confirmButton = {}, text = {
             CommandPalette(
                 onDismiss = { model.paletteOpen.value = false },
-                rankNotes = { model.rankNotes(it) },
+                notesOnly = paletteNotes,
+                rankNotes = { query, limit -> model.rankNotes(query, limit) },
                 onOpenNote = { model.openPath(it); model.showDestination("notes") },
                 onOpenNoteInSplit = { model.openInSplit(it); model.showDestination("notes") },
                 splitOpen = split != null,

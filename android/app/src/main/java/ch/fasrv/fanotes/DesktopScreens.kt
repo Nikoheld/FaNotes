@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
@@ -43,6 +45,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -2392,14 +2395,16 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
 @Composable
 fun CommandPalette(
     onDismiss: () -> Unit,
-    rankNotes: (String) -> List<SwitcherNote>,
+    rankNotes: (String, Int) -> List<SwitcherNote>,
     onOpenNote: (String) -> Unit,
     onOpenNoteInSplit: (String) -> Unit = {},
     splitOpen: Boolean = false,
+    notesOnly: Boolean = false,
     onRun: (String) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
-    val notes = if (query.isBlank()) emptyList() else rankNotes(query)
+    var selected by remember { mutableIntStateOf(0) }
+    val notes = if (notesOnly) rankNotes(query, 40) else if (query.isBlank()) emptyList() else rankNotes(query, 6)
     val actions = listOf(
         "notes" to "Notizen",
         "search" to "Im Vault suchen",
@@ -2439,29 +2444,104 @@ fun CommandPalette(
         "export-pdf" to "Notiz als PDF exportieren",
         "download-note" to "Notiz herunterladen",
     )
-    val commands = if (query.isBlank()) actions else actions.filter { (_, label) -> fuzzyScore(query, label) > 0 }
-    Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()).background(MaterialTheme.colorScheme.surface).padding(12.dp)) {
-        OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Notiz oder Befehl") }, singleLine = true)
-        if (notes.isNotEmpty()) {
-            Text("Notizen", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp), fontSize = 12.sp)
-            notes.forEach { note ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f).clickable { onOpenNote(note.path); onDismiss() }) {
-                        Text(note.title)
-                        if (note.folder.isNotEmpty()) Text(note.folder, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+    val commands = if (notesOnly) emptyList() else if (query.isBlank()) actions else actions.filter { (_, label) -> fuzzyScore(query, label) > 0 }
+    val rows = commands.map { PaletteRow.Command(it.first, it.second) } + notes.map { PaletteRow.Note(it.path, it.title, it.folder) }
+    androidx.compose.runtime.LaunchedEffect(query, notesOnly) { selected = 0 }
+    val listState = rememberLazyListState()
+    androidx.compose.runtime.LaunchedEffect(selected, rows.size) {
+        if (rows.isNotEmpty()) listState.animateScrollToItem(selected.coerceIn(0, rows.lastIndex))
+    }
+    fun openRow(index: Int, split: Boolean) {
+        val row = rows.getOrNull(index) ?: return
+        when (row) {
+            is PaletteRow.Command -> onRun(row.id)
+            is PaletteRow.Note -> if (ch.fasrv.fanotes.desk.paletteOpensInSplit("note", split)) onOpenNoteInSplit(row.path) else onOpenNote(row.path)
+        }
+        onDismiss()
+    }
+    Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).background(MaterialTheme.colorScheme.surface).padding(12.dp)) {
+        OutlinedTextField(
+            query,
+            { query = it },
+            modifier = Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (event.key) {
+                    Key.DirectionDown -> {
+                        selected = ch.fasrv.fanotes.desk.paletteMove(selected, rows.size, 1)
+                        true
                     }
-                    Text(
-                        "Rechts öffnen",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable { onOpenNoteInSplit(note.path); onDismiss() }.padding(start = 8.dp),
-                    )
+                    Key.DirectionUp -> {
+                        selected = ch.fasrv.fanotes.desk.paletteMove(selected, rows.size, -1)
+                        true
+                    }
+                    Key.PageDown -> {
+                        selected = ch.fasrv.fanotes.desk.paletteMove(selected, rows.size, 8)
+                        true
+                    }
+                    Key.PageUp -> {
+                        selected = ch.fasrv.fanotes.desk.paletteMove(selected, rows.size, -8)
+                        true
+                    }
+                    Key.Enter, Key.NumPadEnter -> {
+                        openRow(selected, event.isShiftPressed)
+                        true
+                    }
+                    else -> false
+                }
+            },
+            label = { Text(if (notesOnly) "Notiz öffnen …" else "Befehl suchen …") },
+            singleLine = true,
+        )
+        if (rows.isEmpty()) {
+            Text(
+                if (notesOnly) "Keine passende Notiz" else "Kein passender Befehl",
+                modifier = Modifier.padding(top = 12.dp),
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+        }
+        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).padding(top = 8.dp)) {
+            itemsIndexed(rows) { index, row ->
+                val group = when (row) {
+                    is PaletteRow.Command -> "Befehle"
+                    is PaletteRow.Note -> if (notesOnly && query.isBlank()) "Zuletzt geöffnet" else "Notizen"
+                }
+                val previous = rows.getOrNull(index - 1)
+                val previousGroup = when (previous) {
+                    is PaletteRow.Command -> "Befehle"
+                    is PaletteRow.Note -> if (notesOnly && query.isBlank()) "Zuletzt geöffnet" else "Notizen"
+                    null -> null
+                }
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(if (index == selected) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f) else androidx.compose.ui.graphics.Color.Transparent)
+                        .clickable { openRow(index, false) }
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                ) {
+                    if (group != previousGroup) {
+                        Text(group, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
+                    }
+                    when (row) {
+                        is PaletteRow.Command -> Text(row.label)
+                        is PaletteRow.Note -> {
+                            Text(row.title)
+                            if (row.folder.isNotEmpty()) Text(row.folder, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                        }
+                    }
                 }
             }
         }
-        Text("Befehle", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp), fontSize = 12.sp)
-        commands.forEach { (id, label) ->
-            Text(label, modifier = Modifier.fillMaxWidth().clickable { onRun(id); onDismiss() }.padding(vertical = 8.dp))
-        }
+        Text(
+            if (notesOnly || notes.isNotEmpty()) "↑ ↓ auswählen · Enter öffnen · Umschalt+Enter rechts · Esc schließen" else "↑ ↓ auswählen · Enter öffnen · Esc schließen",
+            modifier = Modifier.padding(top = 8.dp),
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        )
     }
+}
+
+private sealed class PaletteRow {
+    data class Command(val id: String, val label: String) : PaletteRow()
+    data class Note(val path: String, val title: String, val folder: String) : PaletteRow()
 }
