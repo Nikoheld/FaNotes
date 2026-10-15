@@ -1226,6 +1226,7 @@ private fun NotePage(
             MarginTranscript(model)
             if (noteKind == NoteKind.PDF) {
                 PdfSearchBar(model)
+                PdfThumbStrip(model)
                 PdfQuoteMarks(model)
             }
             if (showRelations) NoteRelations(model) { model.openPath(it); model.showDestination("notes") }
@@ -1340,6 +1341,7 @@ private fun PageSurface(
             page.ink.onToggleSection = { model.toggleInkSection(it) }
             page.ink.onEditBox = onEditBox
             page.onMath = onMath
+            page.onPdfPage = { model.notePdfPage(it) }
             page.ink.linkMarks = links
             page.ink.worksheetBoxes = boxes
             page.ink.worksheetHighlights = highlights

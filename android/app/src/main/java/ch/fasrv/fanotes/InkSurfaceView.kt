@@ -142,7 +142,13 @@ class InkSurfaceView @JvmOverloads constructor(
     var linkMarks: List<ch.fasrv.fanotes.desk.NoteLinkMark> = emptyList()
     var worksheetBoxes: List<ch.fasrv.fanotes.desk.AnchoredBox> = emptyList()
     var worksheetHighlights: List<ch.fasrv.fanotes.desk.AnchoredHighlight> = emptyList()
+    private var reportedPdfPage = 0
+    var onPdfPage: (Int) -> Unit = {}
     var pageFrames: List<ch.fasrv.fanotes.desk.PageFrame> = emptyList()
+        set(value) {
+            field = value
+            reportedPdfPage = 0
+        }
     var placingHighlight = false
     var placingText = false
     var onPlaceBox: (String, Int, Double, Double) -> Unit = { _, _, _, _ -> }
@@ -1411,6 +1417,14 @@ class InkSurfaceView @JvmOverloads constructor(
 
     private fun publishCamera() {
         onCamera(pageLeft, pageTop, pixelsPerPageUnit())
+        if (pageFrames.isEmpty()) return
+        val scale = pixelsPerPageUnit().toDouble().coerceAtLeast(0.0001)
+        val center = (height / 2.0 - pageTop) / scale
+        val page = ch.fasrv.fanotes.desk.pdfPageAt(center, pageFrames.map { it.top to it.height })
+        if (page != reportedPdfPage) {
+            reportedPdfPage = page
+            onPdfPage(page)
+        }
     }
 
     private fun addGrownSample(current: InkSession, sample: StrokePoint): Boolean {

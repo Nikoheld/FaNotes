@@ -1,6 +1,7 @@
 package ch.fasrv.fanotes
 
 import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -1806,6 +1807,48 @@ fun MarginTranscript(model: FaNotesViewModel) {
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun PdfThumbStrip(model: FaNotesViewModel) {
+    val open by model.pdfThumbOpen.collectAsStateWithLifecycle()
+    val thumbs by model.pdfThumbs.collectAsStateWithLifecycle()
+    val active by model.pdfThumbPage.collectAsStateWithLifecycle()
+    val total by model.pdfPageCount.collectAsStateWithLifecycle()
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp)) {
+        TextButton(onClick = { model.togglePdfThumbs() }) { Text(if (open) "Miniaturen ●" else "Miniaturen") }
+        if (open) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                thumbs.forEachIndexed { index, bitmap ->
+                    if (bitmap.isRecycled) return@forEachIndexed
+                    val page = index + 1
+                    val selected = page == active
+                    Column(
+                        Modifier
+                            .width(76.dp)
+                            .border(if (selected) 2.dp else 1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
+                            .clickable { model.showPdfThumb(page) }
+                            .padding(2.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Image(
+                            bitmap.asImageBitmap(),
+                            contentDescription = "Seite $page",
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        )
+                        Text("$page", fontSize = 11.sp)
+                    }
+                }
+            }
+            if (total > thumbs.size && thumbs.isNotEmpty()) {
+                Text("Erste ${thumbs.size} Seiten", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
             }
         }
     }

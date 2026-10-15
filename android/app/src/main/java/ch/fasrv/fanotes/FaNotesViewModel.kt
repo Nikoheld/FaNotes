@@ -372,6 +372,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         pdfSearchIndex.value = 0
         pdfSearchBusy.value = false
         pdfTextCache = null
+        clearPdfThumbs()
         val stats = openPageStats(parsePageStats(note.payload.obj("pageStats"), now), now)
         val payload = (note.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
         payload.put("pageStats", mergePageStats(note.payload.obj("pageStats"), stats))
@@ -446,7 +447,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             file.writeBytes(bytes)
             val pages = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
                 PdfRenderer(descriptor).use { renderer ->
-                    val count = renderer.pageCount.coerceAtMost(40)
+                    val count = renderer.pageCount.coerceAtMost(ch.fasrv.fanotes.desk.PDF_NOTE_PAGE_CAP)
                     (0 until count).map { index ->
                         try {
                             renderer.openPage(index).use { page ->
@@ -462,6 +463,93 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             pages
         } catch (_: Exception) {
             emptyList()
+        } finally {
+            file.delete()
+        }
+    }
+
+    val pdfThumbs = MutableStateFlow<List<Bitmap>>(emptyList())
+    val pdfThumbOpen = MutableStateFlow(false)
+    val pdfThumbPage = MutableStateFlow(1)
+    val pdfPageCount = MutableStateFlow(0)
+    private var pdfThumbJob: kotlinx.coroutines.Job? = null
+
+    fun togglePdfThumbs() {
+        val next = !pdfThumbOpen.value
+        pdfThumbOpen.value = next
+        if (next && pdfThumbs.value.isEmpty()) loadPdfThumbs()
+    }
+
+    fun notePdfPage(page: Int) {
+        if (page >= 1 && page != pdfThumbPage.value) pdfThumbPage.value = page
+    }
+
+    fun showPdfThumb(page: Int) {
+        if (page < 1) return
+        pdfThumbPage.value = page
+        revealPdfPage(page)
+    }
+
+    private fun clearPdfThumbs() {
+        pdfThumbJob?.cancel()
+        pdfThumbOpen.value = false
+        pdfThumbPage.value = 1
+        pdfPageCount.value = 0
+        val old = pdfThumbs.value
+        pdfThumbs.value = emptyList()
+        old.forEach { if (!it.isRecycled) it.recycle() }
+    }
+
+    private fun loadPdfThumbs() {
+        val note = open.value ?: return
+        if (note.kind != NoteKind.PDF) return
+        pdfThumbJob?.cancel()
+        pdfThumbJob = viewModelScope.launch {
+            val rendered = withContext(Dispatchers.IO) { renderPdfThumbs(note.path) }
+            if (open.value?.path != note.path) {
+                rendered.bitmaps.forEach { if (!it.isRecycled) it.recycle() }
+                return@launch
+            }
+            val old = pdfThumbs.value
+            pdfPageCount.value = rendered.pageCount
+            pdfThumbs.value = rendered.bitmaps
+            old.forEach { if (!it.isRecycled) it.recycle() }
+        }
+    }
+
+    private data class ThumbBatch(val pageCount: Int, val bitmaps: List<Bitmap>)
+
+    private fun renderPdfThumbs(path: String): ThumbBatch {
+        val bytes = graph.vault.read(path) ?: return ThumbBatch(0, emptyList())
+        val file = java.io.File.createTempFile("fanotes-pdf-thumb", ".pdf")
+        val built = ArrayList<Bitmap>()
+        return try {
+            file.writeBytes(bytes)
+            ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                PdfRenderer(descriptor).use { renderer ->
+                    val shown = ch.fasrv.fanotes.desk.pdfThumbPages(
+                        renderer.pageCount,
+                        minOf(renderer.pageCount, ch.fasrv.fanotes.desk.PDF_NOTE_PAGE_CAP),
+                    )
+                    for (index in 0 until shown) {
+                        renderer.openPage(index).use { page ->
+                            val height = ch.fasrv.fanotes.desk.pdfThumbHeight(page.width, page.height)
+                            val bitmap = Bitmap.createBitmap(
+                                ch.fasrv.fanotes.desk.PDF_THUMB_WIDTH * 2,
+                                height * 2,
+                                Bitmap.Config.ARGB_8888,
+                            )
+                            built += bitmap
+                            android.graphics.Canvas(bitmap).drawColor(android.graphics.Color.WHITE)
+                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        }
+                    }
+                    ThumbBatch(renderer.pageCount, built)
+                }
+            }
+        } catch (_: Exception) {
+            built.forEach { if (!it.isRecycled) it.recycle() }
+            ThumbBatch(0, emptyList())
         } finally {
             file.delete()
         }
@@ -1466,7 +1554,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         file.writeBytes(bytes)
         ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
             PdfRenderer(descriptor).use { renderer ->
-                val aspects = (0 until renderer.pageCount.coerceAtMost(40)).map { index ->
+                val aspects = (0 until renderer.pageCount.coerceAtMost(ch.fasrv.fanotes.desk.PDF_NOTE_PAGE_CAP)).map { index ->
                     renderer.openPage(index).use { page -> page.height.toDouble() / page.width.toDouble() }
                 }
                 val boxes = layoutPdfStack(PAGE_START_WIDTH, aspects)
@@ -1528,7 +1616,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             file.writeBytes(bytes)
             ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
                 PdfRenderer(descriptor).use { renderer ->
-                    val count = renderer.pageCount.coerceAtMost(40)
+                    val count = renderer.pageCount.coerceAtMost(ch.fasrv.fanotes.desk.PDF_NOTE_PAGE_CAP)
                     for (index in 0 until count) {
                         val page = renderer.openPage(index)
                         try {

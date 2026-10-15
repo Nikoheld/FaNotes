@@ -72,6 +72,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onClear: () -> Unit = {}
     var onFinger: (Boolean) -> Unit = {}
     var onMath: () -> Unit = {}
+    var onPdfPage: (Int) -> Unit = {}
     var onRestyleLink: (String, String) -> Unit = { _, _ -> }
 
     init {
@@ -200,6 +201,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         folded: Set<Int> = emptySet(),
         metrics: ch.fasrv.fanotes.desk.EditorMetrics = ch.fasrv.fanotes.desk.editorMetrics(emptyMap()),
     ) {
+        ink.onPdfPage = onPdfPage
         if (dark != darkChrome) {
             dark = darkChrome
             applyChromeColors()
