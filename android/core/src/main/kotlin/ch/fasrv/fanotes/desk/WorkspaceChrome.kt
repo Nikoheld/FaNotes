@@ -63,6 +63,12 @@ fun compactChrome(raw: String?) = raw == "on"
 /** Desktop glass is off until the setting is turned on. */
 fun glassChrome(raw: String?) = raw == "on"
 
+/** Desktop „Bewegung reduzieren“ is off until the setting is turned on. */
+fun reduceMotion(raw: String?) = raw == "on"
+
+/** Palette and search follow the selection instantly when motion is reduced. */
+fun listFollowsSelection(reduceMotion: Boolean): String = if (reduceMotion) "instant" else "animate"
+
 /** File-tree row height from the desktop `--row-height`. */
 fun chromeRowHeightDp(compact: Boolean, overrideDp: Int? = null) = overrideDp ?: if (compact) 27 else 31
 

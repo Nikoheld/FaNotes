@@ -814,6 +814,7 @@ fun FaNotesScreen(
         AlertDialog(onDismissRequest = { model.paletteOpen.value = false }, confirmButton = {}, text = {
             CommandPalette(
                 onDismiss = { model.paletteOpen.value = false },
+                reduceMotion = ch.fasrv.fanotes.desk.reduceMotion(desk["reduce-motion"]),
                 notesOnly = paletteNotes,
                 rankNotes = { query, limit -> model.rankNotes(query, limit) },
                 onOpenNote = { model.openPath(it); model.showDestination("notes") },

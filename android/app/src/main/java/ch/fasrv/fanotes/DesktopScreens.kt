@@ -498,9 +498,16 @@ fun SearchScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
     val query by model.searchQuery.collectAsStateWithLifecycle()
     val hits by model.searchHits.collectAsStateWithLifecycle()
     var selected by remember(query) { mutableIntStateOf(-1) }
+    val settings by model.deskSettings.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
-    androidx.compose.runtime.LaunchedEffect(selected, hits.size) {
-        if (selected in hits.indices) listState.animateScrollToItem(selected)
+    androidx.compose.runtime.LaunchedEffect(selected, hits.size, settings["reduce-motion"]) {
+        if (selected in hits.indices) {
+            if (ch.fasrv.fanotes.desk.listFollowsSelection(ch.fasrv.fanotes.desk.reduceMotion(settings["reduce-motion"])) == "instant") {
+                listState.scrollToItem(selected)
+            } else {
+                listState.animateScrollToItem(selected)
+            }
+        }
     }
     fun openSelected() {
         val hit = hits.getOrNull(selected) ?: return
@@ -2292,6 +2299,12 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     TextButton(onClick = { model.checkUpdate() }) { Text("Nach einem Release suchen") }
                 }
                 "accessibility" -> {
+                    val calm = ch.fasrv.fanotes.desk.reduceMotion(settings["reduce-motion"])
+                    Text(
+                        "Bewegung reduzieren: ${if (calm) "an" else "aus"}",
+                        modifier = Modifier.clickable { model.updateDesk("reduce-motion", if (calm) "off" else "on") }.padding(vertical = 4.dp),
+                    )
+                    Text("Deaktiviert dekorative Übergänge und Animationen.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                     Text("Größere Ziele: ${settings["large"] == "on"}", modifier = Modifier.clickable { model.updateDesk("large", if (settings["large"] == "on") "off" else "on") })
                     EditorSlider("Seitenleiste", ch.fasrv.fanotes.desk.sidebarWidthDp(settings["sidebar-width"]).toFloat(), 210f, 430f, 10f, " px") {
                         model.updateDesk("sidebar-width", it.toInt().toString())
@@ -2731,6 +2744,7 @@ fun CommandPalette(
     onOpenNoteInSplit: (String) -> Unit = {},
     splitOpen: Boolean = false,
     notesOnly: Boolean = false,
+    reduceMotion: Boolean = false,
     onRun: (String) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
@@ -2779,8 +2793,12 @@ fun CommandPalette(
     val rows = commands.map { PaletteRow.Command(it.first, it.second) } + notes.map { PaletteRow.Note(it.path, it.title, it.folder) }
     androidx.compose.runtime.LaunchedEffect(query, notesOnly) { selected = 0 }
     val listState = rememberLazyListState()
-    androidx.compose.runtime.LaunchedEffect(selected, rows.size) {
-        if (rows.isNotEmpty()) listState.animateScrollToItem(selected.coerceIn(0, rows.lastIndex))
+    androidx.compose.runtime.LaunchedEffect(selected, rows.size, reduceMotion) {
+        if (rows.isNotEmpty()) {
+            val index = selected.coerceIn(0, rows.lastIndex)
+            if (ch.fasrv.fanotes.desk.listFollowsSelection(reduceMotion) == "instant") listState.scrollToItem(index)
+            else listState.animateScrollToItem(index)
+        }
     }
     fun openRow(index: Int, split: Boolean) {
         val row = rows.getOrNull(index) ?: return
