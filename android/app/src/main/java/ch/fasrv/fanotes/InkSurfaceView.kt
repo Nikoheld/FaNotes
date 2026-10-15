@@ -221,6 +221,8 @@ class InkSurfaceView @JvmOverloads constructor(
     var placingSymbol: String? = null
     var symbolSize: Double = ch.fasrv.fanotes.ink.ART_SYMBOL_SIZE
     var symbolRotation: Double = 0.0
+    var symbolOpacity: Double = 1.0
+    var symbolCategory: String = "all"
     var shapeSnapSensitivity: Int = 50
     var scribbleSensitivity: Int = 50
     /** Selection rings, hover, and placed links follow the desktop accent. */
@@ -642,7 +644,7 @@ class InkSurfaceView @JvmOverloads constructor(
         val sectionHit = sectionsOf(current.document).firstOrNull { y >= it.top && y < it.bodyTop && x < 0.08 }
         when {
             !eraser && placingSymbol != null -> {
-                val stamped = current.placeSymbol(x, y, style, placingSymbol!!, nowIso(), symbolSize, symbolRotation)
+                val stamped = current.placeSymbol(x, y, style, placingSymbol!!, nowIso(), symbolSize, symbolRotation, symbolOpacity)
                 invalidateTiles()
                 if (stamped != null) onStroke(stamped)
                 onChanged()
