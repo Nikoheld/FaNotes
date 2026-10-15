@@ -21,6 +21,7 @@ import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import ch.fasrv.fanotes.desk.bracketTyping
+import ch.fasrv.fanotes.desk.insertMarkdownBlankLine
 import ch.fasrv.fanotes.desk.copyMarkdownLines
 import ch.fasrv.fanotes.desk.deleteMarkdownLines
 import ch.fasrv.fanotes.desk.toggleMarkdownComment
@@ -92,6 +93,12 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 }
                 return true
             }
+            if (keyCode == KeyEvent.KEYCODE_ENTER && event.isCtrlPressed && !event.isShiftPressed &&
+                !event.isAltPressed && !event.isMetaPressed
+            ) {
+                if (event.action == KeyEvent.ACTION_DOWN) insertBlankLine()
+                return true
+            }
             if (keyCode == KeyEvent.KEYCODE_K && event.isCtrlPressed && event.isShiftPressed &&
                 !event.isAltPressed && !event.isMetaPressed
             ) {
@@ -109,6 +116,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 return true
             }
             return super.onKeyPreIme(keyCode, event)
+        }
+
+        fun insertBlankLine() {
+            applyLineEdit(insertMarkdownBlankLine(text?.toString().orEmpty(), selectionStart, selectionEnd))
         }
 
         fun deleteLines() {
@@ -650,6 +661,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
         editor.toggleComment()
     }
 
+    private fun insertBlank() {
+        if (!textMode) setTextMode(true)
+        editor.insertBlankLine()
+    }
+
     private fun deleteCurrentLines() {
         if (!textMode) setTextMode(true)
         editor.deleteLines()
@@ -778,6 +794,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             tools.addView(chip("Zeile runter") { moveLines(true) })
             tools.addView(chip("Kommentar") { commentLines() })
             tools.addView(chip("Zeile löschen") { deleteCurrentLines() })
+            tools.addView(chip("Leerzeile") { insertBlank() })
         }
         tools.addView(guideChip("Lineal", DraftingKind.RULER))
         tools.addView(guideChip("Geodreieck", DraftingKind.SET_SQUARE))
