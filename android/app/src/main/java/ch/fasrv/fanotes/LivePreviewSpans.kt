@@ -97,6 +97,7 @@ private fun spanFor(mark: LiveMark, readable: Int, accent: Int, textSizePx: Floa
     LiveKind.DETAILS_SUMMARY -> DetailsSummarySpan(mark.label, mark.body)
     LiveKind.TABLE_ROW -> TableRowSpan(paperTableFillArgb(accent), textSizePx)
     LiveKind.TABLE_RULE -> TableRuleSpan(textSizePx)
+    LiveKind.RULE -> PaperThematicRuleSpan(textSizePx)
 }
 
 internal class DetailsSummarySpan(private val summary: String, private val body: String) : ReplacementSpan(), LivePreviewSpan {
@@ -286,6 +287,31 @@ internal class TableRuleSpan(private val textSizePx: Float) : LineHeightSpan, Li
         canvas.drawRect(right - hairline, top.toFloat(), right.toFloat(), bottom.toFloat(), paint)
         paint.color = PAPER_RULE_STRONG_ARGB
         canvas.drawRect(left.toFloat(), bottom - hairline, right.toFloat(), bottom.toFloat(), paint)
+        paint.color = previous
+    }
+}
+
+/** Desktop paper thematic break: a strong rule across the middle of the line. */
+internal class PaperThematicRuleSpan(private val textSizePx: Float) : LineBackgroundSpan, LivePreviewSpan {
+    override fun drawBackground(
+        canvas: Canvas,
+        paint: Paint,
+        left: Int,
+        right: Int,
+        top: Int,
+        baseline: Int,
+        bottom: Int,
+        text: CharSequence,
+        start: Int,
+        end: Int,
+        lineNumber: Int,
+    ) {
+        if (right <= left) return
+        val thickness = (textSizePx / 16f).coerceAtLeast(1f)
+        val y = top + (bottom - top) * 0.5f
+        val previous = paint.color
+        paint.color = PAPER_RULE_STRONG_ARGB
+        canvas.drawRect(left.toFloat(), y, right.toFloat(), y + thickness, paint)
         paint.color = previous
     }
 }

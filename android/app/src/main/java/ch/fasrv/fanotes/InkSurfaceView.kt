@@ -1702,6 +1702,7 @@ class InkSurfaceView @JvmOverloads constructor(
                         end,
                         0,
                     )
+                    PaperKind.RULE -> builder.setSpan(PaperThematicRuleSpan(textSize), start, end, 0)
                     PaperKind.CODE -> builder.setSpan(TypefaceSpan("monospace"), start, end, 0)
                     PaperKind.MATH -> {
                         builder.setSpan(TypefaceSpan("monospace"), start, end, 0)

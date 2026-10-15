@@ -27,6 +27,7 @@ enum class LiveKind {
     DETAILS_SUMMARY,
     TABLE_ROW,
     TABLE_RULE,
+    RULE,
 }
 
 data class LiveMark(
@@ -333,7 +334,10 @@ private fun markLine(marks: MutableList<LiveMark>, line: String, origin: Int, ac
             marks += LiveMark(origin, origin + line.length, LiveKind.QUOTE)
             if (!active) hide(marks, origin, quote.groupValues[1].length, quote.value.length)
         }
-        rule && !active -> marks += LiveMark(origin, origin + line.length, LiveKind.HIDE)
+        rule -> {
+            marks += LiveMark(origin, origin + line.length, LiveKind.RULE)
+            if (!active) marks += LiveMark(origin, origin + line.length, LiveKind.HIDE)
+        }
         tableRule -> {
             marks += LiveMark(origin, origin + line.length, LiveKind.TABLE_RULE)
             marks += LiveMark(origin, origin + line.length, LiveKind.HIDE)
