@@ -113,6 +113,10 @@ class WorkspaceNavTest {
         assertEquals(SplitLayout(0.6, SplitOrientation.ROWS), normalizeSplitLayout(mapOf("ratio" to 0.6, "orientation" to "rows")))
         assertEquals(DEFAULT_SPLIT_LAYOUT, normalizeSplitLayout(mapOf("ratio" to "x", "orientation" to "diagonal")))
         assertEquals(DEFAULT_SPLIT_LAYOUT, normalizeSplitLayout(null))
+        assertEquals(0.5, splitRatioFromSetting(null))
+        assertEquals(0.35, splitRatioFromSetting("0.35"))
+        assertEquals(SPLIT_MIN_RATIO, splitRatioFromSetting("0"))
+        assertEquals(0.5, splitRatioFromSetting("halb"))
     }
 
     @Test

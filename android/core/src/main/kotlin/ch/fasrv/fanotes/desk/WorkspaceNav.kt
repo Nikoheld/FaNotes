@@ -145,6 +145,9 @@ fun clampSplitRatio(ratio: Double): Double {
     return min(SPLIT_MAX_RATIO, max(SPLIT_MIN_RATIO, ratio))
 }
 
+/** The saved split ratio. A missing or broken value is the desktop default, half and half. */
+fun splitRatioFromSetting(value: String?): Double = clampSplitRatio(value?.toDoubleOrNull() ?: Double.NaN)
+
 fun splitRatioFromPointer(container: SplitBox, pointer: SplitPointer, orientation: SplitOrientation): Double {
     val along = if (orientation == SplitOrientation.COLUMNS) {
         (pointer.x - container.left) / max(1.0, container.width)
