@@ -18,6 +18,10 @@ class StudyTest {
             ),
         )
         assertEquals("Schule", picture.subjects.first().subject)
+        assertEquals(
+            "Schule · 2 Seiten · 1 h · 2 min Tippen · 5 min Stift",
+            studySubjectSummary(StudySubject("Schule", 2, 3_600_000, 120_000, 300_000, 0.0)),
+        )
         assertEquals(150_000, picture.dwellMs)
         assertEquals("2 min", formatStudyDuration(120_000))
         assertEquals(1, openPageStats(emptyPageStats(0), 0, ZoneOffset.UTC).openCount)

@@ -1223,11 +1223,13 @@ private fun AgendaList(
             }
             events.forEach { event ->
                 val clock = ch.fasrv.fanotes.desk.eventClock(event)?.let { "$it " }.orEmpty()
-                Text(
-                    clock + event.title,
-                    color = calendarSwatch(document.calendars.find { it.id == event.calendarId }?.color ?: "#2a6f97"),
-                    modifier = Modifier.clickable { onEdit(event, date) }.padding(vertical = 2.dp),
-                )
+                val color = calendarSwatch(document.calendars.find { it.id == event.calendarId }?.color ?: "#2a6f97")
+                Column(Modifier.clickable { onEdit(event, date) }.padding(vertical = 2.dp)) {
+                    Text(clock + event.title, color = color)
+                    ch.fasrv.fanotes.desk.agendaPlace(event)?.let { place ->
+                        Text(place, color = color.copy(alpha = 0.8f), fontSize = 12.sp)
+                    }
+                }
             }
         }
     }
@@ -1851,7 +1853,7 @@ fun StudyScreen(model: FaNotesViewModel) {
             Text("Fächer", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
             if (overview.subjects.isEmpty()) Text("Noch keine Seitenstatistik.")
             overview.subjects.forEach { row ->
-                Text("${row.subject}  ·  ${row.notes}  ·  ${ch.fasrv.fanotes.desk.formatStudyDuration(row.dwellMs)}  ·  ${ch.fasrv.fanotes.desk.formatStudyDuration(row.inkMs)} Stift")
+                Text(ch.fasrv.fanotes.desk.studySubjectSummary(row))
             }
         }
     }
