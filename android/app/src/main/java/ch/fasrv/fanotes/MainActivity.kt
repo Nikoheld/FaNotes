@@ -1327,6 +1327,7 @@ private fun PageSurface(
                 }
                 ink.onPenSample = { x, y -> model.recordPenSample(x, y) }
                 ink.onSwipeNote = { model.swipe(it) }
+                onUnfoldHeading = { model.unfoldHeading(it) }
             }
         },
         update = { page ->
@@ -1339,6 +1340,7 @@ private fun PageSurface(
             }
             page.ink.onPenSample = { x, y -> model.recordPenSample(x, y) }
             page.ink.onSwipeNote = { model.swipe(it) }
+            page.onUnfoldHeading = { model.unfoldHeading(it) }
             if (page.ink.backdrop !== backdrop) page.ink.backdrop = backdrop
             page.onTool = {
                 model.tool.value = it

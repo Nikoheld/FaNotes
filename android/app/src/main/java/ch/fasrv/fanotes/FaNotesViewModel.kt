@@ -1159,6 +1159,18 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         noteChanged()
     }
 
+    /** Opens a folded heading so a jump into its body can land on the line. */
+    fun unfoldHeading(line: Int) {
+        if (line !in foldedHeadings.value) return
+        foldedHeadings.value = foldedHeadings.value - line
+        val index = ch.fasrv.fanotes.desk.sectionIndexForHeading(markdown.value, line)
+        if (index < 0) return
+        val section = ch.fasrv.fanotes.ink.sectionsOf(session.document).sortedBy { it.top }.getOrNull(index) ?: return
+        if (!section.collapsed) return
+        session.replace(ch.fasrv.fanotes.ink.toggleSection(session.document, section.id))
+        noteChanged()
+    }
+
     val noteLinks = MutableStateFlow<List<ch.fasrv.fanotes.desk.NoteLinkMark>>(emptyList())
     val worksheetBoxes = MutableStateFlow<List<ch.fasrv.fanotes.desk.AnchoredBox>>(emptyList())
     val worksheetHighlights = MutableStateFlow<List<ch.fasrv.fanotes.desk.AnchoredHighlight>>(emptyList())

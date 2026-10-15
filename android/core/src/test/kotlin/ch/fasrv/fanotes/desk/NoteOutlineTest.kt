@@ -59,5 +59,10 @@ class NoteOutlineTest {
         assertEquals("# Einleitung!\n\nAbsatz.\n\n## Aufgabe 1\n\nText\n\n# Nächstes\n", edited)
         assertEquals(setOf(1), shiftFoldedLines(note, edited, setOf(1)))
         assertNull(headingFoldRange("# Nur\n", 1))
+        assertEquals(1, foldedHeadingHidingLine(note, setOf(1), 3))
+        assertEquals(1, foldedHeadingHidingLine(note, setOf(1), 7))
+        assertEquals(null, foldedHeadingHidingLine(note, setOf(1), 1))
+        assertEquals(null, foldedHeadingHidingLine(note, setOf(1), 9))
+        assertEquals(null, foldedHeadingHidingLine(note, emptySet(), 3))
     }
 }
