@@ -317,6 +317,12 @@ fun detailsPlain(text: String, collapseImages: Boolean = true, autolinks: Boolea
     }
     rewrite(ITALIC_STAR, "emphasis", { it.groupValues[1] }, { 1 })
     rewrite(ITALIC_UNDER, "emphasis", { it.groupValues[1] }, { 1 })
+    rewrite(READING_UNDERLINE, "underline", { it.groupValues[1] }, { 1 })
+    rewrite(READING_MARK, "mark", { it.groupValues[1] }, { 1 })
+    rewrite(READING_SUB, "sub", { it.groupValues[1] }, { 1 })
+    rewrite(READING_SUP, "sup", { it.groupValues[1] }, { 1 })
+    rewrite(READING_KBD, "kbd", { it.groupValues[1] }, { 1 })
+    rewrite(READING_SMALL, "small", { it.groupValues[1] }, { 1 })
     return value to marks.filter { it.start >= 0 && it.end <= value.length && it.end > it.start }
 }
 
@@ -360,6 +366,12 @@ private val STRIKE = Regex("""~~(?=\S)(.+?\S)~~""")
 private val CODE = Regex("""(`+)([^`\n]+?)\1""")
 private val MATH = Regex("""(?<!\$)\$([^$\n]+?)\$(?!\$)""")
 private val FOOTNOTE_MARK = Regex("""\u0003(\d+)\u0003""")
+private val READING_UNDERLINE = Regex("""\u0004([^\u0004]+)\u0004""")
+private val READING_MARK = Regex("""\u0005([^\u0005]+)\u0005""")
+private val READING_SUB = Regex("""\u0006([^\u0006]+)\u0006""")
+private val READING_SUP = Regex("""\u0007([^\u0007]+)\u0007""")
+private val READING_KBD = Regex("""\u0008([^\u0008]+)\u0008""")
+private val READING_SMALL = Regex("""\u0011([^\u0011]+)\u0011""")
 private val ANGLE_LINK = Regex("""<((?:https?://|mailto:)[^>\s]+)>""")
 private val ANGLE_EMAIL = Regex("""<([A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)>""")
 private val BARE_URL = Regex("""(?<![A-Za-z0-9_/<])https?://[^\s<>]+?(?=[.,;:!?)]*(?:\s|$))""")

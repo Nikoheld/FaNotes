@@ -664,12 +664,41 @@ internal class DetailsSummarySpan(
                 }
                 cursor += width
             } else {
-                paint.textSize = baseSize
+                val highlight = active.any { it.kind == "mark" }
+                val underline = active.any { it.kind == "underline" }
+                val sub = active.any { it.kind == "sub" }
+                val sup = active.any { it.kind == "sup" }
+                val kbd = active.any { it.kind == "kbd" }
+                val small = active.any { it.kind == "small" }
+                var drawSize = baseSize
+                if (small) drawSize *= 0.83f
+                if (sub || sup) drawSize *= 0.75f
+                val drawY = when {
+                    sup -> y - baseSize * 0.35f
+                    sub -> y + baseSize * 0.15f
+                    else -> y
+                }
+                if (kbd) paint.typeface = if (bold) Typeface.create(Typeface.MONOSPACE, Typeface.BOLD) else Typeface.MONOSPACE
+                paint.textSize = drawSize
                 paint.style = Paint.Style.FILL
                 paint.color = if (link) accent else baseColor
                 val width = paint.measureText(segment)
                 if (!measureOnly) {
-                    canvas.drawText(segment, cursor, y, paint)
+                    if (highlight) {
+                        val metrics = paint.fontMetrics
+                        val ink = paint.color
+                        paint.color = 0xFFFFFF00.toInt()
+                        canvas.drawRect(cursor, drawY + metrics.ascent, cursor + width, drawY + metrics.descent, paint)
+                        paint.color = ink
+                    }
+                    canvas.drawText(segment, cursor, drawY, paint)
+                    if (underline && !link) {
+                        val thickness = (textSizePx / 16f).coerceAtLeast(1f)
+                        val ink = paint.color
+                        paint.color = baseColor
+                        canvas.drawRect(cursor, drawY + thickness, cursor + width, drawY + thickness * 2f, paint)
+                        paint.color = ink
+                    }
                     if (returnNumber > 0) {
                         val local = segment.indexOf('\u21A9')
                         if (local >= 0) {

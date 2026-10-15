@@ -72,9 +72,22 @@ private fun applyHtml(value: String): String {
     next = EMPHASIS.replace(next) { "*${it.groupValues[1]}*" }
     next = STRIKE.replace(next) { "~~${it.groupValues[1]}~~" }
     next = CODE.replace(next) { "`${it.groupValues[1]}`" }
+    next = styledTag(UNDERLINE_TAG, next, "\u0004")
+    next = styledTag(MARK_TAG, next, "\u0005")
+    next = styledTag(SUB_TAG, next, "\u0006")
+    next = styledTag(SUP_TAG, next, "\u0007")
+    next = styledTag(KBD_TAG, next, "\u0008")
+    next = styledTag(SMALL_TAG, next, "\u0011")
     next = P_CLOSE.replace(P_OPEN.replace(next, ""), "\n")
     return next
 }
+
+/** Wraps the tag's text in a sentinel the reading marks can see. An empty tag disappears. */
+private fun styledTag(pattern: Regex, value: String, sentinel: String): String =
+    pattern.replace(value) { match ->
+        val inner = match.groupValues[1]
+        if (inner.isEmpty()) "" else "$sentinel$inner$sentinel"
+    }
 
 private fun imageMarkdown(attrs: String): String {
     val src = htmlAttr(attrs, "src") ?: return ""
@@ -118,6 +131,12 @@ private val STRONG = Regex("""<(?:strong|b)\b[^>]*>([\s\S]*?)</(?:strong|b)>""",
 private val EMPHASIS = Regex("""<(?:em|i)\b[^>]*>([\s\S]*?)</(?:em|i)>""", RegexOption.IGNORE_CASE)
 private val STRIKE = Regex("""<(?:del|s|strike)\b[^>]*>([\s\S]*?)</(?:del|s|strike)>""", RegexOption.IGNORE_CASE)
 private val CODE = Regex("""<code\b[^>]*>([\s\S]*?)</code>""", RegexOption.IGNORE_CASE)
+private val UNDERLINE_TAG = Regex("""<u\b[^>]*>([\s\S]*?)</u>""", RegexOption.IGNORE_CASE)
+private val MARK_TAG = Regex("""<mark\b[^>]*>([\s\S]*?)</mark>""", RegexOption.IGNORE_CASE)
+private val SUB_TAG = Regex("""<sub\b[^>]*>([\s\S]*?)</sub>""", RegexOption.IGNORE_CASE)
+private val SUP_TAG = Regex("""<sup\b[^>]*>([\s\S]*?)</sup>""", RegexOption.IGNORE_CASE)
+private val KBD_TAG = Regex("""<kbd\b[^>]*>([\s\S]*?)</kbd>""", RegexOption.IGNORE_CASE)
+private val SMALL_TAG = Regex("""<small\b[^>]*>([\s\S]*?)</small>""", RegexOption.IGNORE_CASE)
 private val P_OPEN = Regex("""<p\b[^>]*>""", RegexOption.IGNORE_CASE)
 private val P_CLOSE = Regex("""</p>""", RegexOption.IGNORE_CASE)
 private val WRAP = Regex(
