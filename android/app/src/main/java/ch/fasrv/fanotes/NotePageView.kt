@@ -183,7 +183,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
                     'd',
                 )
             ) {
-                if (event.action == KeyEvent.ACTION_DOWN) selectNextOccurrence()
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    selectNextOccurrence()
+                    onDeskShortcut("pen")
+                }
                 return true
             }
             val formatLetter = when (keyCode) {
@@ -220,6 +223,38 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 )
                 if (command != null) {
                     if (event.action == KeyEvent.ACTION_DOWN) foldKeys(command)
+                    return true
+                }
+            }
+            val deskKey = when (keyCode) {
+                KeyEvent.KEYCODE_TAB -> "tab"
+                KeyEvent.KEYCODE_DPAD_LEFT -> "left"
+                KeyEvent.KEYCODE_DPAD_RIGHT -> "right"
+                KeyEvent.KEYCODE_T -> "t"
+                KeyEvent.KEYCODE_O -> "o"
+                KeyEvent.KEYCODE_BACKSLASH -> "\\"
+                KeyEvent.KEYCODE_W -> "w"
+                KeyEvent.KEYCODE_S -> "s"
+                KeyEvent.KEYCODE_P -> "p"
+                KeyEvent.KEYCODE_F -> "f"
+                KeyEvent.KEYCODE_A -> "a"
+                KeyEvent.KEYCODE_I -> "i"
+                KeyEvent.KEYCODE_N -> "n"
+                KeyEvent.KEYCODE_COMMA -> ","
+                KeyEvent.KEYCODE_E -> "e"
+                in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9 -> ('1' + (keyCode - KeyEvent.KEYCODE_1)).toString()
+                else -> null
+            }
+            if (deskKey != null) {
+                val command = ch.fasrv.fanotes.desk.deskShortcut(
+                    event.isCtrlPressed,
+                    event.isShiftPressed,
+                    event.isAltPressed,
+                    event.isMetaPressed,
+                    deskKey,
+                )
+                if (command != null) {
+                    if (event.action == KeyEvent.ACTION_DOWN) onDeskShortcut(command)
                     return true
                 }
             }
@@ -353,6 +388,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onToggleHeading: (Int) -> Unit = {}
     var onEditorFold: (String, Int) -> Unit = { _, _ -> }
     var onSearchCommand: (String, String, Int) -> Unit = { _, _, _ -> }
+    var onDeskShortcut: (String) -> Unit = {}
     private var pendingCursor: Int? = null
     var onPdfPage: (Int) -> Unit = {}
     var onSymbolSize: (Double) -> Unit = {}

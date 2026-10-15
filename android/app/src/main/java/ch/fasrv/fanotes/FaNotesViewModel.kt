@@ -2193,6 +2193,35 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         persistWorkspace()
     }
 
+    fun closeCurrentTab() {
+        val path = open.value?.path ?: return
+        if (path in pinnedTabs.value) {
+            message.value = "Diese Notiz ist angeheftet. Löse sie zuerst über das Tab-Menü."
+            return
+        }
+        closeTab(path)
+    }
+
+    fun openTabByDigit(digit: Int) {
+        if (digit !in 1..9) return
+        val path = openTabs.value.getOrNull(digit - 1) ?: return
+        openPath(path)
+        destination.value = "notes"
+    }
+
+    fun saveFromShortcut() {
+        viewModelScope.launch { saveNow() }
+    }
+
+    fun togglePen() {
+        showText.value = !showText.value
+    }
+
+    fun toggleFocusMode() {
+        val on = deskSettings.value["focus"] == "on"
+        updateDesk("focus", if (on) "off" else "on")
+    }
+
     fun cycleTabs(direction: Int) {
         val tabs = openTabs.value
         if (tabs.size < 2) return

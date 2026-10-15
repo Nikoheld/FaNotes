@@ -84,6 +84,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -457,6 +460,31 @@ fun FaNotesScreen(
         }
     }
 
+    fun runDeskShortcut(id: String) {
+        when (id) {
+            "tab-next" -> model.cycleTabs(1)
+            "tab-prev" -> model.cycleTabs(-1)
+            "back" -> model.navigateHistory(-1)
+            "forward" -> model.navigateHistory(1)
+            "reopen-tab" -> model.reopenClosedTab()
+            "quick-open", "palette" -> model.paletteOpen.value = true
+            "split" -> model.toggleSplit()
+            "split-swap" -> model.swapSplit()
+            "close-tab" -> model.closeCurrentTab()
+            "save" -> model.saveFromShortcut()
+            "vault-search" -> model.showDestination("search")
+            "ai" -> model.showDestination("ai")
+            "worksheet" -> onImportSheet()
+            "new-note" -> {
+                createParent = model.defaultCreateFolder()
+                createNote = true
+            }
+            "settings" -> model.showDestination("settings")
+            "focus" -> model.toggleFocusMode()
+            "pen" -> model.togglePen()
+            else -> if (id.startsWith("tab-")) id.removePrefix("tab-").toIntOrNull()?.let(model::openTabByDigit)
+        }
+    }
     val focus = desk["focus"] == "on"
     val chromeBackground = ch.fasrv.fanotes.desk.workspaceBackground(desk["background"])
     val compact = ch.fasrv.fanotes.desk.compactChrome(desk["compact"])
@@ -464,6 +492,46 @@ fun FaNotesScreen(
     Column(
         Modifier
             .fillMaxSize()
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                val name = when (event.key) {
+                    Key.Tab -> "tab"
+                    Key.DirectionLeft -> "left"
+                    Key.DirectionRight -> "right"
+                    Key.T -> "t"
+                    Key.O -> "o"
+                    Key.Backslash -> "\\"
+                    Key.W -> "w"
+                    Key.S -> "s"
+                    Key.P -> "p"
+                    Key.F -> "f"
+                    Key.A -> "a"
+                    Key.I -> "i"
+                    Key.N -> "n"
+                    Key.Comma -> ","
+                    Key.E -> "e"
+                    Key.D -> "d"
+                    Key.One -> "1"
+                    Key.Two -> "2"
+                    Key.Three -> "3"
+                    Key.Four -> "4"
+                    Key.Five -> "5"
+                    Key.Six -> "6"
+                    Key.Seven -> "7"
+                    Key.Eight -> "8"
+                    Key.Nine -> "9"
+                    else -> return@onPreviewKeyEvent false
+                }
+                val command = ch.fasrv.fanotes.desk.deskShortcut(
+                    event.isCtrlPressed,
+                    event.isShiftPressed,
+                    event.isAltPressed,
+                    event.isMetaPressed,
+                    name,
+                ) ?: return@onPreviewKeyEvent false
+                runDeskShortcut(command)
+                true
+            }
             .workspaceBackdrop(
                 chromeBackground,
                 MaterialTheme.colorScheme.background,
@@ -626,6 +694,7 @@ fun FaNotesScreen(
                                     onExportPdf = onExportPdf,
                                     onImportSheet = onImportSheet,
                                     onDownload = onDownload,
+                                    onDeskShortcut = ::runDeskShortcut,
                                 )
                             }
                             if (bookPlacement == "unten") BookPane(model, Modifier.height(220.dp).fillMaxWidth(), openBook)
@@ -645,6 +714,7 @@ fun FaNotesScreen(
                                 onExportPdf = onExportPdf,
                                 onImportSheet = onImportSheet,
                                 onDownload = onDownload,
+                                onDeskShortcut = ::runDeskShortcut,
                             )
                         }
                     }
@@ -1668,6 +1738,7 @@ private fun NotePage(
     onExportPdf: () -> Unit = {},
     onImportSheet: () -> Unit = {},
     onDownload: () -> Unit = {},
+    onDeskShortcut: (String) -> Unit = {},
 ) {
     val noteKind = model.open.collectAsStateWithLifecycle().value?.kind
     val showGoto by model.showGotoLine.collectAsStateWithLifecycle()
@@ -1729,6 +1800,7 @@ private fun NotePage(
         onToggleRail = onToggleRail,
         onEditBox = onEditBox,
         onMath = onMath,
+        onDeskShortcut = onDeskShortcut,
         modifier = Modifier.weight(1f).fillMaxWidth(),
     )
     }
@@ -1752,8 +1824,9 @@ private fun PageSurface(
     onSync: () -> Unit,
     onToggleRail: () -> Unit,
     onEditBox: (String) -> Unit,
-    onMath: () -> Unit,
-    modifier: Modifier,
+        onMath: () -> Unit,
+        onDeskShortcut: (String) -> Unit,
+        modifier: Modifier,
 ) {
     var bound by remember { mutableStateOf("") }
     val links by model.noteLinks.collectAsStateWithLifecycle()
@@ -1799,6 +1872,7 @@ private fun PageSurface(
                     "goto" -> model.openGotoLine()
                 }
             }
+            page.onDeskShortcut = onDeskShortcut
             if (page.ink.backdrop !== backdrop) page.ink.backdrop = backdrop
             page.onTool = {
                 model.tool.value = it
