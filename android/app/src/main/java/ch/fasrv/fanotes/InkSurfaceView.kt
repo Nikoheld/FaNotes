@@ -1224,51 +1224,16 @@ class InkSurfaceView @JvmOverloads constructor(
             drawCalligraphyStroke(canvas, inkPaint, stroke, scale, sessionWidth(), sessionHeight(), parseColor(stroke.color))
             return
         }
-        val passes = ch.fasrv.fanotes.ink.brushPasses(stroke.brush)
-        val baseAlpha = if (stroke.purpose == "art") (stroke.opacity ?: 1.0) else 1.0
-        for ((passIndex, pass) in passes.withIndex()) {
-            if (pass.jitter > 0.0) {
-                inkPaint.color = parseColor(stroke.color)
-                drawPencilGrain(
-                    canvas,
-                    inkPaint,
-                    stroke,
-                    sessionWidth(),
-                    sessionHeight(),
-                    scale,
-                    strokeSmoothing.toDouble(),
-                    passIndex,
-                    pass.jitter,
-                    pass.widthFactor,
-                    (baseAlpha * pass.alpha * 255.0).toInt().coerceIn(0, 255),
-                )
-                continue
-            }
-            canvas.save()
-            val outline = ribbonOutline(
-                stroke,
-                sessionWidth(),
-                sessionHeight(),
-                strokeSmoothing.toDouble(),
-                widthFactor = pass.widthFactor,
-            )
-            if (outline.size >= 4) {
-                val path = Path()
-                smoothOutline(path, outline, scale)
-                inkPaint.color = parseColor(stroke.color)
-                inkPaint.alpha = (baseAlpha * pass.alpha * 255.0).toInt().coerceIn(0, 255)
-                drawInkPath(
-                    canvas,
-                    path,
-                    inkPaint,
-                    stroke.colorEffect,
-                    (sessionWidth() * scale).toFloat(),
-                    (sessionHeight() * scale).toFloat(),
-                    (stroke.baseWidth * pass.widthFactor * scale).toFloat(),
-                )
-            }
-            canvas.restore()
-        }
+        drawBrushPasses(
+            canvas,
+            inkPaint,
+            stroke,
+            sessionWidth(),
+            sessionHeight(),
+            scale,
+            strokeSmoothing.toDouble(),
+            parseColor(stroke.color),
+        )
     }
 
     private fun drawSelection(canvas: Canvas, stroke: InkStroke, scale: Float) {
