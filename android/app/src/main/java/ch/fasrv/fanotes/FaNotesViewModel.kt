@@ -608,6 +608,28 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         canvasToken.value += 1
     }
 
+    /** Replaces the selected hit in the text the editor is showing, then finds again. */
+    fun replaceCurrentNoteSearch(replacement: String) {
+        if (noteSearchQuery.value.trim().isEmpty()) return
+        val shown = ch.fasrv.fanotes.desk.markdownWithFolds(markdown.value, foldedHeadings.value)
+        val hit = noteSearchHits.value.getOrNull(noteSearchIndex.value) ?: return
+        val next = ch.fasrv.fanotes.desk.replaceNoteMatch(shown, hit, replacement)
+        if (next == shown) return
+        updateVisibleMarkdown(shown, next)
+        updateNoteSearch(noteSearchQuery.value)
+    }
+
+    /** Replaces every hit. Folded heading bodies stay in the note. */
+    fun replaceAllNoteSearch(replacement: String) {
+        val query = noteSearchQuery.value
+        if (query.trim().isEmpty()) return
+        val shown = ch.fasrv.fanotes.desk.markdownWithFolds(markdown.value, foldedHeadings.value)
+        val next = ch.fasrv.fanotes.desk.replaceAllNoteMatches(shown, query, replacement)
+        if (next == shown) return
+        updateVisibleMarkdown(shown, next)
+        updateNoteSearch(query)
+    }
+
     fun jumpToOutline(line: Int) {
         showText.value = true
         outlineJump.value = line
