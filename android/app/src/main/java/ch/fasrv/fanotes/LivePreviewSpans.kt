@@ -356,54 +356,68 @@ internal class DetailsSummarySpan(
                         drawRichText(canvas, paint, line, textX + previousSize * 0.7f, cursor, lineInlines, paint.typeface)
                     }
                     "bullet" -> {
+                        val indent = ch.fasrv.fanotes.desk.detailsListIndent(line)
                         val mark = "• "
+                        val indentWidth = if (indent.isEmpty()) 0f else paint.measureText(indent)
                         paint.color = accent
-                        canvas.drawText(mark, textX, cursor, paint)
+                        canvas.drawText(mark, textX + indentWidth, cursor, paint)
                         paint.color = PAPER_MATH_INK
-                        val rest = line.removePrefix(mark)
+                        val rest = line.removePrefix(indent).removePrefix(mark)
                         drawRichText(
                             canvas,
                             paint,
                             rest,
-                            textX + paint.measureText(mark),
+                            textX + indentWidth + paint.measureText(mark),
                             cursor,
-                            shiftInlines(lineInlines, mark.length),
+                            shiftInlines(lineInlines, indent.length + mark.length),
                             paint.typeface,
                         )
                     }
                     "number" -> {
+                        val indent = ch.fasrv.fanotes.desk.detailsListIndent(line)
                         val marker = ch.fasrv.fanotes.desk.detailsNumberMarker(line)
+                        val indentWidth = if (indent.isEmpty()) 0f else paint.measureText(indent)
                         paint.color = accent
-                        if (marker.isNotEmpty()) canvas.drawText(marker, textX, cursor, paint)
+                        if (marker.isNotEmpty()) canvas.drawText(marker, textX + indentWidth, cursor, paint)
                         paint.color = PAPER_MATH_INK
-                        val rest = if (marker.isEmpty()) line else line.removePrefix(marker)
+                        val prefix = indent + marker
+                        val rest = if (prefix.isEmpty()) line else line.removePrefix(prefix)
+                        val markerWidth = if (marker.isEmpty()) 0f else paint.measureText(marker)
                         drawRichText(
                             canvas,
                             paint,
                             rest,
-                            textX + if (marker.isEmpty()) 0f else paint.measureText(marker),
+                            textX + indentWidth + markerWidth,
                             cursor,
-                            shiftInlines(lineInlines, marker.length),
+                            shiftInlines(lineInlines, prefix.length),
                             paint.typeface,
                         )
                     }
                     "task" -> {
+                        val indent = ch.fasrv.fanotes.desk.detailsListIndent(line)
                         val marker = ch.fasrv.fanotes.desk.detailsTaskMarker(line)
                         val checked = ch.fasrv.fanotes.desk.detailsTaskChecked(line) == true
+                        val indentWidth = if (indent.isEmpty()) 0f else paint.measureText(indent)
                         val task = paperTaskBox(previousSize)
                         val mid = cursor + (lineMetrics.ascent + lineMetrics.descent) / 2f
-                        val taskRect = RectF(textX, mid - task.size / 2f, textX + task.size, mid + task.size / 2f)
+                        val taskRect = RectF(
+                            textX + indentWidth,
+                            mid - task.size / 2f,
+                            textX + indentWidth + task.size,
+                            mid + task.size / 2f,
+                        )
                         drawPaperTaskBox(canvas, paint, taskRect, checked, accent, task.border)
                         paint.color = PAPER_MATH_INK
                         paint.style = Paint.Style.FILL
-                        val rest = if (marker.isEmpty()) line else line.removePrefix(marker)
+                        val prefix = indent + marker
+                        val rest = if (prefix.isEmpty()) line else line.removePrefix(prefix)
                         drawRichText(
                             canvas,
                             paint,
                             rest,
-                            textX + task.size + task.gap,
+                            textX + indentWidth + task.size + task.gap,
                             cursor,
-                            shiftInlines(lineInlines, marker.length),
+                            shiftInlines(lineInlines, prefix.length),
                             paint.typeface,
                         )
                     }

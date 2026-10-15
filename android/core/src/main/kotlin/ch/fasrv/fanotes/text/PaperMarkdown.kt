@@ -87,12 +87,18 @@ fun paperLines(markdown: String): List<PaperLine> {
             trimmed.startsWith("### ") -> out += PaperLine(PaperKind.H3, trimmed.drop(4).trim(), index)
             trimmed.startsWith("## ") -> out += PaperLine(PaperKind.H2, trimmed.drop(3).trim(), index)
             trimmed.startsWith("# ") -> out += PaperLine(PaperKind.H1, trimmed.drop(2).trim(), index)
-            trimmed.startsWith("> ") -> out += PaperLine(PaperKind.QUOTE, trimmed.drop(2).trim(), index)
-            trimmed == ">" -> out += PaperLine(PaperKind.QUOTE, "", index)
+            trimmed.startsWith("> ") || trimmed == ">" -> {
+                val body = if (trimmed == ">") "" else trimmed.drop(2).trim()
+                out += PaperLine(PaperKind.QUOTE, listIndent(raw) + body, index)
+            }
             trimmed == "---" || trimmed == "***" || trimmed == "___" -> out += PaperLine(PaperKind.RULE, "", index)
-            task != null -> out += PaperLine(PaperKind.TASK, "${if (task.groupValues[1].equals("x", true)) "x" else " "}|${task.groupValues[2]}", index)
-            NUMBER.containsMatchIn(raw) -> out += PaperLine(PaperKind.NUMBER, raw.trim(), index)
-            BULLET.containsMatchIn(raw) -> out += PaperLine(PaperKind.BULLET, BULLET.replace(raw, "").trim(), index)
+            task != null -> out += PaperLine(
+                PaperKind.TASK,
+                "${if (task.groupValues[1].equals("x", true)) "x" else " "}|${listIndent(raw)}${task.groupValues[2]}",
+                index,
+            )
+            NUMBER.containsMatchIn(raw) -> out += PaperLine(PaperKind.NUMBER, listIndent(raw) + raw.trim(), index)
+            BULLET.containsMatchIn(raw) -> out += PaperLine(PaperKind.BULLET, listIndent(raw) + BULLET.replace(raw, "").trim(), index)
             IMAGE_LINE.matches(trimmed) -> {
                 val image = IMAGE_LINE.matchEntire(trimmed)!!
                 out += PaperLine(PaperKind.IMAGE, "${image.groupValues[1]}\u001f${image.groupValues[2]}", index)
@@ -117,6 +123,9 @@ fun paperImageCaption(text: String): String {
 }
 
 fun paperImageSource(text: String): String = text.substringAfter('\u001f')
+
+/** Spaces or tabs before a list marker or quote, kept so a nested item stays indented. */
+private fun listIndent(raw: String): String = raw.takeWhile { it == ' ' || it == '\t' }
 
 /**
  * Vault paths for a markdown image. A relative source is tried beside the note,
