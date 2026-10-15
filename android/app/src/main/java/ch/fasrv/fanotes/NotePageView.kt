@@ -81,7 +81,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         editor.setHintTextColor(0xFF8A8D98.toInt())
         editor.hint = "Text auf dem Papier"
         editor.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-        editor.setLineSpacing(0f, 1.55f)
+        editor.setLineSpacing(0f, 1.72f)
         editor.gravity = Gravity.TOP or Gravity.START
         editor.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         editor.visibility = GONE
@@ -187,6 +187,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         canRedo: Boolean,
         darkChrome: Boolean,
         folded: Set<Int> = emptySet(),
+        metrics: ch.fasrv.fanotes.desk.EditorMetrics = ch.fasrv.fanotes.desk.editorMetrics(emptyMap()),
     ) {
         if (dark != darkChrome) {
             dark = darkChrome
@@ -195,6 +196,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
         ink.inkTool = tool
         ink.style = style
         ink.fingerDraws = fingerDraws
+        ink.editorFontPx = metrics.fontSizePx.toFloat()
+        ink.editorLineHeight = metrics.lineHeight.toFloat()
+        ink.contentWidthPx = metrics.contentWidthPx.toFloat()
+        ink.zoomMax = metrics.zoomMax.toFloat()
         sourceMarkdown = markdown
         foldedLines = folded
         val visible = ch.fasrv.fanotes.desk.markdownWithFolds(markdown, folded)
@@ -463,10 +468,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private fun placeEditor() {
         if (editor.visibility != VISIBLE) return
         val scale = ink.cameraScale().coerceAtLeast(0.2f)
-        editor.setTextSize(TypedValue.COMPLEX_UNIT_PX, 16f * scale)
+        editor.setTextSize(TypedValue.COMPLEX_UNIT_PX, ink.editorFontPx * scale)
+        editor.setLineSpacing(0f, ink.editorLineHeight)
         val x = (ink.cameraLeft() + 72f * scale).toInt()
         val y = (ink.cameraTop() + 78f * scale).toInt()
-        val width = ((900f - 144f) * scale).toInt().coerceAtLeast(dp(80))
+        val width = (ink.textColumnPx() * scale).toInt().coerceAtLeast(dp(80))
         val height = (ink.height - y).coerceAtLeast(dp(40))
         editor.measure(
             MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
