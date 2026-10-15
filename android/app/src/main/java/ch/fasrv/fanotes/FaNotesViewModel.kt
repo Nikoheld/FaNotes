@@ -3164,13 +3164,14 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     fun wordCountNow() = ch.fasrv.fanotes.desk.statusWordCount(markdown.value)
     fun linksNow() = wikiTargets(markdown.value)
 
-    fun applyProfile(profile: String) {
+    fun applyProfile(profile: String, names: Set<String>? = null) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 val existing = graph.vault.walkFiles().map { it.path }
                 val templates = templatesToSeed(existing, profile)
                 var colors = graph.vault.read(FOLDER_COLORS_PATH)?.decodeToString()?.let(::parseFolderColors).orEmpty()
                 for (folder in profileFolders(profile)) {
+                    if (names != null && folder.name !in names) continue
                     runCatching { graph.store.createFolder("", folder.name) }
                     colors = withFolderColor(colors, folder.name, folder.color)
                 }

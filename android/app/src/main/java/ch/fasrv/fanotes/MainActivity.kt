@@ -431,7 +431,7 @@ fun FaNotesScreen(
     val gotoLine by model.gotoLineInput.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var firstRun by remember { mutableStateOf(desk["welcomed"] != "yes") }
-    var profile by remember { mutableStateOf(desk["profile"].orEmpty().ifBlank { "school" }) }
+    var firstDraft by remember { mutableStateOf(ch.fasrv.fanotes.desk.firstRunStart()) }
     var editingBox by remember { mutableStateOf<String?>(null) }
     var boxText by remember { mutableStateOf("") }
     val editWorksheetBox = { id: String ->
@@ -922,28 +922,14 @@ fun FaNotesScreen(
         )
     }
     if (firstRun) {
-        AlertDialog(
-            onDismissRequest = { firstRun = false; model.updateDesk("welcomed", "yes") },
-            title = { Text("FaNotes") },
-            text = {
-                Column {
-                    Text("Welches Profil passt? Ordner und Vorlagen sind dieselben wie auf dem Desktop.")
-                    listOf("school" to "Schule", "university" to "UNI", "private" to "Privat", "work" to "Arbeit").forEach { (id, label) ->
-                        Text(
-                            label,
-                            modifier = Modifier.fillMaxWidth().clickable { profile = id }.padding(vertical = 6.dp),
-                            fontWeight = if (profile == id) FontWeight.Bold else FontWeight.Normal,
-                            color = if (profile == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
-                }
+        FirstRunDialog(
+            draft = firstDraft,
+            onDraft = { firstDraft = it },
+            onFinish = { draft ->
+                firstRun = false
+                model.applyProfile(draft.profile, draft.selected)
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    firstRun = false
-                    model.applyProfile(profile)
-                }) { Text("Einrichten") }
-            },
+            onDismiss = { firstRun = false; model.updateDesk("welcomed", "yes") },
         )
     }
     if (syncOpen) {
