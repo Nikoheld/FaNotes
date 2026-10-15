@@ -96,6 +96,23 @@ fun paperMathBorderArgb(accent: Int): Int = colorArgb(paperMathBorder("#%06x".fo
 
 fun paperCodeInkArgb(accent: Int): Int = colorArgb(paperCodeInk("#%06x".format(accent and 0xFFFFFF)))
 
+/** Paper strong text is weight 750, a step above a normal bold. */
+const val PAPER_STRONG_WEIGHT = 750
+
+/**
+ * Link underline on the paper: 38% of the readable accent over transparency,
+ * which is that colour at 38% alpha. The line sits 3px below the baseline.
+ */
+fun paperLinkUnderlineArgb(color: Int): Int {
+    val alpha = kotlin.math.round(255 * 0.38).toInt().coerceIn(0, 255)
+    return (alpha shl 24) or (color and 0x00FFFFFF)
+}
+
+fun paperLinkUnderlineOffset(textSizePx: Float): Float {
+    val base = if (textSizePx <= 0f) 16f else textSizePx
+    return 3f * base / 16f
+}
+
 /** `firstWeight` of [first] and the rest of [second], in sRGB. */
 fun mixColors(first: String, second: String, firstWeight: Double): String =
     mixHex(second, first, firstWeight.coerceIn(0.0, 1.0))

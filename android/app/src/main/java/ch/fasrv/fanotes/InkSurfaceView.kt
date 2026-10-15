@@ -1756,7 +1756,7 @@ class InkSurfaceView @JvmOverloads constructor(
                     val start = builder.length
                     builder.append(text.substring(index + marker.length, close))
                     builder.setSpan(
-                        if (bold) StyleSpan(Typeface.BOLD) else StyleSpan(Typeface.ITALIC),
+                        if (bold) StrongSpan() else StyleSpan(Typeface.ITALIC),
                         start,
                         builder.length,
                         0,

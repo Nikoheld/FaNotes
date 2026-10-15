@@ -35,5 +35,12 @@ class AccentColorTest {
         assertEquals("#6f5f39", paperCodeInk("#ba9b4a"))
         assertEquals("#8e5117", paperCodeInk("#d9730d"))
         assertEquals(0xFF295F80.toInt(), paperCodeInkArgb(0xFF2A6F97.toInt()))
+        val readable = paperAccentReadableArgb(0xFF2A6F97.toInt())
+        val underline = paperLinkUnderlineArgb(readable)
+        assertEquals(readable and 0x00FFFFFF, underline and 0x00FFFFFF)
+        assertEquals(kotlin.math.round(255 * 0.38).toInt(), underline ushr 24)
+        assertEquals(3f, paperLinkUnderlineOffset(16f))
+        assertEquals(6f, paperLinkUnderlineOffset(32f))
+        assertEquals(750, PAPER_STRONG_WEIGHT)
     }
 }

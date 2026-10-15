@@ -16,7 +16,6 @@ import android.text.style.LineBackgroundSpan
 import android.text.style.LineHeightSpan
 import android.text.style.MetricAffectingSpan
 import android.text.style.ReplacementSpan
-import android.text.style.StrikethroughSpan
 import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
 import ch.fasrv.fanotes.desk.LiveKind
@@ -36,7 +35,10 @@ import ch.fasrv.fanotes.desk.paperMathInlinePad
 import ch.fasrv.fanotes.desk.paperTableFillArgb
 import ch.fasrv.fanotes.desk.tablePadPx
 import ch.fasrv.fanotes.desk.tableRulePx
+import ch.fasrv.fanotes.desk.PAPER_STRONG_WEIGHT
 import ch.fasrv.fanotes.desk.paperCodeBox
+import ch.fasrv.fanotes.desk.paperLinkUnderlineArgb
+import ch.fasrv.fanotes.desk.paperLinkUnderlineOffset
 import ch.fasrv.fanotes.desk.paperHeading
 import ch.fasrv.fanotes.desk.paperCodeInkArgb
 import ch.fasrv.fanotes.desk.livePreviewMarks
@@ -104,7 +106,7 @@ private fun spanFor(mark: LiveMark, readable: Int, accent: Int, textSizePx: Floa
     LiveKind.CODE -> PaperCodeSpan(paperCodeInkArgb(accent), textSizePx)
     LiveKind.MATH -> PaperInlineMathSpan(textSizePx)
     LiveKind.MATH_BLOCK -> PaperMathBlockSpan(mark.label, paperMathFillArgb(accent), paperMathBorderArgb(accent), textSizePx)
-    LiveKind.LINK -> LinkSpan(readable)
+    LiveKind.LINK -> LinkSpan(readable, textSizePx)
     LiveKind.DETAILS_SUMMARY -> DetailsSummarySpan(
         mark.label,
         mark.body,
@@ -576,9 +578,24 @@ internal class PaperQuoteSpan(
     }
 }
 
-private class StrongSpan : StyleSpan(Typeface.BOLD), LivePreviewSpan
+internal class StrongSpan : MetricAffectingSpan(), LivePreviewSpan {
+    override fun updateDrawState(paint: android.text.TextPaint) = apply(paint)
+    override fun updateMeasureState(paint: android.text.TextPaint) = apply(paint)
+
+    private fun apply(paint: android.text.TextPaint) {
+        paint.typeface = Typeface.create(paint.typeface, PAPER_STRONG_WEIGHT, false)
+    }
+}
+
 private class EmphasisSpan : StyleSpan(Typeface.ITALIC), LivePreviewSpan
-private class StrikeSpan : StrikethroughSpan(), LivePreviewSpan
+
+/** Struck text uses the paper's soft ink, not the body colour. */
+private class StrikeSpan : CharacterStyle(), LivePreviewSpan {
+    override fun updateDrawState(paint: android.text.TextPaint) {
+        paint.color = PAPER_QUOTE_INK
+        paint.isStrikeThruText = true
+    }
+}
 /**
  * Desktop paper inline code: a rounded chip, a hairline rule, monospace
  * at 0.9em, and ink mixed from the readable accent.
@@ -724,9 +741,32 @@ internal class PaperMathBlockSpan(
 
 private const val PAPER_MATH_INK = 0xFF252630.toInt()
 
-private class LinkSpan(private val color: Int) : CharacterStyle(), LivePreviewSpan {
-    override fun updateDrawState(paint: android.text.TextPaint) {
+/**
+ * Desktop paper link: readable accent, with the underline at 38% of that
+ * colour and 3px below the baseline.
+ */
+internal class LinkSpan(private val color: Int, private val textSizePx: Float) : ReplacementSpan(), LivePreviewSpan {
+    override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
+        val extra = (paperLinkUnderlineOffset(textSizePx) + (textSizePx / 16f).coerceAtLeast(1f)).toInt()
+        if (fm != null) {
+            fm.descent += extra
+            fm.bottom += extra
+        }
+        return paint.measureText(text, start, end).toInt().coerceAtLeast(1)
+    }
+
+    override fun draw(canvas: Canvas, text: CharSequence, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) {
+        val previousColor = paint.color
+        val previousStyle = paint.style
+        paint.style = Paint.Style.FILL
         paint.color = color
-        paint.isUnderlineText = true
+        canvas.drawText(text, start, end, x, y.toFloat(), paint)
+        val width = paint.measureText(text, start, end)
+        val offset = paperLinkUnderlineOffset(textSizePx)
+        val thickness = (textSizePx / 16f).coerceAtLeast(1f)
+        paint.color = paperLinkUnderlineArgb(color)
+        canvas.drawRect(x, y + offset, x + width, y + offset + thickness, paint)
+        paint.color = previousColor
+        paint.style = previousStyle
     }
 }
