@@ -168,6 +168,15 @@ fun listFollowsSelection(reduceMotion: Boolean): String = if (reduceMotion) "ins
 /** File-tree row height from the desktop `--row-height`. */
 fun chromeRowHeightDp(compact: Boolean, overrideDp: Int? = null) = overrideDp ?: if (compact) 27 else 31
 
+/** Editor toolbar is 36px. Format buttons are 28px with 7px corners. The mode switch is 28px with 24px buttons. */
+const val EDITOR_TOOLBAR_DP = 36
+const val FORMAT_BUTTON_DP = 28
+const val FORMAT_BUTTON_RADIUS_DP = 7
+const val MODE_SWITCH_DP = 28
+const val MODE_SWITCH_RADIUS_DP = 8
+const val MODE_BUTTON_DP = 24
+const val MODE_BUTTON_RADIUS_DP = 6
+
 /** Desktop sidebar range 210–430, default 286. */
 fun sidebarWidthDp(raw: String?) = (raw?.toIntOrNull() ?: 286).coerceIn(210, 430)
 
