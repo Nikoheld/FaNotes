@@ -1225,6 +1225,8 @@ private fun PageSurface(
             NotePageView(context).apply {
                 attachSession(model.session)
                 ink.onChanged = { model.noteChanged() }
+                ink.onStroke = { model.recordFinishedStroke(it) }
+                ink.onErased = { model.recordErasedStrokes(it) }
                 ink.onPageGrew = { prevWidth, prevHeight, nextWidth, nextHeight, padX, padY ->
                     model.pageGrew(prevWidth, prevHeight, nextWidth, nextHeight, padX, padY)
                 }
@@ -1235,6 +1237,8 @@ private fun PageSurface(
         update = { page ->
             page.attachSession(model.session)
             page.ink.onChanged = { model.noteChanged() }
+            page.ink.onStroke = { model.recordFinishedStroke(it) }
+            page.ink.onErased = { model.recordErasedStrokes(it) }
             page.ink.onPageGrew = { prevWidth, prevHeight, nextWidth, nextHeight, padX, padY ->
                 model.pageGrew(prevWidth, prevHeight, nextWidth, nextHeight, padX, padY)
             }
@@ -1371,6 +1375,8 @@ private fun InkCanvas(
             InkSurfaceView(context).apply {
                 session = model.session
                 onChanged = { model.noteChanged() }
+                onStroke = { model.recordFinishedStroke(it) }
+                onErased = { model.recordErasedStrokes(it) }
                 onSwipeNote = { model.swipe(it) }
             }
         },
@@ -1381,6 +1387,8 @@ private fun InkCanvas(
             view.fingerDraws = finger
             if (view.backdrop !== backdrop) view.backdrop = backdrop
             view.onChanged = { model.noteChanged() }
+            view.onStroke = { model.recordFinishedStroke(it) }
+            view.onErased = { model.recordErasedStrokes(it) }
             view.onSwipeNote = { model.swipe(it) }
             val current = path ?: ""
             if (bound != current) {

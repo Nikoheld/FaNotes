@@ -373,6 +373,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private fun noteOpened(note: OpenNote): OpenNote {
         val now = System.currentTimeMillis()
         openedAtMs = now
+        lastTypedAtMs = null
+        lastStrokeEndedAtMs = null
         val stats = openPageStats(parsePageStats(note.payload.obj("pageStats"), now), now)
         val payload = (note.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
         payload.put("pageStats", mergePageStats(note.payload.obj("pageStats"), stats))
@@ -389,9 +391,39 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun updateMarkdown(value: String) {
+        val now = System.currentTimeMillis()
+        rememberActivity { ch.fasrv.fanotes.desk.recordKeystroke(it, now, lastTypedAtMs) }
+        lastTypedAtMs = now
         markdown.value = value
         open.value?.path?.let { rememberTags(it, value) }
         noteChanged()
+    }
+
+    fun recordFinishedStroke(stroke: ch.fasrv.fanotes.ink.InkStroke) {
+        val now = System.currentTimeMillis()
+        val document = session.document
+        val length = ch.fasrv.fanotes.desk.strokeLengthMm(stroke, document.sourceWidth, document.sourceHeight)
+        val first = stroke.points.firstOrNull()?.t
+        val last = stroke.points.lastOrNull()?.t
+        val duration = if (first != null && last != null) (last - first).coerceAtLeast(0.0).toLong() else 0L
+        rememberActivity { ch.fasrv.fanotes.desk.recordInkActivity(it, stroke.points.size, length, duration, now, lastStrokeEndedAtMs) }
+        lastStrokeEndedAtMs = now
+        noteChanged()
+    }
+
+    fun recordErasedStrokes(removed: Int) {
+        if (removed <= 0) return
+        rememberActivity { ch.fasrv.fanotes.desk.recordInkErased(it, removed, System.currentTimeMillis()) }
+        noteChanged()
+    }
+
+    private fun rememberActivity(transform: (ch.fasrv.fanotes.desk.PageStats) -> ch.fasrv.fanotes.desk.PageStats) {
+        val note = open.value ?: return
+        val now = System.currentTimeMillis()
+        val stats = transform(ch.fasrv.fanotes.desk.parsePageStats(note.payload.obj("pageStats"), now))
+        val payload = (note.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
+        payload.put("pageStats", ch.fasrv.fanotes.desk.mergePageStats(note.payload.obj("pageStats"), stats))
+        open.value = note.copy(payload = payload)
     }
 
     /** An edit of the text the user can see, with folded heading bodies still in the note. */
@@ -1230,6 +1262,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private var splitNote: OpenNote? = null
     private var splitSaveJob: kotlinx.coroutines.Job? = null
     private var openedAtMs = 0L
+    private var lastTypedAtMs: Long? = null
+    private var lastStrokeEndedAtMs: Long? = null
     private var reveal: Pair<String, Double>? = null
     private var boxesNeedSave = false
     val aiReply = MutableStateFlow("")
