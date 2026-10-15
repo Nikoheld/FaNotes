@@ -34,6 +34,44 @@ fun aiPreviewScale(kind: PaperKind): Float = when (kind) {
     else -> 1f
 }
 
+/** Heading sizes from `.markdown-preview`, which the desktop Schön view uses. */
+fun aiPreviewReadingScale(kind: PaperKind): Float = when (kind) {
+    PaperKind.H1 -> 2.15f
+    PaperKind.H2 -> 1.55f
+    PaperKind.H3 -> 1.22f
+    PaperKind.H4 -> 1.02f
+    else -> 1f
+}
+
+/**
+ * Turns a table-cell separator into a visible divider and keeps inline marks
+ * on the words they styled.
+ */
+fun expandFieldSeparators(text: String, marks: List<DetailsInline>): Pair<String, List<DetailsInline>> {
+    if (!text.contains('\u001f')) return text to marks
+    val out = StringBuilder()
+    val shift = IntArray(text.length + 1)
+    var added = 0
+    text.forEachIndexed { index, char ->
+        shift[index] = added
+        if (char == '\u001f') {
+            out.append(" · ")
+            added += 2
+        } else {
+            out.append(char)
+        }
+    }
+    shift[text.length] = added
+    val moved = marks.mapNotNull { mark ->
+        val start = mark.start.coerceIn(0, text.length)
+        val end = mark.end.coerceIn(start, text.length)
+        val newStart = start + shift[start]
+        val newEnd = end + shift[end]
+        if (newEnd > newStart) mark.copy(start = newStart, end = newEnd) else null
+    }
+    return out.toString() to moved
+}
+
 fun aiPreviewHeading(kind: PaperKind): Boolean = kind == PaperKind.H1 || kind == PaperKind.H2 ||
     kind == PaperKind.H3 || kind == PaperKind.H4 || kind == PaperKind.H5 || kind == PaperKind.H6
 
