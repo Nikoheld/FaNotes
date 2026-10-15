@@ -139,10 +139,10 @@ import java.time.LocalDateTime
 import java.time.YearMonth
 import kotlin.math.roundToInt
 
-internal data class StatusInk(val muted: Color, val success: Color, val warning: Color)
+internal data class StatusInk(val muted: Color, val success: Color, val warning: Color, val soft: Color)
 
 internal val LocalStatusInk = staticCompositionLocalOf {
-    StatusInk(Color(0xFF5E5C57), Color(0xFF1F7A48), Color(0xFF8A5A12))
+    StatusInk(Color(0xFF5E5C57), Color(0xFF1F7A48), Color(0xFF8A5A12), Color(0xFF4E4C47))
 }
 
 @Composable

@@ -51,6 +51,8 @@ class WorkspaceNavTest {
         assertEquals("", treeDropFolder("root", "ignored"))
         assertEquals("Archiv", treeDropFolder("folder", "Archiv"))
         assertEquals("Archiv", treeDropFolder("file", "Archiv/A.md"))
+        val empty = listOf(TreeRowBox("Archiv", true, TreeBox(0f, 60f, 100f, 86f)))
+        assertEquals("Archiv", resolveTreeDrop("Note.md", false, rows + empty, 12f, 70f, list))
     }
 
     @Test

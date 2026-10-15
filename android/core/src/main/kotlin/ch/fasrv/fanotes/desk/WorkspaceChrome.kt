@@ -180,6 +180,16 @@ const val TREE_DROP_BORDER_ALPHA = 0.55f
 const val TREE_ICON_DP = 17
 const val TREE_CHEVRON_DP = 14
 
+/** Empty expanded folder from `.file-tree__folder-empty` and `.file-tree__empty-subfolder`. */
+const val TREE_EMPTY_MIN_DP = 26
+const val TREE_EMPTY_GAP_DP = 8
+const val TREE_EMPTY_ACTION_DP = 20
+const val TREE_EMPTY_ACTION_RADIUS_DP = 5
+const val TREE_EMPTY_ACTION_PAD_DP = 6
+
+/** The empty line sits two levels past the folder row: `(depth + 2) * 13`. */
+fun treeEmptyIndentDp(depth: Int) = (depth + 2) * TREE_DEPTH_DP
+
 /** The shell grid row is 44px. Ribbon buttons are 30px tall with 6px corners and 8px of side padding. */
 const val RIBBON_HEIGHT_DP = 44
 const val RIBBON_BUTTON_DP = 30
