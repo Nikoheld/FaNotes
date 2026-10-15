@@ -3,6 +3,7 @@ package ch.fasrv.fanotes.desk
 import ch.fasrv.fanotes.text.PaperKind
 import ch.fasrv.fanotes.text.paperImageCaption
 import ch.fasrv.fanotes.text.paperImageSource
+import ch.fasrv.fanotes.text.tableAlignWire
 import ch.fasrv.fanotes.text.tableRows
 
 /**
@@ -344,7 +345,14 @@ fun detailsReadingLines(body: String): List<DetailsReadingLine> {
             PaperKind.TABLE -> tableRows(line.text).mapIndexedNotNull { index, cells ->
                 val row = styledTableRow(cells)
                 if (row.first.isBlank()) null
-                else DetailsReadingLine(row.first, detailsCardScale(line.kind), index == 0, "table", inlines = row.second)
+                else DetailsReadingLine(
+                    row.first,
+                    detailsCardScale(line.kind),
+                    index == 0,
+                    "table",
+                    tableAlignWire(line.text),
+                    row.second,
+                )
             }
             PaperKind.CODE, PaperKind.MATH -> {
                 if (line.text.isBlank()) emptyList()

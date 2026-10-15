@@ -7,6 +7,9 @@ package ch.fasrv.fanotes.text
  */
 enum class PaperKind { H1, H2, H3, H4, H5, H6, PARAGRAPH, BULLET, NUMBER, TASK, QUOTE, CODE, MATH, RULE, TABLE, IMAGE, SPACER }
 
+/** Column alignment from a GFM separator, the same `:---`, `:---:`, and `---:` the preview uses. */
+enum class TableAlign { LEFT, CENTER, RIGHT }
+
 data class PaperLine(val kind: PaperKind, val text: String, val sourceLine: Int = -1)
 
 private val COMMENT = Regex("""<!--[\s\S]*?-->""")
@@ -69,12 +72,17 @@ fun paperLines(markdown: String): List<PaperLine> {
         if (isTableRow(raw)) {
             val tableStart = index
             val rows = ArrayList<List<String>>()
+            var aligns = emptyList<TableAlign>()
             while (index < lines.size && isTableRow(lines[index])) {
                 val cells = tableCells(lines[index])
-                if (cells.isNotEmpty() && !cells.all { TABLE_RULE.matches(it) }) rows += cells
+                if (cells.isNotEmpty() && cells.all { TABLE_RULE.matches(it) }) {
+                    if (aligns.isEmpty()) aligns = cells.map(::tableColumnAlign)
+                } else if (cells.isNotEmpty()) {
+                    rows += cells
+                }
                 index += 1
             }
-            if (rows.isNotEmpty()) out += PaperLine(PaperKind.TABLE, encodeTable(rows), tableStart)
+            if (rows.isNotEmpty()) out += PaperLine(PaperKind.TABLE, encodeTable(rows, aligns), tableStart)
             continue
         }
         val trimmed = raw.trim()
@@ -112,7 +120,62 @@ fun paperLines(markdown: String): List<PaperLine> {
     return out
 }
 
-fun tableRows(text: String): List<List<String>> = text.split('\n').map { row -> row.split('\u001f') }
+fun tableRows(text: String): List<List<String>> =
+    text.split('\n').filterNot { it.startsWith(ALIGN_PREFIX) }.map { row -> row.split('\u001f') }
+
+/** Column alignment stored with a paper table. Missing columns stay left. */
+fun tableAlignments(text: String): List<TableAlign> {
+    val line = text.lineSequence().firstOrNull { it.startsWith(ALIGN_PREFIX) } ?: return emptyList()
+    return line.removePrefix(ALIGN_PREFIX).split('\u001f').map(::tableAlignToken)
+}
+
+/** Token line stored on a details-card table row: `left`, `center`, or `right` per column. */
+fun tableAlignWire(text: String): String =
+    tableAlignments(text).joinToString("\u001f") { alignWire(it) }
+
+/** One column from the token line a details card keeps beside the cells. */
+fun tableAlignAt(tokens: String, column: Int): TableAlign {
+    if (column < 0 || tokens.isEmpty()) return TableAlign.LEFT
+    return tableAlignToken(tokens.split('\u001f').getOrElse(column) { "left" })
+}
+
+/**
+ * Where a cell's text starts inside its column. [pad] matches the inset the
+ * paper and the details card already leave around the words.
+ */
+fun tableCellOrigin(align: TableAlign, columnLeft: Float, columnWidth: Float, textWidth: Float, pad: Float): Float {
+    val inner = (columnWidth - pad * 2f).coerceAtLeast(0f)
+    val used = textWidth.coerceIn(0f, inner)
+    val shift = when (align) {
+        TableAlign.CENTER -> (inner - used) / 2f
+        TableAlign.RIGHT -> inner - used
+        TableAlign.LEFT -> 0f
+    }
+    return columnLeft + pad + shift
+}
+
+private fun tableColumnAlign(cell: String): TableAlign {
+    val token = cell.trim()
+    val left = token.startsWith(':')
+    val right = token.endsWith(':')
+    return when {
+        left && right -> TableAlign.CENTER
+        right -> TableAlign.RIGHT
+        else -> TableAlign.LEFT
+    }
+}
+
+private fun tableAlignToken(token: String): TableAlign = when (token) {
+    "center" -> TableAlign.CENTER
+    "right" -> TableAlign.RIGHT
+    else -> TableAlign.LEFT
+}
+
+private fun alignWire(align: TableAlign): String = when (align) {
+    TableAlign.CENTER -> "center"
+    TableAlign.RIGHT -> "right"
+    TableAlign.LEFT -> "left"
+}
 
 /** Caption for a whole-line markdown image. The alt text wins; otherwise the file name. */
 fun paperImageCaption(text: String): String {
@@ -181,4 +244,12 @@ private fun tableCells(line: String): List<String> {
     return cells
 }
 
-private fun encodeTable(rows: List<List<String>>) = rows.joinToString("\n") { it.joinToString("\u001f") }
+private const val ALIGN_PREFIX = "\u0002"
+
+private fun encodeTable(rows: List<List<String>>, aligns: List<TableAlign>): String {
+    val columns = maxOf(rows.maxOf { it.size }, aligns.size).coerceAtLeast(1)
+    val used = List(columns) { index -> aligns.getOrElse(index) { TableAlign.LEFT } }
+    val head = ALIGN_PREFIX + used.joinToString("\u001f", transform = ::alignWire)
+    val body = rows.joinToString("\n") { it.joinToString("\u001f") }
+    return "$head\n$body"
+}
