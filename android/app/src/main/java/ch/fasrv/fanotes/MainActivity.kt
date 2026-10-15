@@ -225,6 +225,8 @@ class MainActivity : ComponentActivity() {
                     onExportIcs = { exportIcs.launch("fanotes.ics") },
                     onExportPdf = { exportNotePdf.launch(ch.fasrv.fanotes.desk.PDF_EXPORT_FILE_NAME) },
                     onImportSheet = { sheetDialog = true },
+                    worksheetImport = sheetDialog,
+                    onDismissWorksheet = { sheetDialog = false },
                     onDownload = {
                         val path = model.open.value?.path.orEmpty()
                         if (!ch.fasrv.fanotes.desk.noteCanDownload(path)) model.refuseNoteDownload()
@@ -386,6 +388,8 @@ fun FaNotesScreen(
     onExportPdf: () -> Unit,
     onImportSheet: () -> Unit,
     onDownload: () -> Unit,
+    worksheetImport: Boolean = false,
+    onDismissWorksheet: () -> Unit = {},
 ) {
     val tree by model.tree.collectAsStateWithLifecycle()
     val open by model.open.collectAsStateWithLifecycle()
@@ -416,6 +420,11 @@ fun FaNotesScreen(
     val unsaved by model.unsaved.collectAsStateWithLifecycle()
     val splitUnsaved by model.splitUnsaved.collectAsStateWithLifecycle()
     val palette by model.paletteOpen.collectAsStateWithLifecycle()
+    val bugReportOpen by model.bugReportOpen.collectAsStateWithLifecycle()
+    val confirm by model.confirmRequest.collectAsStateWithLifecycle()
+    val linkPlacing by model.linkPlacing.collectAsStateWithLifecycle()
+    val linkSelected by model.linkSelected.collectAsStateWithLifecycle()
+    val gotoLine by model.gotoLineInput.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var firstRun by remember { mutableStateOf(desk["welcomed"] != "yes") }
     var profile by remember { mutableStateOf(desk["profile"].orEmpty().ifBlank { "school" }) }
@@ -494,6 +503,59 @@ fun FaNotesScreen(
             .fillMaxSize()
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                if (event.key == Key.Escape && !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed) {
+                    val target = ch.fasrv.fanotes.desk.escapeDismisses(
+                        ch.fasrv.fanotes.desk.EscapeLayer(
+                            confirm = confirm != null,
+                            bugReport = bugReportOpen,
+                            gotoLine = gotoLine != null,
+                            math = mathOpen,
+                            textBox = editingBox != null,
+                            firstRun = firstRun,
+                            sync = syncOpen,
+                            createNote = createNote,
+                            createFolder = createFolder,
+                            renaming = renaming != null,
+                            moving = moving != null,
+                            placingLink = linkPlacing,
+                            selectedLink = linkSelected,
+                            worksheetImport = worksheetImport,
+                            palette = palette,
+                            destination = destination,
+                            pen = !showText,
+                            focus = focus,
+                        ),
+                    ) ?: return@onPreviewKeyEvent false
+                    when (target) {
+                        "confirm" -> model.dismissConfirm()
+                        "bug-report" -> model.closeBugReport()
+                        "goto-line" -> model.closeGotoLine()
+                        "math" -> mathOpen = false
+                        "text-box" -> editingBox = null
+                        "first-run" -> {
+                            firstRun = false
+                            model.updateDesk("welcomed", "yes")
+                        }
+                        "sync" -> syncOpen = false
+                        "create-note" -> {
+                            createNote = false
+                            createParent = ""
+                        }
+                        "create-folder" -> {
+                            createFolder = false
+                            createParent = ""
+                        }
+                        "rename" -> renaming = null
+                        "move" -> moving = null
+                        "placing-link", "selected-link" -> model.requestClearLink()
+                        "worksheet" -> onDismissWorksheet()
+                        "palette" -> model.paletteOpen.value = false
+                        "search", "settings", "ai", "calendar", "tasks", "overview" -> model.showDestination("notes")
+                        "pen" -> model.showText.value = true
+                        "focus" -> model.updateDesk("focus", "off")
+                    }
+                    return@onPreviewKeyEvent true
+                }
                 val name = when (event.key) {
                     Key.Tab -> "tab"
                     Key.DirectionLeft -> "left"
@@ -786,9 +848,7 @@ fun FaNotesScreen(
             }
         }, title = { Text("Befehle") })
     }
-    val bugReportOpen by model.bugReportOpen.collectAsStateWithLifecycle()
     if (bugReportOpen) BugReportDialog(model)
-    val confirm by model.confirmRequest.collectAsStateWithLifecycle()
     confirm?.let { request ->
         FaNotesConfirmDialog(request, onConfirm = { model.acceptConfirm() }, onDismiss = { model.dismissConfirm() }, glass = glass, radiusDp = chrome.radiusDp)
     }
@@ -1835,6 +1895,8 @@ private fun PageSurface(
     val outlineJump by model.outlineJump.collectAsStateWithLifecycle()
     val gotoLineInput by model.gotoLineInput.collectAsStateWithLifecycle()
     val foldedHeadings by model.foldedHeadings.collectAsStateWithLifecycle()
+    val clearLink by model.clearLinkRequest.collectAsStateWithLifecycle()
+    var appliedClear by remember { mutableStateOf(0) }
     AndroidView(
         modifier = modifier,
         factory = { context ->
@@ -1904,6 +1966,14 @@ private fun PageSurface(
             page.onDuplicate = { model.duplicateSelection() }
             page.onClear = { model.clearInk() }
             page.ink.onPlaceSection = { model.insertSection(it) }
+            page.ink.onLinkChrome = { placing, selected -> model.reportLinkChrome(placing, selected) }
+            if (clearLink != appliedClear) {
+                appliedClear = clearLink
+                page.ink.placingLink = false
+                page.ink.selectedLinkId = null
+                page.ink.publishLinkChrome()
+                page.ink.invalidate()
+            }
             page.ink.onPlaceLink = { linkPage, x, y -> model.placeNoteLink(linkPage, x, y, page.ink.noteLinkStyle) }
             page.ink.onOpenLink = { model.openPath(it); model.showDestination("notes") }
             page.ink.onRemoveLink = { model.askRemoveNoteLink(it) }

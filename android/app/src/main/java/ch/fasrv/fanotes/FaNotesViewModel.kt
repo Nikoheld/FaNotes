@@ -2091,7 +2091,21 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val aiStatus = MutableStateFlow("")
     val aiModels = MutableStateFlow<List<ch.fasrv.fanotes.desk.AiListedModel>>(emptyList())
     val paletteOpen = MutableStateFlow(false)
+    val linkPlacing = MutableStateFlow(false)
+    val linkSelected = MutableStateFlow(false)
+    val clearLinkRequest = MutableStateFlow(0)
     val updateLabel = MutableStateFlow("2026.10.7")
+
+    fun reportLinkChrome(placing: Boolean, selected: Boolean) {
+        if (linkPlacing.value != placing) linkPlacing.value = placing
+        if (linkSelected.value != selected) linkSelected.value = selected
+    }
+
+    fun requestClearLink() {
+        linkPlacing.value = false
+        linkSelected.value = false
+        clearLinkRequest.value += 1
+    }
 
     fun showDestination(id: String) {
         destination.value = id
