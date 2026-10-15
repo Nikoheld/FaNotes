@@ -817,7 +817,7 @@ fun FaNotesScreen(
                     }
                 }
                 if (panels.inspector) {
-                    Box(Modifier.width(ch.fasrv.fanotes.desk.rightPanelWidthDp(desk["panel-width"]).dp).fillMaxHeight()) { Inspector(model) { model.openPath(it) } }
+                    Box(Modifier.width((chrome.panelDp ?: ch.fasrv.fanotes.desk.rightPanelWidthDp(desk["panel-width"])).dp).fillMaxHeight()) { Inspector(model) { model.openPath(it) } }
                 }
             }
         }
