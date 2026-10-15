@@ -1977,11 +1977,12 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
     val path = model.open.collectAsStateWithLifecycle().value?.path
     if (settings["outline"] == "off") return
     Column(Modifier.fillMaxSize().padding(12.dp).verticalScroll(rememberScrollState())) {
+        val live = ch.fasrv.fanotes.desk.inspectorDocument(markdown)
         val stats = measureDocument(markdown)
         Text("Dokument", fontWeight = FontWeight.SemiBold)
-        Text("${stats.words} Wörter", fontSize = 13.sp)
-        Text("${stats.characters} Zeichen", fontSize = 13.sp)
-        Text("Lesezeit ~ ${stats.readingMinutes} min", fontSize = 13.sp)
+        Text("${live.words} Wörter", fontSize = 13.sp)
+        Text("${live.characters} Zeichen", fontSize = 13.sp)
+        Text("Lesezeit ~ ${live.readingMinutes} min", fontSize = 13.sp)
         Text("${stats.headings} Überschriften · ${stats.tasksDone}/${stats.tasks} Aufgaben", fontSize = 13.sp)
         if (path != null) Text(path, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
         Text("Gliederung", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))

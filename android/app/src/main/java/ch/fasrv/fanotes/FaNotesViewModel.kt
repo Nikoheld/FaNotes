@@ -101,7 +101,6 @@ import ch.fasrv.fanotes.desk.parentFolderOf
 import ch.fasrv.fanotes.desk.swappedSplit
 import ch.fasrv.fanotes.desk.visitNote
 import ch.fasrv.fanotes.desk.wikiTargets
-import ch.fasrv.fanotes.desk.wordCount
 import ch.fasrv.fanotes.desk.workspaceMemoryJson
 import ch.fasrv.fanotes.famd.companionPath
 import ch.fasrv.fanotes.famd.parseFamd
@@ -2450,7 +2449,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun wordCountNow() = wordCount(markdown.value)
+    fun wordCountNow() = ch.fasrv.fanotes.desk.statusWordCount(markdown.value)
     fun linksNow() = wikiTargets(markdown.value)
 
     fun applyProfile(profile: String) {

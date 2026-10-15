@@ -47,6 +47,12 @@ class DeskVaultTest {
         val hits = searchVault(listOf("Notes/A.md" to "Hallo Welt\n<!-- fanotes-ink:abc -->\n"), "welt")
         assertEquals(1, hits.single().line)
         assertEquals(2, wordCount("Zwei wörter <!-- fanotes-ink:abc -->"))
+        assertEquals(2, statusWordCount("Zwei wörter <!-- fanotes-ink:abc -->"))
+        assertEquals(0, statusWordCount("<!-- fanotes-worksheet:blatt -->"))
+        val inspector = inspectorDocument("# Titel\n\n**Hallo**-Welt <!-- fanotes-ink:abc -->")
+        assertEquals(3, inspector.words)
+        assertEquals(1, inspectorDocument("").readingMinutes)
+        assertEquals(2, inspectorDocument("wort ".repeat(211)).readingMinutes)
     }
 
     @Test
