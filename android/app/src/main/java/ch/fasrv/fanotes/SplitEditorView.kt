@@ -276,6 +276,12 @@ class SplitEditorView(context: Context) : EditText(context) {
             }
             return true
         }
+        if (event.isAltPressed && !event.isCtrlPressed && !event.isMetaPressed &&
+            (keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)
+        ) {
+            if (event.action == KeyEvent.ACTION_DOWN) moveBySyntax(keyCode == KeyEvent.KEYCODE_DPAD_RIGHT, event.isShiftPressed)
+            return true
+        }
         if ((event.isCtrlPressed || event.isMetaPressed) && !event.isAltPressed &&
             (keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)
         ) {
@@ -477,6 +483,19 @@ class SplitEditorView(context: Context) : EditText(context) {
     private fun moveByLineBoundary(forward: Boolean, extend: Boolean) {
         val value = text?.toString().orEmpty()
         val (anchor, head) = ch.fasrv.fanotes.desk.editorLineBoundarySelection(
+            value,
+            selectionStart,
+            selectionEnd,
+            forward,
+            extend,
+        )
+        val length = value.length
+        setSelection(anchor.coerceIn(0, length), head.coerceIn(0, length))
+    }
+
+    private fun moveBySyntax(forward: Boolean, extend: Boolean) {
+        val value = text?.toString().orEmpty()
+        val (anchor, head) = ch.fasrv.fanotes.desk.editorSyntaxSelection(
             value,
             selectionStart,
             selectionEnd,

@@ -129,6 +129,14 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 }
                 return true
             }
+            if (event.isAltPressed && !event.isCtrlPressed && !event.isMetaPressed &&
+                (keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)
+            ) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    moveBySyntax(keyCode == KeyEvent.KEYCODE_DPAD_RIGHT, event.isShiftPressed)
+                }
+                return true
+            }
             if (keyCode == KeyEvent.KEYCODE_BACKSLASH && event.isCtrlPressed && event.isShiftPressed &&
                 !event.isAltPressed && !event.isMetaPressed
             ) {
@@ -399,6 +407,19 @@ class NotePageView(context: Context) : FrameLayout(context) {
         fun moveByLineBoundary(forward: Boolean, extend: Boolean) {
             val value = text?.toString().orEmpty()
             val (anchor, head) = ch.fasrv.fanotes.desk.editorLineBoundarySelection(
+                value,
+                selectionStart,
+                selectionEnd,
+                forward,
+                extend,
+            )
+            val length = value.length
+            setSelection(anchor.coerceIn(0, length), head.coerceIn(0, length))
+        }
+
+        fun moveBySyntax(forward: Boolean, extend: Boolean) {
+            val value = text?.toString().orEmpty()
+            val (anchor, head) = ch.fasrv.fanotes.desk.editorSyntaxSelection(
                 value,
                 selectionStart,
                 selectionEnd,
