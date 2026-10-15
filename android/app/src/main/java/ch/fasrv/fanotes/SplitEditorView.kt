@@ -63,7 +63,22 @@ class SplitEditorView(context: Context) : EditText(context) {
             override fun afterTextChanged(s: Editable?) {
                 if (!ready) return
                 paintPreview()
-                if (!writing) onVisibleEdit(editBefore, s?.toString().orEmpty())
+                if (!writing) {
+                    val next = s?.toString().orEmpty()
+                    val replacement = ch.fasrv.fanotes.desk.markdownEnterReplacement(editBefore, next)
+                        ?: ch.fasrv.fanotes.desk.markdownBackspaceReplacement(editBefore, next)
+                    if (replacement != null) {
+                        writing = true
+                        setText(replacement.text)
+                        setSelection(replacement.cursor.coerceIn(0, replacement.text.length))
+                        writing = false
+                        val origin = editBefore
+                        editBefore = replacement.text
+                        onVisibleEdit(origin, replacement.text)
+                    } else {
+                        onVisibleEdit(editBefore, next)
+                    }
+                }
             }
         })
         ready = true
