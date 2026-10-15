@@ -115,6 +115,27 @@ fun highlightOnFrame(
     return WorksheetHighlight(id, frame.page.coerceAtLeast(1), localX, localY, localW, localH)
 }
 
+/**
+ * A tap on the sheet, in 0–1 of this worksheet page.
+ * Null when the point is outside the image.
+ */
+fun pointOnWorksheet(
+    sheetX: Double,
+    sheetY: Double,
+    frame: WorksheetPlacement,
+    sourceWidth: Double,
+    sourceHeight: Double,
+): Pair<Double, Double>? {
+    if (sourceWidth <= 0.0 || sourceHeight <= 0.0 || frame.width <= 0.0 || frame.height <= 0.0) return null
+    if (!sheetX.isFinite() || !sheetY.isFinite()) return null
+    val pageX = sheetX * sourceWidth
+    val pageY = sheetY * sourceHeight
+    if (pageX < frame.left || pageX > frame.left + frame.width || pageY < frame.top || pageY > frame.top + frame.height) {
+        return null
+    }
+    return (pageX - frame.left) / frame.width to (pageY - frame.top) / frame.height
+}
+
 /** Text-box anchor on its own worksheet image, as 0–1 of the sheet. */
 fun boxOnFrame(
     box: WorksheetBox,

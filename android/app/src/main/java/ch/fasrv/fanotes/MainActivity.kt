@@ -345,6 +345,10 @@ fun FaNotesScreen(
     var profile by remember { mutableStateOf(desk["profile"].orEmpty().ifBlank { "school" }) }
     var editingBox by remember { mutableStateOf<String?>(null) }
     var boxText by remember { mutableStateOf("") }
+    val editWorksheetBox = { id: String ->
+        boxText = model.worksheetBoxes.value.firstOrNull { it.box.id == id }?.box?.text.orEmpty()
+        editingBox = id
+    }
     var syncOpen by remember { mutableStateOf(false) }
     var createNote by remember { mutableStateOf(false) }
     var createFolder by remember { mutableStateOf(false) }
@@ -488,7 +492,7 @@ fun FaNotesScreen(
                                 NotePage(
                                     model, tool, style, finger, showText, markdown, backdrop, token, open?.path, syncText,
                                     syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.showList.value = !showList },
-                                    { editingBox = it }, { mathOpen = true }, it.clipToBounds(),
+                                    editWorksheetBox, { mathOpen = true }, it.clipToBounds(),
                                     showRelations = !(wide && desk["outline"] != "off" && !focus),
                                     onExportPdf = onExportPdf,
                                     onImportSheet = onImportSheet,
@@ -507,7 +511,7 @@ fun FaNotesScreen(
                             NotePage(
                                 model, tool, style, finger, showText, markdown, backdrop, token, open?.path, syncText,
                                 syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.showList.value = !showList },
-                                { editingBox = it }, { mathOpen = true }, it.clipToBounds(),
+                                editWorksheetBox, { mathOpen = true }, it.clipToBounds(),
                                 showRelations = !(wide && desk["outline"] != "off" && !focus),
                                 onExportPdf = onExportPdf,
                                 onImportSheet = onImportSheet,
@@ -621,7 +625,12 @@ fun FaNotesScreen(
         AlertDialog(
             onDismissRequest = { editingBox = null },
             title = { Text("Textfeld") },
-            text = { OutlinedTextField(boxText, { boxText = it }, label = { Text("Text") }) },
+            text = {
+                Column {
+                    OutlinedTextField(boxText, { boxText = it }, label = { Text("Text") })
+                    TextButton(onClick = { model.removeWorksheetBox(id); editingBox = null }) { Text("Textfeld entfernen") }
+                }
+            },
             confirmButton = {
                 TextButton(onClick = { model.updateWorksheetBox(id, boxText); editingBox = null }) { Text("Speichern") }
             },
@@ -1344,6 +1353,9 @@ private fun PageSurface(
             page.ink.accentSecondary = android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccentSecondary(model.effectiveDesk()["accent-secondary"]))
             page.setWorkspace(model.effectiveDesk()["background"].orEmpty())
             page.ink.onPlaceHighlight = { worksheetId, mark -> model.addWorksheetHighlight(worksheetId, mark) }
+            page.ink.onPlaceBox = { worksheetId, pageNumber, x, y ->
+                model.placeWorksheetBox(worksheetId, pageNumber, x, y, onEditBox)
+            }
             page.ink.onRemoveHighlight = { model.removeWorksheetHighlight(it) }
             page.onFinger = { model.fingerDraws.value = it }
             page.apply(

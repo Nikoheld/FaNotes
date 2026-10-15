@@ -68,4 +68,24 @@ class WorksheetLayoutTest {
         val other = layoutWorksheetColumn(900.0, 200.0, listOf("a" to 1.0, "b" to 1.0))[1]
         assertNull(highlightOnFrame(sheetX, sheetY, sheetW, sheetH, other, 900.0, 1273.0, "hl"))
     }
+
+    @Test
+    fun aTextToolTapLandsOnThatWorksheetPage() {
+        val frame = layoutWorksheetColumn(900.0, 200.0, listOf("sheet" to (600.0 / 900.0))).single()
+        val sheetX = (frame.left + frame.width * 0.25) / 900.0
+        val sheetY = (frame.top + frame.height * 0.5) / 1273.0
+        val local = pointOnWorksheet(sheetX, sheetY, frame, 900.0, 1273.0)
+        assertEquals(0.25, local?.first ?: -1.0, 0.001)
+        assertEquals(0.5, local?.second ?: -1.0, 0.001)
+        assertNull(pointOnWorksheet(0.01, sheetY, frame, 900.0, 1273.0))
+        val box = placeWorksheetTextBox(frame.page, 1.4, -0.2, "box-1")
+        assertEquals(1, box.page)
+        assertEquals(0.78, box.x, 0.001)
+        assertEquals(0.0, box.y, 0.001)
+        assertEquals(0.28, box.width, 0.001)
+        assertEquals(16.0, box.fontSize, 0.001)
+        assertEquals("", box.text)
+        assertNull(worksheetBoxTextError("Hallo"))
+        assertEquals("Ein Arbeitsblatt-Text ist ungültig.", worksheetBoxTextError("a".repeat(20_001)))
+    }
 }

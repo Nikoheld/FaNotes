@@ -144,6 +144,8 @@ class InkSurfaceView @JvmOverloads constructor(
     var worksheetHighlights: List<ch.fasrv.fanotes.desk.AnchoredHighlight> = emptyList()
     var pageFrames: List<ch.fasrv.fanotes.desk.PageFrame> = emptyList()
     var placingHighlight = false
+    var placingText = false
+    var onPlaceBox: (String, Int, Double, Double) -> Unit = { _, _, _, _ -> }
     var onPlaceHighlight: (String, ch.fasrv.fanotes.desk.WorksheetHighlight) -> Unit = { _, _ -> }
     var onRemoveHighlight: (String) -> Unit = {}
     var onPlaceSection: (Double) -> Unit = { _ -> }
@@ -670,6 +672,22 @@ class InkSurfaceView @JvmOverloads constructor(
                 onPenActive(false)
                 inkPointer = MotionEvent.INVALID_POINTER_ID
             }
+            placingText && !eraser -> {
+                val placements = currentPlacements(pixelsPerPageUnit())
+                worksheetPlacements = placements
+                val width = sessionWidth()
+                val height = sessionHeight()
+                val frame = placements.firstOrNull { pointOnFrame(x, y, it, width, height) != null }
+                if (frame != null) {
+                    val local = pointOnFrame(x, y, frame, width, height)
+                    if (local != null) {
+                        onPlaceBox(frame.id, frame.page, local.first, local.second)
+                        placingText = false
+                    }
+                }
+                onPenActive(false)
+                inkPointer = MotionEvent.INVALID_POINTER_ID
+            }
             inkTool == InkTool.LASSO -> {
                 lassoing = true
                 lassoPoints.clear()
@@ -971,9 +989,17 @@ class InkSurfaceView @JvmOverloads constructor(
             val place = worksheetPlacements.firstOrNull { it.id == anchored.worksheetId && it.page == anchored.box.page.coerceAtLeast(1) } ?: return@forEach
             val sheet = ch.fasrv.fanotes.desk.boxOnFrame(anchored.box, place, sessionWidth(), sessionHeight())
             val (sx, sy) = normToScreen(sheet.first, sheet.second)
-            textPaint.color = Color.parseColor("#202333")
+            val boxWidth = (anchored.box.width * place.width * scale).toFloat().coerceAtLeast(48f * scale)
+            val boxHeight = (28f * scale).coerceAtLeast(textPaint.textSize + 8f)
+            cardFill.color = Color.argb(184, 255, 255, 255)
+            canvas.drawRect(sx, sy - boxHeight + 6f * scale, sx + boxWidth, sy + 8f * scale, cardFill)
+            cardEdge.strokeWidth = max(1f, scale * 0.6f)
+            canvas.drawRect(sx, sy - boxHeight + 6f * scale, sx + boxWidth, sy + 8f * scale, cardEdge)
+            cardFill.color = Color.WHITE
+            textPaint.color = if (anchored.box.text.isEmpty()) Color.parseColor("#747887") else Color.parseColor("#202333")
             textPaint.textSize = (anchored.box.fontSize * scale).toFloat().coerceAtLeast(12f)
-            canvas.drawText(anchored.box.text, sx, sy, textPaint)
+            canvas.drawText(anchored.box.text.ifEmpty { "Text" }, sx + 6f * scale, sy, textPaint)
+            textPaint.color = Color.parseColor("#252630")
         }
         if (lassoPoints.size > 1) {
             val path = Path()
@@ -1885,6 +1911,14 @@ class InkSurfaceView @JvmOverloads constructor(
     }
 
     private fun openWorksheetId(): String? = backdrop.firstOrNull { it.worksheetId.isNotEmpty() }?.worksheetId
+
+    private fun pointOnFrame(
+        x: Double,
+        y: Double,
+        frame: ch.fasrv.fanotes.desk.WorksheetPlacement,
+        width: Double,
+        height: Double,
+    ) = ch.fasrv.fanotes.desk.pointOnWorksheet(x, y, frame, width, height)
 
     private fun hitWorksheetBox(anchored: ch.fasrv.fanotes.desk.AnchoredBox, x: Double, y: Double): Boolean {
         val place = worksheetPlacements.firstOrNull { it.id == anchored.worksheetId && it.page == anchored.box.page.coerceAtLeast(1) } ?: return false

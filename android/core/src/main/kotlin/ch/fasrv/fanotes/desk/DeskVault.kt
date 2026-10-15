@@ -564,6 +564,24 @@ fun noteLinksJson(links: List<NoteLinkMark>): JsonValue.Arr = JsonValue.Arr(link
 
 data class WorksheetBox(val id: String, val page: Int, val x: Double, val y: Double, val width: Double, val text: String, val fontSize: Double)
 
+/** Same clamp as a desktop worksheet text tool: x stays in 0–0.78, y in 0–0.94. */
+fun placeWorksheetTextBox(page: Int, localX: Double, localY: Double, id: String): WorksheetBox {
+    val x = if (localX.isFinite()) localX.coerceIn(0.0, 0.78) else 0.0
+    val y = if (localY.isFinite()) localY.coerceIn(0.0, 0.94) else 0.0
+    return WorksheetBox(
+        id = id,
+        page = page.coerceIn(1, 2000),
+        x = x,
+        y = y,
+        width = 0.28,
+        text = "",
+        fontSize = 16.0,
+    )
+}
+
+fun worksheetBoxTextError(text: String): String? =
+    if (text.indexOf('\u0000') >= 0 || text.length > 20_000) "Ein Arbeitsblatt-Text ist ungültig." else null
+
 fun parseWorksheetBoxes(json: String): List<WorksheetBox> {
     val root = parseJson(json) as? JsonValue.Obj ?: return emptyList()
     return root.array("textBoxes")?.items.orEmpty().mapNotNull { item ->

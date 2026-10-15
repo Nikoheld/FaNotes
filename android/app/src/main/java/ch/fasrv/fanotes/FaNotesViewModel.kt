@@ -1224,7 +1224,39 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         noteChanged()
     }
 
+    fun placeWorksheetBox(worksheetId: String, page: Int, localX: Double, localY: Double, onPlaced: (String) -> Unit) {
+        if (open.value?.worksheets?.contains(worksheetId) != true) return
+        val id = java.util.UUID.randomUUID().toString()
+        val box = ch.fasrv.fanotes.desk.placeWorksheetTextBox(page, localX, localY, id)
+        viewModelScope.launch {
+            val error = withContext(Dispatchers.IO) { insertWorksheetBox(worksheetId, box) }
+            if (error != null) {
+                message.value = error
+                return@launch
+            }
+            worksheetBoxes.value = worksheetBoxes.value + ch.fasrv.fanotes.desk.AnchoredBox(worksheetId, box)
+            refreshOverlays()
+            graph.engine.notifyLocalChange()
+            onPlaced(id)
+        }
+    }
+
+    fun removeWorksheetBox(id: String) {
+        val worksheet = worksheetBoxes.value.firstOrNull { it.box.id == id }?.worksheetId ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { deleteWorksheetBox(worksheet, id) }
+            worksheetBoxes.value = worksheetBoxes.value.filterNot { it.box.id == id }
+            refreshOverlays()
+            graph.engine.notifyLocalChange()
+        }
+    }
+
     fun updateWorksheetBox(id: String, text: String) {
+        val invalid = ch.fasrv.fanotes.desk.worksheetBoxTextError(text)
+        if (invalid != null) {
+            message.value = invalid
+            return
+        }
         val worksheet = worksheetBoxes.value.firstOrNull { it.box.id == id }?.worksheetId
             ?: open.value?.worksheets?.firstOrNull() ?: return
         viewModelScope.launch {
@@ -1253,6 +1285,38 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             refreshOverlays()
             graph.engine.notifyLocalChange()
         }
+    }
+
+    private fun insertWorksheetBox(worksheetId: String, box: ch.fasrv.fanotes.desk.WorksheetBox): String? {
+        val path = ".fanotes/worksheets/$worksheetId.json"
+        val raw = graph.vault.read(path)?.decodeToString() ?: return "Das Arbeitsblatt wurde nicht gefunden."
+        val root = parseJson(raw) as? ch.fasrv.fanotes.json.JsonValue.Obj ?: return "Die Arbeitsblattdaten sind beschädigt."
+        val boxes = root.array("textBoxes") ?: ch.fasrv.fanotes.json.JsonValue.Arr()
+        if (boxes.items.size >= 2000) return "Das Arbeitsblatt enthält zu viele Textfelder."
+        boxes.items += ch.fasrv.fanotes.json.jsonObject(
+            "id" to ch.fasrv.fanotes.json.jsonString(box.id),
+            "page" to ch.fasrv.fanotes.json.jsonNumber(box.page.toDouble()),
+            "x" to ch.fasrv.fanotes.json.jsonNumber(box.x),
+            "y" to ch.fasrv.fanotes.json.jsonNumber(box.y),
+            "width" to ch.fasrv.fanotes.json.jsonNumber(box.width),
+            "text" to ch.fasrv.fanotes.json.jsonString(box.text),
+            "fontSize" to ch.fasrv.fanotes.json.jsonNumber(box.fontSize),
+        )
+        root.put("textBoxes", boxes)
+        root.put("updatedAt", ch.fasrv.fanotes.json.jsonString(isoNow()))
+        graph.vault.write(path, root.stringify().encodeToByteArray())
+        return null
+    }
+
+    private fun deleteWorksheetBox(worksheetId: String, id: String) {
+        val path = ".fanotes/worksheets/$worksheetId.json"
+        val raw = graph.vault.read(path)?.decodeToString() ?: return
+        val root = parseJson(raw) as? ch.fasrv.fanotes.json.JsonValue.Obj ?: return
+        val boxes = root.array("textBoxes") ?: return
+        boxes.items.removeAll { (it as? ch.fasrv.fanotes.json.JsonValue.Obj)?.string("id") == id }
+        root.put("textBoxes", boxes)
+        root.put("updatedAt", ch.fasrv.fanotes.json.jsonString(isoNow()))
+        graph.vault.write(path, root.stringify().encodeToByteArray())
     }
 
     fun flatNotes(): List<VaultNode> {
