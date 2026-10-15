@@ -23,6 +23,7 @@ const val SHAPE_SNAP_SENSITIVITY_DEFAULT = 50
 data class ShapeSnapProfile(
     val minConfidence: Double,
     val dwellMs: Int,
+    val hintMs: Int,
     val axisSnapRad: Double,
     val loosen: Double,
     val minPoints: Int,
@@ -38,6 +39,7 @@ fun shapeSnapProfile(sensitivity: Int = SHAPE_SNAP_SENSITIVITY_DEFAULT): ShapeSn
     return ShapeSnapProfile(
         minConfidence = lerp(0.88, 0.56, t),
         dwellMs = round(lerp(1100.0, 300.0, t)).toInt(),
+        hintMs = round(lerp(400.0, 120.0, t)).toInt(),
         axisSnapRad = lerp(6.0, 18.0, t) * PI / 180.0,
         loosen = lerp(0.76, 1.24, t),
         minPoints = round(lerp(12.0, 8.0, t)).toInt(),
@@ -49,6 +51,109 @@ fun inkStrokeAllowsShapeSnap(purpose: String?, symbolId: String?): Boolean =
     purpose != "art" && symbolId.isNullOrEmpty()
 
 fun shapeSnapAllowsLiveSample(snapped: Boolean) = !snapped
+
+/** German name of a snapped figure, matching the desktop drawing board. */
+fun shapeSnapLabel(kind: String): String = when (kind) {
+    "line" -> "Linie"
+    "circle" -> "Kreis"
+    "ellipse" -> "Ellipse"
+    "triangle" -> "Dreieck"
+    "square" -> "Quadrat"
+    "rectangle" -> "Rechteck"
+    else -> "Form"
+}
+
+fun shapeRecognizedNotice(kind: String): String =
+    "${shapeSnapLabel(kind)} erkannt · Stift heben übernimmt die saubere Form."
+
+/** Peek whether a stroke is already a recognizable figure, without rewriting it. */
+fun strokeLooksLikeShape(
+    points: List<StrokePoint>,
+    sourceWidth: Double,
+    sourceHeight: Double,
+    sensitivity: Int = SHAPE_SNAP_SENSITIVITY_DEFAULT,
+): Boolean = snapStrokeToShape(points, sourceWidth, sourceHeight, sensitivity) != null
+
+/**
+ * Desktop dwell clock: a real move restarts the hold, a still tip keeps the
+ * deadline, and the hint fires before the figure is replaced.
+ */
+class ShapeSnapWatch {
+    var lastMoveAtMs: Long = 0
+        private set
+    private var dwellDueAtMs: Long? = null
+    private var hintDueAtMs: Long? = null
+    var snapped: Boolean = false
+        private set
+
+    fun begin(nowMs: Long) {
+        lastMoveAtMs = nowMs
+        dwellDueAtMs = null
+        hintDueAtMs = null
+        snapped = false
+    }
+
+    fun clear() {
+        dwellDueAtMs = null
+        hintDueAtMs = null
+    }
+
+    /** Milliseconds until the next check. Null means nothing is armed. */
+    fun onSample(nowMs: Long, distancePx: Double, canArm: Boolean, profile: ShapeSnapProfile): Long? {
+        if (snapped) {
+            clear()
+            return null
+        }
+        if (distancePx >= 0.35) {
+            lastMoveAtMs = nowMs
+            clear()
+        }
+        if (!canArm) return null
+        if (dwellDueAtMs == null) dwellDueAtMs = nowMs + profile.dwellMs
+        if (hintDueAtMs == null) hintDueAtMs = nowMs + profile.hintMs
+        return delayUntil(nowMs)
+    }
+
+    data class Due(val showHint: Boolean, val trySnap: Boolean, val waitMs: Long?)
+
+    fun onDue(nowMs: Long, profile: ShapeSnapProfile, looksLikeShape: Boolean): Due {
+        if (snapped) {
+            clear()
+            return Due(showHint = false, trySnap = false, waitMs = null)
+        }
+        var showHint = false
+        var trySnap = false
+        val hintAt = hintDueAtMs
+        if (hintAt != null && nowMs >= hintAt) {
+            hintDueAtMs = null
+            if (nowMs - lastMoveAtMs >= profile.hintMs && looksLikeShape) showHint = true
+        }
+        val dwellAt = dwellDueAtMs
+        if (dwellAt != null && nowMs >= dwellAt) {
+            dwellDueAtMs = null
+            val remaining = profile.dwellMs - (nowMs - lastMoveAtMs)
+            if (remaining > 16) dwellDueAtMs = nowMs + remaining
+            else trySnap = true
+        }
+        return Due(showHint, trySnap, delayUntil(nowMs))
+    }
+
+    /** After a snap attempt. A miss keeps watching; a hit stops the clock. */
+    fun noteSnap(success: Boolean, nowMs: Long): Long? {
+        if (success) {
+            snapped = true
+            clear()
+            return null
+        }
+        if (dwellDueAtMs == null) dwellDueAtMs = nowMs + 180
+        return delayUntil(nowMs)
+    }
+
+    private fun delayUntil(nowMs: Long): Long? {
+        val next = listOfNotNull(dwellDueAtMs, hintDueAtMs).minOrNull() ?: return null
+        return (next - nowMs).coerceAtLeast(0)
+    }
+}
 
 fun isStrokeDwelling(points: List<StrokePoint>, sourceWidth: Double, sourceHeight: Double, windowMs: Double = 480.0, maxMovePx: Double = 6.0): Boolean {
     if (points.size < 6) return false
