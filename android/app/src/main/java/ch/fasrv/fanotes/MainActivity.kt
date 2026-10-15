@@ -420,6 +420,7 @@ fun FaNotesScreen(
     val chrome = ch.fasrv.fanotes.desk.parseCustomChrome(css)
     val split by model.splitPath.collectAsStateWithLifecycle()
     val unsaved by model.unsaved.collectAsStateWithLifecycle()
+    val savePhase by model.savePhase.collectAsStateWithLifecycle()
     val splitUnsaved by model.splitUnsaved.collectAsStateWithLifecycle()
     val palette by model.paletteOpen.collectAsStateWithLifecycle()
     val paletteNotes by model.paletteNotes.collectAsStateWithLifecycle()
@@ -819,6 +820,7 @@ fun FaNotesScreen(
                 }
             }
         }
+        val sheetCount = backdrop.filter { it.worksheetId.isNotEmpty() }.distinctBy { it.worksheetId }.size
         DeskStatusBar(
             model.wordCountNow(),
             syncText,
@@ -826,7 +828,7 @@ fun FaNotesScreen(
             desk["words"] != "off",
             sync.conflicts.size,
             onConflicts = { model.showDestination("settings") },
-            crumbs = if (destination == "notes" && open?.path != null) breadcrumbsFor(open?.path.orEmpty()) else emptyList(),
+            crumbs = if (ch.fasrv.fanotes.desk.statusShowsPath(destination) && open?.path != null) breadcrumbsFor(open?.path.orEmpty()) else emptyList(),
             onCrumb = {
                 model.showList.value = true
                 model.sidebarOpen.value = true
@@ -835,6 +837,16 @@ fun FaNotesScreen(
             onToggleSidebar = { model.setSidebarOpen(!(if (wide) sidebarOpen else showList)) },
             notice = message,
             onDismissNotice = { model.message.value = null },
+            mode = ch.fasrv.fanotes.desk.statusModeLabel(
+                destination,
+                noteOpen = open != null,
+                penOpen = !showText,
+                pdf = open?.kind == NoteKind.PDF,
+                worksheets = sheetCount,
+            ),
+            worksheets = ch.fasrv.fanotes.desk.statusWorksheetLabel(sheetCount),
+            saveLabel = ch.fasrv.fanotes.desk.statusSaveLabel(savePhase),
+            onSave = { model.saveFromShortcut() },
         )
     }
     if (palette) {

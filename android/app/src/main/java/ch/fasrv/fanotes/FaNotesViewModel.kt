@@ -362,6 +362,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 revealFolders(path)
                 dirty = false
                 unsaved.value = false
+                savePhase.value = "saved"
                 persistWorkspace()
                 recordBug("note", path)
             } catch (error: Exception) {
@@ -401,7 +402,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
             kotlinx.coroutines.delay(ch.fasrv.fanotes.desk.editorMetrics(deskSettings.value).autosaveMs)
-            saveNow()
+            try {
+                saveNow()
+            } catch (error: Exception) {
+                message.value = error.message ?: "Speichern fehlgeschlagen."
+            }
         }
     }
 
@@ -920,27 +925,34 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             if (!dirty) return
             while (true) {
                 val note = open.value?.let(::withDwell) ?: return
+                savePhase.value = "saving"
                 val revision = editRevision
                 val document = session.document
                 val text = markdown.value
                 val boxes = if (boxesNeedSave) worksheetBoxes.value else emptyList()
                 boxesNeedSave = false
-                val saved = withContext(Dispatchers.IO) {
-                    boxes.groupBy { it.worksheetId }.forEach { (id, group) ->
-                        if (id.isNotEmpty() && group.isNotEmpty()) writeMovedBoxes(id, group.map { it.box })
+                try {
+                    val saved = withContext(Dispatchers.IO) {
+                        boxes.groupBy { it.worksheetId }.forEach { (id, group) ->
+                            if (id.isNotEmpty() && group.isNotEmpty()) writeMovedBoxes(id, group.map { it.box })
+                        }
+                        val written = graph.store.save(note, document, text)
+                        written to listNoteHistory(graph.vault, historyPathFor(written))
                     }
-                    val written = graph.store.save(note, document, text)
-                    written to listNoteHistory(graph.vault, historyPathFor(written))
+                    if (revision != editRevision) continue
+                    open.value = saved.first
+                    noteHistory.value = saved.second
+                    dirty = false
+                    unsaved.value = false
+                    savePhase.value = "saved"
+                    graph.busyPaths = emptySet()
+                    graph.engine.notifyLocalChange()
+                    refreshTree()
+                    return
+                } catch (error: Exception) {
+                    savePhase.value = "error"
+                    throw error
                 }
-                if (revision != editRevision) continue
-                open.value = saved.first
-                noteHistory.value = saved.second
-                dirty = false
-                unsaved.value = false
-                graph.busyPaths = emptySet()
-                graph.engine.notifyLocalChange()
-                refreshTree()
-                return
             }
         }
     }
@@ -2154,6 +2166,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val customCss = MutableStateFlow(graph.readCustomCss())
     val splitPath = MutableStateFlow<String?>(null)
     val unsaved = MutableStateFlow(false)
+    val savePhase = MutableStateFlow("saved")
     val splitUnsaved = MutableStateFlow(false)
     val splitMarkdown = MutableStateFlow("")
     val splitFolded = MutableStateFlow<Set<Int>>(emptySet())
@@ -2323,7 +2336,13 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun saveFromShortcut() {
-        viewModelScope.launch { saveNow() }
+        viewModelScope.launch {
+            try {
+                saveNow()
+            } catch (error: Exception) {
+                message.value = error.message ?: "Speichern fehlgeschlagen."
+            }
+        }
     }
 
     fun togglePen() {
@@ -2880,6 +2899,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         noteTrail.value = visitNote(noteTrail.value, savedSplit.path)
         rememberLastOpen(savedSplit.path)
         unsaved.value = false
+        savePhase.value = "saved"
         splitUnsaved.value = false
         canvasToken.value += 1
         persistWorkspace()
