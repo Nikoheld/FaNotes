@@ -2004,7 +2004,7 @@ class InkSurfaceView @JvmOverloads constructor(
                         }
                     }
                     PaperKind.QUOTE -> builder.setSpan(
-                        PaperQuoteSpan(readable, ch.fasrv.fanotes.desk.quoteWashArgb(accentColor), textSize),
+                        PaperQuoteSpan(readable, textSize),
                         start,
                         end,
                         0,
