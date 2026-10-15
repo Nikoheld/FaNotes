@@ -70,6 +70,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onClear: () -> Unit = {}
     var onFinger: (Boolean) -> Unit = {}
     var onMath: () -> Unit = {}
+    var onRestyleLink: (String, String) -> Unit = { _, _ -> }
 
     init {
         clipChildren = true
@@ -311,8 +312,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
         tools.addView(chip("Abschnitt") { ink.placingSection = true })
         tools.addView(chip("Lasso") { onTool(ch.fasrv.fanotes.ink.InkTool.LASSO) })
         tools.addView(chip("Verknüpfung") { ink.placingLink = true })
-        ch.fasrv.fanotes.desk.NOTE_LINK_STYLES.forEach { style ->
-            tools.addView(chip(style.label) { ink.noteLinkStyle = style.id })
+        ch.fasrv.fanotes.desk.NOTE_LINK_STYLES.forEach { linkStyle ->
+            tools.addView(chip(linkStyle.label) {
+                ink.noteLinkStyle = linkStyle.id
+                ink.selectedLinkId?.let { onRestyleLink(it, linkStyle.id) }
+            })
         }
         tools.addView(chip("Entfernen") {
             val id = ink.selectedLinkId ?: ink.linkMarks.lastOrNull()?.id ?: return@chip

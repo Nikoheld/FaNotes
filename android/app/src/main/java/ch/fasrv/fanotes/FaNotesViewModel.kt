@@ -1035,6 +1035,23 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         ) { delete(path) }
     }
 
+    fun restylePlacedNoteLink(id: String, style: String) {
+        val source = open.value ?: return
+        val current = noteLinks.value.find { it.id == id } ?: return
+        val next = try {
+            ch.fasrv.fanotes.desk.restyleNoteLink(current, style)
+        } catch (error: IllegalArgumentException) {
+            message.value = error.message
+            return
+        }
+        val links = noteLinks.value.map { if (it.id == id) next else it }
+        val payload = (source.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
+        payload.put("noteLinks", ch.fasrv.fanotes.desk.noteLinksJson(links))
+        open.value = source.copy(payload = payload)
+        noteLinks.value = links
+        noteChanged()
+    }
+
     fun askRemoveNoteLink(id: String) {
         askConfirm(
             ch.fasrv.fanotes.desk.PendingConfirm("Verlinkung entfernen", ch.fasrv.fanotes.desk.noteLinkRemoveMessage(), "Entfernen"),

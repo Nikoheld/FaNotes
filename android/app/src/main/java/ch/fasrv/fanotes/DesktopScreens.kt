@@ -2,6 +2,7 @@ package ch.fasrv.fanotes
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -1450,6 +1451,34 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     listOf("clean", "gradient", "mesh", "paper").forEach { id ->
                         Text(id, modifier = Modifier.clickable { model.updateDesk("background", id) }.padding(vertical = 4.dp))
                     }
+                    Text("Akzentfarbe", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    val accent = ch.fasrv.fanotes.desk.normalizeAccent(settings["accent"])
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ch.fasrv.fanotes.desk.ACCENT_COLORS.forEach { color ->
+                            val selected = color == accent
+                            Box(
+                                Modifier
+                                    .size(28.dp)
+                                    .border(if (selected) 2.dp else 1.dp, if (selected) MaterialTheme.colorScheme.onSurface else Color(0x33000000), CircleShape)
+                                    .padding(3.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(android.graphics.Color.parseColor(color)))
+                                    .clickable { model.updateDesk("accent", color) },
+                            )
+                        }
+                    }
+                    var customAccent by remember(accent) { mutableStateOf(accent) }
+                    OutlinedTextField(
+                        customAccent,
+                        { next ->
+                            customAccent = next
+                            ch.fasrv.fanotes.desk.parseAccent(next)?.let { model.updateDesk("accent", it) }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Eigene Akzentfarbe") },
+                        singleLine = true,
+                    )
+                    Text(accent, fontSize = 12.sp)
                 }
                 "editor" -> {
                     val metrics = ch.fasrv.fanotes.desk.editorMetrics(settings)
