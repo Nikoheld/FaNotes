@@ -77,6 +77,103 @@ fun expandFieldSeparators(text: String, marks: List<DetailsInline>): Pair<String
 /** `.markdown-preview th { font-size: .9em }`. */
 const val PREVIEW_TABLE_HEAD = 0.9f
 
+/** `.markdown-preview code` is 0.88em of the surrounding text. */
+const val PREVIEW_CODE_SCALE = 0.88f
+
+data class PreviewCodeBox(val textPx: Float, val padX: Float, val padY: Float, val radius: Float, val border: Float)
+
+/**
+ * Reading-preview inline code chip. Padding is `em` of the smaller code font,
+ * and the 5px corner is a CSS pixel, not an em.
+ */
+fun previewCodeBox(textSizePx: Float): PreviewCodeBox {
+    val base = if (textSizePx <= 0f) 16f else textSizePx
+    val text = base * PREVIEW_CODE_SCALE
+    return PreviewCodeBox(
+        textPx = text,
+        padX = text * 0.38f,
+        padY = text * 0.16f,
+        radius = 5f,
+        border = 1f,
+    )
+}
+
+/** One inline-code chip in the laid-out preview string. The slot is a single object character. */
+data class PreviewCodeSlot(val id: String, val label: String)
+
+data class PreviewCodeDisplay(
+    val text: String,
+    val marks: List<DetailsInline>,
+    val slots: List<PreviewCodeSlot>,
+    val sourceAt: List<Int>,
+    val markerEnd: Int,
+)
+
+/**
+ * Replaces each inline code span with one object character so the preview can
+ * draw the desktop chip. [sourceAt] maps a displayed offset back to the source.
+ */
+fun previewCodeDisplay(text: String, marks: List<DetailsInline>, markerEnd: Int = 0): PreviewCodeDisplay {
+    val codes = ArrayList<DetailsInline>()
+    val ordered = marks.filter { it.kind == "code" }.sortedBy { it.start }
+    for (mark in ordered) {
+        val start = mark.start.coerceIn(0, text.length)
+        val end = mark.end.coerceIn(start, text.length)
+        if (end <= start) continue
+        if (codes.isNotEmpty() && start < codes.last().end) continue
+        codes += mark.copy(start = start, end = end)
+    }
+    if (codes.isEmpty()) {
+        return PreviewCodeDisplay(text, marks, emptyList(), emptyList(), markerEnd.coerceIn(0, text.length))
+    }
+    val out = StringBuilder()
+    val sourceAt = ArrayList<Int>(text.length)
+    val slots = ArrayList<PreviewCodeSlot>(codes.size)
+    var cursor = 0
+    for (code in codes) {
+        while (cursor < code.start) {
+            sourceAt += cursor
+            out.append(text[cursor])
+            cursor += 1
+        }
+        slots += PreviewCodeSlot("c${slots.size}", text.substring(code.start, code.end))
+        sourceAt += code.start
+        out.append('\uFFFC')
+        cursor = code.end
+    }
+    while (cursor < text.length) {
+        sourceAt += cursor
+        out.append(text[cursor])
+        cursor += 1
+    }
+    sourceAt += text.length
+    val displayedOf = IntArray(text.length + 1)
+    var displayed = 0
+    for (source in 0..text.length) {
+        while (displayed < sourceAt.lastIndex && sourceAt[displayed] < source) displayed += 1
+        displayedOf[source] = displayed.coerceAtMost(out.length)
+    }
+    val shifted = marks.mapNotNull { mark ->
+        if (mark.kind == "code") return@mapNotNull null
+        val start = displayedOf[mark.start.coerceIn(0, text.length)]
+        val end = displayedOf[mark.end.coerceIn(0, text.length)]
+        if (end <= start) null else mark.copy(start = start, end = end)
+    }
+    return PreviewCodeDisplay(
+        out.toString(),
+        shifted,
+        slots,
+        sourceAt,
+        displayedOf[markerEnd.coerceIn(0, text.length)],
+    )
+}
+
+/** Displayed caret back to the source string. An empty map means the text was not rewritten. */
+fun previewSourceOffset(sourceAt: List<Int>, offset: Int): Int {
+    if (sourceAt.isEmpty()) return offset.coerceAtLeast(0)
+    return sourceAt[offset.coerceIn(0, sourceAt.lastIndex)]
+}
+
 /** One cell of a Schön table, with marks in that cell's own coordinates. */
 data class PreviewTableCell(val text: String, val align: TableAlign, val inlines: List<DetailsInline>)
 

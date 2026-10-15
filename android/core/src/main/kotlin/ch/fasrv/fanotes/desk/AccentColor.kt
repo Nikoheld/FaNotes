@@ -67,6 +67,15 @@ const val PAPER_CODE_BACKGROUND = 0xFFF3F4F7.toInt()
  */
 fun paperCodeInk(raw: String?): String = mixColors(paperAccentReadable(raw), PAPER_TEXT, 0.78)
 
+/**
+ * Inline code in the reading preview: 72% of the secondary accent mixed with
+ * the theme text, matching `.markdown-preview code`.
+ */
+fun previewCodeInk(secondary: String?, text: String?): String {
+    val body = parseAccent(text) ?: "#37352f"
+    return mixColors(normalizeAccentSecondary(secondary), body, 0.72)
+}
+
 /** Table row fill: 2.5% of the readable accent mixed into white. */
 fun paperTableFill(raw: String?): String = mixColors(paperAccentReadable(raw), "#ffffff", 0.025)
 

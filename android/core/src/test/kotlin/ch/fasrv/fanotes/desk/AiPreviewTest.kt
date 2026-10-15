@@ -66,4 +66,32 @@ class AiPreviewTest {
         assertEquals(0, previewMarkerEnd("Satz", "paragraph"))
         assertEquals(0, previewMarkerEnd("•Punkt", "bullet"))
     }
+
+    @Test
+    fun schoenInlineCodeUsesThePreviewChip() {
+        val box = previewCodeBox(16f)
+        assertEquals(16f * PREVIEW_CODE_SCALE, box.textPx, 0.01f)
+        assertEquals(box.textPx * 0.38f, box.padX, 0.01f)
+        assertEquals(box.textPx * 0.16f, box.padY, 0.01f)
+        assertEquals(5f, box.radius)
+        assertEquals(1f, box.border)
+        assertEquals("#5c6169", previewCodeInk("#6b7280", "#37352f"))
+        assertEquals("#2f2f2f", themePalette("dark", true).panelStrong)
+        assertEquals("#ffffff", themePalette("light", false).panelStrong)
+        assertEquals("#fffdf8", themePalette("sepia", false).panelStrong)
+
+        val (plain, marks) = detailsPlain("Siehe `api` und **fett**")
+        val display = previewCodeDisplay(plain, marks, previewMarkerEnd(plain, "paragraph"))
+        assertEquals("Siehe \uFFFC und fett", display.text)
+        assertEquals("api", display.slots.single().label)
+        assertEquals("c0", display.slots.single().id)
+        val strong = display.marks.single { it.kind == "strong" }
+        assertEquals("fett", display.text.substring(strong.start, strong.end))
+        assertEquals(plain.indexOf("fett"), previewSourceOffset(display.sourceAt, strong.start))
+        assertTrue(display.marks.none { it.kind == "code" })
+
+        val untouched = previewCodeDisplay("Hallo", emptyList(), 0)
+        assertEquals("Hallo", untouched.text)
+        assertEquals(2, previewSourceOffset(untouched.sourceAt, 2))
+    }
 }
