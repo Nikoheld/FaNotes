@@ -46,7 +46,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 }
                 MotionEvent.ACTION_UP -> {
                     val tapped = kotlin.math.abs(event.x - detailsDownX) < 24f && kotlin.math.abs(event.y - detailsDownY) < 24f
-                    if (tapped && toggleDetailsSummary(event.x, event.y)) return true
+                    if (tapped && (toggleDetailsSummary(event.x, event.y) || toggleTaskBox(event.x, event.y))) return true
                 }
             }
             return super.onTouchEvent(event)
@@ -177,6 +177,27 @@ class NotePageView(context: Context) : FrameLayout(context) {
         writing = true
         editor.setText(next)
         editor.setSelection(cursor.coerceIn(0, next.length))
+        writing = false
+        paintLivePreview()
+        onVisibleMarkdown(before, next)
+        return true
+    }
+
+    /** A tap on the task box writes `[x]` or `[ ]`, and leaves the cursor where it was. */
+    private fun toggleTaskBox(x: Float, y: Float): Boolean {
+        val editable = editor.text ?: return false
+        if (editable.isEmpty()) return false
+        val offset = editor.getOffsetForPosition(x, y).coerceIn(0, editable.length)
+        val probeStart = (offset - 1).coerceAtLeast(0)
+        val probeEnd = (offset + 1).coerceAtMost(editable.length)
+        if (editable.getSpans(probeStart, probeEnd, TaskSpan::class.java).isEmpty()) return false
+        val before = editable.toString()
+        val next = ch.fasrv.fanotes.desk.toggleTaskMarker(before, offset) ?: return false
+        val start = editor.selectionStart.coerceAtLeast(0)
+        val end = editor.selectionEnd.coerceAtLeast(start)
+        writing = true
+        editor.setText(next)
+        editor.setSelection(start.coerceIn(0, next.length), end.coerceIn(0, next.length))
         writing = false
         paintLivePreview()
         onVisibleMarkdown(before, next)

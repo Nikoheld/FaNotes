@@ -90,6 +90,31 @@ fun toggleDetailsOpen(text: String, offset: Int): String? {
     return text.replaceRange(host.from, host.to, newLine)
 }
 
+/**
+ * Flips the task box under [offset], the same three characters the desktop checkbox writes.
+ * A tap on the words after the box does not change them.
+ */
+fun toggleTaskMarker(text: String, offset: Int): String? {
+    if (text.isEmpty()) return null
+    val clamped = offset.coerceIn(0, text.length)
+    val lineStart = if (clamped == 0) 0 else {
+        val breakAt = text.lastIndexOf('\n', clamped - 1)
+        if (breakAt < 0) 0 else breakAt + 1
+    }
+    val lineBreak = text.indexOf('\n', lineStart)
+    val lineEnd = if (lineBreak < 0) text.length else lineBreak
+    val line = text.substring(lineStart, lineEnd)
+    val task = TASK.find(line) ?: return null
+    val markerStart = lineStart + task.groupValues[1].length
+    val markerEnd = lineStart + task.value.length
+    if (clamped < markerStart || clamped >= markerEnd) return null
+    val box = TASK_BOX.find(task.value.substring(task.groupValues[1].length)) ?: return null
+    val at = markerStart + box.range.first
+    if (at + 3 > text.length) return null
+    val checked = text[at + 1].equals('x', true)
+    return text.replaceRange(at, at + 3, if (checked) "[ ]" else "[x]")
+}
+
 fun findDetailsBlocks(text: String): List<DetailsBlock> {
     val lines = documentLines(text)
     val blocks = ArrayList<DetailsBlock>()
@@ -319,6 +344,7 @@ private val METADATA_LINE = Regex("""^\s*<!--\s*fanotes-(?:ink|worksheet):[a-zA-
 private val FAMD_LINE = Regex("""^\s*<!--\s*fanotes-famd:v1\b""")
 private val TABLE_RULE = Regex("""^\s*\|?(?:\s*:?-+:?\s*\|)+\s*$""")
 private val TASK = Regex("""^(\s*)[-+*]\s+\[([ xX])]\s+""")
+private val TASK_BOX = Regex("""\[([ xX])]""")
 private val BULLET = Regex("""^(\s*)[-+*]\s+""")
 private val CODE = Regex("""(`+)([^`\n]+?)\1""")
 private val MATH = Regex("""(?<!\$)\$([^$\n]+?)\$(?!\$)""")

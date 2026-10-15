@@ -67,4 +67,18 @@ class LivePreviewTest {
         assertTrue(openMarks.any { it.kind == LiveKind.HIDE && it.start == multi.indexOf("<summary>") })
         assertTrue(openMarks.any { it.kind == LiveKind.HIDE && it.start == multi.indexOf("</details>") })
     }
+
+    @Test
+    fun tappingTheTaskBoxFlipsOnlyThatBox() {
+        assertEquals("- [x] Offen", toggleTaskMarker("- [ ] Offen", 0))
+        assertEquals("- [ ] Fertig", toggleTaskMarker("- [x] Fertig", 3))
+        assertEquals("- [ ] Fertig", toggleTaskMarker("- [X] Fertig", 0))
+        assertEquals(null, toggleTaskMarker("- [ ] Offen", 6))
+        val indented = "  - [ ] A"
+        assertEquals("  - [x] A", toggleTaskMarker(indented, 4))
+        assertEquals(null, toggleTaskMarker(indented, 0))
+        val second = "- [x] Oben\n- [ ] Unten"
+        assertEquals("- [x] Oben\n- [x] Unten", toggleTaskMarker(second, second.indexOf("Unten") - 2))
+        assertEquals("- [ ] Oben\n- [ ] Unten", toggleTaskMarker(second, 0))
+    }
 }
