@@ -114,6 +114,12 @@ class LivePreviewTest {
             .first { it.kind == LiveKind.DETAILS_SUMMARY }
         assertEquals(listOf("bullet", "rule"), listed.readingKinds)
         assertEquals("• Punkt\n—", listed.body)
+        val table = detailsReadingLines("| A | B |\n| --- | --- |\n| 1 | 2 |")
+        assertEquals(listOf("table", "table"), table.map { it.kind })
+        assertEquals(listOf(true, false), table.map { it.heading })
+        assertEquals("A\u001fB", table[0].text)
+        assertEquals("1\u001f2", table[1].text)
+        assertEquals("A · B\n1 · 2", detailsReading("| A | B |\n| --- | --- |\n| 1 | 2 |"))
         assertTrue(openMarks.any { it.kind == LiveKind.HIDE && it.start == multi.indexOf("<summary>") })
         assertTrue(openMarks.any { it.kind == LiveKind.HIDE && it.start == multi.indexOf("</details>") })
         val inlineOpen = livePreviewMarks(opened, 0, 0).first { it.kind == LiveKind.DETAILS_SUMMARY }
