@@ -2907,12 +2907,22 @@ fun CommandPalette(
     splitOpen: Boolean = false,
     notesOnly: Boolean = false,
     reduceMotion: Boolean = false,
+    penOpen: Boolean = false,
+    bookOpen: Boolean = false,
     onRun: (String) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
     var selected by remember { mutableIntStateOf(0) }
     val notes = if (notesOnly) rankNotes(query, 40) else if (query.isBlank()) emptyList() else rankNotes(query, 6)
     val actions = listOf(
+        "new-note" to "Neue Notiz",
+        "import-pdf" to "PDF importieren",
+        "new-folder" to "Neuer Ordner",
+        "save" to "Aktuelle Notiz speichern",
+        "pen" to if (penOpen) "Zur Tastatur wechseln" else "Mit Stift schreiben",
+        "note-link" to "Verlinkung setzen",
+        "book" to if (bookOpen) "Buch ausblenden" else "Buch einblenden",
+        "worksheet" to "Bild oder PDF als Arbeitsblatt",
         "notes" to "Notizen",
         "search" to "Im Vault suchen",
         "tasks" to "Hausaufgaben & Termine",

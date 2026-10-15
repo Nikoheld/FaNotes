@@ -692,9 +692,14 @@ class InkSurfaceView @JvmOverloads constructor(
         val sectionHit = sectionsOf(current.document).firstOrNull { y >= it.top && y < it.bodyTop && x < 0.08 }
         when {
             !eraser && placingSymbol != null -> {
-                val stamped = current.placeSymbol(x, y, style, placingSymbol!!, nowIso(), symbolSize, symbolRotation, symbolOpacity)
+                val symbolId = placingSymbol!!
+                val stamped = current.placeSymbol(x, y, style, symbolId, nowIso(), symbolSize, symbolRotation, symbolOpacity)
                 invalidateTiles()
-                if (stamped != null) onStroke(stamped)
+                if (stamped != null) {
+                    onStroke(stamped)
+                    val label = ch.fasrv.fanotes.ink.artSymbol(symbolId)?.label ?: symbolId
+                    onInkNotice(ch.fasrv.fanotes.ink.InkNotice("success", ch.fasrv.fanotes.ink.symbolPlacedNotice(label)))
+                }
                 onChanged()
                 onPenActive(false)
                 inkPointer = MotionEvent.INVALID_POINTER_ID

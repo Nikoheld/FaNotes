@@ -47,6 +47,11 @@ class CalendarBooksTest {
         assertEquals(emptyList(), detachSubjectBook(parsed, "Schule/Mathe"))
         assertEquals(parsed, detachSubjectBook(parsed, "Chemie"))
         assertEquals(parsed, detachSubjectBook(parsed, ""))
+        assertEquals(SubjectBookView(false, false, null), subjectBookViewPolicy(false, true, "rechts"))
+        assertEquals(SubjectBookView(true, false, "rechts"), subjectBookViewPolicy(true, false, "rechts"))
+        assertEquals(SubjectBookView(true, true, "links"), subjectBookViewPolicy(true, true, "links"))
+        assertEquals(SubjectBookToggle(true, "rechts"), toggleSubjectBookView(false, "nope"))
+        assertEquals(SubjectBookToggle(false, "oben"), toggleSubjectBookView(true, "oben"))
     }
 
     @Test

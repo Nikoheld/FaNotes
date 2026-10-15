@@ -80,6 +80,9 @@ val ART_SYMBOLS = listOf(
 
 fun artSymbol(id: String?): ArtSymbol? = ART_SYMBOLS.firstOrNull { it.id == id }
 
+/** The stamp stays armed, so the next tap places another copy. */
+fun symbolPlacedNotice(label: String): String = "$label eingefügt · tippe erneut für weitere."
+
 /** Desktop opacity slider: 12–100 percent. */
 fun snapArtSymbolOpacity(value: Double): Double {
     if (!value.isFinite()) return 1.0

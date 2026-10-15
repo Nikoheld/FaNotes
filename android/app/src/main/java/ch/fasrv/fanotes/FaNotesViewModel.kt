@@ -1343,6 +1343,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val worksheetBoxes = MutableStateFlow<List<ch.fasrv.fanotes.desk.AnchoredBox>>(emptyList())
     val worksheetHighlights = MutableStateFlow<List<ch.fasrv.fanotes.desk.AnchoredHighlight>>(emptyList())
     val bookPane = MutableStateFlow<BookPaneState?>(null)
+    val bookOpen = MutableStateFlow(false)
 
     fun refreshOverlays() {
         val note = open.value
@@ -1494,6 +1495,19 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             graph.engine.notifyLocalChange()
             open.value?.let { refreshBook(it) }
         }
+    }
+
+    fun toggleBookView() {
+        val note = open.value
+        val hasBook = note != null && ch.fasrv.fanotes.desk.subjectBookForNote(books.value, note.path) != null
+        if (!hasBook) {
+            message.value = "Öffne eine Notiz in einem Fach, um ein Buch hinzuzufügen."
+            return
+        }
+        val placement = deskSettings.value["book-placement"].orEmpty().ifBlank { "rechts" }
+        val next = ch.fasrv.fanotes.desk.toggleSubjectBookView(bookOpen.value, placement)
+        bookOpen.value = next.open
+        if (next.open) refreshBook(note)
     }
 
     fun turnBook(delta: Int) {
@@ -2117,11 +2131,22 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val placingSection = MutableStateFlow(false)
     val linkSelected = MutableStateFlow(false)
     val clearLinkRequest = MutableStateFlow(0)
+    val placeLinkRequest = MutableStateFlow(0)
     val updateLabel = MutableStateFlow("2026.10.7")
 
     fun reportLinkChrome(placing: Boolean, selected: Boolean) {
         if (linkPlacing.value != placing) linkPlacing.value = placing
         if (linkSelected.value != selected) linkSelected.value = selected
+    }
+
+    fun requestPlaceLink() {
+        if (open.value == null) {
+            message.value = "Öffne zuerst eine Notiz, um eine Verlinkung zu setzen."
+            return
+        }
+        destination.value = "notes"
+        linkPlacing.value = !linkPlacing.value
+        placeLinkRequest.value += 1
     }
 
     fun requestClearLink() {

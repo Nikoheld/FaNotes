@@ -744,8 +744,10 @@ fun FaNotesScreen(
                     }
                 } else {
                     val book by model.bookPane.collectAsStateWithLifecycle()
+                    val bookShown by model.bookOpen.collectAsStateWithLifecycle()
                     val bookPlacement = desk["book-placement"].orEmpty().ifBlank { "rechts" }
-                    val showBook = book != null && bookPlacement != "popout"
+                    val bookPolicy = ch.fasrv.fanotes.desk.subjectBookViewPolicy(book != null, bookShown, bookPlacement)
+                    val showBook = bookPolicy.paneVisible && bookPlacement != "popout"
                     val openBook = { path: String -> model.openPath(path); model.showDestination("notes") }
                     if (showBook && bookPlacement == "links") {
                         BookPane(model, Modifier.width(280.dp).fillMaxHeight(), openBook)
@@ -829,8 +831,24 @@ fun FaNotesScreen(
                 onOpenNote = { model.openPath(it); model.showDestination("notes") },
                 onOpenNoteInSplit = { model.openInSplit(it); model.showDestination("notes") },
                 splitOpen = split != null,
+                penOpen = !showText,
+                bookOpen = model.bookOpen.collectAsStateWithLifecycle().value,
             ) { id ->
                 when (id) {
+                    "new-note" -> {
+                        createParent = model.defaultCreateFolder()
+                        createNote = true
+                    }
+                    "import-pdf" -> onImportPdf()
+                    "new-folder" -> {
+                        createParent = ""
+                        createFolder = true
+                    }
+                    "save" -> model.saveFromShortcut()
+                    "pen" -> model.togglePen()
+                    "note-link" -> model.requestPlaceLink()
+                    "book" -> model.toggleBookView()
+                    "worksheet" -> onImportSheet()
                     "daily" -> model.openDaily()
                     "split" -> model.toggleSplit()
                     "split-orient" -> model.toggleSplitOrientation()
@@ -1916,7 +1934,9 @@ private fun PageSurface(
     val gotoLineInput by model.gotoLineInput.collectAsStateWithLifecycle()
     val foldedHeadings by model.foldedHeadings.collectAsStateWithLifecycle()
     val clearLink by model.clearLinkRequest.collectAsStateWithLifecycle()
+    val placeLinkRequest by model.placeLinkRequest.collectAsStateWithLifecycle()
     var appliedClear by remember { mutableStateOf(0) }
+    var appliedPlaceLink by remember { mutableStateOf(0) }
     val wasPlacingSection = remember { booleanArrayOf(false) }
     Box(modifier) {
     AndroidView(
@@ -2004,6 +2024,11 @@ private fun PageSurface(
             page.ink.onSectionChrome = { model.setPlacingSection(it) }
             page.ink.onPlaceSection = { model.insertSection(it) }
             page.ink.onLinkChrome = { placing, selected -> model.reportLinkChrome(placing, selected) }
+            if (placeLinkRequest != appliedPlaceLink) {
+                appliedPlaceLink = placeLinkRequest
+                page.ink.placingLink = model.linkPlacing.value
+                page.ink.publishLinkChrome()
+            }
             if (clearLink != appliedClear) {
                 appliedClear = clearLink
                 page.ink.placingLink = false
