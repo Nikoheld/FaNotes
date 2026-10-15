@@ -1012,7 +1012,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             val layout = editor.layout ?: return@post
             val safe = from.coerceAtMost(layout.text.length)
             val top = layout.getLineTop(layout.getLineForOffset(safe))
-            editor.scrollTo(0, (top - editor.paddingTop).coerceAtLeast(0))
+            editor.scrollTo(0, ch.fasrv.fanotes.desk.revealScrollTop(top, editor.paddingTop))
         }
     }
 
@@ -1062,7 +1062,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             val layout = editor.layout ?: return@post
             val safe = from.coerceAtMost(layout.text.length)
             val top = layout.getLineTop(layout.getLineForOffset(safe))
-            editor.scrollTo(0, (top - editor.paddingTop).coerceAtLeast(0))
+            editor.scrollTo(0, ch.fasrv.fanotes.desk.revealScrollTop(top, editor.paddingTop))
         }
     }
 
@@ -1089,7 +1089,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             val layout = editor.layout ?: return@post
             val safe = offset.coerceAtMost(layout.text.length)
             val top = layout.getLineTop(layout.getLineForOffset(safe))
-            editor.scrollTo(0, (top - editor.paddingTop).coerceAtLeast(0))
+            editor.scrollTo(0, ch.fasrv.fanotes.desk.revealScrollTop(top, editor.paddingTop))
         }
     }
 
