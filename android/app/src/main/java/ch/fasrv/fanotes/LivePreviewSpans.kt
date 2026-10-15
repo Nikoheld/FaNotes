@@ -360,6 +360,42 @@ internal class DetailsSummarySpan(
                             paint.typeface,
                         )
                     }
+                    "number" -> {
+                        val marker = ch.fasrv.fanotes.desk.detailsNumberMarker(line)
+                        paint.color = accent
+                        if (marker.isNotEmpty()) canvas.drawText(marker, textX, cursor, paint)
+                        paint.color = PAPER_MATH_INK
+                        val rest = if (marker.isEmpty()) line else line.removePrefix(marker)
+                        drawRichText(
+                            canvas,
+                            paint,
+                            rest,
+                            textX + if (marker.isEmpty()) 0f else paint.measureText(marker),
+                            cursor,
+                            shiftInlines(lineInlines, marker.length),
+                            paint.typeface,
+                        )
+                    }
+                    "task" -> {
+                        val marker = ch.fasrv.fanotes.desk.detailsTaskMarker(line)
+                        val checked = ch.fasrv.fanotes.desk.detailsTaskChecked(line) == true
+                        val task = paperTaskBox(previousSize)
+                        val mid = cursor + (lineMetrics.ascent + lineMetrics.descent) / 2f
+                        val taskRect = RectF(textX, mid - task.size / 2f, textX + task.size, mid + task.size / 2f)
+                        drawPaperTaskBox(canvas, paint, taskRect, checked, accent, task.border)
+                        paint.color = PAPER_MATH_INK
+                        paint.style = Paint.Style.FILL
+                        val rest = if (marker.isEmpty()) line else line.removePrefix(marker)
+                        drawRichText(
+                            canvas,
+                            paint,
+                            rest,
+                            textX + task.size + task.gap,
+                            cursor,
+                            shiftInlines(lineInlines, marker.length),
+                            paint.typeface,
+                        )
+                    }
                     "table" -> {
                         val cells = line.split('\u001f')
                         val count = cells.size.coerceAtLeast(1)
@@ -707,38 +743,42 @@ internal class TaskSpan(
         val box = paperTaskBox(textSizePx)
         val mid = (top + bottom) / 2f
         val rect = RectF(x, mid - box.size / 2f, x + box.size, mid + box.size / 2f)
-        val radius = box.size * 0.22f
-        val previousColor = paint.color
-        val previousStyle = paint.style
-        val previousStroke = paint.strokeWidth
-        val previousCap = paint.strokeCap
-        if (checked) {
-            paint.style = Paint.Style.FILL
-            paint.color = accent
-            canvas.drawRoundRect(rect, radius, radius, paint)
-            paint.color = 0xFFFFFFFF.toInt()
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = (box.border * 1.6f).coerceAtLeast(1.5f)
-            paint.strokeCap = Paint.Cap.ROUND
-            val left = rect.left + box.size * 0.22f
-            val right = rect.right - box.size * 0.22f
-            val midY = rect.centerY() + box.size * 0.08f
-            canvas.drawLine(left, midY, left + box.size * 0.22f, midY + box.size * 0.18f, paint)
-            canvas.drawLine(left + box.size * 0.22f, midY + box.size * 0.18f, right, midY - box.size * 0.22f, paint)
-        } else {
-            paint.style = Paint.Style.FILL
-            paint.color = 0xFFFFFFFF.toInt()
-            canvas.drawRoundRect(rect, radius, radius, paint)
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = box.border
-            paint.color = 0xFF6D7180.toInt()
-            canvas.drawRoundRect(rect, radius, radius, paint)
-        }
-        paint.color = previousColor
-        paint.style = previousStyle
-        paint.strokeWidth = previousStroke
-        paint.strokeCap = previousCap
+        drawPaperTaskBox(canvas, paint, rect, checked, accent, box.border)
     }
+}
+
+internal fun drawPaperTaskBox(canvas: Canvas, paint: Paint, rect: RectF, checked: Boolean, accent: Int, border: Float) {
+    val radius = rect.width() * 0.22f
+    val previousColor = paint.color
+    val previousStyle = paint.style
+    val previousStroke = paint.strokeWidth
+    val previousCap = paint.strokeCap
+    if (checked) {
+        paint.style = Paint.Style.FILL
+        paint.color = accent
+        canvas.drawRoundRect(rect, radius, radius, paint)
+        paint.color = 0xFFFFFFFF.toInt()
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = (border * 1.6f).coerceAtLeast(1.5f)
+        paint.strokeCap = Paint.Cap.ROUND
+        val left = rect.left + rect.width() * 0.22f
+        val right = rect.right - rect.width() * 0.22f
+        val midY = rect.centerY() + rect.height() * 0.08f
+        canvas.drawLine(left, midY, left + rect.width() * 0.22f, midY + rect.height() * 0.18f, paint)
+        canvas.drawLine(left + rect.width() * 0.22f, midY + rect.height() * 0.18f, right, midY - rect.height() * 0.22f, paint)
+    } else {
+        paint.style = Paint.Style.FILL
+        paint.color = 0xFFFFFFFF.toInt()
+        canvas.drawRoundRect(rect, radius, radius, paint)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = border
+        paint.color = 0xFF6D7180.toInt()
+        canvas.drawRoundRect(rect, radius, radius, paint)
+    }
+    paint.color = previousColor
+    paint.style = previousStyle
+    paint.strokeWidth = previousStroke
+    paint.strokeCap = previousCap
 }
 
 internal class AccentSwapSpan(drawn: String, private val color: Int) : SwapSpan(drawn) {
