@@ -1414,9 +1414,12 @@ fun BooksScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
             }
         }) { Text("Verbinden") }
         books.forEach { book ->
-            Column(Modifier.clickable { onOpen(book.bookPath) }.padding(vertical = 10.dp)) {
-                Text(book.subjectPath, fontWeight = FontWeight.SemiBold)
-                Text("${book.bookPath} · Seite ${book.lastPage}", fontSize = 13.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f).clickable { onOpen(book.bookPath) }.padding(vertical = 10.dp)) {
+                    Text(book.subjectPath, fontWeight = FontWeight.SemiBold)
+                    Text("${book.bookPath} · Seite ${book.lastPage}", fontSize = 13.sp)
+                }
+                TextButton(onClick = { model.detachSubjectBook(book.subjectPath) }) { Text("Buch entfernen") }
             }
         }
         if (books.isEmpty()) Text("Noch kein Fachbuch mit einem Ordner verbunden.", modifier = Modifier.padding(top = 12.dp))

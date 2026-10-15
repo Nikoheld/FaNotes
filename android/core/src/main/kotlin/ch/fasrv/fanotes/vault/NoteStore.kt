@@ -190,6 +190,13 @@ class NoteStore(private val io: VaultIo) {
         io.write(path, ByteArray(0))
     }
 
+    /** Imports a PDF into a folder, numbering the stem the way the desktop book import does. */
+    fun importUniquePdf(directory: String, fileName: String, bytes: ByteArray): String {
+        val preferred = safeNoteName(fileName.substringBeforeLast('.').ifBlank { "Buch" })
+        val stem = nextFreeLeaf(directory, preferred, ".pdf")
+        return importPdf(directory, "$stem.pdf", bytes)
+    }
+
     fun importPdf(directory: String, fileName: String, bytes: ByteArray): String {
         val stem = safeNoteName(fileName.substringBeforeLast('.').ifBlank { "Document" })
         val folder = directory.trim('/')

@@ -353,6 +353,12 @@ fun subjectBookForNote(books: List<SubjectBook>, notePath: String): SubjectBook?
     return null
 }
 
+fun detachSubjectBook(books: List<SubjectBook>, subjectPath: String): List<SubjectBook> {
+    val subject = subjectPath.trim('/')
+    if (subject.isEmpty()) return books
+    return books.filter { it.subjectPath != subject }
+}
+
 fun attachSubjectBook(books: List<SubjectBook>, subjectPath: String, bookPath: String, lastPage: Int = 1): List<SubjectBook> {
     val subject = subjectPath.trim('/')
     val book = bookPath.trim('/')

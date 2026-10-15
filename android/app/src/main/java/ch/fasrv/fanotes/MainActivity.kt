@@ -126,8 +126,11 @@ class MainActivity : ComponentActivity() {
         )
         model.useTree(uri)
     }
+    private var bookImportFolder: String? = null
     private val importPdf = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        import(uri, pdf = true)
+        val folder = bookImportFolder
+        bookImportFolder = null
+        if (folder != null) importBook(uri, folder) else import(uri, pdf = true)
     }
     private val importImage = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         import(uri, pdf = false)
@@ -186,7 +189,11 @@ class MainActivity : ComponentActivity() {
                 FaNotesScreen(
                     model = model,
                     onOpenVault = { openTree.launch(null) },
-                    onImportPdf = { importPdf.launch(arrayOf("application/pdf")) },
+                    onImportPdf = { bookImportFolder = null; importPdf.launch(arrayOf("application/pdf")) },
+                    onImportBook = { folder ->
+                        bookImportFolder = folder
+                        importPdf.launch(arrayOf("application/pdf"))
+                    },
                     onImportImage = { importImage.launch(arrayOf("image/*")) },
                     onImportIcs = { importIcs.launch(arrayOf("text/calendar", "text/plain", "*/*")) },
                     onExportIcs = { exportIcs.launch("fanotes.ics") },
@@ -230,6 +237,13 @@ class MainActivity : ComponentActivity() {
             // A slow disk must not take the activity down. The next edit saves again.
         }
         super.onPause()
+    }
+
+    private fun importBook(uri: Uri?, folder: String) {
+        if (uri == null) return
+        val name = uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { null } ?: "Buch.pdf"
+        val bytes = model.readUri(uri) ?: return
+        model.importSubjectBook(folder, name, bytes)
     }
 
     private fun import(uri: Uri?, pdf: Boolean) {
@@ -320,6 +334,7 @@ fun FaNotesScreen(
     model: FaNotesViewModel,
     onOpenVault: () -> Unit,
     onImportPdf: () -> Unit,
+    onImportBook: (String) -> Unit = {},
     onImportImage: () -> Unit,
     onImportIcs: () -> Unit,
     onExportIcs: () -> Unit,
@@ -503,6 +518,9 @@ fun FaNotesScreen(
                     onOpenSplit = { model.openInSplit(it) },
                     onCreateNoteIn = { model.createNoteIn(it) },
                     onCreateFolderIn = { model.createFolderIn(it) },
+                    bookFolders = model.books.collectAsStateWithLifecycle().value.map { it.subjectPath }.toSet(),
+                    onImportBook = onImportBook,
+                    onDetachBook = { model.detachSubjectBook(it) },
                     compact = compact,
                     rowHeightDp = chrome.rowHeightDp,
                     radiusDp = chrome.radiusDp ?: 10,
@@ -822,6 +840,9 @@ private fun VaultPane(
     onOpenSplit: (String) -> Unit,
     onCreateNoteIn: (String) -> Unit = {},
     onCreateFolderIn: (String) -> Unit = {},
+    bookFolders: Set<String> = emptySet(),
+    onImportBook: (String) -> Unit = {},
+    onDetachBook: (String) -> Unit = {},
     conflicts: List<ch.fasrv.fanotes.sync.SyncConflict>,
     onResolve: (ch.fasrv.fanotes.sync.SyncConflict, String) -> Unit,
     compact: Boolean = false,
@@ -911,7 +932,7 @@ private fun VaultPane(
             items(tree, key = { it.path }) { node ->
                 NoteRow(
                     node, selected, splitPath, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
-                    onCreateNoteIn, onCreateFolderIn,
+                    onCreateNoteIn, onCreateFolderIn, bookFolders, onImportBook, onDetachBook,
                     localFolders, onToggleLocal, compact, rowHeightDp, radiusDp,
                     dragPath = dragPath,
                     dropDest = dropDest,
@@ -961,6 +982,9 @@ private fun NoteRow(
     onOpenSplit: (String) -> Unit,
     onCreateNoteIn: (String) -> Unit,
     onCreateFolderIn: (String) -> Unit,
+    bookFolders: Set<String>,
+    onImportBook: (String) -> Unit,
+    onDetachBook: (String) -> Unit,
     localFolders: List<String>,
     onToggleLocal: (String) -> Unit,
     compact: Boolean,
@@ -1094,6 +1118,24 @@ private fun NoteRow(
                     .clickable(onClickLabel = "Neue Notiz in diesem Ordner") { onCreateNoteIn(node.path) }
                     .padding(horizontal = 6.dp),
             )
+            Text(
+                "Buch",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clickable(onClickLabel = "Buch hinzufügen") { onImportBook(node.path) }
+                    .padding(horizontal = 4.dp),
+            )
+            if (node.path in bookFolders) {
+                Text(
+                    "Weg",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier
+                        .clickable(onClickLabel = "Buch entfernen") { onDetachBook(node.path) }
+                        .padding(horizontal = 4.dp),
+                )
+            }
             Icon(
                 Icons.Filled.CreateNewFolder,
                 contentDescription = "Unterordner anlegen",
@@ -1142,7 +1184,7 @@ private fun NoteRow(
         node.children.forEach {
             NoteRow(
                 it, selected, splitPath, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
-                onCreateNoteIn, onCreateFolderIn,
+                onCreateNoteIn, onCreateFolderIn, bookFolders, onImportBook, onDetachBook,
                 localFolders, onToggleLocal, compact, rowHeightDp, radiusDp,
                 dragPath = dragPath,
                 dropDest = dropDest,

@@ -23,6 +23,8 @@ class NoteStoreTest {
         store.createUniqueFolder("Schule")
         val names = store.tree().single { it.name == "Schule" }.children.map { it.name }
         assertEquals(listOf("Neuer Ordner", "Neuer Ordner 2", "Unbenannte Notiz", "Unbenannte Notiz 2"), names.sorted())
+        assertEquals("Schule/Buch.pdf", store.importUniquePdf("Schule", "Buch.pdf", byteArrayOf(0x25, 0x50, 0x44, 0x46)))
+        assertEquals("Schule/Buch 2.pdf", store.importUniquePdf("Schule", "Buch.pdf", byteArrayOf(0x25, 0x50, 0x44, 0x46)))
     }
 
     @Test
