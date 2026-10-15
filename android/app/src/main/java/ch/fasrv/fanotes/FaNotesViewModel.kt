@@ -667,7 +667,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun importBytes(name: String, bytes: ByteArray, pdf: Boolean) {
+    fun importBytes(name: String, bytes: ByteArray, pdf: Boolean, mime: String = "") {
         viewModelScope.launch {
             val note = open.value
             if (!pdf) {
@@ -679,8 +679,13 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                     message.value = "Arbeitsblätter gehören in Markdown-Notizen. Eine PDF-Notiz ist bereits das Dokument selbst."
                     return@launch
                 }
-                val mime = if (name.endsWith(".png", true)) "image/png" else "image/jpeg"
-                val stored = withContext(Dispatchers.IO) { graph.store.storeImageWorksheet(name, bytes, mime) }
+                val imageMime = mime.ifBlank { if (name.endsWith(".png", true)) "image/png" else "image/jpeg" }
+                val stored = try {
+                    withContext(Dispatchers.IO) { graph.store.storeImageWorksheet(name, bytes, imageMime) }
+                } catch (error: Exception) {
+                    message.value = error.message ?: "Bild konnte nicht eingefügt werden."
+                    return@launch
+                }
                 val next = ch.fasrv.fanotes.famd.attachWorksheet(markdown.value, stored.id)
                 markdown.value = next
                 val updated = note.copy(markdown = next, worksheets = ch.fasrv.fanotes.famd.worksheetIdsFromMarkdown(next))
@@ -695,6 +700,59 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             val path = withContext(Dispatchers.IO) { graph.store.importPdf("", name, bytes) }
             refreshTree()
             openPath(path, force = true)
+            graph.engine.notifyLocalChange()
+        }
+    }
+
+    /**
+     * Desktop „Arbeitsblatt importieren“: a PDF or image, either on the open
+     * Markdown note or as a new note in the default folder.
+     */
+    fun importWorksheetFile(name: String, bytes: ByteArray, mime: String, intoCurrent: Boolean) {
+        viewModelScope.launch {
+            if (intoCurrent) {
+                val note = open.value
+                if (note == null) {
+                    message.value = "Öffne zuerst eine Notiz oder wähle „Neue Notiz“."
+                    return@launch
+                }
+                if (note.kind != NoteKind.MARKDOWN) {
+                    message.value = "Arbeitsblätter gehören in Markdown-Notizen. Eine PDF-Notiz ist bereits das Dokument selbst."
+                    return@launch
+                }
+                val stored = try {
+                    withContext(Dispatchers.IO) { graph.store.storeWorksheet(name, bytes, mime) }
+                } catch (error: Exception) {
+                    message.value = error.message ?: "Das Arbeitsblatt konnte nicht importiert werden."
+                    return@launch
+                }
+                val next = ch.fasrv.fanotes.famd.attachWorksheet(markdown.value, stored.id)
+                markdown.value = next
+                val updated = note.copy(markdown = next, worksheets = ch.fasrv.fanotes.famd.worksheetIdsFromMarkdown(next))
+                open.value = updated
+                loadBackdrop(updated)
+                refreshOverlays()
+                noteChanged()
+                message.value = "Arbeitsblatt „${stored.title}“ wurde in die Notiz eingefügt."
+                graph.engine.notifyLocalChange()
+                return@launch
+            }
+            val path = try {
+                val paper = ch.fasrv.fanotes.desk.penSettings(deskSettings.value).paper
+                withContext(Dispatchers.IO) {
+                    graph.store.importWorksheetNote(defaultCreateFolder(), name, bytes, mime, paper)
+                }
+            } catch (error: IllegalStateException) {
+                message.value = "Eine Notiz mit diesem Namen gibt es schon."
+                return@launch
+            } catch (error: Exception) {
+                message.value = error.message ?: "Das Arbeitsblatt konnte nicht importiert werden."
+                return@launch
+            }
+            refreshTree()
+            openPath(path, force = true)
+            val title = path.substringAfterLast('/').substringBeforeLast('.')
+            message.value = "Arbeitsblatt „$title“ wurde als neue Notiz angelegt."
             graph.engine.notifyLocalChange()
         }
     }

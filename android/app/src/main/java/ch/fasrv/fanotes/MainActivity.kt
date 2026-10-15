@@ -120,6 +120,14 @@ class MainActivity : ComponentActivity() {
     private val importImage = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         import(uri, pdf = false)
     }
+    private var sheetIntoCurrent = true
+    private val importSheet = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val name = uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { null } ?: "Arbeitsblatt"
+        val mime = contentResolver.getType(uri).orEmpty()
+        val bytes = model.readUri(uri) ?: return@registerForActivityResult
+        model.importWorksheetFile(name, bytes, mime, sheetIntoCurrent)
+    }
     private val importIcs = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@registerForActivityResult
         val text = contentResolver.openInputStream(uri)?.use { it.readBytes() }?.toString(Charsets.UTF_8) ?: return@registerForActivityResult
@@ -153,6 +161,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             val rawDesk by model.deskSettings.collectAsStateWithLifecycle()
             val css by model.customCss.collectAsStateWithLifecycle()
+            var sheetDialog by remember { mutableStateOf(false) }
+            val openForSheet by model.open.collectAsStateWithLifecycle()
             val desk = ch.fasrv.fanotes.desk.deskWithCustomCss(rawDesk, css)
             FaNotesTheme(
                 desk["theme"].orEmpty(),
@@ -169,6 +179,7 @@ class MainActivity : ComponentActivity() {
                     onImportIcs = { importIcs.launch(arrayOf("text/calendar", "text/plain", "*/*")) },
                     onExportIcs = { exportIcs.launch("fanotes.ics") },
                     onExportPdf = { exportNotePdf.launch(ch.fasrv.fanotes.desk.PDF_EXPORT_FILE_NAME) },
+                    onImportSheet = { sheetDialog = true },
                     onDownload = {
                         val path = model.open.value?.path.orEmpty()
                         if (!ch.fasrv.fanotes.desk.noteCanDownload(path)) model.refuseNoteDownload()
@@ -178,6 +189,22 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                 )
+                if (sheetDialog) {
+                    WorksheetImportDialog(
+                        noteTitle = openForSheet?.title,
+                        onCurrent = {
+                            sheetDialog = false
+                            sheetIntoCurrent = true
+                            importSheet.launch(arrayOf("application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif"))
+                        },
+                        onNew = {
+                            sheetDialog = false
+                            sheetIntoCurrent = false
+                            importSheet.launch(arrayOf("application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif"))
+                        },
+                        onDismiss = { sheetDialog = false },
+                    )
+                }
             }
         }
     }
@@ -197,7 +224,7 @@ class MainActivity : ComponentActivity() {
         if (uri == null) return
         val name = uri.lastPathSegment?.substringAfterLast('/') ?: if (pdf) "Document.pdf" else "Image.jpg"
         val bytes = model.readUri(uri) ?: return
-        model.importBytes(name, bytes, pdf)
+        model.importBytes(name, bytes, pdf, contentResolver.getType(uri).orEmpty())
     }
 }
 
@@ -285,6 +312,7 @@ fun FaNotesScreen(
     onImportIcs: () -> Unit,
     onExportIcs: () -> Unit,
     onExportPdf: () -> Unit,
+    onImportSheet: () -> Unit,
     onDownload: () -> Unit,
 ) {
     val tree by model.tree.collectAsStateWithLifecycle()
@@ -406,6 +434,7 @@ fun FaNotesScreen(
                     onCreateFolder = { createParent = ""; createFolder = true },
                     onImportPdf = onImportPdf,
                     onImportImage = onImportImage,
+                    onImportSheet = onImportSheet,
                     onOpenVault = onOpenVault,
                     onPrivateVault = { model.usePrivateVault() },
                     onDelete = { path, folder, name -> model.askDelete(path, folder, name) },
@@ -462,6 +491,7 @@ fun FaNotesScreen(
                                     { editingBox = it }, { mathOpen = true }, it.clipToBounds(),
                                     showRelations = !(wide && desk["outline"] != "off" && !focus),
                                     onExportPdf = onExportPdf,
+                                    onImportSheet = onImportSheet,
                                     onDownload = onDownload,
                                 )
                             }
@@ -480,6 +510,7 @@ fun FaNotesScreen(
                                 { editingBox = it }, { mathOpen = true }, it.clipToBounds(),
                                 showRelations = !(wide && desk["outline"] != "off" && !focus),
                                 onExportPdf = onExportPdf,
+                                onImportSheet = onImportSheet,
                                 onDownload = onDownload,
                             )
                         }
@@ -706,6 +737,7 @@ private fun VaultPane(
     onCreateFolder: () -> Unit,
     onImportPdf: () -> Unit,
     onImportImage: () -> Unit,
+    onImportSheet: () -> Unit,
     onOpenVault: () -> Unit,
     onPrivateVault: () -> Unit,
     onDelete: (String, Boolean, String) -> Unit,
@@ -747,6 +779,7 @@ private fun VaultPane(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
             TextButton(onClick = onImportPdf) { Text("PDF") }
             TextButton(onClick = onImportImage) { Text("Bild") }
+            TextButton(onClick = onImportSheet) { Text("Blatt") }
         }
         if (conflicts.isNotEmpty()) {
             Text("Konflikte", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
@@ -1155,6 +1188,7 @@ private fun NotePage(
     modifier: Modifier,
     showRelations: Boolean = true,
     onExportPdf: () -> Unit = {},
+    onImportSheet: () -> Unit = {},
     onDownload: () -> Unit = {},
 ) {
     val noteKind = model.open.collectAsStateWithLifecycle().value?.kind
@@ -1163,6 +1197,9 @@ private fun NotePage(
             Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onExportPdf) { Text("Als PDF exportieren") }
                 TextButton(onClick = onDownload) { Text("Herunterladen") }
+                if (noteKind != NoteKind.PDF) {
+                    TextButton(onClick = onImportSheet) { Text("Blatt") }
+                }
             }
             val sheets = backdrop.filter { it.worksheetId.isNotEmpty() }.distinctBy { it.worksheetId }
             if (sheets.isNotEmpty()) {
@@ -1475,6 +1512,42 @@ private fun SyncDialog(
                 TextButton(onClick = onLogout) { Text("Abmelden") }
             }
         },
+    )
+}
+
+@Composable
+private fun WorksheetImportDialog(
+    noteTitle: String?,
+    onCurrent: () -> Unit,
+    onNew: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Arbeitsblatt importieren") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Bild oder PDF", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                Text(
+                    "Das Arbeitsblatt bleibt Teil deines Vaults. Anschließend kannst du direkt darauf Textfelder platzieren oder mit dem Grafiktablett schreiben.",
+                    fontSize = 13.sp,
+                )
+                TextButton(onClick = onCurrent, enabled = noteTitle != null, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth()) {
+                        Text("In aktuelle Notiz", fontWeight = FontWeight.SemiBold)
+                        Text(noteTitle ?: "Keine Notiz geöffnet", fontSize = 12.sp)
+                    }
+                }
+                TextButton(onClick = onNew, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth()) {
+                        Text("Als neue Notiz", fontWeight = FontWeight.SemiBold)
+                        Text("Dateiname wird zum Notiztitel", fontSize = 12.sp)
+                    }
+                }
+                Text("PDF · Bilder", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
     )
 }
 
