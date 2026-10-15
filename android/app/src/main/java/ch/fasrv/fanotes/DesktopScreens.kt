@@ -1855,6 +1855,32 @@ fun PdfThumbStrip(model: FaNotesViewModel) {
 }
 
 @Composable
+fun PdfPasswordPrompt(model: FaNotesViewModel) {
+    val needed by model.pdfNeedsPassword.collectAsStateWithLifecycle()
+    val rejected by model.pdfPasswordRejected.collectAsStateWithLifecycle()
+    if (!needed) return
+    var draft by remember { mutableStateOf("") }
+    val supported = ch.fasrv.fanotes.desk.pdfPasswordSupported(android.os.Build.VERSION.SDK_INT)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+        Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_TITLE, fontWeight = FontWeight.SemiBold)
+        if (!supported) {
+            Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_NEEDS_ANDROID_15, fontSize = 13.sp)
+            return@Column
+        }
+        OutlinedTextField(
+            draft,
+            { draft = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            label = { Text("Passwort") },
+        )
+        if (rejected) Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_WRONG, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+        TextButton(onClick = { model.submitPdfPassword(draft) }) { Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_ACTION) }
+    }
+}
+
+@Composable
 fun PdfSearchBar(model: FaNotesViewModel) {
     val query by model.pdfSearchQuery.collectAsStateWithLifecycle()
     val hits by model.pdfSearchHits.collectAsStateWithLifecycle()

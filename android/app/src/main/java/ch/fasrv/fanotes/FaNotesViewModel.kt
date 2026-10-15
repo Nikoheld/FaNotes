@@ -372,6 +372,9 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         pdfSearchBusy.value = false
         pdfTextCache = null
         clearPdfThumbs()
+        pdfPassword = ""
+        pdfNeedsPassword.value = false
+        pdfPasswordRejected.value = false
         val stats = openPageStats(parsePageStats(note.payload.obj("pageStats"), now), now)
         val payload = (note.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
         payload.put("pageStats", mergePageStats(note.payload.obj("pageStats"), stats))
@@ -382,6 +385,9 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val pdfSearchHits = MutableStateFlow<List<ch.fasrv.fanotes.desk.PdfSearchHit>>(emptyList())
     val pdfSearchIndex = MutableStateFlow(0)
     val pdfSearchBusy = MutableStateFlow(false)
+    val pdfNeedsPassword = MutableStateFlow(false)
+    val pdfPasswordRejected = MutableStateFlow(false)
+    private var pdfPassword: String = ""
     private var pdfSearchJob: kotlinx.coroutines.Job? = null
     private var pdfTextCache: Pair<String, List<String>>? = null
 
@@ -445,7 +451,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         return try {
             file.writeBytes(bytes)
             val pages = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
-                PdfRenderer(descriptor).use { renderer ->
+                openNotePdf(descriptor).use { renderer ->
                     val count = renderer.pageCount.coerceAtMost(ch.fasrv.fanotes.desk.PDF_NOTE_PAGE_CAP)
                     (0 until count).map { index ->
                         try {
@@ -525,7 +531,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         return try {
             file.writeBytes(bytes)
             ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
-                PdfRenderer(descriptor).use { renderer ->
+                openNotePdf(descriptor).use { renderer ->
                     val shown = ch.fasrv.fanotes.desk.pdfThumbPages(
                         renderer.pageCount,
                         minOf(renderer.pageCount, ch.fasrv.fanotes.desk.PDF_NOTE_PAGE_CAP),
@@ -1562,13 +1568,33 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun submitPdfPassword(value: String) {
+        pdfPassword = value
+        pdfPasswordRejected.value = false
+        val note = open.value ?: return
+        if (note.kind != NoteKind.PDF) return
+        viewModelScope.launch { loadBackdrop(note) }
+    }
+
+    private fun openNotePdf(descriptor: ParcelFileDescriptor): PdfRenderer {
+        val password = pdfPassword
+        if (password.isNotEmpty() && android.os.Build.VERSION.SDK_INT >= 35) {
+            val params = android.graphics.pdf.LoadParams.Builder().setPassword(password).build()
+            return PdfRenderer(descriptor, params)
+        }
+        return PdfRenderer(descriptor)
+    }
+
     private fun renderPdf(note: OpenNote): List<BackdropSlice> {
         val bytes = graph.vault.read(note.path) ?: return emptyList()
         val file = File.createTempFile("fanotes-pdf", ".pdf")
         return try {
         file.writeBytes(bytes)
         ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
-            PdfRenderer(descriptor).use { renderer ->
+            try {
+            openNotePdf(descriptor).use { renderer ->
+                pdfNeedsPassword.value = false
+                pdfPasswordRejected.value = false
                 val aspects = (0 until renderer.pageCount.coerceAtMost(ch.fasrv.fanotes.desk.PDF_NOTE_PAGE_CAP)).map { index ->
                     renderer.openPage(index).use { page -> page.height.toDouble() / page.width.toDouble() }
                 }
@@ -1589,6 +1615,12 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                         bitmap = bitmap,
                     )
                 }
+            }
+            } catch (error: Exception) {
+                if (!ch.fasrv.fanotes.desk.pdfNeedsPassword(error.javaClass.simpleName, error.message.orEmpty())) throw error
+                pdfNeedsPassword.value = true
+                pdfPasswordRejected.value = pdfPassword.isNotEmpty()
+                emptyList()
             }
         }
         } finally {
