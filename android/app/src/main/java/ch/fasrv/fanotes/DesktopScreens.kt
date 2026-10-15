@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Box
@@ -74,6 +76,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.SpanStyle
@@ -83,6 +86,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.BaselineShift
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.unit.IntOffset
@@ -2198,7 +2202,20 @@ fun AiScreen(model: FaNotesViewModel) {
             } else {
                 val link = MaterialTheme.colorScheme.primary
                 val muted = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
-                ch.fasrv.fanotes.desk.aiPreviewReading(result).forEach { line ->
+                val lines = ch.fasrv.fanotes.desk.aiPreviewReading(result)
+                var index = 0
+                while (index < lines.size) {
+                    val line = lines[index]
+                    if (line.kind == "table") {
+                        val rows = ArrayList<ch.fasrv.fanotes.desk.DetailsReadingLine>()
+                        while (index < lines.size && lines[index].kind == "table") {
+                            rows += lines[index]
+                            index += 1
+                        }
+                        PreviewTable(rows, base, link)
+                        continue
+                    }
+                    index += 1
                     when (line.kind) {
                         "rule" -> Box(
                             Modifier
@@ -2207,12 +2224,12 @@ fun AiScreen(model: FaNotesViewModel) {
                                 .height(1.dp)
                                 .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
                         )
-                        "quote" -> Row(verticalAlignment = Alignment.Top) {
+                        "quote" -> Row(Modifier.height(IntrinsicSize.Min), verticalAlignment = Alignment.Top) {
                             Box(
                                 Modifier
-                                    .padding(top = 3.dp, end = 8.dp)
+                                    .padding(end = 8.dp)
                                     .width(3.dp)
-                                    .height(18.dp)
+                                    .fillMaxHeight()
                                     .background(link),
                             )
                             Text(
@@ -2237,13 +2254,72 @@ fun AiScreen(model: FaNotesViewModel) {
     }
 }
 
+@Composable
+private fun PreviewTable(
+    rows: List<ch.fasrv.fanotes.desk.DetailsReadingLine>,
+    base: Int,
+    link: Color,
+) {
+    val border = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
+    val header = MaterialTheme.colorScheme.surfaceVariant
+    Column(
+        Modifier
+            .padding(vertical = 8.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .border(1.dp, border, RoundedCornerShape(10.dp)),
+    ) {
+        rows.forEachIndexed { rowIndex, row ->
+            val cells = ch.fasrv.fanotes.desk.previewTableCells(row.text, row.inlines, row.source)
+            val scale = if (row.heading) row.scale * ch.fasrv.fanotes.desk.PREVIEW_TABLE_HEAD else row.scale
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                cells.forEachIndexed { cellIndex, cell ->
+                    val align = when (cell.align) {
+                        ch.fasrv.fanotes.text.TableAlign.CENTER -> TextAlign.Center
+                        ch.fasrv.fanotes.text.TableAlign.RIGHT -> TextAlign.End
+                        ch.fasrv.fanotes.text.TableAlign.LEFT -> TextAlign.Start
+                    }
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .background(if (row.heading) header else Color.Transparent),
+                    ) {
+                        Text(
+                            previewMarks(cell.text, cell.inlines, base, scale, link),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                            textAlign = align,
+                            fontWeight = if (row.heading) FontWeight.Bold else FontWeight.Normal,
+                            fontSize = (base * scale).sp,
+                        )
+                        if (cellIndex < cells.lastIndex) {
+                            Box(Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(1.dp).background(border))
+                        }
+                    }
+                }
+            }
+            if (rowIndex < rows.lastIndex) Box(Modifier.fillMaxWidth().height(1.dp).background(border))
+        }
+    }
+}
+
 private fun previewAnnotated(
     line: ch.fasrv.fanotes.desk.DetailsReadingLine,
     base: Int,
     link: Color,
 ): androidx.compose.ui.text.AnnotatedString {
     val (text, marks) = ch.fasrv.fanotes.desk.expandFieldSeparators(line.text, line.inlines)
-    val size = (base * line.scale).sp
+    return previewMarks(text, marks, base, line.scale, link)
+}
+
+private fun previewMarks(
+    text: String,
+    marks: List<ch.fasrv.fanotes.desk.DetailsInline>,
+    base: Int,
+    scale: Float,
+    link: Color,
+): androidx.compose.ui.text.AnnotatedString {
+    val size = (base * scale).sp
     return buildAnnotatedString {
         append(text)
         for (mark in marks) {

@@ -2,7 +2,9 @@ package ch.fasrv.fanotes.desk
 
 import ch.fasrv.fanotes.text.PaperKind
 import ch.fasrv.fanotes.text.PaperLine
+import ch.fasrv.fanotes.text.TableAlign
 import ch.fasrv.fanotes.text.paperLines
+import ch.fasrv.fanotes.text.tableAlignAt
 import ch.fasrv.fanotes.text.tableRows
 
 /**
@@ -70,6 +72,29 @@ fun expandFieldSeparators(text: String, marks: List<DetailsInline>): Pair<String
         if (newEnd > newStart) mark.copy(start = newStart, end = newEnd) else null
     }
     return out.toString() to moved
+}
+
+/** `.markdown-preview th { font-size: .9em }`. */
+const val PREVIEW_TABLE_HEAD = 0.9f
+
+/** One cell of a Schön table, with marks in that cell's own coordinates. */
+data class PreviewTableCell(val text: String, val align: TableAlign, val inlines: List<DetailsInline>)
+
+fun previewTableCells(text: String, inlines: List<DetailsInline>, alignTokens: String): List<PreviewTableCell> {
+    val cells = if (text.isEmpty()) listOf("") else text.split('\u001f')
+    var origin = 0
+    return cells.mapIndexed { index, cell ->
+        val end = origin + cell.length
+        val marks = inlines.mapNotNull { mark ->
+            if (mark.end <= origin || mark.start >= end) return@mapNotNull null
+            mark.copy(
+                start = (mark.start - origin).coerceAtLeast(0),
+                end = (mark.end - origin).coerceAtMost(cell.length),
+            )
+        }.filter { it.end > it.start }
+        origin = end + 1
+        PreviewTableCell(cell, tableAlignAt(alignTokens, index), marks)
+    }
 }
 
 fun aiPreviewHeading(kind: PaperKind): Boolean = kind == PaperKind.H1 || kind == PaperKind.H2 ||

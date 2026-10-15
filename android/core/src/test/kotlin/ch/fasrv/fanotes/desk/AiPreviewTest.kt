@@ -1,6 +1,7 @@
 package ch.fasrv.fanotes.desk
 
 import ch.fasrv.fanotes.text.PaperKind
+import ch.fasrv.fanotes.text.TableAlign
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -47,5 +48,18 @@ class AiPreviewTest {
         val shown = expandFieldSeparators(table.text, table.inlines)
         assertEquals("A · B", shown.first)
         assertEquals("left\u001fleft", table.source)
+        assertEquals(0.9f, PREVIEW_TABLE_HEAD)
+        val row = previewTableCells(
+            "Name\u001fWert",
+            listOf(DetailsInline(0, 4, "strong"), DetailsInline(5, 9, "link", "https://example.com")),
+            "left\u001fright",
+        )
+        assertEquals("Name", row[0].text)
+        assertEquals(TableAlign.LEFT, row[0].align)
+        assertEquals(0 to 4, row[0].inlines.single().let { it.start to it.end })
+        assertEquals("Wert", row[1].text)
+        assertEquals(TableAlign.RIGHT, row[1].align)
+        assertEquals("https://example.com", row[1].inlines.single().target)
+        assertEquals(0 to 4, row[1].inlines.single().let { it.start to it.end })
     }
 }
