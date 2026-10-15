@@ -453,7 +453,19 @@ fun calendarRange(view: String, anchor: java.time.LocalDate): List<java.time.Loc
         (0..6).map { monday.plusDays(it.toLong()) }
     }
     "agenda" -> (0..27).map { anchor.plusDays(it.toLong()) }
+    "month" -> {
+        val first = anchor.withDayOfMonth(1)
+        val start = first.minusDays(((first.dayOfWeek.value + 6) % 7).toLong())
+        (0..41).map { start.plusDays(it.toLong()) }
+    }
     else -> emptyList()
+}
+
+/** Month chip: the start clock, then the title. All-day events are the title alone. */
+fun monthEventLabel(event: CalendarEvent): String {
+    if (event.allDay || !event.start.contains('T')) return event.title
+    val start = event.start.substringAfter('T').take(5)
+    return if (Regex("""\d{2}:\d{2}""").matches(start)) "$start ${event.title}" else event.title
 }
 
 fun eventClock(event: CalendarEvent): String? {
