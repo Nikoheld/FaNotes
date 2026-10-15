@@ -1812,6 +1812,51 @@ fun MarginTranscript(model: FaNotesViewModel) {
 }
 
 @Composable
+fun PdfSearchBar(model: FaNotesViewModel) {
+    val query by model.pdfSearchQuery.collectAsStateWithLifecycle()
+    val hits by model.pdfSearchHits.collectAsStateWithLifecycle()
+    val index by model.pdfSearchIndex.collectAsStateWithLifecycle()
+    val busy by model.pdfSearchBusy.collectAsStateWithLifecycle()
+    val status = when {
+        busy -> "Sucht …"
+        query.trim().isEmpty() -> ""
+        hits.isEmpty() -> "Keine Treffer"
+        else -> "${index + 1} / ${hits.size}"
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                query,
+                { model.updatePdfSearch(it) },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                label = { Text("Im PDF suchen …") },
+            )
+            if (status.isNotEmpty()) {
+                Text(status, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = { model.stepPdfSearch(-1) }, enabled = hits.isNotEmpty()) { Text("Vorheriger Treffer") }
+            TextButton(onClick = { model.stepPdfSearch(1) }, enabled = hits.isNotEmpty()) { Text("Nächster Treffer") }
+        }
+        val windowStart = (index - 2).coerceAtLeast(0)
+        hits.drop(windowStart).take(6).forEachIndexed { offset, hit ->
+            val hitIndex = windowStart + offset
+            val selected = hitIndex == index
+            Text(
+                "S. ${hit.page}  ${hit.excerpt}",
+                fontSize = 13.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                modifier = Modifier.fillMaxWidth().clickable { model.showPdfSearchHit(hitIndex) }.padding(vertical = 2.dp),
+            )
+        }
+    }
+}
+
+@Composable
 fun PdfQuoteMarks(model: FaNotesViewModel) {
     val markdown by model.markdown.collectAsStateWithLifecycle()
     val marks = readPdfMarks(markdown)
