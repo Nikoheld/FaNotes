@@ -32,6 +32,33 @@ fun accentNeedsDarkText(raw: String?): Boolean {
 
 fun accentInk(raw: String?): String = if (accentNeedsDarkText(raw)) ACCENT_DARK_INK else ACCENT_LIGHT_INK
 
+/** Paper sheet colours from `.unified-paper` in the desktop stylesheet. */
+val PAPER_CONTRAST_SURFACES = listOf("#ffffff", "#f7f7fa")
+
+/**
+ * Desktop `ensureReadableColor`. A colour that is already readable on every
+ * surface stays as it is. Otherwise it is mixed toward the ink that contrasts
+ * best, one percent at a time, until the contrast reaches 4.5.
+ */
+fun ensureReadableColor(foreground: String, backgrounds: List<String>, target: Double = 4.5): String {
+    if (backgrounds.isEmpty()) return foreground
+    fun minimum(candidate: String) = backgrounds.minOf { contrastRatio(candidate, it) }
+    if (minimum(foreground) >= target) return foreground
+    val destination = if (minimum(ACCENT_DARK_INK) >= minimum(ACCENT_LIGHT_INK)) ACCENT_DARK_INK else ACCENT_LIGHT_INK
+    for (step in 1..100) {
+        val candidate = mixHex(foreground, destination, step / 100.0)
+        if (minimum(candidate) >= target) return candidate
+    }
+    return destination
+}
+
+/** Accent used for rules and links on the white paper sheet. */
+fun paperAccentReadable(raw: String?): String = ensureReadableColor(normalizeAccent(raw), PAPER_CONTRAST_SURFACES)
+
+fun paperAccentReadableArgb(accent: Int): Int = colorArgb(paperAccentReadable("#%06x".format(accent and 0xFFFFFF)))
+
+fun colorArgb(hex: String): Int = (0xFF000000.toInt()) or hex.removePrefix("#").toInt(16)
+
 private fun channelLuminance(value: Int): Double {
     val channel = value / 255.0
     return if (channel <= 0.04045) channel / 12.92 else Math.pow((channel + 0.055) / 1.055, 2.4)
@@ -43,6 +70,26 @@ private fun relativeLuminance(color: String): Double {
     val green = (hex shr 8) and 255
     val blue = hex and 255
     return channelLuminance(red) * 0.2126 + channelLuminance(green) * 0.7152 + channelLuminance(blue) * 0.0722
+}
+
+private fun mixHex(first: String, second: String, amount: Double): String {
+    val from = rgbChannels(first) ?: return first
+    val to = rgbChannels(second) ?: return first
+    val mixed = from.indices.map { index ->
+        val value = from[index] + (to[index] - from[index]) * amount
+        kotlin.math.floor(value.coerceIn(0.0, 255.0) + 0.5).toInt()
+    }
+    return "#%02x%02x%02x".format(mixed[0], mixed[1], mixed[2])
+}
+
+private fun rgbChannels(color: String): IntArray? {
+    val hex = color.removePrefix("#")
+    if (hex.length != 6) return null
+    return intArrayOf(
+        hex.substring(0, 2).toInt(16),
+        hex.substring(2, 4).toInt(16),
+        hex.substring(4, 6).toInt(16),
+    )
 }
 
 private fun contrastRatio(first: String, second: String): Double {

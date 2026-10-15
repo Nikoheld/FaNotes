@@ -1577,7 +1577,7 @@ class InkSurfaceView @JvmOverloads constructor(
         val textLines = ArrayList<PaperLine>()
         fun flush() {
             if (textLines.isEmpty()) return
-            val (styled, starts, tasks) = styledLines(textLines)
+            val (styled, starts, tasks) = styledLines(textLines, scale)
             built += PaperBlock.Text(textLayoutFor(styled, scale), starts, tasks)
             textLines.clear()
         }
@@ -1658,7 +1658,9 @@ class InkSurfaceView @JvmOverloads constructor(
         canvas.translate(0f, y + 10f * scale)
     }
 
-    private fun styledLines(lines: List<PaperLine>): Triple<CharSequence, IntArray, IntArray> {
+    private fun styledLines(lines: List<PaperLine>, scale: Float): Triple<CharSequence, IntArray, IntArray> {
+        val textSize = editorFontPx * scale
+        val readable = ch.fasrv.fanotes.desk.paperAccentReadableArgb(accentColor)
         val builder = SpannableStringBuilder()
         val starts = IntArray(lines.size)
         for ((index, line) in lines.withIndex()) {
@@ -1679,6 +1681,7 @@ class InkSurfaceView @JvmOverloads constructor(
                     PaperKind.H1 -> {
                         builder.setSpan(RelativeSizeSpan(2f), start, end, 0)
                         builder.setSpan(StyleSpan(Typeface.BOLD), start, end, 0)
+                        builder.setSpan(PaperRuleSpan(textSize), start, end, 0)
                     }
                     PaperKind.H2 -> {
                         builder.setSpan(RelativeSizeSpan(1.55f), start, end, 0)
@@ -1688,7 +1691,17 @@ class InkSurfaceView @JvmOverloads constructor(
                         builder.setSpan(RelativeSizeSpan(1.28f), start, end, 0)
                         builder.setSpan(StyleSpan(Typeface.BOLD), start, end, 0)
                     }
-                    PaperKind.QUOTE -> builder.setSpan(StyleSpan(Typeface.ITALIC), start, end, 0)
+                    PaperKind.BULLET -> {
+                        val marker = (start + 2).coerceAtMost(end)
+                        builder.setSpan(ForegroundColorSpan(readable), start, marker, 0)
+                        builder.setSpan(StyleSpan(Typeface.BOLD), start, marker, 0)
+                    }
+                    PaperKind.QUOTE -> builder.setSpan(
+                        PaperQuoteSpan(readable, ch.fasrv.fanotes.desk.quoteWashArgb(accentColor), textSize),
+                        start,
+                        end,
+                        0,
+                    )
                     PaperKind.CODE -> builder.setSpan(TypefaceSpan("monospace"), start, end, 0)
                     PaperKind.MATH -> {
                         builder.setSpan(TypefaceSpan("monospace"), start, end, 0)
