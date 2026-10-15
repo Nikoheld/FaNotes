@@ -293,6 +293,26 @@ class LivePreviewTest {
     }
 
     @Test
+    fun detailsCardsTurnAddressesIntoLinks() {
+        val line = "Siehe <https://fanotes.example> und https://example.com/a."
+        val (plain, marks) = detailsPlain(line, autolinks = true)
+        assertEquals("Siehe https://fanotes.example und https://example.com/a.", plain)
+        assertEquals("https://fanotes.example", marks.first { it.kind == "link" }.target)
+        val bare = marks.last { it.kind == "link" }
+        assertEquals("https://example.com/a", plain.substring(bare.start, bare.end))
+        assertEquals("https://example.com/a", bare.target)
+        val mail = detailsPlain("Schreib <mailto:ada@example.com>", autolinks = true)
+        assertEquals("Schreib mailto:ada@example.com", mail.first)
+        assertEquals("mailto:ada@example.com", mail.second.single().target)
+        val coded = detailsPlain("`https://example.com`", autolinks = true)
+        assertEquals("https://example.com", coded.first)
+        assertEquals(listOf("code"), coded.second.map { it.kind })
+        assertEquals("<https://fanotes.example>", detailsPlain("<https://fanotes.example>").first)
+        val card = detailsReadingLines("Siehe https://example.com/a.")
+        assertEquals("https://example.com/a", card.single().inlines.single().target)
+    }
+
+    @Test
     fun detailsListsKeepThePreviewMarker() {
         assertEquals("1. ", detailsNumberMarker("1. Eins"))
         assertEquals("12. ", detailsNumberMarker("12. Zwei"))
