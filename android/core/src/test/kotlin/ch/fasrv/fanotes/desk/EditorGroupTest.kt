@@ -32,4 +32,20 @@ class EditorGroupTest {
         assertEquals("ab", deleteEditorGroup("a+b", 1, 1, true).text)
         assertEquals(1, deleteEditorGroup("a+b", 1, 1, true).selectionStart)
     }
+
+    @Test
+    fun homeStopsAtTheIndentAndEndGoesToTheLineEdge() {
+        val line = "    hello"
+        assertEquals(4 to 4, editorLineBoundarySelection(line, 9, 9, false, false))
+        assertEquals(0 to 0, editorLineBoundarySelection(line, 4, 4, false, false))
+        assertEquals(4 to 4, editorLineBoundarySelection(line, 6, 6, false, false))
+        assertEquals(9 to 9, editorLineBoundarySelection(line, 4, 4, true, false))
+        assertEquals(4 to 9, editorLineBoundarySelection(line, 4, 4, true, true))
+        val note = "ab\n  cd"
+        assertEquals(5 to 5, editorLineBoundarySelection(note, 7, 7, false, false))
+        assertEquals(3 to 3, editorLineBoundarySelection(note, 5, 5, false, false))
+        assertEquals(7 to 7, editorLineBoundarySelection(note, 5, 5, true, false))
+        assertEquals(0 to 0, editorLineBoundarySelection("\thello", 0, 0, false, false))
+        assertEquals(1 to 1, editorLineBoundarySelection("\thello", 6, 6, false, false))
+    }
 }

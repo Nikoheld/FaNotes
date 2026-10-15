@@ -108,6 +108,35 @@ private fun deleteGroupOffset(text: String, head: Int, forward: Boolean): Int {
     return pos
 }
 
+/**
+ * Home and End from the desktop keymap. End goes to the line's last character.
+ * Home stops at the end of the indent, and a second press goes to column 0.
+ * Shift keeps the anchor.
+ */
+fun editorLineBoundarySelection(
+    text: String,
+    anchor: Int,
+    head: Int,
+    forward: Boolean,
+    extend: Boolean,
+): Pair<Int, Int> {
+    val safeAnchor = anchor.coerceIn(0, text.length)
+    val safeHead = head.coerceIn(0, text.length)
+    val next = lineBoundaryOffset(text, safeHead, forward)
+    return if (extend) safeAnchor to next else next to next
+}
+
+private fun lineBoundaryOffset(text: String, head: Int, forward: Boolean): Int {
+    val pos = head.coerceIn(0, text.length)
+    val start = lineContentStart(text, pos)
+    val end = lineContentEnd(text, pos)
+    if (forward) return end
+    if (pos == start) return start
+    var indent = start
+    while (indent < end && (text[indent] == ' ' || text[indent] == '\t')) indent += 1
+    return if (indent != start && pos != indent) indent else start
+}
+
 private fun lineContentStart(text: String, pos: Int): Int {
     val at = pos.coerceIn(0, text.length)
     if (at == 0) return 0

@@ -144,6 +144,14 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 if (event.action == KeyEvent.ACTION_DOWN) insertBlankLine()
                 return true
             }
+            if (!event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed &&
+                (keyCode == KeyEvent.KEYCODE_MOVE_HOME || keyCode == KeyEvent.KEYCODE_MOVE_END)
+            ) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    moveByLineBoundary(keyCode == KeyEvent.KEYCODE_MOVE_END, event.isShiftPressed)
+                }
+                return true
+            }
             if ((event.isCtrlPressed || event.isMetaPressed) && !event.isAltPressed &&
                 (keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)
             ) {
@@ -315,6 +323,19 @@ class NotePageView(context: Context) : FrameLayout(context) {
 
         fun deleteLines() {
             applyLineEdit(deleteMarkdownLines(text?.toString().orEmpty(), selectionStart, selectionEnd))
+        }
+
+        fun moveByLineBoundary(forward: Boolean, extend: Boolean) {
+            val value = text?.toString().orEmpty()
+            val (anchor, head) = ch.fasrv.fanotes.desk.editorLineBoundarySelection(
+                value,
+                selectionStart,
+                selectionEnd,
+                forward,
+                extend,
+            )
+            val length = value.length
+            setSelection(anchor.coerceIn(0, length), head.coerceIn(0, length))
         }
 
         fun moveByEditorGroup(forward: Boolean, extend: Boolean) {
