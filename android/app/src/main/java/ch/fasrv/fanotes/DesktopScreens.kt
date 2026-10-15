@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -1863,6 +1864,9 @@ fun AiScreen(model: FaNotesViewModel) {
     val definition = ch.fasrv.fanotes.desk.AI_PROVIDERS.firstOrNull { it.id == provider } ?: ch.fasrv.fanotes.desk.AI_PROVIDERS.first()
     var actions by remember { mutableStateOf(setOf("spelling")) }
     var instruction by remember { mutableStateOf("") }
+    var pretty by remember { mutableStateOf(true) }
+    val note by model.open.collectAsStateWithLifecycle()
+    val live by model.markdown.collectAsStateWithLifecycle()
     fun setting(field: String) = settings["ai-$provider-$field"].orEmpty()
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("AI", style = MaterialTheme.typography.titleLarge)
@@ -1924,7 +1928,47 @@ fun AiScreen(model: FaNotesViewModel) {
             if (preview != null) TextButton(onClick = { model.applyAiPreview() }) { Text("Übernehmen") }
         }
         if (status.isNotBlank()) Text(status, fontSize = 13.sp)
-        if (preview != null) Text(preview.orEmpty(), fontSize = ch.fasrv.fanotes.desk.editorMetrics(settings).previewFontPx.sp)
+        val result = preview
+        if (result == null) {
+            Text("Deine Notiz bleibt unverändert", fontWeight = FontWeight.SemiBold)
+            Text(
+                "FaNotes erstellt zuerst eine Vorschau. Erst „Ergebnis übernehmen“ ersetzt den Inhalt der geöffneten Markdown-Datei.",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            )
+            if (note != null) {
+                Text("Aktuelle Notiz", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                Text(note?.path.orEmpty(), fontWeight = FontWeight.SemiBold)
+                Text("${live.length} Zeichen", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
+            }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { pretty = true }) {
+                    Text("Schön", fontWeight = if (pretty) FontWeight.SemiBold else FontWeight.Normal, color = if (pretty) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                }
+                TextButton(onClick = { pretty = false }) {
+                    Text("Markdown", fontWeight = if (!pretty) FontWeight.SemiBold else FontWeight.Normal, color = if (!pretty) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                }
+            }
+            val base = ch.fasrv.fanotes.desk.editorMetrics(settings).previewFontPx
+            if (!pretty) {
+                Text(result, fontFamily = FontFamily.Monospace, fontSize = base.sp)
+            } else {
+                ch.fasrv.fanotes.desk.aiPreviewLines(result).forEach { line ->
+                    val shown = ch.fasrv.fanotes.desk.aiPreviewLineText(line)
+                    if (line.kind == ch.fasrv.fanotes.text.PaperKind.SPACER) {
+                        Spacer(Modifier.height(8.dp))
+                    } else if (shown.isNotEmpty() || line.kind == ch.fasrv.fanotes.text.PaperKind.RULE) {
+                        Text(
+                            if (line.kind == ch.fasrv.fanotes.text.PaperKind.RULE) "—" else shown,
+                            fontSize = (base * ch.fasrv.fanotes.desk.aiPreviewScale(line.kind)).sp,
+                            fontWeight = if (ch.fasrv.fanotes.desk.aiPreviewHeading(line.kind)) FontWeight.Bold else FontWeight.Normal,
+                            fontFamily = if (line.kind == ch.fasrv.fanotes.text.PaperKind.CODE) FontFamily.Monospace else FontFamily.Default,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
