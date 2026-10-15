@@ -52,7 +52,13 @@ class NoteOutlineTest {
         assertEquals(1, headingAnchorLine(note, "Beweis"))
         assertEquals(1, headingAnchorLine(note, "beweis"))
         assertEquals(5, headingAnchorLine(note, "beweis-2"))
+        assertEquals(1, headingAnchorLine(note, "#user-content-Beweis"))
+        assertEquals(5, headingAnchorLine(note, "user-content-beweis-2"))
+        assertEquals(null, headingAnchorLine(note, "user-content-"))
         assertEquals(null, headingAnchorLine(note, "fehlt"))
+        val prefixed = "# user-content-Beweis\n\n# Beweis\n"
+        assertEquals(1, headingAnchorLine(prefixed, "#user-content-user-content-Beweis"))
+        assertEquals(3, headingAnchorLine(prefixed, "#user-content-beweis"))
     }
 
     @Test
