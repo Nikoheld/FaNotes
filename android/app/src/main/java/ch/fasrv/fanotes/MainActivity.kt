@@ -1885,6 +1885,7 @@ private fun NotePage(
             NoteTagBar(model)
             MarginTranscript(model)
             if (noteKind == NoteKind.PDF) {
+                PdfNoteToolbar(model)
                 PdfPasswordPrompt(model)
                 PdfSearchBar(model)
                 PdfThumbStrip(model)
@@ -1957,8 +1958,10 @@ private fun PageSurface(
     val foldedHeadings by model.foldedHeadings.collectAsStateWithLifecycle()
     val clearLink by model.clearLinkRequest.collectAsStateWithLifecycle()
     val placeLinkRequest by model.placeLinkRequest.collectAsStateWithLifecycle()
+    val pdfCamera by model.pdfCameraCommand.collectAsStateWithLifecycle()
     var appliedClear by remember { mutableStateOf(0) }
     var appliedPlaceLink by remember { mutableStateOf(0) }
+    var appliedPdfCamera by remember { mutableStateOf(0) }
     val wasPlacingSection = remember { booleanArrayOf(false) }
     Box(modifier) {
     AndroidView(
@@ -2067,6 +2070,12 @@ private fun PageSurface(
             page.ink.onEditBox = onEditBox
             page.onMath = onMath
             page.onPdfPage = { model.notePdfPage(it) }
+            page.ink.onPdfZoom = { zoom, zoomMode -> model.notePdfZoom(zoom, zoomMode) }
+            val camera = pdfCamera
+            if (camera != null && camera.first != appliedPdfCamera) {
+                appliedPdfCamera = camera.first
+                page.ink.applyPdfCamera(camera.second)
+            }
             page.onSymbolSize = { model.setArtSymbolSize(it) }
             page.onSymbolRotation = { model.setArtSymbolRotation(it) }
             page.onSymbolOpacity = { model.setArtSymbolOpacity(it) }
