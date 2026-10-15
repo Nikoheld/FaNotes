@@ -41,4 +41,4 @@ fun compactChrome(raw: String?) = raw == "on"
 fun glassChrome(raw: String?) = raw == "on"
 
 /** File-tree row height from the desktop `--row-height`. */
-fun chromeRowHeightDp(compact: Boolean) = if (compact) 27 else 31
+fun chromeRowHeightDp(compact: Boolean, overrideDp: Int? = null) = overrideDp ?: if (compact) 27 else 31

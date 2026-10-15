@@ -151,12 +151,15 @@ class MainActivity : ComponentActivity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 21)
         }
         setContent {
-            val desk by model.deskSettings.collectAsStateWithLifecycle()
+            val rawDesk by model.deskSettings.collectAsStateWithLifecycle()
+            val css by model.customCss.collectAsStateWithLifecycle()
+            val desk = ch.fasrv.fanotes.desk.deskWithCustomCss(rawDesk, css)
             FaNotesTheme(
                 desk["theme"] ?: if (androidx.compose.foundation.isSystemInDarkTheme()) "dark" else "light",
                 desk["accent"].orEmpty(),
                 desk["accent-secondary"].orEmpty(),
                 desk["ui-font"].orEmpty(),
+                ch.fasrv.fanotes.desk.parseCustomChrome(css),
             ) {
                 FaNotesScreen(
                     model = model,
@@ -221,6 +224,7 @@ fun FaNotesTheme(
     accentHex: String = ch.fasrv.fanotes.desk.DEFAULT_ACCENT,
     accentSecondaryHex: String = ch.fasrv.fanotes.desk.DEFAULT_ACCENT_SECONDARY,
     uiFont: String = "inter",
+    chrome: ch.fasrv.fanotes.desk.CustomChrome = ch.fasrv.fanotes.desk.CustomChrome(),
     content: @Composable () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -229,11 +233,16 @@ fun FaNotesTheme(
     val onAccent = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.accentInk(accentHex)))
     val secondary = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccentSecondary(accentSecondaryHex)))
     val onSecondary = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.accentInk(accentSecondaryHex)))
-    val scheme = when (themeName) {
+    val baseScheme = when (themeName) {
         "light" -> lightColorScheme(primary = accent, onPrimary = onAccent, secondary = secondary, onSecondary = onSecondary, onSurface = Color(0xFF252630), background = Color(0xFFFFFFFF), surface = Color(0xFFF7F6F3), surfaceVariant = Color(0xFFE7E4DE))
         "sepia" -> lightColorScheme(primary = accent, onPrimary = onAccent, secondary = secondary, onSecondary = onSecondary, onSurface = Color(0xFF3E3428), background = Color(0xFFF4EFE4), surface = Color(0xFFEFE6D6), surfaceVariant = Color(0xFFE4D7C3))
         else -> darkColorScheme(primary = accent, onPrimary = onAccent, secondary = secondary, onSecondary = onSecondary, onSurface = Color(0xFFEDEDEC), background = Color(0xFF191919), surface = Color(0xFF202020), surfaceVariant = Color(0xFF2A2A2A))
     }
+    val scheme = baseScheme.copy(
+        background = chrome.background?.let { Color(android.graphics.Color.parseColor(it)) } ?: baseScheme.background,
+        surface = chrome.surface?.let { Color(android.graphics.Color.parseColor(it)) } ?: baseScheme.surface,
+        onSurface = chrome.text?.let { Color(android.graphics.Color.parseColor(it)) } ?: baseScheme.onSurface,
+    )
     MaterialTheme(colorScheme = scheme, typography = chromeTypography(family), content = content)
 }
 
@@ -288,7 +297,10 @@ fun FaNotesScreen(
     val tagFilter by model.tagFilter.collectAsStateWithLifecycle()
     val pinned by model.pinnedTabs.collectAsStateWithLifecycle()
     val trail by model.noteTrail.collectAsStateWithLifecycle()
-    val desk by model.deskSettings.collectAsStateWithLifecycle()
+    val rawDesk by model.deskSettings.collectAsStateWithLifecycle()
+    val css by model.customCss.collectAsStateWithLifecycle()
+    val desk = ch.fasrv.fanotes.desk.deskWithCustomCss(rawDesk, css)
+    val chrome = ch.fasrv.fanotes.desk.parseCustomChrome(css)
     val split by model.splitPath.collectAsStateWithLifecycle()
     val palette by model.paletteOpen.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -371,7 +383,7 @@ fun FaNotesScreen(
         Row(Modifier.weight(1f).fillMaxWidth()) {
             if (!focus && (wide || showList) && destination == "notes") {
                 VaultPane(
-                    modifier = Modifier.width(if (wide) 320.dp else 360.dp).fillMaxHeight(),
+                    modifier = Modifier.width((chrome.sidebarDp ?: if (wide) 320 else 360).dp).fillMaxHeight(),
                     tree = filterVaultByTag(tree, tagFilter, tagIndex),
                     tags = collectVaultTags(tagIndex.values.map { noteTags -> noteTags.joinToString(" ") { "#$it" } }),
                     tagFilter = tagFilter,
@@ -395,6 +407,8 @@ fun FaNotesScreen(
                     colors = model.folderColors.collectAsStateWithLifecycle().value,
                     onFolderColor = { model.cycleFolderColor(it) },
                     compact = compact,
+                    rowHeightDp = chrome.rowHeightDp,
+                    radiusDp = chrome.radiusDp ?: 10,
                     conflicts = sync.conflicts,
                     onResolve = { conflict, choice -> model.resolveConflict(conflict, choice) },
                 )
@@ -522,7 +536,7 @@ fun FaNotesScreen(
     if (bugReportOpen) BugReportDialog(model)
     val confirm by model.confirmRequest.collectAsStateWithLifecycle()
     confirm?.let { request ->
-        FaNotesConfirmDialog(request, onConfirm = { model.acceptConfirm() }, onDismiss = { model.dismissConfirm() }, glass = glass)
+        FaNotesConfirmDialog(request, onConfirm = { model.acceptConfirm() }, onDismiss = { model.dismissConfirm() }, glass = glass, radiusDp = chrome.radiusDp)
     }
     if (mathOpen) {
         AlertDialog(
@@ -695,6 +709,8 @@ private fun VaultPane(
     conflicts: List<ch.fasrv.fanotes.sync.SyncConflict>,
     onResolve: (ch.fasrv.fanotes.sync.SyncConflict, String) -> Unit,
     compact: Boolean = false,
+    rowHeightDp: Int? = null,
+    radiusDp: Int = 10,
 ) {
     Column(modifier.background(MaterialTheme.colorScheme.surface).padding(16.dp)) {
         Text("FaNotes", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
@@ -761,7 +777,7 @@ private fun VaultPane(
         }
         LazyColumn(Modifier.weight(1f).padding(top = 8.dp)) {
             items(tree, key = { it.path }) { node ->
-                NoteRow(node, selected, colors, onOpen, onDelete, onRename, onMove, onFolderColor, localFolders, onToggleLocal, compact, depth = 0)
+                NoteRow(node, selected, colors, onOpen, onDelete, onRename, onMove, onFolderColor, localFolders, onToggleLocal, compact, rowHeightDp, radiusDp, depth = 0)
             }
         }
         TextButton(onClick = onOpenVault) { Text("Vault-Ordner öffnen") }
@@ -782,6 +798,8 @@ private fun NoteRow(
     localFolders: List<String>,
     onToggleLocal: (String) -> Unit,
     compact: Boolean,
+    rowHeightDp: Int?,
+    radiusDp: Int,
     depth: Int,
 ) {
     val folderColor = colors[node.path]
@@ -789,8 +807,8 @@ private fun NoteRow(
         Modifier
             .fillMaxWidth()
             .padding(start = (depth * 12).dp)
-            .height(ch.fasrv.fanotes.desk.chromeRowHeightDp(compact).dp)
-            .clip(RoundedCornerShape(10.dp))
+            .height(ch.fasrv.fanotes.desk.chromeRowHeightDp(compact, rowHeightDp).dp)
+            .clip(RoundedCornerShape(radiusDp.dp))
             .background(if (node.path == selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent)
             .clickable { if (node.kind == NoteKind.FOLDER) onFolderColor(node.path) else onOpen(node.path) }
             .padding(horizontal = 8.dp),
@@ -826,7 +844,7 @@ private fun NoteRow(
         }
     }
     if (node.kind == NoteKind.FOLDER) {
-        node.children.forEach { NoteRow(it, selected, colors, onOpen, onDelete, onRename, onMove, onFolderColor, localFolders, onToggleLocal, compact, depth + 1) }
+        node.children.forEach { NoteRow(it, selected, colors, onOpen, onDelete, onRename, onMove, onFolderColor, localFolders, onToggleLocal, compact, rowHeightDp, radiusDp, depth + 1) }
     }
 }
 
@@ -1042,22 +1060,22 @@ private fun SplitPane(
             },
             update = { view ->
                 view.session = model.splitSession
-                val metrics = ch.fasrv.fanotes.desk.editorMetrics(model.deskSettings.value)
+                val metrics = ch.fasrv.fanotes.desk.editorMetrics(model.effectiveDesk())
                 view.editorFontPx = metrics.fontSizePx.toFloat()
                 view.editorLineHeight = metrics.lineHeight.toFloat()
                 view.contentWidthPx = metrics.contentWidthPx.toFloat()
                 view.readableLineLength = metrics.readableLineLength
                 view.setEditorFont(metrics.editorFontId)
-                view.applyWorkspaceKind(model.deskSettings.value["background"].orEmpty())
+                view.applyWorkspaceKind(model.effectiveDesk()["background"].orEmpty())
                 view.showLineNumbers = metrics.showLineNumbers
-                view.accentSecondary = android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccentSecondary(model.deskSettings.value["accent-secondary"]))
+                view.accentSecondary = android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccentSecondary(model.effectiveDesk()["accent-secondary"]))
                 view.zoomMax = metrics.zoomMax.toFloat()
                 view.zoomSpeed = metrics.zoomSpeed
-                val pen = ch.fasrv.fanotes.desk.penSettings(model.deskSettings.value)
+                val pen = ch.fasrv.fanotes.desk.penSettings(model.effectiveDesk())
                 view.shapeSnapSensitivity = pen.shapeSnap
                 view.scribbleSensitivity = pen.scribble
                 view.strokeSmoothing = pen.smoothing.toFloat()
-                view.tabletButtons = model.deskSettings.value["tablet-buttons"].orEmpty()
+                view.tabletButtons = model.effectiveDesk()["tablet-buttons"].orEmpty()
                 view.markdown = markdown
                 view.showMarkdown = markdown.isNotBlank() && !typing
                 view.inkTool = tool
@@ -1249,14 +1267,14 @@ private fun PageSurface(
             page.ink.pageFrames = backdrop.mapIndexed { index, slice ->
                 ch.fasrv.fanotes.desk.PageFrame(index + 1, slice.topPagePx.toDouble(), slice.heightPagePx.toDouble(), slice.widthPagePx.toDouble())
             }
-            val pen = ch.fasrv.fanotes.desk.penSettings(model.deskSettings.value)
-            page.ink.accentColor = android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccent(model.deskSettings.value["accent"]))
+            val pen = ch.fasrv.fanotes.desk.penSettings(model.effectiveDesk())
+            page.ink.accentColor = android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccent(model.effectiveDesk()["accent"]))
             page.ink.shapeSnapSensitivity = pen.shapeSnap
             page.ink.scribbleSensitivity = pen.scribble
             page.ink.strokeSmoothing = pen.smoothing.toFloat()
-            page.ink.tabletButtons = model.deskSettings.value["tablet-buttons"].orEmpty()
-            page.ink.accentSecondary = android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccentSecondary(model.deskSettings.value["accent-secondary"]))
-            page.setWorkspace(model.deskSettings.value["background"].orEmpty())
+            page.ink.tabletButtons = model.effectiveDesk()["tablet-buttons"].orEmpty()
+            page.ink.accentSecondary = android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccentSecondary(model.effectiveDesk()["accent-secondary"]))
+            page.setWorkspace(model.effectiveDesk()["background"].orEmpty())
             page.ink.onPlaceHighlight = { model.addWorksheetHighlight(it) }
             page.ink.onRemoveHighlight = { model.removeWorksheetHighlight(it) }
             page.onFinger = { model.fingerDraws.value = it }
@@ -1274,7 +1292,7 @@ private fun PageSurface(
                 canRedo = model.session.canRedo,
                 darkChrome = dark,
                 folded = foldedHeadings,
-                metrics = ch.fasrv.fanotes.desk.editorMetrics(model.deskSettings.value),
+                metrics = ch.fasrv.fanotes.desk.editorMetrics(model.effectiveDesk()),
             )
             val jump = outlineJump
             if (jump != null) {

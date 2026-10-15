@@ -1078,7 +1078,7 @@ fun BugReportDialog(model: FaNotesViewModel) {
 }
 
 @Composable
-fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismiss: () -> Unit, glass: Boolean = false) {
+fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismiss: () -> Unit, glass: Boolean = false, radiusDp: Int? = null) {
     val cancel = remember { FocusRequester() }
     val confirm = remember { FocusRequester() }
     var focused by remember(request.message) { mutableStateOf(0) }
@@ -1099,7 +1099,7 @@ fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismi
             focused = next
             if (next == 0) cancel.requestFocus() else confirm.requestFocus()
             true
-        }, color = if (glass) MaterialTheme.colorScheme.surface.copy(alpha = 0.88f) else MaterialTheme.colorScheme.surface) {
+        }, color = if (glass) MaterialTheme.colorScheme.surface.copy(alpha = 0.88f) else MaterialTheme.colorScheme.surface, shape = androidx.compose.foundation.shape.RoundedCornerShape((radiusDp ?: 12).dp)) {
             Column(Modifier.padding(20.dp)) {
                 Text("Achtung", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
                 Text(request.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 4.dp))
@@ -1421,6 +1421,7 @@ private fun EditorSlider(title: String, value: Float, min: Float, max: Float, st
 @Composable
 fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () -> Unit, onPrivate: () -> Unit) {
     val settings by model.deskSettings.collectAsStateWithLifecycle()
+    val css by model.customCss.collectAsStateWithLifecycle()
     val update by model.updateLabel.collectAsStateWithLifecycle()
     val sections = listOf(
         "appearance" to "Erscheinungsbild",
@@ -1691,7 +1692,18 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                         fontWeight = if (backups) FontWeight.Bold else FontWeight.Normal,
                     )
                 }
-                "advanced" -> Text("Der Gerätename für Konfliktdateien steht in den Sync-Einstellungen. Secrets liegen im Android-Keystore, nicht im Vault.")
+                "advanced" -> {
+                    Text("Der Gerätename für Konfliktdateien steht in den Sync-Einstellungen. Secrets liegen im Android-Keystore, nicht im Vault.")
+                    Text("Eigenes CSS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Text("Wird nur innerhalb der Oberfläche angewandt. Damit kannst du Abstände, Farben und Markdown-Elemente weiter personalisieren.", fontSize = 12.sp)
+                    OutlinedTextField(
+                        css,
+                        { model.updateCustomCss(it) },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp),
+                        label = { Text("CSS") },
+                        placeholder = { Text(":root {\n  --radius: 14px;\n}") },
+                    )
+                }
             }
             TextButton(onClick = { model.openBugReport() }) { Text("Fehler melden") }
             Text("Die letzten fünf Minuten (Stift, Notiz, Werkzeug) werden an fanotes.fasrv.ch geschickt.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))

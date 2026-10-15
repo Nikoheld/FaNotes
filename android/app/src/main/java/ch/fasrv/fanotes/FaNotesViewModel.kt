@@ -574,7 +574,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 runCatching {
                     val stream = getApplication<Application>().contentResolver.openOutputStream(uri)
                         ?: error(PDF_EXPORT_FAILED)
-                    val metrics = ch.fasrv.fanotes.desk.editorMetrics(deskSettings.value)
+                    val metrics = ch.fasrv.fanotes.desk.editorMetrics(effectiveDesk())
                     stream.use {
                         writeNotePdf(
                             it, visible, document, pages, boxes, marks, links,
@@ -1218,6 +1218,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val historyComparison = MutableStateFlow<Pair<String, String>?>(null)
     val study = MutableStateFlow<StudyPicture?>(null)
     val deskSettings = MutableStateFlow(graph.readDesk())
+    val customCss = MutableStateFlow(graph.readCustomCss())
     val splitPath = MutableStateFlow<String?>(null)
     val splitMarkdown = MutableStateFlow("")
     val splitSession = InkSession(newInkDocument("Spalte", "dots", isoNow()))
@@ -2030,6 +2031,14 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleLocalFolder(path: String) {
         updateDesk("sync-excluded", ch.fasrv.fanotes.sync.toggleSyncPrefix(deskSettings.value["sync-excluded"].orEmpty(), path))
     }
+
+    fun updateCustomCss(value: String) {
+        val stored = value.take(ch.fasrv.fanotes.desk.CUSTOM_CSS_MAX)
+        customCss.value = stored
+        graph.writeCustomCss(stored)
+    }
+
+    fun effectiveDesk(): Map<String, String> = ch.fasrv.fanotes.desk.deskWithCustomCss(deskSettings.value, customCss.value)
 
     fun updateDesk(key: String, value: String) {
         val next = deskSettings.value + (key to value)
