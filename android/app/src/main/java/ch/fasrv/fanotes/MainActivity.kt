@@ -617,10 +617,12 @@ fun FaNotesScreen(
             DeskRibbon(
                 destination = destination,
                 focus = false,
+                penOpen = !showText,
                 onDestination = { model.showDestination(it) },
                 onPalette = { model.showPalette(notes = false) },
                 onFocus = { model.updateDesk("focus", "on") },
                 onDaily = { model.openDaily() },
+                onPen = { model.togglePen(); model.showDestination("notes") },
             )
             NoteTabs(
                 tabs,
@@ -668,7 +670,16 @@ fun FaNotesScreen(
                 },
             )
         } else {
-            DeskRibbon(destination, true, { model.showDestination(it) }, { model.showPalette(notes = false) }, { model.updateDesk("focus", "off") }, { model.openDaily() })
+            DeskRibbon(
+                destination,
+                true,
+                penOpen = !showText,
+                onDestination = { model.showDestination(it) },
+                onPalette = { model.showPalette(notes = false) },
+                onFocus = { model.updateDesk("focus", "off") },
+                onDaily = { model.openDaily() },
+                onPen = { model.togglePen(); model.showDestination("notes") },
+            )
         }
         val panels = ch.fasrv.fanotes.desk.noteWorkspacePanels(
             focus = focus,

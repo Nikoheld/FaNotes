@@ -43,5 +43,14 @@ class WorkspaceChromeTest {
         assertEquals(286, rightPanelWidthDp(""))
         assertEquals(220, rightPanelWidthDp("100"))
         assertEquals(320, rightPanelWidthDp("320"))
+        assertEquals(listOf("notes", "search", "pen", "tasks", "calendar"), RIBBON_PRIMARY.map { it.id })
+        assertEquals("Stift", RIBBON_PRIMARY.first { it.id == "pen" }.label)
+        assertEquals(listOf("daily", "overview", "cards", "books", "history", "study", "ai", "commands", "focus"), RIBBON_TOOLS.map { it.id })
+        assertEquals("Werkzeuge", ribbonToolLabel(false))
+        assertEquals("Weniger", ribbonToolLabel(true))
+        assertTrue(ribbonItemActive("pen", "notes", penOpen = true))
+        assertTrue(ribbonItemActive("notes", "notes", penOpen = false))
+        assertTrue(!ribbonItemActive("notes", "notes", penOpen = true))
+        assertTrue(ribbonItemActive("calendar", "calendar", penOpen = true))
     }
 }
