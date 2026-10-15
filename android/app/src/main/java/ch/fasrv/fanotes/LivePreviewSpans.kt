@@ -999,7 +999,7 @@ internal class StrongSpan : MetricAffectingSpan(), LivePreviewSpan {
 private class EmphasisSpan : StyleSpan(Typeface.ITALIC), LivePreviewSpan
 
 /** Struck text uses the paper's soft ink, not the body colour. */
-private class StrikeSpan : CharacterStyle(), LivePreviewSpan {
+internal class StrikeSpan : CharacterStyle(), LivePreviewSpan {
     override fun updateDrawState(paint: android.text.TextPaint) {
         paint.color = PAPER_QUOTE_INK
         paint.isStrikeThruText = true

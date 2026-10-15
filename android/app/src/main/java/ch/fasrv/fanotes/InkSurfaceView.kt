@@ -1891,12 +1891,12 @@ class InkSurfaceView @JvmOverloads constructor(
             val start = builder.length
             starts[index] = start
             val content: CharSequence = when (line.kind) {
-                PaperKind.BULLET -> inline("•  ${line.text}")
+                PaperKind.BULLET -> inline("•  ${line.text}", textSize)
                 PaperKind.TASK -> taskLine(line.text, readable, textSize)
-                PaperKind.MATH -> inline(line.text)
+                PaperKind.MATH -> line.text
                 PaperKind.SPACER -> ""
                 PaperKind.RULE -> " "
-                else -> inline(line.text)
+                else -> inline(line.text, textSize)
             }
             builder.append(content)
             val end = builder.length
@@ -1968,34 +1968,35 @@ class InkSurfaceView @JvmOverloads constructor(
         val label = raw.removePrefix("x|").removePrefix(" |").removePrefix("|")
         val builder = SpannableStringBuilder(" ")
         builder.setSpan(TaskSpan(done, readable, textSize), 0, 1, 0)
-        if (label.isNotEmpty()) builder.append(label)
+        if (label.isNotEmpty()) builder.append(inline(label, textSize))
         return builder
     }
 
-    private fun inline(text: String): CharSequence {
-        val builder = SpannableStringBuilder()
-        var index = 0
-        while (index < text.length) {
-            val bold = text.startsWith("**", index)
-            val italic = !bold && text[index] == '*'
-            if (bold || italic) {
-                val marker = if (bold) "**" else "*"
-                val close = text.indexOf(marker, index + marker.length)
-                if (close > index) {
-                    val start = builder.length
-                    builder.append(text.substring(index + marker.length, close))
-                    builder.setSpan(
-                        if (bold) StrongSpan() else StyleSpan(Typeface.ITALIC),
-                        start,
-                        builder.length,
-                        0,
-                    )
-                    index = close + marker.length
-                    continue
-                }
-            }
-            builder.append(text[index])
-            index += 1
+    /**
+     * Pen mode draws the note on the sheet. Markers come off the same way as
+     * the desktop live preview: bold, italic, strike, code chips, links, and
+     * wiki links. A whole-line picture is a separate block, so an image in a
+     * sentence keeps its `!` and shows the alt text as a link.
+     */
+    private fun inline(text: String, textSize: Float): CharSequence {
+        val (plain, marks) = ch.fasrv.fanotes.desk.detailsPlain(text, collapseImages = false)
+        if (marks.isEmpty()) return plain
+        val builder = SpannableStringBuilder(plain)
+        val readable = ch.fasrv.fanotes.desk.paperAccentReadableArgb(accentColor)
+        val codeInk = ch.fasrv.fanotes.desk.paperCodeInkArgb(accentColor)
+        for (mark in marks) {
+            val start = mark.start.coerceIn(0, builder.length)
+            val end = mark.end.coerceIn(start, builder.length)
+            if (start == end) continue
+            val span = when (mark.kind) {
+                "strong" -> StrongSpan()
+                "emphasis" -> StyleSpan(Typeface.ITALIC)
+                "strike" -> StrikeSpan()
+                "code" -> PaperCodeSpan(codeInk, textSize)
+                "link" -> LinkSpan(readable, textSize)
+                else -> null
+            } ?: continue
+            builder.setSpan(span, start, end, 0)
         }
         return builder
     }
