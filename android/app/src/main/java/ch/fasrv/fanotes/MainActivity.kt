@@ -1224,7 +1224,10 @@ private fun NotePage(
             }
             NoteTagBar(model)
             MarginTranscript(model)
-            if (noteKind == NoteKind.PDF) PdfQuoteMarks(model)
+            if (noteKind == NoteKind.PDF) {
+                PdfSearchBar(model)
+                PdfQuoteMarks(model)
+            }
             if (showRelations) NoteRelations(model) { model.openPath(it); model.showDestination("notes") }
         }
         PageSurface(

@@ -366,10 +366,105 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         openedAtMs = now
         lastTypedAtMs = null
         lastStrokeEndedAtMs = null
+        pdfSearchJob?.cancel()
+        pdfSearchQuery.value = ""
+        pdfSearchHits.value = emptyList()
+        pdfSearchIndex.value = 0
+        pdfSearchBusy.value = false
+        pdfTextCache = null
         val stats = openPageStats(parsePageStats(note.payload.obj("pageStats"), now), now)
         val payload = (note.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
         payload.put("pageStats", mergePageStats(note.payload.obj("pageStats"), stats))
         return note.copy(payload = payload)
+    }
+
+    val pdfSearchQuery = MutableStateFlow("")
+    val pdfSearchHits = MutableStateFlow<List<ch.fasrv.fanotes.desk.PdfSearchHit>>(emptyList())
+    val pdfSearchIndex = MutableStateFlow(0)
+    val pdfSearchBusy = MutableStateFlow(false)
+    private var pdfSearchJob: kotlinx.coroutines.Job? = null
+    private var pdfTextCache: Pair<String, List<String>>? = null
+
+    /** Desktop PDF find: German case fold, excerpts, at most 400 hits, then jump to the page. */
+    fun updatePdfSearch(query: String) {
+        pdfSearchQuery.value = query
+        pdfSearchJob?.cancel()
+        if (query.trim().isEmpty()) {
+            pdfSearchHits.value = emptyList()
+            pdfSearchIndex.value = 0
+            pdfSearchBusy.value = false
+            return
+        }
+        val note = open.value
+        if (note == null || note.kind != NoteKind.PDF) return
+        if (android.os.Build.VERSION.SDK_INT < 35) {
+            message.value = "Die PDF-Suche braucht Android 15."
+            return
+        }
+        pdfSearchJob = viewModelScope.launch {
+            pdfSearchBusy.value = true
+            kotlinx.coroutines.delay(180)
+            val pages = withContext(Dispatchers.IO) { readPdfTexts(note.path) }
+            if (pdfSearchQuery.value.trim() != query.trim()) return@launch
+            val hits = ch.fasrv.fanotes.desk.searchPdfPages(pages, query)
+            pdfSearchHits.value = hits
+            pdfSearchIndex.value = 0
+            pdfSearchBusy.value = false
+            hits.firstOrNull()?.let { revealPdfPage(it.page) }
+        }
+    }
+
+    fun stepPdfSearch(direction: Int) {
+        val hits = pdfSearchHits.value
+        if (hits.isEmpty() || (direction != 1 && direction != -1)) return
+        val next = (pdfSearchIndex.value + direction).mod(hits.size)
+        showPdfSearchHit(next)
+    }
+
+    fun showPdfSearchHit(index: Int) {
+        val hit = pdfSearchHits.value.getOrNull(index) ?: return
+        pdfSearchIndex.value = index
+        revealPdfPage(hit.page)
+    }
+
+    private fun revealPdfPage(page: Int) {
+        val note = open.value ?: return
+        val slice = backdrop.value.getOrNull(page - 1) ?: return
+        val height = session.document.sourceHeight
+        if (height <= 0.0) return
+        reveal = note.path to (slice.topPagePx.toDouble() / height).coerceIn(0.0, 1.0)
+        canvasToken.value += 1
+    }
+
+    @androidx.annotation.RequiresApi(35)
+    private fun readPdfTexts(path: String): List<String> {
+        val cached = pdfTextCache
+        if (cached != null && cached.first == path) return cached.second
+        val bytes = graph.vault.read(path) ?: return emptyList()
+        val file = java.io.File.createTempFile("fanotes-pdf-text", ".pdf")
+        return try {
+            file.writeBytes(bytes)
+            val pages = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                PdfRenderer(descriptor).use { renderer ->
+                    val count = renderer.pageCount.coerceAtMost(40)
+                    (0 until count).map { index ->
+                        try {
+                            renderer.openPage(index).use { page ->
+                                page.textContents.joinToString(" ") { it.text }
+                            }
+                        } catch (_: Exception) {
+                            ""
+                        }
+                    }
+                }
+            }
+            pdfTextCache = path to pages
+            pages
+        } catch (_: Exception) {
+            emptyList()
+        } finally {
+            file.delete()
+        }
     }
 
     fun jumpToOutline(line: Int) {
