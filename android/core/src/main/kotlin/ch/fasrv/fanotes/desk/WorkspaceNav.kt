@@ -286,6 +286,14 @@ fun splitPanePath(requested: String, active: String?, tabs: List<String>, histor
         ?: tabs.firstOrNull { it != requested }
 }
 
+/** The open note and the split note each keep their own unsaved dot. */
+fun tabShowsUnsaved(path: String, active: String?, split: String?, activeDirty: Boolean, splitDirty: Boolean): Boolean =
+    (path == active && activeDirty) || (path == split && splitDirty && path != active)
+
+/** The sidebar marks the note sitting in the second pane, unless it is also the selected row. */
+fun rowIsSplitCompanion(path: String, selected: String?, split: String?): Boolean =
+    !split.isNullOrEmpty() && path == split && path != selected
+
 fun normalizeSplitLayout(value: Any?): SplitLayout {
     val raw = value as? Map<*, *> ?: return DEFAULT_SPLIT_LAYOUT
     val ratio = (raw["ratio"] as? Number)?.toDouble() ?: Double.NaN
