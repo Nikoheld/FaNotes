@@ -2134,6 +2134,11 @@ fun NoteSearchBar(model: FaNotesViewModel) {
     val caseSensitive by model.noteSearchCaseSensitive.collectAsStateWithLifecycle()
     val regexp by model.noteSearchRegexp.collectAsStateWithLifecycle()
     val wholeWord by model.noteSearchWholeWord.collectAsStateWithLifecycle()
+    val focusToken by model.noteSearchFocus.collectAsStateWithLifecycle()
+    val searchFocus = androidx.compose.runtime.remember { FocusRequester() }
+    androidx.compose.runtime.LaunchedEffect(focusToken) {
+        if (focusToken > 0) runCatching { searchFocus.requestFocus() }
+    }
     var replacement by remember { mutableStateOf("") }
     val status = when {
         query.trim().isEmpty() -> ""
@@ -2145,7 +2150,14 @@ fun NoteSearchBar(model: FaNotesViewModel) {
             OutlinedTextField(
                 query,
                 { model.updateNoteSearch(it) },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).focusRequester(searchFocus).onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown && event.key == Key.Escape && query.isNotEmpty()) {
+                        model.updateNoteSearch("")
+                        true
+                    } else {
+                        false
+                    }
+                },
                 singleLine = true,
                 label = { Text("Im Text suchen …") },
             )

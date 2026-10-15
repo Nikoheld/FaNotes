@@ -400,6 +400,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         noteSearchRegexp.value = false
         noteSearchWholeWord.value = false
         gotoLineInput.value = null
+        showGotoLine.value = false
         val stats = openPageStats(parsePageStats(note.payload.obj("pageStats"), now), now)
         val payload = (note.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
         payload.put("pageStats", mergePageStats(note.payload.obj("pageStats"), stats))
@@ -593,6 +594,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val noteSearchCaseSensitive = MutableStateFlow(false)
     val noteSearchRegexp = MutableStateFlow(false)
     val noteSearchWholeWord = MutableStateFlow(false)
+    val noteSearchFocus = MutableStateFlow(0)
+    val showGotoLine = MutableStateFlow(false)
     private var noteSearchSelection: Pair<Int, Int>? = null
 
     private fun noteSearchOptions() = ch.fasrv.fanotes.desk.NoteSearchOptions(
@@ -631,6 +634,35 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         if (noteSearchWholeWord.value == enabled) return
         noteSearchWholeWord.value = enabled
         updateNoteSearch(noteSearchQuery.value)
+    }
+
+    fun openGotoLine() {
+        showGotoLine.value = true
+    }
+
+    fun closeGotoLine() {
+        showGotoLine.value = false
+    }
+
+    /** Ctrl-F: focus the search field, using a short selection as the query. */
+    fun openNoteSearch(selected: String) {
+        val next = ch.fasrv.fanotes.desk.searchQueryFromSelection(noteSearchQuery.value, selected)
+        if (next != noteSearchQuery.value) updateNoteSearch(next)
+        showText.value = true
+        noteSearchFocus.value += 1
+    }
+
+    /** Ctrl-G and F3. An empty query opens the search field instead. */
+    fun findInNote(forward: Boolean, visibleOffset: Int, selected: String) {
+        if (noteSearchQuery.value.trim().isEmpty()) {
+            openNoteSearch(selected)
+            return
+        }
+        val hits = noteSearchHits.value
+        if (hits.isEmpty()) return
+        val source = ch.fasrv.fanotes.desk.sourceOffsetForVisible(markdown.value, foldedHeadings.value, visibleOffset)
+        val index = ch.fasrv.fanotes.desk.nextSearchHitIndex(hits, source, forward)
+        if (index >= 0) revealNoteSearch(index)
     }
 
     fun stepNoteSearch(direction: Int) {

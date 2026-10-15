@@ -1670,7 +1670,7 @@ private fun NotePage(
     onDownload: () -> Unit = {},
 ) {
     val noteKind = model.open.collectAsStateWithLifecycle().value?.kind
-    var gotoLine by remember { mutableStateOf(false) }
+    val showGoto by model.showGotoLine.collectAsStateWithLifecycle()
     Column(modifier) {
             if (path != null) {
             Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1678,7 +1678,7 @@ private fun NotePage(
                 TextButton(onClick = onDownload) { Text("Herunterladen") }
                 if (noteKind != NoteKind.PDF) {
                     TextButton(onClick = onImportSheet) { Text("Blatt") }
-                    TextButton(onClick = { gotoLine = true }) { Text("Gehe zu Zeile") }
+                    TextButton(onClick = { model.openGotoLine() }) { Text("Gehe zu Zeile") }
                 }
             }
             val sheets = backdrop.filter { it.worksheetId.isNotEmpty() }.distinctBy { it.worksheetId }
@@ -1705,9 +1705,9 @@ private fun NotePage(
             }
             if (showRelations) NoteRelations(model) { model.openPath(it); model.showDestination("notes") }
         }
-        if (gotoLine) {
+        if (showGoto) {
             GotoLineDialog { input ->
-                gotoLine = false
+                model.closeGotoLine()
                 if (input != null) model.requestGotoLine(input)
             }
         }
@@ -1791,6 +1791,14 @@ private fun PageSurface(
             page.onUnfoldHeading = { model.unfoldHeading(it) }
             page.onToggleHeading = { model.toggleHeadingAtVisibleLine(it) }
             page.onEditorFold = { command, offset -> model.foldEditorCommand(command, offset) }
+            page.onSearchCommand = { command, selected, offset ->
+                when (command) {
+                    "open" -> model.openNoteSearch(selected)
+                    "next" -> model.findInNote(true, offset, selected)
+                    "previous" -> model.findInNote(false, offset, selected)
+                    "goto" -> model.openGotoLine()
+                }
+            }
             if (page.ink.backdrop !== backdrop) page.ink.backdrop = backdrop
             page.onTool = {
                 model.tool.value = it
