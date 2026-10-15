@@ -46,8 +46,8 @@ private fun spanFor(mark: LiveMark, accent: Int): Any = when (mark.kind) {
     LiveKind.HIDE -> HideSpan()
     LiveKind.COLLAPSE -> CollapseSpan()
     LiveKind.BULLET -> SwapSpan("• ")
-    LiveKind.TASK_OPEN -> SwapSpan("☐ ")
-    LiveKind.TASK_DONE -> SwapSpan("☑ ")
+    LiveKind.TASK_OPEN -> TaskSpan("☐ ")
+    LiveKind.TASK_DONE -> TaskSpan("☑ ")
     LiveKind.H1 -> HeadingSpan(2f)
     LiveKind.H2 -> HeadingSpan(1.55f)
     LiveKind.H3 -> HeadingSpan(1.28f)
@@ -93,7 +93,7 @@ private class HideSpan : ReplacementSpan(), LivePreviewSpan {
     override fun draw(canvas: Canvas, text: CharSequence, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) = Unit
 }
 
-private class SwapSpan(private val drawn: String) : ReplacementSpan(), LivePreviewSpan {
+internal open class SwapSpan(private val drawn: String) : ReplacementSpan(), LivePreviewSpan {
     override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int =
         paint.measureText(drawn).toInt().coerceAtLeast(1)
 
@@ -101,6 +101,8 @@ private class SwapSpan(private val drawn: String) : ReplacementSpan(), LivePrevi
         canvas.drawText(drawn, x, y.toFloat(), paint)
     }
 }
+
+internal class TaskSpan(drawn: String) : SwapSpan(drawn)
 
 private class CollapseSpan : LineHeightSpan, LivePreviewSpan {
     override fun chooseHeight(text: CharSequence, start: Int, end: Int, spanstartv: Int, lineHeight: Int, fm: Paint.FontMetricsInt) {
