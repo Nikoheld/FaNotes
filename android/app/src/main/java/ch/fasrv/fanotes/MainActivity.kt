@@ -526,6 +526,7 @@ fun FaNotesScreen(
                             palette = palette,
                             destination = destination,
                             selection = model.session.selection.isNotEmpty(),
+                            sheet = model.sheetAdjusted.value && !showText,
                             pen = !showText,
                             focus = focus,
                         ),
@@ -560,6 +561,7 @@ fun FaNotesScreen(
                             model.session.clearSelection()
                             model.message.value = ch.fasrv.fanotes.ink.SELECT_CLEARED_NOTICE
                         }
+                        "sheet" -> model.resetSheet()
                         "pen" -> model.showText.value = true
                         "focus" -> model.updateDesk("focus", "off")
                     }
@@ -2067,9 +2069,11 @@ private fun PageSurface(
     val clearLink by model.clearLinkRequest.collectAsStateWithLifecycle()
     val placeLinkRequest by model.placeLinkRequest.collectAsStateWithLifecycle()
     val pdfCamera by model.pdfCameraCommand.collectAsStateWithLifecycle()
+    val sheetReset by model.sheetReset.collectAsStateWithLifecycle()
     var appliedClear by remember { mutableStateOf(0) }
     var appliedPlaceLink by remember { mutableStateOf(0) }
     var appliedPdfCamera by remember { mutableStateOf(0) }
+    var appliedSheetReset by remember { mutableStateOf(0) }
     val wasPlacingSection = remember { booleanArrayOf(false) }
     Box(modifier) {
     AndroidView(
@@ -2189,6 +2193,11 @@ private fun PageSurface(
             }
             page.onPdfPage = { model.notePdfPage(it) }
             page.ink.onPdfZoom = { zoom, zoomMode -> model.notePdfZoom(zoom, zoomMode) }
+            page.ink.onSheetActive = { model.noteSheetAdjusted(it) }
+            if (sheetReset != appliedSheetReset) {
+                appliedSheetReset = sheetReset
+                if (sheetReset > 0) page.ink.resetView()
+            }
             val camera = pdfCamera
             if (camera != null && camera.first != appliedPdfCamera) {
                 appliedPdfCamera = camera.first
