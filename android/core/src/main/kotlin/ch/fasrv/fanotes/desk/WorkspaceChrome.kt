@@ -180,6 +180,21 @@ const val TREE_DROP_BORDER_ALPHA = 0.55f
 const val TREE_ICON_DP = 17
 const val TREE_CHEVRON_DP = 14
 
+/** Folder color pip from `.file-tree__row[data-kind="folder"]::after`. */
+const val TREE_FOLDER_DOT_DP = 3
+const val TREE_FOLDER_DOT_INSET_DP = 5
+const val TREE_FOLDER_DOT_ALPHA = 0.72f
+
+/** Row hover is 74% of `--panel-hover`. A folder adds an 8% color wash on the left. */
+const val TREE_HOVER_ALPHA = 0.74f
+const val TREE_FOLDER_HOVER_ALPHA = 0.08f
+
+/** Inline actions appear on hover or keyboard focus, the same as the desktop row. */
+fun treeRowShowsActions(hovered: Boolean, focused: Boolean) = hovered || focused
+
+/** The color pip hides while those actions are open. */
+fun treeFolderShowsDot(folder: Boolean, actionsOpen: Boolean) = folder && !actionsOpen
+
 /** Empty expanded folder from `.file-tree__folder-empty` and `.file-tree__empty-subfolder`. */
 const val TREE_EMPTY_MIN_DP = 26
 const val TREE_EMPTY_GAP_DP = 8

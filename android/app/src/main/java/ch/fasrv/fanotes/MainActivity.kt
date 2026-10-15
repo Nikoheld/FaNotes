@@ -16,6 +16,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -75,6 +76,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.Composable
@@ -104,6 +106,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.SolidColor
@@ -1389,12 +1392,19 @@ private fun NoteRow(
     val handleOrigin = remember { floatArrayOf(0f, 0f) }
     val treeShape = RoundedCornerShape(ch.fasrv.fanotes.desk.TREE_ROW_RADIUS_DP.dp)
     val inSplit = splitPath != null && node.path == splitPath && node.path != selected
+    val rowInteraction = remember(node.path) { MutableInteractionSource() }
+    val rowHovered by rowInteraction.collectIsHoveredAsState()
+    val actionsOpen = ch.fasrv.fanotes.desk.treeRowShowsActions(rowHovered, node.path == treeFocus)
+    val accentHex = "#%06x".format(MaterialTheme.colorScheme.primary.toArgb() and 0xFFFFFF)
+    val textHex = "#%06x".format(MaterialTheme.colorScheme.onSurface.toArgb() and 0xFFFFFF)
+    val mutedHex = "#%06x".format(LocalStatusInk.current.muted.toArgb() and 0xFFFFFF)
     Row(
         Modifier
             .fillMaxWidth()
             .padding(start = (depth * ch.fasrv.fanotes.desk.TREE_DEPTH_DP).dp)
             .height(ch.fasrv.fanotes.desk.chromeRowHeightDp(compact, rowHeightDp).dp)
             .alpha(if (dragging) ch.fasrv.fanotes.desk.TREE_DRAG_ALPHA else 1f)
+            .hoverable(rowInteraction)
             .border(
                 if (dropHere || node.path == treeFocus) 1.dp else 0.dp,
                 if (dropHere) MaterialTheme.colorScheme.primary.copy(alpha = ch.fasrv.fanotes.desk.TREE_DROP_BORDER_ALPHA)
@@ -1402,11 +1412,28 @@ private fun NoteRow(
                 treeShape,
             )
             .clip(treeShape)
-            .background(
+            .then(
                 when {
-                    dropHere -> MaterialTheme.colorScheme.primary.copy(alpha = ch.fasrv.fanotes.desk.TREE_DROP_ALPHA)
-                    node.path == selected -> MaterialTheme.colorScheme.surfaceVariant
-                    else -> Color.Transparent
+                    dropHere -> Modifier.background(
+                        MaterialTheme.colorScheme.primary.copy(alpha = ch.fasrv.fanotes.desk.TREE_DROP_ALPHA),
+                    )
+                    node.path == selected -> Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
+                    rowHovered && folder -> Modifier.background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                Color(
+                                    android.graphics.Color.parseColor(
+                                        ch.fasrv.fanotes.desk.folderDotInk(folderColor, accentHex),
+                                    ),
+                                ).copy(alpha = ch.fasrv.fanotes.desk.TREE_FOLDER_HOVER_ALPHA),
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = ch.fasrv.fanotes.desk.TREE_HOVER_ALPHA),
+                            ),
+                        ),
+                    )
+                    rowHovered -> Modifier.background(
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = ch.fasrv.fanotes.desk.TREE_HOVER_ALPHA),
+                    )
+                    else -> Modifier
                 },
             )
             .onGloballyPositioned {
@@ -1429,9 +1456,6 @@ private fun NoteRow(
                     ),
             )
         }
-        val accentHex = "#%06x".format(MaterialTheme.colorScheme.primary.toArgb() and 0xFFFFFF)
-        val textHex = "#%06x".format(MaterialTheme.colorScheme.onSurface.toArgb() and 0xFFFFFF)
-        val mutedHex = "#%06x".format(LocalStatusInk.current.muted.toArgb() and 0xFFFFFF)
         Text(
             if (!folder) "" else if (openFolder) "▾" else "▸",
             fontSize = 12.sp,
@@ -1574,7 +1598,22 @@ private fun NoteRow(
                     }
                 },
         )
-        if (node.kind != NoteKind.FOLDER) {
+        if (ch.fasrv.fanotes.desk.treeFolderShowsDot(folder, actionsOpen)) {
+            Box(
+                Modifier
+                    .padding(end = ch.fasrv.fanotes.desk.TREE_FOLDER_DOT_INSET_DP.dp)
+                    .size(ch.fasrv.fanotes.desk.TREE_FOLDER_DOT_DP.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Color(
+                            android.graphics.Color.parseColor(
+                                ch.fasrv.fanotes.desk.folderDotInk(folderColor, accentHex),
+                            ),
+                        ).copy(alpha = ch.fasrv.fanotes.desk.TREE_FOLDER_DOT_ALPHA),
+                    ),
+            )
+        }
+        if (actionsOpen && node.kind != NoteKind.FOLDER) {
             Text(
                 "Rechts",
                 fontSize = 11.sp,
@@ -1584,7 +1623,7 @@ private fun NoteRow(
                     .padding(horizontal = 6.dp),
             )
         }
-        if (folder) {
+        if (actionsOpen && folder) {
             Text(
                 "+",
                 color = MaterialTheme.colorScheme.primary,
@@ -1628,7 +1667,7 @@ private fun NoteRow(
                     .clickable(onClickLabel = "Unterordner anlegen") { onCreateFolderIn(node.path) },
             )
         }
-        if (node.kind == NoteKind.FOLDER) {
+        if (actionsOpen && node.kind == NoteKind.FOLDER) {
             val local = pathIsSyncExcluded(node.path, localFolders)
             Text(
                 localFolderAction(local),
@@ -1637,14 +1676,16 @@ private fun NoteRow(
                 modifier = Modifier.clickable { onToggleLocal(node.path) }.padding(horizontal = 6.dp),
             )
         }
-        IconButton(onClick = { onRename(node.path, node.name) }) {
-            Icon(Icons.Filled.Edit, contentDescription = "Umbenennen")
-        }
-        IconButton(onClick = { onMove(node.path) }) {
-            Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = "Verschieben")
-        }
-        IconButton(onClick = { onDelete(node.path, node.kind == NoteKind.FOLDER, node.name) }) {
-            Icon(Icons.Filled.Delete, contentDescription = "Löschen")
+        if (actionsOpen) {
+            IconButton(onClick = { onRename(node.path, node.name) }) {
+                Icon(Icons.Filled.Edit, contentDescription = "Umbenennen")
+            }
+            IconButton(onClick = { onMove(node.path) }) {
+                Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = "Verschieben")
+            }
+            IconButton(onClick = { onDelete(node.path, node.kind == NoteKind.FOLDER, node.name) }) {
+                Icon(Icons.Filled.Delete, contentDescription = "Löschen")
+            }
         }
     }
     if (openFolder && node.children.isEmpty()) {
