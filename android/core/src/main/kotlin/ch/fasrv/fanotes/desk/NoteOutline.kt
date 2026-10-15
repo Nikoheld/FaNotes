@@ -60,16 +60,17 @@ fun headingFoldRange(markdown: String, line: Int): HeadingFold? {
     return HeadingFold(bodyStart, end)
 }
 
-/** The folded heading whose body contains [line], if the cursor would land inside it. */
+/** The outermost folded heading whose body contains [line]. */
 fun foldedHeadingHidingLine(markdown: String, foldedLines: Set<Int>, line: Int): Int? {
     if (foldedLines.isEmpty() || line <= 0) return null
     val text = normalizeNewlines(markdown)
     val lineStart = revealLineStart(text, line)
+    var found: Int? = null
     for (heading in foldedLines) {
         val range = headingFoldRange(text, heading) ?: continue
-        if (lineStart >= range.from && lineStart < range.to) return heading
+        if (lineStart >= range.from && lineStart < range.to && (found == null || heading < found)) found = heading
     }
-    return null
+    return found
 }
 
 /** Source text with folded heading bodies removed. No folds returns the original string. */

@@ -1436,7 +1436,7 @@ private fun PageSurface(
                 if (!page.gotoLine(goto)) model.message.value = "Das ist keine Zeile."
                 model.consumeGotoLine()
             }
-            model.takeNoteSearchSelection()?.let { (start, end) -> page.revealRange(start, end) }
+            model.takeNoteSearchSelection()?.let { (start, end) -> page.revealSourceRange(start, end) }
             val current = path ?: ""
             if (bound != current) {
                 page.rememberCamera(bound)

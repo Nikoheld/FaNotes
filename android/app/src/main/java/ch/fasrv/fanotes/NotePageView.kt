@@ -297,6 +297,40 @@ class NotePageView(context: Context) : FrameLayout(context) {
         return true
     }
 
+    fun revealSourceRange(sourceStart: Int, sourceEnd: Int) {
+        val lines = listOf(
+            ch.fasrv.fanotes.desk.lineNumberAt(sourceMarkdown, sourceStart),
+            ch.fasrv.fanotes.desk.lineNumberAt(sourceMarkdown, sourceEnd),
+        )
+        var opened = false
+        for (line in lines) {
+            while (true) {
+                val hiding = ch.fasrv.fanotes.desk.foldedHeadingHidingLine(sourceMarkdown, foldedLines, line) ?: break
+                foldedLines = foldedLines - hiding
+                onUnfoldHeading(hiding)
+                opened = true
+            }
+        }
+        if (opened) {
+            val visible = ch.fasrv.fanotes.desk.markdownWithFolds(sourceMarkdown, foldedLines)
+            writing = true
+            editor.setText(visible)
+            writing = false
+        }
+        val length = editor.text?.length ?: 0
+        val from = ch.fasrv.fanotes.desk.visibleOffsetForSource(sourceMarkdown, foldedLines, sourceStart).coerceIn(0, length)
+        val to = ch.fasrv.fanotes.desk.visibleOffsetForSource(sourceMarkdown, foldedLines, sourceEnd).coerceIn(from, length)
+        if (!textMode) setTextMode(true)
+        editor.requestFocus()
+        editor.setSelection(from, to)
+        editor.post {
+            val layout = editor.layout ?: return@post
+            val safe = from.coerceAtMost(layout.text.length)
+            val top = layout.getLineTop(layout.getLineForOffset(safe))
+            editor.scrollTo(0, (top - editor.paddingTop).coerceAtLeast(0))
+        }
+    }
+
     private fun revealSourceOffset(sourceOffset: Int) {
         val line = ch.fasrv.fanotes.desk.lineNumberAt(sourceMarkdown, sourceOffset)
         val hiding = ch.fasrv.fanotes.desk.foldedHeadingHidingLine(sourceMarkdown, foldedLines, line)

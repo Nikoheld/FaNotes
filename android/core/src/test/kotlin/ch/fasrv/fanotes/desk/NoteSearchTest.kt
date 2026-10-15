@@ -67,4 +67,13 @@ class NoteSearchTest {
         assertEquals("\$", replaceAllNoteMatches("a", "a", "\$\$", NoteSearchOptions(regexp = true)))
         assertEquals("aa", replaceAllNoteMatches("a", "a", "a\$&", NoteSearchOptions(regexp = true)))
     }
+
+    @Test
+    fun theFullNoteStillContainsAFoldedBody() {
+        val note = "# Einleitung\n\nAbsatz beta.\n\n# Nächstes\n"
+        val shown = markdownWithFolds(note, setOf(1))
+        assertEquals(emptyList(), searchNoteText(shown, "beta"))
+        assertEquals(listOf(note.indexOf("beta")), searchNoteText(note, "beta").map { it.start })
+        assertTrue(replaceAllNoteMatches(note, "beta", "X").contains("Absatz X."))
+    }
 }
