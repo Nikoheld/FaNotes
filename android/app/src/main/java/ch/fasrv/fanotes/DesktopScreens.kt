@@ -541,7 +541,7 @@ fun SearchScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
             Text("Keine Treffer für „${query.trim()}“.", modifier = Modifier.padding(top = 12.dp), fontSize = 13.sp)
         }
         LazyColumn(state = listState, modifier = Modifier.padding(top = 8.dp).weight(1f)) {
-            itemsIndexed(hits, key = { _, hit -> "${hit.path}:${hit.line}:${hit.anchorY}:${hit.text}" }) { index, hit ->
+            itemsIndexed(hits, key = { _, hit -> "${hit.kind}:${hit.path}:${hit.line}:${hit.anchorY}" }) { index, hit ->
                 Column(
                     Modifier
                         .fillMaxWidth()
@@ -553,7 +553,19 @@ fun SearchScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                         }
                         .padding(vertical = 8.dp, horizontal = 8.dp),
                 ) {
-                    Text(hit.path + if (hit.anchorY != null) "  · Handschrift" else "", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            hit.title.ifBlank { hit.path.substringAfterLast('/') },
+                            modifier = Modifier.weight(1f),
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text("${hit.matches}", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                    }
+                    Text(
+                        if (hit.kind == "drawing" || hit.anchorY != null) "Handschrift-Seite · unsichtbar transkribiert" else hit.path,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                    )
                     Text(hit.text, maxLines = 2)
                 }
             }

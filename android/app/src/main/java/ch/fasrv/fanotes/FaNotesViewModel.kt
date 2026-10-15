@@ -2464,15 +2464,23 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         searchQuery.value = query
         viewModelScope.launch {
             searchHits.value = withContext(Dispatchers.IO) {
-                val files = graph.vault.walkFiles().filter { it.path.endsWith(".md") || it.path.endsWith(".markdown") }
-                val texts = files.map { it.path to (graph.vault.read(it.path)?.decodeToString().orEmpty()) }
+                val files = graph.vault.walkFiles().filter {
+                    val path = it.path
+                    path.endsWith(".md", true) || path.endsWith(".markdown", true) ||
+                        (path.endsWith(".pdf", true) && !path.startsWith("."))
+                }
+                val texts = files.map { file ->
+                    val path = file.path
+                    if (path.endsWith(".pdf", true)) path to ""
+                    else path to (graph.vault.read(path)?.decodeToString().orEmpty())
+                }
                 val transcripts = texts.mapNotNull { (path, _) ->
                     val famdPath = if (path.endsWith(".famd")) path else companionPath(path, ".famd")
                     val ink = ch.fasrv.fanotes.famd.parseFamd(graph.vault.read(famdPath)?.decodeToString().orEmpty()).payload?.obj("ink")
                     val transcript = ink?.string("searchTranscript") ?: return@mapNotNull null
                     path to transcript
                 }
-                (searchVault(texts, query) + searchTranscriptHits(transcripts, query)).take(200)
+                (searchVault(texts, query) + searchTranscriptHits(transcripts, query)).take(250)
             }
         }
     }

@@ -25,7 +25,15 @@ fun searchTranscriptHits(files: List<Pair<String, String>>, query: String): List
     return files.mapNotNull { (path, transcript) ->
         val y = inkAnchorForQuery(transcript, needle) ?: return@mapNotNull null
         val line = transcript.split('\n').map { parseTranscriptLine(it.trim()) }.firstOrNull { it.second.contains(needle, ignoreCase = true) }
-        SearchHit(path, 0, line?.second?.take(180) ?: needle, y)
+        SearchHit(
+            path,
+            0,
+            line?.second?.take(180) ?: needle,
+            y,
+            title = searchHitTitle(path),
+            matches = 1,
+            kind = "drawing",
+        )
     }
 }
 
