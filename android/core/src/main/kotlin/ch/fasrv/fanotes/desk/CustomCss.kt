@@ -41,6 +41,10 @@ data class CustomChrome(
     val previewFontPx: Int? = null,
     val lineHeight: Double? = null,
     val rowHeightDp: Int? = null,
+    val danger: String? = null,
+    val success: String? = null,
+    val warning: String? = null,
+    val muted: String? = null,
 )
 
 fun parseCustomChrome(css: String?): CustomChrome {
@@ -60,6 +64,10 @@ fun parseCustomChrome(css: String?): CustomChrome {
     var previewFontPx: Int? = null
     var lineHeight: Double? = null
     var rowHeightDp: Int? = null
+    var danger: String? = null
+    var success: String? = null
+    var warning: String? = null
+    var muted: String? = null
     for (match in CUSTOM_PROPERTY.findAll(source)) {
         val name = match.groupValues[1].lowercase()
         val raw = match.groupValues[2].trim()
@@ -78,11 +86,16 @@ fun parseCustomChrome(css: String?): CustomChrome {
             "preview-size" -> cssPx(raw, 10, 40)?.let { previewFontPx = it }
             "line-height" -> cssNumber(raw, 1.0, 3.0)?.let { lineHeight = it }
             "row-height" -> cssPx(raw, 20, 48)?.let { rowHeightDp = it }
+            "danger" -> cssColor(raw)?.let { danger = it }
+            "success" -> cssColor(raw)?.let { success = it }
+            "warning" -> cssColor(raw)?.let { warning = it }
+            "text-muted" -> cssColor(raw)?.let { muted = it }
         }
     }
     return CustomChrome(
         accent, accentSecondary, background, surface, text, radiusDp, sidebarDp, panelDp,
         contentWidthPx, editorFontPx, previewFontPx, lineHeight, rowHeightDp,
+        danger, success, warning, muted,
     )
 }
 

@@ -76,6 +76,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -334,7 +335,12 @@ fun FaNotesTheme(
     val surface = Color(android.graphics.Color.parseColor(palette.surface))
     val surfaceVariant = Color(android.graphics.Color.parseColor(palette.surfaceVariant))
     val onSurface = Color(android.graphics.Color.parseColor(palette.text))
-    val danger = Color(android.graphics.Color.parseColor(palette.danger))
+    val danger = Color(android.graphics.Color.parseColor(chrome.danger ?: palette.danger))
+    val statusInk = StatusInk(
+        muted = Color(android.graphics.Color.parseColor(chrome.muted ?: palette.muted)),
+        success = Color(android.graphics.Color.parseColor(chrome.success ?: palette.success)),
+        warning = Color(android.graphics.Color.parseColor(chrome.warning ?: palette.warning)),
+    )
     val accent = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccent(accentHex)))
     val onAccent = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.accentInk(accentHex)))
     val secondary = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccentSecondary(accentSecondaryHex)))
@@ -348,8 +354,11 @@ fun FaNotesTheme(
         background = chrome.background?.let { Color(android.graphics.Color.parseColor(it)) } ?: baseScheme.background,
         surface = chrome.surface?.let { Color(android.graphics.Color.parseColor(it)) } ?: baseScheme.surface,
         onSurface = chrome.text?.let { Color(android.graphics.Color.parseColor(it)) } ?: baseScheme.onSurface,
+        error = danger,
     )
-    MaterialTheme(colorScheme = scheme, typography = chromeTypography(family), content = content)
+    CompositionLocalProvider(LocalStatusInk provides statusInk) {
+        MaterialTheme(colorScheme = scheme, typography = chromeTypography(family), content = content)
+    }
 }
 
 private fun chromeTypography(family: androidx.compose.ui.text.font.FontFamily): androidx.compose.material3.Typography {
