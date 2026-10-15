@@ -154,6 +154,7 @@ class InkSurfaceView @JvmOverloads constructor(
     var onSwipeNote: (Int) -> Unit = {}
     var onEdgeHistory: (Int) -> Unit = {}
     var onTogglePaperTask: (Int) -> Unit = {}
+    var onFollowMarkdown: (String, Boolean, String?) -> Unit = { _, _, _ -> }
     var onCamera: (Float, Float, Float) -> Unit = { _, _, _ -> }
     var onPenActive: (Boolean) -> Unit = {}
     var placingSection = false
@@ -754,6 +755,7 @@ class InkSurfaceView @JvmOverloads constructor(
                 val taskTap = navTap && fingers.size == 1 && fingers.containsKey(id) && action != MotionEvent.ACTION_CANCEL
                 if (fingers.remove(id) != null && fingers.size < 2 && action != MotionEvent.ACTION_CANCEL) {
                     if (taskTap && tryTogglePaperTask(event.getX(index), event.getY(index))) navTap = false
+                    else if (taskTap && tryFollowPaperLink(event.getX(index), event.getY(index))) navTap = false
                     else maybeSwipe(event)
                     settleZoom()
                 }
@@ -1132,6 +1134,54 @@ class InkSurfaceView @JvmOverloads constructor(
                             }
                         }
                         return false
+                    }
+                    top = bottom
+                }
+                is PaperBlock.Table -> {
+                    var height = 10f * scale
+                    block.rowHeights.forEach { height += it }
+                    top += height
+                }
+                is PaperBlock.Image -> top += block.frameHeight + 24f * scale
+            }
+        }
+        return false
+    }
+
+    /** A stationary finger tap on a rendered link opens that note or address. */
+    private fun tryFollowPaperLink(x: Float, y: Float): Boolean {
+        if (!showMarkdown || markdown.isBlank()) return false
+        val scale = pixelsPerPageUnit()
+        if (scale <= 0f) return false
+        val point = unrotated(x, y)
+        val originX = (session?.document?.originX ?: 0.0).toFloat()
+        val originY = (session?.document?.originY ?: 0.0).toFloat()
+        val textX = point.first - pageLeft - (TEXT_PAD_X + originX) * scale
+        val textY = point.second - pageTop - (TEXT_PAD_Y + originY) * scale
+        if (textX < -8f || textY < 0f) return false
+        var top = 0f
+        for (block in paperBlocks(scale)) {
+            when (block) {
+                is PaperBlock.Text -> {
+                    val bottom = top + block.layout.height
+                    if (textY >= top && textY < bottom) {
+                        val localY = (textY - top).toInt().coerceAtLeast(0)
+                        val visual = block.layout.getLineForVertical(localY)
+                        val lineStart = block.layout.getLineStart(visual)
+                        val lineEnd = block.layout.getLineEnd(visual)
+                        val offset = block.layout.getOffsetForHorizontal(visual, textX.coerceAtLeast(0f))
+                        val link = block.links.lastOrNull { candidate ->
+                            ch.fasrv.fanotes.desk.paperLinkTarget(offset, listOf(candidate)) != null &&
+                                candidate.start < lineEnd && candidate.end > lineStart
+                        } ?: return false
+                        val start = link.start.coerceIn(lineStart, lineEnd)
+                        val end = link.end.coerceIn(start, lineEnd)
+                        val left = block.layout.getPrimaryHorizontal(start)
+                        val right = if (end <= start) left + 8f else block.layout.getPrimaryHorizontal(end)
+                        if (textX < left - 4f || textX > right + 4f) return false
+                        val followed = ch.fasrv.fanotes.desk.followedTarget(link.target) ?: return false
+                        onFollowMarkdown(followed.target, followed.web, followed.anchor)
+                        return true
                     }
                     top = bottom
                 }
@@ -1778,8 +1828,8 @@ class InkSurfaceView @JvmOverloads constructor(
         val textLines = ArrayList<PaperLine>()
         fun flush() {
             if (textLines.isEmpty()) return
-            val (styled, starts, tasks) = styledLines(textLines, scale)
-            built += PaperBlock.Text(textLayoutFor(styled, scale), starts, tasks)
+            val styled = styledLines(textLines, scale)
+            built += PaperBlock.Text(textLayoutFor(styled.text, scale), styled.starts, styled.tasks, styled.links)
             textLines.clear()
         }
         for (line in paperLines(markdown)) {
@@ -1908,24 +1958,28 @@ class InkSurfaceView @JvmOverloads constructor(
         canvas.translate(0f, height + 24f * scale)
     }
 
-    private fun styledLines(lines: List<PaperLine>, scale: Float): Triple<CharSequence, IntArray, IntArray> {
+    private fun styledLines(lines: List<PaperLine>, scale: Float): StyledPaper {
         val textSize = editorFontPx * scale
         val readable = ch.fasrv.fanotes.desk.paperAccentReadableArgb(accentColor)
         val builder = SpannableStringBuilder()
         val starts = IntArray(lines.size)
+        val links = ArrayList<ch.fasrv.fanotes.desk.PaperTextLink>()
         for ((index, line) in lines.withIndex()) {
             val start = builder.length
             starts[index] = start
-            val content: CharSequence = when (line.kind) {
+            val (content, contentLinks) = when (line.kind) {
                 PaperKind.BULLET -> {
                     val indent = line.text.takeWhile { it == ' ' || it == '\t' }
                     inline("$indent•  ${line.text.trimStart()}", textSize)
                 }
                 PaperKind.TASK -> taskLine(line.text, readable, textSize)
-                PaperKind.MATH -> line.text
-                PaperKind.SPACER -> ""
-                PaperKind.RULE -> " "
+                PaperKind.MATH -> line.text to emptyList()
+                PaperKind.SPACER -> "" to emptyList()
+                PaperKind.RULE -> " " to emptyList()
                 else -> inline(line.text, textSize)
+            }
+            contentLinks.forEach { link ->
+                links += link.copy(start = link.start + start, end = link.end + start)
             }
             builder.append(content)
             val end = builder.length
@@ -1974,7 +2028,7 @@ class InkSurfaceView @JvmOverloads constructor(
             val line = lines[index]
             if (line.kind == PaperKind.TASK) line.sourceLine else -1
         }
-        return Triple(builder, starts, sources)
+        return StyledPaper(builder, starts, sources, links)
     }
 
     private val numberPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -1996,7 +2050,7 @@ class InkSurfaceView @JvmOverloads constructor(
         canvas.drawText(label, -8f * scale, baseline, numberPaint)
     }
 
-    private fun taskLine(raw: String, readable: Int, textSize: Float): CharSequence {
+    private fun taskLine(raw: String, readable: Int, textSize: Float): Pair<CharSequence, List<ch.fasrv.fanotes.desk.PaperTextLink>> {
         val done = raw.startsWith("x|")
         val label = raw.substringAfter('|')
         val indent = label.takeWhile { it == ' ' || it == '\t' }
@@ -2005,8 +2059,15 @@ class InkSurfaceView @JvmOverloads constructor(
         val boxAt = builder.length
         builder.append(" ")
         builder.setSpan(TaskSpan(done, readable, textSize), boxAt, boxAt + 1, 0)
-        if (rest.isNotEmpty()) builder.append(inline(rest, textSize))
-        return builder
+        val links = if (rest.isEmpty()) {
+            emptyList()
+        } else {
+            val (restText, restLinks) = inline(rest, textSize)
+            val shift = builder.length
+            builder.append(restText)
+            restLinks.map { it.copy(start = it.start + shift, end = it.end + shift) }
+        }
+        return builder to links
     }
 
     /**
@@ -2015,9 +2076,13 @@ class InkSurfaceView @JvmOverloads constructor(
      * wiki links. A whole-line picture is a separate block, so an image in a
      * sentence keeps its `!` and shows the alt text as a link.
      */
-    private fun inline(text: String, textSize: Float): CharSequence {
+    private fun inline(text: String, textSize: Float): Pair<CharSequence, List<ch.fasrv.fanotes.desk.PaperTextLink>> {
         val (plain, marks) = ch.fasrv.fanotes.desk.detailsPlain(text, collapseImages = false)
-        if (marks.isEmpty()) return plain
+        val links = marks.mapNotNull { mark ->
+            if (mark.kind != "link" || mark.target.isBlank()) null
+            else ch.fasrv.fanotes.desk.PaperTextLink(mark.start, mark.end, mark.target)
+        }
+        if (marks.isEmpty()) return plain to links
         val builder = SpannableStringBuilder(plain)
         val readable = ch.fasrv.fanotes.desk.paperAccentReadableArgb(accentColor)
         val codeInk = ch.fasrv.fanotes.desk.paperCodeInkArgb(accentColor)
@@ -2036,7 +2101,7 @@ class InkSurfaceView @JvmOverloads constructor(
             } ?: continue
             builder.setSpan(span, start, end, 0)
         }
-        return builder
+        return builder to links
     }
 
     private fun smoothOutline(path: Path, outline: FloatArray, scale: Float) {
@@ -2473,8 +2538,20 @@ class InkSurfaceView @JvmOverloads constructor(
     }
 }
 
+private class StyledPaper(
+    val text: CharSequence,
+    val starts: IntArray,
+    val tasks: IntArray,
+    val links: List<ch.fasrv.fanotes.desk.PaperTextLink>,
+)
+
 private sealed class PaperBlock {
-    class Text(val layout: StaticLayout, val paragraphStarts: IntArray, val taskSources: IntArray) : PaperBlock()
+    class Text(
+        val layout: StaticLayout,
+        val paragraphStarts: IntArray,
+        val taskSources: IntArray,
+        val links: List<ch.fasrv.fanotes.desk.PaperTextLink> = emptyList(),
+    ) : PaperBlock()
     class Table(val rows: List<List<String>>, val rowHeights: FloatArray, val cellLayouts: List<List<StaticLayout>>) : PaperBlock()
     class Image(val caption: String, val source: String, val frameHeight: Float, val bitmap: android.graphics.Bitmap?) : PaperBlock()
 }

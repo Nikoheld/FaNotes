@@ -854,6 +854,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 onMarkdown(next)
             }
         }
+        ink.onFollowMarkdown = { target, web, anchor -> onFollowLink(target, web, anchor) }
     }
 
     /** A tap on a rendered link opens the note or the web address. */

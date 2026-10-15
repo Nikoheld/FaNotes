@@ -33,6 +33,15 @@ fun followedLinkAt(text: String, offset: Int): FollowedLink? {
     return null
 }
 
+/** One rendered link on the pen sheet, in the coordinates of the styled text. */
+data class PaperTextLink(val start: Int, val end: Int, val target: String)
+
+/** The link a finger tap lands on. The end offset itself belongs to the following text. */
+fun paperLinkTarget(offset: Int, links: List<PaperTextLink>): String? {
+    if (offset < 0 || links.isEmpty()) return null
+    return links.lastOrNull { it.target.isNotBlank() && offset >= it.start && offset < it.end }?.target
+}
+
 /** A stored link target from a details card, classified the same way as a markdown URL. */
 fun followedTarget(target: String): FollowedLink? {
     val url = target.trim()
