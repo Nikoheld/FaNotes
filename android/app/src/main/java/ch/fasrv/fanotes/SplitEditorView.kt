@@ -67,6 +67,8 @@ class SplitEditorView(context: Context) : EditText(context) {
             invalidate()
         }
     private var tabFocusMode = false
+    private val history = ch.fasrv.fanotes.desk.EditorHistory()
+    private var cursorBeforeEdit = 0
     private val activeLinePaint = Paint()
     var showLineNumbers: Boolean = false
         set(value) {
@@ -87,12 +89,15 @@ class SplitEditorView(context: Context) : EditText(context) {
 
     init {
         tags = HtmlTagAssist(this) { block ->
+            val origin = text?.toString().orEmpty()
+            val cursor = selectionEnd.coerceAtLeast(0)
             writing = true
             try {
                 block()
             } finally {
                 writing = false
             }
+            rememberChange(origin, text?.toString().orEmpty(), cursor)
         }
         background = null
         setTextColor(0xFF252630.toInt())
@@ -112,6 +117,7 @@ class SplitEditorView(context: Context) : EditText(context) {
                     editBefore = s?.toString().orEmpty()
                     changeStart = start
                     changeDeleted = count
+                    cursorBeforeEdit = selectionEnd.coerceAtLeast(0)
                 }
             }
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
@@ -135,6 +141,7 @@ class SplitEditorView(context: Context) : EditText(context) {
                         closedBrackets.addAll(bracket.closedAt)
                         val origin = editBefore
                         editBefore = bracket.text
+                        rememberChange(origin, bracket.text)
                         onVisibleEdit(origin, bracket.text)
                     } else {
                         val replacement = ch.fasrv.fanotes.desk.markdownEnterReplacement(editBefore, next)
@@ -147,6 +154,7 @@ class SplitEditorView(context: Context) : EditText(context) {
                             closedBrackets.clear()
                             val origin = editBefore
                             editBefore = replacement.text
+                            rememberChange(origin, replacement.text)
                             onVisibleEdit(origin, replacement.text)
                         } else {
                             val inserted = next.length - editBefore.length + changeDeleted
@@ -158,6 +166,7 @@ class SplitEditorView(context: Context) : EditText(context) {
                             )
                             closedBrackets.clear()
                             closedBrackets.addAll(bracketsOnCursorLine(next, selectionStart, shifted))
+                            rememberChange(editBefore, next)
                             onVisibleEdit(editBefore, next)
                         }
                     }
@@ -178,12 +187,37 @@ class SplitEditorView(context: Context) : EditText(context) {
         tags?.onCaretMoved()
     }
 
+    private fun rememberChange(before: String, after: String, cursorBefore: Int = cursorBeforeEdit) {
+        history.record(before, after, cursorBefore, selectionEnd.coerceAtLeast(0), System.currentTimeMillis())
+    }
+
+    private fun undoTyping(): Boolean = restoreHistory(history.undo(text?.toString().orEmpty()))
+
+    private fun redoTyping(): Boolean = restoreHistory(history.redo(text?.toString().orEmpty()))
+
+    private fun restoreHistory(edit: ch.fasrv.fanotes.desk.MarkdownEdit?): Boolean {
+        if (edit == null) return false
+        val origin = text?.toString().orEmpty()
+        writing = true
+        setText(edit.text)
+        setSelection(
+            edit.selectionStart.coerceIn(0, edit.text.length),
+            edit.selectionEnd.coerceIn(0, edit.text.length),
+        )
+        writing = false
+        editBefore = edit.text
+        onVisibleEdit(origin, edit.text)
+        paintPreview()
+        return true
+    }
+
     fun show(markdown: String) {
         val pending = pendingCursor
         if (text?.toString() == markdown && pending == null) {
             paintPreview()
             return
         }
+        history.reset()
         val current = text?.toString().orEmpty()
         val selection = if (pending != null) {
             val cursor = pending.coerceIn(0, markdown.length)
@@ -273,6 +307,24 @@ class SplitEditorView(context: Context) : EditText(context) {
             }
         }
         if (tags?.onKey(keyCode, event) == true) return true
+        val historyCommand = ch.fasrv.fanotes.desk.editorHistoryCommand(
+            event.isCtrlPressed,
+            event.isShiftPressed,
+            event.isAltPressed,
+            event.isMetaPressed,
+            when (keyCode) {
+                KeyEvent.KEYCODE_Z -> "z"
+                KeyEvent.KEYCODE_Y -> "y"
+                else -> ""
+            },
+        )
+        if (historyCommand != null) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                tags?.hide()
+                if (historyCommand == "undo") undoTyping() else redoTyping()
+            }
+            return true
+        }
         if (ch.fasrv.fanotes.desk.togglesEditorTabFocus(
                 event.isCtrlPressed,
                 event.isShiftPressed,
@@ -592,11 +644,13 @@ class SplitEditorView(context: Context) : EditText(context) {
         if (pasted.isNullOrEmpty() || writing) return false
         val edit = pasteUrlAsMarkdownLink(text?.toString().orEmpty(), selectionStart, selectionEnd, pasted) ?: return false
         val origin = text?.toString().orEmpty()
+        val cursor = selectionEnd.coerceAtLeast(0)
         writing = true
         setText(edit.text)
         setSelection(edit.selectionStart, edit.selectionEnd)
         writing = false
         editBefore = edit.text
+        rememberChange(origin, edit.text, cursor)
         onVisibleEdit(origin, edit.text)
         return true
     }
@@ -632,10 +686,12 @@ class SplitEditorView(context: Context) : EditText(context) {
             selectionStart.coerceAtLeast(0)
         }
         val end = if (details) start else selectionEnd.coerceAtLeast(start)
+        val caret = selectionEnd.coerceAtLeast(0)
         writing = true
         setText(next)
         setSelection(start.coerceIn(0, next.length), end.coerceIn(0, next.length))
         writing = false
+        rememberChange(before, next, caret)
         paintPreview()
         onVisibleEdit(before, next)
         return true
