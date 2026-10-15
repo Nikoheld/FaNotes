@@ -1446,8 +1446,13 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
             Text(sections.first { it.first == section }.second, style = MaterialTheme.typography.titleLarge)
             when (section) {
                 "appearance" -> {
-                    listOf("dark" to "Dunkel", "light" to "Hell", "sepia" to "Sepia").forEach { (id, label) ->
-                        Text(label, modifier = Modifier.clickable { model.updateDesk("theme", id) }.padding(vertical = 6.dp), fontWeight = if (settings["theme"] == id || (id == "dark" && settings["theme"] == null)) FontWeight.Bold else FontWeight.Normal)
+                    ch.fasrv.fanotes.desk.THEME_CHOICES.forEach { choice ->
+                        val selected = ch.fasrv.fanotes.desk.themeChoiceSelected(settings["theme"], choice.id)
+                        Text(
+                            "${choice.label} · ${choice.detail}",
+                            modifier = Modifier.clickable { model.updateDesk("theme", choice.id) }.padding(vertical = 6.dp),
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        )
                     }
                     Text("Arbeitsflächen-Design", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                     val background = ch.fasrv.fanotes.desk.workspaceBackground(settings["background"])

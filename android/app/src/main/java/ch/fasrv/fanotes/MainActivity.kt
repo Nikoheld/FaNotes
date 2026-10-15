@@ -155,7 +155,7 @@ class MainActivity : ComponentActivity() {
             val css by model.customCss.collectAsStateWithLifecycle()
             val desk = ch.fasrv.fanotes.desk.deskWithCustomCss(rawDesk, css)
             FaNotesTheme(
-                desk["theme"] ?: if (androidx.compose.foundation.isSystemInDarkTheme()) "dark" else "light",
+                desk["theme"].orEmpty(),
                 desk["accent"].orEmpty(),
                 desk["accent-secondary"].orEmpty(),
                 desk["ui-font"].orEmpty(),
@@ -229,14 +229,20 @@ fun FaNotesTheme(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val family = androidx.compose.ui.text.font.FontFamily(loadUiTypeface(context, uiFont))
+    val palette = ch.fasrv.fanotes.desk.themePalette(themeName, androidx.compose.foundation.isSystemInDarkTheme())
+    val background = Color(android.graphics.Color.parseColor(palette.background))
+    val surface = Color(android.graphics.Color.parseColor(palette.surface))
+    val surfaceVariant = Color(android.graphics.Color.parseColor(palette.surfaceVariant))
+    val onSurface = Color(android.graphics.Color.parseColor(palette.text))
+    val danger = Color(android.graphics.Color.parseColor(palette.danger))
     val accent = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccent(accentHex)))
     val onAccent = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.accentInk(accentHex)))
     val secondary = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccentSecondary(accentSecondaryHex)))
     val onSecondary = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.accentInk(accentSecondaryHex)))
-    val baseScheme = when (themeName) {
-        "light" -> lightColorScheme(primary = accent, onPrimary = onAccent, secondary = secondary, onSecondary = onSecondary, onSurface = Color(0xFF252630), background = Color(0xFFFFFFFF), surface = Color(0xFFF7F6F3), surfaceVariant = Color(0xFFE7E4DE))
-        "sepia" -> lightColorScheme(primary = accent, onPrimary = onAccent, secondary = secondary, onSecondary = onSecondary, onSurface = Color(0xFF3E3428), background = Color(0xFFF4EFE4), surface = Color(0xFFEFE6D6), surfaceVariant = Color(0xFFE4D7C3))
-        else -> darkColorScheme(primary = accent, onPrimary = onAccent, secondary = secondary, onSecondary = onSecondary, onSurface = Color(0xFFEDEDEC), background = Color(0xFF191919), surface = Color(0xFF202020), surfaceVariant = Color(0xFF2A2A2A))
+    val baseScheme = if (palette.dark) {
+        darkColorScheme(primary = accent, onPrimary = onAccent, secondary = secondary, onSecondary = onSecondary, onSurface = onSurface, background = background, surface = surface, surfaceVariant = surfaceVariant, error = danger)
+    } else {
+        lightColorScheme(primary = accent, onPrimary = onAccent, secondary = secondary, onSecondary = onSecondary, onSurface = onSurface, background = background, surface = surface, surfaceVariant = surfaceVariant, error = danger)
     }
     val scheme = baseScheme.copy(
         background = chrome.background?.let { Color(android.graphics.Color.parseColor(it)) } ?: baseScheme.background,
@@ -1173,7 +1179,7 @@ private fun NotePage(
         paper = model.session.document.paperStyle,
         syncText = syncText,
         syncBusy = syncBusy,
-        dark = isSystemInDarkTheme(),
+        dark = ch.fasrv.fanotes.desk.themePalette(model.effectiveDesk()["theme"], isSystemInDarkTheme()).dark,
         onSync = onSync,
         onToggleRail = onToggleRail,
         onEditBox = onEditBox,
