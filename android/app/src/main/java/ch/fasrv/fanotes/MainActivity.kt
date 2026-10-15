@@ -84,6 +84,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
@@ -966,16 +967,19 @@ private fun SplitPane(
     val path = model.splitPath.collectAsStateWithLifecycle().value
     val markdown = model.splitMarkdown.collectAsStateWithLifecycle().value
     val title = path?.let { ch.fasrv.fanotes.vault.titleOf(it) }.orEmpty()
+    var typing by remember(path) { mutableStateOf(false) }
     Column(modifier) {
         Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(title.ifBlank { "Zweite Spalte" }, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
+            TextButton(onClick = { typing = !typing }) { Text(if (typing) "Stift" else "Text") }
             TextButton(onClick = { model.swapSplit() }) { Text("Tauschen") }
             TextButton(onClick = { model.toggleSplitOrientation() }) { Text("Drehen") }
             TextButton(onClick = { model.promoteSplit() }) { Text("Einzeln") }
             TextButton(onClick = { model.closeSplit() }) { Text("Schließen") }
         }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
         AndroidView(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
+            modifier = Modifier.fillMaxSize(),
             factory = { context ->
                 InkSurfaceView(context).apply {
                     session = model.splitSession
@@ -986,7 +990,7 @@ private fun SplitPane(
             update = { view ->
                 view.session = model.splitSession
                 view.markdown = markdown
-                view.showMarkdown = markdown.isNotBlank()
+                view.showMarkdown = markdown.isNotBlank() && !typing
                 view.inkTool = tool
                 view.style = style
                 view.fingerDraws = finger
@@ -1021,6 +1025,16 @@ private fun SplitPane(
                 }
             },
         )
+        if (typing) {
+            BasicTextField(
+                value = markdown,
+                onValueChange = { model.updateSplitMarkdown(it) },
+                modifier = Modifier.fillMaxSize().background(Color(0xFFF7F6F3)).padding(16.dp),
+                textStyle = TextStyle(color = Color(0xFF252630), fontSize = 16.sp, lineHeight = 24.sp),
+                cursorBrush = SolidColor(Color(0xFF2A6F97)),
+            )
+        }
+        }
     }
 }
 
