@@ -1185,6 +1185,20 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         noteChanged()
     }
 
+    /** Fold gutter: hide or show the body under this source heading, and the matching ink section. */
+    fun toggleHeadingFold(line: Int) {
+        if (ch.fasrv.fanotes.desk.headingFoldRange(markdown.value, line) == null && line !in foldedHeadings.value) return
+        val collapse = line !in foldedHeadings.value
+        foldedHeadings.value = if (collapse) foldedHeadings.value + line else foldedHeadings.value - line
+        syncHeadingSection(session, markdown.value, line, collapse)
+        noteChanged()
+    }
+
+    fun toggleHeadingAtVisibleLine(visibleLine: Int) {
+        val line = ch.fasrv.fanotes.desk.headingLineForFoldMarker(markdown.value, foldedHeadings.value, visibleLine) ?: return
+        toggleHeadingFold(line)
+    }
+
     /** Opens a folded heading so a jump into its body can land on the line. */
     fun unfoldHeading(line: Int) {
         if (line !in foldedHeadings.value) return
@@ -2494,6 +2508,27 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             splitFolded.value = if (collapsed) splitFolded.value + line else splitFolded.value - line
         }
         splitChanged()
+    }
+
+    fun toggleSplitHeading(line: Int) {
+        if (ch.fasrv.fanotes.desk.headingFoldRange(splitMarkdown.value, line) == null && line !in splitFolded.value) return
+        val collapse = line !in splitFolded.value
+        splitFolded.value = if (collapse) splitFolded.value + line else splitFolded.value - line
+        syncHeadingSection(splitSession, splitMarkdown.value, line, collapse)
+        splitChanged()
+    }
+
+    fun toggleSplitHeadingAtVisibleLine(visibleLine: Int) {
+        val line = ch.fasrv.fanotes.desk.headingLineForFoldMarker(splitMarkdown.value, splitFolded.value, visibleLine) ?: return
+        toggleSplitHeading(line)
+    }
+
+    private fun syncHeadingSection(target: ch.fasrv.fanotes.ink.InkSession, markdown: String, line: Int, collapse: Boolean) {
+        val index = ch.fasrv.fanotes.desk.sectionIndexForHeading(markdown, line)
+        if (index < 0) return
+        val section = ch.fasrv.fanotes.ink.sectionsOf(target.document).sortedBy { it.top }.getOrNull(index) ?: return
+        if (section.collapsed == collapse) return
+        target.replace(ch.fasrv.fanotes.ink.toggleSection(target.document, section.id))
     }
 
     /** An edit of the text visible in the split, leaving folded heading bodies in the note. */

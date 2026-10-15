@@ -1421,6 +1421,8 @@ private fun SplitPane(
                     editor.showLineNumbers = metrics.showLineNumbers
                     editor.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, metrics.fontSizePx.toFloat())
                     editor.setLineSpacing(0f, metrics.lineHeight.toFloat())
+                    editor.foldMarkers = ch.fasrv.fanotes.desk.foldMarkerGlyphs(markdown, folded)
+                    editor.onToggleFold = { model.toggleSplitHeadingAtVisibleLine(it) }
                     editor.show(visible)
                 },
             )
@@ -1572,6 +1574,7 @@ private fun PageSurface(
             page.ink.onPenSample = { x, y -> model.recordPenSample(x, y) }
             page.ink.onSwipeNote = { model.swipe(it) }
             page.onUnfoldHeading = { model.unfoldHeading(it) }
+            page.onToggleHeading = { model.toggleHeadingAtVisibleLine(it) }
             if (page.ink.backdrop !== backdrop) page.ink.backdrop = backdrop
             page.onTool = {
                 model.tool.value = it
