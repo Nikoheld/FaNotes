@@ -1136,6 +1136,10 @@ class InkSurfaceView @JvmOverloads constructor(
             drawSpray(canvas, inkPaint, stroke, scale, sessionWidth(), sessionHeight())
             return
         }
+        if (stroke.brush == "marker") {
+            drawMarkerStroke(canvas, inkPaint, stroke, scale, sessionWidth(), sessionHeight(), strokeSmoothing.toDouble(), parseColor(stroke.color))
+            return
+        }
         val passes = if (stroke.brush == "calligraphy") {
             listOf(ch.fasrv.fanotes.ink.InkPaintPass(ch.fasrv.fanotes.ink.brushWidthScale(stroke.brush), 1.0))
         } else {

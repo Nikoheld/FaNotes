@@ -26,4 +26,19 @@ class InkBrushesTest {
         assertEquals(0.34, brushPasses("highlighter").single().alpha)
         assertEquals(1.0, brushPasses("fineliner").single().widthFactor)
     }
+
+    @Test
+    fun aMarkerCornerFilletsInsideTheNib() {
+        val straight = markerCenterline(listOf(0.0, 10.0), listOf(0.0, 0.0), 8.0, 1.0)
+        assertEquals(2, straight.size)
+        val aligned = markerCenterline(listOf(0.0, 50.0, 100.0), listOf(0.0, 0.0, 0.0), 20.0, 1.0)
+        assertTrue(aligned.none { it is MarkerCommand.Quad })
+        val corner = markerCenterline(listOf(0.0, 100.0, 100.0), listOf(0.0, 0.0, 100.0), 20.0, 1.0)
+        val quad = corner.filterIsInstance<MarkerCommand.Quad>().single()
+        assertEquals(100.0, quad.cx, 0.001)
+        assertEquals(0.0, quad.cy, 0.001)
+        assertEquals(100.0, quad.x, 0.001)
+        assertEquals(24.042, quad.y, 0.01)
+        assertTrue(corner.last() is MarkerCommand.Line)
+    }
 }

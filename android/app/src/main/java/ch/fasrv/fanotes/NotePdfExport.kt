@@ -372,6 +372,10 @@ private fun drawStroke(canvas: Canvas, stroke: InkStroke, sourceWidth: Double, s
         drawSpray(canvas, paint, stroke, scale, sourceWidth, sourceHeight)
         return
     }
+    if (stroke.brush == "marker") {
+        drawMarkerStroke(canvas, paint, stroke, scale, sourceWidth, sourceHeight, smoothing.toDouble(), parsePdfColor(stroke.color))
+        return
+    }
     val passes = if (stroke.brush == "calligraphy") {
         listOf(ch.fasrv.fanotes.ink.InkPaintPass(ch.fasrv.fanotes.ink.brushWidthScale(stroke.brush), 1.0))
     } else {
