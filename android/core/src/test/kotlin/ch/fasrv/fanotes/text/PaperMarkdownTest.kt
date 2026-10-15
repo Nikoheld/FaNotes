@@ -58,4 +58,14 @@ class PaperMarkdownTest {
         assertEquals(2, paperLines(marked).first { it.kind == PaperKind.TASK }.sourceLine)
         assertEquals("- [x] B", ch.fasrv.fanotes.desk.toggleTask(marked, 2).substringAfterLast('\n'))
     }
+
+    @Test
+    fun aWholeLineImageBecomesAPaperCard() {
+        val image = paperLines("Siehe\n\n![Tafel](bilder/tafel.png)\n\nNachher")
+        val card = image.first { it.kind == PaperKind.IMAGE }
+        assertEquals("Tafel", paperImageCaption(card.text))
+        assertEquals("bilder/tafel.png", paperImageSource(card.text))
+        assertEquals("foto.png", paperImageCaption(paperLines("![](ordner/foto.png)").single().text))
+        assertEquals(PaperKind.PARAGRAPH, paperLines("Text ![Tafel](a.png) danach").single().kind)
+    }
 }

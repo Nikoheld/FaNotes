@@ -20,6 +20,7 @@ fun aiPreviewLineText(line: PaperLine): String = when (line.kind) {
         "${if (done) "☑" else "☐"} ${stripPreviewMarkers(body)}"
     }
     PaperKind.RULE, PaperKind.SPACER -> ""
+    PaperKind.IMAGE -> ch.fasrv.fanotes.text.paperImageCaption(line.text)
     PaperKind.CODE, PaperKind.MATH -> line.text
     else -> stripPreviewMarkers(line.text)
 }
