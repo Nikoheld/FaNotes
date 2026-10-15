@@ -208,4 +208,58 @@ class LivePreviewTest {
         assertEquals(12f, detailsImageRadius(16f))
         assertEquals(16f * DETAILS_CARD_FONT * DETAILS_IMAGE_MARGIN_EM, detailsImageMargin(16f))
     }
+
+    @Test
+    fun openDetailsKeepInlineMarksFromThePreview() {
+        val source = "Siehe **fett**, *kursiv*, ~~weg~~, `code` und [Seite](https://x)"
+        val (plain, marks) = detailsPlain(source)
+        assertEquals(stripPreviewMarkers(source), plain)
+        assertEquals("fett", plain.substring(marks.first { it.kind == "strong" }.let { it.start until it.end }))
+        assertEquals("kursiv", plain.substring(marks.first { it.kind == "emphasis" }.let { it.start until it.end }))
+        assertEquals("weg", plain.substring(marks.first { it.kind == "strike" }.let { it.start until it.end }))
+        assertEquals("code", plain.substring(marks.first { it.kind == "code" }.let { it.start until it.end }))
+        val link = marks.first { it.kind == "link" }
+        assertEquals("Seite", plain.substring(link.start, link.end))
+        assertEquals("https://x", link.target)
+        val samples = listOf(
+            "plain",
+            "**a** __b__",
+            "*a* _b_",
+            "~~a~~",
+            "`a`",
+            "[a](b)",
+            "[[Ziel|Name]]",
+            "[[Mechanik]]",
+            "siehe ![alt](bild.png) **c**",
+            "[**Hi**](https://y)",
+            "**a *b* c**",
+        )
+        for (sample in samples) assertEquals(stripPreviewMarkers(sample), detailsPlain(sample).first)
+        val nested = detailsPlain("[**Hi**](https://y)")
+        assertEquals("Hi", nested.first)
+        assertEquals("link", nested.second.first { it.kind == "link" }.kind)
+        assertEquals(0 to 2, nested.second.first { it.kind == "link" }.let { it.start to it.end })
+        assertEquals("https://y", nested.second.first { it.kind == "link" }.target)
+        assertEquals(0 to 2, nested.second.first { it.kind == "strong" }.let { it.start to it.end })
+        val wiki = detailsPlain("[[Mechanik|Kraft]]")
+        assertEquals("Kraft", wiki.first)
+        assertEquals("Mechanik", wiki.second.single().target)
+        val bullet = detailsReadingLines("- **Punkt** und [Ziel](note.md)")
+        assertEquals("• Punkt und Ziel", bullet[0].text)
+        val point = bullet[0].inlines.first { it.kind == "strong" }
+        assertEquals(2, point.start)
+        assertEquals("Punkt", bullet[0].text.substring(point.start, point.end))
+        assertEquals("note.md", bullet[0].inlines.first { it.kind == "link" }.target)
+        val task = detailsReadingLines("- [ ] **Offen**")
+        assertEquals("☐ Offen", task[0].text)
+        assertEquals("Offen", task[0].text.substring(task[0].inlines.single().start, task[0].inlines.single().end))
+        val table = detailsReadingLines("| **Name** | B |\n| --- | --- |\n| 1 | 2 |")
+        val header = table[0].inlines.single { it.kind == "strong" }
+        assertEquals("Name", table[0].text.substring(header.start, header.end))
+        val note = "<details open>\n<summary>T</summary>\n**Geheim**\n</details>"
+        val card = livePreviewMarks(note, 0, 0).first { it.kind == LiveKind.DETAILS_SUMMARY }
+        assertEquals("Geheim", card.body)
+        assertEquals("strong", card.readingInlines.single().single().kind)
+        assertEquals(0 to 6, card.readingInlines.single().single().let { it.start to it.end })
+    }
 }
