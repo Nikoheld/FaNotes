@@ -65,4 +65,13 @@ class EditorMetricsTest {
         assertTrue(fast > 2.0)
         assertEquals(1, editorMetrics(mapOf("zoom-speed" to "1")).zoomSpeed)
     }
+
+    @Test
+    fun readableLinesUseThePageWidthWhenTheLimitIsOff() {
+        assertEquals(true, editorMetrics(emptyMap()).readableLineLength)
+        assertEquals(false, editorMetrics(mapOf("readable-lines" to "off")).readableLineLength)
+        assertEquals(820f, effectiveContentWidth(820, 1200f, readable = true))
+        assertEquals(1056f, effectiveContentWidth(820, 1200f, readable = false))
+        assertEquals(856f, effectiveContentWidth(2000, 1000f, readable = true))
+    }
 }

@@ -997,6 +997,7 @@ private fun SplitPane(
                 view.editorFontPx = metrics.fontSizePx.toFloat()
                 view.editorLineHeight = metrics.lineHeight.toFloat()
                 view.contentWidthPx = metrics.contentWidthPx.toFloat()
+                view.readableLineLength = metrics.readableLineLength
                 view.zoomMax = metrics.zoomMax.toFloat()
                 view.zoomSpeed = metrics.zoomSpeed
                 val pen = ch.fasrv.fanotes.desk.penSettings(model.deskSettings.value)

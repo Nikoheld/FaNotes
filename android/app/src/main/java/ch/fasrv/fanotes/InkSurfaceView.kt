@@ -154,6 +154,8 @@ class InkSurfaceView @JvmOverloads constructor(
         set(value) { if (field != value) { field = value; paperBlocks = emptyList(); invalidate() } }
     var contentWidthPx: Float = 820f
         set(value) { if (field != value) { field = value; paperBlocks = emptyList(); invalidate() } }
+    var readableLineLength: Boolean = true
+        set(value) { if (field != value) { field = value; paperBlocks = emptyList(); invalidate() } }
     var zoomMax: Float = 3.25f
     var zoomSpeed: Int = 5
     var shapeSnapSensitivity: Int = 50
@@ -1156,7 +1158,12 @@ class InkSurfaceView @JvmOverloads constructor(
         return pageLeft + (x * sessionWidth() * scale).toFloat() to pageTop + (y * sessionHeight() * scale).toFloat()
     }
 
-    fun textColumnPx(): Float = contentWidthPx.coerceAtMost((sessionWidth() - TEXT_PAD_X * 2).toFloat()).coerceAtLeast(120f)
+    fun textColumnPx(): Float = ch.fasrv.fanotes.desk.effectiveContentWidth(
+        contentWidthPx.toInt(),
+        sessionWidth().toFloat(),
+        readableLineLength,
+        TEXT_PAD_X,
+    )
 
     private fun clampZoom(value: Float) = value.coerceIn(0.5f, zoomMax.coerceIn(0.5f, 6f))
 
