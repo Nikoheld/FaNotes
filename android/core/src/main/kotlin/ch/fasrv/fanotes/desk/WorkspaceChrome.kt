@@ -41,6 +41,10 @@ fun uiFontId(raw: String?): String {
  */
 data class NoteWorkspacePanels(val sidebar: Boolean, val inspector: Boolean)
 
+/** The file tree stays beside vault search, the same way the desktop sidebar does. */
+fun workspaceKeepsNoteChrome(destination: String): Boolean =
+    destination == "notes" || destination == "search"
+
 fun noteWorkspacePanels(
     focus: Boolean,
     wide: Boolean,

@@ -82,6 +82,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
@@ -682,7 +683,7 @@ fun FaNotesScreen(
             sidebarOpen = sidebarOpen,
             inspectorOpen = inspectorOpen,
             outlineEnabled = desk["outline"] != "off",
-            notes = destination == "notes",
+            notes = ch.fasrv.fanotes.desk.workspaceKeepsNoteChrome(destination),
         )
         Row(Modifier.weight(1f).fillMaxWidth()) {
             if (panels.sidebar) {
@@ -692,6 +693,9 @@ fun FaNotesScreen(
                     tags = collectVaultTags(tagIndex.values.map { noteTags -> noteTags.joinToString(" ") { "#$it" } }),
                     tagFilter = tagFilter,
                     onToggleTag = { model.toggleTagFilter(it) },
+                    searchQuery = model.searchQuery.collectAsStateWithLifecycle().value,
+                    onSearchQuery = { model.searchVaultText(it) },
+                    onOpenSearch = { model.showDestination("search") },
                     selected = open?.path,
                     splitPath = split,
                     vaultLabel = vaultLabel,
@@ -1085,6 +1089,9 @@ private fun VaultPane(
     tags: List<String> = emptyList(),
     tagFilter: String? = null,
     onToggleTag: (String) -> Unit = {},
+    searchQuery: String = "",
+    onSearchQuery: (String) -> Unit = {},
+    onOpenSearch: () -> Unit = {},
     selected: String?,
     splitPath: String? = null,
     vaultLabel: String,
@@ -1156,6 +1163,24 @@ private fun VaultPane(
             TextButton(onClick = onImportImage) { Text("Bild") }
             TextButton(onClick = onImportSheet) { Text("Blatt") }
         }
+        OutlinedTextField(
+            searchQuery,
+            {
+                onSearchQuery(it)
+                onOpenSearch()
+            },
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).onFocusChanged { state ->
+                if (state.isFocused) onOpenSearch()
+            },
+            singleLine = true,
+            label = { Text("Notizen suchen") },
+            placeholder = { Text("Suchen …") },
+            trailingIcon = if (searchQuery.isEmpty()) null else {
+                {
+                    TextButton(onClick = { onSearchQuery("") }) { Text("Suche leeren") }
+                }
+            },
+        )
         if (conflicts.isNotEmpty()) {
             Text("Konflikte", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
             conflicts.forEach { conflict ->
