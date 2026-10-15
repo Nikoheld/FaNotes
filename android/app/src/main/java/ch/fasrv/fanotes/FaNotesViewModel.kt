@@ -579,9 +579,29 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun showPdfThumb(page: Int) {
-        if (page < 1) return
-        pdfThumbPage.value = page
-        revealPdfPage(page)
+        goToPdfPage(page)
+    }
+
+    val pdfZoom = MutableStateFlow(1.0)
+    val pdfZoomMode = MutableStateFlow("custom")
+    val pdfCameraCommand = MutableStateFlow<Pair<Int, String>?>(null)
+
+    fun requestPdfCamera(command: String) {
+        val token = (pdfCameraCommand.value?.first ?: 0) + 1
+        pdfCameraCommand.value = token to command
+    }
+
+    fun notePdfZoom(zoom: Float, mode: String) {
+        if (pdfZoom.value != zoom.toDouble()) pdfZoom.value = zoom.toDouble()
+        if (pdfZoomMode.value != mode) pdfZoomMode.value = mode
+    }
+
+    fun goToPdfPage(page: Int) {
+        val count = backdrop.value.count { it.bitmap != null && it.worksheetId.isEmpty() }
+        if (count <= 0) return
+        val target = ch.fasrv.fanotes.desk.pdfPageTarget(page.toDouble(), count)
+        pdfThumbPage.value = target
+        revealPdfPage(target)
     }
 
     private fun clearPdfThumbs() {

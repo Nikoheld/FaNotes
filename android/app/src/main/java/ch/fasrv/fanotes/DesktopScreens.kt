@@ -2824,6 +2824,60 @@ fun PdfPasswordPrompt(model: FaNotesViewModel) {
 }
 
 @Composable
+fun PdfNoteToolbar(model: FaNotesViewModel) {
+    val open by model.open.collectAsStateWithLifecycle()
+    val page by model.pdfThumbPage.collectAsStateWithLifecycle()
+    val backdrop by model.backdrop.collectAsStateWithLifecycle()
+    val zoom by model.pdfZoom.collectAsStateWithLifecycle()
+    val mode by model.pdfZoomMode.collectAsStateWithLifecycle()
+    val desk by model.deskSettings.collectAsStateWithLifecycle()
+    val count = backdrop.count { it.bitmap != null && it.worksheetId.isEmpty() }
+    val zoomMax = ch.fasrv.fanotes.desk.editorMetrics(desk).zoomMax
+    var draft by remember(open?.path) { mutableStateOf(page.toString()) }
+    androidx.compose.runtime.LaunchedEffect(page) { draft = page.toString() }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(open?.title ?: "PDF", fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f))
+            Text(ch.fasrv.fanotes.desk.pdfPageCountLabel(count), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
+        }
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = { model.goToPdfPage(page - 1) }, enabled = page > 1) { Text("Vorherige Seite") }
+            OutlinedTextField(
+                draft,
+                { draft = it.filter { char -> char.isDigit() }.take(4) },
+                modifier = Modifier.width(72.dp),
+                singleLine = true,
+                label = { Text("Seite") },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                keyboardActions = KeyboardActions(onGo = {
+                    draft.toIntOrNull()?.let(model::goToPdfPage)
+                }),
+            )
+            Text("/ ${if (count > 0) count else "…"}", fontSize = 12.sp, modifier = Modifier.padding(horizontal = 6.dp))
+            TextButton(onClick = { model.goToPdfPage(page + 1) }, enabled = count > 0 && page < count) { Text("Nächste Seite") }
+            TextButton(onClick = { model.requestPdfCamera("out") }, enabled = zoom > 0.5 + 1e-4) { Text("Verkleinern") }
+            Text(
+                ch.fasrv.fanotes.desk.pdfZoomPercentLabel(zoom),
+                fontSize = 12.sp,
+                fontWeight = if (mode == "custom") FontWeight.SemiBold else FontWeight.Normal,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+            TextButton(onClick = { model.requestPdfCamera("in") }, enabled = zoom < zoomMax - 1e-4) { Text("Vergrößern") }
+            TextButton(onClick = { model.requestPdfCamera("fit-width") }) {
+                Text("Breite", fontWeight = if (mode == "fit-width") FontWeight.Bold else FontWeight.Normal)
+            }
+            TextButton(onClick = { model.requestPdfCamera("fit-page") }) {
+                Text("Ganze Seite", fontWeight = if (mode == "fit-page") FontWeight.Bold else FontWeight.Normal)
+            }
+            TextButton(onClick = { model.requestPdfCamera("rotate") }) { Text("Drehen") }
+        }
+    }
+}
+
+@Composable
 fun PdfSearchBar(model: FaNotesViewModel) {
     val query by model.pdfSearchQuery.collectAsStateWithLifecycle()
     val hits by model.pdfSearchHits.collectAsStateWithLifecycle()

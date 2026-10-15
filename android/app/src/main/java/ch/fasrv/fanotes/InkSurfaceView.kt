@@ -162,6 +162,7 @@ class InkSurfaceView @JvmOverloads constructor(
     var worksheetHighlights: List<ch.fasrv.fanotes.desk.AnchoredHighlight> = emptyList()
     private var reportedPdfPage = 0
     var onPdfPage: (Int) -> Unit = {}
+    var onPdfZoom: (Float, String) -> Unit = { _, _ -> }
     var pageFrames: List<ch.fasrv.fanotes.desk.PageFrame> = emptyList()
         set(value) {
             field = value
@@ -435,6 +436,45 @@ class InkSurfaceView @JvmOverloads constructor(
         settleZoom()
         invalidate()
         publishCamera()
+    }
+
+    /** Desktop PDF toolbar: Breite, Ganze Seite, and the multiplicative ± steps. */
+    fun applyPdfCamera(command: String) {
+        val fit = measurePdfFit()
+        when (command) {
+            "fit-width" -> setCameraZoom(fit.width.toFloat())
+            "fit-page" -> setCameraZoom(fit.page.toFloat())
+            "in" -> setCameraZoom(ch.fasrv.fanotes.desk.pdfZoomStep(zoom.toDouble(), 1, 0.5, zoomMax.toDouble()).toFloat())
+            "out" -> setCameraZoom(ch.fasrv.fanotes.desk.pdfZoomStep(zoom.toDouble(), -1, 0.5, zoomMax.toDouble()).toFloat())
+            "rotate" -> {
+                rotatePage()
+                publishCamera()
+            }
+        }
+    }
+
+    fun setCameraZoom(value: Float) {
+        zoom = clampZoom(value)
+        settleZoom()
+        invalidate()
+        publishCamera()
+    }
+
+    private fun measurePdfFit(): ch.fasrv.fanotes.desk.PdfFitZoom {
+        val base = (width - padding() * 2).coerceAtLeast(1f) / ch.fasrv.fanotes.ink.PAGE_START_WIDTH.toFloat()
+        val column = sessionWidth() * base
+        val frameHeight = pageFrames.firstOrNull()?.height ?: sessionHeight()
+        val pageHeight = frameHeight * base
+        return ch.fasrv.fanotes.desk.pdfFitZoom(
+            ch.fasrv.fanotes.desk.PdfFitInput(
+                viewWidth = width.toDouble().coerceAtLeast(1.0),
+                viewHeight = height.toDouble().coerceAtLeast(1.0),
+                columnWidth = column.toDouble(),
+                pageHeight = pageHeight,
+                min = 0.5,
+                max = zoomMax.toDouble(),
+            ),
+        )
     }
 
     fun rotatePage() {
@@ -1630,6 +1670,8 @@ class InkSurfaceView @JvmOverloads constructor(
             reportedPdfPage = page
             onPdfPage(page)
         }
+        val fit = measurePdfFit()
+        onPdfZoom(zoom, ch.fasrv.fanotes.desk.pdfZoomModeForZoom(zoom.toDouble(), fit))
     }
 
     private fun addGrownSample(current: InkSession, sample: StrokePoint): Boolean {
