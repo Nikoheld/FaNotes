@@ -10,6 +10,9 @@ data class FootnotePrep(val body: String, val notes: List<String>)
 /** Footnote lines are smaller than the card body, close to the preview's 12px notes. */
 const val FOOTNOTE_SCALE = 0.78f
 
+/** The return arrow remark-gfm appends to the last paragraph of a definition. */
+const val FOOTNOTE_RETURN = "\u21A9"
+
 private val FOOTNOTE_DEF = Regex("""^ {0,3}\[\^([^\]\s]+)]:[ \t]?(.*)$""")
 private val FOOTNOTE_REF = Regex("""\[\^([^\]\s]+)](?!:)""")
 private val FENCE_LINE = Regex("""^ {0,3}(`{3,}|~{3,})[^`~]*$""")

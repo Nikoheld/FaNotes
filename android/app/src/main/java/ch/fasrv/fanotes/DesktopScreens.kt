@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -52,6 +53,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,6 +74,7 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.asImageBitmap
@@ -81,6 +84,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -95,6 +99,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.abs
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import ch.fasrv.fanotes.desk.DeskTab
 import ch.fasrv.fanotes.desk.measureDocument
@@ -2115,7 +2120,20 @@ fun AiScreen(model: FaNotesViewModel) {
     val note by model.open.collectAsStateWithLifecycle()
     val live by model.markdown.collectAsStateWithLifecycle()
     fun setting(field: String) = settings["ai-$provider-$field"].orEmpty()
-    Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val pageScroll = rememberScrollState()
+    val previewAnchors = remember { androidx.compose.runtime.mutableStateMapOf<Int, Int>() }
+    val previewLayouts = remember { androidx.compose.runtime.mutableStateMapOf<Int, TextLayoutResult>() }
+    val previewScope = rememberCoroutineScope()
+    var previewColumnTop by remember { mutableIntStateOf(0) }
+    val calmMotion = ch.fasrv.fanotes.desk.reduceMotion(settings["reduce-motion"])
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .onGloballyPositioned { previewColumnTop = it.positionInRoot().y.roundToInt() }
+            .verticalScroll(pageScroll),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         Text("AI", style = MaterialTheme.typography.titleLarge)
         Text("Dieselbe Auswahl wie auf dem Desktop. Der Schlüssel bleibt auf diesem Tablet.", fontSize = 13.sp)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2204,22 +2222,43 @@ fun AiScreen(model: FaNotesViewModel) {
                 val link = MaterialTheme.colorScheme.primary
                 val muted = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
                 val lines = ch.fasrv.fanotes.desk.aiPreviewReading(result)
+                fun jumpTo(target: Int) {
+                    val y = previewAnchors[target] ?: return
+                    previewScope.launch {
+                        if (calmMotion) pageScroll.scrollTo(y) else pageScroll.animateScrollTo(y)
+                    }
+                }
+                fun Modifier.previewAnchor(lineIndex: Int): Modifier = onGloballyPositioned { coords ->
+                    previewAnchors[lineIndex] = (coords.positionInRoot().y.roundToInt() - previewColumnTop + pageScroll.value).coerceAtLeast(0)
+                }
+                fun Modifier.previewFootnote(lineIndex: Int): Modifier = previewAnchor(lineIndex).pointerInput(lines, lineIndex, calmMotion) {
+                    detectTapGestures { offset ->
+                        val layout = previewLayouts[lineIndex] ?: return@detectTapGestures
+                        val target = ch.fasrv.fanotes.desk.footnoteJumpIndex(lines, lineIndex, layout.getOffsetForPosition(offset)) ?: return@detectTapGestures
+                        jumpTo(target)
+                    }
+                }
                 var index = 0
                 while (index < lines.size) {
                     val line = lines[index]
                     if (line.kind == "table") {
                         val rows = ArrayList<ch.fasrv.fanotes.desk.DetailsReadingLine>()
+                        val start = index
                         while (index < lines.size && lines[index].kind == "table") {
                             rows += lines[index]
                             index += 1
                         }
-                        PreviewTable(rows, base, link)
+                        PreviewTable(rows, base, link, Modifier.previewAnchor(start)) { number ->
+                            ch.fasrv.fanotes.desk.footnoteDefinitionIndex(lines, number)?.let(::jumpTo)
+                        }
                         continue
                     }
+                    val lineIndex = index
                     index += 1
                     when (line.kind) {
                         "rule" -> Box(
                             Modifier
+                                .previewAnchor(lineIndex)
                                 .padding(vertical = 8.dp)
                                 .fillMaxWidth()
                                 .height(1.dp)
@@ -2242,7 +2281,8 @@ fun AiScreen(model: FaNotesViewModel) {
                             )
                             Text(
                                 previewAnnotated(line, base, link),
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                modifier = Modifier.previewFootnote(lineIndex).padding(horizontal = 12.dp, vertical = 8.dp),
+                                onTextLayout = { previewLayouts[lineIndex] = it },
                                 fontSize = (base * line.scale).sp,
                                 color = muted,
                             )
@@ -2251,6 +2291,7 @@ fun AiScreen(model: FaNotesViewModel) {
                             Text(
                                 previewAnnotated(line, base, link),
                                 modifier = Modifier
+                                    .previewAnchor(lineIndex)
                                     .padding(vertical = 6.dp)
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(6.dp))
@@ -2264,6 +2305,8 @@ fun AiScreen(model: FaNotesViewModel) {
                         else -> if (line.text.isNotEmpty() || line.kind == "image") {
                             Text(
                                 previewAnnotated(line, base, link),
+                                modifier = Modifier.previewFootnote(lineIndex),
+                                onTextLayout = { previewLayouts[lineIndex] = it },
                                 fontSize = (base * line.scale).sp,
                                 fontWeight = if (line.heading) FontWeight.Bold else FontWeight.Normal,
                                 fontFamily = if (line.kind == "code" || line.kind == "math") FontFamily.Monospace else FontFamily.Default,
@@ -2282,11 +2325,14 @@ private fun PreviewTable(
     rows: List<ch.fasrv.fanotes.desk.DetailsReadingLine>,
     base: Int,
     link: Color,
+    modifier: Modifier = Modifier,
+    onFootnote: (Int) -> Unit = {},
 ) {
     val border = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
     val header = MaterialTheme.colorScheme.surfaceVariant
+    val cellLayouts = remember { androidx.compose.runtime.mutableStateMapOf<String, TextLayoutResult>() }
     Column(
-        Modifier
+        modifier
             .padding(vertical = 8.dp)
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
@@ -2308,9 +2354,21 @@ private fun PreviewTable(
                             .fillMaxHeight()
                             .background(if (row.heading) header else Color.Transparent),
                     ) {
+                        val cellKey = "$rowIndex:$cellIndex"
                         Text(
                             previewMarks(cell.text, cell.inlines, base, scale, link),
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp).pointerInput(cell.text, cell.inlines) {
+                                detectTapGestures { offset ->
+                                    val laid = cellLayouts[cellKey] ?: return@detectTapGestures
+                                    val number = ch.fasrv.fanotes.desk.footnoteNumberAtOffset(
+                                        cell.text,
+                                        cell.inlines,
+                                        laid.getOffsetForPosition(offset),
+                                    ) ?: return@detectTapGestures
+                                    onFootnote(number)
+                                }
+                            },
+                            onTextLayout = { cellLayouts[cellKey] = it },
                             textAlign = align,
                             fontWeight = if (row.heading) FontWeight.Bold else FontWeight.Normal,
                             fontSize = (base * scale).sp,

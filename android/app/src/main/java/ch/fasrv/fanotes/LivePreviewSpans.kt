@@ -239,6 +239,26 @@ internal class DetailsSummarySpan(
     private val imageColumnPx: Float = 0f,
 ) : ReplacementSpan(), LineBackgroundSpan, LivePreviewSpan {
     private val linkHits = ArrayList<Pair<RectF, String>>()
+    private val footnoteRefs = ArrayList<Pair<RectF, Int>>()
+    private val footnoteReturns = ArrayList<Pair<RectF, Int>>()
+    private val lineTops = HashMap<Int, Float>()
+
+    /**
+     * Layout Y of the definition or the first reference, when the tap lands on
+     * a superscript or the return arrow. The card stays open.
+     */
+    fun footnoteJumpTop(x: Float, y: Float): Float? {
+        val ref = hitNumber(footnoteRefs, x, y)
+        val back = if (ref == null) hitNumber(footnoteReturns, x, y) else null
+        if (ref == null && back == null) return null
+        val lines = readingLines()
+        val index = if (ref != null) {
+            ch.fasrv.fanotes.desk.footnoteDefinitionIndex(lines, ref)
+        } else {
+            ch.fasrv.fanotes.desk.footnoteReferenceIndex(lines, back ?: return null)
+        } ?: return null
+        return lineTops[index]
+    }
 
     fun linkAt(x: Float, y: Float): ch.fasrv.fanotes.desk.FollowedLink? {
         val target = linkHits.firstOrNull { (rect, _) ->
@@ -317,11 +337,17 @@ internal class DetailsSummarySpan(
         canvas.drawText(summary, rect.left + box.padX, summaryBaseline, paint)
         if (body.isNotEmpty()) {
             linkHits.clear()
+            footnoteRefs.clear()
+            footnoteReturns.clear()
+            lineTops.clear()
+            val bodyLines = body.split('\n')
+            val owners = ch.fasrv.fanotes.desk.footnoteOwners(bodyLines, readingKinds)
             var cursor = summaryBottom + box.padY * 0.35f
-            body.split('\n').forEachIndexed { index, line ->
+            bodyLines.forEachIndexed { index, line ->
                 val picture = imageSlot(index)
                 if (picture != null) {
                     val margin = detailsImageMargin(previousSize)
+                    lineTops[index] = cursor + margin
                     val (frameW, frameH) = detailsImageFrame(picture.width, picture.height, imageColumnPx)
                     val available = (rect.right - box.padX) - (rect.left + box.padX)
                     val drawnW = frameW.coerceAtMost(available.coerceAtLeast(1f))
@@ -343,6 +369,7 @@ internal class DetailsSummarySpan(
                 }
                 val lineMetrics = paint.fontMetrics
                 cursor += -lineMetrics.ascent
+                lineTops[index] = cursor + lineMetrics.ascent
                 val textX = rect.left + box.padX
                 when (kind) {
                     "rule" -> {
@@ -453,7 +480,16 @@ internal class DetailsSummarySpan(
                     }
                     "footnote" -> {
                         paint.color = PAPER_QUOTE_INK
-                        drawRichText(canvas, paint, line, textX, cursor, lineInlines, paint.typeface)
+                        drawRichText(
+                            canvas,
+                            paint,
+                            line,
+                            textX,
+                            cursor,
+                            lineInlines,
+                            paint.typeface,
+                            returnNumber = owners.getOrElse(index) { 0 },
+                        )
                     }
                     else -> drawRichText(canvas, paint, line, textX, cursor, lineInlines, paint.typeface)
                 }
@@ -487,6 +523,24 @@ internal class DetailsSummarySpan(
         }
         paint.textSize = saved
         return height
+    }
+
+    private fun hitNumber(hits: List<Pair<RectF, Int>>, x: Float, y: Float): Int? =
+        hits.firstOrNull { (rect, _) -> x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom }?.second
+
+    private fun readingLines(): List<ch.fasrv.fanotes.desk.DetailsReadingLine> {
+        if (body.isEmpty()) return emptyList()
+        return body.split('\n').mapIndexed { index, text ->
+            val kind = readingKinds.getOrElse(index) { "paragraph" }
+            ch.fasrv.fanotes.desk.DetailsReadingLine(
+                text = if (kind == "rule") "" else text,
+                scale = readingScales.getOrElse(index) { 1f },
+                heading = readingHeadings.getOrElse(index) { false },
+                kind = kind,
+                source = readingSources.getOrElse(index) { "" },
+                inlines = readingInlines.getOrElse(index) { emptyList() },
+            )
+        }
     }
 
     private fun rememberLink(active: List<DetailsInline>, left: Float, width: Float, baseline: Float, paint: Paint) {
@@ -527,6 +581,7 @@ internal class DetailsSummarySpan(
         marks: List<DetailsInline>,
         baseFace: Typeface?,
         measureOnly: Boolean = false,
+        returnNumber: Int = 0,
     ): Float {
         if (text.isEmpty()) return x
         if (marks.isEmpty()) {
@@ -601,7 +656,15 @@ internal class DetailsSummarySpan(
                 paint.style = Paint.Style.FILL
                 paint.color = accent
                 val width = paint.measureText(segment)
-                if (!measureOnly) canvas.drawText(segment, cursor, y - baseSize * 0.35f, paint)
+                val raised = y - baseSize * 0.35f
+                if (!measureOnly) {
+                    canvas.drawText(segment, cursor, raised, paint)
+                    val number = segment.toIntOrNull()
+                    if (number != null) {
+                        val metrics = paint.fontMetrics
+                        footnoteRefs += RectF(cursor, raised + metrics.ascent, cursor + width, raised + metrics.descent) to number
+                    }
+                }
                 cursor += width
             } else {
                 paint.textSize = baseSize
@@ -610,6 +673,20 @@ internal class DetailsSummarySpan(
                 val width = paint.measureText(segment)
                 if (!measureOnly) {
                     canvas.drawText(segment, cursor, y, paint)
+                    if (returnNumber > 0) {
+                        val local = segment.indexOf('\u21A9')
+                        if (local >= 0) {
+                            val before = paint.measureText(segment, 0, local)
+                            val markWidth = paint.measureText(segment, local, local + 1)
+                            val metrics = paint.fontMetrics
+                            footnoteReturns += RectF(
+                                cursor + before,
+                                y + metrics.ascent,
+                                cursor + before + markWidth,
+                                y + metrics.descent,
+                            ) to returnNumber
+                        }
+                    }
                     if (link) {
                         val offset = paperLinkUnderlineOffset(textSizePx)
                         val thickness = (textSizePx / 16f).coerceAtLeast(1f)

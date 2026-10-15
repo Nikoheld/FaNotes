@@ -890,6 +890,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
         val layoutX = x - editor.totalPaddingLeft + editor.scrollX
         val layoutY = y - editor.totalPaddingTop + editor.scrollY
+        val jump = spans.firstNotNullOfOrNull { it.footnoteJumpTop(layoutX, layoutY) }
+        if (jump != null) {
+            editor.scrollTo(0, ch.fasrv.fanotes.desk.revealScrollTop(kotlin.math.round(jump).toInt(), editor.paddingTop))
+            return true
+        }
         val followed = spans.firstNotNullOfOrNull { it.linkAt(layoutX, layoutY) }
         if (followed != null) {
             onFollowLink(followed.target, followed.web, followed.anchor)

@@ -49,4 +49,31 @@ class FootnoteTest {
         assertEquals("Quelle", definition.text.substring(definition.inlines.first { it.kind == "strong" }.let { it.start until it.end }))
         assertEquals("https://example.com/a", definition.inlines.first { it.kind == "link" }.target)
     }
+
+    @Test
+    fun footnoteMarksJumpToTheDefinitionAndBack() {
+        val lines = detailsReadingLines("Siehe [^note] und nochmal [^note].\n\n[^note]: Erste Zeile\n\n    Zweite Zeile")
+        val body = lines[0]
+        val first = body.text.indexOf('1')
+        val second = body.text.indexOf('1', first + 1)
+        assertEquals(2, footnoteDefinitionIndex(lines, 1))
+        assertEquals(0, footnoteReferenceIndex(lines, 1))
+        assertEquals(2, footnoteJumpIndex(lines, 0, first))
+        assertEquals(2, footnoteJumpIndex(lines, 0, second))
+        assertEquals(null, footnoteJumpIndex(lines, 0, 0))
+        assertEquals(null, footnoteDefinitionIndex(lines, 9))
+
+        val definition = lines.last()
+        assertTrue(definition.text.endsWith(FOOTNOTE_RETURN))
+        assertEquals(0, footnoteJumpIndex(lines, lines.lastIndex, definition.text.lastIndexOf(FOOTNOTE_RETURN)))
+        assertEquals(null, footnoteJumpIndex(lines, lines.lastIndex, definition.text.lastIndexOf(FOOTNOTE_RETURN) - 1))
+        assertEquals(null, footnoteJumpIndex(lines, 2, 3))
+
+        val pair = detailsReadingLines("Zuerst [^b] dann [^a].\n\n[^a]: A\n[^b]: B")
+        val back = pair.last()
+        assertEquals("2. A $FOOTNOTE_RETURN", back.text)
+        assertEquals(pair.lastIndex, footnoteJumpIndex(pair, 0, pair[0].text.lastIndexOf('2')))
+        assertEquals(0, footnoteJumpIndex(pair, pair.lastIndex, back.text.lastIndexOf(FOOTNOTE_RETURN)))
+        assertEquals(null, footnoteNumberAtOffset(back.text, back.inlines, 0))
+    }
 }
