@@ -7,6 +7,20 @@ package ch.fasrv.fanotes.desk
 
 data class MarkdownEdit(val text: String, val selectionStart: Int, val selectionEnd: Int)
 
+/**
+ * Desktop editor shortcuts: Ctrl-B bold, Ctrl-I italic, Ctrl-K link.
+ * Shift-Ctrl-K stays the delete-line command, so Shift does not format.
+ */
+fun markdownFormatShortcut(ctrl: Boolean, shift: Boolean, alt: Boolean, meta: Boolean, letter: Char): String? {
+    if (!ctrl || shift || alt || meta) return null
+    return when (letter.lowercaseChar()) {
+        'b' -> "bold"
+        'i' -> "italic"
+        'k' -> "link"
+        else -> null
+    }
+}
+
 fun applyMarkdownFormat(text: String, rawStart: Int, rawEnd: Int, action: String): MarkdownEdit {
     val start = rawStart.coerceIn(0, text.length)
     val end = rawEnd.coerceIn(start, text.length)
