@@ -2,6 +2,7 @@ package ch.fasrv.fanotes.desk
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class MarkdownConflictTest {
     @Test
@@ -25,5 +26,17 @@ class MarkdownConflictTest {
         assertEquals(false, moved.containsKey("Schule"))
         assertEquals("#c4554d", moved["Arbeit"])
         assertEquals(parsed, remapFolderColors(parsed, "Schule", "Schule"))
+    }
+
+    @Test
+    fun theFolderMenuUsesTheDesktopSwatches() {
+        assertEquals(10, FOLDER_COLOR_CHOICES.size)
+        assertEquals("#6b7280", FOLDER_COLOR_CHOICES.first())
+        assertEquals("#787774", FOLDER_COLOR_CHOICES.last())
+        assertEquals("Darstellung", FOLDER_COLOR_MENU)
+        assertEquals("Standardfarbe", FOLDER_COLOR_CLEAR)
+        assertEquals("#11131a", accentInk("#ba9b4a"))
+        assertEquals("#ffffff", accentInk("#2a6f97"))
+        assertTrue(FOLDER_COLOR_CHOICES.all { accentInk(it) == "#11131a" || accentInk(it) == "#ffffff" })
     }
 }

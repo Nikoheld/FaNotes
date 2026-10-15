@@ -579,6 +579,9 @@ fun highlightFromDrag(
 const val FOLDER_COLORS_PATH = ".fanotes/folder-colors.json"
 
 /** Swatches from the desktop file tree. */
+const val FOLDER_COLOR_MENU = "Darstellung"
+const val FOLDER_COLOR_CLEAR = "Standardfarbe"
+
 val FOLDER_COLOR_CHOICES = listOf(
     "#6b7280", "#2a6f97", "#337ea9", "#0f7b6c", "#448361",
     "#ba9b4a", "#d9730d", "#c4554d", "#9065b0", "#787774",
