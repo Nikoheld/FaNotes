@@ -255,6 +255,19 @@ class SplitEditorView(context: Context) : EditText(context) {
     }
 
     override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_ESCAPE && !event.isCtrlPressed && !event.isAltPressed &&
+            !event.isMetaPressed && !event.isShiftPressed
+        ) {
+            val head = ch.fasrv.fanotes.desk.simplifyEditorSelection(
+                selectionStart,
+                selectionEnd,
+                text?.length ?: 0,
+            )
+            if (head != null) {
+                if (event.action == KeyEvent.ACTION_DOWN) setSelection(head)
+                return true
+            }
+        }
         if (tags?.onKey(keyCode, event) == true) return true
         if (!event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed &&
             (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_PAGE_DOWN)
