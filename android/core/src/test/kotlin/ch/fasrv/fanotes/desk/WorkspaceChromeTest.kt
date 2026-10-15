@@ -23,5 +23,11 @@ class WorkspaceChromeTest {
         assertEquals(27, chromeRowHeightDp(true))
         assertEquals(4, WORKSPACE_BACKGROUNDS.size)
         assertEquals(5, UI_FONTS.size)
+        assertEquals(286, sidebarWidthDp(null))
+        assertEquals(210, sidebarWidthDp("40"))
+        assertEquals(430, sidebarWidthDp("900"))
+        assertEquals(286, rightPanelWidthDp(""))
+        assertEquals(220, rightPanelWidthDp("100"))
+        assertEquals(320, rightPanelWidthDp("320"))
     }
 }

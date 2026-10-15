@@ -85,6 +85,7 @@ import ch.fasrv.fanotes.input.PointerTool
 import ch.fasrv.fanotes.input.fingerMayNavigate
 import ch.fasrv.fanotes.input.isPenTool
 import ch.fasrv.fanotes.input.shouldRejectFinger
+import ch.fasrv.fanotes.input.shouldRejectNonPenInk
 import ch.fasrv.fanotes.input.tiltDegrees
 import ch.fasrv.fanotes.input.touchPalmState
 import ch.fasrv.fanotes.text.PaperKind
@@ -204,6 +205,8 @@ class InkSurfaceView @JvmOverloads constructor(
     var zoomSpeed: Int = 5
     /** Desk setting `tablet-buttons`, empty until the factory map is read. */
     var tabletButtons: String = ""
+    /** When set, only a real stylus lays ink. Fingers still pan and zoom. */
+    var penOnly: Boolean = false
     var shapeSnapSensitivity: Int = 50
     var scribbleSensitivity: Int = 50
     /** Selection rings, hover, and placed links follow the desktop accent. */
@@ -522,7 +525,14 @@ class InkSurfaceView @JvmOverloads constructor(
                     return true
                 }
                 if (rejectsUnmappedMouseButton(identity, event.getToolType(index), event.buttonState)) return true
-                if (isPenTool(tool) || tool == PointerTool.MOUSE || (tool == PointerTool.FINGER && fingerDraws)) {
+                val pointerType = when {
+                    isPenTool(tool) -> "pen"
+                    tool == PointerTool.FINGER -> "touch"
+                    tool == PointerTool.MOUSE -> "mouse"
+                    else -> "unknown"
+                }
+                val rejectInk = identity == null && shouldRejectNonPenInk(pointerType, penOnly)
+                if (!rejectInk && (isPenTool(tool) || tool == PointerTool.MOUSE || (tool == PointerTool.FINGER && fingerDraws))) {
                     if (shouldRejectFinger(tool, palm, now, fingerDraws)) return true
                     if (inkPointer != MotionEvent.INVALID_POINTER_ID) return true
                     inkPointer = id

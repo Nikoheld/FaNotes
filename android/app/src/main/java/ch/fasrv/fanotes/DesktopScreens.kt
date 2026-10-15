@@ -1584,6 +1584,11 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                 "drawing" -> {
                     val pen = ch.fasrv.fanotes.desk.penSettings(settings)
                     Text("Druckempfindlichkeit: ${if (pen.pressure) "an" else "aus"}", modifier = Modifier.clickable { model.setPenPressure(!pen.pressure) })
+                    val penOnly = ch.fasrv.fanotes.input.penOnlyEnabled(settings["pen-only"])
+                    Text(
+                        "Nur Stift: ${if (penOnly) "an" else "aus"}",
+                        modifier = Modifier.clickable { model.updateDesk("pen-only", if (penOnly) "off" else "on") }.padding(vertical = 4.dp),
+                    )
                     EditorSlider("Stiftbreite", pen.width.toFloat(), 1f, 18f, 0.5f, " px") { model.setPenWidth(it.toDouble()) }
                     EditorSlider("Form-Erkennung", pen.shapeSnap.toFloat(), 0f, 100f, 5f, " %") { model.updateDesk("shape-snap", it.toInt().toString()) }
                     EditorSlider("Durchkritzel-Empfindlichkeit", pen.scribble.toFloat(), 0f, 100f, 5f, " %") { model.updateDesk("scribble", it.toInt().toString()) }
@@ -1682,7 +1687,15 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     Text(update)
                     TextButton(onClick = { model.checkUpdate() }) { Text("Nach einem Release suchen") }
                 }
-                "accessibility" -> Text("Größere Ziele: ${settings["large"] == "on"}", modifier = Modifier.clickable { model.updateDesk("large", if (settings["large"] == "on") "off" else "on") })
+                "accessibility" -> {
+                    Text("Größere Ziele: ${settings["large"] == "on"}", modifier = Modifier.clickable { model.updateDesk("large", if (settings["large"] == "on") "off" else "on") })
+                    EditorSlider("Seitenleiste", ch.fasrv.fanotes.desk.sidebarWidthDp(settings["sidebar-width"]).toFloat(), 210f, 430f, 10f, " px") {
+                        model.updateDesk("sidebar-width", it.toInt().toString())
+                    }
+                    EditorSlider("Informationsleiste", ch.fasrv.fanotes.desk.rightPanelWidthDp(settings["panel-width"]).toFloat(), 220f, 430f, 10f, " px") {
+                        model.updateDesk("panel-width", it.toInt().toString())
+                    }
+                }
                 "experimental" -> {
                     Text("Geteilte Ansicht ist über die Befehlsleiste erreichbar. Bewegungen lassen sich mit Fokus beruhigen.")
                     val backups = settings["experimental-backup"] == "on"

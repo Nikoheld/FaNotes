@@ -31,6 +31,18 @@ class PalmPolicyTest {
     }
 
     @Test
+    fun penOnlyLeavesTheStylusAndALiveStrokeAlone() {
+        assertFalse(penOnlyEnabled(null))
+        assertTrue(penOnlyEnabled("on"))
+        assertTrue(shouldRejectNonPenInk("mouse", penOnly = true))
+        assertTrue(shouldRejectNonPenInk("touch", penOnly = true))
+        assertFalse(shouldRejectNonPenInk("pen", penOnly = true))
+        assertFalse(shouldRejectNonPenInk("mouse", penOnly = false))
+        assertFalse(shouldRejectNonPenInkMove("mouse", penOnly = true, liveStroke = true))
+        assertTrue(shouldRejectNonPenInkMove("mouse", penOnly = true, liveStroke = false))
+    }
+
+    @Test
     fun tiltMatchesPointerEvents() {
         val (x, y) = tiltDegrees(0f, 0f)
         assertEquals(0f, x)
