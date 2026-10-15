@@ -582,6 +582,15 @@ const val FOLDER_COLORS_PATH = ".fanotes/folder-colors.json"
 const val FOLDER_COLOR_MENU = "Darstellung"
 const val FOLDER_COLOR_CLEAR = "Standardfarbe"
 
+/** Folder titles mix 54% of the folder color into the text and use weight 620. */
+const val FOLDER_NAME_WEIGHT = 620
+
+fun folderNameInk(folderColor: String?, accent: String, text: String): String {
+    val source = parseAccent(folderColor) ?: normalizeAccent(accent)
+    val body = parseAccent(text) ?: "#37352f"
+    return mixColors(source, body, 0.54)
+}
+
 val FOLDER_COLOR_CHOICES = listOf(
     "#6b7280", "#2a6f97", "#337ea9", "#0f7b6c", "#448361",
     "#ba9b4a", "#d9730d", "#c4554d", "#9065b0", "#787774",

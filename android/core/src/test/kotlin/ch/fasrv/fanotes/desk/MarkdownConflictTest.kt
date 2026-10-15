@@ -38,5 +38,9 @@ class MarkdownConflictTest {
         assertEquals("#11131a", accentInk("#ba9b4a"))
         assertEquals("#ffffff", accentInk("#2a6f97"))
         assertTrue(FOLDER_COLOR_CHOICES.all { accentInk(it) == "#11131a" || accentInk(it) == "#ffffff" })
+        assertEquals(620, FOLDER_NAME_WEIGHT)
+        assertEquals(mixColors("#c4554d", "#37352f", 0.54), folderNameInk("#C4554D", "#2a6f97", "#37352f"))
+        assertEquals(mixColors("#2a6f97", "#ededec", 0.54), folderNameInk(null, "#2a6f97", "#ededec"))
+        assertEquals(mixColors("#2a6f97", "#37352f", 0.54), folderNameInk("nope", "blue", "#37352f"))
     }
 }

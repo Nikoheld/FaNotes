@@ -102,6 +102,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.input.pointer.pointerInput
@@ -1482,14 +1483,26 @@ private fun NoteRow(
                 tint = MaterialTheme.colorScheme.primary,
             )
         }
+        val nameInk = when {
+            folder -> Color(
+                android.graphics.Color.parseColor(
+                    ch.fasrv.fanotes.desk.folderNameInk(
+                        folderColor,
+                        "#%06x".format(MaterialTheme.colorScheme.primary.toArgb() and 0xFFFFFF),
+                        "#%06x".format(MaterialTheme.colorScheme.onSurface.toArgb() and 0xFFFFFF),
+                    ),
+                ),
+            )
+            ch.fasrv.fanotes.desk.rowIsSplitCompanion(node.path, selected, splitPath) ->
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+            else -> MaterialTheme.colorScheme.onSurface
+        }
         Text(
             node.name,
             maxLines = 1,
-            color = if (ch.fasrv.fanotes.desk.rowIsSplitCompanion(node.path, selected, splitPath)) {
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
-            } else {
-                MaterialTheme.colorScheme.onSurface
-            },
+            fontSize = 12.sp,
+            fontWeight = if (folder) androidx.compose.ui.text.font.FontWeight(ch.fasrv.fanotes.desk.FOLDER_NAME_WEIGHT) else FontWeight.Normal,
+            color = nameInk,
             modifier = Modifier
                 .weight(1f)
                 .padding(start = 8.dp)
