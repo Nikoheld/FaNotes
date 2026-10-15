@@ -2398,12 +2398,13 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     EditorSlider("Form-Erkennung", pen.shapeSnap.toFloat(), 0f, 100f, 5f, " %") { model.updateDesk("shape-snap", it.toInt().toString()) }
                     EditorSlider("Durchkritzel-Empfindlichkeit", pen.scribble.toFloat(), 0f, 100f, 5f, " %") { model.updateDesk("scribble", it.toInt().toString()) }
                     EditorSlider("Strichglättung", pen.smoothing.toFloat(), 0f, 1f, 0.05f, "") { model.updateDesk("smoothing", "%.2f".format(java.util.Locale.US, it)) }
-                    Text("Papier neuer Notizen", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                    listOf("dots" to "Punkte", "lines" to "Linien", "grid" to "Karo", "squares" to "Quadrat", "blank" to "Leer", "millimeter" to "Millimeter").forEach { (id, label) ->
+                    Text("Papier", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Text("Standard für neue Notizen. Jede Notiz kann ihren Hintergrund selbst wählen.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                    ch.fasrv.fanotes.desk.PAPER_STYLES.forEach { option ->
                         Text(
-                            label,
-                            fontWeight = if (pen.paper == id) FontWeight.SemiBold else FontWeight.Normal,
-                            modifier = Modifier.clickable { model.updateDesk("paper", id) }.padding(vertical = 4.dp),
+                            ch.fasrv.fanotes.desk.paperStyleSettingsLabel(option.id),
+                            fontWeight = if (pen.paper == option.id) FontWeight.SemiBold else FontWeight.Normal,
+                            modifier = Modifier.clickable { model.updateDesk("paper", option.id) }.padding(vertical = 4.dp),
                         )
                     }
                     Text("Grafiktablett", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
@@ -2538,38 +2539,89 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
 @Composable
 fun NoteTagBar(model: FaNotesViewModel) {
     val markdown by model.markdown.collectAsStateWithLifecycle()
+    val open by model.open.collectAsStateWithLifecycle()
+    val token by model.canvasToken.collectAsStateWithLifecycle()
     val tags = parseNoteTags(markdown)
-    var draft by remember(model.open.collectAsStateWithLifecycle().value?.path) { mutableStateOf("") }
+    val paper = remember(token, open?.path) { model.session.document.paperStyle }
+    var draft by remember(open?.path) { mutableStateOf("") }
     fun addTag() {
         if (draft.isBlank()) return
         model.setNoteTags(tags + draft)
         draft = ""
     }
     Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 2.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        tags.forEach { tag ->
-            Text(
-                "#$tag  ×",
-                fontSize = 12.sp,
-                modifier = Modifier
-                    .padding(end = 4.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .clickable { model.setNoteTags(tags.filter { it != tag }) }
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+        Row(
+            Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            tags.forEach { tag ->
+                Text(
+                    "#$tag  ×",
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .padding(end = 6.dp)
+                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.6f), androidx.compose.foundation.shape.RoundedCornerShape(99.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), androidx.compose.foundation.shape.RoundedCornerShape(99.dp))
+                        .clickable(onClickLabel = "Tag entfernen") { model.setNoteTags(tags.filter { it != tag }) }
+                        .padding(horizontal = 7.dp, vertical = 4.dp),
+                )
+            }
+            OutlinedTextField(
+                draft,
+                { draft = it.take(40) },
+                modifier = Modifier.width(160.dp),
+                singleLine = true,
+                label = { Text("Tag hinzufügen") },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { addTag() }),
             )
         }
-        OutlinedTextField(
-            draft,
-            { draft = it.take(40) },
-            modifier = Modifier.width(180.dp),
-            singleLine = true,
-            label = { Text("Tag hinzufügen") },
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { addTag() }),
+        if (open?.kind != ch.fasrv.fanotes.vault.NoteKind.PDF) {
+            PaperStylePicker(paper) { model.setPaper(it) }
+        }
+    }
+}
+
+@Composable
+private fun PaperStylePicker(style: String, onSelect: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val current = ch.fasrv.fanotes.desk.paperStyleLabel(style)
+    Box {
+        Text(
+            current,
+            fontSize = 12.sp,
+            modifier = Modifier
+                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.7f), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                .clickable(onClickLabel = "Notizhintergrund: $current") { open = true }
+                .padding(horizontal = 8.dp, vertical = 6.dp),
         )
-        TextButton(onClick = { addTag() }) { Text("Hinzufügen") }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            Text(
+                ch.fasrv.fanotes.desk.PAPER_PICKER_HINT.uppercase(),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+            ch.fasrv.fanotes.desk.PAPER_STYLES.forEach { option ->
+                val selected = option.id == ch.fasrv.fanotes.desk.normalizePaperStyle(style, "")
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(option.label, fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold, fontSize = 12.sp)
+                            Text(option.detail, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                        }
+                    },
+                    onClick = {
+                        onSelect(option.id)
+                        open = false
+                    },
+                )
+            }
+        }
     }
 }
 
