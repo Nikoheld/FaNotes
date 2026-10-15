@@ -98,6 +98,8 @@ import ch.fasrv.fanotes.input.tiltDegrees
 import ch.fasrv.fanotes.input.touchPalmState
 import ch.fasrv.fanotes.text.PaperKind
 import ch.fasrv.fanotes.text.PaperLine
+import ch.fasrv.fanotes.text.paperImageCaption
+import ch.fasrv.fanotes.text.paperImageSource
 import ch.fasrv.fanotes.text.paperLines
 import ch.fasrv.fanotes.text.tableRows
 import kotlin.math.abs
@@ -1054,6 +1056,7 @@ class InkSurfaceView @JvmOverloads constructor(
                     block.rowHeights.forEach { height += it }
                     top += height
                 }
+                is PaperBlock.Image -> top += 120f * scale
             }
         }
         return false
@@ -1659,6 +1662,11 @@ class InkSurfaceView @JvmOverloads constructor(
                     number += 1
                     drawTable(canvas, block, scale)
                 }
+                is PaperBlock.Image -> {
+                    if (showLineNumbers) drawNumber(canvas, number.toString(), editorFontPx * scale, scale)
+                    number += 1
+                    drawImageCard(canvas, block, scale)
+                }
             }
         }
         canvas.restore()
@@ -1679,6 +1687,9 @@ class InkSurfaceView @JvmOverloads constructor(
             if (line.kind == PaperKind.TABLE) {
                 flush()
                 built += tableBlock(line.text, scale)
+            } else if (line.kind == PaperKind.IMAGE) {
+                flush()
+                built += PaperBlock.Image(paperImageCaption(line.text), paperImageSource(line.text))
             } else {
                 textLines += line
             }
@@ -1750,6 +1761,31 @@ class InkSurfaceView @JvmOverloads constructor(
             y += height
         }
         canvas.translate(0f, y + 10f * scale)
+    }
+
+    private fun drawImageCard(canvas: Canvas, block: PaperBlock.Image, scale: Float) {
+        val width = TEXT_COLUMN * scale
+        val height = 96f * scale
+        val radius = 12f * scale
+        val top = 8f * scale
+        val rect = RectF(0f, top, width, top + height)
+        cardFill.color = Color.WHITE
+        canvas.drawRoundRect(rect, radius, radius, cardFill)
+        tableLine.strokeWidth = max(1f, scale)
+        canvas.drawRoundRect(rect, radius, radius, tableLine)
+        textPaint.color = Color.parseColor("#252630")
+        textPaint.textSize = 15f * scale
+        textPaint.typeface = Typeface.create(editorTypeface, Typeface.BOLD)
+        canvas.drawText(block.caption, 16f * scale, rect.centerY() - 4f * scale, textPaint)
+        textPaint.typeface = editorTypeface
+        textPaint.textSize = 11f * scale
+        textPaint.color = Color.parseColor("#5C6B8E")
+        val file = block.source.substringAfterLast('/').substringBefore('?')
+        if (file.isNotEmpty() && file != block.caption) {
+            canvas.drawText(file, 16f * scale, rect.centerY() + 16f * scale, textPaint)
+        }
+        textPaint.color = Color.parseColor("#252630")
+        canvas.translate(0f, height + 24f * scale)
     }
 
     private fun styledLines(lines: List<PaperLine>, scale: Float): Triple<CharSequence, IntArray, IntArray> {
@@ -2168,6 +2204,7 @@ class InkSurfaceView @JvmOverloads constructor(
             height += when (block) {
                 is PaperBlock.Text -> block.layout.height.toFloat()
                 is PaperBlock.Table -> block.rowHeights.sum() + 10f * scale
+                is PaperBlock.Image -> 120f * scale
             }
         }
         val originY = session?.document?.originY ?: 0.0
@@ -2306,6 +2343,7 @@ class InkSurfaceView @JvmOverloads constructor(
 private sealed class PaperBlock {
     class Text(val layout: StaticLayout, val paragraphStarts: IntArray, val taskSources: IntArray) : PaperBlock()
     class Table(val rows: List<List<String>>, val rowHeights: FloatArray, val cellLayouts: List<List<StaticLayout>>) : PaperBlock()
+    class Image(val caption: String, val source: String) : PaperBlock()
 }
 
 private data class GuideDrag(

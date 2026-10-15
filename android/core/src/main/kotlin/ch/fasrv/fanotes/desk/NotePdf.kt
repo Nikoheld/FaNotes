@@ -1,6 +1,7 @@
 package ch.fasrv.fanotes.desk
 
 import ch.fasrv.fanotes.text.PaperKind
+import ch.fasrv.fanotes.text.paperImageCaption
 import ch.fasrv.fanotes.text.paperLines
 import ch.fasrv.fanotes.text.tableRows
 import kotlin.math.ceil
@@ -57,6 +58,7 @@ fun pdfPaperText(markdown: String): String = paperLines(markdown).joinToString("
         }
         PaperKind.QUOTE -> "│ ${stripInline(line.text)}"
         PaperKind.RULE -> "—"
+        PaperKind.IMAGE -> paperImageCaption(line.text)
         else -> stripInline(line.text)
     }
 }.trimEnd()

@@ -5,7 +5,7 @@ package ch.fasrv.fanotes.text
  * and code, with the ink marker and other HTML comments left off the page.
  * Inline markers such as `**bold**` stay in the text for the renderer.
  */
-enum class PaperKind { H1, H2, H3, H4, H5, H6, PARAGRAPH, BULLET, NUMBER, TASK, QUOTE, CODE, MATH, RULE, TABLE, SPACER }
+enum class PaperKind { H1, H2, H3, H4, H5, H6, PARAGRAPH, BULLET, NUMBER, TASK, QUOTE, CODE, MATH, RULE, TABLE, IMAGE, SPACER }
 
 data class PaperLine(val kind: PaperKind, val text: String, val sourceLine: Int = -1)
 
@@ -14,6 +14,7 @@ private val BULLET = Regex("""^\s*[-*+]\s+""")
 private val NUMBER = Regex("""^\s*(\d+)\.\s+""")
 private val TASK = Regex("""^\s*[-*+]\s+\[([ xX])](?:\s+(.*))?$""")
 private val TABLE_RULE = Regex("""^:?-{3,}:?$""")
+private val IMAGE_LINE = Regex("""^!\[([^\]]*)]\(([^)\s]+)(?:\s+"[^"]*")?\)\s*$""")
 
 fun paperLines(markdown: String): List<PaperLine> {
     val source = markdown.replace("\r\n", "\n").replace(COMMENT, "")
@@ -92,6 +93,10 @@ fun paperLines(markdown: String): List<PaperLine> {
             task != null -> out += PaperLine(PaperKind.TASK, "${if (task.groupValues[1].equals("x", true)) "x" else " "}|${task.groupValues[2]}", index)
             NUMBER.containsMatchIn(raw) -> out += PaperLine(PaperKind.NUMBER, raw.trim(), index)
             BULLET.containsMatchIn(raw) -> out += PaperLine(PaperKind.BULLET, BULLET.replace(raw, "").trim(), index)
+            IMAGE_LINE.matches(trimmed) -> {
+                val image = IMAGE_LINE.matchEntire(trimmed)!!
+                out += PaperLine(PaperKind.IMAGE, "${image.groupValues[1]}\u001f${image.groupValues[2]}", index)
+            }
             else -> out += PaperLine(PaperKind.PARAGRAPH, raw.trimEnd(), index)
         }
         index += 1
@@ -102,6 +107,16 @@ fun paperLines(markdown: String): List<PaperLine> {
 }
 
 fun tableRows(text: String): List<List<String>> = text.split('\n').map { row -> row.split('\u001f') }
+
+/** Caption for a whole-line markdown image. The alt text wins; otherwise the file name. */
+fun paperImageCaption(text: String): String {
+    val alt = text.substringBefore('\u001f').trim()
+    if (alt.isNotEmpty()) return alt
+    val source = text.substringAfter('\u001f').substringBefore('?').substringAfterLast('/')
+    return source.ifBlank { "Bild" }
+}
+
+fun paperImageSource(text: String): String = text.substringAfter('\u001f')
 
 private fun isTableRow(line: String): Boolean {
     val trimmed = line.trim()
