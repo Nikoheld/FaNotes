@@ -25,6 +25,9 @@ class CalendarBooksTest {
         val parsed = parseSubjectBooks(text)
         assertEquals(4, subjectBookForNote(parsed, "Schule/Mathe/Blatt.md")?.lastPage)
         assertEquals(5, recordSubjectBookPage(parsed, "Schule/Mathe", 5).single().lastPage)
+        assertEquals(emptyList(), detachSubjectBook(parsed, "Schule/Mathe"))
+        assertEquals(parsed, detachSubjectBook(parsed, "Chemie"))
+        assertEquals(parsed, detachSubjectBook(parsed, ""))
     }
 
     @Test

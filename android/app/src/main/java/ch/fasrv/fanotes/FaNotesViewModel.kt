@@ -49,6 +49,7 @@ import ch.fasrv.fanotes.desk.searchTranscriptHits
 import ch.fasrv.fanotes.desk.SUBJECT_BOOKS_PATH
 import ch.fasrv.fanotes.desk.WorksheetHighlight
 import ch.fasrv.fanotes.desk.attachSubjectBook
+import ch.fasrv.fanotes.desk.detachSubjectBook
 import ch.fasrv.fanotes.desk.parseSubjectBooks
 import ch.fasrv.fanotes.desk.parseWorksheetHighlights
 import ch.fasrv.fanotes.desk.recordSubjectBookPage
@@ -1352,6 +1353,54 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }.toMutableList()))
         root.put("updatedAt", ch.fasrv.fanotes.json.jsonString(isoNow()))
         graph.vault.write(path, root.stringify().encodeToByteArray())
+    }
+
+    fun importSubjectBook(folder: String, name: String, bytes: ByteArray) {
+        viewModelScope.launch {
+            val subject = folder.trim('/')
+            if (subject.isEmpty()) {
+                message.value = "Das Fach wurde nicht gefunden."
+                return@launch
+            }
+            val path = try {
+                withContext(Dispatchers.IO) { graph.store.importUniquePdf(subject, name, bytes) }
+            } catch (error: Exception) {
+                message.value = error.message ?: "Das Buch konnte nicht hinzugefügt werden."
+                return@launch
+            }
+            val next = withContext(Dispatchers.IO) {
+                val current = graph.vault.read(SUBJECT_BOOKS_PATH)?.decodeToString()?.let(::parseSubjectBooks).orEmpty()
+                val updated = attachSubjectBook(current, subject, path, 1)
+                graph.vault.write(SUBJECT_BOOKS_PATH, serializeSubjectBooks(updated).encodeToByteArray())
+                updated
+            }
+            books.value = next
+            openCreatedFolder(subject)
+            refreshTree()
+            open.value?.let { refreshBook(it) }
+            message.value = "Buch zum Fach hinzugefügt. Oben blendest du die Ansicht ein."
+            graph.engine.notifyLocalChange()
+        }
+    }
+
+    fun detachSubjectBook(folder: String) {
+        viewModelScope.launch {
+            val subject = folder.trim('/')
+            val next = withContext(Dispatchers.IO) {
+                val current = graph.vault.read(SUBJECT_BOOKS_PATH)?.decodeToString()?.let(::parseSubjectBooks).orEmpty()
+                val updated = detachSubjectBook(current, subject)
+                graph.vault.write(SUBJECT_BOOKS_PATH, serializeSubjectBooks(updated).encodeToByteArray())
+                updated
+            }
+            books.value = next
+            val pane = bookPane.value
+            if (pane?.subjectPath == subject) {
+                bookPane.value = null
+                pane.bitmap?.recycle()
+            }
+            message.value = "Buch vom Fach entfernt. Die PDF-Datei bleibt im Ordner."
+            graph.engine.notifyLocalChange()
+        }
     }
 
     fun attachSubjectBook(folder: String, pdf: String) {
