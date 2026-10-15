@@ -73,6 +73,7 @@ class SplitEditorView(context: Context) : EditText(context) {
             applyGutter()
         }
     private var writing = false
+    private var tags: HtmlTagAssist? = null
     private var painting = false
     private var ready = false
     private var downX = 0f
@@ -83,6 +84,14 @@ class SplitEditorView(context: Context) : EditText(context) {
     private val closedBrackets = mutableSetOf<Int>()
 
     init {
+        tags = HtmlTagAssist(this) { block ->
+            writing = true
+            try {
+                block()
+            } finally {
+                writing = false
+            }
+        }
         background = null
         setTextColor(0xFF252630.toInt())
         highlightColor = selectionWashArgb(accent)
@@ -91,7 +100,10 @@ class SplitEditorView(context: Context) : EditText(context) {
         gravity = Gravity.TOP or Gravity.START
         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         setPadding(0, 0, 0, 0)
-        setOnFocusChangeListener { _, _ -> paintPreview() }
+        setOnFocusChangeListener { _, focused ->
+            paintPreview()
+            if (!focused) tags?.hide()
+        }
         addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
                 if (!writing) {
@@ -145,9 +157,20 @@ class SplitEditorView(context: Context) : EditText(context) {
                         }
                     }
                 }
+                if (!writing) tags?.onUserEdit()
             }
         })
         ready = true
+    }
+
+    override fun onDetachedFromWindow() {
+        tags?.hide()
+        super.onDetachedFromWindow()
+    }
+
+    override fun onScrollChanged(horiz: Int, vert: Int, oldHoriz: Int, oldVert: Int) {
+        super.onScrollChanged(horiz, vert, oldHoriz, oldVert)
+        tags?.onCaretMoved()
     }
 
     fun show(markdown: String) {
@@ -193,6 +216,7 @@ class SplitEditorView(context: Context) : EditText(context) {
         super.onSelectionChanged(selStart, selEnd)
         invalidate()
         if (ready && !painting) paintPreview()
+        tags?.onCaretMoved()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -230,6 +254,7 @@ class SplitEditorView(context: Context) : EditText(context) {
     }
 
     override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+        if (tags?.onKey(keyCode, event) == true) return true
         if (!event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed &&
             (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_PAGE_DOWN)
         ) {
