@@ -330,14 +330,27 @@ private fun styledTableRow(cells: List<String>): Pair<String, List<DetailsInline
 }
 
 fun detailsReadingLines(body: String): List<DetailsReadingLine> {
+    val lines = readingLines(body, ::detailsCardScale)
+    return if (lines.isEmpty()) {
+        listOf(DetailsReadingLine("Dieser Klappbereich ist leer.", DETAILS_CARD_FONT, false))
+    } else {
+        lines
+    }
+}
+
+/** Schön preview of a whole note: the desktop Markdown preview, not the nested details card. */
+fun aiPreviewReading(markdown: String): List<DetailsReadingLine> = readingLines(markdown, ::aiPreviewReadingScale)
+
+private fun readingLines(body: String, scaleOf: (PaperKind) -> Float): List<DetailsReadingLine> {
     val prepared = prepareFootnotes(body)
     val lines = aiPreviewLines(prepared.body).flatMap { line ->
+        val scale = scaleOf(line.kind)
         when (line.kind) {
-            PaperKind.RULE -> listOf(DetailsReadingLine("", detailsCardScale(line.kind), false, "rule"))
+            PaperKind.RULE -> listOf(DetailsReadingLine("", scale, false, "rule"))
             PaperKind.IMAGE -> listOf(
                 DetailsReadingLine(
                     paperImageCaption(line.text),
-                    detailsCardScale(line.kind),
+                    scale,
                     false,
                     "image",
                     paperImageSource(line.text),
@@ -348,7 +361,7 @@ fun detailsReadingLines(body: String): List<DetailsReadingLine> {
                 if (row.first.isBlank()) null
                 else DetailsReadingLine(
                     row.first,
-                    detailsCardScale(line.kind),
+                    scale,
                     index == 0,
                     "table",
                     tableAlignWire(line.text),
@@ -357,7 +370,7 @@ fun detailsReadingLines(body: String): List<DetailsReadingLine> {
             }
             PaperKind.CODE, PaperKind.MATH -> {
                 if (line.text.isBlank()) emptyList()
-                else listOf(DetailsReadingLine(line.text, detailsCardScale(line.kind), false, detailsReadingKind(line.kind)))
+                else listOf(DetailsReadingLine(line.text, scale, false, detailsReadingKind(line.kind)))
             }
             PaperKind.TASK -> {
                 val done = line.text.startsWith("x|")
@@ -370,7 +383,7 @@ fun detailsReadingLines(body: String): List<DetailsReadingLine> {
                 else listOf(
                     DetailsReadingLine(
                         text,
-                        detailsCardScale(line.kind),
+                        scale,
                         false,
                         "task",
                         inlines = shiftDetailsInlines(marks, indent.length + box.length),
@@ -388,7 +401,7 @@ fun detailsReadingLines(body: String): List<DetailsReadingLine> {
                     listOf(
                         DetailsReadingLine(
                             text,
-                            detailsCardScale(line.kind),
+                            scale,
                             aiPreviewHeading(line.kind),
                             detailsReadingKind(line.kind),
                             inlines = if (bullet) shiftDetailsInlines(marks, indent.length + 2) else marks,
@@ -398,12 +411,7 @@ fun detailsReadingLines(body: String): List<DetailsReadingLine> {
             }
         }
     }
-    val noted = lines + footnoteSection(prepared.notes)
-    return if (noted.isEmpty()) {
-        listOf(DetailsReadingLine("Dieser Klappbereich ist leer.", DETAILS_CARD_FONT, false))
-    } else {
-        noted
-    }
+    return lines + footnoteSection(prepared.notes)
 }
 
 private fun footnoteSection(notes: List<String>): List<DetailsReadingLine> {

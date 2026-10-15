@@ -76,9 +76,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.unit.IntOffset
@@ -2192,20 +2196,74 @@ fun AiScreen(model: FaNotesViewModel) {
             if (!pretty) {
                 Text(result, fontFamily = FontFamily.Monospace, fontSize = base.sp)
             } else {
-                ch.fasrv.fanotes.desk.aiPreviewLines(result).forEach { line ->
-                    val shown = ch.fasrv.fanotes.desk.aiPreviewLineText(line)
-                    if (line.kind == ch.fasrv.fanotes.text.PaperKind.SPACER) {
-                        Spacer(Modifier.height(8.dp))
-                    } else if (shown.isNotEmpty() || line.kind == ch.fasrv.fanotes.text.PaperKind.RULE) {
-                        Text(
-                            if (line.kind == ch.fasrv.fanotes.text.PaperKind.RULE) "—" else shown,
-                            fontSize = (base * ch.fasrv.fanotes.desk.aiPreviewScale(line.kind)).sp,
-                            fontWeight = if (ch.fasrv.fanotes.desk.aiPreviewHeading(line.kind)) FontWeight.Bold else FontWeight.Normal,
-                            fontFamily = if (line.kind == ch.fasrv.fanotes.text.PaperKind.CODE) FontFamily.Monospace else FontFamily.Default,
+                val link = MaterialTheme.colorScheme.primary
+                val muted = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
+                ch.fasrv.fanotes.desk.aiPreviewReading(result).forEach { line ->
+                    when (line.kind) {
+                        "rule" -> Box(
+                            Modifier
+                                .padding(vertical = 8.dp)
+                                .fillMaxWidth()
+                                .height(1.dp)
+                                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
                         )
+                        "quote" -> Row(verticalAlignment = Alignment.Top) {
+                            Box(
+                                Modifier
+                                    .padding(top = 3.dp, end = 8.dp)
+                                    .width(3.dp)
+                                    .height(18.dp)
+                                    .background(link),
+                            )
+                            Text(
+                                previewAnnotated(line, base, link),
+                                fontSize = (base * line.scale).sp,
+                                color = muted,
+                            )
+                        }
+                        else -> if (line.text.isNotEmpty() || line.kind == "image") {
+                            Text(
+                                previewAnnotated(line, base, link),
+                                fontSize = (base * line.scale).sp,
+                                fontWeight = if (line.heading) FontWeight.Bold else FontWeight.Normal,
+                                fontFamily = if (line.kind == "code" || line.kind == "math") FontFamily.Monospace else FontFamily.Default,
+                                color = if (line.kind == "footnote") muted else MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
                     }
                 }
             }
+        }
+    }
+}
+
+private fun previewAnnotated(
+    line: ch.fasrv.fanotes.desk.DetailsReadingLine,
+    base: Int,
+    link: Color,
+): androidx.compose.ui.text.AnnotatedString {
+    val (text, marks) = ch.fasrv.fanotes.desk.expandFieldSeparators(line.text, line.inlines)
+    val size = (base * line.scale).sp
+    return buildAnnotatedString {
+        append(text)
+        for (mark in marks) {
+            val start = mark.start.coerceIn(0, text.length)
+            val end = mark.end.coerceIn(start, text.length)
+            if (start == end) continue
+            val style = when (mark.kind) {
+                "strong" -> SpanStyle(fontWeight = FontWeight.Bold)
+                "emphasis" -> SpanStyle(fontStyle = FontStyle.Italic)
+                "strike" -> SpanStyle(textDecoration = TextDecoration.LineThrough)
+                "code", "math" -> SpanStyle(fontFamily = FontFamily.Monospace)
+                "link" -> SpanStyle(color = link, textDecoration = TextDecoration.Underline)
+                "footnote" -> SpanStyle(
+                    color = link,
+                    baselineShift = BaselineShift.Superscript,
+                    fontSize = size * 0.7f,
+                )
+                else -> null
+            } ?: continue
+            addStyle(style, start, end)
         }
     }
 }
