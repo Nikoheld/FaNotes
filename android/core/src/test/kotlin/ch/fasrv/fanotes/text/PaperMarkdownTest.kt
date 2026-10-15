@@ -20,6 +20,9 @@ class PaperMarkdownTest {
             """.trimIndent(),
         )
         assertEquals(PaperKind.H1, lines.first().kind)
+        assertEquals(PaperKind.H5, paperLines("##### Klein").single().kind)
+        assertEquals(PaperKind.H6, paperLines("###### Kleiner").single().kind)
+        assertEquals("Klein", paperLines("##### Klein").single().text)
         assertEquals("Vorlesung", lines.first().text)
         assertEquals("Ein **Satz** auf dem Papier.", lines[2].text)
         assertEquals(listOf("erster", "zweiter"), lines.filter { it.kind == PaperKind.BULLET }.map { it.text })

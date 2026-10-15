@@ -37,6 +37,7 @@ import ch.fasrv.fanotes.desk.paperTableFillArgb
 import ch.fasrv.fanotes.desk.tablePadPx
 import ch.fasrv.fanotes.desk.tableRulePx
 import ch.fasrv.fanotes.desk.paperCodeBox
+import ch.fasrv.fanotes.desk.paperHeading
 import ch.fasrv.fanotes.desk.paperCodeInkArgb
 import ch.fasrv.fanotes.desk.livePreviewMarks
 import ch.fasrv.fanotes.desk.paperAccentReadableArgb
@@ -90,11 +91,12 @@ private fun spanFor(mark: LiveMark, readable: Int, accent: Int, textSizePx: Floa
     LiveKind.BULLET -> AccentSwapSpan("• ", readable)
     LiveKind.TASK_OPEN -> TaskSpan("☐ ")
     LiveKind.TASK_DONE -> TaskSpan("☑ ")
-    LiveKind.H1 -> HeadingSpan(2f, textSizePx)
-    LiveKind.H2 -> HeadingSpan(1.55f, textSizePx)
-    LiveKind.H3 -> HeadingSpan(1.28f, textSizePx)
-    LiveKind.H4 -> HeadingSpan(1.1f, textSizePx)
-    LiveKind.H5, LiveKind.H6 -> HeadingSpan(1f, textSizePx)
+    LiveKind.H1 -> HeadingSpan(1, textSizePx)
+    LiveKind.H2 -> HeadingSpan(2, textSizePx)
+    LiveKind.H3 -> HeadingSpan(3, textSizePx)
+    LiveKind.H4 -> HeadingSpan(4, textSizePx)
+    LiveKind.H5 -> HeadingSpan(5, textSizePx)
+    LiveKind.H6 -> HeadingSpan(6, textSizePx)
     LiveKind.QUOTE -> PaperQuoteSpan(readable, quoteWashArgb(accent), textSizePx)
     LiveKind.STRONG -> StrongSpan()
     LiveKind.EMPHASIS -> EmphasisSpan()
@@ -353,20 +355,23 @@ private class CollapseSpan : LineHeightSpan, LivePreviewSpan {
     }
 }
 
-private class HeadingSpan(private val proportion: Float, private val baseTextPx: Float) :
+internal class HeadingSpan(private val level: Int, private val baseTextPx: Float) :
     MetricAffectingSpan(), LineHeightSpan, LineBackgroundSpan, LivePreviewSpan {
     override fun updateDrawState(paint: android.text.TextPaint) = apply(paint)
     override fun updateMeasureState(paint: android.text.TextPaint) = apply(paint)
 
     private fun apply(paint: android.text.TextPaint) {
-        paint.textSize *= proportion
-        paint.typeface = Typeface.create(paint.typeface, Typeface.BOLD)
+        val heading = paperHeading(level, baseTextPx)
+        paint.textSize *= heading.scale
+        paint.letterSpacing = heading.letterSpacing
+        paint.typeface = Typeface.create(paint.typeface, 720, false)
     }
 
     override fun chooseHeight(text: CharSequence, start: Int, end: Int, spanstartv: Int, lineHeight: Int, fm: Paint.FontMetricsInt) {
-        if (proportion != 2f) return
-        val top = (baseTextPx * 1f).toInt()
-        val bottom = (baseTextPx * 0.56f).toInt()
+        val heading = paperHeading(level, baseTextPx)
+        val top = kotlin.math.round(heading.padTop).toInt()
+        val bottom = kotlin.math.round(heading.padBottom).toInt()
+        if (top == 0 && bottom == 0) return
         fm.ascent -= top
         fm.top -= top
         fm.descent += bottom
@@ -386,7 +391,7 @@ private class HeadingSpan(private val proportion: Float, private val baseTextPx:
         end: Int,
         lineNumber: Int,
     ) {
-        if (proportion != 2f || right <= left) return
+        if (level != 1 || right <= left) return
         val thickness = (baseTextPx / 16f).coerceAtLeast(1f)
         val previous = paint.color
         paint.color = PAPER_RULE_ARGB
@@ -501,29 +506,6 @@ internal class PaperThematicRuleSpan(private val textSizePx: Float) : LineBackgr
         val previous = paint.color
         paint.color = PAPER_RULE_STRONG_ARGB
         canvas.drawRect(left.toFloat(), y, right.toFloat(), y + thickness, paint)
-        paint.color = previous
-    }
-}
-
-internal class PaperRuleSpan(private val baseTextPx: Float) : LineBackgroundSpan, LivePreviewSpan {
-    override fun drawBackground(
-        canvas: Canvas,
-        paint: Paint,
-        left: Int,
-        right: Int,
-        top: Int,
-        baseline: Int,
-        bottom: Int,
-        text: CharSequence,
-        start: Int,
-        end: Int,
-        lineNumber: Int,
-    ) {
-        if (right <= left) return
-        val thickness = (baseTextPx / 16f).coerceAtLeast(1f)
-        val previous = paint.color
-        paint.color = PAPER_RULE_ARGB
-        canvas.drawRect(left.toFloat(), bottom - thickness, right.toFloat(), bottom.toFloat(), paint)
         paint.color = previous
     }
 }
