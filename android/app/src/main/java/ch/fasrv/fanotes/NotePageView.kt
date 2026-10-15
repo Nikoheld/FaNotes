@@ -565,6 +565,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             true
         }
         editor.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        editor.setOnFocusChangeListener { _, _ -> paintLivePreview() }
         editor.visibility = GONE
         editor.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
@@ -732,7 +733,14 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val editable = editor.text ?: return
         paintingPreview = true
         try {
-            applyLivePreview(editable, editor.selectionStart, editor.selectionEnd, ink.accentColor, editor.textSize)
+            applyLivePreview(
+                editable,
+                editor.selectionStart,
+                editor.selectionEnd,
+                ink.accentColor,
+                editor.textSize,
+                editor.isFocused,
+            )
         } finally {
             paintingPreview = false
         }
