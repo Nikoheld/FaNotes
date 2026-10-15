@@ -114,6 +114,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
             return true
         }
 
+        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+            super.onSizeChanged(w, h, oldw, oldh)
+            if (w != oldw && previewReady && !paintingPreview) paintLivePreview()
+        }
+
         override fun onDraw(canvas: Canvas) {
             val textLayout = layout
             if (textLayout != null) {
@@ -833,6 +838,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         handle.setOnClickListener { setChromeOpen(true) }
         handle.elevation = 12f
         addView(handle, LayoutParams(dp(112), dp(28), Gravity.TOP or Gravity.END))
+        ink.onPaperImages = { paintLivePreview() }
         ink.onCamera = { _, _, _ -> placeEditor() }
         ink.onPenActive = { active ->
             penDown = active
@@ -925,6 +931,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val editable = editor.text ?: return
         paintingPreview = true
         try {
+            val box = ch.fasrv.fanotes.desk.paperDetailsBox(editor.textSize)
+            val textWidth = editor.layout?.width?.toFloat()
+                ?: (editor.width - editor.paddingLeft - editor.paddingRight).toFloat()
+            val imageColumn = (textWidth - box.border * 2f - box.padX * 2f).coerceAtLeast(0f)
             applyLivePreview(
                 editable,
                 editor.selectionStart,
@@ -932,6 +942,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 ink.accentColor,
                 editor.textSize,
                 editor.isFocused,
+                ink.paperImages,
+                imageColumn,
             )
         } finally {
             paintingPreview = false

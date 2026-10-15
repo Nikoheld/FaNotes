@@ -1,8 +1,11 @@
 package ch.fasrv.fanotes
 
+import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
@@ -53,6 +56,9 @@ import ch.fasrv.fanotes.desk.SYNTAX_ATOM_ARGB
 import ch.fasrv.fanotes.desk.SYNTAX_COMMENT_ARGB
 import ch.fasrv.fanotes.desk.SYNTAX_ESCAPE_ARGB
 import ch.fasrv.fanotes.desk.SourceSyntax
+import ch.fasrv.fanotes.desk.detailsImageFrame
+import ch.fasrv.fanotes.desk.detailsImageMargin
+import ch.fasrv.fanotes.desk.detailsImageRadius
 import ch.fasrv.fanotes.desk.livePreviewMarks
 import ch.fasrv.fanotes.desk.sourceSyntaxMarks
 import ch.fasrv.fanotes.desk.specialCharMarks
@@ -75,6 +81,8 @@ fun applyLivePreview(
     accent: Int,
     textSizePx: Float = 16f,
     focused: Boolean = true,
+    images: Map<String, Bitmap> = emptyMap(),
+    imageColumnPx: Float = 0f,
 ) {
     if (hasComposingSpan(editable)) return
     for (span in editable.getSpans(0, editable.length, LivePreviewSpan::class.java)) editable.removeSpan(span)
@@ -84,7 +92,12 @@ fun applyLivePreview(
         val start = mark.start.coerceIn(0, length)
         val end = mark.end.coerceIn(start, length)
         if (start == end) continue
-        editable.setSpan(spanFor(mark, readable, accent, textSizePx), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        editable.setSpan(
+            spanFor(mark, readable, accent, textSizePx, images, imageColumnPx),
+            start,
+            end,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
     }
     for (mark in sourceSyntaxMarks(editable.toString(), selectionStart, selectionEnd)) {
         val start = mark.start.coerceIn(0, length)
@@ -148,7 +161,14 @@ private fun hasComposingSpan(editable: Editable): Boolean {
     return false
 }
 
-private fun spanFor(mark: LiveMark, readable: Int, accent: Int, textSizePx: Float): Any = when (mark.kind) {
+private fun spanFor(
+    mark: LiveMark,
+    readable: Int,
+    accent: Int,
+    textSizePx: Float,
+    images: Map<String, Bitmap>,
+    imageColumnPx: Float,
+): Any = when (mark.kind) {
     LiveKind.HIDE -> HideSpan()
     LiveKind.COLLAPSE -> CollapseSpan()
     LiveKind.BULLET -> AccentSwapSpan("• ", readable)
@@ -181,6 +201,9 @@ private fun spanFor(mark: LiveMark, readable: Int, accent: Int, textSizePx: Floa
         mark.readingScales,
         mark.readingHeadings,
         mark.readingKinds,
+        mark.readingSources,
+        images,
+        imageColumnPx,
     )
     LiveKind.DETAILS_BODY -> DetailsBodySpan(paperDetailsFillArgb(), textSizePx, false)
     LiveKind.DETAILS_END -> DetailsBodySpan(paperDetailsFillArgb(), textSizePx, true)
@@ -205,6 +228,9 @@ internal class DetailsSummarySpan(
     private val readingScales: List<Float> = emptyList(),
     private val readingHeadings: List<Boolean> = emptyList(),
     private val readingKinds: List<String> = emptyList(),
+    private val readingSources: List<String> = emptyList(),
+    private val images: Map<String, Bitmap> = emptyMap(),
+    private val imageColumnPx: Float = 0f,
 ) : ReplacementSpan(), LineBackgroundSpan, LivePreviewSpan {
     override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
         val box = paperDetailsBox(textSizePx)
@@ -277,6 +303,19 @@ internal class DetailsSummarySpan(
         if (body.isNotEmpty()) {
             var cursor = summaryBottom + box.padY * 0.35f
             body.split('\n').forEachIndexed { index, line ->
+                val picture = imageSlot(index)
+                if (picture != null) {
+                    val margin = detailsImageMargin(previousSize)
+                    val (frameW, frameH) = detailsImageFrame(picture.width, picture.height, imageColumnPx)
+                    val available = (rect.right - box.padX) - (rect.left + box.padX)
+                    val drawnW = frameW.coerceAtMost(available.coerceAtLeast(1f))
+                    val drawnH = if (frameW > 0f) frameH * (drawnW / frameW) else frameH
+                    val left = rect.left + box.padX + ((available - drawnW) / 2f).coerceAtLeast(0f)
+                    cursor += margin
+                    drawDetailsImage(canvas, paint, picture, left, cursor, drawnW, drawnH, box.border)
+                    cursor += frameH + margin
+                    return@forEachIndexed
+                }
                 val scale = readingScales.getOrElse(index) { 1f }
                 val heading = readingHeadings.getOrElse(index) { false }
                 val kind = readingKinds.getOrElse(index) { "paragraph" }
@@ -349,12 +388,56 @@ internal class DetailsSummarySpan(
         val saved = paint.textSize
         var height = padY * 0.35f
         lines.forEachIndexed { index, _ ->
-            paint.textSize = saved * readingScales.getOrElse(index) { 1f }
-            val metrics = paint.fontMetrics
-            height += -metrics.ascent + metrics.descent
+            val picture = imageSlot(index)
+            if (picture != null) {
+                val margin = detailsImageMargin(saved)
+                val frame = detailsImageFrame(picture.width, picture.height, imageColumnPx)
+                height += margin + frame.second + margin
+            } else {
+                paint.textSize = saved * readingScales.getOrElse(index) { 1f }
+                val metrics = paint.fontMetrics
+                height += -metrics.ascent + metrics.descent
+            }
         }
         paint.textSize = saved
         return height
+    }
+
+    private fun imageSlot(index: Int): Bitmap? {
+        if (imageColumnPx <= 0f || readingKinds.getOrElse(index) { "" } != "image") return null
+        val source = readingSources.getOrElse(index) { "" }
+        if (source.isEmpty()) return null
+        return images[source]?.takeIf { !it.isRecycled }
+    }
+
+    private fun drawDetailsImage(
+        canvas: Canvas,
+        paint: Paint,
+        bitmap: Bitmap,
+        left: Float,
+        top: Float,
+        frameW: Float,
+        frameH: Float,
+        border: Float,
+    ) {
+        val dest = RectF(left, top, left + frameW, top + frameH)
+        val radius = detailsImageRadius(textSizePx)
+        val previousFlags = paint.flags
+        paint.style = Paint.Style.FILL
+        paint.color = Color.WHITE
+        canvas.drawRoundRect(dest, radius, radius, paint)
+        canvas.save()
+        canvas.clipPath(Path().apply { addRoundRect(dest, radius, radius, Path.Direction.CW) })
+        paint.flags = previousFlags or Paint.FILTER_BITMAP_FLAG
+        canvas.drawBitmap(bitmap, null, dest, paint)
+        canvas.restore()
+        paint.flags = previousFlags
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = border
+        paint.color = PAPER_RULE_ARGB
+        canvas.drawRoundRect(dest, radius, radius, paint)
+        paint.style = Paint.Style.FILL
+        paint.color = PAPER_MATH_INK
     }
 
     private fun drawEditButton(canvas: Canvas, paint: Paint, rect: RectF, contentTop: Float, border: Float) {
