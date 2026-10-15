@@ -127,6 +127,12 @@ class MainActivity : ComponentActivity() {
     private val exportNotePdf = registerForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
         if (uri != null) model.exportOpenNotePdf(uri)
     }
+    private var pendingDownload: String? = null
+    private val downloadNote = registerForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
+        val path = pendingDownload
+        pendingDownload = null
+        if (uri != null && path != null) model.saveNoteCopy(path, uri)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -148,6 +154,14 @@ class MainActivity : ComponentActivity() {
                     onImportIcs = { importIcs.launch(arrayOf("text/calendar", "text/plain", "*/*")) },
                     onExportIcs = { exportIcs.launch("fanotes.ics") },
                     onExportPdf = { exportNotePdf.launch(ch.fasrv.fanotes.desk.PDF_EXPORT_FILE_NAME) },
+                    onDownload = {
+                        val path = model.open.value?.path.orEmpty()
+                        if (!ch.fasrv.fanotes.desk.noteCanDownload(path)) model.refuseNoteDownload()
+                        else {
+                            pendingDownload = path
+                            downloadNote.launch(ch.fasrv.fanotes.desk.noteDownloadFileName(path))
+                        }
+                    },
                 )
             }
         }
@@ -209,6 +223,7 @@ fun FaNotesScreen(
     onImportIcs: () -> Unit,
     onExportIcs: () -> Unit,
     onExportPdf: () -> Unit,
+    onDownload: () -> Unit,
 ) {
     val tree by model.tree.collectAsStateWithLifecycle()
     val open by model.open.collectAsStateWithLifecycle()
@@ -362,6 +377,7 @@ fun FaNotesScreen(
                                     { editingBox = it }, { mathOpen = true }, it.clipToBounds(),
                                     showRelations = !(wide && desk["outline"] != "off" && !focus),
                                     onExportPdf = onExportPdf,
+                                    onDownload = onDownload,
                                 )
                             }
                             if (bookPlacement == "unten") BookPane(model, Modifier.height(220.dp).fillMaxWidth(), openBook)
@@ -374,6 +390,7 @@ fun FaNotesScreen(
                                 { editingBox = it }, { mathOpen = true }, it.clipToBounds(),
                                 showRelations = !(wide && desk["outline"] != "off" && !focus),
                                 onExportPdf = onExportPdf,
+                                onDownload = onDownload,
                             )
                         }
                     }
@@ -424,6 +441,7 @@ fun FaNotesScreen(
                     "sync" -> requestSync()
                     "bug-report" -> model.openBugReport()
                     "export-pdf" -> onExportPdf()
+                    "download-note" -> onDownload()
                     "nav-back" -> model.navigateHistory(-1)
                     "nav-forward" -> model.navigateHistory(1)
                     "reopen-tab" -> model.reopenClosedTab()
@@ -908,11 +926,15 @@ private fun NotePage(
     modifier: Modifier,
     showRelations: Boolean = true,
     onExportPdf: () -> Unit = {},
+    onDownload: () -> Unit = {},
 ) {
     val noteKind = model.open.collectAsStateWithLifecycle().value?.kind
     Column(modifier) {
         if (path != null) {
-            TextButton(onClick = onExportPdf, modifier = Modifier.padding(horizontal = 4.dp)) { Text("Als PDF exportieren") }
+            Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onExportPdf) { Text("Als PDF exportieren") }
+                TextButton(onClick = onDownload) { Text("Herunterladen") }
+            }
             NoteTagBar(model)
             MarginTranscript(model)
             if (noteKind == NoteKind.PDF) PdfQuoteMarks(model)

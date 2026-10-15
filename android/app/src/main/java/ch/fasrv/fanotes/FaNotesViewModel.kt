@@ -84,6 +84,9 @@ import ch.fasrv.fanotes.desk.pruneWorkspaceMemory
 import ch.fasrv.fanotes.desk.rankSwitcherNotes
 import ch.fasrv.fanotes.desk.rememberClosedTab
 import ch.fasrv.fanotes.desk.remapNoteHistory
+import ch.fasrv.fanotes.desk.NOTE_DOWNLOAD_MISSING
+import ch.fasrv.fanotes.desk.NOTE_DOWNLOAD_REFUSED
+import ch.fasrv.fanotes.desk.NOTE_DOWNLOAD_SAVED
 import ch.fasrv.fanotes.desk.PDF_EXPORT_FAILED
 import ch.fasrv.fanotes.desk.PDF_EXPORT_NEEDS_NOTE
 import ch.fasrv.fanotes.desk.PDF_EXPORT_SAVED
@@ -455,6 +458,30 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (next != path) moveReferences(path, next)
             loadTree()
+        }
+    }
+
+    fun refuseNoteDownload() {
+        message.value = NOTE_DOWNLOAD_REFUSED
+    }
+
+    fun saveNoteCopy(path: String, uri: Uri) {
+        if (!ch.fasrv.fanotes.desk.noteCanDownload(path)) {
+            message.value = NOTE_DOWNLOAD_REFUSED
+            return
+        }
+        viewModelScope.launch {
+            message.value = withContext(Dispatchers.IO) {
+                runCatching {
+                    val bytes = graph.vault.read(path) ?: error(NOTE_DOWNLOAD_MISSING)
+                    val stream = getApplication<Application>().contentResolver.openOutputStream(uri)
+                        ?: error(NOTE_DOWNLOAD_MISSING)
+                    stream.use { it.write(bytes) }
+                    NOTE_DOWNLOAD_SAVED
+                }.getOrElse { error ->
+                    if (error.message == NOTE_DOWNLOAD_MISSING) NOTE_DOWNLOAD_MISSING else NOTE_DOWNLOAD_REFUSED
+                }
+            }
         }
     }
 

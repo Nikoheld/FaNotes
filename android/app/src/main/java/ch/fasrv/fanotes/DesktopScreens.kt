@@ -1700,6 +1700,7 @@ fun CommandPalette(
         "sync" to "Sync",
         "bug-report" to "Fehler melden",
         "export-pdf" to "Notiz als PDF exportieren",
+        "download-note" to "Notiz herunterladen",
     )
     val commands = if (query.isBlank()) actions else actions.filter { (_, label) -> fuzzyScore(query, label) > 0 }
     Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()).background(MaterialTheme.colorScheme.surface).padding(12.dp)) {
