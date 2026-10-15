@@ -157,6 +157,8 @@ class InkSurfaceView @JvmOverloads constructor(
     var zoomMax: Float = 3.25f
     var shapeSnapSensitivity: Int = 50
     var scribbleSensitivity: Int = 50
+    /** Selection rings, hover, and placed links follow the desktop accent. */
+    var accentColor: Int = Color.parseColor("#2A6F97")
     var strokeSmoothing: Float = 0.68f
         set(value) {
             if (field == value) return
@@ -775,6 +777,8 @@ class InkSurfaceView @JvmOverloads constructor(
             )
             canvas.restore()
         }
+        hoverPaint.color = accentColor
+        selectPaint.color = accentColor
         current.selection.forEach { index -> current.document.strokes.getOrNull(index)?.let { drawSelection(canvas, it, scale) } }
         selectRect?.let { rect ->
             val (x1, y1) = normToScreen(rect[0].toDouble(), rect[1].toDouble())
@@ -792,10 +796,10 @@ class InkSurfaceView @JvmOverloads constructor(
         sectionsOf(current.document).forEach { section ->
             val top = pageTop + (section.top * current.document.sourceHeight * scale).toFloat()
             val bottom = pageTop + (section.bodyTop * current.document.sourceHeight * scale).toFloat()
-            ruling.color = Color.parseColor("#2A6F97")
+            ruling.color = accentColor
             ruling.alpha = 40
             canvas.drawRect(pageLeft, top, pageLeft + pageWidth, bottom, ruling)
-            textPaint.color = Color.parseColor("#2A6F97")
+            textPaint.color = accentColor
             textPaint.textSize = 18f * resources.displayMetrics.density
             canvas.drawText(if (section.collapsed) "▸" else "▾", pageLeft + 8f, bottom - 8f, textPaint)
             textPaint.color = Color.parseColor("#252630")
@@ -808,7 +812,7 @@ class InkSurfaceView @JvmOverloads constructor(
                 canvas.drawCircle(sx, sy, 10f * resources.displayMetrics.density, hoverPaint)
             }
             if (appearance != "symbol") {
-                textPaint.color = Color.parseColor("#2A6F97")
+                textPaint.color = accentColor
                 textPaint.textSize = 14f * resources.displayMetrics.density
                 canvas.drawText(link.label.ifBlank { "Notiz" }, sx + if (appearance == "text") 0f else 14f, sy + 6f, textPaint)
                 textPaint.color = Color.parseColor("#252630")

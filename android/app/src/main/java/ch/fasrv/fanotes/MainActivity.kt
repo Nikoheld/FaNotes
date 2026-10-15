@@ -152,7 +152,10 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             val desk by model.deskSettings.collectAsStateWithLifecycle()
-            FaNotesTheme(desk["theme"] ?: if (androidx.compose.foundation.isSystemInDarkTheme()) "dark" else "light") {
+            FaNotesTheme(
+                desk["theme"] ?: if (androidx.compose.foundation.isSystemInDarkTheme()) "dark" else "light",
+                desk["accent"].orEmpty(),
+            ) {
                 FaNotesScreen(
                     model = model,
                     onOpenVault = { openTree.launch(null) },
@@ -193,7 +196,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private val Accent = Color(0xFF2A6F97)
 private val PenColors = listOf("#202333", "#2457D6", "#D23B4A", "#1F8A4C", "#E2A21B", "#7A4DD6")
 private val Papers = listOf(
     "blank" to "Leer",
@@ -212,11 +214,13 @@ private val Brushes = listOf(
 )
 
 @Composable
-fun FaNotesTheme(themeName: String, content: @Composable () -> Unit) {
+fun FaNotesTheme(themeName: String, accentHex: String = ch.fasrv.fanotes.desk.DEFAULT_ACCENT, content: @Composable () -> Unit) {
+    val accent = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccent(accentHex)))
+    val onAccent = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.accentInk(accentHex)))
     val scheme = when (themeName) {
-        "light" -> lightColorScheme(primary = Accent, onSurface = Color(0xFF252630), background = Color(0xFFFFFFFF), surface = Color(0xFFF7F6F3), surfaceVariant = Color(0xFFE7E4DE))
-        "sepia" -> lightColorScheme(primary = Color(0xFF8A5A2B), onSurface = Color(0xFF3E3428), background = Color(0xFFF4EFE4), surface = Color(0xFFEFE6D6), surfaceVariant = Color(0xFFE4D7C3))
-        else -> darkColorScheme(primary = Color(0xFF8EC5E8), onSurface = Color(0xFFEDEDEC), background = Color(0xFF191919), surface = Color(0xFF202020), surfaceVariant = Color(0xFF2A2A2A))
+        "light" -> lightColorScheme(primary = accent, onPrimary = onAccent, onSurface = Color(0xFF252630), background = Color(0xFFFFFFFF), surface = Color(0xFFF7F6F3), surfaceVariant = Color(0xFFE7E4DE))
+        "sepia" -> lightColorScheme(primary = accent, onPrimary = onAccent, onSurface = Color(0xFF3E3428), background = Color(0xFFF4EFE4), surface = Color(0xFFEFE6D6), surfaceVariant = Color(0xFFE4D7C3))
+        else -> darkColorScheme(primary = accent, onPrimary = onAccent, onSurface = Color(0xFFEDEDEC), background = Color(0xFF191919), surface = Color(0xFF202020), surfaceVariant = Color(0xFF2A2A2A))
     }
     MaterialTheme(colorScheme = scheme, content = content)
 }
@@ -1040,7 +1044,7 @@ private fun SplitPane(
                 onValueChange = { model.updateSplitMarkdown(it) },
                 modifier = Modifier.fillMaxSize().background(Color(0xFFF7F6F3)).padding(16.dp),
                 textStyle = TextStyle(color = Color(0xFF252630), fontSize = 16.sp, lineHeight = 24.sp),
-                cursorBrush = SolidColor(Color(0xFF2A6F97)),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             )
         }
         }
@@ -1179,6 +1183,7 @@ private fun PageSurface(
             page.ink.onPlaceLink = { linkPage, x, y -> model.placeNoteLink(linkPage, x, y, page.ink.noteLinkStyle) }
             page.ink.onOpenLink = { model.openPath(it); model.showDestination("notes") }
             page.ink.onRemoveLink = { model.askRemoveNoteLink(it) }
+            page.onRestyleLink = { id, linkStyle -> model.restylePlacedNoteLink(id, linkStyle) }
             page.ink.onToggleSection = { model.toggleInkSection(it) }
             page.ink.onEditBox = onEditBox
             page.onMath = onMath
@@ -1189,6 +1194,7 @@ private fun PageSurface(
                 ch.fasrv.fanotes.desk.PageFrame(index + 1, slice.topPagePx.toDouble(), slice.heightPagePx.toDouble(), slice.widthPagePx.toDouble())
             }
             val pen = ch.fasrv.fanotes.desk.penSettings(model.deskSettings.value)
+            page.ink.accentColor = android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccent(model.deskSettings.value["accent"]))
             page.ink.shapeSnapSensitivity = pen.shapeSnap
             page.ink.scribbleSensitivity = pen.scribble
             page.ink.strokeSmoothing = pen.smoothing.toFloat()
