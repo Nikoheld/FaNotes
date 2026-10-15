@@ -171,6 +171,8 @@ fun DeskStatusBar(
     onCrumb: (String) -> Unit = {},
     notice: String? = null,
     onDismissNotice: () -> Unit = {},
+    sidebarOpen: Boolean = true,
+    onToggleSidebar: (() -> Unit)? = null,
 ) {
     Row(
         Modifier.fillMaxWidth().height(28.dp).background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp),
@@ -182,6 +184,17 @@ fun DeskStatusBar(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (onToggleSidebar != null) {
+                Text(
+                    if (sidebarOpen) "Leiste zu" else "Leiste",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable(
+                        onClickLabel = if (sidebarOpen) "Seitenleiste einklappen" else "Seitenleiste einblenden",
+                        onClick = onToggleSidebar,
+                    ),
+                )
+            }
             Text(syncText, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
             if (!notice.isNullOrBlank()) {
                 Text(
@@ -2407,6 +2420,8 @@ fun CommandPalette(
         "note-here" to "Notiz in diesem Ordner",
         "subfolder" to "Unterordner",
         "focus" to "Fokusmodus",
+        "sidebar" to "Dateileiste umschalten",
+        "inspector" to "Gliederung umschalten",
         "sync" to "Sync",
         "bug-report" to "Fehler melden",
         "export-pdf" to "Notiz als PDF exportieren",
