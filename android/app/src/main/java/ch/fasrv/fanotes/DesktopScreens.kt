@@ -2587,9 +2587,17 @@ fun NoteTagBar(model: FaNotesViewModel) {
     val markdown by model.markdown.collectAsStateWithLifecycle()
     val open by model.open.collectAsStateWithLifecycle()
     val token by model.canvasToken.collectAsStateWithLifecycle()
+    val settings by model.deskSettings.collectAsStateWithLifecycle()
     val tags = parseNoteTags(markdown)
     val paper = remember(token, open?.path) { model.session.document.paperStyle }
     var draft by remember(open?.path) { mutableStateOf("") }
+    val backups = ch.fasrv.fanotes.desk.parseNoteBackups(open?.payload?.array("noteBackups"))
+        .filter { it.notePath == open?.path }
+    val backupPolicy = ch.fasrv.fanotes.desk.noteBackupControlPolicy(
+        settings["experimental-backup"] == "on" && open != null,
+        backups.size,
+    )
+    var backupMenu by remember(open?.path) { mutableStateOf(false) }
     fun addTag() {
         if (draft.isBlank()) return
         model.setNoteTags(tags + draft)
@@ -2624,6 +2632,55 @@ fun NoteTagBar(model: FaNotesViewModel) {
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { addTag() }),
             )
+        }
+        if (backupPolicy.visible) {
+            Box {
+                Text(
+                    "Backup",
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .padding(end = 8.dp)
+                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.7f), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                        .clickable(
+                            onClickLabel = if (backupPolicy.restore) {
+                                "Backup: weiteres Backup oder wiederherstellen"
+                            } else {
+                                "Backup der aktuellen Notiz"
+                            },
+                        ) {
+                            if (backupPolicy.restore) backupMenu = true else model.snapshotNote()
+                        }
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                )
+                DropdownMenu(expanded = backupMenu && backupPolicy.restore, onDismissRequest = { backupMenu = false }) {
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text("Weiteres Backup", fontWeight = FontWeight.SemiBold)
+                                Text("Aktuelle Notiz so sichern, wie sie ist", fontSize = 12.sp)
+                            }
+                        },
+                        onClick = {
+                            backupMenu = false
+                            model.snapshotNote()
+                        },
+                    )
+                    backups.asReversed().forEach { snapshot ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text("Wiederherstellen", fontWeight = FontWeight.SemiBold)
+                                    Text(ch.fasrv.fanotes.desk.noteBackupStamp(snapshot.createdAt), fontSize = 12.sp)
+                                }
+                            },
+                            onClick = {
+                                backupMenu = false
+                                model.restoreNoteBackup(snapshot.id)
+                            },
+                        )
+                    }
+                }
+            }
         }
         if (open?.kind != ch.fasrv.fanotes.vault.NoteKind.PDF) {
             PaperStylePicker(paper) { model.setPaper(it) }
