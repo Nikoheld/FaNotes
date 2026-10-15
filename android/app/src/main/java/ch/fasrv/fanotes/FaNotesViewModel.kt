@@ -1870,6 +1870,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val unsaved = MutableStateFlow(false)
     val splitUnsaved = MutableStateFlow(false)
     val splitMarkdown = MutableStateFlow("")
+    val splitFolded = MutableStateFlow<Set<Int>>(emptySet())
     val splitSession = InkSession(newInkDocument("Spalte", "dots", isoNow()))
     private var splitNote: OpenNote? = null
     private var splitSaveJob: kotlinx.coroutines.Job? = null
@@ -2011,6 +2012,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         splitPath.value = null
         splitNote = null
         splitMarkdown.value = ""
+        splitFolded.value = emptySet()
         splitUnsaved.value = false
         persistWorkspace()
     }
@@ -2022,6 +2024,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         splitPath.value = null
         splitNote = null
         splitMarkdown.value = ""
+        splitFolded.value = emptySet()
         splitUnsaved.value = false
         openPath(path, force = true)
     }
@@ -2415,6 +2418,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         splitSession.replace(mainDocument)
         splitNote = mainNote.copy(markdown = mainMarkdown, document = mainDocument)
         splitMarkdown.value = mainMarkdown
+        splitFolded.value = foldsForSections(mainMarkdown, mainDocument)
         splitPath.value = mainNote.path
         open.value = noteOpened(savedSplit)
         markdown.value = savedSplit.markdown
@@ -2458,6 +2462,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     fun loadSplit(path: String) {
         if (path.isBlank() || path == splitPath.value) return
         splitUnsaved.value = false
+        splitFolded.value = emptySet()
         val generation = ++splitGeneration
         viewModelScope.launch {
             val note = try {
@@ -2470,12 +2475,37 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             splitSession.replace(note.document)
             splitNote = note
             splitMarkdown.value = note.markdown
+            splitFolded.value = foldsForSections(note.markdown, note.document)
             rememberTab(path)
             rememberTags(path, note.markdown)
             splitPath.value = path
             splitUnsaved.value = false
             persistWorkspace()
         }
+    }
+
+    fun toggleSplitSection(id: String) {
+        val sorted = ch.fasrv.fanotes.ink.sectionsOf(splitSession.document).sortedBy { it.top }
+        val index = sorted.indexOfFirst { it.id == id }
+        splitSession.replace(ch.fasrv.fanotes.ink.toggleSection(splitSession.document, id))
+        val collapsed = ch.fasrv.fanotes.ink.sectionsOf(splitSession.document).find { it.id == id }?.collapsed == true
+        val line = if (index >= 0) ch.fasrv.fanotes.desk.headingLineForSection(splitMarkdown.value, index) else null
+        if (line != null) {
+            splitFolded.value = if (collapsed) splitFolded.value + line else splitFolded.value - line
+        }
+        splitChanged()
+    }
+
+    /** An edit of the text visible in the split, leaving folded heading bodies in the note. */
+    fun updateSplitVisible(previousVisible: String, nextVisible: String) {
+        if (previousVisible == nextVisible) return
+        if (splitFolded.value.isEmpty()) {
+            updateSplitMarkdown(nextVisible)
+            return
+        }
+        val full = ch.fasrv.fanotes.desk.applyFoldedEdit(splitMarkdown.value, splitFolded.value, previousVisible, nextVisible)
+        splitFolded.value = ch.fasrv.fanotes.desk.shiftFoldedLines(splitMarkdown.value, full, splitFolded.value)
+        updateSplitMarkdown(full)
     }
 
     fun updateSplitMarkdown(value: String) {

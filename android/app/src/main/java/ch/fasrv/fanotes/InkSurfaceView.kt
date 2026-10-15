@@ -673,6 +673,7 @@ class InkSurfaceView @JvmOverloads constructor(
             }
             sectionHit != null && !eraser -> {
                 onToggleSection(sectionHit.id)
+                refresh()
                 onPenActive(false)
                 inkPointer = MotionEvent.INVALID_POINTER_ID
             }

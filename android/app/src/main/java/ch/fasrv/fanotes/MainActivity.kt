@@ -1304,6 +1304,8 @@ private fun SplitPane(
 ) {
     val path = model.splitPath.collectAsStateWithLifecycle().value
     val markdown = model.splitMarkdown.collectAsStateWithLifecycle().value
+    val folded = model.splitFolded.collectAsStateWithLifecycle().value
+    val visible = ch.fasrv.fanotes.desk.markdownWithFolds(markdown, folded)
     val splitUnsaved = model.splitUnsaved.collectAsStateWithLifecycle().value
     val title = path?.let { ch.fasrv.fanotes.vault.titleOf(it) }.orEmpty()
     var typing by remember(path) { mutableStateOf(false) }
@@ -1357,19 +1359,20 @@ private fun SplitPane(
                 view.strokeSmoothing = pen.smoothing.toFloat()
                 view.tabletButtons = model.effectiveDesk()["tablet-buttons"].orEmpty()
                 view.penOnly = ch.fasrv.fanotes.input.penOnlyEnabled(model.effectiveDesk()["pen-only"])
-                view.markdown = markdown
-                view.showMarkdown = markdown.isNotBlank() && !typing
+                if (view.markdown != visible) {
+                    view.markdown = visible
+                    view.invalidate()
+                }
+                view.showMarkdown = visible.isNotBlank() && !typing
+                view.onToggleSection = { model.toggleSplitSection(it) }
                 view.inkTool = tool
                 view.style = style
                 view.fingerDraws = finger
                 view.onChanged = { model.splitChanged() }
                 view.onTogglePaperTask = { line ->
-                    val next = ch.fasrv.fanotes.desk.toggleTask(view.markdown, line)
-                    if (next != view.markdown) {
-                        view.markdown = next
-                        view.invalidate()
-                        model.updateSplitMarkdown(next)
-                    }
+                    val shown = view.markdown
+                    val next = ch.fasrv.fanotes.desk.toggleTask(shown, line)
+                    if (next != shown) model.updateSplitVisible(shown, next)
                 }
                 view.onCamera = camera@{ _, _, _ ->
                     val current = path ?: return@camera
@@ -1410,7 +1413,7 @@ private fun SplitPane(
                 },
                 update = { editor ->
                     splitEditor = editor
-                    editor.onCommit = { model.updateSplitMarkdown(it) }
+                    editor.onVisibleEdit = { previous, next -> model.updateSplitVisible(previous, next) }
                     editor.accent = android.graphics.Color.parseColor(
                         ch.fasrv.fanotes.desk.normalizeAccent(model.effectiveDesk()["accent"]),
                     )
@@ -1418,7 +1421,7 @@ private fun SplitPane(
                     editor.showLineNumbers = metrics.showLineNumbers
                     editor.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, metrics.fontSizePx.toFloat())
                     editor.setLineSpacing(0f, metrics.lineHeight.toFloat())
-                    editor.show(markdown)
+                    editor.show(visible)
                 },
             )
         }
