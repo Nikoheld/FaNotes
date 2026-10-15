@@ -46,4 +46,31 @@ class AiAssistTest {
         assertEquals("# Algebra", aiReplyText("openai", """{"output_text":"```markdown\n# Algebra\n```"}"""))
         assertEquals("Hallo", aiReplyText("ollama", """{"message":{"content":"Hallo"}}"""))
     }
+
+    @Test
+    fun modelListsKeepTheDesktopKeys() {
+        val ollama = parseAiModels(
+            "ollama",
+            """{"models":[{"model":"llama3","name":"Llama 3","details":{"family":"llama","parameter_size":"8B","quantization_level":"Q4"}}]}""",
+        )
+        assertEquals("llama3", ollama.single().key)
+        assertEquals("Llama 3", ollama.single().title)
+        assertEquals("llama · 8B · Q4", ollama.single().detail)
+        val gemini = parseAiModels(
+            "gemini",
+            """{"models":[{"name":"models/gemini-flash","displayName":"Flash","supportedGenerationMethods":["generateContent"]},{"name":"models/embed","displayName":"Embed","supportedGenerationMethods":["embedContent"]}]}""",
+        )
+        assertEquals(listOf("gemini-flash"), gemini.map { it.key })
+        val openai = parseAiModels("openai", """{"data":[{"id":"gpt-4o-mini","owned_by":"openai"}]}""")
+        assertEquals("gpt-4o-mini", openai.single().key)
+        val opencode = parseAiModels(
+            "opencode",
+            """{"all":[{"id":"local","name":"Local","models":{"small":{"name":"Small"}}}]}""",
+        )
+        assertEquals("local/small", opencode.single().key)
+        assertEquals("Local · Small", opencode.single().title)
+        val missing = assertFailsWith<IllegalArgumentException> { parseAiModels("ollama", """{}""") }
+        assertEquals("Ollama hat keine Modellliste geliefert.", missing.message)
+        assertEquals("http://127.0.0.1:11434/api/tags", aiModelsGet("ollama", "http://127.0.0.1:11434", "", "").url)
+    }
 }

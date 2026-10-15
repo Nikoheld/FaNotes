@@ -1332,6 +1332,7 @@ fun AiScreen(model: FaNotesViewModel) {
     val settings by model.deskSettings.collectAsStateWithLifecycle()
     val status by model.aiStatus.collectAsStateWithLifecycle()
     val preview by model.aiPreview.collectAsStateWithLifecycle()
+    val models by model.aiModels.collectAsStateWithLifecycle()
     val provider = settings["ai-provider"].orEmpty().ifBlank { "lmstudio" }
     val definition = ch.fasrv.fanotes.desk.AI_PROVIDERS.firstOrNull { it.id == provider } ?: ch.fasrv.fanotes.desk.AI_PROVIDERS.first()
     var actions by remember { mutableStateOf(setOf("spelling")) }
@@ -1346,7 +1347,10 @@ fun AiScreen(model: FaNotesViewModel) {
                     entry.title,
                     fontWeight = if (entry.id == provider) FontWeight.SemiBold else FontWeight.Normal,
                     color = if (entry.id == provider) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.clickable { model.updateDesk("ai-provider", entry.id) }.padding(vertical = 6.dp, horizontal = 4.dp),
+                    modifier = Modifier.clickable {
+                        model.aiModels.value = emptyList()
+                        model.updateDesk("ai-provider", entry.id)
+                    }.padding(vertical = 6.dp, horizontal = 4.dp),
                 )
             }
         }
@@ -1361,6 +1365,15 @@ fun AiScreen(model: FaNotesViewModel) {
             )
         }
         OutlinedTextField(setting("model"), { model.updateDesk("ai-$provider-model", it) }, modifier = Modifier.fillMaxWidth(), label = { Text("Modell") }, singleLine = true)
+        TextButton(onClick = { model.loadAiModels(provider, setting("url"), setting("key"), setting("user")) }) { Text("Modelle laden") }
+        models.forEach { listed ->
+            Column(
+                Modifier.fillMaxWidth().clickable { model.updateDesk("ai-$provider-model", listed.key) }.padding(vertical = 4.dp),
+            ) {
+                Text(listed.title, fontWeight = if (setting("model") == listed.key) FontWeight.SemiBold else FontWeight.Normal)
+                if (listed.detail.isNotBlank()) Text(listed.detail, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
+            }
+        }
         if (provider == "opencode") {
             OutlinedTextField(setting("user").ifBlank { "opencode" }, { model.updateDesk("ai-$provider-user", it) }, modifier = Modifier.fillMaxWidth(), label = { Text("Benutzer") }, singleLine = true)
         }
