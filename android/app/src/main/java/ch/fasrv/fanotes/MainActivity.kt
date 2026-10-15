@@ -1090,10 +1090,12 @@ private fun SplitPane(
     val markdown = model.splitMarkdown.collectAsStateWithLifecycle().value
     val title = path?.let { ch.fasrv.fanotes.vault.titleOf(it) }.orEmpty()
     var typing by remember(path) { mutableStateOf(false) }
+    var splitEditor by remember(path) { mutableStateOf<SplitEditorView?>(null) }
     Column(modifier) {
         Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(title.ifBlank { "Zweite Spalte" }, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
             TextButton(onClick = { typing = !typing }) { Text(if (typing) "Stift" else "Text") }
+            if (typing) TextButton(onClick = { splitEditor?.selectNext() }) { Text("Nächstes") }
             TextButton(onClick = { model.swapSplit() }) { Text("Tauschen") }
             TextButton(onClick = { model.toggleSplitOrientation() }) { Text("Drehen") }
             TextButton(onClick = { model.promoteSplit() }) { Text("Einzeln") }
@@ -1134,6 +1136,14 @@ private fun SplitPane(
                 view.style = style
                 view.fingerDraws = finger
                 view.onChanged = { model.splitChanged() }
+                view.onTogglePaperTask = { line ->
+                    val next = ch.fasrv.fanotes.desk.toggleTask(view.markdown, line)
+                    if (next != view.markdown) {
+                        view.markdown = next
+                        view.invalidate()
+                        model.updateSplitMarkdown(next)
+                    }
+                }
                 view.onCamera = camera@{ _, _, _ ->
                     val current = path ?: return@camera
                     val sample = view.cameraSample() ?: return@camera
@@ -1165,12 +1175,23 @@ private fun SplitPane(
             },
         )
         if (typing) {
-            BasicTextField(
-                value = markdown,
-                onValueChange = { model.updateSplitMarkdown(it) },
+            val metrics = ch.fasrv.fanotes.desk.editorMetrics(model.effectiveDesk())
+            AndroidView(
                 modifier = Modifier.fillMaxSize().background(Color(0xFFF7F6F3)).padding(16.dp),
-                textStyle = TextStyle(color = Color(0xFF252630), fontSize = 16.sp, lineHeight = 24.sp),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                factory = { context ->
+                    SplitEditorView(context).also { splitEditor = it }
+                },
+                update = { editor ->
+                    splitEditor = editor
+                    editor.onCommit = { model.updateSplitMarkdown(it) }
+                    editor.accent = android.graphics.Color.parseColor(
+                        ch.fasrv.fanotes.desk.normalizeAccent(model.effectiveDesk()["accent"]),
+                    )
+                    editor.typeface = loadEditorTypeface(editor.context, metrics.editorFontId)
+                    editor.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, metrics.fontSizePx.toFloat())
+                    editor.setLineSpacing(0f, metrics.lineHeight.toFloat())
+                    editor.show(markdown)
+                },
             )
         }
         }
