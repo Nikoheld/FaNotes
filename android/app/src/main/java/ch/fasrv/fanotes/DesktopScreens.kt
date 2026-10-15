@@ -62,10 +62,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -141,10 +143,16 @@ import java.time.LocalDateTime
 import java.time.YearMonth
 import kotlin.math.roundToInt
 
-internal data class StatusInk(val muted: Color, val success: Color, val warning: Color, val soft: Color)
+internal data class StatusInk(
+    val muted: Color,
+    val success: Color,
+    val warning: Color,
+    val soft: Color,
+    val panelActive: Color,
+)
 
 internal val LocalStatusInk = staticCompositionLocalOf {
-    StatusInk(Color(0xFF5E5C57), Color(0xFF1F7A48), Color(0xFF8A5A12), Color(0xFF4E4C47))
+    StatusInk(Color(0xFF5E5C57), Color(0xFF1F7A48), Color(0xFF8A5A12), Color(0xFF4E4C47), Color(0xFFE3E2DE))
 }
 
 @Composable
@@ -2296,63 +2304,123 @@ fun AiScreen(model: FaNotesViewModel) {
                     val lineIndex = index
                     index += 1
                     when (line.kind) {
-                        "rule" -> Box(
-                            Modifier
-                                .previewAnchor(lineIndex)
-                                .padding(vertical = 8.dp)
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
-                        )
-                        "quote" -> Row(
-                            Modifier
-                                .padding(vertical = 4.dp)
-                                .fillMaxWidth()
-                                .height(IntrinsicSize.Min)
-                                .clip(RoundedCornerShape(topEnd = 6.dp, bottomEnd = 6.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                            verticalAlignment = Alignment.Top,
-                        ) {
+                        "rule" -> {
+                            val rule = ch.fasrv.fanotes.desk.previewRuleChrome()
                             Box(
                                 Modifier
-                                    .width(3.dp)
-                                    .fillMaxHeight()
-                                    .background(MaterialTheme.colorScheme.outline),
-                            )
-                            PreviewRich(
-                                line.text,
-                                line.inlines,
-                                base,
-                                line.scale,
-                                link,
-                                codeInk,
-                                codeFill,
-                                codeBorder,
-                                line.kind,
-                                Modifier.previewFootnote(lineIndex).padding(horizontal = 12.dp, vertical = 8.dp),
-                                color = muted,
-                                onTextLayout = { previewLayouts[lineIndex] = it },
+                                    .previewAnchor(lineIndex)
+                                    .padding(
+                                        top = (base * ch.fasrv.fanotes.desk.previewBlockTop(rule.marginEm, lineIndex == 0)).dp,
+                                        bottom = (base * rule.marginEm).dp,
+                                    )
+                                    .fillMaxWidth()
+                                    .height(rule.heightDp.dp)
+                                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_ALPHA)),
                             )
                         }
-                        "code", "math" -> if (line.text.isNotEmpty()) {
+                        "quote" -> {
+                            val quote = ch.fasrv.fanotes.desk.previewQuoteChrome()
+                            val quoteShape = RoundedCornerShape(topEnd = quote.radiusDp.dp, bottomEnd = quote.radiusDp.dp)
+                            Row(
+                                Modifier
+                                    .padding(
+                                        top = (base * ch.fasrv.fanotes.desk.previewBlockTop(quote.marginEm, lineIndex == 0)).dp,
+                                        bottom = (base * quote.marginEm).dp,
+                                    )
+                                    .fillMaxWidth()
+                                    .height(IntrinsicSize.Min)
+                                    .clip(quoteShape)
+                                    .background(MaterialTheme.colorScheme.surface),
+                                verticalAlignment = Alignment.Top,
+                            ) {
+                                Box(
+                                    Modifier
+                                        .width(quote.barDp.dp)
+                                        .fillMaxHeight()
+                                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)),
+                                )
+                                PreviewRich(
+                                    line.text,
+                                    line.inlines,
+                                    base,
+                                    line.scale,
+                                    link,
+                                    codeInk,
+                                    codeFill,
+                                    codeBorder,
+                                    line.kind,
+                                    Modifier.previewFootnote(lineIndex).padding(
+                                        horizontal = (base * quote.padXEm).dp,
+                                        vertical = (base * quote.padYEm).dp,
+                                    ),
+                                    color = LocalStatusInk.current.soft,
+                                    onTextLayout = { previewLayouts[lineIndex] = it },
+                                )
+                            }
+                        }
+                        "code" -> if (line.text.isNotEmpty()) {
                             key(lineIndex) {
+                                val fence = ch.fasrv.fanotes.desk.previewFenceChrome()
                                 val blockScroll = rememberScrollState()
-                                val shape = RoundedCornerShape(6.dp)
+                                val shape = RoundedCornerShape(fence.radiusDp.dp)
                                 Box(
                                     Modifier
                                         .previewAnchor(lineIndex)
-                                        .padding(vertical = 6.dp)
                                         .fillMaxWidth()
                                         .clip(shape)
-                                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.55f), shape)
+                                        .background(MaterialTheme.colorScheme.surface)
+                                        .border(
+                                            fence.borderDp.dp,
+                                            MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA),
+                                            shape,
+                                        )
                                         .horizontalScroll(blockScroll)
-                                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                                    contentAlignment = if (ch.fasrv.fanotes.desk.previewBlockCenters(line.kind)) Alignment.Center else Alignment.CenterStart,
+                                        .padding(horizontal = (base * fence.padXEm).dp, vertical = (base * fence.padYEm).dp),
                                 ) {
                                     Text(
                                         previewAnnotated(line, base, link),
-                                        softWrap = !ch.fasrv.fanotes.desk.previewBlockScrolls(line.kind),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        softWrap = false,
+                                        fontSize = (base * ch.fasrv.fanotes.desk.PREVIEW_CODE_SCALE).sp,
+                                        fontFamily = FontFamily.Monospace,
+                                    )
+                                }
+                            }
+                        }
+                        "math" -> if (line.text.isNotEmpty()) {
+                            key(lineIndex) {
+                                val math = ch.fasrv.fanotes.desk.previewMathChrome()
+                                val blockScroll = rememberScrollState()
+                                val shape = RoundedCornerShape(math.radiusDp.dp)
+                                Box(
+                                    Modifier
+                                        .previewAnchor(lineIndex)
+                                        .padding(
+                                            top = (base * ch.fasrv.fanotes.desk.previewBlockTop(math.marginEm, lineIndex == 0)).dp,
+                                            bottom = (base * math.marginEm).dp,
+                                        )
+                                        .fillMaxWidth()
+                                        .clip(shape)
+                                        .background(
+                                            Brush.linearGradient(
+                                                listOf(
+                                                    MaterialTheme.colorScheme.primary.copy(alpha = math.accentWash),
+                                                    MaterialTheme.colorScheme.secondary.copy(alpha = math.secondaryWash),
+                                                ),
+                                            ),
+                                        )
+                                        .border(
+                                            1.dp,
+                                            MaterialTheme.colorScheme.primary.copy(alpha = math.borderAlpha),
+                                            shape,
+                                        )
+                                        .horizontalScroll(blockScroll)
+                                        .padding(math.padEm.let { (base * it).dp }),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        previewAnnotated(line, base, link),
+                                        softWrap = false,
                                         fontSize = (base * line.scale).sp,
                                         fontFamily = FontFamily.Monospace,
                                     )
@@ -2582,9 +2650,31 @@ private fun PreviewRich(
         }
         annotated.spanStyles.forEach { addStyle(it.item, it.start, it.end) }
     }
+    var laid by remember(shown) { mutableStateOf<TextLayoutResult?>(null) }
     Text(
         shown,
-        modifier = modifier,
+        modifier = modifier.drawBehind {
+            val result = laid ?: return@drawBehind
+            val stroke = 1.dp.toPx()
+            val ink = link.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_LINK_UNDERLINE)
+            for (mark in display.marks) {
+                if (mark.kind != "link") continue
+                val start = mark.start.coerceIn(0, shown.length)
+                val end = mark.end.coerceIn(start, shown.length)
+                if (end <= start) continue
+                val first = result.getLineForOffset(start)
+                val last = result.getLineForOffset(end - 1)
+                for (line in first..last) {
+                    val lineStart = maxOf(start, result.getLineStart(line))
+                    val lineEnd = minOf(end, result.getLineEnd(line, true))
+                    if (lineEnd <= lineStart) continue
+                    val left = result.getHorizontalPosition(lineStart, true)
+                    val right = result.getHorizontalPosition(lineEnd, true)
+                    val y = result.getLineBottom(line) - stroke
+                    drawLine(ink, Offset(left, y), Offset(right, y), stroke)
+                }
+            }
+        },
         color = color,
         fontSize = (base * scale).sp,
         fontWeight = fontWeight,
@@ -2593,7 +2683,10 @@ private fun PreviewRich(
         lineHeight = lineHeight,
         textAlign = textAlign,
         inlineContent = chips,
-        onTextLayout = onTextLayout,
+        onTextLayout = {
+            laid = it
+            onTextLayout(it)
+        },
     )
 }
 
@@ -2627,7 +2720,7 @@ private fun previewMarks(
                 "emphasis" -> SpanStyle(fontStyle = FontStyle.Italic)
                 "strike" -> SpanStyle(textDecoration = TextDecoration.LineThrough)
                 "code", "math" -> SpanStyle(fontFamily = FontFamily.Monospace)
-                "link" -> SpanStyle(color = link, textDecoration = TextDecoration.Underline)
+                "link" -> SpanStyle(color = link)
                 "footnote" -> SpanStyle(
                     color = link,
                     baselineShift = BaselineShift.Superscript,
