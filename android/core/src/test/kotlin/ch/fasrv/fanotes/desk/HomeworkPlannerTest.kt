@@ -31,4 +31,24 @@ class HomeworkPlannerTest {
         assertEquals(listOf("a"), visibleHomeworkTasks(tasks, "homework").map { it.id })
         assertEquals(listOf("c"), visibleHomeworkTasks(tasks, "done").map { it.id })
     }
+
+    @Test
+    fun tasksLandInTheDesktopBucketsAndImportantOnesSortFirst() {
+        val today = LocalDate.of(2026, 10, 15)
+        val overdue = HomeworkTask("late", "Spät", dueDate = "2026-10-14")
+        val morning = HomeworkTask("am", "Früh", dueDate = "2026-10-15", dueTime = "08:00")
+        val soon = HomeworkTask("next", "Bald", dueDate = "2026-10-16", priority = "high")
+        val loose = HomeworkTask("none", "Ohne")
+        val finished = HomeworkTask("fin", "Weg", dueDate = "2026-10-01", done = true)
+        assertEquals("overdue", classifyHomeworkTask(overdue, today))
+        assertEquals("today", classifyHomeworkTask(morning, today))
+        assertEquals("upcoming", classifyHomeworkTask(soon, today))
+        assertEquals("undated", classifyHomeworkTask(loose, today))
+        assertEquals("done", classifyHomeworkTask(finished, today))
+        assertEquals(
+            listOf("next", "late", "am", "none", "fin"),
+            sortHomeworkTasks(listOf(finished, loose, morning, overdue, soon)).map { it.id },
+        )
+        assertEquals(HomeworkStats(4, 1, 1, 0, 1), homeworkStats(listOf(overdue, morning, soon, loose, finished), today))
+    }
 }
