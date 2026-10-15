@@ -73,6 +73,10 @@ class DeskVaultTest {
         assertEquals("", defaultNoteParent("", setOf("Eingang")))
         assertEquals("Schule", defaultNoteParent("Schule", setOf("Eingang", "Schule")))
         assertEquals("", defaultNoteParent("Fehlt", setOf("Eingang")))
+        assertEquals("Schule/Mathe", pdfNoteImportParent("Schule/Mathe", "Eingang"))
+        assertEquals("Eingang", pdfNoteImportParent(null, "Eingang"))
+        assertEquals("Eingang", pdfNoteImportParent("  ", "Eingang"))
+        assertEquals("PDF „Algebra“ ist jetzt eine Notiz.", pdfNoteImportMessage("Schule/Algebra.pdf"))
     }
 
     @Test
