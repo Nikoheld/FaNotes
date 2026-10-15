@@ -40,6 +40,29 @@ fun companionPath(relativePath: String, extension: String): String = noteStem(re
 fun worksheetIdsFromMarkdown(markdown: String): List<String> =
     WORKSHEET_MARKER.findAll(markdown).map { it.groupValues[1] }.toList()
 
+private val WORKSHEET_ID = Regex("""^[a-zA-Z0-9_-]{1,96}$""")
+
+/** Same attachment rule as `attachWorksheet` in the desktop client. */
+fun attachWorksheet(content: String, id: String): String {
+    if (!WORKSHEET_ID.matches(id)) return content
+    if (id in worksheetIdsFromMarkdown(content)) return content
+    val separator = when {
+        content.isEmpty() -> ""
+        content.endsWith("\n") -> "\n"
+        else -> "\n\n"
+    }
+    return "$content$separator<!-- fanotes-worksheet:$id -->\n"
+}
+
+/** Removes one worksheet marker and collapses the blank lines it left behind. */
+fun detachWorksheet(content: String, id: String): String {
+    if (!WORKSHEET_ID.matches(id)) return content
+    return Regex("""(?:\r?\n)*<!--\s*fanotes-worksheet:$id\s*-->\s*""")
+        .replace(content, "\n")
+        .replace(Regex("""\n{3,}"""), "\n\n")
+        .replace(Regex("""^\n+"""), "")
+}
+
 fun noteInkId(markdown: String): String? = INK_MARKER.find(markdown)?.groupValues?.get(1)
 
 /** Same attachment rule as `attachNoteInk` in the desktop client. */

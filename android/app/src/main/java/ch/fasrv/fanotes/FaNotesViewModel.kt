@@ -677,6 +677,21 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun importBytes(name: String, bytes: ByteArray, pdf: Boolean) {
         viewModelScope.launch {
+            val note = open.value
+            if (!pdf && note != null && note.kind == NoteKind.MARKDOWN) {
+                val mime = if (name.endsWith(".png", true)) "image/png" else "image/jpeg"
+                val stored = withContext(Dispatchers.IO) { graph.store.storeImageWorksheet(name, bytes, mime) }
+                val next = ch.fasrv.fanotes.famd.attachWorksheet(markdown.value, stored.id)
+                markdown.value = next
+                val updated = note.copy(markdown = next, worksheets = ch.fasrv.fanotes.famd.worksheetIdsFromMarkdown(next))
+                open.value = updated
+                loadBackdrop(updated)
+                refreshOverlays()
+                noteChanged()
+                message.value = "„${stored.title}“ liegt auf dem Blatt."
+                graph.engine.notifyLocalChange()
+                return@launch
+            }
             val path = withContext(Dispatchers.IO) {
                 if (pdf) graph.store.importPdf("", name, bytes)
                 else graph.store.importImageWorksheet("", name, bytes, if (name.endsWith(".png", true)) "image/png" else "image/jpeg")
