@@ -579,6 +579,11 @@ fun HomeworkScreen(model: FaNotesViewModel) {
     val document by model.homework.collectAsStateWithLifecycle()
     val settings by model.deskSettings.collectAsStateWithLifecycle()
     val status by model.message.collectAsStateWithLifecycle()
+    val tree by model.tree.collectAsStateWithLifecycle()
+    val subjectChoices = ch.fasrv.fanotes.desk.homeworkSubjectOptions(
+        tree.filter { it.kind == ch.fasrv.fanotes.vault.NoteKind.FOLDER }.map { it.name },
+        document.tasks,
+    )
     var title by remember { mutableStateOf("") }
     var subject by remember { mutableStateOf("") }
     var due by remember { mutableStateOf(LocalDate.now().plusDays(1).toString()) }
@@ -603,7 +608,10 @@ fun HomeworkScreen(model: FaNotesViewModel) {
                 }
             },
     ) {
-        Text("Hausaufgaben & Termine", style = MaterialTheme.typography.titleLarge)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Hausaufgaben & Termine", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            TextButton(onClick = { model.openHomeworkNote() }) { Text("Als Notiz öffnen") }
+        }
         Text("Gespeichert in Hausaufgaben.md, dieselbe Datei wie auf dem Desktop.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
         Text("Freigabe", modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.SemiBold)
         Text("Dieselbe Schnittstelle wie der Desktop: PUT an fanotes.fasrv.ch, Kanal-ID und Geheimnis bleiben auf diesem Tablet.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
@@ -627,6 +635,16 @@ fun HomeworkScreen(model: FaNotesViewModel) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 12.dp)) {
             OutlinedTextField(title, { title = it }, label = { Text("Aufgabe") }, modifier = Modifier.weight(1f))
             OutlinedTextField(subject, { subject = it }, label = { Text("Fach") }, modifier = Modifier.weight(0.6f))
+        }
+        val offered = subjectChoices.filter { choice ->
+            subject.isBlank() || choice.startsWith(subject, ignoreCase = true)
+        }.take(8)
+        if (offered.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                offered.forEach { choice ->
+                    TextButton(onClick = { subject = choice }) { Text(choice) }
+                }
+            }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(due, { due = it }, label = { Text("Fällig") })

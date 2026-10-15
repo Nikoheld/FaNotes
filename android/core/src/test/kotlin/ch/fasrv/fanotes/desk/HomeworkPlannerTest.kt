@@ -54,4 +54,33 @@ class HomeworkPlannerTest {
         assertEquals(listOf("late", "next"), removeHomeworkTask(kept, "am").map { it.id })
         assertEquals(listOf("late", "am", "next"), removeHomeworkTask(kept, "missing").map { it.id })
     }
+
+    @Test
+    fun subjectsFollowTheDesktopFolderListAndNewTasksKeepTheFieldLimits() {
+        val options = homeworkSubjectOptions(
+            listOf("physik", " Mathematik ", "", "Mathematik"),
+            listOf(HomeworkTask("a", "Lesen", subject = "Algebra"), HomeworkTask("b", "Ohne")),
+        )
+        assertEquals(listOf("Algebra", "Mathematik", "physik"), options)
+        val draft = prepareHomeworkDraft(
+            title = "  ${"A".repeat(300)}  ",
+            notes = "N".repeat(4_100),
+            subject = "  ${"S".repeat(90)} ",
+            dueDate = "morgen",
+            dueTime = "8:00",
+            kind = "appointment",
+            priority = "high",
+        )
+        assertEquals(240, draft?.title?.length)
+        assertEquals(4_000, draft?.notes?.length)
+        assertEquals(80, draft?.subject?.length)
+        assertEquals(null, draft?.dueDate)
+        assertEquals(null, draft?.dueTime)
+        assertEquals("appointment", draft?.kind)
+        assertEquals("high", draft?.priority)
+        assertEquals(null, prepareHomeworkDraft("   "))
+        val dated = prepareHomeworkDraft("Lesen", dueDate = "2026-10-16", dueTime = "08:00")
+        assertEquals("2026-10-16", dated?.dueDate)
+        assertEquals("08:00", dated?.dueTime)
+    }
 }

@@ -2485,6 +2485,22 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun openHomeworkNote() {
+        viewModelScope.launch {
+            val text = serializeHomeworkMarkdown(homework.value)
+            withContext(Dispatchers.IO) {
+                val path = ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH
+                if (!graph.vault.exists(path)) graph.store.createMarkdown("", "Hausaufgaben")
+                val note = graph.store.readNote(path)
+                graph.store.save(note, note.document, text)
+            }
+            graph.engine.notifyLocalChange()
+            refreshTree()
+            openPath(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH)
+            showDestination("notes")
+        }
+    }
+
     fun loadHomework() {
         viewModelScope.launch {
             homework.value = withContext(Dispatchers.IO) {
@@ -2502,16 +2518,17 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         notes: String = "",
         priority: String = "normal",
     ) {
+        val draft = ch.fasrv.fanotes.desk.prepareHomeworkDraft(title, notes, subject, due, dueTime, kind, priority) ?: return
         val now = isoNow()
         val task = HomeworkTask(
             java.util.UUID.randomUUID().toString(),
-            title.trim(),
-            notes = notes.trim(),
-            subject = subject.trim(),
-            dueDate = due.ifBlank { null },
-            dueTime = dueTime.trim().ifBlank { null },
-            kind = kind,
-            priority = if (priority == "high") "high" else "normal",
+            draft.title,
+            notes = draft.notes,
+            subject = draft.subject,
+            dueDate = draft.dueDate,
+            dueTime = draft.dueTime,
+            kind = draft.kind,
+            priority = draft.priority,
             createdAt = now,
             updatedAt = now,
         )
