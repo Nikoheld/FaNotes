@@ -98,6 +98,7 @@ import ch.fasrv.fanotes.desk.stepNoteHistory
 import ch.fasrv.fanotes.desk.tabsToClose
 import ch.fasrv.fanotes.desk.togglePinnedTab
 import ch.fasrv.fanotes.desk.parentFolderOf
+import ch.fasrv.fanotes.desk.splitPanePath
 import ch.fasrv.fanotes.desk.swappedSplit
 import ch.fasrv.fanotes.desk.visitNote
 import ch.fasrv.fanotes.desk.wikiTargets
@@ -1845,6 +1846,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val splitSession = InkSession(newInkDocument("Spalte", "dots", isoNow()))
     private var splitNote: OpenNote? = null
     private var splitSaveJob: kotlinx.coroutines.Job? = null
+    private var splitGeneration = 0
     private var openedAtMs = 0L
     private var lastTypedAtMs: Long? = null
     private var lastStrokeEndedAtMs: Long? = null
@@ -1962,6 +1964,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun closeSplit() {
+        splitGeneration += 1
         flushSplit()
         splitPath.value = null
         splitNote = null
@@ -2360,13 +2363,44 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         persistWorkspace()
     }
 
+    /** Puts [path] in the second pane. The open note stays in the main pane. */
+    fun openInSplit(path: String) {
+        val target = splitPanePath(path, open.value?.path, openTabs.value, noteTrail.value.entries)
+        if (target == null) {
+            message.value = "Öffne zuerst eine zweite Notiz für die geteilte Ansicht."
+            return
+        }
+        if (target == splitPath.value) return
+        flushSplit()
+        loadSplit(target)
+    }
+
+    /** Ctrl+\ on the desktop: open the second pane, or close it when it is already open. */
+    fun toggleSplit() {
+        if (splitPath.value != null) {
+            closeSplit()
+            return
+        }
+        val active = open.value?.path ?: return
+        openInSplit(active)
+    }
+
     fun loadSplit(path: String) {
+        if (path.isBlank() || path == splitPath.value) return
+        val generation = ++splitGeneration
         viewModelScope.launch {
-            val note = withContext(Dispatchers.IO) { graph.store.readNote(path) }
+            val note = try {
+                withContext(Dispatchers.IO) { graph.store.readNote(path) }
+            } catch (error: Exception) {
+                if (generation == splitGeneration) message.value = error.message ?: "Die Notiz konnte nicht geöffnet werden."
+                return@launch
+            }
+            if (generation != splitGeneration) return@launch
             splitSession.replace(note.document)
             splitNote = note
             splitMarkdown.value = note.markdown
             rememberTab(path)
+            rememberTags(path, note.markdown)
             splitPath.value = path
             persistWorkspace()
         }
