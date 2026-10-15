@@ -360,6 +360,110 @@ fun authHeaders(provider: String, apiKey: String, username: String): List<Pair<S
     }
 }
 
+data class AiListedModel(val key: String, val title: String, val detail: String)
+
+data class AiGet(val url: String, val headers: List<Pair<String, String>>)
+
+fun aiModelsGet(provider: String, origin: String, apiKey: String, username: String): AiGet {
+    val headers = authHeaders(provider, apiKey, username)
+    val url = when (provider) {
+        "ollama" -> "$origin/api/tags"
+        "openai" -> "https://api.openai.com/v1/models"
+        "gemini" -> "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000"
+        "anthropic" -> "https://api.anthropic.com/v1/models?limit=1000"
+        "opencode" -> "$origin/provider"
+        else -> "$origin/v1/models"
+    }
+    return AiGet(url, headers)
+}
+
+fun parseAiModels(provider: String, body: String): List<AiListedModel> {
+    val root = parseJson(body) as? JsonValue.Obj
+        ?: throw IllegalArgumentException(missingModels(provider))
+    return when (provider) {
+        "ollama" -> parseOllamaModels(root)
+        "gemini" -> parseGeminiModels(root)
+        "anthropic" -> parseNamedModels(root, "data", "id", "display_name", "Anthropic")
+        "opencode" -> parseOpenCodeModels(root)
+        else -> parseIdModels(root, if (provider == "openai" || provider == "lmstudio") "data" else "data", provider)
+    }
+}
+
+private fun missingModels(provider: String): String = when (provider) {
+    "ollama" -> "Ollama hat keine Modellliste geliefert."
+    "gemini" -> "Gemini hat keine Modellliste geliefert."
+    "anthropic" -> "Anthropic hat keine Modellliste geliefert."
+    "openai" -> "OpenAI hat keine Modellliste geliefert."
+    "lmstudio" -> "LM Studio hat keine Modellliste geliefert."
+    else -> "Der AI-Anbieter hat keine Modellliste geliefert."
+}
+
+private fun parseOllamaModels(root: JsonValue.Obj): List<AiListedModel> {
+    val models = root.array("models")?.items ?: throw IllegalArgumentException(missingModels("ollama"))
+    return models.mapNotNull { item ->
+        val entry = item as? JsonValue.Obj ?: return@mapNotNull null
+        val key = entry.string("model")?.takeIf { it.isNotEmpty() } ?: entry.string("name")?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+        val title = entry.string("name")?.takeIf { it.isNotEmpty() } ?: key
+        val details = entry.obj("details")
+        val detail = listOfNotNull(
+            details?.string("family")?.takeIf { it.isNotEmpty() },
+            details?.string("parameter_size")?.takeIf { it.isNotEmpty() },
+            details?.string("quantization_level")?.takeIf { it.isNotEmpty() },
+        ).joinToString(" · ")
+        AiListedModel(key.take(500), title.take(500), detail)
+    }
+}
+
+private fun parseGeminiModels(root: JsonValue.Obj): List<AiListedModel> {
+    val models = root.array("models")?.items ?: throw IllegalArgumentException(missingModels("gemini"))
+    return models.mapNotNull { item ->
+        val entry = item as? JsonValue.Obj ?: return@mapNotNull null
+        val methods = entry.array("supportedGenerationMethods")?.items ?: return@mapNotNull null
+        if (methods.none { (it as? JsonValue.Str)?.value == "generateContent" }) return@mapNotNull null
+        val name = entry.string("name") ?: return@mapNotNull null
+        val key = name.removePrefix("models/")
+        val title = entry.string("displayName")?.takeIf { it.isNotEmpty() } ?: key
+        AiListedModel(key.take(500), title.take(500), "Google")
+    }
+}
+
+private fun parseIdModels(root: JsonValue.Obj, arrayName: String, provider: String): List<AiListedModel> {
+    val models = root.array(arrayName)?.items ?: throw IllegalArgumentException(missingModels(provider))
+    return models.mapNotNull { item ->
+        val entry = item as? JsonValue.Obj ?: return@mapNotNull null
+        val id = entry.string("id")?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+        AiListedModel(id.take(500), id.take(500), entry.string("owned_by").orEmpty().take(200))
+    }
+}
+
+private fun parseNamedModels(root: JsonValue.Obj, arrayName: String, idKey: String, nameKey: String, publisher: String): List<AiListedModel> {
+    val models = root.array(arrayName)?.items ?: throw IllegalArgumentException(missingModels("anthropic"))
+    return models.mapNotNull { item ->
+        val entry = item as? JsonValue.Obj ?: return@mapNotNull null
+        val id = entry.string(idKey)?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+        val title = entry.string(nameKey)?.takeIf { it.isNotEmpty() } ?: id
+        AiListedModel(id.take(500), title.take(500), publisher)
+    }
+}
+
+private fun parseOpenCodeModels(root: JsonValue.Obj): List<AiListedModel> {
+    val providers = root.array("all")?.items ?: return emptyList()
+    val found = mutableListOf<AiListedModel>()
+    for (item in providers) {
+        val provider = item as? JsonValue.Obj ?: continue
+        val id = provider.string("id") ?: continue
+        val name = provider.string("name")?.takeIf { it.isNotEmpty() } ?: id
+        val models = provider["models"]
+        if (models is JsonValue.Obj) {
+            for ((modelId, entry) in models.fields) {
+                val title = (entry as? JsonValue.Obj)?.string("name")?.takeIf { it.isNotEmpty() } ?: modelId
+                found += AiListedModel("$id/$modelId".take(500), "$name · $title".take(500), name.take(200))
+            }
+        }
+    }
+    return found
+}
+
 private fun encodeAiModel(model: String): String = buildString {
     for (char in model) {
         if (char.isLetterOrDigit() || char == '-' || char == '_' || char == '.' || char == '~') append(char)

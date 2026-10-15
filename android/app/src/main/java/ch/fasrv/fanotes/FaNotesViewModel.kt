@@ -1176,6 +1176,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val aiReply = MutableStateFlow("")
     val aiPreview = MutableStateFlow<String?>(null)
     val aiStatus = MutableStateFlow("")
+    val aiModels = MutableStateFlow<List<ch.fasrv.fanotes.desk.AiListedModel>>(emptyList())
     val paletteOpen = MutableStateFlow(false)
     val updateLabel = MutableStateFlow("2026.10.7")
 
@@ -2006,11 +2007,50 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun loadAiModels(provider: String, baseUrl: String, apiKey: String, username: String) {
+        viewModelScope.launch {
+            aiStatus.value = "Modelle werden geladen…"
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    val local = ch.fasrv.fanotes.desk.AI_PROVIDERS.firstOrNull { it.id == provider }?.local == true
+                    val origin = if (local) {
+                        ch.fasrv.fanotes.desk.localAiOrigin(baseUrl.ifBlank { ch.fasrv.fanotes.desk.defaultAiBaseUrl(provider) }, provider)
+                    } else {
+                        ""
+                    }
+                    val request = ch.fasrv.fanotes.desk.aiModelsGet(provider, origin, apiKey, username)
+                    ch.fasrv.fanotes.desk.parseAiModels(provider, executeAiGet(request))
+                }
+            }
+            outcome.onSuccess { models ->
+                aiModels.value = models
+                aiStatus.value = if (models.isEmpty()) "Keine Modelle gefunden." else "${models.size} Modelle."
+            }.onFailure { error ->
+                aiModels.value = emptyList()
+                aiStatus.value = error.message ?: "Die Modellliste ist fehlgeschlagen."
+            }
+        }
+    }
+
     fun applyAiPreview() {
         val text = aiPreview.value ?: return
         updateMarkdown(text)
         aiPreview.value = null
         aiStatus.value = "Die Notiz wurde übernommen."
+    }
+
+    private fun executeAiGet(request: ch.fasrv.fanotes.desk.AiGet): String {
+        val builder = okhttp3.Request.Builder().url(request.url).get()
+        request.headers.forEach { (name, value) -> builder.header(name, value) }
+        val client = okhttp3.OkHttpClient.Builder()
+            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+        return client.newCall(builder.build()).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw IllegalArgumentException("Der Anbieter antwortete mit HTTP ${response.code}.")
+            text
+        }
     }
 
     private fun executeAi(call: ch.fasrv.fanotes.desk.AiCall): String {
