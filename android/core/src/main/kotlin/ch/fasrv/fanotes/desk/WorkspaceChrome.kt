@@ -175,6 +175,10 @@ const val TREE_MARK_WIDTH_DP = 2
 const val TREE_MARK_HEIGHT_DP = 17
 const val TREE_DRAG_ALPHA = 0.42f
 const val TREE_SPLIT_MARK_ALPHA = 0.45f
+const val TREE_DROP_ALPHA = 0.16f
+const val TREE_DROP_BORDER_ALPHA = 0.55f
+const val TREE_ICON_DP = 17
+const val TREE_CHEVRON_DP = 14
 
 /** The shell grid row is 44px. Ribbon buttons are 30px tall with 6px corners and 8px of side padding. */
 const val RIBBON_HEIGHT_DP = 44
