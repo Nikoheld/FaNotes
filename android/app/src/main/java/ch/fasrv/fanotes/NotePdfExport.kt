@@ -32,7 +32,6 @@ import kotlin.math.max
 
 private const val TEXT_PAD_X = 72f
 private const val TEXT_PAD_Y = 78f
-private const val TEXT_COLUMN = 900f - 144f
 
 /**
  * Prints the open note the way the desktop does: paper, text, handwriting,
@@ -47,6 +46,9 @@ fun writeNotePdf(
     boxes: List<WorksheetBox>,
     highlights: List<WorksheetHighlight>,
     links: List<NoteLinkMark>,
+    fontSizePx: Float = 16f,
+    lineHeight: Float = 1.72f,
+    contentWidthPx: Float = 820f,
 ) {
     val sourceWidth = document.sourceWidth.coerceAtLeast(1.0)
     val sourceHeight = document.sourceHeight.coerceAtLeast(1.0)
@@ -92,7 +94,7 @@ fun writeNotePdf(
             canvas.drawRect(0f, 0f, pageWidth, pageHeight, paper)
             backdrops.forEach { backdrop -> drawBackdrop(canvas, backdrop, scale) }
             if (backdrops.none { it.bitmap != null }) drawRuling(canvas, document.paperStyle, pageWidth, pageHeight, scale, ruling)
-            drawMarkdown(canvas, markdown, scale, text, document.originX, document.originY)
+            drawMarkdown(canvas, markdown, scale, text, document.originX, document.originY, fontSizePx, lineHeight, contentWidthPx)
             highlights.forEach { mark ->
                 val rect = highlightToSheet(mark, frames, sourceWidth, sourceHeight)
                 highlightPaint.color = parsePdfColor(mark.color)
@@ -224,17 +226,27 @@ private fun drawRuling(canvas: Canvas, style: String, pageWidth: Float, pageHeig
     }
 }
 
-private fun drawMarkdown(canvas: Canvas, markdown: String, scale: Float, paint: TextPaint, originX: Double, originY: Double) {
+private fun drawMarkdown(
+    canvas: Canvas,
+    markdown: String,
+    scale: Float,
+    paint: TextPaint,
+    originX: Double,
+    originY: Double,
+    fontSizePx: Float,
+    lineHeight: Float,
+    contentWidthPx: Float,
+) {
     val text = pdfPaperText(markdown)
     if (text.isEmpty()) return
     paint.color = Color.parseColor("#252630")
-    paint.textSize = 16f * scale
+    paint.textSize = fontSizePx * scale
     paint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-    val width = (TEXT_COLUMN * scale).toInt().coerceAtLeast(1)
+    val width = (contentWidthPx * scale).toInt().coerceAtLeast(1)
     val layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
         .setAlignment(Layout.Alignment.ALIGN_NORMAL)
         .setIncludePad(false)
-        .setLineSpacing(0f, 1.55f)
+        .setLineSpacing(0f, lineHeight)
         .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
         .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
         .build()

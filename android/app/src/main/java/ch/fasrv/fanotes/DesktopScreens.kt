@@ -32,6 +32,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -1403,6 +1404,20 @@ fun AiScreen(model: FaNotesViewModel) {
 }
 
 @Composable
+private fun EditorSlider(title: String, value: Float, min: Float, max: Float, step: Float, suffix: String, onChange: (Float) -> Unit) {
+    val shown = if (step < 1f) "%.2f".format(java.util.Locale.US, value) else value.toInt().toString()
+    Text("$title: $shown$suffix")
+    Slider(
+        value = value.coerceIn(min, max),
+        onValueChange = { raw ->
+            val steps = kotlin.math.round((raw - min) / step)
+            onChange((min + steps * step).coerceIn(min, max))
+        },
+        valueRange = min..max,
+    )
+}
+
+@Composable
 fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () -> Unit, onPrivate: () -> Unit) {
     val settings by model.deskSettings.collectAsStateWithLifecycle()
     val update by model.updateLabel.collectAsStateWithLifecycle()
@@ -1437,9 +1452,15 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     }
                 }
                 "editor" -> {
+                    val metrics = ch.fasrv.fanotes.desk.editorMetrics(settings)
                     Text("Wörter in der Statusleiste: ${settings["words"] != "off"}", modifier = Modifier.clickable { model.updateDesk("words", if (settings["words"] == "off") "on" else "off") })
                     Text("Gliederung: ${settings["outline"] != "off"}", modifier = Modifier.clickable { model.updateDesk("outline", if (settings["outline"] == "off") "on" else "off") })
                     Text("Täglicher Ordner: ${settings["daily-folder"].orEmpty().ifBlank { "Daily Notes" }}")
+                    EditorSlider("Editor-Schriftgröße", metrics.fontSizePx.toFloat(), 12f, 26f, 1f, " px") { model.updateDesk("editor-font", it.toInt().toString()) }
+                    EditorSlider("Zeilenhöhe", metrics.lineHeight.toFloat(), 1.3f, 2.2f, 0.05f, "") { model.updateDesk("line-height", "%.2f".format(java.util.Locale.US, it)) }
+                    EditorSlider("Maximale Inhaltsbreite", metrics.contentWidthPx.toFloat(), 560f, 1200f, 20f, " px") { model.updateDesk("content-width", it.toInt().toString()) }
+                    EditorSlider("Maximaler Zoom", (metrics.zoomMax * 100).toFloat(), 50f, 600f, 5f, " %") { model.updateDesk("zoom-max", it.toInt().toString()) }
+                    EditorSlider("Automatisch speichern", metrics.autosaveMs.toFloat(), 250f, 3000f, 250f, " ms") { model.updateDesk("autosave", it.toInt().toString()) }
                 }
                 "drawing" -> Text("Stift, Radierer, Auswahl, Druck und Papier sitzen auf der Notiz. Der Finger blättert, bis du das in der Leiste umschaltest.")
                 "files" -> {

@@ -147,6 +147,13 @@ class InkSurfaceView @JvmOverloads constructor(
     private var lassoing = false
     /** Styled note text, drawn under the ink at the desktop column. */
     var markdown: String = ""
+    var editorFontPx: Float = 16f
+        set(value) { if (field != value) { field = value; paperBlocks = emptyList(); invalidate() } }
+    var editorLineHeight: Float = 1.72f
+        set(value) { if (field != value) { field = value; paperBlocks = emptyList(); invalidate() } }
+    var contentWidthPx: Float = 820f
+        set(value) { if (field != value) { field = value; paperBlocks = emptyList(); invalidate() } }
+    var zoomMax: Float = 3.25f
         set(value) {
             if (field == value) return
             field = value
@@ -290,7 +297,7 @@ class InkSurfaceView @JvmOverloads constructor(
     }
 
     fun zoomBy(multiplier: Float) {
-        zoom = (zoom * multiplier).coerceIn(0.5f, 4f)
+        zoom = clampZoom(zoom * multiplier)
         settleZoom()
         invalidate()
         publishCamera()
@@ -335,7 +342,7 @@ class InkSurfaceView @JvmOverloads constructor(
         val request = pendingCamera ?: return
         if (width <= 0 || height <= 0) return
         pendingCamera = null
-        zoom = request.zoom.coerceIn(0.5f, 4f)
+        zoom = clampZoom(request.zoom)
         rotation = request.rotation
         val scale = pixelsPerPageUnit()
         pageLeft = width / 2f - (request.centreX * scale).toFloat()
@@ -670,7 +677,7 @@ class InkSurfaceView @JvmOverloads constructor(
                 index += 1
             }
             val span = fingerSpan().coerceAtLeast(1f)
-            val next = (pinchZoom * span / pinchStart.coerceAtLeast(1f)).coerceIn(0.5f, 4f)
+            val next = clampZoom(pinchZoom * span / pinchStart.coerceAtLeast(1f))
             val (cx, cy) = fingerCentroid()
             val before = screenToNorm(cx, cy)
             zoom = next
@@ -1110,6 +1117,10 @@ class InkSurfaceView @JvmOverloads constructor(
         return pageLeft + (x * sessionWidth() * scale).toFloat() to pageTop + (y * sessionHeight() * scale).toFloat()
     }
 
+    fun textColumnPx(): Float = contentWidthPx.coerceAtMost((sessionWidth() - TEXT_PAD_X * 2).toFloat()).coerceAtLeast(120f)
+
+    private fun clampZoom(value: Float) = value.coerceIn(0.5f, zoomMax.coerceIn(0.5f, 6f))
+
     private fun pixelsPerPageUnit(): Float {
         val available = (width - padding() * 2).coerceAtLeast(1f)
         return available / PAGE_START_WIDTH.toFloat() * zoom
@@ -1221,13 +1232,13 @@ class InkSurfaceView @JvmOverloads constructor(
     }
 
     private fun textLayoutFor(text: CharSequence, scale: Float): StaticLayout {
-        val width = (TEXT_COLUMN * scale).toInt().coerceAtLeast(1)
-        textPaint.textSize = 16f * scale
+        val width = (textColumnPx() * scale).toInt().coerceAtLeast(1)
+        textPaint.textSize = editorFontPx * scale
         textPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
         return StaticLayout.Builder.obtain(text, 0, text.length, textPaint, width)
             .setAlignment(Layout.Alignment.ALIGN_NORMAL)
             .setIncludePad(false)
-            .setLineSpacing(0f, 1.55f)
+            .setLineSpacing(0f, editorLineHeight)
             .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
             .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
             .build()
@@ -1241,7 +1252,7 @@ class InkSurfaceView @JvmOverloads constructor(
         val layouts = rows.mapIndexed { rowIndex, row ->
             val face = if (rowIndex == 0) Typeface.BOLD else Typeface.NORMAL
             textPaint.typeface = Typeface.create("sans-serif", face)
-            textPaint.textSize = 15f * scale
+            textPaint.textSize = editorFontPx * scale
             List(columns) { column ->
                 val cell = row.getOrElse(column) { "" }
                 StaticLayout.Builder.obtain(cell, 0, cell.length, textPaint, inner)

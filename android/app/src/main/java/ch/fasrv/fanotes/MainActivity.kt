@@ -989,6 +989,11 @@ private fun SplitPane(
             },
             update = { view ->
                 view.session = model.splitSession
+                val metrics = ch.fasrv.fanotes.desk.editorMetrics(model.deskSettings.value)
+                view.editorFontPx = metrics.fontSizePx.toFloat()
+                view.editorLineHeight = metrics.lineHeight.toFloat()
+                view.contentWidthPx = metrics.contentWidthPx.toFloat()
+                view.zoomMax = metrics.zoomMax.toFloat()
                 view.markdown = markdown
                 view.showMarkdown = markdown.isNotBlank() && !typing
                 view.inkTool = tool
@@ -1196,6 +1201,7 @@ private fun PageSurface(
                 canRedo = model.session.canRedo,
                 darkChrome = dark,
                 folded = foldedHeadings,
+                metrics = ch.fasrv.fanotes.desk.editorMetrics(model.deskSettings.value),
             )
             val jump = outlineJump
             if (jump != null) {

@@ -330,7 +330,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         publishBusy()
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
-            kotlinx.coroutines.delay(750)
+            kotlinx.coroutines.delay(ch.fasrv.fanotes.desk.editorMetrics(deskSettings.value).autosaveMs)
             saveNow()
         }
     }
@@ -553,7 +553,15 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 runCatching {
                     val stream = getApplication<Application>().contentResolver.openOutputStream(uri)
                         ?: error(PDF_EXPORT_FAILED)
-                    stream.use { writeNotePdf(it, visible, document, pages, boxes, marks, links) }
+                    val metrics = ch.fasrv.fanotes.desk.editorMetrics(deskSettings.value)
+                    stream.use {
+                        writeNotePdf(
+                            it, visible, document, pages, boxes, marks, links,
+                            fontSizePx = metrics.fontSizePx.toFloat(),
+                            lineHeight = metrics.lineHeight.toFloat(),
+                            contentWidthPx = metrics.contentWidthPx.toFloat(),
+                        )
+                    }
                     PDF_EXPORT_SAVED
                 }.getOrElse { PDF_EXPORT_FAILED }
             }
@@ -1712,7 +1720,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private fun scheduleSplitSave() {
         splitSaveJob?.cancel()
         splitSaveJob = viewModelScope.launch {
-            kotlinx.coroutines.delay(750)
+            kotlinx.coroutines.delay(ch.fasrv.fanotes.desk.editorMetrics(deskSettings.value).autosaveMs)
             val note = splitNote ?: return@launch
             val text = splitMarkdown.value
             val document = splitSession.document
