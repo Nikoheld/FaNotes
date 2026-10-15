@@ -215,6 +215,10 @@ fun DeskStatusBar(
     onDismissNotice: () -> Unit = {},
     sidebarOpen: Boolean = true,
     onToggleSidebar: (() -> Unit)? = null,
+    mode: String = "",
+    worksheets: String? = null,
+    saveLabel: String = "",
+    onSave: () -> Unit = {},
 ) {
     Row(
         Modifier.fillMaxWidth().height(28.dp).background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp),
@@ -237,7 +241,12 @@ fun DeskStatusBar(
                     ),
                 )
             }
-            Text(syncText, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            if (mode.isNotBlank()) {
+                Text(mode, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f))
+            }
+            if (!worksheets.isNullOrBlank()) {
+                Text(worksheets, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f))
+            }
             if (!notice.isNullOrBlank()) {
                 Text(
                     notice,
@@ -245,14 +254,6 @@ fun DeskStatusBar(
                     maxLines = 1,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.clickable(onClick = onDismissNotice),
-                )
-            }
-            if (conflicts > 0) {
-                Text(
-                    "$conflicts Konflikte",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable(onClick = onConflicts),
                 )
             }
             crumbs.forEachIndexed { index, crumb ->
@@ -270,9 +271,32 @@ fun DeskStatusBar(
                 }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             if (language.isNotBlank()) Text(language, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
             if (showWords) Text("$words Wörter", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            if (conflicts > 0) {
+                Text(
+                    "$conflicts",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.clickable(onClick = onConflicts),
+                )
+            }
+            Text(syncText, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), modifier = Modifier.clickable(onClick = onConflicts))
+            if (saveLabel.isNotBlank()) {
+                val saveColor = when (saveLabel) {
+                    "Speicherfehler" -> MaterialTheme.colorScheme.error
+                    "Speichert …" -> androidx.compose.ui.graphics.Color(0xFF8A5A12)
+                    else -> androidx.compose.ui.graphics.Color(0xFF1F7A48)
+                }
+                Text(
+                    saveLabel,
+                    fontSize = 12.sp,
+                    color = saveColor,
+                    modifier = Modifier.clickable(onClickLabel = "Jetzt speichern", onClick = onSave),
+                )
+            }
+            Text(ch.fasrv.fanotes.desk.STATUS_LOCAL_PRIVATE, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
         }
     }
 }

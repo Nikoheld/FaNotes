@@ -109,3 +109,47 @@ fun sidebarWidthDp(raw: String?) = (raw?.toIntOrNull() ?: 286).coerceIn(210, 430
 
 /** Desktop info-panel range 220–430, default 286. */
 fun rightPanelWidthDp(raw: String?) = (raw?.toIntOrNull() ?: 286).coerceIn(220, 430)
+
+/**
+ * Left status label from the desktop footer.
+ * Kalender, Hausaufgaben and the vault overview win. An open note is then
+ * Stiftmodus, PDF-Notiz, Notiz mit Arbeitsblatt, or Schreibmodus.
+ */
+fun statusModeLabel(
+    destination: String,
+    noteOpen: Boolean,
+    penOpen: Boolean,
+    pdf: Boolean,
+    worksheets: Int,
+): String = when (destination) {
+    "calendar" -> "Kalender"
+    "tasks" -> "Hausaufgaben & Termine"
+    "overview" -> "Vault-Übersicht"
+    else -> when {
+        !noteOpen -> "Bereit"
+        penOpen -> "Stiftmodus"
+        pdf -> "PDF-Notiz"
+        worksheets > 0 -> "Notiz mit Arbeitsblatt"
+        else -> "Schreibmodus"
+    }
+}
+
+/** Breadcrumbs stay with the note except on the three full-screen surfaces. */
+fun statusShowsPath(destination: String): Boolean =
+    destination != "calendar" && destination != "tasks" && destination != "overview"
+
+/** Extra status chip for the open worksheet stack. */
+fun statusWorksheetLabel(count: Int): String? = when {
+    count <= 0 -> null
+    count == 1 -> "1 Arbeitsblatt"
+    else -> "$count Arbeitsblätter"
+}
+
+/** Save chip: Gespeichert, Speichert …, Speicherfehler. */
+fun statusSaveLabel(phase: String): String = when (phase) {
+    "saving" -> "Speichert …"
+    "error" -> "Speicherfehler"
+    else -> "Gespeichert"
+}
+
+const val STATUS_LOCAL_PRIVATE = "Lokal & privat"
