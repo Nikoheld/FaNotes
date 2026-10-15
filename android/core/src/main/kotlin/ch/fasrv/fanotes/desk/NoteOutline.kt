@@ -54,6 +54,12 @@ fun parseNoteOutline(content: String): List<NoteOutlineHeading> {
     }
 }
 
+/** Desktop `revealLine` keeps the target 48px below the top of the scroller. */
+const val REVEAL_LINE_MARGIN_PX = 48
+
+fun revealScrollTop(lineTop: Int, paddingTop: Int, marginPx: Int = REVEAL_LINE_MARGIN_PX): Int =
+    (lineTop - paddingTop - marginPx).coerceAtLeast(0)
+
 /** Character offset where [line] starts. A line outside the note is clamped. */
 fun revealLineStart(markdown: String, line: Int): Int {
     val text = markdown.replace("\r\n", "\n").replace('\r', '\n')
