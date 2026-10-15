@@ -15,6 +15,8 @@ import android.view.inputmethod.InputConnectionWrapper
 import android.widget.EditText
 import ch.fasrv.fanotes.desk.editorLineNumberLabels
 import ch.fasrv.fanotes.desk.findDetailsBlocks
+import ch.fasrv.fanotes.desk.bracketTyping
+import ch.fasrv.fanotes.desk.bracketsOnCursorLine
 import ch.fasrv.fanotes.desk.copyMarkdownLines
 import ch.fasrv.fanotes.desk.deleteMarkdownLines
 import ch.fasrv.fanotes.desk.toggleMarkdownComment
@@ -56,6 +58,9 @@ class SplitEditorView(context: Context) : EditText(context) {
     private var downX = 0f
     private var downY = 0f
     private var editBefore = ""
+    private var changeStart = 0
+    private var changeDeleted = 0
+    private val closedBrackets = mutableSetOf<Int>()
 
     init {
         background = null
@@ -67,26 +72,55 @@ class SplitEditorView(context: Context) : EditText(context) {
         setPadding(0, 0, 0, 0)
         addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
-                if (!writing) editBefore = s?.toString().orEmpty()
+                if (!writing) {
+                    editBefore = s?.toString().orEmpty()
+                    changeStart = start
+                    changeDeleted = count
+                }
             }
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(s: Editable?) {
                 if (!ready) return
                 paintPreview()
-                if (!writing) {
+                if (writing) {
+                    closedBrackets.clear()
+                } else {
                     val next = s?.toString().orEmpty()
-                    val replacement = ch.fasrv.fanotes.desk.markdownEnterReplacement(editBefore, next)
-                        ?: ch.fasrv.fanotes.desk.markdownBackspaceReplacement(editBefore, next)
-                    if (replacement != null) {
+                    val bracket = bracketTyping(editBefore, changeStart, changeDeleted, next, closedBrackets)
+                    if (bracket != null) {
                         writing = true
-                        setText(replacement.text)
-                        setSelection(replacement.cursor.coerceIn(0, replacement.text.length))
+                        setText(bracket.text)
+                        setSelection(bracket.selectionStart, bracket.selectionEnd)
                         writing = false
+                        closedBrackets.clear()
+                        closedBrackets.addAll(bracket.closedAt)
                         val origin = editBefore
-                        editBefore = replacement.text
-                        onVisibleEdit(origin, replacement.text)
+                        editBefore = bracket.text
+                        onVisibleEdit(origin, bracket.text)
                     } else {
-                        onVisibleEdit(editBefore, next)
+                        val replacement = ch.fasrv.fanotes.desk.markdownEnterReplacement(editBefore, next)
+                            ?: ch.fasrv.fanotes.desk.markdownBackspaceReplacement(editBefore, next)
+                        if (replacement != null) {
+                            writing = true
+                            setText(replacement.text)
+                            setSelection(replacement.cursor.coerceIn(0, replacement.text.length))
+                            writing = false
+                            closedBrackets.clear()
+                            val origin = editBefore
+                            editBefore = replacement.text
+                            onVisibleEdit(origin, replacement.text)
+                        } else {
+                            val inserted = next.length - editBefore.length + changeDeleted
+                            val shifted = ch.fasrv.fanotes.desk.shiftClosedBrackets(
+                                closedBrackets,
+                                changeStart,
+                                changeDeleted,
+                                inserted.coerceAtLeast(0),
+                            )
+                            closedBrackets.clear()
+                            closedBrackets.addAll(bracketsOnCursorLine(next, selectionStart, shifted))
+                            onVisibleEdit(editBefore, next)
+                        }
                     }
                 }
             }
