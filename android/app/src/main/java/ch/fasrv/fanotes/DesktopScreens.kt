@@ -1468,6 +1468,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     EditorSlider("Stiftbreite", pen.width.toFloat(), 1f, 18f, 0.5f, " px") { model.setPenWidth(it.toDouble()) }
                     EditorSlider("Form-Erkennung", pen.shapeSnap.toFloat(), 0f, 100f, 5f, " %") { model.updateDesk("shape-snap", it.toInt().toString()) }
                     EditorSlider("Durchkritzel-Empfindlichkeit", pen.scribble.toFloat(), 0f, 100f, 5f, " %") { model.updateDesk("scribble", it.toInt().toString()) }
+                    EditorSlider("Strichglättung", pen.smoothing.toFloat(), 0f, 1f, 0.05f, "") { model.updateDesk("smoothing", "%.2f".format(java.util.Locale.US, it)) }
                     Text("Papier neuer Notizen", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                     listOf("dots" to "Punkte", "lines" to "Linien", "grid" to "Karo", "squares" to "Quadrat", "blank" to "Leer", "millimeter" to "Millimeter").forEach { (id, label) ->
                         Text(

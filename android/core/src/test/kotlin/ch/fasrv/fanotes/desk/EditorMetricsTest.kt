@@ -33,6 +33,7 @@ class EditorMetricsTest {
         assertEquals("dots", pen.paper)
         assertEquals(50, pen.shapeSnap)
         assertEquals(50, pen.scribble)
+        assertEquals(0.68, pen.smoothing)
         assertEquals("#202333", pen.color)
         val custom = penSettings(mapOf("pen-width" to "40", "pressure" to "off", "paper" to "grid", "shape-snap" to "80", "scribble" to "0", "pen-color" to "#2457D6"))
         assertEquals(18.0, custom.width)
@@ -40,6 +41,7 @@ class EditorMetricsTest {
         assertEquals("grid", custom.paper)
         assertEquals(80, custom.shapeSnap)
         assertEquals(0, custom.scribble)
+        assertEquals(1.0, penSettings(mapOf("smoothing" to "4")).smoothing)
         assertEquals("#2457d6", custom.color)
     }
 }

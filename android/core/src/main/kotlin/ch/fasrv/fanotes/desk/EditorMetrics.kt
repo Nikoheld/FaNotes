@@ -36,6 +36,7 @@ data class PenSettings(
     val paper: String,
     val shapeSnap: Int,
     val scribble: Int,
+    val smoothing: Double,
     val color: String,
 )
 
@@ -49,6 +50,7 @@ fun penSettings(settings: Map<String, String>): PenSettings {
         paper = paper,
         shapeSnap = (settings["shape-snap"]?.toIntOrNull() ?: 50).coerceIn(0, 100),
         scribble = (settings["scribble"]?.toIntOrNull() ?: 50).coerceIn(0, 100),
+        smoothing = (settings["smoothing"]?.toDoubleOrNull() ?: 0.68).coerceIn(0.0, 1.0),
         color = color,
     )
 }

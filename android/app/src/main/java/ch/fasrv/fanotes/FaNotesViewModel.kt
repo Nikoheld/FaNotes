@@ -581,6 +581,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                             fontSizePx = metrics.fontSizePx.toFloat(),
                             lineHeight = metrics.lineHeight.toFloat(),
                             contentWidthPx = metrics.contentWidthPx.toFloat(),
+                            smoothing = ch.fasrv.fanotes.desk.penSettings(deskSettings.value).smoothing.toFloat(),
                         )
                     }
                     PDF_EXPORT_SAVED
