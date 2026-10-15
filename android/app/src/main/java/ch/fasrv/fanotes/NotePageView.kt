@@ -700,7 +700,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     init {
         isFocusable = true
         isFocusableInTouchMode = true
-        ink.onPageFocus = { if (pdfNote) requestFocus() }
+        ink.onPageFocus = { requestFocus() }
         tags = HtmlTagAssist(editor) { block ->
             val origin = editor.text?.toString().orEmpty()
             val cursor = editor.selectionEnd.coerceAtLeast(0)
@@ -1191,7 +1191,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             editor.clearFocus()
             val imm = context.getSystemService(InputMethodManager::class.java)
             imm.hideSoftInputFromWindow(windowToken, 0)
-            if (pdfNote) requestFocus()
+            requestFocus()
         }
     }
 
@@ -1631,6 +1631,35 @@ class NotePageView(context: Context) : FrameLayout(context) {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            val sheetName = when (event.keyCode) {
+                KeyEvent.KEYCODE_LEFT_BRACKET -> "["
+                KeyEvent.KEYCODE_RIGHT_BRACKET -> "]"
+                KeyEvent.KEYCODE_EQUALS, KeyEvent.KEYCODE_PLUS, KeyEvent.KEYCODE_NUMPAD_ADD -> if (event.isShiftPressed) "+" else "="
+                KeyEvent.KEYCODE_MINUS, KeyEvent.KEYCODE_NUMPAD_SUBTRACT -> "-"
+                KeyEvent.KEYCODE_0, KeyEvent.KEYCODE_NUMPAD_0 -> "0"
+                else -> null
+            }
+            if (sheetName != null) {
+                val sheet = ch.fasrv.fanotes.desk.sheetViewKey(
+                    sheetName,
+                    event.isCtrlPressed,
+                    event.isMetaPressed,
+                    event.isAltPressed,
+                    event.isShiftPressed,
+                    editor.hasFocus(),
+                )
+                when (sheet) {
+                    "zoom-in" -> ink.zoomByStep(1)
+                    "zoom-out" -> ink.zoomByStep(-1)
+                    "reset" -> ink.resetView()
+                    "rotate-ccw" -> ink.rotateBy(-1)
+                    "rotate-cw" -> ink.rotateBy(1)
+                    else -> sheet
+                }
+                if (sheet != null) return true
+            }
+        }
         if (pdfNote && !editor.hasFocus() && event.action == KeyEvent.ACTION_DOWN) {
             val name = when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_DOWN -> "down"
