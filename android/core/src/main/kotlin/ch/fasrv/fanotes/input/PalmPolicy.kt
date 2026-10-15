@@ -39,6 +39,15 @@ data class PalmState(
 
 fun isPenTool(tool: PointerTool) = tool == PointerTool.STYLUS || tool == PointerTool.ERASER
 
+/** Desktop `shouldRejectNonPenInk`. Pen-only still allows zoom and mapped buttons. */
+fun penOnlyEnabled(raw: String?) = raw == "on"
+
+fun shouldRejectNonPenInk(pointerType: String?, penOnly: Boolean) = penOnly && pointerType != "pen"
+
+/** A stroke that already started keeps its move events, even if the device labelled them mouse. */
+fun shouldRejectNonPenInkMove(pointerType: String?, penOnly: Boolean, liveStroke: Boolean) =
+    if (liveStroke) false else shouldRejectNonPenInk(pointerType, penOnly)
+
 /**
  * True when this contact must not move the page and must not draw.
  * Stylus and mouse are never rejected here.

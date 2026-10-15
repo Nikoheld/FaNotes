@@ -42,3 +42,9 @@ fun glassChrome(raw: String?) = raw == "on"
 
 /** File-tree row height from the desktop `--row-height`. */
 fun chromeRowHeightDp(compact: Boolean, overrideDp: Int? = null) = overrideDp ?: if (compact) 27 else 31
+
+/** Desktop sidebar range 210–430, default 286. */
+fun sidebarWidthDp(raw: String?) = (raw?.toIntOrNull() ?: 286).coerceIn(210, 430)
+
+/** Desktop info-panel range 220–430, default 286. */
+fun rightPanelWidthDp(raw: String?) = (raw?.toIntOrNull() ?: 286).coerceIn(220, 430)

@@ -383,7 +383,7 @@ fun FaNotesScreen(
         Row(Modifier.weight(1f).fillMaxWidth()) {
             if (!focus && (wide || showList) && destination == "notes") {
                 VaultPane(
-                    modifier = Modifier.width((chrome.sidebarDp ?: if (wide) 320 else 360).dp).fillMaxHeight(),
+                    modifier = Modifier.width((chrome.sidebarDp ?: ch.fasrv.fanotes.desk.sidebarWidthDp(desk["sidebar-width"])).dp).fillMaxHeight(),
                     tree = filterVaultByTag(tree, tagFilter, tagIndex),
                     tags = collectVaultTags(tagIndex.values.map { noteTags -> noteTags.joinToString(" ") { "#$it" } }),
                     tagFilter = tagFilter,
@@ -480,7 +480,7 @@ fun FaNotesScreen(
                     }
                 }
                 if (destination == "notes" && wide && desk["outline"] != "off" && !focus) {
-                    Box(Modifier.width(240.dp).fillMaxHeight()) { Inspector(model) { model.openPath(it) } }
+                    Box(Modifier.width(ch.fasrv.fanotes.desk.rightPanelWidthDp(desk["panel-width"]).dp).fillMaxHeight()) { Inspector(model) { model.openPath(it) } }
                 }
             }
         }
@@ -1076,6 +1076,7 @@ private fun SplitPane(
                 view.scribbleSensitivity = pen.scribble
                 view.strokeSmoothing = pen.smoothing.toFloat()
                 view.tabletButtons = model.effectiveDesk()["tablet-buttons"].orEmpty()
+                view.penOnly = ch.fasrv.fanotes.input.penOnlyEnabled(model.effectiveDesk()["pen-only"])
                 view.markdown = markdown
                 view.showMarkdown = markdown.isNotBlank() && !typing
                 view.inkTool = tool
@@ -1273,6 +1274,7 @@ private fun PageSurface(
             page.ink.scribbleSensitivity = pen.scribble
             page.ink.strokeSmoothing = pen.smoothing.toFloat()
             page.ink.tabletButtons = model.effectiveDesk()["tablet-buttons"].orEmpty()
+            page.ink.penOnly = ch.fasrv.fanotes.input.penOnlyEnabled(model.effectiveDesk()["pen-only"])
             page.ink.accentSecondary = android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccentSecondary(model.effectiveDesk()["accent-secondary"]))
             page.setWorkspace(model.effectiveDesk()["background"].orEmpty())
             page.ink.onPlaceHighlight = { model.addWorksheetHighlight(it) }
