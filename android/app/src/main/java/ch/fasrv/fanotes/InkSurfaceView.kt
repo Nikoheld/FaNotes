@@ -1136,21 +1136,43 @@ class InkSurfaceView @JvmOverloads constructor(
             drawSpray(canvas, inkPaint, stroke, scale, sessionWidth(), sessionHeight())
             return
         }
-        val outline = ribbonOutline(stroke, sessionWidth(), sessionHeight(), strokeSmoothing.toDouble())
-        if (outline.size < 4) return
-        val path = Path()
-        smoothOutline(path, outline, scale)
-        inkPaint.color = parseColor(stroke.color)
-        inkPaint.alpha = ((stroke.opacity ?: brushOpacity(stroke.brush) ?: 1.0) * 255).toInt().coerceIn(20, 255)
-        drawInkPath(
-            canvas,
-            path,
-            inkPaint,
-            stroke.colorEffect,
-            (sessionWidth() * scale).toFloat(),
-            (sessionHeight() * scale).toFloat(),
-            (stroke.baseWidth * scale).toFloat(),
-        )
+        val passes = if (stroke.brush == "calligraphy") {
+            listOf(ch.fasrv.fanotes.ink.InkPaintPass(ch.fasrv.fanotes.ink.brushWidthScale(stroke.brush), 1.0))
+        } else {
+            ch.fasrv.fanotes.ink.brushPasses(stroke.brush)
+        }
+        val baseAlpha = if (stroke.purpose == "art") (stroke.opacity ?: 1.0) else 1.0
+        for (pass in passes) {
+            canvas.save()
+            if (pass.jitter > 0.0) {
+                val jx = (ch.fasrv.fanotes.ink.seededUnit(1) - 0.5) * pass.jitter * scale
+                val jy = (ch.fasrv.fanotes.ink.seededUnit(2) - 0.5) * pass.jitter * scale
+                canvas.translate(jx.toFloat(), jy.toFloat())
+            }
+            val outline = ribbonOutline(
+                stroke,
+                sessionWidth(),
+                sessionHeight(),
+                strokeSmoothing.toDouble(),
+                widthFactor = pass.widthFactor,
+            )
+            if (outline.size >= 4) {
+                val path = Path()
+                smoothOutline(path, outline, scale)
+                inkPaint.color = parseColor(stroke.color)
+                inkPaint.alpha = (baseAlpha * pass.alpha * 255.0).toInt().coerceIn(0, 255)
+                drawInkPath(
+                    canvas,
+                    path,
+                    inkPaint,
+                    stroke.colorEffect,
+                    (sessionWidth() * scale).toFloat(),
+                    (sessionHeight() * scale).toFloat(),
+                    (stroke.baseWidth * pass.widthFactor * scale).toFloat(),
+                )
+            }
+            canvas.restore()
+        }
     }
 
     private fun drawSelection(canvas: Canvas, stroke: InkStroke, scale: Float) {
