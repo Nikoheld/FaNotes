@@ -168,6 +168,12 @@ fun listFollowsSelection(reduceMotion: Boolean): String = if (reduceMotion) "ins
 /** File-tree row height from the desktop `--row-height`. */
 fun chromeRowHeightDp(compact: Boolean, overrideDp: Int? = null) = overrideDp ?: if (compact) 27 else 31
 
+/** The shell grid row is 44px. Ribbon buttons are 30px tall with 6px corners and 8px of side padding. */
+const val RIBBON_HEIGHT_DP = 44
+const val RIBBON_BUTTON_DP = 30
+const val RIBBON_BUTTON_RADIUS_DP = 6
+const val RIBBON_BUTTON_PAD_DP = 8
+
 /** Editor toolbar is 36px. Format buttons are 28px with 7px corners. The mode switch is 28px with 24px buttons. */
 const val EDITOR_TOOLBAR_DP = 36
 const val FORMAT_BUTTON_DP = 28

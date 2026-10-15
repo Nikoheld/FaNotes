@@ -160,72 +160,76 @@ fun DeskRibbon(
     val toolIds = ch.fasrv.fanotes.desk.RIBBON_TOOLS.map { it.id }.toSet()
     LaunchedEffect(destination) { if (destination in toolIds) toolsOpen = true }
     Row(
-        Modifier.fillMaxWidth().height(44.dp).background(MaterialTheme.colorScheme.surface).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+        Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.RIBBON_HEIGHT_DP.dp).background(MaterialTheme.colorScheme.surface).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("F", modifier = Modifier.padding(end = 8.dp), fontWeight = FontWeight.SemiBold)
         Text("FaNotes", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(end = 12.dp))
         if (focus) {
-            Text("Fokus aus", modifier = Modifier.clickable(onClick = onFocus).padding(6.dp), fontSize = 13.sp)
+            RibbonButton("Fokus aus", active = false, onClick = onFocus)
             return@Row
         }
         ch.fasrv.fanotes.desk.RIBBON_PRIMARY.forEach { item ->
             val active = ch.fasrv.fanotes.desk.ribbonItemActive(item.id, destination, penOpen)
-            Text(
+            RibbonButton(
                 item.label,
-                modifier = Modifier
-                    .padding(horizontal = 2.dp)
-                    .background(if (active) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
-                    .clickable(
-                        onClickLabel = if (item.id == "pen" && penOpen) "Zur Tastatur wechseln" else item.label,
-                    ) {
-                        if (item.id == "pen") onPen() else onDestination(item.id)
-                    }
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                fontSize = 13.sp,
-                color = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
-            )
+                active,
+                onClickLabel = if (item.id == "pen" && penOpen) "Zur Tastatur wechseln" else item.label,
+            ) {
+                if (item.id == "pen") onPen() else onDestination(item.id)
+            }
         }
-        Text(
+        RibbonButton(
             ch.fasrv.fanotes.desk.ribbonToolLabel(toolsOpen),
-            modifier = Modifier.clickable(onClickLabel = if (toolsOpen) "Zusätzliche Werkzeuge einklappen" else "Zusätzliche Werkzeuge ausklappen") { toolsOpen = !toolsOpen }.padding(6.dp),
-            fontSize = 13.sp,
-            fontWeight = if (toolsOpen) FontWeight.SemiBold else FontWeight.Normal,
-        )
+            toolsOpen,
+            onClickLabel = if (toolsOpen) "Zusätzliche Werkzeuge einklappen" else "Zusätzliche Werkzeuge ausklappen",
+        ) { toolsOpen = !toolsOpen }
         if (toolsOpen) {
             ch.fasrv.fanotes.desk.RIBBON_TOOLS.forEach { item ->
                 val active = ch.fasrv.fanotes.desk.ribbonItemActive(item.id, destination, penOpen)
                 val label = if (item.id == "focus") "Fokus" else item.label
-                Text(
+                RibbonButton(
                     label,
-                    modifier = Modifier
-                        .padding(horizontal = 2.dp)
-                        .background(if (active) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
-                        .clickable(
-                            onClickLabel = if (item.id == "daily") "Heutige Tagesnotiz öffnen" else label,
-                        ) {
-                            when (item.id) {
-                                "daily" -> onDaily()
-                                "commands" -> onPalette()
-                                "focus" -> onFocus()
-                                else -> onDestination(item.id)
-                            }
-                        }
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    fontSize = 13.sp,
-                    color = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
-                )
+                    active,
+                    onClickLabel = if (item.id == "daily") "Heutige Tagesnotiz öffnen" else label,
+                ) {
+                    when (item.id) {
+                        "daily" -> onDaily()
+                        "commands" -> onPalette()
+                        "focus" -> onFocus()
+                        else -> onDestination(item.id)
+                    }
+                }
             }
         }
+        RibbonButton("Einstellungen", destination == "settings") { onDestination("settings") }
+    }
+}
+
+@Composable
+private fun RibbonButton(
+    label: String,
+    active: Boolean,
+    onClickLabel: String = label,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.RIBBON_BUTTON_RADIUS_DP.dp)
+    Box(
+        Modifier
+            .padding(horizontal = 1.dp)
+            .height(ch.fasrv.fanotes.desk.RIBBON_BUTTON_DP.dp)
+            .clip(shape)
+            .background(if (active) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+            .clickable(onClickLabel = onClickLabel, onClick = onClick)
+            .padding(horizontal = ch.fasrv.fanotes.desk.RIBBON_BUTTON_PAD_DP.dp),
+        contentAlignment = Alignment.Center,
+    ) {
         Text(
-            "Einstellungen",
-            modifier = Modifier
-                .padding(horizontal = 2.dp)
-                .background(if (destination == "settings") MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
-                .clickable { onDestination("settings") }
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+            label,
             fontSize = 13.sp,
-            color = if (destination == "settings") MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            color = if (active) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
         )
     }
 }
