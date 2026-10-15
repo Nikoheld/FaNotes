@@ -49,6 +49,7 @@ fun paletteCommands(
         PaletteCommand("reveal", "Im Dateimanager zeigen", "Dateien", "Speicherort der geöffneten Notiz öffnen", keywords = "ordner explorer finder dateimanager"),
         PaletteCommand("history", "Versionsverlauf", "Dateien", "Frühere Stände dieser Notiz ansehen und wiederherstellen", keywords = "history version wiederherstellen"),
         PaletteCommand("search", "Im Vault suchen", "Navigation", shortcut = "Ctrl ⇧ F"),
+        PaletteCommand("quick-open", "Notiz öffnen …", "Navigation", "Schnell zu einer Notiz springen", "Ctrl O", "quick open switcher wechseln springen"),
         PaletteCommand("notes", "Notizen", "Navigation"),
         PaletteCommand("tasks", "Hausaufgaben & Termine", "Navigation", "To-dos, Hausaufgaben und Termine mit Fälligkeit", keywords = "todo hausaufgaben schule termin fällig aufgabe"),
         PaletteCommand("calendar", "Kalender", "Navigation", "Tag, 3 Tage, Woche, Monat und Agenda", keywords = "kalender termin woche monat agenda"),

@@ -3455,7 +3455,7 @@ fun CommandPalette(
     bookOpen: Boolean = false,
     onRun: (String) -> Unit,
 ) {
-    var query by remember { mutableStateOf("") }
+    var query by remember(notesOnly) { mutableStateOf("") }
     var selected by remember { mutableIntStateOf(0) }
     val notes = if (notesOnly) rankNotes(query, 40) else if (query.isBlank()) emptyList() else rankNotes(query, 6)
     val actions = ch.fasrv.fanotes.desk.paletteCommands(penOpen, bookOpen, splitOpen, splitRows, focus, dailyFolder)
@@ -3473,7 +3473,10 @@ fun CommandPalette(
     fun openRow(index: Int, split: Boolean) {
         val row = rows.getOrNull(index) ?: return
         when (row) {
-            is PaletteRow.Command -> onRun(row.command.id)
+            is PaletteRow.Command -> {
+                onRun(row.command.id)
+                if (row.command.id == "quick-open") return
+            }
             is PaletteRow.Note -> if (ch.fasrv.fanotes.desk.paletteOpensInSplit("note", split)) onOpenNoteInSplit(row.path) else onOpenNote(row.path)
         }
         onDismiss()
