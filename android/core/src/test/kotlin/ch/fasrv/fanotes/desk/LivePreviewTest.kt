@@ -1,0 +1,45 @@
+package ch.fasrv.fanotes.desk
+
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+class LivePreviewTest {
+    @Test
+    fun inactiveLinesHideMarkersAndTheCursorLineKeepsThem() {
+        val note = "# Titel\n**fett** und *kursiv*\n- Punkt\n- [x] Tun\n> Zitat\n---\n[[Ziel|Name]]\n[Text](https://fanotes.example)\n`code` und \$x\$"
+        val onTitle = livePreviewMarks(note, 0, 0)
+        assertTrue(onTitle.any { it.kind == LiveKind.H1 && it.start == 0 })
+        assertFalse(onTitle.any { it.kind == LiveKind.HIDE && it.start == 0 })
+        assertEquals(LiveKind.STRONG, onTitle.first { it.start == note.indexOf("fett") }.kind)
+        assertTrue(onTitle.any { it.kind == LiveKind.HIDE && it.start == note.indexOf("**") })
+
+        val onBold = livePreviewMarks(note, note.indexOf("**"), note.indexOf("**"))
+        assertFalse(onBold.any { it.kind == LiveKind.STRONG })
+        assertTrue(onBold.any { it.kind == LiveKind.HIDE && it.start == 0 && it.end == 2 })
+        assertEquals(LiveKind.BULLET, onBold.first { it.start == note.indexOf("- Punkt") }.kind)
+        assertEquals(LiveKind.TASK_DONE, onBold.first { it.start == note.indexOf("- [x]") }.kind)
+        assertEquals(LiveKind.QUOTE, onBold.first { it.start == note.indexOf("> Zitat") }.kind)
+        assertTrue(onBold.any { it.kind == LiveKind.HIDE && it.start == note.indexOf("---") && it.end == note.indexOf("---") + 3 })
+        assertEquals(LiveKind.LINK, onBold.first { it.start == note.indexOf("Name") }.kind)
+        assertEquals(LiveKind.LINK, onBold.first { it.start == note.indexOf("Text") }.kind)
+        assertEquals(LiveKind.CODE, onBold.first { it.start == note.indexOf("code") }.kind)
+        assertEquals(LiveKind.MATH, onBold.first { it.start == note.indexOf("x\$") }.kind)
+        assertEquals(LiveKind.EMPHASIS, onTitle.first { it.start == note.indexOf("kursiv") }.kind)
+    }
+
+    @Test
+    fun metadataStaysHiddenOnTheCursorLineAndCodeOwnsItsRange() {
+        val hidden = "<!-- fanotes-ink:abc -->"
+        val marks = livePreviewMarks(hidden, 0, 0)
+        assertEquals(listOf(LiveKind.HIDE, LiveKind.COLLAPSE), marks.map { it.kind })
+        assertEquals(0 to hidden.length, marks[0].start to marks[0].end)
+        val fenced = "`**a**`\n."
+        val code = livePreviewMarks(fenced, fenced.indexOf('.'), fenced.indexOf('.'))
+        assertEquals(listOf(LiveKind.HIDE, LiveKind.HIDE, LiveKind.CODE), code.map { it.kind })
+        assertFalse(code.any { it.kind == LiveKind.STRONG })
+        assertTrue(livePreviewMarks("| --- | --- |", 0, 0).all { it.kind == LiveKind.HIDE })
+        assertEquals(emptyList(), livePreviewMarks("", 0, 0))
+    }
+}
