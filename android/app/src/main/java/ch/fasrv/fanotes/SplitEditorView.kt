@@ -25,6 +25,14 @@ import kotlin.math.abs
  */
 class SplitEditorView(context: Context) : EditText(context) {
     var onVisibleEdit: (String, String) -> Unit = { _, _ -> }
+    var onToggleFold: (Int) -> Unit = {}
+    var foldMarkers: List<String> = emptyList()
+        set(value) {
+            if (field == value) return
+            field = value
+            applyGutter()
+            invalidate()
+        }
     var accent: Int = 0xFF2A6F97.toInt()
     var showLineNumbers: Boolean = false
         set(value) {
@@ -103,6 +111,7 @@ class SplitEditorView(context: Context) : EditText(context) {
             }
             MotionEvent.ACTION_UP -> {
                 val tapped = abs(event.x - downX) < 24f && abs(event.y - downY) < 24f
+                if (tapped && event.x < foldColumn() && toggleFoldAt(event.y)) return true
                 if (tapped && toggleAt(event.x, event.y)) return true
             }
         }
@@ -149,38 +158,66 @@ class SplitEditorView(context: Context) : EditText(context) {
         applyGutter()
     }
 
+    private fun foldColumn() = dp(18)
+
     private fun applyGutter() {
         val gap = dp(4)
-        val next = if (!showLineNumbers) 0 else lineNumberColumnPx(text?.toString().orEmpty(), textSize, dp(18)) + gap
+        val numbers = if (!showLineNumbers) 0 else lineNumberColumnPx(text?.toString().orEmpty(), textSize, dp(18)) + gap
+        val next = foldColumn() + numbers
         if (next == paddingLeft) return
         setPadding(next, paddingTop, paddingRight, paddingBottom)
     }
 
     override fun onDraw(canvas: Canvas) {
         val layout = layout
-        if (showLineNumbers && layout != null && paddingLeft > 0) {
+        if (layout != null && paddingLeft > 0 && (showLineNumbers || foldMarkers.any { it.isNotEmpty() })) {
             val value = text?.toString().orEmpty()
-            val labels = editorLineNumberLabels(value)
             val starts = lineStartOffsets(value)
             val mark = paint
             val oldColor = mark.color
             val oldSize = mark.textSize
             val oldAlign = mark.textAlign
             mark.color = 0xFF8A8D98.toInt()
-            mark.textSize = textSize * 0.82f
             mark.textAlign = Paint.Align.RIGHT
-            val right = (paddingLeft - dp(4)).toFloat()
-            for (index in starts.indices) {
+            mark.textSize = textSize
+            for (index in foldMarkers.indices) {
+                if (foldMarkers[index].isEmpty() || index >= starts.size) continue
                 val visual = layout.getLineForOffset(starts[index].coerceAtMost(value.length))
                 val baseline = paddingTop + layout.getLineBaseline(visual) - scrollY
                 if (baseline < 0 || baseline > height + mark.textSize) continue
-                canvas.drawText(labels[index], right, baseline.toFloat(), mark)
+                canvas.drawText(foldMarkers[index], (foldColumn() - dp(2)).toFloat(), baseline.toFloat(), mark)
+            }
+            if (showLineNumbers) {
+                val labels = editorLineNumberLabels(value)
+                mark.textSize = textSize * 0.82f
+                val right = (paddingLeft - dp(4)).toFloat()
+                for (index in starts.indices) {
+                    if (index >= labels.size) break
+                    val visual = layout.getLineForOffset(starts[index].coerceAtMost(value.length))
+                    val baseline = paddingTop + layout.getLineBaseline(visual) - scrollY
+                    if (baseline < 0 || baseline > height + mark.textSize) continue
+                    canvas.drawText(labels[index], right, baseline.toFloat(), mark)
+                }
             }
             mark.color = oldColor
             mark.textSize = oldSize
             mark.textAlign = oldAlign
         }
         super.onDraw(canvas)
+    }
+
+    private fun toggleFoldAt(y: Float): Boolean {
+        val layout = layout ?: return false
+        val visual = layout.getLineForVertical((y + scrollY - paddingTop).toInt()).coerceAtLeast(0)
+        val value = text?.toString().orEmpty()
+        val starts = lineStartOffsets(value)
+        var logical = 1
+        for (index in starts.indices) {
+            val line = layout.getLineForOffset(starts[index].coerceAtMost(value.length))
+            if (line <= visual) logical = index + 1 else break
+        }
+        onToggleFold(logical)
+        return true
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()

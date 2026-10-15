@@ -73,6 +73,34 @@ fun foldedHeadingHidingLine(markdown: String, foldedLines: Set<Int>, line: Int):
     return found
 }
 
+/** Glyphs for the fold gutter, one per visible line. Empty when that line is not a heading with a body. */
+fun foldMarkerGlyphs(source: String, foldedLines: Set<Int>): List<String> {
+    val text = normalizeNewlines(source)
+    val visible = markdownWithFolds(text, foldedLines)
+    val lines = if (visible.isEmpty()) 1 else visible.count { it == '\n' } + 1
+    return (1..lines).map { visibleLine ->
+        val heading = headingLineForFoldMarker(text, foldedLines, visibleLine) ?: return@map ""
+        if (heading in foldedLines) "▸" else "▾"
+    }
+}
+
+/**
+ * Source heading line for a tap on visible line [visibleLine] (1-based).
+ * Null when that line is not a foldable heading. A heading that is already
+ * folded still returns so the gutter can open it.
+ */
+fun headingLineForFoldMarker(source: String, foldedLines: Set<Int>, visibleLine: Int): Int? {
+    if (visibleLine < 1) return null
+    val text = normalizeNewlines(source)
+    val visible = markdownWithFolds(text, foldedLines)
+    val count = if (visible.isEmpty()) 1 else visible.count { it == '\n' } + 1
+    if (visibleLine > count) return null
+    val sourceOffset = sourceOffsetForVisible(text, foldedLines, revealLineStart(visible, visibleLine))
+    val sourceLine = text.take(sourceOffset).count { it == '\n' } + 1
+    if (headingFoldRange(text, sourceLine) == null) return if (sourceLine in foldedLines) sourceLine else null
+    return sourceLine
+}
+
 /** Source text with folded heading bodies removed. No folds returns the original string. */
 fun markdownWithFolds(markdown: String, foldedLines: Set<Int>): String {
     if (foldedLines.isEmpty()) return markdown

@@ -65,5 +65,13 @@ class NoteOutlineTest {
         assertEquals(null, foldedHeadingHidingLine(note, setOf(1), 9))
         assertEquals(null, foldedHeadingHidingLine(note, emptySet(), 3))
         assertEquals(1, foldedHeadingHidingLine(note, setOf(1, 5), 7))
+        assertEquals(listOf("▾", "", "", "", "▾", "", "", "", "", ""), foldMarkerGlyphs(note, emptySet()))
+        assertEquals(listOf("▸", "", "", ""), foldMarkerGlyphs(note, setOf(1)))
+        assertEquals(1, headingLineForFoldMarker(note, emptySet(), 1))
+        assertEquals(5, headingLineForFoldMarker(note, emptySet(), 5))
+        assertEquals(1, headingLineForFoldMarker(note, setOf(1), 1))
+        assertNull(headingLineForFoldMarker(note, setOf(1), 3))
+        assertNull(headingLineForFoldMarker(note, emptySet(), 2))
+        assertNull(headingLineForFoldMarker("# Nur\n", emptySet(), 1))
     }
 }

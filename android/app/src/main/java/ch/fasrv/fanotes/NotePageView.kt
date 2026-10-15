@@ -53,6 +53,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
     }
     private val lineNumbers = TextView(context)
+    private val foldMarks = TextView(context)
     private val toolbar = HorizontalScrollView(context)
     private val tools = LinearLayout(context)
     private val handle = TextView(context)
@@ -98,6 +99,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onFinger: (Boolean) -> Unit = {}
     var onMath: () -> Unit = {}
     var onUnfoldHeading: (Int) -> Unit = {}
+    var onToggleHeading: (Int) -> Unit = {}
     var onPdfPage: (Int) -> Unit = {}
     var onSymbolSize: (Double) -> Unit = {}
     var onSymbolRotation: (Double) -> Unit = {}
@@ -124,6 +126,17 @@ class NotePageView(context: Context) : FrameLayout(context) {
         lineNumbers.gravity = Gravity.TOP or Gravity.END
         lineNumbers.setPadding(0, 0, 0, 0)
         lineNumbers.visibility = GONE
+        foldMarks.setTextColor(0xFF8A8D98.toInt())
+        foldMarks.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+        foldMarks.setPadding(0, 0, 0, 0)
+        foldMarks.visibility = GONE
+        foldMarks.setOnTouchListener { _, event ->
+            if (event.actionMasked != MotionEvent.ACTION_UP) return@setOnTouchListener true
+            val layout = foldMarks.layout ?: return@setOnTouchListener true
+            val line = layout.getLineForVertical((event.y + foldMarks.scrollY).toInt()).coerceAtLeast(0)
+            onToggleHeading(line + 1)
+            true
+        }
         editor.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         editor.visibility = GONE
         editor.addTextChangedListener(object : android.text.TextWatcher {
@@ -132,13 +145,18 @@ class NotePageView(context: Context) : FrameLayout(context) {
             }
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(s: android.text.Editable?) {
-                if (lineNumbers.visibility == VISIBLE) placeEditor()
+                if (lineNumbers.visibility == VISIBLE || foldMarks.visibility == VISIBLE) placeEditor()
                 if (!writing) onVisibleMarkdown(editBefore, s?.toString().orEmpty())
                 if (previewReady) paintLivePreview()
             }
         })
         addView(lineNumbers, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
+        addView(foldMarks, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         addView(editor, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
+        editor.setOnScrollChangeListener { _, _, scrollY, _, _ ->
+            lineNumbers.scrollTo(0, scrollY)
+            foldMarks.scrollTo(0, scrollY)
+        }
         tools.orientation = LinearLayout.HORIZONTAL
         tools.gravity = Gravity.CENTER_VERTICAL
         toolbar.isHorizontalScrollBarEnabled = false
@@ -416,6 +434,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         } else if (!widthFromUser) {
             widthBar?.progress = widthProgress(style.baseWidth.toFloat())
         }
+        placeEditor()
     }
 
     private var toolSignature = ""
@@ -722,6 +741,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private fun placeEditor() {
         if (editor.visibility != VISIBLE) {
             lineNumbers.visibility = GONE
+            foldMarks.visibility = GONE
             return
         }
         val scale = ink.cameraScale().coerceAtLeast(0.2f)
@@ -736,6 +756,19 @@ class NotePageView(context: Context) : FrameLayout(context) {
             MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
         )
         editor.layout(x, y, x + width, y + height)
+        val foldWidth = dp(18)
+        val glyphs = ch.fasrv.fanotes.desk.foldMarkerGlyphs(sourceMarkdown, foldedLines)
+        foldMarks.text = glyphs.joinToString("\n")
+        foldMarks.typeface = ink.editorTypeface
+        foldMarks.setTextSize(TypedValue.COMPLEX_UNIT_PX, ink.editorFontPx * scale)
+        foldMarks.setLineSpacing(0f, ink.editorLineHeight)
+        foldMarks.visibility = if (glyphs.any { it.isNotEmpty() }) VISIBLE else GONE
+        foldMarks.measure(
+            MeasureSpec.makeMeasureSpec(foldWidth, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
+        )
+        foldMarks.layout(x - foldWidth - dp(2), y, x - dp(2), y + height)
+        foldMarks.scrollTo(0, editor.scrollY)
         if (ink.showLineNumbers) {
             val labels = ch.fasrv.fanotes.desk.editorLineNumberLabels(editor.text?.toString().orEmpty())
             lineNumbers.text = labels.joinToString("\n")
@@ -748,7 +781,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 MeasureSpec.makeMeasureSpec(gutter, MeasureSpec.EXACTLY),
                 MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
             )
-            lineNumbers.layout(x - gutter - dp(4), y, x - dp(4), y + height)
+            lineNumbers.layout(x - foldWidth - gutter - dp(6), y, x - foldWidth - dp(6), y + height)
+            lineNumbers.scrollTo(0, editor.scrollY)
         } else {
             lineNumbers.visibility = GONE
         }
