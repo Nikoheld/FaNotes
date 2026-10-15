@@ -42,4 +42,29 @@ class LivePreviewTest {
         assertTrue(livePreviewMarks("| --- | --- |", 0, 0).all { it.kind == LiveKind.HIDE })
         assertEquals(emptyList(), livePreviewMarks("", 0, 0))
     }
+
+    @Test
+    fun detailsSummaryHidesTheBodyUntilTheBlockIsOpen() {
+        val closed = "<details>\n<summary>**Titel**</summary>\n\nGeheim\n</details>\nNachher"
+        val folded = livePreviewMarks(closed, closed.length, closed.length)
+        assertEquals("Titel", folded.first { it.kind == LiveKind.DETAILS_SUMMARY }.label)
+        assertTrue(folded.any { it.kind == LiveKind.HIDE && it.start == closed.indexOf("Geheim") })
+        assertTrue(folded.any { it.kind == LiveKind.HIDE && it.start == closed.indexOf("</details>") })
+        val inside = livePreviewMarks(closed, closed.indexOf("Geheim"), closed.indexOf("Geheim"))
+        assertFalse(inside.any { it.kind == LiveKind.DETAILS_SUMMARY })
+
+        val inline = "<details><summary>Was</summary>4</details>"
+        assertEquals("", livePreviewMarks(inline, 0, 0).first { it.kind == LiveKind.DETAILS_SUMMARY }.body)
+        val opened = toggleDetailsOpen(inline, 0)
+        assertEquals("<details open><summary>Was</summary>4</details>", opened)
+        assertEquals("4", livePreviewMarks(opened!!, 0, 0).first { it.kind == LiveKind.DETAILS_SUMMARY }.body)
+        assertEquals(inline, toggleDetailsOpen(opened, 0))
+
+        val multi = "<details open>\n<summary>Titel</summary>\nGeheim\n</details>"
+        val openMarks = livePreviewMarks(multi, multi.length, multi.length)
+        assertEquals("Titel", openMarks.first { it.kind == LiveKind.DETAILS_SUMMARY }.label)
+        assertFalse(openMarks.any { it.kind == LiveKind.HIDE && it.start == multi.indexOf("Geheim") })
+        assertTrue(openMarks.any { it.kind == LiveKind.HIDE && it.start == multi.indexOf("<summary>") })
+        assertTrue(openMarks.any { it.kind == LiveKind.HIDE && it.start == multi.indexOf("</details>") })
+    }
 }
