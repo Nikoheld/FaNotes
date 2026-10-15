@@ -5,7 +5,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -32,6 +31,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedTextField
@@ -61,6 +62,8 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.shape.CircleShape
@@ -74,7 +77,12 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlin.math.abs
+import kotlinx.coroutines.withTimeoutOrNull
+import ch.fasrv.fanotes.desk.DeskTab
 import ch.fasrv.fanotes.desk.measureDocument
+import ch.fasrv.fanotes.desk.moveTab
+import ch.fasrv.fanotes.desk.tabsToClose
 import ch.fasrv.fanotes.desk.marginLinesFromTranscript
 import ch.fasrv.fanotes.desk.readPdfMarks
 import ch.fasrv.fanotes.desk.wikiTargets
@@ -224,11 +232,22 @@ fun NoteTabs(
     onBack: () -> Unit,
     onForward: () -> Unit,
     onOpenSplit: (String) -> Unit = {},
+    splitPath: String? = null,
+    onMove: (String, String?, String) -> Unit = { _, _, _ -> },
+    onTogglePin: (String) -> Unit = {},
+    onCloseScope: (String, String) -> Unit = { _, _ -> },
+    onCopyPath: (String) -> Unit = {},
+    onReveal: (String) -> Unit = {},
 ) {
     if (paths.isEmpty() && !canBack && !canForward) return
     val muted = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    val scroll = rememberScrollState()
+    var dragging by remember { mutableStateOf<String?>(null) }
+    var dropOn by remember { mutableStateOf<Pair<String?, String>?>(null) }
+    val bounds = remember { androidx.compose.runtime.mutableStateMapOf<String, androidx.compose.ui.geometry.Rect>() }
+    val deskTabs = paths.map { DeskTab(it, it in pinned) }
     Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).background(MaterialTheme.colorScheme.surface).padding(horizontal = 8.dp, vertical = 2.dp),
+        Modifier.fillMaxWidth().horizontalScroll(scroll, enabled = dragging == null).background(MaterialTheme.colorScheme.surface).padding(horizontal = 8.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -244,15 +263,195 @@ fun NoteTabs(
             modifier = Modifier.padding(end = 8.dp).then(if (canForward) Modifier.clickable(onClick = onForward) else Modifier).padding(horizontal = 6.dp, vertical = 4.dp),
         )
         paths.forEach { path ->
-            val name = path.substringAfterLast('/').substringBeforeLast('.')
-            Row(
-                Modifier.padding(end = 4.dp).background(if (path == selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent).combinedClickable(onClick = { onOpen(path) }, onLongClick = { onOpenSplit(path) }).padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (path in pinned) Text("● ", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                Text(name, fontSize = 12.sp, maxLines = 1)
-                Text("  ×", modifier = Modifier.clickable { onClose(path) }, fontSize = 12.sp)
+            NoteTabChip(
+                path = path,
+                selected = path == selected,
+                pinned = path in pinned,
+                inSplit = path == splitPath,
+                dragging = dragging == path,
+                dropSide = dropOn?.takeIf { it.first == path && dragging != null && dragging != path }?.second,
+                canCloseOthers = tabsToClose(deskTabs, path, "others").isNotEmpty(),
+                canCloseRight = tabsToClose(deskTabs, path, "right").isNotEmpty(),
+                onOpen = { onOpen(path) },
+                onClose = { onClose(path) },
+                onOpenSplit = { onOpenSplit(path) },
+                onTogglePin = { onTogglePin(path) },
+                onCloseOthers = { onCloseScope(path, "others") },
+                onCloseRight = { onCloseScope(path, "right") },
+                onCopyPath = { onCopyPath(path) },
+                onReveal = { onReveal(path) },
+                onPosition = { bounds[path] = it },
+                restartKey = paths to pinned,
+                onDragStart = {
+                    dragging = path
+                    dropOn = null
+                },
+                onDrag = { rootX ->
+                    val candidate = tabDropTarget(bounds, rootX)
+                    val next = moveTab(deskTabs, path, candidate.first, candidate.second)
+                    dropOn = if (next.map { it.path } == paths) null else candidate
+                },
+                onDragEnd = {
+                    val from = dragging
+                    val drop = dropOn
+                    dragging = null
+                    dropOn = null
+                    if (from != null && drop != null) onMove(from, drop.first, drop.second)
+                },
+                onDragCancel = {
+                    dragging = null
+                    dropOn = null
+                },
+            )
+        }
+    }
+}
+
+private fun tabDropTarget(
+    bounds: Map<String, androidx.compose.ui.geometry.Rect>,
+    rootX: Float,
+): Pair<String?, String> {
+    val hit = bounds.entries.firstOrNull { rootX >= it.value.left && rootX <= it.value.right }
+    if (hit != null) {
+        val mid = (hit.value.left + hit.value.right) / 2f
+        return hit.key to if (rootX < mid) "before" else "after"
+    }
+    val leftmost = bounds.minByOrNull { it.value.left } ?: return null to "after"
+    return if (rootX < leftmost.value.left) leftmost.key to "before" else null to "after"
+}
+
+@Composable
+private fun NoteTabChip(
+    path: String,
+    selected: Boolean,
+    pinned: Boolean,
+    inSplit: Boolean,
+    dragging: Boolean,
+    dropSide: String?,
+    canCloseOthers: Boolean,
+    canCloseRight: Boolean,
+    onOpen: () -> Unit,
+    onClose: () -> Unit,
+    onOpenSplit: () -> Unit,
+    onTogglePin: () -> Unit,
+    onCloseOthers: () -> Unit,
+    onCloseRight: () -> Unit,
+    onCopyPath: () -> Unit,
+    onReveal: () -> Unit,
+    restartKey: Any,
+    onPosition: (androidx.compose.ui.geometry.Rect) -> Unit,
+    onDragStart: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
+) {
+    var menu by remember { mutableStateOf(false) }
+    val textLeft = remember { floatArrayOf(0f) }
+    val name = path.substringAfterLast('/').substringBeforeLast('.')
+    Box {
+        Row(
+            Modifier
+                .padding(end = 4.dp)
+                .onGloballyPositioned { onPosition(it.boundsInRoot()) }
+                .background(
+                    when {
+                        dragging -> MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+                        selected -> MaterialTheme.colorScheme.surfaceVariant
+                        else -> Color.Transparent
+                    },
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (dropSide == "before") {
+                Box(Modifier.padding(end = 2.dp).width(2.dp).height(16.dp).background(MaterialTheme.colorScheme.primary))
             }
+            Text(
+                buildString {
+                    if (pinned) append("● ")
+                    append(name)
+                    if (inSplit) append(" ‖")
+                },
+                fontSize = 12.sp,
+                color = if (inSplit && !selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                modifier = Modifier
+                    .onGloballyPositioned { textLeft[0] = it.boundsInRoot().left }
+                    .pointerInput(path, restartKey) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        val slop = viewConfiguration.touchSlop
+                        val held = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: return@withTimeoutOrNull "cancel"
+                                val dx = change.position.x - down.position.x
+                                val dy = change.position.y - down.position.y
+                                if (dx * dx + dy * dy > slop * slop) return@withTimeoutOrNull "scroll"
+                                if (!change.pressed) return@withTimeoutOrNull "tap"
+                            }
+                            "tap"
+                        }
+                        when (held) {
+                            "tap" -> onOpen()
+                            "scroll", "cancel" -> Unit
+                            else -> {
+                                onDragStart()
+                                var moved = false
+                                var ended = false
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    change.consume()
+                                    onDrag(textLeft[0] + change.position.x)
+                                    if (abs(change.position.x - down.position.x) > slop || abs(change.position.y - down.position.y) > slop) moved = true
+                                    if (!change.pressed) {
+                                        ended = true
+                                        break
+                                    }
+                                }
+                                if (ended && moved) onDragEnd() else if (ended) {
+                                    onDragCancel()
+                                    menu = true
+                                } else onDragCancel()
+                            }
+                        }
+                    }
+                }.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+            if (!pinned) {
+                Text("  ×", modifier = Modifier.clickable(onClick = onClose).padding(end = 6.dp), fontSize = 12.sp)
+            }
+            if (dropSide == "after") {
+                Box(Modifier.padding(start = 2.dp).width(2.dp).height(16.dp).background(MaterialTheme.colorScheme.primary))
+            }
+        }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(
+                text = { Text("Rechts öffnen") },
+                enabled = !inSplit,
+                onClick = { menu = false; onOpenSplit() },
+            )
+            DropdownMenuItem(
+                text = { Text(if (pinned) "Lösen" else "Anheften") },
+                onClick = { menu = false; onTogglePin() },
+            )
+            DropdownMenuItem(text = { Text("Pfad kopieren") }, onClick = { menu = false; onCopyPath() })
+            DropdownMenuItem(text = { Text("Im Dateimanager zeigen") }, onClick = { menu = false; onReveal() })
+            DropdownMenuItem(
+                text = { Text("Schließen") },
+                enabled = !pinned,
+                onClick = { menu = false; onClose() },
+            )
+            DropdownMenuItem(
+                text = { Text("Andere schließen") },
+                enabled = canCloseOthers,
+                onClick = { menu = false; onCloseOthers() },
+            )
+            DropdownMenuItem(
+                text = { Text("Rechts davon schließen") },
+                enabled = canCloseRight,
+                onClick = { menu = false; onCloseRight() },
+            )
         }
     }
 }
