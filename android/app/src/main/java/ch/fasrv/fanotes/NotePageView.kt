@@ -23,6 +23,7 @@ import android.widget.TextView
 import ch.fasrv.fanotes.desk.bracketTyping
 import ch.fasrv.fanotes.desk.insertMarkdownBlankLine
 import ch.fasrv.fanotes.desk.insertMarkdownNewlineIndent
+import ch.fasrv.fanotes.desk.selectMarkdownLine
 import ch.fasrv.fanotes.desk.copyMarkdownLines
 import ch.fasrv.fanotes.desk.deleteMarkdownLines
 import ch.fasrv.fanotes.desk.toggleMarkdownComment
@@ -94,6 +95,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 }
                 return true
             }
+            if (keyCode == KeyEvent.KEYCODE_L && event.isAltPressed && !event.isCtrlPressed && !event.isMetaPressed) {
+                if (event.action == KeyEvent.ACTION_DOWN) selectCurrentLine()
+                return true
+            }
             if (keyCode == KeyEvent.KEYCODE_ENTER && event.isShiftPressed && !event.isCtrlPressed &&
                 !event.isAltPressed && !event.isMetaPressed
             ) {
@@ -123,6 +128,14 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 return true
             }
             return super.onKeyPreIme(keyCode, event)
+        }
+
+        fun selectCurrentLine() {
+            val edit = selectMarkdownLine(text?.toString().orEmpty(), selectionStart, selectionEnd)
+            setSelection(
+                edit.selectionStart.coerceIn(0, edit.text.length),
+                edit.selectionEnd.coerceIn(0, edit.text.length),
+            )
         }
 
         fun insertIndentedBreak() {
@@ -672,6 +685,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
         editor.toggleComment()
     }
 
+    private fun selectLine() {
+        if (!textMode) setTextMode(true)
+        editor.selectCurrentLine()
+    }
+
     private fun insertIndentedNewline() {
         if (!textMode) setTextMode(true)
         editor.insertIndentedBreak()
@@ -812,6 +830,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             tools.addView(chip("Zeile löschen") { deleteCurrentLines() })
             tools.addView(chip("Leerzeile") { insertBlank() })
             tools.addView(chip("Umbruch") { insertIndentedNewline() })
+            tools.addView(chip("Ganze Zeile") { selectLine() })
         }
         tools.addView(guideChip("Lineal", DraftingKind.RULER))
         tools.addView(guideChip("Geodreieck", DraftingKind.SET_SQUARE))
