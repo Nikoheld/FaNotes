@@ -119,6 +119,19 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
 
         override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+            if (keyCode == KeyEvent.KEYCODE_ESCAPE && !event.isCtrlPressed && !event.isAltPressed &&
+                !event.isMetaPressed && !event.isShiftPressed
+            ) {
+                val head = ch.fasrv.fanotes.desk.simplifyEditorSelection(
+                    selectionStart,
+                    selectionEnd,
+                    text?.length ?: 0,
+                )
+                if (head != null) {
+                    if (event.action == KeyEvent.ACTION_DOWN) setSelection(head)
+                    return true
+                }
+            }
             if (tags?.onKey(keyCode, event) == true) return true
             if (event.isAltPressed && !event.isCtrlPressed && !event.isMetaPressed &&
                 (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN)
