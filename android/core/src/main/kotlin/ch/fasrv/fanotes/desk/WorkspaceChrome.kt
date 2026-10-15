@@ -195,4 +195,11 @@ fun statusSaveLabel(phase: String): String = when (phase) {
     else -> "Gespeichert"
 }
 
+/** Which theme ink the save chip uses: danger, warning, or success. */
+fun statusSaveTone(label: String): String = when (label) {
+    "Speicherfehler" -> "danger"
+    "Speichert …" -> "warning"
+    else -> "success"
+}
+
 const val STATUS_LOCAL_PRIVATE = "Lokal & privat"

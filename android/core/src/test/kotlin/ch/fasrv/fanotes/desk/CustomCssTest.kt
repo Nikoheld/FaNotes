@@ -38,6 +38,10 @@ class CustomCssTest {
               --preview-size: 20px;
               --line-height: 1.5;
               --row-height: 24px;
+              --danger: #c03543;
+              --success: #1f7a48;
+              --warning: #8a5a12;
+              --text-muted: #5e5c57;
               --text-primary: var(--text);
             }
             :root { --accent: #9065b0; }
@@ -58,6 +62,10 @@ class CustomCssTest {
         assertEquals(20, chrome.previewFontPx)
         assertEquals(1.5, chrome.lineHeight)
         assertEquals(24, chrome.rowHeightDp)
+        assertEquals("#c03543", chrome.danger)
+        assertEquals("#1f7a48", chrome.success)
+        assertEquals("#8a5a12", chrome.warning)
+        assertEquals("#5e5c57", chrome.muted)
         val desk = deskWithCustomCss(mapOf("accent" to "#2a6f97", "editor-font" to "16"), css)
         assertEquals("#9065b0", desk["accent"])
         assertEquals("18", desk["editor-font"])

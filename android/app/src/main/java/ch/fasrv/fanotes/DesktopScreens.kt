@@ -50,6 +50,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.getValue
@@ -136,6 +137,12 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.YearMonth
 import kotlin.math.roundToInt
+
+internal data class StatusInk(val muted: Color, val success: Color, val warning: Color)
+
+internal val LocalStatusInk = staticCompositionLocalOf {
+    StatusInk(Color(0xFF5E5C57), Color(0xFF1F7A48), Color(0xFF8A5A12))
+}
 
 @Composable
 fun DeskRibbon(
@@ -241,6 +248,7 @@ fun DeskStatusBar(
     saveLabel: String = "",
     onSave: () -> Unit = {},
 ) {
+    val ink = LocalStatusInk.current
     Row(
         Modifier.fillMaxWidth().height(28.dp).background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -263,10 +271,10 @@ fun DeskStatusBar(
                 )
             }
             if (mode.isNotBlank()) {
-                Text(mode, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f))
+                Text(mode, fontSize = 12.sp, color = ink.muted)
             }
             if (!worksheets.isNullOrBlank()) {
-                Text(worksheets, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f))
+                Text(worksheets, fontSize = 12.sp, color = ink.muted)
             }
             if (!notice.isNullOrBlank()) {
                 Text(
@@ -293,8 +301,8 @@ fun DeskStatusBar(
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (language.isNotBlank()) Text(language, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-            if (showWords) Text("$words Wörter", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            if (language.isNotBlank()) Text(language, fontSize = 12.sp, color = ink.muted)
+            if (showWords) Text("$words Wörter", fontSize = 12.sp, color = ink.muted)
             if (conflicts > 0) {
                 Text(
                     "$conflicts",
@@ -303,12 +311,12 @@ fun DeskStatusBar(
                     modifier = Modifier.clickable(onClick = onConflicts),
                 )
             }
-            Text(syncText, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), modifier = Modifier.clickable(onClick = onConflicts))
+            Text(syncText, fontSize = 12.sp, color = ink.muted, modifier = Modifier.clickable(onClick = onConflicts))
             if (saveLabel.isNotBlank()) {
-                val saveColor = when (saveLabel) {
-                    "Speicherfehler" -> MaterialTheme.colorScheme.error
-                    "Speichert …" -> androidx.compose.ui.graphics.Color(0xFF8A5A12)
-                    else -> androidx.compose.ui.graphics.Color(0xFF1F7A48)
+                val saveColor = when (ch.fasrv.fanotes.desk.statusSaveTone(saveLabel)) {
+                    "danger" -> MaterialTheme.colorScheme.error
+                    "warning" -> ink.warning
+                    else -> ink.success
                 }
                 Text(
                     saveLabel,
@@ -317,7 +325,7 @@ fun DeskStatusBar(
                     modifier = Modifier.clickable(onClickLabel = "Jetzt speichern", onClick = onSave),
                 )
             }
-            Text(ch.fasrv.fanotes.desk.STATUS_LOCAL_PRIVATE, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            Text(ch.fasrv.fanotes.desk.STATUS_LOCAL_PRIVATE, fontSize = 12.sp, color = ink.muted)
         }
     }
 }
