@@ -219,6 +219,8 @@ class InkSurfaceView @JvmOverloads constructor(
     var penOnly: Boolean = false
     /** When set, the next pen tap stamps this desktop art symbol. */
     var placingSymbol: String? = null
+    var symbolSize: Double = ch.fasrv.fanotes.ink.ART_SYMBOL_SIZE
+    var symbolRotation: Double = 0.0
     var shapeSnapSensitivity: Int = 50
     var scribbleSensitivity: Int = 50
     /** Selection rings, hover, and placed links follow the desktop accent. */
@@ -640,7 +642,7 @@ class InkSurfaceView @JvmOverloads constructor(
         val sectionHit = sectionsOf(current.document).firstOrNull { y >= it.top && y < it.bodyTop && x < 0.08 }
         when {
             !eraser && placingSymbol != null -> {
-                val stamped = current.placeSymbol(x, y, style, placingSymbol!!, nowIso())
+                val stamped = current.placeSymbol(x, y, style, placingSymbol!!, nowIso(), symbolSize, symbolRotation)
                 invalidateTiles()
                 if (stamped != null) onStroke(stamped)
                 onChanged()

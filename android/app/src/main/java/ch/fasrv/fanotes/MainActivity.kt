@@ -1342,6 +1342,11 @@ private fun PageSurface(
             page.ink.onEditBox = onEditBox
             page.onMath = onMath
             page.onPdfPage = { model.notePdfPage(it) }
+            page.onSymbolSize = { model.setArtSymbolSize(it) }
+            page.onSymbolRotation = { model.setArtSymbolRotation(it) }
+            page.onSymbolPose = { model.canvasToken.value += 1 }
+            page.ink.symbolSize = ch.fasrv.fanotes.ink.artSymbolSizeSetting(model.effectiveDesk()["symbol-size"])
+            page.ink.symbolRotation = ch.fasrv.fanotes.ink.artSymbolRotationSetting(model.effectiveDesk()["symbol-rotation"])
             page.ink.linkMarks = links
             page.ink.worksheetBoxes = boxes
             page.ink.worksheetHighlights = highlights

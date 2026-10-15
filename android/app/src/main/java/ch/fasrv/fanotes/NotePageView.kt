@@ -73,6 +73,9 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onFinger: (Boolean) -> Unit = {}
     var onMath: () -> Unit = {}
     var onPdfPage: (Int) -> Unit = {}
+    var onSymbolSize: (Double) -> Unit = {}
+    var onSymbolRotation: (Double) -> Unit = {}
+    var onSymbolPose: () -> Unit = {}
     var onRestyleLink: (String, String) -> Unit = { _, _ -> }
 
     init {
@@ -236,7 +239,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
         if (textMode != text) setTextMode(text)
         syncPill.text = if (syncBusy && !syncLabel.contains('/')) "Startet…" else syncLabel
-        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|${ink.placingSymbol}|$paper|$fingerDraws|$text|$canUndo|$canRedo|$dark|$followPen"
+        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|${ink.placingSymbol}|${ink.symbolSize}|${ink.symbolRotation}|$paper|$fingerDraws|$text|$canUndo|$canRedo|$dark|$followPen"
         if (signature != toolSignature) {
             toolSignature = signature
             rebuildTools(tool, style, paper, fingerDraws, canUndo, canRedo)
@@ -318,6 +321,15 @@ class NotePageView(context: Context) : FrameLayout(context) {
         symbolChip.setOnClickListener {
             ink.placingSymbol = ch.fasrv.fanotes.ink.nextArtSymbol(ink.placingSymbol)
             symbolChip.text = ch.fasrv.fanotes.ink.artSymbol(ink.placingSymbol)?.label ?: "Symbol"
+            onSymbolPose()
+        }
+        if (ink.placingSymbol != null) {
+            tools.addView(chip("${ink.symbolSize.toInt()} px") {
+                onSymbolSize(ch.fasrv.fanotes.ink.stepArtSymbolSize(ink.symbolSize, 1))
+            })
+            tools.addView(chip("${ink.symbolRotation.toInt()}°") {
+                onSymbolRotation(ch.fasrv.fanotes.ink.stepArtSymbolRotation(ink.symbolRotation, 1))
+            })
         }
         tools.addView(symbolChip)
         val paperLabel = Papers.firstOrNull { it.first == paper }?.second ?: "Punkte"

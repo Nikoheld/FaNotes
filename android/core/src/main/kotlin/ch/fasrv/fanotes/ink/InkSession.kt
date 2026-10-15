@@ -128,11 +128,19 @@ class InkSession(document: InkDocument) {
         return stroke
     }
 
-    fun placeSymbol(x: Double, y: Double, style: StrokeStyle, symbolId: String, now: String): InkStroke? {
+    fun placeSymbol(
+        x: Double,
+        y: Double,
+        style: StrokeStyle,
+        symbolId: String,
+        now: String,
+        size: Double = ART_SYMBOL_SIZE,
+        rotation: Double = 0.0,
+    ): InkStroke? {
         if (artSymbol(symbolId) == null) return null
         val stroke = InkStroke(
             points = listOf(StrokePoint(x, y, 0.0, 0.5, 0.0, 0.0, "pen")),
-            baseWidth = ART_SYMBOL_SIZE,
+            baseWidth = snapArtSymbolSize(size),
             pressureEnabled = false,
             color = style.color,
             purpose = "art",
@@ -140,6 +148,7 @@ class InkSession(document: InkDocument) {
             opacity = 1.0,
             colorEffect = style.colorEffect,
             symbolId = symbolId,
+            symbolRotation = snapArtSymbolRotation(rotation),
         )
         pushUndo()
         document = document.copy(strokes = document.strokes + stroke, updatedAt = now)
