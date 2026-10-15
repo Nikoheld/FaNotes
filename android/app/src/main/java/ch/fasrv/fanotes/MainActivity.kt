@@ -96,6 +96,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.semantics.contentDescription
@@ -1375,22 +1376,24 @@ private fun NoteRow(
     val dragging = dragPath == node.path
     val dropHere = !dropDest.isNullOrEmpty() && folder && node.path == dropDest
     val handleOrigin = remember { floatArrayOf(0f, 0f) }
+    val treeShape = RoundedCornerShape(ch.fasrv.fanotes.desk.TREE_ROW_RADIUS_DP.dp)
+    val inSplit = splitPath != null && node.path == splitPath && node.path != selected
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = (depth * 12).dp)
+            .padding(start = (depth * ch.fasrv.fanotes.desk.TREE_DEPTH_DP).dp)
             .height(ch.fasrv.fanotes.desk.chromeRowHeightDp(compact, rowHeightDp).dp)
+            .alpha(if (dragging) ch.fasrv.fanotes.desk.TREE_DRAG_ALPHA else 1f)
             .border(
                 if (node.path == treeFocus) 1.dp else 0.dp,
                 MaterialTheme.colorScheme.primary,
-                RoundedCornerShape(radiusDp.dp),
+                treeShape,
             )
-            .clip(RoundedCornerShape(radiusDp.dp))
+            .clip(treeShape)
             .background(
                 when {
                     dropHere -> MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
-                    dragging -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                    node.path == selected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                    node.path == selected -> MaterialTheme.colorScheme.surfaceVariant
                     else -> Color.Transparent
                 },
             )
@@ -1401,6 +1404,19 @@ private fun NoteRow(
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (node.path == selected || inSplit) {
+            Box(
+                Modifier
+                    .padding(end = 4.dp)
+                    .width(ch.fasrv.fanotes.desk.TREE_MARK_WIDTH_DP.dp)
+                    .height(ch.fasrv.fanotes.desk.TREE_MARK_HEIGHT_DP.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(
+                        if (node.path == selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.primary.copy(alpha = ch.fasrv.fanotes.desk.TREE_SPLIT_MARK_ALPHA),
+                    ),
+            )
+        }
         Text(
             if (!folder) "" else if (openFolder) "▾" else "▸",
             fontSize = 12.sp,
