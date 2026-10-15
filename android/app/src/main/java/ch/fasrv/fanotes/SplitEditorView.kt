@@ -26,6 +26,7 @@ import ch.fasrv.fanotes.desk.selectMarkdownLine
 import ch.fasrv.fanotes.desk.bracketsOnCursorLine
 import ch.fasrv.fanotes.desk.copyMarkdownLines
 import ch.fasrv.fanotes.desk.deleteMarkdownLines
+import ch.fasrv.fanotes.desk.toggleMarkdownBlockComment
 import ch.fasrv.fanotes.desk.toggleMarkdownComment
 import ch.fasrv.fanotes.desk.indentMarkdownLines
 import ch.fasrv.fanotes.desk.moveMarkdownLines
@@ -349,6 +350,14 @@ class SplitEditorView(context: Context) : EditText(context) {
         ) {
             if (event.action == KeyEvent.ACTION_DOWN) {
                 applyLineEdit(toggleMarkdownComment(text?.toString().orEmpty(), selectionStart, selectionEnd))
+            }
+            return true
+        }
+        if (keyCode == KeyEvent.KEYCODE_A && event.isAltPressed && event.isShiftPressed &&
+            !event.isCtrlPressed && !event.isMetaPressed
+        ) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                applyLineEdit(toggleMarkdownBlockComment(text?.toString().orEmpty(), selectionStart, selectionEnd))
             }
             return true
         }
