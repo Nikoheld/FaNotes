@@ -55,6 +55,29 @@ fun paperCodeBox(textSizePx: Float): PaperCodeBox {
     )
 }
 
+data class PaperMathBox(val radius: Float, val padX: Float, val padY: Float, val marginY: Float, val border: Float)
+
+/**
+ * Display-math card from the paper stylesheet: 10px corners, 1em by 1.25em
+ * padding, and 0.75em of space above and below.
+ */
+fun paperMathBox(textSizePx: Float): PaperMathBox {
+    val base = if (textSizePx <= 0f) 16f else textSizePx
+    return PaperMathBox(
+        radius = (10f * base / 16f).coerceAtLeast(1f),
+        padX = base * 1.25f,
+        padY = base,
+        marginY = base * 0.75f,
+        border = (base / 16f).coerceAtLeast(1f),
+    )
+}
+
+/** Side padding of an inline formula, 0.14em. */
+fun paperMathInlinePad(textSizePx: Float): Float {
+    val base = if (textSizePx <= 0f) 16f else textSizePx
+    return base * 0.14f
+}
+
 /** Bar width and total leading margin for a quote, scaled with the editor font. */
 fun quoteMargins(textSizePx: Float): Pair<Int, Int> {
     val scale = if (textSizePx <= 0f) 1.0 else textSizePx / 16.0

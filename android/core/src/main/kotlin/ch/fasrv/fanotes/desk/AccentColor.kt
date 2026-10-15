@@ -70,7 +70,17 @@ fun paperCodeInk(raw: String?): String = mixColors(paperAccentReadable(raw), PAP
 /** Table row fill: 2.5% of the readable accent mixed into white. */
 fun paperTableFill(raw: String?): String = mixColors(paperAccentReadable(raw), "#ffffff", 0.025)
 
+/** Display-math card: 4% of the readable accent mixed into white. */
+fun paperMathFill(raw: String?): String = mixColors(paperAccentReadable(raw), "#ffffff", 0.04)
+
+/** Display-math rule: 14% of the readable accent mixed into the paper border ink. */
+fun paperMathBorder(raw: String?): String = mixColors(paperAccentReadable(raw), "#232633", 0.14)
+
 fun paperTableFillArgb(accent: Int): Int = colorArgb(paperTableFill("#%06x".format(accent and 0xFFFFFF)))
+
+fun paperMathFillArgb(accent: Int): Int = colorArgb(paperMathFill("#%06x".format(accent and 0xFFFFFF)))
+
+fun paperMathBorderArgb(accent: Int): Int = colorArgb(paperMathBorder("#%06x".format(accent and 0xFFFFFF)))
 
 fun paperCodeInkArgb(accent: Int): Int = colorArgb(paperCodeInk("#%06x".format(accent and 0xFFFFFF)))
 
