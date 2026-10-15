@@ -2539,6 +2539,12 @@ private fun previewMarks(
                     baselineShift = BaselineShift.Superscript,
                     fontSize = size * 0.7f,
                 )
+                "underline" -> SpanStyle(textDecoration = TextDecoration.Underline)
+                "mark" -> SpanStyle(background = Color.Yellow, color = Color.Black)
+                "sub" -> SpanStyle(baselineShift = BaselineShift.Subscript, fontSize = size * 0.75f)
+                "sup" -> SpanStyle(baselineShift = BaselineShift.Superscript, fontSize = size * 0.75f)
+                "kbd" -> SpanStyle(fontFamily = FontFamily.Monospace)
+                "small" -> SpanStyle(fontSize = size * 0.83f)
                 else -> null
             } ?: continue
             addStyle(style, start, end)
