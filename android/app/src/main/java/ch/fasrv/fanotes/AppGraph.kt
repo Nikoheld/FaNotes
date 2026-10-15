@@ -126,6 +126,12 @@ class AppGraph(context: Context) {
         }
         .toMap()
 
+    fun readCustomCss(): String = prefs.getString("custom-css", null).orEmpty()
+
+    fun writeCustomCss(value: String) {
+        prefs.edit().putString("custom-css", value.take(ch.fasrv.fanotes.desk.CUSTOM_CSS_MAX)).apply()
+    }
+
     fun writeDesk(values: Map<String, String>) {
         val text = values.entries.joinToString("\n") { (key, value) -> "$key=${value.replace("\n", " ")}" }
         prefs.edit().putString("desk-settings", text).apply()
