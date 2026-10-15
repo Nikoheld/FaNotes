@@ -18,6 +18,7 @@ import ch.fasrv.fanotes.desk.findDetailsBlocks
 import ch.fasrv.fanotes.desk.bracketTyping
 import ch.fasrv.fanotes.desk.insertMarkdownBlankLine
 import ch.fasrv.fanotes.desk.insertMarkdownNewlineIndent
+import ch.fasrv.fanotes.desk.selectMarkdownLine
 import ch.fasrv.fanotes.desk.bracketsOnCursorLine
 import ch.fasrv.fanotes.desk.copyMarkdownLines
 import ch.fasrv.fanotes.desk.deleteMarkdownLines
@@ -210,6 +211,16 @@ class SplitEditorView(context: Context) : EditText(context) {
                     moveMarkdownLines(text?.toString().orEmpty(), selectionStart, selectionEnd, forward)
                 }
                 applyLineEdit(edit)
+            }
+            return true
+        }
+        if (keyCode == KeyEvent.KEYCODE_L && event.isAltPressed && !event.isCtrlPressed && !event.isMetaPressed) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                val edit = selectMarkdownLine(text?.toString().orEmpty(), selectionStart, selectionEnd)
+                setSelection(
+                    edit.selectionStart.coerceIn(0, edit.text.length),
+                    edit.selectionEnd.coerceIn(0, edit.text.length),
+                )
             }
             return true
         }
