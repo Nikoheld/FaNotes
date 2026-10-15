@@ -71,6 +71,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.asImageBitmap
@@ -2377,7 +2378,17 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
     )
     var section by remember { mutableStateOf("appearance") }
     var settingsQuery by remember { mutableStateOf("") }
+    var scrollTarget by remember { mutableStateOf<String?>(null) }
     val settingsResults = ch.fasrv.fanotes.desk.searchSettings(settingsQuery)
+    val paneScroll = rememberScrollState()
+    val anchorY = remember { androidx.compose.runtime.mutableStateMapOf<String, Int>() }
+    LaunchedEffect(section, scrollTarget, anchorY["$section:$scrollTarget"]) {
+        val id = scrollTarget ?: return@LaunchedEffect
+        val y = anchorY["$section:$id"] ?: return@LaunchedEffect
+        if (ch.fasrv.fanotes.desk.reduceMotion(settings["reduce-motion"])) paneScroll.scrollTo(y)
+        else paneScroll.animateScrollTo(y)
+        scrollTarget = null
+    }
     Row(Modifier.fillMaxSize()) {
         Column(Modifier.weight(0.38f).verticalScroll(rememberScrollState()).padding(8.dp)) {
             OutlinedTextField(
@@ -2408,6 +2419,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                             .fillMaxWidth()
                             .clickable {
                                 section = item.section
+                                scrollTarget = item.target
                                 settingsQuery = ""
                             }
                             .padding(vertical = 8.dp),
@@ -2422,10 +2434,11 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                 }
             }
         }
-        Column(Modifier.weight(0.62f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.weight(0.62f).verticalScroll(paneScroll).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(sections.first { it.first == section }.second, style = MaterialTheme.typography.titleLarge)
             when (section) {
                 "appearance" -> {
+                    Box(Modifier.settingsAnchor("appearance", "settings-surface", anchorY))
                     ch.fasrv.fanotes.desk.THEME_CHOICES.forEach { choice ->
                         val selected = ch.fasrv.fanotes.desk.themeChoiceSelected(settings["theme"], choice.id)
                         Text(
@@ -2451,7 +2464,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                         "Glas-Effekte: ${if (ch.fasrv.fanotes.desk.glassChrome(settings["glass"])) "an" else "aus"}",
                         modifier = Modifier.clickable { model.updateDesk("glass", if (ch.fasrv.fanotes.desk.glassChrome(settings["glass"])) "off" else "on") }.padding(vertical = 4.dp),
                     )
-                    Text("Oberflächen-Schrift", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Text("Oberflächen-Schrift", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp).settingsAnchor("appearance", "settings-typography", anchorY))
                     val uiFont = ch.fasrv.fanotes.desk.uiFontId(settings["ui-font"])
                     ch.fasrv.fanotes.desk.UI_FONTS.forEach { face ->
                         Text(
@@ -2460,7 +2473,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                             modifier = Modifier.clickable { model.updateDesk("ui-font", face.stack) }.padding(vertical = 4.dp),
                         )
                     }
-                    Text("Akzentfarbe", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Text("Akzentfarbe", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp).settingsAnchor("appearance", "settings-accent", anchorY))
                     val accent = ch.fasrv.fanotes.desk.normalizeAccent(settings["accent"])
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ch.fasrv.fanotes.desk.ACCENT_COLORS.forEach { color ->
@@ -2518,9 +2531,9 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                 }
                 "editor" -> {
                     val metrics = ch.fasrv.fanotes.desk.editorMetrics(settings)
-                    Text("Wörter in der Statusleiste: ${settings["words"] != "off"}", modifier = Modifier.clickable { model.updateDesk("words", if (settings["words"] == "off") "on" else "off") })
+                    Text("Wörter in der Statusleiste: ${settings["words"] != "off"}", modifier = Modifier.clickable { model.updateDesk("words", if (settings["words"] == "off") "on" else "off") }.settingsAnchor("editor", "settings-editor", anchorY))
                     Text("Gliederung: ${settings["outline"] != "off"}", modifier = Modifier.clickable { model.updateDesk("outline", if (settings["outline"] == "off") "on" else "off") })
-                    Text("Täglicher Ordner: ${settings["daily-folder"].orEmpty().ifBlank { "Tagesnotizen" }}")
+                    Text("Täglicher Ordner: ${settings["daily-folder"].orEmpty().ifBlank { "Tagesnotizen" }}", modifier = Modifier.settingsAnchor("editor", "settings-daily", anchorY))
                     OutlinedTextField(
                         settings["daily-folder"].orEmpty(),
                         { model.updateDesk("daily-folder", it) },
@@ -2542,7 +2555,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                         label = { Text("Standardordner neuer Notizen") },
                         singleLine = true,
                     )
-                    Text("Editor-Schrift", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Text("Editor-Schrift", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp).settingsAnchor("editor", "settings-type", anchorY))
                     ch.fasrv.fanotes.desk.EDITOR_FONTS.forEach { face ->
                         Text(
                             face.label,
@@ -2559,16 +2572,20 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     EditorSlider("Zeilenhöhe", metrics.lineHeight.toFloat(), 1.3f, 2.2f, 0.05f, "") { model.updateDesk("line-height", "%.2f".format(java.util.Locale.US, it)) }
                     Text(
                         "Lesbare Zeilenlänge: ${if (metrics.readableLineLength) "an" else "aus"}",
-                        modifier = Modifier.clickable { model.updateDesk("readable-lines", if (metrics.readableLineLength) "off" else "on") },
+                        modifier = Modifier.clickable { model.updateDesk("readable-lines", if (metrics.readableLineLength) "off" else "on") }.settingsAnchor("editor", "settings-width", anchorY),
                     )
                     EditorSlider("Maximale Inhaltsbreite", metrics.contentWidthPx.toFloat(), 560f, 1200f, 20f, " px") { model.updateDesk("content-width", it.toInt().toString()) }
-                    EditorSlider("Zoom-Geschwindigkeit", metrics.zoomSpeed.toFloat(), 1f, 10f, 1f, "") { model.updateDesk("zoom-speed", it.toInt().toString()) }
-                    EditorSlider("Maximaler Zoom", (metrics.zoomMax * 100).toFloat(), 50f, 600f, 5f, " %") { model.updateDesk("zoom-max", it.toInt().toString()) }
-                    EditorSlider("Automatisch speichern", metrics.autosaveMs.toFloat(), 250f, 3000f, 250f, " ms") { model.updateDesk("autosave", it.toInt().toString()) }
+                    Column(Modifier.settingsAnchor("editor", "settings-zoom", anchorY)) {
+                        EditorSlider("Zoom-Geschwindigkeit", metrics.zoomSpeed.toFloat(), 1f, 10f, 1f, "") { model.updateDesk("zoom-speed", it.toInt().toString()) }
+                        EditorSlider("Maximaler Zoom", (metrics.zoomMax * 100).toFloat(), 50f, 600f, 5f, " %") { model.updateDesk("zoom-max", it.toInt().toString()) }
+                    }
+                    Column(Modifier.settingsAnchor("editor", "settings-save", anchorY)) {
+                        EditorSlider("Automatisch speichern", metrics.autosaveMs.toFloat(), 250f, 3000f, 250f, " ms") { model.updateDesk("autosave", it.toInt().toString()) }
+                    }
                 }
                 "drawing" -> {
                     val pen = ch.fasrv.fanotes.desk.penSettings(settings)
-                    Text("Druckempfindlichkeit: ${if (pen.pressure) "an" else "aus"}", modifier = Modifier.clickable { model.setPenPressure(!pen.pressure) })
+                    Text("Druckempfindlichkeit: ${if (pen.pressure) "an" else "aus"}", modifier = Modifier.clickable { model.setPenPressure(!pen.pressure) }.settingsAnchor("drawing", "settings-tablet", anchorY))
                     val penOnly = ch.fasrv.fanotes.input.penOnlyEnabled(settings["pen-only"])
                     Text(
                         "Nur Stift: ${if (penOnly) "an" else "aus"}",
@@ -2587,7 +2604,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                             modifier = Modifier.clickable { model.updateDesk("paper", option.id) }.padding(vertical = 4.dp),
                         )
                     }
-                    Text("Grafiktablett", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Text("Grafiktablett", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp).settingsAnchor("drawing", "settings-tablet-buttons", anchorY))
                     Text("Belegt die Tasten, die FaNotes vom Stift und vom Tablett empfängt.", fontSize = 12.sp)
                     val tabletMap = ch.fasrv.fanotes.input.parseTabletButtonMap(settings["tablet-buttons"])
                     listOf("pen" to "Stift", "tablet" to "Tablett").forEach { (group, title) ->
@@ -2615,7 +2632,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     }
                 }
                 "files" -> {
-                    TextButton(onClick = onOpenVault) { Text("Vault-Ordner öffnen") }
+                    TextButton(onClick = onOpenVault, modifier = Modifier.settingsAnchor("files", "settings-vault", anchorY)) { Text("Vault-Ordner öffnen") }
                     TextButton(onClick = onPrivate) { Text("Tablet-Vault verwenden") }
                     Text("Profil", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                     listOf("school" to "Schule", "university" to "UNI", "private" to "Privat", "work" to "Arbeit").forEach { (id, label) ->
@@ -2627,7 +2644,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     }
                 }
                 "sync" -> {
-                    TextButton(onClick = onSync) { Text("Konto und Abgleich") }
+                    TextButton(onClick = onSync, modifier = Modifier.settingsAnchor("sync", "settings-sync-account", anchorY)) { Text("Konto und Abgleich") }
                     var deviceName by remember { mutableStateOf(model.syncDeviceName()) }
                     var automatic by remember { mutableStateOf(model.syncAutomatic()) }
                     OutlinedTextField(
@@ -2637,7 +2654,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                             model.setSyncDeviceName(it.take(80))
                         },
                         label = { Text("Name dieses Geräts") },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().settingsAnchor("sync", "settings-sync-devices", anchorY),
                         singleLine = true,
                     )
                     Text("Erscheint in der Geräteliste und im Namen von Konfliktkopien.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
@@ -2669,7 +2686,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                 }
                 "addons" -> Text("Add-ons des Desktops bleiben Dateien im Vault. GlyphenWerk ist auf dem Tablet nicht enthalten. Andere Erweiterungen werden nicht ausgeführt.")
                 "updates" -> {
-                    Text("Installiert: 2026.10.7")
+                    Text("Installiert: 2026.10.7", modifier = Modifier.settingsAnchor("updates", "settings-updates", anchorY))
                     Text(update)
                     TextButton(onClick = { model.checkUpdate() }) { Text("Nach einem Release suchen") }
                 }
@@ -2677,7 +2694,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     val calm = ch.fasrv.fanotes.desk.reduceMotion(settings["reduce-motion"])
                     Text(
                         "Bewegung reduzieren: ${if (calm) "an" else "aus"}",
-                        modifier = Modifier.clickable { model.updateDesk("reduce-motion", if (calm) "off" else "on") }.padding(vertical = 4.dp),
+                        modifier = Modifier.clickable { model.updateDesk("reduce-motion", if (calm) "off" else "on") }.padding(vertical = 4.dp).settingsAnchor("accessibility", "settings-comfort", anchorY),
                     )
                     Text("Deaktiviert dekorative Übergänge und Animationen.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                     Text("Größere Ziele: ${settings["large"] == "on"}", modifier = Modifier.clickable { model.updateDesk("large", if (settings["large"] == "on") "off" else "on") })
@@ -2693,13 +2710,13 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     val backups = settings["experimental-backup"] == "on"
                     Text(
                         "Notiz-Sicherungen: ${if (backups) "an" else "aus"}",
-                        modifier = Modifier.clickable { model.updateDesk("experimental-backup", if (backups) "off" else "on") }.padding(vertical = 6.dp),
+                        modifier = Modifier.clickable { model.updateDesk("experimental-backup", if (backups) "off" else "on") }.padding(vertical = 6.dp).settingsAnchor("experimental", "settings-note-backup", anchorY),
                         fontWeight = if (backups) FontWeight.Bold else FontWeight.Normal,
                     )
                 }
                 "advanced" -> {
                     Text("Der Gerätename für Konfliktdateien steht in den Sync-Einstellungen. Secrets liegen im Android-Keystore, nicht im Vault.")
-                    Text("Eigenes CSS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Text("Eigenes CSS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp).settingsAnchor("advanced", "settings-css", anchorY))
                     Text("Wird nur innerhalb der Oberfläche angewandt. Damit kannst du Abstände, Farben und Markdown-Elemente weiter personalisieren.", fontSize = 12.sp)
                     OutlinedTextField(
                         css,
@@ -2715,6 +2732,9 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
         }
     }
 }
+
+private fun Modifier.settingsAnchor(section: String, id: String, positions: MutableMap<String, Int>): Modifier =
+    onGloballyPositioned { positions["$section:$id"] = it.positionInParent().y.toInt().coerceAtLeast(0) }
 
 @Composable
 fun NoteTagBar(model: FaNotesViewModel) {
