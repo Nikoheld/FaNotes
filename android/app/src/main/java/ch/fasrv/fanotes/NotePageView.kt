@@ -145,6 +145,14 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 return true
             }
             if (!event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed &&
+                (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_PAGE_DOWN)
+            ) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    moveByPage(keyCode == KeyEvent.KEYCODE_PAGE_DOWN, event.isShiftPressed)
+                }
+                return true
+            }
+            if (!event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed &&
                 (keyCode == KeyEvent.KEYCODE_MOVE_HOME || keyCode == KeyEvent.KEYCODE_MOVE_END)
             ) {
                 if (event.action == KeyEvent.ACTION_DOWN) {
@@ -323,6 +331,30 @@ class NotePageView(context: Context) : FrameLayout(context) {
 
         fun deleteLines() {
             applyLineEdit(deleteMarkdownLines(text?.toString().orEmpty(), selectionStart, selectionEnd))
+        }
+
+        fun moveByPage(forward: Boolean, extend: Boolean) {
+            val value = text?.toString().orEmpty()
+            val metrics = layout
+            val lineHeight = if (metrics != null && metrics.lineCount > 0) {
+                (metrics.getLineBottom(0) - metrics.getLineTop(0)).coerceAtLeast(1)
+            } else this.lineHeight.coerceAtLeast(1)
+            val lines = ch.fasrv.fanotes.desk.editorPageLineCount(height, lineHeight)
+            val headNow = selectionEnd.coerceIn(0, value.length)
+            val before = metrics?.getLineTop(metrics.getLineForOffset(headNow)) ?: 0
+            val (anchor, head) = ch.fasrv.fanotes.desk.editorPageSelection(
+                value,
+                selectionStart,
+                selectionEnd,
+                forward,
+                extend,
+                lines,
+            )
+            val length = value.length
+            setSelection(anchor.coerceIn(0, length), head.coerceIn(0, length))
+            val afterLayout = layout ?: return
+            val after = afterLayout.getLineTop(afterLayout.getLineForOffset(head.coerceIn(0, length)))
+            scrollBy(0, after - before)
         }
 
         fun moveByLineBoundary(forward: Boolean, extend: Boolean) {

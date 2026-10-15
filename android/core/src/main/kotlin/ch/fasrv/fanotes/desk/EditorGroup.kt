@@ -126,6 +126,56 @@ fun editorLineBoundarySelection(
     return if (extend) safeAnchor to next else next to next
 }
 
+/** How many editor lines fit in the visible page. At least one. */
+fun editorPageLineCount(viewportPx: Int, lineHeightPx: Int): Int {
+    if (lineHeightPx <= 0) return 1
+    return (viewportPx / lineHeightPx).coerceAtLeast(1)
+}
+
+/**
+ * Page Up and Page Down. The caret moves that many lines and keeps its column.
+ * A selection without Shift collapses to the edge in the direction of travel.
+ */
+fun editorPageSelection(
+    text: String,
+    anchor: Int,
+    head: Int,
+    forward: Boolean,
+    extend: Boolean,
+    lines: Int,
+): Pair<Int, Int> {
+    val safeAnchor = anchor.coerceIn(0, text.length)
+    val safeHead = head.coerceIn(0, text.length)
+    if (!extend && safeAnchor != safeHead) {
+        val edge = if (forward) maxOf(safeAnchor, safeHead) else minOf(safeAnchor, safeHead)
+        return edge to edge
+    }
+    val next = pageOffset(text, safeHead, forward, lines.coerceAtLeast(1))
+    return if (extend) safeAnchor to next else next to next
+}
+
+private fun pageOffset(text: String, head: Int, forward: Boolean, lines: Int): Int {
+    val pos = head.coerceIn(0, text.length)
+    var lineStart = lineContentStart(text, pos)
+    val column = pos - lineStart
+    var remaining = lines
+    if (forward) {
+        while (remaining > 0) {
+            val end = lineContentEnd(text, lineStart)
+            if (end >= text.length) break
+            lineStart = end + 1
+            remaining -= 1
+        }
+    } else {
+        while (remaining > 0 && lineStart > 0) {
+            lineStart = lineContentStart(text, lineStart - 1)
+            remaining -= 1
+        }
+    }
+    val end = lineContentEnd(text, lineStart)
+    return lineStart + column.coerceAtMost((end - lineStart).coerceAtLeast(0))
+}
+
 private fun lineBoundaryOffset(text: String, head: Int, forward: Boolean): Int {
     val pos = head.coerceIn(0, text.length)
     val start = lineContentStart(text, pos)
