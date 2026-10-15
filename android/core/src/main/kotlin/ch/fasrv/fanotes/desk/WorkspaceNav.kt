@@ -257,6 +257,23 @@ fun snapToDevicePixels(cssPx: Double, devicePixelRatio: Double): Double {
 fun nudgeSplitRatio(ratio: Double, direction: Int): Double =
     clampSplitRatio(floor((ratio + direction * SPLIT_RATIO_STEP) * 100.0 + 0.5) / 100.0)
 
+/**
+ * Keyboard on the focused split divider. Columns use left and right.
+ * Rows use up and down. Home and End jump to the edges. Enter restores half.
+ */
+fun splitDividerRatio(rows: Boolean, key: String, ratio: Double): Double? {
+    val shrink = if (rows) "up" else "left"
+    val grow = if (rows) "down" else "right"
+    return when (key) {
+        shrink -> nudgeSplitRatio(ratio, -1)
+        grow -> nudgeSplitRatio(ratio, 1)
+        "home" -> clampSplitRatio(0.0)
+        "end" -> clampSplitRatio(1.0)
+        "enter" -> DEFAULT_SPLIT_LAYOUT.ratio
+        else -> null
+    }
+}
+
 /** Folder that contains a note. A root note has no parent. */
 fun parentFolderOf(path: String): String {
     val normalized = path.replace('\\', '/').trim('/')

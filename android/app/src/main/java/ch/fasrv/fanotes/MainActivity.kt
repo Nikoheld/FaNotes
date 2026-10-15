@@ -1774,6 +1774,25 @@ private fun SplitDivider(
         Modifier
             .then(if (rows) Modifier.fillMaxWidth().height(8.dp) else Modifier.fillMaxHeight().width(8.dp))
             .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
+            .semantics { contentDescription = "Teilung anpassen" }
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                val name = when (event.key) {
+                    Key.DirectionLeft -> "left"
+                    Key.DirectionRight -> "right"
+                    Key.DirectionUp -> "up"
+                    Key.DirectionDown -> "down"
+                    Key.MoveHome -> "home"
+                    Key.MoveEnd -> "end"
+                    Key.Enter, Key.NumPadEnter -> "enter"
+                    else -> return@onPreviewKeyEvent false
+                }
+                val next = ch.fasrv.fanotes.desk.splitDividerRatio(rows, name, ratioNow.value) ?: return@onPreviewKeyEvent false
+                liveChange.value(next)
+                commitChange.value()
+                true
+            }
             .pointerInput(rows) {
                 detectTapGestures(onDoubleTap = { resetChange.value() })
             }
