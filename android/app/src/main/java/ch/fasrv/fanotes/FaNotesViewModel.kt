@@ -1174,6 +1174,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private var reveal: Pair<String, Double>? = null
     private var boxesNeedSave = false
     val aiReply = MutableStateFlow("")
+    val aiPreview = MutableStateFlow<String?>(null)
+    val aiStatus = MutableStateFlow("")
     val paletteOpen = MutableStateFlow(false)
     val updateLabel = MutableStateFlow("2026.10.7")
 
@@ -1964,6 +1966,93 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         deskSettings.value = next
         graph.writeDesk(next)
     }
+
+    fun runAi(
+        provider: String,
+        baseUrl: String,
+        modelName: String,
+        apiKey: String,
+        username: String,
+        actions: List<String>,
+        instruction: String,
+    ) {
+        val note = open.value
+        if (note == null) {
+            aiStatus.value = "Öffne zuerst eine Notiz."
+            return
+        }
+        val notes = flatNotes().filter { it.path != note.path }.map { it.name to it.path }
+        val source = markdown.value
+        viewModelScope.launch {
+            aiStatus.value = "Die Notiz wird bearbeitet…"
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    val job = ch.fasrv.fanotes.desk.prepareAiJob(
+                        provider, baseUrl, modelName, actions, instruction, note.title, note.path, source, notes,
+                    )
+                    if (job.provider == "opencode") openCodeTransform(job, apiKey, username, note.title)
+                    else {
+                        val call = ch.fasrv.fanotes.desk.aiTransformCall(job, apiKey, username)
+                        ch.fasrv.fanotes.desk.aiReplyText(job.provider, executeAi(call))
+                    }
+                }
+            }
+            outcome.onSuccess { text ->
+                aiPreview.value = text
+                aiStatus.value = "Vorschau bereit."
+            }.onFailure { error ->
+                aiStatus.value = error.message ?: "Die Anfrage ist fehlgeschlagen."
+            }
+        }
+    }
+
+    fun applyAiPreview() {
+        val text = aiPreview.value ?: return
+        updateMarkdown(text)
+        aiPreview.value = null
+        aiStatus.value = "Die Notiz wurde übernommen."
+    }
+
+    private fun executeAi(call: ch.fasrv.fanotes.desk.AiCall): String {
+        val builder = okhttp3.Request.Builder().url(call.url)
+        call.headers.forEach { (name, value) -> builder.header(name, value) }
+        builder.post(call.body.toByteArray().toRequestBody("application/json".toMediaType()))
+        return aiHttp().newCall(builder.build()).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw IllegalArgumentException("Der Anbieter antwortete mit HTTP ${response.code}.")
+            text
+        }
+    }
+
+    private fun openCodeTransform(job: ch.fasrv.fanotes.desk.AiJob, apiKey: String, username: String, title: String): String {
+        val headers = ch.fasrv.fanotes.desk.authHeaders("opencode", apiKey, username)
+        val session = executeAi(ch.fasrv.fanotes.desk.AiCall("${job.origin}/session", headers, ch.fasrv.fanotes.desk.openCodeSessionBody(title)))
+        val id = (ch.fasrv.fanotes.json.parseJson(session) as? ch.fasrv.fanotes.json.JsonValue.Obj)?.string("id")
+            ?: throw IllegalArgumentException("OpenCode konnte keine kurzlebige Sitzung erstellen.")
+        val encoded = java.net.URLEncoder.encode(id, Charsets.UTF_8)
+        return try {
+            val message = executeAi(
+                ch.fasrv.fanotes.desk.AiCall(
+                    "${job.origin}/session/$encoded/message",
+                    headers,
+                    ch.fasrv.fanotes.desk.openCodeMessageBody(job.model, job.prompt),
+                ),
+            )
+            ch.fasrv.fanotes.desk.aiReplyText("opencode", message)
+        } finally {
+            runCatching {
+                val delete = okhttp3.Request.Builder().url("${job.origin}/session/$encoded").delete()
+                headers.forEach { (name, value) -> delete.header(name, value) }
+                aiHttp().newCall(delete.build()).execute().close()
+            }
+        }
+    }
+
+    private fun aiHttp(): okhttp3.OkHttpClient = okhttp3.OkHttpClient.Builder()
+        .connectTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(600, java.util.concurrent.TimeUnit.SECONDS)
+        .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
 
     fun askAi(prompt: String) {
         val settings = deskSettings.value
