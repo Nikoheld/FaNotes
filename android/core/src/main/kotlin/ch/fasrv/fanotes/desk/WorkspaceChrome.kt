@@ -129,6 +129,27 @@ val RIBBON_TOOLS = listOf(
 
 fun ribbonToolLabel(open: Boolean) = if (open) "Weniger" else "Werkzeuge"
 
+/**
+ * Current note tab from the stylesheet: 28px tall, 6px corners, 4px by 2px
+ * margin. A pinned tab is narrower. The close mark shows on the active tab.
+ */
+data class NoteTabBox(
+    val heightDp: Int,
+    val radiusDp: Int,
+    val marginXDp: Int,
+    val marginYDp: Int,
+    val minWidthDp: Int,
+    val maxWidthDp: Int,
+)
+
+fun noteTabBox(pinned: Boolean): NoteTabBox = if (pinned) {
+    NoteTabBox(28, 6, 2, 4, 0, 150)
+} else {
+    NoteTabBox(28, 6, 2, 4, 118, 196)
+}
+
+fun noteTabShowsClose(selected: Boolean, pinned: Boolean): Boolean = selected && !pinned
+
 fun ribbonItemActive(id: String, destination: String, penOpen: Boolean): Boolean = when (id) {
     "pen" -> penOpen && destination == "notes"
     "notes" -> destination == "notes" && !penOpen
