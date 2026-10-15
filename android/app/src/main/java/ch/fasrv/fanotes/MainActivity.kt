@@ -1225,6 +1225,7 @@ private fun NotePage(
             NoteTagBar(model)
             MarginTranscript(model)
             if (noteKind == NoteKind.PDF) {
+                PdfPasswordPrompt(model)
                 PdfSearchBar(model)
                 PdfThumbStrip(model)
                 PdfQuoteMarks(model)
