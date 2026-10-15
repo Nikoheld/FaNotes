@@ -91,6 +91,7 @@ class SplitEditorView(context: Context) : EditText(context) {
         gravity = Gravity.TOP or Gravity.START
         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         setPadding(0, 0, 0, 0)
+        setOnFocusChangeListener { _, _ -> paintPreview() }
         addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
                 if (!writing) {
@@ -554,7 +555,7 @@ class SplitEditorView(context: Context) : EditText(context) {
         val editable = text ?: return
         painting = true
         try {
-            applyLivePreview(editable, selectionStart, selectionEnd, accent, textSize)
+            applyLivePreview(editable, selectionStart, selectionEnd, accent, textSize, isFocused)
         } finally {
             painting = false
         }

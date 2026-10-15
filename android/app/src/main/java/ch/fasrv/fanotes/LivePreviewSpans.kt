@@ -43,6 +43,9 @@ import ch.fasrv.fanotes.desk.paperLinkUnderlineArgb
 import ch.fasrv.fanotes.desk.paperLinkUnderlineOffset
 import ch.fasrv.fanotes.desk.paperHeading
 import ch.fasrv.fanotes.desk.paperCodeInkArgb
+import ch.fasrv.fanotes.desk.MATCHING_BRACKET_ARGB
+import ch.fasrv.fanotes.desk.NONMATCHING_BRACKET_ARGB
+import ch.fasrv.fanotes.desk.bracketHighlight
 import ch.fasrv.fanotes.desk.livePreviewMarks
 import ch.fasrv.fanotes.desk.paperAccentReadableArgb
 import ch.fasrv.fanotes.desk.quoteMargins
@@ -62,6 +65,7 @@ fun applyLivePreview(
     selectionEnd: Int,
     accent: Int,
     textSizePx: Float = 16f,
+    focused: Boolean = true,
 ) {
     if (hasComposingSpan(editable)) return
     for (span in editable.getSpans(0, editable.length, LivePreviewSpan::class.java)) editable.removeSpan(span)
@@ -73,6 +77,15 @@ fun applyLivePreview(
         if (start == end) continue
         editable.setSpan(spanFor(mark, readable, accent, textSizePx), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
+    if (focused && selectionStart == selectionEnd) {
+        val highlight = bracketHighlight(editable.toString(), selectionStart)
+        if (highlight != null) {
+            val color = if (highlight.matched) MATCHING_BRACKET_ARGB else NONMATCHING_BRACKET_ARGB
+            paintBracket(editable, highlight.start, color, length)
+            val partner = highlight.partner
+            if (partner != null) paintBracket(editable, partner, color, length)
+        }
+    }
     val matches = selectionMatchRanges(editable.toString(), selectionStart, selectionEnd) ?: return
     for ((start, end) in matches) {
         val from = start.coerceIn(0, length)
@@ -80,6 +93,13 @@ fun applyLivePreview(
         if (from == to) continue
         editable.setSpan(SelectionMatchSpan(), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
+}
+
+private fun paintBracket(editable: Editable, index: Int, color: Int, length: Int) {
+    val from = index.coerceIn(0, length)
+    val to = (from + 1).coerceAtMost(length)
+    if (from == to) return
+    editable.setSpan(BracketMatchSpan(color), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
 }
 
 private fun hasComposingSpan(editable: Editable): Boolean {
@@ -398,6 +418,8 @@ internal class AccentSwapSpan(drawn: String, private val color: Int) : SwapSpan(
         paint.typeface = previousFace
     }
 }
+
+private class BracketMatchSpan(color: Int) : BackgroundColorSpan(color), LivePreviewSpan
 
 private class SelectionMatchSpan : BackgroundColorSpan(0x8099FF77.toInt()), LivePreviewSpan
 
