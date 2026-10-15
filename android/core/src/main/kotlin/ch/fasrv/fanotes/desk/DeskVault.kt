@@ -598,6 +598,10 @@ fun folderIconInk(folderColor: String?, accent: String, text: String): String {
     return mixColors(normalizeAccent(accent), body, 0.72)
 }
 
+/** The folder pip uses the chosen color, or the accent when the folder has none. */
+fun folderDotInk(folderColor: String?, accent: String): String =
+    parseAccent(folderColor) ?: normalizeAccent(accent)
+
 /** Note and PDF icons mix 52% of the accent into the muted text. */
 fun fileIconInk(accent: String, muted: String): String {
     val faint = parseAccent(muted) ?: "#5e5c57"
