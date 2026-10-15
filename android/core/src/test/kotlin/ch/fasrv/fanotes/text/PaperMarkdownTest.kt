@@ -98,5 +98,10 @@ class PaperMarkdownTest {
         assertEquals(emptyList(), resolvePaperImagePaths("Schule/Mathe.md", "../geheim.png"))
         assertEquals(900f to 450f, paperImageFrame(1800, 900, 900f))
         assertEquals(900f to 1215f, paperImageFrame(100, 400, 900f))
+        assertEquals(
+            listOf("bilder/tafel.png", "ordner/foto.png"),
+            paperImageSources("![Tafel](bilder/tafel.png)\n\nText\n\n![](ordner/foto.png)\n\n![Tafel](bilder/tafel.png)"),
+        )
+        assertEquals(emptyList(), paperImageSources("Text ![Tafel](a.png) danach"))
     }
 }
