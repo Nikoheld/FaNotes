@@ -1,6 +1,19 @@
 package ch.fasrv.fanotes.desk
 
 /**
+ * Desktop Mod-[ outdents and Mod-] indents. Shift and Alt stay with the fold keys.
+ * True means outdent.
+ */
+fun indentBracketShortcut(ctrl: Boolean, shift: Boolean, alt: Boolean, meta: Boolean, bracket: Char): Boolean? {
+    if (!ctrl || shift || alt || meta) return null
+    return when (bracket) {
+        '[' -> true
+        ']' -> false
+        else -> null
+    }
+}
+
+/**
  * Tab and Shift-Tab for the note editor, matching the desktop keymap
  * (`indentMore` and `indentLess` with the default two-space indent).
  */

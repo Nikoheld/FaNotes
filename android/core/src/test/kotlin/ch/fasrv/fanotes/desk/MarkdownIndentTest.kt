@@ -2,6 +2,7 @@ package ch.fasrv.fanotes.desk
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 class MarkdownIndentTest {
     @Test
@@ -21,5 +22,15 @@ class MarkdownIndentTest {
         assertEquals(MarkdownEdit("  X", 2, 2), indentMarkdownLines("    X", 2, 2, outdent = true))
         assertEquals(MarkdownEdit("Hallo", 0, 5), indentMarkdownLines("Hallo", 0, 5, outdent = true))
         assertEquals(MarkdownEdit("", 0, 0), indentMarkdownLines("  ", 2, 2, outdent = true))
+    }
+
+    @Test
+    fun ctrlBracketsIndentTheWayTheDesktopDoes() {
+        assertEquals(true, indentBracketShortcut(true, false, false, false, '['))
+        assertEquals(false, indentBracketShortcut(true, false, false, false, ']'))
+        assertNull(indentBracketShortcut(true, true, false, false, '['))
+        assertNull(indentBracketShortcut(true, false, true, false, ']'))
+        assertNull(indentBracketShortcut(false, false, false, false, '['))
+        assertNull(indentBracketShortcut(true, false, false, true, '['))
     }
 }

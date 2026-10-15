@@ -225,6 +225,17 @@ class NotePageView(context: Context) : FrameLayout(context) {
                     if (event.action == KeyEvent.ACTION_DOWN) foldKeys(command)
                     return true
                 }
+                val outdent = ch.fasrv.fanotes.desk.indentBracketShortcut(
+                    event.isCtrlPressed,
+                    event.isShiftPressed,
+                    event.isAltPressed,
+                    event.isMetaPressed,
+                    bracket,
+                )
+                if (outdent != null) {
+                    if (event.action == KeyEvent.ACTION_DOWN) indentSelection(outdent)
+                    return true
+                }
             }
             val deskKey = when (keyCode) {
                 KeyEvent.KEYCODE_TAB -> "tab"
