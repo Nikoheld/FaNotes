@@ -17,9 +17,7 @@ fun followedLinkAt(text: String, offset: Int): FollowedLink? {
             val url = match.groupValues[2].trim()
             if (url.isEmpty()) continue
             if (isWebLink(url)) return FollowedLink(url, true)
-            val file = url.substringBefore('#').trim()
-            if (file.isEmpty()) continue
-            return FollowedLink(file, false, headingAnchor(url))
+            return followedTarget(url) ?: continue
         }
     }
     for (match in WIKI_LINK.findAll(text)) {
@@ -33,6 +31,16 @@ fun followedLinkAt(text: String, offset: Int): FollowedLink? {
         return FollowedLink(file, false, headingAnchor(rawTarget))
     }
     return null
+}
+
+/** A stored link target from a details card, classified the same way as a markdown URL. */
+fun followedTarget(target: String): FollowedLink? {
+    val url = target.trim()
+    if (url.isEmpty()) return null
+    if (isWebLink(url)) return FollowedLink(url, true)
+    val file = url.substringBefore('#').trim()
+    if (file.isEmpty()) return null
+    return FollowedLink(file, false, headingAnchor(url))
 }
 
 private fun headingAnchor(target: String): String? =

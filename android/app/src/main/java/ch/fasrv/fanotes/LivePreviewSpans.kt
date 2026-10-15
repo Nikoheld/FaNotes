@@ -58,6 +58,7 @@ import ch.fasrv.fanotes.desk.SYNTAX_ESCAPE_ARGB
 import ch.fasrv.fanotes.desk.SourceSyntax
 import ch.fasrv.fanotes.desk.DetailsInline
 import ch.fasrv.fanotes.desk.detailsImageFrame
+import ch.fasrv.fanotes.desk.followedTarget
 import ch.fasrv.fanotes.desk.detailsImageMargin
 import ch.fasrv.fanotes.desk.detailsImageRadius
 import ch.fasrv.fanotes.desk.livePreviewMarks
@@ -235,6 +236,15 @@ internal class DetailsSummarySpan(
     private val images: Map<String, Bitmap> = emptyMap(),
     private val imageColumnPx: Float = 0f,
 ) : ReplacementSpan(), LineBackgroundSpan, LivePreviewSpan {
+    private val linkHits = ArrayList<Pair<RectF, String>>()
+
+    fun linkAt(x: Float, y: Float): ch.fasrv.fanotes.desk.FollowedLink? {
+        val target = linkHits.firstOrNull { (rect, _) ->
+            x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+        }?.second ?: return null
+        return followedTarget(target)
+    }
+
     override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
         val box = paperDetailsBox(textSizePx)
         val metrics = paint.fontMetrics
@@ -304,6 +314,7 @@ internal class DetailsSummarySpan(
         val summaryBaseline = contentTop + box.padY - metrics.ascent
         canvas.drawText(summary, rect.left + box.padX, summaryBaseline, paint)
         if (body.isNotEmpty()) {
+            linkHits.clear()
             var cursor = summaryBottom + box.padY * 0.35f
             body.split('\n').forEachIndexed { index, line ->
                 val picture = imageSlot(index)
@@ -460,6 +471,13 @@ internal class DetailsSummarySpan(
         return height
     }
 
+    private fun rememberLink(active: List<DetailsInline>, left: Float, width: Float, baseline: Float, paint: Paint) {
+        val target = active.firstOrNull { it.kind == "link" && it.target.isNotEmpty() }?.target ?: return
+        if (width <= 0f) return
+        val metrics = paint.fontMetrics
+        linkHits += RectF(left, baseline + metrics.ascent, left + width, baseline + metrics.descent) to target
+    }
+
     private fun shiftInlines(marks: List<DetailsInline>, by: Int): List<DetailsInline> {
         if (by == 0) return marks
         return marks.mapNotNull { mark ->
@@ -534,7 +552,9 @@ internal class DetailsSummarySpan(
                 val formula = layoutDisplayMath(segment)
                 val pad = paperMathInlinePad(baseSize)
                 drawMath(canvas, paint, formula, cursor + pad, y + baseSize * 0.08f, baseSize)
-                cursor += measureMath(paint, formula, baseSize).width + pad * 2f
+                val width = measureMath(paint, formula, baseSize).width + pad * 2f
+                rememberLink(active, cursor, width, y, paint)
+                cursor += width
             } else if (code) {
                 val box = paperCodeBox(baseSize)
                 paint.textSize = box.textPx
@@ -551,7 +571,9 @@ internal class DetailsSummarySpan(
                 paint.style = Paint.Style.FILL
                 paint.color = paperCodeInkArgb(accent)
                 canvas.drawText(segment, cursor + box.padX, y, paint)
-                cursor += width + box.padX * 2f
+                val chip = width + box.padX * 2f
+                rememberLink(active, cursor, chip, y, paint)
+                cursor += chip
             } else {
                 paint.textSize = baseSize
                 paint.style = Paint.Style.FILL
@@ -563,6 +585,7 @@ internal class DetailsSummarySpan(
                     val thickness = (textSizePx / 16f).coerceAtLeast(1f)
                     paint.color = paperLinkUnderlineArgb(accent)
                     canvas.drawRect(cursor, y + offset, cursor + width, y + offset + thickness, paint)
+                    rememberLink(active, cursor, width, y, paint)
                 }
                 cursor += width
             }
