@@ -50,5 +50,8 @@ class HomeworkPlannerTest {
             sortHomeworkTasks(listOf(finished, loose, morning, overdue, soon)).map { it.id },
         )
         assertEquals(HomeworkStats(4, 1, 1, 0, 1), homeworkStats(listOf(overdue, morning, soon, loose, finished), today))
+        val kept = listOf(overdue, morning, soon)
+        assertEquals(listOf("late", "next"), removeHomeworkTask(kept, "am").map { it.id })
+        assertEquals(listOf("late", "am", "next"), removeHomeworkTask(kept, "missing").map { it.id })
     }
 }
