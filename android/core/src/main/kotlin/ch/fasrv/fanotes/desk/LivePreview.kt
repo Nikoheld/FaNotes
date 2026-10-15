@@ -151,34 +151,20 @@ fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int): List
     for (block in findDetailsBlocks(text)) {
         if (selectionEditsDetails(block, from, to)) continue
         val host = lines[block.startLine - 1]
-        val visibleBody = ArrayList<Int>()
         hidden += block.startLine
         for (number in (block.startLine + 1)..block.endLine) {
-            val line = lines[number - 1]
-            val tag = SUMMARY_ONLY.matches(line.text) || DETAILS_CLOSE_LINE.matches(line.text)
-            if (!block.open || tag) {
-                concealLine(marks, text, line)
-                hidden += number
-            } else if (line.to > line.from) {
-                visibleBody += number
-            }
+            concealLine(marks, text, lines[number - 1])
+            hidden += number
         }
         if (host.to > host.from) {
-            val inlineBody = if (block.open && block.startLine == block.endLine) block.body else ""
             marks += LiveMark(
                 host.from,
                 host.to,
                 LiveKind.DETAILS_SUMMARY,
                 block.summary,
-                inlineBody,
+                if (block.open) detailsReading(block.body) else "",
                 open = block.open,
-                continues = visibleBody.isNotEmpty(),
             )
-        }
-        visibleBody.forEachIndexed { index, number ->
-            val line = lines[number - 1]
-            val kind = if (index == visibleBody.lastIndex) LiveKind.DETAILS_END else LiveKind.DETAILS_BODY
-            marks += LiveMark(line.from, line.to, kind)
         }
     }
     for (block in codeFenceBlocks(text)) {
@@ -206,6 +192,15 @@ fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int): List
         markLine(marks, line.text, line.from, line.number in active)
     }
     return marks
+}
+
+/**
+ * Reading text for an open details card. The source stays in the note and is
+ * hidden, the same way the desktop card renders the body with MarkdownPreview.
+ */
+fun detailsReading(body: String): String {
+    val lines = aiPreviewLines(body).map { aiPreviewLineText(it) }.filter { it.isNotBlank() }
+    return if (lines.isEmpty()) "Dieser Klappbereich ist leer." else lines.joinToString("\n")
 }
 
 /** Adds or removes the `open` attribute on the details block covering [offset]. */
