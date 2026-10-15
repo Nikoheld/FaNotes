@@ -717,6 +717,11 @@ class SplitEditorView(context: Context) : EditText(context) {
         if (details) {
             val layoutX = x - totalPaddingLeft + scrollX
             val layoutY = y - totalPaddingTop + scrollY
+            val jump = detailsSpans.firstNotNullOfOrNull { it.footnoteJumpTop(layoutX, layoutY) }
+            if (jump != null) {
+                scrollTo(scrollX, ch.fasrv.fanotes.desk.revealScrollTop(kotlin.math.round(jump).toInt(), paddingTop))
+                return true
+            }
             val followed = detailsSpans.firstNotNullOfOrNull { it.linkAt(layoutX, layoutY) }
             if (followed != null) {
                 onFollowLink(followed.target, followed.web, followed.anchor)

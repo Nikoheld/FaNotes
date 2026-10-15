@@ -424,7 +424,7 @@ private fun footnoteSection(notes: List<String>): List<DetailsReadingLine> {
             val (plain, marks) = detailsPlain(paragraph.trim(), autolinks = true)
             val prefix = if (paragraphIndex == 0) "${index + 1}. " else ""
             val core = if (prefix.isEmpty()) plain else prefix + plain
-            val text = if (paragraphIndex == paragraphs.lastIndex) "$core ↩".trim() else core
+            val text = if (paragraphIndex == paragraphs.lastIndex) "$core $FOOTNOTE_RETURN".trim() else core
             out += DetailsReadingLine(
                 text,
                 FOOTNOTE_SCALE,
@@ -435,6 +435,72 @@ private fun footnoteSection(notes: List<String>): List<DetailsReadingLine> {
         }
     }
     return out
+}
+
+private val FOOTNOTE_HEAD = Regex("""^(\d+)\. """)
+
+/**
+ * Which definition a footnote line belongs to. The first paragraph starts with
+ * `N. `; later paragraphs of the same note keep that number until the next one.
+ */
+fun footnoteOwners(texts: List<String>, kinds: List<String>): IntArray {
+    val owners = IntArray(texts.size)
+    var current = 0
+    for (index in texts.indices) {
+        if (kinds.getOrElse(index) { "" } != "footnote") {
+            current = 0
+            continue
+        }
+        val head = FOOTNOTE_HEAD.find(texts[index])
+        if (head != null) current = head.groupValues[1].toInt()
+        owners[index] = current
+    }
+    return owners
+}
+
+/** Reading line of definition [number], or null when that note is not listed. */
+fun footnoteDefinitionIndex(lines: List<DetailsReadingLine>, number: Int): Int? {
+    if (number < 1) return null
+    val owners = footnoteOwners(lines.map { it.text }, lines.map { it.kind })
+    val index = owners.indexOf(number)
+    return index.takeIf { it >= 0 }
+}
+
+/** First reading line whose superscript is [number]. */
+fun footnoteReferenceIndex(lines: List<DetailsReadingLine>, number: Int): Int? {
+    if (number < 1) return null
+    val label = number.toString()
+    val index = lines.indexOfFirst { line -> footnoteNumberAt(line.text, line.inlines, label) }
+    return index.takeIf { it >= 0 }
+}
+
+/**
+ * Desktop preview anchors: a superscript scrolls to its definition, and the
+ * return arrow scrolls back to the first reference. Other characters stay put.
+ */
+fun footnoteJumpIndex(lines: List<DetailsReadingLine>, lineIndex: Int, offset: Int): Int? {
+    val line = lines.getOrNull(lineIndex) ?: return null
+    if (offset < 0 || offset > line.text.length) return null
+    val number = footnoteNumberAtOffset(line.text, line.inlines, offset)
+    if (number != null) return footnoteDefinitionIndex(lines, number)
+    if (line.kind != "footnote") return null
+    val arrow = line.text.lastIndexOf(FOOTNOTE_RETURN)
+    if (arrow < 0 || offset < arrow || offset >= arrow + FOOTNOTE_RETURN.length) return null
+    val owner = footnoteOwners(lines.map { it.text }, lines.map { it.kind }).getOrElse(lineIndex) { 0 }
+    if (owner < 1) return null
+    return footnoteReferenceIndex(lines, owner)
+}
+
+private fun footnoteNumberAt(text: String, inlines: List<DetailsInline>, label: String): Boolean =
+    inlines.any { mark ->
+        mark.kind == "footnote" &&
+            text.substring(mark.start.coerceIn(0, text.length), mark.end.coerceIn(0, text.length)) == label
+    }
+
+/** Superscript number under [offset], in the coordinates of [text]. */
+fun footnoteNumberAtOffset(text: String, inlines: List<DetailsInline>, offset: Int): Int? {
+    val mark = inlines.firstOrNull { it.kind == "footnote" && offset >= it.start && offset < it.end } ?: return null
+    return text.substring(mark.start.coerceIn(0, text.length), mark.end.coerceIn(0, text.length)).toIntOrNull()
 }
 
 fun detailsReading(body: String): String {
