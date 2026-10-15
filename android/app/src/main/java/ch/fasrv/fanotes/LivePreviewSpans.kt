@@ -45,8 +45,10 @@ import ch.fasrv.fanotes.desk.paperHeading
 import ch.fasrv.fanotes.desk.paperCodeInkArgb
 import ch.fasrv.fanotes.desk.MATCHING_BRACKET_ARGB
 import ch.fasrv.fanotes.desk.NONMATCHING_BRACKET_ARGB
+import ch.fasrv.fanotes.desk.SPECIAL_CHAR_ARGB
 import ch.fasrv.fanotes.desk.bracketHighlight
 import ch.fasrv.fanotes.desk.livePreviewMarks
+import ch.fasrv.fanotes.desk.specialCharMarks
 import ch.fasrv.fanotes.desk.paperAccentReadableArgb
 import ch.fasrv.fanotes.desk.quoteMargins
 import ch.fasrv.fanotes.desk.quoteWashArgb
@@ -85,6 +87,13 @@ fun applyLivePreview(
             val partner = highlight.partner
             if (partner != null) paintBracket(editable, partner, color, length)
         }
+    }
+    for (mark in specialCharMarks(editable.toString())) {
+        val from = mark.index
+        val to = from + 1
+        if (to > length) continue
+        if (editable.getSpans(from, to, HideSpan::class.java).isNotEmpty()) continue
+        editable.setSpan(SpecialCharSpan(mark.placeholder), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
     val matches = selectionMatchRanges(editable.toString(), selectionStart, selectionEnd) ?: return
     for ((start, end) in matches) {
@@ -416,6 +425,15 @@ internal class AccentSwapSpan(drawn: String, private val color: Int) : SwapSpan(
         super.draw(canvas, text, start, end, x, top, y, bottom, paint)
         paint.color = previousColor
         paint.typeface = previousFace
+    }
+}
+
+private class SpecialCharSpan(placeholder: String) : SwapSpan(placeholder) {
+    override fun draw(canvas: Canvas, text: CharSequence, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) {
+        val previous = paint.color
+        paint.color = SPECIAL_CHAR_ARGB
+        super.draw(canvas, text, start, end, x, top, y, bottom, paint)
+        paint.color = previous
     }
 }
 
