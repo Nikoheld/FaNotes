@@ -1859,6 +1859,7 @@ fun NoteSearchBar(model: FaNotesViewModel) {
     val query by model.noteSearchQuery.collectAsStateWithLifecycle()
     val hits by model.noteSearchHits.collectAsStateWithLifecycle()
     val index by model.noteSearchIndex.collectAsStateWithLifecycle()
+    var replacement by remember { mutableStateOf("") }
     val status = when {
         query.trim().isEmpty() -> ""
         hits.isEmpty() -> "Keine Treffer"
@@ -1876,9 +1877,20 @@ fun NoteSearchBar(model: FaNotesViewModel) {
             if (status.isNotEmpty()) Text(status, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
         }
         if (query.isNotEmpty()) {
+            OutlinedTextField(
+                replacement,
+                { replacement = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Ersetzen") },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { model.replaceCurrentNoteSearch(replacement) }),
+            )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { model.stepNoteSearch(-1) }, enabled = hits.isNotEmpty()) { Text("Vorheriger Treffer") }
                 TextButton(onClick = { model.stepNoteSearch(1) }, enabled = hits.isNotEmpty()) { Text("Nächster Treffer") }
+                TextButton(onClick = { model.replaceCurrentNoteSearch(replacement) }, enabled = hits.isNotEmpty()) { Text("Ersetzen") }
+                TextButton(onClick = { model.replaceAllNoteSearch(replacement) }, enabled = hits.isNotEmpty()) { Text("Alle ersetzen") }
             }
             val windowStart = (index - 2).coerceAtLeast(0)
             hits.drop(windowStart).take(6).forEachIndexed { offset, hit ->

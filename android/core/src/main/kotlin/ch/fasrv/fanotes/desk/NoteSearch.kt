@@ -30,3 +30,25 @@ fun searchNoteText(content: String, query: String, limit: Int = 400): List<NoteS
     }
     return hits
 }
+
+/** Replaces one find hit. An empty [replacement] deletes the match. */
+fun replaceNoteMatch(content: String, hit: NoteSearchHit, replacement: String): String {
+    if (hit.start < 0 || hit.end > content.length || hit.start > hit.end) return content
+    return content.replaceRange(hit.start, hit.end, replacement)
+}
+
+/**
+ * Replaces every literal match of [query], walking the original hits from the end.
+ * A replacement that contains the query is not searched again. The find bar stops at
+ * 400 hits; replace-all does not, matching CodeMirror's replace-all.
+ */
+fun replaceAllNoteMatches(content: String, query: String, replacement: String): String {
+    val hits = searchNoteText(content, query, limit = Int.MAX_VALUE)
+    if (hits.isEmpty()) return content
+    val builder = StringBuilder(content)
+    for (hit in hits.asReversed()) {
+        if (hit.start < 0 || hit.end > builder.length || hit.start > hit.end) continue
+        builder.replace(hit.start, hit.end, replacement)
+    }
+    return builder.toString()
+}
