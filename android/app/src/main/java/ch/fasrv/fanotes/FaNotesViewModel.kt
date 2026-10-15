@@ -14,6 +14,9 @@ import ch.fasrv.fanotes.desk.homeworkChannelIdValid
 import ch.fasrv.fanotes.desk.homeworkPublishBody
 import ch.fasrv.fanotes.desk.homeworkPublishUrl
 import ch.fasrv.fanotes.desk.homeworkSecretReady
+import ch.fasrv.fanotes.desk.homeworkTasksFromApiJson
+import ch.fasrv.fanotes.desk.mergeHomeworkFromRemote
+import ch.fasrv.fanotes.desk.rememberPublishedHomeworkIds
 import ch.fasrv.fanotes.desk.newHomeworkChannelId
 import ch.fasrv.fanotes.desk.newHomeworkSecret
 import ch.fasrv.fanotes.desk.SearchHit
@@ -2602,12 +2605,22 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             message.value = "Das Geheimnis braucht mindestens 12 Zeichen."
             return
         }
-        val tasks = homework.value.tasks
         val authorization = previous.ifBlank { secret }
+        val snapshot = homework.value
         viewModelScope.launch {
+            val remote = withContext(Dispatchers.IO) { fetchHomeworkTasks(channel, secret) }
+            val source = if (remote != null && homework.value == snapshot) {
+                mergeHomeworkFromRemote(snapshot, remote)
+            } else {
+                homework.value
+            }
+            if (source != homework.value) {
+                homework.value = source
+                persistSpecial(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, "Hausaufgaben", serializeHomeworkMarkdown(source))
+            }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val body = homeworkPublishBody(true, secret, previous.ifBlank { null }, tasks)
+                    val body = homeworkPublishBody(true, secret, previous.ifBlank { null }, source.tasks)
                     val request = okhttp3.Request.Builder()
                         .url(homeworkPublishUrl(channel))
                         .header("Accept", "application/json")
@@ -2622,9 +2635,30 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 }.getOrElse { "Veröffentlichen fehlgeschlagen." }
             }
             message.value = result
-            if (result == "Hausaufgaben veröffentlicht.") updateDesk("homework-previous", "")
+            if (result == "Hausaufgaben veröffentlicht.") {
+                val remembered = rememberPublishedHomeworkIds(source, source.tasks.map { it.id })
+                if (homework.value.tasks == source.tasks && remembered.publishedIds != homework.value.publishedIds) {
+                    homework.value = remembered
+                    persistSpecial(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, "Hausaufgaben", serializeHomeworkMarkdown(remembered))
+                }
+                updateDesk("homework-previous", "")
+            }
         }
     }
+
+    private fun fetchHomeworkTasks(channel: String, secret: String): List<HomeworkTask>? = runCatching {
+        val request = okhttp3.Request.Builder()
+            .url(homeworkPublishUrl(channel))
+            .header("Accept", "application/json")
+            .header("X-FaNotes-Homework", "1")
+            .header("Authorization", "Bearer $secret")
+            .get()
+            .build()
+        okhttp3.OkHttpClient().newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return null
+            homeworkTasksFromApiJson(response.body?.string().orEmpty())
+        }
+    }.getOrNull()
 
     fun addCalendarEvent(title: String, day: String, calendarId: String, recurrence: String = "none", time: String = "") {
         val clock = time.trim().takeIf { Regex("""\d{2}:\d{2}""").matches(it) }
