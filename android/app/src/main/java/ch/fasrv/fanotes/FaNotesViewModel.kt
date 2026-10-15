@@ -195,8 +195,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val message = MutableStateFlow<String?>(null)
     val backdrop = MutableStateFlow<List<BackdropSlice>>(emptyList())
     val paperImages = MutableStateFlow<Map<String, Bitmap>>(emptyMap())
+    val previewImages = MutableStateFlow<Map<String, Bitmap>>(emptyMap())
     val splitPaperImages = MutableStateFlow<Map<String, Bitmap>>(emptyMap())
     private var paperImageTicket = 0
+    private var previewImageTicket = 0
     private var splitImageTicket = 0
     val sync = graph.engine.state.stateIn(viewModelScope, SharingStarted.Eagerly, graph.engine.state.value)
     private val _vaultLabel = MutableStateFlow(graph.initialVaultLabel)
@@ -277,6 +279,23 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             }
             val previous = splitPaperImages.value
             splitPaperImages.value = next
+            recycleBitmaps(previous.values.filter { it !in next.values })
+        }
+    }
+
+    /** Pictures in the Schön preview, resolved beside the open note the same way the paper does. */
+    fun syncPreviewImages(markdown: String) {
+        val ticket = ++previewImageTicket
+        val path = open.value?.path.orEmpty()
+        val text = ch.fasrv.fanotes.desk.readingHtml(markdown)
+        viewModelScope.launch {
+            val next = withContext(Dispatchers.IO) { loadPaperImages(path, text) }
+            if (ticket != previewImageTicket) {
+                recycleBitmaps(next.values)
+                return@launch
+            }
+            val previous = previewImages.value
+            previewImages.value = next
             recycleBitmaps(previous.values.filter { it !in next.values })
         }
     }

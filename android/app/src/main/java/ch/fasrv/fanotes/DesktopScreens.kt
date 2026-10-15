@@ -2118,6 +2118,7 @@ fun AiScreen(model: FaNotesViewModel) {
     val settings by model.deskSettings.collectAsStateWithLifecycle()
     val status by model.aiStatus.collectAsStateWithLifecycle()
     val preview by model.aiPreview.collectAsStateWithLifecycle()
+    val previewPictures by model.previewImages.collectAsStateWithLifecycle()
     val models by model.aiModels.collectAsStateWithLifecycle()
     val provider = settings["ai-provider"].orEmpty().ifBlank { "lmstudio" }
     val definition = ch.fasrv.fanotes.desk.AI_PROVIDERS.firstOrNull { it.id == provider } ?: ch.fasrv.fanotes.desk.AI_PROVIDERS.first()
@@ -2126,6 +2127,7 @@ fun AiScreen(model: FaNotesViewModel) {
     var pretty by remember { mutableStateOf(true) }
     val note by model.open.collectAsStateWithLifecycle()
     val live by model.markdown.collectAsStateWithLifecycle()
+    LaunchedEffect(preview, note?.path) { model.syncPreviewImages(preview.orEmpty()) }
     fun setting(field: String) = settings["ai-$provider-$field"].orEmpty()
     val pageScroll = rememberScrollState()
     val previewAnchors = remember { androidx.compose.runtime.mutableStateMapOf<Int, Int>() }
@@ -2335,7 +2337,50 @@ fun AiScreen(model: FaNotesViewModel) {
                                 }
                             }
                         }
-                        else -> if (line.text.isNotEmpty() || line.kind == "image") {
+                        "image" -> {
+                            val bitmap = previewPictures[line.source]?.takeIf { !it.isRecycled }
+                            val frame = ch.fasrv.fanotes.desk.previewImageChrome()
+                            if (bitmap != null) {
+                                BoxWithConstraints(
+                                    Modifier
+                                        .previewAnchor(lineIndex)
+                                        .fillMaxWidth()
+                                        .padding(vertical = (base * frame.marginEm).dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Image(
+                                        bitmap.asImageBitmap(),
+                                        contentDescription = line.text.ifBlank { "Bild" },
+                                        modifier = Modifier
+                                            .widthIn(max = maxWidth)
+                                            .clip(RoundedCornerShape(frame.radiusDp.dp))
+                                            .border(
+                                                frame.borderDp.dp,
+                                                MaterialTheme.colorScheme.outline.copy(alpha = 0.55f),
+                                                RoundedCornerShape(frame.radiusDp.dp),
+                                            )
+                                            .background(Color.White),
+                                        contentScale = ContentScale.Fit,
+                                    )
+                                }
+                            } else if (line.text.isNotEmpty()) {
+                                PreviewRich(
+                                    line.text,
+                                    line.inlines,
+                                    base,
+                                    line.scale,
+                                    link,
+                                    codeInk,
+                                    codeFill,
+                                    codeBorder,
+                                    line.kind,
+                                    Modifier.previewFootnote(lineIndex),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    onTextLayout = { previewLayouts[lineIndex] = it },
+                                )
+                            }
+                        }
+                        else -> if (line.text.isNotEmpty()) {
                             PreviewRich(
                                 line.text,
                                 line.inlines,

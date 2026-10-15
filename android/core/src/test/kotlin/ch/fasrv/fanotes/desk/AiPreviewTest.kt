@@ -84,6 +84,20 @@ class AiPreviewTest {
     }
 
     @Test
+    fun schoenPicturesKeepTheirSourceAndThePreviewFrame() {
+        val image = aiPreviewReading("Siehe\n\n![Tafel](bilder/tafel.png)\n\nhttps://example.com/a.png").first { it.kind == "image" }
+        assertEquals("Tafel", image.text)
+        assertEquals("bilder/tafel.png", image.source)
+        val web = aiPreviewReading("![Foto](https://example.com/a.png)").single()
+        assertEquals("image", web.kind)
+        assertEquals("https://example.com/a.png", web.source)
+        val chrome = previewImageChrome()
+        assertEquals(12f, chrome.radiusDp)
+        assertEquals(1.4f, chrome.marginEm)
+        assertEquals(1f, chrome.borderDp)
+    }
+
+    @Test
     fun schoenInlineCodeUsesThePreviewChip() {
         val box = previewCodeBox(16f)
         assertEquals(16f * PREVIEW_CODE_SCALE, box.textPx, 0.01f)
