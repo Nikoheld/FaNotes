@@ -352,6 +352,10 @@ fun formatNoteDate(pattern: String, day: LocalDate): String {
 }
 
 /** A date title that would become a path is replaced by the ISO day. */
+/** Desktop toasts when a calendar day opens its daily note. */
+fun dailyNoteStatus(created: Boolean, title: String): String =
+    if (created) "Tagesnotiz $title ist bereit." else "Tagesnotiz $title geöffnet."
+
 fun dailyNoteFileName(pattern: String, day: LocalDate): String {
     val formatted = formatNoteDate(pattern, day).trim()
     val illegal = formatted.isEmpty() || formatted == "." || formatted == ".." ||

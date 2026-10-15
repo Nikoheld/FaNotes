@@ -78,6 +78,8 @@ class DeskVaultTest {
         assertEquals("26", formatNoteDate("YY", day))
         assertEquals("Tagesnotizen/14.10.2026.md", dailyNotePath("", day, "DD.MM.YYYY"))
         assertEquals("Tagesnotizen/2026-10-14.md", dailyNotePath("", day, "YYYY/MM/DD"))
+        assertEquals("Tagesnotiz 2026-10-14 ist bereit.", dailyNoteStatus(true, "2026-10-14"))
+        assertEquals("Tagesnotiz 2026-10-14 geöffnet.", dailyNoteStatus(false, "2026-10-14"))
         assertEquals("Eingang", defaultNoteParent(null, setOf("Eingang", "Schule")))
         assertEquals("", defaultNoteParent(null, setOf("Schule")))
         assertEquals("", defaultNoteParent("", setOf("Eingang")))
