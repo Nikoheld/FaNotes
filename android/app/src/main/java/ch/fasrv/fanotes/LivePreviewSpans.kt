@@ -3,6 +3,7 @@ package ch.fasrv.fanotes
 import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.text.Editable
@@ -20,8 +21,11 @@ import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
 import ch.fasrv.fanotes.desk.LiveKind
 import ch.fasrv.fanotes.desk.LiveMark
+import ch.fasrv.fanotes.desk.PAPER_CODE_BACKGROUND
 import ch.fasrv.fanotes.desk.PAPER_QUOTE_INK
 import ch.fasrv.fanotes.desk.PAPER_RULE_ARGB
+import ch.fasrv.fanotes.desk.paperCodeBox
+import ch.fasrv.fanotes.desk.paperCodeInkArgb
 import ch.fasrv.fanotes.desk.livePreviewMarks
 import ch.fasrv.fanotes.desk.paperAccentReadableArgb
 import ch.fasrv.fanotes.desk.quoteMargins
@@ -83,7 +87,7 @@ private fun spanFor(mark: LiveMark, readable: Int, accent: Int, textSizePx: Floa
     LiveKind.STRONG -> StrongSpan()
     LiveKind.EMPHASIS -> EmphasisSpan()
     LiveKind.STRIKE -> StrikeSpan()
-    LiveKind.CODE -> CodeSpan()
+    LiveKind.CODE -> PaperCodeSpan(paperCodeInkArgb(accent), textSizePx)
     LiveKind.MATH -> MathSpan()
     LiveKind.LINK -> LinkSpan(readable)
     LiveKind.DETAILS_SUMMARY -> DetailsSummarySpan(mark.label, mark.body)
@@ -291,7 +295,56 @@ internal class PaperQuoteSpan(
 private class StrongSpan : StyleSpan(Typeface.BOLD), LivePreviewSpan
 private class EmphasisSpan : StyleSpan(Typeface.ITALIC), LivePreviewSpan
 private class StrikeSpan : StrikethroughSpan(), LivePreviewSpan
-private class CodeSpan : TypefaceSpan("monospace"), LivePreviewSpan
+/**
+ * Desktop paper inline code: a rounded chip, a hairline rule, monospace
+ * at 0.9em, and ink mixed from the readable accent.
+ */
+internal class PaperCodeSpan(private val ink: Int, private val textSizePx: Float) : ReplacementSpan(), LivePreviewSpan {
+    private val box = paperCodeBox(textSizePx)
+
+    override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
+        val previous = paint.textSize
+        paint.textSize = box.textPx
+        val width = paint.measureText(text, start, end) + box.padX * 2f
+        if (fm != null) {
+            val metrics = paint.fontMetricsInt
+            val pad = box.padY.toInt()
+            fm.ascent = metrics.ascent - pad
+            fm.descent = metrics.descent + pad
+            fm.top = metrics.top - pad
+            fm.bottom = metrics.bottom + pad
+        }
+        paint.textSize = previous
+        return width.toInt().coerceAtLeast(1)
+    }
+
+    override fun draw(canvas: Canvas, text: CharSequence, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) {
+        val previousSize = paint.textSize
+        val previousColor = paint.color
+        val previousFace = paint.typeface
+        val previousStyle = paint.style
+        val previousStroke = paint.strokeWidth
+        paint.textSize = box.textPx
+        val width = paint.measureText(text, start, end) + box.padX * 2f
+        val rect = RectF(x, top.toFloat(), x + width, bottom.toFloat())
+        paint.style = Paint.Style.FILL
+        paint.color = PAPER_CODE_BACKGROUND
+        canvas.drawRoundRect(rect, box.radius, box.radius, paint)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = box.border
+        paint.color = PAPER_RULE_ARGB
+        canvas.drawRoundRect(rect, box.radius, box.radius, paint)
+        paint.style = Paint.Style.FILL
+        paint.color = ink
+        paint.typeface = Typeface.MONOSPACE
+        canvas.drawText(text, start, end, x + box.padX, y.toFloat(), paint)
+        paint.textSize = previousSize
+        paint.color = previousColor
+        paint.typeface = previousFace
+        paint.style = previousStyle
+        paint.strokeWidth = previousStroke
+    }
+}
 private class MathSpan : TypefaceSpan("monospace"), LivePreviewSpan
 
 private class LinkSpan(private val color: Int) : CharacterStyle(), LivePreviewSpan {
