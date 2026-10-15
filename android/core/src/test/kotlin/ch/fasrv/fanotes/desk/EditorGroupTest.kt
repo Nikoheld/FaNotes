@@ -59,6 +59,12 @@ class EditorGroupTest {
         assertEquals(0 to 0, editorPageSelection(text, 0, 0, false, false, 4))
         assertEquals(5 to 5, editorPageSelection("hello", 0, 5, true, false, 3))
         assertEquals(0 to text.indexOf("row3"), editorPageSelection(text, 0, 0, true, true, 2))
+        val note = "abc\ndef"
+        assertEquals(0 to 0, editorDocumentSelection(note, 4, false, false))
+        assertEquals(7 to 7, editorDocumentSelection(note, 2, true, false))
+        assertEquals(4 to 0, editorDocumentSelection(note, 4, false, true))
+        assertEquals(2 to 7, editorDocumentSelection(note, 2, true, true))
+        assertEquals(0 to 0, editorDocumentSelection("", 0, true, false))
         assertEquals(10, editorPageLineCount(200, 20))
         assertEquals(1, editorPageLineCount(10, 40))
         assertEquals(1, editorPageLineCount(100, 0))
