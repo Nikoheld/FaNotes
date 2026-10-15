@@ -997,6 +997,7 @@ private fun SplitPane(
                 val pen = ch.fasrv.fanotes.desk.penSettings(model.deskSettings.value)
                 view.shapeSnapSensitivity = pen.shapeSnap
                 view.scribbleSensitivity = pen.scribble
+                view.strokeSmoothing = pen.smoothing.toFloat()
                 view.markdown = markdown
                 view.showMarkdown = markdown.isNotBlank() && !typing
                 view.inkTool = tool
@@ -1190,6 +1191,7 @@ private fun PageSurface(
             val pen = ch.fasrv.fanotes.desk.penSettings(model.deskSettings.value)
             page.ink.shapeSnapSensitivity = pen.shapeSnap
             page.ink.scribbleSensitivity = pen.scribble
+            page.ink.strokeSmoothing = pen.smoothing.toFloat()
             page.ink.onPlaceHighlight = { model.addWorksheetHighlight(it) }
             page.ink.onRemoveHighlight = { model.removeWorksheetHighlight(it) }
             page.onFinger = { model.fingerDraws.value = it }

@@ -157,11 +157,14 @@ class InkSurfaceView @JvmOverloads constructor(
     var zoomMax: Float = 3.25f
     var shapeSnapSensitivity: Int = 50
     var scribbleSensitivity: Int = 50
+    var strokeSmoothing: Float = 0.68f
         set(value) {
             if (field == value) return
             field = value
-            textStamp = -1f
-            invalidate()
+            if (isAttachedToWindow) {
+                invalidateTiles()
+                invalidate()
+            }
         }
     /** While the on-page editor is open the preview is hidden so the glyphs are not doubled. */
     var showMarkdown: Boolean = true
@@ -932,7 +935,7 @@ class InkSurfaceView @JvmOverloads constructor(
 
     private fun drawStroke(canvas: Canvas, stroke: InkStroke, scale: Float) {
         if (stroke.points.isEmpty()) return
-        val outline = ribbonOutline(stroke, sessionWidth(), sessionHeight())
+        val outline = ribbonOutline(stroke, sessionWidth(), sessionHeight(), strokeSmoothing.toDouble())
         if (outline.size < 4) return
         val path = Path()
         smoothOutline(path, outline, scale)

@@ -368,10 +368,23 @@ fun splitStroke(
  * Closed outline of a pressure-sensitive ribbon, in page pixels.
  * A one-point stroke is a circle. Calligraphy widens across the stroke direction.
  */
+/** How far an interior sample is pulled toward the next point. Matches the desktop paint blend. */
+fun strokeSmoothFactor(smoothing: Double): Double = smoothing.coerceIn(0.0, 0.92) * 0.35
+
+fun smoothedPagePoint(points: List<StrokePoint>, index: Int, axis: (StrokePoint) -> Double, smoothing: Double): Double {
+    val point = axis(points[index])
+    if (smoothing <= 0.0 || index <= 0 || index >= points.lastIndex) return point
+    val next = axis(points[index + 1])
+    val mid = (point + next) / 2.0
+    val factor = strokeSmoothFactor(smoothing)
+    return point * (1.0 - factor) + mid * factor
+}
+
 fun ribbonOutline(
     stroke: InkStroke,
     sourceWidth: Double,
     sourceHeight: Double,
+    smoothing: Double = 0.0,
 ): FloatArray {
     val scale = brushWidthScale(stroke.brush)
     val widths = stroke.points.map { point ->
@@ -397,8 +410,8 @@ fun ribbonOutline(
         val nx = -dy / length
         val ny = dx / length
         val half = widths[index] / 2f
-        val x = (point.x * sourceWidth).toFloat()
-        val y = (point.y * sourceHeight).toFloat()
+        val x = smoothedPagePoint(stroke.points, index, { it.x * sourceWidth }, smoothing).toFloat()
+        val y = smoothedPagePoint(stroke.points, index, { it.y * sourceHeight }, smoothing).toFloat()
         leftX[index] = x + nx * half
         leftY[index] = y + ny * half
         rightX[index] = x - nx * half

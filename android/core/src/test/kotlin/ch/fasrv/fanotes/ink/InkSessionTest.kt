@@ -86,6 +86,21 @@ class InkSessionTest {
     }
 
     @Test
+    fun interiorSamplesPullTowardTheNextPointWhenSmoothingIsOn() {
+        val points = listOf(
+            StrokePoint(0.0, 0.0, 0.0, 0.5, 0.0, 0.0, "pen"),
+            StrokePoint(10.0, 10.0, 1.0, 0.5, 0.0, 0.0, "pen"),
+            StrokePoint(10.0, 0.0, 2.0, 0.5, 0.0, 0.0, "pen"),
+        )
+        assertEquals(10.0, smoothedPagePoint(points, 1, { it.x }, 0.0))
+        assertEquals(0.0, smoothedPagePoint(points, 0, { it.x }, 1.0))
+        assertEquals(10.0, smoothedPagePoint(points, 2, { it.x }, 1.0))
+        val factor = strokeSmoothFactor(1.0)
+        val expectedY = 10.0 * (1.0 - factor) + 5.0 * factor
+        assertEquals(expectedY, smoothedPagePoint(points, 1, { it.y }, 1.0), 1e-9)
+        assertEquals(0.68.coerceIn(0.0, 0.92) * 0.35, strokeSmoothFactor(0.68), 1e-9)
+    }
+
     fun pressureWidthMatchesTheDesktopFormula() {
         assertEquals(3.5, pressureWidth(3.5, 0.9, pressureEnabled = false))
         assertEquals(3.5 * (0.4 + 0.5 * 1.12), pressureWidth(3.5, 0.5, pressureEnabled = true))

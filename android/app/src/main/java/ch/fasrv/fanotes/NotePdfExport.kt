@@ -49,6 +49,7 @@ fun writeNotePdf(
     fontSizePx: Float = 16f,
     lineHeight: Float = 1.72f,
     contentWidthPx: Float = 820f,
+    smoothing: Float = 0.68f,
 ) {
     val sourceWidth = document.sourceWidth.coerceAtLeast(1.0)
     val sourceHeight = document.sourceHeight.coerceAtLeast(1.0)
@@ -107,7 +108,7 @@ fun writeNotePdf(
                     highlightPaint,
                 )
             }
-            document.strokes.forEach { stroke -> drawStroke(canvas, stroke, sourceWidth, sourceHeight, scale, ink) }
+            document.strokes.forEach { stroke -> drawStroke(canvas, stroke, sourceWidth, sourceHeight, scale, ink, smoothing) }
             boxes.forEach { box ->
                 text.color = Color.parseColor("#202333")
                 text.textSize = (box.fontSize * scale).toFloat().coerceAtLeast(8f)
@@ -256,9 +257,9 @@ private fun drawMarkdown(
     canvas.restore()
 }
 
-private fun drawStroke(canvas: Canvas, stroke: InkStroke, sourceWidth: Double, sourceHeight: Double, scale: Float, paint: Paint) {
+private fun drawStroke(canvas: Canvas, stroke: InkStroke, sourceWidth: Double, sourceHeight: Double, scale: Float, paint: Paint, smoothing: Float) {
     if (stroke.points.isEmpty()) return
-    val outline = ribbonOutline(stroke, sourceWidth, sourceHeight)
+    val outline = ribbonOutline(stroke, sourceWidth, sourceHeight, smoothing.toDouble())
     val path = Path()
     smoothOutline(path, outline, scale)
     if (path.isEmpty) return
