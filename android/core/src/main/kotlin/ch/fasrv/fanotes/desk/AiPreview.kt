@@ -80,6 +80,11 @@ const val PREVIEW_TABLE_HEAD = 0.9f
 /** `.markdown-preview code` is 0.88em of the surrounding text. */
 const val PREVIEW_CODE_SCALE = 0.88f
 
+/** A picture in the reading preview: 12px corners, a 1px border, and 1.4em of space. */
+data class PreviewImageChrome(val radiusDp: Float, val marginEm: Float, val borderDp: Float)
+
+fun previewImageChrome() = PreviewImageChrome(12f, 1.4f, 1f)
+
 /** Code and display math keep their lines and scroll sideways, like `pre` and KaTeX. */
 fun previewBlockScrolls(kind: String): Boolean = kind == "code" || kind == "math"
 
