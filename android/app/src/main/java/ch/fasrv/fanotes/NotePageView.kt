@@ -7,6 +7,7 @@ import android.text.InputType
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
@@ -29,9 +30,26 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private var previewReady = false
     private var paintingPreview = false
     private val editor = object : EditText(context) {
+        private var detailsDownX = 0f
+        private var detailsDownY = 0f
+
         override fun onSelectionChanged(selStart: Int, selEnd: Int) {
             super.onSelectionChanged(selStart, selEnd)
             if (previewReady && !paintingPreview) paintLivePreview()
+        }
+
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    detailsDownX = event.x
+                    detailsDownY = event.y
+                }
+                MotionEvent.ACTION_UP -> {
+                    val tapped = kotlin.math.abs(event.x - detailsDownX) < 24f && kotlin.math.abs(event.y - detailsDownY) < 24f
+                    if (tapped && toggleDetailsSummary(event.x, event.y)) return true
+                }
+            }
+            return super.onTouchEvent(event)
         }
     }
     private val lineNumbers = TextView(context)
@@ -140,6 +158,29 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
         applyChromeColors()
         previewReady = true
+    }
+
+    /** A tap on a details summary writes the desktop `open` attribute into the note. */
+    private fun toggleDetailsSummary(x: Float, y: Float): Boolean {
+        val editable = editor.text ?: return false
+        if (editable.isEmpty()) return false
+        val offset = editor.getOffsetForPosition(x, y).coerceIn(0, editable.length)
+        val probeStart = (offset - 1).coerceAtLeast(0)
+        val probeEnd = (offset + 1).coerceAtMost(editable.length)
+        if (editable.getSpans(probeStart, probeEnd, DetailsSummarySpan::class.java).isEmpty()) return false
+        val before = editable.toString()
+        val next = ch.fasrv.fanotes.desk.toggleDetailsOpen(before, offset) ?: return false
+        val cursor = ch.fasrv.fanotes.desk.findDetailsBlocks(before)
+            .firstOrNull { offset >= it.from && offset < it.to }
+            ?.from
+            ?: 0
+        writing = true
+        editor.setText(next)
+        editor.setSelection(cursor.coerceIn(0, next.length))
+        writing = false
+        paintLivePreview()
+        onVisibleMarkdown(before, next)
+        return true
     }
 
     /** Styles every line except the one being edited, matching the desktop live preview. */

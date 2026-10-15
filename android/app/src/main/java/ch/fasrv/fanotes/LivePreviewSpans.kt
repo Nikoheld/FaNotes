@@ -13,6 +13,7 @@ import android.text.style.StrikethroughSpan
 import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
 import ch.fasrv.fanotes.desk.LiveKind
+import ch.fasrv.fanotes.desk.LiveMark
 import ch.fasrv.fanotes.desk.livePreviewMarks
 
 /** A span the live preview owns, so the next pass can remove only its own marks. */
@@ -30,7 +31,7 @@ fun applyLivePreview(editable: Editable, selectionStart: Int, selectionEnd: Int,
         val start = mark.start.coerceIn(0, length)
         val end = mark.end.coerceIn(start, length)
         if (start == end) continue
-        editable.setSpan(spanFor(mark.kind, accent), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        editable.setSpan(spanFor(mark, accent), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
 }
 
@@ -41,7 +42,7 @@ private fun hasComposingSpan(editable: Editable): Boolean {
     return false
 }
 
-private fun spanFor(kind: LiveKind, accent: Int): Any = when (kind) {
+private fun spanFor(mark: LiveMark, accent: Int): Any = when (mark.kind) {
     LiveKind.HIDE -> HideSpan()
     LiveKind.COLLAPSE -> CollapseSpan()
     LiveKind.BULLET -> SwapSpan("• ")
@@ -59,6 +60,32 @@ private fun spanFor(kind: LiveKind, accent: Int): Any = when (kind) {
     LiveKind.CODE -> CodeSpan()
     LiveKind.MATH -> MathSpan()
     LiveKind.LINK -> LinkSpan(accent)
+    LiveKind.DETAILS_SUMMARY -> DetailsSummarySpan(mark.label, mark.body)
+}
+
+internal class DetailsSummarySpan(private val summary: String, private val body: String) : ReplacementSpan(), LivePreviewSpan {
+    override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
+        val summaryWidth = paint.measureText(summary).toInt().coerceAtLeast(1)
+        if (body.isEmpty()) return summaryWidth
+        if (fm != null) {
+            val extra = paint.fontMetricsInt.descent - paint.fontMetricsInt.ascent
+            fm.descent += extra
+            fm.bottom += extra
+        }
+        return maxOf(summaryWidth, paint.measureText(body).toInt())
+    }
+
+    override fun draw(canvas: Canvas, text: CharSequence, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) {
+        val previous = paint.typeface
+        paint.typeface = Typeface.create(previous, Typeface.BOLD)
+        canvas.drawText(summary, x, y.toFloat(), paint)
+        if (body.isNotEmpty()) {
+            paint.typeface = Typeface.create(previous, Typeface.NORMAL)
+            val step = paint.fontMetrics.descent - paint.fontMetrics.ascent
+            canvas.drawText(body, x, y + step, paint)
+        }
+        paint.typeface = previous
+    }
 }
 
 private class HideSpan : ReplacementSpan(), LivePreviewSpan {

@@ -24,27 +24,173 @@ enum class LiveKind {
     CODE,
     LINK,
     MATH,
+    DETAILS_SUMMARY,
 }
 
-data class LiveMark(val start: Int, val end: Int, val kind: LiveKind)
+data class LiveMark(
+    val start: Int,
+    val end: Int,
+    val kind: LiveKind,
+    val label: String = "",
+    val body: String = "",
+)
+
+/** One `<details>` block, in the same shape the desktop editor folds into a widget. */
+data class DetailsBlock(
+    val from: Int,
+    val to: Int,
+    val startLine: Int,
+    val endLine: Int,
+    val summary: String,
+    val body: String,
+    val open: Boolean,
+)
 
 fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int): List<LiveMark> {
     if (text.isEmpty()) return emptyList()
     val from = selectionStart.coerceIn(0, text.length)
     val to = selectionEnd.coerceIn(0, text.length)
     val active = setOf(lineNumberAtOffset(text, minOf(from, to)), lineNumberAtOffset(text, maxOf(from, to)))
+    val lines = documentLines(text)
+    val hidden = HashSet<Int>()
     val marks = ArrayList<LiveMark>()
-    var lineStart = 0
-    var lineNumber = 1
-    while (lineStart <= text.length) {
-        var lineEnd = lineStart
-        while (lineEnd < text.length && text[lineEnd] != '\n') lineEnd += 1
-        markLine(marks, text.substring(lineStart, lineEnd), lineStart, lineNumber in active)
-        if (lineEnd >= text.length) break
-        lineStart = lineEnd + 1
-        lineNumber += 1
+    for (block in findDetailsBlocks(text)) {
+        if (selectionEditsDetails(block, from, to)) continue
+        val host = lines[block.startLine - 1]
+        if (host.to > host.from) {
+            val inlineBody = if (block.open && block.startLine == block.endLine) block.body else ""
+            marks += LiveMark(host.from, host.to, LiveKind.DETAILS_SUMMARY, block.summary, inlineBody)
+        }
+        hidden += block.startLine
+        for (number in (block.startLine + 1)..block.endLine) {
+            val line = lines[number - 1]
+            val tag = SUMMARY_ONLY.matches(line.text) || DETAILS_CLOSE_LINE.matches(line.text)
+            if (!block.open || tag) {
+                concealLine(marks, text, line)
+                hidden += number
+            }
+        }
+    }
+    for (line in lines) {
+        if (line.number in hidden) continue
+        markLine(marks, line.text, line.from, line.number in active)
     }
     return marks
+}
+
+/** Adds or removes the `open` attribute on the details block covering [offset]. */
+fun toggleDetailsOpen(text: String, offset: Int): String? {
+    val lines = documentLines(text)
+    val block = findDetailsBlocks(text).firstOrNull { offset >= it.from && offset < it.to } ?: return null
+    val host = lines.getOrNull(block.startLine - 1) ?: return null
+    val match = DETAILS_TAG.find(host.text) ?: return null
+    val replacement = if (match.groupValues[1].isNotBlank()) "<details" else "<details open"
+    val newLine = host.text.replaceRange(match.range.first, match.range.last + 1, replacement)
+    if (newLine == host.text) return null
+    return text.replaceRange(host.from, host.to, newLine)
+}
+
+fun findDetailsBlocks(text: String): List<DetailsBlock> {
+    val lines = documentLines(text)
+    val blocks = ArrayList<DetailsBlock>()
+    var index = 0
+    while (index < lines.size) {
+        val line = lines[index]
+        val inline = DETAILS_INLINE.matchEntire(line.text)
+        if (inline != null) {
+            blocks += DetailsBlock(
+                line.from,
+                line.to,
+                line.number,
+                line.number,
+                cleanSummary(inline.groupValues[2]),
+                inline.groupValues[3].trim(),
+                inline.groupValues[1].isNotBlank(),
+            )
+            index += 1
+            continue
+        }
+        val opener = DETAILS_OPENER.matchEntire(line.text)
+        if (opener == null) {
+            index += 1
+            continue
+        }
+        var summary = if (opener.groupValues[2].isNotEmpty()) cleanSummary(opener.groupValues[2]) else ""
+        var summaryNumber = line.number
+        if (summary.isEmpty() && index + 1 < lines.size) {
+            val summaryMatch = SUMMARY_ONLY.matchEntire(lines[index + 1].text)
+            if (summaryMatch == null) {
+                index += 1
+                continue
+            }
+            summary = cleanSummary(summaryMatch.groupValues[1])
+            summaryNumber = lines[index + 1].number
+        }
+        if (summary.isEmpty()) summary = "Details"
+        val summaryIndex = lines.indexOfFirst { it.number == summaryNumber }
+        var depth = 1
+        var closing = -1
+        var candidate = summaryIndex + 1
+        while (candidate < lines.size) {
+            val candidateText = lines[candidate].text
+            depth += DETAILS_OPEN.findAll(candidateText).count() - DETAILS_CLOSE.findAll(candidateText).count()
+            if (depth <= 0) {
+                closing = candidate
+                break
+            }
+            candidate += 1
+        }
+        if (closing < 0) {
+            index += 1
+            continue
+        }
+        val summaryLine = lines[summaryIndex]
+        val closeLine = lines[closing]
+        val bodyFrom = minOf(summaryLine.to + 1, closeLine.from).coerceIn(0, text.length)
+        val bodyTo = maxOf(bodyFrom, closeLine.from - 1).coerceIn(bodyFrom, text.length)
+        blocks += DetailsBlock(
+            line.from,
+            closeLine.to,
+            line.number,
+            closeLine.number,
+            summary,
+            text.substring(bodyFrom, bodyTo).trim(),
+            opener.groupValues[1].isNotBlank(),
+        )
+        index = closing + 1
+    }
+    return blocks
+}
+
+private fun selectionEditsDetails(block: DetailsBlock, from: Int, to: Int): Boolean =
+    if (from == to) from > block.from && from < block.to else from < block.to && to > block.from
+
+private fun concealLine(marks: MutableList<LiveMark>, text: String, line: DocLine) {
+    val spanEnd = if (line.to < text.length && text[line.to] == '\n') line.to + 1 else line.to
+    if (line.to > line.from) marks += LiveMark(line.from, line.to, LiveKind.HIDE)
+    if (spanEnd > line.from) marks += LiveMark(line.from, spanEnd, LiveKind.COLLAPSE)
+}
+
+private fun cleanSummary(value: String): String {
+    val stripped = value.replace(SUMMARY_TAGS, "").replace(SUMMARY_STRONG, "\$1").trim()
+    return stripped.ifEmpty { "Details" }
+}
+
+private data class DocLine(val number: Int, val from: Int, val to: Int, val text: String)
+
+private fun documentLines(text: String): List<DocLine> {
+    val lines = ArrayList<DocLine>()
+    var start = 0
+    var number = 1
+    while (start <= text.length) {
+        var end = start
+        while (end < text.length && text[end] != '\n') end += 1
+        lines += DocLine(number, start, end, text.substring(start, end))
+        if (end >= text.length) break
+        start = end + 1
+        number += 1
+    }
+    return lines
 }
 
 private fun lineNumberAtOffset(text: String, offset: Int): Int {
@@ -182,3 +328,12 @@ private val BOLD = Regex("""(\*\*|__)(?=\S)(.+?\S)\1""")
 private val STRIKE = Regex("""~~(?=\S)(.+?\S)~~""")
 private val ITALIC_STAR = Regex("""(?<!\*)\*(?!\*)(\S(?:.*?\S)?)\*(?!\*)""")
 private val ITALIC_UNDER = Regex("""(?<!_)_(?!_)(\S(?:.*?\S)?)_(?!_)""")
+private val DETAILS_INLINE = Regex("""^\s*<details(\s+open)?\s*>\s*<summary>(.*?)</summary>\s*(.*?)\s*</details>\s*$""", RegexOption.IGNORE_CASE)
+private val DETAILS_OPENER = Regex("""^\s*<details(\s+open)?\s*>(?:\s*<summary>(.*?)</summary>)?\s*$""", RegexOption.IGNORE_CASE)
+private val SUMMARY_ONLY = Regex("""^\s*<summary>(.*?)</summary>\s*$""", RegexOption.IGNORE_CASE)
+private val DETAILS_CLOSE_LINE = Regex("""^\s*</details\s*>\s*$""", RegexOption.IGNORE_CASE)
+private val DETAILS_OPEN = Regex("""<details(?:\s|>)""", RegexOption.IGNORE_CASE)
+private val DETAILS_CLOSE = Regex("""</details\s*>""", RegexOption.IGNORE_CASE)
+private val DETAILS_TAG = Regex("""<details(\s+open)?""", RegexOption.IGNORE_CASE)
+private val SUMMARY_TAGS = Regex("<[^>]*>")
+private val SUMMARY_STRONG = Regex("""^(?:\*\*|__)(.*)(?:\*\*|__)$""")
