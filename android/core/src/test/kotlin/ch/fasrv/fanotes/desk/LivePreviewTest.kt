@@ -105,5 +105,12 @@ class LivePreviewTest {
         assertEquals(4 to 8, nextEditorOccurrence("betabeta", 0, 4))
         assertEquals(null, nextEditorOccurrence("Beta beta", 0, 4))
         assertEquals(null, nextEditorOccurrence("nur", 0, 3))
+        assertTrue(nextOccurrenceShortcut(true, false, false, false, 'd'))
+        assertTrue(nextOccurrenceShortcut(true, false, false, false, 'D'))
+        assertFalse(nextOccurrenceShortcut(true, true, false, false, 'd'))
+        assertFalse(nextOccurrenceShortcut(false, false, false, false, 'd'))
+        assertFalse(nextOccurrenceShortcut(true, false, true, false, 'd'))
+        assertFalse(nextOccurrenceShortcut(true, false, false, true, 'd'))
+        assertFalse(nextOccurrenceShortcut(true, false, false, false, 'b'))
     }
 }

@@ -68,6 +68,10 @@ fun selectionMatchRanges(
     return hits
 }
 
+/** Desktop Mod-d. Shift-Ctrl-D is not that command. */
+fun nextOccurrenceShortcut(ctrl: Boolean, shift: Boolean, alt: Boolean, meta: Boolean, letter: Char): Boolean =
+    ctrl && !shift && !alt && !meta && letter.lowercaseChar() == 'd'
+
 /**
  * The desktop Mod-d command for one selection.
  * A cursor expands to the surrounding word. A selection jumps to the next copy,
