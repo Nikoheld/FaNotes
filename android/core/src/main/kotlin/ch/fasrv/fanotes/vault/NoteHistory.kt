@@ -6,6 +6,7 @@ import ch.fasrv.fanotes.json.parseJson
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.Instant
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
@@ -86,6 +87,14 @@ fun readNoteHistory(io: VaultIo, notePath: String, snapshotId: String): HistoryS
 data class HistorySnapshotFile(val id: String, val createdAt: String, val content: String)
 
 fun historyTimestamp(epochMs: Long): String = HISTORY_CLOCK.format(Instant.ofEpochMilli(epochMs))
+
+private val HISTORY_LABEL: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
+
+/** Desktop inspector clock: `new Date(createdAt).toLocaleString`, day and minute. */
+fun historyStampLabel(createdAt: String, zone: ZoneId = ZoneId.systemDefault()): String {
+    val instant = runCatching { Instant.parse(createdAt) }.getOrNull() ?: return createdAt
+    return HISTORY_LABEL.withZone(zone).format(instant)
+}
 
 fun randomHistorySuffix(): String {
     val bytes = ByteArray(3)
