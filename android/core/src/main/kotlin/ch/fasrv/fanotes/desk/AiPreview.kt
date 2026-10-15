@@ -110,6 +110,7 @@ fun detailsPlain(text: String, collapseImages: Boolean = true, autolinks: Boolea
     rewrite(STRIKE, "strike", { it.groupValues[1] }, { 2 })
     rewrite(CODE, "code", { it.groupValues[2] }, { it.groupValues[1].length })
     rewrite(MATH, "math", { it.groupValues[1] }, { 1 }, skipInsideCode = true)
+    rewrite(FOOTNOTE_MARK, "footnote", { it.groupValues[1] }, { 1 }, skipInsideCode = true)
     if (autolinks) {
         rewrite(ANGLE_LINK, "link", { it.groupValues[1] }, { 1 }, { it.groupValues[1] }, skipInsideCode = true)
         rewrite(
@@ -186,6 +187,7 @@ private val BOLD = Regex("""(\*\*|__)(?=\S)(.+?\S)\1""")
 private val STRIKE = Regex("""~~(?=\S)(.+?\S)~~""")
 private val CODE = Regex("""(`+)([^`\n]+?)\1""")
 private val MATH = Regex("""(?<!\$)\$([^$\n]+?)\$(?!\$)""")
+private val FOOTNOTE_MARK = Regex("""\u0003(\d+)\u0003""")
 private val ANGLE_LINK = Regex("""<((?:https?://|mailto:)[^>\s]+)>""")
 private val ANGLE_EMAIL = Regex("""<([A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)>""")
 private val BARE_URL = Regex("""(?<![A-Za-z0-9_/<])https?://[^\s<>]+?(?=[.,;:!?)]*(?:\s|$))""")

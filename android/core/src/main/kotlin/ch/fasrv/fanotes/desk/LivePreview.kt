@@ -330,7 +330,8 @@ private fun styledTableRow(cells: List<String>): Pair<String, List<DetailsInline
 }
 
 fun detailsReadingLines(body: String): List<DetailsReadingLine> {
-    val lines = aiPreviewLines(body).flatMap { line ->
+    val prepared = prepareFootnotes(body)
+    val lines = aiPreviewLines(prepared.body).flatMap { line ->
         when (line.kind) {
             PaperKind.RULE -> listOf(DetailsReadingLine("", detailsCardScale(line.kind), false, "rule"))
             PaperKind.IMAGE -> listOf(
@@ -397,11 +398,35 @@ fun detailsReadingLines(body: String): List<DetailsReadingLine> {
             }
         }
     }
-    return if (lines.isEmpty()) {
+    val noted = lines + footnoteSection(prepared.notes)
+    return if (noted.isEmpty()) {
         listOf(DetailsReadingLine("Dieser Klappbereich ist leer.", DETAILS_CARD_FONT, false))
     } else {
-        lines
+        noted
     }
+}
+
+private fun footnoteSection(notes: List<String>): List<DetailsReadingLine> {
+    if (notes.isEmpty()) return emptyList()
+    val out = ArrayList<DetailsReadingLine>()
+    out += DetailsReadingLine("", FOOTNOTE_SCALE, false, "rule")
+    notes.forEachIndexed { index, note ->
+        val paragraphs = note.split('\n').filter { it.isNotBlank() }.ifEmpty { listOf("") }
+        paragraphs.forEachIndexed { paragraphIndex, paragraph ->
+            val (plain, marks) = detailsPlain(paragraph.trim(), autolinks = true)
+            val prefix = if (paragraphIndex == 0) "${index + 1}. " else ""
+            val core = if (prefix.isEmpty()) plain else prefix + plain
+            val text = if (paragraphIndex == paragraphs.lastIndex) "$core ↩".trim() else core
+            out += DetailsReadingLine(
+                text,
+                FOOTNOTE_SCALE,
+                false,
+                "footnote",
+                inlines = shiftDetailsInlines(marks, prefix.length),
+            )
+        }
+    }
+    return out
 }
 
 fun detailsReading(body: String): String {
