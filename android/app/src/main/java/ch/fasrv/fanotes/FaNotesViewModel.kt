@@ -2942,10 +2942,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         return ch.fasrv.fanotes.desk.defaultNoteParent(deskSettings.value["default-folder"], folders)
     }
 
-    fun openDaily() {
+    fun openDaily(day: java.time.LocalDate = java.time.LocalDate.now()) {
         val folder = deskSettings.value["daily-folder"].orEmpty().ifBlank { "Tagesnotizen" }
         val pattern = deskSettings.value["date-format"].orEmpty().ifBlank { "YYYY-MM-DD" }
-        val path = dailyNotePath(folder, pattern = pattern)
+        val path = dailyNotePath(folder, day, pattern)
         val title = path.substringAfterLast('/').removeSuffix(".md")
         viewModelScope.launch {
             val exists = withContext(Dispatchers.IO) { graph.vault.exists(path) }
@@ -2957,6 +2957,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             refreshTree()
             openPath(path, force = true)
             destination.value = "notes"
+            message.value = ch.fasrv.fanotes.desk.dailyNoteStatus(!exists, title)
         }
     }
 

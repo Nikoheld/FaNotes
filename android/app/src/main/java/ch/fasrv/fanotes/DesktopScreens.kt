@@ -885,7 +885,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
         }
         when (view) {
             "month" -> MonthGrid(month, anchor, shown) { anchor = it }
-            "agenda" -> AgendaList(anchor, shown) { event, date -> editor = draftFor(event, date) }
+            "agenda" -> AgendaList(anchor, shown, { event, date -> editor = draftFor(event, date) }) { model.openDaily(it) }
             else -> DayColumns(
                 ch.fasrv.fanotes.desk.calendarRange(view, anchor),
                 anchor,
@@ -895,6 +895,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 { key, start -> model.moveCalendarOccurrence(key, start) },
                 { key, end -> model.resizeCalendarOccurrence(key, end) },
                 { date, start, end, allDay -> editor = draftForCreate(document, date, start, end, allDay) },
+                { model.openDaily(it) },
             )
         }
         Text("Am $day", modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.SemiBold)
@@ -986,6 +987,7 @@ private fun DayColumns(
     onMove: (String, LocalDateTime) -> Unit,
     onResize: (String, LocalDateTime) -> Unit,
     onCreate: (LocalDate, LocalDateTime, LocalDateTime, Boolean) -> Unit,
+    onDaily: (LocalDate) -> Unit,
 ) {
     val scroll = rememberScrollState()
     val density = LocalDensity.current
@@ -1003,7 +1005,10 @@ private fun DayColumns(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 13.sp,
                             color = if (date == anchor) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f).clickable { onPick(date) },
+                            modifier = Modifier.weight(1f).clickable {
+                                onPick(date)
+                                onDaily(date)
+                            },
                         )
                         Text(
                             "+",
@@ -1191,11 +1196,19 @@ private fun inkOn(hex: String): Color {
 }
 
 @Composable
-private fun AgendaList(anchor: LocalDate, document: ch.fasrv.fanotes.desk.CalendarDocument, onEdit: (CalendarEvent, LocalDate) -> Unit) {
+private fun AgendaList(
+    anchor: LocalDate,
+    document: ch.fasrv.fanotes.desk.CalendarDocument,
+    onEdit: (CalendarEvent, LocalDate) -> Unit,
+    onDaily: (LocalDate) -> Unit,
+) {
     ch.fasrv.fanotes.desk.calendarRange("agenda", anchor).forEach { date ->
         val events = document.events.filter { ch.fasrv.fanotes.desk.occurrencesOn(it, date) }
         if (events.isNotEmpty()) {
-            Text(date.toString(), fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                Text(date.toString(), fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                TextButton(onClick = { onDaily(date) }) { Text("Tagesnotiz") }
+            }
             events.forEach { event ->
                 val clock = ch.fasrv.fanotes.desk.eventClock(event)?.let { "$it " }.orEmpty()
                 Text(
