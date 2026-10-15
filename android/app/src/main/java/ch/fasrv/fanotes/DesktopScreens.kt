@@ -49,6 +49,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.getValue
@@ -2310,19 +2311,29 @@ fun AiScreen(model: FaNotesViewModel) {
                             )
                         }
                         "code", "math" -> if (line.text.isNotEmpty()) {
-                            Text(
-                                previewAnnotated(line, base, link),
-                                modifier = Modifier
-                                    .previewAnchor(lineIndex)
-                                    .padding(vertical = 6.dp)
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                fontSize = (base * line.scale).sp,
-                                fontFamily = FontFamily.Monospace,
-                            )
+                            key(lineIndex) {
+                                val blockScroll = rememberScrollState()
+                                val shape = RoundedCornerShape(6.dp)
+                                Box(
+                                    Modifier
+                                        .previewAnchor(lineIndex)
+                                        .padding(vertical = 6.dp)
+                                        .fillMaxWidth()
+                                        .clip(shape)
+                                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.55f), shape)
+                                        .horizontalScroll(blockScroll)
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    contentAlignment = if (ch.fasrv.fanotes.desk.previewBlockCenters(line.kind)) Alignment.Center else Alignment.CenterStart,
+                                ) {
+                                    Text(
+                                        previewAnnotated(line, base, link),
+                                        softWrap = !ch.fasrv.fanotes.desk.previewBlockScrolls(line.kind),
+                                        fontSize = (base * line.scale).sp,
+                                        fontFamily = FontFamily.Monospace,
+                                    )
+                                }
+                            }
                         }
                         else -> if (line.text.isNotEmpty() || line.kind == "image") {
                             PreviewRich(

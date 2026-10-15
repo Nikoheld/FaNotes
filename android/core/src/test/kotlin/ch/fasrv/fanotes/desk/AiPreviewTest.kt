@@ -68,6 +68,22 @@ class AiPreviewTest {
     }
 
     @Test
+    fun schoenCodeAndMathScrollOnOneLine() {
+        assertTrue(previewBlockScrolls("code"))
+        assertTrue(previewBlockScrolls("math"))
+        assertEquals(false, previewBlockScrolls("paragraph"))
+        assertTrue(previewBlockCenters("math"))
+        assertEquals(false, previewBlockCenters("code"))
+        val lines = aiPreviewReading("```\nalpha beta gamma\n```\n\n$$\nx + 1\n$$")
+        val code = lines.first { it.kind == "code" }
+        assertEquals("alpha beta gamma", code.text)
+        assertTrue(previewBlockScrolls(code.kind))
+        val math = lines.first { it.kind == "math" }
+        assertEquals("x + 1", math.text)
+        assertTrue(previewBlockCenters(math.kind))
+    }
+
+    @Test
     fun schoenInlineCodeUsesThePreviewChip() {
         val box = previewCodeBox(16f)
         assertEquals(16f * PREVIEW_CODE_SCALE, box.textPx, 0.01f)

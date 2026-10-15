@@ -80,6 +80,12 @@ const val PREVIEW_TABLE_HEAD = 0.9f
 /** `.markdown-preview code` is 0.88em of the surrounding text. */
 const val PREVIEW_CODE_SCALE = 0.88f
 
+/** Code and display math keep their lines and scroll sideways, like `pre` and KaTeX. */
+fun previewBlockScrolls(kind: String): Boolean = kind == "code" || kind == "math"
+
+/** Display math is centered. A code block stays at the start of the line. */
+fun previewBlockCenters(kind: String): Boolean = kind == "math"
+
 data class PreviewCodeBox(val textPx: Float, val padX: Float, val padY: Float, val radius: Float, val border: Float)
 
 /**
