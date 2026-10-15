@@ -110,12 +110,13 @@ class HtmlTagAssist(
     private fun accept() {
         val current = completion ?: return
         val label = current.options.getOrNull(selected) ?: return
+        val insert = current.inserts.getOrNull(selected) ?: label
         val cursor = editor.selectionEnd.coerceIn(0, editor.length())
         val from = current.from.coerceIn(0, cursor)
         hide()
         runWriting {
-            editor.text?.replace(from, cursor, label)
-            val caret = (from + label.length).coerceAtMost(editor.text?.length ?: 0)
+            editor.text?.replace(from, cursor, insert)
+            val caret = (from + insert.length).coerceAtMost(editor.text?.length ?: 0)
             editor.setSelection(caret)
         }
     }
@@ -144,7 +145,8 @@ class HtmlTagAssist(
         val density = editor.resources.displayMetrics.density
         val row = (32 * density).toInt()
         popup.height = row * next.options.size.coerceAtMost(PAGE)
-        popup.width = (168 * density).toInt()
+        val longest = next.options.maxOf { it.length }
+        popup.width = ((longest.coerceIn(16, 42) * 7.2f + 24f) * density).toInt()
         if (!popup.isShowing) popup.showAtLocation(editor, Gravity.NO_GRAVITY, 0, 0)
         place()
         rows.setSelection(selected)

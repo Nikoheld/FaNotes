@@ -642,6 +642,9 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 } else {
                     val next = s?.toString().orEmpty()
                     val bracket = bracketTyping(editBefore, changeStart, changeDeleted, next, closedBrackets)
+                        ?: ch.fasrv.fanotes.desk.htmlAutoClose(editBefore, changeStart, changeDeleted, next)?.let {
+                            ch.fasrv.fanotes.desk.BracketEdit(it.text, it.selectionStart, it.selectionEnd, emptySet())
+                        }
                     if (bracket != null) {
                         writing = true
                         editor.setText(bracket.text)
