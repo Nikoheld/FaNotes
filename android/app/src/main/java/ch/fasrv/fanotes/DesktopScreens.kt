@@ -2225,18 +2225,40 @@ fun AiScreen(model: FaNotesViewModel) {
                                 .height(1.dp)
                                 .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
                         )
-                        "quote" -> Row(Modifier.height(IntrinsicSize.Min), verticalAlignment = Alignment.Top) {
+                        "quote" -> Row(
+                            Modifier
+                                .padding(vertical = 4.dp)
+                                .fillMaxWidth()
+                                .height(IntrinsicSize.Min)
+                                .clip(RoundedCornerShape(topEnd = 6.dp, bottomEnd = 6.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                            verticalAlignment = Alignment.Top,
+                        ) {
                             Box(
                                 Modifier
-                                    .padding(end = 8.dp)
                                     .width(3.dp)
                                     .fillMaxHeight()
-                                    .background(link),
+                                    .background(MaterialTheme.colorScheme.outline),
                             )
                             Text(
                                 previewAnnotated(line, base, link),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                                 fontSize = (base * line.scale).sp,
                                 color = muted,
+                            )
+                        }
+                        "code", "math" -> if (line.text.isNotEmpty()) {
+                            Text(
+                                previewAnnotated(line, base, link),
+                                modifier = Modifier
+                                    .padding(vertical = 6.dp)
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                fontSize = (base * line.scale).sp,
+                                fontFamily = FontFamily.Monospace,
                             )
                         }
                         else -> if (line.text.isNotEmpty() || line.kind == "image") {
@@ -2310,7 +2332,7 @@ private fun previewAnnotated(
     link: Color,
 ): androidx.compose.ui.text.AnnotatedString {
     val (text, marks) = ch.fasrv.fanotes.desk.expandFieldSeparators(line.text, line.inlines)
-    return previewMarks(text, marks, base, line.scale, link)
+    return previewMarks(text, marks, base, line.scale, link, ch.fasrv.fanotes.desk.previewMarkerEnd(text, line.kind))
 }
 
 private fun previewMarks(
@@ -2319,10 +2341,12 @@ private fun previewMarks(
     base: Int,
     scale: Float,
     link: Color,
+    markerEnd: Int = 0,
 ): androidx.compose.ui.text.AnnotatedString {
     val size = (base * scale).sp
     return buildAnnotatedString {
         append(text)
+        if (markerEnd in 1..text.length) addStyle(SpanStyle(color = link), 0, markerEnd)
         for (mark in marks) {
             val start = mark.start.coerceIn(0, text.length)
             val end = mark.end.coerceIn(start, text.length)
