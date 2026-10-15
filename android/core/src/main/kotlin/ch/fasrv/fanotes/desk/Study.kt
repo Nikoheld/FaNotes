@@ -52,6 +52,12 @@ fun aggregateStudy(notes: List<Pair<String, PageStats>>): StudyPicture {
     )
 }
 
+/** Fach row: page count, time on the page, typing, and pen time. */
+fun studySubjectSummary(row: StudySubject): String {
+    val pages = if (row.notes == 1) "1 Seite" else "${row.notes} Seiten"
+    return "${row.subject} · $pages · ${formatStudyDuration(row.dwellMs)} · ${formatStudyDuration(row.typingMs)} Tippen · ${formatStudyDuration(row.inkMs)} Stift"
+}
+
 fun formatStudyDuration(ms: Long): String {
     val minutes = kotlin.math.round(ms.coerceAtLeast(0) / 60_000.0).toInt()
     if (minutes < 60) return "$minutes min"

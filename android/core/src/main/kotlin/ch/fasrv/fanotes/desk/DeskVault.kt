@@ -479,6 +479,9 @@ fun monthEventLabel(event: CalendarEvent): String {
     return if (Regex("""\d{2}:\d{2}""").matches(start)) "$start ${event.title}" else event.title
 }
 
+/** Agenda place line. Blank locations stay hidden, matching a missing map pin. */
+fun agendaPlace(event: CalendarEvent): String? = event.location.trim().takeIf { it.isNotEmpty() }
+
 fun eventClock(event: CalendarEvent): String? {
     if (event.allDay || !event.start.contains('T')) return null
     val start = event.start.substringAfter('T').take(5)

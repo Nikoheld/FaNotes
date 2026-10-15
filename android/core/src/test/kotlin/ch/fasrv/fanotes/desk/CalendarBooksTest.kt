@@ -22,6 +22,8 @@ class CalendarBooksTest {
         assertEquals(LocalDate.parse("2026-11-08"), month.last())
         val timed = CalendarEvent("e", "personal", "Lesen", "2026-10-15T08:00", "2026-10-15T09:00", allDay = false)
         assertEquals("08:00 Lesen", monthEventLabel(timed))
+        assertEquals("Raum 12", agendaPlace(timed.copy(location = "  Raum 12  ")))
+        assertNull(agendaPlace(timed.copy(location = "   ")))
         assertEquals("Tag", monthEventLabel(CalendarEvent("e", "personal", "Tag", "2026-10-14", "2026-10-14", allDay = true)))
         val agenda = calendarRange("agenda", LocalDate.parse("2026-10-15"))
         assertEquals(21, agenda.size)
