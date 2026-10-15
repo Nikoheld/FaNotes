@@ -191,9 +191,50 @@ fun pointInPolygon(x: Double, y: Double, polygon: List<StrokePoint>): Boolean {
     return inside
 }
 
+const val SELECT_DRAG_NOTICE = "Ziehen zum Verschieben. Esc hebt die Auswahl auf."
+const val SELECT_EMPTY_NOTICE = "Im gewählten Bereich wurde keine Handschrift gefunden."
+const val SELECT_HINT_NOTICE = "Ziehe einen Rahmen um die Handschrift, die du verschieben möchtest."
+const val SELECT_CLEARED_NOTICE = "Auswahl aufgehoben."
+
+/** A stroke counts when at least half of its samples sit inside the loop. */
 fun lassoHits(strokes: List<InkStroke>, polygon: List<StrokePoint>): Set<Int> {
     if (polygon.size < 3) return emptySet()
     return strokes.mapIndexedNotNull { index, stroke ->
-        if (stroke.points.any { pointInPolygon(it.x, it.y, polygon) }) index else null
+        if (stroke.points.isEmpty()) return@mapIndexedNotNull null
+        val inside = stroke.points.count { pointInPolygon(it.x, it.y, polygon) }
+        if (inside.toDouble() / stroke.points.size >= 0.5) index else null
     }.toSet()
+}
+
+/** One lasso edit: delete, nudge, copy, or recolor. Copy and move use the desktop offset. */
+fun applyLasso(
+    strokes: List<InkStroke>,
+    indexes: Set<Int>,
+    action: String,
+    dx: Double = 0.04,
+    dy: Double = 0.04,
+    color: String = "#202333",
+): List<InkStroke> {
+    if (indexes.isEmpty()) return strokes
+    return when (action) {
+        "delete" -> strokes.filterIndexed { index, _ -> index !in indexes }
+        "recolor" -> strokes.mapIndexed { index, stroke -> if (index in indexes) stroke.copy(color = color) else stroke }
+        "move" -> strokes.mapIndexed { index, stroke ->
+            if (index !in indexes) stroke
+            else stroke.copy(points = stroke.points.map { it.copy(x = it.x + dx, y = it.y + dy) })
+        }
+        "copy" -> strokes + strokes.mapIndexedNotNull { index, stroke ->
+            if (index !in indexes) null
+            else stroke.copy(points = stroke.points.map { it.copy(x = it.x + dx, y = it.y + dy) })
+        }
+        else -> strokes
+    }
+}
+
+fun lassoActionNotice(action: String): String = when (action) {
+    "move" -> "Auswahl verschoben."
+    "copy" -> "Auswahl kopiert."
+    "recolor" -> "Auswahl gefärbt."
+    "delete" -> "Auswahl gelöscht."
+    else -> ""
 }

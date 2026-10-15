@@ -1158,6 +1158,12 @@ class NotePageView(context: Context) : FrameLayout(context) {
     }
 
     private var toolSignature = ""
+    private var builtTool: InkTool = InkTool.PEN
+    private var builtStyle: StrokeStyle = StrokeStyle()
+    private var builtPaper = "dots"
+    private var builtFinger = false
+    private var builtUndo = false
+    private var builtRedo = false
     private var widthBar: SeekBar? = null
     private var widthFromUser = false
 
@@ -1283,6 +1289,19 @@ class NotePageView(context: Context) : FrameLayout(context) {
         canUndo: Boolean,
         canRedo: Boolean,
     ) {
+        builtTool = tool
+        builtStyle = style
+        builtPaper = paper
+        builtFinger = fingerDraws
+        builtUndo = canUndo
+        builtRedo = canRedo
+        ink.onSelection = {
+            post {
+                if (builtTool == InkTool.LASSO || builtTool == InkTool.SELECT) {
+                    rebuildTools(builtTool, builtStyle, builtPaper, builtFinger, builtUndo, builtRedo)
+                }
+            }
+        }
         tools.removeAllViews()
         tools.addView(chip("Notizen") { onToggleRail() })
         tools.addView(segment(tool))
@@ -1347,6 +1366,19 @@ class NotePageView(context: Context) : FrameLayout(context) {
             post { rebuildTools(tool, style, paper, fingerDraws, canUndo, canRedo) }
         })
         tools.addView(chip("Lasso") { onTool(ch.fasrv.fanotes.ink.InkTool.LASSO) })
+        if (tool == InkTool.LASSO && ink.session?.selection?.isNotEmpty() == true) {
+            listOf("move" to "Verschieben", "copy" to "Kopieren", "recolor" to "Färben", "delete" to "Löschen").forEach { (action, label) ->
+                tools.addView(chip(label) {
+                    val session = ink.session ?: return@chip
+                    if (session.commitLasso(action, java.time.Instant.now().toString(), style.color)) {
+                        ink.refresh()
+                        ink.onChanged()
+                        ink.onInkNotice(ch.fasrv.fanotes.ink.InkNotice("success", ch.fasrv.fanotes.ink.lassoActionNotice(action)))
+                        ink.onSelection(session.selection.size)
+                    }
+                })
+            }
+        }
         tools.addView(chip("Verknüpfung") {
             ink.placingLink = true
             ink.publishLinkChrome()

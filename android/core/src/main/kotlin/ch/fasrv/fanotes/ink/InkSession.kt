@@ -246,6 +246,18 @@ class InkSession(document: InkDocument) {
         selection = indices
     }
 
+    /** Delete, nudge, copy, or recolor the current selection as one undo step. */
+    fun commitLasso(action: String, now: String, color: String): Boolean {
+        if (selection.isEmpty() || action !in setOf("delete", "move", "copy", "recolor")) return false
+        pushUndo()
+        document = document.copy(
+            strokes = applyLasso(document.strokes, selection, action, color = color),
+            updatedAt = now,
+        )
+        if (action == "delete" || action == "copy") selection = emptySet()
+        return true
+    }
+
     fun selectAt(x: Double, y: Double, slop: Double) {
         val hit = document.strokes.indexOfLast { stroke ->
             stroke.points.any { point -> hypot(point.x - x, point.y - y) <= slop }
