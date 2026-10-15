@@ -31,15 +31,28 @@ fun headingSlug(value: String): String {
 fun headingAnchorLine(markdown: String, anchor: String): Int? {
     val wanted = anchor.trim().removePrefix("#")
     if (wanted.isEmpty()) return null
+    val headings = parseNoteOutline(markdown)
+    val ids = ArrayList<String>(headings.size)
     val counts = HashMap<String, Int>()
-    for (heading in parseNoteOutline(markdown)) {
+    for (heading in headings) {
         val base = headingSlug(heading.title)
         val seen = counts.getOrDefault(base, 0)
         counts[base] = seen + 1
-        val id = if (seen == 0) base else "$base-${seen + 1}"
-        if (id == wanted || id.equals(wanted, ignoreCase = true) || heading.title.equals(wanted, ignoreCase = true)) {
-            return heading.line
-        }
+        ids += if (seen == 0) base else "$base-${seen + 1}"
+    }
+    // Preview links are prefixed once by rehype-sanitize. Try that slug first,
+    // then the anchor as written so an authored id still resolves.
+    val candidates = ArrayList<String>(2)
+    if (wanted.startsWith("user-content-", ignoreCase = true)) {
+        val stripped = wanted.substring("user-content-".length)
+        if (stripped.isNotEmpty()) candidates += stripped
+    }
+    candidates += wanted
+    for (candidate in candidates) {
+        val index = ids.indexOfFirst { it.equals(candidate, ignoreCase = true) }
+        if (index >= 0) return headings[index].line
+        val titled = headings.indexOfFirst { it.title.equals(candidate, ignoreCase = true) }
+        if (titled >= 0) return headings[titled].line
     }
     return null
 }
