@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes.desk
 
+import java.text.Collator
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -90,6 +91,59 @@ fun homeworkStats(tasks: List<HomeworkTask>, today: LocalDate = LocalDate.now())
 /** Drop one entry and keep the rest in order, the same as the desktop delete button. */
 fun removeHomeworkTask(tasks: List<HomeworkTask>, id: String): List<HomeworkTask> =
     tasks.filter { it.id != id }
+
+/**
+ * Folder names plus subjects already used, in German dictionary order.
+ * The desktop datalist is built the same way from the vault's top folders.
+ */
+fun homeworkSubjectOptions(folderNames: List<String>, tasks: List<HomeworkTask>): List<String> {
+    val names = LinkedHashSet<String>()
+    for (name in folderNames) {
+        val trimmed = name.trim()
+        if (trimmed.isNotEmpty()) names += trimmed
+    }
+    for (task in tasks) {
+        val subject = task.subject.trim()
+        if (subject.isNotEmpty()) names += subject
+    }
+    return names.sortedWith(Collator.getInstance(Locale.GERMAN))
+}
+
+/** Fields accepted by the desktop `createHomeworkTask`, or null when the title is blank. */
+data class HomeworkDraft(
+    val title: String,
+    val notes: String,
+    val subject: String,
+    val dueDate: String?,
+    val dueTime: String?,
+    val kind: String,
+    val priority: String,
+)
+
+fun prepareHomeworkDraft(
+    title: String,
+    notes: String = "",
+    subject: String = "",
+    dueDate: String? = null,
+    dueTime: String? = null,
+    kind: String = "homework",
+    priority: String = "normal",
+): HomeworkDraft? {
+    val cleanTitle = title.trim().take(240)
+    if (cleanTitle.isEmpty()) return null
+    return HomeworkDraft(
+        title = cleanTitle,
+        notes = notes.take(4_000),
+        subject = subject.trim().take(80),
+        dueDate = dueDate?.trim()?.takeIf { ISO_DATE.matches(it) },
+        dueTime = dueTime?.trim()?.takeIf { ISO_TIME.matches(it) },
+        kind = if (kind == "appointment") "appointment" else "homework",
+        priority = if (priority == "high") "high" else "normal",
+    )
+}
+
+private val ISO_DATE = Regex("""\d{4}-\d{2}-\d{2}""")
+private val ISO_TIME = Regex("""\d{2}:\d{2}""")
 
 /** Offen, Hausaufgaben, Termine, Erledigt, Alle — the desktop filter row. */
 fun visibleHomeworkTasks(tasks: List<HomeworkTask>, filter: String): List<HomeworkTask> = tasks.filter { task ->
