@@ -45,6 +45,10 @@ import kotlin.math.abs
 class SplitEditorView(context: Context) : EditText(context) {
     var onVisibleEdit: (String, String) -> Unit = { _, _ -> }
     var onToggleFold: (Int) -> Unit = {}
+    var onEditorFold: (String, Int) -> Unit = { _, _ -> }
+    var foldSource: String = ""
+    var foldState: Set<Int> = emptySet()
+    private var pendingCursor: Int? = null
     var foldMarkers: List<String> = emptyList()
         set(value) {
             if (field == value) return
@@ -144,11 +148,13 @@ class SplitEditorView(context: Context) : EditText(context) {
     }
 
     fun show(markdown: String) {
-        if (text?.toString() == markdown) {
+        val pending = pendingCursor
+        if (text?.toString() == markdown && pending == null) {
             paintPreview()
             return
         }
-        val cursor = selectionStart.coerceAtLeast(0).coerceAtMost(markdown.length)
+        val cursor = (pending ?: selectionStart.coerceAtLeast(0)).coerceIn(0, markdown.length)
+        pendingCursor = null
         writing = true
         setText(markdown)
         setSelection(cursor)
@@ -301,11 +307,36 @@ class SplitEditorView(context: Context) : EditText(context) {
                 return true
             }
         }
+        val bracket = when (keyCode) {
+            KeyEvent.KEYCODE_LEFT_BRACKET -> '['
+            KeyEvent.KEYCODE_RIGHT_BRACKET -> ']'
+            else -> null
+        }
+        if (bracket != null) {
+            val command = ch.fasrv.fanotes.desk.foldShortcut(
+                event.isCtrlPressed,
+                event.isShiftPressed,
+                event.isAltPressed,
+                event.isMetaPressed,
+                bracket,
+            )
+            if (command != null) {
+                if (event.action == KeyEvent.ACTION_DOWN) foldKeys(command)
+                return true
+            }
+        }
         if (keyCode == KeyEvent.KEYCODE_TAB && !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed) {
             if (event.action == KeyEvent.ACTION_DOWN) indentSelection(event.isShiftPressed)
             return true
         }
         return super.onKeyPreIme(keyCode, event)
+    }
+
+    private fun foldKeys(command: String) {
+        val offset = selectionEnd.coerceAtLeast(0)
+        val next = ch.fasrv.fanotes.desk.headingFoldCommand(foldSource, foldState, command, offset) ?: return
+        pendingCursor = ch.fasrv.fanotes.desk.visibleCursorAfterFold(foldSource, foldState, next, offset)
+        onEditorFold(command, offset)
     }
 
     private fun applyLineEdit(edit: ch.fasrv.fanotes.desk.MarkdownEdit?) {

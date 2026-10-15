@@ -74,4 +74,28 @@ class NoteOutlineTest {
         assertNull(headingLineForFoldMarker(note, emptySet(), 2))
         assertNull(headingLineForFoldMarker("# Nur\n", emptySet(), 1))
     }
+
+    @Test
+    fun keyboardFoldsMatchTheDesktopHeadingCommands() {
+        val note = "# A\nbody\n# B\nbody\n## C\nmore\n"
+        assertEquals(setOf(1), foldHeadingAtCursor(note, emptySet(), 0))
+        assertNull(foldHeadingAtCursor(note, emptySet(), note.indexOf("body")))
+        assertNull(foldHeadingAtCursor(note, setOf(1), 0))
+        val all = foldAllHeadings(note, emptySet())
+        assertEquals(setOf(1, 3), all)
+        assertNull(foldAllHeadings(note, setOf(1, 3)))
+        assertEquals(setOf(3), unfoldHeadingAtCursor(note, setOf(1, 3), 0))
+        assertEquals(emptySet(), unfoldAllHeadings(setOf(1)))
+        assertNull(unfoldAllHeadings(emptySet()))
+        val inBody = note.indexOf("# B\nbody") + "# B\n".length
+        val cursor = visibleCursorAfterFold(note, emptySet(), all!!, inBody)
+        val visible = markdownWithFolds(note, all)
+        assertEquals(visible.indexOf("# B") + "# B".length, cursor)
+        assertEquals("fold", foldShortcut(true, true, false, false, '['))
+        assertEquals("unfold", foldShortcut(true, true, false, false, ']'))
+        assertEquals("all", foldShortcut(true, false, true, false, '['))
+        assertEquals("none", foldShortcut(true, false, true, false, ']'))
+        assertNull(foldShortcut(true, true, true, false, '['))
+        assertNull(foldShortcut(false, true, false, false, '['))
+    }
 }
