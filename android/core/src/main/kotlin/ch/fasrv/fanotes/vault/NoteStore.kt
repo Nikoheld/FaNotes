@@ -322,7 +322,14 @@ class NoteStore(private val io: VaultIo) {
                     }
                 }
             }
-            .sortedWith(compareBy<VaultNode> { it.kind != NoteKind.FOLDER }.thenBy { it.name.lowercase() })
+            .sortedWith { left, right ->
+                ch.fasrv.fanotes.desk.compareVaultEntries(
+                    left.kind == NoteKind.FOLDER,
+                    left.name,
+                    right.kind == NoteKind.FOLDER,
+                    right.name,
+                )
+            }
     }
 
 }
