@@ -228,6 +228,18 @@ class SplitEditorView(context: Context) : EditText(context) {
     }
 
     override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+        if ((event.isCtrlPressed || event.isMetaPressed) && !event.isAltPressed &&
+            (keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)
+        ) {
+            if (event.action == KeyEvent.ACTION_DOWN) moveByEditorGroup(keyCode == KeyEvent.KEYCODE_DPAD_RIGHT, event.isShiftPressed)
+            return true
+        }
+        if ((event.isCtrlPressed || event.isMetaPressed) && !event.isShiftPressed && !event.isAltPressed &&
+            (keyCode == KeyEvent.KEYCODE_DEL || keyCode == KeyEvent.KEYCODE_FORWARD_DEL)
+        ) {
+            if (event.action == KeyEvent.ACTION_DOWN) deleteByEditorGroup(keyCode == KeyEvent.KEYCODE_FORWARD_DEL)
+            return true
+        }
         if (event.isAltPressed && !event.isCtrlPressed && !event.isMetaPressed &&
             (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN)
         ) {
@@ -368,6 +380,30 @@ class SplitEditorView(context: Context) : EditText(context) {
         val next = ch.fasrv.fanotes.desk.headingFoldCommand(foldSource, foldState, command, offset) ?: return
         pendingCursor = ch.fasrv.fanotes.desk.visibleCursorAfterFold(foldSource, foldState, next, offset)
         onEditorFold(command, offset)
+    }
+
+    private fun moveByEditorGroup(forward: Boolean, extend: Boolean) {
+        val value = text?.toString().orEmpty()
+        val (anchor, head) = ch.fasrv.fanotes.desk.editorGroupSelection(
+            value,
+            selectionStart,
+            selectionEnd,
+            forward,
+            extend,
+        )
+        val length = value.length
+        setSelection(anchor.coerceIn(0, length), head.coerceIn(0, length))
+    }
+
+    private fun deleteByEditorGroup(forward: Boolean) {
+        val edit = ch.fasrv.fanotes.desk.deleteEditorGroup(
+            text?.toString().orEmpty(),
+            selectionStart,
+            selectionEnd,
+            forward,
+        )
+        if (edit.text == text?.toString()) return
+        applyLineEdit(edit)
     }
 
     private fun applyLineEdit(edit: ch.fasrv.fanotes.desk.MarkdownEdit?) {
