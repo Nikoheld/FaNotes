@@ -66,6 +66,7 @@ class SplitEditorView(context: Context) : EditText(context) {
             highlightColor = selectionWashArgb(value)
             invalidate()
         }
+    private var tabFocusMode = false
     private val activeLinePaint = Paint()
     var showLineNumbers: Boolean = false
         set(value) {
@@ -272,6 +273,21 @@ class SplitEditorView(context: Context) : EditText(context) {
             }
         }
         if (tags?.onKey(keyCode, event) == true) return true
+        if (ch.fasrv.fanotes.desk.togglesEditorTabFocus(
+                event.isCtrlPressed,
+                event.isShiftPressed,
+                event.isAltPressed,
+                event.isMetaPressed,
+                if (keyCode == KeyEvent.KEYCODE_M) "m" else "",
+            )
+        ) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                tabFocusMode = !tabFocusMode
+                @Suppress("DEPRECATION")
+                announceForAccessibility(ch.fasrv.fanotes.desk.editorTabFocusAnnouncement(tabFocusMode))
+            }
+            return true
+        }
         if (!event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed &&
             (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_PAGE_DOWN)
         ) {
@@ -446,7 +462,13 @@ class SplitEditorView(context: Context) : EditText(context) {
                 return true
             }
         }
-        if (keyCode == KeyEvent.KEYCODE_TAB && !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed) {
+        if (keyCode == KeyEvent.KEYCODE_TAB && ch.fasrv.fanotes.desk.editorIndentsOnTab(
+                tabFocusMode,
+                event.isCtrlPressed,
+                event.isAltPressed,
+                event.isMetaPressed,
+            )
+        ) {
             if (event.action == KeyEvent.ACTION_DOWN) indentSelection(event.isShiftPressed)
             return true
         }
