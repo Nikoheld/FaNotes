@@ -479,8 +479,16 @@ class InkSurfaceView @JvmOverloads constructor(
     }
 
     fun rotatePage() {
-        rotation = (rotation + 90f) % 360f
+        rotation = ch.fasrv.fanotes.desk.rotateViewBy(rotation.toDouble(), 1, 90).toFloat()
         invalidate()
+        publishCamera()
+    }
+
+    /** Desktop sheet HUD: 15 degrees, either direction. */
+    fun rotateBy(direction: Int) {
+        rotation = ch.fasrv.fanotes.desk.rotateViewBy(rotation.toDouble(), direction).toFloat()
+        invalidate()
+        publishCamera()
     }
 
     fun resetView() {

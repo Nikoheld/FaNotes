@@ -92,6 +92,12 @@ fun zoomSensitivityFromSpeed(speed: Int): Double {
     return 0.28 + (level - 1) * (1.72 / 9.0)
 }
 
+/** Desktop sheet HUD rotates 15 degrees and keeps the angle in −180°…180°. */
+const val VIEW_ROTATE_STEP = 15
+
+fun rotateViewBy(current: Double, direction: Int, step: Int = VIEW_ROTATE_STEP): Double =
+    normalizeRotation(current + direction * step)
+
 /** Desktop `zoomStepFromSpeed`, rounded half away from zero the way `Math.round` does. */
 fun zoomStepFromSpeed(speed: Int): Double {
     val raw = 0.12 * zoomSensitivityFromSpeed(speed)

@@ -1457,10 +1457,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
         tools.addView(textChip)
         tools.addView(mark)
-        tools.addView(chip("+") { ink.zoomByStep(1) })
-        tools.addView(chip("−") { ink.zoomByStep(-1) })
-        tools.addView(chip("Drehen") { ink.rotatePage() })
-        tools.addView(chip("Ansicht") { ink.resetView() })
+        tools.addView(chip("+", description = "Hineinzoomen") { ink.zoomByStep(1) })
+        tools.addView(chip("−", description = "Herauszoomen") { ink.zoomByStep(-1) })
+        tools.addView(chip("↺", description = "Blatt gegen den Uhrzeigersinn drehen") { ink.rotateBy(-1) })
+        tools.addView(chip("↻", description = "Blatt im Uhrzeigersinn drehen") { ink.rotateBy(1) })
+        tools.addView(chip("Ansicht", description = "Ansicht zurücksetzen") { ink.resetView() })
         tools.addView(chip("Kopieren") { onDuplicate() })
         tools.addView(chip("Leeren") { onClear() })
         tools.addView(chip("Einklappen") { setChromeOpen(false) })
@@ -1499,9 +1500,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
         return view
     }
 
-    private fun chip(label: String, enabled: Boolean = true, click: () -> Unit): TextView {
+    private fun chip(label: String, enabled: Boolean = true, description: String = label, click: () -> Unit): TextView {
         val view = TextView(context)
         view.text = label
+        view.contentDescription = description
         view.textSize = 13f
         view.gravity = Gravity.CENTER
         view.setPadding(dp(10), 0, dp(10), 0)
