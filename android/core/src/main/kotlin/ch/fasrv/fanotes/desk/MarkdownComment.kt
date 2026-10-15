@@ -9,9 +9,33 @@ fun toggleMarkdownComment(text: String, anchor: Int, head: Int): MarkdownEdit {
     val safeAnchor = anchor.coerceIn(0, text.length)
     val safeHead = head.coerceIn(0, text.length)
     val range = commentLineRange(text, safeAnchor, safeHead)
-    val found = findBlockComment(text, range.from, range.to)
+    return applyCommentToggle(text, safeAnchor, safeHead, range.from, range.to, insideEmpty = false)
+}
+
+/**
+ * Alt-Shift-A comments the selection itself (`toggleBlockComment`).
+ * An empty caret inserts `<!--  -->` with the caret between the markers,
+ * so a second press removes it. Ctrl-/ still comments the whole line.
+ */
+fun toggleMarkdownBlockComment(text: String, anchor: Int, head: Int): MarkdownEdit {
+    val safeAnchor = anchor.coerceIn(0, text.length)
+    val safeHead = head.coerceIn(0, text.length)
+    val from = minOf(safeAnchor, safeHead)
+    val to = maxOf(safeAnchor, safeHead)
+    return applyCommentToggle(text, safeAnchor, safeHead, from, to, insideEmpty = true)
+}
+
+private fun applyCommentToggle(
+    text: String,
+    safeAnchor: Int,
+    safeHead: Int,
+    from: Int,
+    to: Int,
+    insideEmpty: Boolean,
+): MarkdownEdit {
+    val found = findBlockComment(text, from, to)
     val edits = if (found == null) {
-        listOf(CommentEdit(range.from, range.from, "$OPEN "), CommentEdit(range.to, range.to, " $CLOSE"))
+        listOf(CommentEdit(from, from, "$OPEN "), CommentEdit(to, to, " $CLOSE"))
     } else {
         listOf(CommentEdit(found.openFrom, found.openTo, ""), CommentEdit(found.closeFrom, found.closeTo, ""))
     }
@@ -19,7 +43,10 @@ fun toggleMarkdownComment(text: String, anchor: Int, head: Int): MarkdownEdit {
     val lower = minOf(safeAnchor, safeHead)
     val upper = maxOf(safeAnchor, safeHead)
     val inverted = safeAnchor > safeHead
-    val (newLower, newUpper) = if (lower == upper) {
+    val (newLower, newUpper) = if (lower == upper && found == null && insideEmpty) {
+        val between = lower + OPEN.length + 1
+        between to between
+    } else if (lower == upper) {
         val mapped = mapPos(lower, edits, -1)
         mapped to mapped
     } else {

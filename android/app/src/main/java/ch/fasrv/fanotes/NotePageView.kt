@@ -35,6 +35,7 @@ import ch.fasrv.fanotes.desk.matchingBracketJump
 import ch.fasrv.fanotes.desk.selectMarkdownLine
 import ch.fasrv.fanotes.desk.copyMarkdownLines
 import ch.fasrv.fanotes.desk.deleteMarkdownLines
+import ch.fasrv.fanotes.desk.toggleMarkdownBlockComment
 import ch.fasrv.fanotes.desk.toggleMarkdownComment
 import ch.fasrv.fanotes.desk.indentMarkdownLines
 import ch.fasrv.fanotes.desk.moveMarkdownLines
@@ -200,6 +201,12 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 (keyCode == KeyEvent.KEYCODE_SLASH || event.unicodeChar == '/'.code)
             ) {
                 if (event.action == KeyEvent.ACTION_DOWN) toggleComment()
+                return true
+            }
+            if (keyCode == KeyEvent.KEYCODE_A && event.isAltPressed && event.isShiftPressed &&
+                !event.isCtrlPressed && !event.isMetaPressed
+            ) {
+                if (event.action == KeyEvent.ACTION_DOWN) toggleBlockComment()
                 return true
             }
             val searchKey = when (keyCode) {
@@ -428,6 +435,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
 
         fun toggleComment() {
             applyLineEdit(toggleMarkdownComment(text?.toString().orEmpty(), selectionStart, selectionEnd))
+        }
+
+        fun toggleBlockComment() {
+            applyLineEdit(toggleMarkdownBlockComment(text?.toString().orEmpty(), selectionStart, selectionEnd))
         }
 
         fun moveSelection(forward: Boolean) {
