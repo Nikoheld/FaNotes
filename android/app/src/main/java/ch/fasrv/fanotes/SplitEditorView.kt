@@ -13,6 +13,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputConnectionWrapper
 import android.widget.EditText
+import ch.fasrv.fanotes.desk.selectionWashArgb
 import ch.fasrv.fanotes.desk.editorLineNumberLabels
 import ch.fasrv.fanotes.desk.findDetailsBlocks
 import ch.fasrv.fanotes.desk.bracketTyping
@@ -50,6 +51,13 @@ class SplitEditorView(context: Context) : EditText(context) {
             invalidate()
         }
     var accent: Int = 0xFF2A6F97.toInt()
+        set(value) {
+            if (field == value) return
+            field = value
+            highlightColor = selectionWashArgb(value)
+            invalidate()
+        }
+    private val activeLinePaint = Paint()
     var showLineNumbers: Boolean = false
         set(value) {
             if (field == value) return
@@ -69,6 +77,7 @@ class SplitEditorView(context: Context) : EditText(context) {
     init {
         background = null
         setTextColor(0xFF252630.toInt())
+        highlightColor = selectionWashArgb(accent)
         setHintTextColor(0xFF8A8D98.toInt())
         hint = "Text auf dem Papier"
         gravity = Gravity.TOP or Gravity.START
@@ -163,6 +172,7 @@ class SplitEditorView(context: Context) : EditText(context) {
 
     override fun onSelectionChanged(selStart: Int, selEnd: Int) {
         super.onSelectionChanged(selStart, selEnd)
+        invalidate()
         if (ready && !painting) paintPreview()
     }
 
@@ -358,6 +368,21 @@ class SplitEditorView(context: Context) : EditText(context) {
 
     override fun onDraw(canvas: Canvas) {
         val layout = layout
+        if (layout != null) {
+            canvas.drawEditorActiveLine(
+                layout,
+                text?.length ?: 0,
+                selectionEnd,
+                accent,
+                activeLinePaint,
+                scrollY,
+                paddingLeft,
+                paddingTop,
+                paddingRight,
+                width,
+                height,
+            )
+        }
         if (layout != null && paddingLeft > 0 && (showLineNumbers || foldMarkers.any { it.isNotEmpty() })) {
             val value = text?.toString().orEmpty()
             val starts = lineStartOffsets(value)

@@ -1,6 +1,8 @@
 package ch.fasrv.fanotes
 
 import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -20,6 +22,7 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
+import ch.fasrv.fanotes.desk.selectionWashArgb
 import ch.fasrv.fanotes.desk.bracketTyping
 import ch.fasrv.fanotes.desk.insertMarkdownBlankLine
 import ch.fasrv.fanotes.desk.insertMarkdownNewlineIndent
@@ -47,9 +50,31 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private val editor = object : EditText(context) {
         private var detailsDownX = 0f
         private var detailsDownY = 0f
+        private val activeLinePaint = Paint()
+
+        override fun onDraw(canvas: Canvas) {
+            val textLayout = layout
+            if (textLayout != null) {
+                canvas.drawEditorActiveLine(
+                    textLayout,
+                    text?.length ?: 0,
+                    selectionEnd,
+                    ink.accentColor,
+                    activeLinePaint,
+                    scrollY,
+                    paddingLeft,
+                    paddingTop,
+                    paddingRight,
+                    width,
+                    height,
+                )
+            }
+            super.onDraw(canvas)
+        }
 
         override fun onSelectionChanged(selStart: Int, selEnd: Int) {
             super.onSelectionChanged(selStart, selEnd)
+            invalidate()
             if (previewReady && !paintingPreview) paintLivePreview()
         }
 
@@ -274,6 +299,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         addView(ink, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         editor.background = null
         editor.setTextColor(0xFF252630.toInt())
+        editor.highlightColor = selectionWashArgb(ink.accentColor)
         editor.setHintTextColor(0xFF8A8D98.toInt())
         editor.hint = "Text auf dem Papier"
         editor.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
@@ -1001,6 +1027,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val scale = ink.cameraScale().coerceAtLeast(0.2f)
         editor.setTextSize(TypedValue.COMPLEX_UNIT_PX, ink.editorFontPx * scale)
         editor.setLineSpacing(0f, ink.editorLineHeight)
+        editor.highlightColor = selectionWashArgb(ink.accentColor)
         val x = (ink.cameraLeft() + 72f * scale).toInt()
         val y = (ink.cameraTop() + 78f * scale).toInt()
         val width = (ink.textColumnPx() * scale).toInt().coerceAtLeast(dp(80))
