@@ -307,6 +307,18 @@ fun dailyNoteFileName(pattern: String, day: LocalDate): String {
  * Folder for a new root note. A missing setting is Eingang when that folder
  * exists. A blank setting, or a folder that is not in the vault, is the root.
  */
+/** A chosen sidebar folder wins. Otherwise the PDF note uses the default folder. */
+fun pdfNoteImportParent(requested: String?, defaultFolder: String): String {
+    val asked = requested?.replace('\\', '/')?.trim()?.trim('/')
+    if (!asked.isNullOrEmpty()) return asked
+    return defaultFolder.replace('\\', '/').trim().trim('/')
+}
+
+fun pdfNoteImportMessage(path: String): String {
+    val title = path.substringAfterLast('/').substringBeforeLast('.')
+    return "PDF „$title“ ist jetzt eine Notiz."
+}
+
 fun defaultNoteParent(setting: String?, folders: Set<String>): String {
     if (setting != null && setting.isBlank()) return ""
     val raw = (setting ?: "Eingang").replace('\\', '/').trim().trim('/')

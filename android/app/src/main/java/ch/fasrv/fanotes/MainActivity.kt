@@ -127,10 +127,13 @@ class MainActivity : ComponentActivity() {
         model.useTree(uri)
     }
     private var bookImportFolder: String? = null
+    private var pdfNoteFolder: String? = null
     private val importPdf = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        val folder = bookImportFolder
+        val bookFolder = bookImportFolder
+        val noteFolder = pdfNoteFolder
         bookImportFolder = null
-        if (folder != null) importBook(uri, folder) else import(uri, pdf = true)
+        pdfNoteFolder = null
+        if (bookFolder != null) importBook(uri, bookFolder) else importPdfNote(uri, noteFolder)
     }
     private val importImage = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         import(uri, pdf = false)
@@ -189,8 +192,18 @@ class MainActivity : ComponentActivity() {
                 FaNotesScreen(
                     model = model,
                     onOpenVault = { openTree.launch(null) },
-                    onImportPdf = { bookImportFolder = null; importPdf.launch(arrayOf("application/pdf")) },
+                    onImportPdf = {
+                        bookImportFolder = null
+                        pdfNoteFolder = null
+                        importPdf.launch(arrayOf("application/pdf"))
+                    },
+                    onImportPdfIn = { folder ->
+                        bookImportFolder = null
+                        pdfNoteFolder = folder
+                        importPdf.launch(arrayOf("application/pdf"))
+                    },
                     onImportBook = { folder ->
+                        pdfNoteFolder = null
                         bookImportFolder = folder
                         importPdf.launch(arrayOf("application/pdf"))
                     },
@@ -237,6 +250,13 @@ class MainActivity : ComponentActivity() {
             // A slow disk must not take the activity down. The next edit saves again.
         }
         super.onPause()
+    }
+
+    private fun importPdfNote(uri: Uri?, folder: String?) {
+        if (uri == null) return
+        val name = uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { null } ?: "PDF-Notiz.pdf"
+        val bytes = model.readUri(uri) ?: return
+        model.importPdfNote(folder, name, bytes)
     }
 
     private fun importBook(uri: Uri?, folder: String) {
@@ -334,6 +354,7 @@ fun FaNotesScreen(
     model: FaNotesViewModel,
     onOpenVault: () -> Unit,
     onImportPdf: () -> Unit,
+    onImportPdfIn: (String) -> Unit = {},
     onImportBook: (String) -> Unit = {},
     onImportImage: () -> Unit,
     onImportIcs: () -> Unit,
@@ -519,6 +540,7 @@ fun FaNotesScreen(
                     onCreateNoteIn = { model.createNoteIn(it) },
                     onCreateFolderIn = { model.createFolderIn(it) },
                     bookFolders = model.books.collectAsStateWithLifecycle().value.map { it.subjectPath }.toSet(),
+                    onImportPdfIn = onImportPdfIn,
                     onImportBook = onImportBook,
                     onDetachBook = { model.detachSubjectBook(it) },
                     compact = compact,
@@ -841,6 +863,7 @@ private fun VaultPane(
     onCreateNoteIn: (String) -> Unit = {},
     onCreateFolderIn: (String) -> Unit = {},
     bookFolders: Set<String> = emptySet(),
+    onImportPdfIn: (String) -> Unit = {},
     onImportBook: (String) -> Unit = {},
     onDetachBook: (String) -> Unit = {},
     conflicts: List<ch.fasrv.fanotes.sync.SyncConflict>,
@@ -932,7 +955,7 @@ private fun VaultPane(
             items(tree, key = { it.path }) { node ->
                 NoteRow(
                     node, selected, splitPath, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
-                    onCreateNoteIn, onCreateFolderIn, bookFolders, onImportBook, onDetachBook,
+                    onCreateNoteIn, onCreateFolderIn, bookFolders, onImportPdfIn, onImportBook, onDetachBook,
                     localFolders, onToggleLocal, compact, rowHeightDp, radiusDp,
                     dragPath = dragPath,
                     dropDest = dropDest,
@@ -983,6 +1006,7 @@ private fun NoteRow(
     onCreateNoteIn: (String) -> Unit,
     onCreateFolderIn: (String) -> Unit,
     bookFolders: Set<String>,
+    onImportPdfIn: (String) -> Unit,
     onImportBook: (String) -> Unit,
     onDetachBook: (String) -> Unit,
     localFolders: List<String>,
@@ -1119,6 +1143,14 @@ private fun NoteRow(
                     .padding(horizontal = 6.dp),
             )
             Text(
+                "PDF",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clickable(onClickLabel = "PDF importieren") { onImportPdfIn(node.path) }
+                    .padding(horizontal = 4.dp),
+            )
+            Text(
                 "Buch",
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.primary,
@@ -1184,7 +1216,7 @@ private fun NoteRow(
         node.children.forEach {
             NoteRow(
                 it, selected, splitPath, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
-                onCreateNoteIn, onCreateFolderIn, bookFolders, onImportBook, onDetachBook,
+                onCreateNoteIn, onCreateFolderIn, bookFolders, onImportPdfIn, onImportBook, onDetachBook,
                 localFolders, onToggleLocal, compact, rowHeightDp, radiusDp,
                 dragPath = dragPath,
                 dropDest = dropDest,

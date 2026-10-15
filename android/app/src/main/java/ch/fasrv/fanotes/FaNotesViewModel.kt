@@ -1088,9 +1088,24 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 graph.engine.notifyLocalChange()
                 return@launch
             }
-            val path = withContext(Dispatchers.IO) { graph.store.importPdf("", name, bytes) }
+            importPdfNote(null, name, bytes)
+        }
+    }
+
+    /** Desktop PDF import: the file becomes a note in the chosen folder, or the default folder. */
+    fun importPdfNote(parent: String?, name: String, bytes: ByteArray) {
+        viewModelScope.launch {
+            val folder = ch.fasrv.fanotes.desk.pdfNoteImportParent(parent, defaultCreateFolder())
+            val path = try {
+                withContext(Dispatchers.IO) { graph.store.importUniquePdf(folder, name, bytes) }
+            } catch (error: Exception) {
+                message.value = error.message ?: "Das PDF konnte nicht als Notiz importiert werden."
+                return@launch
+            }
+            openCreatedFolder(folder)
             refreshTree()
             openPath(path, force = true)
+            message.value = ch.fasrv.fanotes.desk.pdfNoteImportMessage(path)
             graph.engine.notifyLocalChange()
         }
     }
