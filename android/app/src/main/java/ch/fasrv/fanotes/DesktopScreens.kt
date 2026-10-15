@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -1903,32 +1904,7 @@ fun HistoryScreen(model: FaNotesViewModel) {
         if (history.isEmpty()) {
             Text("Für diese Notiz liegt noch keine ältere Fassung vor. Sie entsteht, sobald die Notiz erneut gespeichert wird.", modifier = Modifier.padding(top = 12.dp))
         }
-        history.forEach { snapshot ->
-            Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(snapshot.createdAt, fontSize = 14.sp)
-                        Text("${snapshot.bytes} Bytes", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                    }
-                    TextButton(onClick = { model.compareHistory(snapshot.id) }) { Text("Vergleichen") }
-                    TextButton(onClick = { model.restoreHistory(snapshot.id) }) { Text("Wiederherstellen") }
-                }
-                if (comparison?.first == snapshot.id) {
-                    val diff = comparison?.second.orEmpty()
-                    diff.lineSequence().forEach { line ->
-                        val color = when {
-                            line.startsWith("+") -> MaterialTheme.colorScheme.primary
-                            line.startsWith("-") -> MaterialTheme.colorScheme.error
-                            else -> MaterialTheme.colorScheme.onSurface
-                        }
-                        Text(line, color = color, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                    }
-                    if (ch.fasrv.fanotes.desk.timelineHasInk(diff)) {
-                        Text("Enthält Handschrift.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                    }
-                }
-            }
-        }
+        NoteHistoryRows(model, history, comparison)
         val backupsOn = model.deskSettings.collectAsStateWithLifecycle().value["experimental-backup"] == "on"
         if (backupsOn && open != null) {
             val backups = ch.fasrv.fanotes.desk.parseNoteBackups(open?.payload?.array("noteBackups")).filter { it.notePath == open?.path }.asReversed()
@@ -2859,10 +2835,9 @@ fun NoteRelations(model: FaNotesViewModel, onOpen: (String) -> Unit) {
     val markdown by model.markdown.collectAsStateWithLifecycle()
     val incoming by model.backlinks.collectAsStateWithLifecycle()
     val outgoing = wikiTargets(markdown)
-    if (outgoing.isEmpty() && incoming.isEmpty()) return
-    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+    Column(Modifier.fillMaxWidth()) {
         if (outgoing.isNotEmpty()) {
-            Text("Verweise", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+            InspectorHeading("Verweise")
             outgoing.forEach { target ->
                 Text(
                     "[[$target]]",
@@ -2872,7 +2847,7 @@ fun NoteRelations(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                 )
             }
         }
-        Text("Rückverweise", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+        InspectorHeading("Rückverweise")
         if (incoming.isEmpty()) {
             Text("Keine Wiki-Links auf diese Notiz.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
         }
@@ -2888,45 +2863,163 @@ fun NoteRelations(model: FaNotesViewModel, onOpen: (String) -> Unit) {
 }
 
 @Composable
+private fun NoteHistoryRows(
+    model: FaNotesViewModel,
+    history: List<ch.fasrv.fanotes.vault.HistorySnapshot>,
+    comparison: Pair<String, String>?,
+) {
+    history.forEach { snapshot ->
+        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(ch.fasrv.fanotes.vault.historyStampLabel(snapshot.createdAt), fontSize = 14.sp)
+                    Text("${snapshot.bytes} Bytes", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                }
+                TextButton(onClick = { model.compareHistory(snapshot.id) }) { Text("Vergleichen") }
+                TextButton(onClick = { model.restoreHistory(snapshot.id) }) { Text("Wiederherstellen") }
+            }
+            val shown = comparison
+            if (shown != null && shown.first == snapshot.id) HistoryDiff(shown.second)
+        }
+    }
+}
+
+@Composable
+private fun HistoryDiff(diff: String) {
+    diff.lineSequence().forEach { line ->
+        val color = when {
+            line.startsWith("+") -> MaterialTheme.colorScheme.primary
+            line.startsWith("-") -> MaterialTheme.colorScheme.error
+            else -> MaterialTheme.colorScheme.onSurface
+        }
+        Text(line, color = color, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+    }
+    if (ch.fasrv.fanotes.desk.timelineHasInk(diff)) {
+        Text("Enthält Handschrift.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+    }
+}
+
+@Composable
+private fun InspectorHeading(title: String) {
+    Text(
+        title.uppercase(),
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 0.7.sp,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+        modifier = Modifier.padding(top = 14.dp, bottom = 6.dp),
+    )
+}
+
+@Composable
 fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
     val markdown by model.markdown.collectAsStateWithLifecycle()
     val settings by model.deskSettings.collectAsStateWithLifecycle()
     val path = model.open.collectAsStateWithLifecycle().value?.path
+    val history by model.noteHistory.collectAsStateWithLifecycle()
+    val comparison by model.historyComparison.collectAsStateWithLifecycle()
     if (settings["outline"] == "off") return
-    Column(Modifier.fillMaxSize().padding(12.dp).verticalScroll(rememberScrollState())) {
-        val live = ch.fasrv.fanotes.desk.inspectorDocument(markdown)
-        val stats = measureDocument(markdown)
-        Text("Dokument", fontWeight = FontWeight.SemiBold)
-        Text("${live.words} Wörter", fontSize = 13.sp)
-        Text("${live.characters} Zeichen", fontSize = 13.sp)
-        Text("Lesezeit ~ ${live.readingMinutes} min", fontSize = 13.sp)
-        Text("${stats.headings} Überschriften · ${stats.tasksDone}/${stats.tasks} Aufgaben", fontSize = 13.sp)
-        if (path != null) Text(path, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
-        Text("Gliederung", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
-        val headings = parseNoteOutline(markdown)
-        if (headings.isEmpty()) {
-            Text("Überschriften erscheinen hier automatisch.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-        }
-        headings.forEach { heading ->
-            val inset = (10 + (heading.level - 1).coerceAtLeast(0) * 12).dp
+    LaunchedEffect(path) { model.refreshNoteHistory() }
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().height(36.dp).padding(horizontal = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                "› ${heading.title}",
-                modifier = Modifier.padding(start = inset, top = 4.dp).clickable { model.jumpToOutline(heading.line) },
-                fontSize = 13.sp,
+                "Gliederung",
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f), androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                    .padding(horizontal = 7.dp, vertical = 4.dp),
             )
         }
-        Text("Tags", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
-        val tags = parseNoteTags(markdown)
-        if (tags.isEmpty()) {
-            Text("Noch keine Tags.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-        } else {
-            Text(tags.joinToString("  ") { "#$it" }, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+        Column(Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp).verticalScroll(rememberScrollState())) {
+            val live = ch.fasrv.fanotes.desk.inspectorDocument(markdown)
+            val stats = measureDocument(markdown)
+            val muted = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            InspectorHeading("Gliederung")
+            val headings = parseNoteOutline(markdown)
+            if (headings.isEmpty()) {
+                Text("Überschriften erscheinen hier automatisch.", fontSize = 12.sp, color = muted)
+            }
+            headings.forEach { heading ->
+                val inset = (10 + (heading.level - 1).coerceAtLeast(0) * 12).dp
+                Text(
+                    "› ${heading.title}",
+                    modifier = Modifier.padding(start = inset, top = 4.dp).clickable { model.jumpToOutline(heading.line) },
+                    fontSize = 12.sp,
+                )
+            }
+            InspectorHeading("Dokument")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                listOf(
+                    "Wörter" to live.words.toString(),
+                    "Zeichen" to live.characters.toString(),
+                    "Lesezeit" to "~ ${live.readingMinutes} min",
+                ).forEach { (label, value) ->
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                            .padding(horizontal = 6.dp, vertical = 7.dp),
+                    ) {
+                        Text(label, fontSize = 12.sp, color = muted)
+                        Text(value, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+                    }
+                }
+            }
+            Text("${stats.headings} Überschriften · ${stats.tasksDone}/${stats.tasks} Aufgaben", fontSize = 12.sp, color = muted, modifier = Modifier.padding(top = 6.dp))
+            if (path != null) Text(path, fontSize = 12.sp, color = muted, maxLines = 1, modifier = Modifier.padding(top = 6.dp))
+            NoteRelations(model, onOpen)
+            InspectorHeading("Versionen")
+            TextButton(onClick = { model.refreshNoteHistory() }) { Text("Verlauf laden") }
+            history.forEach { snapshot ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        ch.fasrv.fanotes.vault.historyStampLabel(snapshot.createdAt),
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f).clickable { model.compareHistory(snapshot.id) }.padding(vertical = 4.dp),
+                    )
+                    TextButton(onClick = { model.restoreHistory(snapshot.id) }) { Text("Wiederherstellen") }
+                }
+            }
+            val shown = comparison
+            if (shown != null) HistoryDiff(shown.second)
+            InspectorHeading("Tags")
+            val tags = parseNoteTags(markdown)
+            if (tags.isEmpty()) {
+                Text("Noch keine Tags.", fontSize = 12.sp, color = muted)
+            } else {
+                FlowRow(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    tags.forEach { tag ->
+                        Text(
+                            "#$tag",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), androidx.compose.foundation.shape.RoundedCornerShape(99.dp))
+                                .padding(horizontal = 7.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+            }
+            InspectorHeading("Aufgaben")
+            taskLines(markdown).forEach { (index, done, text) ->
+                Text("${if (done) "☑" else "☐"} $text", modifier = Modifier.clickable { model.updateMarkdown(ch.fasrv.fanotes.desk.toggleTask(markdown, index)) }.padding(vertical = 4.dp), fontSize = 13.sp)
+            }
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 14.dp)
+                    .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.18f), androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f), androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                    .padding(10.dp),
+            ) {
+                Text("Local first", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text("Deine Inhalte bleiben als lesbare Dateien in deinem Vault.", fontSize = 12.sp, color = muted, modifier = Modifier.padding(top = 3.dp))
+            }
         }
-        Text("Aufgaben", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
-        taskLines(markdown).forEach { (index, done, text) ->
-            Text("${if (done) "☑" else "☐"} $text", modifier = Modifier.clickable { model.updateMarkdown(ch.fasrv.fanotes.desk.toggleTask(markdown, index)) }.padding(vertical = 4.dp), fontSize = 13.sp)
-        }
-        NoteRelations(model, onOpen)
     }
 }
 

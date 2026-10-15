@@ -1,6 +1,7 @@
 package ch.fasrv.fanotes.vault
 
 import java.nio.file.Files
+import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -37,6 +38,13 @@ class NoteHistoryTest {
         assertTrue("revision 0\n" !in retained)
         val files = vault.list(historyDirectory("Long.md")).count { it.path.endsWith(".md") }
         assertEquals(HISTORY_LIMIT, files)
+    }
+
+    @Test
+    fun historyStampLabelUsesTheDesktopClock() {
+        assertEquals("15.10.2026 12:00", historyStampLabel("2026-10-15T12:00:00.000Z", ZoneOffset.UTC))
+        assertEquals("15.10.2026 14:30", historyStampLabel("2026-10-15T12:30:00.000Z", ZoneOffset.ofHours(2)))
+        assertEquals("nicht-lesbar", historyStampLabel("nicht-lesbar", ZoneOffset.UTC))
     }
 
     @Test
