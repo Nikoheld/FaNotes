@@ -1323,7 +1323,10 @@ private fun PageSurface(
             page.onColor = { model.style.value = style.copy(color = it) }
             page.onWidth = { model.style.value = style.copy(baseWidth = it.toDouble()) }
             page.onPaper = { model.setPaper(it) }
-            page.onBrush = { model.style.value = style.copy(brush = it) }
+            page.onBrush = {
+                val brush = ch.fasrv.fanotes.ink.artBrush(it)
+                model.style.value = style.copy(brush = brush.id, baseWidth = brush.defaultWidth, pressureEnabled = brush.pressure)
+            }
             page.onEffect = {
                 model.style.value = style.copy(colorEffect = it)
                 model.updateDesk("ink-effect", it)

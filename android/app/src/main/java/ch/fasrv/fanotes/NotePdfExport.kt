@@ -372,13 +372,29 @@ private fun drawStroke(canvas: Canvas, stroke: InkStroke, sourceWidth: Double, s
         drawSpray(canvas, paint, stroke, scale, sourceWidth, sourceHeight)
         return
     }
-    val outline = ribbonOutline(stroke, sourceWidth, sourceHeight, smoothing.toDouble())
-    val path = Path()
-    smoothOutline(path, outline, scale)
-    if (path.isEmpty) return
-    paint.color = parsePdfColor(stroke.color)
-    paint.alpha = ((stroke.opacity ?: brushOpacity(stroke.brush) ?: 1.0) * 255).toInt().coerceIn(20, 255)
-    drawInkPath(canvas, path, paint, stroke.colorEffect, (sourceWidth * scale).toFloat(), (sourceHeight * scale).toFloat(), (stroke.baseWidth * scale).toFloat())
+    val passes = if (stroke.brush == "calligraphy") {
+        listOf(ch.fasrv.fanotes.ink.InkPaintPass(ch.fasrv.fanotes.ink.brushWidthScale(stroke.brush), 1.0))
+    } else {
+        ch.fasrv.fanotes.ink.brushPasses(stroke.brush)
+    }
+    val baseAlpha = if (stroke.purpose == "art") (stroke.opacity ?: 1.0) else 1.0
+    for (pass in passes) {
+        canvas.save()
+        if (pass.jitter > 0.0) {
+            val jx = (ch.fasrv.fanotes.ink.seededUnit(1) - 0.5) * pass.jitter * scale
+            val jy = (ch.fasrv.fanotes.ink.seededUnit(2) - 0.5) * pass.jitter * scale
+            canvas.translate(jx.toFloat(), jy.toFloat())
+        }
+        val outline = ribbonOutline(stroke, sourceWidth, sourceHeight, smoothing.toDouble(), widthFactor = pass.widthFactor)
+        val path = Path()
+        smoothOutline(path, outline, scale)
+        if (!path.isEmpty) {
+            paint.color = parsePdfColor(stroke.color)
+            paint.alpha = (baseAlpha * pass.alpha * 255.0).toInt().coerceIn(0, 255)
+            drawInkPath(canvas, path, paint, stroke.colorEffect, (sourceWidth * scale).toFloat(), (sourceHeight * scale).toFloat(), (stroke.baseWidth * pass.widthFactor * scale).toFloat())
+        }
+        canvas.restore()
+    }
 }
 
 private fun smoothOutline(path: Path, outline: FloatArray, scale: Float) {

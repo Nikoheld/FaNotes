@@ -416,8 +416,9 @@ fun ribbonOutline(
     sourceWidth: Double,
     sourceHeight: Double,
     smoothing: Double = 0.0,
+    widthFactor: Double? = null,
 ): FloatArray {
-    val scale = brushWidthScale(stroke.brush)
+    val scale = widthFactor ?: brushWidthScale(stroke.brush)
     val widths = stroke.points.map { point ->
         var width = pressureWidth(stroke.baseWidth, point.pressure, stroke.pressureEnabled) * scale
         if (stroke.brush == "calligraphy" && stroke.points.size > 1) {
