@@ -140,11 +140,11 @@ class InkSurfaceView @JvmOverloads constructor(
     var placingSection = false
     var placingLink = false
     var linkMarks: List<ch.fasrv.fanotes.desk.NoteLinkMark> = emptyList()
-    var worksheetBoxes: List<ch.fasrv.fanotes.desk.WorksheetBox> = emptyList()
-    var worksheetHighlights: List<ch.fasrv.fanotes.desk.WorksheetHighlight> = emptyList()
+    var worksheetBoxes: List<ch.fasrv.fanotes.desk.AnchoredBox> = emptyList()
+    var worksheetHighlights: List<ch.fasrv.fanotes.desk.AnchoredHighlight> = emptyList()
     var pageFrames: List<ch.fasrv.fanotes.desk.PageFrame> = emptyList()
     var placingHighlight = false
-    var onPlaceHighlight: (ch.fasrv.fanotes.desk.WorksheetHighlight) -> Unit = {}
+    var onPlaceHighlight: (String, ch.fasrv.fanotes.desk.WorksheetHighlight) -> Unit = { _, _ -> }
     var onRemoveHighlight: (String) -> Unit = {}
     var onPlaceSection: (Double) -> Unit = { _ -> }
     var noteLinkStyle: String = "symbol"
@@ -286,6 +286,14 @@ class InkSurfaceView @JvmOverloads constructor(
     private var highlightEndX = 0.0
     private var highlightEndY = 0.0
     private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#FFE566") }
+    private val captionPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#282A34") }
+    private val cardFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; style = Paint.Style.FILL }
+    private val cardEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#2E3848")
+        style = Paint.Style.STROKE
+        alpha = 46
+    }
+    private var worksheetPlacements: List<ch.fasrv.fanotes.desk.WorksheetPlacement> = emptyList()
     private val guideLabel = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#1B4F82")
         textAlign = Paint.Align.CENTER
@@ -657,8 +665,8 @@ class InkSurfaceView @JvmOverloads constructor(
                     inkPointer = MotionEvent.INVALID_POINTER_ID
                 }
             }
-            worksheetBoxes.firstOrNull { x >= it.x && x <= it.x + it.width && kotlin.math.abs(y - it.y) < 0.04 } != null && !eraser -> {
-                onEditBox(worksheetBoxes.first { x >= it.x && x <= it.x + it.width && kotlin.math.abs(y - it.y) < 0.04 }.id)
+            worksheetBoxes.firstOrNull { anchored -> hitWorksheetBox(anchored, x, y) } != null && !eraser -> {
+                onEditBox(worksheetBoxes.first { anchored -> hitWorksheetBox(anchored, x, y) }.box.id)
                 onPenActive(false)
                 inkPointer = MotionEvent.INVALID_POINTER_ID
             }
@@ -895,11 +903,15 @@ class InkSurfaceView @JvmOverloads constructor(
         }
         val scale = pixelsPerPageUnit()
         if (cacheScale == 0f) cacheScale = scale.coerceIn(MIN_CACHE_SCALE, MAX_CACHE_SCALE)
+        val placements = currentPlacements(scale)
+        worksheetPlacements = placements
+        val cover = placements.maxOfOrNull { it.top + it.height + 36.0 } ?: 0.0
         val pageWidth = (current.document.sourceWidth * scale).toFloat()
-        val pageHeight = (current.document.sourceHeight * scale).toFloat()
+        val pageHeight = (max(current.document.sourceHeight, cover) * scale).toFloat()
         canvas.drawRect(pageLeft, pageTop, pageLeft + pageWidth, pageTop + pageHeight, paper)
-        drawBackdrop(canvas, scale)
-        if (backdrop.isEmpty()) drawRuling(canvas, current.document.paperStyle, pageWidth, pageHeight, scale)
+        val worksheets = backdrop.any { it.worksheetId.isNotEmpty() }
+        if (backdrop.isEmpty() || worksheets) drawRuling(canvas, current.document.paperStyle, (current.document.sourceWidth * scale).toFloat(), (current.document.sourceHeight * scale).toFloat(), scale)
+        drawBackdrop(canvas, scale, placements)
         if (showMarkdown && markdown.isNotBlank()) drawMarkdown(canvas, scale)
         drawTiles(canvas, current, scale)
         val live = current.livePoints
@@ -955,11 +967,13 @@ class InkSurfaceView @JvmOverloads constructor(
             }
         }
         drawHighlights(canvas)
-        worksheetBoxes.forEach { box ->
-            val (sx, sy) = normToScreen(box.x, box.y)
+        worksheetBoxes.forEach { anchored ->
+            val place = worksheetPlacements.firstOrNull { it.id == anchored.worksheetId } ?: return@forEach
+            val sheet = ch.fasrv.fanotes.desk.boxOnFrame(anchored.box, place, sessionWidth(), sessionHeight())
+            val (sx, sy) = normToScreen(sheet.first, sheet.second)
             textPaint.color = Color.parseColor("#202333")
-            textPaint.textSize = (box.fontSize * scale).toFloat().coerceAtLeast(12f)
-            canvas.drawText(box.text, sx, sy, textPaint)
+            textPaint.textSize = (anchored.box.fontSize * scale).toFloat().coerceAtLeast(12f)
+            canvas.drawText(anchored.box.text, sx, sy, textPaint)
         }
         if (lassoPoints.size > 1) {
             val path = Path()
@@ -1211,13 +1225,34 @@ class InkSurfaceView @JvmOverloads constructor(
         }
     }
 
-    private fun drawBackdrop(canvas: Canvas, scale: Float) {
-        for (slice in backdrop) {
-            val bitmap = slice.bitmap ?: continue
-            val top = pageTop + slice.topPagePx * scale
-            val destHeight = slice.heightPagePx * scale
-            val destWidth = slice.widthPagePx * scale
-            canvas.drawBitmap(bitmap, null, android.graphics.RectF(pageLeft, top, pageLeft + destWidth, top + destHeight), tilePaint)
+    private fun drawBackdrop(canvas: Canvas, scale: Float, placements: List<ch.fasrv.fanotes.desk.WorksheetPlacement>) {
+        if (placements.isEmpty()) {
+            for (slice in backdrop) {
+                val bitmap = slice.bitmap ?: continue
+                val top = pageTop + slice.topPagePx * scale
+                val destHeight = slice.heightPagePx * scale
+                val destWidth = slice.widthPagePx * scale
+                canvas.drawBitmap(bitmap, null, android.graphics.RectF(pageLeft, top, pageLeft + destWidth, top + destHeight), tilePaint)
+            }
+            return
+        }
+        val label = backdrop.associate { it.worksheetId to it.label }
+        cardEdge.strokeWidth = max(1f, scale)
+        for (place in placements) {
+            val bitmap = backdrop.firstOrNull { it.worksheetId == place.id }?.bitmap ?: continue
+            val left = pageLeft + place.left.toFloat() * scale
+            val top = pageTop + place.top.toFloat() * scale
+            val right = left + place.width.toFloat() * scale
+            val bottom = top + place.height.toFloat() * scale
+            val card = android.graphics.RectF(left, top, right, bottom)
+            canvas.drawRect(card, cardFill)
+            canvas.drawBitmap(bitmap, null, card, tilePaint)
+            canvas.drawRect(card, cardEdge)
+            val caption = label[place.id].orEmpty()
+            if (caption.isNotEmpty()) {
+                captionPaint.textSize = 13f * scale
+                canvas.drawText(caption, left, pageTop + (place.captionTop + 18.0).toFloat() * scale, captionPaint)
+            }
         }
     }
 
@@ -1820,40 +1855,101 @@ class InkSurfaceView @JvmOverloads constructor(
         canvas.restore()
     }
 
+    private fun markdownBottomPagePx(scale: Float): Double {
+        if (!showMarkdown || markdown.isBlank() || scale <= 0f) return 0.0
+        var height = 0f
+        for (block in paperBlocks(scale)) {
+            height += when (block) {
+                is PaperBlock.Text -> block.layout.height.toFloat()
+                is PaperBlock.Table -> block.rowHeights.sum() + 10f * scale
+            }
+        }
+        val originY = session?.document?.originY ?: 0.0
+        return TEXT_PAD_Y.toDouble() + originY + (height / scale).toDouble()
+    }
+
+    private fun currentPlacements(scale: Float): List<ch.fasrv.fanotes.desk.WorksheetPlacement> {
+        val sheets = backdrop.filter { slice ->
+            val bitmap = slice.bitmap
+            slice.worksheetId.isNotEmpty() && bitmap != null && !bitmap.isRecycled && bitmap.width > 0 && bitmap.height > 0
+        }
+        if (sheets.isEmpty()) return emptyList()
+        val aspects = sheets.map { slice ->
+            val bitmap = slice.bitmap!!
+            slice.worksheetId to bitmap.height.toDouble() / bitmap.width.toDouble()
+        }
+        return ch.fasrv.fanotes.desk.layoutWorksheetColumn(sessionWidth(), markdownBottomPagePx(scale), aspects)
+    }
+
+    private fun openWorksheetId(): String? = backdrop.firstOrNull { it.worksheetId.isNotEmpty() }?.worksheetId
+
+    private fun hitWorksheetBox(anchored: ch.fasrv.fanotes.desk.AnchoredBox, x: Double, y: Double): Boolean {
+        val place = worksheetPlacements.firstOrNull { it.id == anchored.worksheetId } ?: return false
+        val width = sessionWidth()
+        if (width <= 0.0) return false
+        val sheet = ch.fasrv.fanotes.desk.boxOnFrame(anchored.box, place, width, sessionHeight())
+        val boxWidth = anchored.box.width * place.width / width
+        return x >= sheet.first && x <= sheet.first + boxWidth && kotlin.math.abs(y - sheet.second) < 0.04
+    }
+
     private fun commitHighlight() {
         val left = min(highlightStartX, highlightEndX)
         val top = min(highlightStartY, highlightEndY)
         val width = abs(highlightEndX - highlightStartX)
         val height = abs(highlightEndY - highlightStartY)
-        val frames = pageFrames
-        val existing = worksheetHighlights.firstOrNull { mark ->
-            val rect = ch.fasrv.fanotes.desk.highlightToSheet(mark, frames, sessionWidth(), sessionHeight())
+        val placements = currentPlacements(pixelsPerPageUnit())
+        worksheetPlacements = placements
+        val sheetWidth = sessionWidth()
+        val sheetHeight = sessionHeight()
+        if (placements.isEmpty()) {
+            val frames = pageFrames
+            val existing = worksheetHighlights.firstOrNull { anchored ->
+                val rect = ch.fasrv.fanotes.desk.highlightToSheet(anchored.mark, frames, sheetWidth, sheetHeight)
+                left >= rect.x && left <= rect.x + rect.width && top >= rect.y && top <= rect.y + rect.height && width < 0.02 && height < 0.02
+            }
+            if (existing != null) {
+                onRemoveHighlight(existing.mark.id)
+                return
+            }
+            val mark = ch.fasrv.fanotes.desk.highlightFromDrag(
+                left, top, width, height, frames, sheetWidth, sheetHeight,
+                "hl-${System.currentTimeMillis().toString(36)}",
+            ) ?: return
+            val worksheetId = openWorksheetId() ?: return
+            onPlaceHighlight(worksheetId, mark)
+            return
+        }
+        val existing = worksheetHighlights.firstOrNull { anchored ->
+            val frame = placements.firstOrNull { it.id == anchored.worksheetId } ?: return@firstOrNull false
+            val rect = ch.fasrv.fanotes.desk.highlightFrameToSheet(anchored.mark, frame, sheetWidth, sheetHeight)
             left >= rect.x && left <= rect.x + rect.width && top >= rect.y && top <= rect.y + rect.height && width < 0.02 && height < 0.02
         }
         if (existing != null) {
-            onRemoveHighlight(existing.id)
+            onRemoveHighlight(existing.mark.id)
             return
         }
-        val mark = ch.fasrv.fanotes.desk.highlightFromDrag(
-            left,
-            top,
-            width,
-            height,
-            frames,
-            sessionWidth(),
-            sessionHeight(),
-            "hl-${System.currentTimeMillis().toString(36)}",
-        ) ?: return
-        onPlaceHighlight(mark)
+        val id = "hl-${System.currentTimeMillis().toString(36)}"
+        for (frame in placements) {
+            val mark = ch.fasrv.fanotes.desk.highlightOnFrame(left, top, width, height, frame, sheetWidth, sheetHeight, id) ?: continue
+            onPlaceHighlight(frame.id, mark)
+            return
+        }
     }
 
     private fun drawHighlights(canvas: Canvas) {
         highlightPaint.style = Paint.Style.FILL
-        worksheetHighlights.forEach { mark ->
-            val rect = ch.fasrv.fanotes.desk.highlightToSheet(mark, pageFrames, sessionWidth(), sessionHeight())
+        val sheetWidth = sessionWidth()
+        val sheetHeight = sessionHeight()
+        worksheetHighlights.forEach { anchored ->
+            val rect = if (worksheetPlacements.isEmpty()) {
+                ch.fasrv.fanotes.desk.highlightToSheet(anchored.mark, pageFrames, sheetWidth, sheetHeight)
+            } else {
+                val frame = worksheetPlacements.firstOrNull { it.id == anchored.worksheetId } ?: return@forEach
+                ch.fasrv.fanotes.desk.highlightFrameToSheet(anchored.mark, frame, sheetWidth, sheetHeight)
+            }
             val (x1, y1) = normToScreen(rect.x, rect.y)
             val (x2, y2) = normToScreen(rect.x + rect.width, rect.y + rect.height)
-            highlightPaint.color = parseColor(mark.color)
+            highlightPaint.color = parseColor(anchored.mark.color)
             highlightPaint.alpha = 96
             canvas.drawRect(x1, y1, x2, y2, highlightPaint)
         }
@@ -1904,4 +2000,6 @@ data class BackdropSlice(
     val heightPagePx: Float,
     val widthPagePx: Float,
     val bitmap: Bitmap?,
+    val worksheetId: String = "",
+    val label: String = "",
 )

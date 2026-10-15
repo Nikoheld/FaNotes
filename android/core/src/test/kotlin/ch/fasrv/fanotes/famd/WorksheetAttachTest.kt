@@ -16,5 +16,10 @@ class WorksheetAttachTest {
         val removed = detachWorksheet("Hallo\n\n<!-- fanotes-worksheet:$id -->\n", id)
         assertEquals("Hallo\n", removed)
         assertEquals("Hallo", detachWorksheet("Hallo", "../x"))
+        assertEquals(".fanotes/worksheets/sheet-1.json", worksheetRecordPath(id))
+        assertEquals(".fanotes/worksheets/sheet-1.png", safeWorksheetSource(id, ".fanotes/worksheets/sheet-1.png"))
+        assertEquals(null, safeWorksheetSource(id, ".fanotes/worksheets/other.png"))
+        assertEquals(null, safeWorksheetSource(id, "../secret.png"))
+        assertEquals(null, worksheetRecordPath("../x"))
     }
 }

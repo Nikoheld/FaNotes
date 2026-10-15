@@ -2,6 +2,8 @@ package ch.fasrv.fanotes.vault
 
 import ch.fasrv.fanotes.famd.FAMD_EXTENSION
 import ch.fasrv.fanotes.famd.attachNoteInk
+import ch.fasrv.fanotes.famd.safeWorksheetSource
+import ch.fasrv.fanotes.famd.worksheetRecordPath
 import ch.fasrv.fanotes.famd.companionPath
 import ch.fasrv.fanotes.famd.emptyFamdPayload
 import ch.fasrv.fanotes.famd.isoNow
@@ -17,6 +19,7 @@ import ch.fasrv.fanotes.ink.InkDocument
 import ch.fasrv.fanotes.ink.newInkDocument
 import ch.fasrv.fanotes.ink.parseInkDocument
 import ch.fasrv.fanotes.json.JsonValue
+import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.json.deepCopy
 import ch.fasrv.fanotes.json.jsonArray
 import ch.fasrv.fanotes.json.jsonNumber
@@ -209,6 +212,17 @@ class NoteStore(private val io: VaultIo) {
         )
         io.write(data, record.stringify().encodeToByteArray())
         return StoredWorksheet(id, title)
+    }
+
+    /** Deletes the worksheet JSON and its image or PDF, and nothing else in the vault. */
+    fun deleteWorksheet(id: String) {
+        val record = worksheetRecordPath(id) ?: return
+        val raw = io.read(record)?.decodeToString()
+        val source = raw?.let {
+            runCatching { (parseJson(it) as? JsonValue.Obj)?.string("sourceRelativePath") }.getOrNull()
+        }
+        safeWorksheetSource(id, source)?.let { path -> if (io.exists(path)) io.delete(path) }
+        if (io.exists(record)) io.delete(record)
     }
 
     fun importImageWorksheet(directory: String, fileName: String, bytes: ByteArray, mime: String): String {

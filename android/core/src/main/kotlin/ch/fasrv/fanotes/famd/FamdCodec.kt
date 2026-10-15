@@ -54,6 +54,20 @@ fun attachWorksheet(content: String, id: String): String {
     return "$content$separator<!-- fanotes-worksheet:$id -->\n"
 }
 
+fun worksheetRecordPath(id: String): String? =
+    if (WORKSHEET_ID.matches(id)) ".fanotes/worksheets/$id.json" else null
+
+/**
+ * The image or PDF next to a worksheet record. Anything outside
+ * `.fanotes/worksheets/<id>.<ext>` is refused, including `..`.
+ */
+fun safeWorksheetSource(id: String, relative: String?): String? {
+    if (!WORKSHEET_ID.matches(id)) return null
+    val path = relative?.replace('\\', '/')?.trim()?.removePrefix("/") ?: return null
+    val pattern = Regex("""^\.fanotes/worksheets/${Regex.escape(id)}\.(?:png|jpe?g|webp|gif|pdf|html)$""")
+    return if (pattern.matches(path)) path else null
+}
+
 /** Removes one worksheet marker and collapses the blank lines it left behind. */
 fun detachWorksheet(content: String, id: String): String {
     if (!WORKSHEET_ID.matches(id)) return content

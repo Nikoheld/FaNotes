@@ -1159,10 +1159,22 @@ private fun NotePage(
 ) {
     val noteKind = model.open.collectAsStateWithLifecycle().value?.kind
     Column(modifier) {
-        if (path != null) {
+            if (path != null) {
             Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onExportPdf) { Text("Als PDF exportieren") }
                 TextButton(onClick = onDownload) { Text("Herunterladen") }
+            }
+            val sheets = backdrop.filter { it.worksheetId.isNotEmpty() }
+            if (sheets.isNotEmpty()) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    sheets.forEach { slice ->
+                        Text(slice.label.ifBlank { "Arbeitsblatt" }, fontSize = 13.sp, maxLines = 1)
+                        TextButton(onClick = { model.removeWorksheet(slice.worksheetId) }) { Text("Entfernen") }
+                    }
+                }
             }
             NoteTagBar(model)
             MarginTranscript(model)
@@ -1282,7 +1294,7 @@ private fun PageSurface(
             page.ink.linkMarks = links
             page.ink.worksheetBoxes = boxes
             page.ink.worksheetHighlights = highlights
-            page.ink.pageFrames = backdrop.mapIndexed { index, slice ->
+            page.ink.pageFrames = backdrop.filter { it.worksheetId.isEmpty() }.mapIndexed { index, slice ->
                 ch.fasrv.fanotes.desk.PageFrame(index + 1, slice.topPagePx.toDouble(), slice.heightPagePx.toDouble(), slice.widthPagePx.toDouble())
             }
             val pen = ch.fasrv.fanotes.desk.penSettings(model.effectiveDesk())
@@ -1294,7 +1306,7 @@ private fun PageSurface(
             page.ink.penOnly = ch.fasrv.fanotes.input.penOnlyEnabled(model.effectiveDesk()["pen-only"])
             page.ink.accentSecondary = android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccentSecondary(model.effectiveDesk()["accent-secondary"]))
             page.setWorkspace(model.effectiveDesk()["background"].orEmpty())
-            page.ink.onPlaceHighlight = { model.addWorksheetHighlight(it) }
+            page.ink.onPlaceHighlight = { worksheetId, mark -> model.addWorksheetHighlight(worksheetId, mark) }
             page.ink.onRemoveHighlight = { model.removeWorksheetHighlight(it) }
             page.onFinger = { model.fingerDraws.value = it }
             page.apply(
