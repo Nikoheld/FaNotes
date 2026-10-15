@@ -46,7 +46,7 @@ import kotlin.math.abs
  */
 class SplitEditorView(context: Context) : EditText(context) {
     var onVisibleEdit: (String, String) -> Unit = { _, _ -> }
-    var onFollowLink: (String, Boolean) -> Unit = { _, _ -> }
+    var onFollowLink: (String, Boolean, String?) -> Unit = { _, _, _ -> }
     var onToggleFold: (Int) -> Unit = {}
     var onEditorFold: (String, Int) -> Unit = { _, _ -> }
     var foldSource: String = ""
@@ -573,7 +573,7 @@ class SplitEditorView(context: Context) : EditText(context) {
         if (editable.getSpans(probeStart, probeEnd, LinkSpan::class.java).isNotEmpty()) {
             val link = ch.fasrv.fanotes.desk.followedLinkAt(before, offset)
             if (link != null) {
-                onFollowLink(link.target, link.web)
+                onFollowLink(link.target, link.web, link.anchor)
                 return true
             }
         }

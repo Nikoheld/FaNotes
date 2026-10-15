@@ -528,7 +528,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onSync: () -> Unit = {}
     var onMarkdown: (String) -> Unit = {}
     var onPasteImage: (String, ByteArray, String) -> Unit = { _, _, _ -> }
-    var onFollowLink: (String, Boolean) -> Unit = { _, _ -> }
+    var onFollowLink: (String, Boolean, String?) -> Unit = { _, _, _ -> }
     var onVisibleMarkdown: (String, String) -> Unit = { _, next -> onMarkdown(next) }
     var onRememberCamera: (
         String,
@@ -718,7 +718,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val probeEnd = (offset + 1).coerceAtMost(editable.length)
         if (editable.getSpans(probeStart, probeEnd, LinkSpan::class.java).isEmpty()) return false
         val link = ch.fasrv.fanotes.desk.followedLinkAt(editable.toString(), offset) ?: return false
-        onFollowLink(link.target, link.web)
+        onFollowLink(link.target, link.web, link.anchor)
         return true
     }
 

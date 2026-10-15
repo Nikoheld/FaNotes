@@ -987,9 +987,15 @@ fun FaNotesScreen(
     }
 }
 
-private fun openFollowedLink(context: android.content.Context, model: FaNotesViewModel, target: String, web: Boolean) {
+private fun openFollowedLink(
+    context: android.content.Context,
+    model: FaNotesViewModel,
+    target: String,
+    web: Boolean,
+    anchor: String? = null,
+) {
     if (!web) {
-        model.openWikiTarget(target)
+        model.openWikiTarget(target, anchor)
         return
     }
     val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(target))
@@ -1767,7 +1773,7 @@ private fun SplitPane(
                 update = { editor ->
                     splitEditor = editor
                     editor.onVisibleEdit = { previous, next -> model.updateSplitVisible(previous, next) }
-                    editor.onFollowLink = { target, web -> openFollowedLink(editor.context, model, target, web) }
+                    editor.onFollowLink = { target, web, anchor -> openFollowedLink(editor.context, model, target, web, anchor) }
                     editor.accent = android.graphics.Color.parseColor(
                         ch.fasrv.fanotes.desk.normalizeAccent(model.effectiveDesk()["accent"]),
                     )
@@ -1956,7 +1962,7 @@ private fun PageSurface(
             page.onSync = onSync
             page.onMarkdown = { model.updateMarkdown(it) }
             page.onPasteImage = { name, bytes, mime -> model.importBytes(name, bytes, pdf = false, mime = mime) }
-            page.onFollowLink = { target, web -> openFollowedLink(page.context, model, target, web) }
+            page.onFollowLink = { target, web, anchor -> openFollowedLink(page.context, model, target, web, anchor) }
             page.onVisibleMarkdown = { previous, next -> model.updateVisibleMarkdown(previous, next) }
             page.onRememberCamera = { path, zoom, rotation, centreX, centreY, pageWidth, pageHeight, anchor ->
                 model.rememberPaperCamera(path, zoom, rotation, centreX, centreY, pageWidth, pageHeight, anchor)

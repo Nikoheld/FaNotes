@@ -278,12 +278,13 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     private var openGeneration = 0
 
-    fun openPath(path: String, force: Boolean = false, fromHistory: NoteTrail? = null) {
+    fun openPath(path: String, force: Boolean = false, fromHistory: NoteTrail? = null, headingAnchor: String? = null) {
         val generation = ++openGeneration
         viewModelScope.launch {
             try {
                 if (swappedSplit(open.value?.path, splitPath.value)?.first == path) {
                     swapSplitNow()
+                    jumpToHeading(markdown.value, headingAnchor)
                     return@launch
                 }
                 if (!force) saveNow()
@@ -293,6 +294,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 open.value = noteOpened(note)
                 markdown.value = note.markdown
                 foldedHeadings.value = foldsForSections(note.markdown, note.document)
+                jumpToHeading(note.markdown, headingAnchor)
                 rememberTags(path, note.markdown)
                 refreshBacklinks(path)
                 rememberTab(path)
@@ -3021,14 +3023,25 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private fun historyPathFor(note: OpenNote): String =
         if (note.kind == NoteKind.PDF) companionPath(note.path, ".famd") else note.path
 
-    fun openWikiTarget(target: String) {
-        val path = resolveWikiTarget(target, flatNotes().map { it.path }, open.value?.path)
+    fun openWikiTarget(target: String, anchor: String? = null) {
+        val file = target.substringBefore('#').trim()
+        val hash = anchor?.trim()?.removePrefix("#")?.takeIf { it.isNotEmpty() }
+            ?: target.substringAfter('#', "").trim().takeIf { it.isNotEmpty() }
+        if (file.isEmpty()) return
+        val path = resolveWikiTarget(file, flatNotes().map { it.path }, open.value?.path)
         if (path == null) {
-            message.value = "Keine Notiz für [[${target.trim()}]]."
+            message.value = "Keine Notiz für [[${file}]]."
             return
         }
-        openPath(path)
+        if (open.value?.path == path) jumpToHeading(markdown.value, hash)
+        else openPath(path, headingAnchor = hash)
         destination.value = "notes"
+    }
+
+    private fun jumpToHeading(markdown: String, anchor: String?) {
+        val line = anchor?.let { ch.fasrv.fanotes.desk.headingAnchorLine(markdown, it) } ?: return
+        showText.value = true
+        outlineJump.value = line
     }
 
     private fun refreshBacklinks(path: String) {
