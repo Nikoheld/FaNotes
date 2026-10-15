@@ -12,7 +12,10 @@ import android.text.InputType
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
+import android.app.Activity
 import android.content.ClipboardManager
+import android.content.ContextWrapper
+import android.view.DragEvent
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -1286,6 +1289,59 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val next = ch.fasrv.fanotes.desk.workspaceBackground(kind)
         setBackgroundColor(if (next == "clean") 0xFFE8E6E1.toInt() else android.graphics.Color.TRANSPARENT)
         ink.applyWorkspaceKind(next)
+    }
+
+    override fun onDragEvent(event: DragEvent): Boolean {
+        if (!dragOffersImage(event)) return false
+        return when (event.action) {
+            DragEvent.ACTION_DRAG_STARTED,
+            DragEvent.ACTION_DRAG_ENTERED,
+            DragEvent.ACTION_DRAG_LOCATION,
+            DragEvent.ACTION_DRAG_EXITED,
+            DragEvent.ACTION_DRAG_ENDED,
+            -> true
+            DragEvent.ACTION_DROP -> dropImage(event)
+            else -> false
+        }
+    }
+
+    private fun hostActivity(): Activity? {
+        var current = context
+        while (current is ContextWrapper) {
+            if (current is Activity) return current
+            current = current.baseContext
+        }
+        return null
+    }
+
+    private fun dragOffersImage(event: DragEvent): Boolean {
+        val description = event.clipDescription ?: return false
+        for (index in 0 until description.mimeTypeCount) {
+            if (ch.fasrv.fanotes.desk.droppedImageFile(description.getMimeType(index)) != null) return true
+        }
+        return false
+    }
+
+    private fun dropImage(event: DragEvent): Boolean {
+        val description = event.clipDescription ?: return false
+        var mime: String? = null
+        for (index in 0 until description.mimeTypeCount) {
+            mime = ch.fasrv.fanotes.desk.clipboardImageMime(description.getMimeType(index))
+            if (mime != null) break
+        }
+        val type = mime ?: return false
+        val clip = event.clipData ?: return false
+        if (clip.itemCount == 0) return false
+        val uri = clip.getItemAt(0).uri ?: return false
+        val permission = hostActivity()?.requestDragAndDropPermissions(event)
+        val bytes = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        }.getOrNull()
+        permission?.release()
+        if (bytes == null || bytes.isEmpty()) return false
+        val name = ch.fasrv.fanotes.desk.droppedImageFile(type) ?: return false
+        onPasteImage(name, bytes, type)
+        return true
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
