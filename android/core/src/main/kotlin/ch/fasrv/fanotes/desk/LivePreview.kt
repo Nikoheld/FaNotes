@@ -313,7 +313,7 @@ private fun styledTableRow(cells: List<String>): Pair<String, List<DetailsInline
     val marks = ArrayList<DetailsInline>()
     cells.forEachIndexed { index, cell ->
         if (index > 0) text.append('\u001f')
-        val (plain, inlines) = detailsPlain(cell)
+        val (plain, inlines) = detailsPlain(cell, autolinks = true)
         val origin = text.length
         marks += inlines.map { it.copy(start = it.start + origin, end = it.end + origin) }
         text.append(plain)
@@ -345,7 +345,7 @@ fun detailsReadingLines(body: String): List<DetailsReadingLine> {
             }
             PaperKind.TASK -> {
                 val done = line.text.startsWith("x|")
-                val (plain, marks) = detailsPlain(line.text.substringAfter('|'))
+                val (plain, marks) = detailsPlain(line.text.substringAfter('|'), autolinks = true)
                 val prefix = if (done) "☑ " else "☐ "
                 val text = prefix + plain
                 if (text.isBlank()) emptyList()
@@ -360,7 +360,7 @@ fun detailsReadingLines(body: String): List<DetailsReadingLine> {
                 )
             }
             else -> {
-                val (plain, marks) = detailsPlain(line.text)
+                val (plain, marks) = detailsPlain(line.text, autolinks = true)
                 if (plain.isBlank()) emptyList()
                 else {
                     val bullet = line.kind == PaperKind.BULLET
