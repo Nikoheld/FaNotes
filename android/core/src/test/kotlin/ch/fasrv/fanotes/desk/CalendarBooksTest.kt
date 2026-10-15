@@ -23,6 +23,16 @@ class CalendarBooksTest {
         val timed = CalendarEvent("e", "personal", "Lesen", "2026-10-15T08:00", "2026-10-15T09:00", allDay = false)
         assertEquals("08:00 Lesen", monthEventLabel(timed))
         assertEquals("Tag", monthEventLabel(CalendarEvent("e", "personal", "Tag", "2026-10-14", "2026-10-14", allDay = true)))
+        val agenda = calendarRange("agenda", LocalDate.parse("2026-10-15"))
+        assertEquals(21, agenda.size)
+        assertEquals(LocalDate.parse("2026-10-14"), agenda.first())
+        assertEquals(LocalDate.parse("2026-11-03"), agenda.last())
+        val cursor = LocalDate.parse("2026-10-15")
+        assertEquals(cursor.plusWeeks(1), calendarShift("agenda", cursor, 1))
+        assertEquals(cursor.plusWeeks(1), calendarShift("week", cursor, 1))
+        assertEquals(cursor.plusDays(3), calendarShift("three", cursor, 1))
+        assertEquals(cursor.plusMonths(1), calendarShift("month", cursor, 1))
+        assertEquals(cursor.plusDays(1), calendarShift("day", cursor, 1))
     }
 
     @Test

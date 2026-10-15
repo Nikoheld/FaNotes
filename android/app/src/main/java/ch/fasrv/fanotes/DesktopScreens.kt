@@ -808,17 +808,9 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
     var editor by remember { mutableStateOf<CalendarDraft?>(null) }
     val day = anchor.toString()
     fun shiftCalendar(step: Int) {
-        anchor = when (view) {
-            "day" -> anchor.plusDays(step.toLong())
-            "three" -> anchor.plusDays(3L * step)
-            "week" -> anchor.plusWeeks(step.toLong())
-            "agenda" -> anchor.plusDays(28L * step)
-            else -> {
-                val next = if (step < 0) month.minusMonths(1) else month.plusMonths(1)
-                month = next
-                next.atDay(1)
-            }
-        }
+        val next = ch.fasrv.fanotes.desk.calendarShift(view, anchor, step)
+        anchor = next
+        if (view == "month") month = YearMonth.from(next)
     }
     Column(
         Modifier
@@ -863,25 +855,9 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 anchor = LocalDate.now()
                 month = YearMonth.now()
             }) { Text("Heute") }
-            TextButton(onClick = {
-                anchor = when (view) {
-                    "day" -> anchor.minusDays(1)
-                    "three" -> anchor.minusDays(3)
-                    "week" -> anchor.minusWeeks(1)
-                    "agenda" -> anchor.minusDays(28)
-                    else -> month.minusMonths(1).atDay(1).also { month = YearMonth.from(it) }
-                }
-            }) { Text("‹") }
+            TextButton(onClick = { shiftCalendar(-1) }) { Text("‹") }
             Text(if (view == "month") month.toString() else day, modifier = Modifier.padding(horizontal = 8.dp))
-            TextButton(onClick = {
-                anchor = when (view) {
-                    "day" -> anchor.plusDays(1)
-                    "three" -> anchor.plusDays(3)
-                    "week" -> anchor.plusWeeks(1)
-                    "agenda" -> anchor.plusDays(28)
-                    else -> month.plusMonths(1).atDay(1).also { month = YearMonth.from(it) }
-                }
-            }) { Text("›") }
+            TextButton(onClick = { shiftCalendar(1) }) { Text("›") }
         }
         when (view) {
             "month" -> MonthGrid(
