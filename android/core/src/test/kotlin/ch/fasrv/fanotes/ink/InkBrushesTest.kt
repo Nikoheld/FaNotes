@@ -77,4 +77,32 @@ class InkBrushesTest {
         val shifted = pencilGrainSegments(straight, 100.0, 100.0, 0.0, 3.0, true, 0.22, 1, 1, 1.4, 1.0).single()
         assertEquals(pencilJitterOffset(1, 1, 1, 1.4).first, shifted.startX, 1e-9)
     }
+
+    @Test
+    fun constantWidthDropsATinyPenUpStub() {
+        val points = listOf(
+            StrokePoint(0.0, 0.0, 0.0, 0.5, 0.0, 0.0, "pen"),
+            StrokePoint(1.0, 0.0, 1.0, 0.5, 0.0, 0.0, "pen"),
+            StrokePoint(1.001, 0.0, 2.0, 0.5, 0.0, 0.0, "pen"),
+        )
+        val stroke = constantWidthStroke(points, 100.0, 100.0, 0.0, 10.0, false, 1.0, 1.0)
+        assertEquals(listOf(0.0, 100.0), stroke?.commands?.map {
+            when (it) {
+                is StrokeCommand.Move -> it.x
+                is StrokeCommand.Line -> it.x
+                is StrokeCommand.Quad -> it.x
+            }
+        })
+        val kept = constantWidthStroke(
+            points.dropLast(1) + StrokePoint(2.0, 0.0, 2.0, 0.5, 0.0, 0.0, "pen"),
+            100.0, 100.0, 0.0, 10.0, false, 1.0, 1.0,
+        )
+        assertEquals(3, kept?.commands?.size)
+        val light = StrokePoint(0.0, 0.0, 0.0, 0.1, 0.0, 0.0, "pen")
+        val heavy = StrokePoint(1.0, 0.0, 1.0, 1.0, 0.0, 0.0, "pen")
+        val soft = pencilGrainSegments(listOf(light, light.copy(x = 1.0)), 100.0, 100.0, 0.0, 4.0, true, 1.0, 1, 0, 0.0, 1.0).single().width
+        val firm = pencilGrainSegments(listOf(heavy, heavy.copy(x = 1.0)), 100.0, 100.0, 0.0, 4.0, true, 1.0, 1, 0, 0.0, 1.0).single().width
+        assertTrue(firm > soft)
+        assertEquals(5.0, strokeDotRadius(10.0, 0.5, false, 1.0), 1e-9)
+    }
 }

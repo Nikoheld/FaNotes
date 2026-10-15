@@ -380,37 +380,7 @@ private fun drawStroke(canvas: Canvas, stroke: InkStroke, sourceWidth: Double, s
         drawCalligraphyStroke(canvas, paint, stroke, scale, sourceWidth, sourceHeight, parsePdfColor(stroke.color))
         return
     }
-    val passes = ch.fasrv.fanotes.ink.brushPasses(stroke.brush)
-    val baseAlpha = if (stroke.purpose == "art") (stroke.opacity ?: 1.0) else 1.0
-    for ((passIndex, pass) in passes.withIndex()) {
-        if (pass.jitter > 0.0) {
-            paint.color = parsePdfColor(stroke.color)
-            drawPencilGrain(
-                canvas,
-                paint,
-                stroke,
-                sourceWidth,
-                sourceHeight,
-                scale,
-                smoothing.toDouble(),
-                passIndex,
-                pass.jitter,
-                pass.widthFactor,
-                (baseAlpha * pass.alpha * 255.0).toInt().coerceIn(0, 255),
-            )
-            continue
-        }
-        canvas.save()
-        val outline = ribbonOutline(stroke, sourceWidth, sourceHeight, smoothing.toDouble(), widthFactor = pass.widthFactor)
-        val path = Path()
-        smoothOutline(path, outline, scale)
-        if (!path.isEmpty) {
-            paint.color = parsePdfColor(stroke.color)
-            paint.alpha = (baseAlpha * pass.alpha * 255.0).toInt().coerceIn(0, 255)
-            drawInkPath(canvas, path, paint, stroke.colorEffect, (sourceWidth * scale).toFloat(), (sourceHeight * scale).toFloat(), (stroke.baseWidth * pass.widthFactor * scale).toFloat())
-        }
-        canvas.restore()
-    }
+    drawBrushPasses(canvas, paint, stroke, sourceWidth, sourceHeight, scale, smoothing.toDouble(), parsePdfColor(stroke.color))
 }
 
 private fun smoothOutline(path: Path, outline: FloatArray, scale: Float) {

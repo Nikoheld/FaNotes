@@ -213,3 +213,83 @@ fun pencilGrainSegments(
     }
     return segments
 }
+
+/** One command of a constant-width stroke. Coordinates are page pixels. */
+sealed class StrokeCommand {
+    data class Move(val x: Double, val y: Double) : StrokeCommand()
+    data class Line(val x: Double, val y: Double) : StrokeCommand()
+    data class Quad(val cx: Double, val cy: Double, val x: Double, val y: Double) : StrokeCommand()
+}
+
+data class ConstantStroke(val width: Double, val commands: List<StrokeCommand>)
+
+/**
+ * One joined path for a brush with pressure off. A tiny pen-up stub at the end
+ * is left out, matching `paintPassPath` in `inkStrokePaint.ts`.
+ */
+fun constantWidthStroke(
+    points: List<StrokePoint>,
+    pageWidth: Double,
+    pageHeight: Double,
+    smoothing: Double,
+    baseWidth: Double,
+    pressureEnabled: Boolean,
+    widthFactor: Double,
+    scale: Double,
+): ConstantStroke? {
+    if (points.size < 2 || scale <= 0.0) return null
+    val blend = smoothing.coerceIn(0.0, 0.92)
+    val factor = blend * 0.35
+    val tail = blend * 0.4
+    val width = segmentBitmapWidth(points[0], points[1], baseWidth, pressureEnabled, widthFactor, scale) / scale
+    var end = points.size
+    if (end - 1 > 1) {
+        val last = points[end - 1]
+        val before = points[end - 2]
+        val stub = hypot((last.x - before.x) * pageWidth, (last.y - before.y) * pageHeight)
+        if (stub < width * 0.3) end -= 1
+    }
+    if (end <= 1) return null
+    val commands = ArrayList<StrokeCommand>()
+    for (index in 1 until end) {
+        val previous = points[index - 1]
+        val point = points[index]
+        val previousX = previous.x * pageWidth
+        val previousY = previous.y * pageHeight
+        val pointX = point.x * pageWidth
+        val pointY = point.y * pageHeight
+        if (index == 1) commands += StrokeCommand.Move(previousX, previousY)
+        if (smoothing > 0.0 && index < end - 1) {
+            val next = points[index + 1]
+            val midX = pointX * (1.0 - factor) + ((pointX + next.x * pageWidth) / 2.0) * factor
+            val midY = pointY * (1.0 - factor) + ((pointY + next.y * pageHeight) / 2.0) * factor
+            commands += StrokeCommand.Quad(pointX, pointY, midX, midY)
+        } else if (smoothing > 0.0 && index >= 2) {
+            val before = points[index - 2]
+            val controlX = previousX + (previous.x - before.x) * pageWidth * tail
+            val controlY = previousY + (previous.y - before.y) * pageHeight * tail
+            commands += StrokeCommand.Quad(controlX, controlY, pointX, pointY)
+        } else {
+            commands += StrokeCommand.Line(pointX, pointY)
+        }
+    }
+    return ConstantStroke(width, commands)
+}
+
+/** Filled-dot radius in page pixels for a one-sample stroke. */
+fun strokeDotRadius(baseWidth: Double, pressure: Double, pressureEnabled: Boolean, scale: Double): Double {
+    if (scale <= 0.0) return 0.0
+    return max(1.0, pressureWidth(baseWidth, pressure, pressureEnabled) * scale) / 2.0 / scale
+}
+
+private fun segmentBitmapWidth(
+    previous: StrokePoint,
+    point: StrokePoint,
+    baseWidth: Double,
+    pressureEnabled: Boolean,
+    widthFactor: Double,
+    scale: Double,
+): Double {
+    val pressure = (previous.pressure + point.pressure) / 2.0
+    return max(1.0, pressureWidth(baseWidth, pressure, pressureEnabled) * scale) * widthFactor
+}
