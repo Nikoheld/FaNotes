@@ -13,6 +13,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
@@ -78,6 +80,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
@@ -272,6 +282,17 @@ class MainActivity : ComponentActivity() {
         val bytes = model.readUri(uri) ?: return
         model.importBytes(name, bytes, pdf, contentResolver.getType(uri).orEmpty())
     }
+}
+
+private fun VaultNode.toTreeKey(): ch.fasrv.fanotes.desk.TreeKeyNode =
+    ch.fasrv.fanotes.desk.TreeKeyNode(path, kind == NoteKind.FOLDER, children.map { it.toTreeKey() })
+
+private fun findVaultNode(nodes: List<VaultNode>, path: String): VaultNode? {
+    for (node in nodes) {
+        if (node.path == path) return node
+        if (node.kind == NoteKind.FOLDER) findVaultNode(node.children, path)?.let { return it }
+    }
+    return null
 }
 
 private val PenColors = listOf("#202333", "#2457D6", "#D23B4A", "#1F8A4C", "#E2A21B", "#7A4DD6")
@@ -536,6 +557,7 @@ fun FaNotesScreen(
                     onFolderColor = { model.cycleFolderColor(it) },
                     expanded = model.expandedFolders.collectAsStateWithLifecycle().value,
                     onToggleFolder = { model.toggleFolder(it) },
+                    onSetFolderExpanded = { path, open -> model.setFolderExpanded(path, open) },
                     onOpenSplit = { model.openInSplit(it) },
                     onCreateNoteIn = { model.createNoteIn(it) },
                     onCreateFolderIn = { model.createFolderIn(it) },
@@ -859,6 +881,7 @@ private fun VaultPane(
     onFolderColor: (String) -> Unit,
     expanded: Set<String>,
     onToggleFolder: (String) -> Unit,
+    onSetFolderExpanded: (String, Boolean) -> Unit = { _, _ -> },
     onOpenSplit: (String) -> Unit,
     onCreateNoteIn: (String) -> Unit = {},
     onCreateFolderIn: (String) -> Unit = {},
@@ -936,6 +959,8 @@ private fun VaultPane(
                 }
             }
         }
+        var treeFocus by remember(selected) { mutableStateOf(selected) }
+        val treeFocusRequester = remember { FocusRequester() }
         var dragPath by remember { mutableStateOf<String?>(null) }
         var dragFolder by remember { mutableStateOf(false) }
         var dropDest by remember { mutableStateOf<String?>(null) }
@@ -945,6 +970,36 @@ private fun VaultPane(
             Modifier
                 .weight(1f)
                 .padding(top = 8.dp)
+                .focusRequester(treeFocusRequester)
+                .focusable()
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    val command = when (event.key) {
+                        Key.DirectionDown -> "down"
+                        Key.DirectionUp -> "up"
+                        Key.MoveHome -> "home"
+                        Key.MoveEnd -> "end"
+                        Key.DirectionLeft -> "left"
+                        Key.DirectionRight -> "right"
+                        Key.F2 -> "rename"
+                        Key.Delete -> "delete"
+                        Key.Enter, Key.NumPadEnter -> if (event.isShiftPressed) "split" else "open"
+                        else -> return@onPreviewKeyEvent false
+                    }
+                    val step = ch.fasrv.fanotes.desk.applyTreeKey(tree.map { it.toTreeKey() }, expanded, treeFocus, command)
+                    treeFocus = step.focus
+                    (step.expanded - expanded).forEach { onSetFolderExpanded(it, true) }
+                    (expanded - step.expanded).forEach { onSetFolderExpanded(it, false) }
+                    val focused = step.focus?.let { path -> findVaultNode(tree, path) }
+                    when (step.action) {
+                        ch.fasrv.fanotes.desk.TreeKeyAction.OPEN -> step.focus?.let(onOpen)
+                        ch.fasrv.fanotes.desk.TreeKeyAction.OPEN_SPLIT -> step.focus?.let(onOpenSplit)
+                        ch.fasrv.fanotes.desk.TreeKeyAction.RENAME -> focused?.let { onRename(it.path, it.name) }
+                        ch.fasrv.fanotes.desk.TreeKeyAction.DELETE -> focused?.let { onDelete(it.path, it.kind == NoteKind.FOLDER, it.name) }
+                        null -> Unit
+                    }
+                    true
+                }
                 .onGloballyPositioned {
                     val bounds = it.boundsInRoot()
                     listBounds = TreeBox(bounds.left, bounds.top, bounds.right, bounds.bottom)
@@ -954,8 +1009,12 @@ private fun VaultPane(
         ) {
             items(tree, key = { it.path }) { node ->
                 NoteRow(
-                    node, selected, splitPath, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
+                    node, selected, splitPath, treeFocus, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
                     onCreateNoteIn, onCreateFolderIn, bookFolders, onImportPdfIn, onImportBook, onDetachBook,
+                    {
+                        treeFocus = it
+                        runCatching { treeFocusRequester.requestFocus() }
+                    },
                     localFolders, onToggleLocal, compact, rowHeightDp, radiusDp,
                     dragPath = dragPath,
                     dropDest = dropDest,
@@ -994,6 +1053,7 @@ private fun NoteRow(
     node: VaultNode,
     selected: String?,
     splitPath: String?,
+    treeFocus: String?,
     colors: Map<String, String>,
     expanded: Set<String>,
     onOpen: (String) -> Unit,
@@ -1009,6 +1069,7 @@ private fun NoteRow(
     onImportPdfIn: (String) -> Unit,
     onImportBook: (String) -> Unit,
     onDetachBook: (String) -> Unit,
+    onTreeFocus: (String) -> Unit,
     localFolders: List<String>,
     onToggleLocal: (String) -> Unit,
     compact: Boolean,
@@ -1034,6 +1095,11 @@ private fun NoteRow(
             .fillMaxWidth()
             .padding(start = (depth * 12).dp)
             .height(ch.fasrv.fanotes.desk.chromeRowHeightDp(compact, rowHeightDp).dp)
+            .border(
+                if (node.path == treeFocus) 1.dp else 0.dp,
+                MaterialTheme.colorScheme.primary,
+                RoundedCornerShape(radiusDp.dp),
+            )
             .clip(RoundedCornerShape(radiusDp.dp))
             .background(
                 when {
@@ -1055,6 +1121,7 @@ private fun NoteRow(
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
             modifier = Modifier.width(14.dp).clickable {
+                onTreeFocus(node.path)
                 if (folder) onToggleFolder(node.path) else onOpen(node.path)
             },
         )
@@ -1100,7 +1167,10 @@ private fun NoteRow(
                             "tap"
                         }
                         when (held) {
-                            "tap" -> if (folder) onToggleFolder(node.path) else onOpen(node.path)
+                            "tap" -> {
+                                onTreeFocus(node.path)
+                                if (folder) onToggleFolder(node.path) else onOpen(node.path)
+                            }
                             "scroll", "cancel" -> Unit
                             else -> {
                                 onDragStart(node.path, folder)
@@ -1215,8 +1285,9 @@ private fun NoteRow(
     if (openFolder) {
         node.children.forEach {
             NoteRow(
-                it, selected, splitPath, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
+                it, selected, splitPath, treeFocus, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
                 onCreateNoteIn, onCreateFolderIn, bookFolders, onImportPdfIn, onImportBook, onDetachBook,
+                onTreeFocus,
                 localFolders, onToggleLocal, compact, rowHeightDp, radiusDp,
                 dragPath = dragPath,
                 dropDest = dropDest,
