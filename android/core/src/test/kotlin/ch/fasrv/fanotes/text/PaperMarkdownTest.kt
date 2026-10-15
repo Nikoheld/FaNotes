@@ -67,5 +67,10 @@ class PaperMarkdownTest {
         assertEquals("bilder/tafel.png", paperImageSource(card.text))
         assertEquals("foto.png", paperImageCaption(paperLines("![](ordner/foto.png)").single().text))
         assertEquals(PaperKind.PARAGRAPH, paperLines("Text ![Tafel](a.png) danach").single().kind)
+        assertEquals(listOf("Schule/bilder/tafel.png", "bilder/tafel.png"), resolvePaperImagePaths("Schule/Mathe.md", "./bilder/tafel.png"))
+        assertEquals(emptyList(), resolvePaperImagePaths("Schule/Mathe.md", "https://example.com/a.png"))
+        assertEquals(emptyList(), resolvePaperImagePaths("Schule/Mathe.md", "../geheim.png"))
+        assertEquals(900f to 450f, paperImageFrame(1800, 900, 900f))
+        assertEquals(900f to 1215f, paperImageFrame(100, 400, 900f))
     }
 }

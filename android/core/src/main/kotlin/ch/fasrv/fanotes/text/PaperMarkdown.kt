@@ -118,6 +118,32 @@ fun paperImageCaption(text: String): String {
 
 fun paperImageSource(text: String): String = text.substringAfter('\u001f')
 
+/**
+ * Vault paths for a markdown image. A relative source is tried beside the note,
+ * then from the vault root. Web and data URLs are left to the caption card.
+ */
+fun resolvePaperImagePaths(notePath: String, source: String): List<String> {
+    val decoded = runCatching { java.net.URLDecoder.decode(source.trim(), Charsets.UTF_8.name()) }.getOrDefault(source.trim())
+    val raw = decoded.removePrefix("./").replace('\\', '/').trim()
+    if (raw.isEmpty()) return emptyList()
+    val lower = raw.lowercase()
+    if (lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("data:") || lower.startsWith("blob:") || lower.startsWith("mailto:")) {
+        return emptyList()
+    }
+    val cleaned = raw.trim('/')
+    if (cleaned.isEmpty() || cleaned.split('/').any { it.isEmpty() || it == "." || it == ".." }) return emptyList()
+    val folder = notePath.replace('\\', '/').substringBeforeLast('/', "")
+    val beside = if (folder.isEmpty()) cleaned else "$folder/$cleaned"
+    return listOf(beside, cleaned).distinct()
+}
+
+/** Display size inside the text column. Tall pictures stay within 1.35× the column width. */
+fun paperImageFrame(pixelWidth: Int, pixelHeight: Int, columnPx: Float): Pair<Float, Float> {
+    if (pixelWidth <= 0 || pixelHeight <= 0 || columnPx <= 0f) return columnPx.coerceAtLeast(1f) to 96f
+    val height = columnPx * pixelHeight.toFloat() / pixelWidth.toFloat()
+    return columnPx to height.coerceIn(48f, columnPx * 1.35f)
+}
+
 private fun isTableRow(line: String): Boolean {
     val trimmed = line.trim()
     return trimmed.startsWith("|") && trimmed.indexOf('|', 1) > 0
