@@ -3,6 +3,10 @@ package ch.fasrv.fanotes.desk
 import java.text.Collator
 import java.util.Locale
 
+/** Empty file tree from the desktop sidebar. */
+const val EMPTY_VAULT_MESSAGE = "Noch keine Notizen vorhanden"
+const val EMPTY_VAULT_ACTION = "Erste Notiz erstellen"
+
 /**
  * Sidebar order from the desktop file tree: folders first, then a German
  * base-letter comparison that treats digit runs as numbers (`Note 2` before
