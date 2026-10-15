@@ -275,20 +275,27 @@ fun detailsImageFrame(pixelWidth: Int, pixelHeight: Int, contentPx: Float): Pair
 
 private val DETAILS_NUMBER_MARKER = Regex("""^\d+\.\s+""")
 
+fun detailsListIndent(text: String): String = text.takeWhile { it == ' ' || it == '\t' }
+
+private fun detailsAfterIndent(text: String): String = text.drop(detailsListIndent(text).length)
+
 /** Ordered-list prefix inside a details card. The desktop preview paints this marker in the accent. */
-fun detailsNumberMarker(text: String): String = DETAILS_NUMBER_MARKER.find(text)?.value.orEmpty()
+fun detailsNumberMarker(text: String): String = DETAILS_NUMBER_MARKER.find(detailsAfterIndent(text))?.value.orEmpty()
 
 /**
  * Task prefix inside a details card. `true` is checked, `false` is open,
- * and null means the line is not a task marker.
+ * and null means the line is not a task marker. Leading indent is skipped.
  */
 fun detailsTaskChecked(text: String): Boolean? = when {
-    text.startsWith("☑ ") -> true
-    text.startsWith("☐ ") -> false
+    detailsAfterIndent(text).startsWith("☑ ") -> true
+    detailsAfterIndent(text).startsWith("☐ ") -> false
     else -> null
 }
 
-fun detailsTaskMarker(text: String): String = if (detailsTaskChecked(text) == null) "" else text.take(2)
+fun detailsTaskMarker(text: String): String {
+    val body = detailsAfterIndent(text)
+    return if (detailsTaskChecked(text) == null) "" else body.take(2)
+}
 
 /** Block kind drawn inside an open details card, matching the desktop preview. */
 fun detailsReadingKind(kind: PaperKind): String = when (kind) {
@@ -345,33 +352,37 @@ fun detailsReadingLines(body: String): List<DetailsReadingLine> {
             }
             PaperKind.TASK -> {
                 val done = line.text.startsWith("x|")
-                val (plain, marks) = detailsPlain(line.text.substringAfter('|'), autolinks = true)
-                val prefix = if (done) "☑ " else "☐ "
-                val text = prefix + plain
-                if (text.isBlank()) emptyList()
+                val rawBody = line.text.substringAfter('|')
+                val indent = rawBody.takeWhile { it == ' ' || it == '\t' }
+                val (plain, marks) = detailsPlain(rawBody.trimStart(), autolinks = true)
+                val box = if (done) "☑ " else "☐ "
+                val text = indent + box + plain
+                if (plain.isBlank() && text.isBlank()) emptyList()
                 else listOf(
                     DetailsReadingLine(
                         text,
                         detailsCardScale(line.kind),
                         false,
                         "task",
-                        inlines = shiftDetailsInlines(marks, prefix.length),
+                        inlines = shiftDetailsInlines(marks, indent.length + box.length),
                     ),
                 )
             }
             else -> {
-                val (plain, marks) = detailsPlain(line.text, autolinks = true)
+                val bullet = line.kind == PaperKind.BULLET
+                val indent = if (bullet) line.text.takeWhile { it == ' ' || it == '\t' } else ""
+                val source = if (bullet) line.text.trimStart() else line.text
+                val (plain, marks) = detailsPlain(source, autolinks = true)
                 if (plain.isBlank()) emptyList()
                 else {
-                    val bullet = line.kind == PaperKind.BULLET
-                    val text = if (bullet) "• $plain" else plain
+                    val text = if (bullet) "$indent• $plain" else plain
                     listOf(
                         DetailsReadingLine(
                             text,
                             detailsCardScale(line.kind),
                             aiPreviewHeading(line.kind),
                             detailsReadingKind(line.kind),
-                            inlines = if (bullet) shiftDetailsInlines(marks, 2) else marks,
+                            inlines = if (bullet) shiftDetailsInlines(marks, indent.length + 2) else marks,
                         ),
                     )
                 }

@@ -26,6 +26,11 @@ class PaperMarkdownTest {
         assertEquals("Vorlesung", lines.first().text)
         assertEquals("Ein **Satz** auf dem Papier.", lines[2].text)
         assertEquals(listOf("erster", "zweiter"), lines.filter { it.kind == PaperKind.BULLET }.map { it.text })
+        val nested = paperLines("- erste\n    - zweite\n\t- dritte\n    1. Nummer\n    > Zitat\n    - [x] Fertig")
+        assertEquals(listOf("erste", "    zweite", "\tdritte"), nested.filter { it.kind == PaperKind.BULLET }.map { it.text })
+        assertEquals("    1. Nummer", nested.first { it.kind == PaperKind.NUMBER }.text)
+        assertEquals("    Zitat", nested.first { it.kind == PaperKind.QUOTE }.text)
+        assertEquals("x|    Fertig", nested.first { it.kind == PaperKind.TASK }.text)
         assertTrue(lines.none { it.text.contains("fanotes-ink") })
     }
 

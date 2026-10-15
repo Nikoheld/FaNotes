@@ -1908,7 +1908,10 @@ class InkSurfaceView @JvmOverloads constructor(
             val start = builder.length
             starts[index] = start
             val content: CharSequence = when (line.kind) {
-                PaperKind.BULLET -> inline("•  ${line.text}", textSize)
+                PaperKind.BULLET -> {
+                    val indent = line.text.takeWhile { it == ' ' || it == '\t' }
+                    inline("$indent•  ${line.text.trimStart()}", textSize)
+                }
                 PaperKind.TASK -> taskLine(line.text, readable, textSize)
                 PaperKind.MATH -> line.text
                 PaperKind.SPACER -> ""
@@ -1926,9 +1929,13 @@ class InkSurfaceView @JvmOverloads constructor(
                     PaperKind.H5 -> builder.setSpan(HeadingSpan(5, textSize), start, end, 0)
                     PaperKind.H6 -> builder.setSpan(HeadingSpan(6, textSize), start, end, 0)
                     PaperKind.BULLET -> {
-                        val marker = (start + 2).coerceAtMost(end)
-                        builder.setSpan(ForegroundColorSpan(readable), start, marker, 0)
-                        builder.setSpan(StyleSpan(Typeface.BOLD), start, marker, 0)
+                        val indentLen = line.text.takeWhile { it == ' ' || it == '\t' }.length
+                        val from = start + indentLen
+                        val marker = (from + 2).coerceAtMost(end)
+                        if (marker > from) {
+                            builder.setSpan(ForegroundColorSpan(readable), from, marker, 0)
+                            builder.setSpan(StyleSpan(Typeface.BOLD), from, marker, 0)
+                        }
                     }
                     PaperKind.QUOTE -> builder.setSpan(
                         PaperQuoteSpan(readable, ch.fasrv.fanotes.desk.quoteWashArgb(accentColor), textSize),
@@ -1982,10 +1989,14 @@ class InkSurfaceView @JvmOverloads constructor(
 
     private fun taskLine(raw: String, readable: Int, textSize: Float): CharSequence {
         val done = raw.startsWith("x|")
-        val label = raw.removePrefix("x|").removePrefix(" |").removePrefix("|")
-        val builder = SpannableStringBuilder(" ")
-        builder.setSpan(TaskSpan(done, readable, textSize), 0, 1, 0)
-        if (label.isNotEmpty()) builder.append(inline(label, textSize))
+        val label = raw.substringAfter('|')
+        val indent = label.takeWhile { it == ' ' || it == '\t' }
+        val rest = label.trimStart()
+        val builder = SpannableStringBuilder(indent)
+        val boxAt = builder.length
+        builder.append(" ")
+        builder.setSpan(TaskSpan(done, readable, textSize), boxAt, boxAt + 1, 0)
+        if (rest.isNotEmpty()) builder.append(inline(rest, textSize))
         return builder
     }
 
