@@ -501,6 +501,8 @@ fun FaNotesScreen(
                     expanded = model.expandedFolders.collectAsStateWithLifecycle().value,
                     onToggleFolder = { model.toggleFolder(it) },
                     onOpenSplit = { model.openInSplit(it) },
+                    onCreateNoteIn = { model.createNoteIn(it) },
+                    onCreateFolderIn = { model.createFolderIn(it) },
                     compact = compact,
                     rowHeightDp = chrome.rowHeightDp,
                     radiusDp = chrome.radiusDp ?: 10,
@@ -818,6 +820,8 @@ private fun VaultPane(
     expanded: Set<String>,
     onToggleFolder: (String) -> Unit,
     onOpenSplit: (String) -> Unit,
+    onCreateNoteIn: (String) -> Unit = {},
+    onCreateFolderIn: (String) -> Unit = {},
     conflicts: List<ch.fasrv.fanotes.sync.SyncConflict>,
     onResolve: (ch.fasrv.fanotes.sync.SyncConflict, String) -> Unit,
     compact: Boolean = false,
@@ -907,6 +911,7 @@ private fun VaultPane(
             items(tree, key = { it.path }) { node ->
                 NoteRow(
                     node, selected, splitPath, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
+                    onCreateNoteIn, onCreateFolderIn,
                     localFolders, onToggleLocal, compact, rowHeightDp, radiusDp,
                     dragPath = dragPath,
                     dropDest = dropDest,
@@ -954,6 +959,8 @@ private fun NoteRow(
     onFolderColor: (String) -> Unit,
     onToggleFolder: (String) -> Unit,
     onOpenSplit: (String) -> Unit,
+    onCreateNoteIn: (String) -> Unit,
+    onCreateFolderIn: (String) -> Unit,
     localFolders: List<String>,
     onToggleLocal: (String) -> Unit,
     compact: Boolean,
@@ -1078,6 +1085,24 @@ private fun NoteRow(
                     .padding(horizontal = 6.dp),
             )
         }
+        if (folder) {
+            Text(
+                "+",
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .clickable(onClickLabel = "Neue Notiz in diesem Ordner") { onCreateNoteIn(node.path) }
+                    .padding(horizontal = 6.dp),
+            )
+            Icon(
+                Icons.Filled.CreateNewFolder,
+                contentDescription = "Unterordner anlegen",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .size(18.dp)
+                    .clickable(onClickLabel = "Unterordner anlegen") { onCreateFolderIn(node.path) },
+            )
+        }
         if (node.kind == NoteKind.FOLDER) {
             val local = pathIsSyncExcluded(node.path, localFolders)
             Text(
@@ -1097,10 +1122,27 @@ private fun NoteRow(
             Icon(Icons.Filled.Delete, contentDescription = "Löschen")
         }
     }
+    if (openFolder && node.children.isEmpty()) {
+        Row(
+            Modifier.padding(start = ((depth + 1) * 12).dp, top = 2.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Leer", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
+            Text(
+                "Unterordner anlegen",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .padding(start = 8.dp)
+                    .clickable(onClickLabel = "Unterordner anlegen") { onCreateFolderIn(node.path) },
+            )
+        }
+    }
     if (openFolder) {
         node.children.forEach {
             NoteRow(
                 it, selected, splitPath, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
+                onCreateNoteIn, onCreateFolderIn,
                 localFolders, onToggleLocal, compact, rowHeightDp, radiusDp,
                 dragPath = dragPath,
                 dropDest = dropDest,

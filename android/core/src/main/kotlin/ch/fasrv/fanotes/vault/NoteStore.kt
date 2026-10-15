@@ -150,11 +150,37 @@ class NoteStore(private val io: VaultIo) {
         if (io.exists(path) || io.exists(companionPath(path, FAMD_EXTENSION))) {
             throw IllegalStateException("A note named $name already exists")
         }
-        val body = "# $name\n"
+        val body = "# $name\n\n"
         val document = newInkDocument(name, paper, now)
         val note = OpenNote(path, NoteKind.MARKDOWN, name, body, document, emptyFamdPayload(now), emptyList(), UUID.randomUUID().toString())
         save(note, document, body, now)
         return path
+    }
+
+    /** Creates `Unbenannte Notiz`, then `Unbenannte Notiz 2`, the way the desktop vault does. */
+    fun createUniqueMarkdown(directory: String, preferred: String = "Unbenannte Notiz", now: String = isoNow(), paper: String = "dots"): String {
+        val stem = nextFreeLeaf(directory, safeNoteName(preferred), ".md")
+        return createMarkdown(directory, stem, now, paper)
+    }
+
+    /** Creates `Neuer Ordner`, then `Neuer Ordner 2`, inside the chosen folder. */
+    fun createUniqueFolder(directory: String, preferred: String = "Neuer Ordner") {
+        val stem = nextFreeLeaf(directory, safeNoteName(preferred), "")
+        createFolder(directory, stem)
+    }
+
+    private fun nextFreeLeaf(directory: String, stem: String, extension: String): String {
+        fun taken(name: String): Boolean {
+            val leaf = name + extension
+            val folder = directory.trim('/')
+            val path = if (folder.isEmpty()) leaf else "$folder/$leaf"
+            if (io.exists(path)) return true
+            return extension == ".md" && io.exists(companionPath(path, FAMD_EXTENSION))
+        }
+        if (!taken(stem)) return stem
+        var index = 2
+        while (taken("$stem $index")) index += 1
+        return "$stem $index"
     }
 
     fun createFolder(directory: String, title: String) {

@@ -870,6 +870,50 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun createNoteIn(parent: String) {
+        viewModelScope.launch {
+            val folder = parent.trim('/')
+            val path = try {
+                val paper = ch.fasrv.fanotes.desk.penSettings(deskSettings.value).paper
+                withContext(Dispatchers.IO) { graph.store.createUniqueMarkdown(folder, paper = paper) }
+            } catch (error: Exception) {
+                message.value = error.message ?: "Die Notiz konnte nicht erstellt werden."
+                return@launch
+            }
+            openCreatedFolder(folder)
+            refreshTree()
+            openPath(path, force = true)
+            message.value = "Neue Markdown-Notiz erstellt."
+        }
+    }
+
+    fun createFolderIn(parent: String) {
+        viewModelScope.launch {
+            val folder = parent.trim('/')
+            try {
+                withContext(Dispatchers.IO) { graph.store.createUniqueFolder(folder) }
+            } catch (error: Exception) {
+                message.value = error.message ?: "Der Ordner konnte nicht erstellt werden."
+                return@launch
+            }
+            openCreatedFolder(folder)
+            refreshTree()
+            message.value = if (folder.isEmpty()) {
+                "Neuer Ordner erstellt."
+            } else {
+                "Unterordner in „${folder.substringAfterLast('/')}“ erstellt."
+            }
+        }
+    }
+
+    private fun openCreatedFolder(folder: String) {
+        if (folder.isEmpty()) return
+        val opened = toggleExpandedFolder(expandedFolders.value, folder, forceOpen = true)
+        if (opened == expandedFolders.value) return
+        expandedFolders.value = opened
+        persistExpandedFolders()
+    }
+
     fun createFolder(title: String, parent: String = "") {
         viewModelScope.launch {
             try {
