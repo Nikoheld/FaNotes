@@ -11,7 +11,6 @@ internal fun Canvas.drawEditorActiveLine(
     layout: Layout,
     textLength: Int,
     selectionEnd: Int,
-    accent: Int,
     paint: Paint,
     scrollY: Int,
     paddingLeft: Int,
@@ -29,6 +28,6 @@ internal fun Canvas.drawEditorActiveLine(
     val top = paddingTop + layout.getLineTop(line) - scrollY
     val bottom = paddingTop + layout.getLineBottom(line) - scrollY
     if (bottom <= 0 || top >= viewHeight) return
-    paint.color = activeLineArgb(accent)
+    paint.color = activeLineArgb()
     drawRect(paddingLeft.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat(), paint)
 }

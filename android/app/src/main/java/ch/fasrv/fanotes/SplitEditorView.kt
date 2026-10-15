@@ -792,7 +792,6 @@ class SplitEditorView(context: Context) : EditText(context) {
                 layout,
                 text?.length ?: 0,
                 selectionEnd,
-                accent,
                 activeLinePaint,
                 scrollY,
                 paddingLeft,
