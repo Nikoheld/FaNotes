@@ -45,4 +45,26 @@ class NoteSearchTest {
         assertTrue(edited.contains("X hier"))
         assertEquals(false, edited.contains("beta hier"))
     }
+
+    @Test
+    fun caseWholeWordAndRegexpMatchTheSearchPanel() {
+        val text = "Alpha Beta und beta, betabeta."
+        assertEquals(listOf(6), searchNoteText(text, "Beta", options = NoteSearchOptions(caseSensitive = true)).map { it.start })
+        val words = searchNoteText(text, "beta", options = NoteSearchOptions(wholeWord = true))
+        assertEquals(listOf(6, 15), words.map { it.start })
+        val pattern = searchNoteText(text, "b.ta", options = NoteSearchOptions(regexp = true))
+        assertEquals(listOf(6, 15, 21, 25), pattern.map { it.start })
+        assertEquals(emptyList(), searchNoteText("xText", "^Text", options = NoteSearchOptions(regexp = true)))
+        assertEquals(listOf(4), searchNoteText("foo\nText", "^Text", options = NoteSearchOptions(regexp = true)).map { it.start })
+        assertEquals(emptyList(), searchNoteText("foo\nbar", "foo.bar", options = NoteSearchOptions(regexp = true)))
+        assertEquals(listOf(1), searchNoteText("a\tb", "\\t").map { it.start })
+        assertEquals(emptyList(), searchNoteText("a1", "\\d"))
+        assertEquals(listOf(1), searchNoteText("a1", "\\d", options = NoteSearchOptions(regexp = true)).map { it.start })
+        assertEquals(emptyList(), searchNoteText("Hallo", "(", options = NoteSearchOptions(regexp = true)))
+        assertEquals("a\nb", replaceNoteMatch("ab", searchNoteText("ab", "a").first(), "a\\n"))
+        assertEquals("[a] [b]", replaceAllNoteMatches("a b", "(\\w)", "[\$1]", NoteSearchOptions(regexp = true)))
+        assertEquals("a2", replaceAllNoteMatches("a", "(a)", "\$12", NoteSearchOptions(regexp = true)))
+        assertEquals("\$", replaceAllNoteMatches("a", "a", "\$\$", NoteSearchOptions(regexp = true)))
+        assertEquals("aa", replaceAllNoteMatches("a", "a", "a\$&", NoteSearchOptions(regexp = true)))
+    }
 }

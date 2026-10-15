@@ -1855,10 +1855,21 @@ fun PdfThumbStrip(model: FaNotesViewModel) {
 }
 
 @Composable
+private fun SearchFlag(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked, onChange)
+        Text(label, fontSize = 13.sp)
+    }
+}
+
+@Composable
 fun NoteSearchBar(model: FaNotesViewModel) {
     val query by model.noteSearchQuery.collectAsStateWithLifecycle()
     val hits by model.noteSearchHits.collectAsStateWithLifecycle()
     val index by model.noteSearchIndex.collectAsStateWithLifecycle()
+    val caseSensitive by model.noteSearchCaseSensitive.collectAsStateWithLifecycle()
+    val regexp by model.noteSearchRegexp.collectAsStateWithLifecycle()
+    val wholeWord by model.noteSearchWholeWord.collectAsStateWithLifecycle()
     var replacement by remember { mutableStateOf("") }
     val status = when {
         query.trim().isEmpty() -> ""
@@ -1877,6 +1888,16 @@ fun NoteSearchBar(model: FaNotesViewModel) {
             if (status.isNotEmpty()) Text(status, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
         }
         if (query.isNotEmpty()) {
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = { model.stepNoteSearch(-1) }, enabled = hits.isNotEmpty()) { Text("Vorheriger Treffer") }
+                TextButton(onClick = { model.stepNoteSearch(1) }, enabled = hits.isNotEmpty()) { Text("Nächster Treffer") }
+                SearchFlag("Groß-/Kleinschreibung", caseSensitive, model::setNoteSearchCaseSensitive)
+                SearchFlag("Regulärer Ausdruck", regexp, model::setNoteSearchRegexp)
+                SearchFlag("Ganzes Wort", wholeWord, model::setNoteSearchWholeWord)
+            }
             OutlinedTextField(
                 replacement,
                 { replacement = it },
@@ -1887,8 +1908,6 @@ fun NoteSearchBar(model: FaNotesViewModel) {
                 keyboardActions = KeyboardActions(onDone = { model.replaceCurrentNoteSearch(replacement) }),
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { model.stepNoteSearch(-1) }, enabled = hits.isNotEmpty()) { Text("Vorheriger Treffer") }
-                TextButton(onClick = { model.stepNoteSearch(1) }, enabled = hits.isNotEmpty()) { Text("Nächster Treffer") }
                 TextButton(onClick = { model.replaceCurrentNoteSearch(replacement) }, enabled = hits.isNotEmpty()) { Text("Ersetzen") }
                 TextButton(onClick = { model.replaceAllNoteSearch(replacement) }, enabled = hits.isNotEmpty()) { Text("Alle ersetzen") }
             }
