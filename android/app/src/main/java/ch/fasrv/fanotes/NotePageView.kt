@@ -1065,7 +1065,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
         })
         tools.addView(chip("Abschnitt") { ink.placingSection = true })
         tools.addView(chip("Lasso") { onTool(ch.fasrv.fanotes.ink.InkTool.LASSO) })
-        tools.addView(chip("Verknüpfung") { ink.placingLink = true })
+        tools.addView(chip("Verknüpfung") {
+            ink.placingLink = true
+            ink.publishLinkChrome()
+        })
         ch.fasrv.fanotes.desk.NOTE_LINK_STYLES.forEach { linkStyle ->
             tools.addView(chip(linkStyle.label) {
                 ink.noteLinkStyle = linkStyle.id
@@ -1076,6 +1079,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             val id = ink.selectedLinkId ?: ink.linkMarks.lastOrNull()?.id ?: return@chip
             ink.onRemoveLink(id)
             ink.selectedLinkId = null
+            ink.publishLinkChrome()
         })
         tools.addView(chip("Fett") { format("bold") })
         tools.addView(chip("Nächstes") { selectNextOccurrence() })

@@ -139,6 +139,9 @@ class InkSurfaceView @JvmOverloads constructor(
     var onPenActive: (Boolean) -> Unit = {}
     var placingSection = false
     var placingLink = false
+    var onLinkChrome: (Boolean, Boolean) -> Unit = { _, _ -> }
+
+    fun publishLinkChrome() = onLinkChrome(placingLink, selectedLinkId != null)
     var linkMarks: List<ch.fasrv.fanotes.desk.NoteLinkMark> = emptyList()
     var worksheetBoxes: List<ch.fasrv.fanotes.desk.AnchoredBox> = emptyList()
     var worksheetHighlights: List<ch.fasrv.fanotes.desk.AnchoredHighlight> = emptyList()
@@ -686,12 +689,14 @@ class InkSurfaceView @JvmOverloads constructor(
                 val point = ch.fasrv.fanotes.desk.noteLinkPointOnSheet(x, y, pageFrames, sessionWidth().toDouble(), sessionHeight().toDouble())
                 onPlaceLink(point.page, point.x, point.y)
                 placingLink = false
+                publishLinkChrome()
                 onPenActive(false)
                 inkPointer = MotionEvent.INVALID_POINTER_ID
             }
             linkHit(x, y) != null && !eraser -> {
                 linkHit(x, y)?.let { link ->
                     selectedLinkId = link.id
+                    publishLinkChrome()
                     onOpenLink(link.targetPath)
                     onPenActive(false)
                     inkPointer = MotionEvent.INVALID_POINTER_ID
