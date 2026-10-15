@@ -67,6 +67,11 @@ const val PAPER_CODE_BACKGROUND = 0xFFF3F4F7.toInt()
  */
 fun paperCodeInk(raw: String?): String = mixColors(paperAccentReadable(raw), PAPER_TEXT, 0.78)
 
+/** Table row fill: 2.5% of the readable accent mixed into white. */
+fun paperTableFill(raw: String?): String = mixColors(paperAccentReadable(raw), "#ffffff", 0.025)
+
+fun paperTableFillArgb(accent: Int): Int = colorArgb(paperTableFill("#%06x".format(accent and 0xFFFFFF)))
+
 fun paperCodeInkArgb(accent: Int): Int = colorArgb(paperCodeInk("#%06x".format(accent and 0xFFFFFF)))
 
 /** `firstWeight` of [first] and the rest of [second], in sRGB. */

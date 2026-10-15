@@ -25,6 +25,8 @@ enum class LiveKind {
     LINK,
     MATH,
     DETAILS_SUMMARY,
+    TABLE_ROW,
+    TABLE_RULE,
 }
 
 data class LiveMark(
@@ -320,7 +322,8 @@ private fun markLine(marks: MutableList<LiveMark>, line: String, origin: Int, ac
     val heading = HEADING.find(line)
     val quote = if (heading == null) QUOTE.find(line) else null
     val rule = heading == null && quote == null && RULE.matches(line)
-    val tableRule = heading == null && quote == null && !rule && TABLE_RULE.matches(line)
+    val tableLine = heading == null && quote == null && !rule && TABLE_LINE.matches(line)
+    val tableRule = tableLine && TABLE_RULE.matches(line)
     when {
         heading != null -> {
             marks += LiveMark(origin, origin + line.length, headingKind(heading.groupValues[2].length))
@@ -331,7 +334,11 @@ private fun markLine(marks: MutableList<LiveMark>, line: String, origin: Int, ac
             if (!active) hide(marks, origin, quote.groupValues[1].length, quote.value.length)
         }
         rule && !active -> marks += LiveMark(origin, origin + line.length, LiveKind.HIDE)
-        tableRule -> marks += LiveMark(origin, origin + line.length, LiveKind.HIDE)
+        tableRule -> {
+            marks += LiveMark(origin, origin + line.length, LiveKind.TABLE_RULE)
+            marks += LiveMark(origin, origin + line.length, LiveKind.HIDE)
+        }
+        tableLine -> marks += LiveMark(origin, origin + line.length, LiveKind.TABLE_ROW)
     }
     if (!active && !rule && !tableRule) markInline(marks, line, origin)
 }
@@ -427,6 +434,7 @@ private val QUOTE = Regex("""^(\s*)>\s?""")
 private val RULE = Regex("""^\s*(?:-{3,}|\*{3,}|_{3,})\s*$""")
 private val METADATA_LINE = Regex("""^\s*<!--\s*fanotes-(?:ink|worksheet):[a-zA-Z0-9_-]{1,96}\s*-->\s*$""")
 private val FAMD_LINE = Regex("""^\s*<!--\s*fanotes-famd:v1\b""")
+private val TABLE_LINE = Regex("""^\s*\|.*\|\s*$""")
 private val TABLE_RULE = Regex("""^\s*\|?(?:\s*:?-+:?\s*\|)+\s*$""")
 private val TASK = Regex("""^(\s*)[-+*]\s+\[([ xX])]\s+""")
 private val TASK_BOX = Regex("""\[([ xX])]""")

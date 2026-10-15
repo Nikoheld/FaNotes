@@ -39,7 +39,10 @@ class LivePreviewTest {
         val code = livePreviewMarks(fenced, fenced.indexOf('.'), fenced.indexOf('.'))
         assertEquals(listOf(LiveKind.HIDE, LiveKind.HIDE, LiveKind.CODE), code.map { it.kind })
         assertFalse(code.any { it.kind == LiveKind.STRONG })
-        assertTrue(livePreviewMarks("| --- | --- |", 0, 0).all { it.kind == LiveKind.HIDE })
+        val rule = livePreviewMarks("| --- | --- |", 0, 0)
+        assertTrue(rule.any { it.kind == LiveKind.TABLE_RULE })
+        assertTrue(rule.any { it.kind == LiveKind.HIDE })
+        assertTrue(livePreviewMarks("| A | B |", 0, 0).any { it.kind == LiveKind.TABLE_ROW })
         assertEquals(emptyList(), livePreviewMarks("", 0, 0))
     }
 
