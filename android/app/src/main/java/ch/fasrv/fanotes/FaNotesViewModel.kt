@@ -2589,6 +2589,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun searchVaultText(query: String) {
         searchQuery.value = query
+        if (query.isBlank()) {
+            searchHits.value = emptyList()
+            return
+        }
         viewModelScope.launch {
             searchHits.value = withContext(Dispatchers.IO) {
                 val files = graph.vault.walkFiles().filter {

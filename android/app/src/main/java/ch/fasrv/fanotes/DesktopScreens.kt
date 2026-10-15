@@ -595,7 +595,13 @@ fun SearchScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                     else -> false
                 }
             },
-            label = { Text("Im Vault suchen") },
+            label = { Text("Suchbegriff") },
+            placeholder = { Text("Text, Dateinamen, Handschrift …") },
+            trailingIcon = if (query.isEmpty()) null else {
+                {
+                    TextButton(onClick = { model.searchVaultText("") }) { Text("Suchbegriff löschen") }
+                }
+            },
             singleLine = true,
         )
         Text(
