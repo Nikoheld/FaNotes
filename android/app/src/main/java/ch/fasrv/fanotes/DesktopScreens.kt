@@ -100,6 +100,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.unit.IntOffset
@@ -358,7 +359,7 @@ fun NoteTabs(
     val bounds = remember { androidx.compose.runtime.mutableStateMapOf<String, androidx.compose.ui.geometry.Rect>() }
     val deskTabs = paths.map { DeskTab(it, it in pinned) }
     Row(
-        Modifier.fillMaxWidth().horizontalScroll(scroll, enabled = dragging == null).background(MaterialTheme.colorScheme.surface).padding(horizontal = 8.dp, vertical = 2.dp),
+        Modifier.fillMaxWidth().horizontalScroll(scroll, enabled = dragging == null).background(MaterialTheme.colorScheme.surface).padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -461,10 +462,15 @@ private fun NoteTabChip(
     var menu by remember { mutableStateOf(false) }
     val textLeft = remember { floatArrayOf(0f) }
     val name = path.substringAfterLast('/').substringBeforeLast('.')
+    val box = ch.fasrv.fanotes.desk.noteTabBox(pinned)
+    val shape = RoundedCornerShape(box.radiusDp.dp)
     Box {
         Row(
             Modifier
-                .padding(end = 4.dp)
+                .padding(horizontal = box.marginXDp.dp, vertical = box.marginYDp.dp)
+                .height(box.heightDp.dp)
+                .widthIn(min = box.minWidthDp.dp, max = box.maxWidthDp.dp)
+                .clip(shape)
                 .onGloballyPositioned { onPosition(it.boundsInRoot()) }
                 .background(
                     when {
@@ -472,7 +478,8 @@ private fun NoteTabChip(
                         selected -> MaterialTheme.colorScheme.surfaceVariant
                         else -> Color.Transparent
                     },
-                ),
+                )
+                .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (dropSide == "before") {
@@ -485,8 +492,9 @@ private fun NoteTabChip(
                     if (inSplit) append(" ‖")
                 },
                 fontSize = 12.sp,
-                color = if (inSplit && !selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                color = if (selected) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .onGloballyPositioned { textLeft[0] = it.boundsInRoot().left }
                     .pointerInput(path, restartKey) {
@@ -529,7 +537,7 @@ private fun NoteTabChip(
                             }
                         }
                     }
-                }.padding(horizontal = 8.dp, vertical = 4.dp),
+                },
             )
             if (unsaved) {
                 Box(
@@ -541,8 +549,8 @@ private fun NoteTabChip(
                         .semantics { contentDescription = "Noch nicht gespeichert" },
                 )
             }
-            if (!pinned) {
-                Text("  ×", modifier = Modifier.clickable(onClick = onClose).padding(end = 6.dp), fontSize = 12.sp)
+            if (ch.fasrv.fanotes.desk.noteTabShowsClose(selected, pinned)) {
+                Text("×", modifier = Modifier.clickable(onClick = onClose).padding(start = 4.dp), fontSize = 12.sp)
             }
             if (dropSide == "after") {
                 Box(Modifier.padding(start = 2.dp).width(2.dp).height(16.dp).background(MaterialTheme.colorScheme.primary))
