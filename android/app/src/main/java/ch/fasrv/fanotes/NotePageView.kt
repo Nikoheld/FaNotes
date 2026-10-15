@@ -26,7 +26,14 @@ import ch.fasrv.fanotes.ink.StrokeStyle
  */
 class NotePageView(context: Context) : FrameLayout(context) {
     val ink = InkSurfaceView(context)
-    private val editor = EditText(context)
+    private var previewReady = false
+    private var paintingPreview = false
+    private val editor = object : EditText(context) {
+        override fun onSelectionChanged(selStart: Int, selEnd: Int) {
+            super.onSelectionChanged(selStart, selEnd)
+            if (previewReady && !paintingPreview) paintLivePreview()
+        }
+    }
     private val lineNumbers = TextView(context)
     private val toolbar = HorizontalScrollView(context)
     private val tools = LinearLayout(context)
@@ -108,6 +115,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             override fun afterTextChanged(s: android.text.Editable?) {
                 if (lineNumbers.visibility == VISIBLE) placeEditor()
                 if (!writing) onVisibleMarkdown(editBefore, s?.toString().orEmpty())
+                if (previewReady) paintLivePreview()
             }
         })
         addView(lineNumbers, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
@@ -131,6 +139,19 @@ class NotePageView(context: Context) : FrameLayout(context) {
             applyChromeVisibility()
         }
         applyChromeColors()
+        previewReady = true
+    }
+
+    /** Styles every line except the one being edited, matching the desktop live preview. */
+    private fun paintLivePreview() {
+        if (!previewReady || paintingPreview) return
+        val editable = editor.text ?: return
+        paintingPreview = true
+        try {
+            applyLivePreview(editable, editor.selectionStart, editor.selectionEnd, ink.accentColor)
+        } finally {
+            paintingPreview = false
+        }
     }
 
     fun rememberCamera(path: String) {
@@ -263,6 +284,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             editor.setText(visible)
             editor.setSelection(cursor)
             writing = false
+            paintLivePreview()
         }
         if (ink.markdown != visible) {
             ink.markdown = visible
