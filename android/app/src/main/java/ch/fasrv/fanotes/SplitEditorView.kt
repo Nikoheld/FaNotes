@@ -336,6 +336,17 @@ class SplitEditorView(context: Context) : EditText(context) {
                 if (event.action == KeyEvent.ACTION_DOWN) foldKeys(command)
                 return true
             }
+            val outdent = ch.fasrv.fanotes.desk.indentBracketShortcut(
+                event.isCtrlPressed,
+                event.isShiftPressed,
+                event.isAltPressed,
+                event.isMetaPressed,
+                bracket,
+            )
+            if (outdent != null) {
+                if (event.action == KeyEvent.ACTION_DOWN) indentSelection(outdent)
+                return true
+            }
         }
         if (keyCode == KeyEvent.KEYCODE_TAB && !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed) {
             if (event.action == KeyEvent.ACTION_DOWN) indentSelection(event.isShiftPressed)
