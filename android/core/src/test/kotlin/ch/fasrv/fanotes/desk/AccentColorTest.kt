@@ -23,5 +23,12 @@ class AccentColorTest {
         assertEquals(DEFAULT_ACCENT_SECONDARY, normalizeAccentSecondary(null))
         assertEquals("#9065b0", normalizeAccentSecondary("#9065B0"))
         assertEquals(DEFAULT_ACCENT_SECONDARY, normalizeAccentSecondary("nope"))
+        assertEquals("#2a6f97", paperAccentReadable("#2a6f97"))
+        assertEquals("#707175", ensureReadableColor("#eeeeee", PAPER_CONTRAST_SURFACES))
+        assertEquals("#846f3b", paperAccentReadable("#ba9b4a"))
+        assertEquals("#ab5d10", paperAccentReadable("#d9730d"))
+        assertEquals("#707176", ensureReadableColor("#ffffff", PAPER_CONTRAST_SURFACES))
+        assertEquals(0xFF2A6F97.toInt(), paperAccentReadableArgb(0xFF2A6F97.toInt()))
+        assertEquals(0xFF846F3B.toInt(), paperAccentReadableArgb(0xFFBA9B4A.toInt()))
     }
 }

@@ -1,12 +1,17 @@
 package ch.fasrv.fanotes
 
 import android.graphics.Canvas
+import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.text.Editable
+import android.text.Layout
 import android.text.Spanned
 import android.text.style.BackgroundColorSpan
 import android.text.style.CharacterStyle
+import android.text.style.LeadingMarginSpan
+import android.text.style.LineBackgroundSpan
 import android.text.style.LineHeightSpan
 import android.text.style.MetricAffectingSpan
 import android.text.style.ReplacementSpan
@@ -15,7 +20,12 @@ import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
 import ch.fasrv.fanotes.desk.LiveKind
 import ch.fasrv.fanotes.desk.LiveMark
+import ch.fasrv.fanotes.desk.PAPER_QUOTE_INK
+import ch.fasrv.fanotes.desk.PAPER_RULE_ARGB
 import ch.fasrv.fanotes.desk.livePreviewMarks
+import ch.fasrv.fanotes.desk.paperAccentReadableArgb
+import ch.fasrv.fanotes.desk.quoteMargins
+import ch.fasrv.fanotes.desk.quoteWashArgb
 import ch.fasrv.fanotes.desk.selectionMatchRanges
 
 /** A span the live preview owns, so the next pass can remove only its own marks. */
@@ -25,15 +35,22 @@ interface LivePreviewSpan
  * Paints desktop live-preview marks onto the editor text without changing
  * the characters. The cursor line still shows its Markdown markers.
  */
-fun applyLivePreview(editable: Editable, selectionStart: Int, selectionEnd: Int, accent: Int) {
+fun applyLivePreview(
+    editable: Editable,
+    selectionStart: Int,
+    selectionEnd: Int,
+    accent: Int,
+    textSizePx: Float = 16f,
+) {
     if (hasComposingSpan(editable)) return
     for (span in editable.getSpans(0, editable.length, LivePreviewSpan::class.java)) editable.removeSpan(span)
     val length = editable.length
+    val readable = paperAccentReadableArgb(accent)
     for (mark in livePreviewMarks(editable.toString(), selectionStart, selectionEnd)) {
         val start = mark.start.coerceIn(0, length)
         val end = mark.end.coerceIn(start, length)
         if (start == end) continue
-        editable.setSpan(spanFor(mark, accent), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        editable.setSpan(spanFor(mark, readable, accent, textSizePx), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
     val matches = selectionMatchRanges(editable.toString(), selectionStart, selectionEnd) ?: return
     for ((start, end) in matches) {
@@ -51,24 +68,24 @@ private fun hasComposingSpan(editable: Editable): Boolean {
     return false
 }
 
-private fun spanFor(mark: LiveMark, accent: Int): Any = when (mark.kind) {
+private fun spanFor(mark: LiveMark, readable: Int, accent: Int, textSizePx: Float): Any = when (mark.kind) {
     LiveKind.HIDE -> HideSpan()
     LiveKind.COLLAPSE -> CollapseSpan()
-    LiveKind.BULLET -> SwapSpan("• ")
+    LiveKind.BULLET -> AccentSwapSpan("• ", readable)
     LiveKind.TASK_OPEN -> TaskSpan("☐ ")
     LiveKind.TASK_DONE -> TaskSpan("☑ ")
-    LiveKind.H1 -> HeadingSpan(2f)
-    LiveKind.H2 -> HeadingSpan(1.55f)
-    LiveKind.H3 -> HeadingSpan(1.28f)
-    LiveKind.H4 -> HeadingSpan(1.1f)
-    LiveKind.H5, LiveKind.H6 -> HeadingSpan(1f)
-    LiveKind.QUOTE -> QuoteSpan()
+    LiveKind.H1 -> HeadingSpan(2f, textSizePx)
+    LiveKind.H2 -> HeadingSpan(1.55f, textSizePx)
+    LiveKind.H3 -> HeadingSpan(1.28f, textSizePx)
+    LiveKind.H4 -> HeadingSpan(1.1f, textSizePx)
+    LiveKind.H5, LiveKind.H6 -> HeadingSpan(1f, textSizePx)
+    LiveKind.QUOTE -> PaperQuoteSpan(readable, quoteWashArgb(accent), textSizePx)
     LiveKind.STRONG -> StrongSpan()
     LiveKind.EMPHASIS -> EmphasisSpan()
     LiveKind.STRIKE -> StrikeSpan()
     LiveKind.CODE -> CodeSpan()
     LiveKind.MATH -> MathSpan()
-    LiveKind.LINK -> LinkSpan(accent)
+    LiveKind.LINK -> LinkSpan(readable)
     LiveKind.DETAILS_SUMMARY -> DetailsSummarySpan(mark.label, mark.body)
 }
 
@@ -113,6 +130,18 @@ internal open class SwapSpan(private val drawn: String) : ReplacementSpan(), Liv
 
 internal class TaskSpan(drawn: String) : SwapSpan(drawn)
 
+internal class AccentSwapSpan(drawn: String, private val color: Int) : SwapSpan(drawn) {
+    override fun draw(canvas: Canvas, text: CharSequence, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) {
+        val previousColor = paint.color
+        val previousFace = paint.typeface
+        paint.color = color
+        paint.typeface = Typeface.create(previousFace, Typeface.BOLD)
+        super.draw(canvas, text, start, end, x, top, y, bottom, paint)
+        paint.color = previousColor
+        paint.typeface = previousFace
+    }
+}
+
 private class SelectionMatchSpan : BackgroundColorSpan(0x8099FF77.toInt()), LivePreviewSpan
 
 private class CollapseSpan : LineHeightSpan, LivePreviewSpan {
@@ -124,7 +153,8 @@ private class CollapseSpan : LineHeightSpan, LivePreviewSpan {
     }
 }
 
-private class HeadingSpan(private val proportion: Float) : MetricAffectingSpan(), LivePreviewSpan {
+private class HeadingSpan(private val proportion: Float, private val baseTextPx: Float) :
+    MetricAffectingSpan(), LineHeightSpan, LineBackgroundSpan, LivePreviewSpan {
     override fun updateDrawState(paint: android.text.TextPaint) = apply(paint)
     override fun updateMeasureState(paint: android.text.TextPaint) = apply(paint)
 
@@ -132,11 +162,129 @@ private class HeadingSpan(private val proportion: Float) : MetricAffectingSpan()
         paint.textSize *= proportion
         paint.typeface = Typeface.create(paint.typeface, Typeface.BOLD)
     }
+
+    override fun chooseHeight(text: CharSequence, start: Int, end: Int, spanstartv: Int, lineHeight: Int, fm: Paint.FontMetricsInt) {
+        if (proportion != 2f) return
+        val top = (baseTextPx * 1f).toInt()
+        val bottom = (baseTextPx * 0.56f).toInt()
+        fm.ascent -= top
+        fm.top -= top
+        fm.descent += bottom
+        fm.bottom += bottom
+    }
+
+    override fun drawBackground(
+        canvas: Canvas,
+        paint: Paint,
+        left: Int,
+        right: Int,
+        top: Int,
+        baseline: Int,
+        bottom: Int,
+        text: CharSequence,
+        start: Int,
+        end: Int,
+        lineNumber: Int,
+    ) {
+        if (proportion != 2f || right <= left) return
+        val thickness = (baseTextPx / 16f).coerceAtLeast(1f)
+        val previous = paint.color
+        paint.color = PAPER_RULE_ARGB
+        canvas.drawRect(left.toFloat(), bottom - thickness, right.toFloat(), bottom.toFloat(), paint)
+        paint.color = previous
+    }
 }
 
-private class QuoteSpan : CharacterStyle(), LivePreviewSpan {
+/**
+ * Desktop paper quote: a 3px accent bar, 13px of space, a 7% accent wash,
+ * and the paper's soft text colour.
+ */
+internal class PaperRuleSpan(private val baseTextPx: Float) : LineBackgroundSpan, LivePreviewSpan {
+    override fun drawBackground(
+        canvas: Canvas,
+        paint: Paint,
+        left: Int,
+        right: Int,
+        top: Int,
+        baseline: Int,
+        bottom: Int,
+        text: CharSequence,
+        start: Int,
+        end: Int,
+        lineNumber: Int,
+    ) {
+        if (right <= left) return
+        val thickness = (baseTextPx / 16f).coerceAtLeast(1f)
+        val previous = paint.color
+        paint.color = PAPER_RULE_ARGB
+        canvas.drawRect(left.toFloat(), bottom - thickness, right.toFloat(), bottom.toFloat(), paint)
+        paint.color = previous
+    }
+}
+
+internal class PaperQuoteSpan(
+    private val barColor: Int,
+    private val washColor: Int,
+    private val textSizePx: Float,
+) : CharacterStyle(), LeadingMarginSpan, LineBackgroundSpan, LivePreviewSpan {
+    private val barPx = quoteMargins(textSizePx).first
+    private val marginPx = quoteMargins(textSizePx).second
+
     override fun updateDrawState(paint: android.text.TextPaint) {
-        paint.color = 0xFF5C6158.toInt()
+        paint.color = PAPER_QUOTE_INK
+    }
+
+    override fun getLeadingMargin(first: Boolean) = marginPx
+
+    override fun drawLeadingMargin(
+        canvas: Canvas,
+        paint: Paint,
+        x: Int,
+        dir: Int,
+        top: Int,
+        baseline: Int,
+        bottom: Int,
+        text: CharSequence,
+        start: Int,
+        end: Int,
+        first: Boolean,
+        layout: Layout,
+    ) {
+        val previous = paint.color
+        paint.color = barColor
+        val left = if (dir > 0) x else x - barPx
+        canvas.drawRect(left.toFloat(), top.toFloat(), (left + barPx).toFloat(), bottom.toFloat(), paint)
+        paint.color = previous
+    }
+
+    override fun drawBackground(
+        canvas: Canvas,
+        paint: Paint,
+        left: Int,
+        right: Int,
+        top: Int,
+        baseline: Int,
+        bottom: Int,
+        text: CharSequence,
+        start: Int,
+        end: Int,
+        lineNumber: Int,
+    ) {
+        if (right <= left) return
+        val previousShader = paint.shader
+        val previousColor = paint.color
+        paint.shader = LinearGradient(
+            left.toFloat(),
+            0f,
+            right.toFloat(),
+            0f,
+            washColor,
+            0x00000000,
+            Shader.TileMode.CLAMP,
+        )
+        canvas.drawRect(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat(), paint)
+        paint.shader = previousShader
+        paint.color = previousColor
     }
 }
 

@@ -349,7 +349,7 @@ class SplitEditorView(context: Context) : EditText(context) {
         val editable = text ?: return
         painting = true
         try {
-            applyLivePreview(editable, selectionStart, selectionEnd, accent)
+            applyLivePreview(editable, selectionStart, selectionEnd, accent, textSize)
         } finally {
             painting = false
         }

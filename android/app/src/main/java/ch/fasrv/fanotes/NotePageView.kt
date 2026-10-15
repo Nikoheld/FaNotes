@@ -467,7 +467,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val editable = editor.text ?: return
         paintingPreview = true
         try {
-            applyLivePreview(editable, editor.selectionStart, editor.selectionEnd, ink.accentColor)
+            applyLivePreview(editable, editor.selectionStart, editor.selectionEnd, ink.accentColor, editor.textSize)
         } finally {
             paintingPreview = false
         }
