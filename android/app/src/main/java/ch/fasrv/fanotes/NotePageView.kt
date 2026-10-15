@@ -827,9 +827,9 @@ class NotePageView(context: Context) : FrameLayout(context) {
         tools.orientation = LinearLayout.HORIZONTAL
         tools.gravity = Gravity.CENTER_VERTICAL
         toolbar.isHorizontalScrollBarEnabled = false
-        toolbar.addView(tools, LayoutParams(LayoutParams.WRAP_CONTENT, dp(44)))
+        toolbar.addView(tools, LayoutParams(LayoutParams.WRAP_CONTENT, dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_DP)))
         toolbar.elevation = 12f
-        addView(toolbar, LayoutParams(LayoutParams.MATCH_PARENT, dp(44), Gravity.TOP))
+        addView(toolbar, LayoutParams(LayoutParams.MATCH_PARENT, dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_DP), Gravity.TOP))
         handle.text = "Werkzeuge"
         handle.gravity = Gravity.CENTER
         handle.textSize = 12f
@@ -1492,7 +1492,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private fun segment(tool: InkTool): LinearLayout {
         val row = LinearLayout(context)
         row.orientation = LinearLayout.HORIZONTAL
-        row.background = rounded(if (dark) 0xFF2A2A2A.toInt() else 0xFFE7E4DE.toInt(), dp(8))
+        row.background = rounded(if (dark) 0xFF2A2A2A.toInt() else 0xFFE7E4DE.toInt(), dp(ch.fasrv.fanotes.desk.MODE_SWITCH_RADIUS_DP))
         row.addView(seg("Stift", tool == InkTool.PEN) { onTool(InkTool.PEN) })
         row.addView(seg("Radierer", tool == InkTool.ERASER) { onTool(InkTool.ERASER) })
         row.addView(seg("Auswahl", tool == InkTool.SELECT) { onTool(InkTool.SELECT) })
@@ -1502,12 +1502,12 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private fun seg(label: String, selected: Boolean, click: () -> Unit): TextView {
         val view = TextView(context)
         view.text = label
-        view.textSize = 13f
+        view.textSize = 12f
         view.gravity = Gravity.CENTER
         view.setPadding(dp(10), 0, dp(10), 0)
-        view.minHeight = dp(32)
+        view.minHeight = dp(ch.fasrv.fanotes.desk.MODE_BUTTON_DP)
         view.setTextColor(if (dark) 0xFFEDEDEC.toInt() else 0xFF252630.toInt())
-        if (selected) view.background = rounded(if (dark) 0xFF3A3A3A.toInt() else 0xFFFFFFFF.toInt(), dp(7))
+        if (selected) view.background = rounded(if (dark) 0xFF3A3A3A.toInt() else 0xFFFFFFFF.toInt(), dp(ch.fasrv.fanotes.desk.MODE_BUTTON_RADIUS_DP))
         view.setOnClickListener { click() }
         return view
     }
@@ -1525,15 +1525,16 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val view = TextView(context)
         view.text = label
         view.contentDescription = description
-        view.textSize = 13f
+        view.textSize = 12f
         view.gravity = Gravity.CENTER
         view.setPadding(dp(10), 0, dp(10), 0)
-        view.minHeight = dp(32)
+        view.minHeight = dp(ch.fasrv.fanotes.desk.FORMAT_BUTTON_DP)
+        view.background = rounded(android.graphics.Color.TRANSPARENT, dp(ch.fasrv.fanotes.desk.FORMAT_BUTTON_RADIUS_DP))
         view.isEnabled = enabled
         view.alpha = if (enabled) 1f else 0.38f
         view.setTextColor(if (dark) 0xFFEDEDEC.toInt() else 0xFF252630.toInt())
         view.setOnClickListener { if (enabled) click() }
-        val params = LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, dp(36))
+        val params = LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, dp(ch.fasrv.fanotes.desk.FORMAT_BUTTON_DP))
         params.marginStart = dp(4)
         view.layoutParams = params
         return view
@@ -1567,7 +1568,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             override fun onStopTrackingTouch(seekBar: SeekBar?) { widthFromUser = false }
         })
         widthBar = slider
-        val params = LinearLayout.LayoutParams(dp(120), dp(36))
+        val params = LinearLayout.LayoutParams(dp(120), dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_DP))
         params.marginStart = dp(6)
         slider.layoutParams = params
         return slider
