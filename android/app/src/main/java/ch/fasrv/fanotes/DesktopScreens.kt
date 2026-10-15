@@ -2242,10 +2242,50 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
         "advanced" to "Erweitert",
     )
     var section by remember { mutableStateOf("appearance") }
+    var settingsQuery by remember { mutableStateOf("") }
+    val settingsResults = ch.fasrv.fanotes.desk.searchSettings(settingsQuery)
     Row(Modifier.fillMaxSize()) {
         Column(Modifier.weight(0.38f).verticalScroll(rememberScrollState()).padding(8.dp)) {
-            sections.forEach { (id, label) ->
-                Text(label, modifier = Modifier.fillMaxWidth().background(if (section == id) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent).clickable { section = id }.padding(10.dp))
+            OutlinedTextField(
+                settingsQuery,
+                { settingsQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Einstellungen durchsuchen") },
+                placeholder = { Text("Einstellungen suchen") },
+            )
+            if (settingsQuery.isNotBlank()) {
+                TextButton(onClick = { settingsQuery = "" }) { Text("Einstellungssuche leeren") }
+                Text(
+                    if (settingsResults.isEmpty()) "Keine Treffer" else "${settingsResults.size} Treffer",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+                if (settingsResults.isEmpty()) {
+                    Text(
+                        "Versuche zum Beispiel „Schrift“, „Backup“ oder „Handschrift“.",
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(vertical = 6.dp),
+                    )
+                }
+                settingsResults.forEach { item ->
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                section = item.section
+                                settingsQuery = ""
+                            }
+                            .padding(vertical = 8.dp),
+                    ) {
+                        Text(item.label, fontWeight = FontWeight.SemiBold)
+                        Text(item.detail, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                    }
+                }
+            } else {
+                sections.forEach { (id, label) ->
+                    Text(label, modifier = Modifier.fillMaxWidth().background(if (section == id) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent).clickable { section = id }.padding(10.dp))
+                }
             }
         }
         Column(Modifier.weight(0.62f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
