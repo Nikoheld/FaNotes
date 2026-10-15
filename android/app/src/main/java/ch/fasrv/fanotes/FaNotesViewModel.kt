@@ -583,7 +583,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         regexp = noteSearchRegexp.value,
     )
 
-    /** Finds in the text the editor is showing and selects the first hit. */
+    /** Finds in the whole note, including a folded heading body, and selects the first hit. */
     fun updateNoteSearch(query: String) {
         noteSearchQuery.value = query
         if (query.trim().isEmpty()) {
@@ -591,8 +591,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             noteSearchIndex.value = 0
             return
         }
-        val shown = ch.fasrv.fanotes.desk.markdownWithFolds(markdown.value, foldedHeadings.value)
-        val hits = ch.fasrv.fanotes.desk.searchNoteText(shown, query, options = noteSearchOptions())
+        val hits = ch.fasrv.fanotes.desk.searchNoteText(markdown.value, query, options = noteSearchOptions())
         noteSearchHits.value = hits
         noteSearchIndex.value = 0
         if (hits.isNotEmpty()) revealNoteSearch(0) else canvasToken.value += 1
@@ -640,26 +639,28 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         canvasToken.value += 1
     }
 
-    /** Replaces the selected hit in the text the editor is showing, then finds again. */
+    /** Replaces the selected hit in the whole note, including a folded heading body. */
     fun replaceCurrentNoteSearch(replacement: String) {
         if (noteSearchQuery.value.trim().isEmpty()) return
-        val shown = ch.fasrv.fanotes.desk.markdownWithFolds(markdown.value, foldedHeadings.value)
+        val full = markdown.value
         val hit = noteSearchHits.value.getOrNull(noteSearchIndex.value) ?: return
         val options = noteSearchOptions()
-        val next = ch.fasrv.fanotes.desk.replaceNoteMatch(shown, hit, replacement, options.regexp)
-        if (next == shown) return
-        updateVisibleMarkdown(shown, next)
+        val next = ch.fasrv.fanotes.desk.replaceNoteMatch(full, hit, replacement, options.regexp)
+        if (next == full) return
+        foldedHeadings.value = ch.fasrv.fanotes.desk.shiftFoldedLines(full, next, foldedHeadings.value)
+        updateMarkdown(next)
         updateNoteSearch(noteSearchQuery.value)
     }
 
-    /** Replaces every hit. Folded heading bodies stay in the note. */
+    /** Replaces every hit in the whole note, including folded heading bodies. */
     fun replaceAllNoteSearch(replacement: String) {
         val query = noteSearchQuery.value
         if (query.trim().isEmpty()) return
-        val shown = ch.fasrv.fanotes.desk.markdownWithFolds(markdown.value, foldedHeadings.value)
-        val next = ch.fasrv.fanotes.desk.replaceAllNoteMatches(shown, query, replacement, noteSearchOptions())
-        if (next == shown) return
-        updateVisibleMarkdown(shown, next)
+        val full = markdown.value
+        val next = ch.fasrv.fanotes.desk.replaceAllNoteMatches(full, query, replacement, noteSearchOptions())
+        if (next == full) return
+        foldedHeadings.value = ch.fasrv.fanotes.desk.shiftFoldedLines(full, next, foldedHeadings.value)
+        updateMarkdown(next)
         updateNoteSearch(query)
     }
 

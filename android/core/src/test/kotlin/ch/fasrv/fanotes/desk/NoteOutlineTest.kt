@@ -64,5 +64,6 @@ class NoteOutlineTest {
         assertEquals(null, foldedHeadingHidingLine(note, setOf(1), 1))
         assertEquals(null, foldedHeadingHidingLine(note, setOf(1), 9))
         assertEquals(null, foldedHeadingHidingLine(note, emptySet(), 3))
+        assertEquals(1, foldedHeadingHidingLine(note, setOf(1, 5), 7))
     }
 }
