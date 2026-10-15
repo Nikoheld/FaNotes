@@ -48,4 +48,19 @@ class EditorGroupTest {
         assertEquals(0 to 0, editorLineBoundarySelection("\thello", 0, 0, false, false))
         assertEquals(1 to 1, editorLineBoundarySelection("\thello", 6, 6, false, false))
     }
+
+    @Test
+    fun pageUpAndPageDownKeepTheColumn() {
+        val text = (1..8).joinToString("\n") { "row$it" }
+        val row2 = text.indexOf("row2")
+        assertEquals(text.indexOf("row5") + 2, editorPageSelection(text, row2 + 2, row2 + 2, true, false, 3).first)
+        assertEquals(text.indexOf("row1") + 1, editorPageSelection(text, text.indexOf("row4") + 1, text.indexOf("row4") + 1, false, false, 3).first)
+        assertEquals(text.length to text.length, editorPageSelection(text, text.length, text.length, true, false, 4))
+        assertEquals(0 to 0, editorPageSelection(text, 0, 0, false, false, 4))
+        assertEquals(5 to 5, editorPageSelection("hello", 0, 5, true, false, 3))
+        assertEquals(0 to text.indexOf("row3"), editorPageSelection(text, 0, 0, true, true, 2))
+        assertEquals(10, editorPageLineCount(200, 20))
+        assertEquals(1, editorPageLineCount(10, 40))
+        assertEquals(1, editorPageLineCount(100, 0))
+    }
 }
