@@ -645,7 +645,30 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
     var calendarName by remember { mutableStateOf("") }
     var editor by remember { mutableStateOf<CalendarDraft?>(null) }
     val day = anchor.toString()
-    Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
+    fun shiftCalendar(step: Int) {
+        anchor = when (view) {
+            "day" -> anchor.plusDays(step.toLong())
+            "three" -> anchor.plusDays(3L * step)
+            "week" -> anchor.plusWeeks(step.toLong())
+            "agenda" -> anchor.plusDays(28L * step)
+            else -> {
+                val next = if (step < 0) month.minusMonths(1) else month.plusMonths(1)
+                month = next
+                next.atDay(1)
+            }
+        }
+    }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState())
+            .pointerInput(view) {
+                detectDeskSwipe { direction ->
+                    ch.fasrv.fanotes.desk.calendarSwipeStep(direction)?.let(::shiftCalendar)
+                }
+            },
+    ) {
         Text("Kalender", style = MaterialTheme.typography.titleLarge)
         Text("Gespeichert in Kalender.md.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
         TextButton(onClick = { onOpenNote(CALENDAR_NOTE_PATH) }) { Text("Als Notiz öffnen") }
@@ -1441,7 +1464,22 @@ fun CardsScreen(model: FaNotesViewModel) {
     var index by remember(markdown) { mutableStateOf(0) }
     var showBack by remember(markdown, index) { mutableStateOf(false) }
     val card = cards.getOrNull(index)
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(
+        Modifier.fillMaxSize().padding(24.dp).pointerInput(card?.id, showBack) {
+            detectDeskSwipe { direction ->
+                val current = card ?: return@detectDeskSwipe
+                when (ch.fasrv.fanotes.desk.cardSwipeAction(showBack, direction)) {
+                    "reveal" -> showBack = true
+                    else -> {
+                        val grade = ch.fasrv.fanotes.desk.cardSwipeAction(true, direction)
+                        model.reviewFlashcard(current.id, grade)
+                        showBack = false
+                    }
+                }
+            }
+        },
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         Text("Karteikarten", style = MaterialTheme.typography.titleLarge)
         Text("Fragen stehen unter ## Lernfragen, der Plan in fanotes-cards-v1.", fontSize = 13.sp)
         if (card == null) {
@@ -2595,6 +2633,25 @@ fun CommandPalette(
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
         )
+    }
+}
+
+private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectDeskSwipe(
+    onSwipe: (ch.fasrv.fanotes.desk.SwipeDirection) -> Unit,
+) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        var end = down.position
+        val pointer = down.id
+        while (true) {
+            val event = awaitPointerEvent()
+            val change = event.changes.firstOrNull { it.id == pointer } ?: break
+            end = change.position
+            if (!change.pressed) break
+        }
+        val direction = ch.fasrv.fanotes.desk.swipeDirection(end.x - down.position.x, end.y - down.position.y)
+            ?: return@awaitEachGesture
+        onSwipe(direction)
     }
 }
 

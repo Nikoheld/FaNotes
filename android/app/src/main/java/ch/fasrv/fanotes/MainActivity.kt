@@ -1932,6 +1932,7 @@ private fun PageSurface(
                 }
                 ink.onPenSample = { x, y -> model.recordPenSample(x, y) }
                 ink.onSwipeNote = { model.swipe(it) }
+                ink.onEdgeHistory = { model.navigateHistory(it) }
                 onUnfoldHeading = { model.unfoldHeading(it) }
             }
         },
@@ -1945,6 +1946,7 @@ private fun PageSurface(
             }
             page.ink.onPenSample = { x, y -> model.recordPenSample(x, y) }
             page.ink.onSwipeNote = { model.swipe(it) }
+            page.ink.onEdgeHistory = { model.navigateHistory(it) }
             page.onUnfoldHeading = { model.unfoldHeading(it) }
             page.onToggleHeading = { model.toggleHeadingAtVisibleLine(it) }
             page.onEditorFold = { command, offset -> model.foldEditorCommand(command, offset) }
@@ -2123,6 +2125,7 @@ private fun InkCanvas(
                 onStroke = { model.recordFinishedStroke(it) }
                 onErased = { model.recordErasedStrokes(it) }
                 onSwipeNote = { model.swipe(it) }
+                onEdgeHistory = { model.navigateHistory(it) }
             }
         },
         update = { view ->
@@ -2135,6 +2138,7 @@ private fun InkCanvas(
             view.onStroke = { model.recordFinishedStroke(it) }
             view.onErased = { model.recordErasedStrokes(it) }
             view.onSwipeNote = { model.swipe(it) }
+            view.onEdgeHistory = { model.navigateHistory(it) }
             val current = path ?: ""
             if (bound != current) {
                 bound = current

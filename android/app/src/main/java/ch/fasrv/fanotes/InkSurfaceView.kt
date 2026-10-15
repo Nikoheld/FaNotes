@@ -134,6 +134,7 @@ class InkSurfaceView @JvmOverloads constructor(
     var onPageGrew: (Double, Double, Double, Double, Double, Double) -> Unit = { _, _, _, _, _, _ -> }
     var onPenSample: (Double, Double) -> Unit = { _, _ -> }
     var onSwipeNote: (Int) -> Unit = {}
+    var onEdgeHistory: (Int) -> Unit = {}
     var onTogglePaperTask: (Int) -> Unit = {}
     var onCamera: (Float, Float, Float) -> Unit = { _, _, _ -> }
     var onPenActive: (Boolean) -> Unit = {}
@@ -922,6 +923,12 @@ class InkSurfaceView @JvmOverloads constructor(
     }
 
     private fun maybeSwipe(event: MotionEvent) {
+        val direction = ch.fasrv.fanotes.desk.swipeDirection(event.x - navTapX, event.y - navTapY)
+        val history = direction?.let { ch.fasrv.fanotes.desk.paperEdgeHistory(navTapX, width.toFloat(), it) }
+        if (history != null) {
+            onEdgeHistory(history)
+            return
+        }
         val tracker = velocity ?: return
         tracker.computeCurrentVelocity(1000)
         val vx = tracker.xVelocity
