@@ -135,6 +135,7 @@ class InkSurfaceView @JvmOverloads constructor(
     var onPageGrew: (Double, Double, Double, Double, Double, Double) -> Unit = { _, _, _, _, _, _ -> }
     var onPenSample: (Double, Double) -> Unit = { _, _ -> }
     var onSwipeNote: (Int) -> Unit = {}
+    var onTogglePaperTask: (Int) -> Unit = {}
     var onCamera: (Float, Float, Float) -> Unit = { _, _, _ -> }
     var onPenActive: (Boolean) -> Unit = {}
     var placingSection = false
@@ -328,6 +329,9 @@ class InkSurfaceView @JvmOverloads constructor(
     private val fingers = LinkedHashMap<Int, Pair<Float, Float>>()
     private var pinchStart = 0f
     private var pinchZoom = 1f
+    private var navTap = false
+    private var navTapX = 0f
+    private var navTapY = 0f
     private var zoom = 1f
     private var pageLeft = 0f
     private var pageTop = 0f
@@ -566,8 +570,17 @@ class InkSurfaceView @JvmOverloads constructor(
                     // A tool already owns this gesture. A second finger does not pan it away.
                 } else if (fingerMayNavigate(palm, now)) {
                     if (fingers.isEmpty() && tryBeginGuideDrag(id, event, index)) {
-                        // The finger grabbed a ruler, set square or compass.
-                    } else fingers[id] = event.getX(index) to event.getY(index)
+                        navTap = false
+                    } else {
+                        if (fingers.isEmpty()) {
+                            navTapX = event.getX(index)
+                            navTapY = event.getY(index)
+                            navTap = true
+                        } else {
+                            navTap = false
+                        }
+                        fingers[id] = event.getX(index) to event.getY(index)
+                    }
                     if (fingers.size == 1) {
                         velocity?.recycle()
                         velocity = VelocityTracker.obtain()
@@ -600,6 +613,11 @@ class InkSurfaceView @JvmOverloads constructor(
                 } else if (guideDrag != null) {
                     moveGuide(event)
                 } else if (fingerMayNavigate(palm, now)) {
+                    if (navTap) {
+                        val dx = event.x - navTapX
+                        val dy = event.y - navTapY
+                        if (dx * dx + dy * dy > 24f * 24f) navTap = false
+                    }
                     moveFingers(event)
                     if (fingers.size == 1) gestures.onTouchEvent(event)
                 }
@@ -617,8 +635,10 @@ class InkSurfaceView @JvmOverloads constructor(
                     palm = touchPalmState(palm, sample(event, inkIndex.coerceAtMost(event.pointerCount - 1), PointerAction.UP))
                     inkPointer = MotionEvent.INVALID_POINTER_ID
                 }
+                val taskTap = navTap && fingers.size == 1 && fingers.containsKey(id) && action != MotionEvent.ACTION_CANCEL
                 if (fingers.remove(id) != null && fingers.size < 2 && action != MotionEvent.ACTION_CANCEL) {
-                    maybeSwipe(event)
+                    if (taskTap && tryTogglePaperTask(event.getX(index), event.getY(index))) navTap = false
+                    else maybeSwipe(event)
                     settleZoom()
                 }
                 if (fingers.isEmpty()) {
@@ -904,6 +924,66 @@ class InkSurfaceView @JvmOverloads constructor(
         if (zoom > 1.15f) return
         if (abs(vx) < 900f || abs(vx) < abs(vy) * 1.3f) return
         onSwipeNote(if (vx < 0) 1 else -1)
+    }
+
+    /** A stationary finger tap on a paper task box checks that source line. */
+    private fun tryTogglePaperTask(x: Float, y: Float): Boolean {
+        if (!showMarkdown || markdown.isBlank()) return false
+        val scale = pixelsPerPageUnit()
+        if (scale <= 0f) return false
+        val point = unrotated(x, y)
+        val originX = (session?.document?.originX ?: 0.0).toFloat()
+        val originY = (session?.document?.originY ?: 0.0).toFloat()
+        val textX = point.first - pageLeft - (TEXT_PAD_X + originX) * scale
+        val textY = point.second - pageTop - (TEXT_PAD_Y + originY) * scale
+        if (textX < -8f || textY < 0f) return false
+        textPaint.textSize = editorFontPx * scale
+        textPaint.typeface = editorTypeface
+        val boxWidth = textPaint.measureText("☑  ") + 8f
+        var top = 0f
+        for (block in paperBlocks(scale)) {
+            when (block) {
+                is PaperBlock.Text -> {
+                    val bottom = top + block.layout.height
+                    if (textY >= top && textY < bottom) {
+                        val visual = block.layout.getLineForVertical((textY - top).toInt().coerceAtLeast(0))
+                        val offset = block.layout.getLineStart(visual)
+                        var paragraph = -1
+                        for (index in block.paragraphStarts.indices) {
+                            if (block.paragraphStarts[index] <= offset) paragraph = index
+                        }
+                        val source = block.taskSources.getOrNull(paragraph) ?: -1
+                        if (paragraph >= 0 && source >= 0 && block.layout.getLineStart(visual) == block.paragraphStarts[paragraph]) {
+                            val boxLeft = block.layout.getPrimaryHorizontal(block.paragraphStarts[paragraph])
+                            if (textX >= boxLeft - 8f && textX <= boxLeft + boxWidth) {
+                                onTogglePaperTask(source)
+                                return true
+                            }
+                        }
+                        return false
+                    }
+                    top = bottom
+                }
+                is PaperBlock.Table -> {
+                    var height = 10f * scale
+                    block.rowHeights.forEach { height += it }
+                    top += height
+                }
+            }
+        }
+        return false
+    }
+
+    private fun unrotated(x: Float, y: Float): Pair<Float, Float> {
+        if (rotation == 0f) return x to y
+        val cx = width / 2f
+        val cy = height / 2f
+        val radians = Math.toRadians(-rotation.toDouble())
+        val cosine = cos(radians)
+        val sine = sin(radians)
+        val dx = x - cx
+        val dy = y - cy
+        return (cx + (dx * cosine - dy * sine)).toFloat() to (cy + (dx * sine + dy * cosine)).toFloat()
     }
 
     private fun predict(event: MotionEvent): List<StrokePoint> {
@@ -1510,8 +1590,8 @@ class InkSurfaceView @JvmOverloads constructor(
         val textLines = ArrayList<PaperLine>()
         fun flush() {
             if (textLines.isEmpty()) return
-            val (styled, starts) = styledLines(textLines)
-            built += PaperBlock.Text(textLayoutFor(styled, scale), starts)
+            val (styled, starts, tasks) = styledLines(textLines)
+            built += PaperBlock.Text(textLayoutFor(styled, scale), starts, tasks)
             textLines.clear()
         }
         for (line in paperLines(markdown)) {
@@ -1591,7 +1671,7 @@ class InkSurfaceView @JvmOverloads constructor(
         canvas.translate(0f, y + 10f * scale)
     }
 
-    private fun styledLines(lines: List<PaperLine>): Pair<CharSequence, IntArray> {
+    private fun styledLines(lines: List<PaperLine>): Triple<CharSequence, IntArray, IntArray> {
         val builder = SpannableStringBuilder()
         val starts = IntArray(lines.size)
         for ((index, line) in lines.withIndex()) {
@@ -1632,7 +1712,11 @@ class InkSurfaceView @JvmOverloads constructor(
             }
             builder.append('\n')
         }
-        return builder to starts
+        val sources = IntArray(lines.size) { index ->
+            val line = lines[index]
+            if (line.kind == PaperKind.TASK) line.sourceLine else -1
+        }
+        return Triple(builder, starts, sources)
     }
 
     private val numberPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -2062,7 +2146,7 @@ class InkSurfaceView @JvmOverloads constructor(
 }
 
 private sealed class PaperBlock {
-    class Text(val layout: StaticLayout, val paragraphStarts: IntArray) : PaperBlock()
+    class Text(val layout: StaticLayout, val paragraphStarts: IntArray, val taskSources: IntArray) : PaperBlock()
     class Table(val rows: List<List<String>>, val rowHeights: FloatArray, val cellLayouts: List<List<StaticLayout>>) : PaperBlock()
 }
 
