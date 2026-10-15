@@ -303,14 +303,7 @@ private fun findVaultNode(nodes: List<VaultNode>, path: String): VaultNode? {
 }
 
 private val PenColors = listOf("#202333", "#2457D6", "#D23B4A", "#1F8A4C", "#E2A21B", "#7A4DD6")
-private val Papers = listOf(
-    "blank" to "Leer",
-    "dots" to "Punkte",
-    "squares" to "Häuschen",
-    "grid" to "Kariert",
-    "lines" to "Linien",
-    "millimeter" to "mm",
-)
+private val Papers = ch.fasrv.fanotes.desk.PAPER_STYLES.map { it.id to it.label }
 private val Brushes = listOf(
     "fineliner" to "Fineliner",
     "pencil" to "Bleistift",
