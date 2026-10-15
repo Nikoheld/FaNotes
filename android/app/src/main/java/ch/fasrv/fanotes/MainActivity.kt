@@ -81,6 +81,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalConfiguration
@@ -349,6 +351,8 @@ fun FaNotesScreen(
     val desk = ch.fasrv.fanotes.desk.deskWithCustomCss(rawDesk, css)
     val chrome = ch.fasrv.fanotes.desk.parseCustomChrome(css)
     val split by model.splitPath.collectAsStateWithLifecycle()
+    val unsaved by model.unsaved.collectAsStateWithLifecycle()
+    val splitUnsaved by model.splitUnsaved.collectAsStateWithLifecycle()
     val palette by model.paletteOpen.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var firstRun by remember { mutableStateOf(desk["welcomed"] != "yes") }
@@ -429,6 +433,13 @@ fun FaNotesScreen(
                 { model.navigateHistory(1) },
                 { model.openInSplit(it) },
                 split,
+                buildSet {
+                    val active = open?.path
+                    val right = split
+                    tabs.forEach { path ->
+                        if (ch.fasrv.fanotes.desk.tabShowsUnsaved(path, active, right, unsaved, splitUnsaved)) add(path)
+                    }
+                },
                 { from, to, side -> model.moveOpenTab(from, to, side) },
                 { model.togglePinTab(it) },
                 { anchor, scope -> model.closeTabs(scope, anchor) },
@@ -467,6 +478,7 @@ fun FaNotesScreen(
                     tagFilter = tagFilter,
                     onToggleTag = { model.toggleTagFilter(it) },
                     selected = open?.path,
+                    splitPath = split,
                     vaultLabel = vaultLabel,
                     syncLabel = syncText,
                     onOpen = { model.openPath(it) },
@@ -783,6 +795,7 @@ private fun VaultPane(
     tagFilter: String? = null,
     onToggleTag: (String) -> Unit = {},
     selected: String?,
+    splitPath: String? = null,
     vaultLabel: String,
     syncLabel: String,
     onOpen: (String) -> Unit,
@@ -893,7 +906,7 @@ private fun VaultPane(
         ) {
             items(tree, key = { it.path }) { node ->
                 NoteRow(
-                    node, selected, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
+                    node, selected, splitPath, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
                     localFolders, onToggleLocal, compact, rowHeightDp, radiusDp,
                     dragPath = dragPath,
                     dropDest = dropDest,
@@ -931,6 +944,7 @@ private fun VaultPane(
 private fun NoteRow(
     node: VaultNode,
     selected: String?,
+    splitPath: String?,
     colors: Map<String, String>,
     expanded: Set<String>,
     onOpen: (String) -> Unit,
@@ -1002,6 +1016,11 @@ private fun NoteRow(
         Text(
             node.name,
             maxLines = 1,
+            color = if (ch.fasrv.fanotes.desk.rowIsSplitCompanion(node.path, selected, splitPath)) {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
             modifier = Modifier
                 .weight(1f)
                 .padding(start = 8.dp)
@@ -1081,7 +1100,7 @@ private fun NoteRow(
     if (openFolder) {
         node.children.forEach {
             NoteRow(
-                it, selected, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
+                it, selected, splitPath, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
                 localFolders, onToggleLocal, compact, rowHeightDp, radiusDp,
                 dragPath = dragPath,
                 dropDest = dropDest,
@@ -1285,12 +1304,23 @@ private fun SplitPane(
 ) {
     val path = model.splitPath.collectAsStateWithLifecycle().value
     val markdown = model.splitMarkdown.collectAsStateWithLifecycle().value
+    val splitUnsaved = model.splitUnsaved.collectAsStateWithLifecycle().value
     val title = path?.let { ch.fasrv.fanotes.vault.titleOf(it) }.orEmpty()
     var typing by remember(path) { mutableStateOf(false) }
     var splitEditor by remember(path) { mutableStateOf<SplitEditorView?>(null) }
     Column(modifier) {
         Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(title.ifBlank { "Zweite Spalte" }, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
+            if (splitUnsaved) {
+                Box(
+                    Modifier
+                        .padding(end = 6.dp)
+                        .size(6.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                        .semantics { contentDescription = "Noch nicht gespeichert" },
+                )
+            }
             TextButton(onClick = { typing = !typing }) { Text(if (typing) "Stift" else "Text") }
             if (typing) TextButton(onClick = { splitEditor?.selectNext() }) { Text("Nächstes") }
             TextButton(onClick = { model.swapSplit() }) { Text("Tauschen") }

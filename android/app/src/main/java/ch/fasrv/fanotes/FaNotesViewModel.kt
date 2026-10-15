@@ -300,6 +300,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 if (fromHistory == null) noteTrail.value = visitNote(noteTrail.value, path)
                 rememberLastOpen(path)
                 revealFolders(path)
+                dirty = false
+                unsaved.value = false
                 persistWorkspace()
                 recordBug("note", path)
             } catch (error: Exception) {
@@ -332,6 +334,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun noteChanged() {
         dirty = true
+        unsaved.value = true
         editRevision += 1
         canvasToken.value += 1
         publishBusy()
@@ -839,6 +842,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 open.value = saved.first
                 noteHistory.value = saved.second
                 dirty = false
+                unsaved.value = false
                 graph.busyPaths = emptySet()
                 graph.engine.notifyLocalChange()
                 refreshTree()
@@ -1863,10 +1867,13 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val deskSettings = MutableStateFlow(graph.readDesk())
     val customCss = MutableStateFlow(graph.readCustomCss())
     val splitPath = MutableStateFlow<String?>(null)
+    val unsaved = MutableStateFlow(false)
+    val splitUnsaved = MutableStateFlow(false)
     val splitMarkdown = MutableStateFlow("")
     val splitSession = InkSession(newInkDocument("Spalte", "dots", isoNow()))
     private var splitNote: OpenNote? = null
     private var splitSaveJob: kotlinx.coroutines.Job? = null
+    private var splitSaveGeneration = 0
     private var splitGeneration = 0
     private var openedAtMs = 0L
     private var lastTypedAtMs: Long? = null
@@ -2004,6 +2011,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         splitPath.value = null
         splitNote = null
         splitMarkdown.value = ""
+        splitUnsaved.value = false
         persistWorkspace()
     }
 
@@ -2014,6 +2022,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         splitPath.value = null
         splitNote = null
         splitMarkdown.value = ""
+        splitUnsaved.value = false
         openPath(path, force = true)
     }
 
@@ -2418,6 +2427,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         refreshBook(savedSplit)
         noteTrail.value = visitNote(noteTrail.value, savedSplit.path)
         rememberLastOpen(savedSplit.path)
+        unsaved.value = false
+        splitUnsaved.value = false
         canvasToken.value += 1
         persistWorkspace()
     }
@@ -2446,6 +2457,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadSplit(path: String) {
         if (path.isBlank() || path == splitPath.value) return
+        splitUnsaved.value = false
         val generation = ++splitGeneration
         viewModelScope.launch {
             val note = try {
@@ -2461,6 +2473,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             rememberTab(path)
             rememberTags(path, note.markdown)
             splitPath.value = path
+            splitUnsaved.value = false
             persistWorkspace()
         }
     }
@@ -2480,6 +2493,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun scheduleSplitSave() {
+        splitUnsaved.value = true
+        val generation = ++splitSaveGeneration
         splitSaveJob?.cancel()
         splitSaveJob = viewModelScope.launch {
             kotlinx.coroutines.delay(ch.fasrv.fanotes.desk.editorMetrics(deskSettings.value).autosaveMs)
@@ -2488,6 +2503,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             val document = splitSession.document
             splitNote = withContext(Dispatchers.IO) { graph.store.save(note.copy(markdown = text), document, text) }
             graph.engine.notifyLocalChange()
+            if (generation == splitSaveGeneration) splitUnsaved.value = false
         }
     }
 

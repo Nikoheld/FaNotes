@@ -64,6 +64,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.shape.CircleShape
@@ -233,6 +235,7 @@ fun NoteTabs(
     onForward: () -> Unit,
     onOpenSplit: (String) -> Unit = {},
     splitPath: String? = null,
+    unsavedPaths: Set<String> = emptySet(),
     onMove: (String, String?, String) -> Unit = { _, _, _ -> },
     onTogglePin: (String) -> Unit = {},
     onCloseScope: (String, String) -> Unit = { _, _ -> },
@@ -268,6 +271,7 @@ fun NoteTabs(
                 selected = path == selected,
                 pinned = path in pinned,
                 inSplit = path == splitPath,
+                unsaved = path in unsavedPaths,
                 dragging = dragging == path,
                 dropSide = dropOn?.takeIf { it.first == path && dragging != null && dragging != path }?.second,
                 canCloseOthers = tabsToClose(deskTabs, path, "others").isNotEmpty(),
@@ -326,6 +330,7 @@ private fun NoteTabChip(
     selected: Boolean,
     pinned: Boolean,
     inSplit: Boolean,
+    unsaved: Boolean,
     dragging: Boolean,
     dropSide: String?,
     canCloseOthers: Boolean,
@@ -418,6 +423,16 @@ private fun NoteTabChip(
                     }
                 }.padding(horizontal = 8.dp, vertical = 4.dp),
             )
+            if (unsaved) {
+                Box(
+                    Modifier
+                        .padding(end = 4.dp)
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                        .semantics { contentDescription = "Noch nicht gespeichert" },
+                )
+            }
             if (!pinned) {
                 Text("  ×", modifier = Modifier.clickable(onClick = onClose).padding(end = 6.dp), fontSize = 12.sp)
             }

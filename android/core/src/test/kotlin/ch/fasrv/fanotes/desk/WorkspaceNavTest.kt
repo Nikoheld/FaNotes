@@ -62,6 +62,13 @@ class WorkspaceNavTest {
         assertEquals("b.md", splitPanePath("a.md", "a.md", tabs, listOf("a.md")))
         assertNull(splitPanePath("a.md", "a.md", listOf("a.md"), listOf("a.md")))
         assertNull(splitPanePath("", "a.md", tabs, emptyList()))
+        assertTrue(tabShowsUnsaved("a.md", "a.md", "b.md", activeDirty = true, splitDirty = false))
+        assertTrue(tabShowsUnsaved("b.md", "a.md", "b.md", activeDirty = false, splitDirty = true))
+        assertEquals(false, tabShowsUnsaved("a.md", "a.md", "a.md", activeDirty = false, splitDirty = true))
+        assertEquals(false, tabShowsUnsaved("c.md", "a.md", "b.md", activeDirty = true, splitDirty = true))
+        assertTrue(rowIsSplitCompanion("b.md", "a.md", "b.md"))
+        assertEquals(false, rowIsSplitCompanion("a.md", "a.md", "a.md"))
+        assertEquals(false, rowIsSplitCompanion("c.md", "a.md", "b.md"))
     }
 
     @Test
