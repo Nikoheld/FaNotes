@@ -145,6 +145,109 @@ fun visibleOffsetForSource(source: String, foldedLines: Set<Int>, sourceOffset: 
     return visible
 }
 
+/**
+ * Desktop Ctrl-Shift-[ folds the heading on the cursor line when that heading
+ * has a body. The offset is in the text the editor is showing.
+ */
+fun foldHeadingAtCursor(markdown: String, foldedLines: Set<Int>, visibleOffset: Int): Set<Int>? {
+    val text = normalizeNewlines(markdown)
+    val line = sourceLineForVisibleOffset(text, foldedLines, visibleOffset)
+    if (headingFoldRange(text, line) == null || line in foldedLines) return null
+    return foldedLines + line
+}
+
+/** Desktop Ctrl-Shift-] opens the fold on the cursor line, or the fold hiding it. */
+fun unfoldHeadingAtCursor(markdown: String, foldedLines: Set<Int>, visibleOffset: Int): Set<Int>? {
+    if (foldedLines.isEmpty()) return null
+    val text = normalizeNewlines(markdown)
+    val line = sourceLineForVisibleOffset(text, foldedLines, visibleOffset)
+    val target = if (line in foldedLines) line else foldedHeadingHidingLine(text, foldedLines, line)
+    if (target == null || target !in foldedLines) return null
+    return foldedLines - target
+}
+
+/**
+ * Desktop Ctrl-Alt-[ folds every outermost heading and skips the headings
+ * inside those bodies.
+ */
+fun foldAllHeadings(markdown: String, foldedLines: Set<Int>): Set<Int>? {
+    val text = normalizeNewlines(markdown)
+    val headings = parseNoteOutline(text)
+    val next = foldedLines.toMutableSet()
+    var changed = false
+    var index = 0
+    while (index < headings.size) {
+        val heading = headings[index]
+        val range = headingFoldRange(text, heading.line)
+        if (range == null) {
+            index += 1
+            continue
+        }
+        if (heading.line !in next) {
+            next += heading.line
+            changed = true
+        }
+        index += 1
+        while (index < headings.size && revealLineStart(text, headings[index].line) < range.to) index += 1
+    }
+    return if (changed) next else null
+}
+
+/** Desktop Ctrl-Alt-] opens every fold. */
+fun unfoldAllHeadings(foldedLines: Set<Int>): Set<Int>? = if (foldedLines.isEmpty()) null else emptySet()
+
+/** Desktop fold keymap: Ctrl-Shift-[/] fold or open, Ctrl-Alt-[/] fold or open everything. */
+fun foldShortcut(ctrl: Boolean, shift: Boolean, alt: Boolean, meta: Boolean, bracket: Char): String? {
+    if (!ctrl || meta) return null
+    if (shift && !alt) {
+        return when (bracket) {
+            '[' -> "fold"
+            ']' -> "unfold"
+            else -> null
+        }
+    }
+    if (alt && !shift) {
+        return when (bracket) {
+            '[' -> "all"
+            ']' -> "none"
+            else -> null
+        }
+    }
+    return null
+}
+
+fun headingFoldCommand(markdown: String, foldedLines: Set<Int>, command: String, visibleOffset: Int): Set<Int>? =
+    when (command) {
+        "fold" -> foldHeadingAtCursor(markdown, foldedLines, visibleOffset)
+        "unfold" -> unfoldHeadingAtCursor(markdown, foldedLines, visibleOffset)
+        "all" -> foldAllHeadings(markdown, foldedLines)
+        "none" -> unfoldAllHeadings(foldedLines)
+        else -> null
+    }
+
+/**
+ * Where the caret should sit after a fold change. A caret inside a newly
+ * hidden body moves to the end of that heading line.
+ */
+fun visibleCursorAfterFold(markdown: String, before: Set<Int>, after: Set<Int>, visibleOffset: Int): Int {
+    val text = normalizeNewlines(markdown)
+    val sourceOffset = sourceOffsetForVisible(text, before, visibleOffset)
+    val line = text.take(sourceOffset.coerceIn(0, text.length)).count { it == '\n' } + 1
+    val hiding = foldedHeadingHidingLine(text, after, line)
+    val target = if (hiding == null) {
+        sourceOffset
+    } else {
+        val start = revealLineStart(text, hiding)
+        start + text.substring(start).substringBefore('\n').length
+    }
+    return visibleOffsetForSource(text, after, target)
+}
+
+private fun sourceLineForVisibleOffset(text: String, foldedLines: Set<Int>, visibleOffset: Int): Int {
+    val sourceOffset = sourceOffsetForVisible(text, foldedLines, visibleOffset)
+    return text.take(sourceOffset.coerceIn(0, text.length)).count { it == '\n' } + 1
+}
+
 /** Where a folded-text offset lands in the full note. */
 fun sourceOffsetForVisible(source: String, foldedLines: Set<Int>, visibleOffset: Int): Int {
     if (foldedLines.isEmpty()) return visibleOffset.coerceIn(0, source.length)

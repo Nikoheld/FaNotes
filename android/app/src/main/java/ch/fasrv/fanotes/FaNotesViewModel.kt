@@ -1264,6 +1264,21 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         toggleHeadingFold(line)
     }
 
+    /** Ctrl-Shift-[, Ctrl-Shift-], Ctrl-Alt-[, and Ctrl-Alt-] from the desktop fold keymap. */
+    fun foldEditorCommand(command: String, visibleOffset: Int) {
+        val next = ch.fasrv.fanotes.desk.headingFoldCommand(markdown.value, foldedHeadings.value, command, visibleOffset) ?: return
+        replaceHeadingFolds(next)
+    }
+
+    private fun replaceHeadingFolds(next: Set<Int>) {
+        val previous = foldedHeadings.value
+        if (next == previous) return
+        foldedHeadings.value = next
+        for (line in next - previous) syncHeadingSection(session, markdown.value, line, true)
+        for (line in previous - next) syncHeadingSection(session, markdown.value, line, false)
+        noteChanged()
+    }
+
     /** Opens a folded heading so a jump into its body can land on the line. */
     fun unfoldHeading(line: Int) {
         if (line !in foldedHeadings.value) return
@@ -2683,6 +2698,16 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleSplitHeadingAtVisibleLine(visibleLine: Int) {
         val line = ch.fasrv.fanotes.desk.headingLineForFoldMarker(splitMarkdown.value, splitFolded.value, visibleLine) ?: return
         toggleSplitHeading(line)
+    }
+
+    fun foldSplitCommand(command: String, visibleOffset: Int) {
+        val next = ch.fasrv.fanotes.desk.headingFoldCommand(splitMarkdown.value, splitFolded.value, command, visibleOffset) ?: return
+        val previous = splitFolded.value
+        if (next == previous) return
+        splitFolded.value = next
+        for (line in next - previous) syncHeadingSection(splitSession, splitMarkdown.value, line, true)
+        for (line in previous - next) syncHeadingSection(splitSession, splitMarkdown.value, line, false)
+        splitChanged()
     }
 
     private fun syncHeadingSection(target: ch.fasrv.fanotes.ink.InkSession, markdown: String, line: Int, collapse: Boolean) {

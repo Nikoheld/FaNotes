@@ -175,6 +175,24 @@ class NotePageView(context: Context) : FrameLayout(context) {
                     return true
                 }
             }
+            val bracket = when (keyCode) {
+                KeyEvent.KEYCODE_LEFT_BRACKET -> '['
+                KeyEvent.KEYCODE_RIGHT_BRACKET -> ']'
+                else -> null
+            }
+            if (bracket != null) {
+                val command = ch.fasrv.fanotes.desk.foldShortcut(
+                    event.isCtrlPressed,
+                    event.isShiftPressed,
+                    event.isAltPressed,
+                    event.isMetaPressed,
+                    bracket,
+                )
+                if (command != null) {
+                    if (event.action == KeyEvent.ACTION_DOWN) foldKeys(command)
+                    return true
+                }
+            }
             if (keyCode == KeyEvent.KEYCODE_TAB && !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed) {
                 if (event.action == KeyEvent.ACTION_DOWN) indentSelection(event.isShiftPressed)
                 return true
@@ -303,6 +321,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onMath: () -> Unit = {}
     var onUnfoldHeading: (Int) -> Unit = {}
     var onToggleHeading: (Int) -> Unit = {}
+    var onEditorFold: (String, Int) -> Unit = { _, _ -> }
+    private var pendingCursor: Int? = null
     var onPdfPage: (Int) -> Unit = {}
     var onSymbolSize: (Double) -> Unit = {}
     var onSymbolRotation: (Double) -> Unit = {}
@@ -662,8 +682,14 @@ class NotePageView(context: Context) : FrameLayout(context) {
         foldedLines = folded
         val visible = ch.fasrv.fanotes.desk.markdownWithFolds(markdown, folded)
         val shown = editor.text?.toString().orEmpty()
-        if (path != boundPath || shown != visible) {
-            val cursor = if (path != boundPath) visible.length else editor.selectionStart.coerceIn(0, visible.length)
+        val pending = pendingCursor
+        if (path != boundPath || shown != visible || pending != null) {
+            val cursor = when {
+                path != boundPath -> visible.length
+                pending != null -> pending.coerceIn(0, visible.length)
+                else -> editor.selectionStart.coerceIn(0, visible.length)
+            }
+            pendingCursor = null
             boundPath = path
             writing = true
             editor.setText(visible)
@@ -710,6 +736,13 @@ class NotePageView(context: Context) : FrameLayout(context) {
             val imm = context.getSystemService(InputMethodManager::class.java)
             imm.hideSoftInputFromWindow(windowToken, 0)
         }
+    }
+
+    private fun foldKeys(command: String) {
+        val offset = editor.selectionEnd.coerceAtLeast(0)
+        val next = ch.fasrv.fanotes.desk.headingFoldCommand(sourceMarkdown, foldedLines, command, offset) ?: return
+        pendingCursor = ch.fasrv.fanotes.desk.visibleCursorAfterFold(sourceMarkdown, foldedLines, next, offset)
+        onEditorFold(command, offset)
     }
 
     private fun selectNextOccurrence() {
