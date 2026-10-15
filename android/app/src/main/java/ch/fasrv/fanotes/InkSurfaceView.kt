@@ -98,6 +98,7 @@ import ch.fasrv.fanotes.input.tiltDegrees
 import ch.fasrv.fanotes.input.touchPalmState
 import ch.fasrv.fanotes.text.PaperKind
 import ch.fasrv.fanotes.text.PaperLine
+import ch.fasrv.fanotes.text.paperImageFrame
 import ch.fasrv.fanotes.text.paperImageCaption
 import ch.fasrv.fanotes.text.paperImageSource
 import ch.fasrv.fanotes.text.paperLines
@@ -287,6 +288,16 @@ class InkSurfaceView @JvmOverloads constructor(
     private var textStamp = -1f
     private var cachedMarkdown = ""
     private var paperBlocks: List<PaperBlock> = emptyList()
+    private var cachedImageEpoch = 0
+    private var imageEpoch = 0
+    var paperImages: Map<String, android.graphics.Bitmap> = emptyMap()
+        set(value) {
+            if (field == value) return
+            field = value
+            imageEpoch += 1
+            paperBlocks = emptyList()
+            invalidate()
+        }
     private val tableLine = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         color = Color.parseColor("#D5D0C8")
@@ -1056,7 +1067,7 @@ class InkSurfaceView @JvmOverloads constructor(
                     block.rowHeights.forEach { height += it }
                     top += height
                 }
-                is PaperBlock.Image -> top += 120f * scale
+                is PaperBlock.Image -> top += block.frameHeight + 24f * scale
             }
         }
         return false
@@ -1674,7 +1685,7 @@ class InkSurfaceView @JvmOverloads constructor(
 
     private fun paperBlocks(scale: Float): List<PaperBlock> {
         if (scale <= 0f || markdown.isBlank()) return emptyList()
-        if (paperBlocks.isNotEmpty() && markdown == cachedMarkdown && kotlin.math.abs(scale - textStamp) < scale * 0.03f) return paperBlocks
+        if (paperBlocks.isNotEmpty() && markdown == cachedMarkdown && imageEpoch == cachedImageEpoch && kotlin.math.abs(scale - textStamp) < scale * 0.03f) return paperBlocks
         val built = ArrayList<PaperBlock>()
         val textLines = ArrayList<PaperLine>()
         fun flush() {
@@ -1689,7 +1700,10 @@ class InkSurfaceView @JvmOverloads constructor(
                 built += tableBlock(line.text, scale)
             } else if (line.kind == PaperKind.IMAGE) {
                 flush()
-                built += PaperBlock.Image(paperImageCaption(line.text), paperImageSource(line.text))
+                val source = paperImageSource(line.text)
+                val bitmap = paperImages[source]?.takeIf { !it.isRecycled }
+                val frame = if (bitmap == null) 96f * scale else paperImageFrame(bitmap.width, bitmap.height, TEXT_COLUMN * scale).second
+                built += PaperBlock.Image(paperImageCaption(line.text), source, frame, bitmap)
             } else {
                 textLines += line
             }
@@ -1697,6 +1711,7 @@ class InkSurfaceView @JvmOverloads constructor(
         flush()
         paperBlocks = built
         cachedMarkdown = markdown
+        cachedImageEpoch = imageEpoch
         textStamp = scale
         return built
     }
@@ -1765,26 +1780,36 @@ class InkSurfaceView @JvmOverloads constructor(
 
     private fun drawImageCard(canvas: Canvas, block: PaperBlock.Image, scale: Float) {
         val width = TEXT_COLUMN * scale
-        val height = 96f * scale
+        val height = block.frameHeight
         val radius = 12f * scale
         val top = 8f * scale
         val rect = RectF(0f, top, width, top + height)
         cardFill.color = Color.WHITE
         canvas.drawRoundRect(rect, radius, radius, cardFill)
+        val bitmap = block.bitmap?.takeIf { !it.isRecycled }
+        if (bitmap != null) {
+            val pad = 8f * scale
+            val dest = RectF(rect.left + pad, rect.top + pad, rect.right - pad, rect.bottom - pad)
+            canvas.save()
+            canvas.clipPath(android.graphics.Path().apply { addRoundRect(rect, radius, radius, android.graphics.Path.Direction.CW) })
+            canvas.drawBitmap(bitmap, null, dest, tilePaint)
+            canvas.restore()
+        } else {
+            textPaint.color = Color.parseColor("#252630")
+            textPaint.textSize = 15f * scale
+            textPaint.typeface = Typeface.create(editorTypeface, Typeface.BOLD)
+            canvas.drawText(block.caption, 16f * scale, rect.centerY() - 4f * scale, textPaint)
+            textPaint.typeface = editorTypeface
+            textPaint.textSize = 11f * scale
+            textPaint.color = Color.parseColor("#5C6B8E")
+            val file = block.source.substringAfterLast('/').substringBefore('?')
+            if (file.isNotEmpty() && file != block.caption) {
+                canvas.drawText(file, 16f * scale, rect.centerY() + 16f * scale, textPaint)
+            }
+            textPaint.color = Color.parseColor("#252630")
+        }
         tableLine.strokeWidth = max(1f, scale)
         canvas.drawRoundRect(rect, radius, radius, tableLine)
-        textPaint.color = Color.parseColor("#252630")
-        textPaint.textSize = 15f * scale
-        textPaint.typeface = Typeface.create(editorTypeface, Typeface.BOLD)
-        canvas.drawText(block.caption, 16f * scale, rect.centerY() - 4f * scale, textPaint)
-        textPaint.typeface = editorTypeface
-        textPaint.textSize = 11f * scale
-        textPaint.color = Color.parseColor("#5C6B8E")
-        val file = block.source.substringAfterLast('/').substringBefore('?')
-        if (file.isNotEmpty() && file != block.caption) {
-            canvas.drawText(file, 16f * scale, rect.centerY() + 16f * scale, textPaint)
-        }
-        textPaint.color = Color.parseColor("#252630")
         canvas.translate(0f, height + 24f * scale)
     }
 
@@ -2204,7 +2229,7 @@ class InkSurfaceView @JvmOverloads constructor(
             height += when (block) {
                 is PaperBlock.Text -> block.layout.height.toFloat()
                 is PaperBlock.Table -> block.rowHeights.sum() + 10f * scale
-                is PaperBlock.Image -> 120f * scale
+                is PaperBlock.Image -> block.frameHeight + 24f * scale
             }
         }
         val originY = session?.document?.originY ?: 0.0
@@ -2343,7 +2368,7 @@ class InkSurfaceView @JvmOverloads constructor(
 private sealed class PaperBlock {
     class Text(val layout: StaticLayout, val paragraphStarts: IntArray, val taskSources: IntArray) : PaperBlock()
     class Table(val rows: List<List<String>>, val rowHeights: FloatArray, val cellLayouts: List<List<StaticLayout>>) : PaperBlock()
-    class Image(val caption: String, val source: String) : PaperBlock()
+    class Image(val caption: String, val source: String, val frameHeight: Float, val bitmap: android.graphics.Bitmap?) : PaperBlock()
 }
 
 private data class GuideDrag(

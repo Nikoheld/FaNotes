@@ -1944,6 +1944,7 @@ private fun PageSurface(
     var bound by remember { mutableStateOf("") }
     var inkNotice by remember { mutableStateOf<ch.fasrv.fanotes.ink.InkNotice?>(null) }
     val links by model.noteLinks.collectAsStateWithLifecycle()
+    val paperImages by model.paperImages.collectAsStateWithLifecycle()
     val boxes by model.worksheetBoxes.collectAsStateWithLifecycle()
     val highlights by model.worksheetHighlights.collectAsStateWithLifecycle()
     val outlineJump by model.outlineJump.collectAsStateWithLifecycle()
@@ -1998,6 +1999,7 @@ private fun PageSurface(
             }
             page.onDeskShortcut = onDeskShortcut
             if (page.ink.backdrop !== backdrop) page.ink.backdrop = backdrop
+            if (page.ink.paperImages !== paperImages) page.ink.paperImages = paperImages
             page.onTool = {
                 model.tool.value = it
                 model.recordBugTool(it.name)

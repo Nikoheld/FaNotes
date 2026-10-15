@@ -2,6 +2,7 @@ package ch.fasrv.fanotes
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
@@ -145,6 +146,8 @@ import ch.fasrv.fanotes.vault.VaultNode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -191,6 +194,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val inspectorOpen = MutableStateFlow(false)
     val message = MutableStateFlow<String?>(null)
     val backdrop = MutableStateFlow<List<BackdropSlice>>(emptyList())
+    val paperImages = MutableStateFlow<Map<String, Bitmap>>(emptyMap())
+    private var paperImageTicket = 0
     val sync = graph.engine.state.stateIn(viewModelScope, SharingStarted.Eagerly, graph.engine.state.value)
     private val _vaultLabel = MutableStateFlow(graph.initialVaultLabel)
     val vaultLabel = _vaultLabel.asStateFlow()
@@ -235,6 +240,52 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             refreshTagIndex()
             graph.engine.start()
         }
+        viewModelScope.launch {
+            combine(open, markdown) { note, text -> note?.path.orEmpty() to text }
+                .distinctUntilChanged()
+                .collect { reloadPaperImages() }
+        }
+    }
+
+    private fun reloadPaperImages() {
+        val ticket = ++paperImageTicket
+        val path = open.value?.path.orEmpty()
+        val text = markdown.value
+        viewModelScope.launch {
+            val next = withContext(Dispatchers.IO) {
+                ch.fasrv.fanotes.text.paperLines(text)
+                    .filter { it.kind == ch.fasrv.fanotes.text.PaperKind.IMAGE }
+                    .map { ch.fasrv.fanotes.text.paperImageSource(it.text) }
+                    .distinct()
+                    .mapNotNull { source ->
+                        val bytes = ch.fasrv.fanotes.text.resolvePaperImagePaths(path, source)
+                            .firstNotNullOfOrNull { candidate -> runCatching { graph.vault.read(candidate) }.getOrNull() }
+                        val bitmap = bytes?.let { decodePaperImage(it) } ?: return@mapNotNull null
+                        source to bitmap
+                    }
+                    .toMap()
+            }
+            if (ticket != paperImageTicket) {
+                next.values.forEach { if (!it.isRecycled) it.recycle() }
+                return@launch
+            }
+            val previous = paperImages.value
+            paperImages.value = next
+            previous.values.forEach { bitmap ->
+                if (bitmap !in next.values && !bitmap.isRecycled) bitmap.recycle()
+            }
+        }
+    }
+
+    private fun decodePaperImage(bytes: ByteArray): Bitmap? {
+        if (bytes.isEmpty() || bytes.size > 32 * 1024 * 1024) return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        while (bounds.outWidth / sample > 1600 || bounds.outHeight / sample > 1600) sample *= 2
+        val options = BitmapFactory.Options().apply { inSampleSize = sample }
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
     }
 
     fun refreshTree() {
