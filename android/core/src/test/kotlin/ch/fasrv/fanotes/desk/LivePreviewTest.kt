@@ -104,6 +104,16 @@ class LivePreviewTest {
             .first { it.kind == LiveKind.DETAILS_SUMMARY }
         assertEquals(chapter.map { it.scale }, openChapter.readingScales)
         assertEquals(chapter.map { it.heading }, openChapter.readingHeadings)
+        val blocks = detailsReadingLines("- Punkt\n\n> Zitat\n\n---\n\n1. Eins\n\n```\ncode\n```")
+        assertEquals(listOf("bullet", "quote", "rule", "number", "code"), blocks.map { it.kind })
+        assertEquals("• Punkt", blocks[0].text)
+        assertEquals("Zitat", blocks[1].text)
+        assertEquals("1. Eins", blocks[3].text)
+        assertEquals("• Punkt\nZitat\n1. Eins\ncode", detailsReading("- Punkt\n\n> Zitat\n\n---\n\n1. Eins\n\n```\ncode\n```"))
+        val listed = livePreviewMarks("<details open>\n<summary>Liste</summary>\n- Punkt\n\n---\n</details>", 0, 0)
+            .first { it.kind == LiveKind.DETAILS_SUMMARY }
+        assertEquals(listOf("bullet", "rule"), listed.readingKinds)
+        assertEquals("• Punkt\n—", listed.body)
         assertTrue(openMarks.any { it.kind == LiveKind.HIDE && it.start == multi.indexOf("<summary>") })
         assertTrue(openMarks.any { it.kind == LiveKind.HIDE && it.start == multi.indexOf("</details>") })
         val inlineOpen = livePreviewMarks(opened, 0, 0).first { it.kind == LiveKind.DETAILS_SUMMARY }

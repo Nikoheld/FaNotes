@@ -180,6 +180,7 @@ private fun spanFor(mark: LiveMark, readable: Int, accent: Int, textSizePx: Floa
         textSizePx,
         mark.readingScales,
         mark.readingHeadings,
+        mark.readingKinds,
     )
     LiveKind.DETAILS_BODY -> DetailsBodySpan(paperDetailsFillArgb(), textSizePx, false)
     LiveKind.DETAILS_END -> DetailsBodySpan(paperDetailsFillArgb(), textSizePx, true)
@@ -203,6 +204,7 @@ internal class DetailsSummarySpan(
     private val textSizePx: Float,
     private val readingScales: List<Float> = emptyList(),
     private val readingHeadings: List<Boolean> = emptyList(),
+    private val readingKinds: List<String> = emptyList(),
 ) : ReplacementSpan(), LineBackgroundSpan, LivePreviewSpan {
     override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
         val box = paperDetailsBox(textSizePx)
@@ -277,11 +279,37 @@ internal class DetailsSummarySpan(
             body.split('\n').forEachIndexed { index, line ->
                 val scale = readingScales.getOrElse(index) { 1f }
                 val heading = readingHeadings.getOrElse(index) { false }
+                val kind = readingKinds.getOrElse(index) { "paragraph" }
                 paint.textSize = previousSize * scale
-                paint.typeface = Typeface.create(previousFace, if (heading) Typeface.BOLD else Typeface.NORMAL)
+                paint.typeface = when (kind) {
+                    "code", "math" -> Typeface.MONOSPACE
+                    else -> Typeface.create(previousFace, if (heading) Typeface.BOLD else Typeface.NORMAL)
+                }
                 val lineMetrics = paint.fontMetrics
                 cursor += -lineMetrics.ascent
-                canvas.drawText(line, rect.left + box.padX, cursor, paint)
+                val textX = rect.left + box.padX
+                when (kind) {
+                    "rule" -> {
+                        paint.color = PAPER_RULE_ARGB
+                        val ruleY = cursor - lineMetrics.descent
+                        canvas.drawRect(textX, ruleY, rect.right - box.padX, ruleY + box.border, paint)
+                        paint.color = PAPER_MATH_INK
+                    }
+                    "quote" -> {
+                        paint.color = accent
+                        canvas.drawRect(textX, cursor + lineMetrics.ascent, textX + box.border * 2f, cursor + lineMetrics.descent, paint)
+                        paint.color = PAPER_MATH_INK
+                        canvas.drawText(line, textX + previousSize * 0.7f, cursor, paint)
+                    }
+                    "bullet" -> {
+                        val mark = "• "
+                        paint.color = accent
+                        canvas.drawText(mark, textX, cursor, paint)
+                        paint.color = PAPER_MATH_INK
+                        canvas.drawText(line.removePrefix(mark), textX + paint.measureText(mark), cursor, paint)
+                    }
+                    else -> canvas.drawText(line, textX, cursor, paint)
+                }
                 cursor += lineMetrics.descent
             }
         }
