@@ -92,4 +92,18 @@ class LivePreviewTest {
         assertEquals(null, selectionMatchRanges(many, 0, 1))
         assertEquals(100, selectionMatchRanges("a".repeat(101), 0, 1)?.size)
     }
+
+    @Test
+    fun nextOccurrenceSelectsTheWordThenTheNextWholeCopy() {
+        assertEquals(0 to 5, nextEditorOccurrence("Hallo Welt", 2, 2))
+        assertEquals(0 to 5, nextEditorOccurrence("Hallo Welt", 5, 5))
+        assertEquals(null, nextEditorOccurrence("Hallo Welt", 5, 6))
+        assertEquals(0 to 7, editorWordRange("foo_bar baz", 1))
+        val repeated = "beta und beta"
+        assertEquals(9 to 13, nextEditorOccurrence(repeated, 0, 4))
+        assertEquals(0 to 4, nextEditorOccurrence(repeated, 9, 13))
+        assertEquals(4 to 8, nextEditorOccurrence("betabeta", 0, 4))
+        assertEquals(null, nextEditorOccurrence("Beta beta", 0, 4))
+        assertEquals(null, nextEditorOccurrence("nur", 0, 3))
+    }
 }

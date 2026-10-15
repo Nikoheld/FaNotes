@@ -396,6 +396,22 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
     }
 
+    private fun selectNextOccurrence() {
+        val text = editor.text?.toString().orEmpty()
+        val start = editor.selectionStart.coerceAtLeast(0)
+        val end = editor.selectionEnd.coerceAtLeast(start)
+        val next = ch.fasrv.fanotes.desk.nextEditorOccurrence(text, start, end) ?: return
+        if (!textMode) setTextMode(true)
+        editor.requestFocus()
+        editor.setSelection(next.first, next.second)
+        editor.post {
+            val layout = editor.layout ?: return@post
+            val safe = next.first.coerceAtMost(layout.text.length)
+            val top = layout.getLineTop(layout.getLineForOffset(safe))
+            editor.scrollTo(0, (top - editor.paddingTop).coerceAtLeast(0))
+        }
+    }
+
     private fun format(action: String) {
         val start = editor.selectionStart.coerceAtLeast(0)
         val end = editor.selectionEnd.coerceAtLeast(start)
@@ -494,6 +510,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             ink.selectedLinkId = null
         })
         tools.addView(chip("Fett") { format("bold") })
+        tools.addView(chip("Nächstes") { selectNextOccurrence() })
         tools.addView(chip("Liste") { format("bulletList") })
         tools.addView(chip("Aufgabe") { format("checklist") })
         tools.addView(chip("Zitat") { format("quote") })
