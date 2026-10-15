@@ -60,6 +60,38 @@ fun noteWorkspacePanels(
 /** Desktop compact mode is off until the setting is turned on. */
 fun compactChrome(raw: String?) = raw == "on"
 
+data class RibbonItem(val id: String, val label: String)
+
+/** Main ribbon, in the desktop order. Stift is a mode, not a screen. */
+val RIBBON_PRIMARY = listOf(
+    RibbonItem("notes", "Notizen"),
+    RibbonItem("search", "Suchen"),
+    RibbonItem("pen", "Stift"),
+    RibbonItem("tasks", "Aufgaben"),
+    RibbonItem("calendar", "Kalender"),
+)
+
+/** Extra tools behind Werkzeuge. GlyphenWerk stays out. */
+val RIBBON_TOOLS = listOf(
+    RibbonItem("daily", "Tagesnotiz"),
+    RibbonItem("overview", "Übersicht"),
+    RibbonItem("cards", "Karten"),
+    RibbonItem("books", "Fachbuch"),
+    RibbonItem("history", "Verlauf"),
+    RibbonItem("study", "Lernzeit"),
+    RibbonItem("ai", "AI"),
+    RibbonItem("commands", "Befehle"),
+    RibbonItem("focus", "Fokus"),
+)
+
+fun ribbonToolLabel(open: Boolean) = if (open) "Weniger" else "Werkzeuge"
+
+fun ribbonItemActive(id: String, destination: String, penOpen: Boolean): Boolean = when (id) {
+    "pen" -> penOpen && destination == "notes"
+    "notes" -> destination == "notes" && !penOpen
+    else -> destination == id
+}
+
 /** Desktop glass is off until the setting is turned on. */
 fun glassChrome(raw: String?) = raw == "on"
 
