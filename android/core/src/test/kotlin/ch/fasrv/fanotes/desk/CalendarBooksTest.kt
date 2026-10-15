@@ -16,6 +16,13 @@ class CalendarBooksTest {
         assertEquals(listOf(wednesday, wednesday.plusDays(1), wednesday.plusDays(2)), calendarRange("three", wednesday))
         assertEquals("09:00–10:00", eventClock(CalendarEvent("e", "personal", "Stunde", "2026-10-14T09:00", "2026-10-14T10:00", allDay = false)))
         assertNull(eventClock(CalendarEvent("e", "personal", "Tag", "2026-10-14", "2026-10-14", allDay = true)))
+        val month = calendarRange("month", LocalDate.parse("2026-10-15"))
+        assertEquals(42, month.size)
+        assertEquals(LocalDate.parse("2026-09-28"), month.first())
+        assertEquals(LocalDate.parse("2026-11-08"), month.last())
+        val timed = CalendarEvent("e", "personal", "Lesen", "2026-10-15T08:00", "2026-10-15T09:00", allDay = false)
+        assertEquals("08:00 Lesen", monthEventLabel(timed))
+        assertEquals("Tag", monthEventLabel(CalendarEvent("e", "personal", "Tag", "2026-10-14", "2026-10-14", allDay = true)))
     }
 
     @Test

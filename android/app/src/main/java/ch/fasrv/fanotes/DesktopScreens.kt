@@ -884,7 +884,16 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
             }) { Text("›") }
         }
         when (view) {
-            "month" -> MonthGrid(month, anchor, shown) { anchor = it }
+            "month" -> MonthGrid(
+                anchor,
+                shown,
+                onSelect = { day ->
+                    anchor = day
+                    month = java.time.YearMonth.from(day)
+                    view = "day"
+                },
+                onEdit = { event, date -> editor = draftFor(event, date) },
+            )
             "agenda" -> AgendaList(anchor, shown, { event, date -> editor = draftFor(event, date) }) { model.openDaily(it) }
             else -> DayColumns(
                 ch.fasrv.fanotes.desk.calendarRange(view, anchor),
@@ -951,25 +960,52 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
 }
 
 @Composable
-private fun MonthGrid(month: YearMonth, anchor: LocalDate, document: ch.fasrv.fanotes.desk.CalendarDocument, onPick: (LocalDate) -> Unit) {
-    val start = month.atDay(1)
-    val offset = (start.dayOfWeek.value + 6) % 7
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+private fun MonthGrid(
+    anchor: LocalDate,
+    document: ch.fasrv.fanotes.desk.CalendarDocument,
+    onSelect: (LocalDate) -> Unit,
+    onEdit: (CalendarEvent, LocalDate) -> Unit,
+) {
+    val days = ch.fasrv.fanotes.desk.calendarRange("month", anchor)
+    Row(Modifier.fillMaxWidth()) {
         listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So").forEach { Text(it, fontSize = 12.sp, modifier = Modifier.weight(1f)) }
     }
-    val cells = offset + month.lengthOfMonth()
-    for (week in 0 until (cells + 6) / 7) {
+    days.chunked(7).forEach { week ->
         Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-            for (column in 0 until 7) {
-                val index = week * 7 + column
-                val date = if (index >= offset && index < offset + month.lengthOfMonth()) month.atDay(index - offset + 1) else null
-                val count = if (date == null) 0 else document.events.count { ch.fasrv.fanotes.desk.occurrencesOn(it, date) }
-                Text(
-                    if (date == null) "" else "${date.dayOfMonth}${if (count > 0) " ·$count" else ""}",
-                    modifier = Modifier.weight(1f).clickable(enabled = date != null) { if (date != null) onPick(date) }.padding(4.dp),
-                    fontSize = 13.sp,
-                    color = if (date == anchor) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                )
+            week.forEach { date ->
+                val outside = date.month != anchor.month
+                val items = document.events.filter { ch.fasrv.fanotes.desk.occurrencesOn(it, date) }
+                Column(Modifier.weight(1f).heightIn(min = 72.dp).padding(1.dp)) {
+                    Text(
+                        date.dayOfMonth.toString(),
+                        fontSize = 12.sp,
+                        fontWeight = if (date == LocalDate.now() || date == anchor) FontWeight.Bold else FontWeight.Normal,
+                        color = when {
+                            date == LocalDate.now() -> MaterialTheme.colorScheme.primary
+                            outside -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+                            else -> MaterialTheme.colorScheme.onSurface
+                        },
+                        modifier = Modifier.clickable { onSelect(date) },
+                    )
+                    items.take(3).forEach { event ->
+                        val tint = document.calendars.find { it.id == event.calendarId }?.color ?: "#2a6f97"
+                        Text(
+                            ch.fasrv.fanotes.desk.monthEventLabel(event),
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            color = inkOn(tint),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 1.dp)
+                                .background(calendarSwatch(tint))
+                                .clickable { onEdit(event, date) }
+                                .padding(horizontal = 2.dp),
+                        )
+                    }
+                    if (items.size > 3) {
+                        Text("+${items.size - 3} weitere", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
             }
         }
     }
