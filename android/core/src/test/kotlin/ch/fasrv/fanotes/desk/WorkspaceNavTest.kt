@@ -161,6 +161,16 @@ class WorkspaceNavTest {
         assertEquals(0.35, splitRatioFromSetting("0.35"))
         assertEquals(SPLIT_MIN_RATIO, splitRatioFromSetting("0"))
         assertEquals(0.5, splitRatioFromSetting("halb"))
+        assertEquals(0.55, splitDividerRatio(false, "right", 0.5))
+        assertEquals(0.45, splitDividerRatio(false, "left", 0.5))
+        assertEquals(null, splitDividerRatio(false, "up", 0.5))
+        assertEquals(0.45, splitDividerRatio(true, "up", 0.5))
+        assertEquals(0.55, splitDividerRatio(true, "down", 0.5))
+        assertEquals(null, splitDividerRatio(true, "left", 0.5))
+        assertEquals(SPLIT_MIN_RATIO, splitDividerRatio(false, "home", 0.5))
+        assertEquals(SPLIT_MAX_RATIO, splitDividerRatio(true, "end", 0.5))
+        assertEquals(0.5, splitDividerRatio(true, "enter", 0.72))
+        assertEquals(null, splitDividerRatio(false, "a", 0.5))
     }
 
     @Test
