@@ -2164,6 +2164,16 @@ private fun PageSurface(
             page.ink.onToggleSection = { model.toggleInkSection(it) }
             page.ink.onEditBox = onEditBox
             page.onMath = onMath
+            page.pdfNote = model.open.value?.kind == NoteKind.PDF
+            page.onPdfKey = { action ->
+                when (action) {
+                    "next" -> model.goToPdfPage(model.pdfThumbPage.value + 1)
+                    "previous" -> model.goToPdfPage(model.pdfThumbPage.value - 1)
+                    "first" -> model.goToPdfPage(1)
+                    "last" -> model.goToPdfPage(Int.MAX_VALUE)
+                    "search" -> model.focusPdfSearch()
+                }
+            }
             page.onPdfPage = { model.notePdfPage(it) }
             page.ink.onPdfZoom = { zoom, zoomMode -> model.notePdfZoom(zoom, zoomMode) }
             val camera = pdfCamera

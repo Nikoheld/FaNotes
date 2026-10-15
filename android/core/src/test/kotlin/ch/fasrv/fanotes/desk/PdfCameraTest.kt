@@ -32,5 +32,16 @@ class PdfCameraTest {
         assertEquals("…", pdfPageCountLabel(0))
         assertEquals("1 Seite", pdfPageCountLabel(1))
         assertEquals("3 Seiten", pdfPageCountLabel(3))
+        assertEquals("next", pdfViewerKey("page-down", ctrl = false, meta = false, alt = false, shift = false))
+        assertEquals("next", pdfViewerKey("down", ctrl = false, meta = false, alt = false, shift = true))
+        assertEquals("previous", pdfViewerKey("page-up", ctrl = false, meta = false, alt = false, shift = false))
+        assertEquals("previous", pdfViewerKey("up", ctrl = false, meta = false, alt = false, shift = false))
+        assertEquals("first", pdfViewerKey("home", ctrl = false, meta = false, alt = false, shift = false))
+        assertEquals("last", pdfViewerKey("end", ctrl = false, meta = false, alt = false, shift = false))
+        assertEquals("search", pdfViewerKey("f", ctrl = true, meta = false, alt = false, shift = false))
+        assertEquals(null, pdfViewerKey("f", ctrl = true, meta = false, alt = false, shift = true))
+        assertEquals(null, pdfViewerKey("down", ctrl = true, meta = false, alt = false, shift = false))
+        assertEquals(null, pdfViewerKey("down", ctrl = false, meta = false, alt = true, shift = false))
+        assertEquals(null, pdfViewerKey("left", ctrl = false, meta = false, alt = false, shift = false))
     }
 }

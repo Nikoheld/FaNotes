@@ -73,6 +73,23 @@ fun pdfPageTarget(page: Double, count: Int): Int {
     return rounded.coerceIn(1, limit)
 }
 
+/**
+ * Keys the desktop PDF viewer handles when focus is not in a text field.
+ * Page Up, Page Down, arrows, Home and End move between pages. Ctrl+F opens search.
+ */
+fun pdfViewerKey(key: String, ctrl: Boolean, meta: Boolean, alt: Boolean, shift: Boolean): String? {
+    if (alt) return null
+    if ((ctrl || meta) && !shift && key == "f") return "search"
+    if (ctrl || meta) return null
+    return when (key) {
+        "down", "page-down" -> "next"
+        "up", "page-up" -> "previous"
+        "home" -> "first"
+        "end" -> "last"
+        else -> null
+    }
+}
+
 fun pdfPageCountLabel(count: Int): String = when {
     count <= 0 -> "…"
     count == 1 -> "1 Seite"
