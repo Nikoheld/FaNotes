@@ -2296,7 +2296,7 @@ fun AiScreen(model: FaNotesViewModel) {
                             rows += lines[index]
                             index += 1
                         }
-                        PreviewTable(rows, base, link, codeInk, codeFill, codeBorder, Modifier.previewAnchor(start)) { number ->
+                        PreviewTable(rows, base, link, codeInk, codeFill, codeBorder, Modifier.previewAnchor(start), start == 0) { number ->
                             ch.fasrv.fanotes.desk.footnoteDefinitionIndex(lines, number)?.let(::jumpTo)
                         }
                         continue
@@ -2476,6 +2476,10 @@ fun AiScreen(model: FaNotesViewModel) {
                             } else {
                                 null
                             }
+                            val flowTop = (base * line.scale) * (headingBox?.marginTopEm ?: 0f) +
+                                base * ch.fasrv.fanotes.desk.previewFlowTop(line.kind, lineIndex == 0)
+                            val flowBottom = (base * line.scale) * (headingBox?.marginBottomEm ?: 0f) +
+                                base * ch.fasrv.fanotes.desk.previewFlowBottom(line.kind)
                             PreviewRich(
                                 line.text,
                                 line.inlines,
@@ -2488,8 +2492,9 @@ fun AiScreen(model: FaNotesViewModel) {
                                 line.kind,
                                 Modifier
                                     .padding(
-                                        top = ((base * line.scale) * (headingBox?.marginTopEm ?: 0f)).dp,
-                                        bottom = ((base * line.scale) * (headingBox?.marginBottomEm ?: 0f)).dp,
+                                        start = (base * ch.fasrv.fanotes.desk.previewFlowStart(line.kind)).dp,
+                                        top = flowTop.dp,
+                                        bottom = flowBottom.dp,
                                     )
                                     .previewFootnote(lineIndex),
                                 color = if (line.kind == "footnote") muted else MaterialTheme.colorScheme.onSurface,
@@ -2516,17 +2521,23 @@ private fun PreviewTable(
     codeFill: Color,
     codeBorder: Color,
     modifier: Modifier = Modifier,
+    first: Boolean = false,
     onFootnote: (Int) -> Unit = {},
 ) {
-    val border = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f)
-    val header = MaterialTheme.colorScheme.surfaceVariant
+    val chrome = ch.fasrv.fanotes.desk.previewTableChrome()
+    val border = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_ALPHA)
+    val frame = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
+    val shape = RoundedCornerShape(chrome.radiusDp.dp)
     val cellLayouts = remember { androidx.compose.runtime.mutableStateMapOf<String, TextLayoutResult>() }
     Column(
         modifier
-            .padding(vertical = 8.dp)
+            .padding(
+                top = (base * ch.fasrv.fanotes.desk.previewBlockTop(chrome.marginEm, first)).dp,
+                bottom = (base * chrome.marginEm).dp,
+            )
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .border(1.dp, border, RoundedCornerShape(10.dp)),
+            .clip(shape)
+            .border(1.dp, frame, shape),
     ) {
         rows.forEachIndexed { rowIndex, row ->
             val cells = ch.fasrv.fanotes.desk.previewTableCells(row.text, row.inlines, row.source)
@@ -2542,7 +2553,7 @@ private fun PreviewTable(
                         Modifier
                             .weight(1f)
                             .fillMaxHeight()
-                            .background(if (row.heading) header else Color.Transparent),
+                            .background(if (row.heading) codeFill else Color.Transparent),
                     ) {
                         val cellKey = "$rowIndex:$cellIndex"
                         PreviewRich(
@@ -2554,7 +2565,10 @@ private fun PreviewTable(
                             codeInk,
                             codeFill,
                             codeBorder,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp).pointerInput(cell.text, cell.inlines) {
+                            modifier = Modifier.fillMaxWidth().padding(
+                                horizontal = (base * chrome.padXEm).dp,
+                                vertical = (base * chrome.padYEm).dp,
+                            ).pointerInput(cell.text, cell.inlines) {
                                 detectTapGestures { offset ->
                                     val laid = cellLayouts[cellKey] ?: return@detectTapGestures
                                     val display = ch.fasrv.fanotes.desk.previewCodeDisplay(cell.text, cell.inlines)

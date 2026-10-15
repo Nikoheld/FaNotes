@@ -156,6 +156,42 @@ fun previewMathChrome() = PreviewMathChrome(1.45f, 1.05f, 12f, 0.075f, 0.05f, 0.
 
 fun previewBlockTop(marginEm: Float, first: Boolean) = if (first) 0f else marginEm
 
+/**
+ * Paragraph and list rhythm from `.markdown-preview`. List indent is the
+ * 1.5em padding of `ul`/`ol` plus the 0.2em on each item.
+ */
+data class PreviewFlowBox(
+    val paragraphTopEm: Float,
+    val paragraphBottomEm: Float,
+    val listMarginEm: Float,
+    val listPadEm: Float,
+    val listIndentEm: Float,
+)
+
+fun previewFlowBox() = PreviewFlowBox(0.65f, 1f, 0.28f, 0.2f, 1.5f)
+
+fun previewFlowTop(kind: String, first: Boolean): Float = when (kind) {
+    "paragraph" -> previewBlockTop(previewFlowBox().paragraphTopEm, first)
+    "bullet", "number", "task" -> previewFlowBox().listMarginEm
+    else -> 0f
+}
+
+fun previewFlowBottom(kind: String): Float = when (kind) {
+    "paragraph" -> previewFlowBox().paragraphBottomEm
+    "bullet", "number", "task" -> previewFlowBox().listMarginEm
+    else -> 0f
+}
+
+fun previewFlowStart(kind: String): Float {
+    val flow = previewFlowBox()
+    return if (kind == "bullet" || kind == "number" || kind == "task") flow.listIndentEm + flow.listPadEm else 0f
+}
+
+/** Table card from `.markdown-preview table` and the cell padding. */
+data class PreviewTableChrome(val marginEm: Float, val radiusDp: Float, val padYEm: Float, val padXEm: Float)
+
+fun previewTableChrome() = PreviewTableChrome(1.2f, 10f, 0.55f, 0.7f)
+
 /** Display math is centered. A code block stays at the start of the line. */
 fun previewBlockCenters(kind: String): Boolean = kind == "math"
 
