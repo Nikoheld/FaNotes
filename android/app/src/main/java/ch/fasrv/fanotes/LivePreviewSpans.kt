@@ -178,6 +178,8 @@ private fun spanFor(mark: LiveMark, readable: Int, accent: Int, textSizePx: Floa
         paperDetailsOpenFillArgb(accent),
         readable,
         textSizePx,
+        mark.readingScales,
+        mark.readingHeadings,
     )
     LiveKind.DETAILS_BODY -> DetailsBodySpan(paperDetailsFillArgb(), textSizePx, false)
     LiveKind.DETAILS_END -> DetailsBodySpan(paperDetailsFillArgb(), textSizePx, true)
@@ -199,13 +201,15 @@ internal class DetailsSummarySpan(
     private val openFill: Int,
     private val accent: Int,
     private val textSizePx: Float,
+    private val readingScales: List<Float> = emptyList(),
+    private val readingHeadings: List<Boolean> = emptyList(),
 ) : ReplacementSpan(), LineBackgroundSpan, LivePreviewSpan {
     override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
         val box = paperDetailsBox(textSizePx)
         val metrics = paint.fontMetrics
         val textHeight = -metrics.ascent + metrics.descent
-        val bodyLines = if (body.isEmpty()) 0 else body.count { it == '\n' } + 1
-        val bodyExtra = if (bodyLines == 0) 0f else bodyLines * textHeight + box.padY
+        val bodyLines = if (body.isEmpty()) emptyList() else body.split('\n')
+        val bodyExtra = bodyBlockHeight(paint, bodyLines, box.padY)
         val total = box.marginY * 2f + box.padY * 2f + textHeight + bodyExtra
         if (fm != null) {
             val half = (total / 2f).toInt().coerceAtLeast(1)
@@ -269,10 +273,16 @@ internal class DetailsSummarySpan(
         val summaryBaseline = contentTop + box.padY - metrics.ascent
         canvas.drawText(summary, rect.left + box.padX, summaryBaseline, paint)
         if (body.isNotEmpty()) {
-            paint.typeface = Typeface.create(previousFace, Typeface.NORMAL)
-            val step = textHeight + box.padY * 0.15f
+            var cursor = summaryBottom + box.padY * 0.35f
             body.split('\n').forEachIndexed { index, line ->
-                canvas.drawText(line, rect.left + box.padX, summaryBaseline + box.padY + (index + 1) * step, paint)
+                val scale = readingScales.getOrElse(index) { 1f }
+                val heading = readingHeadings.getOrElse(index) { false }
+                paint.textSize = previousSize * scale
+                paint.typeface = Typeface.create(previousFace, if (heading) Typeface.BOLD else Typeface.NORMAL)
+                val lineMetrics = paint.fontMetrics
+                cursor += -lineMetrics.ascent
+                canvas.drawText(line, rect.left + box.padX, cursor, paint)
+                cursor += lineMetrics.descent
             }
         }
         drawEditButton(canvas, paint, rect, contentTop, box.border)
@@ -282,6 +292,19 @@ internal class DetailsSummarySpan(
         paint.strokeWidth = previousStroke
         paint.typeface = previousFace
         paint.textSize = previousSize
+    }
+
+    private fun bodyBlockHeight(paint: Paint, lines: List<String>, padY: Float): Float {
+        if (lines.isEmpty()) return 0f
+        val saved = paint.textSize
+        var height = padY * 0.35f
+        lines.forEachIndexed { index, _ ->
+            paint.textSize = saved * readingScales.getOrElse(index) { 1f }
+            val metrics = paint.fontMetrics
+            height += -metrics.ascent + metrics.descent
+        }
+        paint.textSize = saved
+        return height
     }
 
     private fun drawEditButton(canvas: Canvas, paint: Paint, rect: RectF, contentTop: Float, border: Float) {

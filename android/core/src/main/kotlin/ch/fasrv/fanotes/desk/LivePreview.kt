@@ -1,5 +1,7 @@
 package ch.fasrv.fanotes.desk
 
+import ch.fasrv.fanotes.text.PaperKind
+
 /**
  * Marks for the desktop editor's live preview.
  * The line that holds the cursor keeps its Markdown markers. Every other line
@@ -42,6 +44,8 @@ data class LiveMark(
     val body: String = "",
     val open: Boolean = false,
     val continues: Boolean = false,
+    val readingScales: List<Float> = emptyList(),
+    val readingHeadings: List<Boolean> = emptyList(),
 )
 
 /**
@@ -157,13 +161,16 @@ fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int): List
             hidden += number
         }
         if (host.to > host.from) {
+            val reading = if (block.open) detailsReadingLines(block.body) else emptyList()
             marks += LiveMark(
                 host.from,
                 host.to,
                 LiveKind.DETAILS_SUMMARY,
                 block.summary,
-                if (block.open) detailsReading(block.body) else "",
+                reading.joinToString("\n") { it.text },
                 open = block.open,
+                readingScales = reading.map { it.scale },
+                readingHeadings = reading.map { it.heading },
             )
         }
     }
@@ -198,10 +205,39 @@ fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int): List
  * Reading text for an open details card. The source stays in the note and is
  * hidden, the same way the desktop card renders the body with MarkdownPreview.
  */
-fun detailsReading(body: String): String {
-    val lines = aiPreviewLines(body).map { aiPreviewLineText(it) }.filter { it.isNotBlank() }
-    return if (lines.isEmpty()) "Dieser Klappbereich ist leer." else lines.joinToString("\n")
+data class DetailsReadingLine(val text: String, val scale: Float, val heading: Boolean)
+
+/** `.cm-live-details-content .markdown-preview { font-size: .96em }`. */
+const val DETAILS_CARD_FONT = 0.96f
+
+/**
+ * Heading sizes inside that card. h1 and h2 are the live-preview overrides;
+ * h3 and h4 follow `.markdown-preview`. The em is relative to the card font.
+ */
+fun detailsCardEm(kind: PaperKind): Float = when (kind) {
+    PaperKind.H1 -> 1.45f
+    PaperKind.H2 -> 1.25f
+    PaperKind.H3 -> 1.22f
+    PaperKind.H4 -> 1.02f
+    else -> 1f
 }
+
+fun detailsCardScale(kind: PaperKind): Float = detailsCardEm(kind) * DETAILS_CARD_FONT
+
+fun detailsReadingLines(body: String): List<DetailsReadingLine> {
+    val lines = aiPreviewLines(body).mapNotNull { line ->
+        val text = aiPreviewLineText(line)
+        if (text.isBlank()) null
+        else DetailsReadingLine(text, detailsCardScale(line.kind), aiPreviewHeading(line.kind))
+    }
+    return if (lines.isEmpty()) {
+        listOf(DetailsReadingLine("Dieser Klappbereich ist leer.", DETAILS_CARD_FONT, false))
+    } else {
+        lines
+    }
+}
+
+fun detailsReading(body: String): String = detailsReadingLines(body).joinToString("\n") { it.text }
 
 /** Adds or removes the `open` attribute on the details block covering [offset]. */
 fun toggleDetailsOpen(text: String, offset: Int): String? {
