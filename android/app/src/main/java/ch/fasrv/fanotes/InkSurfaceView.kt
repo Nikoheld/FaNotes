@@ -891,7 +891,7 @@ class InkSurfaceView @JvmOverloads constructor(
             canvas.translate(pageLeft, pageTop)
             drawStroke(
                 canvas,
-                InkStroke(live + predicted, style.baseWidth, style.pressureEnabled, style.color, brush = style.brush, opacity = brushOpacity(style.brush)),
+                InkStroke(live + predicted, style.baseWidth, style.pressureEnabled, style.color, brush = style.brush, opacity = brushOpacity(style.brush), colorEffect = style.colorEffect),
                 scale,
             )
             canvas.restore()
@@ -1064,7 +1064,15 @@ class InkSurfaceView @JvmOverloads constructor(
         smoothOutline(path, outline, scale)
         inkPaint.color = parseColor(stroke.color)
         inkPaint.alpha = ((stroke.opacity ?: brushOpacity(stroke.brush) ?: 1.0) * 255).toInt().coerceIn(20, 255)
-        canvas.drawPath(path, inkPaint)
+        drawInkPath(
+            canvas,
+            path,
+            inkPaint,
+            stroke.colorEffect,
+            (sessionWidth() * scale).toFloat(),
+            (sessionHeight() * scale).toFloat(),
+            (stroke.baseWidth * scale).toFloat(),
+        )
     }
 
     private fun drawSelection(canvas: Canvas, stroke: InkStroke, scale: Float) {
