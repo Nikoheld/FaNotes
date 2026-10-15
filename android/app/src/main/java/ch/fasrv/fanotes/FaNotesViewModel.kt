@@ -2482,9 +2482,28 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun addHomework(title: String, subject: String, due: String, kind: String) {
+    fun addHomework(
+        title: String,
+        subject: String,
+        due: String,
+        kind: String,
+        dueTime: String = "",
+        notes: String = "",
+        priority: String = "normal",
+    ) {
         val now = isoNow()
-        val task = HomeworkTask(java.util.UUID.randomUUID().toString(), title.trim(), subject = subject.trim(), dueDate = due.ifBlank { null }, kind = kind, createdAt = now, updatedAt = now)
+        val task = HomeworkTask(
+            java.util.UUID.randomUUID().toString(),
+            title.trim(),
+            notes = notes.trim(),
+            subject = subject.trim(),
+            dueDate = due.ifBlank { null },
+            dueTime = dueTime.trim().ifBlank { null },
+            kind = kind,
+            priority = if (priority == "high") "high" else "normal",
+            createdAt = now,
+            updatedAt = now,
+        )
         val next = homework.value.copy(tasks = listOf(task) + homework.value.tasks)
         homework.value = next
         persistSpecial(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, "Hausaufgaben", serializeHomeworkMarkdown(next))

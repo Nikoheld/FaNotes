@@ -572,6 +572,10 @@ fun HomeworkScreen(model: FaNotesViewModel) {
     var planner by remember { mutableStateOf("list") }
     var filter by remember { mutableStateOf("open") }
     var cursor by remember { mutableStateOf(LocalDate.now()) }
+    var dueTime by remember { mutableStateOf("") }
+    var notes by remember { mutableStateOf("") }
+    var priority by remember { mutableStateOf("normal") }
+    val stats = ch.fasrv.fanotes.desk.homeworkStats(document.tasks)
     val shownTasks = ch.fasrv.fanotes.desk.visibleHomeworkTasks(document.tasks, filter)
     Column(
         Modifier
@@ -613,19 +617,38 @@ fun HomeworkScreen(model: FaNotesViewModel) {
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(due, { due = it }, label = { Text("Fällig") })
+            OutlinedTextField(dueTime, { dueTime = it }, label = { Text("Uhrzeit") }, modifier = Modifier.padding(start = 8.dp))
+            TextButton(onClick = { priority = if (priority == "high") "normal" else "high" }) {
+                Text(if (priority == "high") "Wichtig" else "Normal", fontWeight = if (priority == "high") FontWeight.Bold else FontWeight.Normal)
+            }
+        }
+        OutlinedTextField(notes, { notes = it }, label = { Text("Notizen") }, modifier = Modifier.fillMaxWidth())
+        Row {
             TextButton(onClick = {
                 if (title.isNotBlank()) {
-                    model.addHomework(title, subject, due, "homework")
+                    model.addHomework(title, subject, due, "homework", dueTime, notes, priority)
                     title = ""
+                    notes = ""
+                    dueTime = ""
+                    priority = "normal"
                 }
             }) { Text("Hinzufügen") }
             TextButton(onClick = {
                 if (title.isNotBlank()) {
-                    model.addHomework(title, subject, due, "appointment")
+                    model.addHomework(title, subject, due, "appointment", dueTime, notes, priority)
                     title = ""
+                    notes = ""
+                    dueTime = ""
+                    priority = "normal"
                 }
             }) { Text("Termin") }
         }
+        Text(
+            "Offen ${stats.open} · Überfällig ${stats.overdue} · Heute ${stats.today} · Termine ${stats.appointments}",
+            modifier = Modifier.padding(top = 8.dp),
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+        )
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp)) {
             listOf("list" to "Liste", "week" to "Woche", "month" to "Monat").forEach { (id, label) ->
                 TextButton(onClick = { planner = id }) {
@@ -685,12 +708,26 @@ fun HomeworkScreen(model: FaNotesViewModel) {
                 }
             }
         }
-        shownTasks.forEach { task ->
-            Row(Modifier.fillMaxWidth().clickable { model.toggleHomework(task.id) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(if (task.done) "☑" else "☐", modifier = Modifier.padding(end = 8.dp))
-                Column {
-                    Text(task.title, fontWeight = if (task.priority == "high") FontWeight.Bold else FontWeight.Normal)
-                    Text(listOf(task.subject, task.dueDate, if (task.kind == "appointment") "Termin" else "Aufgabe").filter { !it.isNullOrBlank() }.joinToString(" · "), fontSize = 12.sp)
+        val ordered = ch.fasrv.fanotes.desk.sortHomeworkTasks(shownTasks)
+        if (ordered.isEmpty()) {
+            Text("Noch keine Einträge", modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.SemiBold)
+            Text("Lege deine erste Hausaufgabe oder den nächsten Termin oben an.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        }
+        listOf("overdue" to "Überfällig", "today" to "Heute", "upcoming" to "Demnächst", "undated" to "Ohne Termin", "done" to "Erledigt").forEach { (bucket, label) ->
+            val items = ordered.filter { ch.fasrv.fanotes.desk.classifyHomeworkTask(it) == bucket }
+            if (items.isEmpty()) return@forEach
+            Text("$label ${items.size}", modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.SemiBold)
+            items.forEach { task ->
+                Row(Modifier.fillMaxWidth().clickable { model.toggleHomework(task.id) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (task.done) "☑" else "☐", modifier = Modifier.padding(end = 8.dp))
+                    Column {
+                        Text(task.title, fontWeight = if (task.priority == "high") FontWeight.Bold else FontWeight.Normal)
+                        Text(
+                            listOf(task.subject, task.dueDate, task.dueTime, if (task.kind == "appointment") "Termin" else "Aufgabe").filter { !it.isNullOrBlank() }.joinToString(" · "),
+                            fontSize = 12.sp,
+                            color = if (bucket == "overdue") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        )
+                    }
                 }
             }
         }
