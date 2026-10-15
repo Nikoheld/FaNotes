@@ -7,8 +7,7 @@ import kotlin.test.assertTrue
 class EditorWashTest {
     @Test
     fun theActiveLineAndSelectionUseTheDesktopAccentMix() {
-        assertEquals(0x0D2A6F97, activeLineArgb(0xFF2A6F97.toInt()))
-        assertEquals(0x0D2A6F97, activeLineArgb(0x802A6F97.toInt()))
+        assertEquals(0x09252630, activeLineArgb())
         assertEquals(0x472A6F97, selectionWashArgb(0xFF2A6F97.toInt()))
         assertEquals(0x47D9730D, selectionWashArgb(0xFFD9730D.toInt()))
         assertEquals(0x122A6F97, quoteWashArgb(0xFF2A6F97.toInt()))

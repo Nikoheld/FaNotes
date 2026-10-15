@@ -1,11 +1,16 @@
 package ch.fasrv.fanotes.desk
 
 /**
- * Washes from the desktop editor theme in `MarkdownEditor.tsx`.
- * The active line mixes the accent at 5% over transparency, and the
- * selection mixes it at 28%. The gutter stays clear.
+ * Washes from the desktop editor theme.
+ * The active line mixes the paper text `#252630` at 3.5%, matching
+ * `.cm-activeLine`. The selection mixes the accent at 28%.
  */
-fun activeLineArgb(accent: Int): Int = accentWash(accent, 5)
+const val PAPER_INK = 0xFF252630.toInt()
+
+fun activeLineArgb(): Int {
+    val alpha = (255 * 35 + 500) / 1000
+    return (alpha.coerceIn(0, 255) shl 24) or (PAPER_INK and 0x00FFFFFF)
+}
 
 fun selectionWashArgb(accent: Int): Int = accentWash(accent, 28)
 

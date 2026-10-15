@@ -126,7 +126,6 @@ class NotePageView(context: Context) : FrameLayout(context) {
                     textLayout,
                     text?.length ?: 0,
                     selectionEnd,
-                    ink.accentColor,
                     activeLinePaint,
                     scrollY,
                     paddingLeft,
