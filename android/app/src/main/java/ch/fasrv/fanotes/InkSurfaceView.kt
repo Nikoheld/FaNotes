@@ -161,6 +161,8 @@ class InkSurfaceView @JvmOverloads constructor(
     var worksheetBoxes: List<ch.fasrv.fanotes.desk.AnchoredBox> = emptyList()
     var worksheetHighlights: List<ch.fasrv.fanotes.desk.AnchoredHighlight> = emptyList()
     private var reportedPdfPage = 0
+    private var reportedSheet = false
+    var onSheetActive: (Boolean) -> Unit = {}
     var onPdfPage: (Int) -> Unit = {}
     var onPdfZoom: (Float, String) -> Unit = { _, _ -> }
     var onPageFocus: () -> Unit = {}
@@ -1672,6 +1674,7 @@ class InkSurfaceView @JvmOverloads constructor(
 
     private fun publishCamera() {
         onCamera(pageLeft, pageTop, pixelsPerPageUnit())
+        publishSheetActive()
         if (pageFrames.isEmpty()) return
         val scale = pixelsPerPageUnit().toDouble().coerceAtLeast(0.0001)
         val center = (height / 2.0 - pageTop) / scale
@@ -1682,6 +1685,18 @@ class InkSurfaceView @JvmOverloads constructor(
         }
         val fit = measurePdfFit()
         onPdfZoom(zoom, ch.fasrv.fanotes.desk.pdfZoomModeForZoom(zoom.toDouble(), fit))
+    }
+
+    private fun publishSheetActive() {
+        val active = ch.fasrv.fanotes.desk.sheetViewAdjusted(
+            zoom.toDouble(),
+            rotation.toDouble(),
+            (pageLeft - padding()).toDouble(),
+            (pageTop - padding()).toDouble(),
+        )
+        if (active == reportedSheet) return
+        reportedSheet = active
+        onSheetActive(active)
     }
 
     private fun addGrownSample(current: InkSession, sample: StrokePoint): Boolean {

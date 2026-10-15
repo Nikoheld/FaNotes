@@ -20,6 +20,8 @@ class EscapeDismissTest {
         assertEquals("tasks", escapeDismisses(EscapeLayer(destination = "tasks")))
         assertEquals("overview", escapeDismisses(EscapeLayer(destination = "overview", pen = true)))
         assertEquals("pen", escapeDismisses(EscapeLayer(pen = true, focus = true)))
+        assertEquals("sheet", escapeDismisses(EscapeLayer(sheet = true, pen = true, focus = true)))
+        assertEquals("selection", escapeDismisses(EscapeLayer(selection = true, sheet = true)))
         assertEquals("selection", escapeDismisses(EscapeLayer(selection = true, pen = true)))
         assertEquals("focus", escapeDismisses(EscapeLayer(focus = true)))
         assertNull(escapeDismisses(EscapeLayer(destination = "notes")))

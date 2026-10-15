@@ -95,6 +95,10 @@ fun zoomSensitivityFromSpeed(speed: Int): Double {
 /** Desktop sheet HUD rotates 15 degrees and keeps the angle in −180°…180°. */
 const val VIEW_ROTATE_STEP = 15
 
+/** True when zoom, rotation, or pan is away from the resting sheet. */
+fun sheetViewAdjusted(zoom: Double, rotation: Double, panX: Double, panY: Double): Boolean =
+    zoom != 1.0 || normalizeRotation(rotation) != 0.0 || panX != 0.0 || panY != 0.0
+
 fun rotateViewBy(current: Double, direction: Int, step: Int = VIEW_ROTATE_STEP): Double =
     normalizeRotation(current + direction * step)
 

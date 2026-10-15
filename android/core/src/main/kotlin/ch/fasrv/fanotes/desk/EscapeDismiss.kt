@@ -25,6 +25,7 @@ data class EscapeLayer(
     val palette: Boolean = false,
     val destination: String = "notes",
     val selection: Boolean = false,
+    val sheet: Boolean = false,
     val pen: Boolean = false,
     val focus: Boolean = false,
 )
@@ -55,6 +56,7 @@ fun escapeDismisses(layer: EscapeLayer): String? {
         "overview" -> return "overview"
     }
     if (layer.selection) return "selection"
+    if (layer.sheet) return "sheet"
     if (layer.pen) return "pen"
     if (layer.focus) return "focus"
     return null
