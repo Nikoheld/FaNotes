@@ -33,6 +33,7 @@ import ch.fasrv.fanotes.desk.pasteUrlAsMarkdownLink
 import ch.fasrv.fanotes.desk.lineNumberColumnPx
 import ch.fasrv.fanotes.desk.lineStartOffsets
 import ch.fasrv.fanotes.desk.nextEditorOccurrence
+import ch.fasrv.fanotes.desk.nextOccurrenceShortcut
 import ch.fasrv.fanotes.desk.toggleDetailsOpen
 import ch.fasrv.fanotes.desk.toggleTaskMarker
 import kotlin.math.abs
@@ -282,6 +283,17 @@ class SplitEditorView(context: Context) : EditText(context) {
             if (event.action == KeyEvent.ACTION_DOWN) {
                 applyLineEdit(toggleMarkdownComment(text?.toString().orEmpty(), selectionStart, selectionEnd))
             }
+            return true
+        }
+        if (keyCode == KeyEvent.KEYCODE_D && nextOccurrenceShortcut(
+                event.isCtrlPressed,
+                event.isShiftPressed,
+                event.isAltPressed,
+                event.isMetaPressed,
+                'd',
+            )
+        ) {
+            if (event.action == KeyEvent.ACTION_DOWN) selectNext()
             return true
         }
         val formatLetter = when (keyCode) {

@@ -156,6 +156,17 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 if (event.action == KeyEvent.ACTION_DOWN) toggleComment()
                 return true
             }
+            if (keyCode == KeyEvent.KEYCODE_D && ch.fasrv.fanotes.desk.nextOccurrenceShortcut(
+                    event.isCtrlPressed,
+                    event.isShiftPressed,
+                    event.isAltPressed,
+                    event.isMetaPressed,
+                    'd',
+                )
+            ) {
+                if (event.action == KeyEvent.ACTION_DOWN) selectNextOccurrence()
+                return true
+            }
             val formatLetter = when (keyCode) {
                 KeyEvent.KEYCODE_B -> 'b'
                 KeyEvent.KEYCODE_I -> 'i'
