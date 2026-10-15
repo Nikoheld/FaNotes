@@ -273,6 +273,23 @@ fun detailsImageFrame(pixelWidth: Int, pixelHeight: Int, contentPx: Float): Pair
     return frameW to frameH
 }
 
+private val DETAILS_NUMBER_MARKER = Regex("""^\d+\.\s+""")
+
+/** Ordered-list prefix inside a details card. The desktop preview paints this marker in the accent. */
+fun detailsNumberMarker(text: String): String = DETAILS_NUMBER_MARKER.find(text)?.value.orEmpty()
+
+/**
+ * Task prefix inside a details card. `true` is checked, `false` is open,
+ * and null means the line is not a task marker.
+ */
+fun detailsTaskChecked(text: String): Boolean? = when {
+    text.startsWith("☑ ") -> true
+    text.startsWith("☐ ") -> false
+    else -> null
+}
+
+fun detailsTaskMarker(text: String): String = if (detailsTaskChecked(text) == null) "" else text.take(2)
+
 /** Block kind drawn inside an open details card, matching the desktop preview. */
 fun detailsReadingKind(kind: PaperKind): String = when (kind) {
     PaperKind.H1, PaperKind.H2, PaperKind.H3, PaperKind.H4, PaperKind.H5, PaperKind.H6 -> "heading"
