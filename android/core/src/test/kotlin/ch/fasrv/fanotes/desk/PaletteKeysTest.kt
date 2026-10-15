@@ -37,5 +37,11 @@ class PaletteKeysTest {
         assertEquals("Vorlage: Protokoll", commands.first { it.id == "template-protocol" }.label)
         assertTrue(commands.any { it.id == "reveal" && it.group == "Dateien" })
         assertTrue(commands.any { it.id == "sync-settings" && it.label == "Sync einrichten" })
+        val opener = commands.first { it.id == "quick-open" }
+        assertEquals("Notiz öffnen …", opener.label)
+        assertEquals("Navigation", opener.group)
+        assertEquals("Ctrl O", opener.shortcut)
+        assertEquals("Schnell zu einer Notiz springen", opener.detail)
+        assertTrue(paletteCommandMatches(opener, "switcher"))
     }
 }

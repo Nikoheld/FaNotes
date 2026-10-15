@@ -867,6 +867,7 @@ fun FaNotesScreen(
                 bookOpen = model.bookOpen.collectAsStateWithLifecycle().value,
             ) { id ->
                 when (id) {
+                    "quick-open" -> model.showPalette(notes = true)
                     "new-note" -> {
                         createParent = model.defaultCreateFolder()
                         createNote = true
