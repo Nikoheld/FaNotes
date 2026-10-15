@@ -1329,18 +1329,63 @@ fun ConflictList(model: FaNotesViewModel) {
 
 @Composable
 fun AiScreen(model: FaNotesViewModel) {
-    val reply by model.aiReply.collectAsStateWithLifecycle()
-    val markdown by model.markdown.collectAsStateWithLifecycle()
-    var prompt by remember { mutableStateOf("") }
+    val settings by model.deskSettings.collectAsStateWithLifecycle()
+    val status by model.aiStatus.collectAsStateWithLifecycle()
+    val preview by model.aiPreview.collectAsStateWithLifecycle()
+    val provider = settings["ai-provider"].orEmpty().ifBlank { "lmstudio" }
+    val definition = ch.fasrv.fanotes.desk.AI_PROVIDERS.firstOrNull { it.id == provider } ?: ch.fasrv.fanotes.desk.AI_PROVIDERS.first()
+    var actions by remember { mutableStateOf(setOf("spelling")) }
+    var instruction by remember { mutableStateOf("") }
+    fun setting(field: String) = settings["ai-$provider-$field"].orEmpty()
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("AI", style = MaterialTheme.typography.titleLarge)
-        Text("Der Schlüssel bleibt in den Einstellungen dieses Tablets. Es wird derselbe Chat-Endpunkt wie bei einem selbst gewählten Anbieter benutzt.", fontSize = 13.sp)
-        OutlinedTextField(prompt, { prompt = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Frage") })
-        Row {
-            TextButton(onClick = { model.askAi(prompt.ifBlank { "Fasse diese Notiz zusammen:\n\n${markdown.take(6000)}" }) }) { Text("Fragen") }
-            TextButton(onClick = { model.askAi("Formuliere Lernfragen als Markdown mit ## Lernfragen und details/summary zu:\n\n${markdown.take(6000)}") }) { Text("Lernfragen") }
+        Text("Dieselbe Auswahl wie auf dem Desktop. Der Schlüssel bleibt auf diesem Tablet.", fontSize = 13.sp)
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ch.fasrv.fanotes.desk.AI_PROVIDERS.forEach { entry ->
+                Text(
+                    entry.title,
+                    fontWeight = if (entry.id == provider) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (entry.id == provider) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.clickable { model.updateDesk("ai-provider", entry.id) }.padding(vertical = 6.dp, horizontal = 4.dp),
+                )
+            }
         }
-        Text(reply)
+        Text(definition.description, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        if (definition.local) {
+            OutlinedTextField(
+                setting("url").ifBlank { ch.fasrv.fanotes.desk.defaultAiBaseUrl(provider) },
+                { model.updateDesk("ai-$provider-url", it) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Adresse") },
+                singleLine = true,
+            )
+        }
+        OutlinedTextField(setting("model"), { model.updateDesk("ai-$provider-model", it) }, modifier = Modifier.fillMaxWidth(), label = { Text("Modell") }, singleLine = true)
+        if (provider == "opencode") {
+            OutlinedTextField(setting("user").ifBlank { "opencode" }, { model.updateDesk("ai-$provider-user", it) }, modifier = Modifier.fillMaxWidth(), label = { Text("Benutzer") }, singleLine = true)
+        }
+        OutlinedTextField(setting("key"), { model.updateDesk("ai-$provider-key", it) }, modifier = Modifier.fillMaxWidth(), label = { Text(if (definition.local) "Schlüssel, optional" else "API-Schlüssel") }, singleLine = true)
+        Text("Aktionen", fontWeight = FontWeight.SemiBold)
+        ch.fasrv.fanotes.desk.AI_ACTIONS.forEach { action ->
+            val selected = action.id in actions
+            Text(
+                "${if (selected) "☑" else "☐"} ${action.title}",
+                modifier = Modifier.clickable {
+                    actions = if (selected) actions - action.id else actions + action.id
+                }.padding(vertical = 4.dp),
+            )
+        }
+        if ("instruction" in actions) {
+            OutlinedTextField(instruction, { instruction = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Freier Auftrag") })
+        }
+        Row {
+            TextButton(onClick = {
+                model.runAi(provider, setting("url"), setting("model"), setting("key"), setting("user"), actions.toList(), instruction)
+            }) { Text("Ausführen") }
+            if (preview != null) TextButton(onClick = { model.applyAiPreview() }) { Text("Übernehmen") }
+        }
+        if (status.isNotBlank()) Text(status, fontSize = 13.sp)
+        if (preview != null) Text(preview.orEmpty(), fontSize = 13.sp)
     }
 }
 
