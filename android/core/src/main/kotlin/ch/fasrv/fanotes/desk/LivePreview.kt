@@ -342,7 +342,7 @@ fun detailsReadingLines(body: String): List<DetailsReadingLine> {
 fun aiPreviewReading(markdown: String): List<DetailsReadingLine> = readingLines(markdown, ::aiPreviewReadingScale)
 
 private fun readingLines(body: String, scaleOf: (PaperKind) -> Float): List<DetailsReadingLine> {
-    val prepared = prepareFootnotes(body)
+    val prepared = prepareFootnotes(readingHtml(body))
     val lines = aiPreviewLines(prepared.body).flatMap { line ->
         val scale = scaleOf(line.kind)
         when (line.kind) {
