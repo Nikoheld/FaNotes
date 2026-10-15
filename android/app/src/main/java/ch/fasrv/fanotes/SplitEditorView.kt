@@ -8,9 +8,13 @@ import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputConnectionWrapper
 import android.widget.EditText
 import ch.fasrv.fanotes.desk.editorLineNumberLabels
 import ch.fasrv.fanotes.desk.findDetailsBlocks
+import ch.fasrv.fanotes.desk.pasteUrlAsMarkdownLink
 import ch.fasrv.fanotes.desk.lineNumberColumnPx
 import ch.fasrv.fanotes.desk.lineStartOffsets
 import ch.fasrv.fanotes.desk.nextEditorOccurrence
@@ -131,6 +135,38 @@ class SplitEditorView(context: Context) : EditText(context) {
             }
         }
         return super.onTouchEvent(event)
+    }
+
+    override fun onTextContextMenuItem(id: Int): Boolean {
+        if ((id == android.R.id.paste || id == android.R.id.pasteAsPlainText) && applyPastedLink(clipboardPlainText(context))) {
+            return true
+        }
+        return super.onTextContextMenuItem(id)
+    }
+
+    override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
+        val base = super.onCreateInputConnection(outAttrs) ?: return null
+        return object : InputConnectionWrapper(base, true) {
+            override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
+                if (writing) return true
+                val pasted = text?.toString().orEmpty()
+                if (pasted.length > 1 && applyPastedLink(pasted)) return true
+                return super.commitText(text, newCursorPosition)
+            }
+        }
+    }
+
+    private fun applyPastedLink(pasted: String?): Boolean {
+        if (pasted.isNullOrEmpty() || writing) return false
+        val edit = pasteUrlAsMarkdownLink(text?.toString().orEmpty(), selectionStart, selectionEnd, pasted) ?: return false
+        val origin = text?.toString().orEmpty()
+        writing = true
+        setText(edit.text)
+        setSelection(edit.selectionStart, edit.selectionEnd)
+        writing = false
+        editBefore = edit.text
+        onVisibleEdit(origin, edit.text)
+        return true
     }
 
     private fun toggleAt(x: Float, y: Float): Boolean {
