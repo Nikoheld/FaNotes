@@ -28,5 +28,10 @@ class LinkFollowTest {
         val script = followedLinkAt("[Text](javascript:alert(1))", 1)
         assertEquals("javascript:alert(1", script?.target)
         assertFalse(script?.web == true)
+        assertEquals(FollowedLink("https://example.com/a", true), followedTarget("https://example.com/a"))
+        assertEquals(FollowedLink("mailto:ada@example.com", true), followedTarget(" mailto:ada@example.com "))
+        assertEquals(FollowedLink("Algebra.md", false, "Beweis"), followedTarget("Algebra.md#Beweis"))
+        assertNull(followedTarget("   "))
+        assertNull(followedTarget("#nur-anker"))
     }
 }

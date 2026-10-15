@@ -699,11 +699,21 @@ class SplitEditorView(context: Context) : EditText(context) {
                 return true
             }
         }
-        val details = editable.getSpans(probeStart, probeEnd, DetailsSummarySpan::class.java).isNotEmpty()
+        val detailsSpans = editable.getSpans(probeStart, probeEnd, DetailsSummarySpan::class.java)
+        val details = detailsSpans.isNotEmpty()
         if (details && ch.fasrv.fanotes.desk.detailsTapAction((layout?.width ?: width).toFloat(), x, textSize) == "edit") {
             val block = findDetailsBlocks(before).firstOrNull { offset >= it.from && offset < it.to } ?: return false
             setSelection((block.from + 1).coerceAtMost(before.length))
             return true
+        }
+        if (details) {
+            val layoutX = x - totalPaddingLeft + scrollX
+            val layoutY = y - totalPaddingTop + scrollY
+            val followed = detailsSpans.firstNotNullOfOrNull { it.linkAt(layoutX, layoutY) }
+            if (followed != null) {
+                onFollowLink(followed.target, followed.web, followed.anchor)
+                return true
+            }
         }
         val next = when {
             details -> toggleDetailsOpen(before, offset)
