@@ -98,6 +98,29 @@ const val VIEW_ROTATE_STEP = 15
 fun rotateViewBy(current: Double, direction: Int, step: Int = VIEW_ROTATE_STEP): Double =
     normalizeRotation(current + direction * step)
 
+/**
+ * Sheet keys from the desktop page HUD.
+ * `[` and `]` rotate when the text field is not focused. Ctrl with `+`, `-`, or `0`
+ * zooms or resets even while typing.
+ */
+fun sheetViewKey(key: String, ctrl: Boolean, meta: Boolean, alt: Boolean, shift: Boolean, textFocused: Boolean): String? {
+    if (alt) return null
+    if (ctrl || meta) {
+        return when (key) {
+            "=", "+" -> "zoom-in"
+            "-", "_" -> "zoom-out"
+            "0" -> if (shift) null else "reset"
+            else -> null
+        }
+    }
+    if (shift || textFocused) return null
+    return when (key) {
+        "[" -> "rotate-ccw"
+        "]" -> "rotate-cw"
+        else -> null
+    }
+}
+
 /** Desktop `zoomStepFromSpeed`, rounded half away from zero the way `Math.round` does. */
 fun zoomStepFromSpeed(speed: Int): Double {
     val raw = 0.12 * zoomSensitivityFromSpeed(speed)
