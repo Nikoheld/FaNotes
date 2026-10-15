@@ -155,6 +155,7 @@ class InkSurfaceView @JvmOverloads constructor(
     var contentWidthPx: Float = 820f
         set(value) { if (field != value) { field = value; paperBlocks = emptyList(); invalidate() } }
     var zoomMax: Float = 3.25f
+    var zoomSpeed: Int = 5
     var shapeSnapSensitivity: Int = 50
     var scribbleSensitivity: Int = 50
     /** Selection rings, hover, and placed links follow the desktop accent. */
@@ -306,6 +307,15 @@ class InkSurfaceView @JvmOverloads constructor(
 
     fun zoomBy(multiplier: Float) {
         zoom = clampZoom(zoom * multiplier)
+        settleZoom()
+        invalidate()
+        publishCamera()
+    }
+
+    /** Desktop zoom buttons add or subtract `zoomStepFromSpeed`, they do not multiply. */
+    fun zoomByStep(direction: Int) {
+        val step = ch.fasrv.fanotes.desk.zoomStepFromSpeed(zoomSpeed)
+        zoom = clampZoom((zoom + direction * step).toFloat())
         settleZoom()
         invalidate()
         publishCamera()
@@ -703,7 +713,8 @@ class InkSurfaceView @JvmOverloads constructor(
                 index += 1
             }
             val span = fingerSpan().coerceAtLeast(1f)
-            val next = clampZoom(pinchZoom * span / pinchStart.coerceAtLeast(1f))
+            val ratio = span / pinchStart.coerceAtLeast(1f)
+            val next = clampZoom(ch.fasrv.fanotes.desk.pinchZoom(pinchZoom.toDouble(), ratio.toDouble(), zoomSpeed).toFloat())
             val (cx, cy) = fingerCentroid()
             val before = screenToNorm(cx, cy)
             zoom = next

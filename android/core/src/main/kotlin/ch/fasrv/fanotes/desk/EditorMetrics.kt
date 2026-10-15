@@ -10,6 +10,7 @@ data class EditorMetrics(
     val contentWidthPx: Int,
     val zoomMax: Double,
     val autosaveMs: Long,
+    val zoomSpeed: Int,
 )
 
 fun editorMetrics(settings: Map<String, String>): EditorMetrics = EditorMetrics(
@@ -18,7 +19,39 @@ fun editorMetrics(settings: Map<String, String>): EditorMetrics = EditorMetrics(
     contentWidthPx = clampInt(settings["content-width"], 820, 560, 1200),
     zoomMax = clampInt(settings["zoom-max"], 325, 50, 600) / 100.0,
     autosaveMs = clampInt(settings["autosave"], 750, 250, 3000).toLong(),
+    zoomSpeed = clampViewZoomSpeed(settings["zoom-speed"]),
 )
+
+const val VIEW_ZOOM_SPEED_DEFAULT = 5
+
+/** Desktop `clampViewZoomSpeed`: blank or zero falls back to 5, then 1–10. */
+fun clampViewZoomSpeed(raw: String?): Int {
+    val number = raw?.trim()?.toDoubleOrNull()
+    val value = if (number == null || number == 0.0) VIEW_ZOOM_SPEED_DEFAULT.toDouble() else number
+    return kotlin.math.floor(value + 0.5).toInt().coerceIn(1, 10)
+}
+
+/** Desktop `zoomSensitivityFromSpeed`. Level 5 is the previous wheel default. */
+fun zoomSensitivityFromSpeed(speed: Int): Double {
+    val level = speed.coerceIn(1, 10)
+    return 0.28 + (level - 1) * (1.72 / 9.0)
+}
+
+/** Desktop `zoomStepFromSpeed`, rounded half away from zero the way `Math.round` does. */
+fun zoomStepFromSpeed(speed: Int): Double {
+    val raw = 0.12 * zoomSensitivityFromSpeed(speed)
+    return kotlin.math.floor(raw * 1000.0 + 0.5) / 1000.0
+}
+
+/**
+ * Two-finger pinch. Speed 5 keeps the zoom equal to the span ratio.
+ * Slower and faster settings scale that exponent with the desktop sensitivity.
+ */
+fun pinchZoom(startZoom: Double, spanRatio: Double, speed: Int): Double {
+    val ratio = spanRatio.coerceAtLeast(1e-4)
+    val scale = zoomSensitivityFromSpeed(speed) / zoomSensitivityFromSpeed(VIEW_ZOOM_SPEED_DEFAULT)
+    return startZoom * Math.pow(ratio, scale)
+}
 
 private fun clampInt(raw: String?, fallback: Int, min: Int, max: Int): Int {
     val value = raw?.toIntOrNull() ?: fallback
