@@ -91,7 +91,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 }
                 MotionEvent.ACTION_UP -> {
                     val tapped = kotlin.math.abs(event.x - detailsDownX) < 24f && kotlin.math.abs(event.y - detailsDownY) < 24f
-                    if (tapped && (toggleDetailsSummary(event.x, event.y) || toggleTaskBox(event.x, event.y))) return true
+                    if (tapped && (followRenderedLink(event.x, event.y) || toggleDetailsSummary(event.x, event.y) || toggleTaskBox(event.x, event.y))) return true
                 }
             }
             return super.onTouchEvent(event)
@@ -493,6 +493,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onSync: () -> Unit = {}
     var onMarkdown: (String) -> Unit = {}
     var onPasteImage: (String, ByteArray, String) -> Unit = { _, _, _ -> }
+    var onFollowLink: (String, Boolean) -> Unit = { _, _ -> }
     var onVisibleMarkdown: (String, String) -> Unit = { _, next -> onMarkdown(next) }
     var onRememberCamera: (
         String,
@@ -657,6 +658,19 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 onMarkdown(next)
             }
         }
+    }
+
+    /** A tap on a rendered link opens the note or the web address. */
+    private fun followRenderedLink(x: Float, y: Float): Boolean {
+        val editable = editor.text ?: return false
+        if (editable.isEmpty()) return false
+        val offset = editor.getOffsetForPosition(x, y).coerceIn(0, editable.length)
+        val probeStart = (offset - 1).coerceAtLeast(0)
+        val probeEnd = (offset + 1).coerceAtMost(editable.length)
+        if (editable.getSpans(probeStart, probeEnd, LinkSpan::class.java).isEmpty()) return false
+        val link = ch.fasrv.fanotes.desk.followedLinkAt(editable.toString(), offset) ?: return false
+        onFollowLink(link.target, link.web)
+        return true
     }
 
     /** A tap on a details summary writes the desktop `open` attribute into the note. */

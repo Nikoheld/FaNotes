@@ -987,6 +987,17 @@ fun FaNotesScreen(
     }
 }
 
+private fun openFollowedLink(context: android.content.Context, model: FaNotesViewModel, target: String, web: Boolean) {
+    if (!web) {
+        model.openWikiTarget(target)
+        return
+    }
+    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(target))
+    runCatching { context.startActivity(intent) }.onFailure {
+        model.message.value = "Der Link konnte nicht geöffnet werden."
+    }
+}
+
 private fun collectFolders(nodes: List<VaultNode>): List<String> {
     val found = mutableListOf<String>()
     fun walk(list: List<VaultNode>) {
@@ -1756,6 +1767,7 @@ private fun SplitPane(
                 update = { editor ->
                     splitEditor = editor
                     editor.onVisibleEdit = { previous, next -> model.updateSplitVisible(previous, next) }
+                    editor.onFollowLink = { target, web -> openFollowedLink(editor.context, model, target, web) }
                     editor.accent = android.graphics.Color.parseColor(
                         ch.fasrv.fanotes.desk.normalizeAccent(model.effectiveDesk()["accent"]),
                     )
@@ -1944,6 +1956,7 @@ private fun PageSurface(
             page.onSync = onSync
             page.onMarkdown = { model.updateMarkdown(it) }
             page.onPasteImage = { name, bytes, mime -> model.importBytes(name, bytes, pdf = false, mime = mime) }
+            page.onFollowLink = { target, web -> openFollowedLink(page.context, model, target, web) }
             page.onVisibleMarkdown = { previous, next -> model.updateVisibleMarkdown(previous, next) }
             page.onRememberCamera = { path, zoom, rotation, centreX, centreY, pageWidth, pageHeight, anchor ->
                 model.rememberPaperCamera(path, zoom, rotation, centreX, centreY, pageWidth, pageHeight, anchor)
