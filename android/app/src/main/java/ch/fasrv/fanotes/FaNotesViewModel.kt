@@ -1751,15 +1751,31 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun defaultCreateFolder(): String {
+        val folders = mutableSetOf<String>()
+        fun walk(nodes: List<VaultNode>) {
+            for (node in nodes) {
+                if (node.kind == NoteKind.FOLDER) {
+                    folders += node.path
+                    walk(node.children)
+                }
+            }
+        }
+        walk(tree.value)
+        return ch.fasrv.fanotes.desk.defaultNoteParent(deskSettings.value["default-folder"], folders)
+    }
+
     fun openDaily() {
-        val folder = deskSettings.value["daily-folder"].orEmpty().ifBlank { "Daily Notes" }
-        val path = dailyNotePath(folder)
+        val folder = deskSettings.value["daily-folder"].orEmpty().ifBlank { "Tagesnotizen" }
+        val pattern = deskSettings.value["date-format"].orEmpty().ifBlank { "YYYY-MM-DD" }
+        val path = dailyNotePath(folder, pattern = pattern)
+        val title = path.substringAfterLast('/').removeSuffix(".md")
         viewModelScope.launch {
             val exists = withContext(Dispatchers.IO) { graph.vault.exists(path) }
             if (!exists) {
-                val created = withContext(Dispatchers.IO) { graph.store.createMarkdown(folder, path.substringAfterLast('/').removeSuffix(".md")) }
+                val created = withContext(Dispatchers.IO) { graph.store.createMarkdown(folder, title, paper = ch.fasrv.fanotes.desk.penSettings(deskSettings.value).paper) }
                 val note = withContext(Dispatchers.IO) { graph.store.readNote(created) }
-                withContext(Dispatchers.IO) { graph.store.save(note, note.document, "# ${path.substringAfterLast('/').removeSuffix(".md")}\n") }
+                withContext(Dispatchers.IO) { graph.store.save(note, note.document, "# $title\n") }
             }
             refreshTree()
             openPath(path, force = true)

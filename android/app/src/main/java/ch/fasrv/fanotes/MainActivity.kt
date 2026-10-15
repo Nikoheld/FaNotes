@@ -332,7 +332,7 @@ fun FaNotesScreen(
                     syncLabel = syncText,
                     onOpen = { model.openPath(it) },
                     onSync = { requestSync() },
-                    onCreateNote = { createParent = ""; createNote = true },
+                    onCreateNote = { createParent = model.defaultCreateFolder(); createNote = true },
                     onCreateFolder = { createParent = ""; createFolder = true },
                     onImportPdf = onImportPdf,
                     onImportImage = onImportImage,

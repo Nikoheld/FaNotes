@@ -1455,7 +1455,28 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     val metrics = ch.fasrv.fanotes.desk.editorMetrics(settings)
                     Text("Wörter in der Statusleiste: ${settings["words"] != "off"}", modifier = Modifier.clickable { model.updateDesk("words", if (settings["words"] == "off") "on" else "off") })
                     Text("Gliederung: ${settings["outline"] != "off"}", modifier = Modifier.clickable { model.updateDesk("outline", if (settings["outline"] == "off") "on" else "off") })
-                    Text("Täglicher Ordner: ${settings["daily-folder"].orEmpty().ifBlank { "Daily Notes" }}")
+                    Text("Täglicher Ordner: ${settings["daily-folder"].orEmpty().ifBlank { "Tagesnotizen" }}")
+                    OutlinedTextField(
+                        settings["daily-folder"].orEmpty(),
+                        { model.updateDesk("daily-folder", it) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Ordner der Tagesnotiz") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        settings["date-format"].orEmpty().ifBlank { "YYYY-MM-DD" },
+                        { model.updateDesk("date-format", it) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Datumsformat") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        settings["default-folder"] ?: "Eingang",
+                        { model.updateDesk("default-folder", it) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Standardordner neuer Notizen") },
+                        singleLine = true,
+                    )
                     EditorSlider("Editor-Schriftgröße", metrics.fontSizePx.toFloat(), 12f, 26f, 1f, " px") { model.updateDesk("editor-font", it.toInt().toString()) }
                     EditorSlider("Zeilenhöhe", metrics.lineHeight.toFloat(), 1.3f, 2.2f, 0.05f, "") { model.updateDesk("line-height", "%.2f".format(java.util.Locale.US, it)) }
                     EditorSlider("Maximale Inhaltsbreite", metrics.contentWidthPx.toFloat(), 560f, 1200f, 20f, " px") { model.updateDesk("content-width", it.toInt().toString()) }
