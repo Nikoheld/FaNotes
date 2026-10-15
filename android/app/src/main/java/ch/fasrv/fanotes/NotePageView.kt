@@ -64,6 +64,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onWidth: (Float) -> Unit = {}
     var onPaper: (String) -> Unit = {}
     var onBrush: (String) -> Unit = {}
+    var onEffect: (String) -> Unit = {}
     var onToggleRail: () -> Unit = {}
     var onTextMode: (Boolean) -> Unit = {}
     var onDeleteSelection: () -> Unit = {}
@@ -233,7 +234,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
         if (textMode != text) setTextMode(text)
         syncPill.text = if (syncBusy && !syncLabel.contains('/')) "Startet…" else syncLabel
-        val signature = "$tool|${style.color}|${style.brush}|$paper|$fingerDraws|$text|$canUndo|$canRedo|$dark|$followPen"
+        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|$paper|$fingerDraws|$text|$canUndo|$canRedo|$dark|$followPen"
         if (signature != toolSignature) {
             toolSignature = signature
             rebuildTools(tool, style, paper, fingerDraws, canUndo, canRedo)
@@ -307,6 +308,9 @@ class NotePageView(context: Context) : FrameLayout(context) {
         tools.addView(chip(brush) {
             val index = Brushes.indexOfFirst { it.first == style.brush }.let { if (it < 0) 0 else it }
             onBrush(Brushes[(index + 1) % Brushes.size].first)
+        })
+        tools.addView(chip(ch.fasrv.fanotes.ink.inkEffectLabel(style.colorEffect)) {
+            onEffect(ch.fasrv.fanotes.ink.nextInkEffect(style.colorEffect))
         })
         val paperLabel = Papers.firstOrNull { it.first == paper }?.second ?: "Punkte"
         tools.addView(chip(paperLabel) {

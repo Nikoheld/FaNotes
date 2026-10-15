@@ -1255,6 +1255,10 @@ private fun PageSurface(
             page.onWidth = { model.style.value = style.copy(baseWidth = it.toDouble()) }
             page.onPaper = { model.setPaper(it) }
             page.onBrush = { model.style.value = style.copy(brush = it) }
+            page.onEffect = {
+                model.style.value = style.copy(colorEffect = it)
+                model.updateDesk("ink-effect", it)
+            }
             page.onToggleRail = onToggleRail
             page.onTextMode = { model.showText.value = it }
             page.onDeleteSelection = { model.deleteSelection() }

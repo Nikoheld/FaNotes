@@ -280,7 +280,7 @@ private fun drawStroke(canvas: Canvas, stroke: InkStroke, sourceWidth: Double, s
     if (path.isEmpty) return
     paint.color = parsePdfColor(stroke.color)
     paint.alpha = ((stroke.opacity ?: brushOpacity(stroke.brush) ?: 1.0) * 255).toInt().coerceIn(20, 255)
-    canvas.drawPath(path, paint)
+    drawInkPath(canvas, path, paint, stroke.colorEffect, (sourceWidth * scale).toFloat(), (sourceHeight * scale).toFloat(), (stroke.baseWidth * scale).toFloat())
 }
 
 private fun smoothOutline(path: Path, outline: FloatArray, scale: Float) {

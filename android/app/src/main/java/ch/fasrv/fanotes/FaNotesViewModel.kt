@@ -187,7 +187,12 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         val pen = ch.fasrv.fanotes.desk.penSettings(graph.readDesk())
-        style.value = style.value.copy(baseWidth = pen.width, pressureEnabled = pen.pressure, color = pen.color)
+        style.value = style.value.copy(
+            baseWidth = pen.width,
+            pressureEnabled = pen.pressure,
+            color = pen.color,
+            colorEffect = ch.fasrv.fanotes.ink.normalizeInkEffect(graph.readDesk()["ink-effect"]),
+        )
         synchronized(graph.remoteListeners) {
             graph.remoteListeners += { written, _ ->
                 viewModelScope.launch {
