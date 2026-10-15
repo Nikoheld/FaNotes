@@ -10,6 +10,7 @@ import android.text.InputType
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.InputMethodManager
@@ -19,6 +20,7 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
+import ch.fasrv.fanotes.desk.indentMarkdownLines
 import ch.fasrv.fanotes.desk.pasteUrlAsMarkdownLink
 import ch.fasrv.fanotes.ink.DraftingKind
 import ch.fasrv.fanotes.ink.InkTool
@@ -73,6 +75,25 @@ class NotePageView(context: Context) : FrameLayout(context) {
                     return super.commitText(text, newCursorPosition)
                 }
             }
+        }
+
+        override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+            if (keyCode == KeyEvent.KEYCODE_TAB && !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed) {
+                if (event.action == KeyEvent.ACTION_DOWN) indentSelection(event.isShiftPressed)
+                return true
+            }
+            return super.onKeyPreIme(keyCode, event)
+        }
+
+        fun indentSelection(outdent: Boolean) {
+            if (writing) return
+            val edit = indentMarkdownLines(text?.toString().orEmpty(), selectionStart, selectionEnd, outdent)
+            if (edit.text == text?.toString()) return
+            setText(edit.text)
+            setSelection(
+                edit.selectionStart.coerceIn(0, edit.text.length),
+                edit.selectionEnd.coerceIn(0, edit.text.length),
+            )
         }
 
         private fun applyPastedLink(pasted: String?): Boolean {
@@ -529,6 +550,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
     }
 
+    private fun indentLines(outdent: Boolean) {
+        if (!textMode) setTextMode(true)
+        editor.indentSelection(outdent)
+    }
+
     private fun format(action: String) {
         val start = editor.selectionStart.coerceAtLeast(0)
         val end = editor.selectionEnd.coerceAtLeast(start)
@@ -646,6 +672,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 "details" to "Details",
                 "horizontalRule" to "Linie",
             ).forEach { (action, label) -> tools.addView(chip(label) { format(action) }) }
+            tools.addView(chip("Einzug") { indentLines(false) })
+            tools.addView(chip("Ausrücken") { indentLines(true) })
         }
         tools.addView(guideChip("Lineal", DraftingKind.RULER))
         tools.addView(guideChip("Geodreieck", DraftingKind.SET_SQUARE))

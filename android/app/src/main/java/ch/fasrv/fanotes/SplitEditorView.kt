@@ -7,6 +7,7 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -14,6 +15,7 @@ import android.view.inputmethod.InputConnectionWrapper
 import android.widget.EditText
 import ch.fasrv.fanotes.desk.editorLineNumberLabels
 import ch.fasrv.fanotes.desk.findDetailsBlocks
+import ch.fasrv.fanotes.desk.indentMarkdownLines
 import ch.fasrv.fanotes.desk.pasteUrlAsMarkdownLink
 import ch.fasrv.fanotes.desk.lineNumberColumnPx
 import ch.fasrv.fanotes.desk.lineStartOffsets
@@ -154,6 +156,25 @@ class SplitEditorView(context: Context) : EditText(context) {
                 return super.commitText(text, newCursorPosition)
             }
         }
+    }
+
+    override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_TAB && !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed) {
+            if (event.action == KeyEvent.ACTION_DOWN) indentSelection(event.isShiftPressed)
+            return true
+        }
+        return super.onKeyPreIme(keyCode, event)
+    }
+
+    private fun indentSelection(outdent: Boolean) {
+        if (writing) return
+        val edit = indentMarkdownLines(text?.toString().orEmpty(), selectionStart, selectionEnd, outdent)
+        if (edit.text == text?.toString()) return
+        setText(edit.text)
+        setSelection(
+            edit.selectionStart.coerceIn(0, edit.text.length),
+            edit.selectionEnd.coerceIn(0, edit.text.length),
+        )
     }
 
     private fun applyPastedLink(pasted: String?): Boolean {
