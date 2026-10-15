@@ -178,7 +178,10 @@ class NoteStore(private val io: VaultIo) {
      * Image worksheet in the desktop layout: bytes under `.fanotes/worksheets`,
      * a JSON record, and a Markdown note that points at it.
      */
-    fun importImageWorksheet(directory: String, fileName: String, bytes: ByteArray, mime: String): String {
+    data class StoredWorksheet(val id: String, val title: String)
+
+    /** Writes the image bytes and the desktop worksheet JSON. It does not create a note. */
+    fun storeImageWorksheet(fileName: String, bytes: ByteArray, mime: String): StoredWorksheet {
         val extension = when {
             mime.contains("png") || fileName.endsWith(".png", true) -> ".png"
             mime.contains("webp") || fileName.endsWith(".webp", true) -> ".webp"
@@ -205,9 +208,17 @@ class NoteStore(private val io: VaultIo) {
             "highlights" to jsonArray(),
         )
         io.write(data, record.stringify().encodeToByteArray())
+        return StoredWorksheet(id, title)
+    }
+
+    fun importImageWorksheet(directory: String, fileName: String, bytes: ByteArray, mime: String): String {
+        val stored = storeImageWorksheet(fileName, bytes, mime)
+        val id = stored.id
+        val title = stored.title
         val folder = directory.trim('/')
         val path = if (folder.isEmpty()) "$title.md" else "$folder/$title.md"
         if (io.exists(path)) throw IllegalStateException("A note named $title already exists")
+        val now = isoNow()
         val body = "# $title\n\n<!-- fanotes-worksheet:$id -->\n"
         val document = newInkDocument(title, "blank", now)
         val note = OpenNote(path, NoteKind.MARKDOWN, title, body, document, emptyFamdPayload(now), listOf(id), UUID.randomUUID().toString())
