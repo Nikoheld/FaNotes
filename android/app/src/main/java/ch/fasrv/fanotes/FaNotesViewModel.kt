@@ -2285,6 +2285,13 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         persistExpandedFolders()
     }
 
+    fun setFolderExpanded(path: String, open: Boolean) {
+        val next = toggleExpandedFolder(expandedFolders.value, path, forceOpen = open)
+        if (next == expandedFolders.value) return
+        expandedFolders.value = next
+        persistExpandedFolders()
+    }
+
     private fun revealFolders(path: String) {
         val next = revealExpandedFolders(expandedFolders.value, path)
         if (next == expandedFolders.value) return
