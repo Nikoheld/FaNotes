@@ -1914,6 +1914,90 @@ fun HistoryScreen(model: FaNotesViewModel) {
 }
 
 @Composable
+fun FirstRunDialog(
+    draft: ch.fasrv.fanotes.desk.FirstRunDraft,
+    onDraft: (ch.fasrv.fanotes.desk.FirstRunDraft) -> Unit,
+    onFinish: (ch.fasrv.fanotes.desk.FirstRunDraft) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val folders = ch.fasrv.fanotes.desk.profileFolders(draft.profile)
+    val chosen = ch.fasrv.fanotes.desk.firstRunChosenFolders(draft)
+    val allSelected = folders.isNotEmpty() && folders.all { it.name in draft.selected }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(ch.fasrv.fanotes.desk.FIRST_RUN_STEPS[draft.step]) },
+        text = {
+            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                when (draft.step) {
+                    0 -> {
+                        Text("Willkommen bei FaNotes", fontWeight = FontWeight.SemiBold)
+                        Text("Alles, was dir wichtig ist. An einem ruhigen Ort.")
+                        Text("Schreibe mit Tastatur oder Stift, ordne deine Themen und finde jeden Gedanken wieder – in Schule, UNI, Privatleben oder Arbeit.")
+                        Text("Lokal & privat · Stift & Tastatur · Markdown inklusive", fontSize = 13.sp)
+                    }
+                    1 -> {
+                        Text("Wofür möchtest du FaNotes verwenden?")
+                        Text("Deine Auswahl bestimmt nur die vorgeschlagenen Startordner. Alle Funktionen bleiben in jedem Profil verfügbar.", fontSize = 13.sp)
+                        ch.fasrv.fanotes.desk.firstRunProfiles().forEach { profile ->
+                            val selected = profile.id == draft.profile
+                            Text(
+                                "${profile.title} · ${profile.description}",
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.fillMaxWidth().clickable { onDraft(ch.fasrv.fanotes.desk.firstRunChooseProfile(draft, profile.id)) }.padding(vertical = 4.dp),
+                            )
+                        }
+                    }
+                    2 -> {
+                        Text("Eine Seite. Zwei Arten zu schreiben.")
+                        Text("Tippe und schreibe frei auf derselben Seite. Handschrift bleibt Handschrift, bis du sie bewusst umwandelst.", fontSize = 13.sp)
+                        Text("Einfach losschreiben. Markdown wird direkt dargestellt.", fontSize = 13.sp)
+                        Text("Natürlich mit dem Stift. Ganze Seiten oder Ergänzungen zwischen Text.", fontSize = 13.sp)
+                        Text("Trotzdem alles finden. Die unsichtbare Transkription bleibt durchsuchbar.", fontSize = 13.sp)
+                    }
+                    else -> {
+                        Text("Welche Ordner möchtest du verwenden?")
+                        Text("Eingang ist immer dabei. Der schnelle Sammelplatz für neue Notizen und Ideen.", fontSize = 13.sp)
+                        Text(ch.fasrv.fanotes.desk.firstRunSelectionLine(chosen.size, folders.size), fontSize = 12.sp)
+                        Text(
+                            if (allSelected) "Auswahl aufheben" else "Alle auswählen",
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.clickable { onDraft(ch.fasrv.fanotes.desk.firstRunToggleAll(draft)) },
+                        )
+                        folders.forEach { folder ->
+                            val on = folder.name in draft.selected
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Checkbox(checked = on, onCheckedChange = { onDraft(ch.fasrv.fanotes.desk.firstRunToggleFolder(draft, folder.name)) })
+                                Column(Modifier.clickable { onDraft(ch.fasrv.fanotes.desk.firstRunToggleFolder(draft, folder.name)) }) {
+                                    Text("${ch.fasrv.fanotes.desk.firstRunFolderMark(folder.name)}  ${folder.name}", fontWeight = FontWeight.SemiBold)
+                                    Text(ch.fasrv.fanotes.desk.firstRunFolderBlurb(folder.name), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                                }
+                            }
+                        }
+                        Text(ch.fasrv.fanotes.desk.firstRunPlanLine(chosen.size), fontSize = 13.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            when (draft.step) {
+                0 -> TextButton(onClick = { onDraft(ch.fasrv.fanotes.desk.firstRunStep(draft, 1)) }) { Text("Los geht’s") }
+                1 -> TextButton(onClick = { onDraft(ch.fasrv.fanotes.desk.firstRunStep(draft, 2)) }) { Text("Weiter") }
+                2 -> TextButton(onClick = { onDraft(ch.fasrv.fanotes.desk.firstRunStep(draft, 3)) }) { Text("Ordner auswählen") }
+                else -> TextButton(onClick = { onFinish(draft) }) { Text("FaNotes einrichten") }
+            }
+        },
+        dismissButton = {
+            if (draft.step == 0) {
+                TextButton(onClick = { onDraft(ch.fasrv.fanotes.desk.firstRunStep(draft, 1)) }) { Text("Einsatzprofil auswählen") }
+            } else {
+                TextButton(onClick = { onDraft(ch.fasrv.fanotes.desk.firstRunStep(draft, draft.step - 1)) }) { Text("Zurück") }
+            }
+        },
+    )
+}
+
+@Composable
 fun StudyScreen(model: FaNotesViewModel) {
     val picture by model.study.collectAsStateWithLifecycle()
     val overview = picture

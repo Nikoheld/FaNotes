@@ -164,3 +164,75 @@ fun profileFolders(profile: String): List<ProfileFolder> = when (profile) {
         ProfileFolder("Wirtschaft", "#c47d4e"),
     )
 }
+
+data class FirstRunProfile(val id: String, val title: String, val description: String)
+
+data class FirstRunDraft(
+    val step: Int = 0,
+    val profile: String = "school",
+    val selected: Set<String> = emptySet(),
+)
+
+val FIRST_RUN_STEPS = listOf("Willkommen", "Profil", "Deine Seite", "Deine Ordner")
+
+fun firstRunProfiles() = listOf(
+    FirstRunProfile("school", "Schule", "Fächer, Aufgaben und Prüfungen klar organisieren."),
+    FirstRunProfile("university", "UNI", "Vorlesungen, Forschung und Literatur zusammenhalten."),
+    FirstRunProfile("private", "Privat", "Ideen, Tagebuch, Projekte und wichtige Dokumente."),
+    FirstRunProfile("work", "Arbeit", "Meetings, Aufgaben und Wissen an einem ruhigen Ort."),
+)
+
+fun firstRunStart(): FirstRunDraft {
+    val folders = profileFolders("school").map { it.name }.toSet()
+    return FirstRunDraft(step = 0, profile = "school", selected = folders)
+}
+
+fun firstRunStep(draft: FirstRunDraft, step: Int): FirstRunDraft =
+    draft.copy(step = step.coerceIn(0, FIRST_RUN_STEPS.lastIndex))
+
+fun firstRunChooseProfile(draft: FirstRunDraft, profile: String): FirstRunDraft {
+    val known = firstRunProfiles().any { it.id == profile }
+    val id = if (known) profile else "school"
+    return draft.copy(profile = id, selected = profileFolders(id).map { it.name }.toSet())
+}
+
+fun firstRunToggleFolder(draft: FirstRunDraft, name: String): FirstRunDraft {
+    val allowed = profileFolders(draft.profile).map { it.name }.toSet()
+    if (name !in allowed) return draft
+    val next = if (name in draft.selected) draft.selected - name else draft.selected + name
+    return draft.copy(selected = next)
+}
+
+fun firstRunToggleAll(draft: FirstRunDraft): FirstRunDraft {
+    val names = profileFolders(draft.profile).map { it.name }
+    val next = if (names.all { it in draft.selected }) emptySet() else names.toSet()
+    return draft.copy(selected = next)
+}
+
+fun firstRunChosenFolders(draft: FirstRunDraft): List<ProfileFolder> =
+    profileFolders(draft.profile).filter { it.name in draft.selected }
+
+fun firstRunPlanLine(count: Int): String =
+    if (count == 0) "Nur Eingang wird angelegt." else "$count Ordner + Eingang wird angelegt."
+
+fun firstRunSelectionLine(selected: Int, total: Int): String = "$selected von $total ausgewählt"
+
+private val FOLDER_BLURBS = mapOf(
+    "Mathematik" to ("∑" to "Algebra, Geometrie & Analysis"),
+    "AMAT" to ("f(x)" to "Anwendungen der Mathematik"),
+    "Deutsch" to ("Aa" to "Sprache, Literatur & Aufsätze"),
+    "Englisch" to ("Ab" to "Vocabulary, texts & grammar"),
+    "Französisch" to ("Fr" to "Grammatik, Texte & Vokabeln"),
+    "Physik" to ("λ" to "Mechanik, Elektrizität & Wellen"),
+    "Chemie" to ("H₂" to "Stoffe, Reaktionen & Formeln"),
+    "Biologie" to ("DNA" to "Leben, Umwelt & Genetik"),
+    "Geschichte" to ("Ⅰ" to "Epochen, Quellen & Zusammenhänge"),
+    "Informatik" to ("</>" to "Code, Systeme & Algorithmen"),
+    "Wirtschaft" to ("%" to "Betriebe, Märkte & Finanzen"),
+    "Vorlesungen" to ("Vo" to "Organisierter Startordner"),
+    "Persönlich" to ("Pe" to "Organisierter Startordner"),
+)
+
+fun firstRunFolderMark(name: String): String = FOLDER_BLURBS[name]?.first ?: name.take(2)
+
+fun firstRunFolderBlurb(name: String): String = FOLDER_BLURBS[name]?.second ?: "Organisierter Startordner"
