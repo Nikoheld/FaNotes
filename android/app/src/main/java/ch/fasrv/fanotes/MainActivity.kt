@@ -1942,6 +1942,7 @@ private fun PageSurface(
             }
             page.onSync = onSync
             page.onMarkdown = { model.updateMarkdown(it) }
+            page.onPasteImage = { name, bytes, mime -> model.importBytes(name, bytes, pdf = false, mime = mime) }
             page.onVisibleMarkdown = { previous, next -> model.updateVisibleMarkdown(previous, next) }
             page.onRememberCamera = { path, zoom, rotation, centreX, centreY, pageWidth, pageHeight, anchor ->
                 model.rememberPaperCamera(path, zoom, rotation, centreX, centreY, pageWidth, pageHeight, anchor)

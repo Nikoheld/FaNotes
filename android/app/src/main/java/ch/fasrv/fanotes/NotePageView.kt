@@ -12,6 +12,7 @@ import android.text.InputType
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
+import android.content.ClipboardManager
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -462,6 +463,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onTool: (InkTool) -> Unit = {}
     var onSync: () -> Unit = {}
     var onMarkdown: (String) -> Unit = {}
+    var onPasteImage: (String, ByteArray, String) -> Unit = { _, _, _ -> }
     var onVisibleMarkdown: (String, String) -> Unit = { _, next -> onMarkdown(next) }
     var onRememberCamera: (
         String,
@@ -1284,6 +1286,38 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val next = ch.fasrv.fanotes.desk.workspaceBackground(kind)
         setBackgroundColor(if (next == "clean") 0xFFE8E6E1.toInt() else android.graphics.Color.TRANSPARENT)
         ink.applyWorkspaceKind(next)
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN &&
+            event.isCtrlPressed && !event.isShiftPressed && !event.isAltPressed && !event.isMetaPressed &&
+            event.keyCode == KeyEvent.KEYCODE_V &&
+            ch.fasrv.fanotes.desk.pasteImageOntoSheet(textMode && editor.hasFocus()) &&
+            pasteClipboardImage()
+        ) {
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    private fun pasteClipboardImage(): Boolean {
+        val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return false
+        val clip = clipboard.primaryClip ?: return false
+        if (clip.itemCount == 0) return false
+        var mime: String? = null
+        val description = clip.description
+        for (index in 0 until description.mimeTypeCount) {
+            mime = ch.fasrv.fanotes.desk.clipboardImageMime(description.getMimeType(index))
+            if (mime != null) break
+        }
+        val type = mime ?: return false
+        val uri = clip.getItemAt(0).uri ?: return false
+        val bytes = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        }.getOrNull() ?: return false
+        if (bytes.isEmpty()) return false
+        onPasteImage(ch.fasrv.fanotes.desk.clipboardImageFileName(type), bytes, type)
+        return true
     }
 
     private fun placeEditor() {
