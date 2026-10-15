@@ -183,17 +183,15 @@ class NoteStore(private val io: VaultIo) {
      */
     data class StoredWorksheet(val id: String, val title: String)
 
-    /** Writes the image bytes and the desktop worksheet JSON. It does not create a note. */
-    fun storeImageWorksheet(fileName: String, bytes: ByteArray, mime: String): StoredWorksheet {
-        val extension = when {
-            mime.contains("png") || fileName.endsWith(".png", true) -> ".png"
-            mime.contains("webp") || fileName.endsWith(".webp", true) -> ".webp"
-            mime.contains("gif") || fileName.endsWith(".gif", true) -> ".gif"
-            else -> ".jpg"
-        }
+    /** Writes image or PDF bytes and the desktop worksheet JSON. It does not create a note. */
+    fun storeWorksheet(fileName: String, bytes: ByteArray, mime: String = ""): StoredWorksheet {
+        val error = worksheetImportError(fileName, mime, bytes)
+        if (error != null) throw IllegalArgumentException(error)
+        val format = worksheetFileFormat(fileName, mime) ?: throw IllegalArgumentException(WORKSHEET_FORMAT_UNSUPPORTED)
         val id = UUID.randomUUID().toString()
-        val title = safeNoteName(fileName.substringBeforeLast('.').ifBlank { "Worksheet" })
-        val source = ".fanotes/worksheets/$id$extension"
+        val base = fileName.substringAfterLast('/').substringAfterLast('\\')
+        val title = safeNoteName(base.substringBeforeLast('.').ifBlank { "Arbeitsblatt" })
+        val source = ".fanotes/worksheets/$id${format.extension}"
         val data = ".fanotes/worksheets/$id.json"
         io.write(source, bytes)
         val now = isoNow()
@@ -201,8 +199,8 @@ class NoteStore(private val io: VaultIo) {
             "schemaVersion" to jsonNumber(1.0),
             "id" to jsonString(id),
             "title" to jsonString(title),
-            "kind" to jsonString("image"),
-            "mimeType" to jsonString(mime.ifBlank { "image/jpeg" }),
+            "kind" to jsonString(format.kind),
+            "mimeType" to jsonString(format.mime),
             "sourceRelativePath" to jsonString(source),
             "dataRelativePath" to jsonString(data),
             "createdAt" to jsonString(now),
@@ -213,6 +211,9 @@ class NoteStore(private val io: VaultIo) {
         io.write(data, record.stringify().encodeToByteArray())
         return StoredWorksheet(id, title)
     }
+
+    fun storeImageWorksheet(fileName: String, bytes: ByteArray, mime: String): StoredWorksheet =
+        storeWorksheet(fileName, bytes, mime)
 
     /** Deletes the worksheet JSON and its image or PDF, and nothing else in the vault. */
     fun deleteWorksheet(id: String) {
@@ -225,8 +226,8 @@ class NoteStore(private val io: VaultIo) {
         if (io.exists(record)) io.delete(record)
     }
 
-    fun importImageWorksheet(directory: String, fileName: String, bytes: ByteArray, mime: String): String {
-        val stored = storeImageWorksheet(fileName, bytes, mime)
+    fun importWorksheetNote(directory: String, fileName: String, bytes: ByteArray, mime: String = "", paper: String = "dots"): String {
+        val stored = storeWorksheet(fileName, bytes, mime)
         val id = stored.id
         val title = stored.title
         val folder = directory.trim('/')
@@ -234,11 +235,14 @@ class NoteStore(private val io: VaultIo) {
         if (io.exists(path)) throw IllegalStateException("A note named $title already exists")
         val now = isoNow()
         val body = "# $title\n\n<!-- fanotes-worksheet:$id -->\n"
-        val document = newInkDocument(title, "blank", now)
+        val document = newInkDocument(title, paper, now)
         val note = OpenNote(path, NoteKind.MARKDOWN, title, body, document, emptyFamdPayload(now), listOf(id), UUID.randomUUID().toString())
         save(note, document, body, now)
         return path
     }
+
+    fun importImageWorksheet(directory: String, fileName: String, bytes: ByteArray, mime: String): String =
+        importWorksheetNote(directory, fileName, bytes, mime, "blank")
 
     fun rename(path: String, title: String): String {
         val parent = path.substringBeforeLast('/', "")

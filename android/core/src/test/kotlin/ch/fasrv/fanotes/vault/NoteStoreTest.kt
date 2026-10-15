@@ -41,8 +41,9 @@ class NoteStoreTest {
         val root = Files.createTempDirectory("fanotes-sheets")
         val vault = DirectoryVault(root)
         val store = NoteStore(vault)
-        val kept = store.storeImageWorksheet("Bleibt.png", byteArrayOf(4, 5), "image/png")
-        val dropped = store.storeImageWorksheet("Weg.png", byteArrayOf(1, 2, 3), "image/png")
+        val png = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+        val kept = store.storeImageWorksheet("Bleibt.png", png, "image/png")
+        val dropped = store.storeImageWorksheet("Weg.png", png, "image/png")
         val record = ".fanotes/worksheets/${dropped.id}.json"
         val escaped = vault.read(record)!!.decodeToString().replace(
             ".fanotes/worksheets/${dropped.id}.png",
@@ -58,5 +59,19 @@ class NoteStoreTest {
         store.deleteWorksheet(kept.id)
         assertFalse(vault.exists(".fanotes/worksheets/${kept.id}.json"))
         assertFalse(vault.exists(".fanotes/worksheets/${kept.id}.png"))
+    }
+
+    @Test
+    fun aPdfWorksheetNoteStoresTheDesktopPdfRecord() {
+        val root = Files.createTempDirectory("fanotes-pdf-sheet")
+        val store = NoteStore(DirectoryVault(root))
+        val path = store.importWorksheetNote("", "Blatt.pdf", "%PDF-1.4".encodeToByteArray(), "application/pdf", "lines")
+        val note = store.readNote(path)
+        assertEquals("Blatt", note.title)
+        assertEquals(listOf(note.worksheets.single()), note.worksheets)
+        val record = DirectoryVault(root).read(".fanotes/worksheets/${note.worksheets.single()}.json")!!.decodeToString()
+        assertTrue(record.contains("\"kind\":\"pdf\"") || record.contains("\"kind\": \"pdf\""))
+        assertTrue(record.contains(".pdf"))
+        assertEquals("lines", note.document.paperStyle)
     }
 }
