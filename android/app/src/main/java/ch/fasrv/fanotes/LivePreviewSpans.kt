@@ -204,7 +204,8 @@ internal class DetailsSummarySpan(
         val box = paperDetailsBox(textSizePx)
         val metrics = paint.fontMetrics
         val textHeight = -metrics.ascent + metrics.descent
-        val bodyExtra = if (body.isEmpty()) 0f else textHeight + box.padY
+        val bodyLines = if (body.isEmpty()) 0 else body.count { it == '\n' } + 1
+        val bodyExtra = if (bodyLines == 0) 0f else bodyLines * textHeight + box.padY
         val total = box.marginY * 2f + box.padY * 2f + textHeight + bodyExtra
         if (fm != null) {
             val half = (total / 2f).toInt().coerceAtLeast(1)
@@ -245,7 +246,7 @@ internal class DetailsSummarySpan(
         paint.style = Paint.Style.FILL
         paint.color = fill
         canvas.drawRoundRect(rect, box.radius, box.radius, paint)
-        if (continues || body.isNotEmpty()) {
+        if (continues) {
             canvas.drawRect(rect.left, rect.bottom - box.radius, rect.right, rect.bottom, paint)
         }
         val metrics = paint.fontMetrics
@@ -269,7 +270,10 @@ internal class DetailsSummarySpan(
         canvas.drawText(summary, rect.left + box.padX, summaryBaseline, paint)
         if (body.isNotEmpty()) {
             paint.typeface = Typeface.create(previousFace, Typeface.NORMAL)
-            canvas.drawText(body, rect.left + box.padX, summaryBaseline + textHeight + box.padY * 0.4f, paint)
+            val step = textHeight + box.padY * 0.15f
+            body.split('\n').forEachIndexed { index, line ->
+                canvas.drawText(line, rect.left + box.padX, summaryBaseline + box.padY + (index + 1) * step, paint)
+            }
         }
         drawEditButton(canvas, paint, rect, contentTop, box.border)
         drawChevron(canvas, paint, rect, summaryBaseline, open)

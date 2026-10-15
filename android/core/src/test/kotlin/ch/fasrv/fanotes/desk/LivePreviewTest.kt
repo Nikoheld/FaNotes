@@ -80,14 +80,17 @@ class LivePreviewTest {
         assertEquals("4", livePreviewMarks(opened!!, 0, 0).first { it.kind == LiveKind.DETAILS_SUMMARY }.body)
         assertEquals(inline, toggleDetailsOpen(opened, 0))
 
-        val multi = "<details open>\n<summary>Titel</summary>\nGeheim\n</details>"
+        val multi = "<details open>\n<summary>Titel</summary>\n**Geheim** und [Link](https://x)\n</details>"
         val openMarks = livePreviewMarks(multi, multi.length, multi.length)
         val summary = openMarks.first { it.kind == LiveKind.DETAILS_SUMMARY }
         assertEquals("Titel", summary.label)
         assertTrue(summary.open)
-        assertTrue(summary.continues)
-        assertTrue(openMarks.any { it.kind == LiveKind.DETAILS_END && it.start == multi.indexOf("Geheim") })
-        assertFalse(openMarks.any { it.kind == LiveKind.HIDE && it.start == multi.indexOf("Geheim") })
+        assertFalse(summary.continues)
+        assertEquals("Geheim und Link", summary.body)
+        assertFalse(openMarks.any { it.kind == LiveKind.DETAILS_END })
+        assertTrue(openMarks.any { it.kind == LiveKind.HIDE && it.start == multi.indexOf("**Geheim**") })
+        assertEquals("Dieser Klappbereich ist leer.", detailsReading("  \n"))
+        assertEquals("Kapitel\nText", detailsReading("## Kapitel\n\nText"))
         assertTrue(openMarks.any { it.kind == LiveKind.HIDE && it.start == multi.indexOf("<summary>") })
         assertTrue(openMarks.any { it.kind == LiveKind.HIDE && it.start == multi.indexOf("</details>") })
         val inlineOpen = livePreviewMarks(opened, 0, 0).first { it.kind == LiveKind.DETAILS_SUMMARY }
