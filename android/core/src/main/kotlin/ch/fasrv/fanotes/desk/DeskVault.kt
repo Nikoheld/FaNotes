@@ -519,6 +519,36 @@ fun wordCount(markdown: String) = markdown.replace(Regex("""<!--[\s\S]*?-->"""),
     .split(Regex("""\s+"""))
     .count { it.any(Char::isLetterOrDigit) }
 
+private val INSPECTOR_MARKERS = Regex("""<!--\s*fanotes-(?:ink|worksheet):[a-zA-Z0-9_-]{1,96}\s*-->""")
+private val STATUS_INK_MARKER = Regex("""<!--\s*fanotes-ink:[a-zA-Z0-9_-]{1,96}\s*-->""")
+private val STATUS_WORKSHEET_MARKER = Regex("""<!--\s*fanotes-worksheet:[a-zA-Z0-9_-]{1,96}\s*-->""")
+private val FAMD_TAIL = Regex("""(?:^|\n)<!--\s*fanotes-famd:v1[\s\S]*$""")
+private val INSPECTOR_PUNCTUATION = Regex("""[`#>*_~\[\]()-]""")
+
+/** Status-bar count: trimmed visible note text, split on whitespace. */
+fun statusWordCount(content: String): Int {
+    val visible = content
+        .replaceFirst(STATUS_INK_MARKER, "")
+        .replace(STATUS_WORKSHEET_MARKER, "")
+        .replace(FAMD_TAIL, "")
+        .trim()
+    if (visible.isEmpty()) return 0
+    return visible.split(Regex("""\s+""")).size
+}
+
+data class InspectorDocument(val words: Int, val characters: Int, val readingMinutes: Int)
+
+/** Live inspector counts from `RightInspector`, including the one-minute floor. */
+fun inspectorDocument(content: String): InspectorDocument {
+    val visible = content
+        .replace(INSPECTOR_MARKERS, "")
+        .replace(FAMD_TAIL, "")
+    val plain = visible.replace(INSPECTOR_PUNCTUATION, " ").trim()
+    val words = if (plain.isEmpty()) 0 else plain.split(Regex("""\s+""")).size
+    val reading = maxOf(1, kotlin.math.ceil(words / 210.0).toInt())
+    return InspectorDocument(words, visible.length, reading)
+}
+
 fun occurrencesOn(event: CalendarEvent, day: java.time.LocalDate): Boolean {
     val startDay = runCatching { java.time.LocalDate.parse(event.start.take(10)) }.getOrNull() ?: return false
     if (day < startDay) return false
