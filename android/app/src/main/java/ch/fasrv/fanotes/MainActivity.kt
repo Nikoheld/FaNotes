@@ -528,6 +528,7 @@ fun FaNotesScreen(
                             worksheetImport = worksheetImport,
                             palette = palette,
                             destination = destination,
+                            selection = model.session.selection.isNotEmpty(),
                             pen = !showText,
                             focus = focus,
                         ),
@@ -558,6 +559,10 @@ fun FaNotesScreen(
                         "worksheet" -> onDismissWorksheet()
                         "palette" -> model.paletteOpen.value = false
                         "search", "settings", "ai", "calendar", "tasks", "overview" -> model.showDestination("notes")
+                        "selection" -> {
+                            model.session.clearSelection()
+                            model.message.value = ch.fasrv.fanotes.ink.SELECT_CLEARED_NOTICE
+                        }
                         "pen" -> model.showText.value = true
                         "focus" -> model.updateDesk("focus", "off")
                     }

@@ -40,5 +40,24 @@ class InkSectionsTest {
             StrokePoint(0.2, 0.8, 0.0, 0.0, 0.0, 0.0, "pen"),
         )
         assertEquals(setOf(0), lassoHits(listOf(stroke), loop))
+        val half = InkStroke(
+            listOf(
+                StrokePoint(0.5, 0.5, 0.0, 0.4, 0.0, 0.0, "pen"),
+                StrokePoint(0.0, 0.0, 0.0, 0.4, 0.0, 0.0, "pen"),
+                StrokePoint(0.0, 1.0, 0.0, 0.4, 0.0, 0.0, "pen"),
+            ),
+            2.0,
+            false,
+            "#000000",
+        )
+        assertEquals(emptySet(), lassoHits(listOf(half), loop))
+        val moved = applyLasso(listOf(stroke), setOf(0), "move")
+        assertEquals(0.54, moved.single().points.single().x, 1e-9)
+        val copied = applyLasso(listOf(stroke), setOf(0), "copy")
+        assertEquals(2, copied.size)
+        assertEquals("#2457d6", applyLasso(listOf(stroke), setOf(0), "recolor", color = "#2457d6").single().color)
+        assertEquals(emptyList(), applyLasso(listOf(stroke), setOf(0), "delete"))
+        assertEquals("Auswahl verschoben.", lassoActionNotice("move"))
+        assertEquals(SELECT_DRAG_NOTICE, SELECT_DRAG_NOTICE)
     }
 }

@@ -141,6 +141,7 @@ class InkSurfaceView @JvmOverloads constructor(
     var onStroke: (ch.fasrv.fanotes.ink.InkStroke) -> Unit = {}
     var onErased: (Int) -> Unit = {}
     var onInkNotice: (InkNotice) -> Unit = {}
+    var onSelection: (Int) -> Unit = {}
     var onPageGrew: (Double, Double, Double, Double, Double, Double) -> Unit = { _, _, _, _, _, _ -> }
     var onPenSample: (Double, Double) -> Unit = { _, _ -> }
     var onSwipeNote: (Int) -> Unit = {}
@@ -866,6 +867,14 @@ class InkSurfaceView @JvmOverloads constructor(
             lassoing = false
             current.selectIndices(lassoHits(current.document.strokes, lassoPoints.toList()))
             lassoPoints.clear()
+            val found = current.selection.isNotEmpty()
+            onInkNotice(
+                ch.fasrv.fanotes.ink.InkNotice(
+                    "info",
+                    if (found) ch.fasrv.fanotes.ink.SELECT_DRAG_NOTICE else ch.fasrv.fanotes.ink.SELECT_EMPTY_NOTICE,
+                ),
+            )
+            onSelection(current.selection.size)
             invalidateTiles()
             invalidate()
             return
@@ -885,18 +894,25 @@ class InkSurfaceView @JvmOverloads constructor(
                     if (rect != null) {
                         val left = min(rect[0], rect[2]).toDouble()
                         val top = min(rect[1], rect[3]).toDouble()
-                        current.selectRect(
-                            ch.fasrv.fanotes.ink.NormalizedRect(
-                                left,
-                                top,
-                                abs(rect[2] - rect[0]).toDouble(),
-                                abs(rect[3] - rect[1]).toDouble(),
-                            ),
-                        )
+                        val width = abs(rect[2] - rect[0]).toDouble()
+                        val height = abs(rect[3] - rect[1]).toDouble()
+                        if (width < 0.012 || height < 0.012) {
+                            current.clearSelection()
+                            onInkNotice(ch.fasrv.fanotes.ink.InkNotice("info", ch.fasrv.fanotes.ink.SELECT_HINT_NOTICE))
+                        } else {
+                            current.selectRect(ch.fasrv.fanotes.ink.NormalizedRect(left, top, width, height))
+                            onInkNotice(
+                                ch.fasrv.fanotes.ink.InkNotice(
+                                    "info",
+                                    if (current.selection.isEmpty()) ch.fasrv.fanotes.ink.SELECT_EMPTY_NOTICE else ch.fasrv.fanotes.ink.SELECT_DRAG_NOTICE,
+                                ),
+                            )
+                        }
                     }
                 }
                 movingSelection = false
                 selectRect = null
+                onSelection(current.selection.size)
                 invalidateTiles()
             }
             cancel -> {
