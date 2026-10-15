@@ -1271,9 +1271,20 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         noteChanged()
     }
 
-    fun insertSection(y: Double) {
-        session.replace(ch.fasrv.fanotes.ink.insertSection(session.document, y))
-        noteChanged()
+    fun setPlacingSection(active: Boolean) {
+        if (placingSection.value != active) placingSection.value = active
+    }
+
+    fun insertSection(y: Double): String {
+        val before = session.document
+        val next = ch.fasrv.fanotes.ink.insertSection(before, y)
+        val notice = ch.fasrv.fanotes.ink.sectionInsertNotice(before, next)
+        if (notice == ch.fasrv.fanotes.ink.SECTION_PLACE_DONE) {
+            session.replace(next)
+            noteChanged()
+        }
+        placingSection.value = false
+        return notice
     }
 
     fun toggleInkSection(id: String) {
@@ -2103,6 +2114,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         paletteOpen.value = true
     }
     val linkPlacing = MutableStateFlow(false)
+    val placingSection = MutableStateFlow(false)
     val linkSelected = MutableStateFlow(false)
     val clearLinkRequest = MutableStateFlow(0)
     val updateLabel = MutableStateFlow("2026.10.7")

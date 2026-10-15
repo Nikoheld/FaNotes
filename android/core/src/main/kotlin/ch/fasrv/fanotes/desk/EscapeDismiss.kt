@@ -19,6 +19,7 @@ data class EscapeLayer(
     val renaming: Boolean = false,
     val moving: Boolean = false,
     val placingLink: Boolean = false,
+    val placingSection: Boolean = false,
     val selectedLink: Boolean = false,
     val worksheetImport: Boolean = false,
     val palette: Boolean = false,
@@ -40,6 +41,7 @@ fun escapeDismisses(layer: EscapeLayer): String? {
     if (layer.renaming) return "rename"
     if (layer.moving) return "move"
     if (layer.placingLink) return "placing-link"
+    if (layer.placingSection) return "placing-section"
     if (layer.selectedLink) return "selected-link"
     if (layer.worksheetImport) return "worksheet"
     if (layer.palette) return "palette"

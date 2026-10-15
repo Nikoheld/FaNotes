@@ -426,6 +426,7 @@ fun FaNotesScreen(
     val bugReportOpen by model.bugReportOpen.collectAsStateWithLifecycle()
     val confirm by model.confirmRequest.collectAsStateWithLifecycle()
     val linkPlacing by model.linkPlacing.collectAsStateWithLifecycle()
+    val placingSection by model.placingSection.collectAsStateWithLifecycle()
     val linkSelected by model.linkSelected.collectAsStateWithLifecycle()
     val gotoLine by model.gotoLineInput.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -522,6 +523,7 @@ fun FaNotesScreen(
                             renaming = renaming != null,
                             moving = moving != null,
                             placingLink = linkPlacing,
+                            placingSection = placingSection,
                             selectedLink = linkSelected,
                             worksheetImport = worksheetImport,
                             palette = palette,
@@ -552,6 +554,7 @@ fun FaNotesScreen(
                         "rename" -> renaming = null
                         "move" -> moving = null
                         "placing-link", "selected-link" -> model.requestClearLink()
+                        "placing-section" -> model.setPlacingSection(false)
                         "worksheet" -> onDismissWorksheet()
                         "palette" -> model.paletteOpen.value = false
                         "search", "settings", "ai", "calendar", "tasks", "overview" -> model.showDestination("notes")
@@ -1928,6 +1931,7 @@ private fun PageSurface(
     val foldedHeadings by model.foldedHeadings.collectAsStateWithLifecycle()
     val clearLink by model.clearLinkRequest.collectAsStateWithLifecycle()
     var appliedClear by remember { mutableStateOf(0) }
+    val wasPlacingSection = remember { booleanArrayOf(false) }
     Box(modifier) {
     AndroidView(
         modifier = Modifier.matchParentSize(),
@@ -2003,6 +2007,15 @@ private fun PageSurface(
             page.onDeleteSelection = { model.deleteSelection() }
             page.onDuplicate = { model.duplicateSelection() }
             page.onClear = { model.clearInk() }
+            val placing = model.placingSection.value
+            if (wasPlacingSection[0] && !placing && page.ink.placingSection) {
+                page.ink.onInkNotice(ch.fasrv.fanotes.ink.InkNotice("info", ch.fasrv.fanotes.ink.SECTION_PLACE_CANCELLED))
+                page.ink.sectionGuideY = Float.NaN
+                page.ink.invalidate()
+            }
+            wasPlacingSection[0] = placing
+            page.ink.placingSection = placing
+            page.ink.onSectionChrome = { model.setPlacingSection(it) }
             page.ink.onPlaceSection = { model.insertSection(it) }
             page.ink.onLinkChrome = { placing, selected -> model.reportLinkChrome(placing, selected) }
             if (clearLink != appliedClear) {

@@ -22,6 +22,12 @@ class InkSectionsTest {
         val expanded = toggleSection(collapsed, section.id)
         assertEquals(1, expanded.strokes.size)
         assertTrue(!sectionsOf(expanded).single().collapsed)
+        val again = insertSection(inserted, (section.top + section.bodyTop) / 2)
+        assertEquals(SECTION_PLACE_BLOCKED, sectionInsertNotice(inserted, again))
+        assertEquals(1, sectionsOf(again).size)
+        val second = insertSection(inserted, 0.8)
+        assertEquals(SECTION_PLACE_DONE, sectionInsertNotice(inserted, second))
+        assertEquals(2, sectionsOf(second).size)
     }
 
     @Test

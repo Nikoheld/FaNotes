@@ -9,6 +9,7 @@ class EscapeDismissTest {
     fun escapeClosesTheTopmostSurfaceInDesktopOrder() {
         assertEquals("confirm", escapeDismisses(EscapeLayer(confirm = true, palette = true, focus = true)))
         assertEquals("placing-link", escapeDismisses(EscapeLayer(placingLink = true, worksheetImport = true, palette = true)))
+        assertEquals("placing-section", escapeDismisses(EscapeLayer(placingSection = true, pen = true)))
         assertEquals("selected-link", escapeDismisses(EscapeLayer(selectedLink = true, palette = true)))
         assertEquals("worksheet", escapeDismisses(EscapeLayer(worksheetImport = true, palette = true, destination = "search")))
         assertEquals("palette", escapeDismisses(EscapeLayer(palette = true, destination = "settings")))
