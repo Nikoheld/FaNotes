@@ -6,8 +6,8 @@ package ch.fasrv.fanotes.input
  * A finger never lays ink. While a stylus is down, and for [POST_PEN_IGNORE_MS]
  * after it lifts, finger contacts are also ignored for navigation so a resting
  * palm does not pan or zoom the page. A mouse may ink (emulator, Bluetooth
- * mouse) unless the caller disables it. The S-Pen eraser and the barrel button
- * erase instead of drawing.
+ * mouse) unless the caller disables it. The side button and the eraser end
+ * follow the tablet button map; their defaults still erase.
  */
 const val POST_PEN_IGNORE_MS = 850L
 

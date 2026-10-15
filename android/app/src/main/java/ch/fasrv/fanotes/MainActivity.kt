@@ -1004,6 +1004,7 @@ private fun SplitPane(
                 view.shapeSnapSensitivity = pen.shapeSnap
                 view.scribbleSensitivity = pen.scribble
                 view.strokeSmoothing = pen.smoothing.toFloat()
+                view.tabletButtons = model.deskSettings.value["tablet-buttons"].orEmpty()
                 view.markdown = markdown
                 view.showMarkdown = markdown.isNotBlank() && !typing
                 view.inkTool = tool
@@ -1200,6 +1201,7 @@ private fun PageSurface(
             page.ink.shapeSnapSensitivity = pen.shapeSnap
             page.ink.scribbleSensitivity = pen.scribble
             page.ink.strokeSmoothing = pen.smoothing.toFloat()
+            page.ink.tabletButtons = model.deskSettings.value["tablet-buttons"].orEmpty()
             page.ink.onPlaceHighlight = { model.addWorksheetHighlight(it) }
             page.ink.onRemoveHighlight = { model.removeWorksheetHighlight(it) }
             page.onFinger = { model.fingerDraws.value = it }
