@@ -1164,7 +1164,7 @@ private fun NotePage(
                 TextButton(onClick = onExportPdf) { Text("Als PDF exportieren") }
                 TextButton(onClick = onDownload) { Text("Herunterladen") }
             }
-            val sheets = backdrop.filter { it.worksheetId.isNotEmpty() }
+            val sheets = backdrop.filter { it.worksheetId.isNotEmpty() }.distinctBy { it.worksheetId }
             if (sheets.isNotEmpty()) {
                 Row(
                     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),

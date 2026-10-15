@@ -21,7 +21,8 @@ import ch.fasrv.fanotes.desk.PageFrame
 import ch.fasrv.fanotes.desk.boxOnFrame
 import ch.fasrv.fanotes.desk.highlightFrameToSheet
 import ch.fasrv.fanotes.desk.highlightToSheet
-import ch.fasrv.fanotes.desk.layoutWorksheetColumn
+import ch.fasrv.fanotes.desk.WorksheetPageSpec
+import ch.fasrv.fanotes.desk.layoutWorksheetPages
 import ch.fasrv.fanotes.desk.noteLinkAppearanceToken
 import ch.fasrv.fanotes.desk.noteLinkToSheet
 import ch.fasrv.fanotes.desk.pdfPageSlices
@@ -58,15 +59,15 @@ fun writeNotePdf(
 ) {
     val sourceWidth = document.sourceWidth.coerceAtLeast(1.0)
     val sourceHeight = document.sourceHeight.coerceAtLeast(1.0)
-    val worksheetAspects = backdrops.mapNotNull { slice ->
+    val worksheetPages = backdrops.mapNotNull { slice ->
         val bitmap = slice.bitmap ?: return@mapNotNull null
         if (slice.worksheetId.isEmpty() || bitmap.isRecycled || bitmap.width <= 0 || bitmap.height <= 0) return@mapNotNull null
-        slice.worksheetId to bitmap.height.toDouble() / bitmap.width.toDouble()
+        WorksheetPageSpec(slice.worksheetId, slice.page, bitmap.height.toDouble() / bitmap.width.toDouble())
     }
-    val placements = if (worksheetAspects.isEmpty()) {
+    val placements = if (worksheetPages.isEmpty()) {
         emptyList()
     } else {
-        layoutWorksheetColumn(sourceWidth, pdfTextBottom(markdown, fontSizePx, lineHeight, contentWidthPx, document.originY), worksheetAspects)
+        layoutWorksheetPages(sourceWidth, pdfTextBottom(markdown, fontSizePx, lineHeight, contentWidthPx, document.originY), worksheetPages)
     }
     val virtualHeight = max(sourceHeight, placements.maxOfOrNull { it.top + it.height + 36.0 } ?: 0.0)
     val slices = pdfPageSlices(sourceWidth, virtualHeight)
@@ -123,7 +124,7 @@ fun writeNotePdf(
                 val rect = if (placements.isEmpty()) {
                     highlightToSheet(anchored.mark, frames, sourceWidth, sourceHeight)
                 } else {
-                    val frame = placements.firstOrNull { it.id == anchored.worksheetId } ?: return@forEach
+                    val frame = placements.firstOrNull { it.id == anchored.worksheetId && it.page == anchored.mark.page.coerceAtLeast(1) } ?: return@forEach
                     highlightFrameToSheet(anchored.mark, frame, sourceWidth, sourceHeight)
                 }
                 highlightPaint.color = parsePdfColor(anchored.mark.color)
@@ -141,7 +142,7 @@ fun writeNotePdf(
                 val (x, y) = if (placements.isEmpty()) {
                     anchored.box.x to anchored.box.y
                 } else {
-                    val frame = placements.firstOrNull { it.id == anchored.worksheetId } ?: return@forEach
+                    val frame = placements.firstOrNull { it.id == anchored.worksheetId && it.page == anchored.box.page.coerceAtLeast(1) } ?: return@forEach
                     boxOnFrame(anchored.box, frame, sourceWidth, sourceHeight)
                 }
                 text.color = Color.parseColor("#202333")
@@ -206,7 +207,7 @@ private fun drawWorksheetColumn(
         textSize = 11f
     }
     for (place in placements) {
-        val slice = backdrops.firstOrNull { it.worksheetId == place.id } ?: continue
+        val slice = backdrops.firstOrNull { it.worksheetId == place.id && it.page == place.page } ?: continue
         val bitmap = slice.bitmap ?: continue
         if (bitmap.isRecycled) continue
         val dest = RectF(
@@ -218,7 +219,7 @@ private fun drawWorksheetColumn(
         canvas.drawRect(dest, fill)
         canvas.drawBitmap(bitmap, null, dest, null)
         canvas.drawRect(dest, edge)
-        if (slice.label.isNotEmpty()) {
+        if (place.captionTop >= 0.0 && slice.label.isNotEmpty()) {
             canvas.drawText(slice.label, dest.left, (place.captionTop * scale).toFloat() + 12f, label)
         }
     }

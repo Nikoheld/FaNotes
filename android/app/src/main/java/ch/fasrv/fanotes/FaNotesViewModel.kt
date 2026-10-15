@@ -1283,18 +1283,64 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             val json = parseJson(record) as? JsonValue.Obj ?: continue
             val source = json.string("sourceRelativePath") ?: continue
             val bytes = graph.vault.read(source) ?: continue
-            val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: continue
             val title = json.string("title").orEmpty().ifBlank { "Arbeitsblatt" }
-            slices += BackdropSlice(
-                topPagePx = 0f,
-                heightPagePx = bitmap.height.toFloat(),
-                widthPagePx = bitmap.width.toFloat(),
-                bitmap = bitmap,
-                worksheetId = id,
-                label = title,
-            )
+            val kind = json.string("kind").orEmpty()
+            if (kind == "pdf" || source.endsWith(".pdf", true)) {
+                slices += renderWorksheetPdf(id, title, bytes)
+            } else {
+                val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: continue
+                slices += BackdropSlice(
+                    topPagePx = 0f,
+                    heightPagePx = bitmap.height.toFloat(),
+                    widthPagePx = bitmap.width.toFloat(),
+                    bitmap = bitmap,
+                    worksheetId = id,
+                    label = title,
+                    page = 1,
+                )
+            }
         }
         return slices
+    }
+
+    /** One card per PDF page, capped like the note PDF renderer. */
+    private fun renderWorksheetPdf(id: String, title: String, bytes: ByteArray): List<BackdropSlice> {
+        val file = java.io.File.createTempFile("fanotes-worksheet", ".pdf")
+        val built = ArrayList<BackdropSlice>()
+        return try {
+            file.writeBytes(bytes)
+            ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                PdfRenderer(descriptor).use { renderer ->
+                    val count = renderer.pageCount.coerceAtMost(40)
+                    for (index in 0 until count) {
+                        val page = renderer.openPage(index)
+                        try {
+                            val width = 1200
+                            val height = (width * (page.height.toFloat() / page.width.toFloat().coerceAtLeast(1f))).toInt().coerceAtLeast(1)
+                            val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            built += BackdropSlice(
+                                topPagePx = 0f,
+                                heightPagePx = height.toFloat(),
+                                widthPagePx = width.toFloat(),
+                                bitmap = bitmap,
+                                worksheetId = id,
+                                label = if (index == 0) title else "",
+                                page = index + 1,
+                            )
+                        } finally {
+                            page.close()
+                        }
+                    }
+                }
+            }
+            built
+        } catch (_: Exception) {
+            built.forEach { it.bitmap?.recycle() }
+            emptyList()
+        } finally {
+            file.delete()
+        }
     }
 
     val destination = MutableStateFlow("notes")

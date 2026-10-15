@@ -29,6 +29,29 @@ class WorksheetLayoutTest {
     }
 
     @Test
+    fun laterPdfPagesShareTheCaptionAndKeepTheirPageNumber() {
+        val placed = layoutWorksheetPages(
+            900.0,
+            200.0,
+            listOf(
+                WorksheetPageSpec("pdf", 1, 1.4),
+                WorksheetPageSpec("pdf", 2, 1.2),
+            ),
+        )
+        assertEquals(1, placed[0].page)
+        assertEquals(2, placed[1].page)
+        assertTrue(placed[0].captionTop >= 0.0)
+        assertEquals(-1.0, placed[1].captionTop)
+        assertEquals(placed[0].top + placed[0].height + WORKSHEET_PAGE_GAP, placed[1].top, 0.001)
+        val frame = placed[1]
+        val sheetX = (frame.left + frame.width * 0.4) / 900.0
+        val sheetY = (frame.top + frame.height * 0.2) / 4000.0
+        val mark = highlightOnFrame(sheetX, sheetY, frame.width * 0.2 / 900.0, frame.height * 0.1 / 4000.0, frame, 900.0, 4000.0, "hl")
+        assertEquals(2, mark?.page)
+        assertEquals(0.4, mark!!.x, 0.001)
+    }
+
+    @Test
     fun aHighlightStaysOnTheImageItWasDrawnOn() {
         val frame = layoutWorksheetColumn(900.0, 200.0, listOf("a" to (600.0 / 900.0))).single()
         val sheetX = (frame.left + frame.width * 0.25) / 900.0
