@@ -1,13 +1,18 @@
 package ch.fasrv.fanotes
 
 import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.MotionEvent
 import android.widget.EditText
+import ch.fasrv.fanotes.desk.editorLineNumberLabels
 import ch.fasrv.fanotes.desk.findDetailsBlocks
+import ch.fasrv.fanotes.desk.lineNumberColumnPx
+import ch.fasrv.fanotes.desk.lineStartOffsets
 import ch.fasrv.fanotes.desk.nextEditorOccurrence
 import ch.fasrv.fanotes.desk.toggleDetailsOpen
 import ch.fasrv.fanotes.desk.toggleTaskMarker
@@ -21,6 +26,12 @@ import kotlin.math.abs
 class SplitEditorView(context: Context) : EditText(context) {
     var onCommit: (String) -> Unit = {}
     var accent: Int = 0xFF2A6F97.toInt()
+    var showLineNumbers: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            applyGutter()
+        }
     private var writing = false
     private var painting = false
     private var ready = false
@@ -131,5 +142,42 @@ class SplitEditorView(context: Context) : EditText(context) {
         } finally {
             painting = false
         }
+        applyGutter()
     }
+
+    private fun applyGutter() {
+        val gap = dp(4)
+        val next = if (!showLineNumbers) 0 else lineNumberColumnPx(text?.toString().orEmpty(), textSize, dp(18)) + gap
+        if (next == paddingLeft) return
+        setPadding(next, paddingTop, paddingRight, paddingBottom)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val layout = layout
+        if (showLineNumbers && layout != null && paddingLeft > 0) {
+            val value = text?.toString().orEmpty()
+            val labels = editorLineNumberLabels(value)
+            val starts = lineStartOffsets(value)
+            val mark = paint
+            val oldColor = mark.color
+            val oldSize = mark.textSize
+            val oldAlign = mark.textAlign
+            mark.color = 0xFF8A8D98.toInt()
+            mark.textSize = textSize * 0.82f
+            mark.textAlign = Paint.Align.RIGHT
+            val right = (paddingLeft - dp(4)).toFloat()
+            for (index in starts.indices) {
+                val visual = layout.getLineForOffset(starts[index].coerceAtMost(value.length))
+                val baseline = paddingTop + layout.getLineBaseline(visual) - scrollY
+                if (baseline < 0 || baseline > height + mark.textSize) continue
+                canvas.drawText(labels[index], right, baseline.toFloat(), mark)
+            }
+            mark.color = oldColor
+            mark.textSize = oldSize
+            mark.textAlign = oldAlign
+        }
+        super.onDraw(canvas)
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 }

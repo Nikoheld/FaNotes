@@ -1206,6 +1206,7 @@ private fun SplitPane(
                         ch.fasrv.fanotes.desk.normalizeAccent(model.effectiveDesk()["accent"]),
                     )
                     editor.typeface = loadEditorTypeface(editor.context, metrics.editorFontId)
+                    editor.showLineNumbers = metrics.showLineNumbers
                     editor.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, metrics.fontSizePx.toFloat())
                     editor.setLineSpacing(0f, metrics.lineHeight.toFloat())
                     editor.show(markdown)
