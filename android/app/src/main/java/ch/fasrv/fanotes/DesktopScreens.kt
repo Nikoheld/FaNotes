@@ -491,16 +491,73 @@ private fun NoteTabChip(
 fun SearchScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
     val query by model.searchQuery.collectAsStateWithLifecycle()
     val hits by model.searchHits.collectAsStateWithLifecycle()
+    var selected by remember(query) { mutableIntStateOf(-1) }
+    val listState = rememberLazyListState()
+    androidx.compose.runtime.LaunchedEffect(selected, hits.size) {
+        if (selected in hits.indices) listState.animateScrollToItem(selected)
+    }
+    fun openSelected() {
+        val hit = hits.getOrNull(selected) ?: return
+        model.openSearchHit(hit)
+        onOpen(hit.path)
+    }
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        OutlinedTextField(query, { model.searchVaultText(it) }, modifier = Modifier.fillMaxWidth(), label = { Text("Im Vault suchen") }, singleLine = true)
-        LazyColumn(Modifier.padding(top = 8.dp)) {
-            items(hits, key = { "${it.path}:${it.line}:${it.anchorY}:${it.text}" }) { hit ->
-                Column(Modifier.fillMaxWidth().clickable { model.openSearchHit(hit); onOpen(hit.path) }.padding(vertical = 8.dp)) {
+        Text("Notizen durchsuchen", style = MaterialTheme.typography.titleLarge)
+        Text("Im gesamten Vault", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        OutlinedTextField(
+            query,
+            { model.searchVaultText(it) },
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (event.key) {
+                    Key.DirectionDown -> {
+                        selected = ch.fasrv.fanotes.desk.searchResultMove(selected, hits.size, true)
+                        true
+                    }
+                    Key.DirectionUp -> {
+                        selected = ch.fasrv.fanotes.desk.searchResultMove(selected, hits.size, false)
+                        true
+                    }
+                    Key.Enter, Key.NumPadEnter -> {
+                        if (selected in hits.indices) openSelected()
+                        selected in hits.indices
+                    }
+                    else -> false
+                }
+            },
+            label = { Text("Im Vault suchen") },
+            singleLine = true,
+        )
+        Text(
+            if (query.trim().length >= 2) "${hits.size} Treffer" else "Text und unsichtbare Handschrift",
+            modifier = Modifier.padding(top = 8.dp),
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        )
+        if (query.trim().length < 2) {
+            Text("Tippe mindestens zwei Zeichen. Auch noch nicht konvertierte Handschrift wird durchsucht.", modifier = Modifier.padding(top = 12.dp), fontSize = 13.sp)
+        } else if (hits.isEmpty()) {
+            Text("Keine Treffer für „${query.trim()}“.", modifier = Modifier.padding(top = 12.dp), fontSize = 13.sp)
+        }
+        LazyColumn(state = listState, modifier = Modifier.padding(top = 8.dp).weight(1f)) {
+            itemsIndexed(hits, key = { _, hit -> "${hit.path}:${hit.line}:${hit.anchorY}:${hit.text}" }) { index, hit ->
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(if (index == selected) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f) else androidx.compose.ui.graphics.Color.Transparent)
+                        .clickable {
+                            selected = index
+                            model.openSearchHit(hit)
+                            onOpen(hit.path)
+                        }
+                        .padding(vertical = 8.dp, horizontal = 8.dp),
+                ) {
                     Text(hit.path + if (hit.anchorY != null) "  · Handschrift" else "", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                     Text(hit.text, maxLines = 2)
                 }
             }
         }
+        Text("↑ ↓ Ergebnis wählen · Esc schließen", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
     }
 }
 
