@@ -19,6 +19,8 @@ import ch.fasrv.fanotes.desk.findDetailsBlocks
 import ch.fasrv.fanotes.desk.bracketTyping
 import ch.fasrv.fanotes.desk.insertMarkdownBlankLine
 import ch.fasrv.fanotes.desk.insertMarkdownNewlineIndent
+import ch.fasrv.fanotes.desk.applyMarkdownFormat
+import ch.fasrv.fanotes.desk.markdownFormatShortcut
 import ch.fasrv.fanotes.desk.matchingBracketJump
 import ch.fasrv.fanotes.desk.selectMarkdownLine
 import ch.fasrv.fanotes.desk.bracketsOnCursorLine
@@ -275,6 +277,29 @@ class SplitEditorView(context: Context) : EditText(context) {
                 applyLineEdit(toggleMarkdownComment(text?.toString().orEmpty(), selectionStart, selectionEnd))
             }
             return true
+        }
+        val formatLetter = when (keyCode) {
+            KeyEvent.KEYCODE_B -> 'b'
+            KeyEvent.KEYCODE_I -> 'i'
+            KeyEvent.KEYCODE_K -> 'k'
+            else -> null
+        }
+        if (formatLetter != null) {
+            val action = markdownFormatShortcut(
+                event.isCtrlPressed,
+                event.isShiftPressed,
+                event.isAltPressed,
+                event.isMetaPressed,
+                formatLetter,
+            )
+            if (action != null) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    val start = selectionStart.coerceAtLeast(0)
+                    val end = selectionEnd.coerceAtLeast(start)
+                    applyLineEdit(applyMarkdownFormat(text?.toString().orEmpty(), start, end, action))
+                }
+                return true
+            }
         }
         if (keyCode == KeyEvent.KEYCODE_TAB && !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed) {
             if (event.action == KeyEvent.ACTION_DOWN) indentSelection(event.isShiftPressed)
