@@ -21,6 +21,18 @@ class NoteBackupSearchTest {
     }
 
     @Test
+    fun theBackupButtonFollowsTheDesktopPolicy() {
+        assertEquals(NoteBackupPolicy(false, false, false), noteBackupControlPolicy(false, 3))
+        assertEquals(NoteBackupPolicy(true, true, false), noteBackupControlPolicy(true, 0))
+        assertEquals(NoteBackupPolicy(true, true, false), noteBackupControlPolicy(true, -2))
+        assertEquals(NoteBackupPolicy(true, true, true), noteBackupControlPolicy(true, 1))
+        assertEquals("später", noteBackupStamp("später"))
+        val stamp = noteBackupStamp("2026-10-14T16:30:00Z", java.time.ZoneOffset.UTC)
+        assertTrue(stamp.contains("14"))
+        assertTrue(stamp.contains("16:30") || stamp.contains("16.30"))
+    }
+
+    @Test
     fun aTranscriptHitPointsAtTheLineOnThePage() {
         val transcript = "0.1000\talpha\n0.6400\tDie Hausaufgabe\n0.9000\tomega"
         assertEquals(0.64, inkAnchorForQuery(transcript, "hausaufgabe"))

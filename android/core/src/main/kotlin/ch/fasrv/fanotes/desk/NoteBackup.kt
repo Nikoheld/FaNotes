@@ -4,6 +4,10 @@ import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.jsonArray
 import ch.fasrv.fanotes.json.jsonString
 import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
 
 /** In-note snapshots stored as `payload.noteBackups`, matching `noteBackup.ts`. */
 const val NOTE_BACKUP_LIMIT = 40
@@ -53,6 +57,22 @@ fun noteBackupsJson(list: List<NoteBackup>): JsonValue.Arr = jsonArray(
 )
 
 fun newNoteBackupId(): String = "nb-${System.currentTimeMillis().toString(36)}-${(0..5).joinToString("") { ('a'..'z').random().toString() }}"
+
+data class NoteBackupPolicy(val visible: Boolean, val snapshot: Boolean, val restore: Boolean)
+
+/** Desktop toolbar: hidden until the experiment is on, and restore appears after the first snapshot. */
+fun noteBackupControlPolicy(experimentalOn: Boolean, snapshotCount: Int): NoteBackupPolicy {
+    if (!experimentalOn) return NoteBackupPolicy(visible = false, snapshot = false, restore = false)
+    return NoteBackupPolicy(visible = true, snapshot = true, restore = snapshotCount.coerceAtLeast(0) >= 1)
+}
+
+/** Short date and time, the same fields the desktop backup menu shows. Unparseable stamps stay as written. */
+fun noteBackupStamp(createdAt: String, zone: ZoneId = ZoneId.systemDefault()): String {
+    val instant = runCatching { Instant.parse(createdAt) }.getOrNull() ?: return createdAt
+    val formatter = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT)
+        .withLocale(Locale.forLanguageTag("de-CH"))
+    return formatter.format(instant.atZone(zone))
+}
 
 private fun sanitizeNoteBackup(obj: JsonValue.Obj): NoteBackup? {
     val path = sanitizeBackupPath(obj.string("notePath").orEmpty())
