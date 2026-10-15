@@ -234,6 +234,12 @@ class SplitEditorView(context: Context) : EditText(context) {
             if (event.action == KeyEvent.ACTION_DOWN) moveByPage(keyCode == KeyEvent.KEYCODE_PAGE_DOWN, event.isShiftPressed)
             return true
         }
+        if ((event.isCtrlPressed || event.isMetaPressed) && !event.isAltPressed &&
+            (keyCode == KeyEvent.KEYCODE_MOVE_HOME || keyCode == KeyEvent.KEYCODE_MOVE_END)
+        ) {
+            if (event.action == KeyEvent.ACTION_DOWN) moveToDocumentEdge(keyCode == KeyEvent.KEYCODE_MOVE_END, event.isShiftPressed)
+            return true
+        }
         if (!event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed &&
             (keyCode == KeyEvent.KEYCODE_MOVE_HOME || keyCode == KeyEvent.KEYCODE_MOVE_END)
         ) {
@@ -394,6 +400,18 @@ class SplitEditorView(context: Context) : EditText(context) {
         val next = ch.fasrv.fanotes.desk.headingFoldCommand(foldSource, foldState, command, offset) ?: return
         pendingCursor = ch.fasrv.fanotes.desk.visibleCursorAfterFold(foldSource, foldState, next, offset)
         onEditorFold(command, offset)
+    }
+
+    private fun moveToDocumentEdge(forward: Boolean, extend: Boolean) {
+        val value = text?.toString().orEmpty()
+        val (anchor, head) = ch.fasrv.fanotes.desk.editorDocumentSelection(value, selectionStart, forward, extend)
+        val length = value.length
+        val nextHead = head.coerceIn(0, length)
+        setSelection(anchor.coerceIn(0, length), nextHead)
+        val metrics = layout ?: return
+        if (metrics.lineCount == 0) return
+        val line = metrics.getLineForOffset(nextHead.coerceAtMost(metrics.getLineEnd(metrics.lineCount - 1)))
+        scrollTo(scrollX, (metrics.getLineTop(line) - height / 3).coerceAtLeast(0))
     }
 
     private fun moveByPage(forward: Boolean, extend: Boolean) {

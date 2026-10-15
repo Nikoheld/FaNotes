@@ -126,6 +126,16 @@ fun editorLineBoundarySelection(
     return if (extend) safeAnchor to next else next to next
 }
 
+/**
+ * Ctrl-Home and Ctrl-End. The caret goes to the start or the end of the note.
+ * Shift keeps the anchor. A selection without Shift is replaced by that caret.
+ */
+fun editorDocumentSelection(text: String, anchor: Int, forward: Boolean, extend: Boolean): Pair<Int, Int> {
+    val dest = if (forward) text.length else 0
+    val safeAnchor = anchor.coerceIn(0, text.length)
+    return if (extend) safeAnchor to dest else dest to dest
+}
+
 /** How many editor lines fit in the visible page. At least one. */
 fun editorPageLineCount(viewportPx: Int, lineHeightPx: Int): Int {
     if (lineHeightPx <= 0) return 1
