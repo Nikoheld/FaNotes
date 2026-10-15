@@ -26,6 +26,8 @@ enum class LiveKind {
     MATH,
     MATH_BLOCK,
     DETAILS_SUMMARY,
+    DETAILS_BODY,
+    DETAILS_END,
     TABLE_ROW,
     TABLE_RULE,
     RULE,
@@ -37,6 +39,8 @@ data class LiveMark(
     val kind: LiveKind,
     val label: String = "",
     val body: String = "",
+    val open: Boolean = false,
+    val continues: Boolean = false,
 )
 
 /**
@@ -146,10 +150,7 @@ fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int): List
     for (block in findDetailsBlocks(text)) {
         if (selectionEditsDetails(block, from, to)) continue
         val host = lines[block.startLine - 1]
-        if (host.to > host.from) {
-            val inlineBody = if (block.open && block.startLine == block.endLine) block.body else ""
-            marks += LiveMark(host.from, host.to, LiveKind.DETAILS_SUMMARY, block.summary, inlineBody)
-        }
+        val visibleBody = ArrayList<Int>()
         hidden += block.startLine
         for (number in (block.startLine + 1)..block.endLine) {
             val line = lines[number - 1]
@@ -157,7 +158,26 @@ fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int): List
             if (!block.open || tag) {
                 concealLine(marks, text, line)
                 hidden += number
+            } else if (line.to > line.from) {
+                visibleBody += number
             }
+        }
+        if (host.to > host.from) {
+            val inlineBody = if (block.open && block.startLine == block.endLine) block.body else ""
+            marks += LiveMark(
+                host.from,
+                host.to,
+                LiveKind.DETAILS_SUMMARY,
+                block.summary,
+                inlineBody,
+                open = block.open,
+                continues = visibleBody.isNotEmpty(),
+            )
+        }
+        visibleBody.forEachIndexed { index, number ->
+            val line = lines[number - 1]
+            val kind = if (index == visibleBody.lastIndex) LiveKind.DETAILS_END else LiveKind.DETAILS_BODY
+            marks += LiveMark(line.from, line.to, kind)
         }
     }
     for (block in displayMathBlocks(text)) {

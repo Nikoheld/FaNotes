@@ -411,6 +411,11 @@ class SplitEditorView(context: Context) : EditText(context) {
         val probeEnd = (offset + 1).coerceAtMost(editable.length)
         val before = editable.toString()
         val details = editable.getSpans(probeStart, probeEnd, DetailsSummarySpan::class.java).isNotEmpty()
+        if (details && ch.fasrv.fanotes.desk.detailsTapAction((layout?.width ?: width).toFloat(), x, textSize) == "edit") {
+            val block = findDetailsBlocks(before).firstOrNull { offset >= it.from && offset < it.to } ?: return false
+            setSelection((block.from + 1).coerceAtMost(before.length))
+            return true
+        }
         val next = when {
             details -> toggleDetailsOpen(before, offset)
             editable.getSpans(probeStart, probeEnd, TaskSpan::class.java).isNotEmpty() -> toggleTaskMarker(before, offset)

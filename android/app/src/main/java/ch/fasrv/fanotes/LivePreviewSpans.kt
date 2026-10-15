@@ -26,6 +26,9 @@ import ch.fasrv.fanotes.desk.PAPER_QUOTE_INK
 import ch.fasrv.fanotes.desk.PAPER_RULE_ARGB
 import ch.fasrv.fanotes.desk.PAPER_RULE_STRONG_ARGB
 import ch.fasrv.fanotes.desk.layoutDisplayMath
+import ch.fasrv.fanotes.desk.paperDetailsBox
+import ch.fasrv.fanotes.desk.paperDetailsFillArgb
+import ch.fasrv.fanotes.desk.paperDetailsOpenFillArgb
 import ch.fasrv.fanotes.desk.paperMathBorderArgb
 import ch.fasrv.fanotes.desk.paperMathBox
 import ch.fasrv.fanotes.desk.paperMathFillArgb
@@ -100,36 +103,216 @@ private fun spanFor(mark: LiveMark, readable: Int, accent: Int, textSizePx: Floa
     LiveKind.MATH -> PaperInlineMathSpan(textSizePx)
     LiveKind.MATH_BLOCK -> PaperMathBlockSpan(mark.label, paperMathFillArgb(accent), paperMathBorderArgb(accent), textSizePx)
     LiveKind.LINK -> LinkSpan(readable)
-    LiveKind.DETAILS_SUMMARY -> DetailsSummarySpan(mark.label, mark.body)
+    LiveKind.DETAILS_SUMMARY -> DetailsSummarySpan(
+        mark.label,
+        mark.body,
+        mark.open,
+        mark.continues,
+        paperDetailsFillArgb(),
+        paperDetailsOpenFillArgb(accent),
+        readable,
+        textSizePx,
+    )
+    LiveKind.DETAILS_BODY -> DetailsBodySpan(paperDetailsFillArgb(), textSizePx, false)
+    LiveKind.DETAILS_END -> DetailsBodySpan(paperDetailsFillArgb(), textSizePx, true)
     LiveKind.TABLE_ROW -> TableRowSpan(paperTableFillArgb(accent), textSizePx)
     LiveKind.TABLE_RULE -> TableRuleSpan(textSizePx)
     LiveKind.RULE -> PaperThematicRuleSpan(textSizePx)
 }
 
-internal class DetailsSummarySpan(private val summary: String, private val body: String) : ReplacementSpan(), LivePreviewSpan {
+/**
+ * Desktop paper details card: a rounded panel, a chevron, and „Bearbeiten“.
+ * An open block keeps the summary band washed and lets the body continue below.
+ */
+internal class DetailsSummarySpan(
+    private val summary: String,
+    private val body: String,
+    private val open: Boolean,
+    private val continues: Boolean,
+    private val fill: Int,
+    private val openFill: Int,
+    private val accent: Int,
+    private val textSizePx: Float,
+) : ReplacementSpan(), LineBackgroundSpan, LivePreviewSpan {
     override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
-        val summaryWidth = paint.measureText(summary).toInt().coerceAtLeast(1)
-        if (body.isEmpty()) return summaryWidth
+        val box = paperDetailsBox(textSizePx)
+        val metrics = paint.fontMetrics
+        val textHeight = -metrics.ascent + metrics.descent
+        val bodyExtra = if (body.isEmpty()) 0f else textHeight + box.padY
+        val total = box.marginY * 2f + box.padY * 2f + textHeight + bodyExtra
         if (fm != null) {
-            val extra = paint.fontMetricsInt.descent - paint.fontMetricsInt.ascent
-            fm.descent += extra
-            fm.bottom += extra
+            val half = (total / 2f).toInt().coerceAtLeast(1)
+            fm.ascent = -half
+            fm.descent = half
+            fm.top = fm.ascent
+            fm.bottom = fm.descent
         }
-        return maxOf(summaryWidth, paint.measureText(body).toInt())
+        return (paint.measureText(summary) + box.padX + textSizePx * 7f).toInt().coerceAtLeast(1)
     }
 
-    override fun draw(canvas: Canvas, text: CharSequence, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) {
-        val previous = paint.typeface
-        paint.typeface = Typeface.create(previous, Typeface.BOLD)
-        canvas.drawText(summary, x, y.toFloat(), paint)
-        if (body.isNotEmpty()) {
-            paint.typeface = Typeface.create(previous, Typeface.NORMAL)
-            val step = paint.fontMetrics.descent - paint.fontMetrics.ascent
-            canvas.drawText(body, x, y + step, paint)
+    override fun draw(canvas: Canvas, text: CharSequence, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) = Unit
+
+    override fun drawBackground(
+        canvas: Canvas,
+        paint: Paint,
+        left: Int,
+        right: Int,
+        top: Int,
+        baseline: Int,
+        bottom: Int,
+        text: CharSequence,
+        start: Int,
+        end: Int,
+        lineNumber: Int,
+    ) {
+        if (right <= left) return
+        val box = paperDetailsBox(textSizePx)
+        val contentTop = top + box.marginY
+        val contentBottom = bottom - box.marginY
+        if (contentBottom <= contentTop) return
+        val rect = RectF(left + box.border, contentTop, right - box.border, contentBottom)
+        val previousColor = paint.color
+        val previousStyle = paint.style
+        val previousStroke = paint.strokeWidth
+        val previousFace = paint.typeface
+        val previousSize = paint.textSize
+        paint.style = Paint.Style.FILL
+        paint.color = fill
+        canvas.drawRoundRect(rect, box.radius, box.radius, paint)
+        if (continues || body.isNotEmpty()) {
+            canvas.drawRect(rect.left, rect.bottom - box.radius, rect.right, rect.bottom, paint)
         }
-        paint.typeface = previous
+        val metrics = paint.fontMetrics
+        val textHeight = -metrics.ascent + metrics.descent
+        val summaryBottom = contentTop + box.padY * 2f + textHeight
+        if (open) {
+            val washBottom = if (body.isEmpty()) contentBottom.coerceAtMost(summaryBottom) else summaryBottom.coerceAtMost(contentBottom)
+            paint.color = openFill
+            canvas.drawRect(rect.left, rect.top, rect.right, washBottom, paint)
+            paint.color = PAPER_RULE_ARGB
+            canvas.drawRect(rect.left, washBottom - box.border, rect.right, washBottom, paint)
+        }
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = box.border
+        paint.color = PAPER_RULE_STRONG_ARGB
+        canvas.drawRoundRect(rect, box.radius, box.radius, paint)
+        paint.style = Paint.Style.FILL
+        paint.color = PAPER_MATH_INK
+        paint.typeface = Typeface.create(previousFace, Typeface.BOLD)
+        val summaryBaseline = contentTop + box.padY - metrics.ascent
+        canvas.drawText(summary, rect.left + box.padX, summaryBaseline, paint)
+        if (body.isNotEmpty()) {
+            paint.typeface = Typeface.create(previousFace, Typeface.NORMAL)
+            canvas.drawText(body, rect.left + box.padX, summaryBaseline + textHeight + box.padY * 0.4f, paint)
+        }
+        drawEditButton(canvas, paint, rect, contentTop, box.border)
+        drawChevron(canvas, paint, rect, summaryBaseline, open)
+        paint.color = previousColor
+        paint.style = previousStyle
+        paint.strokeWidth = previousStroke
+        paint.typeface = previousFace
+        paint.textSize = previousSize
+    }
+
+    private fun drawEditButton(canvas: Canvas, paint: Paint, rect: RectF, contentTop: Float, border: Float) {
+        paint.textSize = textSizePx * 0.75f
+        val label = "Bearbeiten"
+        val width = paint.measureText(label) + textSizePx * 0.7f
+        val height = textSizePx * 1.35f
+        val right = rect.right - textSizePx * 2.6f
+        val button = RectF(right - width, contentTop + textSizePx * 0.28f, right, contentTop + textSizePx * 0.28f + height)
+        paint.style = Paint.Style.FILL
+        paint.color = PAPER_DETAILS_BUTTON
+        canvas.drawRoundRect(button, textSizePx * 0.4f, textSizePx * 0.4f, paint)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = border
+        paint.color = PAPER_RULE_ARGB
+        canvas.drawRoundRect(button, textSizePx * 0.4f, textSizePx * 0.4f, paint)
+        paint.style = Paint.Style.FILL
+        paint.color = PAPER_QUOTE_INK
+        paint.typeface = Typeface.create(paint.typeface, Typeface.NORMAL)
+        val baseline = button.centerY() - (paint.fontMetrics.ascent + paint.fontMetrics.descent) / 2f
+        canvas.drawText(label, button.left + textSizePx * 0.35f, baseline, paint)
+    }
+
+    private fun drawChevron(canvas: Canvas, paint: Paint, rect: RectF, baseline: Float, opened: Boolean) {
+        paint.style = Paint.Style.FILL
+        paint.color = accent
+        paint.textSize = textSizePx * 1.25f
+        paint.typeface = Typeface.create(paint.typeface, Typeface.NORMAL)
+        val label = "›"
+        val width = paint.measureText(label)
+        val cx = rect.right - textSizePx * 0.9f - width / 2f
+        val cy = baseline + (paint.fontMetrics.ascent + paint.fontMetrics.descent) / 2f
+        canvas.save()
+        canvas.rotate(if (opened) -90f else 90f, cx, cy)
+        canvas.drawText(label, cx - width / 2f, baseline, paint)
+        canvas.restore()
     }
 }
+
+internal class DetailsBodySpan(
+    private val fill: Int,
+    private val textSizePx: Float,
+    private val close: Boolean,
+) : LineBackgroundSpan, LeadingMarginSpan, LivePreviewSpan {
+    override fun getLeadingMargin(first: Boolean) = paperDetailsBox(textSizePx).padX.toInt()
+
+    override fun drawLeadingMargin(
+        canvas: Canvas,
+        paint: Paint,
+        x: Int,
+        dir: Int,
+        top: Int,
+        baseline: Int,
+        bottom: Int,
+        text: CharSequence,
+        start: Int,
+        end: Int,
+        first: Boolean,
+        layout: Layout,
+    ) = Unit
+
+    override fun drawBackground(
+        canvas: Canvas,
+        paint: Paint,
+        left: Int,
+        right: Int,
+        top: Int,
+        baseline: Int,
+        bottom: Int,
+        text: CharSequence,
+        start: Int,
+        end: Int,
+        lineNumber: Int,
+    ) {
+        if (right <= left) return
+        val box = paperDetailsBox(textSizePx)
+        val rect = RectF(left + box.border, top.toFloat(), right - box.border, bottom.toFloat())
+        val previousColor = paint.color
+        val previousStyle = paint.style
+        val previousStroke = paint.strokeWidth
+        paint.style = Paint.Style.FILL
+        paint.color = fill
+        if (close) {
+            canvas.drawRoundRect(rect, box.radius, box.radius, paint)
+            canvas.drawRect(rect.left, rect.top, rect.right, (rect.top + box.radius).coerceAtMost(rect.bottom), paint)
+        } else {
+            canvas.drawRect(rect, paint)
+        }
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = box.border
+        paint.color = PAPER_RULE_STRONG_ARGB
+        canvas.drawLine(rect.left, rect.top, rect.left, rect.bottom, paint)
+        canvas.drawLine(rect.right, rect.top, rect.right, rect.bottom, paint)
+        if (close) canvas.drawLine(rect.left, rect.bottom, rect.right, rect.bottom, paint)
+        paint.color = previousColor
+        paint.style = previousStyle
+        paint.strokeWidth = previousStroke
+    }
+}
+
+private const val PAPER_DETAILS_BUTTON = 0xFFFAFAFD.toInt()
 
 private class HideSpan : ReplacementSpan(), LivePreviewSpan {
     override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?) = 0

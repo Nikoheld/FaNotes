@@ -70,6 +70,14 @@ fun paperCodeInk(raw: String?): String = mixColors(paperAccentReadable(raw), PAP
 /** Table row fill: 2.5% of the readable accent mixed into white. */
 fun paperTableFill(raw: String?): String = mixColors(paperAccentReadable(raw), "#ffffff", 0.025)
 
+/** Paper panel used for a folded details card, 76% of `--panel-strong` over white. */
+const val PAPER_PANEL_STRONG = "#f1f2f6"
+
+fun paperDetailsFill(): String = mixColors(PAPER_PANEL_STRONG, "#ffffff", 0.76)
+
+/** Open summary band: 6% of the readable accent mixed into white. */
+fun paperDetailsOpenFill(raw: String?): String = mixColors(paperAccentReadable(raw), "#ffffff", 0.06)
+
 /** Display-math card: 4% of the readable accent mixed into white. */
 fun paperMathFill(raw: String?): String = mixColors(paperAccentReadable(raw), "#ffffff", 0.04)
 
@@ -79,6 +87,10 @@ fun paperMathBorder(raw: String?): String = mixColors(paperAccentReadable(raw), 
 fun paperTableFillArgb(accent: Int): Int = colorArgb(paperTableFill("#%06x".format(accent and 0xFFFFFF)))
 
 fun paperMathFillArgb(accent: Int): Int = colorArgb(paperMathFill("#%06x".format(accent and 0xFFFFFF)))
+
+fun paperDetailsFillArgb(): Int = colorArgb(paperDetailsFill())
+
+fun paperDetailsOpenFillArgb(accent: Int): Int = colorArgb(paperDetailsOpenFill("#%06x".format(accent and 0xFFFFFF)))
 
 fun paperMathBorderArgb(accent: Int): Int = colorArgb(paperMathBorder("#%06x".format(accent and 0xFFFFFF)))
 
