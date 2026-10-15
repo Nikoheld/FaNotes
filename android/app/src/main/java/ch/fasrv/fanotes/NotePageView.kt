@@ -234,7 +234,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
         if (textMode != text) setTextMode(text)
         syncPill.text = if (syncBusy && !syncLabel.contains('/')) "Startet…" else syncLabel
-        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|$paper|$fingerDraws|$text|$canUndo|$canRedo|$dark|$followPen"
+        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|${ink.placingSymbol}|$paper|$fingerDraws|$text|$canUndo|$canRedo|$dark|$followPen"
         if (signature != toolSignature) {
             toolSignature = signature
             rebuildTools(tool, style, paper, fingerDraws, canUndo, canRedo)
@@ -312,6 +312,12 @@ class NotePageView(context: Context) : FrameLayout(context) {
         tools.addView(chip(ch.fasrv.fanotes.ink.inkEffectLabel(style.colorEffect)) {
             onEffect(ch.fasrv.fanotes.ink.nextInkEffect(style.colorEffect))
         })
+        val symbolChip = chip(ch.fasrv.fanotes.ink.artSymbol(ink.placingSymbol)?.label ?: "Symbol") {}
+        symbolChip.setOnClickListener {
+            ink.placingSymbol = ch.fasrv.fanotes.ink.nextArtSymbol(ink.placingSymbol)
+            symbolChip.text = ch.fasrv.fanotes.ink.artSymbol(ink.placingSymbol)?.label ?: "Symbol"
+        }
+        tools.addView(symbolChip)
         val paperLabel = Papers.firstOrNull { it.first == paper }?.second ?: "Punkte"
         tools.addView(chip(paperLabel) {
             val index = Papers.indexOfFirst { it.first == paper }.let { if (it < 0) 0 else it }
@@ -551,11 +557,14 @@ class NotePageView(context: Context) : FrameLayout(context) {
             "millimeter" to "mm",
         )
         val Brushes = listOf(
-            "fineliner" to "Fein",
-            "pencil" to "Blei",
+            "fineliner" to "Fineliner",
+            "pencil" to "Bleistift",
             "marker" to "Marker",
+            "paintbrush" to "Pinsel",
+            "calligraphy" to "Kalligrafie",
             "highlighter" to "Textmarker",
-            "calligraphy" to "Feder",
+            "watercolor" to "Aquarell",
+            "spray" to "Spray",
         )
     }
 }

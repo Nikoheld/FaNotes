@@ -207,6 +207,8 @@ class InkSurfaceView @JvmOverloads constructor(
     var tabletButtons: String = ""
     /** When set, only a real stylus lays ink. Fingers still pan and zoom. */
     var penOnly: Boolean = false
+    /** When set, the next pen tap stamps this desktop art symbol. */
+    var placingSymbol: String? = null
     var shapeSnapSensitivity: Int = 50
     var scribbleSensitivity: Int = 50
     /** Selection rings, hover, and placed links follow the desktop accent. */
@@ -619,6 +621,13 @@ class InkSurfaceView @JvmOverloads constructor(
         val (x, y) = screenToNorm(event.getX(index), event.getY(index))
         val sectionHit = sectionsOf(current.document).firstOrNull { y >= it.top && y < it.bodyTop && x < 0.08 }
         when {
+            !eraser && placingSymbol != null -> {
+                current.placeSymbol(x, y, style, placingSymbol!!, nowIso())
+                invalidateTiles()
+                onChanged()
+                onPenActive(false)
+                inkPointer = MotionEvent.INVALID_POINTER_ID
+            }
             sectionHit != null && !eraser -> {
                 onToggleSection(sectionHit.id)
                 onPenActive(false)
@@ -1052,12 +1061,23 @@ class InkSurfaceView @JvmOverloads constructor(
         return stroke.points.any { point ->
             val px = point.x * width
             val py = point.y * height
-            px >= x - 40 && px <= x + tile + 40 && py >= y - 40 && py <= y + tile + 40
+            val pad = if (stroke.symbolId != null) stroke.baseWidth else 40.0
+            px >= x - pad && px <= x + tile + pad && py >= y - pad && py <= y + tile + pad
         }
     }
 
     private fun drawStroke(canvas: Canvas, stroke: InkStroke, scale: Float) {
         if (stroke.points.isEmpty()) return
+        inkPaint.color = parseColor(stroke.color)
+        inkPaint.alpha = 255
+        if (stroke.symbolId != null) {
+            drawArtSymbol(canvas, inkPaint, stroke, scale, sessionWidth(), sessionHeight())
+            return
+        }
+        if (stroke.brush == "spray") {
+            drawSpray(canvas, inkPaint, stroke, scale, sessionWidth(), sessionHeight())
+            return
+        }
         val outline = ribbonOutline(stroke, sessionWidth(), sessionHeight(), strokeSmoothing.toDouble())
         if (outline.size < 4) return
         val path = Path()
