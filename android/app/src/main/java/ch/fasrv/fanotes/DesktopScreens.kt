@@ -569,7 +569,23 @@ fun HomeworkScreen(model: FaNotesViewModel) {
     var title by remember { mutableStateOf("") }
     var subject by remember { mutableStateOf("") }
     var due by remember { mutableStateOf(LocalDate.now().plusDays(1).toString()) }
-    Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
+    var planner by remember { mutableStateOf("list") }
+    var filter by remember { mutableStateOf("open") }
+    var cursor by remember { mutableStateOf(LocalDate.now()) }
+    val shownTasks = ch.fasrv.fanotes.desk.visibleHomeworkTasks(document.tasks, filter)
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState())
+            .pointerInput(planner) {
+                detectDeskSwipe { direction ->
+                    if (planner == "list") return@detectDeskSwipe
+                    val step = ch.fasrv.fanotes.desk.calendarSwipeStep(direction) ?: return@detectDeskSwipe
+                    cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, step)
+                }
+            },
+    ) {
         Text("Hausaufgaben & Termine", style = MaterialTheme.typography.titleLarge)
         Text("Gespeichert in Hausaufgaben.md, dieselbe Datei wie auf dem Desktop.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
         Text("Freigabe", modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.SemiBold)
@@ -610,7 +626,66 @@ fun HomeworkScreen(model: FaNotesViewModel) {
                 }
             }) { Text("Termin") }
         }
-        document.tasks.forEach { task ->
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp)) {
+            listOf("list" to "Liste", "week" to "Woche", "month" to "Monat").forEach { (id, label) ->
+                TextButton(onClick = { planner = id }) {
+                    Text(label, color = if (planner == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontWeight = if (planner == id) FontWeight.SemiBold else FontWeight.Normal)
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            listOf("open" to "Offen", "homework" to "Hausaufgaben", "appointment" to "Termine", "done" to "Erledigt", "all" to "Alle").forEach { (id, label) ->
+                TextButton(onClick = { filter = id }) {
+                    Text(label, color = if (filter == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontWeight = if (filter == id) FontWeight.SemiBold else FontWeight.Normal)
+                }
+            }
+        }
+        if (planner != "list") {
+            val days = ch.fasrv.fanotes.desk.homeworkPlannerDays(cursor, planner)
+            val byDate = shownTasks.filter { it.dueDate != null }.groupBy { it.dueDate }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                TextButton(onClick = { cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, -1) }) { Text("‹") }
+                Text(ch.fasrv.fanotes.desk.homeworkPlannerLabel(cursor, planner), modifier = Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.SemiBold)
+                TextButton(onClick = { cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, 1) }) { Text("›") }
+                TextButton(onClick = { cursor = LocalDate.now() }) { Text("Heute") }
+            }
+            Row(Modifier.fillMaxWidth()) {
+                ch.fasrv.fanotes.desk.homeworkWeekdays().forEach { label ->
+                    Text(label, modifier = Modifier.weight(1f), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                }
+            }
+            days.chunked(7).forEach { week ->
+                Row(Modifier.fillMaxWidth()) {
+                    week.forEach { day ->
+                        val items = byDate[day.date.toString()].orEmpty()
+                        Column(
+                            Modifier
+                                .weight(1f)
+                                .heightIn(min = if (planner == "week") 72.dp else 48.dp)
+                                .clickable { due = day.date.toString() }
+                                .padding(2.dp),
+                        ) {
+                            Text(
+                                day.date.dayOfMonth.toString(),
+                                fontSize = 12.sp,
+                                color = when {
+                                    day.date == LocalDate.now() -> MaterialTheme.colorScheme.primary
+                                    day.outside -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+                                    else -> MaterialTheme.colorScheme.onSurface
+                                },
+                                fontWeight = if (day.date == LocalDate.now()) FontWeight.Bold else FontWeight.Normal,
+                            )
+                            items.take(if (planner == "week") 8 else 3).forEach { task ->
+                                Text(task.title, fontSize = 10.sp, maxLines = 1, color = if (task.done) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f) else MaterialTheme.colorScheme.onSurface)
+                            }
+                            val hidden = items.size - (if (planner == "week") 8 else 3)
+                            if (hidden > 0) Text("+$hidden", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+            }
+        }
+        shownTasks.forEach { task ->
             Row(Modifier.fillMaxWidth().clickable { model.toggleHomework(task.id) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(if (task.done) "☑" else "☐", modifier = Modifier.padding(end = 8.dp))
                 Column {
