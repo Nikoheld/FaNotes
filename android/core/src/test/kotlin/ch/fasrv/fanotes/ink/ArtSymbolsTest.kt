@@ -31,6 +31,24 @@ class ArtSymbolsTest {
     }
 
     @Test
+    fun symbolSizeAndRotationFollowTheDesktopSliders() {
+        assertEquals(72.0, artSymbolSizeSetting(null))
+        assertEquals(20.0, snapArtSymbolSize(10.0))
+        assertEquals(180.0, snapArtSymbolSize(200.0))
+        assertEquals(74.0, snapArtSymbolSize(73.0))
+        assertEquals(20.0, stepArtSymbolSize(180.0, 1))
+        assertEquals(180.0, stepArtSymbolSize(20.0, -1))
+        assertEquals(0.0, artSymbolRotationSetting("nope"))
+        assertEquals(5.0, snapArtSymbolRotation(3.0))
+        assertEquals(-180.0, stepArtSymbolRotation(180.0, 1))
+        assertEquals(180.0, stepArtSymbolRotation(-180.0, -1))
+        val session = InkSession(newInkDocument("Symbole", "blank", "2026-01-01T00:00:00.000Z"))
+        val stamped = session.placeSymbol(0.2, 0.3, StrokeStyle(), "star", "2026-01-01T00:00:00.000Z", 41.0, 12.0)
+        assertEquals(42.0, stamped?.baseWidth)
+        assertEquals(10.0, stamped?.symbolRotation)
+    }
+
+    @Test
     fun sprayUsesTheDesktopParticleCount() {
         val dots = sprayDots(0.0, 0.0, 10.0, 0.0, 5.0, 10.0, 1, 0, 1.0)
         assertEquals(7, dots.size)

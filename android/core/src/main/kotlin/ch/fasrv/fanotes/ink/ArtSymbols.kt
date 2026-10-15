@@ -7,6 +7,48 @@ package ch.fasrv.fanotes.ink
 data class ArtSymbol(val id: String, val label: String, val category: String, val paths: List<String>)
 
 const val ART_SYMBOL_SIZE = 72.0
+const val ART_SYMBOL_MIN = 20.0
+const val ART_SYMBOL_MAX = 180.0
+
+/** Desktop slider: 20–180 px in steps of 2. Invalid values fall back to 72. */
+fun snapArtSymbolSize(value: Double): Double {
+    if (!value.isFinite()) return ART_SYMBOL_SIZE
+    val clamped = value.coerceIn(ART_SYMBOL_MIN, ART_SYMBOL_MAX)
+    val steps = kotlin.math.floor((clamped - ART_SYMBOL_MIN) / 2.0 + 0.5)
+    return (ART_SYMBOL_MIN + steps * 2.0).coerceIn(ART_SYMBOL_MIN, ART_SYMBOL_MAX)
+}
+
+fun artSymbolSizeSetting(raw: String?): Double = snapArtSymbolSize(raw?.toDoubleOrNull() ?: ART_SYMBOL_SIZE)
+
+fun stepArtSymbolSize(current: Double, direction: Int): Double {
+    if (direction == 0) return snapArtSymbolSize(current)
+    val stepped = snapArtSymbolSize(current) + direction * 2.0
+    return when {
+        stepped > ART_SYMBOL_MAX -> ART_SYMBOL_MIN
+        stepped < ART_SYMBOL_MIN -> ART_SYMBOL_MAX
+        else -> stepped
+    }
+}
+
+/** Desktop slider: −180° to 180° in steps of 5. */
+fun snapArtSymbolRotation(value: Double): Double {
+    if (!value.isFinite()) return 0.0
+    val clamped = value.coerceIn(-180.0, 180.0)
+    val steps = kotlin.math.floor(clamped / 5.0 + 0.5)
+    return (steps * 5.0).coerceIn(-180.0, 180.0)
+}
+
+fun artSymbolRotationSetting(raw: String?): Double = snapArtSymbolRotation(raw?.toDoubleOrNull() ?: 0.0)
+
+fun stepArtSymbolRotation(current: Double, direction: Int): Double {
+    if (direction == 0) return snapArtSymbolRotation(current)
+    val stepped = snapArtSymbolRotation(current) + direction * 5.0
+    return when {
+        stepped > 180.0 -> -180.0
+        stepped < -180.0 -> 180.0
+        else -> stepped
+    }
+}
 
 val ART_SYMBOLS = listOf(
     ArtSymbol("book", "Buch", "school", listOf("M2 4.5A2.5 2.5 0 0 1 4.5 2H9a3 3 0 0 1 3 3v17a3 3 0 0 0-3-3H2Z", "M22 4.5A2.5 2.5 0 0 0 19.5 2H15a3 3 0 0 0-3 3v17a3 3 0 0 1 3-3h7Z")),

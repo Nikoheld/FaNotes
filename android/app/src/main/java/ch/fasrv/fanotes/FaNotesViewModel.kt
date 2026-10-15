@@ -664,6 +664,14 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         style.value = style.value.copy(color = hex)
     }
 
+    fun setArtSymbolSize(value: Double) {
+        updateDesk("symbol-size", ch.fasrv.fanotes.ink.snapArtSymbolSize(value).toInt().toString())
+    }
+
+    fun setArtSymbolRotation(value: Double) {
+        updateDesk("symbol-rotation", ch.fasrv.fanotes.ink.snapArtSymbolRotation(value).toInt().toString())
+    }
+
     fun setPaper(styleId: String) {
         session.setPaperStyle(styleId, isoNow())
         noteChanged()
