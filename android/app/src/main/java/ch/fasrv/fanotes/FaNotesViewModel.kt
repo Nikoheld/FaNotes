@@ -1169,6 +1169,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val splitMarkdown = MutableStateFlow("")
     val splitSession = InkSession(newInkDocument("Spalte", "dots", isoNow()))
     private var splitNote: OpenNote? = null
+    private var splitSaveJob: kotlinx.coroutines.Job? = null
     private var openedAtMs = 0L
     private var reveal: Pair<String, Double>? = null
     private var boxesNeedSave = false
@@ -1281,6 +1282,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun closeSplit() {
+        flushSplit()
         splitPath.value = null
         splitNote = null
         splitMarkdown.value = ""
@@ -1290,10 +1292,22 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     /** The split note becomes the only open note. The previous main note stays in the tabs. */
     fun promoteSplit() {
         val path = splitPath.value ?: return
+        flushSplit()
         splitPath.value = null
         splitNote = null
         splitMarkdown.value = ""
         openPath(path, force = true)
+    }
+
+    private fun flushSplit() {
+        val note = splitNote ?: return
+        val text = splitMarkdown.value
+        val document = splitSession.document
+        splitSaveJob?.cancel()
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { graph.store.save(note.copy(markdown = text), document, text) }
+            graph.engine.notifyLocalChange()
+        }
     }
 
     fun rankNotes(query: String, limit: Int = 8): List<SwitcherNote> {
@@ -1678,10 +1692,28 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun splitChanged() {
+    fun updateSplitMarkdown(value: String) {
         val note = splitNote ?: return
-        viewModelScope.launch {
-            splitNote = withContext(Dispatchers.IO) { graph.store.save(note, splitSession.document, note.markdown) }
+        if (value == splitMarkdown.value) return
+        splitNote = note.copy(markdown = value)
+        splitMarkdown.value = value
+        rememberTags(note.path, value)
+        scheduleSplitSave()
+    }
+
+    fun splitChanged() {
+        if (splitNote == null) return
+        scheduleSplitSave()
+    }
+
+    private fun scheduleSplitSave() {
+        splitSaveJob?.cancel()
+        splitSaveJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(750)
+            val note = splitNote ?: return@launch
+            val text = splitMarkdown.value
+            val document = splitSession.document
+            splitNote = withContext(Dispatchers.IO) { graph.store.save(note.copy(markdown = text), document, text) }
             graph.engine.notifyLocalChange()
         }
     }
