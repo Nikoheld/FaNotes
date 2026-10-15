@@ -391,6 +391,23 @@ data class SubjectBook(val subjectPath: String, val bookPath: String, val lastPa
 const val SUBJECT_BOOKS_PATH = ".fanotes/subject-books.json"
 val SUBJECT_BOOK_PLACEMENTS = listOf("links", "rechts", "oben", "unten", "popout")
 
+data class SubjectBookView(val controlVisible: Boolean, val paneVisible: Boolean, val placement: String?)
+
+data class SubjectBookToggle(val open: Boolean, val placement: String)
+
+/** The book control and pane follow the desktop: hidden until the view is opened. */
+fun subjectBookViewPolicy(hasBook: Boolean, open: Boolean, placement: String?): SubjectBookView {
+    if (!hasBook) return SubjectBookView(controlVisible = false, paneVisible = false, placement = null)
+    val place = placement?.takeIf { it in SUBJECT_BOOK_PLACEMENTS }
+    if (!open || place == null) return SubjectBookView(controlVisible = true, paneVisible = false, placement = place)
+    return SubjectBookView(controlVisible = true, paneVisible = true, placement = place)
+}
+
+fun toggleSubjectBookView(open: Boolean, placement: String?): SubjectBookToggle {
+    val next = placement?.takeIf { it in SUBJECT_BOOK_PLACEMENTS } ?: "rechts"
+    return SubjectBookToggle(open = !open, placement = next)
+}
+
 fun parseSubjectBooks(json: String): List<SubjectBook> {
     val root = parseJson(json) as? JsonValue.Obj ?: return emptyList()
     val items = root.array("books")?.items ?: (root as? JsonValue.Arr)?.items ?: return emptyList()

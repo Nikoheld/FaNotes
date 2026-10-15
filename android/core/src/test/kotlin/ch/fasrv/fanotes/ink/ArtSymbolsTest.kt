@@ -12,6 +12,7 @@ class ArtSymbolsTest {
         assertEquals("Stern", artSymbol("star")?.label)
         assertEquals(2, artSymbol("book")?.paths?.size)
         assertNull(artSymbol("missing"))
+        assertEquals("Stern eingefügt · tippe erneut für weitere.", symbolPlacedNotice("Stern"))
         assertEquals("book", nextArtSymbol(null))
         assertNull(nextArtSymbol(ART_SYMBOLS.last().id))
         val stroke = InkStroke(
