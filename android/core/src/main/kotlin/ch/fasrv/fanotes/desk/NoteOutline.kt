@@ -104,7 +104,8 @@ fun visibleOffsetForSource(source: String, foldedLines: Set<Int>, sourceOffset: 
     return visible
 }
 
-private fun sourceOffsetForVisible(source: String, foldedLines: Set<Int>, visibleOffset: Int): Int {
+/** Where a folded-text offset lands in the full note. */
+fun sourceOffsetForVisible(source: String, foldedLines: Set<Int>, visibleOffset: Int): Int {
     if (foldedLines.isEmpty()) return visibleOffset.coerceIn(0, source.length)
     val text = normalizeNewlines(source)
     val hidden = hiddenMask(text, foldedLines)

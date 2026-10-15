@@ -192,6 +192,20 @@ class NotePageView(context: Context) : FrameLayout(context) {
 
     fun revealLine(line: Int) {
         val sourceOffset = ch.fasrv.fanotes.desk.revealLineStart(sourceMarkdown, line)
+        revealSourceOffset(sourceOffset)
+    }
+
+    /** CodeMirror's go-to-line field. Returns false when the text is not a line, offset, percent, or column. */
+    fun gotoLine(input: String): Boolean {
+        val visibleCursor = editor.selectionStart.coerceAtLeast(0)
+        val sourceOffset = ch.fasrv.fanotes.desk.sourceOffsetForVisible(sourceMarkdown, foldedLines, visibleCursor)
+        val current = ch.fasrv.fanotes.desk.lineNumberAt(sourceMarkdown, sourceOffset)
+        val cursor = ch.fasrv.fanotes.desk.gotoLineCursor(sourceMarkdown, input, current) ?: return false
+        revealSourceOffset(cursor.offset)
+        return true
+    }
+
+    private fun revealSourceOffset(sourceOffset: Int) {
         val offset = ch.fasrv.fanotes.desk.visibleOffsetForSource(sourceMarkdown, foldedLines, sourceOffset)
             .coerceIn(0, editor.text?.length ?: 0)
         if (!textMode) setTextMode(true)

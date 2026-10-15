@@ -1201,6 +1201,7 @@ private fun NotePage(
     onDownload: () -> Unit = {},
 ) {
     val noteKind = model.open.collectAsStateWithLifecycle().value?.kind
+    var gotoLine by remember { mutableStateOf(false) }
     Column(modifier) {
             if (path != null) {
             Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1208,6 +1209,7 @@ private fun NotePage(
                 TextButton(onClick = onDownload) { Text("Herunterladen") }
                 if (noteKind != NoteKind.PDF) {
                     TextButton(onClick = onImportSheet) { Text("Blatt") }
+                    TextButton(onClick = { gotoLine = true }) { Text("Gehe zu Zeile") }
                 }
             }
             val sheets = backdrop.filter { it.worksheetId.isNotEmpty() }.distinctBy { it.worksheetId }
@@ -1233,6 +1235,12 @@ private fun NotePage(
                 NoteSearchBar(model)
             }
             if (showRelations) NoteRelations(model) { model.openPath(it); model.showDestination("notes") }
+        }
+        if (gotoLine) {
+            GotoLineDialog { input ->
+                gotoLine = false
+                if (input != null) model.requestGotoLine(input)
+            }
         }
         PageSurface(
         model = model,
@@ -1283,6 +1291,7 @@ private fun PageSurface(
     val boxes by model.worksheetBoxes.collectAsStateWithLifecycle()
     val highlights by model.worksheetHighlights.collectAsStateWithLifecycle()
     val outlineJump by model.outlineJump.collectAsStateWithLifecycle()
+    val gotoLineInput by model.gotoLineInput.collectAsStateWithLifecycle()
     val foldedHeadings by model.foldedHeadings.collectAsStateWithLifecycle()
     AndroidView(
         modifier = modifier,
@@ -1398,6 +1407,11 @@ private fun PageSurface(
             if (jump != null) {
                 page.revealLine(jump)
                 model.consumeOutlineJump()
+            }
+            val goto = gotoLineInput
+            if (goto != null) {
+                if (!page.gotoLine(goto)) model.message.value = "Das ist keine Zeile."
+                model.consumeGotoLine()
             }
             model.takeNoteSearchSelection()?.let { (start, end) -> page.revealRange(start, end) }
             val current = path ?: ""
@@ -1581,6 +1595,25 @@ private fun WorksheetImportDialog(
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
+    )
+}
+
+@Composable
+private fun GotoLineDialog(onDone: (String?) -> Unit) {
+    var value by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = { onDone(null) },
+        title = { Text("Gehe zu Zeile") },
+        text = {
+            OutlinedTextField(
+                value,
+                { value = it },
+                placeholder = { Text("12, +3, 50%, 8:4") },
+                singleLine = true,
+            )
+        },
+        confirmButton = { Button(onClick = { onDone(value) }) { Text("Gehe") } },
+        dismissButton = { TextButton(onClick = { onDone(null) }) { Text("Abbrechen") } },
     )
 }
 

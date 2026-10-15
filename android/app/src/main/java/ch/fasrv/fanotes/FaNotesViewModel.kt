@@ -164,6 +164,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val fingerDraws = MutableStateFlow(false)
     val showText = MutableStateFlow(false)
     val outlineJump = MutableStateFlow<Int?>(null)
+    val gotoLineInput = MutableStateFlow<String?>(null)
     val foldedHeadings = MutableStateFlow<Set<Int>>(emptySet())
     val confirmRequest = MutableStateFlow<ch.fasrv.fanotes.desk.PendingConfirm?>(null)
     private var confirmAction: (() -> Unit)? = null
@@ -382,6 +383,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         noteSearchCaseSensitive.value = false
         noteSearchRegexp.value = false
         noteSearchWholeWord.value = false
+        gotoLineInput.value = null
         val stats = openPageStats(parsePageStats(note.payload.obj("pageStats"), now), now)
         val payload = (note.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
         payload.put("pageStats", mergePageStats(note.payload.obj("pageStats"), stats))
@@ -668,6 +670,16 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun consumeOutlineJump() {
         outlineJump.value = null
+    }
+
+    /** Asks the open editor to run CodeMirror's go-to-line field. */
+    fun requestGotoLine(input: String) {
+        showText.value = true
+        gotoLineInput.value = input
+    }
+
+    fun consumeGotoLine() {
+        gotoLineInput.value = null
     }
 
     fun updateMarkdown(value: String) {
