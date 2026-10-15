@@ -48,6 +48,17 @@ class LivePreviewTest {
         assertTrue(rule.any { it.kind == LiveKind.HIDE })
         assertTrue(livePreviewMarks("| A | B |", 0, 0).any { it.kind == LiveKind.TABLE_ROW })
         assertEquals(emptyList(), livePreviewMarks("", 0, 0))
+        val fencedNote = "Vorher\n```kotlin\ncode\n```\nNachher"
+        val outsideFence = livePreviewMarks(fencedNote, 0, 0)
+        assertTrue(outsideFence.any { it.kind == LiveKind.CODE_FENCE && it.start == fencedNote.indexOf("code") })
+        assertTrue(outsideFence.any { it.kind == LiveKind.CODE_FENCE && it.start == fencedNote.indexOf("```kotlin") })
+        assertFalse(outsideFence.any { it.kind == LiveKind.CODE_FENCE && it.start == fencedNote.indexOf("Nachher") })
+        val insideFence = livePreviewMarks(fencedNote, fencedNote.indexOf("code"), fencedNote.indexOf("code"))
+        assertFalse(insideFence.any { it.kind == LiveKind.CODE_FENCE })
+        val tilde = "~~~\nalpha\n~~~"
+        assertEquals(listOf(1 to 3), codeFenceBlocks(tilde).map { it.openLine to it.closeLine })
+        assertTrue(codeFenceBlocks("```\nopen").single().closeLine == 2)
+        assertTrue(codeFenceBlocks("```\n~~~\n```").single().closeLine == 3)
     }
 
     @Test
