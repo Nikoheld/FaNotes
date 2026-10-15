@@ -28,6 +28,17 @@ class WorkspaceNavTest {
     }
 
     @Test
+    fun openOnTheRightKeepsTheCurrentNoteAndPicksAnotherTab() {
+        val tabs = listOf("a.md", "b.md", "c.md")
+        assertEquals("d.md", splitPanePath("d.md", "a.md", tabs, listOf("a.md", "c.md", "b.md")))
+        assertEquals("b.md", splitPanePath("a.md", "a.md", tabs, listOf("a.md", "c.md", "b.md")))
+        assertEquals("c.md", splitPanePath("a.md", "a.md", listOf("a.md", "c.md"), listOf("a.md", "b.md")))
+        assertEquals("b.md", splitPanePath("a.md", "a.md", tabs, listOf("a.md")))
+        assertNull(splitPanePath("a.md", "a.md", listOf("a.md"), listOf("a.md")))
+        assertNull(splitPanePath("", "a.md", tabs, emptyList()))
+    }
+
+    @Test
     fun visitedNotesWalkBackAndDropTheForwardTail() {
         var history = EMPTY_NOTE_TRAIL
         assertEquals(false, canGoBack(history))

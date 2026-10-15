@@ -5,6 +5,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -158,6 +159,8 @@ fun DeskStatusBar(
     onConflicts: () -> Unit = {},
     crumbs: List<Breadcrumb> = emptyList(),
     onCrumb: (String) -> Unit = {},
+    notice: String? = null,
+    onDismissNotice: () -> Unit = {},
 ) {
     Row(
         Modifier.fillMaxWidth().height(28.dp).background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp),
@@ -170,6 +173,15 @@ fun DeskStatusBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(syncText, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            if (!notice.isNullOrBlank()) {
+                Text(
+                    notice,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable(onClick = onDismissNotice),
+                )
+            }
             if (conflicts > 0) {
                 Text(
                     "$conflicts Konflikte",
@@ -211,6 +223,7 @@ fun NoteTabs(
     onClose: (String) -> Unit,
     onBack: () -> Unit,
     onForward: () -> Unit,
+    onOpenSplit: (String) -> Unit = {},
 ) {
     if (paths.isEmpty() && !canBack && !canForward) return
     val muted = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
@@ -233,7 +246,7 @@ fun NoteTabs(
         paths.forEach { path ->
             val name = path.substringAfterLast('/').substringBeforeLast('.')
             Row(
-                Modifier.padding(end = 4.dp).background(if (path == selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent).clickable { onOpen(path) }.padding(horizontal = 8.dp, vertical = 4.dp),
+                Modifier.padding(end = 4.dp).background(if (path == selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent).combinedClickable(onClick = { onOpen(path) }, onLongClick = { onOpenSplit(path) }).padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (path in pinned) Text("● ", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
@@ -2118,6 +2131,8 @@ fun CommandPalette(
     onDismiss: () -> Unit,
     rankNotes: (String) -> List<SwitcherNote>,
     onOpenNote: (String) -> Unit,
+    onOpenNoteInSplit: (String) -> Unit = {},
+    splitOpen: Boolean = false,
     onRun: (String) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
@@ -2148,7 +2163,7 @@ fun CommandPalette(
         "ai" to "AI",
         "settings" to "Einstellungen",
         "daily" to "Tägliche Notiz",
-        "split" to "Zweite Spalte",
+        "split" to if (splitOpen) "Geteilte Ansicht schließen" else "Geteilte Ansicht öffnen",
         "split-orient" to "Teilung drehen",
         "split-swap" to "Geteilte Ansicht tauschen",
         "note-here" to "Notiz in diesem Ordner",
@@ -2165,9 +2180,17 @@ fun CommandPalette(
         if (notes.isNotEmpty()) {
             Text("Notizen", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp), fontSize = 12.sp)
             notes.forEach { note ->
-                Column(Modifier.fillMaxWidth().clickable { onOpenNote(note.path); onDismiss() }.padding(vertical = 6.dp)) {
-                    Text(note.title)
-                    if (note.folder.isNotEmpty()) Text(note.folder, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f).clickable { onOpenNote(note.path); onDismiss() }) {
+                        Text(note.title)
+                        if (note.folder.isNotEmpty()) Text(note.folder, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                    }
+                    Text(
+                        "Rechts öffnen",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable { onOpenNoteInSplit(note.path); onDismiss() }.padding(start = 8.dp),
+                    )
                 }
             }
         }

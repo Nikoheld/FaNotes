@@ -417,6 +417,7 @@ fun FaNotesScreen(
                 { model.closeTab(it) },
                 { model.navigateHistory(-1) },
                 { model.navigateHistory(1) },
+                { model.openInSplit(it) },
             )
         } else {
             DeskRibbon(destination, true, { model.showDestination(it) }, { model.paletteOpen.value = true }, { model.updateDesk("focus", "off") }, { model.openDaily() })
@@ -448,6 +449,7 @@ fun FaNotesScreen(
                     onToggleLocal = { model.toggleLocalFolder(it) },
                     colors = model.folderColors.collectAsStateWithLifecycle().value,
                     onFolderColor = { model.cycleFolderColor(it) },
+                    onOpenSplit = { model.openInSplit(it) },
                     compact = compact,
                     rowHeightDp = chrome.rowHeightDp,
                     radiusDp = chrome.radiusDp ?: 10,
@@ -537,6 +539,8 @@ fun FaNotesScreen(
             onConflicts = { model.showDestination("settings") },
             crumbs = if (destination == "notes" && open?.path != null) breadcrumbsFor(open?.path.orEmpty()) else emptyList(),
             onCrumb = { model.showList.value = true },
+            notice = message,
+            onDismissNotice = { model.message.value = null },
         )
     }
     if (palette) {
@@ -545,10 +549,12 @@ fun FaNotesScreen(
                 onDismiss = { model.paletteOpen.value = false },
                 rankNotes = { model.rankNotes(it) },
                 onOpenNote = { model.openPath(it); model.showDestination("notes") },
+                onOpenNoteInSplit = { model.openInSplit(it); model.showDestination("notes") },
+                splitOpen = split != null,
             ) { id ->
                 when (id) {
                     "daily" -> model.openDaily()
-                    "split" -> tabs.firstOrNull { it != open?.path }?.let { model.loadSplit(it) }
+                    "split" -> model.toggleSplit()
                     "split-orient" -> model.toggleSplitOrientation()
                     "split-swap" -> model.swapSplit()
                     "note-here" -> {
@@ -756,6 +762,7 @@ private fun VaultPane(
     onToggleLocal: (String) -> Unit = {},
     colors: Map<String, String>,
     onFolderColor: (String) -> Unit,
+    onOpenSplit: (String) -> Unit,
     conflicts: List<ch.fasrv.fanotes.sync.SyncConflict>,
     onResolve: (ch.fasrv.fanotes.sync.SyncConflict, String) -> Unit,
     compact: Boolean = false,
@@ -828,7 +835,7 @@ private fun VaultPane(
         }
         LazyColumn(Modifier.weight(1f).padding(top = 8.dp)) {
             items(tree, key = { it.path }) { node ->
-                NoteRow(node, selected, colors, onOpen, onDelete, onRename, onMove, onFolderColor, localFolders, onToggleLocal, compact, rowHeightDp, radiusDp, depth = 0)
+                NoteRow(node, selected, colors, onOpen, onDelete, onRename, onMove, onFolderColor, onOpenSplit, localFolders, onToggleLocal, compact, rowHeightDp, radiusDp, depth = 0)
             }
         }
         TextButton(onClick = onOpenVault) { Text("Vault-Ordner öffnen") }
@@ -846,6 +853,7 @@ private fun NoteRow(
     onRename: (String, String) -> Unit,
     onMove: (String) -> Unit,
     onFolderColor: (String) -> Unit,
+    onOpenSplit: (String) -> Unit,
     localFolders: List<String>,
     onToggleLocal: (String) -> Unit,
     compact: Boolean,
@@ -875,6 +883,16 @@ private fun NoteRow(
             tint = folderColor?.let { Color(android.graphics.Color.parseColor(it)) } ?: MaterialTheme.colorScheme.primary,
         )
         Text(node.name, modifier = Modifier.weight(1f).padding(start = 8.dp), maxLines = 1)
+        if (node.kind != NoteKind.FOLDER) {
+            Text(
+                "Rechts",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clickable(onClickLabel = "Rechts öffnen") { onOpenSplit(node.path) }
+                    .padding(horizontal = 6.dp),
+            )
+        }
         if (node.kind == NoteKind.FOLDER) {
             val local = pathIsSyncExcluded(node.path, localFolders)
             Text(
@@ -895,7 +913,7 @@ private fun NoteRow(
         }
     }
     if (node.kind == NoteKind.FOLDER) {
-        node.children.forEach { NoteRow(it, selected, colors, onOpen, onDelete, onRename, onMove, onFolderColor, localFolders, onToggleLocal, compact, rowHeightDp, radiusDp, depth + 1) }
+        node.children.forEach { NoteRow(it, selected, colors, onOpen, onDelete, onRename, onMove, onFolderColor, onOpenSplit, localFolders, onToggleLocal, compact, rowHeightDp, radiusDp, depth + 1) }
     }
 }
 

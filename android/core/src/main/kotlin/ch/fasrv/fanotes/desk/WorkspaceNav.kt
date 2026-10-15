@@ -189,6 +189,19 @@ fun swappedSplit(active: String?, split: String?): Pair<String, String>? {
     return split to active
 }
 
+/**
+ * Note that „Rechts öffnen“ puts in the second pane.
+ * The open note stays where it is. Choosing it uses the newest other tab,
+ * then the first other tab. Null means there is no second note yet.
+ * [history] is oldest first, the same order as [NoteTrail.entries].
+ */
+fun splitPanePath(requested: String, active: String?, tabs: List<String>, history: List<String>): String? {
+    if (requested.isBlank()) return null
+    if (requested != active) return requested
+    return history.asReversed().firstOrNull { entry -> entry != requested && entry in tabs }
+        ?: tabs.firstOrNull { it != requested }
+}
+
 fun normalizeSplitLayout(value: Any?): SplitLayout {
     val raw = value as? Map<*, *> ?: return DEFAULT_SPLIT_LAYOUT
     val ratio = (raw["ratio"] as? Number)?.toDouble() ?: Double.NaN
