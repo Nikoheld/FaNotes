@@ -321,25 +321,34 @@ fun DeskStatusBar(
     onSave: () -> Unit = {},
 ) {
     val ink = LocalStatusInk.current
-    Row(
-        Modifier.fillMaxWidth().height(28.dp).background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
         Row(
-            Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier
+                .fillMaxWidth()
+                .height(ch.fasrv.fanotes.desk.STATUS_BAR_DP.dp)
+                .padding(horizontal = ch.fasrv.fanotes.desk.STATUS_PAD_DP.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.STATUS_GROUP_GAP_DP.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (onToggleSidebar != null) {
                 Text(
                     if (sidebarOpen) "Leiste zu" else "Leiste",
                     fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable(
-                        onClickLabel = if (sidebarOpen) "Seitenleiste einklappen" else "Seitenleiste einblenden",
-                        onClick = onToggleSidebar,
-                    ),
+                    color = ink.muted,
+                    modifier = Modifier
+                        .height(ch.fasrv.fanotes.desk.STATUS_BUTTON_DP.dp)
+                        .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.STATUS_BUTTON_RADIUS_DP.dp))
+                        .clickable(
+                            onClickLabel = if (sidebarOpen) "Seitenleiste einklappen" else "Seitenleiste einblenden",
+                            onClick = onToggleSidebar,
+                        )
+                        .padding(horizontal = ch.fasrv.fanotes.desk.STATUS_CRUMB_PAD_DP.dp)
+                        .wrapContentHeight(Alignment.CenterVertically),
                 )
             }
             if (mode.isNotBlank()) {
@@ -353,26 +362,59 @@ fun DeskStatusBar(
                     notice,
                     fontSize = 12.sp,
                     maxLines = 1,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = ink.muted,
                     modifier = Modifier.clickable(onClick = onDismissNotice),
                 )
             }
-            crumbs.forEachIndexed { index, crumb ->
-                if (index > 0) Text("›", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
-                if (crumb.isNote) {
-                    Text(crumb.label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                } else {
-                    Text(
-                        crumb.label,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
-                        modifier = Modifier.clickable { onCrumb(crumb.path) },
-                    )
+        }
+        if (crumbs.isNotEmpty()) {
+            Box(
+                Modifier
+                    .padding(start = ch.fasrv.fanotes.desk.STATUS_CRUMB_INSET_DP.dp)
+                    .width(1.dp)
+                    .height(16.dp)
+                    .background(rule),
+            )
+            Row(
+                Modifier
+                    .weight(1f)
+                    .padding(start = ch.fasrv.fanotes.desk.STATUS_CRUMB_INSET_DP.dp)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.STATUS_CRUMB_GAP_DP.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                crumbs.forEachIndexed { index, crumb ->
+                    if (index > 0) Text("›", fontSize = 12.sp, color = ink.muted.copy(alpha = 0.6f))
+                    if (crumb.isNote) {
+                        Text(
+                            crumb.label,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = ink.soft,
+                            maxLines = 1,
+                            modifier = Modifier.widthIn(max = ch.fasrv.fanotes.desk.STATUS_NOTE_MAX_DP.dp),
+                        )
+                    } else {
+                        Text(
+                            crumb.label,
+                            fontSize = 12.sp,
+                            color = ink.muted,
+                            maxLines = 1,
+                            modifier = Modifier
+                                .widthIn(max = ch.fasrv.fanotes.desk.STATUS_FOLDER_MAX_DP.dp)
+                                .height(ch.fasrv.fanotes.desk.STATUS_BUTTON_DP.dp)
+                                .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.STATUS_BUTTON_RADIUS_DP.dp))
+                                .clickable { onCrumb(crumb.path) }
+                                .padding(horizontal = ch.fasrv.fanotes.desk.STATUS_CRUMB_PAD_DP.dp)
+                                .wrapContentHeight(Alignment.CenterVertically),
+                        )
+                    }
                 }
             }
+        } else {
+            Spacer(Modifier.weight(1f))
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.STATUS_GROUP_GAP_DP.dp), verticalAlignment = Alignment.CenterVertically) {
             if (language.isNotBlank()) Text(language, fontSize = 12.sp, color = ink.muted)
             if (showWords) Text("$words Wörter", fontSize = 12.sp, color = ink.muted)
             if (conflicts > 0) {
@@ -398,6 +440,7 @@ fun DeskStatusBar(
                 )
             }
             Text(ch.fasrv.fanotes.desk.STATUS_LOCAL_PRIVATE, fontSize = 12.sp, color = ink.muted)
+        }
         }
     }
 }

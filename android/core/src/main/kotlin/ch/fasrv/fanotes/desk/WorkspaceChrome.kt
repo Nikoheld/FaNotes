@@ -323,6 +323,18 @@ fun statusSaveTone(label: String): String = when (label) {
 
 const val STATUS_LOCAL_PRIVATE = "Lokal & privat"
 
+/** Status bar from `.statusbar`: 28px row, 11px groups, and 20px crumb buttons. */
+const val STATUS_BAR_DP = 28
+const val STATUS_GROUP_GAP_DP = 11
+const val STATUS_PAD_DP = 12
+const val STATUS_BUTTON_DP = 20
+const val STATUS_BUTTON_RADIUS_DP = 5
+const val STATUS_CRUMB_GAP_DP = 1
+const val STATUS_CRUMB_INSET_DP = 11
+const val STATUS_CRUMB_PAD_DP = 5
+const val STATUS_FOLDER_MAX_DP = 160
+const val STATUS_NOTE_MAX_DP = 220
+
 /** Floating notice from `.toast` after the later chrome pass. */
 const val TOAST_MIN_DP = 44
 const val TOAST_RADIUS_DP = 8
