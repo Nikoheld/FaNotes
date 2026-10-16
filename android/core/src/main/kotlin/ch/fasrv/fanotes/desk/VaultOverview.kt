@@ -139,3 +139,16 @@ private fun collectFolderRows(
         else listOf(row) + collectFolderRows(folder.children, depth + 1, hueOffset + index * 5 + 1, colors)
     }
 }
+
+/** Files in the sidebar tree, including notes inside folders. PDFs count too. */
+fun sidebarFileCount(nodes: List<VaultNode>): Int = nodes.sumOf { node ->
+    if (node.kind == NoteKind.FOLDER) sidebarFileCount(node.children) else 1
+}
+
+/** Desktop sidebar footer: „1 Notiz“ or „N Notizen“. */
+fun sidebarFileLabel(count: Int) = if (count == 1) "1 Notiz" else "$count Notizen"
+
+/** Sidebar footer after the later chrome pass. */
+const val SIDEBAR_FOOTER_DP = 34
+const val SIDEBAR_FOOTER_PAD_X_DP = 12
+const val SIDEBAR_FOOTER_PAD_Y_DP = 4

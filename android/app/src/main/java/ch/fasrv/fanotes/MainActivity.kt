@@ -1361,6 +1361,28 @@ private fun VaultPane(
         }
         TextButton(onClick = onOpenVault) { Text("Vault-Ordner öffnen") }
         TextButton(onClick = onPrivateVault) { Text("Tablet-Vault verwenden") }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)),
+        )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = ch.fasrv.fanotes.desk.SIDEBAR_FOOTER_DP.dp)
+                .padding(
+                    horizontal = ch.fasrv.fanotes.desk.SIDEBAR_FOOTER_PAD_X_DP.dp,
+                    vertical = ch.fasrv.fanotes.desk.SIDEBAR_FOOTER_PAD_Y_DP.dp,
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                ch.fasrv.fanotes.desk.sidebarFileLabel(ch.fasrv.fanotes.desk.sidebarFileCount(tree)),
+                fontSize = 12.sp,
+                color = LocalStatusInk.current.muted,
+            )
+        }
     }
 }
 
