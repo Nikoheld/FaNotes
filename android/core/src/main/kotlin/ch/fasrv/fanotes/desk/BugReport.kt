@@ -3,6 +3,8 @@ package ch.fasrv.fanotes.desk
 import ch.fasrv.fanotes.json.escapeJson
 import ch.fasrv.fanotes.json.jsNumber
 import java.net.URI
+import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -22,6 +24,16 @@ const val BUG_REPORT_WIDTH_FRACTION = 0.94f
 const val BUG_REPORT_MAX_HEIGHT_DP = 640
 const val BUG_REPORT_HEIGHT_FRACTION = 0.9f
 const val BUG_REPORT_RADIUS_DP = 12
+
+/**
+ * Winning shadow on `.settings-modal.bug-report-modal`.
+ * `.bug-report-modal` sets no box-shadow. The earlier `.settings-modal` rule is
+ * `box-shadow: var(--shadow)`. The later `.settings-modal` rule replaces it with
+ * `box-shadow: 0 24px 80px rgba(0, 0, 0, .16)`.
+ * The "One dialog, button and type system" block does not include this dialog.
+ * x is 0, y is down, then blur and black alpha. The literal does not follow the theme.
+ */
+const val BUG_REPORT_SHADOW_X_DP = 0
 const val BUG_REPORT_SHADOW_Y_DP = 24
 const val BUG_REPORT_SHADOW_BLUR_DP = 80
 const val BUG_REPORT_SHADOW_ALPHA = 0.16f
@@ -78,6 +90,99 @@ fun bugReportCardWidthDp(windowWidthDp: Int): Int {
 fun bugReportMaxHeightDp(windowHeightDp: Int): Int {
     val fraction = (windowHeightDp.coerceAtLeast(0) * BUG_REPORT_HEIGHT_FRACTION).roundToInt()
     return min(BUG_REPORT_MAX_HEIGHT_DP, fraction)
+}
+
+data class BugReportPanelShadow(
+    val xDp: Int,
+    val yDp: Int,
+    val blurDp: Int,
+    val alpha: Float,
+)
+
+/** Desktop shadow for the bug-report dialog. The same literal applies in every theme. */
+fun bugReportPanelShadow() = BugReportPanelShadow(
+    BUG_REPORT_SHADOW_X_DP,
+    BUG_REPORT_SHADOW_Y_DP,
+    BUG_REPORT_SHADOW_BLUR_DP,
+    BUG_REPORT_SHADOW_ALPHA,
+)
+
+/**
+ * Nominal reach past each dialog edge. CSS blur spreads `blur` around the shifted silhouette,
+ * so a positive y reaches farther below than above.
+ */
+data class BugReportShadowReach(
+    val leftDp: Int,
+    val topDp: Int,
+    val rightDp: Int,
+    val bottomDp: Int,
+)
+
+fun bugReportShadowReach(shadow: BugReportPanelShadow = bugReportPanelShadow()): BugReportShadowReach {
+    val blur = shadow.blurDp.coerceAtLeast(0)
+    return BugReportShadowReach(
+        leftDp = (blur - shadow.xDp).coerceAtLeast(0),
+        topDp = (blur - shadow.yDp).coerceAtLeast(0),
+        rightDp = (shadow.xDp + blur).coerceAtLeast(0),
+        bottomDp = (shadow.yDp + blur).coerceAtLeast(0),
+    )
+}
+
+/** Black at the desktop alpha, packed ARGB. */
+fun bugReportShadowColor(alpha: Float = BUG_REPORT_SHADOW_ALPHA): Int {
+    val channel = (alpha.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
+    return channel shl 24
+}
+
+/**
+ * Software-bitmap placement of the dialog rectangle shifted by the desktop offset.
+ * [padPx] is the bitmap inset of the unshifted dialog origin, large enough for the blur.
+ */
+data class BugReportShadowFrame(
+    val bitmapWidthPx: Int,
+    val bitmapHeightPx: Int,
+    val padPx: Float,
+    val shapeLeftPx: Float,
+    val shapeTopPx: Float,
+    val shapeRightPx: Float,
+    val shapeBottomPx: Float,
+    val blurPx: Float,
+    val color: Int,
+)
+
+fun bugReportShadowFrame(widthPx: Float, heightPx: Float, density: Float): BugReportShadowFrame? {
+    if (widthPx < 1f || heightPx < 1f || density <= 0f) return null
+    val shadow = bugReportPanelShadow()
+    if (shadow.blurDp <= 0) return null
+    val blurPx = shadow.blurDp * density
+    if (blurPx <= 0.5f) return null
+    val offsetX = shadow.xDp * density
+    val offsetY = shadow.yDp * density
+    val pad = blurPx * 2f + abs(offsetX) + abs(offsetY) + 2f
+    val bitmapWidth = ceil(widthPx + pad * 2f).toInt()
+    val bitmapHeight = ceil(heightPx + pad * 2f).toInt()
+    if (bitmapWidth < 1 || bitmapHeight < 1) return null
+    return BugReportShadowFrame(
+        bitmapWidthPx = bitmapWidth,
+        bitmapHeightPx = bitmapHeight,
+        padPx = pad,
+        shapeLeftPx = pad + offsetX,
+        shapeTopPx = pad + offsetY,
+        shapeRightPx = pad + offsetX + widthPx,
+        shapeBottomPx = pad + offsetY + heightPx,
+        blurPx = blurPx,
+        color = bugReportShadowColor(shadow.alpha),
+    )
+}
+
+/** True when the blurred shape passes the dialog's bottom edge farther than its top edge. */
+fun bugReportShadowFavorsDown(frame: BugReportShadowFrame, heightPx: Float): Boolean {
+    if (heightPx <= 0f) return false
+    val panelTop = frame.padPx
+    val panelBottom = panelTop + heightPx
+    val bottomSpill = frame.shapeBottomPx + frame.blurPx - panelBottom
+    val topSpill = panelTop - (frame.shapeTopPx - frame.blurPx)
+    return frame.shapeTopPx > panelTop && bottomSpill > topSpill
 }
 
 data class BugReportEvent(

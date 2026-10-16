@@ -2,6 +2,7 @@ package ch.fasrv.fanotes.desk
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class BugReportTest {
@@ -64,6 +65,47 @@ class BugReportTest {
         assertEquals(false, bugReportCanSend("Stift springt", true))
         assertEquals(true, bugReportCanSend("Stift springt", false))
         assertEquals("Kurz beschreiben, z. B. Stift springt nach oben beim Schreiben.", BUG_REPORT_PLACEHOLDER)
+    }
+
+    @Test
+    fun theBugReportDialogUsesTheSettingsModalShadow() {
+        val shadow = bugReportPanelShadow()
+        assertEquals(0, BUG_REPORT_SHADOW_X_DP)
+        assertEquals(0, shadow.xDp)
+        assertEquals(24, shadow.yDp)
+        assertEquals(80, shadow.blurDp)
+        assertEquals(0.16f, shadow.alpha)
+        assertTrue(shadow.yDp != 0)
+        val reach = bugReportShadowReach(shadow)
+        assertEquals(80, reach.leftDp)
+        assertEquals(56, reach.topDp)
+        assertEquals(80, reach.rightDp)
+        assertEquals(104, reach.bottomDp)
+        assertEquals(reach.leftDp, reach.rightDp)
+        assertTrue(reach.bottomDp > reach.topDp)
+        val frame = checkNotNull(bugReportShadowFrame(400f, 300f, 2f))
+        assertEquals(160f, frame.blurPx)
+        assertEquals(0f, frame.shapeLeftPx - frame.padPx)
+        assertEquals(48f, frame.shapeTopPx - frame.padPx)
+        assertTrue(frame.shapeTopPx - frame.padPx != 0f)
+        assertEquals(0x29000000, frame.color)
+        assertEquals(0x29000000, bugReportShadowColor(0.16f))
+        assertTrue(frame.shapeBottomPx + frame.blurPx < frame.bitmapHeightPx)
+        assertTrue(bugReportShadowFavorsDown(frame, 300f))
+        val flat = frame.copy(shapeTopPx = frame.padPx, shapeBottomPx = frame.padPx + 300f)
+        assertTrue(!bugReportShadowFavorsDown(flat, 300f))
+        assertTrue(bugReportShadowFrame(0f, 300f, 2f) == null)
+        // The winning rule is a literal, so dark and sepia stay off `var(--shadow)`.
+        val dark = confirmDialogShadow("dark")
+        val sepia = confirmDialogShadow("sepia")
+        assertNotEquals(dark.yDp, shadow.yDp)
+        assertNotEquals(dark.blurDp, shadow.blurDp)
+        assertNotEquals(dark.alpha, shadow.alpha)
+        assertNotEquals(sepia.yDp, shadow.yDp)
+        assertNotEquals(sepia.blurDp, shadow.blurDp)
+        assertNotEquals(sepia.alpha, shadow.alpha)
+        assertNotEquals(confirmShadowColor(sepia.alpha, sepia.red, sepia.green, sepia.blue), frame.color)
+        assertNotEquals(confirmShadowColor(dark.alpha, dark.red, dark.green, dark.blue), frame.color)
     }
 
     @Test

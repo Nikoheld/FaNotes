@@ -3842,12 +3842,7 @@ fun BugReportDialog(model: FaNotesViewModel) {
                     .widthIn(max = ch.fasrv.fanotes.desk.BUG_REPORT_MAX_DP.dp)
                     .heightIn(max = ch.fasrv.fanotes.desk.bugReportMaxHeightDp(screen.screenHeightDp).dp)
                     .clickable(interactionSource = card, indication = null, onClick = {})
-                    .shadow(
-                        elevation = ch.fasrv.fanotes.desk.BUG_REPORT_SHADOW_Y_DP.dp,
-                        shape = shape,
-                        ambientColor = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.BUG_REPORT_SHADOW_ALPHA),
-                        spotColor = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.BUG_REPORT_SHADOW_ALPHA),
-                    )
+                    .directionalBugReportShade()
                     .clip(shape)
                     .border(1.dp, strong, shape)
                     .background(MaterialTheme.colorScheme.background),
