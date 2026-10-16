@@ -312,9 +312,68 @@ fun FaNotesToast(message: String, onDismiss: () -> Unit, modifier: Modifier = Mo
 }
 
 @Composable
+private fun StatusChip(
+    label: String,
+    idle: Color,
+    onClick: () -> Unit,
+    onClickLabel: String,
+    radiusDp: Int = ch.fasrv.fanotes.desk.STATUS_BUTTON_RADIUS_DP,
+    padDp: Int = ch.fasrv.fanotes.desk.STATUS_CRUMB_PAD_DP,
+    maxWidthDp: Int? = null,
+    badge: Int = 0,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val pressed by interaction.collectIsPressedAsState()
+    val hot = hovered || pressed
+    val ink = if (ch.fasrv.fanotes.desk.statusChipInk(hot, "inherit") == "text") MaterialTheme.colorScheme.onSurface else idle
+    Row(
+        Modifier
+            .height(ch.fasrv.fanotes.desk.STATUS_BUTTON_DP.dp)
+            .then(if (maxWidthDp != null) Modifier.widthIn(max = maxWidthDp.dp) else Modifier)
+            .clip(RoundedCornerShape(radiusDp.dp))
+            .background(if (hot) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+            .hoverable(interaction)
+            .clickable(interactionSource = interaction, indication = null, onClickLabel = onClickLabel, onClick = onClick)
+            .padding(horizontal = padDp.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            label,
+            fontSize = 12.sp,
+            color = ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = if (maxWidthDp != null) Modifier.weight(1f, fill = false) else Modifier,
+        )
+        if (badge > 0) {
+            Box(
+                Modifier
+                    .height(ch.fasrv.fanotes.desk.STATUS_CONFLICT_HEIGHT_DP.dp)
+                    .widthIn(min = ch.fasrv.fanotes.desk.STATUS_CONFLICT_MIN_DP.dp)
+                    .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.STATUS_CONFLICT_RADIUS_DP.dp))
+                    .background(MaterialTheme.colorScheme.error.copy(alpha = ch.fasrv.fanotes.desk.STATUS_CONFLICT_ALPHA))
+                    .padding(horizontal = ch.fasrv.fanotes.desk.STATUS_CONFLICT_PAD_DP.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "$badge",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun DeskStatusBar(
     words: Int,
     syncText: String,
+    syncTone: String = "muted",
     language: String,
     showWords: Boolean,
     conflicts: Int = 0,
@@ -346,19 +405,11 @@ fun DeskStatusBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (onToggleSidebar != null) {
-                Text(
-                    if (sidebarOpen) "Leiste zu" else "Leiste",
-                    fontSize = 12.sp,
-                    color = ink.muted,
-                    modifier = Modifier
-                        .height(ch.fasrv.fanotes.desk.STATUS_BUTTON_DP.dp)
-                        .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.STATUS_BUTTON_RADIUS_DP.dp))
-                        .clickable(
-                            onClickLabel = if (sidebarOpen) "Seitenleiste einklappen" else "Seitenleiste einblenden",
-                            onClick = onToggleSidebar,
-                        )
-                        .padding(horizontal = ch.fasrv.fanotes.desk.STATUS_CRUMB_PAD_DP.dp)
-                        .wrapContentHeight(Alignment.CenterVertically),
+                StatusChip(
+                    label = if (sidebarOpen) "Leiste zu" else "Leiste",
+                    idle = ink.muted,
+                    onClick = onToggleSidebar,
+                    onClickLabel = if (sidebarOpen) "Seitenleiste einklappen" else "Seitenleiste einblenden",
                 )
             }
             if (mode.isNotBlank()) {
@@ -405,18 +456,12 @@ fun DeskStatusBar(
                             modifier = Modifier.widthIn(max = ch.fasrv.fanotes.desk.STATUS_NOTE_MAX_DP.dp),
                         )
                     } else {
-                        Text(
-                            crumb.label,
-                            fontSize = 12.sp,
-                            color = ink.muted,
-                            maxLines = 1,
-                            modifier = Modifier
-                                .widthIn(max = ch.fasrv.fanotes.desk.STATUS_FOLDER_MAX_DP.dp)
-                                .height(ch.fasrv.fanotes.desk.STATUS_BUTTON_DP.dp)
-                                .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.STATUS_BUTTON_RADIUS_DP.dp))
-                                .clickable { onCrumb(crumb.path) }
-                                .padding(horizontal = ch.fasrv.fanotes.desk.STATUS_CRUMB_PAD_DP.dp)
-                                .wrapContentHeight(Alignment.CenterVertically),
+                        StatusChip(
+                            label = crumb.label,
+                            idle = ink.muted,
+                            onClick = { onCrumb(crumb.path) },
+                            onClickLabel = "„${crumb.label}“ in der Dateileiste zeigen",
+                            maxWidthDp = ch.fasrv.fanotes.desk.STATUS_FOLDER_MAX_DP,
                         )
                     }
                 }
@@ -427,26 +472,32 @@ fun DeskStatusBar(
         Row(horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.STATUS_GROUP_GAP_DP.dp), verticalAlignment = Alignment.CenterVertically) {
             if (language.isNotBlank()) Text(language, fontSize = 12.sp, color = ink.muted)
             if (showWords) Text("$words Wörter", fontSize = 12.sp, color = ink.muted)
-            if (conflicts > 0) {
-                Text(
-                    "$conflicts",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.clickable(onClick = onConflicts),
-                )
+            val syncIdle = when (ch.fasrv.fanotes.desk.statusSyncTone(syncTone)) {
+                "success" -> ink.success
+                "danger" -> MaterialTheme.colorScheme.error
+                else -> ink.muted
             }
-            Text(syncText, fontSize = 12.sp, color = ink.muted, modifier = Modifier.clickable(onClick = onConflicts))
+            StatusChip(
+                label = syncText,
+                idle = syncIdle,
+                onClick = onConflicts,
+                onClickLabel = "Synchronisation",
+                radiusDp = ch.fasrv.fanotes.desk.STATUS_SYNC_RADIUS_DP,
+                padDp = ch.fasrv.fanotes.desk.STATUS_SYNC_PAD_DP,
+                badge = conflicts,
+            )
             if (saveLabel.isNotBlank()) {
                 val saveColor = when (ch.fasrv.fanotes.desk.statusSaveTone(saveLabel)) {
                     "danger" -> MaterialTheme.colorScheme.error
                     "warning" -> ink.warning
                     else -> ink.success
                 }
-                Text(
-                    saveLabel,
-                    fontSize = 12.sp,
-                    color = saveColor,
-                    modifier = Modifier.clickable(onClickLabel = "Jetzt speichern", onClick = onSave),
+                StatusChip(
+                    label = saveLabel,
+                    idle = saveColor,
+                    onClick = onSave,
+                    onClickLabel = "Jetzt speichern",
+                    padDp = ch.fasrv.fanotes.desk.STATUS_SAVE_PAD_DP,
                 )
             }
             Text(ch.fasrv.fanotes.desk.STATUS_LOCAL_PRIVATE, fontSize = 12.sp, color = ink.muted)
