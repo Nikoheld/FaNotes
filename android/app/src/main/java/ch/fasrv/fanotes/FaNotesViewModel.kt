@@ -2334,6 +2334,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val aiPreview = MutableStateFlow<String?>(null)
     val aiBusy = MutableStateFlow(false)
     val aiOpen = MutableStateFlow(false)
+    val settingsOpen = MutableStateFlow(false)
     val aiStatus = MutableStateFlow("")
     val aiModels = MutableStateFlow<List<ch.fasrv.fanotes.desk.AiListedModel>>(emptyList())
     val paletteOpen = MutableStateFlow(false)
@@ -2382,6 +2383,16 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         aiOpen.value = false
     }
 
+    /** The desktop `.settings-modal` covers the note. A full screen steps aside so the editor stays underneath. */
+    fun openSettings() {
+        if (!ch.fasrv.fanotes.desk.workspaceKeepsNoteChrome(destination.value)) destination.value = "notes"
+        settingsOpen.value = true
+    }
+
+    fun closeSettings() {
+        settingsOpen.value = false
+    }
+
     fun showDestination(id: String) {
         if (id == "history") {
             openHistory()
@@ -2389,6 +2400,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (id == "ai") {
             openAi()
+            return
+        }
+        if (id == "settings") {
+            openSettings()
             return
         }
         destination.value = id
