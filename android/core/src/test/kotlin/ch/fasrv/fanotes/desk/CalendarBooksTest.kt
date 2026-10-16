@@ -35,6 +35,11 @@ class CalendarBooksTest {
         assertEquals(cursor.plusDays(3), calendarShift("three", cursor, 1))
         assertEquals(cursor.plusMonths(1), calendarShift("month", cursor, 1))
         assertEquals(cursor.plusDays(1), calendarShift("day", cursor, 1))
+        assertEquals(false, calendarShowsSide(960))
+        assertEquals(true, calendarShowsSide(961))
+        assertEquals(248, CAL_SIDE_DP)
+        assertEquals(28, CAL_MINI_CELL_DP)
+        assertEquals(4, CAL_MINI_DOT_DP)
     }
 
     @Test
