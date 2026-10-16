@@ -165,6 +165,37 @@ export const emptyCalendarDocument = (): CalendarDocument => ({
   events: [],
 })
 
+export type CalendarMarkdownLoad =
+  | { ok: true, document: CalendarDocument }
+  | { ok: false }
+
+/** A missing note is safe to create. Any other read failure must not be saved back. */
+export const isMissingNoteError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+  return /nicht gefunden|ENOENT|no such file/iu.test(message)
+}
+
+/**
+ * No marker means a fresh calendar. A marker that does not close or does not
+ * parse is left untouched: treating it as empty would overwrite the file.
+ */
+export const loadCalendarMarkdown = (markdown: string): CalendarMarkdownLoad => {
+  if (typeof markdown !== 'string' || !markdown.includes(CALENDAR_MARKER_START)) {
+    return { ok: true, document: emptyCalendarDocument() }
+  }
+  const start = markdown.indexOf(CALENDAR_MARKER_START)
+  const end = markdown.indexOf(CALENDAR_MARKER_END, start + CALENDAR_MARKER_START.length)
+  if (end < 0) return { ok: false }
+  try {
+    return {
+      ok: true,
+      document: sanitizeCalendarDocument(JSON.parse(markdown.slice(start + CALENDAR_MARKER_START.length, end))),
+    }
+  } catch {
+    return { ok: false }
+  }
+}
+
 /**
  * A blank rename is not a deletion. Restore the last committed name so the
  * next save does not drop the calendar and every event that belongs to it.
@@ -259,15 +290,8 @@ export const sanitizeCalendarDocument = (raw: unknown): CalendarDocument => {
 }
 
 export const parseCalendarMarkdown = (markdown: string): CalendarDocument => {
-  if (typeof markdown !== 'string' || !markdown.includes(CALENDAR_MARKER_START)) return emptyCalendarDocument()
-  const start = markdown.indexOf(CALENDAR_MARKER_START)
-  const end = markdown.indexOf(CALENDAR_MARKER_END, start + CALENDAR_MARKER_START.length)
-  if (end < 0) return emptyCalendarDocument()
-  try {
-    return sanitizeCalendarDocument(JSON.parse(markdown.slice(start + CALENDAR_MARKER_START.length, end)))
-  } catch {
-    return emptyCalendarDocument()
-  }
+  const loaded = loadCalendarMarkdown(markdown)
+  return loaded.ok ? loaded.document : emptyCalendarDocument()
 }
 
 export const serializeCalendarMarkdown = (document: CalendarDocument): string => {
@@ -348,6 +372,17 @@ const nextInstanceStart = (cursor: Date, frequency: RecurrenceFreq) => {
   return addDays(cursor, 1)
 }
 
+/**
+ * The nth repeat, counted from the original start. A short month clamps that
+ * one instance, then the next month returns to the original day.
+ */
+const instanceStart = (origin: Date, step: number, frequency: RecurrenceFreq) => {
+  if (frequency === 'weekly') return addDays(origin, step * 7)
+  if (frequency === 'monthly') return addMonths(origin, step)
+  if (frequency === 'yearly') return addMonths(origin, step * 12)
+  return addDays(origin, step)
+}
+
 const eventBounds = (event: CalendarEvent) => {
   const start = parseWall(event.start, event.allDay)
   if (!start) return null
@@ -377,6 +412,7 @@ export const expandOccurrences = (
     const until = event.recurrenceUntil ? parseDateKey(event.recurrenceUntil) : null
     const untilEnd = until ? addDays(startOfDay(until), 1) : null
     const skipped = new Set(event.exceptionDates)
+    let step = 0
     let cursor = bounds.start
     let guard = 0
     while (cursor < rangeEnd && guard < 500) {
@@ -387,7 +423,8 @@ export const expandOccurrences = (
         occurrences.push({ event, start: new Date(cursor), end, key })
       }
       if (event.recurrence === 'none') break
-      const next = nextInstanceStart(cursor, event.recurrence)
+      step += 1
+      const next = instanceStart(bounds.start, step, event.recurrence)
       if (next.getTime() <= cursor.getTime()) break
       cursor = next
       guard += 1
@@ -557,6 +594,15 @@ export const skipOccurrence = (document: CalendarDocument, key: string): Calenda
   if (event.recurrence === 'none') return deleteEvent(document, event.id)
   const masterDay = dateKey(parseWall(event.start, event.allDay) ?? new Date())
   if (masterDay === day) {
+    // Moving a monthly or yearly series onto the clamped next day would
+    // forget the original day, so that first day is skipped instead.
+    if (event.recurrence === 'monthly' || event.recurrence === 'yearly') {
+      if (event.exceptionDates.includes(day)) return document
+      return replaceEvent(document, {
+        ...event,
+        exceptionDates: [...event.exceptionDates, day],
+      })
+    }
     const bounds = eventBounds(event)
     if (!bounds) return deleteEvent(document, event.id)
     const next = nextInstanceStart(bounds.start, event.recurrence)

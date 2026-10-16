@@ -13,10 +13,12 @@ import {
 import {
   Check,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Columns2,
   Copy,
-  CopyPlus,
   File,
+  Files,
   FileText,
   Folder,
   FolderOpen,
@@ -31,6 +33,7 @@ import {
 } from 'lucide-react'
 import type { VaultEntry } from '../types'
 import { bestContrastText } from '../lib/colorContrast'
+import { folderPathsIn, nextExpandedFolders } from '../lib/noteQoL'
 
 type MaybePromise<T = void> = T | Promise<T>
 
@@ -59,8 +62,6 @@ export type FileTreeProps = {
   onDuplicate?: (relativePath: string) => MaybePromise
   onCopyWikiLink?: (relativePath: string) => MaybePromise
   onCopyPath?: (relativePath: string) => MaybePromise
-  /** Bumps when the sidebar asks every folder to close. */
-  collapseToken?: number
   confirmTrash?: (message: string) => Promise<boolean>
   className?: string
   rootLabel?: string
@@ -200,7 +201,6 @@ export const FileTree = memo(function FileTree({
   onDuplicate,
   onCopyWikiLink,
   onCopyPath,
-  collapseToken = 0,
   confirmTrash,
   className = '',
   rootLabel = 'Dateien',
@@ -220,6 +220,9 @@ export const FileTree = memo(function FileTree({
   const treeRef = useRef<HTMLElement>(null)
   const dragSourceRef = useRef<{ path: string; kind: VaultEntry['kind'] } | null>(null)
   const orderedEntries = useMemo(() => sortedEntries(entries), [entries])
+  const folderList = useMemo(() => folderPathsIn(entries), [entries])
+  const foldersOpen = folderList.some((path) => expanded.has(path))
+  const foldLabel = foldersOpen ? 'Alle Ordner einklappen' : 'Alle Ordner aufklappen'
 
   // A vault switch hands over a new key: forget the old vault's folders.
   const storageKeyRef = useRef(expansionStorageKey)
@@ -229,12 +232,6 @@ export const FileTree = memo(function FileTree({
     setExpanded(readExpandedFolders(expansionStorageKey))
   }, [expansionStorageKey])
   useEffect(() => { writeExpandedFolders(expansionStorageKey, expanded) }, [expanded, expansionStorageKey])
-  const seenCollapseToken = useRef(collapseToken)
-  useEffect(() => {
-    if (collapseToken === seenCollapseToken.current) return
-    seenCollapseToken.current = collapseToken
-    setExpanded(new Set())
-  }, [collapseToken])
 
   useEffect(() => {
     if (!activePath) return
@@ -744,6 +741,21 @@ export const FileTree = memo(function FileTree({
         </div>
       )}
 
+      {folderList.length > 0 && (
+        <div className="file-tree__fold">
+          <button
+            type="button"
+            className="file-tree__fold-button"
+            aria-label={foldLabel}
+            title={foldLabel}
+            onClick={() => setExpanded(nextExpandedFolders(expanded, folderList))}
+          >
+            {foldersOpen ? <ChevronsDownUp aria-hidden="true" size={14} /> : <ChevronsUpDown aria-hidden="true" size={14} />}
+            <span>{foldLabel}</span>
+          </button>
+        </div>
+      )}
+
       {orderedEntries.length > 0 ? (
         <ul className="file-tree__root" role="tree">
           {orderedEntries.map((entry) => renderEntry(entry, 0))}
@@ -770,7 +782,7 @@ export const FileTree = memo(function FileTree({
             left: Math.min(Math.max(8, contextMenu.x), window.innerWidth - 232),
             top: Math.min(
               Math.max(8, contextMenu.y),
-              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 560 : isPdfEntry(contextMenu.entry) ? 280 : 390),
+              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 560 : 420),
             ),
           }}
         >
@@ -905,10 +917,24 @@ export const FileTree = memo(function FileTree({
               <span className="file-tree__menu-separator" role="separator" />
             </>
           )}
-          {contextMenu.entry.kind === 'file' && (onCopyWikiLink || onCopyPath || onDuplicate) && (
+          {(onDuplicate || onCopyWikiLink || onCopyPath) && (
             <>
               <span className="file-tree__menu-label">Kopieren</span>
-              {onCopyWikiLink && (
+              {contextMenu.entry.kind === 'file' && onDuplicate && !isPdfEntry(contextMenu.entry) && (
+                <button
+                  onClick={() => {
+                    const path = contextMenu.entry.relativePath
+                    setContextMenu(null)
+                    void Promise.resolve(onDuplicate(path))
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Files aria-hidden="true" size={15} />
+                  Notiz duplizieren
+                </button>
+              )}
+              {contextMenu.entry.kind === 'file' && onCopyWikiLink && (
                 <button
                   onClick={() => {
                     const path = contextMenu.entry.relativePath
@@ -936,38 +962,10 @@ export const FileTree = memo(function FileTree({
                   Pfad kopieren
                 </button>
               )}
-              {onDuplicate && !isPdfEntry(contextMenu.entry) && (
-                <button
-                  onClick={() => {
-                    const path = contextMenu.entry.relativePath
-                    setContextMenu(null)
-                    void Promise.resolve(onDuplicate(path))
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  <CopyPlus aria-hidden="true" size={15} />
-                  Duplizieren
-                </button>
-              )}
               <span className="file-tree__menu-separator" role="separator" />
             </>
           )}
           <span className="file-tree__menu-label">Verwalten</span>
-          {contextMenu.entry.kind === 'folder' && onCopyPath && (
-            <button
-              onClick={() => {
-                const path = contextMenu.entry.relativePath
-                setContextMenu(null)
-                void Promise.resolve(onCopyPath(path))
-              }}
-              role="menuitem"
-              type="button"
-            >
-              <Copy aria-hidden="true" size={15} />
-              Pfad kopieren
-            </button>
-          )}
           <button
             onClick={() => beginRename(contextMenu.entry)}
             role="menuitem"

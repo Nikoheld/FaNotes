@@ -967,19 +967,10 @@ const liveInkRectsTouch = (a: LiveInkRect, b: LiveInkRect) => (
 )
 
 /**
- * The closing segment of a stroke (no point after it yet) curves around a
- * control point extrapolated past its start by up to this share of the
- * previous segment — outside the hull of the points themselves.
- */
-const INK_CLOSING_CONTROL_REACH = .92 * .4
-
-/**
  * Where segments `from`..`to` of a stroke (point indexes, clamped) can paint:
  * the points' box grown by the brush margin, snapped to whole bitmap px so a
- * clear and its repair meet on pixel edges. Smoothing control points stay
- * inside the hull of the neighbouring points, so include one point on each
- * side for the curve shape — plus the extrapolated control of the closing
- * segment when the range reaches it.
+ * clear and its repair meet on pixel edges. The curve stays inside the
+ * neighbouring samples, so one point on each side is enough.
  */
 const liveInkSegmentBox = (
   points: ReadonlyArray<{ x: number; y: number }>,
@@ -1004,14 +995,6 @@ const liveInkSegmentBox = (
     if (py > y1) y1 = py
   }
   for (let index = start; index <= end; index += 1) include(points[index].x * width, points[index].y * height)
-  if (end === last && last >= 2) {
-    const previous = points[last - 1]
-    const before = points[last - 2]
-    include(
-      (previous.x + (previous.x - before.x) * INK_CLOSING_CONTROL_REACH) * width,
-      (previous.y + (previous.y - before.y) * INK_CLOSING_CONTROL_REACH) * height,
-    )
-  }
   return {
     x0: Math.floor(x0 - margin),
     y0: Math.floor(y0 - margin),
@@ -1826,18 +1809,25 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       remember(liveInkSegmentBox(stroke.points, startSegment - 1, permanentEnd - 1, pixelWidth, virtualHeight, margin))
     }
     activeRenderedPointCountRef.current = permanentEnd
-    // Volatile tail: the newest segment (or the single dot of a fresh stroke)
-    // plus the predicted continuation.
-    const preview: InkStroke = previewPoints.length
-      ? { ...stroke, points: [...stroke.points, ...previewPoints as StrokePoint[]] }
-      : stroke
+    // Volatile tail: the newest committed segment (or the single dot). A
+    // prediction is a separate extension from the last sample, so it cannot
+    // bend ink that already happened off in another direction.
     const tailStart = Math.max(1, count - 1)
-    if (preview.points.length === 1) {
-      drawInkStroke(context, preview, pixelWidth, virtualHeight, smoothing, 1, sourceWidthNow, layoutWidth)
-      liveVolatileRectRef.current = liveInkSegmentBox(preview.points, 0, 0, pixelWidth, virtualHeight, margin)
+    if (count === 1) {
+      drawInkStroke(context, stroke, pixelWidth, virtualHeight, smoothing, 1, sourceWidthNow, layoutWidth)
+      liveVolatileRectRef.current = liveInkSegmentBox(stroke.points, 0, 0, pixelWidth, virtualHeight, margin)
     } else {
-      drawInkStroke(context, preview, pixelWidth, virtualHeight, smoothing, tailStart, sourceWidthNow, layoutWidth)
-      liveVolatileRectRef.current = liveInkSegmentBox(preview.points, tailStart - 1, preview.points.length - 1, pixelWidth, virtualHeight, margin)
+      drawInkStroke(context, stroke, pixelWidth, virtualHeight, smoothing, tailStart, sourceWidthNow, layoutWidth)
+      liveVolatileRectRef.current = liveInkSegmentBox(stroke.points, tailStart - 1, count - 1, pixelWidth, virtualHeight, margin)
+    }
+    if (previewPoints.length) {
+      const extensionPoints = [stroke.points[count - 1], ...previewPoints]
+      const extension: InkStroke = { ...stroke, points: extensionPoints as StrokePoint[] }
+      drawInkStroke(context, extension, pixelWidth, virtualHeight, smoothing, 1, sourceWidthNow, layoutWidth)
+      liveVolatileRectRef.current = unionLiveInkRect(
+        liveVolatileRectRef.current,
+        liveInkSegmentBox(extensionPoints, 0, extensionPoints.length - 1, pixelWidth, virtualHeight, margin),
+      )
     }
     remember(liveVolatileRectRef.current)
     liveCanvasHasInkRef.current = true

@@ -2,10 +2,16 @@
 
 ## 2026.10.8
 
-- **Alltag mit der Notiz.** Eine Notiz lässt sich duplizieren (Alt+Umschalt+D): Text, Handschrift und Papier liegen in der Kopie, Arbeitsblätter bleiben beim Original. Wiki-Link und Pfad kopierst du aus dem Dateimenü, dem Tab oder der Befehlspalette. Strg+Umschalt+. setzt das Datum aus den Einstellungen an die Schreibmarke, die Palette setzt die Uhrzeit. Strg+Enter schaltet die Aufgabe der Zeile um oder macht aus der Zeile eine Aufgabe. Alle Ordner klappen in der Dateileiste und über die Palette zu.
+- **Aufgabe umschalten.** Strg+Enter macht aus der aktuellen Zeile eine Aufgabe oder hakt sie ab. Überschriften, Zitate, Tabellen, Linien und Code bleiben. Alt+Umschalt+D dupliziert die Notiz. Kopieren fällt auf eine Textauswahl zurück, wenn der Browser die Zwischenablage sperrt.
 
 ## 2026.10.7
 
+- **Alltag.** Eine Notiz lässt sich duplizieren: Text, Handschrift, Verlinkungen und Arbeitsblätter kommen in eine neue Datei, die Antworten des Originals bleiben dort. Wiki-Link und Pfad kopierst du aus dem Dateimenü, `Strg+Umschalt+D` setzt das Datum an der Schreibmarke ein, alle Ordner klappen mit einem Klick zu, und die leere Seite zeigt die zuletzt geöffneten Notizen.
+- **Kalenderdatei.** Eine ICS-Datei mit Weltzeit oder einer Dauer landet auf der örtlichen Uhrzeit. Dieselbe Datei noch einmal importieren aktualisiert den Termin und nimmt abgesagte Einträge heraus, statt ihn zu verdoppeln.
+- **Bild einfügen.** Ein Screenshot aus der Zwischenablage landet auf der offenen Notiz, auch während der Cursor im Text steht. Text bleibt Text.
+- **Terminerinnerung.** Der Hinweis im Kalender folgt der Sprache der Oberfläche und nennt weitere Termine, die gleich beginnen.
+- **Karteikarten.** Nochmal legt die Karte hinter die anderen fälligen Karten, statt sie sofort wieder zu zeigen. Leertaste zeigt die Antwort, 1 bis 4 bewertet, und die Karte folgt der Sprache der Oberfläche.
+- **Ausgefallene Termine.** Eine wiederkehrende Kalenderdatei behält die ausgelassenen Tage. Ein erneuter Import ergänzt sie, ohne einen lokal übersprungenen Tag zurückzuholen.
 - **Android-Tablet.** Der Text liegt auf dem Papier, die Leiste klappt beim Schreiben ein, und der Radierer folgt der Spitze.
 - **Sync.** Der Abgleich zeigt den Fortschritt, und ein zweiter Start geht nicht verloren.
 - **Version.** Die Version lässt sich in GitHub Actions unter Update version setzen. Der Android-Release installiert das SDK, ohne am Lizenzdialog abzubrechen.

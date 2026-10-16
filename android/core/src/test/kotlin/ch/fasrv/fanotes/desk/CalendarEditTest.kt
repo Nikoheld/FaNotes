@@ -45,6 +45,41 @@ class CalendarEditTest {
     }
 
     @Test
+    fun aMonthlySeriesReturnsToTheOriginalDayAfterAShortMonth() {
+        val rent = CalendarEvent(
+            "rent",
+            "personal",
+            "Miete",
+            "2026-01-31T09:00",
+            "2026-01-31T10:00",
+            allDay = false,
+            recurrence = "monthly",
+        )
+        val document = emptyCalendar().copy(events = listOf(rent))
+        assertEquals(1, timedDayLayout(document, LocalDate.of(2026, 2, 28)).size)
+        assertEquals(0, timedDayLayout(document, LocalDate.of(2026, 3, 28)).size)
+        assertEquals(LocalDate.of(2026, 3, 31), timedDayLayout(document, LocalDate.of(2026, 3, 31)).single().start.toLocalDate())
+        val skipped = skipCalendarOccurrence(document, "rent", LocalDate.of(2026, 1, 31))
+        assertEquals("2026-01-31T09:00", skipped.events.single().start)
+        assertEquals(listOf("2026-01-31"), skipped.events.single().exceptionDates)
+        assertEquals(0, timedDayLayout(skipped, LocalDate.of(2026, 1, 31)).size)
+        assertEquals(1, timedDayLayout(skipped, LocalDate.of(2026, 3, 31)).size)
+        val leap = CalendarEvent(
+            "leap",
+            "personal",
+            "Schaltjahr",
+            "2024-02-29T08:00",
+            "2024-02-29T09:00",
+            allDay = false,
+            recurrence = "yearly",
+        )
+        val leaps = emptyCalendar().copy(events = listOf(leap))
+        assertEquals(1, timedDayLayout(leaps, LocalDate.of(2025, 2, 28)).size)
+        assertEquals(0, timedDayLayout(leaps, LocalDate.of(2028, 2, 28)).size)
+        assertEquals(1, timedDayLayout(leaps, LocalDate.of(2028, 2, 29)).size)
+    }
+
+    @Test
     fun aNewListTakesTheNextDesktopColorAndCanBeHidden() {
         val empty = emptyCalendar()
         assertSame(empty, createCalendarList(empty, "   "))

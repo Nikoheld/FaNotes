@@ -247,6 +247,9 @@ internal val LocalStatusInk = staticCompositionLocalOf {
     StatusInk(Color(0xFF5E5C57), Color(0xFF1F7A48), Color(0xFF8A5A12), Color(0xFF4E4C47), Color(0xFFE3E2DE), Color(0xFFFFFFFF))
 }
 
+/** Resolved theme id from [ch.fasrv.fanotes.desk.themePalette], never the raw `system` token. */
+internal val LocalDeskThemeId = staticCompositionLocalOf { "light" }
+
 /** True when the settings viewport stacks each `.setting-row`. */
 private val LocalSettingsContentStacks = staticCompositionLocalOf { false }
 
@@ -4620,11 +4623,11 @@ fun FirstRunDialog(
                             if (wide) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(copyWeight)) { FirstRunWelcomeCopy(accent) { go(1) } }
-                                    WelcomePreview(Modifier.weight(panelWeight), accent)
+                                    WelcomePreview(Modifier.weight(panelWeight))
                                 }
                             } else {
                                 FirstRunWelcomeCopy(accent) { go(1) }
-                                WelcomePreview(Modifier.fillMaxWidth().padding(top = gap), accent)
+                                WelcomePreview(Modifier.fillMaxWidth().padding(top = gap))
                             }
                         }
                     }
@@ -4664,11 +4667,11 @@ fun FirstRunDialog(
                             if (wide) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(copyWeight)) { FirstRunWritingCopy(accent) { go(it) } }
-                                    WritingPreview(Modifier.weight(panelWeight), accent)
+                                    WritingPreview(Modifier.weight(panelWeight))
                                 }
                             } else {
                                 FirstRunWritingCopy(accent) { go(it) }
-                                WritingPreview(Modifier.fillMaxWidth().padding(top = gap), accent)
+                                WritingPreview(Modifier.fillMaxWidth().padding(top = gap))
                             }
                         }
                     }
@@ -4864,8 +4867,10 @@ private fun FirstRunWelcomeCopy(accent: Color, onContinue: () -> Unit) {
 }
 
 @Composable
-private fun WelcomePreview(modifier: Modifier, accent: Color) {
+private fun WelcomePreview(modifier: Modifier) {
     val ink = LocalStatusInk.current
+    // Subject mark, formula, and hit count use `--accent`, not the readable label color.
+    val accent = MaterialTheme.colorScheme.primary
     val screen = LocalConfiguration.current
     val screenWidth = screen.screenWidthDp
     val screenHeight = screen.screenHeightDp
@@ -4881,37 +4886,120 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
         bottomStart = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_RADIUS_BOTTOM_DP.dp,
     )
     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_RADIUS_DP.dp)
-    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
-    Column(modifier.semantics { contentDescription = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_LABEL }) {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val windowBorder = Color(ch.fasrv.fanotes.desk.firstRunPreviewWindowBorder(LocalDeskThemeId.current))
+    val windowShadow = Color(ch.fasrv.fanotes.desk.firstRunPreviewWindowShadowColor())
+    Box(modifier.semantics { contentDescription = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_LABEL }) {
+        Box(Modifier.matchParentSize().welcomePreviewGlow(MaterialTheme.colorScheme.primary.toArgb()))
         Column(
             Modifier
                 .fillMaxWidth()
+                .shadow(
+                    elevation = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_WINDOW_SHADOW_Y_DP.dp,
+                    shape = shape,
+                    clip = false,
+                    ambientColor = windowShadow,
+                    spotColor = windowShadow,
+                )
+                .drawBehind {
+                    val stroke = 1.dp.toPx()
+                    val radius = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_RADIUS_DP.dp.toPx()
+                    drawRoundRect(
+                        color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_WINDOW_RING),
+                        topLeft = Offset(-stroke / 2f, -stroke / 2f),
+                        size = Size(size.width + stroke, size.height + stroke),
+                        cornerRadius = CornerRadius(radius + stroke / 2f, radius + stroke / 2f),
+                        style = Stroke(width = stroke),
+                    )
+                }
                 .clip(shape)
-                .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), shape)
+                .border(1.dp, windowBorder, shape)
                 .background(ink.panelStrong),
         ) {
-            Row(
-                Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_DP.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)).padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                listOf(MaterialTheme.colorScheme.error, Color(0xFFD8A643), LocalStatusInk.current.success).forEach { dot ->
-                    Box(Modifier.size(6.dp).clip(CircleShape).background(dot))
+            val headerBorder = Color(ch.fasrv.fanotes.desk.firstRunPreviewBorder(LocalDeskThemeId.current))
+            Column(Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_DP.dp)) {
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .background(Color(ch.fasrv.fanotes.desk.firstRunPreviewHeaderFill(MaterialTheme.colorScheme.surface.toArgb())))
+                        .padding(horizontal = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_PAD_DP.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_GAP_DP.dp),
+                ) {
+                    val dots = listOf(
+                        Color(ch.fasrv.fanotes.desk.firstRunPreviewHeaderClose(MaterialTheme.colorScheme.error.toArgb(), headerBorder.toArgb())),
+                        Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_MIDDLE_DOT),
+                        ink.success,
+                    )
+                    dots.forEach { dot ->
+                        Box(
+                            Modifier
+                                .size(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_DOT_DP.dp)
+                                .clip(CircleShape)
+                                .background(dot),
+                        )
+                    }
+                    Text(
+                        ch.fasrv.fanotes.desk.FIRST_RUN_BRAND,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.End,
+                        fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_TITLE_SP.sp,
+                        fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_TITLE_WEIGHT),
+                        color = ink.muted,
+                    )
                 }
-                Text(ch.fasrv.fanotes.desk.FIRST_RUN_BRAND, modifier = Modifier.weight(1f), textAlign = TextAlign.End, fontSize = 11.sp, color = ink.muted)
+                Box(Modifier.fillMaxWidth().height(1.dp).background(headerBorder))
             }
             // The body does not clip, so the sheet shadow can paint. The window clip above still cuts blur that leaves the window.
             Row(Modifier.fillMaxWidth().heightIn(min = bodyMin)) {
                 Column(
-                    Modifier.width(aside).fillMaxHeight().padding(
-                        start = asidePad.start.dp,
-                        top = asidePad.top.dp,
-                        end = asidePad.end.dp,
-                        bottom = asidePad.bottom.dp,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    Modifier
+                        .width(aside)
+                        .fillMaxHeight()
+                        .background(
+                            Color(
+                                ch.fasrv.fanotes.desk.firstRunPreviewAsideFill(
+                                    MaterialTheme.colorScheme.background.toArgb(),
+                                    MaterialTheme.colorScheme.surface.toArgb(),
+                                ),
+                            ),
+                        )
+                        .drawBehind {
+                            val stroke = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_RULE_DP.dp.toPx()
+                            val x = size.width - stroke / 2f
+                            drawLine(headerBorder, Offset(x, 0f), Offset(x, size.height), strokeWidth = stroke)
+                        }
+                        .padding(
+                            start = asidePad.start.dp,
+                            top = asidePad.top.dp,
+                            end = asidePad.end.dp + ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_RULE_DP.dp,
+                            bottom = asidePad.bottom.dp,
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_GAP_DP.dp),
                 ) {
-                    Text("Meine Fächer", fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_SP.sp, fontWeight = FontWeight.SemiBold)
+                    Row(
+                        Modifier.padding(
+                            start = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_MARGIN_INLINE_DP.dp,
+                            end = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_MARGIN_INLINE_DP.dp,
+                            bottom = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_MARGIN_BOTTOM_DP.dp,
+                        ),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_ICON_GAP_DP.dp),
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.MenuBook,
+                            contentDescription = null,
+                            modifier = Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_ICON_DP.dp),
+                            tint = ink.soft,
+                        )
+                        Text(
+                            ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SUBJECTS_HEADING,
+                            fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_SP.sp,
+                            fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_WEIGHT),
+                            color = ink.soft,
+                        )
+                    }
                     ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SUBJECTS.forEachIndexed { index, subject ->
                         Row(
                             Modifier
@@ -4994,15 +5082,19 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
                             .background(Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_RULE_ARGB)),
                     )
                     Canvas(Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_HEIGHT_DP.dp).semantics { contentDescription = "Handschriftliche Formel" }) {
+                        val meet = ch.fasrv.fanotes.desk.previewInkMeet(
+                            size.width,
+                            size.height,
+                            ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_VIEW_WIDTH.toFloat(),
+                            ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_VIEW_HEIGHT.toFloat(),
+                        ) ?: return@Canvas
                         val stroke = androidx.compose.ui.graphics.drawscope.Stroke(
-                            width = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_WIDTH_DP.dp.toPx(),
+                            width = ch.fasrv.fanotes.desk.previewInkStrokePx(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_WIDTH_DP, meet.scale),
                             cap = androidx.compose.ui.graphics.StrokeCap.Round,
                             join = androidx.compose.ui.graphics.StrokeJoin.Round,
                         )
-                        val sx = size.width / ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_VIEW_WIDTH
-                        val sy = size.height / ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_HEIGHT_DP
-                        fun mx(x: Float) = x * sx
-                        fun my(y: Float) = y * sy
+                        fun mx(x: Float) = meet.offsetX + x * meet.scale
+                        fun my(y: Float) = meet.offsetY + y * meet.scale
                         val path = androidx.compose.ui.graphics.Path().apply {
                             moveTo(mx(15f), my(58f))
                             cubicTo(mx(29f), my(50f), mx(33f), my(32f), mx(39f), my(26f))
@@ -5027,6 +5119,7 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
                     }
                     Row(
                         Modifier
+                            .fillMaxWidth()
                             .height(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_HEIGHT_DP.dp)
                             .shadow(
                                 elevation = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_SHADOW_Y_DP.dp,
@@ -5053,15 +5146,68 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
                 }
             }
         }
-        Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK, ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FOUND).forEach { label ->
-                Text(
-                    label,
-                    fontSize = 12.sp,
-                    modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, rule, RoundedCornerShape(999.dp)).background(ink.panelStrong).padding(horizontal = 10.dp, vertical = 6.dp),
-                )
-            }
+        BoxWithConstraints(Modifier.matchParentSize()) {
+            val handwriting = ch.fasrv.fanotes.desk.firstRunPreviewFloatOffset(ch.fasrv.fanotes.desk.firstRunPreviewFloatOne(screenWidth))
+            val found = ch.fasrv.fanotes.desk.firstRunPreviewFloatOffset(ch.fasrv.fanotes.desk.firstRunPreviewFloatTwo())
+            WelcomePreviewFloat(
+                ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK,
+                Icons.Filled.Edit,
+                dark,
+                ink,
+                Modifier.align(Alignment.TopEnd).offset(x = handwriting.xDp.dp, y = maxHeight * handwriting.yFraction + handwriting.yDp.dp),
+            )
+            WelcomePreviewFloat(
+                ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FOUND,
+                Icons.Filled.Search,
+                dark,
+                ink,
+                Modifier.align(Alignment.BottomEnd).offset(x = found.xDp.dp, y = maxHeight * found.yFraction + found.yDp.dp),
+            )
         }
+    }
+}
+
+@Composable
+private fun WelcomePreviewFloat(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    dark: Boolean,
+    ink: StatusInk,
+    modifier: Modifier,
+) {
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FLOAT_RADIUS_DP.dp)
+    val shadow = Color(ch.fasrv.fanotes.desk.firstRunPreviewFloatShadowColor())
+    Row(
+        modifier
+            .shadow(
+                elevation = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FLOAT_SHADOW_Y_DP.dp,
+                shape = shape,
+                clip = false,
+                ambientColor = shadow,
+                spotColor = shadow,
+            )
+            .clip(shape)
+            .border(1.dp, Color(ch.fasrv.fanotes.desk.firstRunPreviewFloatBorder(dark)), shape)
+            .background(Color(ch.fasrv.fanotes.desk.firstRunPreviewFloatFill(ink.panelStrong.toArgb())))
+            .padding(
+                horizontal = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FLOAT_PAD_INLINE_DP.dp,
+                vertical = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FLOAT_PAD_BLOCK_DP.dp,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FLOAT_GAP_DP.dp),
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FLOAT_ICON_DP.dp),
+            tint = Color(ch.fasrv.fanotes.desk.firstRunPreviewFloatIcon(dark)),
+        )
+        Text(
+            label,
+            fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FLOAT_SP.sp,
+            fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FLOAT_WEIGHT),
+            color = ink.soft,
+        )
     }
 }
 
@@ -5094,61 +5240,259 @@ private fun FirstRunWritingCopy(accent: Color, onStep: (Int) -> Unit) {
 }
 
 @Composable
-private fun WritingPreview(modifier: Modifier, accent: Color) {
+private fun WritingPreview(modifier: Modifier) {
     val ink = LocalStatusInk.current
-    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_RADIUS_DP.dp)
-    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
-    Column(
+    // Toolbar, ink, transcript, and selection use `--accent`, not the readable label color.
+    val accent = MaterialTheme.colorScheme.primary
+    val screen = LocalConfiguration.current
+    val framePad = ch.fasrv.fanotes.desk.firstRunWritingFramePad(screen.screenWidthDp, screen.screenHeightDp)
+    val sheetPad = ch.fasrv.fanotes.desk.firstRunWritingSheetPad(screen.screenWidthDp, screen.screenHeightDp)
+    val sheetMin = ch.fasrv.fanotes.desk.firstRunWritingSheetMinDp(screen.screenWidthDp, screen.screenHeightDp).dp
+    val inkHeight = ch.fasrv.fanotes.desk.firstRunWritingInkHeightDp(screen.screenWidthDp, screen.screenHeightDp).dp
+    val frameShape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FRAME_RADIUS_DP.dp)
+    val sheetShape = RoundedCornerShape(
+        topStart = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SHEET_RADIUS_DP.dp,
+        topEnd = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SHEET_RADIUS_DP.dp,
+    )
+    val transcriptShape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_RADIUS_DP.dp)
+    val labelShape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SELECTION_LABEL_RADIUS_DP.dp)
+    val strong = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    val panelWash = ink.panelStrong.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FRAME_PANEL_ALPHA)
+    val elevatedWash = MaterialTheme.colorScheme.surface.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FRAME_ELEVATED_ALPHA)
+    val accentArgb = accent.toArgb()
+    Box(
         modifier
-            .clip(shape)
-            .border(1.dp, rule, shape)
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(start = 24.dp, end = 24.dp, top = 18.dp, bottom = 16.dp)
+            .shadow(
+                elevation = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FRAME_SHADOW_Y_DP.dp,
+                shape = frameShape,
+                ambientColor = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FRAME_SHADOW_ALPHA),
+                spotColor = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FRAME_SHADOW_ALPHA),
+            )
+            .clip(frameShape)
+            .border(1.dp, strong, frameShape)
+            .drawBehind {
+                val radians = Math.toRadians(145.0)
+                val dx = kotlin.math.sin(radians).toFloat()
+                val dy = -kotlin.math.cos(radians).toFloat()
+                val reach = size.maxDimension
+                val center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
+                drawRect(
+                    Brush.linearGradient(
+                        listOf(panelWash, elevatedWash),
+                        start = center - androidx.compose.ui.geometry.Offset(dx, dy) * reach,
+                        end = center + androidx.compose.ui.geometry.Offset(dx, dy) * reach,
+                    ),
+                )
+            }
             .semantics { contentDescription = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_PREVIEW_LABEL },
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Box(Modifier.size(8.dp).clip(CircleShape).background(accent))
-            Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FILE, fontSize = 12.sp, color = ink.muted)
-        }
-        Column(
+        Row(
             Modifier
-                .padding(top = 12.dp)
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .background(ink.panelStrong)
-                .padding(16.dp),
+                .height(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TOOLBAR_DP.dp)
+                .drawBehind {
+                    val y = size.height
+                    drawLine(rule, androidx.compose.ui.geometry.Offset(0f, y), androidx.compose.ui.geometry.Offset(size.width, y), strokeWidth = 1.dp.toPx())
+                }
+                .padding(horizontal = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TOOLBAR_PAD_DP.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_DATE, fontSize = 12.sp, color = ink.muted)
-            Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_HEADING, fontSize = 20.sp, fontWeight = FontWeight(650), modifier = Modifier.padding(top = 6.dp))
-            Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TYPED, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-            Canvas(Modifier.fillMaxWidth().height(56.dp).padding(top = 8.dp).semantics { contentDescription = "Handschriftliche Integralrechnung" }) {
-                val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                val path = androidx.compose.ui.graphics.Path().apply {
-                    moveTo(12f, size.height * 0.7f)
-                    quadraticTo(size.width * 0.12f, size.height * 0.15f, size.width * 0.22f, size.height * 0.45f)
-                    quadraticTo(size.width * 0.34f, size.height * 0.85f, size.width * 0.48f, size.height * 0.35f)
-                    quadraticTo(size.width * 0.7f, size.height * 0.1f, size.width - 12f, size.height * 0.55f)
+            Row(horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TOOLBAR_GAP_DP.dp), verticalAlignment = Alignment.CenterVertically) {
+                val markShape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TOOLBAR_MARK_RADIUS_DP.dp)
+                Box(
+                    Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TOOLBAR_MARK_DP.dp).clip(markShape).border(1.dp, rule, markShape).background(accent.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TOOLBAR_DOT_ALPHA)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TOOLBAR_DOT_DP.dp).clip(CircleShape).background(accent))
                 }
-                drawPath(path, accent, style = stroke)
+                repeat(2) {
+                    Box(Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TOOLBAR_MARK_DP.dp).clip(markShape).border(1.dp, rule, markShape))
+                }
             }
-            Row(
-                Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)).padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Spacer(Modifier.weight(1f))
+            Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FILE, fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FILE_SP.sp, color = ink.muted)
+        }
+        Box(
+            Modifier
+                .padding(start = framePad.start.dp, top = framePad.top.dp, end = framePad.end.dp, bottom = framePad.bottom.dp)
+                .fillMaxWidth()
+                .heightIn(min = sheetMin)
+                .shadow(
+                    elevation = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SHEET_SHADOW_Y_DP.dp,
+                    shape = sheetShape,
+                    ambientColor = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SHEET_SHADOW_ALPHA),
+                    spotColor = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SHEET_SHADOW_ALPHA),
+                )
+                .clip(sheetShape)
+                .background(Color(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SHEET_FILL)),
+        ) {
+            Column(
+                Modifier.padding(start = sheetPad.start.dp, top = sheetPad.top.dp, end = sheetPad.end.dp, bottom = sheetPad.bottom.dp),
             ) {
-                Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(12.dp), tint = accent)
-                Column(Modifier.weight(1f)) {
-                    Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_RECOGNIZED, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FORMULA, fontSize = 12.sp, color = ink.muted)
+                Text(
+                    ch.fasrv.fanotes.desk.firstRunWritingDateLabel(),
+                    fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_DATE_SP.sp,
+                    fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_DATE_WEIGHT),
+                    letterSpacing = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_DATE_TRACKING_EM.em,
+                    color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_DATE_INK),
+                )
+                Text(
+                    ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_HEADING,
+                    fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TITLE_SP.sp,
+                    fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TITLE_WEIGHT),
+                    letterSpacing = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TITLE_TRACKING_EM.em,
+                    lineHeight = (ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TITLE_SP * ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TITLE_LINE).sp,
+                    color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SHEET_INK),
+                    modifier = Modifier.padding(
+                        top = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TITLE_MARGIN_TOP_DP.dp,
+                        bottom = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TITLE_MARGIN_BOTTOM_DP.dp,
+                    ),
+                )
+                Text(
+                    ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TYPED,
+                    fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TYPED_SP.sp,
+                    lineHeight = (ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TYPED_SP * ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TYPED_LINE).sp,
+                    color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TYPED_INK),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                )
+                Canvas(
+                    Modifier
+                        .padding(top = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_INK_MARGIN_TOP_DP.dp)
+                        .fillMaxWidth()
+                        .height(inkHeight)
+                        .semantics { contentDescription = "Handschriftliche Integralrechnung" },
+                ) {
+                    val meet = ch.fasrv.fanotes.desk.previewInkMeet(
+                        size.width,
+                        size.height,
+                        ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_INK_VIEW_WIDTH.toFloat(),
+                        ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_INK_VIEW_HEIGHT.toFloat(),
+                    ) ?: return@Canvas
+                    val stroke = androidx.compose.ui.graphics.drawscope.Stroke(
+                        width = ch.fasrv.fanotes.desk.previewInkStrokePx(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_INK_WIDTH_DP, meet.scale),
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                        join = androidx.compose.ui.graphics.StrokeJoin.Round,
+                    )
+                    fun mx(x: Float) = meet.offsetX + x * meet.scale
+                    fun my(y: Float) = meet.offsetY + y * meet.scale
+                    val integral = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(mx(36f), my(96f))
+                        cubicTo(mx(51f), my(77f), mx(46f), my(38f), mx(65f), my(28f))
+                        cubicTo(mx(77f), my(22f), mx(79f), my(36f), mx(68f), my(43f))
+                        cubicTo(mx(52f), my(54f), mx(51f), my(98f), mx(35f), my(112f))
+                        cubicTo(mx(28f), my(118f), mx(19f), my(113f), mx(23f), my(107f))
+                    }
+                    val terms = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(mx(81f), my(42f)); lineTo(mx(92f), my(42f))
+                        moveTo(mx(79f), my(107f)); lineTo(mx(91f), my(107f))
+                        moveTo(mx(111f), my(78f))
+                        cubicTo(mx(126f), my(66f), mx(137f), my(67f), mx(145f), my(77f))
+                        cubicTo(mx(152f), my(88f), mx(140f), my(99f), mx(124f), my(98f))
+                        cubicTo(mx(110f), my(98f), mx(102f), my(87f), mx(111f), my(78f))
+                        moveTo(mx(155f), my(72f)); lineTo(mx(183f), my(72f))
+                        moveTo(mx(169f), my(58f)); lineTo(mx(169f), my(89f))
+                        moveTo(mx(202f), my(48f))
+                        cubicTo(mx(218f), my(38f), mx(239f), my(48f), mx(236f), my(67f))
+                        cubicTo(mx(232f), my(88f), mx(213f), my(96f), mx(201f), my(88f))
+                        moveTo(mx(258f), my(70f)); lineTo(mx(294f), my(70f))
+                        moveTo(mx(314f), my(47f))
+                        cubicTo(mx(331f), my(36f), mx(348f), my(47f), mx(345f), my(65f))
+                        cubicTo(mx(342f), my(83f), mx(326f), my(93f), mx(312f), my(86f))
+                        moveTo(mx(365f), my(82f))
+                        cubicTo(mx(374f), my(68f), mx(385f), my(62f), mx(398f), my(64f))
+                    }
+                    val color = Color(ch.fasrv.fanotes.desk.firstRunWritingInkStroke(accentArgb))
+                    drawPath(integral, color, style = stroke)
+                    drawPath(terms, color, style = stroke)
                 }
-                Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(13.dp), tint = accent)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_MIN_DP.dp)
+                        .shadow(
+                            elevation = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_SHADOW_Y_DP.dp,
+                            shape = transcriptShape,
+                            ambientColor = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_SHADOW_ALPHA),
+                            spotColor = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_SHADOW_ALPHA),
+                        )
+                        .clip(transcriptShape)
+                        .border(1.dp, Color(ch.fasrv.fanotes.desk.firstRunWritingTranscriptBorder(accentArgb)), transcriptShape)
+                        .background(Color(ch.fasrv.fanotes.desk.firstRunWritingTranscriptFill(accentArgb)))
+                        .padding(
+                            horizontal = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_PAD_INLINE_DP.dp,
+                            vertical = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_PAD_BLOCK_DP.dp,
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_GAP_DP.dp),
+                ) {
+                    Box(Modifier.width(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_LEAD_DP.dp), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_ICON_DP.dp), tint = Color(ch.fasrv.fanotes.desk.firstRunWritingSparkle(accentArgb)))
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_RECOGNIZED,
+                            fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_SP.sp,
+                            fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_WEIGHT),
+                            lineHeight = (ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_SP * ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_LINE).sp,
+                            color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TYPED_INK),
+                        )
+                        Text(
+                            ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FORMULA,
+                            fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_SP.sp,
+                            fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_DETAIL_WEIGHT),
+                            color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_DETAIL_INK),
+                            modifier = Modifier.padding(top = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_DETAIL_GAP_DP.dp),
+                        )
+                    }
+                    Box(Modifier.width(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_TRAIL_DP.dp), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_CHECK_DP.dp), tint = Color(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_CHECK_INK))
+                    }
+                }
             }
-            Text(
-                ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_CONVERT,
-                fontSize = 12.sp,
-                color = ink.muted,
-                modifier = Modifier.padding(top = 8.dp).clip(RoundedCornerShape(6.dp)).border(1.dp, rule, RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 4.dp),
-            )
+            Box(
+                Modifier
+                    .padding(
+                        start = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SELECTION_START_DP.dp,
+                        end = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SELECTION_END_DP.dp,
+                        top = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SELECTION_TOP_DP.dp,
+                    )
+                    .fillMaxWidth()
+                    .height(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SELECTION_HEIGHT_DP.dp),
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    drawRoundRect(
+                        color = accent.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SELECTION_ALPHA),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(
+                            width = 1.dp.toPx(),
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx())),
+                        ),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SELECTION_RADIUS_DP.dp.toPx()),
+                    )
+                }
+                val handle = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SELECTION_HANDLE_DP.dp
+                val outset = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SELECTION_HANDLE_OUTSET_DP.dp
+                val handleShape = RoundedCornerShape(1.dp)
+                Box(Modifier.align(Alignment.TopStart).offset(x = -outset, y = -outset).size(handle).clip(handleShape).border(1.dp, accent, handleShape).background(Color.White))
+                Box(Modifier.align(Alignment.BottomEnd).offset(x = outset, y = outset).size(handle).clip(handleShape).border(1.dp, accent, handleShape).background(Color.White))
+                Text(
+                    ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_CONVERT,
+                    fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SELECTION_LABEL_SP.sp,
+                    fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SELECTION_LABEL_WEIGHT),
+                    color = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(y = -ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SELECTION_LABEL_RISE_DP.dp)
+                        .clip(labelShape)
+                        .background(Color(ch.fasrv.fanotes.desk.firstRunWritingSelectionLabel(accentArgb)))
+                        .padding(
+                            horizontal = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SELECTION_LABEL_PAD_INLINE_DP.dp,
+                            vertical = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SELECTION_LABEL_PAD_BLOCK_DP.dp,
+                        ),
+                )
+            }
         }
     }
 }
@@ -7653,6 +7997,25 @@ private fun SettingsPage(
                                 onCheckedChange = { model.updateDesk("line-numbers", if (it) "on" else "off") },
                             )
                         }
+                        SettingRow(
+                            "Rechtschreibprüfung",
+                            "Unterstreicht Tippfehler lokal rot und erkennt Deutsch oder Englisch automatisch. Mathematik und Code bleiben unberührt. Ein langes Drücken oder Strg+. zeigt Vorschläge.",
+                        ) {
+                            Switch(
+                                checked = settings["spellcheck"] != "off",
+                                onCheckedChange = { model.updateDesk("spellcheck", if (it) "on" else "off") },
+                            )
+                        }
+                        SettingRow(
+                            "Autokorrektur",
+                            "Ersetzt einen eindeutigen Tippfehler, sobald das Wort mit Leerzeichen oder Satzzeichen endet. Rückschritt direkt danach stellt das getippte Wort wieder her.",
+                        ) {
+                            Switch(
+                                checked = settings["spellcheck"] != "off" && settings["autocorrect"] != "off",
+                                enabled = settings["spellcheck"] != "off",
+                                onCheckedChange = { model.updateDesk("autocorrect", if (it) "on" else "off") },
+                            )
+                        }
                         SettingRow("Wortzahl in Statusleiste") {
                             Switch(
                                 checked = settings["words"] != "off",
@@ -7726,9 +8089,25 @@ private fun SettingsPage(
                         SettingRow(
                             "Form-Erkennung",
                             "Wie bereitwillig Stillhalten eine Linie, einen Kreis oder ein Vieleck glättet. Niedrig nur bei sehr klaren Figuren; hoch früher und auch bei unsaubereren Strichen.",
-                            divider = false,
                         ) {
                             SettingSlider(pen.shapeSnap.toFloat(), 0f, 100f, 5f, " %") { model.updateDesk("shape-snap", it.toInt().toString()) }
+                        }
+                        val standardBusy by model.noteStandardBusy.collectAsStateWithLifecycle()
+                        val standardStatus by model.noteStandardStatus.collectAsStateWithLifecycle()
+                        SettingRow(
+                            "Alte Notizen auf den aktuellen Standard",
+                            "Bringt vorhandene Handschrift auf die aktuelle scharfe HiDPI-Anzeige. Markdown, Tinte, Arbeitsblätter und Seitenstatistik bleiben erhalten.",
+                            divider = false,
+                            modifier = Modifier.settingsAnchor("drawing", "settings-note-standard", anchorY),
+                        ) {
+                            Column(horizontalAlignment = Alignment.End) {
+                                TextButton(onClick = { model.convertOldNotes() }, enabled = !standardBusy) {
+                                    Text(if (standardBusy) "Aktualisiert …" else "Aktualisieren")
+                                }
+                                if (!standardStatus.isNullOrBlank()) {
+                                    Text(standardStatus.orEmpty(), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                                }
+                            }
                         }
                     }
                 }

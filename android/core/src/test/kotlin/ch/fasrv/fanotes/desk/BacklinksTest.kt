@@ -20,6 +20,10 @@ class BacklinksTest {
         assertEquals("Text", found[0].title)
         assertTrue(found[0].excerpt.contains("[[Algebra]]"))
         assertEquals(listOf("Andere"), wikilinkTargets("Siehe [[Andere#Kapitel|hier]] und [[Andere]]"))
+        val example = "Siehe [[Algebra]] und `[[Physik]]`.\n```\n[[Chemie]]\n```\n"
+        assertEquals(listOf("Algebra"), wikilinkTargets(example))
+        val onlyCode = backlinksFor("Mathe/Physik.md", listOf("Deutsch/Text.md" to "Beispiel `[[Physik]]`."))
+        assertEquals(0, onlyCode.size)
     }
 
     @Test

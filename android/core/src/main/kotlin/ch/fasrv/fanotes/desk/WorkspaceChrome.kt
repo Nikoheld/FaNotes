@@ -84,6 +84,13 @@ data class NoteWorkspacePanels(val sidebar: Boolean, val inspector: Boolean)
 fun workspaceKeepsNoteChrome(destination: String): Boolean =
     destination == "notes" || destination == "search"
 
+/**
+ * Settings and the AI assistant are dialogs over the current screen.
+ * Kalender, Hausaufgaben, and the overview stay where they are. Switching
+ * them to the note editor left that editor behind after the dialog closed.
+ */
+fun destinationUnderOverlay(current: String): String = current
+
 fun noteWorkspacePanels(
     focus: Boolean,
     wide: Boolean,

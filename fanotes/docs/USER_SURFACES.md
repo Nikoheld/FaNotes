@@ -37,16 +37,20 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Spelling suggestion menu (right-click / Strg+.) with Ignore and Add to dictionary | `src/lib/spellingCorrections.ts` | `cm-spelling-menu__learn` |
 | Correction candidates, ranking and the autocorrect decision | `src/lib/spellingSuggest.ts` | `export const decideAutocorrect` |
 | Autokorrektur setting | `src/components/SettingsModal.tsx` | `title="Autokorrektur"` |
+| Lernzeit | `src/App.tsx` | `id: 'study'` |
+| Karteikarten | `src/App.tsx` | `id: 'flashcards'` |
+| Duplicate a note (text, ink, links, worksheets) | `src/App.tsx` | `id: 'duplicate-note'` |
+| Duplicate name, wiki link, date stamp, recent notes | `src/lib/noteQoL.ts` | `export const duplicatePreferredStem` |
+| Copy wiki link | `src/App.tsx` | `id: 'copy-wiki-link'` |
+| Insert date | `src/App.tsx` | `id: 'insert-date'` |
+| Insert date and time | `src/App.tsx` | `id: 'insert-date-time'` |
+| Collapse or expand every folder | `src/components/FileTree.tsx` | `Alle Ordner einklappen` |
+| Recent notes on the empty page | `src/App.tsx` | `placeholder-recent` |
 | Note backup snapshots | `src/lib/noteBackup.ts` | `export const createNoteBackup` |
 | Backup control policy | `src/lib/noteBackup.ts` | `export const noteBackupControlPolicy` |
 | Backup top chrome | `src/App.tsx` | `note-backup-control` |
-| Duplicate the open note | `src/App.tsx` | `id: 'duplicate-note'` |
-| Copy a wiki link | `src/App.tsx` | `id: 'copy-wikilink'` |
-| Insert today's date | `src/App.tsx` | `id: 'insert-date'` |
-| Insert the time | `src/App.tsx` | `id: 'insert-time'` |
 | Toggle the task on the current line | `src/App.tsx` | `id: 'toggle-task'` |
-| Collapse every folder in the file tree | `src/App.tsx` | `id: 'collapse-folders'` |
-| Everyday note helpers | `src/lib/noteEveryday.ts` | `export const duplicateStem` |
+| Task line toggle | `src/lib/noteEveryday.ts` | `export const toggleTaskLine` |
 | Notiz-Backup Experimentell | `src/components/SettingsModal.tsx` | `title="Notiz-Backup"` |
 | Send Data Experimentell | `src/components/SettingsModal.tsx` | `title="Send Data"` |
 | Send Data policy | `src/lib/sendData.ts` | `export const sendDataPolicy` |
@@ -171,9 +175,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Calendar model | `src/lib/calendarModel.ts` | `export const CALENDAR_NOTE_PATH` |
 | Calendar command | `src/App.tsx` | `id: 'calendar'` |
 | Study time | `src/components/StudyOverview.tsx` | `export function StudyOverview` |
-| Study time command | `src/App.tsx` | `id: 'study'` |
 | Flashcards | `src/components/FlashcardReview.tsx` | `export function FlashcardReview` |
-| Flashcards command | `src/App.tsx` | `id: 'flashcards'` |
 
 ## Homework
 
