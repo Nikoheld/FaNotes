@@ -77,8 +77,13 @@ class NotePageView(context: Context) : FrameLayout(context) {
             history.reset()
         }
 
-        fun rememberChange(before: String, after: String, cursorBefore: Int = cursorBeforeEdit) {
-            history.record(before, after, cursorBefore, selectionEnd.coerceAtLeast(0), System.currentTimeMillis())
+        fun rememberChange(
+            before: String,
+            after: String,
+            cursorBefore: Int = cursorBeforeEdit,
+            cursorAfter: Int = selectionEnd.coerceAtLeast(0),
+        ) {
+            history.record(before, after, cursorBefore, cursorAfter, System.currentTimeMillis())
         }
 
         fun undoTyping(): Boolean = restoreHistory(history.undo(text?.toString().orEmpty()))
@@ -870,8 +875,26 @@ class NotePageView(context: Context) : FrameLayout(context) {
                             closedBrackets.addAll(
                                 ch.fasrv.fanotes.desk.bracketsOnCursorLine(next, editor.selectionStart, shifted),
                             )
-                            editor.rememberChange(editBefore, next)
-                            onVisibleMarkdown(editBefore, next)
+                            val corrected = editor.spelling.autocorrectEdit(editBefore, next, changeStart, changeDeleted)
+                            if (corrected != null) {
+                                writing = true
+                                editor.setText(corrected.text)
+                                editor.setSelection(corrected.cursor.coerceIn(0, corrected.text.length))
+                                writing = false
+                                val origin = editBefore
+                                editBefore = corrected.text
+                                val boundaryCursor = (changeStart + 1).coerceIn(0, next.length)
+                                if (corrected.splitHistory) {
+                                    editor.rememberChange(origin, next, cursorAfter = boundaryCursor)
+                                    editor.rememberChange(next, corrected.text, boundaryCursor, corrected.cursor)
+                                } else {
+                                    editor.rememberChange(origin, corrected.text, cursorAfter = corrected.cursor)
+                                }
+                                onVisibleMarkdown(origin, corrected.text)
+                            } else {
+                                editor.rememberChange(editBefore, next)
+                                onVisibleMarkdown(editBefore, next)
+                            }
                         }
                     }
                 }
@@ -1362,8 +1385,13 @@ class NotePageView(context: Context) : FrameLayout(context) {
         onLanguage: (String) -> Unit,
         onLearn: (String) -> Unit,
         onIgnore: (String) -> Unit,
+        autocorrect: Boolean = true,
+        declined: (String) -> Boolean = { false },
+        onDecline: (String) -> Unit = {},
     ) {
-        editor.spelling.configure(enabled, wave, ink, paper, epoch, accepted, onLanguage, onLearn, onIgnore)
+        editor.spelling.configure(
+            enabled, wave, ink, paper, epoch, accepted, onLanguage, onLearn, onIgnore, autocorrect, declined, onDecline,
+        )
     }
 
     fun attachSession(session: ch.fasrv.fanotes.ink.InkSession) {

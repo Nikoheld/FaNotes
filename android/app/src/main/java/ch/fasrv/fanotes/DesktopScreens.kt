@@ -8006,6 +8006,16 @@ private fun SettingsPage(
                                 onCheckedChange = { model.updateDesk("spellcheck", if (it) "on" else "off") },
                             )
                         }
+                        SettingRow(
+                            "Autokorrektur",
+                            "Ersetzt einen eindeutigen Tippfehler, sobald das Wort mit Leerzeichen oder Satzzeichen endet. Rückschritt direkt danach stellt das getippte Wort wieder her.",
+                        ) {
+                            Switch(
+                                checked = settings["spellcheck"] != "off" && settings["autocorrect"] != "off",
+                                enabled = settings["spellcheck"] != "off",
+                                onCheckedChange = { model.updateDesk("autocorrect", if (it) "on" else "off") },
+                            )
+                        }
                         SettingRow("Wortzahl in Statusleiste") {
                             Switch(
                                 checked = settings["words"] != "off",
