@@ -2732,44 +2732,73 @@ private fun DayColumns(
     LaunchedEffect(days) {
         scroll.scrollTo(with(density) { (7 * HOUR_DP).dp.roundToPx() })
     }
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    val gutter = ch.fasrv.fanotes.desk.CAL_GUTTER_DP.dp
     Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
         Row {
-            Box(Modifier.width(44.dp))
+            Box(Modifier.width(gutter))
             days.forEach { date ->
-                Column(Modifier.width(148.dp).padding(end = 4.dp).padding(bottom = 4.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "${date.dayOfMonth}. ${date.monthValue}.",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            color = if (date == anchor) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f).clickable {
-                                onPick(date)
-                                onDaily(date)
-                            },
-                        )
-                        Text(
-                            "+",
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.clickable {
-                                onCreate(date, date.atStartOfDay(), date.plusDays(1).atStartOfDay(), true)
-                            }.padding(horizontal = 6.dp),
-                        )
-                    }
+                val today = date == LocalDate.now()
+                Column(
+                    Modifier
+                        .width(148.dp)
+                        .clickable {
+                            onPick(date)
+                            onDaily(date)
+                        }
+                        .padding(bottom = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        ch.fasrv.fanotes.desk.calendarWeekdayShort(date).uppercase(java.util.Locale.GERMAN),
+                        fontSize = 12.sp,
+                        color = LocalStatusInk.current.muted,
+                        letterSpacing = 0.04.em,
+                    )
+                    Text(
+                        date.dayOfMonth.toString(),
+                        fontSize = ch.fasrv.fanotes.desk.CAL_HEAD_NUM_SP.sp,
+                        fontWeight = FontWeight(650),
+                        color = if (today) accent else MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            Box(Modifier.width(gutter).padding(top = 8.dp), contentAlignment = Alignment.CenterEnd) {
+                Text(ch.fasrv.fanotes.desk.CAL_ALL_DAY, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(end = 8.dp))
+            }
+            days.forEach { date ->
+                Column(Modifier.width(148.dp).padding(end = 4.dp).heightIn(min = 34.dp)) {
                     allDaySpans(document, date).forEach { span ->
-                        val tint = document.calendars.find { it.id == span.event.calendarId }?.color ?: "#7f6df2"
+                        val tint = document.calendars.find { it.id == span.event.calendarId }?.color ?: "#2a6f97"
                         Text(
                             span.event.title,
                             fontSize = 12.sp,
-                            color = inkOn(tint),
-                            modifier = Modifier.fillMaxWidth().padding(top = 2.dp).background(calendarSwatch(tint)).clickable { onEdit(span.event, date) }.padding(horizontal = 4.dp, vertical = 2.dp),
+                            maxLines = 1,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 2.dp)
+                                .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.CAL_CHIP_RADIUS_DP.dp))
+                                .background(calendarSwatch(tint).copy(alpha = ch.fasrv.fanotes.desk.CAL_CHIP_ALPHA))
+                                .clickable { onEdit(span.event, date) }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
                         )
                     }
+                    Text(
+                        "+",
+                        fontSize = 12.sp,
+                        color = LocalStatusInk.current.muted,
+                        modifier = Modifier.clickable(onClickLabel = "Neuer Termin") {
+                            onCreate(date, date.atStartOfDay(), date.plusDays(1).atStartOfDay(), true)
+                        }.padding(horizontal = 6.dp),
+                    )
                 }
             }
         }
         Row(Modifier.height(420.dp).verticalScroll(scroll)) {
-            Column(Modifier.width(44.dp)) {
+            Column(Modifier.width(gutter)) {
                 for (hour in 0..23) {
                     Text(
                         "%02d:00".format(hour),
@@ -2804,9 +2833,15 @@ private fun HourColumn(
             )
         }
         if (day == LocalDate.now()) {
-            val minutes = java.time.LocalTime.now().hour * 60 + java.time.LocalTime.now().minute
+            val now = java.time.LocalTime.now()
+            val y = ch.fasrv.fanotes.desk.calendarNowOffsetDp(now.hour, now.minute, HOUR_DP).dp
+            Box(Modifier.fillMaxWidth().height(2.dp).offset(y = y).background(MaterialTheme.colorScheme.error))
             Box(
-                Modifier.fillMaxWidth().height(2.dp).offset(y = (minutes / 60f * HOUR_DP).dp).background(MaterialTheme.colorScheme.primary),
+                Modifier
+                    .size(ch.fasrv.fanotes.desk.CAL_NOW_DOT_DP.dp)
+                    .offset(x = (-4).dp, y = y - 3.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.error),
             )
         }
         BoxWithConstraints(

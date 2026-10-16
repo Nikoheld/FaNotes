@@ -59,6 +59,12 @@ class CalendarBooksTest {
         assertEquals(30, CAL_TOOL_DP)
         assertEquals("Termine suchen", CAL_SEARCH)
         assertEquals("Tagesnotiz", CAL_DAILY)
+        assertEquals("Do", calendarWeekdayShort(thursday))
+        assertEquals("Mo", calendarWeekdayShort(LocalDate.parse("2026-10-12")))
+        assertEquals(0f, calendarNowOffsetDp(0, 0))
+        assertEquals(7.5f * 48f, calendarNowOffsetDp(7, 30))
+        assertEquals(56, CAL_GUTTER_DP)
+        assertEquals(8, CAL_NOW_DOT_DP)
     }
 
     @Test
