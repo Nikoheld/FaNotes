@@ -11576,13 +11576,32 @@ mod local_zone_tests {
             unix_millis_from_iso(" -000001-10-13"),
             Some(1_357_794_000_000)
         );
-        // `-000001-10-13 16:00` is year -1, before 1970. A leading space is
-        // still 10 January 2013 at 16:00 EST.
+        // `-000001-10-13 16:00` is year -1, before 1970. `16:`, `4:5`,
+        // `16::30`, and `EST+5:30` are that year too. A leading space is
+        // still 10 January 2013.
         assert_eq!(unix_millis_from_iso("-000001-10-13 16:00"), None);
         assert_eq!(unix_millis_from_iso("-000001-10-13T16:00:00"), None);
+        assert_eq!(unix_millis_from_iso("-000001-10-13 16:"), None);
+        assert_eq!(unix_millis_from_iso("-000001-10-13 4:5"), None);
+        assert_eq!(unix_millis_from_iso("-000001-10-13 16:00 EST+5:30"), None);
+        assert_eq!(unix_millis_from_iso("-000001-10-13 16:0"), None);
+        assert_eq!(unix_millis_from_iso("-000001-10-13 16::30"), None);
+        assert_eq!(unix_millis_from_iso("-000001-10-13 4:5 PM"), None);
         assert_eq!(
             unix_millis_from_iso(" -000001-10-13 16:00"),
             Some(1_357_851_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso(" -000001-10-13 16:"),
+            Some(1_357_851_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso(" -000001-10-13 4:5"),
+            Some(1_357_808_700_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso(" -000001-10-13 16:00 EST+5:30"),
+            Some(1_357_813_800_000)
         );
     }
 

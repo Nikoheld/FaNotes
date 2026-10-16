@@ -1122,13 +1122,17 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         // A `T` clock that is not `HH:MM` is empty. A space before the clock
         // is legacy: `16:` is 16:00, `4:5` is 4:05, and `16:.5` is 16:05.
         // `2026-10-13 16:00:60` is a broken clock. `2026 10 13 16:00` is a
-        // legacy date whose tail is not one clock.
+        // legacy date whose tail is not one clock. A negative expanded year
+        // keeps that short clock; the legacy reread would turn it into 2013.
         if has_iso_t(source)
             && time_text.contains(':')
             && !time_text.contains(is_date_parse_space)
             && time_text.starts_with(|character: char| character.is_ascii_digit())
         {
             return None;
+        }
+        if let Some(iso) = negative_expanded_legacy_clock(source, year, month, day, time_text) {
+            return Some(iso);
         }
         return legacy_numeric_iso(trimmed);
     };
@@ -1153,6 +1157,11 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         local_civil_to_utc(year, month, day, hour, minute, second)?
     } else if rest.contains(is_date_parse_space) {
         // `2026-10-13 16:00 +5: 1` is a legacy offset, not an ISO zone.
+        // `EST+5:30` on a negative expanded year replaces the name and keeps
+        // that year. The legacy reread would turn it into 2013.
+        if let Some(iso) = negative_expanded_legacy_clock(source, year, month, day, time_text) {
+            return Some(iso);
+        }
         return legacy_numeric_iso(trimmed);
     } else if let Some(offset) = parse_offset(rest) {
         shift_seconds(year, month, day, hour, minute, second, -(offset as i64))?
@@ -1165,6 +1174,59 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     Some(format_civil_iso(
         year, month, day, hour, minute, second, millis,
     ))
+}
+
+/// `16:` and `4:5` on `-000001-10-13` are local mean time in that year.
+/// `16:00 EST+5:30` is 16:00 at UTC+5:30. Reading the hyphen date again as a
+/// legacy number would make the year 2013.
+fn negative_expanded_legacy_clock(
+    source: &str,
+    year: i32,
+    month: i32,
+    day: i32,
+    time_text: &str,
+) -> Option<String> {
+    if year >= 0
+        || source.as_bytes().first() != Some(&b'-')
+        || source[1..]
+            .bytes()
+            .take_while(|byte| byte.is_ascii_digit())
+            .count()
+            != 6
+    {
+        return None;
+    }
+    let words: Vec<&str> = time_text
+        .split(is_date_parse_space)
+        .filter(|word| !word.is_empty())
+        .collect();
+    let (clock, offset_minutes) = match words.as_slice() {
+        [clock] => (legacy_clock_text(clock)?, None),
+        [clock, zone] => {
+            let tail = named_zone_offset_tail(zone)?;
+            let parsed = parse_legacy_offset(tail)?;
+            if !parsed.spilled.is_empty() || !parsed.time_fields.is_empty() {
+                return None;
+            }
+            let clock = legacy_clock_text(clock)?;
+            if clock.contains(['+', '-', 'Z', 'z']) {
+                return None;
+            }
+            (clock, Some(parsed.minutes))
+        }
+        _ => return None,
+    };
+    let (delta, suffix) = match offset_minutes {
+        Some(minutes) => fold_offset_days(minutes)?,
+        None => (0, String::new()),
+    };
+    let (year, month, day) = if delta == 0 {
+        (year, month, day)
+    } else {
+        shift_ymd(year, month, day, delta)?
+    };
+    let date = format!("{}-{:02}-{:02}", legacy_iso_year(year), month, day);
+    canonical_iso(&format!("{date}T{clock}{suffix}"))
 }
 
 fn has_english_month(value: &str) -> bool {
@@ -9480,13 +9542,56 @@ mod tests {
                 super::canonical_iso("-000001-10-13T16:00:00").as_deref(),
                 Some("-000001-10-13T20:56:02.000Z")
             );
+            // `16:` is 16:00 and `4:5` is 4:05. `16:0` and `16::30` are the
+            // same local mean time. `EST+5:30` replaces the name with +5:30.
+            // A leading space is still 10 January 2013.
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 16:").as_deref(),
+                Some("-000001-10-13T20:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 4:5").as_deref(),
+                Some("-000001-10-13T09:01:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 16:00 EST+5:30").as_deref(),
+                Some("-000001-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 16:0").as_deref(),
+                Some("-000001-10-13T20:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 16::30").as_deref(),
+                Some("-000001-10-13T20:56:32.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 4:5 PM").as_deref(),
+                Some("-000001-10-13T21:01:02.000Z")
+            );
             assert_eq!(
                 super::canonical_iso(" -000001-10-13 16:00").as_deref(),
                 Some("2013-01-10T21:00:00.000Z")
             );
             assert_eq!(
+                super::canonical_iso(" -000001-10-13 16:").as_deref(),
+                Some("2013-01-10T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(" -000001-10-13 4:5").as_deref(),
+                Some("2013-01-10T09:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(" -000001-10-13 16:00 EST+5:30").as_deref(),
+                Some("2013-01-10T10:30:00.000Z")
+            );
+            assert_eq!(
                 super::canonical_iso("1950-10-13 16:00").as_deref(),
                 Some("1950-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 EST+5:30").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
             );
         });
     }
