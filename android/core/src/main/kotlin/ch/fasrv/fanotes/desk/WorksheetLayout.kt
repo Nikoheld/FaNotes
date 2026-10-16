@@ -187,20 +187,17 @@ data class WorksheetFieldRect(
 )
 
 /**
- * Height of the on-sheet field. Never shorter than the desktop 38 or [BOX_EDITOR_MIN_DP].
- * When the canvas card is taller than that floor, the field grows with the card.
+ * Height of the on-sheet field. The desktop textarea is at least 38px and grows with its text.
  */
-fun worksheetFieldHeightPx(canvasHeightPx: Float, desktopMinPx: Float, editorMinPx: Float): Float {
+fun worksheetFieldHeightPx(canvasHeightPx: Float, desktopMinPx: Float): Float {
     val desktop = if (desktopMinPx.isFinite()) desktopMinPx.coerceAtLeast(0f) else 0f
-    val editor = if (editorMinPx.isFinite()) editorMinPx.coerceAtLeast(0f) else 0f
     val canvas = if (canvasHeightPx.isFinite()) canvasHeightPx.coerceAtLeast(0f) else 0f
-    return max(desktop, max(editor, canvas))
+    return max(desktop, canvas)
 }
 
 /**
- * Places the inline worksheet field over the canvas card and clamps it onto the page.
- * [anchorX] and [anchorY] are the box origin in screen pixels after zoom and scroll.
- * The card bottom sits [lipPx] below that origin, matching the canvas draw.
+ * Places the inline worksheet field on the page the way the desktop textarea does.
+ * [anchorX] and [anchorY] are the box origin after zoom and scroll, and the field grows downward from that top.
  * Null when the page has no area, so the caller can wait until the sheet is laid out.
  */
 fun worksheetFieldFrame(
@@ -208,23 +205,21 @@ fun worksheetFieldFrame(
     anchorY: Float,
     widthPx: Float,
     canvasHeightPx: Float,
-    lipPx: Float,
     pageLeft: Float,
     pageTop: Float,
     pageRight: Float,
     pageBottom: Float,
     desktopMinPx: Float,
-    editorMinPx: Float,
 ): WorksheetFieldRect? {
-    if (!anchorX.isFinite() || !anchorY.isFinite() || !widthPx.isFinite() || !lipPx.isFinite()) return null
+    if (!anchorX.isFinite() || !anchorY.isFinite() || !widthPx.isFinite()) return null
     if (!pageLeft.isFinite() || !pageTop.isFinite() || !pageRight.isFinite() || !pageBottom.isFinite()) return null
     val pageWidth = pageRight - pageLeft
     val pageHeight = pageBottom - pageTop
     if (pageWidth < 1f || pageHeight < 1f) return null
     val width = widthPx.coerceAtLeast(1f).coerceAtMost(pageWidth)
-    val height = worksheetFieldHeightPx(canvasHeightPx, desktopMinPx, editorMinPx).coerceAtMost(pageHeight)
+    val height = worksheetFieldHeightPx(canvasHeightPx, desktopMinPx).coerceAtMost(pageHeight)
     var left = anchorX
-    var top = anchorY + lipPx - height
+    var top = anchorY
     if (left < pageLeft) left = pageLeft
     if (top < pageTop) top = pageTop
     if (left + width > pageRight) left = (pageRight - width).coerceAtLeast(pageLeft)
