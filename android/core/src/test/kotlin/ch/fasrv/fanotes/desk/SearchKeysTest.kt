@@ -2,6 +2,7 @@ package ch.fasrv.fanotes.desk
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class SearchKeysTest {
     @Test
@@ -31,5 +32,17 @@ class SearchKeysTest {
         assertEquals("Text, Dateinamen, Handschrift …", SEARCH_PLACEHOLDER)
         assertEquals("Ergebnis wählen", SEARCH_CHOOSE)
         assertEquals(5, SEARCH_KBD_RADIUS_DP)
+    }
+
+    @Test
+    fun thePanelFloatsOverTheSidebar() {
+        assertEquals(286, searchPanelWidthDp(null))
+        assertEquals(sidebarWidthDp("320"), searchPanelWidthDp("320"))
+        assertEquals(210, searchPanelWidthDp("40"))
+        assertEquals(430, searchPanelWidthDp("900"))
+        assertEquals(16, SEARCH_SHADOW_X_DP)
+        assertEquals(32, SEARCH_SHADOW_BLUR_DP)
+        assertEquals(0.14f, SEARCH_SHADOW_ALPHA)
+        assertTrue(workspaceKeepsNoteChrome("search"))
     }
 }

@@ -34,3 +34,9 @@ const val SEARCH_PLACEHOLDER = "Text, Dateinamen, Handschrift …"
 const val SEARCH_CHOOSE = "Ergebnis wählen"
 const val SEARCH_FOOTER_CLOSE = "Schließen"
 const val SEARCH_KBD_RADIUS_DP = 5
+const val SEARCH_SHADOW_X_DP = 16
+const val SEARCH_SHADOW_BLUR_DP = 32
+const val SEARCH_SHADOW_ALPHA = 0.14f
+
+/** The vault search panel is as wide as the file tree and floats over the left of the workspace. */
+fun searchPanelWidthDp(raw: String?) = sidebarWidthDp(raw)

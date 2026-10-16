@@ -791,10 +791,9 @@ fun FaNotesScreen(
                 )
             }
             if (focus || wide || !showList || destination != "notes") {
-                if (destination != "notes") {
+                if (destination != "notes" && destination != "search") {
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         when (destination) {
-                            "search" -> SearchScreen(model, { model.openPath(it); model.showDestination("notes") }, { model.showDestination("notes") })
                             "tasks" -> HomeworkScreen(model)
                             "calendar" -> CalendarScreen(model, { model.openPath(it); model.showDestination("notes") }, onImportIcs, onExportIcs)
                             "overview" -> OverviewScreen(
@@ -877,6 +876,24 @@ fun FaNotesScreen(
                     Box(Modifier.width((chrome.panelDp ?: ch.fasrv.fanotes.desk.rightPanelWidthDp(desk["panel-width"])).dp).fillMaxHeight()) { Inspector(model) { model.openPath(it) } }
                 }
             }
+        }
+        if (destination == "search") {
+            val shadow = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_SHADOW_ALPHA)
+            SearchScreen(
+                model,
+                { model.openPath(it); model.showDestination("notes") },
+                { model.showDestination("notes") },
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .width((chrome.sidebarDp ?: ch.fasrv.fanotes.desk.searchPanelWidthDp(desk["sidebar-width"])).dp)
+                    .fillMaxHeight()
+                    .shadow(
+                        ch.fasrv.fanotes.desk.SEARCH_SHADOW_X_DP.dp,
+                        clip = false,
+                        ambientColor = shadow,
+                        spotColor = shadow,
+                    ),
+            )
         }
             val toast = message
             if (!toast.isNullOrBlank()) {
