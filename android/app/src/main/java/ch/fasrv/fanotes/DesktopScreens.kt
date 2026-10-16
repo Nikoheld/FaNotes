@@ -247,6 +247,9 @@ internal val LocalStatusInk = staticCompositionLocalOf {
     StatusInk(Color(0xFF5E5C57), Color(0xFF1F7A48), Color(0xFF8A5A12), Color(0xFF4E4C47), Color(0xFFE3E2DE), Color(0xFFFFFFFF))
 }
 
+/** Resolved theme id from [ch.fasrv.fanotes.desk.themePalette], never the raw `system` token. */
+internal val LocalDeskThemeId = staticCompositionLocalOf { "light" }
+
 /** True when the settings viewport stacks each `.setting-row`. */
 private val LocalSettingsContentStacks = staticCompositionLocalOf { false }
 
@@ -4891,15 +4894,40 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
                 .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), shape)
                 .background(ink.panelStrong),
         ) {
-            Row(
-                Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_DP.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)).padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                listOf(MaterialTheme.colorScheme.error, Color(0xFFD8A643), LocalStatusInk.current.success).forEach { dot ->
-                    Box(Modifier.size(6.dp).clip(CircleShape).background(dot))
+            val headerBorder = Color(ch.fasrv.fanotes.desk.firstRunPreviewBorder(LocalDeskThemeId.current))
+            Column(Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_DP.dp)) {
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .background(Color(ch.fasrv.fanotes.desk.firstRunPreviewHeaderFill(MaterialTheme.colorScheme.surface.toArgb())))
+                        .padding(horizontal = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_PAD_DP.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_GAP_DP.dp),
+                ) {
+                    val dots = listOf(
+                        Color(ch.fasrv.fanotes.desk.firstRunPreviewHeaderClose(MaterialTheme.colorScheme.error.toArgb(), headerBorder.toArgb())),
+                        Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_MIDDLE_DOT),
+                        ink.success,
+                    )
+                    dots.forEach { dot ->
+                        Box(
+                            Modifier
+                                .size(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_DOT_DP.dp)
+                                .clip(CircleShape)
+                                .background(dot),
+                        )
+                    }
+                    Text(
+                        ch.fasrv.fanotes.desk.FIRST_RUN_BRAND,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.End,
+                        fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_TITLE_SP.sp,
+                        fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_TITLE_WEIGHT),
+                        color = ink.muted,
+                    )
                 }
-                Text(ch.fasrv.fanotes.desk.FIRST_RUN_BRAND, modifier = Modifier.weight(1f), textAlign = TextAlign.End, fontSize = 11.sp, color = ink.muted)
+                Box(Modifier.fillMaxWidth().height(1.dp).background(headerBorder))
             }
             // The body does not clip, so the sheet shadow can paint. The window clip above still cuts blur that leaves the window.
             Row(Modifier.fillMaxWidth().heightIn(min = bodyMin)) {

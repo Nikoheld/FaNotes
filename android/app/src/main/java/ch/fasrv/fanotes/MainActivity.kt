@@ -402,7 +402,7 @@ fun FaNotesTheme(
         onSurface = chrome.text?.let { Color(android.graphics.Color.parseColor(it)) } ?: baseScheme.onSurface,
         error = danger,
     )
-    CompositionLocalProvider(LocalStatusInk provides statusInk) {
+    CompositionLocalProvider(LocalStatusInk provides statusInk, LocalDeskThemeId provides palette.id) {
         MaterialTheme(colorScheme = scheme, typography = chromeTypography(family), content = content)
     }
 }
