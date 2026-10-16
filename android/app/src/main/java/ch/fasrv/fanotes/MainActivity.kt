@@ -38,9 +38,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -48,15 +50,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
+import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
@@ -118,8 +123,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -1125,6 +1132,156 @@ private fun collectFolders(nodes: List<VaultNode>): List<String> {
 }
 
 @Composable
+private fun SidebarIconButton(label: String, onClick: () -> Unit, icon: @Composable () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val pressed by interaction.collectIsPressedAsState()
+    val hot = hovered || pressed
+    Box(
+        Modifier
+            .size(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_DP.dp)
+            .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_RADIUS_DP.dp))
+            .background(if (hot) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+            .hoverable(interaction)
+            .clickable(interactionSource = interaction, indication = null, onClickLabel = label, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.material3.LocalContentColor provides if (hot) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
+        ) {
+            icon()
+        }
+    }
+}
+
+@Composable
+private fun SidebarLabelButton(label: String, onClick: () -> Unit, wide: Boolean = false, description: String = label) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val pressed by interaction.collectIsPressedAsState()
+    val hot = hovered || pressed
+    Box(
+        Modifier
+            .height(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_DP.dp)
+            .then(
+                if (wide) Modifier.widthIn(min = ch.fasrv.fanotes.desk.SIDEBAR_PDF_MIN_DP.dp)
+                else Modifier
+            )
+            .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_RADIUS_DP.dp))
+            .background(if (hot) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+            .hoverable(interaction)
+            .clickable(interactionSource = interaction, indication = null, onClickLabel = description, onClick = onClick)
+            .padding(horizontal = ch.fasrv.fanotes.desk.SIDEBAR_PDF_PAD_DP.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            fontSize = 12.sp,
+            fontWeight = if (wide) FontWeight.ExtraBold else FontWeight.Medium,
+            letterSpacing = if (wide) ch.fasrv.fanotes.desk.SIDEBAR_PDF_TRACKING.em else 0.em,
+            color = if (hot) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun SidebarSearchField(query: String, onQuery: (String) -> Unit, onFocus: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    var focused by remember { mutableStateOf(false) }
+    val hot = hovered || focused
+    val ink = LocalStatusInk.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_MARGIN_X_DP.dp)
+            .padding(bottom = ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_MARGIN_BOTTOM_DP.dp)
+            .height(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_DP.dp)
+            .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_RADIUS_DP.dp))
+            .background(if (hot) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+            .hoverable(interaction)
+            .padding(horizontal = ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_PAD_DP.dp)
+            .semantics { contentDescription = "Notizen suchen" },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_GAP_DP.dp),
+    ) {
+        Icon(
+            Icons.Filled.Search,
+            contentDescription = null,
+            modifier = Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_ICON_DP.dp),
+            tint = ink.muted,
+        )
+        BasicTextField(
+            value = query,
+            onValueChange = {
+                onQuery(it)
+                onFocus()
+            },
+            modifier = Modifier.weight(1f).onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocus()
+            },
+            singleLine = true,
+            textStyle = TextStyle(
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_SP.sp,
+            ),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            decorationBox = { inner ->
+                Box {
+                    if (query.isEmpty()) {
+                        Text("Suchen …", fontSize = ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_SP.sp, color = ink.muted)
+                    }
+                    inner()
+                }
+            },
+        )
+        if (query.isNotEmpty()) {
+            val clearInteraction = remember { MutableInteractionSource() }
+            val clearHot by clearInteraction.collectIsHoveredAsState()
+            Box(
+                Modifier
+                    .size(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_CLEAR_DP.dp)
+                    .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_CLEAR_RADIUS_DP.dp))
+                    .background(if (clearHot) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+                    .hoverable(clearInteraction)
+                    .clickable(interactionSource = clearInteraction, indication = null, onClickLabel = "Suche leeren") { onQuery("") },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = "Suche leeren",
+                    modifier = Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_CLEAR_ICON_DP.dp),
+                    tint = if (clearHot) MaterialTheme.colorScheme.onSurface else ink.muted,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TagFilterChip(label: String, active: Boolean, onClick: () -> Unit) {
+    val borderAlpha = if (active) {
+        ch.fasrv.fanotes.desk.TAG_FILTER_ACTIVE_BORDER_ALPHA
+    } else {
+        ch.fasrv.fanotes.desk.TAG_FILTER_BORDER_ALPHA
+    }
+    Text(
+        label,
+        fontSize = 12.sp,
+        color = if (active) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
+        modifier = Modifier
+            .height(ch.fasrv.fanotes.desk.TAG_FILTER_HEIGHT_DP.dp)
+            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = borderAlpha), RoundedCornerShape(99.dp))
+            .background(if (active) LocalStatusInk.current.panelActive else MaterialTheme.colorScheme.surface, RoundedCornerShape(99.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = ch.fasrv.fanotes.desk.TAG_FILTER_PAD_H_DP.dp)
+            .wrapContentHeight(Alignment.CenterVertically),
+    )
+}
+
+@Composable
 private fun VaultPane(
     modifier: Modifier,
     tree: List<VaultNode>,
@@ -1172,59 +1329,59 @@ private fun VaultPane(
     radiusDp: Int = 10,
     onCollapse: () -> Unit = {},
 ) {
-    Column(modifier.background(MaterialTheme.colorScheme.surface).padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("FaNotes", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                Text(vaultLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-            }
-            TextButton(onClick = onCollapse) { Text("Einklappen") }
-        }
-        Spacer(Modifier.height(12.dp))
-        FilledTonalButton(onClick = onSync, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Filled.Sync, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text("Sync")
-        }
-        Text(
-            syncLabel,
-            maxLines = 1,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-            modifier = Modifier.padding(top = 4.dp),
-        )
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(onClick = onCreateNote, modifier = Modifier.weight(1f)) { Text("Notiz") }
-            FilledTonalButton(onClick = onCreateFolder, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Filled.CreateNewFolder, contentDescription = "New folder")
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
-            TextButton(onClick = onImportPdf) { Text("PDF") }
-            TextButton(onClick = onImportImage) { Text("Bild") }
-            TextButton(onClick = onImportSheet) { Text("Blatt") }
-        }
-        OutlinedTextField(
-            searchQuery,
-            {
-                onSearchQuery(it)
-                onOpenSearch()
-            },
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).onFocusChanged { state ->
-                if (state.isFocused) onOpenSearch()
-            },
-            singleLine = true,
-            label = { Text("Notizen suchen") },
-            placeholder = { Text("Suchen …") },
-            trailingIcon = if (searchQuery.isEmpty()) null else {
-                {
-                    TextButton(onClick = { onSearchQuery("") }) { Text("Suche leeren") }
+    Column(modifier.background(MaterialTheme.colorScheme.surface)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(
+                    start = ch.fasrv.fanotes.desk.SIDEBAR_HEADER_PAD_X_DP.dp,
+                    end = ch.fasrv.fanotes.desk.SIDEBAR_HEADER_PAD_X_DP.dp,
+                    top = ch.fasrv.fanotes.desk.SIDEBAR_HEADER_PAD_TOP_DP.dp,
+                    bottom = ch.fasrv.fanotes.desk.SIDEBAR_HEADER_PAD_BOTTOM_DP.dp,
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SIDEBAR_HEADER_GAP_DP.dp),
+        ) {
+            Text(
+                vaultLabel,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(
+                        horizontal = ch.fasrv.fanotes.desk.SIDEBAR_VAULT_PAD_X_DP.dp,
+                        vertical = ch.fasrv.fanotes.desk.SIDEBAR_VAULT_PAD_Y_DP.dp,
+                    ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontSize = ch.fasrv.fanotes.desk.SIDEBAR_VAULT_SP.sp,
+                fontWeight = FontWeight(ch.fasrv.fanotes.desk.SIDEBAR_VAULT_WEIGHT),
+                letterSpacing = ch.fasrv.fanotes.desk.SIDEBAR_VAULT_TRACKING.em,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_GAP_DP.dp)) {
+                SidebarIconButton("Neue Notiz", onCreateNote) {
+                    Icon(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_ICON_DP.dp))
                 }
-            },
-        )
+                SidebarIconButton("Neuer Ordner", onCreateFolder) {
+                    Icon(Icons.Filled.CreateNewFolder, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_ICON_DP.dp))
+                }
+                SidebarLabelButton("PDF", onImportPdf, wide = true)
+                SidebarIconButton("Seitenleiste einklappen", onCollapse) {
+                    Icon(Icons.Filled.Menu, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_ICON_DP.dp))
+                }
+            }
+        }
+        SidebarSearchField(searchQuery, onSearchQuery, onOpenSearch)
+        Row(
+            Modifier
+                .padding(horizontal = ch.fasrv.fanotes.desk.SIDEBAR_HEADER_PAD_X_DP.dp)
+                .padding(bottom = ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_MARGIN_BOTTOM_DP.dp),
+            horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_GAP_DP.dp),
+        ) {
+            SidebarLabelButton("Sync", onSync, description = syncLabel.ifBlank { "Sync" })
+            SidebarLabelButton("Bild", onImportImage)
+            SidebarLabelButton("Blatt", onImportSheet)
+        }
         if (conflicts.isNotEmpty()) {
-            Text("Konflikte", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+            Text("Konflikte", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 12.dp))
             conflicts.forEach { conflict ->
                 Column(Modifier.padding(vertical = 4.dp)) {
                     Text(conflict.path.substringAfterLast('/'), maxLines = 1, fontSize = 13.sp)
@@ -1239,23 +1396,22 @@ private fun VaultPane(
             }
         }
         if (tags.isNotEmpty()) {
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            FlowRow(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = ch.fasrv.fanotes.desk.TAG_FILTER_PAD_X_DP.dp,
+                        end = ch.fasrv.fanotes.desk.TAG_FILTER_PAD_X_DP.dp,
+                        top = ch.fasrv.fanotes.desk.TAG_FILTER_PAD_TOP_DP.dp,
+                    ),
+                horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.TAG_FILTER_GAP_DP.dp),
+                verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.TAG_FILTER_GAP_DP.dp),
+            ) {
                 tags.forEach { tag ->
-                    val selectedTag = tag == tagFilter
-                    Text(
-                        "#$tag",
-                        fontSize = 12.sp,
-                        fontWeight = if (selectedTag) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (selectedTag) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier
-                            .padding(end = 4.dp)
-                            .background(if (selectedTag) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant)
-                            .clickable { onToggleTag(tag) }
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                    )
+                    TagFilterChip("#$tag", tag == tagFilter) { onToggleTag(tag) }
                 }
                 if (tagFilter != null) {
-                    TextButton(onClick = { onToggleTag(tagFilter) }) { Text("Filter aus") }
+                    TagFilterChip("Filter aus", false) { onToggleTag(tagFilter) }
                 }
             }
         }
@@ -1268,7 +1424,7 @@ private fun VaultPane(
         var listBounds by remember { mutableStateOf<TreeBox?>(null) }
         if (tree.isEmpty()) {
             Column(
-                Modifier.weight(1f).fillMaxWidth().padding(top = 28.dp),
+                Modifier.weight(1f).fillMaxWidth().padding(top = 28.dp, start = ch.fasrv.fanotes.desk.TREE_WRAP_PAD_X_DP.dp, end = ch.fasrv.fanotes.desk.TREE_WRAP_PAD_X_DP.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
@@ -1282,7 +1438,12 @@ private fun VaultPane(
         } else LazyColumn(
             Modifier
                 .weight(1f)
-                .padding(top = 8.dp)
+                .padding(
+                    start = ch.fasrv.fanotes.desk.TREE_WRAP_PAD_X_DP.dp,
+                    end = ch.fasrv.fanotes.desk.TREE_WRAP_PAD_X_DP.dp,
+                    top = ch.fasrv.fanotes.desk.TREE_WRAP_PAD_TOP_DP.dp,
+                    bottom = ch.fasrv.fanotes.desk.TREE_WRAP_PAD_BOTTOM_DP.dp,
+                )
                 .focusRequester(treeFocusRequester)
                 .focusable()
                 .onPreviewKeyEvent { event ->

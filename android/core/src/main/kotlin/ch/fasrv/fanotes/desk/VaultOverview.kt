@@ -152,3 +152,52 @@ fun sidebarFileLabel(count: Int) = if (count == 1) "1 Notiz" else "$count Notize
 const val SIDEBAR_FOOTER_DP = 34
 const val SIDEBAR_FOOTER_PAD_X_DP = 12
 const val SIDEBAR_FOOTER_PAD_Y_DP = 4
+
+/** Sidebar header after the later chrome pass: 14px vault name, 30px actions. */
+const val SIDEBAR_HEADER_PAD_TOP_DP = 14
+const val SIDEBAR_HEADER_PAD_X_DP = 12
+const val SIDEBAR_HEADER_PAD_BOTTOM_DP = 8
+const val SIDEBAR_HEADER_GAP_DP = 8
+const val SIDEBAR_VAULT_PAD_X_DP = 4
+const val SIDEBAR_VAULT_PAD_Y_DP = 2
+const val SIDEBAR_VAULT_SP = 14
+const val SIDEBAR_VAULT_WEIGHT = 600
+const val SIDEBAR_VAULT_TRACKING = -0.02f
+const val SIDEBAR_ACTION_DP = 30
+const val SIDEBAR_ACTION_RADIUS_DP = 6
+const val SIDEBAR_ACTION_GAP_DP = 2
+const val SIDEBAR_ACTION_ICON_DP = 16
+const val SIDEBAR_PDF_MIN_DP = 34
+const val SIDEBAR_PDF_PAD_DP = 7
+const val SIDEBAR_PDF_TRACKING = 0.04f
+
+/** Search field after the later chrome pass: quiet until hover or focus. */
+const val SIDEBAR_SEARCH_MARGIN_X_DP = 8
+const val SIDEBAR_SEARCH_MARGIN_BOTTOM_DP = 8
+const val SIDEBAR_SEARCH_DP = 30
+const val SIDEBAR_SEARCH_RADIUS_DP = 6
+const val SIDEBAR_SEARCH_PAD_DP = 9
+const val SIDEBAR_SEARCH_GAP_DP = 7
+const val SIDEBAR_SEARCH_ICON_DP = 14
+const val SIDEBAR_SEARCH_SP = 13
+const val SIDEBAR_SEARCH_CLEAR_DP = 21
+const val SIDEBAR_SEARCH_CLEAR_RADIUS_DP = 5
+const val SIDEBAR_SEARCH_CLEAR_ICON_DP = 13
+
+/** Tag chips. The later pass paints the active chip with `--panel-active`. */
+const val TAG_FILTER_PAD_X_DP = 10
+const val TAG_FILTER_PAD_TOP_DP = 6
+const val TAG_FILTER_GAP_DP = 5
+const val TAG_FILTER_HEIGHT_DP = 22
+const val TAG_FILTER_PAD_H_DP = 8
+const val TAG_FILTER_BORDER_ALPHA = 0.09f
+const val TAG_FILTER_ACTIVE_BORDER_ALPHA = 0.16f
+
+/** File tree inset from `.file-tree-wrap`. */
+const val TREE_WRAP_PAD_TOP_DP = 2
+const val TREE_WRAP_PAD_X_DP = 7
+const val TREE_WRAP_PAD_BOTTOM_DP = 8
+
+fun sidebarSearchFill(hot: Boolean) = if (hot) "panel-hover" else "clear"
+
+fun tagFilterFill(active: Boolean) = if (active) "panel-active" else "panel"
