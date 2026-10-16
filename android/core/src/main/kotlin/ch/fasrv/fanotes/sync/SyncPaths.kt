@@ -6,7 +6,7 @@ import java.time.format.DateTimeFormatter
 
 const val RECOGNITION_MODEL_SYNC_PATH = ".fanotes/recognition-model.json"
 private const val INTERNAL_DIRECTORY = ".fanotes"
-private val SKIPPED_INTERNAL = setOf("history", "onboarding.json", "tree-cache")
+private val SKIPPED_INTERNAL = setOf("history", "onboarding.json", "tree-cache", "trash")
 private val SKIPPED_NAMES = setOf(".DS_Store", "Thumbs.db", "desktop.ini")
 
 data class SyncPathOptions(

@@ -27,6 +27,7 @@ class DeskShortcutsTest {
         assertEquals("settings", deskShortcut(true, false, false, false, ","))
         assertEquals("focus", deskShortcut(true, true, false, false, "e"))
         assertEquals("pen", deskShortcut(true, false, false, false, "d"))
+        assertEquals("stamp", deskShortcut(true, true, false, false, "d"))
         assertNull(deskShortcut(true, true, false, false, "g"))
         assertNull(deskShortcut(true, false, false, false, "q"))
         assertNull(deskShortcut(false, false, false, false, "s"))

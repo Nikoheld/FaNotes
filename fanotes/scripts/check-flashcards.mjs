@@ -1,8 +1,17 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createServer } from 'vite'
+
+if (process.env.TZ !== 'America/New_York') {
+  const rerun = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
+    env: { ...process.env, TZ: 'America/New_York' },
+    stdio: 'inherit',
+  })
+  process.exit(rerun.status ?? 1)
+}
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const server = await createServer({
@@ -13,7 +22,7 @@ const server = await createServer({
 })
 
 try {
-  const { applyReview, cardsFromMarkdown, reviewQueue } = await server.ssrLoadModule('/src/lib/flashcards.ts')
+  const { applyReview, cardsFromMarkdown, reviewCard, reviewQueue } = await server.ssrLoadModule('/src/lib/flashcards.ts')
   const now = new Date(2026, 9, 16, 12, 0, 0)
   const markdown = `## Lernfragen
 
@@ -46,8 +55,16 @@ try {
   assert.deepEqual(reviewQueue([card('b'), card('c')], ['a', 'b']).map((item) => item.id), ['c'])
   assert.deepEqual(reviewQueue([card('a')], ['a']).map((item) => item.id), ['a'])
 
+  const repeating = { id: 'dst', front: 'dst', back: '', ease: 2.5, intervalDays: 1, due: '2026-11-01', reps: 1, lapses: 0 }
+  const fallBack = reviewCard(repeating, 'hard', new Date(2026, 10, 1, 0, 30, 0))
+  assert.equal(fallBack.intervalDays, 1)
+  assert.equal(fallBack.due, '2026-11-02', 'a one-day review on the fall-back morning is the next calendar day')
+  const spring = reviewCard(repeating, 'hard', new Date(2026, 2, 7, 23, 30, 0))
+  assert.equal(spring.due, '2026-03-08', 'a one-day review before the spring jump does not skip a day')
+
   const view = readFileSync(join(root, 'src/components/FlashcardReview.tsx'), 'utf8')
   assert.match(view, /reviewQueue\(due, later\)/)
+  assert.match(readFileSync(join(root, 'src/App.tsx'), 'utf8'), /editorRef\.current\?\.flushChanges\(\); setCardsOpen\(true\)/, 'opening flashcards books the latest keystrokes before a grade can rewrite the note')
   assert.match(view, /value === 'again'/)
   assert.match(view, /GRADE_KEYS/)
   assert.match(view, /addEventListener\('keydown', onKey, true\)/)

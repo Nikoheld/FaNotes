@@ -17,7 +17,7 @@ const fsp = require('node:fs/promises')
 const path = require('node:path')
 
 const INTERNAL_DIRECTORY = '.fanotes'
-const SKIPPED_INTERNAL = new Set(['history', 'tree-cache'])
+const SKIPPED_INTERNAL = new Set(['history', 'tree-cache', 'trash'])
 const MAX_ENTRIES = 100_000
 const MAX_DEPTH = 40
 const MAX_FILE_BYTES = 100 * 1024 * 1024

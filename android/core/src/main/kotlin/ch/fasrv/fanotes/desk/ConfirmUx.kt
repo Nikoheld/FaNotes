@@ -18,10 +18,10 @@ fun confirmDialogTabTarget(buttonCount: Int, focusedIndex: Int, backwards: Boole
     return (focusedIndex + (if (backwards) buttonCount - 1 else 1)) % buttonCount
 }
 
-/** A vault file is deleted here. The desktop moves the same entry to the system trash. */
+/** A vault file moves to the in-app trash. The desktop moves the same entry to the system trash. */
 fun vaultDeleteMessage(folder: Boolean, name: String): String {
     val type = if (folder) "Ordner" else "Notiz"
-    return "$type „$name“ wirklich löschen?"
+    return "$type „$name“ in den Papierkorb verschieben?"
 }
 
 fun noteLinkRemoveMessage(): String =

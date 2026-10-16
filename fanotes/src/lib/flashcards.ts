@@ -15,12 +15,14 @@ export type FlashGrade = 'again' | 'hard' | 'good' | 'easy'
 
 const MARKER_START = '<!-- fanotes-cards-v1'
 const MARKER_END = '-->'
-const DAY = 86_400_000
 
 const dayKey = (date: Date) => {
   const pad = (value: number) => String(value).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
+
+/** The calendar day `days` ahead. A 24-hour step lands on the same day, or skips one, when the clocks change. */
+const dayAfter = (now: Date, days: number) => dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() + days))
 
 const clean = (value: string) => value.replace(/\s+/gu, ' ').trim().slice(0, 600)
 
@@ -147,7 +149,7 @@ export const reviewCard = (card: FlashCard, grade: FlashGrade, now = new Date())
   const factor = grade === 'hard' ? 1.2 : grade === 'easy' ? card.ease * 1.3 : card.ease
   next.ease = grade === 'hard' ? Math.max(1.3, card.ease - 0.15) : grade === 'easy' ? card.ease + 0.15 : card.ease
   next.intervalDays = card.intervalDays <= 0 ? (grade === 'hard' ? 1 : grade === 'easy' ? 4 : 2) : Math.max(1, Math.round(card.intervalDays * factor))
-  next.due = dayKey(new Date(now.getTime() + next.intervalDays * DAY))
+  next.due = dayAfter(now, next.intervalDays)
   return next
 }
 

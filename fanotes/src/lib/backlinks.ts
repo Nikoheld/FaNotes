@@ -8,7 +8,26 @@ export type Backlink = {
   excerpt: string
 }
 
-const titleFromPath = (path: string) => path.split('/').pop()?.replace(/\.(md|markdown|pdf)$/iu, '') ?? path
+const NOTE_EXT = /\.(md|markdown|pdf)$/iu
+
+const titleFromPath = (path: string) => path.split('/').pop()?.replace(NOTE_EXT, '') ?? path
+
+const slashPath = (value: string) => value.replace(/\\/gu, '/').replace(/^\/+|\/+$/gu, '')
+
+/**
+ * A wiki target names this note by title (`[[Algebra]]`, `[[Algebra.md]]`)
+ * or by vault path (`[[Mathe/Algebra]]`). A path does not match a different
+ * folder that happens to use the same title.
+ */
+export const wikiTargetMatchesNote = (target: string, path: string) => {
+  const link = slashPath(target.trim())
+  const note = slashPath(path.trim())
+  if (!link || !note) return false
+  const linkBare = link.replace(NOTE_EXT, '').toLocaleLowerCase('de-DE')
+  const noteBare = note.replace(NOTE_EXT, '').toLocaleLowerCase('de-DE')
+  if (link.includes('/')) return linkBare === noteBare
+  return linkBare === titleFromPath(note).toLocaleLowerCase('de-DE')
+}
 
 /** Titles a note points at with wiki links such as `[[Mechanik]]`. Examples in code do not count. */
 export const wikilinkTargets = (markdown: string) => {
@@ -32,12 +51,10 @@ export const backlinksFor = (
   path: string,
   notes: readonly { path: string; content: string }[],
 ): Backlink[] => {
-  const title = titleFromPath(path)
-  const stem = title.toLocaleLowerCase('de-DE')
-  return notes.flatMap((note) => {
-    if (note.path === path) return []
-    const targets = wikilinkTargets(note.content)
-    const hit = targets.find((target) => target.toLocaleLowerCase('de-DE') === stem || target === path)
+    return notes.flatMap((note) => {
+      if (note.path === path) return []
+      const targets = wikilinkTargets(note.content)
+      const hit = targets.find((target) => wikiTargetMatchesNote(target, path))
     if (!hit) return []
     return [{
       path: note.path,

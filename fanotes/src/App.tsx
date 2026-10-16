@@ -4133,7 +4133,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'glyphenwerk', label: 'GlyphenWerk öffnen', detail: 'Handschrift trainieren, live testen, korrigieren und verwalten', shortcut: 'Ctrl ⇧ G', group: 'Werkzeuge', keywords: 'training erkennung symbole test datensatz', icon: <Database size={15} />, run: openGlyphenWerk },
     { id: 'overview', label: 'Vault-Übersicht', detail: 'Ordner und offene Notizen überblicken', group: 'Navigation', icon: <Network size={15} />, run: openOverview },
     { id: 'study', label: 'Lernzeit', detail: 'Zeit, Tippen und Handschrift je Fach, nur lokal', group: 'Ansicht', keywords: 'statistik lernen heatmap', icon: <BarChart3 size={15} />, run: () => { setStudyOpen(true); setOverviewOpen(false); setHomeworkOpen(false); setCalendarOpen(false); setGlyphenWerkOpen(false) } },
-    { id: 'flashcards', label: 'Karteikarten', detail: 'Lernfragen dieser Notiz wiederholen', group: 'Lernen', keywords: 'flashcards karten spaced', icon: <Sparkles size={15} />, run: () => setCardsOpen(true) },
+    { id: 'flashcards', label: 'Karteikarten', detail: 'Lernfragen dieser Notiz wiederholen', group: 'Lernen', keywords: 'flashcards karten spaced', icon: <Sparkles size={15} />, run: () => { editorRef.current?.flushChanges(); setCardsOpen(true) } },
     ...NOTE_TEMPLATES.map((template) => ({
       id: `template-${template.id}`,
       label: `Vorlage: ${template.title}`,
