@@ -147,6 +147,36 @@ assert.equal(homeworkStore.loadHomeworkMarkdown('').ok, true)
 assert.equal(homeworkSync.calendarMarkdownWithHomework(brokenJson, { version: 1, tasks: [] }), null)
 assert.equal(typeof homeworkSync.calendarMarkdownWithHomework('', { version: 1, tasks: [] }), 'string')
 
+const rent = createEvent({
+  calendarId: personal,
+  title: 'Miete',
+  start: new Date(2026, 0, 31, 9, 0),
+  end: new Date(2026, 0, 31, 10, 0),
+  recurrence: 'monthly',
+})
+const rentDoc = { ...doc, events: [rent] }
+const february = expandOccurrences(rentDoc, new Date(2026, 1, 1), new Date(2026, 2, 1))
+const march = expandOccurrences(rentDoc, new Date(2026, 2, 1), new Date(2026, 3, 1))
+assert.equal(dateKey(february[0].start), '2026-02-28')
+assert.equal(february[0].start.getHours(), 9)
+assert.equal(dateKey(march[0].start), '2026-03-31')
+const skippedRent = skipOccurrence(rentDoc, `${rent.id}@2026-01-31`)
+const rentMaster = skippedRent.events.find((event) => event.id === rent.id)
+assert.equal(rentMaster.start, '2026-01-31T09:00')
+assert.ok(rentMaster.exceptionDates.includes('2026-01-31'))
+assert.equal(dateKey(expandOccurrences(skippedRent, new Date(2026, 2, 1), new Date(2026, 3, 1))[0].start), '2026-03-31')
+
+const leap = createEvent({
+  calendarId: personal,
+  title: 'Schaltjahr',
+  start: new Date(2024, 1, 29, 8, 0),
+  end: new Date(2024, 1, 29, 9, 0),
+  recurrence: 'yearly',
+})
+const leapDoc = { ...doc, events: [leap] }
+assert.equal(dateKey(expandOccurrences(leapDoc, new Date(2025, 1, 1), new Date(2025, 2, 1))[0].start), '2025-02-28')
+assert.equal(dateKey(expandOccurrences(leapDoc, new Date(2028, 1, 1), new Date(2028, 2, 1))[0].start), '2028-02-29')
+
 const month = viewRange('month', monday)
 assert.equal(month.days.length, 42)
 assert.equal(month.days[0].getDay(), 1)
