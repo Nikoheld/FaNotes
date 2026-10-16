@@ -247,7 +247,7 @@ internal val LocalStatusInk = staticCompositionLocalOf {
 /** True when the settings viewport stacks each `.setting-row`. */
 private val LocalSettingsContentStacks = staticCompositionLocalOf { false }
 
-/** True when `.range-setting` is `width: 100%` at max-width 760px. */
+/** True when `.range-setting` is `width: 100%` at max-width 760px. The value box stays beside the track. */
 private val LocalSettingsRangeFillsWidth = staticCompositionLocalOf { false }
 
 @Composable
@@ -6377,18 +6377,45 @@ private fun SettingSlider(value: Float, min: Float, max: Float, step: Float, suf
     val width = if (LocalSettingsRangeFillsWidth.current) {
         Modifier.fillMaxWidth()
     } else {
-        Modifier.widthIn(min = 170.dp, max = 360.dp)
+        Modifier.width(ch.fasrv.fanotes.desk.RANGE_SETTING_WIDTH_DP.dp)
     }
-    Column(width) {
-        Text("$shown$suffix", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+    val valueShape = RoundedCornerShape(ch.fasrv.fanotes.desk.RANGE_SETTING_VALUE_RADIUS_DP.dp)
+    Row(
+        width,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.RANGE_SETTING_GAP_DP.dp),
+    ) {
         Slider(
             value = value.coerceIn(min, max),
             onValueChange = { raw ->
                 val steps = kotlin.math.round((raw - min) / step)
                 onChange((min + steps * step).coerceIn(min, max))
             },
+            modifier = Modifier
+                .weight(1f)
+                .widthIn(min = ch.fasrv.fanotes.desk.RANGE_SETTING_TRACK_MIN_DP.dp),
             valueRange = min..max,
         )
+        Box(
+            Modifier
+                .width(ch.fasrv.fanotes.desk.RANGE_SETTING_VALUE_WIDTH_DP.dp)
+                .height(ch.fasrv.fanotes.desk.RANGE_SETTING_VALUE_HEIGHT_DP.dp)
+                .border(
+                    ch.fasrv.fanotes.desk.RANGE_SETTING_VALUE_BORDER_DP.dp,
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA),
+                    valueShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "$shown$suffix",
+                fontSize = ch.fasrv.fanotes.desk.RANGE_SETTING_VALUE_SP.sp,
+                color = LocalStatusInk.current.soft,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
     }
 }
 
