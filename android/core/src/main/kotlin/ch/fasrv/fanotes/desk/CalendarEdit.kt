@@ -5,6 +5,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
+import kotlin.math.min
 
 /**
  * Delete, duplicate, shift, skip, edit, move, and resize calendar events, and
@@ -490,4 +491,65 @@ private fun advanceCalendarWhen(value: String, allDay: Boolean, recurrence: Stri
         else -> moment.plusDays(1)
     }
     return if (allDay || !value.contains('T')) next.toLocalDate().toString() else next.format(WALL)
+}
+
+/** Termin editor after the later chrome pass: 12px panel-strong card, min(440px, viewport − 32px). */
+const val CAL_EDITOR_MAX_DP = 440
+const val CAL_EDITOR_INSET_DP = 16
+const val CAL_EDITOR_RADIUS_DP = 12
+const val CAL_EDITOR_GAP_DP = 10
+const val CAL_EDITOR_PAD_DP = 16
+const val CAL_EDITOR_TITLE_SP = 18
+const val CAL_EDITOR_FIELD_RADIUS_DP = 8
+const val CAL_EDITOR_FIELD_PAD_Y_DP = 6
+const val CAL_EDITOR_FIELD_PAD_X_DP = 8
+const val CAL_EDITOR_LABEL_SP = 12
+const val CAL_EDITOR_LABEL_GAP_DP = 4
+const val CAL_EDITOR_WHEN_GAP_DP = 8
+const val CAL_EDITOR_ACTION_DP = 30
+const val CAL_EDITOR_ACTION_RADIUS_DP = 8
+const val CAL_EDITOR_ACTION_PAD_DP = 10
+const val CAL_EDITOR_ACTION_SP = 12
+const val CAL_EDITOR_ACTION_ICON_DP = 13
+const val CAL_EDITOR_ACTION_GAP_DP = 8
+const val CAL_EDITOR_SCRIM = 0x48000000
+const val CAL_EDITOR_TITLE = "Neuer Termin"
+const val CAL_EDITOR_CALENDAR = "Kalender"
+const val CAL_EDITOR_ALL_DAY = "Ganztägig"
+const val CAL_EDITOR_START = "Beginn"
+const val CAL_EDITOR_END = "Ende"
+const val CAL_EDITOR_REPEAT = "Wiederholen"
+const val CAL_EDITOR_UNTIL = "Bis"
+const val CAL_EDITOR_LOCATION = "Ort"
+const val CAL_EDITOR_NOTES = "Notizen"
+const val CAL_EDITOR_NOTE = "Notizpfad"
+const val CAL_EDITOR_NOTE_HINT = "Schule/Mathe.md"
+const val CAL_EDITOR_SAVE = "Speichern"
+const val CAL_EDITOR_CANCEL = "Abbrechen"
+const val CAL_EDITOR_DUPLICATE = "Duplizieren"
+const val CAL_EDITOR_OPEN_NOTE = "Notiz öffnen"
+const val CAL_EDITOR_DELETE_ONE = "Nur diesen löschen"
+const val CAL_EDITOR_DELETE_SERIES = "Serie löschen"
+const val CAL_EDITOR_DATE_ERROR = "Beginn oder Ende ist kein Datum."
+const val CAL_EDITOR_DETACH = "Dieser Termin wird aus der Serie gelöst."
+
+val CAL_EDITOR_REPEATS = listOf(
+    "none" to "Nie",
+    "daily" to "Täglich",
+    "weekly" to "Wöchentlich",
+    "monthly" to "Monatlich",
+    "yearly" to "Jährlich",
+)
+
+fun calEditorWidthDp(windowWidthDp: Int): Int = min(CAL_EDITOR_MAX_DP, (windowWidthDp - CAL_EDITOR_INSET_DP * 2).coerceAtLeast(0))
+
+fun calEditorRepeatLabel(id: String): String = CAL_EDITOR_REPEATS.firstOrNull { it.first == id }?.second ?: "Nie"
+
+data class CalEditorShadow(val yDp: Int, val blurDp: Int, val alpha: Float)
+
+/** Theme `--shadow` on the Termin card. */
+fun calEditorShadow(dark: Boolean): CalEditorShadow = if (dark) {
+    CalEditorShadow(16, 48, 0.32f)
+} else {
+    CalEditorShadow(12, 40, 0.08f)
 }

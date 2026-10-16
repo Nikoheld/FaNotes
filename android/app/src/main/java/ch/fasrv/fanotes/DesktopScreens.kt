@@ -65,7 +65,9 @@ import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Edit
@@ -2017,87 +2019,252 @@ private fun CalendarEventEditor(
     onOpenNote: () -> Unit,
 ) {
     var error by remember(draft.key) { mutableStateOf("") }
-    val calendarName = document.calendars.find { it.id == draft.calendarId }?.name ?: "Kalender"
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(onClick = {
-                val dates = runCatching {
-                    LocalDate.parse(draft.startDate.trim())
-                    LocalDate.parse(draft.endDate.trim())
-                    if (!draft.allDay) {
-                        java.time.LocalTime.parse(draft.startTime.trim())
-                        java.time.LocalTime.parse(draft.endTime.trim())
-                    }
-                }
-                if (dates.isFailure) {
-                    error = "Beginn oder Ende ist kein Datum."
-                } else {
-                    onSave()
-                }
-            }) { Text("Speichern") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
-        title = {
-            Text(
-                when {
-                    draft.creating -> "Neuer Termin"
-                    draft.detaches -> "Diesen Termin"
-                    else -> "Termin"
-                },
-            )
-        },
-        text = {
-            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+    val calendarName = document.calendars.find { it.id == draft.calendarId }?.name ?: ch.fasrv.fanotes.desk.CAL_EDITOR_CALENDAR
+    val save = {
+        val dates = runCatching {
+            LocalDate.parse(draft.startDate.trim())
+            LocalDate.parse(draft.endDate.trim())
+            if (!draft.allDay) {
+                java.time.LocalTime.parse(draft.startTime.trim())
+                java.time.LocalTime.parse(draft.endTime.trim())
+            }
+        }
+        if (dates.isFailure) error = ch.fasrv.fanotes.desk.CAL_EDITOR_DATE_ERROR else onSave()
+    }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        val scrim = remember { MutableInteractionSource() }
+        val card = remember { MutableInteractionSource() }
+        val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.CAL_EDITOR_RADIUS_DP.dp)
+        val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+        val ink = LocalStatusInk.current
+        val screen = androidx.compose.ui.platform.LocalConfiguration.current
+        val shadow = ch.fasrv.fanotes.desk.calEditorShadow(MaterialTheme.colorScheme.background.luminance() < 0.5f)
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color(ch.fasrv.fanotes.desk.CAL_EDITOR_SCRIM))
+                .clickable(interactionSource = scrim, indication = null, onClick = onDismiss),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                Modifier
+                    .padding(ch.fasrv.fanotes.desk.CAL_EDITOR_INSET_DP.dp)
+                    .width(ch.fasrv.fanotes.desk.calEditorWidthDp(screen.screenWidthDp).dp)
+                    .heightIn(max = (screen.screenHeightDp - ch.fasrv.fanotes.desk.CAL_EDITOR_INSET_DP * 2).coerceAtLeast(120).dp)
+                    .clickable(interactionSource = card, indication = null, onClick = {})
+                    .shadow(
+                        elevation = shadow.yDp.dp,
+                        shape = shape,
+                        ambientColor = Color.Black.copy(alpha = shadow.alpha),
+                        spotColor = Color.Black.copy(alpha = shadow.alpha),
+                    )
+                    .clip(shape)
+                    .border(1.dp, rule, shape)
+                    .background(ink.panelStrong)
+                    .verticalScroll(rememberScrollState())
+                    .padding(ch.fasrv.fanotes.desk.CAL_EDITOR_PAD_DP.dp),
+                verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.CAL_EDITOR_GAP_DP.dp),
+            ) {
                 if (draft.detaches) {
-                    Text("Dieser Termin wird aus der Serie gelöst.", fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    Text(ch.fasrv.fanotes.desk.CAL_EDITOR_DETACH, fontSize = 12.sp, color = ink.muted)
                 }
-                OutlinedTextField(draft.title, { onChange(draft.copy(title = it.take(240))) }, label = { Text("Neuer Termin") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                TextButton(onClick = {
-                    val ids = document.calendars
-                    if (ids.isEmpty()) return@TextButton
-                    val index = ids.indexOfFirst { it.id == draft.calendarId }.let { if (it < 0) 0 else it }
-                    onChange(draft.copy(calendarId = ids[(index + 1) % ids.size].id))
-                }) { Text("Kalender: $calendarName") }
+                CalEditorInput(
+                    draft.title,
+                    { onChange(draft.copy(title = it.take(240))) },
+                    contentDescription = ch.fasrv.fanotes.desk.CAL_EDITOR_TITLE,
+                    title = true,
+                )
+                CalEditorMenu(ch.fasrv.fanotes.desk.CAL_EDITOR_CALENDAR, calendarName, document.calendars.map { it.id to it.name }) {
+                    onChange(draft.copy(calendarId = it))
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = draft.allDay, onCheckedChange = { onChange(draft.copy(allDay = it)) })
-                    Text("Ganztägig")
+                    Text(ch.fasrv.fanotes.desk.CAL_EDITOR_ALL_DAY, fontSize = 12.sp, color = ink.muted)
                 }
-                OutlinedTextField(draft.startDate, { onChange(draft.copy(startDate = it.take(10))) }, label = { Text("Beginn") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                if (!draft.allDay) {
-                    OutlinedTextField(draft.startTime, { onChange(draft.copy(startTime = it.take(5))) }, label = { Text("Beginn Uhrzeit") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                }
-                OutlinedTextField(draft.endDate, { onChange(draft.copy(endDate = it.take(10))) }, label = { Text("Ende") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                if (!draft.allDay) {
-                    OutlinedTextField(draft.endTime, { onChange(draft.copy(endTime = it.take(5))) }, label = { Text("Ende Uhrzeit") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                if (draft.allDay) {
+                    CalEditorField(ch.fasrv.fanotes.desk.CAL_EDITOR_START, draft.startDate, { onChange(draft.copy(startDate = it.take(10))) })
+                    CalEditorField(ch.fasrv.fanotes.desk.CAL_EDITOR_END, draft.endDate, { onChange(draft.copy(endDate = it.take(10))) })
+                } else {
+                    CalEditorWhen(
+                        ch.fasrv.fanotes.desk.CAL_EDITOR_START,
+                        draft.startDate,
+                        { onChange(draft.copy(startDate = it.take(10))) },
+                        draft.startTime,
+                        { onChange(draft.copy(startTime = it.take(5))) },
+                    )
+                    CalEditorWhen(
+                        ch.fasrv.fanotes.desk.CAL_EDITOR_END,
+                        draft.endDate,
+                        { onChange(draft.copy(endDate = it.take(10))) },
+                        draft.endTime,
+                        { onChange(draft.copy(endTime = it.take(5))) },
+                    )
                 }
                 if (!draft.detaches) {
-                    Row(Modifier.horizontalScroll(rememberScrollState())) {
-                        listOf("none" to "Nie", "daily" to "Täglich", "weekly" to "Wöchentlich", "monthly" to "Monatlich", "yearly" to "Jährlich").forEach { (id, label) ->
-                            TextButton(onClick = { onChange(draft.copy(recurrence = id)) }) {
-                                Text(label, color = if (draft.recurrence == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-                            }
-                        }
+                    CalEditorMenu(ch.fasrv.fanotes.desk.CAL_EDITOR_REPEAT, ch.fasrv.fanotes.desk.calEditorRepeatLabel(draft.recurrence), ch.fasrv.fanotes.desk.CAL_EDITOR_REPEATS) {
+                        onChange(draft.copy(recurrence = it))
                     }
                     if (draft.recurrence != "none") {
-                        OutlinedTextField(draft.recurrenceUntil, { onChange(draft.copy(recurrenceUntil = it.take(10))) }, label = { Text("Bis") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        CalEditorField(ch.fasrv.fanotes.desk.CAL_EDITOR_UNTIL, draft.recurrenceUntil, { onChange(draft.copy(recurrenceUntil = it.take(10))) })
                     }
                 }
-                OutlinedTextField(draft.location, { onChange(draft.copy(location = it.take(160))) }, label = { Text("Ort") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                OutlinedTextField(draft.notes, { onChange(draft.copy(notes = it.take(4000))) }, label = { Text("Notizen") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(draft.notePath, { onChange(draft.copy(notePath = it.take(400))) }, label = { Text("Notizpfad") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
-                if (!draft.creating) {
-                    Row(Modifier.horizontalScroll(rememberScrollState())) {
-                        TextButton(onClick = onDuplicate) { Text("Duplizieren") }
-                        if (draft.notePath.isNotBlank()) TextButton(onClick = onOpenNote) { Text("Notiz öffnen") }
-                        TextButton(onClick = onDeleteOne) { Text("Nur diesen löschen") }
-                        if (draft.recurrence != "none") TextButton(onClick = onDeleteSeries) { Text("Serie löschen") }
+                CalEditorField(ch.fasrv.fanotes.desk.CAL_EDITOR_LOCATION, draft.location, { onChange(draft.copy(location = it.take(160))) })
+                CalEditorField(ch.fasrv.fanotes.desk.CAL_EDITOR_NOTES, draft.notes, { onChange(draft.copy(notes = it.take(4000))) }, singleLine = false)
+                CalEditorField(
+                    ch.fasrv.fanotes.desk.CAL_EDITOR_NOTE,
+                    draft.notePath,
+                    { onChange(draft.copy(notePath = it.take(400))) },
+                    placeholder = ch.fasrv.fanotes.desk.CAL_EDITOR_NOTE_HINT,
+                )
+                if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.CAL_EDITOR_ACTION_GAP_DP.dp),
+                    verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.CAL_EDITOR_ACTION_GAP_DP.dp),
+                ) {
+                    if (!draft.creating) {
+                        CalEditorAction(ch.fasrv.fanotes.desk.CAL_EDITOR_DUPLICATE, Icons.Filled.ContentCopy, onClick = onDuplicate)
+                        if (draft.notePath.isNotBlank()) {
+                            CalEditorAction(ch.fasrv.fanotes.desk.CAL_EDITOR_OPEN_NOTE, Icons.Filled.CalendarMonth, onClick = onOpenNote)
+                        }
+                        CalEditorAction(ch.fasrv.fanotes.desk.CAL_EDITOR_DELETE_ONE, Icons.Filled.Delete, danger = true, onClick = onDeleteOne)
+                        if (draft.recurrence != "none") {
+                            CalEditorAction(ch.fasrv.fanotes.desk.CAL_EDITOR_DELETE_SERIES, danger = true, onClick = onDeleteSeries)
+                        }
                     }
+                    Spacer(Modifier.weight(1f))
+                    CalEditorAction(ch.fasrv.fanotes.desk.CAL_EDITOR_CANCEL, onClick = onDismiss)
+                    CalEditorAction(ch.fasrv.fanotes.desk.CAL_EDITOR_SAVE, primary = true, onClick = save)
                 }
             }
-        },
-    )
+        }
+    }
+}
+
+@Composable
+private fun CalEditorField(
+    label: String,
+    value: String,
+    onChange: (String) -> Unit,
+    singleLine: Boolean = true,
+    placeholder: String = "",
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.CAL_EDITOR_LABEL_GAP_DP.dp)) {
+        Text(label, fontSize = ch.fasrv.fanotes.desk.CAL_EDITOR_LABEL_SP.sp, color = LocalStatusInk.current.muted)
+        CalEditorInput(value, onChange, singleLine = singleLine, placeholder = placeholder)
+    }
+}
+
+@Composable
+private fun CalEditorWhen(
+    label: String,
+    date: String,
+    onDate: (String) -> Unit,
+    time: String,
+    onTime: (String) -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.CAL_EDITOR_WHEN_GAP_DP.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.CAL_EDITOR_LABEL_GAP_DP.dp)) {
+            Text(label, fontSize = ch.fasrv.fanotes.desk.CAL_EDITOR_LABEL_SP.sp, color = LocalStatusInk.current.muted)
+            CalEditorInput(date, onDate)
+        }
+        Box(Modifier.widthIn(min = 88.dp)) { CalEditorInput(time, onTime, contentDescription = label) }
+    }
+}
+
+@Composable
+private fun CalEditorMenu(label: String, value: String, options: List<Pair<String, String>>, onPick: (String) -> Unit) {
+    var open by remember(value) { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.CAL_EDITOR_LABEL_GAP_DP.dp)) {
+        Text(label, fontSize = ch.fasrv.fanotes.desk.CAL_EDITOR_LABEL_SP.sp, color = LocalStatusInk.current.muted)
+        Box {
+            CalEditorInput(value, {}, readOnly = true, onClick = { if (options.isNotEmpty()) open = true })
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                options.forEach { (id, name) ->
+                    DropdownMenuItem(text = { Text(name) }, onClick = { onPick(id); open = false })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalEditorInput(
+    value: String,
+    onChange: (String) -> Unit,
+    singleLine: Boolean = true,
+    placeholder: String = "",
+    contentDescription: String = "",
+    title: Boolean = false,
+    readOnly: Boolean = false,
+    onClick: (() -> Unit)? = null,
+) {
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.CAL_EDITOR_FIELD_RADIUS_DP.dp)
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = if (singleLine) 0.dp else 72.dp)
+            .clip(shape)
+            .border(1.dp, rule, shape)
+            .background(MaterialTheme.colorScheme.background)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(
+                horizontal = ch.fasrv.fanotes.desk.CAL_EDITOR_FIELD_PAD_X_DP.dp,
+                vertical = ch.fasrv.fanotes.desk.CAL_EDITOR_FIELD_PAD_Y_DP.dp,
+            )
+            .then(if (contentDescription.isNotEmpty()) Modifier.semantics { this.contentDescription = contentDescription } else Modifier),
+    ) {
+        if (value.isEmpty() && placeholder.isNotEmpty()) {
+            Text(placeholder, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+        }
+        BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            readOnly = readOnly,
+            singleLine = singleLine,
+            textStyle = TextStyle(
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = if (title) ch.fasrv.fanotes.desk.CAL_EDITOR_TITLE_SP.sp else 16.sp,
+                fontWeight = if (title) FontWeight(650) else FontWeight.Normal,
+            ),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun CalEditorAction(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    danger: Boolean = false,
+    primary: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.CAL_EDITOR_ACTION_RADIUS_DP.dp)
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    val ink = if (primary) MaterialTheme.colorScheme.background else if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+    val fill = if (primary) MaterialTheme.colorScheme.onSurface else Color.Transparent
+    val border = if (primary) MaterialTheme.colorScheme.onSurface else rule
+    Row(
+        Modifier
+            .height(ch.fasrv.fanotes.desk.CAL_EDITOR_ACTION_DP.dp)
+            .clip(shape)
+            .background(fill)
+            .border(1.dp, border, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = ch.fasrv.fanotes.desk.CAL_EDITOR_ACTION_PAD_DP.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (icon != null) Icon(icon, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.CAL_EDITOR_ACTION_ICON_DP.dp), tint = ink)
+        Text(label, fontSize = ch.fasrv.fanotes.desk.CAL_EDITOR_ACTION_SP.sp, color = ink)
+    }
 }
 
 @Composable
