@@ -17,6 +17,7 @@ class SettingsSearchTest {
         assertEquals("settings-note-backup", searchSettings("Backup").single().target)
         assertEquals("experimental", searchSettings("Backup").single().section)
         assertEquals("drawing", searchSettings("Handschrift").single { it.label == "Papier & Stift" }.section)
+        assertEquals("settings-note-standard", searchSettings("HiDPI").single().target)
         assertTrue(searchSettings("GlyphenWerk").isEmpty())
         assertTrue(searchSettings("OneNote").isEmpty())
         assertTrue(searchSettings("vim modus").isEmpty())

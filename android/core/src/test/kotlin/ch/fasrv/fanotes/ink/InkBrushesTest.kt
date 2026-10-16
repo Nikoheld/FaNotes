@@ -79,6 +79,28 @@ class InkBrushesTest {
     }
 
     @Test
+    fun anOpenTipStaysOnTheChord() {
+        assertEquals(0.0, interiorSegmentPull(0.0, 12.0, 4.0), 1e-9)
+        assertEquals(0.85, interiorSegmentPull(1.0, 4.0, 20.0), 1e-9)
+        assertTrue(interiorSegmentPull(1.0, 200.0, 3.5) < 0.02)
+        val turn = listOf(
+            StrokePoint(0.0, 0.0, 0.0, 0.5, 0.0, 0.0, "pen"),
+            StrokePoint(1.0, 0.0, 1.0, 0.5, 0.0, 0.0, "pen"),
+            StrokePoint(1.0, 1.0, 2.0, 0.5, 0.0, 0.0, "pen"),
+        )
+        val grain = pencilGrainSegments(turn, 100.0, 100.0, 1.0, 3.5, true, 1.0, 1, 0, 0.0, 1.0)
+        assertEquals(null, grain.last().controlX, "the open tip must not hook along the previous heading")
+        assertEquals(100.0, grain.last().endX, 1e-6)
+        assertEquals(100.0, grain.last().endY, 1e-6)
+        assertTrue(grain[0].endX <= 100.0 + 1e-6, "a corner must not bow past the sample")
+        val stroke = constantWidthStroke(turn, 100.0, 100.0, 1.0, 3.5, true, 1.0, 1.0)
+        val tip = stroke!!.commands.last()
+        assertTrue(tip is StrokeCommand.Line)
+        assertEquals(100.0, (tip as StrokeCommand.Line).x, 1e-6)
+        assertEquals(100.0, (tip as StrokeCommand.Line).y, 1e-6)
+    }
+
+    @Test
     fun constantWidthDropsATinyPenUpStub() {
         val points = listOf(
             StrokePoint(0.0, 0.0, 0.0, 0.5, 0.0, 0.0, "pen"),

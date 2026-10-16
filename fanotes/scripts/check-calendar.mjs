@@ -182,25 +182,52 @@ assert.equal(month.days.length, 42)
 assert.equal(month.days[0].getDay(), 1)
 
 const ics = await server.ssrLoadModule('/src/lib/icsCalendar.ts')
-const wallOf = (date) => {
-  const pad = (value) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-const utcEvents = ics.importIcs([
+const timed = ics.importIcs([
   'BEGIN:VCALENDAR',
   'BEGIN:VEVENT',
-  'UID:utc',
-  'SUMMARY:Pfad\\\\notes',
-  'DTSTART:20261020T090000Z',
-  'DTEND:20261020T100000Z',
-  'DESCRIPTION:C:\\\\notes',
+  'UID:lesson',
+  'SUMMARY:Hello\\, Welt',
+  'DESCRIPTION:Zeile\\\\n2',
+  'DTSTART:20261014T153000',
+  'DURATION:PT45M',
+  'END:VEVENT',
+  'BEGIN:VEVENT',
+  'UID:gone',
+  'STATUS:CANCELLED',
+  'SUMMARY:Entfällt',
+  'DTSTART:20261014T180000',
   'END:VEVENT',
   'END:VCALENDAR',
 ].join('\n'), personal)
-assert.equal(utcEvents[0].start, wallOf(new Date(Date.UTC(2026, 9, 20, 9, 0))))
-assert.equal(utcEvents[0].end, wallOf(new Date(Date.UTC(2026, 9, 20, 10, 0))))
-assert.equal(utcEvents[0].title, 'Pfad\\notes')
-assert.equal(utcEvents[0].notes, 'C:\\notes')
+assert.equal(timed.length, 1)
+assert.equal(timed[0].title, 'Hello, Welt')
+assert.equal(timed[0].notes, 'Zeile\\n2')
+assert.equal(timed[0].start, '2026-10-14T15:30')
+assert.equal(timed[0].end, '2026-10-14T16:15')
+
+const utcStart = new Date(Date.UTC(2026, 9, 16, 7, 0, 0))
+const utc = ics.importIcs([
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'UID:utc-call',
+  'SUMMARY:Anruf',
+  'DTSTART:20261016T070000Z',
+  'DURATION:PT90M',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+const utcWall = (date) => {
+  const pad = (part) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+assert.equal(utc[0].start, utcWall(utcStart), 'UTC stamp becomes the local clock')
+assert.equal(utc[0].end, utcWall(new Date(utcStart.getTime() + 90 * 60_000)))
+if (utcStart.getTimezoneOffset() !== 0) assert.notEqual(utc[0].start, '2026-10-16T07:00')
+
+const wallOf = (date) => {
+  const pad = (part) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
 const offsetEvents = ics.importIcs([
   'BEGIN:VCALENDAR',
   'BEGIN:VEVENT',
@@ -220,6 +247,61 @@ assert.equal(ics.importIcs([
   'END:VEVENT',
   'END:VCALENDAR',
 ].join('\n'), personal).length, 0)
+
+const existing = {
+  ...doc,
+  events: [{
+    ...focus,
+    id: 'lesson',
+    calendarId: school,
+    title: 'Alt',
+    notePath: 'Schule/Mathe.md',
+    recurrence: 'weekly',
+    exceptionDates: ['2026-10-21'],
+  }],
+}
+const merged = ics.applyIcsImport(existing, [
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'UID:lesson',
+  'SUMMARY:Neu',
+  'DTSTART:20261014T153000',
+  'DURATION:PT45M',
+  'RRULE:FREQ=WEEKLY',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+assert.equal(merged.updated, 1)
+assert.equal(merged.added, 0)
+assert.equal(merged.document.events.length, 1)
+assert.equal(merged.document.events[0].title, 'Neu')
+assert.equal(merged.document.events[0].calendarId, school)
+assert.equal(merged.document.events[0].notePath, 'Schule/Mathe.md')
+assert.deepEqual(merged.document.events[0].exceptionDates, ['2026-10-21'])
+const again = ics.applyIcsImport(merged.document, [
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'UID:lesson',
+  'SUMMARY:Neu',
+  'DTSTART:20261014T153000',
+  'DURATION:PT45M',
+  'RRULE:FREQ=WEEKLY',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+assert.equal(again.document.events.length, 1)
+const cancelled = ics.applyIcsImport(again.document, [
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'UID:lesson',
+  'STATUS:CANCELLED',
+  'SUMMARY:Neu',
+  'DTSTART:20261014T153000',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+assert.equal(cancelled.removed, 1)
+assert.equal(cancelled.document.events.length, 0)
 
 await server.close()
 console.log(JSON.stringify({
