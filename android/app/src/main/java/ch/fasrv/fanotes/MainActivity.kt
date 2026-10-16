@@ -475,9 +475,7 @@ fun FaNotesScreen(
     var firstRun by remember { mutableStateOf(desk["welcomed"] != "yes") }
     var firstDraft by remember { mutableStateOf(ch.fasrv.fanotes.desk.firstRunStart()) }
     var editingBox by remember { mutableStateOf<String?>(null) }
-    var boxText by remember { mutableStateOf("") }
     val editWorksheetBox = { id: String ->
-        boxText = model.worksheetBoxes.value.firstOrNull { it.box.id == id }?.box?.text.orEmpty()
         editingBox = id
     }
     var syncOpen by remember { mutableStateOf(false) }
@@ -836,7 +834,7 @@ fun FaNotesScreen(
                                 NotePage(
                                     model, tool, style, finger, showText, markdown, backdrop, token, open?.path, syncText,
                                     syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.setSidebarOpen(!(if (wide) sidebarOpen else showList)) },
-                                    editWorksheetBox, { mathOpen = true }, it.clipToBounds(),
+                                    editWorksheetBox, editingBox, { editingBox = null }, { mathOpen = true }, it.clipToBounds(),
                                     showRelations = !panels.inspector,
                                     onExportPdf = onExportPdf,
                                     onImportSheet = onImportSheet,
@@ -859,7 +857,7 @@ fun FaNotesScreen(
                             NotePage(
                                 model, tool, style, finger, showText, markdown, backdrop, token, open?.path, syncText,
                                 syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.setSidebarOpen(!(if (wide) sidebarOpen else showList)) },
-                                editWorksheetBox, { mathOpen = true }, it.clipToBounds(),
+                                editWorksheetBox, editingBox, { editingBox = null }, { mathOpen = true }, it.clipToBounds(),
                                 showRelations = !panels.inspector,
                                 onExportPdf = onExportPdf,
                                 onImportSheet = onImportSheet,
@@ -1090,39 +1088,6 @@ fun FaNotesScreen(
             if (mathOutput.isNotBlank()) {
                 Text(mathOutput, fontSize = 13.sp, color = if (mathOk) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error)
             }
-        }
-    }
-    editingBox?.let { id ->
-        PromptCard(
-            ch.fasrv.fanotes.desk.BOX_EDITOR_TITLE,
-            onDismiss = { editingBox = null },
-            confirmLabel = ch.fasrv.fanotes.desk.BOX_EDITOR_SAVE,
-            onConfirm = {
-                model.updateWorksheetBox(id, boxText)
-                editingBox = null
-            },
-        ) {
-            PromptField(
-                boxText,
-                { boxText = it },
-                ch.fasrv.fanotes.desk.BOX_EDITOR_PLACEHOLDER,
-                onDone = {
-                    model.updateWorksheetBox(id, boxText)
-                    editingBox = null
-                },
-                singleLine = false,
-                minHeightDp = ch.fasrv.fanotes.desk.BOX_EDITOR_MIN_DP,
-                radiusDp = ch.fasrv.fanotes.desk.BOX_EDITOR_RADIUS_DP,
-            )
-            Text(
-                ch.fasrv.fanotes.desk.BOX_EDITOR_REMOVE,
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.clickable {
-                    model.removeWorksheetBox(id)
-                    editingBox = null
-                },
-            )
         }
     }
     if (firstRun) {
@@ -2586,6 +2551,8 @@ private fun NotePage(
     onSync: () -> Unit,
     onToggleRail: () -> Unit,
     onEditBox: (String) -> Unit,
+    editingBox: String?,
+    onCloseBox: () -> Unit,
     onMath: () -> Unit,
     modifier: Modifier,
     showRelations: Boolean = true,
@@ -2663,6 +2630,8 @@ private fun NotePage(
         onSync = onSync,
         onToggleRail = onToggleRail,
         onEditBox = onEditBox,
+        editingBox = editingBox,
+        onCloseBox = onCloseBox,
         onMath = onMath,
         onDeskShortcut = onDeskShortcut,
         modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -2690,7 +2659,9 @@ private fun PageSurface(
     onSync: () -> Unit,
     onToggleRail: () -> Unit,
     onEditBox: (String) -> Unit,
-        onMath: () -> Unit,
+    editingBox: String?,
+    onCloseBox: () -> Unit,
+    onMath: () -> Unit,
         onDeskShortcut: (String) -> Unit,
         modifier: Modifier,
 ) {
@@ -2854,6 +2825,13 @@ private fun PageSurface(
             page.ink.linkMarks = links
             page.ink.worksheetBoxes = boxes
             page.ink.worksheetHighlights = highlights
+            page.onWorksheetBoxText = { id, text -> model.updateWorksheetBox(id, text) }
+            page.onWorksheetBoxRemove = { id ->
+                model.removeWorksheetBox(id)
+                onCloseBox()
+            }
+            page.onWorksheetBoxClosed = onCloseBox
+            page.syncWorksheetField(editingBox)
             page.ink.pageFrames = backdrop.filter { it.worksheetId.isEmpty() }.mapIndexed { index, slice ->
                 ch.fasrv.fanotes.desk.PageFrame(index + 1, slice.topPagePx.toDouble(), slice.heightPagePx.toDouble(), slice.widthPagePx.toDouble())
             }
