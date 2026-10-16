@@ -168,6 +168,31 @@ class NoteProfilesTest {
     }
 
     @Test
+    fun theWelcomePreviewFormulaAndSearchMatchTheDesktopSheet() {
+        assertEquals(0xFFE7E5DF.toInt(), FIRST_RUN_PREVIEW_RULE_ARGB)
+        assertEquals(11, FIRST_RUN_PREVIEW_RULE_MARGIN_TOP_DP)
+        assertEquals(4, FIRST_RUN_PREVIEW_RULE_MARGIN_BOTTOM_DP)
+        assertEquals(330, FIRST_RUN_PREVIEW_INK_VIEW_WIDTH)
+        assertEquals(98, FIRST_RUN_PREVIEW_INK_HEIGHT_DP)
+        assertEquals(3.4f, FIRST_RUN_PREVIEW_INK_WIDTH_DP)
+        assertEquals(27, FIRST_RUN_PREVIEW_SEARCH_HEIGHT_DP)
+        assertEquals(7, FIRST_RUN_PREVIEW_SEARCH_SP)
+        assertEquals(7, FIRST_RUN_PREVIEW_SEARCH_RADIUS_DP)
+        assertEquals(6, FIRST_RUN_PREVIEW_SEARCH_GAP_DP)
+        assertEquals(8, FIRST_RUN_PREVIEW_SEARCH_PAD_DP)
+        assertEquals(11, FIRST_RUN_PREVIEW_SEARCH_ICON_DP)
+        assertEquals(0xFF66676B.toInt(), FIRST_RUN_PREVIEW_SEARCH_ARGB)
+        assertEquals(0xFFDFDDD7.toInt(), FIRST_RUN_PREVIEW_SEARCH_BORDER_ARGB)
+        assertEquals(0xFFFFFFFF.toInt(), FIRST_RUN_PREVIEW_SEARCH_FILL_ARGB)
+        assertEquals(5, FIRST_RUN_PREVIEW_SEARCH_SHADOW_Y_DP)
+        assertEquals(0.06f, FIRST_RUN_PREVIEW_SEARCH_SHADOW_ALPHA)
+        assertEquals(6.5f, FIRST_RUN_PREVIEW_HITS_SP)
+        val accent = 0xFF226688.toInt()
+        assertEquals(mixArgb(accent, 0xFF222222.toInt(), 0.78f), firstRunPreviewInkStroke(accent))
+        assertEquals(mixArgb(accent, 0xFF333333.toInt(), 0.78f), firstRunPreviewSearchHits(accent))
+    }
+
+    @Test
     fun theFirstRunGridFollowsTheDesktopBreakpoints() {
         assertEquals(0.78f to 1.22f, firstRunColumnWeights(0, 980))
         assertEquals(0.78f to 1.22f, firstRunColumnWeights(1, 800))

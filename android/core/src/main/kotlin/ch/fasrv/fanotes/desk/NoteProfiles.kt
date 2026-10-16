@@ -362,6 +362,34 @@ const val FIRST_RUN_PREVIEW_PAPER_SHADOW_X_DP = 0
 const val FIRST_RUN_PREVIEW_PAPER_SHADOW_Y_DP = 10
 const val FIRST_RUN_PREVIEW_PAPER_SHADOW_BLUR_DP = 30
 const val FIRST_RUN_PREVIEW_PAPER_SHADOW_ALPHA = 0.14f
+/** `.first-run-preview-rule` is 1px `#e7e5df` with margin `11px 0 4px`. */
+const val FIRST_RUN_PREVIEW_RULE_ARGB = 0xFFE7E5DF.toInt()
+const val FIRST_RUN_PREVIEW_RULE_MARGIN_TOP_DP = 11
+const val FIRST_RUN_PREVIEW_RULE_MARGIN_BOTTOM_DP = 4
+/**
+ * `.first-run-preview-ink` is 98px tall on a `0 0 330 98` viewBox.
+ * The stroke is 3.4 user units of `color-mix(in srgb, var(--accent) 78%, #222)`.
+ */
+const val FIRST_RUN_PREVIEW_INK_VIEW_WIDTH = 330
+const val FIRST_RUN_PREVIEW_INK_HEIGHT_DP = 98
+const val FIRST_RUN_PREVIEW_INK_WIDTH_DP = 3.4f
+const val FIRST_RUN_PREVIEW_INK_MIX = 0.78f
+const val FIRST_RUN_PREVIEW_INK_INTO_ARGB = 0xFF222222.toInt()
+/** `.first-run-preview-search` is 27px tall, 7px type, 7px radius, gap 6px, padding `0 8px`, `#66676b` on white, border `#dfddd7`. */
+const val FIRST_RUN_PREVIEW_SEARCH_HEIGHT_DP = 27
+const val FIRST_RUN_PREVIEW_SEARCH_SP = 7
+const val FIRST_RUN_PREVIEW_SEARCH_RADIUS_DP = 7
+const val FIRST_RUN_PREVIEW_SEARCH_GAP_DP = 6
+const val FIRST_RUN_PREVIEW_SEARCH_PAD_DP = 8
+const val FIRST_RUN_PREVIEW_SEARCH_ICON_DP = 11
+const val FIRST_RUN_PREVIEW_SEARCH_ARGB = 0xFF66676B.toInt()
+const val FIRST_RUN_PREVIEW_SEARCH_BORDER_ARGB = 0xFFDFDDD7.toInt()
+const val FIRST_RUN_PREVIEW_SEARCH_FILL_ARGB = 0xFFFFFFFF.toInt()
+const val FIRST_RUN_PREVIEW_SEARCH_SHADOW_Y_DP = 5
+const val FIRST_RUN_PREVIEW_SEARCH_SHADOW_ALPHA = 0.06f
+/** `.first-run-preview-search b` is 6.5px and `color-mix(in srgb, var(--accent) 78%, #333)`. */
+const val FIRST_RUN_PREVIEW_HITS_SP = 6.5f
+const val FIRST_RUN_PREVIEW_HITS_INTO_ARGB = 0xFF333333.toInt()
 const val FIRST_RUN_PREVIEW_QUERY = "„Änderungsrate“"
 const val FIRST_RUN_PREVIEW_HITS = "1 Treffer"
 const val FIRST_RUN_PREVIEW_INK = "Handschrift"
@@ -412,6 +440,14 @@ fun firstRunPreviewAsidePad(screenWidthDp: Int): FirstRunPreviewAsidePad {
  * Mathematik keeps `var(--accent)`, Deutsch is #c76868, Französisch #3d8be0, Physik #5e9abd, Wirtschaft #cf9a48.
  * [accentArgb] is the theme accent for Mathematik.
  */
+/** Stroke of `.first-run-preview-ink path`: accent mixed 78% into #222. */
+fun firstRunPreviewInkStroke(accentArgb: Int): Int =
+    mixArgb(accentArgb, FIRST_RUN_PREVIEW_INK_INTO_ARGB, FIRST_RUN_PREVIEW_INK_MIX)
+
+/** Hit count on `.first-run-preview-search b`: accent mixed 78% into #333. */
+fun firstRunPreviewSearchHits(accentArgb: Int): Int =
+    mixArgb(accentArgb, FIRST_RUN_PREVIEW_HITS_INTO_ARGB, FIRST_RUN_PREVIEW_INK_MIX)
+
 fun firstRunPreviewMarkColors(accentArgb: Int): List<Int> = listOf(
     accentArgb,
     0xFFC76868.toInt(),
