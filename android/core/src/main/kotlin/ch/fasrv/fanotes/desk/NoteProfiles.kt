@@ -295,6 +295,14 @@ val FIRST_RUN_PREVIEW_SUBJECTS = listOf("Mathematik", "Deutsch", "Französisch",
 
 fun firstRunPreviewColumns(widthDp: Int): Int = if (widthDp <= FIRST_RUN_PREVIEW_SPLIT_DP) 1 else 2
 
+/** Copy and panel weights from the desktop first-run grids. */
+fun firstRunColumnWeights(step: Int): Pair<Float, Float> = when (step) {
+    0 -> 0.87f to 1.13f
+    1 -> 0.75f to 1.25f
+    2 -> 0.78f to 1.22f
+    else -> 0.82f to 1.18f
+}
+
 val FIRST_RUN_BENEFITS = listOf("Lokal & privat", "Stift & Tastatur", "Markdown inklusive")
 
 val FIRST_RUN_WRITING = listOf(
