@@ -8195,6 +8195,8 @@ mod tests {
             );
         });
     }
+
+    #[test]
     fn a_line_separator_inside_a_month_is_not_a_year() {
         with_tz("America/New_York", || {
             // U+2028 and U+2029 are word characters. Two of them around the
@@ -8421,6 +8423,31 @@ mod tests {
                 Some("2026-10-13T04:00:00.000Z")
             );
             assert_eq!(super::canonical_iso("-000001-13."), None);
+        });
+    }
+
+    #[test]
+    fn a_newline_before_a_negative_year_clock_is_a_separator() {
+        with_tz("America/New_York", || {
+            // Tab, newline, and a no-break space are the same break as a space.
+            // Year -1 keeps its local mean time instead of becoming 2013.
+            assert_eq!(
+                super::canonical_iso("-000001-10-13\n16:00").as_deref(),
+                Some("-000001-10-13T20:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13\t16:00").as_deref(),
+                Some("-000001-10-13T20:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13\u{00a0}16:00").as_deref(),
+                Some("-000001-10-13T20:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13\n16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("-000001-10-13\u{2028}16:00"), None);
         });
     }
 }
