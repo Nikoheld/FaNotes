@@ -1492,7 +1492,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private fun segment(tool: InkTool): LinearLayout {
         val row = LinearLayout(context)
         row.orientation = LinearLayout.HORIZONTAL
-        row.background = rounded(if (dark) 0xFF2A2A2A.toInt() else 0xFFE7E4DE.toInt(), dp(ch.fasrv.fanotes.desk.MODE_SWITCH_RADIUS_DP))
+        row.background = rounded(ch.fasrv.fanotes.desk.modeSwitchTrackColor(dark), dp(ch.fasrv.fanotes.desk.MODE_SWITCH_RADIUS_DP))
         row.addView(seg("Stift", tool == InkTool.PEN) { onTool(InkTool.PEN) })
         row.addView(seg("Radierer", tool == InkTool.ERASER) { onTool(InkTool.ERASER) })
         row.addView(seg("Auswahl", tool == InkTool.SELECT) { onTool(InkTool.SELECT) })
@@ -1506,8 +1506,16 @@ class NotePageView(context: Context) : FrameLayout(context) {
         view.gravity = Gravity.CENTER
         view.setPadding(dp(10), 0, dp(10), 0)
         view.minHeight = dp(ch.fasrv.fanotes.desk.MODE_BUTTON_DP)
-        view.setTextColor(if (dark) 0xFFEDEDEC.toInt() else 0xFF252630.toInt())
-        if (selected) view.background = rounded(if (dark) 0xFF3A3A3A.toInt() else 0xFFFFFFFF.toInt(), dp(ch.fasrv.fanotes.desk.MODE_BUTTON_RADIUS_DP))
+        view.setTextColor(ch.fasrv.fanotes.desk.modeSwitchInk(dark, selected))
+        view.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, 650, false)
+        if (selected) {
+            view.background = rounded(
+                ch.fasrv.fanotes.desk.modeSwitchActiveColor(dark),
+                dp(ch.fasrv.fanotes.desk.MODE_BUTTON_RADIUS_DP),
+                ch.fasrv.fanotes.desk.modeSwitchRing(ink.accentColor),
+                dp(1),
+            )
+        }
         view.setOnClickListener { click() }
         return view
     }
@@ -1531,8 +1539,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
         view.minHeight = dp(ch.fasrv.fanotes.desk.FORMAT_BUTTON_DP)
         view.background = rounded(android.graphics.Color.TRANSPARENT, dp(ch.fasrv.fanotes.desk.FORMAT_BUTTON_RADIUS_DP))
         view.isEnabled = enabled
-        view.alpha = if (enabled) 1f else 0.38f
-        view.setTextColor(if (dark) 0xFFEDEDEC.toInt() else 0xFF252630.toInt())
+        view.alpha = if (enabled) 1f else ch.fasrv.fanotes.desk.FORMAT_DISABLED_ALPHA
+        view.setTextColor(ch.fasrv.fanotes.desk.formatChipInk(dark))
         view.setOnClickListener { if (enabled) click() }
         val params = LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, dp(ch.fasrv.fanotes.desk.FORMAT_BUTTON_DP))
         params.marginStart = dp(4)
@@ -1810,9 +1818,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
         placeEditor()
     }
 
-    private fun rounded(color: Int, radius: Int) = GradientDrawable().apply {
+    private fun rounded(color: Int, radius: Int, stroke: Int = 0, strokeWidth: Int = 0) = GradientDrawable().apply {
         cornerRadius = radius.toFloat()
         setColor(color)
+        if (strokeWidth > 0) setStroke(strokeWidth, stroke)
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
