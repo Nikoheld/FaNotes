@@ -292,6 +292,16 @@ const val FIRST_RUN_LOGO_DP = 39
 const val FIRST_RUN_LOGO_RADIUS_DP = 8
 const val FIRST_RUN_LOGO_ICON_DP = 18
 const val FIRST_RUN_STEP_DP = 22
+/**
+ * Progress steps. The line before a step turns accent only once that step is complete.
+ * The active circle wears `0 0 0 4px` of the accent at 11%. Idle rings are `--border-strong`.
+ */
+const val FIRST_RUN_STEP_CONNECTOR_DP = 22
+const val FIRST_RUN_STEP_CONNECTOR_GAP_DP = 2
+const val FIRST_RUN_STEP_HALO_DP = 4
+const val FIRST_RUN_STEP_HALO_ALPHA = 0.11f
+const val FIRST_RUN_STEP_COMPLETE_LINE = 0.55f
+const val FIRST_RUN_STEP_COMPLETE_FILL = 0.10f
 const val FIRST_RUN_PROFILE_RADIUS_DP = 12
 const val FIRST_RUN_PROFILE_MIN_DP = 150
 const val FIRST_RUN_PICKER_RADIUS_DP = 12
@@ -1032,6 +1042,18 @@ fun firstRunLocalBorder(successArgb: Int, borderArgb: Int): Int =
 /** Label and icon of `.first-run-local`: success mixed 74% into the text color. */
 fun firstRunLocalInk(successArgb: Int, textArgb: Int): Int =
     mixArgb(successArgb, textArgb, FIRST_RUN_LOCAL_INK_MIX)
+
+/** True when the line leading into [stepIndex] is accent. That step must already be complete. */
+fun firstRunStepConnectorLit(stepIndex: Int, currentStep: Int): Boolean = stepIndex < currentStep
+
+/** Accent at [alpha], used for the completed line, ring, and fill. */
+fun firstRunStepAccentWash(accentArgb: Int, alpha: Float): Int {
+    val channel = (alpha.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
+    return (channel shl 24) or (accentArgb and 0xFFFFFF)
+}
+
+/** Active step halo: accent at 11%, drawn as a 4px ring outside the circle. */
+fun firstRunStepHalo(accentArgb: Int): Int = firstRunStepAccentWash(accentArgb, FIRST_RUN_STEP_HALO_ALPHA)
 
 /** Fill of `.first-run-local`: success at 7% over a transparent backdrop. */
 fun firstRunLocalFill(successArgb: Int): Int {
