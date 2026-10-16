@@ -48,8 +48,16 @@ import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Draw
@@ -4002,99 +4010,127 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                             )
                         }
                     }
-                    TextButton(onClick = onOpenVault, modifier = Modifier.settingsAnchor("files", "settings-vault", anchorY)) { Text("Vault-Ordner öffnen") }
-                    TextButton(onClick = onPrivate) { Text("Tablet-Vault verwenden") }
-                    Text("Profil", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                    listOf("school" to "Schule", "university" to "UNI", "private" to "Privat", "work" to "Arbeit").forEach { (id, label) ->
-                        Text(
-                            label,
-                            modifier = Modifier.clickable { model.applyProfile(id) }.padding(vertical = 4.dp),
-                            fontWeight = if (settings["profile"] == id) FontWeight.Bold else FontWeight.Normal,
-                        )
+                    SettingCard("Aktueller Vault", Icons.Filled.Folder, Modifier.settingsAnchor("files", "settings-vault", anchorY)) {
+                        SettingRow("Ordner", "Notizen bleiben Markdown-Dateien in diesem Ordner.", divider = false) {
+                            Column {
+                                TextButton(onClick = onOpenVault) { Text("Vault-Ordner öffnen") }
+                                TextButton(onClick = onPrivate) { Text("Tablet-Vault verwenden") }
+                            }
+                        }
+                    }
+                    SettingCard("Profil", Icons.Filled.Person) {
+                        SettingRow("Arbeitsprofil", divider = false) {
+                            Column {
+                                listOf("school" to "Schule", "university" to "UNI", "private" to "Privat", "work" to "Arbeit").forEach { (id, label) ->
+                                    val on = settings["profile"] == id
+                                    Text(
+                                        label,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (on) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft,
+                                        modifier = Modifier.clickable { model.applyProfile(id) }.padding(vertical = 4.dp),
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 "sync" -> {
-                    TextButton(onClick = onSync, modifier = Modifier.settingsAnchor("sync", "settings-sync-account", anchorY)) { Text("Konto und Abgleich") }
                     var deviceName by remember { mutableStateOf(model.syncDeviceName()) }
                     var automatic by remember { mutableStateOf(model.syncAutomatic()) }
-                    OutlinedTextField(
-                        deviceName,
-                        {
-                            deviceName = it.take(80)
-                            model.setSyncDeviceName(it.take(80))
-                        },
-                        label = { Text("Name dieses Geräts") },
-                        modifier = Modifier.fillMaxWidth().settingsAnchor("sync", "settings-sync-devices", anchorY),
-                        singleLine = true,
-                    )
-                    Text("Erscheint in der Geräteliste und im Namen von Konfliktkopien.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                    Text(
-                        "Automatisch synchronisieren: ${if (automatic) "an" else "aus"}",
-                        modifier = Modifier.clickable {
-                            automatic = !automatic
-                            model.setSyncAutomatic(automatic)
-                        }.padding(vertical = 6.dp),
-                        fontWeight = if (automatic) FontWeight.Bold else FontWeight.Normal,
-                    )
-                    Text("Nach jedem Speichern und im Hintergrund. Aus: nur über Konto und Abgleich.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                    Text("Ein Konflikt behält die Serverfassung auf dem ursprünglichen Pfad. Die Tablet-Fassung liegt daneben.", fontSize = 13.sp)
-                    OutlinedTextField(
-                        settings["sync-excluded"].orEmpty(),
-                        { model.updateDesk("sync-excluded", it) },
-                        label = { Text("Ordner nur auf diesem Gerät") },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text("Ein Ordner je Zeile. Dateien darunter bleiben auf diesem Tablet.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                     val historySync = settings["sync-history"] == "on"
-                    Text(
-                        "Versionsverlauf synchronisieren: ${if (historySync) "an" else "aus"}",
-                        modifier = Modifier.clickable { model.updateDesk("sync-history", if (historySync) "off" else "on") }.padding(vertical = 6.dp),
-                        fontWeight = if (historySync) FontWeight.Bold else FontWeight.Normal,
-                    )
-                    Text("Die lokalen Sicherungen unter .fanotes/history mitnehmen. Aus: der Verlauf bleibt auf diesem Gerät.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                    SettingCard("Konto & Status", Icons.Filled.Cloud, Modifier.settingsAnchor("sync", "settings-sync-account", anchorY)) {
+                        SettingRow("Konto") {
+                            TextButton(onClick = onSync) { Text("Konto und Abgleich") }
+                        }
+                        SettingRow("Automatisch synchronisieren", "Nach jedem Speichern und im Hintergrund. Aus: nur über Konto und Abgleich.") {
+                            Switch(checked = automatic, onCheckedChange = {
+                                automatic = it
+                                model.setSyncAutomatic(it)
+                            })
+                        }
+                        SettingRow("Versionsverlauf synchronisieren", "Die lokalen Sicherungen unter .fanotes/history mitnehmen. Aus: der Verlauf bleibt auf diesem Gerät.") {
+                            Switch(checked = historySync, onCheckedChange = { model.updateDesk("sync-history", if (it) "on" else "off") })
+                        }
+                        SettingRow("Ordner nur auf diesem Gerät", "Ein Ordner je Zeile. Dateien darunter bleiben auf diesem Tablet.") {
+                            OutlinedTextField(
+                                settings["sync-excluded"].orEmpty(),
+                                { model.updateDesk("sync-excluded", it) },
+                                modifier = Modifier.widthIn(min = 170.dp),
+                                minLines = 3,
+                            )
+                        }
+                        SettingRow(
+                            "Name dieses Geräts",
+                            "Erscheint in der Geräteliste und im Namen von Konfliktkopien.",
+                            divider = false,
+                            modifier = Modifier.settingsAnchor("sync", "settings-sync-devices", anchorY),
+                        ) {
+                            OutlinedTextField(
+                                deviceName,
+                                {
+                                    deviceName = it.take(80)
+                                    model.setSyncDeviceName(it.take(80))
+                                },
+                                modifier = Modifier.widthIn(min = 170.dp),
+                                singleLine = true,
+                            )
+                        }
+                    }
+                    Text("Ein Konflikt behält die Serverfassung auf dem ursprünglichen Pfad. Die Tablet-Fassung liegt daneben.", fontSize = 12.sp, color = LocalStatusInk.current.muted)
                     ConflictList(model)
                 }
-                "addons" -> Text("Add-ons des Desktops bleiben Dateien im Vault. GlyphenWerk ist auf dem Tablet nicht enthalten. Andere Erweiterungen werden nicht ausgeführt.")
-                "updates" -> {
-                    Text("Installiert: 2026.10.7", modifier = Modifier.settingsAnchor("updates", "settings-updates", anchorY))
-                    Text(update)
-                    TextButton(onClick = { model.checkUpdate() }) { Text("Nach einem Release suchen") }
+                "addons" -> SettingCard("Add-ons", Icons.Filled.Extension) {
+                    SettingRow("Erweiterungen", "Add-ons des Desktops bleiben Dateien im Vault. Andere Erweiterungen werden nicht ausgeführt.", divider = false) {}
+                }
+                "updates" -> SettingCard("Updates", Icons.Filled.SystemUpdate, Modifier.settingsAnchor("updates", "settings-updates", anchorY)) {
+                    SettingRow("Installiert", divider = false) {
+                        Column {
+                            Text("2026.10.7", fontSize = 12.sp)
+                            Text(update, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                            TextButton(onClick = { model.checkUpdate() }) { Text("Nach einem Release suchen") }
+                        }
+                    }
                 }
                 "accessibility" -> {
                     val calm = ch.fasrv.fanotes.desk.reduceMotion(settings["reduce-motion"])
-                    Text(
-                        "Bewegung reduzieren: ${if (calm) "an" else "aus"}",
-                        modifier = Modifier.clickable { model.updateDesk("reduce-motion", if (calm) "off" else "on") }.padding(vertical = 4.dp).settingsAnchor("accessibility", "settings-comfort", anchorY),
-                    )
-                    Text("Deaktiviert dekorative Übergänge und Animationen.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                    Text("Größere Ziele: ${settings["large"] == "on"}", modifier = Modifier.clickable { model.updateDesk("large", if (settings["large"] == "on") "off" else "on") })
-                    EditorSlider("Seitenleiste", ch.fasrv.fanotes.desk.sidebarWidthDp(settings["sidebar-width"]).toFloat(), 210f, 430f, 10f, " px") {
-                        model.updateDesk("sidebar-width", it.toInt().toString())
-                    }
-                    EditorSlider("Informationsleiste", ch.fasrv.fanotes.desk.rightPanelWidthDp(settings["panel-width"]).toFloat(), 220f, 430f, 10f, " px") {
-                        model.updateDesk("panel-width", it.toInt().toString())
+                    SettingCard("Komfort & Fokus", Icons.Filled.Accessibility, Modifier.settingsAnchor("accessibility", "settings-comfort", anchorY)) {
+                        SettingRow("Bewegung reduzieren", "Deaktiviert dekorative Übergänge und Animationen.") {
+                            Switch(checked = calm, onCheckedChange = { model.updateDesk("reduce-motion", if (it) "on" else "off") })
+                        }
+                        SettingRow("Seitenleiste") {
+                            SettingSlider(ch.fasrv.fanotes.desk.sidebarWidthDp(settings["sidebar-width"]).toFloat(), 210f, 430f, 10f, " px") {
+                                model.updateDesk("sidebar-width", it.toInt().toString())
+                            }
+                        }
+                        SettingRow("Informationsleiste", divider = false) {
+                            SettingSlider(ch.fasrv.fanotes.desk.rightPanelWidthDp(settings["panel-width"]).toFloat(), 220f, 430f, 10f, " px") {
+                                model.updateDesk("panel-width", it.toInt().toString())
+                            }
+                        }
                     }
                 }
                 "experimental" -> {
-                    Text("Geteilte Ansicht ist über die Befehlsleiste erreichbar. Bewegungen lassen sich mit Fokus beruhigen.")
                     val backups = settings["experimental-backup"] == "on"
-                    Text(
-                        "Notiz-Sicherungen: ${if (backups) "an" else "aus"}",
-                        modifier = Modifier.clickable { model.updateDesk("experimental-backup", if (backups) "off" else "on") }.padding(vertical = 6.dp).settingsAnchor("experimental", "settings-note-backup", anchorY),
-                        fontWeight = if (backups) FontWeight.Bold else FontWeight.Normal,
-                    )
+                    SettingCard("Experimentelle Funktionen", Icons.Filled.Science, Modifier.settingsAnchor("experimental", "settings-note-backup", anchorY)) {
+                        SettingRow("Notiz-Sicherungen", "Legt Sicherungen in der Notiz ab und zeigt sie im Verlauf.", divider = false) {
+                            Switch(checked = backups, onCheckedChange = { model.updateDesk("experimental-backup", if (it) "on" else "off") })
+                        }
+                    }
                 }
                 "advanced" -> {
-                    Text("Der Gerätename für Konfliktdateien steht in den Sync-Einstellungen. Secrets liegen im Android-Keystore, nicht im Vault.")
-                    Text("Eigenes CSS", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp).settingsAnchor("advanced", "settings-css", anchorY))
-                    Text("Wird nur innerhalb der Oberfläche angewandt. Damit kannst du Abstände, Farben und Markdown-Elemente weiter personalisieren.", fontSize = 12.sp)
-                    OutlinedTextField(
-                        css,
-                        { model.updateCustomCss(it) },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp),
-                        label = { Text("CSS") },
-                        placeholder = { Text(":root {\n  --radius: 14px;\n}") },
-                    )
+                    SettingCard("Eigenes CSS", Icons.Filled.Code, Modifier.settingsAnchor("advanced", "settings-css", anchorY)) {
+                        Column(Modifier.padding(horizontal = 15.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Wird nur innerhalb der Oberfläche angewandt. Damit kannst du Abstände, Farben und Markdown-Elemente weiter personalisieren.", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                            OutlinedTextField(
+                                css,
+                                { model.updateCustomCss(it) },
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp),
+                                placeholder = { Text(":root {\n  --radius: 14px;\n}") },
+                            )
+                            Text("Secrets liegen im Android-Keystore, nicht im Vault.", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                        }
+                    }
                 }
             }
             TextButton(onClick = { model.openBugReport() }) { Text("Fehler melden") }
