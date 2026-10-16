@@ -310,6 +310,16 @@ class NoteProfilesTest {
         assertEquals(0xB5FF9295.toInt(), firstRunPreviewHeaderClose(0xFFFF8D90.toInt(), firstRunPreviewBorder("dark")))
         assertEquals(0xB5BA3542.toInt(), firstRunPreviewHeaderClose(0xFFC03543.toInt(), firstRunPreviewBorder("light")))
         assertEquals(0xB6BA3542.toInt(), firstRunPreviewHeaderClose(0xFFC03543.toInt(), firstRunPreviewBorder("sepia")))
+        assertEquals(0x25FFFFFF, firstRunPreviewWindowBorder("dark"))
+        assertEquals(0x25FFFFFF, firstRunPreviewWindowBorder("aurora"))
+        assertEquals(0x2537352F, firstRunPreviewWindowBorder("light"))
+        assertEquals(0x2537352F, firstRunPreviewWindowBorder("sepia"))
+        assertEquals(0, FIRST_RUN_PREVIEW_WINDOW_SHADOW_X_DP)
+        assertEquals(34, FIRST_RUN_PREVIEW_WINDOW_SHADOW_Y_DP)
+        assertEquals(95, FIRST_RUN_PREVIEW_WINDOW_SHADOW_BLUR_DP)
+        assertEquals(0.25f, FIRST_RUN_PREVIEW_WINDOW_SHADOW_ALPHA)
+        assertEquals(0x40000000, firstRunPreviewWindowShadowColor())
+        assertEquals(0x06FFFFFF, FIRST_RUN_PREVIEW_WINDOW_RING)
     }
 
     @Test
