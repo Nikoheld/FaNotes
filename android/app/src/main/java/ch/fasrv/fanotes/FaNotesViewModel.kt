@@ -26,6 +26,9 @@ import ch.fasrv.fanotes.desk.applyReview
 import ch.fasrv.fanotes.desk.cardsFromMarkdown
 import ch.fasrv.fanotes.desk.dailyNotePath
 import ch.fasrv.fanotes.desk.emptyCalendar
+import ch.fasrv.fanotes.desk.loadCalendarMarkdown
+import ch.fasrv.fanotes.desk.loadHomeworkMarkdown
+import ch.fasrv.fanotes.desk.NoteMarkdownLoad
 import ch.fasrv.fanotes.desk.parseCalendarMarkdown
 import ch.fasrv.fanotes.desk.FOLDER_COLOR_CHOICES
 import ch.fasrv.fanotes.desk.FOLDER_COLORS_PATH
@@ -178,6 +181,9 @@ data class BookPaneState(
     val title: String,
     val needsPassword: Boolean = false,
 )
+
+private const val HOMEWORK_UNREADABLE = "Hausaufgaben.md konnte nicht gelesen werden. Die Datei bleibt unverändert."
+private const val CALENDAR_UNREADABLE = "Kalender.md konnte nicht gelesen werden. Die Datei bleibt unverändert."
 
 class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private val graph = (app as FaNotesApplication).graph
@@ -2838,6 +2844,15 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openHomeworkNote() {
         viewModelScope.launch {
+            val existing = withContext(Dispatchers.IO) {
+                graph.vault.read(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH)?.decodeToString()
+            }
+            if (!ch.fasrv.fanotes.desk.managedNoteAllowsReplace(existing, ::loadHomeworkMarkdown)) {
+                message.value = HOMEWORK_UNREADABLE
+                openPath(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH)
+                showDestination("notes")
+                return@launch
+            }
             val text = serializeHomeworkMarkdown(homework.value)
             withContext(Dispatchers.IO) {
                 val path = ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH
@@ -2854,9 +2869,14 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadHomework() {
         viewModelScope.launch {
-            homework.value = withContext(Dispatchers.IO) {
-                parseHomeworkMarkdown(graph.vault.read(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH)?.decodeToString().orEmpty())
+            val text = withContext(Dispatchers.IO) {
+                graph.vault.read(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH)?.decodeToString()
             }
+            if (text != null && loadHomeworkMarkdown(text) is NoteMarkdownLoad.Unreadable) {
+                message.value = HOMEWORK_UNREADABLE
+                return@launch
+            }
+            homework.value = parseHomeworkMarkdown(text.orEmpty())
         }
     }
 
@@ -2885,14 +2905,14 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         )
         val next = homework.value.copy(tasks = listOf(task) + homework.value.tasks)
         homework.value = next
-        persistSpecial(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, "Hausaufgaben", serializeHomeworkMarkdown(next))
+        persistHomeworkNote(serializeHomeworkMarkdown(next))
         publishHomeworkCalendar(next)
     }
 
     fun toggleHomework(id: String) {
         val next = homework.value.copy(tasks = homework.value.tasks.map { if (it.id == id) it.copy(done = !it.done, updatedAt = isoNow()) else it })
         homework.value = next
-        persistSpecial(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, "Hausaufgaben", serializeHomeworkMarkdown(next))
+        persistHomeworkNote(serializeHomeworkMarkdown(next))
         publishHomeworkCalendar(next)
     }
 
@@ -2900,22 +2920,34 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val next = homework.value.copy(tasks = ch.fasrv.fanotes.desk.removeHomeworkTask(homework.value.tasks, id))
         if (next.tasks.size == homework.value.tasks.size) return
         homework.value = next
-        persistSpecial(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, "Hausaufgaben", serializeHomeworkMarkdown(next))
+        persistHomeworkNote(serializeHomeworkMarkdown(next))
         publishHomeworkCalendar(next)
     }
 
     fun loadCalendar() {
         viewModelScope.launch {
+            val raw = withContext(Dispatchers.IO) {
+                graph.vault.read(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH)?.decodeToString()
+            }
+            if (raw != null && loadCalendarMarkdown(raw) is NoteMarkdownLoad.Unreadable) {
+                message.value = CALENDAR_UNREADABLE
+                return@launch
+            }
             val loaded = withContext(Dispatchers.IO) { calendarWithHomework() }
             calendar.value = loaded.second
-            if (loaded.first != loaded.second) {
-                persistSpecial(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH, "Kalender", serializeCalendarMarkdown(loaded.second))
-            }
+            if (loaded.first != loaded.second) persistCalendarNote(serializeCalendarMarkdown(loaded.second))
         }
     }
 
     fun importCalendarIcs(text: String) {
         viewModelScope.launch {
+            val raw = withContext(Dispatchers.IO) {
+                graph.vault.read(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH)?.decodeToString()
+            }
+            if (raw != null && loadCalendarMarkdown(raw) is NoteMarkdownLoad.Unreadable) {
+                message.value = CALENDAR_UNREADABLE
+                return@launch
+            }
             val current = withContext(Dispatchers.IO) { calendarWithHomework().second }
             val calendarId = current.calendars.firstOrNull()?.id
             if (calendarId.isNullOrBlank()) {
@@ -2928,7 +2960,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             calendar.value = result.document
-            persistSpecial(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH, "Kalender", serializeCalendarMarkdown(result.document))
+            persistCalendarNote(serializeCalendarMarkdown(result.document))
             val count = result.added + result.updated
             message.value = when {
                 count == 0 -> "Abgesagte Termine entfernt."
@@ -2948,14 +2980,18 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun publishHomeworkCalendar(tasks: HomeworkDocument) {
         viewModelScope.launch {
+            val raw = withContext(Dispatchers.IO) {
+                graph.vault.read(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH)?.decodeToString()
+            }
+            if (raw != null && loadCalendarMarkdown(raw) is NoteMarkdownLoad.Unreadable) {
+                message.value = CALENDAR_UNREADABLE
+                return@launch
+            }
             val next = withContext(Dispatchers.IO) {
-                applyHomeworkToCalendar(
-                    parseCalendarMarkdown(graph.vault.read(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH)?.decodeToString().orEmpty()),
-                    tasks,
-                )
+                applyHomeworkToCalendar(parseCalendarMarkdown(raw.orEmpty()), tasks)
             }
             calendar.value = next
-            persistSpecial(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH, "Kalender", serializeCalendarMarkdown(next))
+            persistCalendarNote(serializeCalendarMarkdown(next))
         }
     }
 
@@ -3104,7 +3140,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (source != homework.value) {
                 homework.value = source
-                persistSpecial(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, "Hausaufgaben", serializeHomeworkMarkdown(source))
+                persistHomeworkNote(serializeHomeworkMarkdown(source))
             }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
@@ -3127,7 +3163,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 val remembered = rememberPublishedHomeworkIds(source, source.tasks.map { it.id })
                 if (homework.value.tasks == source.tasks && remembered.publishedIds != homework.value.publishedIds) {
                     homework.value = remembered
-                    persistSpecial(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, "Hausaufgaben", serializeHomeworkMarkdown(remembered))
+                    persistHomeworkNote(serializeHomeworkMarkdown(remembered))
                 }
                 updateDesk("homework-previous", "")
             }
@@ -3218,7 +3254,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun saveCalendar(next: ch.fasrv.fanotes.desk.CalendarDocument) {
         calendar.value = next
-        persistSpecial(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH, "Kalender", serializeCalendarMarkdown(next))
+        persistCalendarNote(serializeCalendarMarkdown(next))
     }
 
     fun swapSplit() {
@@ -3887,16 +3923,51 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun persistSpecial(path: String, title: String, text: String) {
+    private fun persistHomeworkNote(text: String) = persistIfReadable(
+        ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH,
+        "Hausaufgaben",
+        text,
+        ::loadHomeworkMarkdown,
+        HOMEWORK_UNREADABLE,
+    )
+
+    private fun persistCalendarNote(text: String) = persistIfReadable(
+        ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH,
+        "Kalender",
+        text,
+        ::loadCalendarMarkdown,
+        CALENDAR_UNREADABLE,
+    )
+
+    private fun <T> persistIfReadable(
+        path: String,
+        title: String,
+        text: String,
+        load: (String) -> NoteMarkdownLoad<T>,
+        unreadable: String,
+    ) {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                if (!graph.vault.exists(path)) graph.store.createMarkdown("", title)
-                val note = graph.store.readNote(path)
-                graph.store.save(note, note.document, text)
+            val existing = withContext(Dispatchers.IO) { graph.vault.read(path)?.decodeToString() }
+            if (!ch.fasrv.fanotes.desk.managedNoteAllowsReplace(existing, load)) {
+                message.value = unreadable
+                return@launch
             }
-            graph.engine.notifyLocalChange()
-            refreshTree()
+            persistSpecialNow(path, title, text)
         }
+    }
+
+    private fun persistSpecial(path: String, title: String, text: String) {
+        viewModelScope.launch { persistSpecialNow(path, title, text) }
+    }
+
+    private suspend fun persistSpecialNow(path: String, title: String, text: String) {
+        withContext(Dispatchers.IO) {
+            if (!graph.vault.exists(path)) graph.store.createMarkdown("", title)
+            val note = graph.store.readNote(path)
+            graph.store.save(note, note.document, text)
+        }
+        graph.engine.notifyLocalChange()
+        refreshTree()
     }
 
     fun syncLabel(): String = when (sync.value.status) {
