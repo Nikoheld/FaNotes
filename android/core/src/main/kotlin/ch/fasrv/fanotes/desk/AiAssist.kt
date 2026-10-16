@@ -61,6 +61,7 @@ const val AI_INSTRUCTION_HINT = "Zum Beispiel: Erkläre jeden Fachbegriff einfac
 const val AI_PANEL_RADIUS_DP = 12
 const val AI_PANEL_MAX_WIDTH_DP = 1230
 const val AI_PANEL_MAX_HEIGHT_DP = 850
+const val AI_PANEL_MIN_HEIGHT_DP = 620
 const val AI_CONFIG_MAX_DP = 510
 const val AI_CONFIG_MIN_DP = 430
 const val AI_CONFIG_COMPACT_MIN_DP = 360
@@ -88,8 +89,9 @@ fun aiPanelRadiusDp(widthDp: Int): Int = if (aiPanelStacks(widthDp)) 0 else AI_P
 /**
  * Centered AI dialog from `.lm-studio-panel`.
  * Above 980: min(1230, 97vw) by min(850, 94vh), radius 12.
- * From 761 to 980: 98vw by 96vh, radius 12.
- * At 760 and below: the full viewport, with the radius cleared.
+ * From 761 to 980: 98vw by 96vh, radius 12. That band leaves min-height in place.
+ * Above 760 the used height is at least 620, and a shorter viewport keeps that floor.
+ * At 760 and below: the full viewport, min-height 0, radius cleared.
  */
 data class AiPanelSize(val widthDp: Int, val heightDp: Int, val radiusDp: Int)
 
@@ -101,16 +103,19 @@ fun aiPanelSize(widthDp: Int, heightDp: Int): AiPanelSize {
     if (width <= AI_COMPACT_BREAK_DP) {
         return AiPanelSize(
             viewportShare(width, 98).coerceAtMost(width),
-            viewportShare(height, 96).coerceAtMost(height),
+            panelHeight(viewportShare(height, 96).coerceAtMost(height)),
             radius,
         )
     }
     return AiPanelSize(
         minOf(AI_PANEL_MAX_WIDTH_DP, viewportShare(width, 97)).coerceAtMost(width),
-        minOf(AI_PANEL_MAX_HEIGHT_DP, viewportShare(height, 94)).coerceAtMost(height),
+        panelHeight(minOf(AI_PANEL_MAX_HEIGHT_DP, viewportShare(height, 94)).coerceAtMost(height)),
         radius,
     )
 }
+
+/** `.lm-studio-panel` min-height stays 620 until the 760px rule sets it to 0. */
+private fun panelHeight(preferredDp: Int): Int = preferredDp.coerceAtLeast(AI_PANEL_MIN_HEIGHT_DP)
 
 private fun viewportShare(viewportDp: Int, percent: Int): Int =
     (viewportDp.toLong() * percent / 100.0).roundToInt()
