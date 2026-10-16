@@ -444,12 +444,20 @@ fun addPersonalSpellWord(stored: String?, word: String): String? {
 /** Words ignored until the app process ends, plus the saved personal dictionary. */
 class SpellingSession {
     private val ignored = HashSet<String>()
+    private val declined = HashSet<String>()
 
     fun ignore(word: String): Boolean {
         val normalized = normalizeForDictionary(word)
         if (normalized.isEmpty()) return false
         return ignored.add(normalized)
     }
+
+    fun decline(word: String) {
+        val normalized = normalizeForDictionary(word)
+        if (normalized.isNotEmpty()) declined += normalized
+    }
+
+    fun isDeclined(word: String): Boolean = normalizeForDictionary(word) in declined
 
     fun accepts(word: String, personal: Set<String>): Boolean {
         val normalized = normalizeForDictionary(word)
