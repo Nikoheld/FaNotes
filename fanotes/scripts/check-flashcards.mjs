@@ -12,24 +12,48 @@ const server = await createServer({
   server: { middlewareMode: true },
 })
 
-const { reviewQueue } = await server.ssrLoadModule('/src/lib/flashcards.ts')
-const view = readFileSync(join(root, 'src/components/FlashcardReview.tsx'), 'utf8')
+try {
+  const { applyReview, cardsFromMarkdown, reviewQueue } = await server.ssrLoadModule('/src/lib/flashcards.ts')
+  const now = new Date(2026, 9, 16, 12, 0, 0)
+  const markdown = `## Lernfragen
 
-const card = (id) => ({ id, front: id, back: '', ease: 2.5, intervalDays: 1, due: '2026-10-16', reps: 1, lapses: 0 })
-const due = [card('a'), card('b'), card('c')]
-assert.deepEqual(reviewQueue(due, []).map((item) => item.id), ['a', 'b', 'c'])
-assert.deepEqual(reviewQueue(due, ['a']).map((item) => item.id), ['b', 'c'])
-assert.deepEqual(reviewQueue(due, ['a', 'b']).map((item) => item.id), ['c'])
-assert.deepEqual(reviewQueue(due, ['a', 'b', 'c']).map((item) => item.id), ['a', 'b', 'c'])
-assert.deepEqual(reviewQueue([card('b'), card('c')], ['a', 'b']).map((item) => item.id), ['c'])
-assert.deepEqual(reviewQueue([card('a')], ['a']).map((item) => item.id), ['a'])
+<details><summary>Was ist 2?</summary>Zwei</details>
+`
+  const first = cardsFromMarkdown(markdown, now)
+  assert.equal(first.length, 1)
+  assert.notEqual(first[0].id, 'card-1')
+  const reviewed = applyReview(markdown, first[0].id, 'good', now)
+  const withNew = reviewed.replace(
+    '## Lernfragen\n',
+    '## Lernfragen\n\n<details><summary>Was ist 1?</summary>Eins</details>\n',
+  )
+  const both = cardsFromMarkdown(withNew, now)
+  assert.equal(new Set(both.map((card) => card.id)).size, 2)
+  const kept = both.find((card) => card.front === 'Was ist 2?')
+  const fresh = both.find((card) => card.front === 'Was ist 1?')
+  assert.equal(kept.reps, 1)
+  assert.equal(fresh.reps, 0)
+  const after = cardsFromMarkdown(applyReview(withNew, fresh.id, 'easy', now), now)
+  assert.equal(after.find((card) => card.front === 'Was ist 2?').reps, 1)
+  assert.equal(after.find((card) => card.front === 'Was ist 1?').reps, 1)
 
-assert.match(view, /reviewQueue\(due, later\)/)
-assert.match(view, /value === 'again'/)
-assert.match(view, /GRADE_KEYS/)
-assert.match(view, /addEventListener\('keydown', onKey, true\)/)
-assert.match(view, /bindHandGestures/)
-assert.match(view, /copy\.show/)
+  const card = (id) => ({ id, front: id, back: '', ease: 2.5, intervalDays: 1, due: '2026-10-16', reps: 1, lapses: 0 })
+  const due = [card('a'), card('b'), card('c')]
+  assert.deepEqual(reviewQueue(due, []).map((item) => item.id), ['a', 'b', 'c'])
+  assert.deepEqual(reviewQueue(due, ['a']).map((item) => item.id), ['b', 'c'])
+  assert.deepEqual(reviewQueue(due, ['a', 'b']).map((item) => item.id), ['c'])
+  assert.deepEqual(reviewQueue(due, ['a', 'b', 'c']).map((item) => item.id), ['a', 'b', 'c'])
+  assert.deepEqual(reviewQueue([card('b'), card('c')], ['a', 'b']).map((item) => item.id), ['c'])
+  assert.deepEqual(reviewQueue([card('a')], ['a']).map((item) => item.id), ['a'])
 
-await server.close()
-console.log('flashcards ok')
+  const view = readFileSync(join(root, 'src/components/FlashcardReview.tsx'), 'utf8')
+  assert.match(view, /reviewQueue\(due, later\)/)
+  assert.match(view, /value === 'again'/)
+  assert.match(view, /GRADE_KEYS/)
+  assert.match(view, /addEventListener\('keydown', onKey, true\)/)
+  assert.match(view, /bindHandGestures/)
+  assert.match(view, /copy\.show/)
+  console.log('flashcards ok')
+} finally {
+  await server.close()
+}

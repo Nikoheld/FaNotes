@@ -6,12 +6,40 @@ export type NoteOutlineHeading = {
   line: number
 }
 
-export const parseNoteOutline = (content: string): NoteOutlineHeading[] => (
-  String(content ?? '').split('\n').flatMap((line, index) => {
-    const match = /^(#{1,6})\s+(.+?)\s*#*$/u.exec(line)
-    return match ? [{ level: match[1].length, title: match[2], line: index + 1 }] : []
-  })
-)
+const FENCE_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/u
+const HEADING_RE = /^(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/u
+
+/** Headings outside fenced code. A closing `#` sequence needs a space before it, so `C#` stays. */
+export const parseNoteOutline = (content: string): NoteOutlineHeading[] => {
+  const lines = String(content ?? '').replace(/\r\n/gu, '\n').replace(/\r/gu, '\n').split('\n')
+  const headings: NoteOutlineHeading[] = []
+  let fenceMarker = ''
+  let fenceLength = 0
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? ''
+    const fence = FENCE_RE.exec(line)
+    if (fence) {
+      const token = fence[1] ?? ''
+      const marker = token[0] ?? ''
+      const rest = fence[2] ?? ''
+      if (!fenceMarker) {
+        if (marker !== '`' || !rest.includes('`')) {
+          fenceMarker = marker
+          fenceLength = token.length
+        }
+      } else if (marker === fenceMarker && token.length >= fenceLength && rest.trim() === '') {
+        fenceMarker = ''
+        fenceLength = 0
+      }
+      continue
+    }
+    if (fenceMarker) continue
+    const match = HEADING_RE.exec(line)
+    if (!match) continue
+    headings.push({ level: match[1].length, title: match[2], line: index + 1 })
+  }
+  return headings
+}
 
 export const outlineTagsFromNote = (content: string): string[] => parseNoteTags(content)
 

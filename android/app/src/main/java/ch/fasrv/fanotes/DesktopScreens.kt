@@ -4624,11 +4624,11 @@ fun FirstRunDialog(
                             if (wide) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(copyWeight)) { FirstRunWelcomeCopy(accent) { go(1) } }
-                                    WelcomePreview(Modifier.weight(panelWeight), accent)
+                                    WelcomePreview(Modifier.weight(panelWeight))
                                 }
                             } else {
                                 FirstRunWelcomeCopy(accent) { go(1) }
-                                WelcomePreview(Modifier.fillMaxWidth().padding(top = gap), accent)
+                                WelcomePreview(Modifier.fillMaxWidth().padding(top = gap))
                             }
                         }
                     }
@@ -4668,11 +4668,11 @@ fun FirstRunDialog(
                             if (wide) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(copyWeight)) { FirstRunWritingCopy(accent) { go(it) } }
-                                    WritingPreview(Modifier.weight(panelWeight), accent)
+                                    WritingPreview(Modifier.weight(panelWeight))
                                 }
                             } else {
                                 FirstRunWritingCopy(accent) { go(it) }
-                                WritingPreview(Modifier.fillMaxWidth().padding(top = gap), accent)
+                                WritingPreview(Modifier.fillMaxWidth().padding(top = gap))
                             }
                         }
                     }
@@ -4868,8 +4868,10 @@ private fun FirstRunWelcomeCopy(accent: Color, onContinue: () -> Unit) {
 }
 
 @Composable
-private fun WelcomePreview(modifier: Modifier, accent: Color) {
+private fun WelcomePreview(modifier: Modifier) {
     val ink = LocalStatusInk.current
+    // Subject mark, formula, and hit count use `--accent`, not the readable label color.
+    val accent = MaterialTheme.colorScheme.primary
     val screen = LocalConfiguration.current
     val screenWidth = screen.screenWidthDp
     val screenHeight = screen.screenHeightDp
@@ -5197,8 +5199,10 @@ private fun FirstRunWritingCopy(accent: Color, onStep: (Int) -> Unit) {
 }
 
 @Composable
-private fun WritingPreview(modifier: Modifier, accent: Color) {
+private fun WritingPreview(modifier: Modifier) {
     val ink = LocalStatusInk.current
+    // Toolbar, ink, transcript, and selection use `--accent`, not the readable label color.
+    val accent = MaterialTheme.colorScheme.primary
     val screen = LocalConfiguration.current
     val framePad = ch.fasrv.fanotes.desk.firstRunWritingFramePad(screen.screenWidthDp, screen.screenHeightDp)
     val sheetPad = ch.fasrv.fanotes.desk.firstRunWritingSheetPad(screen.screenWidthDp, screen.screenHeightDp)
