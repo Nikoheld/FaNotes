@@ -6939,6 +6939,55 @@ private fun SyncFormField(
 
 @Composable
 fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () -> Unit, onPrivate: () -> Unit) {
+    val dismiss = {
+        model.closeSettings()
+        if (model.destination.value == "settings") model.showDestination("notes")
+    }
+    Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        val scrim = remember { MutableInteractionSource() }
+        val card = remember { MutableInteractionSource() }
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val panel = ch.fasrv.fanotes.desk.settingsModalSize(maxWidth.value.roundToInt(), maxHeight.value.roundToInt())
+            val shape = RoundedCornerShape(panel.radiusDp.dp)
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM))
+                    .clickable(interactionSource = scrim, indication = null, onClick = dismiss),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    Modifier
+                        .width(panel.widthDp.dp)
+                        .height(panel.heightDp.dp)
+                        .clickable(interactionSource = card, indication = null, onClick = {})
+                        .directionalBugReportShade()
+                        .clip(shape)
+                        .then(
+                            if (panel.radiusDp == 0) Modifier
+                            else Modifier.border(
+                                1.dp,
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA),
+                                shape,
+                            ),
+                        )
+                        .background(MaterialTheme.colorScheme.background),
+                ) {
+                    SettingsPage(model, onSync, onOpenVault, onPrivate, dismiss)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsPage(
+    model: FaNotesViewModel,
+    onSync: () -> Unit,
+    onOpenVault: () -> Unit,
+    onPrivate: () -> Unit,
+    onClose: () -> Unit,
+) {
     val settings by model.deskSettings.collectAsStateWithLifecycle()
     val sync by model.sync.collectAsStateWithLifecycle()
     val syncDeviceNote by model.syncDeviceNote.collectAsStateWithLifecycle()
@@ -7623,7 +7672,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                         .height(31.dp)
                         .clip(RoundedCornerShape(6.dp))
                         .background(MaterialTheme.colorScheme.onSurface)
-                        .clickable { model.showDestination("notes") }
+                        .clickable(onClick = onClose)
                         .padding(horizontal = 12.dp),
                     contentAlignment = Alignment.Center,
                 ) {
