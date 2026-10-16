@@ -73,6 +73,11 @@ class CalendarBooksTest {
         assertEquals(false, calendarRangeIsEmpty("agenda", 2))
         assertEquals("Keine Termine in diesem Zeitraum.", CAL_EMPTY)
         assertEquals("Neuer Termin", CAL_NEW_EVENT)
+        assertEquals(6, CAL_EVENT_RADIUS_DP)
+        assertEquals(6, CAL_EVENT_PAD_X_DP)
+        assertEquals(3, CAL_EVENT_PAD_Y_DP)
+        assertEquals(2, CAL_EVENT_INSET_DP)
+        assertEquals(0.22f, CAL_CHIP_ALPHA)
     }
 
     @Test
