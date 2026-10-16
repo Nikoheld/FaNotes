@@ -2,7 +2,7 @@ import {
   CALENDAR_COLORS,
   createEvent,
   dateKey,
-  parseCalendarMarkdown,
+  loadCalendarMarkdown,
   parseDateKey,
   sanitizeCalendarDocument,
   serializeCalendarMarkdown,
@@ -93,8 +93,11 @@ export const applyHomeworkToCalendar = (calendar: CalendarDocument, homework: Ho
   return next
 }
 
-export const calendarMarkdownWithHomework = (calendarMarkdown: string, homework: HomeworkDocument) => (
-  serializeCalendarMarkdown(applyHomeworkToCalendar(parseCalendarMarkdown(calendarMarkdown), homework))
-)
+/** `null` means the calendar file is present but unreadable, so it must not be replaced. */
+export const calendarMarkdownWithHomework = (calendarMarkdown: string, homework: HomeworkDocument): string | null => {
+  const loaded = loadCalendarMarkdown(calendarMarkdown)
+  if (!loaded.ok) return null
+  return serializeCalendarMarkdown(applyHomeworkToCalendar(loaded.document, homework))
+}
 
 export const homeworkDueKey = (task: HomeworkTask) => task.dueDate ? dateKey(parseDateKey(task.dueDate) ?? new Date(task.dueDate)) : ''

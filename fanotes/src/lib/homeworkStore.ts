@@ -32,13 +32,34 @@ const MARKER_END = '-->'
 
 const emptyDocument = (): HomeworkDocument => ({ version: 1, tasks: [] })
 
-const isIsoDate = (value: unknown): value is string => (
-  typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(value)
-)
+const calendarDay = (date: Date) => {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
 
-const isIsoTime = (value: unknown): value is string => (
-  typeof value === 'string' && /^\d{2}:\d{2}$/u.test(value)
-)
+/** A real civil day. `2026-02-31` matches the shape but is not a day. */
+const isIsoDate = (value: unknown): value is string => {
+  if (typeof value !== 'string') return false
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value)
+  if (!match) return false
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const date = new Date(0)
+  date.setFullYear(year, month - 1, day)
+  date.setHours(0, 0, 0, 0)
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
+}
+
+/** `HH:mm` from 00:00 through 23:59. `24:00` is the next day, so it is not a time. */
+const isIsoTime = (value: unknown): value is string => {
+  if (typeof value !== 'string') return false
+  const match = /^(\d{2}):(\d{2})$/u.exec(value)
+  if (!match) return false
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  return hours <= 23 && minutes <= 59
+}
 
 const sanitizeTask = (raw: unknown): HomeworkTask | null => {
   if (!raw || typeof raw !== 'object') return null
@@ -77,11 +98,16 @@ const sanitizePublishedIds = (value: unknown): string[] | undefined => {
   return ids.length ? ids : undefined
 }
 
-export const parseHomeworkMarkdown = (markdown: string): HomeworkDocument => {
-  if (typeof markdown !== 'string' || !markdown.includes(MARKER_START)) return emptyDocument()
+export type HomeworkMarkdownLoad =
+  | { ok: true, document: HomeworkDocument }
+  | { ok: false }
+
+/** No marker is a fresh list. A broken marker stays on disk instead of becoming an empty list. */
+export const loadHomeworkMarkdown = (markdown: string): HomeworkMarkdownLoad => {
+  if (typeof markdown !== 'string' || !markdown.includes(MARKER_START)) return { ok: true, document: emptyDocument() }
   const start = markdown.indexOf(MARKER_START)
   const end = markdown.indexOf(MARKER_END, start + MARKER_START.length)
-  if (start < 0 || end < 0) return emptyDocument()
+  if (end < 0) return { ok: false }
   const jsonText = markdown.slice(start + MARKER_START.length, end).trim()
   try {
     const parsed = JSON.parse(jsonText) as Partial<HomeworkDocument>
@@ -89,10 +115,15 @@ export const parseHomeworkMarkdown = (markdown: string): HomeworkDocument => {
       ? parsed.tasks.map(sanitizeTask).filter((task): task is HomeworkTask => Boolean(task))
       : []
     const publishedIds = sanitizePublishedIds(parsed.publishedIds)
-    return { version: 1, tasks, ...(publishedIds ? { publishedIds } : {}) }
+    return { ok: true, document: { version: 1, tasks, ...(publishedIds ? { publishedIds } : {}) } }
   } catch {
-    return emptyDocument()
+    return { ok: false }
   }
+}
+
+export const parseHomeworkMarkdown = (markdown: string): HomeworkDocument => {
+  const loaded = loadHomeworkMarkdown(markdown)
+  return loaded.ok ? loaded.document : emptyDocument()
 }
 
 export const serializeHomeworkMarkdown = (document: HomeworkDocument): string => {
@@ -225,23 +256,29 @@ export const mergeHomeworkFromRemote = (
 }
 
 export const taskDueTimestamp = (task: HomeworkTask): number | null => {
-  if (!task.dueDate) return null
-  const time = task.dueTime && isIsoTime(task.dueTime) ? task.dueTime : '23:59'
-  const parsed = Date.parse(`${task.dueDate}T${time}:00`)
-  return Number.isFinite(parsed) ? parsed : null
+  if (!isIsoDate(task.dueDate)) return null
+  const [year, month, day] = task.dueDate.split('-').map(Number)
+  const time = isIsoTime(task.dueTime) ? task.dueTime : '23:59'
+  const [hours, minutes] = time.split(':').map(Number)
+  const stamp = new Date(0)
+  stamp.setFullYear(year, month - 1, day)
+  stamp.setHours(hours, minutes, 0, 0)
+  return stamp.getTime()
 }
 
 export type HomeworkBucket = 'overdue' | 'today' | 'upcoming' | 'undated' | 'done'
 
+/**
+ * Buckets follow the calendar day, including a 23-hour or 25-hour
+ * daylight-saving day. A time of 23:30 stays on the day written on the task.
+ */
 export const classifyHomeworkTask = (task: HomeworkTask, now = new Date()): HomeworkBucket => {
   if (task.done) return 'done'
-  const due = taskDueTimestamp(task)
-  if (due === null) return 'undated'
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  const endOfToday = startOfToday + 24 * 60 * 60 * 1000 - 1
-  if (due < startOfToday) return 'overdue'
-  if (due <= endOfToday) return 'today'
-  return 'upcoming'
+  if (!isIsoDate(task.dueDate)) return 'undated'
+  const today = calendarDay(now)
+  if (task.dueDate < today) return 'overdue'
+  if (task.dueDate > today) return 'upcoming'
+  return 'today'
 }
 
 export const sortHomeworkTasks = (tasks: HomeworkTask[]): HomeworkTask[] => (
