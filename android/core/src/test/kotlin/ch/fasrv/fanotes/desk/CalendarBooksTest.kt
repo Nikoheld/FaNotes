@@ -99,12 +99,9 @@ class CalendarBooksTest {
     }
 
     @Test
-    fun calendarToolbarWrapsWhenThePaneCannotHoldTheControls() {
+    fun calendarToolbarStaysOneLineAndTheSearchCanShrink() {
         assertEquals(6, CAL_TOOLBAR_GAP_DP)
-        assertEquals(862, CAL_TOOLBAR_CONTENT_DP)
-        assertEquals(false, calendarToolbarWraps(862, CAL_TOOLBAR_CONTENT_DP))
-        assertEquals(false, calendarToolbarWraps(863, CAL_TOOLBAR_CONTENT_DP))
-        assertEquals(true, calendarToolbarWraps(861, CAL_TOOLBAR_CONTENT_DP))
+        assertEquals(120, CAL_SEARCH_MIN_DP)
     }
 
     @Test
