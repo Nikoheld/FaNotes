@@ -8939,6 +8939,16 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("Oct 13\u{0} 2026"), Some(1_002_945_600_000));
         assert_eq!(unix_millis_from_iso("2026/10\u{0}/13"), Some(1_790_827_200_000));
         assert_eq!(unix_millis_from_iso("4\u{0}"), Some(986_101_200_000));
+        // A control below `A` is ignored. DEL is a word, so it rejects the date.
+        assert_eq!(unix_millis_from_iso("2026\u{1}-10-13"), None);
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13\u{1}16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("\u{1}2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13\u{7f}"), None);
+        assert_eq!(unix_millis_from_iso("\u{7f}2026-10-13"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13\u{7f}16:00"), None);
     }
 
     #[test]

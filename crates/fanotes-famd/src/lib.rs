@@ -8533,6 +8533,19 @@ mod tests {
                 super::canonical_iso("4\u{0}").as_deref(),
                 Some("2001-04-01T05:00:00.000Z")
             );
+            // A control below `A` is ignored. DEL is a word, so it rejects the date.
+            assert_eq!(super::canonical_iso("2026\u{1}-10-13"), None);
+            assert_eq!(
+                super::canonical_iso("2026-10-13\u{1}16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("\u{1}2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13\u{7f}"), None);
+            assert_eq!(super::canonical_iso("\u{7f}2026-10-13"), None);
+            assert_eq!(super::canonical_iso("2026-10-13\u{7f}16:00"), None);
         });
     }
 
