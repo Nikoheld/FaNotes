@@ -8392,12 +8392,7 @@ fun CommandPalette(
             .widthIn(max = ch.fasrv.fanotes.desk.PALETTE_MAX_DP.dp)
             .fillMaxWidth()
             .heightIn(max = ch.fasrv.fanotes.desk.PALETTE_MAX_HEIGHT_DP.dp)
-            .shadow(
-                elevation = ch.fasrv.fanotes.desk.PALETTE_SHADOW_Y_DP.dp,
-                shape = shape,
-                ambientColor = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.PALETTE_SHADOW_ALPHA),
-                spotColor = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.PALETTE_SHADOW_ALPHA),
-            )
+            .directionalPaletteShade()
             .clip(shape)
             .border(1.dp, strong, shape)
             .background(MaterialTheme.colorScheme.background),

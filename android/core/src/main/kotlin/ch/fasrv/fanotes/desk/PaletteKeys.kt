@@ -1,6 +1,8 @@
 package ch.fasrv.fanotes.desk
 
 import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 /**
@@ -46,14 +48,113 @@ const val PALETTE_EMPTY_PAD_TOP_DP = 50
 const val PALETTE_KBD_RADIUS_DP = 5
 const val PALETTE_GROUP_TRACKING = 0.1f
 
-/** The palette sits 13% down the window. The later pass uses a 16×70px shadow at 16% black. */
+/** The palette sits 13% down the window. */
 const val PALETTE_TOP_FRACTION = 0.13f
+
+/**
+ * Notion-like chrome `.command-palette` box-shadow: `0 16px 70px rgba(0, 0, 0, .16)`.
+ * Nothing later replaces it. x is 0, y is down, then blur and black alpha.
+ */
+const val PALETTE_SHADOW_X_DP = 0
 const val PALETTE_SHADOW_Y_DP = 16
 const val PALETTE_SHADOW_BLUR_DP = 70
 const val PALETTE_SHADOW_ALPHA = 0.16f
 const val PALETTE_SCRIM = 0x590F0F0F
 
 fun paletteTopDp(windowHeightDp: Int) = (windowHeightDp.coerceAtLeast(0) * PALETTE_TOP_FRACTION).roundToInt()
+
+data class PalettePanelShadow(
+    val xDp: Int,
+    val yDp: Int,
+    val blurDp: Int,
+    val alpha: Float,
+)
+
+/** Desktop shadow for the command palette. */
+fun palettePanelShadow() = PalettePanelShadow(
+    PALETTE_SHADOW_X_DP,
+    PALETTE_SHADOW_Y_DP,
+    PALETTE_SHADOW_BLUR_DP,
+    PALETTE_SHADOW_ALPHA,
+)
+
+/**
+ * Nominal reach past each palette edge. CSS blur spreads `blur` around the shifted silhouette,
+ * so a positive y reaches farther below than above.
+ */
+data class PaletteShadowReach(
+    val leftDp: Int,
+    val topDp: Int,
+    val rightDp: Int,
+    val bottomDp: Int,
+)
+
+fun paletteShadowReach(shadow: PalettePanelShadow = palettePanelShadow()): PaletteShadowReach {
+    val blur = shadow.blurDp.coerceAtLeast(0)
+    return PaletteShadowReach(
+        leftDp = (blur - shadow.xDp).coerceAtLeast(0),
+        topDp = (blur - shadow.yDp).coerceAtLeast(0),
+        rightDp = (shadow.xDp + blur).coerceAtLeast(0),
+        bottomDp = (shadow.yDp + blur).coerceAtLeast(0),
+    )
+}
+
+/** Black at the desktop alpha, packed ARGB. */
+fun paletteShadowColor(alpha: Float = PALETTE_SHADOW_ALPHA): Int {
+    val channel = (alpha.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
+    return channel shl 24
+}
+
+/**
+ * Software-bitmap placement of the palette rectangle shifted by the desktop offset.
+ * [padPx] is the bitmap inset of the unshifted palette origin, large enough for the blur.
+ */
+data class PaletteShadowFrame(
+    val bitmapWidthPx: Int,
+    val bitmapHeightPx: Int,
+    val padPx: Float,
+    val shapeLeftPx: Float,
+    val shapeTopPx: Float,
+    val shapeRightPx: Float,
+    val shapeBottomPx: Float,
+    val blurPx: Float,
+    val color: Int,
+)
+
+fun paletteShadowFrame(widthPx: Float, heightPx: Float, density: Float): PaletteShadowFrame? {
+    if (widthPx < 1f || heightPx < 1f || density <= 0f) return null
+    val shadow = palettePanelShadow()
+    if (shadow.blurDp <= 0) return null
+    val blurPx = shadow.blurDp * density
+    if (blurPx <= 0.5f) return null
+    val offsetX = shadow.xDp * density
+    val offsetY = shadow.yDp * density
+    val pad = blurPx * 2f + abs(offsetX) + abs(offsetY) + 2f
+    val bitmapWidth = ceil(widthPx + pad * 2f).toInt()
+    val bitmapHeight = ceil(heightPx + pad * 2f).toInt()
+    if (bitmapWidth < 1 || bitmapHeight < 1) return null
+    return PaletteShadowFrame(
+        bitmapWidthPx = bitmapWidth,
+        bitmapHeightPx = bitmapHeight,
+        padPx = pad,
+        shapeLeftPx = pad + offsetX,
+        shapeTopPx = pad + offsetY,
+        shapeRightPx = pad + offsetX + widthPx,
+        shapeBottomPx = pad + offsetY + heightPx,
+        blurPx = blurPx,
+        color = paletteShadowColor(shadow.alpha),
+    )
+}
+
+/** True when the blurred shape passes the palette's bottom edge farther than its top edge. */
+fun paletteShadowFavorsDown(frame: PaletteShadowFrame, heightPx: Float): Boolean {
+    if (heightPx <= 0f) return false
+    val panelTop = frame.padPx
+    val panelBottom = panelTop + heightPx
+    val bottomSpill = frame.shapeBottomPx + frame.blurPx - panelBottom
+    val topSpill = panelTop - (frame.shapeTopPx - frame.blurPx)
+    return frame.shapeTopPx > panelTop && bottomSpill > topSpill
+}
 
 /**
  * One command in the desktop palette: group, detail, shortcut, and the extra
