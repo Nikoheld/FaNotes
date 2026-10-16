@@ -373,8 +373,9 @@ const val FIRST_RUN_PREVIEW_ASIDE_PAD_INLINE_DP = 10
 const val FIRST_RUN_PREVIEW_ASIDE_PAD_INLINE_NARROW_DP = 7
 const val FIRST_RUN_PREVIEW_SPLIT_DP = 760
 const val FIRST_RUN_MEDIUM_DP = 980
-/** `.first-run-preview-body > aside strong` is 7.5px. */
+/** `.first-run-preview-body > aside strong` is 7.5px. The column fill is `--bg` mixed 76% into `--panel`. */
 const val FIRST_RUN_PREVIEW_HEADING_SP = 7.5f
+const val FIRST_RUN_PREVIEW_ASIDE_FILL_MIX = 0.76f
 /** `.first-run-preview-body > aside > span` is 7px, with 7px padding, a 6px radius, and a 7px gap. */
 const val FIRST_RUN_PREVIEW_SUBJECT_SP = 7
 const val FIRST_RUN_PREVIEW_SUBJECT_PAD_DP = 7
@@ -703,6 +704,10 @@ fun firstRunPreviewColumns(widthDp: Int): Int = if (widthDp <= FIRST_RUN_PREVIEW
  */
 fun firstRunPreviewAsideDp(screenWidthDp: Int): Int =
     if (screenWidthDp > FIRST_RUN_MEDIUM_DP) FIRST_RUN_PREVIEW_ASIDE_DP else FIRST_RUN_PREVIEW_ASIDE_NARROW_DP
+
+/** Subject-column fill: `--bg` mixed 76% into `--panel`. */
+fun firstRunPreviewAsideFill(backgroundArgb: Int, panelArgb: Int): Int =
+    cssColorMix(backgroundArgb, panelArgb, FIRST_RUN_PREVIEW_ASIDE_FILL_MIX)
 
 /** Top, end, bottom, and start padding of the welcome-preview subject column. */
 data class FirstRunPreviewAsidePad(val top: Int, val end: Int, val bottom: Int, val start: Int)
