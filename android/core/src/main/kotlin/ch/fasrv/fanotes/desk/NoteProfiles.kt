@@ -347,6 +347,16 @@ const val FIRST_RUN_PREVIEW_WINDOW_SHADOW_Y_DP = 34
 const val FIRST_RUN_PREVIEW_WINDOW_SHADOW_BLUR_DP = 95
 const val FIRST_RUN_PREVIEW_WINDOW_SHADOW_ALPHA = 0.25f
 const val FIRST_RUN_PREVIEW_WINDOW_RING = 0x06FFFFFF
+/**
+ * `.first-run-preview-glow` is an ellipse inset 12% from the top and bottom and 8% from the sides.
+ * The fill is the accent at 22%, then the whole glow is at 70% opacity, blurred by 65px.
+ * The desktop pulse is not played.
+ */
+const val FIRST_RUN_PREVIEW_GLOW_INSET_BLOCK = 0.12f
+const val FIRST_RUN_PREVIEW_GLOW_INSET_INLINE = 0.08f
+const val FIRST_RUN_PREVIEW_GLOW_BLUR_DP = 65
+const val FIRST_RUN_PREVIEW_GLOW_COLOR_ALPHA = 0.22f
+const val FIRST_RUN_PREVIEW_GLOW_OPACITY = 0.7f
 const val FIRST_RUN_PREVIEW_ASIDE_DP = 118
 const val FIRST_RUN_PREVIEW_ASIDE_NARROW_DP = 102
 const val FIRST_RUN_PREVIEW_ASIDE_PAD_BLOCK_DP = 17
@@ -487,8 +497,11 @@ const val FIRST_RUN_WRITING_TYPED = "Der Flächeninhalt lässt sich mit dem best
 const val FIRST_RUN_WRITING_RECOGNIZED = "Im Hintergrund erkannt"
 const val FIRST_RUN_WRITING_FORMULA = "∫₀¹ (x + 2) dx = 2,5"
 const val FIRST_RUN_WRITING_CONVERT = "Optional umwandeln"
-/** `.first-run-writing-preview` radius, toolbar, and `0 32px 90px rgba(0,0,0,.2)` shadow. */
-const val FIRST_RUN_WRITING_FRAME_RADIUS_DP = 19
+/**
+ * `.first-run-writing-preview` starts at 19px, then the shared chrome rule sets it to 12px.
+ * The toolbar and `0 32px 90px rgba(0,0,0,.2)` shadow are unchanged.
+ */
+const val FIRST_RUN_WRITING_FRAME_RADIUS_DP = 12
 const val FIRST_RUN_WRITING_FRAME_PAD_TOP_DP = 31
 const val FIRST_RUN_WRITING_FRAME_PAD_WIDE_DP = 34
 const val FIRST_RUN_WRITING_FRAME_PAD_MEDIUM_DP = 24
@@ -891,6 +904,54 @@ fun firstRunPreviewWindowBorder(themeId: String, systemDark: Boolean = false): I
 fun firstRunPreviewWindowShadowColor(alpha: Float = FIRST_RUN_PREVIEW_WINDOW_SHADOW_ALPHA): Int {
     val channel = (alpha.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
     return channel shl 24
+}
+
+/** Accent painted in the glow: 22% color times 70% opacity. */
+fun firstRunPreviewGlowColor(accentArgb: Int): Int {
+    val alpha = (FIRST_RUN_PREVIEW_GLOW_COLOR_ALPHA * FIRST_RUN_PREVIEW_GLOW_OPACITY * 255f).roundToInt().coerceIn(0, 255)
+    return (alpha shl 24) or (accentArgb and 0xFFFFFF)
+}
+
+/**
+ * Software-bitmap placement of the glow ellipse.
+ * [padPx] leaves room for the 65dp blur around the preview.
+ */
+data class FirstRunPreviewGlowFrame(
+    val bitmapWidthPx: Int,
+    val bitmapHeightPx: Int,
+    val padPx: Float,
+    val ovalLeftPx: Float,
+    val ovalTopPx: Float,
+    val ovalRightPx: Float,
+    val ovalBottomPx: Float,
+    val blurPx: Float,
+    val color: Int,
+)
+
+fun firstRunPreviewGlowFrame(widthPx: Float, heightPx: Float, density: Float, accentArgb: Int): FirstRunPreviewGlowFrame? {
+    if (widthPx < 1f || heightPx < 1f || density <= 0f) return null
+    val blurPx = FIRST_RUN_PREVIEW_GLOW_BLUR_DP * density
+    if (blurPx <= 0.5f) return null
+    val pad = blurPx * 2f + 2f
+    val left = widthPx * FIRST_RUN_PREVIEW_GLOW_INSET_INLINE
+    val top = heightPx * FIRST_RUN_PREVIEW_GLOW_INSET_BLOCK
+    val right = widthPx * (1f - FIRST_RUN_PREVIEW_GLOW_INSET_INLINE)
+    val bottom = heightPx * (1f - FIRST_RUN_PREVIEW_GLOW_INSET_BLOCK)
+    if (right - left < 1f || bottom - top < 1f) return null
+    val bitmapWidth = ceil(widthPx + pad * 2f).toInt()
+    val bitmapHeight = ceil(heightPx + pad * 2f).toInt()
+    if (bitmapWidth < 1 || bitmapHeight < 1) return null
+    return FirstRunPreviewGlowFrame(
+        bitmapWidthPx = bitmapWidth,
+        bitmapHeightPx = bitmapHeight,
+        padPx = pad,
+        ovalLeftPx = pad + left,
+        ovalTopPx = pad + top,
+        ovalRightPx = pad + right,
+        ovalBottomPx = pad + bottom,
+        blurPx = blurPx,
+        color = firstRunPreviewGlowColor(accentArgb),
+    )
 }
 
 /** Black at the floating-tag shadow alpha. */

@@ -13,7 +13,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { bindHandGestures } from '../../../src/lib/handGestures'
 import { getUiLanguage } from '../i18n'
-import { dueReminders } from '../lib/calendarReminders'
+import { dueReminders, formatMoreReminders, formatReminder } from '../lib/calendarReminders'
 import { applyIcsImport, exportIcs } from '../lib/icsCalendar'
 import {
   CALENDAR_NOTE_PATH,
@@ -620,7 +620,7 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
             }).catch(() => setError(copy.importFailed))
           }} /></label>
         </header>
-        {reminders[0] && <p className="cal-error" role="status">{reminders[0].title} beginnt {reminders[0].minutesUntil === 0 ? 'jetzt' : `in ${reminders[0].minutesUntil} min`}. <button type="button" onClick={() => setDismissedReminders((current) => [...current, reminders[0].key])}>Schließen</button></p>}
+        {reminders[0] && <p className="cal-error" role="status">{formatReminder(reminders[0], getUiLanguage())} {formatMoreReminders(reminders.length - 1, getUiLanguage())} <button type="button" onClick={() => setDismissedReminders((current) => [...current, reminders[0].key])}>{copy.close}</button></p>}
         {error && <p className="cal-error" role="alert">{error}</p>}
         {loading ? (
           <div className="cal-loading"><LoaderCircle className="spin" size={18} /></div>

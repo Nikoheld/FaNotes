@@ -33,6 +33,30 @@ Text #übung und mehr.
     { level: 1, title: 'Einleitung', line: 2 },
     { level: 2, title: 'Aufgabe 1', line: 6 },
   ])
+  const fenced = [
+    '# Davor',
+    '',
+    '```md',
+    '# Im Code',
+    '```',
+    '',
+    '# C#',
+    '',
+    '~~~',
+    '# Auch Code',
+    '~~~',
+    '',
+    '## Danach ##',
+    '',
+    '```',
+    '# Versteckt',
+  ].join('\n')
+  assert.deepEqual(parseNoteOutline(fenced).map((item) => ({ title: item.title, line: item.line })), [
+    { title: 'Davor', line: 1 },
+    { title: 'C#', line: 7 },
+    { title: 'Danach', line: 13 },
+  ])
+
   const tags = outlineTagsFromNote(markdown)
   assert.ok(tags.includes('klausur'))
   assert.ok(tags.includes('physik'))

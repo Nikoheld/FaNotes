@@ -1943,7 +1943,7 @@ fn month_words(value: &str) -> Vec<&str> {
                 .flat_map(expand_hyphen_numbers)
                 .flat_map(split_unmatched_paren),
         );
-        if token_is_open_clock(token) {
+        if token_is_open_clock(token) || clock_field_stayed_open(token) {
             open_clock = true;
             open_offset = false;
         } else if token_is_open_offset(token) {
@@ -2111,6 +2111,36 @@ fn open_clock_before_slash(value: &str) -> bool {
         }
     }
     false
+}
+
+/// `16:00:60` did not accept 60 as a second, so the next number can.
+/// `16:00` and `16:00:30` already finalized the clock.
+fn clock_field_stayed_open(token: &str) -> bool {
+    if !token.starts_with(|character: char| character.is_ascii_digit())
+        || !token.contains(':')
+        || token.ends_with(':')
+        || token
+            .bytes()
+            .any(|byte| !byte.is_ascii_digit() && byte != b':')
+    {
+        return false;
+    }
+    let fields: Vec<&str> = token.split(':').collect();
+    if fields.iter().any(|field| field.is_empty()) {
+        return false;
+    }
+    let Ok(numbers) = fields
+        .iter()
+        .map(|field| field.parse::<i32>())
+        .collect::<Result<Vec<_>, _>>()
+    else {
+        return false;
+    };
+    match numbers.len() {
+        2 => numbers[1] > 59,
+        3 => numbers[2] > 59,
+        _ => false,
+    }
 }
 
 /// `16:00:` still has an open second. `16:00` and `16:00:5` do not.
@@ -4498,37 +4528,38 @@ fn take_open_clock_hyphen_tail(
         let number = unsigned_number(&word[start..index])?;
         if time.expecting(number) {
             time.add_final(number)?;
-            if index == bytes.len() {
-                return Some(true);
-            }
-            let sign = if bytes[index] == b'+' {
-                1i64
-            } else if bytes[index] == b'-' {
-                -1
-            } else {
-                return Some(false);
-            };
-            index += 1;
-            let offset_start = index;
-            while index < bytes.len() && bytes[index].is_ascii_digit() {
+            // `1-2-3` is one second, then UTC−2, then UTC−3. The later sign
+            // replaces the offset. `10-13-2026` is ten seconds at UTC−20:26.
+            while index < bytes.len() {
+                let sign = if bytes[index] == b'+' {
+                    1i64
+                } else if bytes[index] == b'-' {
+                    -1
+                } else {
+                    return Some(false);
+                };
                 index += 1;
-            }
-            if offset_start == index || index != bytes.len() {
-                return Some(false);
-            }
-            let offset_text = &word[offset_start..index];
-            let offset_number = unsigned_number(offset_text)?;
-            let minutes = match offset_text.len() {
-                1 | 2 => sign * i64::from(offset_number) * 60,
-                3 | 4 => {
-                    let hour = i64::from(offset_number / 100);
-                    let minute = i64::from(offset_number % 100);
-                    sign * (hour * 60 + minute)
+                let offset_start = index;
+                while index < bytes.len() && bytes[index].is_ascii_digit() {
+                    index += 1;
                 }
-                _ => return Some(false),
-            };
-            *offset = Some(minutes);
-            *minute_sign = 0;
+                if offset_start == index {
+                    return Some(false);
+                }
+                let offset_text = &word[offset_start..index];
+                let offset_number = unsigned_number(offset_text)?;
+                let minutes = match offset_text.len() {
+                    1 | 2 => sign * i64::from(offset_number) * 60,
+                    3 | 4 => {
+                        let hour = i64::from(offset_number / 100);
+                        let minute = i64::from(offset_number % 100);
+                        sign * (hour * 60 + minute)
+                    }
+                    _ => return Some(false),
+                };
+                *offset = Some(minutes);
+                *minute_sign = 0;
+            }
             return Some(true);
         }
         push_date_number(dates, number)?;
@@ -5901,12 +5932,80 @@ fn unfinished_hyphen_ymd(body: &str) -> Option<(i32, i32, i32)> {
 }
 
 fn date_only_iso(value: &str, surrounded: bool) -> Option<String> {
+    if surrounded {
+        // `-000001-10-13.` keeps year -1 and makes midnight local. Stripping
+        // the sign would read `000001-10-13` as 10 January 2013.
+        match negative_dot_year(value) {
+            DotYear::Local(year, month, day) => {
+                let (year, month, day) = normalize_ymd(year, month, day)?;
+                let (year, month, day, hour, minute, second) =
+                    local_civil_to_utc(year, month, day, 0, 0, 0)?;
+                return format_civil_iso(year, month, day, hour, minute, second, 0);
+            }
+            DotYear::Empty => return None,
+            DotYear::Other => {}
+        }
+    }
     if !surrounded {
         if let Some(instant) = iso_hyphen_date(value) {
             return Some(instant);
         }
     }
     legacy_hyphen_date(value)
+}
+
+enum DotYear {
+    Other,
+    Empty,
+    Local(i32, i32, i32),
+}
+
+/// A negative expanded year after a trailing dot has been removed.
+/// `-000000` stays on the legacy path. A month past 12 is empty.
+fn negative_dot_year(value: &str) -> DotYear {
+    let bytes = value.as_bytes();
+    if bytes.first() != Some(&b'-') || bytes.len() < 7 {
+        return DotYear::Other;
+    }
+    if !bytes[1..7].iter().all(u8::is_ascii_digit) {
+        return DotYear::Other;
+    }
+    let Ok(year) = value[..7].parse::<i32>() else {
+        return DotYear::Other;
+    };
+    if year >= 0 {
+        return DotYear::Other;
+    }
+    let rest = &value[7..];
+    if rest.is_empty() {
+        return DotYear::Local(year, 1, 1);
+    }
+    let Some(rest) = rest.strip_prefix('-') else {
+        return DotYear::Other;
+    };
+    if rest.is_empty() {
+        return DotYear::Local(year, 1, 1);
+    }
+    let (month_text, day_text) = if let Some((month, day)) = rest.split_once('-') {
+        if month.is_empty() || day.is_empty() || day.contains('-') {
+            return DotYear::Empty;
+        }
+        (month, day)
+    } else {
+        (rest, "1")
+    };
+    if !month_text.bytes().all(|byte| byte.is_ascii_digit())
+        || !day_text.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return DotYear::Other;
+    }
+    let (Ok(month), Ok(day)) = (month_text.parse::<i32>(), day_text.parse::<i32>()) else {
+        return DotYear::Empty;
+    };
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return DotYear::Empty;
+    }
+    DotYear::Local(year, month, day)
 }
 
 /// `YYYY` and `±YYYYYY`, with optional month and day. A short month or day is
@@ -7189,6 +7288,53 @@ mod tests {
             assert_eq!(super::canonical_iso("Oct 2026 16:00:60"), None);
             assert_eq!(super::canonical_iso("Oct 13 2026 16 16:00:60"), None);
             assert_eq!(super::canonical_iso("Oct 13 16:00:2026 61 62"), None);
+        });
+    }
+
+    #[test]
+    fn a_hyphen_run_after_an_open_clock_is_an_offset() {
+        with_tz("America/New_York", || {
+            // `60` is the year. `10` fills the open second, and `-2026` is
+            // UTC−20:26. The middle `-13` is replaced. A finished second
+            // still reads the hyphen run as a date.
+            assert_eq!(
+                super::canonical_iso("16:00:60 10-13-2026").as_deref(),
+                Some("1960-01-02T12:26:10.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:60 10-13-2026").as_deref(),
+                Some("1960-01-02T12:36:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00:60 1-2-3").as_deref(),
+                Some("1960-01-01T19:00:01.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00:60 10-13").as_deref(),
+                Some("1960-01-02T05:00:10.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00:60 1-25").as_deref(),
+                Some("1960-01-02T17:00:01.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00:2026 10-13-2026").as_deref(),
+                Some("2026-01-02T12:26:10.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00:60 GMT 10-13-2026").as_deref(),
+                Some("1960-01-02T12:26:10.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00:60 10-13-2026 EST").as_deref(),
+                Some("1960-01-01T21:00:10.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00:30 1-2-3").as_deref(),
+                Some("2003-01-02T21:00:30.000Z")
+            );
+            assert_eq!(super::canonical_iso("24:00:60 10-13-2026"), None);
+            assert_eq!(super::canonical_iso("16:00:60 2026-10-13"), None);
         });
     }
 
@@ -13719,6 +13865,46 @@ mod tests {
                 super::canonical_iso(" -000001/01/01").as_deref(),
                 Some("2001-01-01T05:00:00.000Z")
             );
+        });
+    }
+
+    #[test]
+    fn a_trailing_dot_keeps_a_negative_expanded_year() {
+        with_tz("America/New_York", || {
+            // The dot makes midnight local. Year -1 stays negative.
+            assert_eq!(
+                super::canonical_iso("-000001-10-13.").as_deref(),
+                Some("-000001-10-13T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001.").as_deref(),
+                Some("-000001-01-01T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10.").as_deref(),
+                Some("-000001-10-01T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-1-13.").as_deref(),
+                Some("-000001-01-13T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13..").as_deref(),
+                Some("-000001-10-13T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13").as_deref(),
+                Some("-000001-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000000-10-13.").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+002026-10-13.").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("-000001-13."), None);
         });
     }
 }
