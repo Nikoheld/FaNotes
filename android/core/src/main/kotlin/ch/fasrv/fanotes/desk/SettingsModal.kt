@@ -67,6 +67,14 @@ const val SETTINGS_HEADING_GAP_DP = 11
  */
 fun settingsContentStacks(widthDp: Int): Boolean = settingsNavCollapses(widthDp)
 
+/**
+ * `.range-setting { width: 100%; }` inside `@media (max-width: 760px)`.
+ * The base rule is `width: 220px`. That media-query block is the last
+ * `.range-setting` rule, and it sets width rather than a max-width, so the
+ * stacked slider fills its control. Above 760 the existing cap stays.
+ */
+fun settingsRangeFillsWidth(widthDp: Int): Boolean = widthDp <= SETTINGS_MODAL_FULL_DP
+
 data class SettingsContentLayout(
     val headerPadXDp: Int,
     val scrollPadTopDp: Int,

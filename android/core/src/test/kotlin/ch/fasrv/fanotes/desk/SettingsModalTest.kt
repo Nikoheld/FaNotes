@@ -64,6 +64,17 @@ class SettingsModalTest {
     }
 
     @Test
+    fun theSettingsRangeFillsTheRowAt760() {
+        assertTrue(settingsRangeFillsWidth(760))
+        assertTrue(settingsRangeFillsWidth(400))
+        assertTrue(settingsRangeFillsWidth(0))
+        assertFalse(settingsRangeFillsWidth(761))
+        assertFalse(settingsRangeFillsWidth(800))
+        assertEquals(settingsContentStacks(760), settingsRangeFillsWidth(760))
+        assertEquals(settingsContentStacks(761), settingsRangeFillsWidth(761))
+    }
+
+    @Test
     fun theSettingsHeadingIconShowsAbove760() {
         assertEquals(38, SETTINGS_HEADING_ICON_DP)
         assertEquals(11, SETTINGS_HEADING_ICON_RADIUS_DP)
