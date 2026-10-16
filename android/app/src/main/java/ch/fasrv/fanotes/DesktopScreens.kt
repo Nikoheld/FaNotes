@@ -2601,43 +2601,72 @@ private fun MonthGrid(
     onEdit: (CalendarEvent, LocalDate) -> Unit,
 ) {
     val days = ch.fasrv.fanotes.desk.calendarRange("month", anchor)
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
     Row(Modifier.fillMaxWidth()) {
-        listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So").forEach { Text(it, fontSize = 12.sp, modifier = Modifier.weight(1f)) }
+        listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So").forEach { label ->
+            Text(
+                label.uppercase(java.util.Locale.GERMAN),
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center,
+                fontSize = 12.sp,
+                fontWeight = FontWeight(700),
+                letterSpacing = 0.04.em,
+                color = LocalStatusInk.current.muted,
+            )
+        }
     }
     days.chunked(7).forEach { week ->
-        Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Row(Modifier.fillMaxWidth()) {
             week.forEach { date ->
                 val outside = date.month != anchor.month
+                val today = date == LocalDate.now()
                 val items = document.events.filter { ch.fasrv.fanotes.desk.occurrencesOn(it, date) }
-                Column(Modifier.weight(1f).heightIn(min = 72.dp).padding(1.dp)) {
-                    Text(
-                        date.dayOfMonth.toString(),
-                        fontSize = 12.sp,
-                        fontWeight = if (date == LocalDate.now() || date == anchor) FontWeight.Bold else FontWeight.Normal,
-                        color = when {
-                            date == LocalDate.now() -> MaterialTheme.colorScheme.primary
-                            outside -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
-                            else -> MaterialTheme.colorScheme.onSurface
-                        },
-                        modifier = Modifier.clickable { onSelect(date) },
-                    )
-                    items.take(3).forEach { event ->
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .heightIn(min = ch.fasrv.fanotes.desk.CAL_MONTH_CELL_MIN_DP.dp)
+                        .drawBehind {
+                            val stroke = 1.dp.toPx()
+                            drawLine(rule, Offset(0f, 0f), Offset(size.width, 0f), stroke)
+                            drawLine(rule, Offset(0f, 0f), Offset(0f, size.height), stroke)
+                        }
+                        .alpha(if (outside) 0.55f else 1f)
+                        .padding(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Box(
+                        Modifier
+                            .size(ch.fasrv.fanotes.desk.CAL_MONTH_DAY_DP.dp)
+                            .clip(CircleShape)
+                            .clickable { onSelect(date) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            date.dayOfMonth.toString(),
+                            fontSize = 12.sp,
+                            color = if (today) accent else if (outside) LocalStatusInk.current.muted else MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    items.take(ch.fasrv.fanotes.desk.CAL_MONTH_LIMIT).forEach { event ->
                         val tint = document.calendars.find { it.id == event.calendarId }?.color ?: "#2a6f97"
                         Text(
                             ch.fasrv.fanotes.desk.monthEventLabel(event),
-                            fontSize = 10.sp,
+                            fontSize = 12.sp,
                             maxLines = 1,
-                            color = inkOn(tint),
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 1.dp)
-                                .background(calendarSwatch(tint))
+                                .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.CAL_CHIP_RADIUS_DP.dp))
+                                .background(calendarSwatch(tint).copy(alpha = ch.fasrv.fanotes.desk.CAL_CHIP_ALPHA))
                                 .clickable { onEdit(event, date) }
-                                .padding(horizontal = 2.dp),
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
                         )
                     }
-                    if (items.size > 3) {
-                        Text("+${items.size - 3} weitere", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
+                    val hidden = items.size - ch.fasrv.fanotes.desk.CAL_MONTH_LIMIT
+                    if (hidden > 0) {
+                        Text(ch.fasrv.fanotes.desk.calendarMoreLabel(hidden), fontSize = 12.sp, color = LocalStatusInk.current.muted)
                     }
                 }
             }
