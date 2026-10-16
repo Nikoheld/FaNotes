@@ -18,6 +18,11 @@ class WorkspaceChromeTest {
         assertFalse(workspaceKeepsNoteChrome("calendar"))
         assertFalse(workspaceKeepsNoteChrome("tasks"))
         assertFalse(workspaceKeepsNoteChrome("overview"))
+        assertEquals("calendar", destinationUnderOverlay("calendar"))
+        assertEquals("tasks", destinationUnderOverlay("tasks"))
+        assertEquals("overview", destinationUnderOverlay("overview"))
+        assertEquals("notes", destinationUnderOverlay("notes"))
+        assertEquals("search", destinationUnderOverlay("search"))
     }
 
     @Test

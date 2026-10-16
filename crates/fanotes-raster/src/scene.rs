@@ -136,22 +136,13 @@ impl SceneStroke {
             x1 = x1.max(x);
             y1 = y1.max(y);
         };
-        for (index, point) in stroke.points.iter().enumerate() {
+        for point in &stroke.points {
             let x = point.x * layout.0;
             let y = point.y * layout.1;
             hash = fnv(hash, quantize(x));
             hash = fnv(hash, quantize(y));
             hash = fnv(hash, (point.pressure * 4096.0).round() as i64 as u64);
             include(x, y);
-            if index >= 2 {
-                // Smoothing extrapolates the closing control point past the second-to-last sample.
-                let previous = &stroke.points[index - 1];
-                let before = &stroke.points[index - 2];
-                include(
-                    (previous.x + (previous.x - before.x) * 0.4) * layout.0,
-                    (previous.y + (previous.y - before.y) * 0.4) * layout.1,
-                );
-            }
         }
         for value in [
             stroke.base_width.to_bits(),

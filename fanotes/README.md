@@ -129,6 +129,7 @@ PDFs werden ausschließlich lokal gerendert. Originaldatei, Textfelder und Stift
 | GlyphenWerk Training & Test | `Strg+Umschalt+G` |
 | Bild oder PDF als Arbeitsblatt | `Strg+Umschalt+I` |
 | Tastatur/Stift wechseln | `Strg+D` |
+| Datum einfügen | `Strg+Umschalt+D` |
 | Fokusmodus | `Strg+Umschalt+E` |
 | Fett / kursiv / Link | `Strg+B` / `Strg+I` / `Strg+K` |
 | Einstellungen | `Strg+,` |

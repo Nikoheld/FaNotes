@@ -2,6 +2,7 @@ package ch.fasrv.fanotes.desk
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class DeskVaultTest {
@@ -25,6 +26,12 @@ class DeskVaultTest {
         val parsed = parseCalendarMarkdown(serializeCalendarMarkdown(document))
         assertEquals("Probe", parsed.events.single().title)
         assertEquals("school", parsed.events.single().calendarId)
+        val broken = "<!-- fanotes-calendar-v1\n{not json"
+        assertTrue(loadCalendarMarkdown(broken) is NoteMarkdownLoad.Unreadable)
+        assertFalse(managedNoteAllowsReplace(broken, ::loadCalendarMarkdown))
+        assertTrue(managedNoteAllowsReplace(null, ::loadCalendarMarkdown))
+        assertTrue(loadHomeworkMarkdown("<!-- fanotes-homework-v1\n{") is NoteMarkdownLoad.Unreadable)
+        assertTrue(loadCalendarMarkdown("") is NoteMarkdownLoad.Ready)
         assertTrue(occurrencesOn(parsed.events.single().copy(recurrence = "weekly"), java.time.LocalDate.parse("2026-10-28")))
         assertTrue(!occurrencesOn(parsed.events.single().copy(recurrence = "weekly"), java.time.LocalDate.parse("2026-10-22")))
     }

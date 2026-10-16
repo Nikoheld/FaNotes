@@ -12,6 +12,7 @@ data class EscapeLayer(
     val history: Boolean = false,
     val gotoLine: Boolean = false,
     val math: Boolean = false,
+    val handwriting: Boolean = false,
     val textBox: Boolean = false,
     val firstRun: Boolean = false,
     val sync: Boolean = false,
@@ -39,6 +40,7 @@ fun escapeDismisses(layer: EscapeLayer): String? {
     if (layer.history) return "history"
     if (layer.gotoLine) return "goto-line"
     if (layer.math) return "math"
+    if (layer.handwriting) return "handwriting"
     if (layer.textBox) return "text-box"
     if (layer.firstRun) return "first-run"
     if (layer.sync) return "sync"

@@ -13,8 +13,8 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { bindHandGestures } from '../../../src/lib/handGestures'
 import { getUiLanguage } from '../i18n'
-import { dueReminders } from '../lib/calendarReminders'
-import { exportIcs, importIcs } from '../lib/icsCalendar'
+import { dueReminders, formatMoreReminders, formatReminder } from '../lib/calendarReminders'
+import { applyIcsImport, exportIcs } from '../lib/icsCalendar'
 import {
   CALENDAR_NOTE_PATH,
   CALENDAR_NOTE_TITLE,
@@ -30,12 +30,13 @@ import {
   emptyCalendarDocument,
   expandOccurrences,
   healCalendarNames,
+  isMissingNoteError,
   isoWeek,
   layoutDayColumns,
+  loadCalendarMarkdown,
   minutesSinceMidnight,
   moveOccurrence,
   occurrenceOnDay,
-  parseCalendarMarkdown,
   parseDateKey,
   parseWall,
   resizeOccurrence,
@@ -106,7 +107,10 @@ const COPY = {
     calendar: 'Kalender',
     saving: 'Speichert …',
     saved: 'Gespeichert',
+    unreadable: 'Kalender.md konnte nicht gelesen werden. Die Datei bleibt unverändert.',
     openFile: 'Als Notiz öffnen',
+    importEmpty: 'Keine Termine in dieser Kalenderdatei.',
+    importFailed: 'Die Kalenderdatei konnte nicht gelesen werden.',
     repeats: { none: 'Nie', daily: 'Täglich', weekly: 'Wöchentlich', monthly: 'Monatlich', yearly: 'Jährlich' } as Record<RecurrenceFreq, string>,
     weekdays: ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'],
   },
@@ -149,7 +153,10 @@ const COPY = {
     calendar: 'Calendar',
     saving: 'Saving …',
     saved: 'Saved',
+    unreadable: 'Kalender.md could not be read. The file was left unchanged.',
     openFile: 'Open as note',
+    importEmpty: 'No events in that calendar file.',
+    importFailed: 'That calendar file could not be read.',
     repeats: { none: 'Never', daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' } as Record<RecurrenceFreq, string>,
     weekdays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
   },
@@ -197,6 +204,8 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
   const persistQueue = useRef(Promise.resolve())
   const persistGeneration = useRef(0)
   const committedDocument = useRef<CalendarDocument>(emptyCalendarDocument())
+  /** False until a read succeeds or the note is simply missing. A failed read must not be saved back. */
+  const canWriteCalendar = useRef(false)
   const scrollerRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{
     kind: 'create' | 'move' | 'resize'
@@ -214,6 +223,10 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
   const reminders = useMemo(() => dueReminders(document, now).filter((item) => !dismissedReminders.includes(item.key)), [dismissedReminders, document, now])
 
   const persist = useCallback(async (next: CalendarDocument) => {
+    if (!canWriteCalendar.current) {
+      setError(copy.unreadable)
+      return
+    }
     const healed = healCalendarNames(next, committedDocument.current)
     const generation = ++persistGeneration.current
     const run = async () => {
@@ -244,25 +257,36 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
     }
     persistQueue.current = persistQueue.current.then(run, run)
     await persistQueue.current
-  }, [])
+  }, [copy.unreadable])
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
+    canWriteCalendar.current = false
     void (async () => {
       try {
         const markdown = await window.fanotes.readFile(CALENDAR_NOTE_PATH)
-        if (!cancelled) {
-          const loaded = parseCalendarMarkdown(markdown)
-          committedDocument.current = loaded
-          setDocument(loaded)
+        if (cancelled) return
+        const loaded = loadCalendarMarkdown(markdown)
+        if (!loaded.ok) {
+          setError(text().unreadable)
+          return
         }
-      } catch {
-        if (!cancelled) {
+        canWriteCalendar.current = true
+        committedDocument.current = loaded.document
+        setDocument(loaded.document)
+        setError(null)
+      } catch (error) {
+        if (cancelled) return
+        if (isMissingNoteError(error)) {
           const empty = emptyCalendarDocument()
+          canWriteCalendar.current = true
           committedDocument.current = empty
           setDocument(empty)
+          setError(null)
+          return
         }
+        setError(text().unreadable)
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -286,11 +310,15 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
     searchOccurrences(expandOccurrences(document, range.start, addDays(range.end, view === 'agenda' ? 14 : 0)), query, document.calendars)
   ), [document, query, range.end, range.start, view])
   const openComposer = useCallback((start: Date, end: Date, allDay = false) => {
+    if (!canWriteCalendar.current) {
+      setError(copy.unreadable)
+      return
+    }
     const calendarId = document.calendars.find((calendar) => calendar.visible)?.id ?? document.calendars[0]?.id
     if (!calendarId) return
     const event = createEvent({ calendarId, title: copy.untitled, start, end, allDay })
     setEditor({ key: null, event })
-  }, [copy.untitled, document.calendars])
+  }, [copy.unreadable, copy.untitled, document.calendars])
 
   const openOccurrence = (occurrence: CalendarOccurrence) => {
     const event = occurrence.event.allDay
@@ -580,15 +608,19 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
             const file = event.target.files?.[0]
             event.target.value = ''
             if (!file) return
+            const calendarId = document.calendars[0]?.id
+            if (!calendarId) return
             void file.text().then((text) => {
-              const calendarId = document.calendars[0]?.id
-              if (!calendarId) return
-              const imported = importIcs(text, calendarId)
-              void persist({ ...document, events: [...document.events, ...imported].slice(0, 2000) })
-            })
+              const result = applyIcsImport(document, text, calendarId)
+              if (result.added === 0 && result.updated === 0 && result.removed === 0) {
+                setError(copy.importEmpty)
+                return
+              }
+              void persist(result.document)
+            }).catch(() => setError(copy.importFailed))
           }} /></label>
         </header>
-        {reminders[0] && <p className="cal-error" role="status">{reminders[0].title} beginnt {reminders[0].minutesUntil === 0 ? 'jetzt' : `in ${reminders[0].minutesUntil} min`}. <button type="button" onClick={() => setDismissedReminders((current) => [...current, reminders[0].key])}>Schließen</button></p>}
+        {reminders[0] && <p className="cal-error" role="status">{formatReminder(reminders[0], getUiLanguage())} {formatMoreReminders(reminders.length - 1, getUiLanguage())} <button type="button" onClick={() => setDismissedReminders((current) => [...current, reminders[0].key])}>{copy.close}</button></p>}
         {error && <p className="cal-error" role="alert">{error}</p>}
         {loading ? (
           <div className="cal-loading"><LoaderCircle className="spin" size={18} /></div>
