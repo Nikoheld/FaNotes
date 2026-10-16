@@ -34,13 +34,20 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Draw
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Checkbox
@@ -74,6 +81,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isShiftPressed
@@ -4019,6 +4027,7 @@ fun CommandPalette(
     focus: Boolean = false,
     dailyFolder: String = "",
     notesOnly: Boolean = false,
+    activePath: String? = null,
     reduceMotion: Boolean = false,
     penOpen: Boolean = false,
     bookOpen: Boolean = false,
@@ -4050,48 +4059,103 @@ fun CommandPalette(
         }
         onDismiss()
     }
-    Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).background(MaterialTheme.colorScheme.surface).padding(12.dp)) {
-        OutlinedTextField(
-            query,
-            { query = it },
-            modifier = Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                when (event.key) {
-                    Key.DirectionDown -> {
-                        selected = ch.fasrv.fanotes.desk.paletteMove(selected, rows.size, 1)
-                        true
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.PALETTE_RADIUS_DP.dp)
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    val strong = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
+    Column(
+        Modifier
+            .widthIn(max = ch.fasrv.fanotes.desk.PALETTE_MAX_DP.dp)
+            .fillMaxWidth()
+            .heightIn(max = ch.fasrv.fanotes.desk.PALETTE_MAX_HEIGHT_DP.dp)
+            .clip(shape)
+            .border(1.dp, strong, shape)
+            .background(MaterialTheme.colorScheme.background),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(ch.fasrv.fanotes.desk.PALETTE_SEARCH_DP.dp)
+                .padding(horizontal = ch.fasrv.fanotes.desk.PALETTE_SEARCH_PAD_DP.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.PALETTE_SEARCH_GAP_DP.dp),
+        ) {
+            Icon(
+                Icons.Filled.Search,
+                contentDescription = null,
+                modifier = Modifier.size(19.dp),
+                tint = if (notesOnly) LocalStatusInk.current.soft else MaterialTheme.colorScheme.primary,
+            )
+            BasicTextField(
+                query,
+                { query = it },
+                singleLine = true,
+                textStyle = TextStyle(
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = ch.fasrv.fanotes.desk.PALETTE_SEARCH_SP.sp,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                modifier = Modifier.weight(1f).onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when (event.key) {
+                        Key.DirectionDown -> {
+                            selected = ch.fasrv.fanotes.desk.paletteMove(selected, rows.size, 1)
+                            true
+                        }
+                        Key.DirectionUp -> {
+                            selected = ch.fasrv.fanotes.desk.paletteMove(selected, rows.size, -1)
+                            true
+                        }
+                        Key.PageDown -> {
+                            selected = ch.fasrv.fanotes.desk.paletteMove(selected, rows.size, 8)
+                            true
+                        }
+                        Key.PageUp -> {
+                            selected = ch.fasrv.fanotes.desk.paletteMove(selected, rows.size, -8)
+                            true
+                        }
+                        Key.Enter, Key.NumPadEnter -> {
+                            openRow(selected, event.isShiftPressed)
+                            true
+                        }
+                        else -> false
                     }
-                    Key.DirectionUp -> {
-                        selected = ch.fasrv.fanotes.desk.paletteMove(selected, rows.size, -1)
-                        true
+                },
+                decorationBox = { inner ->
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (query.isEmpty()) {
+                            Text(
+                                if (notesOnly) "Notiz öffnen …" else "Befehl suchen …",
+                                color = LocalStatusInk.current.muted,
+                                fontSize = ch.fasrv.fanotes.desk.PALETTE_SEARCH_SP.sp,
+                            )
+                        }
+                        inner()
                     }
-                    Key.PageDown -> {
-                        selected = ch.fasrv.fanotes.desk.paletteMove(selected, rows.size, 8)
-                        true
-                    }
-                    Key.PageUp -> {
-                        selected = ch.fasrv.fanotes.desk.paletteMove(selected, rows.size, -8)
-                        true
-                    }
-                    Key.Enter, Key.NumPadEnter -> {
-                        openRow(selected, event.isShiftPressed)
-                        true
-                    }
-                    else -> false
-                }
-            },
-            label = { Text(if (notesOnly) "Notiz öffnen …" else "Befehl suchen …") },
-            singleLine = true,
-        )
+                },
+            )
+            Box(
+                Modifier
+                    .size(ch.fasrv.fanotes.desk.PALETTE_CLOSE_DP.dp)
+                    .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.PALETTE_CLOSE_RADIUS_DP.dp))
+                    .clickable(onClickLabel = "Schließen", onClick = onDismiss),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Close, contentDescription = "Schließen", modifier = Modifier.size(16.dp), tint = LocalStatusInk.current.muted)
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
         if (rows.isEmpty()) {
             Text(
                 if (notesOnly) "Keine passende Notiz" else "Kein passender Befehl",
-                modifier = Modifier.padding(top = 12.dp),
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = ch.fasrv.fanotes.desk.PALETTE_EMPTY_PAD_TOP_DP.dp, bottom = 20.dp),
+                fontSize = 12.sp,
+                color = LocalStatusInk.current.muted,
+                textAlign = TextAlign.Center,
             )
         }
-        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).padding(top = 8.dp)) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).padding(6.dp)) {
             itemsIndexed(rows) { index, row ->
                 val group = when (row) {
                     is PaletteRow.Command -> row.command.group
@@ -4103,42 +4167,112 @@ fun CommandPalette(
                     is PaletteRow.Note -> if (notesOnly && query.isBlank()) "Zuletzt geöffnet" else "Notizen"
                     null -> null
                 }
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(if (index == selected) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f) else androidx.compose.ui.graphics.Color.Transparent)
-                        .clickable { openRow(index, false) }
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                ) {
+                val note = row as? PaletteRow.Note
+                val active = note != null && note.path == activePath
+                val mark = if (note == null) "" else ch.fasrv.fanotes.desk.paletteNoteMark(active, index == selected)
+                Column(Modifier.fillMaxWidth()) {
                     if (group != previousGroup) {
-                        Text(group, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
+                        Text(
+                            group.uppercase(java.util.Locale.GERMAN),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            letterSpacing = ch.fasrv.fanotes.desk.PALETTE_GROUP_TRACKING.em,
+                            color = LocalStatusInk.current.muted,
+                            modifier = Modifier.padding(start = 9.dp, top = 8.dp, end = 9.dp, bottom = 4.dp),
+                        )
                     }
-                    when (row) {
-                        is PaletteRow.Command -> Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(row.command.label, fontWeight = FontWeight.SemiBold)
-                                if (row.command.detail.isNotEmpty()) {
-                                    Text(row.command.detail, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                                }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = (if (note != null) ch.fasrv.fanotes.desk.PALETTE_NOTE_DP else ch.fasrv.fanotes.desk.PALETTE_ROW_DP).dp)
+                            .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.PALETTE_ROW_RADIUS_DP.dp))
+                            .background(if (index == selected) MaterialTheme.colorScheme.surfaceVariant else androidx.compose.ui.graphics.Color.Transparent)
+                            .clickable { openRow(index, false) }
+                            .padding(
+                                horizontal = ch.fasrv.fanotes.desk.PALETTE_ROW_PAD_X_DP.dp,
+                                vertical = ch.fasrv.fanotes.desk.PALETTE_ROW_PAD_Y_DP.dp,
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.PALETTE_ROW_GAP_DP.dp),
+                    ) {
+                        val icon = when {
+                            note != null && note.path.endsWith(".pdf", ignoreCase = true) -> Icons.Filled.PictureAsPdf
+                            note != null -> Icons.Filled.Description
+                            group == "Navigation" -> Icons.Filled.Search
+                            group == "Werkzeuge" -> Icons.Filled.Edit
+                            group == "FaNotes" -> Icons.Filled.Settings
+                            else -> Icons.Filled.Folder
+                        }
+                        Box(
+                            Modifier
+                                .size(ch.fasrv.fanotes.desk.PALETTE_ICON_DP.dp)
+                                .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.PALETTE_ICON_RADIUS_DP.dp))
+                                .background(MaterialTheme.colorScheme.surface)
+                                .border(
+                                    1.dp,
+                                    if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f) else rule,
+                                    RoundedCornerShape(ch.fasrv.fanotes.desk.PALETTE_ICON_RADIUS_DP.dp),
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(icon, contentDescription = null, modifier = Modifier.size(15.dp), tint = MaterialTheme.colorScheme.primary)
+                        }
+                        Column(Modifier.weight(1f)) {
+                            val title = when (row) {
+                                is PaletteRow.Command -> row.command.label
+                                is PaletteRow.Note -> row.title
                             }
-                            if (row.command.shortcut.isNotEmpty()) {
-                                Text(row.command.shortcut, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f), modifier = Modifier.padding(start = 8.dp))
+                            val detail = when (row) {
+                                is PaletteRow.Command -> row.command.detail
+                                is PaletteRow.Note -> row.folder
+                            }
+                            Text(
+                                title,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (index == selected) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft,
+                                maxLines = 1,
+                            )
+                            if (detail.isNotEmpty()) {
+                                Text(detail, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 2.dp), maxLines = 1)
                             }
                         }
-                        is PaletteRow.Note -> {
-                            Text(row.title, fontWeight = FontWeight.SemiBold)
-                            if (row.folder.isNotEmpty()) Text(row.folder, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                        val shortcut = when (row) {
+                            is PaletteRow.Command -> row.command.shortcut
+                            is PaletteRow.Note -> mark
+                        }
+                        if (shortcut.isNotEmpty()) {
+                            Text(
+                                shortcut,
+                                fontSize = 12.sp,
+                                color = LocalStatusInk.current.muted,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.PALETTE_KBD_RADIUS_DP.dp))
+                                    .background(MaterialTheme.colorScheme.surface)
+                                    .border(1.dp, strong, RoundedCornerShape(ch.fasrv.fanotes.desk.PALETTE_KBD_RADIUS_DP.dp))
+                                    .padding(horizontal = 6.dp, vertical = 3.dp),
+                            )
                         }
                     }
                 }
             }
         }
-        Text(
-            if (notesOnly || notes.isNotEmpty()) "↑ ↓ auswählen · Enter öffnen · Umschalt+Enter rechts · Esc schließen" else "↑ ↓ auswählen · Enter öffnen · Esc schließen",
-            modifier = Modifier.padding(top = 8.dp),
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-        )
+        Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(ch.fasrv.fanotes.desk.PALETTE_FOOTER_DP.dp)
+                .padding(horizontal = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text("↑ ↓ auswählen", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            Text("Enter öffnen", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            if (notesOnly || notes.isNotEmpty()) {
+                Text("⇧ Enter rechts", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            }
+            Text("Esc schließen", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+        }
     }
 }
 

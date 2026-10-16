@@ -17,6 +17,20 @@ class PaletteKeysTest {
         assertTrue(paletteOpensInSplit("note", true))
         assertFalse(paletteOpensInSplit("note", false))
         assertFalse(paletteOpensInSplit("command", true))
+        assertEquals("geöffnet", paletteNoteMark(active = true, selected = true))
+        assertEquals("geöffnet", paletteNoteMark(active = true, selected = false))
+        assertEquals("⇧↵", paletteNoteMark(active = false, selected = true))
+        assertEquals("", paletteNoteMark(active = false, selected = false))
+        assertEquals(12, PALETTE_RADIUS_DP)
+        assertEquals(620, PALETTE_MAX_DP)
+        assertEquals(570, PALETTE_MAX_HEIGHT_DP)
+        assertEquals(51, PALETTE_SEARCH_DP)
+        assertEquals(15, PALETTE_SEARCH_SP)
+        assertEquals(43, PALETTE_ROW_DP)
+        assertEquals(40, PALETTE_NOTE_DP)
+        assertEquals(29, PALETTE_ICON_DP)
+        assertEquals(30, PALETTE_FOOTER_DP)
+        assertEquals(0.1f, PALETTE_GROUP_TRACKING)
     }
 
     @Test
