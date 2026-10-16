@@ -9282,6 +9282,19 @@ mod local_zone_tests {
             Some(1_767_330_600_000)
         );
         assert_eq!(
+            unix_millis_from_iso("16:0012026-10-13"),
+            Some(317_336_850_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:00:10-5 2026"),
+            Some(1_767_301_210_000)
+        );
+        assert_eq!(unix_millis_from_iso("16:00Z5"), Some(988_732_800_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00Z5"), None);
+        assert_eq!(unix_millis_from_iso("24:00: 2026-10-13"), None);
+        assert_eq!(unix_millis_from_iso("16:602026-10-13"), None);
+        assert_eq!(unix_millis_from_iso("16:1002026-10-13"), None);
+        assert_eq!(
             unix_millis_from_iso("16:00Z2026-10-13"),
             Some(1_791_907_200_000)
         );

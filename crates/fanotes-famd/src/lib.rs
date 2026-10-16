@@ -8899,6 +8899,22 @@ mod tests {
                 Some("2026-01-02T05:10:00.000Z")
             );
             assert_eq!(
+                super::canonical_iso("16:0012026-10-13").as_deref(),
+                Some("+012026-01-02T05:10:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00:10-5 2026").as_deref(),
+                Some("2026-01-01T21:00:10.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00Z5").as_deref(),
+                Some("2001-05-01T16:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13 16:00Z5"), None);
+            assert_eq!(super::canonical_iso("24:00: 2026-10-13"), None);
+            assert_eq!(super::canonical_iso("16:602026-10-13"), None);
+            assert_eq!(super::canonical_iso("16:1002026-10-13"), None);
+            assert_eq!(
                 super::canonical_iso("16:00Z2026-10-13").as_deref(),
                 Some("2026-10-13T16:00:00.000Z")
             );
