@@ -132,8 +132,39 @@ fun previewBlockScrolls(kind: String): Boolean = kind == "code" || kind == "math
 const val PREVIEW_BORDER_ALPHA = 0.09f
 const val PREVIEW_BORDER_STRONG_ALPHA = 0.16f
 
-/** A preview link rests on a 1px rule at 45% of the readable accent. */
+/**
+ * `.markdown-preview a` rests on
+ * `border-bottom: 1px solid color-mix(in srgb, var(--accent-readable) 45%, transparent)`.
+ * `.markdown-preview a:hover { border-color: var(--accent-readable); }` keeps that 1px rule
+ * and paints it with the full accent. The Notion chrome block does not override either rule.
+ */
 const val PREVIEW_LINK_UNDERLINE = 0.45f
+const val PREVIEW_LINK_HOVER_UNDERLINE = 1f
+const val PREVIEW_LINK_BORDER_DP = 1f
+
+data class PreviewLinkChrome(val alpha: Float, val borderDp: Float)
+
+fun previewLinkChrome(hot: Boolean): PreviewLinkChrome = PreviewLinkChrome(
+    alpha = if (hot) PREVIEW_LINK_HOVER_UNDERLINE else PREVIEW_LINK_UNDERLINE,
+    borderDp = PREVIEW_LINK_BORDER_DP,
+)
+
+/** One CSS pixel, scaled the same way as the other paper rules from a 16px font. */
+fun previewLinkBorderPx(textSizePx: Float): Float {
+    val base = if (textSizePx <= 0f) 16f else textSizePx
+    return (PREVIEW_LINK_BORDER_DP * base / 16f).coerceAtLeast(1f)
+}
+
+fun previewLinkUnderlineArgb(color: Int, hot: Boolean): Int {
+    val alpha = kotlin.math.round(255.0 * previewLinkChrome(hot).alpha).toInt().coerceIn(0, 255)
+    return (alpha shl 24) or (color and 0x00FFFFFF)
+}
+
+/** Index of the link mark that contains [offset], or null when the caret is not on a link. */
+fun previewLinkIndexAt(marks: List<DetailsInline>, offset: Int): Int? {
+    val index = marks.indexOfFirst { it.kind == "link" && offset >= it.start && offset < it.end }
+    return index.takeIf { it >= 0 }
+}
 
 /**
  * Quote after the later chrome pass. The accent wash becomes `--bg-elevated`,
