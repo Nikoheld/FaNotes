@@ -2702,12 +2702,17 @@ fn take_month_clock(
             index += 1;
             if index < bytes.len() && bytes[index] == b':' {
                 // `16::30` is 16:00:30. A second `::` is not a time.
+                // `16:::30` and `16::.5` still fill the next field: the extra
+                // colon or dot is only a separator.
                 if time.index != 0 {
                     return None;
                 }
                 time.add(number)?;
                 time.add(0)?;
                 index += 1;
+                while index < bytes.len() && matches!(bytes[index], b':' | b'.') {
+                    index += 1;
+                }
                 continue;
             }
             time.add(number)?;
@@ -9027,6 +9032,44 @@ mod tests {
                     "{input}"
                 );
             }
+        });
+    }
+
+    #[test]
+    fn a_repeated_colon_after_an_empty_minute_is_a_separator() {
+        with_tz("America/New_York", || {
+            // `16:::30` is 16:00:30. `16::.5` is 16:00:05. A finished
+            // `16:00:::` is empty, and a `T` clock does not use this rule.
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:::30").as_deref(),
+                Some("2026-10-13T20:00:30.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16::.5").as_deref(),
+                Some("2026-10-13T20:00:05.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16::.").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:::5 PM").as_deref(),
+                Some("2026-10-13T20:00:05.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16::30.5").as_deref(),
+                Some("2026-10-13T20:00:30.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 1950 16:::30").as_deref(),
+                Some("1950-10-13T21:00:30.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 1950 16::.5").as_deref(),
+                Some("1950-10-13T21:00:05.000Z")
+            );
+            assert_eq!(super::canonical_iso("Oct 13 2026 16:00:::30"), None);
+            assert_eq!(super::canonical_iso("2026-10-13T16:::30"), None);
         });
     }
 }

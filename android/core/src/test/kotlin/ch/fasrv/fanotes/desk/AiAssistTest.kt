@@ -82,4 +82,23 @@ class AiAssistTest {
         assertEquals("Vorschau erzeugen", AI_RUN)
         assertEquals("Ergebnis übernehmen", AI_APPLY)
     }
+
+    @Test
+    fun thePanelUsesTheDesktopColumns() {
+        assertEquals(true, aiPanelStacks(760))
+        assertEquals(false, aiPanelStacks(761))
+        assertEquals(400, aiConfigWidthDp(400))
+        assertEquals(360, aiConfigWidthDp(800))
+        assertEquals(510, aiConfigWidthDp(1200))
+        assertEquals(2, aiProviderColumns(980))
+        assertEquals(3, aiProviderColumns(981))
+        assertEquals(2, aiActionColumns(700))
+        assertEquals(1, aiActionColumns(900))
+        assertEquals(2, aiActionColumns(1100))
+        assertEquals(12, AI_PANEL_RADIUS_DP)
+        assertEquals(33, AI_FIELD_HEIGHT_DP)
+        assertEquals(8, AI_FIELD_RADIUS_DP)
+        assertEquals("AI-Menü schließen", AI_CLOSE)
+        assertEquals("3 · Prüfen", AI_PREVIEW_EYEBROW)
+    }
 }

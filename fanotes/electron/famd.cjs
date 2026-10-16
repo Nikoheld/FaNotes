@@ -148,7 +148,10 @@ function parsePageStats(value) {
     : createdAt
   const dwell = Number(value.dwellMs)
   const opens = Number(value.openCount)
+  // The editor stores typing, ink, and document counts beside the five
+  // companion keys. Replacing the object dropped those counts on every save.
   return {
+    ...value,
     createdAt,
     modifiedAt,
     lastOpenedAt,

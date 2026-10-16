@@ -3718,12 +3718,17 @@ fn take_clock_word(
             index += 1;
             if index < bytes.len() && bytes[index] == b':' {
                 // `16::30` is 16:00:30. A second `::` is not a time.
+                // `16:::30` and `16::.5` still fill the next field: the extra
+                // colon or dot is only a separator.
                 if time.index != 0 {
                     return None;
                 }
                 time.add(number)?;
                 time.add(0)?;
                 index += 1;
+                while index < bytes.len() && matches!(bytes[index], b':' | b'.') {
+                    index += 1;
+                }
                 continue;
             }
             time.add(number)?;
@@ -11045,5 +11050,59 @@ mod local_zone_tests {
         for (input, expected) in cases {
             assert_eq!(unix_millis_from_iso(input), expected, "{input}");
         }
+    }
+
+    #[test]
+    fn a_repeated_colon_after_an_empty_minute_is_a_separator() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `16::30` is 16:00:30. Another colon or a dot still starts the next
+        // field, so `16:::30` is 16:00:30 and `16::.5` is 16:00:05.
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:::30"),
+            Some(1_791_921_630_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16::::30"),
+            Some(1_791_921_630_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16::.5"),
+            Some(1_791_921_605_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16::."),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16::..5"),
+            Some(1_791_921_605_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 4:::5 PM"),
+            Some(1_791_921_605_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16::30.5"),
+            Some(1_791_921_630_500)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:::30"),
+            Some(1_791_921_630_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:::30"),
+            Some(1_791_921_630_000)
+        );
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00:::30"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13T16:::30"), None);
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16::30"),
+            Some(1_791_921_630_000)
+        );
     }
 }

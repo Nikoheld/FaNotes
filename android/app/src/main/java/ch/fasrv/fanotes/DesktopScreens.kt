@@ -4442,10 +4442,11 @@ private fun AiStep(number: Int, title: String, detail: String, content: @Composa
 }
 
 @Composable
-private fun AiChoiceGrid(count: Int, minColumns: Int, item: @Composable (Int) -> Unit) {
+private fun AiChoiceGrid(count: Int, minColumns: Int, forcedColumns: Int = 0, item: @Composable (Int) -> Unit) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val columns = when {
             maxWidth < 420.dp -> 1
+            forcedColumns > 0 -> forcedColumns
             maxWidth < 720.dp && minColumns > 2 -> 2
             else -> minColumns
         }
@@ -4501,6 +4502,49 @@ private fun AiPanelButton(label: String, primary: Boolean, enabled: Boolean = tr
 }
 
 @Composable
+private fun AiField(
+    label: String,
+    value: String,
+    onValue: (String) -> Unit,
+    hint: String = "",
+    password: Boolean = false,
+    minLines: Int = 1,
+) {
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.AI_FIELD_RADIUS_DP.dp)
+    Column(Modifier.fillMaxWidth().padding(top = 9.dp)) {
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight(650), color = LocalStatusInk.current.soft)
+        BasicTextField(
+            value = value,
+            onValueChange = onValue,
+            singleLine = minLines == 1,
+            minLines = minLines,
+            visualTransformation = if (password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+            textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 5.dp)
+                .heightIn(min = if (minLines > 1) ch.fasrv.fanotes.desk.AI_FIELD_AREA_DP.dp else ch.fasrv.fanotes.desk.AI_FIELD_HEIGHT_DP.dp)
+                .clip(shape)
+                .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), shape)
+                .background(MaterialTheme.colorScheme.background)
+                .padding(horizontal = 9.dp, vertical = if (minLines > 1) 8.dp else 0.dp),
+            decorationBox = { inner ->
+                Box(
+                    Modifier.fillMaxWidth().heightIn(min = ch.fasrv.fanotes.desk.AI_FIELD_HEIGHT_DP.dp),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    if (value.isEmpty() && hint.isNotEmpty()) {
+                        Text(hint, color = LocalStatusInk.current.muted, fontSize = 12.sp, maxLines = 1)
+                    }
+                    inner()
+                }
+            },
+        )
+    }
+}
+
+@Composable
 fun AiScreen(model: FaNotesViewModel) {
     val settings by model.deskSettings.collectAsStateWithLifecycle()
     val status by model.aiStatus.collectAsStateWithLifecycle()
@@ -4518,21 +4562,24 @@ fun AiScreen(model: FaNotesViewModel) {
     LaunchedEffect(preview, note?.path) { model.syncPreviewImages(preview.orEmpty()) }
     fun setting(field: String) = settings["ai-$provider-$field"].orEmpty()
     val pageScroll = rememberScrollState()
+    val configScroll = rememberScrollState()
     val previewAnchors = remember { androidx.compose.runtime.mutableStateMapOf<Int, Int>() }
     val previewLayouts = remember { androidx.compose.runtime.mutableStateMapOf<Int, TextLayoutResult>() }
     val previewScope = rememberCoroutineScope()
     var previewColumnTop by remember { mutableIntStateOf(0) }
     val calmMotion = ch.fasrv.fanotes.desk.reduceMotion(settings["reduce-motion"])
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .onGloballyPositioned { previewColumnTop = it.positionInRoot().y.roundToInt() }
-            .verticalScroll(pageScroll),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    val canRun = !busy && note != null && setting("model").isNotBlank() && actions.isNotEmpty()
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = ch.fasrv.fanotes.desk.AI_HEADER_DP.dp)
+                .background(MaterialTheme.colorScheme.background)
+                .padding(horizontal = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             Box(
                 Modifier.size(ch.fasrv.fanotes.desk.AI_MARK_DP.dp).clip(RoundedCornerShape(ch.fasrv.fanotes.desk.AI_MARK_RADIUS_DP.dp)).background(MaterialTheme.colorScheme.onSurface),
                 contentAlignment = Alignment.Center,
@@ -4542,87 +4589,130 @@ fun AiScreen(model: FaNotesViewModel) {
             Column(Modifier.weight(1f)) {
                 Text(ch.fasrv.fanotes.desk.AI_PANEL_EYEBROW.uppercase(java.util.Locale.GERMAN), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.08.em, color = accent)
                 Text(ch.fasrv.fanotes.desk.AI_PANEL_TITLE, fontSize = 18.sp, letterSpacing = (-0.035).em)
-                Text(ch.fasrv.fanotes.desk.AI_PANEL_DETAIL, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
+                Text(ch.fasrv.fanotes.desk.AI_PANEL_DETAIL, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
             }
-        }
-        AiStep(1, ch.fasrv.fanotes.desk.AI_STEP_PROVIDERS, ch.fasrv.fanotes.desk.AI_STEP_PROVIDERS_DETAIL) {
-            AiChoiceGrid(ch.fasrv.fanotes.desk.AI_PROVIDERS.size, minColumns = 3) { index ->
-                val entry = ch.fasrv.fanotes.desk.AI_PROVIDERS[index]
-                AiChoiceCard(
-                    entry.title,
-                    entry.description,
-                    ch.fasrv.fanotes.desk.aiProviderKind(entry.local),
-                    entry.id == provider,
-                    minDp = ch.fasrv.fanotes.desk.AI_PROVIDER_MIN_DP,
-                ) {
-                    model.aiModels.value = emptyList()
-                    model.updateDesk("ai-provider", entry.id)
-                }
-            }
-            Text(
-                if (definition.local) "Deine Notiz bleibt im lokalen Netzwerk." else "Die Notiz wird zur Verarbeitung an den gewählten Anbieter übertragen.",
-                fontSize = 12.sp,
-                color = LocalStatusInk.current.muted,
-                modifier = Modifier.padding(top = 12.dp),
-            )
-        }
-        if (definition.local) {
-            OutlinedTextField(
-                setting("url").ifBlank { ch.fasrv.fanotes.desk.defaultAiBaseUrl(provider) },
-                { model.updateDesk("ai-$provider-url", it) },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Adresse") },
-                singleLine = true,
-            )
-        }
-        OutlinedTextField(setting("model"), { model.updateDesk("ai-$provider-model", it) }, modifier = Modifier.fillMaxWidth(), label = { Text("Modell") }, singleLine = true)
-        TextButton(onClick = { model.loadAiModels(provider, setting("url"), setting("key"), setting("user")) }) { Text("Modelle laden") }
-        models.forEach { listed ->
-            Column(
-                Modifier.fillMaxWidth().clickable { model.updateDesk("ai-$provider-model", listed.key) }.padding(vertical = 4.dp),
+            Box(
+                Modifier.size(34.dp).clip(RoundedCornerShape(6.dp)).clickable(enabled = !busy) { model.showDestination("notes") },
+                contentAlignment = Alignment.Center,
             ) {
-                Text(listed.title, fontWeight = if (setting("model") == listed.key) FontWeight.SemiBold else FontWeight.Normal)
-                if (listed.detail.isNotBlank()) Text(listed.detail, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
+                Icon(Icons.Filled.Close, contentDescription = ch.fasrv.fanotes.desk.AI_CLOSE, modifier = Modifier.size(18.dp), tint = LocalStatusInk.current.muted)
             }
         }
-        if (provider == "opencode") {
-            OutlinedTextField(setting("user").ifBlank { "opencode" }, { model.updateDesk("ai-$provider-user", it) }, modifier = Modifier.fillMaxWidth(), label = { Text("Benutzer") }, singleLine = true)
-        }
-        OutlinedTextField(setting("key"), { model.updateDesk("ai-$provider-key", it) }, modifier = Modifier.fillMaxWidth(), label = { Text(if (definition.local) "Schlüssel, optional" else "API-Schlüssel") }, singleLine = true)
-        AiStep(2, ch.fasrv.fanotes.desk.AI_STEP_ACTIONS, ch.fasrv.fanotes.desk.aiActionCountLabel(actions.size)) {
-            AiChoiceGrid(ch.fasrv.fanotes.desk.AI_ACTIONS.size, minColumns = 2) { index ->
-                val action = ch.fasrv.fanotes.desk.AI_ACTIONS[index]
-                val selected = action.id in actions
-                AiChoiceCard(action.title, action.description, if (action.additive) "ergänzt" else "", selected, minDp = ch.fasrv.fanotes.desk.AI_ACTION_MIN_DP) {
-                    actions = if (selected) actions - action.id else actions + action.id
+        Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val panelWidth = maxWidth.value.toInt()
+            val configPane: @Composable () -> Unit = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    AiStep(1, ch.fasrv.fanotes.desk.AI_STEP_PROVIDERS, ch.fasrv.fanotes.desk.AI_STEP_PROVIDERS_DETAIL) {
+                        AiChoiceGrid(ch.fasrv.fanotes.desk.AI_PROVIDERS.size, minColumns = 3, forcedColumns = ch.fasrv.fanotes.desk.aiProviderColumns(panelWidth)) { index ->
+                            val entry = ch.fasrv.fanotes.desk.AI_PROVIDERS[index]
+                            AiChoiceCard(
+                                entry.title,
+                                entry.description,
+                                ch.fasrv.fanotes.desk.aiProviderKind(entry.local),
+                                entry.id == provider,
+                                minDp = ch.fasrv.fanotes.desk.AI_PROVIDER_MIN_DP,
+                            ) {
+                                model.aiModels.value = emptyList()
+                                model.updateDesk("ai-provider", entry.id)
+                            }
+                        }
+                        Text(
+                            "${definition.title} verbinden",
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                        Text(
+                            if (definition.local) "Deine Notiz bleibt im lokalen Netzwerk." else "Die Notiz wird zur Verarbeitung an den gewählten Anbieter übertragen.",
+                            fontSize = 12.sp,
+                            color = LocalStatusInk.current.muted,
+                        )
+                        if (definition.local) {
+                            AiField(
+                                "Server-Adresse",
+                                setting("url").ifBlank { ch.fasrv.fanotes.desk.defaultAiBaseUrl(provider) },
+                                { model.updateDesk("ai-$provider-url", it) },
+                                hint = ch.fasrv.fanotes.desk.defaultAiBaseUrl(provider),
+                            )
+                        }
+                        if (provider == "opencode") {
+                            AiField("Benutzername", setting("user").ifBlank { "opencode" }, { model.updateDesk("ai-$provider-user", it) })
+                        }
+                        AiField(
+                            when {
+                                provider == "opencode" -> "Server-Passwort"
+                                definition.local -> "API-Token"
+                                else -> "API-Schlüssel"
+                            },
+                            setting("key"),
+                            { model.updateDesk("ai-$provider-key", it) },
+                            hint = if (definition.local) "Nur bei aktivierter Authentifizierung" else "${definition.title}-Schlüssel eingeben",
+                            password = true,
+                        )
+                        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            Box(Modifier.weight(1f)) {
+                                AiField("Modell", setting("model"), { model.updateDesk("ai-$provider-model", it) }, hint = "Modell auswählen …")
+                            }
+                            val refreshShape = RoundedCornerShape(ch.fasrv.fanotes.desk.AI_FIELD_RADIUS_DP.dp)
+                            Box(
+                                Modifier
+                                    .padding(bottom = 0.dp)
+                                    .size(width = 34.dp, height = ch.fasrv.fanotes.desk.AI_FIELD_HEIGHT_DP.dp)
+                                    .clip(refreshShape)
+                                    .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), refreshShape)
+                                    .background(MaterialTheme.colorScheme.background)
+                                    .clickable { model.loadAiModels(provider, setting("url"), setting("key"), setting("user")) },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(Icons.Filled.Sync, contentDescription = "Modelle laden", modifier = Modifier.size(16.dp), tint = accent)
+                            }
+                        }
+                        models.forEach { listed ->
+                            val chosen = setting("model") == listed.key
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 9.dp)
+                                    .heightIn(min = 43.dp)
+                                    .clip(RoundedCornerShape(9.dp))
+                                    .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = if (chosen) 0.14f else 0f), RoundedCornerShape(9.dp))
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = if (chosen) 0.085f else 0f))
+                                    .clickable { model.updateDesk("ai-$provider-model", listed.key) }
+                                    .padding(horizontal = 9.dp, vertical = 7.dp),
+                            ) {
+                                Text(listed.title, fontSize = 12.sp, fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
+                                if (listed.detail.isNotBlank()) Text(listed.detail, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1)
+                            }
+                        }
+                    }
+                    AiStep(2, ch.fasrv.fanotes.desk.AI_STEP_ACTIONS, ch.fasrv.fanotes.desk.aiActionCountLabel(actions.size)) {
+                        AiChoiceGrid(ch.fasrv.fanotes.desk.AI_ACTIONS.size, minColumns = 2, forcedColumns = ch.fasrv.fanotes.desk.aiActionColumns(panelWidth)) { index ->
+                            val action = ch.fasrv.fanotes.desk.AI_ACTIONS[index]
+                            val selected = action.id in actions
+                            AiChoiceCard(action.title, action.description, if (action.additive) "ergänzt" else "", selected, minDp = ch.fasrv.fanotes.desk.AI_ACTION_MIN_DP) {
+                                actions = if (selected) actions - action.id else actions + action.id
+                            }
+                        }
+                        if ("instruction" in actions) {
+                            AiField(ch.fasrv.fanotes.desk.AI_INSTRUCTION_LABEL, instruction, { instruction = it }, hint = ch.fasrv.fanotes.desk.AI_INSTRUCTION_HINT, minLines = 4)
+                        }
+                        if ("facts" in actions) {
+                            Text(ch.fasrv.fanotes.desk.AI_FACTS_WARNING, fontSize = 12.sp, lineHeight = 17.sp, color = LocalStatusInk.current.warning, modifier = Modifier.padding(top = 9.dp))
+                        }
+                    }
                 }
             }
-            if ("instruction" in actions) {
-                OutlinedTextField(
-                    instruction,
-                    { instruction = it },
-                    modifier = Modifier.fillMaxWidth().padding(top = 11.dp),
-                    label = { Text(ch.fasrv.fanotes.desk.AI_INSTRUCTION_LABEL) },
-                    placeholder = { Text(ch.fasrv.fanotes.desk.AI_INSTRUCTION_HINT) },
-                    minLines = 4,
-                )
-            }
-            if ("facts" in actions) {
-                Text(ch.fasrv.fanotes.desk.AI_FACTS_WARNING, fontSize = 12.sp, lineHeight = 17.sp, color = LocalStatusInk.current.warning, modifier = Modifier.padding(top = 9.dp))
-            }
-        }
-        val canRun = !busy && note != null && setting("model").isNotBlank() && actions.isNotEmpty()
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (preview != null) {
-                AiPanelButton(ch.fasrv.fanotes.desk.AI_RESET, primary = false) { model.aiPreview.value = null }
-                AiPanelButton(ch.fasrv.fanotes.desk.AI_APPLY, primary = true) { model.applyAiPreview() }
-            } else {
-                AiPanelButton(ch.fasrv.fanotes.desk.AI_RUN, primary = true, enabled = canRun) {
-                    model.runAi(provider, setting("url"), setting("model"), setting("key"), setting("user"), actions.toList(), instruction)
-                }
-            }
-        }
-        if (status.isNotBlank()) Text(status, fontSize = 13.sp)
+            val previewPane: @Composable () -> Unit = {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 12.dp)) {
+        Text(ch.fasrv.fanotes.desk.AI_PREVIEW_EYEBROW.uppercase(java.util.Locale.GERMAN), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.08.em, color = accent)
+        Text(
+            if (preview != null) "${definition.title} · Ergebnis" else note?.path ?: "Keine Notiz geöffnet",
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(bottom = 12.dp),
+        )
+        if (status.isNotBlank()) Text(status, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(bottom = 8.dp))
         val result = preview
         if (result == null) {
             Text("Deine Notiz bleibt unverändert", fontWeight = FontWeight.SemiBold)
@@ -4980,6 +5070,43 @@ fun AiScreen(model: FaNotesViewModel) {
                             )
                         }
                     }
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 12.dp)) {
+            if (preview != null) {
+                AiPanelButton(ch.fasrv.fanotes.desk.AI_RESET, primary = false) { model.aiPreview.value = null }
+                AiPanelButton(ch.fasrv.fanotes.desk.AI_APPLY, primary = true) { model.applyAiPreview() }
+            } else {
+                AiPanelButton(ch.fasrv.fanotes.desk.AI_RUN, primary = true, enabled = canRun) {
+                    model.runAi(provider, setting("url"), setting("model"), setting("key"), setting("user"), actions.toList(), instruction)
+                }
+            }
+        }
+        }
+            }
+            val previewScroll = Modifier
+                .onGloballyPositioned { previewColumnTop = it.positionInRoot().y.roundToInt() }
+                .verticalScroll(pageScroll)
+            if (ch.fasrv.fanotes.desk.aiPanelStacks(panelWidth)) {
+                Column(Modifier.fillMaxSize().then(previewScroll)) {
+                    Column(Modifier.padding(15.dp)) { configPane() }
+                    previewPane()
+                }
+            } else {
+                Row(Modifier.fillMaxSize()) {
+                    Column(
+                        Modifier
+                            .width(ch.fasrv.fanotes.desk.aiConfigWidthDp(panelWidth).dp)
+                            .fillMaxHeight()
+                            .verticalScroll(configScroll)
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.84f))
+                            .padding(15.dp),
+                    ) { configPane() }
+                    Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
+                    Column(
+                        Modifier.weight(1f).fillMaxHeight().background(MaterialTheme.colorScheme.background).then(previewScroll),
+                    ) { previewPane() }
                 }
             }
         }
