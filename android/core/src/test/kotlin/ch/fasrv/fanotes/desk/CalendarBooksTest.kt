@@ -43,6 +43,16 @@ class CalendarBooksTest {
     }
 
     @Test
+    fun monthCellsUseTheDesktopChip() {
+        assertEquals(24, CAL_MONTH_DAY_DP)
+        assertEquals(6, CAL_CHIP_RADIUS_DP)
+        assertEquals(3, CAL_MONTH_LIMIT)
+        assertEquals(0.22f, CAL_CHIP_ALPHA)
+        assertEquals("+2 weitere", calendarMoreLabel(2))
+        assertEquals("+1 weitere", calendarMoreLabel(1))
+    }
+
+    @Test
     fun subjectBookFollowsTheFolderAndRemembersThePage() {
         val books = attachSubjectBook(emptyList(), "Schule/Mathe", "Buecher/Algebra.pdf", 4)
         val text = serializeSubjectBooks(books)

@@ -487,8 +487,16 @@ const val CAL_SIDE_BREAK_DP = 960
 const val CAL_MINI_CELL_DP = 28
 const val CAL_MINI_DOT_DP = 4
 const val CAL_ICON_DP = 28
+const val CAL_MONTH_DAY_DP = 24
+const val CAL_MONTH_CELL_MIN_DP = 88
+const val CAL_CHIP_RADIUS_DP = 6
+const val CAL_MONTH_LIMIT = 3
+const val CAL_CHIP_ALPHA = 0.22f
+const val CAL_MORE = "weitere"
 
 fun calendarShowsSide(widthDp: Int): Boolean = widthDp > CAL_SIDE_BREAK_DP
+
+fun calendarMoreLabel(hidden: Int): String = "+$hidden $CAL_MORE"
 
 /** How far the desktop calendar moves: a week for Woche and Agenda, a month for Monat. */
 fun calendarShift(view: String, anchor: java.time.LocalDate, step: Int): java.time.LocalDate = when (view) {
