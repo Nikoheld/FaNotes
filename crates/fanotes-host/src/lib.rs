@@ -7132,7 +7132,7 @@ fn scan_sync_directory(root: &Path, directory: &Path, depth: usize, out: &mut Ve
         let relative = vault::relative_posix(root, &path);
         if depth == 1
             && relative.starts_with(".fanotes/")
-            && matches!(name.as_str(), "history" | "tree-cache")
+            && matches!(name.as_str(), "history" | "tree-cache" | "trash")
         {
             continue;
         }

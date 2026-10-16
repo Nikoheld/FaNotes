@@ -144,6 +144,8 @@ try {
   assert.ok(isSyncablePath('.fanotes/folder-colors.json'))
   assert.ok(isSyncablePath('.fanotes/assets/abc.json'))
   assert.ok(!isSyncablePath('.fanotes/history/abc/index.json'), 'local version history stays local')
+  assert.ok(!isSyncablePath('.fanotes/trash/index.json'), 'tablet trash stays on the device')
+  assert.ok(!isSyncablePath('.fanotes/trash/abc/Math/Algebra.md'), 'a trashed note is not uploaded')
   assert.ok(!isSyncablePath('.fanotes/onboarding.json'))
   assert.ok(!isSyncablePath('.git/config'))
   assert.ok(!isSyncablePath('Mathe/.Algebra.md.123.tmp'))

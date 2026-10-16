@@ -265,6 +265,7 @@ const val TREE_MENU_SUBFOLDER = "Neuer Unterordner"
 const val TREE_MENU_SPLIT = "Rechts öffnen"
 const val TREE_MENU_RENAME = "Umbenennen"
 const val TREE_MENU_MOVE = "Verschieben"
+const val TREE_MENU_DUPLICATE = "Duplizieren"
 const val TREE_MENU_DELETE = "Löschen"
 const val TREE_MENU_ICON_DP = 15
 const val TREE_MENU_ICON_GAP_DP = 9
@@ -283,6 +284,7 @@ fun treeMenuIcon(label: String): String = when (label) {
     TREE_MENU_SPLIT -> "columns"
     TREE_MENU_RENAME -> "pencil"
     TREE_MENU_MOVE -> "move"
+    TREE_MENU_DUPLICATE -> "copy"
     TREE_MENU_DELETE -> "trash"
     else -> "folder"
 }

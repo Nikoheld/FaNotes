@@ -302,6 +302,7 @@ class WorkspaceChromeTest {
         assertEquals("columns", treeMenuIcon(TREE_MENU_SPLIT))
         assertEquals("pencil", treeMenuIcon(TREE_MENU_RENAME))
         assertEquals("move", treeMenuIcon(TREE_MENU_MOVE))
+        assertEquals("copy", treeMenuIcon(TREE_MENU_DUPLICATE))
         assertEquals("trash", treeMenuIcon(TREE_MENU_DELETE))
         assertEquals("folder", treeMenuIcon("Nur auf diesem Gerät"))
         assertEquals("folder", treeMenuIcon("Wieder synchronisieren"))

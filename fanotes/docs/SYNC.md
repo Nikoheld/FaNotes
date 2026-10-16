@@ -111,7 +111,7 @@ sync is on, when the window regains focus or comes back online, and on demand
    in the meantime: the server's version wins the original path, the local bytes are kept
    as a conflict copy, and both end up on every device.
 
-Skipped: the local history (`.fanotes/history`), tree cache, onboarding state, hidden files
+Skipped: the local history (`.fanotes/history`), the tablet trash (`.fanotes/trash`), tree cache, onboarding state, hidden files
 other than `.fanotes/`, editor lock files (`.~lock.*`, `~$*`, `*.tmp`), `.DS_Store`,
 `Thumbs.db`, `desktop.ini`, and anything above 100 MB (reported in the log).
 
