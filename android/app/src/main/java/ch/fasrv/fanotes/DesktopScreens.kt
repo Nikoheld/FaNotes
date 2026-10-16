@@ -59,6 +59,7 @@ import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ViewColumn
 import androidx.compose.material.icons.filled.Warning
@@ -3296,6 +3297,22 @@ private fun previewMarks(
 }
 
 @Composable
+private fun SettingSlider(value: Float, min: Float, max: Float, step: Float, suffix: String, onChange: (Float) -> Unit) {
+    val shown = if (step < 1f) "%.2f".format(java.util.Locale.US, value) else value.toInt().toString()
+    Column(Modifier.widthIn(min = 170.dp, max = 360.dp)) {
+        Text("$shown$suffix", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+        Slider(
+            value = value.coerceIn(min, max),
+            onValueChange = { raw ->
+                val steps = kotlin.math.round((raw - min) / step)
+                onChange((min + steps * step).coerceIn(min, max))
+            },
+            valueRange = min..max,
+        )
+    }
+}
+
+@Composable
 private fun EditorSlider(title: String, value: Float, min: Float, max: Float, step: Float, suffix: String, onChange: (Float) -> Unit) {
     val shown = if (step < 1f) "%.2f".format(java.util.Locale.US, value) else value.toInt().toString()
     Text("$title: $shown$suffix")
@@ -3714,12 +3731,13 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                         }
                     }
                     val uiFont = ch.fasrv.fanotes.desk.uiFontId(settings["ui-font"])
+                    val metrics = ch.fasrv.fanotes.desk.editorMetrics(settings)
                     SettingCard(
                         "Typografie",
                         Icons.Filled.TextFields,
                         Modifier.settingsAnchor("appearance", "settings-typography", anchorY),
                     ) {
-                        SettingRow("Oberflächen-Schrift", divider = false) {
+                        SettingRow("Oberflächen-Schrift") {
                             Column {
                                 ch.fasrv.fanotes.desk.UI_FONTS.forEach { face ->
                                     Text(
@@ -3732,60 +3750,77 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                                 }
                             }
                         }
+                        SettingRow("Editor-Schrift", modifier = Modifier.settingsAnchor("appearance", "settings-type", anchorY)) {
+                            Column {
+                                ch.fasrv.fanotes.desk.EDITOR_FONTS.forEach { face ->
+                                    Text(
+                                        face.label,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (metrics.editorFontId == face.id) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (metrics.editorFontId == face.id) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft,
+                                        modifier = Modifier.clickable { model.updateDesk("editor-face", face.stack) }.padding(vertical = 4.dp),
+                                    )
+                                }
+                            }
+                        }
+                        SettingRow("Editor-Schriftgröße") {
+                            SettingSlider(metrics.fontSizePx.toFloat(), 12f, 26f, 1f, " px") { model.updateDesk("editor-font", it.toInt().toString()) }
+                        }
+                        SettingRow("KI-Vorschau-Schriftgröße") {
+                            SettingSlider(metrics.previewFontPx.toFloat(), 13f, 28f, 1f, " px") { model.updateDesk("preview-font", it.toInt().toString()) }
+                        }
+                        SettingRow("Zeilenhöhe", divider = false) {
+                            SettingSlider(metrics.lineHeight.toFloat(), 1.3f, 2.2f, 0.05f, "") { model.updateDesk("line-height", "%.2f".format(java.util.Locale.US, it)) }
+                        }
                     }
                 }
                 "editor" -> {
                     val metrics = ch.fasrv.fanotes.desk.editorMetrics(settings)
-                    Text("Wörter in der Statusleiste: ${settings["words"] != "off"}", modifier = Modifier.clickable { model.updateDesk("words", if (settings["words"] == "off") "on" else "off") }.settingsAnchor("editor", "settings-editor", anchorY))
-                    Text("Gliederung: ${settings["outline"] != "off"}", modifier = Modifier.clickable { model.updateDesk("outline", if (settings["outline"] == "off") "on" else "off") })
-                    Text("Täglicher Ordner: ${settings["daily-folder"].orEmpty().ifBlank { "Tagesnotizen" }}", modifier = Modifier.settingsAnchor("editor", "settings-daily", anchorY))
-                    OutlinedTextField(
-                        settings["daily-folder"].orEmpty(),
-                        { model.updateDesk("daily-folder", it) },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Ordner der Tagesnotiz") },
-                        singleLine = true,
-                    )
-                    OutlinedTextField(
-                        settings["date-format"].orEmpty().ifBlank { "YYYY-MM-DD" },
-                        { model.updateDesk("date-format", it) },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Datumsformat") },
-                        singleLine = true,
-                    )
-                    OutlinedTextField(
-                        settings["default-folder"] ?: "Eingang",
-                        { model.updateDesk("default-folder", it) },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Standardordner neuer Notizen") },
-                        singleLine = true,
-                    )
-                    Text("Editor-Schrift", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp).settingsAnchor("editor", "settings-type", anchorY))
-                    ch.fasrv.fanotes.desk.EDITOR_FONTS.forEach { face ->
-                        Text(
-                            face.label,
-                            fontWeight = if (metrics.editorFontId == face.id) FontWeight.SemiBold else FontWeight.Normal,
-                            modifier = Modifier.clickable { model.updateDesk("editor-face", face.stack) }.padding(vertical = 4.dp),
-                        )
-                    }
-                    EditorSlider("Editor-Schriftgröße", metrics.fontSizePx.toFloat(), 12f, 26f, 1f, " px") { model.updateDesk("editor-font", it.toInt().toString()) }
-                    EditorSlider("KI-Vorschau-Schriftgröße", metrics.previewFontPx.toFloat(), 13f, 28f, 1f, " px") { model.updateDesk("preview-font", it.toInt().toString()) }
-                    Text(
-                        "Zeilennummern: ${if (metrics.showLineNumbers) "an" else "aus"}",
-                        modifier = Modifier.clickable { model.updateDesk("line-numbers", if (metrics.showLineNumbers) "off" else "on") },
-                    )
-                    EditorSlider("Zeilenhöhe", metrics.lineHeight.toFloat(), 1.3f, 2.2f, 0.05f, "") { model.updateDesk("line-height", "%.2f".format(java.util.Locale.US, it)) }
-                    Text(
-                        "Lesbare Zeilenlänge: ${if (metrics.readableLineLength) "an" else "aus"}",
-                        modifier = Modifier.clickable { model.updateDesk("readable-lines", if (metrics.readableLineLength) "off" else "on") }.settingsAnchor("editor", "settings-width", anchorY),
-                    )
-                    EditorSlider("Maximale Inhaltsbreite", metrics.contentWidthPx.toFloat(), 560f, 1200f, 20f, " px") { model.updateDesk("content-width", it.toInt().toString()) }
-                    Column(Modifier.settingsAnchor("editor", "settings-zoom", anchorY)) {
-                        EditorSlider("Zoom-Geschwindigkeit", metrics.zoomSpeed.toFloat(), 1f, 10f, 1f, "") { model.updateDesk("zoom-speed", it.toInt().toString()) }
-                        EditorSlider("Maximaler Zoom", (metrics.zoomMax * 100).toFloat(), 50f, 600f, 5f, " %") { model.updateDesk("zoom-max", it.toInt().toString()) }
-                    }
-                    Column(Modifier.settingsAnchor("editor", "settings-save", anchorY)) {
-                        EditorSlider("Automatisch speichern", metrics.autosaveMs.toFloat(), 250f, 3000f, 250f, " ms") { model.updateDesk("autosave", it.toInt().toString()) }
+                    SettingCard(
+                        "Markdown-Arbeitsbereich",
+                        Icons.Filled.Description,
+                        Modifier.settingsAnchor("editor", "settings-editor", anchorY),
+                    ) {
+                        SettingRow("Live-Ansicht", "Markdown wird direkt auf der Seite bearbeitet und formatiert – ohne getrennte Vorschau.") {
+                            Text("Immer aktiv", fontSize = 12.sp, color = LocalStatusInk.current.soft)
+                        }
+                        SettingRow("Lesbare Zeilenlänge", "Begrenzt lange Textzeilen für angenehmes Lesen.", modifier = Modifier.settingsAnchor("editor", "settings-width", anchorY)) {
+                            Switch(
+                                checked = metrics.readableLineLength,
+                                onCheckedChange = { model.updateDesk("readable-lines", if (it) "on" else "off") },
+                            )
+                        }
+                        SettingRow("Maximale Inhaltsbreite") {
+                            SettingSlider(metrics.contentWidthPx.toFloat(), 560f, 1200f, 20f, " px") { model.updateDesk("content-width", it.toInt().toString()) }
+                        }
+                        SettingRow(
+                            "Zoom-Geschwindigkeit",
+                            "Wie weit Strg+Mausrad oder Trackpad-Pinch das Blatt verändert. 1 ist langsam, 5 normal, 10 schnell.",
+                            modifier = Modifier.settingsAnchor("editor", "settings-zoom", anchorY),
+                        ) {
+                            SettingSlider(metrics.zoomSpeed.toFloat(), 1f, 10f, 1f, "") { model.updateDesk("zoom-speed", it.toInt().toString()) }
+                        }
+                        SettingRow("Zoom-Limit", "Wie weit du das Blatt hereinzoomen kannst. 50 % ist kaum näher, 325 % ist der bisherige Höchstwert, 600 % ist sehr nah.") {
+                            SettingSlider((metrics.zoomMax * 100).toFloat(), 50f, 600f, 5f, " %") { model.updateDesk("zoom-max", it.toInt().toString()) }
+                        }
+                        SettingRow("Zeilennummern") {
+                            Switch(
+                                checked = metrics.showLineNumbers,
+                                onCheckedChange = { model.updateDesk("line-numbers", if (it) "on" else "off") },
+                            )
+                        }
+                        SettingRow("Wortzahl in Statusleiste") {
+                            Switch(
+                                checked = settings["words"] != "off",
+                                onCheckedChange = { model.updateDesk("words", if (it) "on" else "off") },
+                            )
+                        }
+                        SettingRow("Gliederung anzeigen", divider = false) {
+                            Switch(
+                                checked = settings["outline"] != "off",
+                                onCheckedChange = { model.updateDesk("outline", if (it) "on" else "off") },
+                            )
+                        }
                     }
                 }
                 "drawing" -> {
@@ -3837,6 +3872,37 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     }
                 }
                 "files" -> {
+                    val metrics = ch.fasrv.fanotes.desk.editorMetrics(settings)
+                    SettingCard("Dateiverhalten", Icons.Filled.Tune, Modifier.settingsAnchor("files", "settings-save", anchorY)) {
+                        SettingRow("Automatisch speichern") {
+                            SettingSlider(metrics.autosaveMs.toFloat(), 250f, 3000f, 250f, " ms") { model.updateDesk("autosave", it.toInt().toString()) }
+                        }
+                        SettingRow("Standardordner") {
+                            OutlinedTextField(
+                                settings["default-folder"] ?: "Eingang",
+                                { model.updateDesk("default-folder", it) },
+                                modifier = Modifier.widthIn(min = 170.dp),
+                                singleLine = true,
+                            )
+                        }
+                        SettingRow("Tagesnotizen", modifier = Modifier.settingsAnchor("files", "settings-daily", anchorY)) {
+                            OutlinedTextField(
+                                settings["daily-folder"].orEmpty(),
+                                { model.updateDesk("daily-folder", it) },
+                                modifier = Modifier.widthIn(min = 170.dp),
+                                placeholder = { Text("Tagesnotizen") },
+                                singleLine = true,
+                            )
+                        }
+                        SettingRow("Datumsformat", divider = false) {
+                            OutlinedTextField(
+                                settings["date-format"].orEmpty().ifBlank { "YYYY-MM-DD" },
+                                { model.updateDesk("date-format", it) },
+                                modifier = Modifier.widthIn(min = 170.dp),
+                                singleLine = true,
+                            )
+                        }
+                    }
                     TextButton(onClick = onOpenVault, modifier = Modifier.settingsAnchor("files", "settings-vault", anchorY)) { Text("Vault-Ordner öffnen") }
                     TextButton(onClick = onPrivate) { Text("Tablet-Vault verwenden") }
                     Text("Profil", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
