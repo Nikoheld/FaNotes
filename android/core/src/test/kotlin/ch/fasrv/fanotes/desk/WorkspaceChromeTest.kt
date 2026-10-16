@@ -261,6 +261,8 @@ class WorkspaceChromeTest {
         assertTrue(ribbonItemActive("notes", "notes", penOpen = false))
         assertTrue(!ribbonItemActive("notes", "notes", penOpen = true))
         assertTrue(ribbonItemActive("calendar", "calendar", penOpen = true))
+        assertTrue(ribbonItemActive("ai", "notes", penOpen = false, aiOpen = true))
+        assertTrue(!ribbonItemActive("notes", "notes", penOpen = false, aiOpen = true))
     }
 
     @Test
