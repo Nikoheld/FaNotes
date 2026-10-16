@@ -497,6 +497,33 @@ const val CAL_CHIP_ALPHA = 0.22f
 const val CAL_MORE = "weitere"
 const val CAL_TOOL_DP = 30
 const val CAL_VIEW_RADIUS_DP = 9
+/**
+ * Desktop `.cal-toolbar` gap. The shared flex rule is 8px; the later toolbar
+ * rule sets 6px and wins. The same gap is used between wrapped lines.
+ */
+const val CAL_TOOLBAR_GAP_DP = 6
+/**
+ * One-line width of the shipped toolbar at the desktop control sizes.
+ *
+ * Boxes are border-box. Button labels are 12px Inter regular, rounded to the
+ * nearest pixel. The heading is 15px Inter semibold: weight 650 selects the
+ * loaded 600 face, with the heading's -0.01em tracking. The label measured
+ * here is the longest German day heading, "Donnerstag, 30. September" (196px).
+ * Search contributes its 120px min-width (`flex: 1`). View chips have no gap;
+ * `.cal-views button { border: 0 }` clears the shared border, and the frame
+ * keeps a 1px border plus 2px padding. Heute is 34 + 20 padding + 2 border.
+ * Previous and next are 28. Neuer Termin is the 14px plus, 77px label, 20px
+ * padding, and 2px border. Seven controls means six 6px gaps.
+ * 56 + 28 + 28 + 196 + 120 + 285 + 113 + 36 = 862.
+ */
+const val CAL_TOOLBAR_CONTENT_DP =
+    (34 + 20 + 2) +
+        28 + 28 +
+        196 +
+        120 +
+        (6 + (21 + 20) + (39 + 20) + (39 + 20) + (36 + 20) + (44 + 20)) +
+        (77 + 14 + 20 + 2) +
+        CAL_TOOLBAR_GAP_DP * 6
 const val CAL_SEARCH = "Termine suchen"
 const val CAL_ALL_DAY = "Ganztägig"
 const val CAL_DAILY = "Tagesnotiz"
@@ -518,6 +545,13 @@ const val CAL_NOW_DOT_DP = 8
 const val CAL_HEAD_NUM_SP = 16
 
 fun calendarShowsSide(widthDp: Int): Boolean = widthDp > CAL_SIDE_BREAK_DP
+
+/**
+ * Desktop `.cal-toolbar` wraps when the controls are wider than the pane.
+ * There is no horizontal scroller. The pane holds [contentDp] when [paneDp]
+ * is at least that wide, so equal widths stay on one line.
+ */
+fun calendarToolbarWraps(paneDp: Int, contentDp: Int): Boolean = paneDp < contentDp
 
 fun calendarMoreLabel(hidden: Int): String = "+$hidden $CAL_MORE"
 

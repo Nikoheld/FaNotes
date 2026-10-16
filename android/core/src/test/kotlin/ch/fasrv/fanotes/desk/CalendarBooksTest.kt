@@ -99,6 +99,15 @@ class CalendarBooksTest {
     }
 
     @Test
+    fun calendarToolbarWrapsWhenThePaneCannotHoldTheControls() {
+        assertEquals(6, CAL_TOOLBAR_GAP_DP)
+        assertEquals(862, CAL_TOOLBAR_CONTENT_DP)
+        assertEquals(false, calendarToolbarWraps(862, CAL_TOOLBAR_CONTENT_DP))
+        assertEquals(false, calendarToolbarWraps(863, CAL_TOOLBAR_CONTENT_DP))
+        assertEquals(true, calendarToolbarWraps(861, CAL_TOOLBAR_CONTENT_DP))
+    }
+
+    @Test
     fun monthRowsShareTheLeftoverHeight() {
         assertEquals(88, monthRowHeightDp(0, minDp = 88))
         assertEquals(100, monthRowHeightDp(600, minDp = 88))

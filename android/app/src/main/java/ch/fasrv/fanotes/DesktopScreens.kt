@@ -2470,11 +2470,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
         }
         val calRule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
         val calShape = RoundedCornerShape(8.dp)
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
+        CalendarToolbarLine(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
             Box(
                 Modifier.height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp).clip(calShape).border(1.dp, calRule, calShape).background(MaterialTheme.colorScheme.surface).clickable {
                     anchor = LocalDate.now()
@@ -2678,6 +2674,67 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
     }
 }
 
+
+/**
+ * Desktop `.cal-toolbar` keeps intrinsic control sizes and wraps, with the
+ * 6px gap, once [calendarToolbarWraps] says the pane cannot hold the row.
+ * Children are measured unbounded so the search field stays at its min width
+ * instead of stretching, which is what the old horizontal scroller did.
+ */
+@Composable
+private fun CalendarToolbarLine(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    SubcomposeLayout(modifier) { constraints ->
+        val gap = ch.fasrv.fanotes.desk.CAL_TOOLBAR_GAP_DP.dp.roundToPx()
+        val items = subcompose("controls", content).map { measurable ->
+            measurable.measure(Constraints(maxWidth = Constraints.Infinity, maxHeight = Constraints.Infinity))
+        }
+        val contentPx = if (items.isEmpty()) 0 else items.sumOf { it.width } + gap * items.lastIndex
+        val bounded = constraints.hasBoundedWidth
+        val panePx = if (bounded) constraints.maxWidth else contentPx
+        val paneDp = panePx.toDp().value.roundToInt()
+        val measuredDp = contentPx.toDp().value.roundToInt()
+        val contentDp = maxOf(ch.fasrv.fanotes.desk.CAL_TOOLBAR_CONTENT_DP, measuredDp)
+        val wraps = bounded && panePx > 0 && ch.fasrv.fanotes.desk.calendarToolbarWraps(paneDp, contentDp)
+        val limit = if (wraps) panePx else Constraints.Infinity
+        val lines = mutableListOf<MutableList<Int>>()
+        var current = mutableListOf<Int>()
+        var used = 0
+        items.forEachIndexed { index, item ->
+            val at = if (current.isEmpty()) 0 else used + gap
+            if (current.isNotEmpty() && at + item.width > limit) {
+                lines += current
+                current = mutableListOf(index)
+                used = item.width
+            } else {
+                current += index
+                used = at + item.width
+            }
+        }
+        if (current.isNotEmpty()) lines += current
+        var height = 0
+        val xs = IntArray(items.size)
+        val ys = IntArray(items.size)
+        var y = 0
+        lines.forEachIndexed { lineIndex, line ->
+            val rowHeight = line.maxOf { items[it].height }
+            var x = 0
+            for (index in line) {
+                xs[index] = x
+                ys[index] = y + (rowHeight - items[index].height) / 2
+                x += items[index].width + gap
+            }
+            y += rowHeight
+            if (lineIndex != lines.lastIndex) y += gap
+            height = y
+        }
+        layout(panePx.coerceAtLeast(0), height) {
+            items.forEachIndexed { index, item -> item.placeRelative(xs[index], ys[index]) }
+        }
+    }
+}
 
 @Composable
 private fun FillingMonth(
