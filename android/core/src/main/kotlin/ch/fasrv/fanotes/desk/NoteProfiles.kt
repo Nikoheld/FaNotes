@@ -301,6 +301,8 @@ const val FIRST_RUN_PREPARED = "Sauber vorbereitet"
 const val FIRST_RUN_PREPARED_DETAIL = "jeder Ordner erhält eine eigene Farbe und erscheint direkt in der Seitenleiste."
 const val FIRST_RUN_PREVIEW_RADIUS_DP = 12
 const val FIRST_RUN_PREVIEW_HEADER_DP = 32
+const val FIRST_RUN_PREVIEW_ASIDE_DP = 118
+const val FIRST_RUN_PREVIEW_ASIDE_NARROW_DP = 102
 const val FIRST_RUN_PREVIEW_SPLIT_DP = 760
 const val FIRST_RUN_MEDIUM_DP = 980
 const val FIRST_RUN_PREVIEW_KICKER = "MATHEMATIK · ANALYSIS"
@@ -322,6 +324,14 @@ const val FIRST_RUN_WRITING_CONVERT = "Optional umwandeln"
 val FIRST_RUN_PREVIEW_SUBJECTS = listOf("Mathematik", "Deutsch", "Französisch", "Physik", "Wirtschaft")
 
 fun firstRunPreviewColumns(widthDp: Int): Int = if (widthDp <= FIRST_RUN_PREVIEW_SPLIT_DP) 1 else 2
+
+/**
+ * Subject column of `.first-run-preview-body`.
+ * Desktop is 118px, and 102px from `max-width: 980px`. The 760px query stacks the welcome layout and leaves these columns alone.
+ * [screenWidthDp] is the viewport, the same width as [firstRunPreviewColumns].
+ */
+fun firstRunPreviewAsideDp(screenWidthDp: Int): Int =
+    if (screenWidthDp > FIRST_RUN_MEDIUM_DP) FIRST_RUN_PREVIEW_ASIDE_DP else FIRST_RUN_PREVIEW_ASIDE_NARROW_DP
 
 /** Copy and panel weights from the desktop first-run grids above 980dp. */
 fun firstRunColumnWeights(step: Int): Pair<Float, Float> = firstRunColumnWeights(step, FIRST_RUN_MAX_DP)

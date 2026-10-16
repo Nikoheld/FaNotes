@@ -80,6 +80,13 @@ class NoteProfilesTest {
     }
 
     @Test
+    fun theWelcomePreviewAsideFollowsTheDesktopColumn() {
+        assertEquals(118, firstRunPreviewAsideDp(981))
+        assertEquals(102, firstRunPreviewAsideDp(980))
+        assertEquals(102, firstRunPreviewAsideDp(760))
+    }
+
+    @Test
     fun theFirstRunGridFollowsTheDesktopBreakpoints() {
         assertEquals(0.78f to 1.22f, firstRunColumnWeights(0, 980))
         assertEquals(0.78f to 1.22f, firstRunColumnWeights(1, 800))
