@@ -4035,10 +4035,23 @@ fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismi
     val confirm = remember { FocusRequester() }
     var focused by remember(request.message) { mutableStateOf(0) }
     LaunchedEffect(request.message) { runCatching { cancel.requestFocus() } }
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        val scrim = remember { MutableInteractionSource() }
+        val card = remember { MutableInteractionSource() }
         val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.CONFIRM_RADIUS_DP.dp)
         val buttonShape = RoundedCornerShape(ch.fasrv.fanotes.desk.CONFIRM_BUTTON_RADIUS_DP.dp)
-        Surface(Modifier.widthIn(max = ch.fasrv.fanotes.desk.CONFIRM_MAX_DP.dp).onPreviewKeyEvent { event ->
+        Box(
+            Modifier
+                .fillMaxSize()
+                .clickable(interactionSource = scrim, indication = null, onClick = onDismiss),
+            contentAlignment = Alignment.Center,
+        ) {
+        Surface(
+            Modifier
+                .widthIn(max = ch.fasrv.fanotes.desk.CONFIRM_MAX_DP.dp)
+                .directionalConfirmShade()
+                .clickable(interactionSource = card, indication = null, onClick = {})
+                .onPreviewKeyEvent { event ->
             if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
             val keyName = when (event.key) {
                 Key.Escape -> "Escape"
@@ -4053,7 +4066,13 @@ fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismi
             focused = next
             if (next == 0) cancel.requestFocus() else confirm.requestFocus()
             true
-        }, color = if (glass) MaterialTheme.colorScheme.surface.copy(alpha = 0.88f) else MaterialTheme.colorScheme.surface, shape = shape, border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA))) {
+        },
+            color = if (glass) MaterialTheme.colorScheme.surface.copy(alpha = 0.88f) else MaterialTheme.colorScheme.surface,
+            shape = shape,
+            shadowElevation = 0.dp,
+            tonalElevation = 0.dp,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)),
+        ) {
             Column(
                 Modifier.padding(
                     start = ch.fasrv.fanotes.desk.CONFIRM_PAD_X_DP.dp,
@@ -4133,6 +4152,7 @@ fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismi
                     }
                 }
             }
+        }
         }
     }
 }
