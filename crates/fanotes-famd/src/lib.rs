@@ -5901,12 +5901,80 @@ fn unfinished_hyphen_ymd(body: &str) -> Option<(i32, i32, i32)> {
 }
 
 fn date_only_iso(value: &str, surrounded: bool) -> Option<String> {
+    if surrounded {
+        // `-000001-10-13.` keeps year -1 and makes midnight local. Stripping
+        // the sign would read `000001-10-13` as 10 January 2013.
+        match negative_dot_year(value) {
+            DotYear::Local(year, month, day) => {
+                let (year, month, day) = normalize_ymd(year, month, day)?;
+                let (year, month, day, hour, minute, second) =
+                    local_civil_to_utc(year, month, day, 0, 0, 0)?;
+                return format_civil_iso(year, month, day, hour, minute, second, 0);
+            }
+            DotYear::Empty => return None,
+            DotYear::Other => {}
+        }
+    }
     if !surrounded {
         if let Some(instant) = iso_hyphen_date(value) {
             return Some(instant);
         }
     }
     legacy_hyphen_date(value)
+}
+
+enum DotYear {
+    Other,
+    Empty,
+    Local(i32, i32, i32),
+}
+
+/// A negative expanded year after a trailing dot has been removed.
+/// `-000000` stays on the legacy path. A month past 12 is empty.
+fn negative_dot_year(value: &str) -> DotYear {
+    let bytes = value.as_bytes();
+    if bytes.first() != Some(&b'-') || bytes.len() < 7 {
+        return DotYear::Other;
+    }
+    if !bytes[1..7].iter().all(u8::is_ascii_digit) {
+        return DotYear::Other;
+    }
+    let Ok(year) = value[..7].parse::<i32>() else {
+        return DotYear::Other;
+    };
+    if year >= 0 {
+        return DotYear::Other;
+    }
+    let rest = &value[7..];
+    if rest.is_empty() {
+        return DotYear::Local(year, 1, 1);
+    }
+    let Some(rest) = rest.strip_prefix('-') else {
+        return DotYear::Other;
+    };
+    if rest.is_empty() {
+        return DotYear::Local(year, 1, 1);
+    }
+    let (month_text, day_text) = if let Some((month, day)) = rest.split_once('-') {
+        if month.is_empty() || day.is_empty() || day.contains('-') {
+            return DotYear::Empty;
+        }
+        (month, day)
+    } else {
+        (rest, "1")
+    };
+    if !month_text.bytes().all(|byte| byte.is_ascii_digit())
+        || !day_text.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return DotYear::Other;
+    }
+    let (Ok(month), Ok(day)) = (month_text.parse::<i32>(), day_text.parse::<i32>()) else {
+        return DotYear::Empty;
+    };
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return DotYear::Empty;
+    }
+    DotYear::Local(year, month, day)
 }
 
 /// `YYYY` and `±YYYYYY`, with optional month and day. A short month or day is
@@ -13719,6 +13787,46 @@ mod tests {
                 super::canonical_iso(" -000001/01/01").as_deref(),
                 Some("2001-01-01T05:00:00.000Z")
             );
+        });
+    }
+
+    #[test]
+    fn a_trailing_dot_keeps_a_negative_expanded_year() {
+        with_tz("America/New_York", || {
+            // The dot makes midnight local. Year -1 stays negative.
+            assert_eq!(
+                super::canonical_iso("-000001-10-13.").as_deref(),
+                Some("-000001-10-13T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001.").as_deref(),
+                Some("-000001-01-01T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10.").as_deref(),
+                Some("-000001-10-01T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-1-13.").as_deref(),
+                Some("-000001-01-13T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13..").as_deref(),
+                Some("-000001-10-13T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13").as_deref(),
+                Some("-000001-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000000-10-13.").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+002026-10-13.").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("-000001-13."), None);
         });
     }
 }

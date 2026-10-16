@@ -6852,6 +6852,10 @@ fn unfinished_hyphen_ymd(body: &str) -> Option<(i32, i32, i32)> {
 }
 
 fn date_only_millis(value: &str, surrounded: bool) -> Option<u64> {
+    if surrounded && negative_dot_year_is_expanded(value) {
+        // `-000001-10-13.` is year -1, before 1970. It must not become 2013.
+        return None;
+    }
     if !surrounded {
         match iso_hyphen_millis(value) {
             IsoHyphenMillis::Ready(millis) => return millis,
@@ -6861,6 +6865,32 @@ fn date_only_millis(value: &str, surrounded: bool) -> Option<u64> {
         }
     }
     legacy_hyphen_millis(value)
+}
+
+/// True for `-YYYYYY` with an optional month and day, except year `-000000`.
+/// The instant is before 1970, so the caller stores nothing.
+fn negative_dot_year_is_expanded(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.first() != Some(&b'-') || bytes.len() < 7 {
+        return false;
+    }
+    if !bytes[1..7].iter().all(u8::is_ascii_digit) {
+        return false;
+    }
+    let Ok(year) = value[..7].parse::<i32>() else {
+        return false;
+    };
+    if year >= 0 {
+        return false;
+    }
+    let rest = &value[7..];
+    if rest.is_empty() {
+        return true;
+    }
+    let Some(rest) = rest.strip_prefix('-') else {
+        return false;
+    };
+    rest.split('-').all(|field| field.is_empty() || field.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 enum IsoHyphenMillis {
@@ -15381,6 +15411,30 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("-000001-10-13-"), None);
         assert_eq!(unix_millis_from_iso("-271821/10/01"), None);
         assert_eq!(unix_millis_from_iso("-000001-01-01"), None);
+    }
+
+    #[test]
+    fn a_trailing_dot_keeps_a_negative_expanded_year() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Year -1 is before 1970. The dot must not turn it into 2013.
+        assert_eq!(unix_millis_from_iso("-000001-10-13."), None);
+        assert_eq!(unix_millis_from_iso("-000001."), None);
+        assert_eq!(unix_millis_from_iso("-000001-10."), None);
+        assert_eq!(unix_millis_from_iso("-000001-1-13."), None);
+        assert_eq!(unix_millis_from_iso("-000001-13."), None);
+        assert_eq!(
+            unix_millis_from_iso("-000000-10-13."),
+            Some(1_002_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("+002026-10-13."),
+            Some(1_791_864_000_000)
+        );
     }
 
 }
