@@ -9,6 +9,7 @@ import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.json.stringify
 import java.net.URI
 import java.util.Base64
+import kotlin.math.roundToInt
 
 data class AiProvider(val id: String, val title: String, val description: String, val local: Boolean)
 
@@ -57,8 +58,40 @@ const val AI_RESET = "Neu bearbeiten"
 const val AI_FACTS_WARNING = "Die Faktenprüfung verwendet das Modellwissen. FaNotes aktiviert dafür keine Websuche und markiert Unsicherheit, statt Live-Quellen vorzutäuschen."
 const val AI_INSTRUCTION_LABEL = "Dein freier Auftrag"
 const val AI_INSTRUCTION_HINT = "Zum Beispiel: Erkläre jeden Fachbegriff einfacher und ergänze pro Abschnitt ein Beispiel …"
+const val AI_PANEL_RADIUS_DP = 12
+const val AI_CONFIG_MAX_DP = 510
+const val AI_CONFIG_MIN_DP = 430
+const val AI_CONFIG_COMPACT_MIN_DP = 360
+const val AI_STACK_BREAK_DP = 760
+const val AI_COMPACT_BREAK_DP = 980
+const val AI_HEADER_DP = 76
+const val AI_FIELD_HEIGHT_DP = 33
+const val AI_FIELD_AREA_DP = 82
+const val AI_FIELD_RADIUS_DP = 8
+const val AI_CLOSE = "AI-Menü schließen"
+const val AI_PREVIEW_EYEBROW = "3 · Prüfen"
 
 fun aiProviderKind(local: Boolean): String = if (local) "Lokal" else "Cloud"
+
+/** One column at the desktop 760px stack, otherwise config beside the preview. */
+fun aiPanelStacks(widthDp: Int): Boolean = widthDp <= AI_STACK_BREAK_DP
+
+/** Config track: full width when stacked, 43% from 761–980, otherwise 430–510. */
+fun aiConfigWidthDp(widthDp: Int): Int = when {
+    widthDp <= AI_STACK_BREAK_DP -> widthDp.coerceAtLeast(0)
+    widthDp <= AI_COMPACT_BREAK_DP -> (widthDp * 0.43f).roundToInt().coerceIn(AI_CONFIG_COMPACT_MIN_DP, widthDp)
+    else -> AI_CONFIG_MAX_DP.coerceAtMost(widthDp).coerceAtLeast(AI_CONFIG_MIN_DP.coerceAtMost(widthDp))
+}
+
+/** Provider cards follow the viewport, not the narrow config column. */
+fun aiProviderColumns(widthDp: Int): Int = if (widthDp <= AI_COMPACT_BREAK_DP) 2 else 3
+
+/** Action cards drop to one column only between the two desktop breakpoints. */
+fun aiActionColumns(widthDp: Int): Int = when {
+    widthDp <= AI_STACK_BREAK_DP -> 2
+    widthDp <= AI_COMPACT_BREAK_DP -> 1
+    else -> 2
+}
 
 fun aiActionCountLabel(count: Int): String = "$count ausgewählt · Mehrfachauswahl möglich"
 
