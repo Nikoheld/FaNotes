@@ -2,9 +2,7 @@ import {
   addDays,
   createEvent,
   dateKey,
-  parseDateKey,
   parseWall,
-  wallKey,
   type CalendarDocument,
   type CalendarEvent,
   type RecurrenceFreq,
@@ -18,11 +16,12 @@ const icsEscape = (value: string) => value
   .replace(/,/gu, '\\,')
   .replace(/;/gu, '\\;')
 
-const icsUnescape = (value: string) => value
-  .replace(/\\n/giu, '\n')
-  .replace(/\\,/gu, ',')
-  .replace(/\\;/gu, ';')
-  .replace(/\\\\/gu, '\\')
+/** `\\` is one backslash, so `\\n` stays a backslash and the letter n. */
+const icsUnescape = (value: string) => value.replace(/\\(.)/gu, (match, char: string) => {
+  if (char === 'n' || char === 'N') return '\n'
+  if (char === '\\' || char === ',' || char === ';') return char
+  return match
+})
 
 const stamp = (date: Date) => {
   const pad = (part: number) => String(part).padStart(2, '0')
@@ -34,17 +33,58 @@ const dateStamp = (date: Date) => {
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
 }
 
+const civilTime = (year: number, month: number, day: number, hour: number, minute: number) => {
+  const date = new Date(0)
+  date.setFullYear(year, month - 1, day)
+  date.setHours(hour, minute, 0, 0)
+  if (
+    date.getFullYear() !== year
+    || date.getMonth() !== month - 1
+    || date.getDate() !== day
+    || date.getHours() !== hour
+    || date.getMinutes() !== minute
+  ) return null
+  return date
+}
+
+/** Minutes east of UTC. `Z` is 0. `+0200` is 120. */
+const icsOffsetMinutes = (zone: string) => {
+  if (zone === 'Z' || zone === 'z') return 0
+  const match = /^([+-])(\d{2})(\d{2})$/u.exec(zone)
+  if (!match) return null
+  const hours = Number(match[2])
+  const minutes = Number(match[3])
+  if (hours > 23 || minutes > 59) return null
+  return (match[1] === '-' ? -1 : 1) * (hours * 60 + minutes)
+}
+
+/**
+ * A floating clock stays as written. `Z` and a numeric offset become the
+ * local wall time, so 09:00Z is not stored as 09:00.
+ */
 const parseIcsDate = (raw: string): { date: Date; allDay: boolean } | null => {
   const value = raw.trim()
   const day = /^(\d{4})(\d{2})(\d{2})$/u.exec(value)
   if (day) {
-    const date = parseDateKey(`${day[1]}-${day[2]}-${day[3]}`)
+    const date = civilTime(Number(day[1]), Number(day[2]), Number(day[3]), 0, 0)
     return date ? { date, allDay: true } : null
   }
-  const timed = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/u.exec(value)
+  const timed = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z|z|[+-]\d{4})?$/u.exec(value)
   if (!timed) return null
-  const date = parseWall(`${timed[1]}-${timed[2]}-${timed[3]}T${timed[4]}:${timed[5]}`, false)
-  return date ? { date, allDay: false } : null
+  const year = Number(timed[1])
+  const month = Number(timed[2])
+  const dayNum = Number(timed[3])
+  const hour = Number(timed[4])
+  const minute = Number(timed[5])
+  const zone = timed[7] ?? ''
+  if (!zone) {
+    const date = civilTime(year, month, dayNum, hour, minute)
+    return date ? { date, allDay: false } : null
+  }
+  const offset = icsOffsetMinutes(zone)
+  if (offset === null || !civilTime(year, month, dayNum, hour, minute)) return null
+  const instant = new Date(Date.UTC(year, month - 1, dayNum, hour, minute) - offset * 60_000)
+  return Number.isNaN(instant.getTime()) ? null : { date: instant, allDay: false }
 }
 
 const recurrenceFromRule = (rule: string): RecurrenceFreq => {

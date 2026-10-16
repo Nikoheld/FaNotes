@@ -181,6 +181,46 @@ const month = viewRange('month', monday)
 assert.equal(month.days.length, 42)
 assert.equal(month.days[0].getDay(), 1)
 
+const ics = await server.ssrLoadModule('/src/lib/icsCalendar.ts')
+const wallOf = (date) => {
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+const utcEvents = ics.importIcs([
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'UID:utc',
+  'SUMMARY:Pfad\\\\notes',
+  'DTSTART:20261020T090000Z',
+  'DTEND:20261020T100000Z',
+  'DESCRIPTION:C:\\\\notes',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+assert.equal(utcEvents[0].start, wallOf(new Date(Date.UTC(2026, 9, 20, 9, 0))))
+assert.equal(utcEvents[0].end, wallOf(new Date(Date.UTC(2026, 9, 20, 10, 0))))
+assert.equal(utcEvents[0].title, 'Pfad\\notes')
+assert.equal(utcEvents[0].notes, 'C:\\notes')
+const offsetEvents = ics.importIcs([
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'SUMMARY:Versetzt',
+  'DTSTART:20261020T090000+0200',
+  'DTEND:20261020T093000+0200',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+assert.equal(offsetEvents[0].start, wallOf(new Date(Date.UTC(2026, 9, 20, 7, 0))))
+assert.equal(offsetEvents[0].end, wallOf(new Date(Date.UTC(2026, 9, 20, 7, 30))))
+assert.equal(ics.importIcs([
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'SUMMARY:Nein',
+  'DTSTART:20260231T090000Z',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal).length, 0)
+
 await server.close()
 console.log(JSON.stringify({
   events: roundTrip.events.length,

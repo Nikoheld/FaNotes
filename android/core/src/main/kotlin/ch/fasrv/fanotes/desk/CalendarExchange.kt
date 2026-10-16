@@ -4,6 +4,7 @@ import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
@@ -234,6 +235,8 @@ private fun recurrenceFromRule(rule: String): String {
     return if (freq == "daily" || freq == "weekly" || freq == "monthly" || freq == "yearly") freq else "none"
 }
 
+private val ICS_TIMED = Regex("""^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z|z|[+-]\d{4})?$""")
+
 private fun parseIcsDate(raw: String): IcsMoment? {
     val value = raw.trim()
     val day = Regex("""^(\d{4})(\d{2})(\d{2})$""").find(value)
@@ -243,7 +246,7 @@ private fun parseIcsDate(raw: String): IcsMoment? {
         }.getOrNull() ?: return null
         return IcsMoment(date.atStartOfDay(), true)
     }
-    val timed = Regex("""^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})""").find(value) ?: return null
+    val timed = ICS_TIMED.find(value) ?: return null
     val moment = runCatching {
         LocalDateTime.of(
             timed.groupValues[1].toInt(),
@@ -253,7 +256,19 @@ private fun parseIcsDate(raw: String): IcsMoment? {
             timed.groupValues[5].toInt(),
         )
     }.getOrNull() ?: return null
-    return IcsMoment(moment, false)
+    val zone = timed.groupValues[7]
+    if (zone.isEmpty()) return IcsMoment(moment, false)
+    val offset = if (zone.equals("Z", ignoreCase = true)) {
+        ZoneOffset.UTC
+    } else {
+        val sign = if (zone.startsWith("-")) -1 else 1
+        val hours = zone.substring(1, 3).toInt()
+        val minutes = zone.substring(3, 5).toInt()
+        if (hours > 23 || minutes > 59) return null
+        ZoneOffset.ofHoursMinutes(sign * hours, sign * minutes)
+    }
+    val local = moment.atOffset(offset).atZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime()
+    return IcsMoment(local, false)
 }
 
 private fun splitEvents(text: String): List<List<String>> {
@@ -286,11 +301,25 @@ private fun icsEscape(value: String) = value
     .replace(",", "\\,")
     .replace(";", "\\;")
 
-private fun icsUnescape(value: String) = value
-    .replace(Regex("""\\n""", RegexOption.IGNORE_CASE), "\n")
-    .replace("\\,", ",")
-    .replace("\\;", ";")
-    .replace("\\\\", "\\")
+private fun icsUnescape(value: String): String {
+    val out = StringBuilder()
+    var index = 0
+    while (index < value.length) {
+        val char = value[index]
+        if (char == '\\' && index + 1 < value.length) {
+            when (val next = value[index + 1]) {
+                'n', 'N' -> out.append('\n')
+                '\\', ',', ';' -> out.append(next)
+                else -> out.append(char).append(next)
+            }
+            index += 2
+        } else {
+            out.append(char)
+            index += 1
+        }
+    }
+    return out.toString()
+}
 
 private fun expandOccurrences(document: CalendarDocument, rangeStart: ZonedDateTime, rangeEnd: ZonedDateTime): List<Occurrence> {
     val visible = document.calendars.filter { it.visible }.map { it.id }.toSet()
