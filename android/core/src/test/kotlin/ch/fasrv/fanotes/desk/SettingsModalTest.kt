@@ -119,6 +119,36 @@ class SettingsModalTest {
     }
 
     @Test
+    fun theSettingCalloutWrapsItsActionsAt760() {
+        assertEquals("center", SETTING_CALLOUT_ALIGN_WIDE)
+        assertEquals("flex-start", SETTING_CALLOUT_ALIGN_NARROW)
+        assertEquals(46, SETTING_CALLOUT_ACTIONS_PAD_START_DP)
+        assertEquals(7, SETTING_CALLOUT_ACTIONS_GAP_DP)
+        val narrow = settingCalloutLayout(760)
+        assertEquals("flex-start", narrow.alignItems)
+        assertTrue(narrow.wraps)
+        assertTrue(narrow.actionsFillWidth)
+        assertEquals(46, narrow.actionsPadStartDp)
+        assertEquals(7, narrow.actionsGapDp)
+        assertTrue(settingsContentStacks(760))
+        assertEquals(settingCalloutLayout(400).alignItems, narrow.alignItems)
+        assertEquals(settingCalloutLayout(400).actionsPadStartDp, narrow.actionsPadStartDp)
+        assertEquals(settingCalloutLayout(0).wraps, narrow.wraps)
+        val wide = settingCalloutLayout(761)
+        assertEquals("center", wide.alignItems)
+        assertFalse(wide.wraps)
+        assertFalse(wide.actionsFillWidth)
+        assertEquals(0, wide.actionsPadStartDp)
+        assertEquals(7, wide.actionsGapDp)
+        assertFalse(settingsContentStacks(761))
+        assertEquals(settingCalloutLayout(800).alignItems, wide.alignItems)
+        assertEquals(settingCalloutLayout(800).actionsPadStartDp, wide.actionsPadStartDp)
+        assertEquals(settingsContentStacks(760), narrow.wraps)
+        assertEquals(settingsContentStacks(761), wide.wraps)
+        assertEquals(narrow.actionsGapDp, wide.actionsGapDp)
+    }
+
+    @Test
     fun theSettingsHeadingIconShowsAbove760() {
         assertEquals(38, SETTINGS_HEADING_ICON_DP)
         assertEquals(11, SETTINGS_HEADING_ICON_RADIUS_DP)
