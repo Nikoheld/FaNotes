@@ -3,6 +3,7 @@ package ch.fasrv.fanotes
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -176,6 +177,12 @@ class InkSurfaceView @JvmOverloads constructor(
             field = value
             invalidate()
         }
+    private var worksheetBoxFocused = false
+    private var worksheetChromeField: RectF? = null
+    private var worksheetChromeRemove: RectF? = null
+    private val fieldShadow = SoftShadow()
+    private val removeShadow = SoftShadow()
+    private val boxRingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     var worksheetHighlights: List<ch.fasrv.fanotes.desk.AnchoredHighlight> = emptyList()
     private var reportedPdfPage = 0
     private var reportedSheet = false
@@ -1395,8 +1402,94 @@ class InkSurfaceView @JvmOverloads constructor(
             canvas.drawPath(path, selectPaint)
         }
         drawGuides(canvas)
+        drawWorksheetBoxChrome(canvas)
         canvas.restore()
         canvas.restore()
+    }
+
+    /**
+     * Focus ring and drop shadow for the open worksheet field.
+     * Drawn on the sheet, under the inline editor, from `.worksheet-textbox textarea:focus`.
+     */
+    fun updateWorksheetBoxFocus(focused: Boolean) {
+        if (worksheetBoxFocused == focused) return
+        worksheetBoxFocused = focused
+        invalidate()
+    }
+
+    fun placeWorksheetBoxChrome(
+        fieldLeft: Float,
+        fieldTop: Float,
+        fieldRight: Float,
+        fieldBottom: Float,
+        removeLeft: Float,
+        removeTop: Float,
+        removeRight: Float,
+        removeBottom: Float,
+        showRemove: Boolean,
+    ) {
+        val field = worksheetChromeField ?: RectF().also { worksheetChromeField = it }
+        field.set(fieldLeft, fieldTop, fieldRight, fieldBottom)
+        if (showRemove) {
+            val remove = worksheetChromeRemove ?: RectF().also { worksheetChromeRemove = it }
+            remove.set(removeLeft, removeTop, removeRight, removeBottom)
+        } else {
+            worksheetChromeRemove = null
+        }
+        invalidate()
+    }
+
+    fun clearWorksheetBoxChrome() {
+        if (worksheetChromeField == null && worksheetChromeRemove == null) return
+        worksheetChromeField = null
+        worksheetChromeRemove = null
+        invalidate()
+    }
+
+    private fun drawWorksheetBoxChrome(canvas: Canvas) {
+        val field = worksheetChromeField ?: return
+        if (field.width() < 1f || field.height() < 1f) return
+        val density = resources.displayMetrics.density
+        val chrome = ch.fasrv.fanotes.desk.worksheetBoxFieldChrome(worksheetBoxFocused)
+        val corner = ch.fasrv.fanotes.desk.BOX_EDITOR_RADIUS_DP * density
+        drawSoftShadow(
+            canvas,
+            fieldShadow,
+            field,
+            corner,
+            chrome.shadowYDp * density,
+            chrome.shadowBlurDp * density,
+            ch.fasrv.fanotes.desk.worksheetBoxShadowColor(chrome.shadowAlpha),
+        )
+        val ring = ch.fasrv.fanotes.desk.worksheetFocusRing(
+            field.left,
+            field.top,
+            field.right,
+            field.bottom,
+            corner,
+            chrome.ringDp * density,
+        )
+        if (ring != null) {
+            boxRingPaint.color = ch.fasrv.fanotes.desk.worksheetBoxFocusRingColor(accentColor)
+            boxRingPaint.strokeWidth = ring.stroke
+            canvas.drawRoundRect(ring.left, ring.top, ring.right, ring.bottom, ring.radius, ring.radius, boxRingPaint)
+        }
+        val remove = worksheetChromeRemove ?: return
+        if (remove.width() < 1f || remove.height() < 1f) return
+        drawSoftShadow(
+            canvas,
+            removeShadow,
+            remove,
+            remove.width() / 2f,
+            ch.fasrv.fanotes.desk.BOX_REMOVE_SHADOW_Y_DP * density,
+            ch.fasrv.fanotes.desk.BOX_REMOVE_SHADOW_BLUR_DP * density,
+            ch.fasrv.fanotes.desk.worksheetBoxShadowColor(ch.fasrv.fanotes.desk.BOX_REMOVE_SHADOW_ALPHA),
+        )
+    }
+
+    private fun drawSoftShadow(canvas: Canvas, cache: SoftShadow, rect: RectF, radius: Float, offsetY: Float, blur: Float, color: Int) {
+        val bitmap = cache.obtain(rect.width().toInt(), rect.height().toInt(), radius, offsetY, blur, color) ?: return
+        canvas.drawBitmap(bitmap, rect.left - cache.pad, rect.top - cache.pad, null)
     }
 
     private fun drawTiles(canvas: Canvas, current: InkSession, scale: Float) {
@@ -2240,6 +2333,8 @@ class InkSurfaceView @JvmOverloads constructor(
     }
 
     override fun onDetachedFromWindow() {
+        fieldShadow.clear()
+        removeShadow.clear()
         clearShapeWatch()
         super.onDetachedFromWindow()
     }
@@ -2586,6 +2681,53 @@ class InkSurfaceView @JvmOverloads constructor(
         const val TEXT_PAD_X = 72f
         const val TEXT_PAD_Y = 78f
         const val TEXT_COLUMN = 900f - 144f
+    }
+}
+
+/** Blurred copy of a round rect. The bitmap canvas is software, so the mask filter is real. */
+private class SoftShadow {
+    var pad: Float = 0f
+        private set
+    private var bitmap: Bitmap? = null
+    private var key: String = ""
+
+    fun obtain(width: Int, height: Int, radius: Float, offsetY: Float, blur: Float, color: Int): Bitmap? {
+        if (width < 1 || height < 1 || blur <= 0.5f || width > 1800 || height > 1800) return null
+        val token = "$width|$height|$radius|$offsetY|$blur|$color"
+        val existing = bitmap
+        if (token == key && existing != null && !existing.isRecycled) return existing
+        existing?.recycle()
+        bitmap = null
+        key = ""
+        val spread = blur * 2f + kotlin.math.abs(offsetY) + 2f
+        pad = spread
+        val image = Bitmap.createBitmap(
+            (width + spread * 2f).toInt().coerceAtLeast(1),
+            (height + spread * 2f).toInt().coerceAtLeast(1),
+            Bitmap.Config.ARGB_8888,
+        )
+        val software = Canvas(image)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.color = color
+        paint.maskFilter = BlurMaskFilter(blur, BlurMaskFilter.Blur.NORMAL)
+        software.drawRoundRect(
+            spread,
+            spread + offsetY,
+            spread + width,
+            spread + offsetY + height,
+            radius,
+            radius,
+            paint,
+        )
+        bitmap = image
+        key = token
+        return image
+    }
+
+    fun clear() {
+        bitmap?.recycle()
+        bitmap = null
+        key = ""
     }
 }
 

@@ -652,6 +652,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private var writingBox = false
     private var suppressBoxClose = false
     private var boxRemovePressed = false
+    private var boxChromeFocused = false
+    private var boxChromeAccent = Int.MIN_VALUE
     private val toolbar = HorizontalScrollView(context)
     private val toolbarRule = View(context)
     private val tools = LinearLayout(context)
@@ -1926,6 +1928,17 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val removeRight = right + outset
         val removeTop = top - outset
         pinToSheet(boxRemove, removeRight - size, removeTop, removeRight, removeTop + size)
+        ink.placeWorksheetBoxChrome(
+            left.toFloat(),
+            top.toFloat(),
+            right.toFloat(),
+            bottom.toFloat(),
+            (removeRight - size).toFloat(),
+            removeTop.toFloat(),
+            removeRight.toFloat(),
+            (removeTop + size).toFloat(),
+            boxRemove.visibility == VISIBLE,
+        )
     }
 
     private fun pinToSheet(view: View, left: Int, top: Int, right: Int, bottom: Int) {
@@ -1940,12 +1953,21 @@ class NotePageView(context: Context) : FrameLayout(context) {
         view.rotation = rotation
     }
 
+    fun refreshBoxChrome() {
+        applyBoxFieldChrome(boxField.isFocused)
+    }
+
     private fun applyBoxFieldChrome(focused: Boolean) {
+        ink.updateWorksheetBoxFocus(focused)
+        val accent = ink.accentColor
+        if (boxField.background != null && focused == boxChromeFocused && accent == boxChromeAccent) return
+        boxChromeFocused = focused
+        boxChromeAccent = accent
         val alpha = if (focused) ch.fasrv.fanotes.desk.BOX_FIELD_FOCUS_BG_ALPHA else ch.fasrv.fanotes.desk.BOX_FIELD_BG_ALPHA
         boxField.background = GradientDrawable().apply {
             cornerRadius = dp(ch.fasrv.fanotes.desk.BOX_EDITOR_RADIUS_DP).toFloat()
             setColor(android.graphics.Color.argb((alpha * 255f + 0.5f).toInt(), 255, 255, 255))
-            val stroke = if (focused) ink.accentColor else 0x2E2E3848
+            val stroke = if (focused) accent else ch.fasrv.fanotes.desk.worksheetBoxRestBorder(accent)
             setStroke(dp(1).coerceAtLeast(1), stroke)
         }
         val padX = dp(ch.fasrv.fanotes.desk.BOX_EDITOR_PAD_X_DP)
@@ -1956,7 +1978,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private fun dismissWorksheetField() {
         val open = openBoxId != null || boxField.visibility == VISIBLE
         requestedBoxId = null
-        if (!open && ink.activeWorksheetBoxId == null) return
+        if (!open && ink.activeWorksheetBoxId == null) {
+            ink.clearWorksheetBoxChrome()
+            return
+        }
         suppressBoxClose = true
         boxField.visibility = GONE
         boxRemove.visibility = GONE
@@ -1965,6 +1990,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val imm = context.getSystemService(InputMethodManager::class.java)
         imm?.hideSoftInputFromWindow(boxField.windowToken, 0)
         if (ink.activeWorksheetBoxId != null) ink.activeWorksheetBoxId = null
+        ink.clearWorksheetBoxChrome()
         suppressBoxClose = false
     }
 

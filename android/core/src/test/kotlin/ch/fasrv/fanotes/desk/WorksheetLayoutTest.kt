@@ -174,6 +174,35 @@ class WorksheetLayoutTest {
     }
 
     @Test
+    fun theWorksheetFieldUsesTheDesktopFocusShadow() {
+        val resting = worksheetBoxFieldChrome(false)
+        assertEquals(2, resting.shadowYDp)
+        assertEquals(8, resting.shadowBlurDp)
+        assertEquals(0.08f, resting.shadowAlpha)
+        assertEquals(0, resting.ringDp)
+        val focused = worksheetBoxFieldChrome(true)
+        assertEquals(4, focused.shadowYDp)
+        assertEquals(14, focused.shadowBlurDp)
+        assertEquals(0.12f, focused.shadowAlpha)
+        assertEquals(3, focused.ringDp)
+        assertEquals(0x14000000, worksheetBoxShadowColor(0.08f))
+        assertEquals(0x1F000000, worksheetBoxShadowColor(0.12f))
+        assertEquals(0x29000000, worksheetBoxShadowColor(BOX_REMOVE_SHADOW_ALPHA))
+        assertEquals(4, BOX_REMOVE_SHADOW_Y_DP)
+        assertEquals(10, BOX_REMOVE_SHADOW_BLUR_DP)
+        assertEquals(0x262A6F97, worksheetBoxFocusRingColor(0xFF2A6F97.toInt()))
+        assertEquals(0x752B5F7F, worksheetBoxRestBorder(0xFF2A6F97.toInt()))
+        val ring = worksheetFocusRing(10f, 20f, 110f, 70f, 5f, 3f)
+        assertEquals(8.5f, ring?.left)
+        assertEquals(18.5f, ring?.top)
+        assertEquals(111.5f, ring?.right)
+        assertEquals(71.5f, ring?.bottom)
+        assertEquals(6.5f, ring?.radius)
+        assertEquals(3f, ring?.stroke)
+        assertNull(worksheetFocusRing(10f, 20f, 110f, 70f, 5f, 0f))
+    }
+
+    @Test
     fun theImportDialogUsesTheDesktopCard() {
         assertEquals(620, SHEET_IMPORT_MAX_DP)
         assertEquals(0.92f, SHEET_IMPORT_WIDTH_FRACTION)
