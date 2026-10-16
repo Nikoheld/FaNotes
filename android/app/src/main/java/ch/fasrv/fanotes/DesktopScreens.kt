@@ -48,14 +48,17 @@ import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ViewColumn
 import androidx.compose.material.icons.filled.Warning
@@ -68,6 +71,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -3306,6 +3310,195 @@ private fun EditorSlider(title: String, value: Float, min: Float, max: Float, st
 }
 
 @Composable
+private fun SettingCard(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+) {
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.SETTING_CARD_RADIUS_DP.dp)
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .border(1.dp, rule, shape)
+            .background(LocalStatusInk.current.panelStrong.copy(alpha = ch.fasrv.fanotes.desk.SETTING_CARD_FILL_ALPHA)),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(ch.fasrv.fanotes.desk.SETTING_TITLE_DP.dp)
+                .padding(horizontal = ch.fasrv.fanotes.desk.SETTING_TITLE_PAD_DP.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTING_TITLE_GAP_DP.dp),
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.SETTING_TITLE_ICON_DP.dp), tint = accent)
+            Text(
+                title.uppercase(java.util.Locale.GERMAN),
+                fontSize = 12.sp,
+                fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTING_TITLE_WEIGHT),
+                letterSpacing = ch.fasrv.fanotes.desk.SETTING_TITLE_TRACKING.em,
+                color = LocalStatusInk.current.soft,
+            )
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
+        content()
+    }
+}
+
+@Composable
+private fun SettingRow(
+    title: String,
+    description: String? = null,
+    divider: Boolean = true,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    Column(modifier.fillMaxWidth()) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val stacked = maxWidth < 420.dp
+            if (stacked) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = ch.fasrv.fanotes.desk.SETTING_ROW_MIN_DP.dp)
+                        .padding(
+                            horizontal = ch.fasrv.fanotes.desk.SETTING_ROW_PAD_X_DP.dp,
+                            vertical = ch.fasrv.fanotes.desk.SETTING_ROW_PAD_Y_DP.dp,
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(9.dp),
+                ) {
+                    SettingCopy(title, description)
+                    content()
+                }
+            } else {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = ch.fasrv.fanotes.desk.SETTING_ROW_MIN_DP.dp)
+                        .padding(
+                            horizontal = ch.fasrv.fanotes.desk.SETTING_ROW_PAD_X_DP.dp,
+                            vertical = ch.fasrv.fanotes.desk.SETTING_ROW_PAD_Y_DP.dp,
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTING_ROW_GAP_DP.dp),
+                ) {
+                    SettingCopy(title, description, Modifier.weight(1f))
+                    Box(Modifier.widthIn(max = 360.dp)) { content() }
+                }
+            }
+        }
+        if (divider) Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
+    }
+}
+
+@Composable
+private fun SettingCopy(title: String, description: String?, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(title, fontSize = 12.sp, fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTING_COPY_WEIGHT), color = MaterialTheme.colorScheme.onSurface)
+        if (!description.isNullOrBlank()) {
+            Text(description, fontSize = 12.sp, color = LocalStatusInk.current.muted, lineHeight = 17.sp, modifier = Modifier.padding(top = 3.dp))
+        }
+    }
+}
+
+@Composable
+private fun ThemeChoiceGrid(settings: Map<String, String>, onPick: (String) -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val columns = if (maxWidth >= 640.dp) 4 else 2
+        Column(verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.THEME_CHOICE_GAP_DP.dp)) {
+            ch.fasrv.fanotes.desk.THEME_CHOICES.chunked(columns).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.THEME_CHOICE_GAP_DP.dp)) {
+                    row.forEach { choice ->
+                        val selected = ch.fasrv.fanotes.desk.themeChoiceSelected(settings["theme"], choice.id)
+                        ThemeChoiceButton(choice, selected, Modifier.weight(1f)) { onPick(choice.id) }
+                    }
+                    repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeChoiceButton(
+    choice: ch.fasrv.fanotes.desk.ThemeChoice,
+    selected: Boolean,
+    modifier: Modifier,
+    onClick: () -> Unit,
+) {
+    val swatch = ch.fasrv.fanotes.desk.themeSwatch(choice.id)
+    val accent = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.DEFAULT_ACCENT))
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.THEME_CHOICE_RADIUS_DP.dp)
+    val border = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.48f) else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    Row(
+        modifier
+            .heightIn(min = ch.fasrv.fanotes.desk.THEME_CHOICE_MIN_DP.dp)
+            .clip(shape)
+            .border(1.dp, border, shape)
+            .background(MaterialTheme.colorScheme.surface)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Box(
+            Modifier
+                .size(width = ch.fasrv.fanotes.desk.THEME_PREVIEW_W_DP.dp, height = ch.fasrv.fanotes.desk.THEME_PREVIEW_H_DP.dp)
+                .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.THEME_PREVIEW_RADIUS_DP.dp))
+                .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), RoundedCornerShape(ch.fasrv.fanotes.desk.THEME_PREVIEW_RADIUS_DP.dp))
+                .background(Color(android.graphics.Color.parseColor(swatch.background))),
+        ) {
+            if (swatch.split) {
+                Box(Modifier.fillMaxHeight().fillMaxWidth(0.5f).align(Alignment.CenterEnd).background(Color(android.graphics.Color.parseColor(swatch.surface))))
+            }
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 4.dp)
+                    .width(5.dp)
+                    .height(18.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(accent),
+            )
+        }
+        Column(Modifier.weight(1f)) {
+            Text(choice.label, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (selected) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft)
+            Text(choice.detail, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = LocalStatusInk.current.muted)
+        }
+        if (selected) {
+            Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f)))
+        } else {
+            Spacer(Modifier.size(14.dp))
+        }
+    }
+}
+
+@Composable
+private fun AccentSwatches(selected: String, onPick: (String) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SWATCH_GAP_DP.dp)) {
+        ch.fasrv.fanotes.desk.ACCENT_COLORS.forEach { color ->
+            val on = color == selected
+            Box(
+                Modifier
+                    .size(ch.fasrv.fanotes.desk.SWATCH_DP.dp)
+                    .clip(CircleShape)
+                    .background(Color(android.graphics.Color.parseColor(color)))
+                    .border(
+                        if (on) 2.dp else 0.dp,
+                        if (on) MaterialTheme.colorScheme.onSurface else Color.Transparent,
+                        CircleShape,
+                    )
+                    .clickable { onPick(color) },
+            )
+        }
+    }
+}
+
+@Composable
 fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () -> Unit, onPrivate: () -> Unit) {
     val settings by model.deskSettings.collectAsStateWithLifecycle()
     val css by model.customCss.collectAsStateWithLifecycle()
@@ -3411,6 +3604,13 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     ),
             ) {
                 Text(
+                    ch.fasrv.fanotes.desk.settingsEyebrow(current.count),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = ch.fasrv.fanotes.desk.SETTINGS_EYEBROW_TRACKING.em,
+                    color = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f)),
+                )
+                Text(
                     current.label,
                     fontSize = ch.fasrv.fanotes.desk.SETTINGS_TITLE_SP.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -3429,99 +3629,110 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     .height(1.dp)
                     .background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)),
             )
-            Column(Modifier.weight(1f).verticalScroll(paneScroll).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                Modifier.weight(1f).verticalScroll(paneScroll).padding(
+                    start = ch.fasrv.fanotes.desk.SETTINGS_SCROLL_PAD_X_DP.dp,
+                    end = ch.fasrv.fanotes.desk.SETTINGS_SCROLL_PAD_X_DP.dp,
+                    top = ch.fasrv.fanotes.desk.SETTINGS_SCROLL_PAD_TOP_DP.dp,
+                    bottom = ch.fasrv.fanotes.desk.SETTINGS_SCROLL_PAD_BOTTOM_DP.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTING_CARD_MARGIN_DP.dp),
+            ) {
             when (section) {
                 "appearance" -> {
-                    Box(Modifier.settingsAnchor("appearance", "settings-surface", anchorY))
-                    ch.fasrv.fanotes.desk.THEME_CHOICES.forEach { choice ->
-                        val selected = ch.fasrv.fanotes.desk.themeChoiceSelected(settings["theme"], choice.id)
-                        Text(
-                            "${choice.label} · ${choice.detail}",
-                            modifier = Modifier.clickable { model.updateDesk("theme", choice.id) }.padding(vertical = 6.dp),
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                        )
-                    }
-                    Text("Arbeitsflächen-Design", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                    val background = ch.fasrv.fanotes.desk.workspaceBackground(settings["background"])
-                    ch.fasrv.fanotes.desk.WORKSPACE_BACKGROUNDS.forEach { (id, label) ->
-                        Text(
-                            label,
-                            fontWeight = if (background == id) FontWeight.SemiBold else FontWeight.Normal,
-                            modifier = Modifier.clickable { model.updateDesk("background", id) }.padding(vertical = 4.dp),
-                        )
-                    }
-                    Text(
-                        "Kompakte Oberfläche: ${if (ch.fasrv.fanotes.desk.compactChrome(settings["compact"])) "an" else "aus"}",
-                        modifier = Modifier.clickable { model.updateDesk("compact", if (ch.fasrv.fanotes.desk.compactChrome(settings["compact"])) "off" else "on") }.padding(vertical = 4.dp),
-                    )
-                    Text(
-                        "Glas-Effekte: ${if (ch.fasrv.fanotes.desk.glassChrome(settings["glass"])) "an" else "aus"}",
-                        modifier = Modifier.clickable { model.updateDesk("glass", if (ch.fasrv.fanotes.desk.glassChrome(settings["glass"])) "off" else "on") }.padding(vertical = 4.dp),
-                    )
-                    Text("Oberflächen-Schrift", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp).settingsAnchor("appearance", "settings-typography", anchorY))
-                    val uiFont = ch.fasrv.fanotes.desk.uiFontId(settings["ui-font"])
-                    ch.fasrv.fanotes.desk.UI_FONTS.forEach { face ->
-                        Text(
-                            face.label,
-                            fontWeight = if (uiFont == face.id) FontWeight.SemiBold else FontWeight.Normal,
-                            modifier = Modifier.clickable { model.updateDesk("ui-font", face.stack) }.padding(vertical = 4.dp),
-                        )
-                    }
-                    Text("Akzentfarbe", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp).settingsAnchor("appearance", "settings-accent", anchorY))
                     val accent = ch.fasrv.fanotes.desk.normalizeAccent(settings["accent"])
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ch.fasrv.fanotes.desk.ACCENT_COLORS.forEach { color ->
-                            val selected = color == accent
-                            Box(
-                                Modifier
-                                    .size(28.dp)
-                                    .border(if (selected) 2.dp else 1.dp, if (selected) MaterialTheme.colorScheme.onSurface else Color(0x33000000), CircleShape)
-                                    .padding(3.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(android.graphics.Color.parseColor(color)))
-                                    .clickable { model.updateDesk("accent", color) },
-                            )
-                        }
-                    }
-                    var customAccent by remember(accent) { mutableStateOf(accent) }
-                    OutlinedTextField(
-                        customAccent,
-                        { next ->
-                            customAccent = next
-                            ch.fasrv.fanotes.desk.parseAccent(next)?.let { model.updateDesk("accent", it) }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Eigene Akzentfarbe") },
-                        singleLine = true,
-                    )
-                    Text(accent, fontSize = 12.sp)
-                    Text("Zweite Akzentfarbe", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                     val secondary = ch.fasrv.fanotes.desk.normalizeAccentSecondary(settings["accent-secondary"])
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ch.fasrv.fanotes.desk.ACCENT_COLORS.forEach { color ->
-                            val selected = color == secondary
-                            Box(
-                                Modifier
-                                    .size(28.dp)
-                                    .border(if (selected) 2.dp else 1.dp, if (selected) MaterialTheme.colorScheme.onSurface else Color(0x33000000), CircleShape)
-                                    .padding(3.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(android.graphics.Color.parseColor(color)))
-                                    .clickable { model.updateDesk("accent-secondary", color) },
+                    val background = ch.fasrv.fanotes.desk.workspaceBackground(settings["background"])
+                    SettingCard(
+                        "Oberfläche",
+                        Icons.Filled.Palette,
+                        Modifier.settingsAnchor("appearance", "settings-surface", anchorY),
+                    ) {
+                        SettingRow("Farbschema", "Kann automatisch dem System folgen.") {
+                            ThemeChoiceGrid(settings) { model.updateDesk("theme", it) }
+                        }
+                        SettingRow("Arbeitsflächen-Design", "Dekoriert den Hintergrund dezent, ohne vom Inhalt abzulenken.") {
+                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                ch.fasrv.fanotes.desk.WORKSPACE_BACKGROUNDS.forEach { (id, label) ->
+                                    val on = background == id
+                                    Text(
+                                        label,
+                                        fontSize = 12.sp,
+                                        color = if (on) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(if (on) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+                                            .clickable { model.updateDesk("background", id) }
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    )
+                                }
+                            }
+                        }
+                        SettingRow("Akzentfarbe", "Färbt Auswahl, Fokus und interaktive Elemente.", modifier = Modifier.settingsAnchor("appearance", "settings-accent", anchorY)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                AccentSwatches(accent) { model.updateDesk("accent", it) }
+                                var customAccent by remember(accent) { mutableStateOf(accent) }
+                                OutlinedTextField(
+                                    customAccent,
+                                    { next ->
+                                        customAccent = next
+                                        ch.fasrv.fanotes.desk.parseAccent(next)?.let { model.updateDesk("accent", it) }
+                                    },
+                                    modifier = Modifier.widthIn(min = 170.dp),
+                                    label = { Text("Eigene Akzentfarbe") },
+                                    singleLine = true,
+                                )
+                            }
+                        }
+                        SettingRow("Zweite Akzentfarbe", "Für Verläufe und mathematische Auszeichnungen.") {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                AccentSwatches(secondary) { model.updateDesk("accent-secondary", it) }
+                                var customSecondary by remember(secondary) { mutableStateOf(secondary) }
+                                OutlinedTextField(
+                                    customSecondary,
+                                    { next ->
+                                        customSecondary = next
+                                        ch.fasrv.fanotes.desk.parseAccent(next)?.let { model.updateDesk("accent-secondary", it) }
+                                    },
+                                    modifier = Modifier.widthIn(min = 170.dp),
+                                    label = { Text("Eigene zweite Akzentfarbe") },
+                                    singleLine = true,
+                                )
+                            }
+                        }
+                        SettingRow("Kompakte Oberfläche", "Mehr Inhalt auf kleineren Displays.") {
+                            Switch(
+                                checked = ch.fasrv.fanotes.desk.compactChrome(settings["compact"]),
+                                onCheckedChange = { model.updateDesk("compact", if (it) "on" else "off") },
+                            )
+                        }
+                        SettingRow("Glas-Effekte", "Transparente Ebenen und weiche Unschärfe.", divider = false) {
+                            Switch(
+                                checked = ch.fasrv.fanotes.desk.glassChrome(settings["glass"]),
+                                onCheckedChange = { model.updateDesk("glass", if (it) "on" else "off") },
                             )
                         }
                     }
-                    var customSecondary by remember(secondary) { mutableStateOf(secondary) }
-                    OutlinedTextField(
-                        customSecondary,
-                        { next ->
-                            customSecondary = next
-                            ch.fasrv.fanotes.desk.parseAccent(next)?.let { model.updateDesk("accent-secondary", it) }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Eigene zweite Akzentfarbe") },
-                        singleLine = true,
-                    )
+                    val uiFont = ch.fasrv.fanotes.desk.uiFontId(settings["ui-font"])
+                    SettingCard(
+                        "Typografie",
+                        Icons.Filled.TextFields,
+                        Modifier.settingsAnchor("appearance", "settings-typography", anchorY),
+                    ) {
+                        SettingRow("Oberflächen-Schrift", divider = false) {
+                            Column {
+                                ch.fasrv.fanotes.desk.UI_FONTS.forEach { face ->
+                                    Text(
+                                        face.label,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (uiFont == face.id) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (uiFont == face.id) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft,
+                                        modifier = Modifier.clickable { model.updateDesk("ui-font", face.stack) }.padding(vertical = 4.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
                 "editor" -> {
                     val metrics = ch.fasrv.fanotes.desk.editorMetrics(settings)
