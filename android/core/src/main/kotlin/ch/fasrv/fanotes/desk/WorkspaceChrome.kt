@@ -246,6 +246,31 @@ fun treeRenameCommit(current: String, next: String): String? {
     if (trimmed.isEmpty() || trimmed == current) return null
     return trimmed
 }
+
+/** Context menu after the later chrome pass: 12px card, 220px wide, 34px rows. */
+const val TREE_MENU_WIDTH_DP = 220
+const val TREE_MENU_RADIUS_DP = 12
+const val TREE_MENU_PAD_DP = 7
+const val TREE_MENU_ROW_DP = 34
+const val TREE_MENU_ROW_RADIUS_DP = 8
+const val TREE_MENU_CREATE = "Erstellen"
+const val TREE_MENU_OPEN = "Öffnen"
+const val TREE_MENU_MANAGE = "Verwalten"
+const val TREE_MENU_NOTE = "Neue Notiz"
+const val TREE_MENU_PDF = "PDF importieren"
+const val TREE_MENU_BOOK = "Buch hinzufügen"
+const val TREE_MENU_DETACH = "Buch entfernen"
+const val TREE_MENU_SUBFOLDER = "Neuer Unterordner"
+const val TREE_MENU_SPLIT = "Rechts öffnen"
+const val TREE_MENU_RENAME = "Umbenennen"
+const val TREE_MENU_MOVE = "Verschieben"
+const val TREE_MENU_DELETE = "Löschen"
+
+fun treeMenuKind(folder: Boolean, pdf: Boolean): String = when {
+    folder -> "Ordner"
+    pdf -> "PDF-Notiz"
+    else -> "Notiz"
+}
 const val TREE_DEPTH_DP = 13
 const val TREE_MARK_WIDTH_DP = 2
 const val TREE_MARK_HEIGHT_DP = 17

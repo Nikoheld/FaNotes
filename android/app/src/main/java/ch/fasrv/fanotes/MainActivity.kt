@@ -67,6 +67,7 @@ import androidx.compose.material.icons.filled.FileCopy
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Sync
@@ -1599,6 +1600,34 @@ private fun VaultPane(
 }
 
 @Composable
+private fun TreeMenuLabel(label: String) {
+    Text(
+        label.uppercase(java.util.Locale.GERMAN),
+        fontSize = 12.sp,
+        fontWeight = FontWeight.ExtraBold,
+        letterSpacing = 0.09.em,
+        color = LocalStatusInk.current.muted,
+        modifier = Modifier.padding(start = 8.dp, top = 5.dp, end = 8.dp, bottom = 3.dp),
+    )
+}
+
+@Composable
+private fun TreeMenuItem(label: String, danger: Boolean = false, onClick: () -> Unit) {
+    Text(
+        label,
+        fontSize = 12.sp,
+        color = if (danger) MaterialTheme.colorScheme.error else LocalStatusInk.current.soft,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(ch.fasrv.fanotes.desk.TREE_MENU_ROW_DP.dp)
+            .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.TREE_MENU_ROW_RADIUS_DP.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp)
+            .wrapContentHeight(Alignment.CenterVertically),
+    )
+}
+
+@Composable
 private fun NoteRow(
     node: VaultNode,
     selected: String?,
@@ -1906,78 +1935,55 @@ private fun NoteRow(
                     ),
             )
         }
-        if (actionsOpen && node.kind != NoteKind.FOLDER) {
-            Text(
-                "Rechts",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .clickable(onClickLabel = "Rechts öffnen") { onOpenSplit(node.path) }
-                    .padding(horizontal = 6.dp),
-            )
-        }
-        if (actionsOpen && folder) {
-            Text(
-                "+",
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier
-                    .clickable(onClickLabel = "Neue Notiz in diesem Ordner") { onCreateNoteIn(node.path) }
-                    .padding(horizontal = 6.dp),
-            )
-            Text(
-                "PDF",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .clickable(onClickLabel = "PDF importieren") { onImportPdfIn(node.path) }
-                    .padding(horizontal = 4.dp),
-            )
-            Text(
-                "Buch",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .clickable(onClickLabel = "Buch hinzufügen") { onImportBook(node.path) }
-                    .padding(horizontal = 4.dp),
-            )
-            if (node.path in bookFolders) {
-                Text(
-                    "Weg",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier
-                        .clickable(onClickLabel = "Buch entfernen") { onDetachBook(node.path) }
-                        .padding(horizontal = 4.dp),
-                )
-            }
-            Icon(
-                Icons.Filled.CreateNewFolder,
-                contentDescription = "Unterordner anlegen",
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .size(18.dp)
-                    .clickable(onClickLabel = "Unterordner anlegen") { onCreateFolderIn(node.path) },
-            )
-        }
-        if (actionsOpen && node.kind == NoteKind.FOLDER) {
-            val local = pathIsSyncExcluded(node.path, localFolders)
-            Text(
-                localFolderAction(local),
-                fontSize = 11.sp,
-                color = if (local) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                modifier = Modifier.clickable { onToggleLocal(node.path) }.padding(horizontal = 6.dp),
-            )
-        }
         if (actionsOpen) {
-            IconButton(onClick = { onRename(node.path, node.name) }) {
-                Icon(Icons.Filled.Edit, contentDescription = "Umbenennen")
-            }
-            IconButton(onClick = { onMove(node.path) }) {
-                Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = "Verschieben")
-            }
-            IconButton(onClick = { onDelete(node.path, node.kind == NoteKind.FOLDER, node.name) }) {
-                Icon(Icons.Filled.Delete, contentDescription = "Löschen")
+            var menu by remember(node.path) { mutableStateOf(false) }
+            val local = pathIsSyncExcluded(node.path, localFolders)
+            Box {
+                Icon(
+                    Icons.Filled.MoreVert,
+                    contentDescription = "Aktionen für ${node.name}",
+                    tint = LocalStatusInk.current.muted,
+                    modifier = Modifier.size(22.dp).clickable { menu = true },
+                )
+                DropdownMenu(
+                    expanded = menu,
+                    onDismissRequest = { menu = false },
+                    modifier = Modifier.width(ch.fasrv.fanotes.desk.TREE_MENU_WIDTH_DP.dp),
+                    shape = RoundedCornerShape(ch.fasrv.fanotes.desk.TREE_MENU_RADIUS_DP.dp),
+                    containerColor = LocalStatusInk.current.panelStrong,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 20.dp,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)),
+                ) {
+                    Column(Modifier.padding(ch.fasrv.fanotes.desk.TREE_MENU_PAD_DP.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
+                            Text(
+                                ch.fasrv.fanotes.desk.treeMenuKind(folder, node.kind == NoteKind.PDF).uppercase(java.util.Locale.GERMAN),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.07.em,
+                                color = LocalStatusInk.current.muted,
+                            )
+                            Text(node.name, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        }
+                        if (folder) {
+                            TreeMenuLabel(ch.fasrv.fanotes.desk.TREE_MENU_CREATE)
+                            TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_NOTE) { menu = false; onCreateNoteIn(node.path) }
+                            TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_PDF) { menu = false; onImportPdfIn(node.path) }
+                            TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_BOOK) { menu = false; onImportBook(node.path) }
+                            if (node.path in bookFolders) TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_DETACH, danger = true) { menu = false; onDetachBook(node.path) }
+                            TreeMenuItem(localFolderAction(local)) { menu = false; onToggleLocal(node.path) }
+                            TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_SUBFOLDER) { menu = false; onCreateFolderIn(node.path) }
+                        } else {
+                            TreeMenuLabel(ch.fasrv.fanotes.desk.TREE_MENU_OPEN)
+                            TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_SPLIT) { menu = false; onOpenSplit(node.path) }
+                        }
+                        TreeMenuLabel(ch.fasrv.fanotes.desk.TREE_MENU_MANAGE)
+                        TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_RENAME) { menu = false; onRename(node.path, node.name) }
+                        TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_MOVE) { menu = false; onMove(node.path) }
+                        TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_DELETE, danger = true) { menu = false; onDelete(node.path, folder, node.name) }
+                    }
+                }
             }
         }
     }
