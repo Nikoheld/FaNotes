@@ -1807,12 +1807,15 @@ fn month_words(value: &str) -> Vec<&str> {
         .collect();
     let mut words = Vec::new();
     let mut open_clock = false;
+    let mut open_offset = false;
     for token in raw {
         // `16:00: 2026-10-13` keeps the hyphen word. The 10 is seconds and
-        // `-13` is the offset. Splitting it first would lose that sign.
-        if open_clock && is_hyphen_number_run(token) {
+        // `-13` is the offset. `GMT+5: 2026-10-13` keeps it too: 10 fills
+        // the open offset minute and `-13` replaces the offset.
+        if (open_clock || open_offset) && is_hyphen_number_run(token) {
             words.push(token);
             open_clock = false;
+            open_offset = false;
             continue;
         }
         words.extend(
@@ -1824,8 +1827,14 @@ fn month_words(value: &str) -> Vec<&str> {
         );
         if token_is_open_clock(token) {
             open_clock = true;
-        } else if token.chars().any(|character| character.is_ascii_digit()) {
+            open_offset = false;
+        } else if token_is_open_offset(token) {
+            open_offset = true;
+        } else if token.chars().any(|character| character.is_ascii_digit())
+            && !token_keeps_open_clock(token)
+        {
             open_clock = false;
+            open_offset = false;
         }
     }
     words
@@ -3665,6 +3674,19 @@ fn compose_month_date(
             number_seen = true;
             continue;
         }
+        if let Some(done) = apply_pending_offset_hyphen(
+            word,
+            &mut time,
+            &mut dates,
+            &mut offset,
+            &mut minute_sign,
+        ) {
+            if !done {
+                return None;
+            }
+            number_seen = true;
+            continue;
+        }
         if let Some(done) = take_open_clock_hyphen(
             word,
             &mut time,
@@ -3755,6 +3777,109 @@ fn numeric_month_day_year(dates: &[i32]) -> Option<(i32, i32, i32)> {
 /// part of a date field.
 /// `16:00: 2026-10-13` is 16:00:10 on 1 January 2026 at UTC−13.
 /// The number that finishes the open field makes the next hyphen an offset.
+/// `GMT+5:` still needs its minutes. `16:` is a clock, not an offset.
+fn token_is_open_offset(token: &str) -> bool {
+    let Some(body) = token.strip_suffix(':') else {
+        return false;
+    };
+    body.ends_with(|character: char| character.is_ascii_digit()) && body.contains(['+', '-'])
+}
+
+/// `+5` and `GMT+5` do not fill an open clock field. `30` does.
+fn token_keeps_open_clock(token: &str) -> bool {
+    if token_is_open_offset(token) {
+        return true;
+    }
+    if month_zone_suffix(token).is_some() || zone_keyword_tail(token).is_some() {
+        return true;
+    }
+    token.starts_with(['+', '-']) && parse_legacy_offset(token).is_some()
+}
+
+/// `GMT+5: 2026-10-13` is 16:00 at UTC−13. `2026` is the year, `10` fills
+/// the open minute, and `-13` replaces the offset. An open offset minute
+/// wins over an open clock field.
+fn apply_pending_offset_hyphen(
+    word: &str,
+    time: &mut MonthTime,
+    dates: &mut Vec<i32>,
+    offset: &mut Option<i64>,
+    minute_sign: &mut i64,
+) -> Option<bool> {
+    if *minute_sign == 0 || !is_hyphen_number_run(word) {
+        return None;
+    }
+    let bytes = word.as_bytes();
+    let mut index = 0;
+    loop {
+        if index >= bytes.len() {
+            return Some(true);
+        }
+        let start = index;
+        while index < bytes.len() && bytes[index].is_ascii_digit() {
+            index += 1;
+        }
+        if start == index {
+            return Some(false);
+        }
+        let number = unsigned_number(&word[start..index])?;
+        if (0..=59).contains(&number) {
+            *offset = Some(offset.unwrap_or(0) + *minute_sign * i64::from(number));
+            *minute_sign = 0;
+            return replace_offset_tail(word, index, offset);
+        }
+        if time.expecting(number) {
+            time.add_final(number)?;
+            return replace_offset_tail(word, index, offset);
+        }
+        push_date_number(dates, number)?;
+        if index >= bytes.len() {
+            return Some(true);
+        }
+        if !matches!(bytes[index], b'+' | b'-') {
+            return Some(false);
+        }
+        index += 1;
+    }
+}
+
+fn replace_offset_tail(word: &str, mut index: usize, offset: &mut Option<i64>) -> Option<bool> {
+    let bytes = word.as_bytes();
+    if index >= bytes.len() {
+        return Some(true);
+    }
+    while index < bytes.len() {
+        let sign = if bytes[index] == b'+' {
+            1i64
+        } else if bytes[index] == b'-' {
+            -1
+        } else {
+            return Some(false);
+        };
+        index += 1;
+        let start = index;
+        while index < bytes.len() && bytes[index].is_ascii_digit() {
+            index += 1;
+        }
+        if start == index {
+            return Some(false);
+        }
+        let text = &word[start..index];
+        let number = unsigned_number(text)?;
+        let minutes = match text.len() {
+            1 | 2 => sign * i64::from(number) * 60,
+            3 | 4 => {
+                let hour = i64::from(number / 100);
+                let minute = i64::from(number % 100);
+                sign * (hour * 60 + minute)
+            }
+            _ => return Some(false),
+        };
+        *offset = Some(minutes);
+    }
+    Some(true)
+}
+
 fn take_open_clock_hyphen(
     word: &str,
     time: &mut MonthTime,
@@ -8216,6 +8341,56 @@ mod tests {
                 Some("1950-10-14T05:00:00.000Z")
             );
             assert_eq!(super::canonical_iso("16:00Z-10-13"), None);
+            assert_eq!(
+                super::canonical_iso("16:00 GMT+5: 2026-10-13").as_deref(),
+                Some("2026-01-02T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00 +5: 2026-10-13").as_deref(),
+                Some("2026-01-02T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00 GMT+5: 2026-10").as_deref(),
+                Some("2026-01-01T10:50:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16: +5 2026-10-13").as_deref(),
+                Some("2026-01-02T05:10:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16: GMT+5 2026-10-13").as_deref(),
+                Some("2026-01-02T05:10:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16: EST 2026-10-13").as_deref(),
+                Some("2026-01-02T05:10:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16: GMT+5: 2026-10-13").as_deref(),
+                Some("2026-01-02T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00 GMT+5: 2026-10-13 EST").as_deref(),
+                Some("2026-01-01T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00:00.5 GMT+5: 2026-10-13").as_deref(),
+                Some("2026-01-02T05:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("4:5 GMT+5: 2026-10-13").as_deref(),
+                Some("2026-01-01T17:05:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("16:00 GMT+5: 30"), None);
+            assert_eq!(super::canonical_iso("16:00 GMT+5: 2026-60-13"), None);
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 GMT+5:").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 GMT+5: 30").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
             assert_eq!(super::canonical_iso("2026-10-13T16:00Z-10-13"), None);
         });
     }
