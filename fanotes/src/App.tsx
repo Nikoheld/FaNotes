@@ -17,7 +17,6 @@ import {
   Columns2,
   Command,
   Copy,
-  CopyPlus,
   Database,
   Download,
   File,
@@ -427,8 +426,6 @@ function TabContextMenu({ menu, title, pinned, inSplit, isWeb, canCloseOthers, c
       <button type="button" role="menuitem" onClick={run(onDuplicate)}><Files aria-hidden="true" size={15} /> Notiz duplizieren</button>
       <button type="button" role="menuitem" onClick={run(onCopyWikiLink)}><Link2 aria-hidden="true" size={15} /> Wiki-Link kopieren</button>
       <button type="button" role="menuitem" onClick={run(onCopyPath)}><Copy aria-hidden="true" size={15} /> Pfad kopieren</button>
-      <button type="button" role="menuitem" disabled={isPdfNotePath(menu.path)} onClick={run(onDuplicate)}><CopyPlus aria-hidden="true" size={15} /> Duplizieren</button>
-      <button type="button" role="menuitem" onClick={run(onCopyWikiLink)}><Link2 aria-hidden="true" size={15} /> Wiki-Link kopieren</button>
       <button type="button" role="menuitem" onClick={run(onReveal)}>{isWeb ? <Download aria-hidden="true" size={15} /> : <FolderOpen aria-hidden="true" size={15} />} {isWeb ? 'Herunterladen' : 'Im Dateimanager zeigen'}</button>
       <span className="file-tree__menu-separator" role="separator" />
       <button type="button" role="menuitem" disabled={pinned} onClick={run(onCloseTab)}><X aria-hidden="true" size={15} /> Schließen</button>
