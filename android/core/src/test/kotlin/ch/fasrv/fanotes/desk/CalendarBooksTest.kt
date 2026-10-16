@@ -65,6 +65,14 @@ class CalendarBooksTest {
         assertEquals(7.5f * 48f, calendarNowOffsetDp(7, 30))
         assertEquals(56, CAL_GUTTER_DP)
         assertEquals(8, CAL_NOW_DOT_DP)
+        assertEquals(SnappedClock(0, 10, 0), snapCalendarClock(10, 7))
+        assertEquals(SnappedClock(0, 10, 15), snapCalendarClock(10, 8))
+        assertEquals(SnappedClock(1, 0, 0), snapCalendarClock(23, 53))
+        assertEquals(true, calendarRangeIsEmpty("week", 0))
+        assertEquals(false, calendarRangeIsEmpty("month", 0))
+        assertEquals(false, calendarRangeIsEmpty("agenda", 2))
+        assertEquals("Keine Termine in diesem Zeitraum.", CAL_EMPTY)
+        assertEquals("Neuer Termin", CAL_NEW_EVENT)
     }
 
     @Test

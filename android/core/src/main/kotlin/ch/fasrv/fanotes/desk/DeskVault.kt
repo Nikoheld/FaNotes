@@ -499,6 +499,8 @@ const val CAL_VIEW_RADIUS_DP = 9
 const val CAL_SEARCH = "Termine suchen"
 const val CAL_ALL_DAY = "Ganztägig"
 const val CAL_DAILY = "Tagesnotiz"
+const val CAL_EMPTY = "Keine Termine in diesem Zeitraum."
+const val CAL_NEW_EVENT = "Neuer Termin"
 const val CAL_GUTTER_DP = 56
 const val CAL_NOW_DOT_DP = 8
 const val CAL_HEAD_NUM_SP = 16
@@ -535,6 +537,19 @@ fun calendarHeading(view: String, anchor: LocalDate): String {
 }
 
 fun agendaWhenLabel(event: CalendarEvent): String = eventClock(event) ?: CAL_ALL_DAY
+
+data class SnappedClock(val dayOffset: Int, val hour: Int, val minute: Int)
+
+/** Round to the desktop 15-minute step. 24:00 rolls into the next day. */
+fun snapCalendarClock(hour: Int, minute: Int, step: Int = 15): SnappedClock {
+    val total = hour.coerceIn(0, 23) * 60 + minute.coerceIn(0, 59)
+    val next = Math.round(total / step.toDouble()).toInt() * step
+    val dayOffset = if (next >= 24 * 60) 1 else 0
+    val clipped = if (dayOffset == 1) 0 else next
+    return SnappedClock(dayOffset, clipped / 60, clipped % 60)
+}
+
+fun calendarRangeIsEmpty(view: String, occupiedDays: Int): Boolean = view != "month" && occupiedDays == 0
 
 private val CAL_WEEKDAYS = listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
 
