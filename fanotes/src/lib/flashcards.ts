@@ -117,6 +117,23 @@ export const dueCards = (cards: readonly FlashCard[], now = new Date()) => {
   return cards.filter((card) => card.due <= today)
 }
 
+/** Due cards still to see. Ones marked Again wait until the others in this session are done. */
+export const reviewQueue = (due: readonly FlashCard[], later: readonly string[]): FlashCard[] => {
+  const deferred = new Set(later)
+  const fresh = due.filter((card) => !deferred.has(card.id))
+  if (fresh.length) return fresh
+  const byId = new Map(due.map((card) => [card.id, card]))
+  const seen = new Set<string>()
+  const waiting: FlashCard[] = []
+  for (const id of later) {
+    if (seen.has(id)) continue
+    seen.add(id)
+    const card = byId.get(id)
+    if (card) waiting.push(card)
+  }
+  return waiting
+}
+
 export const reviewCard = (card: FlashCard, grade: FlashGrade, now = new Date()): FlashCard => {
   const next = { ...card, reps: card.reps + 1 }
   if (grade === 'again') {

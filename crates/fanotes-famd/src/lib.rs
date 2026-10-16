@@ -1055,6 +1055,10 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         // `hello 2026-10-13` is local. The word is not part of the date.
         return canonical_iso(&next);
     }
+    if let Some(next) = sign_after_leading_word(trimmed) {
+        // `hello+5` is May. The word and the sign are padding before the number.
+        return canonical_iso(&next);
+    }
     // A period between numbers is a hyphen. A period before a clock is a space.
     // Trailing periods make a date local. A `T` form keeps its fraction dot.
     if !has_iso_t(&trimmed) && trimmed.contains('.') {
@@ -2879,6 +2883,34 @@ fn strip_leading_signs(trimmed: &str) -> Option<&str> {
 /// `hello 2026-10-13` drops `hello`. A word continues through every non-space
 /// character at or above `A`, so `hello_world 10/13/2026` drops that word too.
 /// `Oct_13` stays, because it names a month. The space keeps a date local.
+/// `hello+5` and `GMe-5` are May. A word and one sign before the first number
+/// are padding. `Oct+5` stays October 5, and `hello+5:30` is not a date.
+fn sign_after_leading_word(trimmed: &str) -> Option<String> {
+    let mut index = 0;
+    for character in trimmed.chars() {
+        if !character.is_ascii_alphabetic() {
+            break;
+        }
+        index += 1;
+    }
+    if index == 0 {
+        return None;
+    }
+    let rest = trimmed.get(index..)?;
+    let mut rest_chars = rest.chars();
+    if !matches!(rest_chars.next(), Some('+' | '-')) {
+        return None;
+    }
+    if !rest_chars.next().is_some_and(|character| character.is_ascii_digit()) {
+        return None;
+    }
+    let word = &trimmed[..index];
+    if english_month(word).is_some() {
+        return None;
+    }
+    Some(format!(" {}", &rest[1..]))
+}
+
 fn strip_leading_word(trimmed: &str) -> Option<String> {
     let end = trimmed
         .char_indices()
@@ -7335,6 +7367,41 @@ mod tests {
             );
             assert_eq!(super::canonical_iso("24:00:60 10-13-2026"), None);
             assert_eq!(super::canonical_iso("16:00:60 2026-10-13"), None);
+        });
+    }
+
+    #[test]
+    fn a_sign_after_a_leading_word_is_padding() {
+        with_tz("America/New_York", || {
+            // `hello+5` is May. The word and the sign are ignored before the
+            // first number. A month keeps the sign as a separator, and a
+            // clock after the sign is empty.
+            assert_eq!(
+                super::canonical_iso("hello+5").as_deref(),
+                Some("2001-05-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("GMe-5").as_deref(),
+                Some("2001-05-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("x+5").as_deref(),
+                Some("2001-05-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("note+2026").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct+5").as_deref(),
+                Some("2001-10-05T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("GMT+5").as_deref(),
+                Some("2001-05-01T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("hello+5:30"), None);
+            assert_eq!(super::canonical_iso("abc+13"), None);
         });
     }
 
