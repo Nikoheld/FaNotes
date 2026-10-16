@@ -449,3 +449,19 @@ const val TOAST_PAD_START_DP = 11
 const val TOAST_PAD_DP = 8
 const val TOAST_INSET_END_DP = 14
 const val TOAST_INSET_BOTTOM_DP = 12
+
+/** Empty editor after the later chrome pass: inverted 12px glyph, 390px column. */
+const val PLACEHOLDER_MAX_DP = 390
+const val PLACEHOLDER_PAD_DP = 30
+const val PLACEHOLDER_GLYPH_DP = 66
+const val PLACEHOLDER_GLYPH_RADIUS_DP = 12
+const val PLACEHOLDER_GLYPH_ICON_DP = 28
+const val PLACEHOLDER_TITLE_SP = 21
+const val PLACEHOLDER_BODY_SP = 13
+const val PLACEHOLDER_EYEBROW = "Bereit für deine nächste Idee"
+const val PLACEHOLDER_TITLE = "Dein Wissen, in deiner Hand"
+const val PLACEHOLDER_BODY = "Schreibe mit Tastatur und Stift auf derselben Seite, importiere ein PDF als eigene Notiz oder starte mit einem Arbeitsblatt."
+const val PLACEHOLDER_NOTE = "Neue Notiz"
+const val PLACEHOLDER_PDF = "PDF"
+const val PLACEHOLDER_SHEET = "Arbeitsblatt"
+const val PLACEHOLDER_COMMAND = "Alle Aktionen mit Strg P"
