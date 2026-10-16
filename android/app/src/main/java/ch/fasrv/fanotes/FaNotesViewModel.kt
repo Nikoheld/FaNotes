@@ -2283,6 +2283,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val tagFilter = MutableStateFlow<String?>(null)
     val backlinks = MutableStateFlow<List<Backlink>>(emptyList())
     val noteHistory = MutableStateFlow<List<HistorySnapshot>>(emptyList())
+    val historyOpen = MutableStateFlow(false)
+    val historyBusy = MutableStateFlow(false)
     val historyComparison = MutableStateFlow<Pair<String, String>?>(null)
     val study = MutableStateFlow<StudyPicture?>(null)
     val deskSettings = MutableStateFlow(graph.readDesk())
@@ -2351,14 +2353,30 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun showDestination(id: String) {
+        if (id == "history") {
+            openHistory()
+            return
+        }
         destination.value = id
         when (id) {
             "tasks" -> loadHomework()
             "calendar" -> loadCalendar()
             "overview", "books" -> loadVaultMeta()
-            "history" -> refreshNoteHistory()
             "study" -> loadStudy()
         }
+    }
+
+    fun openHistory() {
+        if (open.value == null) {
+            message.value = "Öffne zuerst eine Notiz."
+            return
+        }
+        historyOpen.value = true
+        refreshNoteHistory()
+    }
+
+    fun closeHistory() {
+        historyOpen.value = false
     }
 
     fun rememberTab(path: String) {
@@ -3269,10 +3287,16 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         historyComparison.value = null
         if (note == null) {
             noteHistory.value = emptyList()
+            historyBusy.value = false
             return
         }
+        historyBusy.value = true
         viewModelScope.launch {
-            noteHistory.value = withContext(Dispatchers.IO) { listNoteHistory(graph.vault, historyPathFor(note)) }
+            try {
+                noteHistory.value = withContext(Dispatchers.IO) { listNoteHistory(graph.vault, historyPathFor(note)) }
+            } finally {
+                historyBusy.value = false
+            }
         }
     }
 
@@ -3305,6 +3329,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             updateMarkdown(restored)
             foldedHeadings.value = foldsForSections(restored, session.document)
             message.value = "Ältere Version wiederhergestellt. Speichern sichert sie."
+            historyOpen.value = false
             destination.value = "notes"
         }
     }

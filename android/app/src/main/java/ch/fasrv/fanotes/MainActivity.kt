@@ -448,6 +448,7 @@ fun FaNotesScreen(
     val palette by model.paletteOpen.collectAsStateWithLifecycle()
     val paletteNotes by model.paletteNotes.collectAsStateWithLifecycle()
     val bugReportOpen by model.bugReportOpen.collectAsStateWithLifecycle()
+    val historyOpen by model.historyOpen.collectAsStateWithLifecycle()
     val confirm by model.confirmRequest.collectAsStateWithLifecycle()
     val linkPlacing by model.linkPlacing.collectAsStateWithLifecycle()
     val placingSection by model.placingSection.collectAsStateWithLifecycle()
@@ -537,6 +538,7 @@ fun FaNotesScreen(
                         ch.fasrv.fanotes.desk.EscapeLayer(
                             confirm = confirm != null,
                             bugReport = bugReportOpen,
+                            history = historyOpen,
                             gotoLine = gotoLine != null,
                             math = mathOpen,
                             textBox = editingBox != null,
@@ -561,6 +563,7 @@ fun FaNotesScreen(
                     when (target) {
                         "confirm" -> model.dismissConfirm()
                         "bug-report" -> model.closeBugReport()
+                        "history" -> model.closeHistory()
                         "goto-line" -> model.closeGotoLine()
                         "math" -> mathOpen = false
                         "text-box" -> editingBox = null
@@ -999,6 +1002,7 @@ fun FaNotesScreen(
         }
     }
     if (bugReportOpen) BugReportDialog(model)
+    if (historyOpen) HistoryDialog(model)
     confirm?.let { request ->
         FaNotesConfirmDialog(request, onConfirm = { model.acceptConfirm() }, onDismiss = { model.dismissConfirm() }, glass = glass, radiusDp = chrome.radiusDp)
     }

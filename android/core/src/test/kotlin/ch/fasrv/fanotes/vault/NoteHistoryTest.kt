@@ -45,6 +45,21 @@ class NoteHistoryTest {
         assertEquals("15.10.2026 12:00", historyStampLabel("2026-10-15T12:00:00.000Z", ZoneOffset.UTC))
         assertEquals("15.10.2026 14:30", historyStampLabel("2026-10-15T12:30:00.000Z", ZoneOffset.ofHours(2)))
         assertEquals("nicht-lesbar", historyStampLabel("nicht-lesbar", ZoneOffset.UTC))
+        assertEquals("1 KB", historySizeLabel(0))
+        assertEquals("1 KB", historySizeLabel(400))
+        assertEquals("1 KB", historySizeLabel(1024))
+        assertEquals("2 KB", historySizeLabel(1536))
+        assertEquals(520, HISTORY_DIALOG_MAX_DP)
+        assertEquals(0.92f, HISTORY_DIALOG_WIDTH_FRACTION)
+        assertEquals(12, HISTORY_DIALOG_RADIUS_DP)
+        assertEquals(520, historyDialogWidthDp(800))
+        assertEquals(368, historyDialogWidthDp(400))
+        assertEquals(640, historyDialogMaxHeightDp(1200))
+        assertEquals(280, historyDialogMaxHeightDp(400))
+        assertEquals(HistoryDialogShadow(12, 40, 0.08f), historyDialogShadow(false))
+        assertEquals(HistoryDialogShadow(16, 48, 0.32f), historyDialogShadow(true))
+        assertEquals("Frühere Versionen", HISTORY_TITLE)
+        assertEquals("Noch keine älteren Stände. Nach dem nächsten Speichern erscheint hier die vorherige Version.", HISTORY_EMPTY)
     }
 
     @Test
