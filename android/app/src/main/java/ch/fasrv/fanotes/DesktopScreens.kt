@@ -6,7 +6,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -42,14 +46,18 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ViewColumn
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -75,6 +83,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
@@ -85,6 +94,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isShiftPressed
@@ -466,28 +476,20 @@ fun NoteTabs(
     onReveal: (String) -> Unit = {},
 ) {
     if (paths.isEmpty() && !canBack && !canForward) return
-    val muted = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
     val scroll = rememberScrollState()
     var dragging by remember { mutableStateOf<String?>(null) }
     var dropOn by remember { mutableStateOf<Pair<String?, String>?>(null) }
     val bounds = remember { androidx.compose.runtime.mutableStateMapOf<String, androidx.compose.ui.geometry.Rect>() }
     val deskTabs = paths.map { DeskTab(it, it in pinned) }
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(scroll, enabled = dragging == null).background(MaterialTheme.colorScheme.surface).padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            "← Zurück",
-            fontSize = 12.sp,
-            color = if (canBack) MaterialTheme.colorScheme.onSurface else muted,
-            modifier = Modifier.padding(end = 4.dp).then(if (canBack) Modifier.clickable(onClick = onBack) else Modifier).padding(horizontal = 6.dp, vertical = 4.dp),
-        )
-        Text(
-            "→",
-            fontSize = 12.sp,
-            color = if (canForward) MaterialTheme.colorScheme.onSurface else muted,
-            modifier = Modifier.padding(end = 8.dp).then(if (canForward) Modifier.clickable(onClick = onForward) else Modifier).padding(horizontal = 6.dp, vertical = 4.dp),
-        )
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.NOTE_TAB_RULE_ALPHA)
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        NoteHistoryButton(back = true, enabled = canBack, onClick = onBack)
+        NoteHistoryButton(back = false, enabled = canForward, onClick = onForward)
+        Row(
+            Modifier.weight(1f).horizontalScroll(scroll, enabled = dragging == null),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
         paths.forEach { path ->
             NoteTabChip(
                 path = path,
@@ -531,6 +533,62 @@ fun NoteTabs(
                 },
             )
         }
+        }
+    }
+    Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
+    }
+}
+
+@Composable
+private fun NoteHistoryButton(back: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val ink = LocalStatusInk.current
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val pressed by interaction.collectIsPressedAsState()
+    val hot = enabled && (hovered || pressed)
+    val color = if (hot) MaterialTheme.colorScheme.onSurface else ink.soft
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.noteNavRuleAlpha(back))
+    Row(
+        Modifier
+            .height(ch.fasrv.fanotes.desk.NOTE_NAV_HEIGHT_DP.dp)
+            .alpha(if (enabled) 1f else ch.fasrv.fanotes.desk.NOTE_NAV_DISABLED_ALPHA)
+            .background(
+                if (hot) MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.NOTE_NAV_HOVER_ALPHA) else Color.Transparent,
+            )
+            .hoverable(interaction)
+            .clickable(interactionSource = interaction, indication = null, enabled = enabled, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            Modifier
+                .fillMaxHeight()
+                .then(
+                    if (back) Modifier.padding(horizontal = ch.fasrv.fanotes.desk.NOTE_NAV_BACK_PAD_DP.dp)
+                    else Modifier.width((ch.fasrv.fanotes.desk.NOTE_NAV_FORWARD_DP - 1).dp),
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = if (back) {
+                Arrangement.spacedBy(ch.fasrv.fanotes.desk.NOTE_NAV_GAP_DP.dp)
+            } else {
+                Arrangement.Center
+            },
+        ) {
+            Icon(
+                if (back) Icons.AutoMirrored.Filled.ArrowBack else Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = if (back) "Zurück" else "Vorwärts",
+                modifier = Modifier.size(ch.fasrv.fanotes.desk.NOTE_NAV_ICON_DP.dp),
+                tint = color,
+            )
+            if (back) {
+                Text(
+                    "Zurück",
+                    fontSize = ch.fasrv.fanotes.desk.NOTE_NAV_FONT_SP.sp,
+                    fontWeight = FontWeight(ch.fasrv.fanotes.desk.NOTE_NAV_WEIGHT),
+                    color = color,
+                )
+            }
+        }
+        Box(Modifier.fillMaxHeight().width(1.dp).background(rule))
     }
 }
 
@@ -578,38 +636,53 @@ private fun NoteTabChip(
     val name = path.substringAfterLast('/').substringBeforeLast('.')
     val box = ch.fasrv.fanotes.desk.noteTabBox(pinned)
     val shape = RoundedCornerShape(box.radiusDp.dp)
+    val tabInteraction = remember(path) { MutableInteractionSource() }
+    val tabHovered by tabInteraction.collectIsHoveredAsState()
+    val tabPressed by tabInteraction.collectIsPressedAsState()
+    val hot = tabHovered || tabPressed
+    val accent = Color(
+        ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f),
+    )
+    val titleColor = when (ch.fasrv.fanotes.desk.noteTabInk(selected, inSplit)) {
+        "text" -> MaterialTheme.colorScheme.onSurface
+        "soft" -> LocalStatusInk.current.soft
+        else -> if (hot) LocalStatusInk.current.soft else LocalStatusInk.current.muted
+    }
+    val fill = when {
+        selected -> MaterialTheme.colorScheme.surfaceVariant
+        hot -> MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.NOTE_TAB_HOVER_ALPHA)
+        else -> Color.Transparent
+    }
+    val glyph = ch.fasrv.fanotes.desk.noteTabGlyph(path, pinned)
     Box {
-        Row(
+        Box(
             Modifier
                 .padding(horizontal = box.marginXDp.dp, vertical = box.marginYDp.dp)
                 .height(box.heightDp.dp)
-                .widthIn(min = box.minWidthDp.dp, max = box.maxWidthDp.dp)
-                .clip(shape)
-                .onGloballyPositioned { onPosition(it.boundsInRoot()) }
-                .background(
-                    when {
-                        dragging -> MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
-                        selected -> MaterialTheme.colorScheme.surfaceVariant
-                        else -> Color.Transparent
+                .then(
+                    if (box.basisDp > 0) {
+                        Modifier.widthIn(min = box.minWidthDp.dp, max = box.maxWidthDp.dp).width(box.basisDp.dp)
+                    } else {
+                        Modifier.widthIn(max = box.maxWidthDp.dp)
                     },
                 )
-                .padding(horizontal = 8.dp),
+                .hoverable(tabInteraction)
+                .onGloballyPositioned { onPosition(it.boundsInRoot()) }
+                .semantics { if (dragging) contentDescription = "Wird verschoben" },
+        ) {
+        Row(
+            Modifier
+                .fillMaxHeight()
+                .then(if (box.basisDp > 0) Modifier.fillMaxWidth() else Modifier)
+                .clip(shape)
+                .background(fill)
+                .padding(start = box.padStartDp.dp, end = box.padEndDp.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (dropSide == "before") {
-                Box(Modifier.padding(end = 2.dp).width(2.dp).height(16.dp).background(MaterialTheme.colorScheme.primary))
-            }
-            Text(
-                buildString {
-                    if (pinned) append("● ")
-                    append(name)
-                    if (inSplit) append(" ‖")
-                },
-                fontSize = 12.sp,
-                color = if (selected) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
+            Row(
+                Modifier
+                    .then(if (box.basisDp > 0) Modifier.weight(1f) else Modifier)
+                    .padding(horizontal = ch.fasrv.fanotes.desk.NOTE_TAB_MAIN_PAD_DP.dp)
                     .onGloballyPositioned { textLeft[0] = it.boundsInRoot().left }
                     .pointerInput(path, restartKey) {
                     awaitEachGesture {
@@ -652,23 +725,91 @@ private fun NoteTabChip(
                         }
                     }
                 },
-            )
-            if (unsaved) {
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.NOTE_TAB_GAP_DP.dp),
+            ) {
+                Icon(
+                    when (glyph) {
+                        "pin" -> Icons.Filled.PushPin
+                        "pdf" -> Icons.Filled.PictureAsPdf
+                        else -> Icons.Filled.Description
+                    },
+                    contentDescription = null,
+                    modifier = Modifier.size(
+                        (if (glyph == "pin") ch.fasrv.fanotes.desk.NOTE_TAB_PIN_DP else ch.fasrv.fanotes.desk.NOTE_TAB_FILE_DP).dp,
+                    ),
+                    tint = if (glyph == "pin") accent else titleColor,
+                )
+                Text(
+                    name,
+                    fontSize = 12.sp,
+                    color = titleColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = box.basisDp > 0),
+                )
+                if (inSplit) {
+                    Icon(
+                        Icons.Filled.ViewColumn,
+                        contentDescription = "In der zweiten Spalte",
+                        modifier = Modifier.size(ch.fasrv.fanotes.desk.NOTE_TAB_SPLIT_DP.dp),
+                        tint = accent,
+                    )
+                }
+                if (unsaved) {
+                    Box(
+                        Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary)
+                            .semantics { contentDescription = "Noch nicht gespeichert" },
+                    )
+                }
+            }
+            if (!pinned) {
+                val closeInteraction = remember(path) { MutableInteractionSource() }
+                val closeHovered by closeInteraction.collectIsHoveredAsState()
+                val closePressed by closeInteraction.collectIsPressedAsState()
+                val showClose = ch.fasrv.fanotes.desk.noteTabShowsClose(selected, pinned, hot || closeHovered || closePressed)
                 Box(
                     Modifier
-                        .padding(end = 4.dp)
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary)
-                        .semantics { contentDescription = "Noch nicht gespeichert" },
-                )
+                        .size(ch.fasrv.fanotes.desk.NOTE_TAB_CLOSE_DP.dp)
+                        .alpha(if (showClose) 1f else 0f)
+                        .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.NOTE_TAB_CLOSE_RADIUS_DP.dp))
+                        .background(
+                            if (showClose && (closeHovered || closePressed)) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
+                        )
+                        .hoverable(closeInteraction)
+                        .clickable(
+                            interactionSource = closeInteraction,
+                            indication = null,
+                            onClickLabel = "Tab schließen",
+                            onClick = onClose,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = "$name schließen",
+                        modifier = Modifier.size(ch.fasrv.fanotes.desk.NOTE_TAB_CLOSE_ICON_DP.dp),
+                        tint = titleColor,
+                    )
+                }
             }
-            if (ch.fasrv.fanotes.desk.noteTabShowsClose(selected, pinned)) {
-                Text("×", modifier = Modifier.clickable(onClick = onClose).padding(start = 4.dp), fontSize = 12.sp)
-            }
-            if (dropSide == "after") {
-                Box(Modifier.padding(start = 2.dp).width(2.dp).height(16.dp).background(MaterialTheme.colorScheme.primary))
-            }
+        }
+        if (dropSide == "before" || dropSide == "after") {
+            val before = dropSide == "before"
+            Box(
+                Modifier
+                    .align(if (before) Alignment.CenterStart else Alignment.CenterEnd)
+                    .offset(x = (if (before) -1 else 1).dp)
+                    .padding(vertical = ch.fasrv.fanotes.desk.NOTE_TAB_DROP_INSET_DP.dp)
+                    .fillMaxHeight()
+                    .width(ch.fasrv.fanotes.desk.NOTE_TAB_DROP_WIDTH_DP.dp)
+                    .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.NOTE_TAB_DROP_RADIUS_DP.dp))
+                    .background(MaterialTheme.colorScheme.primary),
+            )
+        }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(

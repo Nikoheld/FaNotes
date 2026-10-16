@@ -130,8 +130,9 @@ val RIBBON_TOOLS = listOf(
 fun ribbonToolLabel(open: Boolean) = if (open) "Weniger" else "Werkzeuge"
 
 /**
- * Current note tab from the stylesheet: 28px tall, 6px corners, 4px by 2px
- * margin. A pinned tab is narrower. The close mark shows on the active tab.
+ * Note tab after the later chrome pass. The bar itself is `--bg`. Each tab is
+ * 28px tall with 6px corners and a 4×2px margin. An open tab prefers 168px.
+ * A pinned tab shrinks to its label, up to 150px, and drops the close control.
  */
 data class NoteTabBox(
     val heightDp: Int,
@@ -140,15 +141,73 @@ data class NoteTabBox(
     val marginYDp: Int,
     val minWidthDp: Int,
     val maxWidthDp: Int,
+    val basisDp: Int,
+    val padStartDp: Int,
+    val padEndDp: Int,
 )
 
 fun noteTabBox(pinned: Boolean): NoteTabBox = if (pinned) {
-    NoteTabBox(28, 6, 2, 4, 0, 150)
+    NoteTabBox(28, 6, 2, 4, 0, 150, 0, 8, 8)
 } else {
-    NoteTabBox(28, 6, 2, 4, 118, 196)
+    NoteTabBox(28, 6, 2, 4, 118, 196, 168, 8, 5)
 }
 
-fun noteTabShowsClose(selected: Boolean, pinned: Boolean): Boolean = selected && !pinned
+/** The later pass paints the tab bar with `--bg`, not the elevated surface. */
+const val NOTE_TAB_BAR_FILL = "bg"
+
+const val NOTE_TAB_GAP_DP = 7
+const val NOTE_TAB_MAIN_PAD_DP = 3
+const val NOTE_TAB_FILE_DP = 13
+const val NOTE_TAB_PIN_DP = 12
+const val NOTE_TAB_SPLIT_DP = 11
+const val NOTE_TAB_CLOSE_DP = 21
+const val NOTE_TAB_CLOSE_RADIUS_DP = 5
+const val NOTE_TAB_CLOSE_ICON_DP = 12
+const val NOTE_TAB_HOVER_ALPHA = 0.04f
+const val NOTE_TAB_DROP_WIDTH_DP = 2
+const val NOTE_TAB_DROP_INSET_DP = 5
+const val NOTE_TAB_DROP_RADIUS_DP = 2
+
+/** History buttons keep the 33px row. The later pass sets both labels to weight 500. */
+const val NOTE_NAV_HEIGHT_DP = 33
+const val NOTE_NAV_BACK_PAD_DP = 10
+const val NOTE_NAV_GAP_DP = 5
+const val NOTE_NAV_FORWARD_DP = 30
+const val NOTE_NAV_ICON_DP = 14
+const val NOTE_NAV_FONT_SP = 12
+const val NOTE_NAV_WEIGHT = 500
+const val NOTE_NAV_DISABLED_ALPHA = 0.38f
+const val NOTE_NAV_HOVER_ALPHA = 0.05f
+
+/** `--border` is the body ink at 9%. The back button's right rule is 55% of that, because Vorwärts follows it. */
+const val NOTE_TAB_RULE_ALPHA = 0.09f
+const val NOTE_NAV_RULE_MIX = 0.55f
+
+const val NOTE_TAB_ACCENT_DARK = 0xFF8EC4E0.toInt()
+const val NOTE_TAB_ACCENT_LIGHT = 0xFF1A6690.toInt()
+
+fun noteTabAccentArgb(dark: Boolean) = if (dark) NOTE_TAB_ACCENT_DARK else NOTE_TAB_ACCENT_LIGHT
+
+fun noteNavRuleAlpha(back: Boolean): Float =
+    if (back) NOTE_TAB_RULE_ALPHA * NOTE_NAV_RULE_MIX else NOTE_TAB_RULE_ALPHA
+
+/** Pin, PDF file, or note file. A pin replaces the file glyph. */
+fun noteTabGlyph(path: String, pinned: Boolean): String = when {
+    pinned -> "pin"
+    path.endsWith(".pdf", ignoreCase = true) -> "pdf"
+    else -> "note"
+}
+
+/** Active tabs use body text. A split companion uses `--text-soft`. */
+fun noteTabInk(selected: Boolean, inSplit: Boolean): String = when {
+    selected -> "text"
+    inSplit -> "soft"
+    else -> "muted"
+}
+
+/** The close control is in the layout for every unpinned tab, and visible on the active tab or on hover. */
+fun noteTabShowsClose(selected: Boolean, pinned: Boolean, hovered: Boolean = false): Boolean =
+    !pinned && (selected || hovered)
 
 fun ribbonItemActive(id: String, destination: String, penOpen: Boolean): Boolean = when (id) {
     "pen" -> penOpen && destination == "notes"
