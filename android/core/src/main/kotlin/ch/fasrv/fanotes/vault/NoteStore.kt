@@ -45,6 +45,7 @@ interface VaultIo {
     fun mtime(path: String): Long
     fun list(directory: String): List<VaultEntry>
     fun walkFiles(): List<VaultEntry>
+    fun mkdir(path: String)
 }
 
 data class VaultEntry(val path: String, val directory: Boolean, val size: Long, val mtimeMs: Long)
@@ -329,6 +330,201 @@ class NoteStore(private val io: VaultIo) {
         for (companion in companions.distinct()) if (io.exists(companion)) io.delete(companion)
     }
 
+    /**
+     * Moves a note or folder into `.fanotes/trash`. The ink asset moves with it.
+     * Worksheet files stay, because another note can still point at them.
+     */
+    fun trashEntry(path: String, id: String, now: String): TrashItem {
+        val normalized = normalize(path)
+        if (normalized == ".fanotes" || normalized.startsWith(".fanotes/")) {
+            throw IllegalArgumentException("Dieser Eintrag kann nicht in den Papierkorb.")
+        }
+        val bundle = trashBundle(id)
+        if (io.exists(bundle) || io.exists(TRASH_INDEX) && readTrashIndex(io).any { it.id == id }) {
+            throw IllegalArgumentException("Der Papierkorb-Eintrag existiert schon.")
+        }
+        val folder = isDirectory(normalized)
+        io.mkdir(bundle)
+        if (folder) {
+            val inside = io.walkFiles().map { it.path }.filter { it == normalized || it.startsWith("$normalized/") }
+            if (inside.isEmpty() && !io.exists(normalized)) throw IllegalArgumentException("Der Eintrag wurde nicht gefunden.")
+            val assets = referencedAssets(inside)
+            val destParent = if (normalized.contains('/')) "$bundle/${normalized.substringBeforeLast('/')}" else bundle
+            if (destParent != bundle) io.mkdir(destParent)
+            io.move(normalized, "$bundle/$normalized")
+            moveAside(assets, bundle)
+        } else {
+            val files = noteFiles(normalized)
+            if (files.isEmpty()) throw IllegalArgumentException("Der Eintrag wurde nicht gefunden.")
+            moveAside(files + referencedAssets(files), bundle)
+        }
+        val item = TrashItem(id, normalized, folder, now, titleOf(normalized))
+        writeTrashIndex(io, readTrashIndex(io) + item)
+        return item
+    }
+
+    fun listTrash(): List<TrashItem> = listTrashItems(io)
+
+    /** Puts the entry back. A taken name becomes `Name 2`. Returns the restored path. */
+    fun restoreTrash(id: String): String {
+        val items = readTrashIndex(io)
+        val item = items.find { it.id == id } ?: throw IllegalArgumentException("Der Eintrag ist nicht mehr im Papierkorb.")
+        val bundle = trashBundle(id)
+        val files = io.walkFiles().map { it.path }.filter { it.startsWith("$bundle/") }.map { it.removePrefix("$bundle/") }.sorted()
+        val restored = restoredVaultPath(item.path, item.folder) { io.exists(it) }
+        if (files.isEmpty()) {
+            if (!item.folder) throw IllegalArgumentException("Der Papierkorb-Eintrag ist leer.")
+            io.mkdir(restored)
+        } else {
+            for (file in files) {
+                val dest = remapRestoredFile(item.path, restored, file)
+                val parent = dest.substringBeforeLast('/', "")
+                if (parent.isNotEmpty()) io.mkdir(parent)
+                io.move("$bundle/$file", dest)
+            }
+        }
+        if (io.exists(bundle)) io.delete(bundle)
+        writeTrashIndex(io, items.filter { it.id != id })
+        return restored
+    }
+
+    fun purgeTrash(id: String) {
+        val bundle = trashBundle(id)
+        if (io.exists(bundle)) io.delete(bundle)
+        writeTrashIndex(io, readTrashIndex(io).filter { it.id != id })
+    }
+
+    fun emptyTrash() {
+        for (item in readTrashIndex(io)) {
+            val bundle = trashBundle(item.id)
+            if (io.exists(bundle)) io.delete(bundle)
+        }
+        writeTrashIndex(io, emptyList())
+    }
+
+    /** A new note with its own ink id and its own worksheet files. */
+    fun duplicateNote(path: String, now: String = isoNow()): String {
+        val normalized = normalize(path)
+        if (!io.exists(normalized) && !io.exists(companionPath(normalized, FAMD_EXTENSION))) {
+            throw IllegalArgumentException("Die Notiz wurde nicht gefunden.")
+        }
+        val note = readNote(normalized)
+        if (note.kind == NoteKind.PDF) throw IllegalArgumentException(PDF_DUPLICATE_REFUSED)
+        val parent = normalized.substringBeforeLast('/', "")
+        val extension = if (note.kind == NoteKind.PDF) ".pdf" else ".md"
+        val stem = duplicateLeaf(parent, note.title, extension)
+        val newPath = if (parent.isEmpty()) "$stem$extension" else "$parent/$stem$extension"
+        if (note.kind == NoteKind.PDF) {
+            val bytes = io.read(normalized) ?: throw IllegalArgumentException("Die Notiz wurde nicht gefunden.")
+            io.write(newPath, bytes)
+        }
+        val inkId = UUID.randomUUID().toString()
+        val body = copyWorksheets(withFreshInkId(note.markdown, inkId))
+        val payload = (note.payload.deepCopy() as JsonValue.Obj).also {
+            it.put("pageStats", null)
+            it.put("noteBackups", null)
+            val links = ch.fasrv.fanotes.desk.parseNoteLinkMarks(it).map { link ->
+                link.copy(
+                    id = "nl-${UUID.randomUUID().toString().replace("-", "").take(12)}",
+                    sourcePath = newPath,
+                )
+            }
+            if (links.isEmpty()) it.put("noteLinks", null) else it.put("noteLinks", ch.fasrv.fanotes.desk.noteLinksJson(links))
+        }
+        val copy = OpenNote(
+            newPath,
+            note.kind,
+            stem,
+            body,
+            note.document,
+            payload,
+            worksheetIdsFromMarkdown(body),
+            inkId,
+        )
+        save(copy, note.document, body, now)
+        return newPath
+    }
+
+    private fun duplicateLeaf(directory: String, title: String, extension: String): String {
+        val preferred = duplicatePreferredStem(title)
+        var stem = nextFreeLeaf(directory, preferred, extension)
+        if (extension != ".pdf") return stem
+        var index = 2
+        while (io.exists(companionPath(joinLeaf(directory, "$stem$extension"), FAMD_EXTENSION))) {
+            stem = nextFreeLeaf(directory, "$preferred $index", extension)
+            index += 1
+            if (index > 10_000) throw IllegalArgumentException("Es konnte kein eindeutiger Name erzeugt werden.")
+        }
+        return stem
+    }
+
+    private fun joinLeaf(directory: String, leaf: String): String {
+        val folder = directory.trim('/')
+        return if (folder.isEmpty()) leaf else "$folder/$leaf"
+    }
+
+    private fun moveAside(files: List<String>, bundle: String) {
+        for (file in files.distinct()) {
+            if (!io.exists(file)) continue
+            val dest = "$bundle/$file"
+            val parent = dest.substringBeforeLast('/', "")
+            if (parent.isNotEmpty()) io.mkdir(parent)
+            io.move(file, dest)
+        }
+    }
+
+    private fun noteFiles(path: String): List<String> {
+        val extension = extensionOf(path)
+        val candidates = buildList {
+            add(path)
+            if (extension != FAMD_EXTENSION) add(companionPath(path, FAMD_EXTENSION))
+            if (extension != ".md") add(companionPath(path, ".md"))
+            if (extension == ".pdf") add(companionPath(path, FAMD_EXTENSION))
+        }
+        return candidates.distinct().filter { io.exists(it) }
+    }
+
+    private fun referencedAssets(files: List<String>): List<String> {
+        val found = linkedSetOf<String>()
+        for (file in files) {
+            if (extensionOf(file) !in setOf(".md", ".markdown", ".famd")) continue
+            val text = io.read(file)?.decodeToString() ?: continue
+            val id = noteInkId(text) ?: continue
+            val asset = ".fanotes/assets/$id.json"
+            if (io.exists(asset)) found += asset
+        }
+        return found.toList()
+    }
+
+    private fun withFreshInkId(markdown: String, id: String): String {
+        val current = noteInkId(markdown) ?: return ch.fasrv.fanotes.famd.attachNoteInk(markdown, id)
+        return markdown.replaceFirst(
+            Regex("""<!--\s*fanotes-ink:${Regex.escape(current)}\s*-->"""),
+            "<!-- fanotes-ink:$id -->",
+        )
+    }
+
+    private fun copyWorksheets(markdown: String): String {
+        var text = markdown
+        for (id in worksheetIdsFromMarkdown(markdown).distinct()) {
+            val recordPath = worksheetRecordPath(id) ?: continue
+            val raw = io.read(recordPath)?.decodeToString() ?: continue
+            val obj = (runCatching { parseJson(raw) }.getOrNull() as? JsonValue.Obj)?.deepCopy() as? JsonValue.Obj ?: continue
+            val source = ch.fasrv.fanotes.famd.safeWorksheetSource(id, obj.string("sourceRelativePath")) ?: continue
+            val bytes = io.read(source) ?: continue
+            val newId = UUID.randomUUID().toString()
+            val newSource = source.replace(id, newId)
+            val newRecord = worksheetRecordPath(newId) ?: continue
+            obj.put("id", jsonString(newId))
+            obj.put("sourceRelativePath", jsonString(newSource))
+            obj.put("dataRelativePath", jsonString(newRecord))
+            io.write(newSource, bytes)
+            io.write(newRecord, obj.stringify().encodeToByteArray())
+            text = text.replace("fanotes-worksheet:$id", "fanotes-worksheet:$newId")
+        }
+        return text
+    }
+
     private fun writeInkAsset(id: String, ink: JsonValue.Obj) {
         io.write(".fanotes/assets/$id.json", ink.stringify().encodeToByteArray())
     }
@@ -478,6 +674,10 @@ class DirectoryVault(val root: Path) : VaultIo {
         if (Files.exists(target)) throw IllegalArgumentException("An diesem Ort existiert bereits ein Eintrag mit diesem Namen.")
         Files.createDirectories(target.parent)
         Files.move(source, target)
+    }
+
+    override fun mkdir(path: String) {
+        Files.createDirectories(resolve(path))
     }
 
     override fun exists(path: String) = Files.exists(resolve(path))

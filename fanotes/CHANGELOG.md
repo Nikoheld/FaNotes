@@ -2,6 +2,7 @@
 
 ## 2026.10.7
 
+- **Android-Tablet.** Löschen verschiebt in den Papierkorb auf dem Gerät, mit Rückgängig, Wiederherstellen und endgültigem Leeren. Eine Notiz lässt sich wie am Desktop duplizieren, der Wiki-Link kopieren, und `Strg+Umschalt+D` setzt das Datum an der Schreibmarke. Alle Ordner klappen mit einem Klick, die leere Seite zeigt die letzten Notizen, und im Stiftmodus bleibt der Bildschirm drei Minuten an.
 - **Alltag.** Eine Notiz lässt sich duplizieren: Text, Handschrift, Verlinkungen und Arbeitsblätter kommen in eine neue Datei, die Antworten des Originals bleiben dort. Wiki-Link und Pfad kopierst du aus dem Dateimenü, `Strg+Umschalt+D` setzt das Datum an der Schreibmarke ein, alle Ordner klappen mit einem Klick zu, und die leere Seite zeigt die zuletzt geöffneten Notizen.
 - **Kalenderdatei.** Eine ICS-Datei mit Weltzeit oder einer Dauer landet auf der örtlichen Uhrzeit. Dieselbe Datei noch einmal importieren aktualisiert den Termin und nimmt abgesagte Einträge heraus, statt ihn zu verdoppeln.
 - **Bild einfügen.** Ein Screenshot aus der Zwischenablage landet auf der offenen Notiz, auch während der Cursor im Text steht. Text bleibt Text.

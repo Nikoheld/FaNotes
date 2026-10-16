@@ -26,8 +26,8 @@ class ConfirmUxTest {
 
     @Test
     fun deleteAndLinkPromptsUseTheDesktopWording() {
-        assertEquals("Notiz „Vorlesung“ wirklich löschen?", vaultDeleteMessage(folder = false, name = "Vorlesung"))
-        assertEquals("Ordner „Schule“ wirklich löschen?", vaultDeleteMessage(folder = true, name = "Schule"))
+        assertEquals("Notiz „Vorlesung“ in den Papierkorb verschieben?", vaultDeleteMessage(folder = false, name = "Vorlesung"))
+        assertEquals("Ordner „Schule“ in den Papierkorb verschieben?", vaultDeleteMessage(folder = true, name = "Schule"))
         assertEquals(
             "Verlinkung wirklich entfernen? Die verlinkte Notiz bleibt im Vault.",
             noteLinkRemoveMessage(),

@@ -861,6 +861,14 @@ fun remapFolderColors(colors: Map<String, String>, from: String, to: String): Ma
     return if (changed) next else colors
 }
 
+/** Folder colours of a trashed entry leave with it. A restore does not bring them back. */
+fun dropFolderColors(colors: Map<String, String>, path: String): Map<String, String> {
+    val source = path.replace('\\', '/').trim('/')
+    if (source.isEmpty()) return colors
+    val next = colors.filterKeys { it != source && !it.startsWith("$source/") }
+    return if (next.size == colors.size) colors else next
+}
+
 fun withFolderColor(colors: Map<String, String>, path: String, color: String?): Map<String, String> {
     val key = path.replace('\\', '/').trim('/')
     if (color == null) return colors - key

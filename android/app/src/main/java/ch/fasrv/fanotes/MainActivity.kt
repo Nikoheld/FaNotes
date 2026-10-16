@@ -505,6 +505,9 @@ fun FaNotesScreen(
     var mathInput by remember { mutableStateOf("") }
     var mathOutput by remember { mutableStateOf("") }
     var mathOk by remember { mutableStateOf(false) }
+    val undoTrash by model.undoTrash.collectAsStateWithLifecycle()
+    val trashOpen by model.trashOpen.collectAsStateWithLifecycle()
+    val trashItems by model.trashItems.collectAsStateWithLifecycle()
     val wide = LocalConfiguration.current.screenWidthDp >= 840
     val signedIn = sync.account != null
     val syncText = if (syncPending && sync.status != SyncStatus.SYNCING) "Startet…" else syncDetail(sync)
@@ -557,10 +560,34 @@ fun FaNotesScreen(
             "settings" -> model.showDestination("settings")
             "focus" -> model.toggleFocusMode()
             "pen" -> model.togglePen()
+            "stamp" -> model.insertDateStamp()
             else -> if (id.startsWith("tab-")) id.removePrefix("tab-").toIntOrNull()?.let(model::openTabByDigit)
         }
     }
     val focus = desk["focus"] == "on"
+    val view = androidx.compose.ui.platform.LocalView.current
+    var keepScreenAwake by remember { mutableStateOf(false) }
+    LaunchedEffect(showText) {
+        if (showText) {
+            keepScreenAwake = false
+            return@LaunchedEffect
+        }
+        model.notePenActivity()
+        while (true) {
+            val now = System.currentTimeMillis()
+            val until = model.penAwakeUntilMs
+            val stay = until > now
+            if (stay != keepScreenAwake) keepScreenAwake = stay
+            val wait = if (stay) (until - now).coerceIn(500L, 30_000L) else 1_000L
+            kotlinx.coroutines.delay(wait)
+        }
+    }
+    DisposableEffect(keepScreenAwake) {
+        val window = view.context.findActivity()?.window
+        if (keepScreenAwake) window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose { window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+    }
     val chromeBackground = ch.fasrv.fanotes.desk.workspaceBackground(desk["background"])
     val compact = ch.fasrv.fanotes.desk.compactChrome(desk["compact"])
     val glass = ch.fasrv.fanotes.desk.glassChrome(desk["glass"])
@@ -795,6 +822,7 @@ fun FaNotesScreen(
                     onOpenVault = onOpenVault,
                     onPrivateVault = { model.usePrivateVault() },
                     onDelete = { path, folder, name -> model.askDelete(path, folder, name) },
+                    onDuplicate = { model.duplicateNote(it) },
                     onRename = { path, name -> renaming = path to name },
                     renamingPath = renaming?.first,
                     onCommitRename = { path, name ->
@@ -810,6 +838,13 @@ fun FaNotesScreen(
                     onFolderColor = { path, color -> model.setFolderColor(path, color) },
                     expanded = model.expandedFolders.collectAsStateWithLifecycle().value,
                     onToggleFolder = { model.toggleFolder(it) },
+                    onToggleFolders = { model.toggleAllFolders() },
+                    onCopyWiki = { path ->
+                        val link = ch.fasrv.fanotes.vault.wikiLinkForNote(path)
+                        val clipboard = context.getSystemService(ClipboardManager::class.java)
+                        clipboard?.setPrimaryClip(ClipData.newPlainText("Wiki-Link", link))
+                        model.message.value = ch.fasrv.fanotes.vault.WIKI_LINK_COPIED
+                    },
                     onSetFolderExpanded = { path, open -> model.setFolderExpanded(path, open) },
                     onOpenSplit = { model.openInSplit(it) },
                     onCreateNoteIn = { model.createNoteIn(it) },
@@ -924,10 +959,18 @@ fun FaNotesScreen(
             )
         }
             val toast = message
+            LaunchedEffect(toast) {
+                if (toast != ch.fasrv.fanotes.vault.TRASH_NOTICE) model.undoTrash.value = null
+            }
             if (!toast.isNullOrBlank()) {
                 FaNotesToast(
                     toast,
-                onDismiss = { model.message.value = null },
+                onDismiss = {
+                    model.undoTrash.value = null
+                    model.message.value = null
+                },
+                actionLabel = if (undoTrash != null && toast == ch.fasrv.fanotes.vault.TRASH_NOTICE) ch.fasrv.fanotes.vault.TRASH_UNDO else null,
+                onAction = { model.undoLastTrash() },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(
@@ -1064,6 +1107,9 @@ fun FaNotesScreen(
                     "nav-back" -> model.navigateHistory(-1)
                     "nav-forward" -> model.navigateHistory(1)
                     "reopen-tab" -> model.reopenClosedTab()
+                    "duplicate" -> model.duplicateNote()
+                    "trash" -> model.openTrash()
+                    "stamp" -> model.insertDateStamp()
                     "pin-tab" -> model.togglePinTab()
                     "close-others" -> model.closeTabs("others")
                     "close-right" -> model.closeTabs("right")
@@ -1083,6 +1129,15 @@ fun FaNotesScreen(
         model,
         themeId = ch.fasrv.fanotes.desk.themePalette(desk["theme"], androidx.compose.foundation.isSystemInDarkTheme()).id,
     )
+    if (trashOpen) {
+        TrashDialog(
+            trashItems,
+            onRestore = { model.restoreTrash(it) },
+            onPurge = { model.askPurgeTrash(it) },
+            onEmpty = { model.askEmptyTrash() },
+            onDismiss = { model.closeTrash() },
+        )
+    }
     confirm?.let { request ->
         FaNotesConfirmDialog(
             request,
@@ -1396,6 +1451,7 @@ private fun VaultPane(
     onOpenVault: () -> Unit,
     onPrivateVault: () -> Unit,
     onDelete: (String, Boolean, String) -> Unit,
+    onDuplicate: (String) -> Unit = {},
     onRename: (String, String) -> Unit,
     renamingPath: String? = null,
     onCommitRename: (String, String) -> Unit = { _, _ -> },
@@ -1408,6 +1464,8 @@ private fun VaultPane(
     onFolderColor: (String, String?) -> Unit,
     expanded: Set<String>,
     onToggleFolder: (String) -> Unit,
+    onToggleFolders: () -> Unit = {},
+    onCopyWiki: (String) -> Unit = {},
     onSetFolderExpanded: (String, Boolean) -> Unit = { _, _ -> },
     onOpenSplit: (String) -> Unit,
     onCreateNoteIn: (String) -> Unit = {},
@@ -1473,6 +1531,11 @@ private fun VaultPane(
             SidebarLabelButton("Sync", onSync, description = syncLabel.ifBlank { "Sync" })
             SidebarLabelButton("Bild", onImportImage)
             SidebarLabelButton("Blatt", onImportSheet)
+            SidebarLabelButton(
+                if (expanded.isEmpty()) "Aufklappen" else "Zuklappen",
+                onToggleFolders,
+                description = if (expanded.isEmpty()) "Alle Ordner aufklappen" else "Alle Ordner zuklappen",
+            )
         }
         if (conflicts.isNotEmpty()) {
             Text("Konflikte", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 12.dp))
@@ -1577,7 +1640,7 @@ private fun VaultPane(
         ) {
             items(tree, key = { it.path }) { node ->
                 NoteRow(
-                    node, selected, splitPath, treeFocus, colors, expanded, onOpen, onDelete, onRename, renamingPath, onCommitRename, onCancelRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
+                    node, selected, splitPath, treeFocus, colors, expanded, onOpen, onDelete, onDuplicate, onCopyWiki, onRename, renamingPath, onCommitRename, onCancelRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
                     onCreateNoteIn, onCreateFolderIn, bookFolders, onImportPdfIn, onImportBook, onDetachBook,
                     {
                         treeFocus = it
@@ -1664,6 +1727,7 @@ private fun treeMenuImage(id: String) = when (id) {
     "columns" -> Icons.Filled.ViewColumn
     "pencil" -> Icons.Filled.Edit
     "move" -> Icons.AutoMirrored.Filled.DriveFileMove
+    "copy" -> Icons.Filled.FileCopy
     "trash" -> Icons.Filled.Delete
     else -> Icons.Filled.Folder
 }
@@ -1706,6 +1770,8 @@ private fun NoteRow(
     expanded: Set<String>,
     onOpen: (String) -> Unit,
     onDelete: (String, Boolean, String) -> Unit,
+    onDuplicate: (String) -> Unit = {},
+    onCopyWiki: (String) -> Unit = {},
     onRename: (String, String) -> Unit,
     renamingPath: String? = null,
     onCommitRename: (String, String) -> Unit = { _, _ -> },
@@ -2109,6 +2175,8 @@ private fun NoteRow(
                         TreeMenuLabel(ch.fasrv.fanotes.desk.TREE_MENU_MANAGE)
                         TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_RENAME) { menu = false; onRename(node.path, node.name) }
                         TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_MOVE) { menu = false; onMove(node.path) }
+                        if (!folder) TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_DUPLICATE) { menu = false; onDuplicate(node.path) }
+                        if (!folder) TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_WIKI) { menu = false; onCopyWiki(node.path) }
                         TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_DELETE, danger = true) { menu = false; onDelete(node.path, folder, node.name) }
                     }
                 }
@@ -2183,7 +2251,7 @@ private fun NoteRow(
     if (openFolder) {
         node.children.forEach {
             NoteRow(
-                it, selected, splitPath, treeFocus, colors, expanded, onOpen, onDelete, onRename, renamingPath, onCommitRename, onCancelRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
+                it, selected, splitPath, treeFocus, colors, expanded, onOpen, onDelete, onDuplicate, onCopyWiki, onRename, renamingPath, onCommitRename, onCancelRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
                 onCreateNoteIn, onCreateFolderIn, bookFolders, onImportPdfIn, onImportBook, onDetachBook,
                 onTreeFocus,
                 localFolders, onToggleLocal, compact, rowHeightDp, radiusDp,
@@ -2572,6 +2640,8 @@ private fun EmptyEditor(
     onPdf: () -> Unit,
     onSheet: () -> Unit,
     onPalette: () -> Unit,
+    recent: List<Pair<String, String>> = emptyList(),
+    onOpenRecent: (String) -> Unit = {},
     modifier: Modifier,
 ) {
     val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
@@ -2622,6 +2692,28 @@ private fun EmptyEditor(
             ) {
                 Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(13.dp), tint = ink.muted)
                 Text(ch.fasrv.fanotes.desk.PLACEHOLDER_COMMAND, fontSize = 12.sp, color = ink.muted)
+            }
+            if (recent.isNotEmpty()) {
+                Text(
+                    "Zuletzt geöffnete Notizen",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = ink.muted,
+                    modifier = Modifier.padding(top = 18.dp, bottom = 6.dp),
+                )
+                recent.forEach { (path, title) ->
+                    Text(
+                        title,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { onOpenRecent(path) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
             }
         }
     }
@@ -2721,7 +2813,15 @@ private fun NotePage(
             }
         }
         if (path == null) {
-            EmptyEditor(onCreateNote, onImportPdf, onImportSheet, onPalette, Modifier.weight(1f).fillMaxWidth())
+            EmptyEditor(
+                onCreateNote,
+                onImportPdf,
+                onImportSheet,
+                onPalette,
+                recent = model.recentNotePaths().map { path -> path to path.substringAfterLast('/').substringBeforeLast('.') },
+                onOpenRecent = { model.openPath(it) },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
             return@Column
         }
         PageSurface(
@@ -2871,6 +2971,11 @@ private fun PageSurface(
             page.onPasteImage = { name, bytes, mime -> model.importBytes(name, bytes, pdf = false, mime = mime) }
             page.onFollowLink = { target, web, anchor -> openFollowedLink(page.context, model, target, web, anchor) }
             page.onVisibleMarkdown = { previous, next -> model.updateVisibleMarkdown(previous, next) }
+            val pendingStamp = model.stampRequest.value
+            if (!pendingStamp.isNullOrEmpty()) {
+                model.consumeStamp()
+                if (!page.insertStamp(pendingStamp)) model.message.value = ch.fasrv.fanotes.vault.STAMP_FAILED
+            }
             page.onRememberCamera = { path, zoom, rotation, centreX, centreY, pageWidth, pageHeight, anchor ->
                 model.rememberPaperCamera(path, zoom, rotation, centreX, centreY, pageWidth, pageHeight, anchor)
             }
@@ -3416,6 +3521,94 @@ private fun NameDialog(
     PromptCard(title, onDismiss = { onDone(null) }, confirmLabel = confirm, confirmEnabled = name.isNotBlank(), onConfirm = { onDone(name) }) {
         PromptField(name, { name = it }, placeholder, onDone = { if (name.isNotBlank()) onDone(name) })
     }
+}
+
+@Composable
+private fun TrashDialog(
+    items: List<ch.fasrv.fanotes.vault.TrashItem>,
+    onRestore: (String) -> Unit,
+    onPurge: (String) -> Unit,
+    onEmpty: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        val scrim = remember { MutableInteractionSource() }
+        val card = remember { MutableInteractionSource() }
+        val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.PROMPT_RADIUS_DP.dp)
+        val screen = LocalConfiguration.current
+        val shadow = ch.fasrv.fanotes.desk.calEditorShadow(MaterialTheme.colorScheme.background.luminance() < 0.5f)
+        val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+        Box(
+            Modifier.fillMaxSize().background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM)).clickable(interactionSource = scrim, indication = null, onClick = onDismiss),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                Modifier
+                    .padding(ch.fasrv.fanotes.desk.PROMPT_INSET_DP.dp)
+                    .width(ch.fasrv.fanotes.desk.promptWidthDp(screen.screenWidthDp).dp)
+                    .clickable(interactionSource = card, indication = null, onClick = {})
+                    .shadow(shadow.yDp.dp, shape, ambientColor = Color.Black.copy(alpha = shadow.alpha), spotColor = Color.Black.copy(alpha = shadow.alpha))
+                    .clip(shape)
+                    .border(1.dp, rule, shape)
+                    .background(LocalStatusInk.current.panelStrong)
+                    .padding(ch.fasrv.fanotes.desk.PROMPT_PAD_DP.dp),
+                verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.PROMPT_GAP_DP.dp),
+            ) {
+                Text("Papierkorb", fontSize = ch.fasrv.fanotes.desk.PROMPT_TITLE_SP.sp, fontWeight = FontWeight(650), letterSpacing = (-0.02).em)
+                Text(
+                    "Gelöschte Notizen bleiben auf diesem Tablet. Andere Geräte sehen sie nicht.",
+                    fontSize = 12.sp,
+                    color = LocalStatusInk.current.muted,
+                    lineHeight = 17.sp,
+                )
+                if (items.isEmpty()) {
+                    Text("Der Papierkorb ist leer.", fontSize = 14.sp, color = LocalStatusInk.current.soft)
+                } else {
+                    Column(
+                        Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        items.forEach { item ->
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(item.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    "${if (item.folder) "Ordner" else "Notiz"} · ${item.path}",
+                                    fontSize = 12.sp,
+                                    color = LocalStatusInk.current.muted,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(trashWhen(item.deletedAt), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextButton(onClick = { onRestore(item.id) }) { Text("Wiederherstellen") }
+                                    TextButton(onClick = { onPurge(item.id) }) { Text("Endgültig löschen") }
+                                }
+                            }
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                    if (items.isNotEmpty()) PromptButton("Papierkorb leeren", primary = false, onClick = onEmpty)
+                    PromptButton("Schließen", primary = true, onClick = onDismiss)
+                }
+            }
+        }
+    }
+}
+
+private fun trashWhen(iso: String): String {
+    val instant = runCatching { java.time.Instant.parse(iso) }.getOrNull() ?: return iso
+    val local = instant.atZone(java.time.ZoneId.systemDefault())
+    return "%02d.%02d.%04d %02d:%02d".format(local.dayOfMonth, local.monthValue, local.year, local.hour, local.minute)
+}
+
+private fun android.content.Context.findActivity(): android.app.Activity? {
+    var current = this
+    while (current is android.content.ContextWrapper) {
+        if (current is android.app.Activity) return current
+        current = current.baseContext
+    }
+    return null
 }
 
 @Composable

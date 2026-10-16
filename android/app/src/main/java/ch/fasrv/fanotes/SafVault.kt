@@ -54,6 +54,18 @@ class SafVault(private val context: Context, private val tree: Uri) : VaultIo {
         if (!moved.renameTo(targetName)) error("Umbenennen ist fehlgeschlagen.")
     }
 
+    override fun mkdir(path: String) {
+        var current = root
+        for (part in normalize(path).split('/')) {
+            val child = current.findFile(part)
+            current = when {
+                child == null -> current.createDirectory(part) ?: error("Der Ordner konnte nicht erstellt werden.")
+                child.isDirectory -> child
+                else -> error("An diesem Ort liegt schon eine Datei.")
+            }
+        }
+    }
+
     override fun exists(path: String): Boolean = locate(normalize(path), create = false) != null
 
     override fun mtime(path: String): Long = locate(normalize(path), create = false)?.lastModified() ?: 0L
