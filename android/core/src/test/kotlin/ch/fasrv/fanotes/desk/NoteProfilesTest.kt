@@ -258,6 +258,40 @@ class NoteProfilesTest {
     }
 
     @Test
+    fun theWelcomePreviewTagsFloatOnTheWindow() {
+        val wide = firstRunPreviewFloatOne(761)
+        val narrow = firstRunPreviewFloatOne(760)
+        val found = firstRunPreviewFloatTwo()
+        assertEquals(0.24f, wide.topFraction)
+        assertEquals(-25, wide.rightDp)
+        assertEquals(-8, narrow.rightDp)
+        assertEquals(true, wide.fromTop)
+        assertEquals(FirstRunPreviewFloatOffset(25, 0.24f, 0), firstRunPreviewFloatOffset(wide))
+        assertEquals(FirstRunPreviewFloatOffset(8, 0.24f, 0), firstRunPreviewFloatOffset(narrow))
+        assertEquals(28, found.rightDp)
+        assertEquals(-16, found.bottomDp)
+        assertEquals(false, found.fromTop)
+        assertEquals(FirstRunPreviewFloatOffset(-28, 0f, 16), firstRunPreviewFloatOffset(found))
+        assertEquals(8, FIRST_RUN_PREVIEW_FLOAT_PAD_BLOCK_DP)
+        assertEquals(10, FIRST_RUN_PREVIEW_FLOAT_PAD_INLINE_DP)
+        assertEquals(6, FIRST_RUN_PREVIEW_FLOAT_GAP_DP)
+        assertEquals(9, FIRST_RUN_PREVIEW_FLOAT_RADIUS_DP)
+        assertEquals(8, FIRST_RUN_PREVIEW_FLOAT_SP)
+        assertEquals(600, FIRST_RUN_PREVIEW_FLOAT_WEIGHT)
+        assertEquals(15, FIRST_RUN_PREVIEW_FLOAT_ICON_DP)
+        assertEquals(0xFF8EC4E0.toInt(), firstRunPreviewFloatIcon(dark = true))
+        assertEquals(0xFF1A6690.toInt(), firstRunPreviewFloatIcon(dark = false))
+        assertEquals(0xEDFFFFFF.toInt(), firstRunPreviewFloatFill(0xFFFFFFFF.toInt()))
+        assertEquals(0x29FFFFFF, firstRunPreviewFloatBorder(dark = true))
+        assertEquals(0x2937352F, firstRunPreviewFloatBorder(dark = false))
+        assertEquals(0, FIRST_RUN_PREVIEW_FLOAT_SHADOW_X_DP)
+        assertEquals(13, FIRST_RUN_PREVIEW_FLOAT_SHADOW_Y_DP)
+        assertEquals(35, FIRST_RUN_PREVIEW_FLOAT_SHADOW_BLUR_DP)
+        assertEquals(0.2f, FIRST_RUN_PREVIEW_FLOAT_SHADOW_ALPHA)
+        assertEquals(0x33000000, firstRunPreviewFloatShadowColor())
+    }
+
+    @Test
     fun folderButtonsUseTheirOwnColor() {
         assertEquals(0xFF2A6F97.toInt(), firstRunFolderArgb("#2a6f97"))
         assertEquals(0xFF2A6F97.toInt(), firstRunFolderArgb(profileFolders("school").first { it.name == "Mathematik" }.color))
