@@ -2018,6 +2018,13 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
     }
     if trimmed.contains('/') {
         // `16:00: 10/13/2026` finalizes the second and then sees `/`.
+        // `16: GMT+5: 2026/10/13` uses the slashes as separators: 10 is the
+        // offset minute and 13 is the clock minute.
+        match slash_after_open_field(trimmed) {
+            OpenSlash::Illegal => return None,
+            OpenSlash::Split(next) => return unix_millis_from_iso(&next),
+            OpenSlash::Keep => {}
+        }
         if open_clock_before_slash(trimmed) {
             return None;
         }
@@ -3122,6 +3129,116 @@ fn legacy_words(value: &str) -> Vec<&str> {
         }
     }
     words
+}
+
+enum OpenSlash {
+    Illegal,
+    Split(String),
+    Keep,
+}
+
+fn field_expects(index: usize, number: i32) -> bool {
+    match index {
+        1 | 2 => (0..=59).contains(&number),
+        3 => (0..=999).contains(&number),
+        _ => false,
+    }
+}
+
+fn open_clock_index(token: &str) -> usize {
+    let extra = token.chars().rev().take_while(|character| *character == ':').count();
+    let fields = token
+        .trim_end_matches(':')
+        .split(':')
+        .filter(|part| !part.is_empty())
+        .count();
+    if extra >= 2 && fields == 1 {
+        2
+    } else {
+        fields.min(3)
+    }
+}
+
+/// A slash run while a clock field or offset minute is open. `10/13/2026`
+/// after `16:` finalizes the minute and then sees `/`, so it is empty.
+/// `2026/10/13` after `GMT+5:` lets 10 fill the offset and 13 fill the clock.
+fn slash_after_open_field(value: &str) -> OpenSlash {
+    let tokens: Vec<&str> = value
+        .split(is_date_parse_space)
+        .filter(|token| !token.is_empty())
+        .collect();
+    let mut index = 0usize;
+    let mut offset_open = false;
+    let mut changed = false;
+    let mut out = Vec::with_capacity(tokens.len());
+    for token in tokens {
+        let numeric_slash = token.contains('/')
+            && !token.split('/').any(|part| part.is_empty())
+            && token
+                .split('/')
+                .all(|part| part.bytes().all(|byte| byte.is_ascii_digit()));
+        if numeric_slash && (field_expects(index, 0) || offset_open || (1..=3).contains(&index)) {
+            let parts: Vec<&str> = token.split('/').collect();
+            let mut idx = index;
+            let mut off = offset_open;
+            for (part_index, part) in parts.iter().enumerate() {
+                let number: i32 = part.parse().unwrap_or(i32::MAX);
+                let more = part_index + 1 < parts.len();
+                if off && (0..=59).contains(&number) {
+                    off = false;
+                    continue;
+                }
+                if field_expects(idx, number) {
+                    if more {
+                        return OpenSlash::Illegal;
+                    }
+                    idx = 4;
+                    continue;
+                }
+            }
+            out.push(token.replace('/', " "));
+            changed = true;
+            index = 4;
+            offset_open = false;
+            continue;
+        }
+        out.push(token.to_string());
+        if token_is_open_offset(token) {
+            offset_open = true;
+        } else if token_is_open_clock(token) {
+            index = open_clock_index(token);
+        } else if token.starts_with(|character: char| character.is_ascii_digit())
+            && token.contains(':')
+            && !token.ends_with(':')
+        {
+            index = 4;
+            offset_open = false;
+        } else if slash_is_an_offset_separator(token) {
+            if let Some(number) = token.rsplit('/').next().and_then(|part| part.parse::<i32>().ok())
+            {
+                if field_expects(index, number) {
+                    index = 4;
+                }
+            }
+            offset_open = false;
+        } else if token.starts_with(['+', '-']) || exact_zone_keyword(token) {
+            offset_open = false;
+        } else if let Ok(number) = token.parse::<i32>() {
+            if offset_open && (0..=59).contains(&number) {
+                offset_open = false;
+            } else if field_expects(index, number) {
+                index = 4;
+            }
+        }
+    }
+    if !changed {
+        return OpenSlash::Keep;
+    }
+    let mut next = out.join(" ");
+    if value.starts_with(is_date_parse_space) {
+        next.insert(0, ' ');
+    }
+    OpenSlash::Split(next)
 }
 
 /// `16:00: 10/13/2026` is empty. The slash follows a finished field.
@@ -11992,6 +12109,29 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13 16: +5.30EST"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 16::30 +5.10"), None);
         assert_eq!(unix_millis_from_iso("16: +5.30"), None);
+        assert_eq!(
+            unix_millis_from_iso("16: GMT+5: 2026/10/13"),
+            Some(1_767_265_380_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:: GMT+5: 2026/10/13"),
+            Some(1_767_264_613_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16: GMT+5: 2026/1/2"),
+            Some(1_767_265_260_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16: +5/30 10/13/2026"),
+            Some(1_791_891_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("16:00 GMT+5: 10/13/2026"), None);
+        assert_eq!(unix_millis_from_iso("16: +5 10/13/2026"), None);
+        assert_eq!(unix_millis_from_iso("16: 10/13/2026"), None);
+        assert_eq!(unix_millis_from_iso("16: GMT+5 10/13/2026"), None);
+        assert_eq!(unix_millis_from_iso("16: GMT+5:30 10/13/2026"), None);
+        assert_eq!(unix_millis_from_iso("16: +5 2026/10/13"), None);
+        assert_eq!(unix_millis_from_iso("16:: 2026/1/2"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13T16:00+5-30"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13-5"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00 --5"), None);
