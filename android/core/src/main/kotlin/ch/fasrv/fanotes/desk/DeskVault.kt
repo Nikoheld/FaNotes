@@ -516,6 +516,12 @@ const val CAL_ALL_DAY = "Ganztägig"
 const val CAL_DAILY = "Tagesnotiz"
 const val CAL_EMPTY = "Keine Termine in diesem Zeitraum."
 const val CAL_NEW_EVENT = "Neuer Termin"
+/**
+ * Desktop toolbar, immediately after `.cal-primary` (Neuer Termin).
+ * Both use `.cal-today`: 30px tall, 10px horizontal padding, 8px radius,
+ * panel fill and a border. The toolbar stays one line.
+ */
+val CAL_TOOLBAR_FILE_ACTIONS = listOf("Exportieren", "Importieren")
 const val CAL_WEEK = "KW"
 const val CAL_EVENT_RADIUS_DP = 6
 const val CAL_EVENT_PAD_X_DP = 6
