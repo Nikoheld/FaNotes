@@ -291,38 +291,61 @@ const val MODE_SWITCH_DP = 28
 const val MODE_SWITCH_RADIUS_DP = 8
 const val MODE_BUTTON_DP = 24
 const val MODE_BUTTON_RADIUS_DP = 6
-const val MODE_ACTIVE_RING = 0.34f
 const val FORMAT_DISABLED_ALPHA = 0.48f
 
-/** Mode switch track is `--panel`. The active segment is `--panel-active`. */
-fun modeSwitchTrackColor(dark: Boolean): Int = if (dark) 0xFF202020.toInt() else 0xFFF7F6F3.toInt()
+/** Later chrome pass: the active segment is `--panel-strong` with a 1×2px shadow at 6% black. */
+const val MODE_ACTIVE_SHADOW_Y_DP = 1
+const val MODE_ACTIVE_SHADOW_BLUR_DP = 2
+const val MODE_ACTIVE_SHADOW_ALPHA = 0.06f
 
-fun modeSwitchActiveColor(dark: Boolean): Int = if (dark) 0xFF3A3A3A.toInt() else 0xFFE3E2DE.toInt()
-
-/** Inactive labels are muted. The active label is the body text. */
-fun modeSwitchInk(dark: Boolean, selected: Boolean): Int = when {
-    selected && dark -> 0xFFEDEDEC.toInt()
-    selected -> 0xFF37352F.toInt()
-    dark -> 0xFFB3B3AE.toInt()
-    else -> 0xFF5E5C57.toInt()
+private fun cssHex(hex: String): Int {
+    val rgb = hex.removePrefix("#").toLong(16).toInt() and 0xFFFFFF
+    return 0xFF000000.toInt() or rgb
 }
 
-/** Format chips use `--text-soft`. */
-fun formatChipInk(dark: Boolean): Int = if (dark) 0xFFCFCFCA.toInt() else 0xFF4E4C47.toInt()
+/** Mode switch track is `--panel` for the active theme, not only dark or light. */
+fun modeSwitchTrackColor(theme: String?, systemDark: Boolean): Int =
+    cssHex(themePalette(theme, systemDark).surface)
 
-/** Toolbar fill is `--bg`. The bottom rule is `--border` at 9%. */
-fun editorToolbarColor(dark: Boolean): Int = if (dark) 0xFF191919.toInt() else 0xFFFFFFFF.toInt()
+fun modeSwitchTrackColor(dark: Boolean): Int = modeSwitchTrackColor(if (dark) "dark" else "light", dark)
+
+/** Active segment fill is `--panel-strong` after the later chrome pass. */
+fun modeSwitchActiveColor(theme: String?, systemDark: Boolean): Int =
+    cssHex(themePalette(theme, systemDark).panelStrong)
+
+fun modeSwitchActiveColor(dark: Boolean): Int = modeSwitchActiveColor(if (dark) "dark" else "light", dark)
+
+/** Inactive labels are muted. The active label is the body text. */
+fun modeSwitchInk(theme: String?, systemDark: Boolean, selected: Boolean): Int {
+    val palette = themePalette(theme, systemDark)
+    return cssHex(if (selected) palette.text else palette.muted)
+}
+
+fun modeSwitchInk(dark: Boolean, selected: Boolean): Int =
+    modeSwitchInk(if (dark) "dark" else "light", dark, selected)
+
+/** Format chips use `--text-soft`. */
+fun formatChipInk(theme: String?, systemDark: Boolean): Int =
+    cssHex(themePalette(theme, systemDark).soft)
+
+fun formatChipInk(dark: Boolean): Int = formatChipInk(if (dark) "dark" else "light", dark)
+
+/** `box-shadow: 0 1px 2px rgba(0, 0, 0, .06)`. */
+fun modeSwitchShadowColor(): Int {
+    val alpha = kotlin.math.round(255f * MODE_ACTIVE_SHADOW_ALPHA).toInt().coerceIn(0, 255)
+    return (alpha shl 24)
+}
+
+/** Toolbar fill is `--bg` for the active theme. */
+fun editorToolbarColor(theme: String?, systemDark: Boolean): Int =
+    cssHex(themePalette(theme, systemDark).background)
+
+fun editorToolbarColor(dark: Boolean): Int = editorToolbarColor(if (dark) "dark" else "light", dark)
 
 fun editorToolbarRule(dark: Boolean): Int {
     val alpha = kotlin.math.round(255f * 0.09f).toInt().coerceIn(0, 255)
     val rgb = if (dark) 0xFFFFFF else 0x37352F
     return (alpha shl 24) or rgb
-}
-
-/** Inset ring: 34% of the accent over transparency. */
-fun modeSwitchRing(accent: Int): Int {
-    val alpha = kotlin.math.round(255f * MODE_ACTIVE_RING).toInt().coerceIn(0, 255)
-    return (alpha shl 24) or (accent and 0x00FFFFFF)
 }
 
 /** Desktop sidebar range 210–430, default 286. */
