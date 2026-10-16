@@ -367,7 +367,7 @@ fun previewMarkerEnd(text: String, kind: String): Int {
     val rest = text.drop(indent)
     val marker = when (kind) {
         "bullet" -> if (rest.startsWith("• ")) "• " else ""
-        "number" -> Regex("""^\d+\.\s+""").find(rest)?.value.orEmpty()
+        "number" -> Regex("""^\d+[.)]\s+""").find(rest)?.value.orEmpty()
         else -> ""
     }
     return if (marker.isEmpty()) 0 else indent + marker.length

@@ -104,4 +104,13 @@ class PaperMarkdownTest {
         )
         assertEquals(emptyList(), paperImageSources("Text ![Tafel](a.png) danach"))
     }
+
+    @Test
+    fun parenthesisMarkersAreOrderedLists() {
+        val lines = paperLines("1) Eins\n2) Zwei\n    3) Drei")
+        assertEquals(listOf(PaperKind.NUMBER, PaperKind.NUMBER, PaperKind.NUMBER), lines.map { it.kind })
+        assertEquals(listOf("1) Eins", "2) Zwei", "    3) Drei"), lines.map { it.text })
+        assertEquals(PaperKind.PARAGRAPH, paperLines("Siehe 1) oben").single().kind)
+        assertEquals(PaperKind.NUMBER, paperLines("12. Zwölf").single().kind)
+    }
 }
