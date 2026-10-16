@@ -15,6 +15,36 @@ fun paletteMove(selected: Int, count: Int, delta: Int): Int {
 /** Enter on a note opens it. Shift-Enter opens it in the split column. A command just runs. */
 fun paletteOpensInSplit(kind: String, shift: Boolean): Boolean = kind == "note" && shift
 
+/** The mark on a palette note: the open note, otherwise the split hint while it is selected. */
+fun paletteNoteMark(active: Boolean, selected: Boolean): String = when {
+    active -> "geöffnet"
+    selected -> "⇧↵"
+    else -> ""
+}
+
+/** Command palette after the later chrome pass: 12px corners, a 51px search row, 43px commands. */
+const val PALETTE_RADIUS_DP = 12
+const val PALETTE_MAX_DP = 620
+const val PALETTE_MAX_HEIGHT_DP = 570
+const val PALETTE_SEARCH_DP = 51
+const val PALETTE_SEARCH_SP = 15
+const val PALETTE_SEARCH_PAD_DP = 13
+const val PALETTE_SEARCH_GAP_DP = 9
+const val PALETTE_CLOSE_DP = 25
+const val PALETTE_CLOSE_RADIUS_DP = 6
+const val PALETTE_ROW_DP = 43
+const val PALETTE_NOTE_DP = 40
+const val PALETTE_ROW_RADIUS_DP = 8
+const val PALETTE_ROW_PAD_X_DP = 9
+const val PALETTE_ROW_PAD_Y_DP = 5
+const val PALETTE_ROW_GAP_DP = 9
+const val PALETTE_ICON_DP = 29
+const val PALETTE_ICON_RADIUS_DP = 8
+const val PALETTE_FOOTER_DP = 30
+const val PALETTE_EMPTY_PAD_TOP_DP = 50
+const val PALETTE_KBD_RADIUS_DP = 5
+const val PALETTE_GROUP_TRACKING = 0.1f
+
 /**
  * One command in the desktop palette: group, detail, shortcut, and the extra
  * words the search box matches besides the label.

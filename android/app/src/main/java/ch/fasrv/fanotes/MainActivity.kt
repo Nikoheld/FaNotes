@@ -870,11 +870,12 @@ fun FaNotesScreen(
         )
     }
     if (palette) {
-        AlertDialog(onDismissRequest = { model.paletteOpen.value = false }, confirmButton = {}, text = {
+        androidx.compose.ui.window.Dialog(onDismissRequest = { model.paletteOpen.value = false }) {
             CommandPalette(
                 onDismiss = { model.paletteOpen.value = false },
                 reduceMotion = ch.fasrv.fanotes.desk.reduceMotion(desk["reduce-motion"]),
                 notesOnly = paletteNotes,
+                activePath = open?.path,
                 rankNotes = { query, limit -> model.rankNotes(query, limit) },
                 onOpenNote = { model.openPath(it); model.showDestination("notes") },
                 onOpenNoteInSplit = { model.openInSplit(it); model.showDestination("notes") },
@@ -949,7 +950,7 @@ fun FaNotesScreen(
                     else -> if (id.startsWith("template-")) model.createFromTemplate(id.removePrefix("template-")) else model.showDestination(id)
                 }
             }
-        }, title = { Text("Befehle") })
+        }
     }
     if (bugReportOpen) BugReportDialog(model)
     confirm?.let { request ->
