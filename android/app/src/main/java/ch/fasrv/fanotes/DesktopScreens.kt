@@ -3609,6 +3609,7 @@ private fun AccentSwatches(selected: String, onPick: (String) -> Unit) {
 fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () -> Unit, onPrivate: () -> Unit) {
     val settings by model.deskSettings.collectAsStateWithLifecycle()
     val sync by model.sync.collectAsStateWithLifecycle()
+    val syncDeviceNote by model.syncDeviceNote.collectAsStateWithLifecycle()
     val css by model.customCss.collectAsStateWithLifecycle()
     val update by model.updateLabel.collectAsStateWithLifecycle()
     val sections = ch.fasrv.fanotes.desk.SETTINGS_NAV
@@ -4084,6 +4085,12 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                         val devices = sync.info?.devices.orEmpty()
                         when {
                             sync.account == null -> SettingRow("Nicht angemeldet", divider = false) {}
+                            devices.isEmpty() && sync.info == null && syncDeviceNote != null -> SettingRow(
+                                syncDeviceNote.orEmpty(),
+                                divider = false,
+                            ) {
+                                TextButton(onClick = { model.refreshSyncDevices() }) { Text("Erneut laden") }
+                            }
                             devices.isEmpty() && sync.info == null -> SettingRow("Geräteliste wird geladen …", divider = false) {}
                             devices.isEmpty() -> SettingRow("Keine weiteren Geräte", divider = false) {}
                             else -> devices.forEachIndexed { index, device ->

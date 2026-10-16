@@ -1383,9 +1383,13 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { graph.engine.syncNow() }
     }
 
+    val syncDeviceNote = MutableStateFlow<String?>(null)
+
     fun refreshSyncDevices() {
         viewModelScope.launch {
             runCatching { graph.engine.refreshAccount() }
+                .onSuccess { syncDeviceNote.value = null }
+                .onFailure { syncDeviceNote.value = "Die Geräteliste konnte nicht geladen werden." }
         }
     }
 
