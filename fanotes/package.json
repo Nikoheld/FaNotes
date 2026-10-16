@@ -204,6 +204,7 @@
     "check:arrow-lock": "node scripts/check-arrow-lock.mjs",
     "check:ink-pointer": "node scripts/check-ink-pointer-session.mjs",
     "check:homework-day": "cross-env TZ=Europe/Zurich node scripts/check-homework-day.mjs",
+    "check:flashcards": "node scripts/check-flashcards.mjs",
     "check:clipboard-image": "node scripts/check-clipboard-image.mjs",
     "check:homework-api": "node scripts/check-homework-api.mjs",
     "check:remote-support": "node scripts/check-remote-support-session.mjs && node scripts/check-remote-support-ui.mjs"

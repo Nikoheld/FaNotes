@@ -1055,6 +1055,10 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         // `hello 2026-10-13` is local. The word is not part of the date.
         return canonical_iso(&next);
     }
+    if let Some(next) = sign_after_leading_word(trimmed) {
+        // `hello+5` is May. The word and the sign are padding before the number.
+        return canonical_iso(&next);
+    }
     // A period between numbers is a hyphen. A period before a clock is a space.
     // Trailing periods make a date local. A `T` form keeps its fraction dot.
     if !has_iso_t(&trimmed) && trimmed.contains('.') {
@@ -2879,6 +2883,34 @@ fn strip_leading_signs(trimmed: &str) -> Option<&str> {
 /// `hello 2026-10-13` drops `hello`. A word continues through every non-space
 /// character at or above `A`, so `hello_world 10/13/2026` drops that word too.
 /// `Oct_13` stays, because it names a month. The space keeps a date local.
+/// `hello+5` and `GMe-5` are May. A word and one sign before the first number
+/// are padding. `Oct+5` stays October 5, and `hello+5:30` is not a date.
+fn sign_after_leading_word(trimmed: &str) -> Option<String> {
+    let mut index = 0;
+    for character in trimmed.chars() {
+        if !character.is_ascii_alphabetic() {
+            break;
+        }
+        index += 1;
+    }
+    if index == 0 {
+        return None;
+    }
+    let rest = trimmed.get(index..)?;
+    let mut rest_chars = rest.chars();
+    if !matches!(rest_chars.next(), Some('+' | '-')) {
+        return None;
+    }
+    if !rest_chars.next().is_some_and(|character| character.is_ascii_digit()) {
+        return None;
+    }
+    let word = &trimmed[..index];
+    if english_month(word).is_some() {
+        return None;
+    }
+    Some(format!(" {}", &rest[1..]))
+}
+
 fn strip_leading_word(trimmed: &str) -> Option<String> {
     let end = trimmed
         .char_indices()
@@ -5932,12 +5964,80 @@ fn unfinished_hyphen_ymd(body: &str) -> Option<(i32, i32, i32)> {
 }
 
 fn date_only_iso(value: &str, surrounded: bool) -> Option<String> {
+    if surrounded {
+        // `-000001-10-13.` keeps year -1 and makes midnight local. Stripping
+        // the sign would read `000001-10-13` as 10 January 2013.
+        match negative_dot_year(value) {
+            DotYear::Local(year, month, day) => {
+                let (year, month, day) = normalize_ymd(year, month, day)?;
+                let (year, month, day, hour, minute, second) =
+                    local_civil_to_utc(year, month, day, 0, 0, 0)?;
+                return format_civil_iso(year, month, day, hour, minute, second, 0);
+            }
+            DotYear::Empty => return None,
+            DotYear::Other => {}
+        }
+    }
     if !surrounded {
         if let Some(instant) = iso_hyphen_date(value) {
             return Some(instant);
         }
     }
     legacy_hyphen_date(value)
+}
+
+enum DotYear {
+    Other,
+    Empty,
+    Local(i32, i32, i32),
+}
+
+/// A negative expanded year after a trailing dot has been removed.
+/// `-000000` stays on the legacy path. A month past 12 is empty.
+fn negative_dot_year(value: &str) -> DotYear {
+    let bytes = value.as_bytes();
+    if bytes.first() != Some(&b'-') || bytes.len() < 7 {
+        return DotYear::Other;
+    }
+    if !bytes[1..7].iter().all(u8::is_ascii_digit) {
+        return DotYear::Other;
+    }
+    let Ok(year) = value[..7].parse::<i32>() else {
+        return DotYear::Other;
+    };
+    if year >= 0 {
+        return DotYear::Other;
+    }
+    let rest = &value[7..];
+    if rest.is_empty() {
+        return DotYear::Local(year, 1, 1);
+    }
+    let Some(rest) = rest.strip_prefix('-') else {
+        return DotYear::Other;
+    };
+    if rest.is_empty() {
+        return DotYear::Local(year, 1, 1);
+    }
+    let (month_text, day_text) = if let Some((month, day)) = rest.split_once('-') {
+        if month.is_empty() || day.is_empty() || day.contains('-') {
+            return DotYear::Empty;
+        }
+        (month, day)
+    } else {
+        (rest, "1")
+    };
+    if !month_text.bytes().all(|byte| byte.is_ascii_digit())
+        || !day_text.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return DotYear::Other;
+    }
+    let (Ok(month), Ok(day)) = (month_text.parse::<i32>(), day_text.parse::<i32>()) else {
+        return DotYear::Empty;
+    };
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return DotYear::Empty;
+    }
+    DotYear::Local(year, month, day)
 }
 
 /// `YYYY` and `±YYYYYY`, with optional month and day. A short month or day is
@@ -7267,6 +7367,41 @@ mod tests {
             );
             assert_eq!(super::canonical_iso("24:00:60 10-13-2026"), None);
             assert_eq!(super::canonical_iso("16:00:60 2026-10-13"), None);
+        });
+    }
+
+    #[test]
+    fn a_sign_after_a_leading_word_is_padding() {
+        with_tz("America/New_York", || {
+            // `hello+5` is May. The word and the sign are ignored before the
+            // first number. A month keeps the sign as a separator, and a
+            // clock after the sign is empty.
+            assert_eq!(
+                super::canonical_iso("hello+5").as_deref(),
+                Some("2001-05-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("GMe-5").as_deref(),
+                Some("2001-05-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("x+5").as_deref(),
+                Some("2001-05-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("note+2026").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct+5").as_deref(),
+                Some("2001-10-05T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("GMT+5").as_deref(),
+                Some("2001-05-01T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("hello+5:30"), None);
+            assert_eq!(super::canonical_iso("abc+13"), None);
         });
     }
 
@@ -13797,6 +13932,46 @@ mod tests {
                 super::canonical_iso(" -000001/01/01").as_deref(),
                 Some("2001-01-01T05:00:00.000Z")
             );
+        });
+    }
+
+    #[test]
+    fn a_trailing_dot_keeps_a_negative_expanded_year() {
+        with_tz("America/New_York", || {
+            // The dot makes midnight local. Year -1 stays negative.
+            assert_eq!(
+                super::canonical_iso("-000001-10-13.").as_deref(),
+                Some("-000001-10-13T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001.").as_deref(),
+                Some("-000001-01-01T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10.").as_deref(),
+                Some("-000001-10-01T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-1-13.").as_deref(),
+                Some("-000001-01-13T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13..").as_deref(),
+                Some("-000001-10-13T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13").as_deref(),
+                Some("-000001-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000000-10-13.").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+002026-10-13.").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("-000001-13."), None);
         });
     }
 }

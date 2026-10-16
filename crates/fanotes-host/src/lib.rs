@@ -1964,6 +1964,10 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         // `hello 2026-10-13` is local. The word is not part of the date.
         return unix_millis_from_iso(&next);
     }
+    if let Some(next) = sign_after_leading_word(trimmed) {
+        // `hello+5` is May. The word and the sign are padding before the number.
+        return unix_millis_from_iso(&next);
+    }
     // A period between numbers is a hyphen. A period before a clock is a space.
     // Trailing periods make a date local. A `T` form keeps its fraction dot.
     if !has_iso_t(trimmed) && trimmed.contains('.') {
@@ -4321,6 +4325,34 @@ fn strip_leading_signs(trimmed: &str) -> Option<&str> {
 /// `hello 2026-10-13` drops `hello`. A word continues through every non-space
 /// character at or above `A`, so `hello_world 10/13/2026` drops that word too.
 /// `Oct_13` stays, because it names a month. The space keeps a date local.
+/// `hello+5` and `GMe-5` are May. A word and one sign before the first number
+/// are padding. `Oct+5` stays October 5, and `hello+5:30` is not a date.
+fn sign_after_leading_word(trimmed: &str) -> Option<String> {
+    let mut index = 0;
+    for character in trimmed.chars() {
+        if !character.is_ascii_alphabetic() {
+            break;
+        }
+        index += 1;
+    }
+    if index == 0 {
+        return None;
+    }
+    let rest = trimmed.get(index..)?;
+    let mut rest_chars = rest.chars();
+    if !matches!(rest_chars.next(), Some('+' | '-')) {
+        return None;
+    }
+    if !rest_chars.next().is_some_and(|character| character.is_ascii_digit()) {
+        return None;
+    }
+    let word = &trimmed[..index];
+    if english_month(word).is_some() {
+        return None;
+    }
+    Some(format!(" {}", &rest[1..]))
+}
+
 fn strip_leading_word(trimmed: &str) -> Option<String> {
     let end = trimmed
         .char_indices()
@@ -6883,6 +6915,10 @@ fn unfinished_hyphen_ymd(body: &str) -> Option<(i32, i32, i32)> {
 }
 
 fn date_only_millis(value: &str, surrounded: bool) -> Option<u64> {
+    if surrounded && negative_dot_year_is_expanded(value) {
+        // `-000001-10-13.` is year -1, before 1970. It must not become 2013.
+        return None;
+    }
     if !surrounded {
         match iso_hyphen_millis(value) {
             IsoHyphenMillis::Ready(millis) => return millis,
@@ -6892,6 +6928,32 @@ fn date_only_millis(value: &str, surrounded: bool) -> Option<u64> {
         }
     }
     legacy_hyphen_millis(value)
+}
+
+/// True for `-YYYYYY` with an optional month and day, except year `-000000`.
+/// The instant is before 1970, so the caller stores nothing.
+fn negative_dot_year_is_expanded(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.first() != Some(&b'-') || bytes.len() < 7 {
+        return false;
+    }
+    if !bytes[1..7].iter().all(u8::is_ascii_digit) {
+        return false;
+    }
+    let Ok(year) = value[..7].parse::<i32>() else {
+        return false;
+    };
+    if year >= 0 {
+        return false;
+    }
+    let rest = &value[7..];
+    if rest.is_empty() {
+        return true;
+    }
+    let Some(rest) = rest.strip_prefix('-') else {
+        return false;
+    };
+    rest.split('-').all(|field| field.is_empty() || field.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 enum IsoHyphenMillis {
@@ -11079,6 +11141,13 @@ mod local_zone_tests {
             Some(1_041_541_230_000)
         );
         assert_eq!(unix_millis_from_iso("24:00:60 10-13-2026"), None);
+        // `hello+5` is May. The word and the sign are padding.
+        assert_eq!(unix_millis_from_iso("hello+5"), Some(988_689_600_000));
+        assert_eq!(unix_millis_from_iso("GMe-5"), Some(988_689_600_000));
+        assert_eq!(unix_millis_from_iso("note+2026"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("Oct+5"), Some(1_002_254_400_000));
+        assert_eq!(unix_millis_from_iso("hello+5:30"), None);
+        assert_eq!(unix_millis_from_iso("abc+13"), None);
         assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00:60.500"), None);
         assert_eq!(unix_millis_from_iso("Oct 13 2026 16 16:00:60"), None);
         assert_eq!(unix_millis_from_iso("Oct 2026 16:00:60"), None);
@@ -15431,6 +15500,30 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("-000001-10-13-"), None);
         assert_eq!(unix_millis_from_iso("-271821/10/01"), None);
         assert_eq!(unix_millis_from_iso("-000001-01-01"), None);
+    }
+
+    #[test]
+    fn a_trailing_dot_keeps_a_negative_expanded_year() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Year -1 is before 1970. The dot must not turn it into 2013.
+        assert_eq!(unix_millis_from_iso("-000001-10-13."), None);
+        assert_eq!(unix_millis_from_iso("-000001."), None);
+        assert_eq!(unix_millis_from_iso("-000001-10."), None);
+        assert_eq!(unix_millis_from_iso("-000001-1-13."), None);
+        assert_eq!(unix_millis_from_iso("-000001-13."), None);
+        assert_eq!(
+            unix_millis_from_iso("-000000-10-13."),
+            Some(1_002_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("+002026-10-13."),
+            Some(1_791_864_000_000)
+        );
     }
 
 }
