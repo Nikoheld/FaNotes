@@ -1922,6 +1922,11 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         return unix_millis_from_iso(&next);
     }
     let trimmed = value.trim_matches(is_date_parse_space);
+    // `-000001/01/01` is year -1. That instant does not fit in `u64`, and
+    // `-000001/01/32` is empty. A strict `-000001-01-01` stays on the ES5 path.
+    if value == trimmed && negative_expanded_tail_unstored(trimmed) {
+        return None;
+    }
     // A space around `2026-10-13T16:00` is empty. The `T` was already read, so
     // the legacy parser cannot start over.
     if has_iso_t(trimmed) && trimmed.len() != value.len() {
@@ -2904,6 +2909,83 @@ fn keep_leading_space(value: &str, normalized: String) -> String {
     } else {
         normalized
     }
+}
+
+/// `true` when a negative six-digit year has a non-ES5 `/` or `-` tail.
+///
+/// The civil time is before 1970, so `u64` cannot store it. An out-of-range
+/// day is empty for the same reason the caller sees `None`. `-000001-01-01`
+/// is strict ES5 and returns `false`.
+fn negative_expanded_tail_unstored(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.first() != Some(&b'-') || bytes.len() < 8 || !bytes[1..7].iter().all(u8::is_ascii_digit)
+    {
+        return false;
+    }
+    let Ok(year) = value[..7].parse::<i32>() else {
+        return false;
+    };
+    if year >= 0 {
+        return false;
+    }
+    let rest = &value[7..];
+    if rest.bytes().any(|byte| !matches!(byte, b'0'..=b'9' | b'/' | b'-')) {
+        return false;
+    }
+    let rest_bytes = rest.as_bytes();
+    if !matches!(rest_bytes.first(), Some(b'/' | b'-')) {
+        return false;
+    }
+    let mut fields = Vec::new();
+    let mut all_hyphen = true;
+    let mut all_two = true;
+    let mut trailing = false;
+    let mut index = 0;
+    while index < rest_bytes.len() {
+        if rest_bytes[index] == b'/' {
+            all_hyphen = false;
+        }
+        index += 1;
+        let start = index;
+        while index < rest_bytes.len() && rest_bytes[index].is_ascii_digit() {
+            index += 1;
+        }
+        if start == index {
+            if index == rest_bytes.len() && fields.len() < 2 {
+                trailing = true;
+                break;
+            }
+            return true;
+        }
+        let field = &rest[start..index];
+        if field.len() != 2 {
+            all_two = false;
+        }
+        fields.push(field);
+        if fields.len() > 2 {
+            return true;
+        }
+    }
+    if trailing && fields.len() >= 2 {
+        return true;
+    }
+    if !fields.is_empty() {
+        let Ok(month) = fields[0].parse::<i32>() else {
+            return true;
+        };
+        let day = if fields.len() == 2 {
+            let Ok(day) = fields[1].parse::<i32>() else {
+                return true;
+            };
+            day
+        } else {
+            1
+        };
+        if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+            return true;
+        }
+    }
+    !(all_hyphen && all_two && !trailing)
 }
 
 fn negative_expanded_clock(value: &str) -> bool {
@@ -15050,6 +15132,28 @@ mod local_zone_tests {
             Some(1_791_864_000_000)
         );
         assert_eq!(unix_millis_from_iso("10/13/2026"), Some(1_791_864_000_000));
+    }
+
+    #[test]
+    fn a_negative_expanded_year_keeps_slash_fields() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Year -1 does not fit in `u64`. An impossible day is empty too.
+        assert_eq!(unix_millis_from_iso("-000001/01/01"), None);
+        assert_eq!(unix_millis_from_iso("-000001/10/13"), None);
+        assert_eq!(unix_millis_from_iso("-000001/02/31"), None);
+        assert_eq!(unix_millis_from_iso("-000001-2-31"), None);
+        assert_eq!(unix_millis_from_iso("-000001/01/32"), None);
+        assert_eq!(unix_millis_from_iso("-000001-01-32"), None);
+        assert_eq!(unix_millis_from_iso("-000001/13/1"), None);
+        assert_eq!(unix_millis_from_iso("-000001-01-00"), None);
+        assert_eq!(unix_millis_from_iso("-000001-10-13-"), None);
+        assert_eq!(unix_millis_from_iso("-271821/10/01"), None);
+        assert_eq!(unix_millis_from_iso("-000001-01-01"), None);
     }
 
 }
