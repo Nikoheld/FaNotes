@@ -1,6 +1,7 @@
 import {
   Bold,
   Braces,
+  Check,
   Code,
   Heading1,
   Heading2,
@@ -41,6 +42,7 @@ const ACTIONS: Array<{
   { action: 'bulletList', label: 'Aufzählung', icon: List, divider: true },
   { action: 'numberedList', label: 'Nummerierte Liste', icon: ListOrdered },
   { action: 'checklist', label: 'Aufgabenliste', icon: ListChecks },
+  { action: 'toggleTask', label: 'Aufgabe abhaken', shortcut: 'Strg+Enter', icon: Check },
   { action: 'quote', label: 'Zitat', icon: Quote },
   { action: 'table', label: 'Tabelle', icon: Table2, divider: true },
   { action: 'mathBlock', label: 'Mathematikblock', icon: Sigma },

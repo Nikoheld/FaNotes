@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## Unreleased
+
+- **Alltag.** Eine Notiz lässt sich duplizieren: Text und Handschrift liegen in der neuen Datei daneben, Arbeitsblätter bleiben beim Original. Strg+Enter hakt die Aufgabe unter der Schreibmarke ab, Strg+Umschalt+D setzt das Datum, und der Wiki-Link der Notiz oder der Überschrift lässt sich kopieren. In einer Tagesnotiz führen zwei Knöpfe und die Befehlspalette zum Vortag und zum nächsten Tag. Der Tab schließt sich auch über die Palette mit Strg+W.
+
 ## 2026.10.7
 
 - **Android-Tablet.** Der Text liegt auf dem Papier, die Leiste klappt beim Schreiben ein, und der Radierer folgt der Spitze.

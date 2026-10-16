@@ -15,6 +15,7 @@
     "check:themes": "node scripts/check-theme-contrast.cjs",
     "check:visual": "node scripts/check-visual-rendering.cjs",
     "check:notes": "node scripts/check-note-creation.cjs",
+    "check:note-life": "node scripts/check-note-life.mjs",
     "check:desktop-guards": "node scripts/check-desktop-guards.cjs",
     "check:tauri-channels": "node scripts/check-tauri-channel-parity.mjs",
     "check:famd": "node scripts/check-famd.cjs",

@@ -14,11 +14,13 @@ import {
   Check,
   ChevronRight,
   Columns2,
+  Copy,
   File,
   FileText,
   Folder,
   FolderOpen,
   FolderPlus,
+  Files,
   MoreHorizontal,
   Palette,
   Pencil,
@@ -53,6 +55,8 @@ export type FileTreeProps = {
   onRename: (relativePath: string, nextName: string) => MaybePromise
   onMove: (relativePath: string, destFolder: string) => MaybePromise
   onTrash: (relativePath: string) => MaybePromise
+  onDuplicate?: (relativePath: string) => MaybePromise
+  onCopyWikiLink?: (relativePath: string) => void
   confirmTrash?: (message: string) => Promise<boolean>
   className?: string
   rootLabel?: string
@@ -189,6 +193,8 @@ export const FileTree = memo(function FileTree({
   onRename,
   onMove,
   onTrash,
+  onDuplicate,
+  onCopyWikiLink,
   confirmTrash,
   className = '',
   rootLabel = 'Dateien',
@@ -752,7 +758,7 @@ export const FileTree = memo(function FileTree({
             left: Math.min(Math.max(8, contextMenu.x), window.innerWidth - 232),
             top: Math.min(
               Math.max(8, contextMenu.y),
-              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 510 : 172),
+              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 510 : 280),
             ),
           }}
         >
@@ -888,6 +894,34 @@ export const FileTree = memo(function FileTree({
             </>
           )}
           <span className="file-tree__menu-label">Verwalten</span>
+          {contextMenu.entry.kind === 'file' && onCopyWikiLink && (
+            <button
+              onClick={() => {
+                const path = contextMenu.entry.relativePath
+                setContextMenu(null)
+                onCopyWikiLink(path)
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <Copy aria-hidden="true" size={15} />
+              Wiki-Link kopieren
+            </button>
+          )}
+          {contextMenu.entry.kind === 'file' && !isPdfEntry(contextMenu.entry) && onDuplicate && (
+            <button
+              onClick={() => {
+                const path = contextMenu.entry.relativePath
+                setContextMenu(null)
+                void Promise.resolve(onDuplicate(path))
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <Files aria-hidden="true" size={15} />
+              Duplizieren
+            </button>
+          )}
           <button
             onClick={() => beginRename(contextMenu.entry)}
             role="menuitem"

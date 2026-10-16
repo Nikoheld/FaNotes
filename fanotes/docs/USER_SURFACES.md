@@ -2,7 +2,7 @@
 
 Inventory walked from the shipped UI entry points. Each row names a user-visible surface and the source that implements it. The check `scripts/check-user-surfaces.cjs` re-reads those files and fails if a listed needle disappears.
 
-Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-note`, `new-folder`, `new-subfolder`, `save`, `search`, `drawing`, `note-link`, `subject-book`, `worksheet`, `onenote-import`, `ai-assistant`, `glyphenwerk`, `overview`, `homework`, `daily`, `export-pdf`, `history`, `quick-open`, `nav-back`, `nav-forward`, `reopen-tab`, `split`, `split-swap`, `split-orientation`, `focus`, `sidebar`, `inspector`, `settings`, `sync-now`, `sync-settings`, `addon-store`, `reveal`, `bug-report`, `quit`. Commands contributed by add-ons appear under `Add-on: <name>` and are prefixed `addon:` internally.
+Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-note`, `new-folder`, `new-subfolder`, `save`, `duplicate-note`, `copy-path`, `copy-wiki-link`, `copy-heading-link`, `search`, `drawing`, `insert-date`, `insert-datetime`, `toggle-task`, `note-link`, `subject-book`, `worksheet`, `onenote-import`, `ai-assistant`, `glyphenwerk`, `overview`, `homework`, `study`, `flashcards`, `daily`, `daily-previous`, `daily-next`, `export-pdf`, `history`, `quick-open`, `close-tab`, `nav-back`, `nav-forward`, `reopen-tab`, `split`, `split-swap`, `split-orientation`, `focus`, `sidebar`, `inspector`, `settings`, `sync-now`, `sync-settings`, `addon-store`, `reveal`, `bug-report`, `quit`. Commands contributed by add-ons appear under `Add-on: <name>` and are prefixed `addon:` internally.
 
 ## Notes / vault
 
@@ -10,6 +10,21 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | --- | --- | --- |
 | Note tabs, dirty marker, close | `src/App.tsx` | `NoteTabButton` |
 | New note / folder / daily note | `src/App.tsx` | `id: 'new-note'` |
+| Duplicate note | `src/App.tsx` | `id: 'duplicate-note'` |
+| Copy note path | `src/App.tsx` | `id: 'copy-path'` |
+| Copy wiki link | `src/App.tsx` | `id: 'copy-wiki-link'` |
+| Copy heading link | `src/App.tsx` | `id: 'copy-heading-link'` |
+| Previous daily note | `src/App.tsx` | `id: 'daily-previous'` |
+| Next daily note | `src/App.tsx` | `id: 'daily-next'` |
+| Neighbouring daily notes | `src/App.tsx` | `aria-label="Benachbarte Tagesnotizen"` |
+| Close tab | `src/App.tsx` | `id: 'close-tab'` |
+| Insert date | `src/App.tsx` | `id: 'insert-date'` |
+| Insert date and time | `src/App.tsx` | `id: 'insert-datetime'` |
+| Toggle task | `src/App.tsx` | `id: 'toggle-task'` |
+| Toggle task in the editor | `src/components/MarkdownEditor.tsx` | `key: 'Mod-Enter'` |
+| Insert date in the editor | `src/components/MarkdownEditor.tsx` | `key: 'Shift-Mod-d'` |
+| Duplicate in the file tree | `src/components/FileTree.tsx` | `Duplizieren` |
+| Everyday note actions | `src/lib/noteLife.ts` | `export const toggleTaskLine` |
 | File tree create / rename / trash / color | `src/components/FileTree.tsx` | `file-tree__menu-label">Erstellen` |
 | Tag filter and note tags | `src/App.tsx` | `aria-label="Nach Schlagwort filtern"` |
 | Tag parse / apply | `src/lib/noteTags.ts` | `export const applyNoteTags` |

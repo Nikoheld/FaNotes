@@ -1061,6 +1061,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .paper-picker__menu strong { display: block; font-size: 12px; }
 .paper-picker__menu small { display: block; color: var(--text-muted); font-size: 12px; }
 .note-tag { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 7px; border: 1px solid var(--border); border-radius: 999px; background: color-mix(in srgb, var(--accent) 10%, var(--panel)); color: var(--text-soft); font-size: 12px; cursor: pointer; }
+.daily-nav { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.daily-nav button { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text-soft); cursor: pointer; }
+.daily-nav button:hover { color: var(--text); border-color: var(--border-strong); }
 .note-tags input { width: 120px; height: 22px; padding: 0 7px; border: 1px dashed var(--border); border-radius: 999px; background: transparent; color: var(--text); font-size: 12px; }
 .tag-filter { display: flex; flex-wrap: wrap; gap: 5px; padding: 6px 10px 0; }
 .tag-filter > button { height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--text-muted); font-size: 12px; cursor: pointer; }

@@ -75,6 +75,7 @@ import { revealDocumentLine } from '../lib/noteOutline'
 import { clientYFromTextAnchor, registerPaperTextAnchorProvider, textAnchorFromView } from '../lib/paperTextAnchor'
 import { minimalReplacement } from '../lib/textReplacement'
 import { primeSpellingCorrections, rerunSpellingCheck, spellingCorrections } from '../lib/spellingCorrections'
+import { formatNoteStamp, toggleTaskLine } from '../lib/noteLife'
 import type { SpellingLanguage } from '../types'
 
 const LazyMarkdownPreview = lazy(() => import('./MarkdownPreview').then((module) => ({
@@ -100,6 +101,7 @@ export type MarkdownEditorSettings = Pick<
   | 'showLineNumbers'
   | 'spellcheck'
   | 'autocorrect'
+  | 'dateFormat'
 >
 
 const WORD_CHARACTER = /[\p{L}\p{N}]/u
@@ -173,6 +175,7 @@ export type MarkdownFormatAction =
   | 'bulletList'
   | 'numberedList'
   | 'checklist'
+  | 'toggleTask'
   | 'codeBlock'
   | 'table'
   | 'mathBlock'
@@ -224,6 +227,18 @@ function wrapSelection(view: EditorView, before: string, after: string, placehol
   )
 }
 
+function toggleTaskSelection(view: EditorView) {
+  if (view.state.readOnly) return false
+  const { from, to } = view.state.selection.main
+  const startLine = view.state.doc.lineAt(from)
+  const effectiveEnd = to > from && to === view.state.doc.lineAt(to).from ? to - 1 : to
+  const endLine = view.state.doc.lineAt(Math.max(from, effectiveEnd))
+  const original = view.state.sliceDoc(startLine.from, endLine.to)
+  const next = original.split('\n').map((line) => toggleTaskLine(line)).join('\n')
+  if (next === original) return false
+  return commitEditorChange(view, startLine.from, endLine.to, next, startLine.from + next.length)
+}
+
 function insertTemplate(view: EditorView, template: string, placeholder: string) {
   const { from, to } = view.state.selection.main
   const selected = view.state.sliceDoc(from, to)
@@ -238,6 +253,13 @@ function insertTemplate(view: EditorView, template: string, placeholder: string)
     from + Math.max(0, selectionOffset),
     from + Math.max(0, selectionOffset) + body.length,
   )
+}
+
+function insertNoteStamp(view: EditorView, pattern: string, withTime: boolean) {
+  if (view.state.readOnly) return false
+  const stamp = formatNoteStamp(pattern || 'YYYY-MM-DD', new Date(), withTime)
+  const { from, to } = view.state.selection.main
+  return commitEditorChange(view, from, to, stamp, from + stamp.length)
 }
 
 function transformSelectedLines(
@@ -283,6 +305,7 @@ export function applyMarkdownFormat(view: EditorView, action: MarkdownFormatActi
     case 'bulletList': return transformSelectedLines(view, (line) => `- ${stripBlockPrefix(line).trimStart()}`)
     case 'numberedList': return transformSelectedLines(view, (line, index) => `${index + 1}. ${stripBlockPrefix(line).trimStart()}`)
     case 'checklist': return transformSelectedLines(view, (line) => `- [ ] ${stripBlockPrefix(line).trimStart()}`)
+    case 'toggleTask': return toggleTaskSelection(view)
     case 'codeBlock': return insertTemplate(view, '\n```\n{{selection}}\n```\n', 'Code')
     case 'table': return insertTemplate(view, '\n| Thema | Notiz |\n| --- | --- |\n| {{selection}} |  |\n', 'Eintrag')
     case 'mathBlock': return insertTemplate(view, '\n$$\n{{selection}}\n$$\n', 'f(x) = x^2')
@@ -1234,6 +1257,8 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   const autocorrectEnabled = settings.spellcheck && settings.autocorrect && !readOnly
   const autocorrectEnabledRef = useRef(autocorrectEnabled)
   autocorrectEnabledRef.current = autocorrectEnabled
+  const dateFormatRef = useRef(settings.dateFormat)
+  dateFormatRef.current = settings.dateFormat
   const systemDark = useSystemDarkMode()
   const resolvedTheme = settings.theme === 'system' ? (systemDark ? 'dark' : 'light') : settings.theme
   const dark = !paperMode && resolvedTheme !== 'light' && resolvedTheme !== 'sepia'
@@ -1368,6 +1393,9 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
           { key: 'Mod-b', preventDefault: true, run: (view) => applyMarkdownFormat(view, 'bold') },
           { key: 'Mod-i', preventDefault: true, run: (view) => applyMarkdownFormat(view, 'italic') },
           { key: 'Mod-k', preventDefault: true, run: (view) => applyMarkdownFormat(view, 'link') },
+          { key: 'Mod-Enter', preventDefault: true, run: (view) => applyMarkdownFormat(view, 'toggleTask') },
+          { key: 'Shift-Mod-d', preventDefault: true, run: (view) => insertNoteStamp(view, dateFormatRef.current, false) },
+          { key: 'Shift-Alt-Mod-d', preventDefault: true, run: (view) => insertNoteStamp(view, dateFormatRef.current, true) },
           indentWithTab,
           ...closeBracketsKeymap,
           ...defaultKeymap,
