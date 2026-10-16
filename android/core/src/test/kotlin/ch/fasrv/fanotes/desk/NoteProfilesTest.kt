@@ -292,6 +292,27 @@ class NoteProfilesTest {
     }
 
     @Test
+    fun theWelcomePreviewHeaderMatchesTheDesktopWindow() {
+        assertEquals(7, FIRST_RUN_PREVIEW_HEADER_TITLE_SP)
+        assertEquals(600, FIRST_RUN_PREVIEW_HEADER_TITLE_WEIGHT)
+        assertEquals(6, FIRST_RUN_PREVIEW_HEADER_DOT_DP)
+        assertEquals(5, FIRST_RUN_PREVIEW_HEADER_GAP_DP)
+        assertEquals(12, FIRST_RUN_PREVIEW_HEADER_PAD_DP)
+        assertEquals(32, FIRST_RUN_PREVIEW_HEADER_DP)
+        assertEquals(0xFFD8A643.toInt(), FIRST_RUN_PREVIEW_HEADER_MIDDLE_DOT)
+        assertEquals(0xEB202020.toInt(), firstRunPreviewHeaderFill(0xFF202020.toInt()))
+        assertEquals(0x17FFFFFF, firstRunPreviewBorder("dark"))
+        assertEquals(0x17FFFFFF, firstRunPreviewBorder("midnight"))
+        assertEquals(0x17FFFFFF, firstRunPreviewBorder("system", systemDark = true))
+        assertEquals(0x1737352F, firstRunPreviewBorder("light"))
+        assertEquals(0x1737352F, firstRunPreviewBorder("system", systemDark = false))
+        assertEquals(0x1A37352F, firstRunPreviewBorder("sepia"))
+        assertEquals(0xB5FF9295.toInt(), firstRunPreviewHeaderClose(0xFFFF8D90.toInt(), firstRunPreviewBorder("dark")))
+        assertEquals(0xB5BA3542.toInt(), firstRunPreviewHeaderClose(0xFFC03543.toInt(), firstRunPreviewBorder("light")))
+        assertEquals(0xB6BA3542.toInt(), firstRunPreviewHeaderClose(0xFFC03543.toInt(), firstRunPreviewBorder("sepia")))
+    }
+
+    @Test
     fun folderButtonsUseTheirOwnColor() {
         assertEquals(0xFF2A6F97.toInt(), firstRunFolderArgb("#2a6f97"))
         assertEquals(0xFF2A6F97.toInt(), firstRunFolderArgb(profileFolders("school").first { it.name == "Mathematik" }.color))
