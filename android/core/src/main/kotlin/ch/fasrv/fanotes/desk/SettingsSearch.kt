@@ -5,8 +5,8 @@ import java.util.Locale
 
 /**
  * Settings the desktop dialog can find, limited to controls this tablet
- * actually shows. GlyphenWerk, spellcheck dictionaries, OneNote import, and
- * the other desktop-only rows stay out of the list.
+ * actually shows. GlyphenWerk, OneNote import, and the other desktop-only
+ * rows stay out of the list.
  */
 data class SettingsSearchItem(
     val label: String,
@@ -31,10 +31,12 @@ val SETTINGS_SEARCH_ITEMS: List<SettingsSearchItem> = listOf(
     SettingsSearchItem("Zoom-Geschwindigkeit", "Editor", "editor", "settings-zoom", "zoom geschwindigkeit mausrad pinch trackpad"),
     SettingsSearchItem("Zoom-Limit", "Editor", "editor", "settings-zoom", "zoom limit maximum hinein 50 325 600 prozent"),
     SettingsSearchItem("Zeilennummern, Wortzahl & Gliederung", "Editor", "editor", "settings-editor", "statusleiste outline struktur markdown zeilennummern wortzahl"),
+    SettingsSearchItem("Rechtschreibprüfung", "Editor", "editor", "settings-editor", "rechtschreibung sprache deutsch englisch rot unterstreichen fehler spellcheck vorschläge wörterbuch"),
     SettingsSearchItem("Papier & Stift", "Stift & Erkennung", "drawing", "settings-tablet", "tablet karos linien punkte gepunktet häuschen kästchen millimeter farbe breite druck glättung hintergrund handschrift stift"),
     SettingsSearchItem("Stifte- und Tablett-Tasten", "Stift & Erkennung", "drawing", "settings-tablet-buttons", "wacom tablett taste barrel radierer expresskey stift knopf mapping"),
     SettingsSearchItem("Durchkritzel-Empfindlichkeit", "Stift & Erkennung", "drawing", "settings-tablet", "löschen radierer scribble sensitivity"),
     SettingsSearchItem("Form-Erkennung", "Stift & Erkennung", "drawing", "settings-tablet", "form zirkel kreis linie rechteck dreieck glätten snap stillhalten empfindlichkeit"),
+    SettingsSearchItem("Alte Notizen auf den aktuellen Standard", "Stift & Erkennung", "drawing", "settings-note-standard", "hidpi scharf qualität standard konvertieren alte notizen pixel"),
     SettingsSearchItem("Notiz-Backup", "Experimentell", "experimental", "settings-note-backup", "backup sichern wiederherstellen snapshot notiz"),
     SettingsSearchItem("Vault & Speicherort", "Dateien & Vault", "files", "settings-vault", "ordner wechseln pfad notizen markdown vault"),
     SettingsSearchItem("Automatisches Speichern", "Dateien & Vault", "files", "settings-save", "autosave verzögerung dateiverhalten speichern"),

@@ -147,9 +147,161 @@ assert.equal(homeworkStore.loadHomeworkMarkdown('').ok, true)
 assert.equal(homeworkSync.calendarMarkdownWithHomework(brokenJson, { version: 1, tasks: [] }), null)
 assert.equal(typeof homeworkSync.calendarMarkdownWithHomework('', { version: 1, tasks: [] }), 'string')
 
+const rent = createEvent({
+  calendarId: personal,
+  title: 'Miete',
+  start: new Date(2026, 0, 31, 9, 0),
+  end: new Date(2026, 0, 31, 10, 0),
+  recurrence: 'monthly',
+})
+const rentDoc = { ...doc, events: [rent] }
+const february = expandOccurrences(rentDoc, new Date(2026, 1, 1), new Date(2026, 2, 1))
+const march = expandOccurrences(rentDoc, new Date(2026, 2, 1), new Date(2026, 3, 1))
+assert.equal(dateKey(february[0].start), '2026-02-28')
+assert.equal(february[0].start.getHours(), 9)
+assert.equal(dateKey(march[0].start), '2026-03-31')
+const skippedRent = skipOccurrence(rentDoc, `${rent.id}@2026-01-31`)
+const rentMaster = skippedRent.events.find((event) => event.id === rent.id)
+assert.equal(rentMaster.start, '2026-01-31T09:00')
+assert.ok(rentMaster.exceptionDates.includes('2026-01-31'))
+assert.equal(dateKey(expandOccurrences(skippedRent, new Date(2026, 2, 1), new Date(2026, 3, 1))[0].start), '2026-03-31')
+
+const leap = createEvent({
+  calendarId: personal,
+  title: 'Schaltjahr',
+  start: new Date(2024, 1, 29, 8, 0),
+  end: new Date(2024, 1, 29, 9, 0),
+  recurrence: 'yearly',
+})
+const leapDoc = { ...doc, events: [leap] }
+assert.equal(dateKey(expandOccurrences(leapDoc, new Date(2025, 1, 1), new Date(2025, 2, 1))[0].start), '2025-02-28')
+assert.equal(dateKey(expandOccurrences(leapDoc, new Date(2028, 1, 1), new Date(2028, 2, 1))[0].start), '2028-02-29')
+
 const month = viewRange('month', monday)
 assert.equal(month.days.length, 42)
 assert.equal(month.days[0].getDay(), 1)
+
+const ics = await server.ssrLoadModule('/src/lib/icsCalendar.ts')
+const timed = ics.importIcs([
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'UID:lesson',
+  'SUMMARY:Hello\\, Welt',
+  'DESCRIPTION:Zeile\\\\n2',
+  'DTSTART:20261014T153000',
+  'DURATION:PT45M',
+  'END:VEVENT',
+  'BEGIN:VEVENT',
+  'UID:gone',
+  'STATUS:CANCELLED',
+  'SUMMARY:Entfällt',
+  'DTSTART:20261014T180000',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+assert.equal(timed.length, 1)
+assert.equal(timed[0].title, 'Hello, Welt')
+assert.equal(timed[0].notes, 'Zeile\\n2')
+assert.equal(timed[0].start, '2026-10-14T15:30')
+assert.equal(timed[0].end, '2026-10-14T16:15')
+
+const utcStart = new Date(Date.UTC(2026, 9, 16, 7, 0, 0))
+const utc = ics.importIcs([
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'UID:utc-call',
+  'SUMMARY:Anruf',
+  'DTSTART:20261016T070000Z',
+  'DURATION:PT90M',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+const utcWall = (date) => {
+  const pad = (part) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+assert.equal(utc[0].start, utcWall(utcStart), 'UTC stamp becomes the local clock')
+assert.equal(utc[0].end, utcWall(new Date(utcStart.getTime() + 90 * 60_000)))
+if (utcStart.getTimezoneOffset() !== 0) assert.notEqual(utc[0].start, '2026-10-16T07:00')
+
+const wallOf = (date) => {
+  const pad = (part) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+const offsetEvents = ics.importIcs([
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'SUMMARY:Versetzt',
+  'DTSTART:20261020T090000+0200',
+  'DTEND:20261020T093000+0200',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+assert.equal(offsetEvents[0].start, wallOf(new Date(Date.UTC(2026, 9, 20, 7, 0))))
+assert.equal(offsetEvents[0].end, wallOf(new Date(Date.UTC(2026, 9, 20, 7, 30))))
+assert.equal(ics.importIcs([
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'SUMMARY:Nein',
+  'DTSTART:20260231T090000Z',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal).length, 0)
+
+const existing = {
+  ...doc,
+  events: [{
+    ...focus,
+    id: 'lesson',
+    calendarId: school,
+    title: 'Alt',
+    notePath: 'Schule/Mathe.md',
+    recurrence: 'weekly',
+    exceptionDates: ['2026-10-21'],
+  }],
+}
+const merged = ics.applyIcsImport(existing, [
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'UID:lesson',
+  'SUMMARY:Neu',
+  'DTSTART:20261014T153000',
+  'DURATION:PT45M',
+  'RRULE:FREQ=WEEKLY',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+assert.equal(merged.updated, 1)
+assert.equal(merged.added, 0)
+assert.equal(merged.document.events.length, 1)
+assert.equal(merged.document.events[0].title, 'Neu')
+assert.equal(merged.document.events[0].calendarId, school)
+assert.equal(merged.document.events[0].notePath, 'Schule/Mathe.md')
+assert.deepEqual(merged.document.events[0].exceptionDates, ['2026-10-21'])
+const again = ics.applyIcsImport(merged.document, [
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'UID:lesson',
+  'SUMMARY:Neu',
+  'DTSTART:20261014T153000',
+  'DURATION:PT45M',
+  'RRULE:FREQ=WEEKLY',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+assert.equal(again.document.events.length, 1)
+const cancelled = ics.applyIcsImport(again.document, [
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'UID:lesson',
+  'STATUS:CANCELLED',
+  'SUMMARY:Neu',
+  'DTSTART:20261014T153000',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+assert.equal(cancelled.removed, 1)
+assert.equal(cancelled.document.events.length, 0)
 
 await server.close()
 console.log(JSON.stringify({

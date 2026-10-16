@@ -67,6 +67,7 @@ import { NoteLinkLayer } from './components/NoteLinkLayer'
 import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
+import { clipboardImageFile } from './lib/clipboardImage'
 import { companionNotePath, emptyFamdPayload, isNoteFileName, isPdfNotePath, parseFamd, readPageStatsFromNote, serializeFamd, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
 import { createAppAddonBridge, safeSettingsView, type AppAddonDeps } from './lib/addons/appBridge'
 import { sanitizeCustomCss } from './lib/customCss'
@@ -4392,30 +4393,24 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [calendarOpen, closeDrawing, closeTab, createNote, cycleTabs, focusMode, glyphenWerkOpen, homeworkOpen, lmStudioOpen, navigateHistory, noteLinkPlacing, openGlyphenWerk, openLmStudio, openSettings, openTabByDigit, openWorksheetImport, overviewOpen, paletteOpen, removeSelectedNoteLink, reopenClosedTab, saveCurrentWork, searchOpen, selectedNoteLinkId, settingsOpen, swapSplitPanes, toast, toggleDrawing, toggleFocusMode, toggleSplit, worksheetImportOpen])
 
   useEffect(() => {
-    const imageFile = (file: File | undefined) => file && file.type.startsWith('image/')
-    const onPaste = (event: ClipboardEvent) => {
-      const target = event.target as HTMLElement | null
-      if (target?.closest('textarea, input, [contenteditable="true"]')) return
-      const file = [...(event.clipboardData?.files ?? [])].find(imageFile)
+    const placeImage = (data: DataTransfer | null, event: Event, failure: string) => {
+      const file = clipboardImageFile(data)
       if (!file) return
       event.preventDefault()
-      void importImageBytes(file).catch((error) => toast(error instanceof Error ? error.message : 'Bild konnte nicht eingefügt werden.', 'error'))
+      event.stopPropagation()
+      void importImageBytes(file).catch((error) => toast(error instanceof Error ? error.message : failure, 'error'))
     }
-    const onDrop = (event: DragEvent) => {
-      const file = [...(event.dataTransfer?.files ?? [])].find(imageFile)
-      if (!file) return
-      event.preventDefault()
-      void importImageBytes(file).catch((error) => toast(error instanceof Error ? error.message : 'Bild konnte nicht abgelegt werden.', 'error'))
-    }
+    const onPaste = (event: ClipboardEvent) => placeImage(event.clipboardData, event, 'Bild konnte nicht eingefügt werden.')
+    const onDrop = (event: DragEvent) => placeImage(event.dataTransfer, event, 'Bild konnte nicht abgelegt werden.')
     const onDragOver = (event: DragEvent) => {
       if ([...(event.dataTransfer?.types ?? [])].includes('Files')) event.preventDefault()
     }
-    window.addEventListener('paste', onPaste)
-    window.addEventListener('drop', onDrop)
+    window.addEventListener('paste', onPaste, true)
+    window.addEventListener('drop', onDrop, true)
     window.addEventListener('dragover', onDragOver)
     return () => {
-      window.removeEventListener('paste', onPaste)
-      window.removeEventListener('drop', onDrop)
+      window.removeEventListener('paste', onPaste, true)
+      window.removeEventListener('drop', onDrop, true)
       window.removeEventListener('dragover', onDragOver)
     }
   }, [importImageBytes, toast])

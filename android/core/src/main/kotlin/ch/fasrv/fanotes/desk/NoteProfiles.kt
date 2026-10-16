@@ -250,6 +250,23 @@ fun firstRunFolderArgb(hex: String): Int {
     return (0xFF shl 24) or rgb
 }
 
+/**
+ * CSS `color-mix(in srgb, source share, into)`.
+ * Alpha is mixed in premultiplied form, the same way the browser mixes `--border`.
+ */
+fun cssColorMix(source: Int, into: Int, sourceShare: Float): Int {
+    val share = sourceShare.coerceIn(0f, 1f)
+    fun channel(color: Int, shift: Int): Int = (color ushr shift) and 0xFF
+    val p1 = share * (channel(source, 24) / 255f)
+    val p2 = (1f - share) * (channel(into, 24) / 255f)
+    val alpha = p1 + p2
+    if (alpha <= 0f) return 0
+    fun mixed(shift: Int): Int =
+        ((channel(source, shift) * p1 + channel(into, shift) * p2) / alpha).roundToInt().coerceIn(0, 255)
+    val a = (alpha * 255f).roundToInt().coerceIn(0, 255)
+    return (a shl 24) or (mixed(16) shl 16) or (mixed(8) shl 8) or mixed(0)
+}
+
 /** `color-mix` of [source] into [into] by [sourceShare]. */
 fun mixArgb(source: Int, into: Int, sourceShare: Float): Int {
     val share = sourceShare.coerceIn(0f, 1f)
@@ -302,8 +319,34 @@ const val FIRST_RUN_INBOX = "Eingang ist immer dabei"
 const val FIRST_RUN_INBOX_DETAIL = "Der schnelle Sammelplatz für neue Notizen und Ideen."
 const val FIRST_RUN_PREPARED = "Sauber vorbereitet"
 const val FIRST_RUN_PREPARED_DETAIL = "jeder Ordner erhält eine eigene Farbe und erscheint direkt in der Seitenleiste."
-const val FIRST_RUN_PREVIEW_RADIUS_DP = 12
+/** `.first-run-preview-window` border-radius is 18px. */
+const val FIRST_RUN_PREVIEW_RADIUS_DP = 18
 const val FIRST_RUN_PREVIEW_HEADER_DP = 32
+/** `.first-run-preview-window > header b` is 7px at weight 600. Dots are 6px, the row gap is 5px, and the side padding is 12px. */
+const val FIRST_RUN_PREVIEW_HEADER_TITLE_SP = 7
+const val FIRST_RUN_PREVIEW_HEADER_TITLE_WEIGHT = 600
+const val FIRST_RUN_PREVIEW_HEADER_DOT_DP = 6
+const val FIRST_RUN_PREVIEW_HEADER_GAP_DP = 5
+const val FIRST_RUN_PREVIEW_HEADER_PAD_DP = 12
+/** Header fill is `color-mix(in srgb, var(--panel) 92%, transparent)`. */
+const val FIRST_RUN_PREVIEW_HEADER_FILL_ALPHA = 0.92f
+/** Close dot is `color-mix(in srgb, var(--danger) 68%, var(--border))`. The middle dot is `#d8a643`. */
+const val FIRST_RUN_PREVIEW_HEADER_CLOSE_MIX = 0.68f
+const val FIRST_RUN_PREVIEW_HEADER_MIDDLE_DOT = 0xFFD8A643.toInt()
+/** `--border` is white at 9% on dark themes, `#37352f` at 9% on light, and `#37352f` at 10% on sepia. */
+const val FIRST_RUN_PREVIEW_BORDER_ALPHA = 0.09f
+const val FIRST_RUN_PREVIEW_BORDER_SEPIA_ALPHA = 0.10f
+const val FIRST_RUN_PREVIEW_BORDER_LIGHT_RGB = 0x37352F
+/**
+ * Window edge is `color-mix(in srgb, var(--border-strong) 90%, transparent)`.
+ * The shadow is `0 34px 95px rgba(0,0,0,.25)` plus a 1px ring at `rgba(255,255,255,.025)`.
+ */
+const val FIRST_RUN_PREVIEW_WINDOW_BORDER_MIX = 0.90f
+const val FIRST_RUN_PREVIEW_WINDOW_SHADOW_X_DP = 0
+const val FIRST_RUN_PREVIEW_WINDOW_SHADOW_Y_DP = 34
+const val FIRST_RUN_PREVIEW_WINDOW_SHADOW_BLUR_DP = 95
+const val FIRST_RUN_PREVIEW_WINDOW_SHADOW_ALPHA = 0.25f
+const val FIRST_RUN_PREVIEW_WINDOW_RING = 0x06FFFFFF
 const val FIRST_RUN_PREVIEW_ASIDE_DP = 118
 const val FIRST_RUN_PREVIEW_ASIDE_NARROW_DP = 102
 const val FIRST_RUN_PREVIEW_ASIDE_PAD_BLOCK_DP = 17
@@ -329,7 +372,7 @@ const val FIRST_RUN_PREVIEW_KICKER = "MATHEMATIK · ANALYSIS"
 const val FIRST_RUN_PREVIEW_HEADING = "Ableitungen"
 const val FIRST_RUN_PREVIEW_TYPED = "Die Änderungsrate beschreibt die Steigung."
 /**
- * `.first-run-preview-paper` still wins. No later rule, including the 12px window radius, changes this sheet.
+ * `.first-run-preview-paper` still wins. No later rule, including the 18px window radius, changes this sheet.
  * Margin is 18px 19px 0. Padding is 25px 27px. Top corners are 11px and the bottom corners stay 0.
  */
 const val FIRST_RUN_PREVIEW_PAPER_MARGIN_TOP_DP = 18
@@ -801,6 +844,37 @@ fun firstRunPreviewFloatBorder(dark: Boolean): Int {
     val rgb = if (dark) 0xFFFFFF else FIRST_RUN_PREVIEW_FLOAT_BORDER_LIGHT_RGB
     val alpha = (FIRST_RUN_PREVIEW_FLOAT_BORDER_ALPHA * 255f).roundToInt().coerceIn(0, 255)
     return (alpha shl 24) or rgb
+}
+
+/** Header bar fill: `--panel` at 92% over a transparent backdrop. */
+fun firstRunPreviewHeaderFill(panelArgb: Int): Int {
+    val alpha = (FIRST_RUN_PREVIEW_HEADER_FILL_ALPHA * 255f).roundToInt().coerceIn(0, 255)
+    return (alpha shl 24) or (panelArgb and 0xFFFFFF)
+}
+
+/** `--border` for the welcome preview, including the sepia 10% rule. */
+fun firstRunPreviewBorder(themeId: String, systemDark: Boolean = false): Int {
+    val palette = themePalette(themeId, systemDark)
+    val alpha = if (palette.id == "sepia") FIRST_RUN_PREVIEW_BORDER_SEPIA_ALPHA else FIRST_RUN_PREVIEW_BORDER_ALPHA
+    val rgb = if (palette.dark) 0xFFFFFF else FIRST_RUN_PREVIEW_BORDER_LIGHT_RGB
+    val channel = (alpha * 255f).roundToInt().coerceIn(0, 255)
+    return (channel shl 24) or rgb
+}
+
+/** Close traffic light: danger mixed 68% into `--border`. */
+fun firstRunPreviewHeaderClose(dangerArgb: Int, borderArgb: Int): Int =
+    cssColorMix(dangerArgb, borderArgb, FIRST_RUN_PREVIEW_HEADER_CLOSE_MIX)
+
+/** Window border: `--border-strong` mixed 90% into transparent. */
+fun firstRunPreviewWindowBorder(themeId: String, systemDark: Boolean = false): Int {
+    val dark = themePalette(themeId, systemDark).dark
+    return cssColorMix(firstRunPreviewFloatBorder(dark), 0, FIRST_RUN_PREVIEW_WINDOW_BORDER_MIX)
+}
+
+/** Black at the welcome-window shadow alpha. */
+fun firstRunPreviewWindowShadowColor(alpha: Float = FIRST_RUN_PREVIEW_WINDOW_SHADOW_ALPHA): Int {
+    val channel = (alpha.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
+    return channel shl 24
 }
 
 /** Black at the floating-tag shadow alpha. */

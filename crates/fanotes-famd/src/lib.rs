@@ -1007,6 +1007,20 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     // U+2028 and U+2029 are JavaScript trim characters, and `Date.parse` rejects
     // them. Only the date-parse spaces are padding.
     let trimmed = value.trim_matches(is_date_parse_space);
+    // `-000001/01/01` keeps year -1. A slash is not an ES5 hyphen, so midnight
+    // is local. `32` is not a day, and that date is empty instead of 2032.
+    // A leading or trailing space stays on the legacy path.
+    if value == trimmed {
+        match negative_expanded_tail(trimmed) {
+            ExpandedTail::Skip | ExpandedTail::Strict => {}
+            ExpandedTail::Reject => return None,
+            ExpandedTail::Local(year, month, day) => {
+                let (year, month, day, hour, minute, second) =
+                    local_civil_to_utc(year, month, day, 0, 0, 0)?;
+                return format_civil_iso(year, month, day, hour, minute, second, 0);
+            }
+        }
+    }
     // `-000000-10-13` drops the invalid negative zero once. The remainder is
     // legacy, so `-10-13` is 13 October 2001 and a second `-000000` is year 0.
     // `-000001-10-13 EST` stays in year -1. A leading space stays legacy.
@@ -1445,6 +1459,99 @@ fn strip_negative_zero_year(trimmed: &str) -> Option<&str> {
         return None;
     }
     Some(rest.trim_start_matches(is_date_parse_space))
+}
+
+enum ExpandedTail {
+    Skip,
+    Strict,
+    Reject,
+    Local(i32, i32, i32),
+}
+
+/// A negative six-digit year followed by `/` or `-`.
+///
+/// `-000001-01-01` is a finished ES5 date, so this returns `Strict` and the
+/// UTC path keeps it. `-000001/01/01` and `-000001-1-1` are local mean time.
+/// `-000001-01-32` and `-000001/13/1` are empty. `-000000` is not this year.
+fn negative_expanded_tail(value: &str) -> ExpandedTail {
+    let bytes = value.as_bytes();
+    if bytes.first() != Some(&b'-') || bytes.len() < 8 || !bytes[1..7].iter().all(u8::is_ascii_digit)
+    {
+        return ExpandedTail::Skip;
+    }
+    let Ok(year) = value[..7].parse::<i32>() else {
+        return ExpandedTail::Skip;
+    };
+    if year >= 0 {
+        return ExpandedTail::Skip;
+    }
+    let rest = &value[7..];
+    if rest.bytes().any(|byte| !matches!(byte, b'0'..=b'9' | b'/' | b'-')) {
+        return ExpandedTail::Skip;
+    }
+    let rest_bytes = rest.as_bytes();
+    if !matches!(rest_bytes.first(), Some(b'/' | b'-')) {
+        return ExpandedTail::Skip;
+    }
+    let mut fields = Vec::new();
+    let mut all_hyphen = true;
+    let mut all_two = true;
+    let mut trailing = false;
+    let mut index = 0;
+    while index < rest_bytes.len() {
+        if rest_bytes[index] == b'/' {
+            all_hyphen = false;
+        }
+        index += 1;
+        let start = index;
+        while index < rest_bytes.len() && rest_bytes[index].is_ascii_digit() {
+            index += 1;
+        }
+        if start == index {
+            if index == rest_bytes.len() && fields.len() < 2 {
+                trailing = true;
+                break;
+            }
+            return ExpandedTail::Reject;
+        }
+        let field = &rest[start..index];
+        if field.len() != 2 {
+            all_two = false;
+        }
+        fields.push(field);
+        if fields.len() > 2 {
+            return ExpandedTail::Reject;
+        }
+    }
+    if trailing && fields.len() >= 2 {
+        return ExpandedTail::Reject;
+    }
+    let (month, day) = if fields.is_empty() {
+        (1, 1)
+    } else {
+        let Ok(month) = fields[0].parse::<i32>() else {
+            return ExpandedTail::Reject;
+        };
+        let day = if fields.len() == 2 {
+            let Ok(day) = fields[1].parse::<i32>() else {
+                return ExpandedTail::Reject;
+            };
+            day
+        } else {
+            1
+        };
+        if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+            return ExpandedTail::Reject;
+        }
+        (month, day)
+    };
+    if all_hyphen && all_two && !trailing {
+        return ExpandedTail::Strict;
+    }
+    match normalize_ymd(year, month, day) {
+        Some((year, month, day)) => ExpandedTail::Local(year, month, day),
+        None => ExpandedTail::Reject,
+    }
 }
 
 fn negative_expanded_ymd(date: &str) -> Option<(i32, i32, i32)> {
@@ -2260,9 +2367,178 @@ fn separate_colon_after_hyphen_date(value: &str) -> Option<String> {
             next.push_str(&value[index + 1..]);
             return Some(next);
         }
+        if let Some(next) = loose_hyphen_colon_time(value, index) {
+            return Some(next);
+        }
         index += 1;
     }
     None
+}
+
+fn hyphen_run_is_a_date(value: &str, start: usize) -> bool {
+    if start == 0 {
+        return true;
+    }
+    let Some(before) = value[..start].chars().next_back() else {
+        return false;
+    };
+    matches!(before, '+' | '-') || is_date_parse_space(before)
+}
+
+/// `2026-1-2:16:00` is 02:16 on 1 January. The colon takes the last short
+/// field as the hour, and a missing day stays 1. `2026-10-13:16:00` is a
+/// strict date, so 13 stays the day and this rewrite does not apply.
+fn loose_hyphen_colon_time(value: &str, colon: usize) -> Option<String> {
+    let bytes = value.as_bytes();
+    if colon == 0 || !bytes[colon - 1].is_ascii_digit() {
+        return None;
+    }
+    let mut start = colon;
+    while start > 0 && bytes[start - 1].is_ascii_digit() {
+        start -= 1;
+    }
+    if start == 0 || bytes[start - 1] != b'-' {
+        return None;
+    }
+    start -= 1;
+    if start == 0 || !bytes[start - 1].is_ascii_digit() {
+        return None;
+    }
+    loop {
+        while start > 0 && bytes[start - 1].is_ascii_digit() {
+            start -= 1;
+        }
+        if start == 0 || bytes[start - 1] != b'-' {
+            break;
+        }
+        if start >= 2 && bytes[start - 2] == b'-' {
+            return None;
+        }
+        if start == 1 || !bytes[start - 2].is_ascii_digit() {
+            break;
+        }
+        start -= 1;
+    }
+    // `16:00-05:00` and `16:00:00.5-05:00` are zones. A date run starts at the
+    // beginning, after padding, or after a sign.
+    if !hyphen_run_is_a_date(value, start) {
+        return None;
+    }
+    // `Oct 13 2026 5-04:00` already has a date. `5-` is an extra number and
+    // `04:00` is its clock. A run is the date only when no digit comes first.
+    if value[..start].bytes().any(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let mut run_start = start;
+    if run_start > 0 && matches!(bytes[run_start - 1], b'+' | b'-') {
+        let first = value[run_start..colon].split('-').next()?;
+        if first.len() == 6 && first.bytes().all(|byte| byte.is_ascii_digit()) {
+            let year: i32 = first.parse().ok()?;
+            if bytes[run_start - 1] == b'-' && year == 0 {
+                let after = run_start + 6;
+                if bytes.get(after) != Some(&b'-') {
+                    return None;
+                }
+                run_start = after + 1;
+            } else {
+                return signed_expanded_colon_time(
+                    bytes[run_start - 1] == b'-',
+                    &value[..run_start - 1],
+                    &value[run_start..colon],
+                    &value[colon + 1..],
+                );
+            }
+        }
+    }
+    let run = &value[run_start..colon];
+    if prefix_is_strict_hyphen_date(run) || !run.contains('-') {
+        return None;
+    }
+    let field_count = run.split('-').count();
+    if !(2..=4).contains(&field_count) {
+        return None;
+    }
+    let parts: Vec<&str> = run.split('-').collect();
+    if parts.len() == 4
+        && parts[0].len() == 4
+        && parts[1].len() == 2
+        && parts[2].len() == 2
+    {
+        // `2026-10-13-16:00` finished the strict date. The extra hyphen is illegal.
+        return None;
+    }
+    let rewritten = legacy_hyphen_colon_time(run, &value[colon + 1..])?;
+    let mut next = String::with_capacity(value.len());
+    next.push_str(&value[..run_start]);
+    next.push_str(&rewritten);
+    Some(next)
+}
+
+/// `+002026-1-2:16:00` already read year 2026. `-000001-1-2:16:00` keeps
+/// year -1. `-000000` is discarded before the legacy fields are read.
+fn signed_expanded_colon_time(
+    negative: bool,
+    head: &str,
+    run: &str,
+    suffix: &str,
+) -> Option<String> {
+    let mut fields: Vec<&str> = run.split('-').collect();
+    if !(2..=4).contains(&fields.len()) {
+        return None;
+    }
+    let hour = fields.pop()?;
+    if hour.is_empty() || fields.iter().any(|field| field.is_empty()) {
+        return None;
+    }
+    let year_text = fields.remove(0);
+    if year_text.len() != 6 {
+        return None;
+    }
+    if fields.len() == 2 && fields[0].len() == 2 && fields[1].len() == 2 {
+        // `+002026-10-13-16:00` finished the strict date before the extra hyphen.
+        return None;
+    }
+    let year_value: i32 = year_text.parse().ok()?;
+    let mut dates = vec![if negative { -year_value } else { year_value }];
+    for field in fields {
+        dates.push(field.parse().ok()?);
+    }
+    let (month, day, year) = compose_legacy_ymd(&dates)?;
+    let clock = format!(
+        "{hour}:{}",
+        suffix.trim_start_matches(is_date_parse_space)
+    );
+    let mut next = String::with_capacity(head.len() + 32);
+    next.push_str(head);
+    next.push_str(&format!(
+        "{}-{month:02}-{day:02} {clock}",
+        legacy_iso_year(year)
+    ));
+    Some(next)
+}
+
+fn compose_legacy_ymd(dates: &[i32]) -> Option<(i32, i32, i32)> {
+    let mut comps = dates.to_vec();
+    while comps.len() < 3 {
+        comps.push(1);
+    }
+    if comps.len() != 3 {
+        return None;
+    }
+    let (year, month, day) = if !(1..=31).contains(&comps[0]) {
+        (comps[0], comps[1], comps[2])
+    } else {
+        (comps[2], comps[0], comps[1])
+    };
+    let year = if year < 0 {
+        year
+    } else {
+        legacy_year_number(year)?
+    };
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    Some((month, day, year))
 }
 
 /// `note:10/13/2026` and `hello:Oct 13 2026`. A colon after a word is only a
@@ -13277,6 +13553,68 @@ mod tests {
     }
 
     #[test]
+    fn a_colon_takes_the_last_short_hyphen_field_as_the_hour() {
+        with_tz("America/New_York", || {
+            // `2026-1-2:16:00` is 02:16 on 1 January. The colon attaches to 2.
+            // A strict `2026-10-13:16:00` keeps 13 as the day.
+            assert_eq!(
+                super::canonical_iso("2026-1-2:16:00").as_deref(),
+                Some("2026-01-01T07:16:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-1-2:").as_deref(),
+                Some("2026-01-01T07:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-1-2:4:00 PM").as_deref(),
+                Some("2026-01-01T19:04:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-1-2:16:00.5").as_deref(),
+                Some("2026-01-01T07:16:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-7-2:16:00 EST").as_deref(),
+                Some("2026-07-01T07:16:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("99-1-2:16:00").as_deref(),
+                Some("1999-01-01T07:16:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+002026-1-2:16:00").as_deref(),
+                Some("2026-01-01T07:16:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-1-2:16:00").as_deref(),
+                Some("-000001-01-01T07:12:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-1-2-3:16:00").as_deref(),
+                Some("2026-01-02T08:16:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-1-2").as_deref(),
+                Some("2026-01-02T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13:16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13-16:00"), None);
+            assert_eq!(super::canonical_iso("+002026-10-13-16:00"), None);
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 :5-04:00").as_deref(),
+                Some("2026-10-13T08:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:00.5 EST").as_deref(),
+                Some("2026-10-13T21:00:00.500Z")
+            );
+        });
+    }
+
+    #[test]
     fn a_fullwidth_digit_prefix_is_a_word() {
         with_tz("America/New_York", || {
             // Fullwidth digits are letters to `Date.parse`. `２０２６` is a
@@ -13327,6 +13665,59 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("10/13/2026").as_deref(),
                 Some("2026-10-13T04:00:00.000Z")
+            );
+        });
+    }
+
+    #[test]
+    fn a_negative_expanded_year_keeps_slash_fields() {
+        with_tz("America/New_York", || {
+            // Slashes are not ES5 hyphens, so year -1 stays on local mean time.
+            // A day past 31 is empty. Two-digit hyphens stay UTC.
+            assert_eq!(
+                super::canonical_iso("-000001/01/01").as_deref(),
+                Some("-000001-01-01T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001/10/13").as_deref(),
+                Some("-000001-10-13T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001/02/31").as_deref(),
+                Some("-000001-03-03T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-2-31").as_deref(),
+                Some("-000001-03-03T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001/10").as_deref(),
+                Some("-000001-10-01T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-").as_deref(),
+                Some("-000001-01-01T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-271821/10/01").as_deref(),
+                Some("-271821-10-01T04:56:02.000Z")
+            );
+            assert_eq!(super::canonical_iso("-000001/01/32"), None);
+            assert_eq!(super::canonical_iso("-000001-01-32"), None);
+            assert_eq!(super::canonical_iso("-000001/13/1"), None);
+            assert_eq!(super::canonical_iso("-000001-01-00"), None);
+            assert_eq!(super::canonical_iso("-000001-10-13-"), None);
+            assert_eq!(
+                super::canonical_iso("-000001-01-01").as_deref(),
+                Some("-000001-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-02-31").as_deref(),
+                Some("-000001-03-03T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(" -000001/01/01").as_deref(),
+                Some("2001-01-01T05:00:00.000Z")
             );
         });
     }

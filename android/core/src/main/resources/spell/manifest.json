@@ -1,0 +1,42 @@
+{
+  "format": "fanotes-spelling-bloom-v2",
+  "generatedFrom": {
+    "de": [
+      "dictionary-de@3.0.0"
+    ],
+    "en": [
+      "dictionary-en@4.0.0",
+      "dictionary-en-gb@3.0.0"
+    ]
+  },
+  "ocrFrequencySource": "SUBTLEXus via subtlex-word-frequencies@2.0.0",
+  "minimumSupplementalOcrFrequency": 3,
+  "bitsPerWord": 12,
+  "hashes": 8,
+  "languages": {
+    "de": {
+      "file": "de.bloom",
+      "bitCount": 3557296,
+      "wordCount": 296441,
+      "sha256": "0634bd62eb039b47f1ff6c6b43c97b6c5a3fac6abe4c3d7c05a2967b84579e7a",
+      "candidates": {
+        "file": "de.words",
+        "size": 3750882,
+        "wordCount": 292216,
+        "sha256": "f4e9712ded85c08b59b44bf383702df715404e0a410ab118681db1698997ded3"
+      }
+    },
+    "en": {
+      "file": "en.bloom",
+      "bitCount": 1491904,
+      "wordCount": 124325,
+      "sha256": "74c85c19ea46ce74cee5611697bff0b747cd5ceecad2551f9d692eb4c8392c3e",
+      "candidates": {
+        "file": "en.words",
+        "size": 821268,
+        "wordCount": 88134,
+        "sha256": "33f55dbcf4516e5bafa45d1381272f6d80e3f335a9c7013d06f37218ef5751e1"
+      }
+    }
+  }
+}

@@ -58,7 +58,7 @@ class NoteProfilesTest {
     fun theWelcomePreviewUsesTheDesktopWindow() {
         assertEquals(1, firstRunPreviewColumns(760))
         assertEquals(2, firstRunPreviewColumns(761))
-        assertEquals(12, FIRST_RUN_PREVIEW_RADIUS_DP)
+        assertEquals(18, FIRST_RUN_PREVIEW_RADIUS_DP)
         assertEquals(32, FIRST_RUN_PREVIEW_HEADER_DP)
         assertEquals(listOf("Mathematik", "Deutsch", "Französisch", "Physik", "Wirtschaft"), FIRST_RUN_PREVIEW_SUBJECTS)
         assertEquals("Ableitungen", FIRST_RUN_PREVIEW_HEADING)
@@ -289,6 +289,37 @@ class NoteProfilesTest {
         assertEquals(35, FIRST_RUN_PREVIEW_FLOAT_SHADOW_BLUR_DP)
         assertEquals(0.2f, FIRST_RUN_PREVIEW_FLOAT_SHADOW_ALPHA)
         assertEquals(0x33000000, firstRunPreviewFloatShadowColor())
+    }
+
+    @Test
+    fun theWelcomePreviewHeaderMatchesTheDesktopWindow() {
+        assertEquals(7, FIRST_RUN_PREVIEW_HEADER_TITLE_SP)
+        assertEquals(600, FIRST_RUN_PREVIEW_HEADER_TITLE_WEIGHT)
+        assertEquals(6, FIRST_RUN_PREVIEW_HEADER_DOT_DP)
+        assertEquals(5, FIRST_RUN_PREVIEW_HEADER_GAP_DP)
+        assertEquals(12, FIRST_RUN_PREVIEW_HEADER_PAD_DP)
+        assertEquals(32, FIRST_RUN_PREVIEW_HEADER_DP)
+        assertEquals(0xFFD8A643.toInt(), FIRST_RUN_PREVIEW_HEADER_MIDDLE_DOT)
+        assertEquals(0xEB202020.toInt(), firstRunPreviewHeaderFill(0xFF202020.toInt()))
+        assertEquals(0x17FFFFFF, firstRunPreviewBorder("dark"))
+        assertEquals(0x17FFFFFF, firstRunPreviewBorder("midnight"))
+        assertEquals(0x17FFFFFF, firstRunPreviewBorder("system", systemDark = true))
+        assertEquals(0x1737352F, firstRunPreviewBorder("light"))
+        assertEquals(0x1737352F, firstRunPreviewBorder("system", systemDark = false))
+        assertEquals(0x1A37352F, firstRunPreviewBorder("sepia"))
+        assertEquals(0xB5FF9295.toInt(), firstRunPreviewHeaderClose(0xFFFF8D90.toInt(), firstRunPreviewBorder("dark")))
+        assertEquals(0xB5BA3542.toInt(), firstRunPreviewHeaderClose(0xFFC03543.toInt(), firstRunPreviewBorder("light")))
+        assertEquals(0xB6BA3542.toInt(), firstRunPreviewHeaderClose(0xFFC03543.toInt(), firstRunPreviewBorder("sepia")))
+        assertEquals(0x25FFFFFF, firstRunPreviewWindowBorder("dark"))
+        assertEquals(0x25FFFFFF, firstRunPreviewWindowBorder("aurora"))
+        assertEquals(0x2537352F, firstRunPreviewWindowBorder("light"))
+        assertEquals(0x2537352F, firstRunPreviewWindowBorder("sepia"))
+        assertEquals(0, FIRST_RUN_PREVIEW_WINDOW_SHADOW_X_DP)
+        assertEquals(34, FIRST_RUN_PREVIEW_WINDOW_SHADOW_Y_DP)
+        assertEquals(95, FIRST_RUN_PREVIEW_WINDOW_SHADOW_BLUR_DP)
+        assertEquals(0.25f, FIRST_RUN_PREVIEW_WINDOW_SHADOW_ALPHA)
+        assertEquals(0x40000000, firstRunPreviewWindowShadowColor())
+        assertEquals(0x06FFFFFF, FIRST_RUN_PREVIEW_WINDOW_RING)
     }
 
     @Test

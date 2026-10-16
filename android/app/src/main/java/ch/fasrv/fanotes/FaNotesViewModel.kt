@@ -35,6 +35,9 @@ import ch.fasrv.fanotes.desk.FOLDER_COLORS_PATH
 import ch.fasrv.fanotes.desk.isMarkdownConflictPath
 import ch.fasrv.fanotes.desk.TEMPLATES_FOLDER
 import ch.fasrv.fanotes.desk.NOTE_TEMPLATES
+import ch.fasrv.fanotes.desk.NoteStandardBatch
+import ch.fasrv.fanotes.desk.convertFamdToCurrentStandard
+import ch.fasrv.fanotes.desk.isConvertibleFamdPath
 import ch.fasrv.fanotes.desk.StudyPicture
 import ch.fasrv.fanotes.desk.aggregateStudy
 import ch.fasrv.fanotes.desk.openPageStats
@@ -80,7 +83,7 @@ import ch.fasrv.fanotes.desk.applyNoteTags
 import ch.fasrv.fanotes.desk.parseNoteTags
 import ch.fasrv.fanotes.desk.applyHomeworkToCalendar
 import ch.fasrv.fanotes.desk.exportIcs
-import ch.fasrv.fanotes.desk.importIcs
+import ch.fasrv.fanotes.desk.applyIcsImport
 import ch.fasrv.fanotes.desk.DeskTab
 import ch.fasrv.fanotes.desk.NoteTrail
 import ch.fasrv.fanotes.desk.SwitcherNote
@@ -220,6 +223,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val canvasToken = MutableStateFlow(0)
     val glyphSamples = MutableStateFlow<List<GlyphSample>>(emptyList())
     val textHandOpen = MutableStateFlow(false)
+    val noteStandardStatus = MutableStateFlow<String?>(null)
+    val noteStandardBusy = MutableStateFlow(false)
     private val glyphImportRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val glyphImports = glyphImportRequests.asSharedFlow()
     private var saveJob: Job? = null
@@ -409,6 +414,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 session.replace(note.document)
                 open.value = noteOpened(note)
                 markdown.value = note.markdown
+                spellingLanguage.value = "unknown"
                 foldedHeadings.value = foldsForSections(note.markdown, note.document)
                 jumpToHeading(note.markdown, headingAnchor)
                 rememberTags(path, note.markdown)
@@ -2327,6 +2333,26 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val historyComparison = MutableStateFlow<Pair<String, String>?>(null)
     val study = MutableStateFlow<StudyPicture?>(null)
     val deskSettings = MutableStateFlow(graph.readDesk())
+    val spellingLanguage = MutableStateFlow("unknown")
+    val spellingEpoch = MutableStateFlow(0)
+    private val spellingSession = ch.fasrv.fanotes.desk.SpellingSession()
+
+    fun reportSpellingLanguage(code: String) {
+        if (spellingLanguage.value != code) spellingLanguage.value = code
+    }
+
+    fun spellingAcceptedWords(): Set<String> =
+        ch.fasrv.fanotes.desk.personalSpellWords(deskSettings.value["spell-personal"]) + spellingSession.snapshot()
+
+    fun learnSpellingWord(word: String) {
+        val next = ch.fasrv.fanotes.desk.addPersonalSpellWord(deskSettings.value["spell-personal"], word) ?: return
+        updateDesk("spell-personal", next)
+        spellingEpoch.value += 1
+    }
+
+    fun ignoreSpellingWord(word: String) {
+        if (spellingSession.ignore(word)) spellingEpoch.value += 1
+    }
     val customCss = MutableStateFlow(graph.readCustomCss())
     val splitPath = MutableStateFlow<String?>(null)
     val unsaved = MutableStateFlow(false)
@@ -2928,15 +2954,19 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 message.value = "Kein Kalender vorhanden."
                 return@launch
             }
-            val imported = importIcs(text, calendarId)
-            if (imported.isEmpty()) {
+            val result = applyIcsImport(current, text, calendarId)
+            if (result.added == 0 && result.updated == 0 && result.removed == 0) {
                 message.value = "Keine Termine in der ICS-Datei."
                 return@launch
             }
-            val next = current.copy(events = (current.events + imported).take(2_000))
-            calendar.value = next
-            persistCalendarNote(serializeCalendarMarkdown(next))
-            message.value = if (imported.size == 1) "1 Termin importiert." else "${imported.size} Termine importiert."
+            calendar.value = result.document
+            persistCalendarNote(serializeCalendarMarkdown(result.document))
+            val count = result.added + result.updated
+            message.value = when {
+                count == 0 -> "Abgesagte Termine entfernt."
+                count == 1 -> "1 Termin importiert."
+                else -> "$count Termine importiert."
+            }
         }
     }
 
@@ -3019,6 +3049,58 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val links = if (result.connectionCount > 0) " · ${result.connectionCount} Verbindungen" else ""
         message.value = "${result.glyphCount} Zeichen als $kind eingefügt$links."
         textHandOpen.value = false
+    }
+
+    fun convertOldNotes() {
+        if (noteStandardBusy.value) return
+        noteStandardBusy.value = true
+        viewModelScope.launch {
+            val openNote = open.value
+            val skip = if (dirty && openNote != null) {
+                if (openNote.path.endsWith(".famd", ignoreCase = true)) openNote.path else companionPath(openNote.path, ".famd")
+            } else {
+                null
+            }
+            val outcome = withContext(Dispatchers.IO) {
+                var converted = 0
+                var skipped = 0
+                var failed = 0
+                val touched = ArrayList<String>()
+                for (entry in graph.vault.walkFiles()) {
+                    if (!isConvertibleFamdPath(entry.path)) continue
+                    if (entry.path == skip) {
+                        skipped += 1
+                        continue
+                    }
+                    try {
+                        val bytes = graph.vault.read(entry.path) ?: run {
+                            skipped += 1
+                            continue
+                        }
+                        val result = convertFamdToCurrentStandard(bytes.decodeToString())
+                        if (!result.converted) {
+                            skipped += 1
+                            continue
+                        }
+                        graph.vault.write(entry.path, result.source.encodeToByteArray())
+                        converted += 1
+                        touched += entry.path
+                    } catch (_: Exception) {
+                        failed += 1
+                    }
+                }
+                if (touched.isNotEmpty()) graph.engine.notifyLocalChange()
+                NoteStandardBatch(converted, skipped, failed) to touched
+            }
+            noteStandardBusy.value = false
+            noteStandardStatus.value = outcome.first.summary()
+            message.value = outcome.first.summary()
+            val current = open.value?.path
+            val famd = current?.let { path ->
+                if (path.endsWith(".famd", ignoreCase = true)) path else companionPath(path, ".famd")
+            }
+            if (!dirty && current != null && famd != null && famd in outcome.second) openPath(current, force = true)
+        }
     }
 
     fun insertMath(expression: String) {
