@@ -7947,6 +7947,15 @@ private fun SettingsPage(
                                 onCheckedChange = { model.updateDesk("line-numbers", if (it) "on" else "off") },
                             )
                         }
+                        SettingRow(
+                            "Rechtschreibprüfung",
+                            "Unterstreicht Tippfehler lokal rot und erkennt Deutsch oder Englisch automatisch. Mathematik und Code bleiben unberührt. Ein langes Drücken oder Strg+. zeigt Vorschläge.",
+                        ) {
+                            Switch(
+                                checked = settings["spellcheck"] != "off",
+                                onCheckedChange = { model.updateDesk("spellcheck", if (it) "on" else "off") },
+                            )
+                        }
                         SettingRow("Wortzahl in Statusleiste") {
                             Switch(
                                 checked = settings["words"] != "off",
