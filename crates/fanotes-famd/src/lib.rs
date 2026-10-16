@@ -2585,6 +2585,36 @@ fn finish_slash_offset(
 }
 
 /// `YYYY/M/D` or `M/D/YYYY`. A date alone is local midnight. `T` is not a separator.
+/// `10/13/2026 +5` has no clock, so the sign is not an offset. `GMT+5`
+/// is allowed because GMT is UTC. `EST+5` is not.
+fn slash_signed_offset_without_time(trimmed: &str, time: &Option<String>) -> bool {
+    if time.is_some() {
+        return false;
+    }
+    let words: Vec<&str> = trimmed
+        .split(is_date_parse_space)
+        .filter(|word| !word.is_empty())
+        .collect();
+    if words.iter().copied().any(utc_zone_word) {
+        return false;
+    }
+    words.iter().copied().any(signed_offset_word)
+}
+
+fn utc_zone_word(word: &str) -> bool {
+    let lower = word.to_ascii_lowercase();
+    lower == "z"
+        || lower == "ut"
+        || lower.starts_with("gmt")
+        || lower.starts_with("utc")
+        || lower.starts_with("ut+")
+        || lower.starts_with("ut-")
+}
+
+fn signed_offset_word(word: &str) -> bool {
+    word.starts_with(['+', '-']) || (named_zone_offset_tail(word).is_some() && !utc_zone_word(word))
+}
+
 /// `16:00` and `4:5` can sit in front of a slash date. `16:00/10/13` cannot.
 fn slash_clock_word(word: &str) -> bool {
     let bytes = word.as_bytes();
@@ -2658,6 +2688,9 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
             (date, None)
         }
     };
+    if slash_signed_offset_without_time(trimmed, &time) {
+        return None;
+    }
     let fields: Vec<&str> = date.split('/').filter(|part| !part.is_empty()).collect();
     if fields.is_empty() || fields.len() > 3 {
         return None;
@@ -7875,6 +7908,20 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("16:00 EST 10/13/1950").as_deref(),
                 Some("1950-10-13T21:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("10/13/2026 +5"), None);
+            assert_eq!(super::canonical_iso("10/13/2026 EST+5"), None);
+            assert_eq!(
+                super::canonical_iso("10/13/2026 GMT+5").as_deref(),
+                Some("2026-10-12T19:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 GMT").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00 +5").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
             );
         });
     }

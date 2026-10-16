@@ -4924,6 +4924,36 @@ fn finish_slash_offset(
 /// `YYYY/M/D` or `M/D/YYYY`, then an optional legacy clock. A date alone is
 /// local midnight. `GMT` and `EST` name an offset. The `T` inside those words
 /// is not a time separator.
+/// `10/13/2026 +5` has no clock, so the sign is not an offset. `GMT+5`
+/// is allowed because GMT is UTC. `EST+5` is not.
+fn slash_signed_offset_without_time(trimmed: &str, time: &Option<String>) -> bool {
+    if time.is_some() {
+        return false;
+    }
+    let words: Vec<&str> = trimmed
+        .split(is_date_parse_space)
+        .filter(|word| !word.is_empty())
+        .collect();
+    if words.iter().copied().any(utc_zone_word) {
+        return false;
+    }
+    words.iter().copied().any(signed_offset_word)
+}
+
+fn utc_zone_word(word: &str) -> bool {
+    let lower = word.to_ascii_lowercase();
+    lower == "z"
+        || lower == "ut"
+        || lower.starts_with("gmt")
+        || lower.starts_with("utc")
+        || lower.starts_with("ut+")
+        || lower.starts_with("ut-")
+}
+
+fn signed_offset_word(word: &str) -> bool {
+    word.starts_with(['+', '-']) || (named_zone_offset_tail(word).is_some() && !utc_zone_word(word))
+}
+
 /// `16:00` and `4:5` can sit in front of a slash date. `16:00/10/13` cannot.
 fn slash_clock_word(word: &str) -> bool {
     let bytes = word.as_bytes();
@@ -4990,6 +5020,9 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
             (date, None)
         }
     };
+    if slash_signed_offset_without_time(trimmed, &time) {
+        return None;
+    }
     let fields: Vec<&str> = date.split('/').filter(|part| !part.is_empty()).collect();
     if fields.is_empty() || fields.len() > 3 {
         return None;
@@ -8435,6 +8468,21 @@ mod local_zone_tests {
             Some(1_791_889_200_000)
         );
         assert_eq!(unix_millis_from_iso("16:00 EST 10/13/1950"), None);
+        // A sign with no clock is not an offset. GMT is UTC, so GMT+5 is.
+        assert_eq!(unix_millis_from_iso("10/13/2026 +5"), None);
+        assert_eq!(unix_millis_from_iso("10/13/2026 EST+5"), None);
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 GMT+5"),
+            Some(1_791_831_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 GMT"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00 +5"),
+            Some(1_791_889_200_000)
+        );
     }
 
     #[test]
@@ -12406,4 +12454,5 @@ mod local_zone_tests {
             assert_eq!(unix_millis_from_iso(input), expected, "{input}");
         }
     }
+
 }
