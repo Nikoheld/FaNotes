@@ -1096,8 +1096,15 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         return None;
     }
     if has_english_month(trimmed) {
-        let normalized = rewrite_month_name(trimmed)?;
-        return canonical_iso(&normalized);
+        // `Oct 13, 2026` is local midnight. `16:00 / +5 Oct 13` still has a
+        // separator slash, so the month scan can run again after that slash
+        // becomes a space. `13:Oct-2026.5/1` glues the slash to digits.
+        if let Some(normalized) = rewrite_month_name(trimmed) {
+            return canonical_iso(&normalized);
+        }
+        if !separator_slash(trimmed) {
+            return None;
+        }
     }
     if trimmed.contains('/') {
         // `16:00: 10/13/2026` finalizes the second and then sees `/`.
@@ -1987,20 +1994,82 @@ fn slash_after_open_field(value: &str) -> OpenSlash {
     OpenSlash::Split(next)
 }
 
-/// `16:00: 10/13/2026` is empty. The slash follows a finished field.
+/// A slash with a non-digit on one side is only a separator. A slash between
+/// digits belongs to the number, as in `13:Oct-2026.5/1`.
+fn separator_slash(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.iter().enumerate().any(|(index, byte)| {
+        if *byte != b'/' {
+            return false;
+        }
+        let before_digit = index > 0 && bytes[index - 1].is_ascii_digit();
+        let after_digit = index + 1 < bytes.len() && bytes[index + 1].is_ascii_digit();
+        !(before_digit && after_digit)
+    })
+}
+
+/// `16: 10/13/2026` is empty. The 10 fills the open minute and the next
+/// slash is junk. `16: / 2026` ignores the slash, and 2026 is the year.
 fn open_clock_before_slash(value: &str) -> bool {
-    let mut open = false;
+    let mut index = 0usize;
     for token in value
         .split(is_date_parse_space)
         .filter(|token| !token.is_empty())
     {
-        if open && token.contains('/') && !slash_is_an_offset_separator(token) {
+        if slash_is_an_offset_separator(token) {
+            if let Some(number) = token
+                .rsplit('/')
+                .next()
+                .and_then(|part| part.parse::<i32>().ok())
+            {
+                if field_expects(index, number) {
+                    index = 4;
+                }
+            }
+            continue;
+        }
+        if token.contains('/') && slash_follows_filled_field(token, index) {
             return true;
         }
         if token_is_open_clock(token) {
-            open = true;
-        } else if token.chars().any(|character| character.is_ascii_digit()) {
-            open = false;
+            index = open_clock_index(token);
+        } else if token.starts_with(|character: char| character.is_ascii_digit())
+            && token.contains(':')
+            && !token.ends_with(':')
+        {
+            index = 4;
+        } else if let Ok(number) = token.parse::<i32>() {
+            if field_expects(index, number) {
+                index = 4;
+            }
+        }
+    }
+    false
+}
+
+/// A slash after the number that fills the open field rejects the date.
+/// A slash before that number is only a separator.
+fn slash_follows_filled_field(token: &str, index: usize) -> bool {
+    if slash_is_an_offset_separator(token) {
+        return false;
+    }
+    let bytes = token.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] == b'/' {
+            at += 1;
+            continue;
+        }
+        if !bytes[at].is_ascii_digit() {
+            return false;
+        }
+        let start = at;
+        while at < bytes.len() && bytes[at].is_ascii_digit() {
+            at += 1;
+        }
+        let number = token[start..at].parse::<i32>().unwrap_or(i32::MAX);
+        if field_expects(index, number) {
+            return at < bytes.len() && bytes[at] == b'/';
         }
     }
     false
@@ -2913,6 +2982,13 @@ fn expand_glued_month(token: &str) -> Vec<&str> {
             while index < bytes.len() && bytes[index].is_ascii_digit() {
                 index += 1;
             }
+            // `Oct+5:3013` is hour 5 and year 3013. The colon stays on the
+            // signed word so it can be read as a clock.
+            if bytes.get(index) == Some(&b':') {
+                while index < bytes.len() && matches!(bytes[index], b':' | b'0'..=b'9') {
+                    index += 1;
+                }
+            }
             runs.push(&token[start..index]);
         } else if bytes[index] == b'-'
             && runs.last().is_some_and(|word| exact_zone_keyword(word))
@@ -3455,6 +3531,13 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
     if fields.is_empty() || fields.len() > 3 {
         return None;
     }
+    // `2026/+5` is an extra sign. `+5` is not the month 5.
+    if fields
+        .iter()
+        .any(|part| !part.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return None;
+    }
     let mut numbers = fields
         .iter()
         .map(|part| part.parse::<i32>().ok())
@@ -3892,6 +3975,30 @@ fn compose_month_date(
             )?;
             number_seen = true;
             continue;
+        }
+        // `Oct +5:30 2026` ignores the sign. No number has been read, so
+        // `5:30` is a clock. After a number the sign is an offset only once
+        // a clock or `GMT` was seen.
+        if !number_seen && time.index == 0 && offset != Some(0) && word.starts_with(['+', '-'])
+        {
+            let body = word.strip_prefix(['+', '-']).unwrap_or(word);
+            if body.contains(':')
+                && body.starts_with(|character: char| character.is_ascii_digit())
+                && body
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || byte == b':')
+            {
+                take_month_clock(
+                    body,
+                    &mut time,
+                    &mut dates,
+                    &mut offset,
+                    &mut minute_sign,
+                    &mut hour_offset,
+                )?;
+                number_seen = true;
+                continue;
+            }
         }
         // `+5` after a clock, or after `GMT`, is a fixed offset. `+5` with no
         // clock is not. A later `EST` replaces it.
@@ -8993,6 +9100,37 @@ mod tests {
             assert_eq!(super::canonical_iso("2026-10-13 16: +5.30EST"), None);
             assert_eq!(super::canonical_iso("2026-10-13 16::30 +5.10"), None);
             assert_eq!(super::canonical_iso("16: +5.30"), None);
+            assert_eq!(
+                super::canonical_iso("+5.30EST").as_deref(),
+                Some("2001-05-30T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+5.30").as_deref(),
+                Some("2001-05-30T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026/+5"), None);
+            assert_eq!(super::canonical_iso("2026 / +5"), None);
+            assert_eq!(super::canonical_iso("16:00 / +5"), None);
+            assert_eq!(
+                super::canonical_iso("16:00 / +5 Oct 13 2026").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct +5:30 2026").as_deref(),
+                Some("2026-10-01T09:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct +5:30 13").as_deref(),
+                Some("2001-10-13T09:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct+5:3013").as_deref(),
+                Some("3013-10-01T09:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16: / 2026").as_deref(),
+                Some("2026-01-01T21:00:00.000Z")
+            );
             assert_eq!(
                 super::canonical_iso("16: GMT+5: 2026/10/13").as_deref(),
                 Some("2026-01-01T11:03:00.000Z")
