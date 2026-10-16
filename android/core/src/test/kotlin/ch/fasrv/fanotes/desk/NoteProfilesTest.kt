@@ -214,7 +214,7 @@ class NoteProfilesTest {
         assertEquals(0xFFFBFAF7.toInt(), FIRST_RUN_WRITING_SHEET_FILL)
         assertEquals(0xFF28292D.toInt(), FIRST_RUN_WRITING_SHEET_INK)
         assertEquals(0xFF55565B.toInt(), FIRST_RUN_WRITING_TYPED_INK)
-        assertEquals(19, FIRST_RUN_WRITING_FRAME_RADIUS_DP)
+        assertEquals(12, FIRST_RUN_WRITING_FRAME_RADIUS_DP)
         assertEquals(11, FIRST_RUN_WRITING_SHEET_RADIUS_DP)
         assertEquals(420, FIRST_RUN_WRITING_INK_VIEW_WIDTH)
         assertEquals(3.3f, FIRST_RUN_WRITING_INK_WIDTH_DP)
