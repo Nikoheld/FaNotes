@@ -241,14 +241,32 @@ data class FlashCard(
 
 private const val CARDS_START = "<!-- fanotes-cards-v1"
 
+private fun cardIdFor(front: String, used: MutableSet<String>): String {
+    var hash = 2166136261u
+    for (char in front) {
+        hash = hash xor char.code.toUInt()
+        hash *= 16777619u
+    }
+    val base = "card-${hash.toString(36)}"
+    var id = base
+    var suffix = 2
+    while (id in used) {
+        id = "$base-$suffix"
+        suffix += 1
+    }
+    used += id
+    return id.take(80)
+}
+
 fun cardsFromMarkdown(markdown: String, today: String): List<FlashCard> {
     val stored = parseStoredCards(markdown)
     val byFront = stored.associateBy { it.front }
     val questions = questionBlocks(markdown)
     if (questions.isEmpty()) return stored
-    return questions.mapIndexed { index, pair ->
+    val used = stored.map { it.id }.toMutableSet()
+    return questions.map { pair ->
         byFront[pair.first]?.copy(back = pair.second.ifBlank { byFront[pair.first]?.back.orEmpty() })
-            ?: FlashCard("card-${index + 1}", pair.first, pair.second, due = today)
+            ?: FlashCard(cardIdFor(pair.first, used), pair.first, pair.second, due = today)
     }
 }
 

@@ -72,16 +72,35 @@ export const parseStoredCards = (markdown: string): FlashCard[] => {
   }
 }
 
+/** Stable id from the question, so a new card above an old one does not reuse `card-1`. */
+const cardIdFor = (front: string, used: Set<string>) => {
+  let hash = 2166136261
+  for (const char of front) {
+    hash ^= char.codePointAt(0) ?? 0
+    hash = Math.imul(hash, 16777619)
+  }
+  const base = `card-${(hash >>> 0).toString(36)}`
+  let id = base
+  let suffix = 2
+  while (used.has(id)) {
+    id = `${base}-${suffix}`
+    suffix += 1
+  }
+  used.add(id)
+  return id.slice(0, 80)
+}
+
 /** Questions in the note, merged with a schedule already stored beside them. */
 export const cardsFromMarkdown = (markdown: string, now = new Date()): FlashCard[] => {
   const stored = parseStoredCards(markdown)
   const byFront = new Map(stored.map((card) => [card.front, card]))
+  const used = new Set(stored.map((card) => card.id))
   const due = dayKey(now)
-  return questionBlocks(markdown).map((question, index) => {
+  return questionBlocks(markdown).map((question) => {
     const existing = byFront.get(question.front)
     if (existing) return { ...existing, back: question.back || existing.back }
     return {
-      id: `card-${index + 1}`,
+      id: cardIdFor(question.front, used),
       front: question.front,
       back: question.back,
       ease: 2.5,

@@ -494,8 +494,11 @@ const val FIRST_RUN_WRITING_TYPED = "Der Flächeninhalt lässt sich mit dem best
 const val FIRST_RUN_WRITING_RECOGNIZED = "Im Hintergrund erkannt"
 const val FIRST_RUN_WRITING_FORMULA = "∫₀¹ (x + 2) dx = 2,5"
 const val FIRST_RUN_WRITING_CONVERT = "Optional umwandeln"
-/** `.first-run-writing-preview` radius, toolbar, and `0 32px 90px rgba(0,0,0,.2)` shadow. */
-const val FIRST_RUN_WRITING_FRAME_RADIUS_DP = 19
+/**
+ * `.first-run-writing-preview` starts at 19px, then the shared chrome rule sets it to 12px.
+ * The toolbar and `0 32px 90px rgba(0,0,0,.2)` shadow are unchanged.
+ */
+const val FIRST_RUN_WRITING_FRAME_RADIUS_DP = 12
 const val FIRST_RUN_WRITING_FRAME_PAD_TOP_DP = 31
 const val FIRST_RUN_WRITING_FRAME_PAD_WIDE_DP = 34
 const val FIRST_RUN_WRITING_FRAME_PAD_MEDIUM_DP = 24

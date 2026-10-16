@@ -47,6 +47,20 @@ class DeskVaultTest {
         val reviewed = applyReview(markdown, cards.single().id, "good", "2026-10-14")
         val again = cardsFromMarkdown(reviewed, "2026-10-14")
         assertTrue(again.single().due > "2026-10-14")
+        val withNew = reviewed.replace(
+            "## Lernfragen",
+            "## Lernfragen\n<details><summary>Was ist 1?</summary>Eins</details>",
+        )
+        val both = cardsFromMarkdown(withNew, "2026-10-14")
+        assertEquals(2, both.map { it.id }.toSet().size)
+        val kept = both.single { it.front == "Was ist 2+2?" }
+        val fresh = both.single { it.front == "Was ist 1?" }
+        assertTrue(kept.due > "2026-10-14")
+        assertEquals(0, fresh.reps)
+        val reviewedFresh = applyReview(withNew, fresh.id, "easy", "2026-10-14")
+        val after = cardsFromMarkdown(reviewedFresh, "2026-10-14")
+        assertEquals(1, after.single { it.front == "Was ist 2+2?" }.reps)
+        assertEquals(1, after.single { it.front == "Was ist 1?" }.reps)
     }
 
     @Test
