@@ -1080,16 +1080,8 @@ fun FaNotesScreen(
             onDismiss = { firstRun = false; model.updateDesk("welcomed", "yes") },
         )
     }
-    if (syncOpen) {
-        SyncDialog(
-            email = sync.account?.email,
-            status = syncText,
-            error = sync.error ?: message,
-            onDismiss = { syncOpen = false },
-            onLogin = { email, password, register -> model.login(email, password, register) },
-            onLogout = { model.logout() },
-            onSync = { model.syncNow() },
-        )
+    if (syncOpen && sync.account == null) {
+        SyncDialog(model) { syncOpen = false }
     }
     if (createNote) NameDialog(if (createParent.isBlank()) "Neue Notiz" else "Notiz in diesem Ordner", "Vorlesung") { name ->
         createNote = false
@@ -2797,48 +2789,29 @@ private fun MarkdownPanel(text: String, onChange: (String) -> Unit, modifier: Mo
 }
 
 @Composable
-private fun SyncDialog(
-    email: String?,
-    status: String,
-    error: String?,
-    onDismiss: () -> Unit,
-    onLogin: (String, String, Boolean) -> Unit,
-    onLogout: () -> Unit,
-    onSync: () -> Unit,
-) {
-    var address by remember { mutableStateOf(email ?: "") }
-    var password by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Sync") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(status)
-                Text("Notizen werden auf diesem Tablet verschlüsselt, bevor sie das Gerät verlassen. Ein vergessenes Passwort kann nicht wiederhergestellt werden.")
-                if (error != null) Text(error, color = MaterialTheme.colorScheme.error)
-                if (email == null) {
-                    OutlinedTextField(address, { address = it }, label = { Text("Email") }, singleLine = true)
-                    OutlinedTextField(password, { password = it }, label = { Text("Password") }, singleLine = true)
-                } else {
-                    Text(email)
+private fun SyncDialog(model: FaNotesViewModel, onDismiss: () -> Unit) {
+    var register by remember { mutableStateOf(false) }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        val scrim = remember { MutableInteractionSource() }
+        val card = remember { MutableInteractionSource() }
+        val shape = RoundedCornerShape(12.dp)
+        val strong = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
+        Box(
+            Modifier.fillMaxSize().background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM)).clickable(interactionSource = scrim, indication = null, onClick = onDismiss),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                Modifier.widthIn(max = 560.dp).fillMaxWidth(0.92f).heightIn(max = 640.dp).clickable(interactionSource = card, indication = null, onClick = {}).clip(shape).border(1.dp, strong, shape).background(LocalStatusInk.current.panelStrong).verticalScroll(rememberScrollState()).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (register) ch.fasrv.fanotes.sync.SYNC_ACCOUNT_REGISTER else ch.fasrv.fanotes.sync.SYNC_ACCOUNT_LOGIN, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    SyncModeSwitch(register) { register = it }
                 }
+                SyncSignInFields(model, register)
             }
-        },
-        confirmButton = {
-            if (email == null) {
-                Button(onClick = { onLogin(address, password, false) }) { Text("Anmelden") }
-            } else {
-                Button(onClick = onSync) { Text("Jetzt synchronisieren") }
-            }
-        },
-        dismissButton = {
-            if (email == null) {
-                TextButton(onClick = { onLogin(address, password, true) }) { Text("Konto erstellen") }
-            } else {
-                TextButton(onClick = onLogout) { Text("Abmelden") }
-            }
-        },
-    )
+        }
+    }
 }
 
 @Composable

@@ -4621,6 +4621,138 @@ private fun settingsSectionIcon(section: String) = when (section) {
 }
 
 @Composable
+private fun SyncAccountCallout(modifier: Modifier = Modifier) {
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.sync.SYNC_CALLOUT_RADIUS_DP.dp)
+    Row(
+        modifier.fillMaxWidth().clip(shape).border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.17f), shape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.13f)).padding(13.dp),
+        horizontalArrangement = Arrangement.spacedBy(11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(ch.fasrv.fanotes.sync.SYNC_CALLOUT_ICON_DP.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Cloud, contentDescription = null, modifier = Modifier.size(18.dp), tint = accent)
+        }
+        Column(Modifier.weight(1f)) {
+            Text(ch.fasrv.fanotes.sync.SYNC_ACCOUNT_CALLOUT, fontSize = 12.sp)
+            Text(ch.fasrv.fanotes.sync.SYNC_ACCOUNT_CALLOUT_BODY, fontSize = 12.sp, lineHeight = 17.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 3.dp))
+        }
+    }
+}
+
+@Composable
+internal fun SyncModeSwitch(register: Boolean, onRegister: (Boolean) -> Unit) {
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.sync.SYNC_MODE_TRACK_RADIUS_DP.dp)
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    Row(
+        Modifier.clip(shape).border(1.dp, rule, shape).background(MaterialTheme.colorScheme.surface).padding(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        listOf(false to ch.fasrv.fanotes.sync.SYNC_ACCOUNT_LOGIN, true to ch.fasrv.fanotes.sync.SYNC_ACCOUNT_REGISTER).forEach { (flag, label) ->
+            val on = register == flag
+            val chip = RoundedCornerShape(ch.fasrv.fanotes.sync.SYNC_MODE_RADIUS_DP.dp)
+            Box(
+                Modifier.height(ch.fasrv.fanotes.sync.SYNC_MODE_DP.dp).clip(chip).background(if (on) LocalStatusInk.current.panelStrong else Color.Transparent).clickable { onRegister(flag) }.padding(horizontal = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(label, fontSize = 12.sp, fontWeight = FontWeight(650), color = if (on) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted)
+            }
+        }
+    }
+}
+
+@Composable
+internal fun SyncSignInFields(model: FaNotesViewModel, register: Boolean) {
+    val busy by model.syncAccountBusy.collectAsStateWithLifecycle()
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var repeat by remember { mutableStateOf("") }
+    var device by remember { mutableStateOf(model.syncDeviceName()) }
+    var localError by remember { mutableStateOf<String?>(null) }
+    val canSubmit = ch.fasrv.fanotes.sync.syncAccountCanSubmit(email, password, busy)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 13.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SyncFormField(ch.fasrv.fanotes.sync.SYNC_ACCOUNT_EMAIL, email, { email = it }, ch.fasrv.fanotes.sync.SYNC_ACCOUNT_EMAIL_HINT)
+        SyncFormField(
+            ch.fasrv.fanotes.sync.SYNC_ACCOUNT_PASSWORD,
+            password,
+            { password = it },
+            if (register) ch.fasrv.fanotes.sync.SYNC_ACCOUNT_PASSWORD_HINT else "",
+            password = true,
+        )
+        if (register) {
+            SyncFormField(ch.fasrv.fanotes.sync.SYNC_ACCOUNT_REPEAT, repeat, { repeat = it }, password = true)
+        }
+        SyncFormField(ch.fasrv.fanotes.sync.SYNC_ACCOUNT_DEVICE, device, {
+            device = it.take(80)
+            model.setSyncDeviceName(device)
+        }, ch.fasrv.fanotes.sync.SYNC_ACCOUNT_DEVICE_HINT)
+        val problem = localError
+        if (!problem.isNullOrBlank()) Text(problem, fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
+            val shape = RoundedCornerShape(6.dp)
+            Box(
+                Modifier.height(31.dp).alpha(if (canSubmit) 1f else 0.45f).clip(shape).background(MaterialTheme.colorScheme.onSurface).clickable(enabled = canSubmit) {
+                    val error = ch.fasrv.fanotes.sync.syncAccountSubmitError(register, password, repeat)
+                    if (error != null) {
+                        localError = error
+                    } else {
+                        localError = null
+                        model.login(email.trim(), password, register)
+                    }
+                }.padding(horizontal = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(ch.fasrv.fanotes.sync.syncAccountButtonLabel(register, busy), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.background)
+            }
+            Text(
+                if (register) ch.fasrv.fanotes.sync.SYNC_ACCOUNT_REGISTER_NOTE else ch.fasrv.fanotes.sync.SYNC_ACCOUNT_LOGIN_NOTE,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                color = LocalStatusInk.current.muted,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SyncFormField(
+    label: String,
+    value: String,
+    onChange: (String) -> Unit,
+    placeholder: String = "",
+    password: Boolean = false,
+) {
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.sync.SYNC_FORM_FIELD_RADIUS_DP.dp)
+    val strong = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight(650), color = LocalStatusInk.current.soft)
+        BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            singleLine = true,
+            visualTransformation = if (password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+            textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            modifier = Modifier.fillMaxWidth().height(ch.fasrv.fanotes.sync.SYNC_FORM_FIELD_DP.dp),
+            decorationBox = { inner ->
+                Box(
+                    Modifier.fillMaxSize().clip(shape).border(1.dp, strong, shape).background(MaterialTheme.colorScheme.surface).padding(horizontal = ch.fasrv.fanotes.sync.SYNC_FORM_PAD_DP.dp),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    if (value.isEmpty() && placeholder.isNotEmpty()) {
+                        Text(placeholder, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                    }
+                    inner()
+                }
+            },
+        )
+    }
+}
+
+@Composable
 fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () -> Unit, onPrivate: () -> Unit) {
     val settings by model.deskSettings.collectAsStateWithLifecycle()
     val sync by model.sync.collectAsStateWithLifecycle()
@@ -5100,7 +5232,17 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     var deviceName by remember { mutableStateOf(model.syncDeviceName()) }
                     var automatic by remember { mutableStateOf(model.syncAutomatic()) }
                     val historySync = settings["sync-history"] == "on"
-                    SettingCard("Konto & Status", Icons.Filled.Cloud, Modifier.settingsAnchor("sync", "settings-sync-account", anchorY)) {
+                    val signedIn = sync.account != null
+                    var registerMode by remember { mutableStateOf(false) }
+                    SyncAccountCallout(Modifier.padding(bottom = 13.dp))
+                    SettingCard(
+                        if (signedIn) "Konto & Status" else if (registerMode) ch.fasrv.fanotes.sync.SYNC_ACCOUNT_REGISTER else ch.fasrv.fanotes.sync.SYNC_ACCOUNT_LOGIN,
+                        if (signedIn) Icons.Filled.Cloud else Icons.Filled.Key,
+                        Modifier.settingsAnchor("sync", "settings-sync-account", anchorY),
+                        action = if (signedIn) null else {
+                            { SyncModeSwitch(registerMode) { registerMode = it } }
+                        },
+                    ) {
                         if (sync.account != null) {
                             Column(Modifier.fillMaxWidth().padding(15.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(sync.account?.email.orEmpty(), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -5139,16 +5281,15 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                             }
                             Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
                         }
+                        if (sync.account == null) {
+                            SyncSignInFields(model, registerMode)
+                        } else {
                         SettingRow("Konto") {
-                            if (sync.account == null) {
-                                TextButton(onClick = onSync) { Text("Konto und Abgleich") }
-                            } else {
-                                Row {
-                                    TextButton(onClick = onSync, enabled = sync.status != ch.fasrv.fanotes.sync.SyncStatus.SYNCING) {
-                                        Text("Jetzt synchronisieren")
-                                    }
-                                    TextButton(onClick = { model.logout() }) { Text("Abmelden") }
+                            Row {
+                                TextButton(onClick = onSync, enabled = sync.status != ch.fasrv.fanotes.sync.SyncStatus.SYNCING) {
+                                    Text("Jetzt synchronisieren")
                                 }
+                                TextButton(onClick = { model.logout() }) { Text("Abmelden") }
                             }
                         }
                         SettingRow("Automatisch synchronisieren", "Nach jedem Speichern und im Hintergrund. Aus: nur über „Jetzt synchronisieren“.") {
@@ -5182,6 +5323,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                                 modifier = Modifier.widthIn(min = 170.dp),
                                 singleLine = true,
                             )
+                        }
                         }
                     }
                     SettingCard("Angemeldete Geräte", Icons.Filled.Laptop, Modifier.settingsAnchor("sync", "settings-sync-devices", anchorY)) {
