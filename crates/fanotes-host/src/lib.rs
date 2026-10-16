@@ -2266,7 +2266,8 @@ fn join_open_clock_fields(value: &str) -> Option<String> {
     let mut changed = false;
     for word in words {
         if joined.last().is_some_and(|previous| previous.ends_with(':'))
-            && word.bytes().next().is_some_and(|byte| byte.is_ascii_digit())
+            && word.bytes().all(|byte| byte.is_ascii_digit())
+            && !word.is_empty()
         {
             joined.last_mut().unwrap().push_str(word);
             changed = true;
@@ -3056,21 +3057,72 @@ fn trim_date_token(token: &str) -> &str {
 }
 
 fn legacy_words(value: &str) -> Vec<&str> {
-    value
+    let raw: Vec<&str> = value
         .split(is_date_parse_space)
         .flat_map(|piece| piece.split(','))
         .map(trim_date_token)
         .filter(|token| !token.is_empty())
-        .flat_map(expand_joined_month)
-        .flat_map(expand_glued_month)
-        .flat_map(expand_hyphen_numbers)
-        .flat_map(split_unmatched_paren)
-        .collect()
+        .collect();
+    let mut words = Vec::new();
+    let mut open_clock = false;
+    for token in raw {
+        // `16:00: 2026-10-13` keeps the hyphen word. The 10 is seconds and
+        // `-13` is the offset. Splitting it first would lose that sign.
+        if open_clock && is_hyphen_number_run(token) {
+            words.push(token);
+            open_clock = false;
+            continue;
+        }
+        words.extend(
+            expand_joined_month(token)
+                .into_iter()
+                .flat_map(expand_glued_month)
+                .flat_map(expand_hyphen_numbers)
+                .flat_map(split_unmatched_paren),
+        );
+        if token_is_open_clock(token) {
+            open_clock = true;
+        } else if token.chars().any(|character| character.is_ascii_digit()) {
+            open_clock = false;
+        }
+    }
+    words
+}
+
+/// `16:00:` still has an open second. `16:00` and `16:00:5` do not.
+fn token_is_open_clock(token: &str) -> bool {
+    token.ends_with(':')
+        && token.starts_with(|character: char| character.is_ascii_digit())
+        && token.contains(':')
+}
+
+/// `2026-10-13` is only digits and hyphens, with a digit on both sides.
+fn is_hyphen_number_run(token: &str) -> bool {
+    let bytes = token.as_bytes();
+    if bytes.len() < 3 || !token.contains('-') || token.starts_with('-') || token.ends_with('-') {
+        return false;
+    }
+    let mut previous_hyphen = false;
+    for byte in bytes {
+        if byte.is_ascii_digit() {
+            previous_hyphen = false;
+            continue;
+        }
+        if *byte == b'-' && !previous_hyphen {
+            previous_hyphen = true;
+            continue;
+        }
+        return false;
+    }
+    !previous_hyphen
 }
 
 /// `2026-10-13` next to `GMT` is three numbers and a zone. A month word such
 /// as `13-Oct-26` stays one token for the month scan.
 fn expand_hyphen_numbers(token: &str) -> Vec<&str> {
+    if let Some(parts) = split_hyphen_zone(token) {
+        return parts;
+    }
     if token.contains(':') || !token.contains('-') {
         return vec![token];
     }
@@ -3096,6 +3148,20 @@ fn expand_hyphen_numbers(token: &str) -> Vec<&str> {
         return vec![token];
     }
     parts
+}
+
+/// `2026-10-13-EST` is the date and then `EST`. The hyphen is skipped.
+fn split_hyphen_zone(token: &str) -> Option<Vec<&str>> {
+    let (body, zone) = token.rsplit_once('-')?;
+    if !exact_zone_keyword(zone) || !body.contains('-') || body.ends_with('-') {
+        return None;
+    }
+    let mut parts: Vec<&str> = body.split('-').collect();
+    if parts.len() < 2 || parts.iter().any(|part| unsigned_number(part).is_none()) {
+        return None;
+    }
+    parts.push(&token[token.len() - zone.len()..]);
+    Some(parts)
 }
 
 /// `13)` is the number 13 and then a `)`. The `)` is its own word.
@@ -4370,6 +4436,19 @@ fn compose_month_date(
             number_seen = true;
             continue;
         }
+        if let Some(done) = take_open_clock_hyphen(
+            word,
+            &mut time,
+            &mut dates,
+            &mut offset,
+            &mut minute_sign,
+        ) {
+            if !done {
+                return None;
+            }
+            number_seen = true;
+            continue;
+        }
         if let Some((number, signed)) = date_number_word(word) {
             if signed && number_seen {
                 return None;
@@ -4445,6 +4524,51 @@ fn numeric_month_day_year(dates: &[i32]) -> Option<(i32, i32, i32)> {
 
 /// `+2026` before the first number is 2026. After a number, the sign is not
 /// part of a date field.
+/// `16:00: 2026-10-13` is 16:00:10 on 1 January 2026 at UTC−13.
+/// The number that finishes the open field makes the next hyphen an offset.
+fn take_open_clock_hyphen(
+    word: &str,
+    time: &mut LegacyTime,
+    dates: &mut Vec<i32>,
+    offset: &mut Option<i64>,
+    minute_sign: &mut i64,
+) -> Option<bool> {
+    if !(1..=3).contains(&time.index) || !is_hyphen_number_run(word) {
+        return None;
+    }
+    let parts: Vec<&str> = word.split('-').collect();
+    let mut index = 0;
+    while index < parts.len() {
+        let number = unsigned_number(parts[index])?;
+        if time.expecting(number) {
+            time.add_final(number)?;
+            if index + 1 == parts.len() {
+                return Some(true);
+            }
+            let offset_text = parts[index + 1];
+            let offset_number = unsigned_number(offset_text)?;
+            let minutes = match offset_text.len() {
+                1 | 2 => -i64::from(offset_number) * 60,
+                3 | 4 => {
+                    let hour = i64::from(offset_number / 100);
+                    let minute = i64::from(offset_number % 100);
+                    -(hour * 60 + minute)
+                }
+                _ => return Some(false),
+            };
+            if index + 2 != parts.len() {
+                return Some(false);
+            }
+            *offset = Some(minutes);
+            *minute_sign = 0;
+            return Some(true);
+        }
+        push_date_number(dates, number)?;
+        index += 1;
+    }
+    Some(true)
+}
+
 fn date_number_word(word: &str) -> Option<(i32, bool)> {
     if let Some(number) = unsigned_number(word) {
         return Some((number, false));
@@ -8951,6 +9075,47 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13-"), None);
         assert_eq!(unix_millis_from_iso(" 2026-10-13-"), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso("16:00 2026-10-13--"), None);
+        // Node 22. An open field takes the next in-range number. The hyphen
+        // after that number is an offset, so `10-13` is 10 seconds at UTC−13.
+        assert_eq!(
+            unix_millis_from_iso("16:00: 2026-10-13"),
+            Some(1_767_330_010_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("4:00: PM 2026-10-13"),
+            Some(1_767_330_010_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:00:5 2026-10-13"),
+            Some(1_791_921_605_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:00: 2026"),
+            Some(1_767_301_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:00: 13 2026"),
+            Some(1_767_301_213_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("1:2: 2026-10-13"),
+            Some(1_767_276_130_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:00:00: 2026-10-13"),
+            Some(1_767_330_000_010)
+        );
+        assert_eq!(unix_millis_from_iso("16:00:: 2026-10-13"), None);
+        assert_eq!(unix_millis_from_iso("16:00: 10"), None);
+        assert_eq!(
+            unix_millis_from_iso("16:00 2026-10-13-EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:00 2026-10-13-GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026-10-13-EST"), None);
         assert_eq!(unix_millis_from_iso("hello16:00 10/13/2026"), None);
         assert_eq!(unix_millis_from_iso("  T16:00 2026-10-13"), None);
         assert_eq!(
