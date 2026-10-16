@@ -3,6 +3,10 @@ package ch.fasrv.fanotes.sync
 import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.parseJson
 import java.nio.charset.StandardCharsets
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 const val SYNC_ORIGIN = "https://fanotes.fasrv.ch"
 const val SYNC_API_PATH = "/api/v1/sync"
@@ -22,7 +26,29 @@ data class SyncRemoteEntry(
 
 data class SyncChangesPage(val revision: Long, val entries: List<SyncRemoteEntry>, val more: Boolean, val nextSince: Long)
 
-data class SyncDevice(val id: String, val name: String, val platform: String, val current: Boolean)
+data class SyncDevice(
+    val id: String,
+    val name: String,
+    val platform: String,
+    val current: Boolean,
+    val lastSeenAt: String = "",
+)
+
+private val SYNC_SEEN = DateTimeFormatter.ofPattern("d. MMM yyyy, HH:mm", Locale.GERMAN)
+
+/** Desktop `formatWhen` for a device's last activity. */
+fun syncDeviceSeenLabel(iso: String?, zone: ZoneId = ZoneId.systemDefault()): String {
+    if (iso.isNullOrBlank()) return "noch nie"
+    val instant = runCatching { Instant.parse(iso) }.getOrNull() ?: return "unbekannt"
+    return SYNC_SEEN.format(instant.atZone(zone))
+}
+
+fun syncDeviceTitle(name: String, current: Boolean) = if (current) "$name · dieses Gerät" else name
+
+/** The signed-in device stays. Every other device can be signed out. */
+fun syncDeviceCanSignOut(current: Boolean) = !current
+
+fun syncDeviceIsPhone(platform: String) = platform == "web" || platform == "browser-preview"
 
 data class SyncAccountInfo(
     val accountId: String,
@@ -94,7 +120,13 @@ class SyncApi(
         val usage = json.obj("usage")
         val devices = json.array("devices")?.items.orEmpty().mapNotNull { item ->
             val obj = item as? JsonValue.Obj ?: return@mapNotNull null
-            SyncDevice(obj.string("id") ?: return@mapNotNull null, obj.string("name") ?: "", obj.string("platform") ?: "", obj.bool("current") == true)
+            SyncDevice(
+                obj.string("id") ?: return@mapNotNull null,
+                obj.string("name") ?: "",
+                obj.string("platform") ?: "",
+                obj.bool("current") == true,
+                obj.string("lastSeenAt").orEmpty(),
+            )
         }
         return SyncAccountInfo(
             json.string("accountId") ?: session.accountId,
