@@ -48,6 +48,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.MenuBook
@@ -55,6 +57,7 @@ import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
@@ -129,6 +132,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
@@ -755,6 +759,12 @@ fun FaNotesScreen(
                     onPrivateVault = { model.usePrivateVault() },
                     onDelete = { path, folder, name -> model.askDelete(path, folder, name) },
                     onRename = { path, name -> renaming = path to name },
+                    renamingPath = renaming?.first,
+                    onCommitRename = { path, name ->
+                        renaming = null
+                        model.rename(path, name)
+                    },
+                    onCancelRename = { renaming = null },
                     onMove = { moving = it },
                     onDrop = { path, folder, dest -> model.dropTreeEntry(path, folder, dest) },
                     localFolders = syncPrefixesFromSetting(desk["sync-excluded"]),
@@ -1100,12 +1110,6 @@ fun FaNotesScreen(
         if (name != null) model.createFolder(name, createParent)
         createParent = ""
     }
-    renaming?.let { (path, current) ->
-        NameDialog("Umbenennen", current, initial = current, confirm = "Umbenennen") { name ->
-            renaming = null
-            if (name != null && name.trim() != current) model.rename(path, name)
-        }
-    }
     moving?.let { path ->
         val folders = remember(tree, path) {
             ch.fasrv.fanotes.desk.movableFolderTargets(collectFolders(tree), path)
@@ -1339,6 +1343,9 @@ private fun VaultPane(
     onPrivateVault: () -> Unit,
     onDelete: (String, Boolean, String) -> Unit,
     onRename: (String, String) -> Unit,
+    renamingPath: String? = null,
+    onCommitRename: (String, String) -> Unit = { _, _ -> },
+    onCancelRename: () -> Unit = {},
     onMove: (String) -> Unit,
     onDrop: (String, Boolean, String) -> Unit,
     localFolders: List<String> = emptyList(),
@@ -1516,7 +1523,7 @@ private fun VaultPane(
         ) {
             items(tree, key = { it.path }) { node ->
                 NoteRow(
-                    node, selected, splitPath, treeFocus, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
+                    node, selected, splitPath, treeFocus, colors, expanded, onOpen, onDelete, onRename, renamingPath, onCommitRename, onCancelRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
                     onCreateNoteIn, onCreateFolderIn, bookFolders, onImportPdfIn, onImportBook, onDetachBook,
                     {
                         treeFocus = it
@@ -1592,6 +1599,9 @@ private fun NoteRow(
     onOpen: (String) -> Unit,
     onDelete: (String, Boolean, String) -> Unit,
     onRename: (String, String) -> Unit,
+    renamingPath: String? = null,
+    onCommitRename: (String, String) -> Unit = { _, _ -> },
+    onCancelRename: () -> Unit = {},
     onMove: (String) -> Unit,
     onFolderColor: (String, String?) -> Unit,
     onToggleFolder: (String) -> Unit,
@@ -1763,7 +1773,59 @@ private fun NoteRow(
                 LocalStatusInk.current.soft
             else -> MaterialTheme.colorScheme.onSurface
         }
-        Text(
+        if (renamingPath == node.path) {
+            var draft by remember(node.path, node.name) { mutableStateOf(node.name) }
+            var canceling by remember(node.path) { mutableStateOf(false) }
+            val renameFocus = remember(node.path) { FocusRequester() }
+            fun finish() {
+                if (canceling) return
+                val next = ch.fasrv.fanotes.desk.treeRenameCommit(node.name, draft)
+                if (next == null) onCancelRename() else onCommitRename(node.path, next)
+            }
+            LaunchedEffect(node.path) { runCatching { renameFocus.requestFocus() } }
+            BasicTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                singleLine = true,
+                textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = ch.fasrv.fanotes.desk.TREE_RENAME_SP.sp),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { finish() }),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 8.dp)
+                    .height(ch.fasrv.fanotes.desk.TREE_RENAME_DP.dp)
+                    .focusRequester(renameFocus)
+                    .onFocusChanged { if (!it.isFocused) finish() }
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
+                            canceling = true
+                            onCancelRename()
+                            true
+                        } else false
+                    }
+                    .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = ch.fasrv.fanotes.desk.TREE_RENAME_RING), RoundedCornerShape(ch.fasrv.fanotes.desk.TREE_RENAME_RADIUS_DP.dp))
+                    .padding(1.dp)
+                    .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(ch.fasrv.fanotes.desk.TREE_RENAME_RADIUS_DP.dp))
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(horizontal = ch.fasrv.fanotes.desk.TREE_RENAME_PAD_DP.dp),
+            )
+            Icon(
+                Icons.Filled.Check,
+                contentDescription = "Namen übernehmen",
+                modifier = Modifier.size(ch.fasrv.fanotes.desk.TREE_RENAME_ACTION_DP.dp).clickable { finish() },
+                tint = LocalStatusInk.current.muted,
+            )
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = "Umbenennen abbrechen",
+                modifier = Modifier.size(ch.fasrv.fanotes.desk.TREE_RENAME_ACTION_DP.dp).clickable {
+                    canceling = true
+                    onCancelRename()
+                },
+                tint = LocalStatusInk.current.muted,
+            )
+        } else Text(
             node.name,
             maxLines = 1,
             fontSize = ch.fasrv.fanotes.desk.TREE_LABEL_SP.sp,
@@ -1977,7 +2039,7 @@ private fun NoteRow(
     if (openFolder) {
         node.children.forEach {
             NoteRow(
-                it, selected, splitPath, treeFocus, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
+                it, selected, splitPath, treeFocus, colors, expanded, onOpen, onDelete, onRename, renamingPath, onCommitRename, onCancelRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
                 onCreateNoteIn, onCreateFolderIn, bookFolders, onImportPdfIn, onImportBook, onDetachBook,
                 onTreeFocus,
                 localFolders, onToggleLocal, compact, rowHeightDp, radiusDp,

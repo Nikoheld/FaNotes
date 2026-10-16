@@ -273,5 +273,11 @@ class WorkspaceChromeTest {
         assertEquals("Dein Wissen, in deiner Hand", PLACEHOLDER_TITLE)
         assertEquals("Neue Notiz", PLACEHOLDER_NOTE)
         assertEquals("Alle Aktionen mit Strg P", PLACEHOLDER_COMMAND)
+        assertEquals(null, treeRenameCommit("Mathe", "  "))
+        assertEquals(null, treeRenameCommit("Mathe", "Mathe"))
+        assertEquals("Algebra", treeRenameCommit("Mathe", " Algebra "))
+        assertEquals(24, TREE_RENAME_DP)
+        assertEquals(5, TREE_RENAME_RADIUS_DP)
+        assertEquals(0.1f, TREE_RENAME_RING)
     }
 }
