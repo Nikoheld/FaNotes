@@ -4613,10 +4613,10 @@ fun FirstRunDialog(
                 when (draft.step) {
                     0 -> {
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
-                            val width = maxWidth.value.toInt()
-                            val wide = ch.fasrv.fanotes.desk.firstRunPreviewColumns(width) == 2
-                            val (copyWeight, panelWeight) = ch.fasrv.fanotes.desk.firstRunColumnWeights(0, width)
-                            val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(0, LocalConfiguration.current.screenWidthDp).dp
+                            val screenWidth = LocalConfiguration.current.screenWidthDp
+                            val wide = ch.fasrv.fanotes.desk.firstRunPreviewColumns(screenWidth) == 2
+                            val (copyWeight, panelWeight) = ch.fasrv.fanotes.desk.firstRunColumnWeights(0, screenWidth)
+                            val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(0, screenWidth).dp
                             if (wide) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(copyWeight)) { FirstRunWelcomeCopy(accent) { go(1) } }
@@ -4630,10 +4630,10 @@ fun FirstRunDialog(
                     }
                     1 -> {
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
-                            val width = maxWidth.value.toInt()
-                            val wide = ch.fasrv.fanotes.desk.firstRunPreviewColumns(width) == 2
-                            val (copyWeight, panelWeight) = ch.fasrv.fanotes.desk.firstRunColumnWeights(1, width)
-                            val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(1, LocalConfiguration.current.screenWidthDp).dp
+                            val screenWidth = LocalConfiguration.current.screenWidthDp
+                            val wide = ch.fasrv.fanotes.desk.firstRunPreviewColumns(screenWidth) == 2
+                            val (copyWeight, panelWeight) = ch.fasrv.fanotes.desk.firstRunColumnWeights(1, screenWidth)
+                            val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(1, screenWidth).dp
                             val copy: @Composable () -> Unit = {
                                 Text(ch.fasrv.fanotes.desk.FIRST_RUN_PROFILE_TITLE, fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.055).em, lineHeight = 36.sp, modifier = Modifier.padding(top = 18.dp))
                                 Text(ch.fasrv.fanotes.desk.FIRST_RUN_PROFILE_BODY, fontSize = 13.sp, lineHeight = 22.sp, color = ink.muted, modifier = Modifier.padding(top = 15.dp).widthIn(max = 480.dp))
@@ -4657,10 +4657,10 @@ fun FirstRunDialog(
                     }
                     2 -> {
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
-                            val width = maxWidth.value.toInt()
-                            val wide = ch.fasrv.fanotes.desk.firstRunPreviewColumns(width) == 2
-                            val (copyWeight, panelWeight) = ch.fasrv.fanotes.desk.firstRunColumnWeights(2, width)
-                            val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(2, LocalConfiguration.current.screenWidthDp).dp
+                            val screenWidth = LocalConfiguration.current.screenWidthDp
+                            val wide = ch.fasrv.fanotes.desk.firstRunPreviewColumns(screenWidth) == 2
+                            val (copyWeight, panelWeight) = ch.fasrv.fanotes.desk.firstRunColumnWeights(2, screenWidth)
+                            val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(2, screenWidth).dp
                             if (wide) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(copyWeight)) { FirstRunWritingCopy(accent) { go(it) } }
@@ -4674,10 +4674,10 @@ fun FirstRunDialog(
                     }
                     else -> {
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
-                            val width = maxWidth.value.toInt()
-                            val wide = ch.fasrv.fanotes.desk.firstRunPreviewColumns(width) == 2
-                            val (copyWeight, panelWeight) = ch.fasrv.fanotes.desk.firstRunColumnWeights(3, width)
-                            val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(3, LocalConfiguration.current.screenWidthDp).dp
+                            val screenWidth = LocalConfiguration.current.screenWidthDp
+                            val wide = ch.fasrv.fanotes.desk.firstRunPreviewColumns(screenWidth) == 2
+                            val (copyWeight, panelWeight) = ch.fasrv.fanotes.desk.firstRunColumnWeights(3, screenWidth)
+                            val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(3, screenWidth).dp
                             val intro: @Composable () -> Unit = {
                                 Text(ch.fasrv.fanotes.desk.FIRST_RUN_FOLDER_TITLE, fontSize = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.052).em, lineHeight = 34.sp, modifier = Modifier.padding(top = 18.dp))
                                 Text(ch.fasrv.fanotes.desk.firstRunFolderIntro(profile?.title ?: "Schule"), fontSize = 12.sp, lineHeight = 21.sp, color = ink.muted, modifier = Modifier.padding(top = 13.dp).widthIn(max = 540.dp))
@@ -4866,6 +4866,7 @@ private fun FirstRunWelcomeCopy(accent: Color, onContinue: () -> Unit) {
 @Composable
 private fun WelcomePreview(modifier: Modifier, accent: Color) {
     val ink = LocalStatusInk.current
+    val aside = ch.fasrv.fanotes.desk.firstRunPreviewAsideDp(LocalConfiguration.current.screenWidthDp).dp
     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_RADIUS_DP.dp)
     val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
     Column(modifier.semantics { contentDescription = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_LABEL }) {
@@ -4887,7 +4888,7 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
                 Text(ch.fasrv.fanotes.desk.FIRST_RUN_BRAND, modifier = Modifier.weight(1f), textAlign = TextAlign.End, fontSize = 11.sp, color = ink.muted)
             }
             Row(Modifier.fillMaxWidth().heightIn(min = 220.dp)) {
-                Column(Modifier.width(102.dp).fillMaxHeight().padding(7.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(Modifier.width(aside).fillMaxHeight().padding(7.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Meine Fächer", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SUBJECTS.forEachIndexed { index, subject ->
                         Text(
