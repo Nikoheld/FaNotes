@@ -101,6 +101,16 @@ class CalendarBooksTest {
     }
 
     @Test
+    fun hourViewportUsesTheLeftoverHeight() {
+        assertEquals(48, CAL_HOUR_DP)
+        assertEquals(48, hourViewportDp(0, minDp = 48))
+        assertEquals(900, hourViewportDp(900, minDp = 48))
+        assertEquals(48, hourViewportDp(47, minDp = 48))
+        assertEquals(48, hourViewportDp(-4, minDp = 48))
+        assertEquals(0, hourViewportDp(-4, minDp = -8))
+    }
+
+    @Test
     fun subjectBookFollowsTheFolderAndRemembersThePage() {
         val books = attachSubjectBook(emptyList(), "Schule/Mathe", "Buecher/Algebra.pdf", 4)
         val text = serializeSubjectBooks(books)
