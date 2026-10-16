@@ -935,6 +935,10 @@ fn skip_clock_digits(bytes: &[u8], start: usize) -> usize {
 }
 
 pub fn canonical_iso(value: &str) -> Option<String> {
+    if comma_after_final_clock(value) {
+        // `16:00,` and `16: Oct 13, 2026` finalize a field and then see a comma.
+        return None;
+    }
     if let Some(end) = value.find('\0') {
         // A NUL ends the date string. `2026-10-13\016:00` is the UTC date,
         // and `\02026-10-13` is empty.
@@ -5160,6 +5164,69 @@ fn is_date_parse_space(character: char) -> bool {
     )
 }
 
+fn is_clock_separator_space(character: char) -> bool {
+    is_date_parse_space(character) && character != ','
+}
+
+/// `16:00,` and `16: Oct 13, 2026` finalize a clock field and then see `,`.
+/// A comma after a date number, or after a fraction, stays a separator.
+fn comma_after_final_clock(value: &str) -> bool {
+    let mut time_index = 0usize;
+    for token in value.split(is_clock_separator_space).filter(|token| !token.is_empty()) {
+        let pieces: Vec<&str> = token.split(',').collect();
+        for (piece_index, piece) in pieces.iter().enumerate() {
+            let comma_after = piece_index + 1 < pieces.len();
+            if piece.is_empty() {
+                continue;
+            }
+            if comma_after && comma_rejects_piece(piece, time_index) {
+                return true;
+            }
+            note_clock_piece(piece, &mut time_index);
+        }
+    }
+    false
+}
+
+fn comma_rejects_piece(piece: &str, time_index: usize) -> bool {
+    if piece.contains(':') && piece.contains('.') {
+        return false;
+    }
+    if piece.ends_with(':') {
+        return false;
+    }
+    if piece.starts_with(|character: char| character.is_ascii_digit()) && piece.contains(':') {
+        return true;
+    }
+    !piece.starts_with(['+', '-'])
+        && piece
+            .parse::<i32>()
+            .ok()
+            .is_some_and(|number| field_expects(time_index, number))
+}
+
+fn note_clock_piece(piece: &str, time_index: &mut usize) {
+    if piece.contains(':') && piece.contains('.') {
+        *time_index = 4;
+        return;
+    }
+    if token_is_open_clock(piece) {
+        *time_index = open_clock_index(piece);
+        return;
+    }
+    if piece.starts_with(|character: char| character.is_ascii_digit()) && piece.contains(':') {
+        *time_index = 4;
+        return;
+    }
+    if !piece.starts_with(['+', '-']) {
+        if let Ok(number) = piece.parse::<i32>() {
+            if field_expects(*time_index, number) {
+                *time_index = 4;
+            }
+        }
+    }
+}
+
 fn finished_date_has_an_extra_hyphen(trimmed: &str) -> bool {
     let head = trimmed
         .split_once(is_date_parse_space)
@@ -8907,6 +8974,32 @@ mod tests {
             );
             assert_eq!(
                 super::canonical_iso("Oct 13, 2026 16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("16: Oct 13, 2026"), None);
+            assert_eq!(super::canonical_iso("16: Oct 13,2026"), None);
+            assert_eq!(super::canonical_iso("16: EST Oct 13, 2026"), None);
+            assert_eq!(super::canonical_iso("16: +5 Oct 13, 2026"), None);
+            assert_eq!(super::canonical_iso("16: 13, Oct 2026"), None);
+            assert_eq!(super::canonical_iso("16:00, Oct 13 2026"), None);
+            assert_eq!(
+                super::canonical_iso("16: Oct 13 2026").as_deref(),
+                Some("2026-10-01T20:13:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:,13 Oct 2026").as_deref(),
+                Some("2026-10-01T20:13:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:00.5,").as_deref(),
+                Some("2026-10-13T20:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13,16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("4:00 PM, Oct 13 2026").as_deref(),
                 Some("2026-10-13T20:00:00.000Z")
             );
             assert_eq!(
