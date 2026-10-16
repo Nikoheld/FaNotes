@@ -105,6 +105,23 @@ class CalendarBooksTest {
     }
 
     @Test
+    fun openNoteButtonPinsToTheBottomOfTheSideRail() {
+        assertEquals(14, CAL_SIDE_GAP_DP)
+        val wide = calendarNoteButtonPins(calendarShowsSide(961))
+        assertEquals(true, wide.lastChild)
+        assertEquals(true, wide.pins)
+        assertEquals(14, wide.gapDp)
+        val narrow = calendarNoteButtonPins(calendarShowsSide(960))
+        assertEquals(false, calendarShowsSide(960))
+        assertEquals(false, calendarShowsSide(CAL_SIDE_BREAK_DP))
+        assertEquals(false, narrow.pins)
+        assertEquals(true, narrow.lastChild)
+        assertEquals(14, narrow.gapDp)
+        assertEquals(false, calendarNoteButtonPins(false).pins)
+        assertEquals(true, calendarNoteButtonPins(true).pins)
+    }
+
+    @Test
     fun monthRowsShareTheLeftoverHeight() {
         assertEquals(88, monthRowHeightDp(0, minDp = 88))
         assertEquals(100, monthRowHeightDp(600, minDp = 88))
