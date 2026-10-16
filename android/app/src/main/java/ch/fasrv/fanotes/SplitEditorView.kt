@@ -147,6 +147,7 @@ class SplitEditorView(context: Context) : EditText(context) {
                             ch.fasrv.fanotes.desk.BracketEdit(it.text, it.selectionStart, it.selectionEnd, emptySet())
                         }
                     if (bracket != null) {
+                        spelling.finishAutocorrect()
                         writing = true
                         setText(bracket.text)
                         setSelection(bracket.selectionStart, bracket.selectionEnd)
@@ -158,6 +159,20 @@ class SplitEditorView(context: Context) : EditText(context) {
                         rememberChange(origin, bracket.text)
                         onVisibleEdit(origin, bracket.text)
                     } else {
+                        val corrected = if (s != null && hasComposingSpan(s)) null else {
+                            spelling.autocorrectEdit(editBefore, next, changeStart, changeDeleted)
+                        }
+                        if (corrected != null) {
+                            writing = true
+                            setText(corrected.text)
+                            setSelection(corrected.cursor.coerceIn(0, corrected.text.length))
+                            writing = false
+                            closedBrackets.clear()
+                            val origin = editBefore
+                            editBefore = corrected.text
+                            rememberChange(origin, corrected.text)
+                            onVisibleEdit(origin, corrected.text)
+                        } else {
                         val replacement = ch.fasrv.fanotes.desk.markdownEnterReplacement(editBefore, next)
                             ?: ch.fasrv.fanotes.desk.markdownBackspaceReplacement(editBefore, next)
                         if (replacement != null) {
@@ -182,6 +197,7 @@ class SplitEditorView(context: Context) : EditText(context) {
                             closedBrackets.addAll(bracketsOnCursorLine(next, selectionStart, shifted))
                             rememberChange(editBefore, next)
                             onVisibleEdit(editBefore, next)
+                        }
                         }
                     }
                 }

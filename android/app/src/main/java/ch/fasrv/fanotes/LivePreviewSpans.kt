@@ -155,7 +155,7 @@ private fun paintBracket(editable: Editable, index: Int, color: Int, length: Int
     editable.setSpan(BracketMatchSpan(color), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
 }
 
-private fun hasComposingSpan(editable: Editable): Boolean {
+internal fun hasComposingSpan(editable: Editable): Boolean {
     for (span in editable.getSpans(0, editable.length, Any::class.java)) {
         if (editable.getSpanFlags(span) and Spanned.SPAN_COMPOSING != 0) return true
     }

@@ -256,3 +256,109 @@ class SpellingLexicon(
         else -> false
     }
 }
+
+data class AutocorrectMark(
+    val from: Int,
+    val to: Int,
+    val original: String,
+    val replacement: String,
+    val boundary: Int,
+)
+
+data class AutocorrectEdit(
+    val text: String,
+    val cursor: Int,
+    val mark: AutocorrectMark?,
+    val declined: String? = null,
+)
+
+private val AUTO_BOUNDARY = Regex("""^[\s.,;:!?]$""")
+private val AUTO_LETTER = Regex("""[\p{L}\p{M}]""")
+private val AUTO_TOKEN_EDGE = Regex("""[\p{L}\p{M}\d'’\-_#@/\\.:&+]""")
+private val AUTO_SENTENCE = Regex("""[.!?:]\s*$""")
+private val AUTO_LIST = Regex("""^\s*(?:[-*+>]|\d+[.)]|#{1,6})?\s*""")
+
+/**
+ * Applies one sure correction after a space or punctuation mark, or restores
+ * the typed word when Backspace arrives immediately afterwards.
+ * Null leaves [next] unchanged and ends the undo window.
+ */
+fun autocorrectAfterEdit(
+    before: String,
+    next: String,
+    changeStart: Int,
+    changeDeleted: Int,
+    enabled: Boolean,
+    lexicon: SpellingLexicon?,
+    languageAt: (Int) -> String?,
+    mark: AutocorrectMark?,
+    isDeclined: (String) -> Boolean,
+    isProperName: (String) -> Boolean,
+): AutocorrectEdit? {
+    if (mark != null && changeDeleted == mark.boundary && changeStart == mark.to && next.length + changeDeleted == before.length) {
+        val end = mark.to.coerceAtMost(next.length)
+        if (mark.from in 0..end && next.substring(mark.from, end) == mark.replacement) {
+            val text = next.replaceRange(mark.from, end, mark.original)
+            return AutocorrectEdit(text, mark.from + mark.original.length, null, mark.original)
+        }
+    }
+    if (!enabled || lexicon == null || changeDeleted != 0) return null
+    val insertedCount = next.length - before.length
+    if (insertedCount != 1 || changeStart !in next.indices) return null
+    val inserted = next[changeStart].toString()
+    if (!AUTO_BOUNDARY.matches(inserted)) return null
+    val plan = planAutocorrect(before, changeStart, lexicon, languageAt, isDeclined, isProperName) ?: return null
+    val text = next.replaceRange(plan.from, plan.to, plan.replacement)
+    return AutocorrectEdit(
+        text,
+        (plan.from + plan.replacement.length + inserted.length).coerceIn(0, text.length),
+        AutocorrectMark(plan.from, plan.from + plan.replacement.length, plan.word, plan.replacement, inserted.length),
+    )
+}
+
+private data class PlannedAutocorrect(val from: Int, val to: Int, val word: String, val replacement: String)
+
+private fun planAutocorrect(
+    text: String,
+    wordEnd: Int,
+    lexicon: SpellingLexicon,
+    languageAt: (Int) -> String?,
+    isDeclined: (String) -> Boolean,
+    isProperName: (String) -> Boolean,
+): PlannedAutocorrect? {
+    val lineStart = text.lastIndexOf('\n', (wordEnd - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+    val lineEnd = text.indexOf('\n', wordEnd).let { if (it < 0) text.length else it }
+    val line = text.substring(lineStart, lineEnd)
+    var start = (wordEnd - lineStart).coerceIn(0, line.length)
+    val end = start
+    while (start > 0 && AUTO_LETTER.matches(line[start - 1].toString())) start -= 1
+    if (start == end) return null
+    if (start > 0 && AUTO_TOKEN_EDGE.matches(line[start - 1].toString())) return null
+    val word = line.substring(start, end)
+    if (isDeclined(word) || !lexicon.isMisspelled(word)) return null
+    val from = lineStart + start
+    if (autocorrectIgnored(text, from, wordEnd)) return null
+    val language = languageAt(from)
+    val languages = if (language == "de" || language == "en") listOf(language) else lexicon.languages
+    val decision = decideAutocorrect(
+        word,
+        suggestCorrections(word, languages, lexicon, limit = 4, maxDistance = 1),
+        AutocorrectContext(language, opensAutocorrectSentence(text, from), isProperName),
+    ) ?: return null
+    return PlannedAutocorrect(from, wordEnd, word, decision.word)
+}
+
+private fun opensAutocorrectSentence(text: String, from: Int): Boolean {
+    val lineStart = text.lastIndexOf('\n', (from - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+    val before = AUTO_LIST.replace(text.substring(lineStart, from), "")
+    if (before.isBlank()) return true
+    return AUTO_SENTENCE.containsMatchIn(before)
+}
+
+private fun autocorrectIgnored(text: String, from: Int, to: Int): Boolean {
+    if (markdownSpellingIgnored(text).any { from < it.to && to > it.from }) return true
+    val lineStart = text.lastIndexOf('\n', (from - 1).coerceAtLeast(0)).let { if (it < 0) 0 else it + 1 }
+    val lineEnd = text.indexOf('\n', from).let { if (it < 0) text.length else it }
+    return automaticIgnoredRanges(SpellingSegment(lineStart, text.substring(lineStart, lineEnd)))
+        .any { from < it.to && to > it.from }
+}

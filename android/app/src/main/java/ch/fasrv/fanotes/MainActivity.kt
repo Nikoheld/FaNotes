@@ -2543,6 +2543,8 @@ private fun SplitPane(
                         { model.learnSpellingWord(it) },
                         { model.ignoreSpellingWord(it) },
                     )
+                    editor.spelling.autocorrect = spellOn && model.deskSettings.value["autocorrect"] != "off"
+                    editor.spelling.accentColor = editor.accent
                     editor.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, metrics.fontSizePx.toFloat())
                     editor.setLineSpacing(0f, metrics.lineHeight.toFloat())
                     applyPaperCaret(editor, editor.accent, metrics.fontSizePx.toFloat())
@@ -2858,6 +2860,7 @@ private fun PageSurface(
                 { model.learnSpellingWord(it) },
                 { model.ignoreSpellingWord(it) },
             )
+            page.setSpellingAutocorrect(spellOn && model.deskSettings.value["autocorrect"] != "off")
             page.onPasteImage = { name, bytes, mime -> model.importBytes(name, bytes, pdf = false, mime = mime) }
             page.onFollowLink = { target, web, anchor -> openFollowedLink(page.context, model, target, web, anchor) }
             page.onVisibleMarkdown = { previous, next -> model.updateVisibleMarkdown(previous, next) }
@@ -2960,6 +2963,7 @@ private fun PageSurface(
             }
             val pen = ch.fasrv.fanotes.desk.penSettings(model.effectiveDesk())
             page.ink.accentColor = android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccent(model.effectiveDesk()["accent"]))
+            page.setSpellingAccent(page.ink.accentColor)
             page.refreshBoxChrome()
             page.ink.shapeSnapSensitivity = pen.shapeSnap
             page.ink.scribbleSensitivity = pen.scribble

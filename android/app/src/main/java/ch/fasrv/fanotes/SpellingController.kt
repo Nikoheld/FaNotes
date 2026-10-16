@@ -15,12 +15,17 @@ import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.ScrollView
 import android.widget.TextView
+import android.graphics.DashPathEffect
+import ch.fasrv.fanotes.desk.AutocorrectEdit
+import ch.fasrv.fanotes.desk.AutocorrectMark
 import ch.fasrv.fanotes.desk.SpellingDictionaries
 import ch.fasrv.fanotes.desk.SpellingError
 import ch.fasrv.fanotes.desk.SpellingLexicon
 import ch.fasrv.fanotes.desk.SpellingLine
+import ch.fasrv.fanotes.desk.autocorrectAfterEdit
 import ch.fasrv.fanotes.desk.checkNoteSpelling
 import ch.fasrv.fanotes.desk.loadBundledSpelling
+import ch.fasrv.fanotes.desk.normalizeForDictionary
 import ch.fasrv.fanotes.desk.suggestCorrections
 import java.util.concurrent.Executors
 
@@ -30,6 +35,8 @@ import java.util.concurrent.Executors
  */
 class SpellingController(private val view: EditText) {
     var enabled: Boolean = true
+    var autocorrect: Boolean = true
+    var accentColor: Int = 0xFF2A6F97.toInt()
     var waveColor: Int = 0xFFC03543.toInt()
     var inkColor: Int = 0xFF1C1C1C.toInt()
     var paperColor: Int = 0xFFFFFFFF.toInt()
@@ -43,6 +50,9 @@ class SpellingController(private val view: EditText) {
     private var errors: List<SpellingError> = emptyList()
     private var lines: List<SpellingLine> = emptyList()
     private var popup: PopupWindow? = null
+    private var mark: AutocorrectMark? = null
+    private var markText: String? = null
+    private val declined = HashSet<String>()
     private val handler = Handler(Looper.getMainLooper())
     private val wave = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -71,6 +81,40 @@ class SpellingController(private val view: EditText) {
         this.onLearn = onLearn
         this.onIgnore = onIgnore
         if (!enabled) clear() else if (turned) schedule(0) else view.invalidate()
+    }
+
+    /**
+     * One desktop autocorrect step. Returns the editor text to install, or null
+     * when this keystroke should stay as typed.
+     */
+    fun autocorrectEdit(before: String, next: String, changeStart: Int, changeDeleted: Int): AutocorrectEdit? {
+        if (!enabled && mark == null) return null
+        val edit = autocorrectAfterEdit(
+            before,
+            next,
+            changeStart,
+            changeDeleted,
+            enabled && autocorrect,
+            SpellingBundle.readyLexicon(acceptedWords()),
+            ::languageAt,
+            mark,
+            { normalizeForDictionary(it) in declined },
+            { false },
+        )
+        val declinedWord = edit?.declined
+        if (declinedWord != null) {
+            val key = normalizeForDictionary(declinedWord)
+            if (key.isNotEmpty()) declined += key
+        }
+        mark = edit?.mark
+        markText = if (edit?.mark == null) null else edit.text
+        if (edit != null) popup?.dismiss()
+        return edit
+    }
+
+    fun finishAutocorrect() {
+        mark = null
+        markText = null
     }
 
     fun schedule(delayMs: Long) {
@@ -105,7 +149,7 @@ class SpellingController(private val view: EditText) {
 
     fun draw(canvas: Canvas) {
         val layout = view.layout ?: return
-        if (!enabled || errors.isEmpty()) return
+        if (!enabled || (errors.isEmpty() && mark == null)) return
         val density = view.resources.displayMetrics.density
         wave.color = waveColor
         wave.strokeWidth = 1.5f * density
@@ -128,7 +172,26 @@ class SpellingController(private val view: EditText) {
                 drawWave(canvas, left, right, baseline + offset, amplitude, period)
             }
         }
+        val corrected = mark?.takeIf { view.text?.toString() == markText } ?: return
+        val previous = wave.pathEffect
+        wave.color = accentColor
+        wave.pathEffect = DashPathEffect(floatArrayOf(1.5f * density, 2.5f * density), 0f)
+        val startLine = layout.getLineForOffset(corrected.from.coerceIn(0, layout.text.length))
+        val endLine = layout.getLineForOffset((corrected.to - 1).coerceAtLeast(corrected.from).coerceIn(0, layout.text.length))
+        for (line in startLine..endLine) {
+            val from = maxOf(corrected.from, layout.getLineStart(line))
+            val to = minOf(corrected.to, layout.getLineEnd(line))
+            if (from >= to) continue
+            val left = view.paddingLeft + layout.getPrimaryHorizontal(from)
+            val right = view.paddingLeft + horizontalEnd(layout, to)
+            val baseline = view.paddingTop + layout.getLineBaseline(line) - view.scrollY
+            drawWave(canvas, left, right, baseline + offset, amplitude * 0.6f, period)
+        }
+        wave.pathEffect = previous
     }
+
+    private fun languageAt(offset: Int): String? =
+        lines.firstOrNull { offset in it.from until it.to }?.language
 
     fun showAt(offset: Int): Boolean {
         if (!enabled) return false
@@ -142,6 +205,8 @@ class SpellingController(private val view: EditText) {
     private fun clear() {
         errors = emptyList()
         lines = emptyList()
+        mark = null
+        markText = null
         popup?.dismiss()
         view.invalidate()
         onLanguage("unknown")
@@ -297,6 +362,12 @@ private object SpellingBundle {
 
     fun warm() {
         lexicon(emptySet())
+    }
+
+    fun readyLexicon(personal: Set<String>): SpellingLexicon? = synchronized(gate) {
+        val dictionaries = full ?: return null
+        if (dictionaries.deWords == null || dictionaries.enWords == null) return null
+        SpellingLexicon(dictionaries, personal)
     }
 
     fun lexicon(personal: Set<String>): SpellingLexicon? = synchronized(gate) {

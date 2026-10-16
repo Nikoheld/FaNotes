@@ -835,6 +835,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
                             ch.fasrv.fanotes.desk.BracketEdit(it.text, it.selectionStart, it.selectionEnd, emptySet())
                         }
                     if (bracket != null) {
+                        editor.spelling.finishAutocorrect()
                         writing = true
                         editor.setText(bracket.text)
                         editor.setSelection(bracket.selectionStart, bracket.selectionEnd)
@@ -846,6 +847,20 @@ class NotePageView(context: Context) : FrameLayout(context) {
                         editor.rememberChange(origin, bracket.text)
                         onVisibleMarkdown(origin, bracket.text)
                     } else {
+                        val corrected = if (s != null && hasComposingSpan(s)) null else {
+                            editor.spelling.autocorrectEdit(editBefore, next, changeStart, changeDeleted)
+                        }
+                        if (corrected != null) {
+                            writing = true
+                            editor.setText(corrected.text)
+                            editor.setSelection(corrected.cursor.coerceIn(0, corrected.text.length))
+                            writing = false
+                            closedBrackets.clear()
+                            val origin = editBefore
+                            editBefore = corrected.text
+                            editor.rememberChange(origin, corrected.text)
+                            onVisibleMarkdown(origin, corrected.text)
+                        } else {
                         val replacement = ch.fasrv.fanotes.desk.markdownEnterReplacement(editBefore, next)
                             ?: ch.fasrv.fanotes.desk.markdownBackspaceReplacement(editBefore, next)
                         if (replacement != null) {
@@ -872,6 +887,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
                             )
                             editor.rememberChange(editBefore, next)
                             onVisibleMarkdown(editBefore, next)
+                        }
                         }
                     }
                 }
@@ -1364,6 +1380,14 @@ class NotePageView(context: Context) : FrameLayout(context) {
         onIgnore: (String) -> Unit,
     ) {
         editor.spelling.configure(enabled, wave, ink, paper, epoch, accepted, onLanguage, onLearn, onIgnore)
+    }
+
+    fun setSpellingAutocorrect(enabled: Boolean) {
+        editor.spelling.autocorrect = enabled
+    }
+
+    fun setSpellingAccent(color: Int) {
+        editor.spelling.accentColor = color
     }
 
     fun attachSession(session: ch.fasrv.fanotes.ink.InkSession) {

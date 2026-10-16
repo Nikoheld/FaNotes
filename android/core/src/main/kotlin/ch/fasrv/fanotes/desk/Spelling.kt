@@ -231,6 +231,17 @@ fun checkNoteSpelling(
     acceptedWords: Set<String> = emptySet(),
 ): SpellingCheckResult {
     val segments = ArrayList<SpellingSegment>()
+    var offset = 0
+    val parts = markdown.split('\n')
+    for ((index, line) in parts.withIndex()) {
+        segments += SpellingSegment(offset, line)
+        offset += line.length + if (index == parts.lastIndex) 0 else 1
+    }
+    return checkSpelling(segments, dictionaries, markdownSpellingIgnored(markdown), cursors, acceptedWords)
+}
+
+/** Fenced code, comments, and display math. Inline code and links are added per line. */
+fun markdownSpellingIgnored(markdown: String): List<SpellingRange> {
     val ignored = ArrayList<SpellingRange>()
     var fenceStart: Int? = null
     var offset = 0
@@ -243,14 +254,16 @@ fun checkNoteSpelling(
                 fenceStart = null
             }
         }
-        segments += SpellingSegment(offset, line)
         offset += line.length + if (index == parts.lastIndex) 0 else 1
     }
     if (fenceStart != null) ignored += SpellingRange(fenceStart!!, markdown.length)
     for (match in DISPLAY_MATH.findAll(markdown)) {
         ignored += SpellingRange(match.range.first, match.range.last + 1)
     }
-    return checkSpelling(segments, dictionaries, ignored, cursors, acceptedWords)
+    for (match in Regex("""<!--[\s\S]*?-->""").findAll(markdown)) {
+        ignored += SpellingRange(match.range.first, match.range.last + 1)
+    }
+    return ignored
 }
 
 fun automaticIgnoredRanges(segment: SpellingSegment): List<SpellingRange> {
