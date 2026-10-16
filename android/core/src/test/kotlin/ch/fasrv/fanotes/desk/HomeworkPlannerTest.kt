@@ -85,6 +85,29 @@ class HomeworkPlannerTest {
     }
 
     @Test
+    fun dueAndTimeStayInTheDesktopInputFormat() {
+        assertEquals("", homeworkDueValue(""))
+        assertEquals("", homeworkDueValue("   "))
+        assertEquals("2026-10-15", homeworkDueValue("2026-10-15"))
+        assertEquals("2024-02-29", homeworkDueValue("2024-02-29"))
+        assertEquals(null, homeworkDueValue("2026-10-15T09:30"))
+        assertEquals(null, homeworkDueValue("2026-13-40"))
+        assertEquals(null, homeworkDueValue("2026-02-31"))
+        assertEquals(null, homeworkDueValue("15.10.2026"))
+        assertEquals("", homeworkTimeValue(""))
+        assertEquals("09:30", homeworkTimeValue("09:30"))
+        assertEquals(null, homeworkTimeValue("9:30"))
+        assertEquals(null, homeworkTimeValue("25:00"))
+        val dropped = prepareHomeworkDraft("Lesen", dueDate = "2026-13-40", dueTime = "25:00")
+        assertEquals("Lesen", dropped?.title)
+        assertEquals(null, dropped?.dueDate)
+        assertEquals(null, dropped?.dueTime)
+        val kept = prepareHomeworkDraft("Lesen", dueDate = "", dueTime = "09:30")
+        assertEquals(null, kept?.dueDate)
+        assertEquals("09:30", kept?.dueTime)
+    }
+
+    @Test
     fun cardsUseTheDesktopKindDateAndInset() {
         val today = LocalDate.of(2026, 10, 15)
         val late = HomeworkTask("late", "Spät", dueDate = "2026-10-14", dueTime = "18:30", priority = "high")

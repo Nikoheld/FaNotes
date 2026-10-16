@@ -120,6 +120,31 @@ data class HomeworkDraft(
     val priority: String,
 )
 
+/**
+ * Value an `<input type="date">` keeps: empty, or a real `yyyy-MM-dd` (year 0001–9999).
+ * A date-time, a German `15.10.2026`, and an impossible day are not values the control reports.
+ */
+fun homeworkDueValue(raw: String): String? {
+    val text = raw.trim()
+    if (text.isEmpty()) return ""
+    if (!ISO_DATE.matches(text)) return null
+    val date = runCatching { LocalDate.parse(text) }.getOrNull() ?: return null
+    if (date.year !in 1..9999) return null
+    return text
+}
+
+/**
+ * Value an `<input type="time">` keeps: empty, or `HH:mm` from 00:00 through 23:59.
+ * One hour digit, such as `9:30`, is not a time string, so it is not padded to `09:30`.
+ */
+fun homeworkTimeValue(raw: String): String? {
+    val text = raw.trim()
+    if (text.isEmpty()) return ""
+    if (!ISO_TIME.matches(text)) return null
+    if (runCatching { LocalTime.parse(text) }.isFailure) return null
+    return text
+}
+
 fun prepareHomeworkDraft(
     title: String,
     notes: String = "",
@@ -135,8 +160,8 @@ fun prepareHomeworkDraft(
         title = cleanTitle,
         notes = notes.take(4_000),
         subject = subject.trim().take(80),
-        dueDate = dueDate?.trim()?.takeIf { ISO_DATE.matches(it) },
-        dueTime = dueTime?.trim()?.takeIf { ISO_TIME.matches(it) },
+        dueDate = dueDate?.let(::homeworkDueValue)?.takeIf { it.isNotEmpty() },
+        dueTime = dueTime?.let(::homeworkTimeValue)?.takeIf { it.isNotEmpty() },
         kind = if (kind == "appointment") "appointment" else "homework",
         priority = if (priority == "high") "high" else "normal",
     )
