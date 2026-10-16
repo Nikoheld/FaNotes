@@ -1383,6 +1383,24 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { graph.engine.syncNow() }
     }
 
+    val syncDeviceNote = MutableStateFlow<String?>(null)
+
+    fun refreshSyncDevices() {
+        viewModelScope.launch {
+            runCatching { graph.engine.refreshAccount() }
+                .onSuccess { syncDeviceNote.value = null }
+                .onFailure { syncDeviceNote.value = "Die Geräteliste konnte nicht geladen werden." }
+        }
+    }
+
+    fun removeSyncDevice(deviceId: String, name: String) {
+        viewModelScope.launch {
+            runCatching { graph.engine.removeDevice(deviceId) }
+                .onSuccess { message.value = "„$name“ wurde abgemeldet." }
+                .onFailure { error -> message.value = error.message ?: "Das Gerät konnte nicht abgemeldet werden." }
+        }
+    }
+
     fun undo() {
         if (session.undo()) noteChanged()
     }

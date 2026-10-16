@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.SystemUpdate
@@ -62,7 +63,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PushPin
@@ -3608,10 +3608,15 @@ private fun AccentSwatches(selected: String, onPick: (String) -> Unit) {
 @Composable
 fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () -> Unit, onPrivate: () -> Unit) {
     val settings by model.deskSettings.collectAsStateWithLifecycle()
+    val sync by model.sync.collectAsStateWithLifecycle()
+    val syncDeviceNote by model.syncDeviceNote.collectAsStateWithLifecycle()
     val css by model.customCss.collectAsStateWithLifecycle()
     val update by model.updateLabel.collectAsStateWithLifecycle()
     val sections = ch.fasrv.fanotes.desk.SETTINGS_NAV
     var section by remember { mutableStateOf("appearance") }
+    LaunchedEffect(section, sync.account?.accountId) {
+        if (section == "sync" && sync.account != null) model.refreshSyncDevices()
+    }
     var settingsQuery by remember { mutableStateOf("") }
     var scrollTarget by remember { mutableStateOf<String?>(null) }
     val settingsResults = ch.fasrv.fanotes.desk.searchSettings(settingsQuery)
@@ -4064,7 +4069,6 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                             "Name dieses Geräts",
                             "Erscheint in der Geräteliste und im Namen von Konfliktkopien.",
                             divider = false,
-                            modifier = Modifier.settingsAnchor("sync", "settings-sync-devices", anchorY),
                         ) {
                             OutlinedTextField(
                                 deviceName,
@@ -4075,6 +4079,31 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                                 modifier = Modifier.widthIn(min = 170.dp),
                                 singleLine = true,
                             )
+                        }
+                    }
+                    SettingCard("Angemeldete Geräte", Icons.Filled.Laptop, Modifier.settingsAnchor("sync", "settings-sync-devices", anchorY)) {
+                        val devices = sync.info?.devices.orEmpty()
+                        when {
+                            sync.account == null -> SettingRow("Nicht angemeldet", divider = false) {}
+                            devices.isEmpty() && sync.info == null && syncDeviceNote != null -> SettingRow(
+                                syncDeviceNote.orEmpty(),
+                                divider = false,
+                            ) {
+                                TextButton(onClick = { model.refreshSyncDevices() }) { Text("Erneut laden") }
+                            }
+                            devices.isEmpty() && sync.info == null -> SettingRow("Geräteliste wird geladen …", divider = false) {}
+                            devices.isEmpty() -> SettingRow("Keine weiteren Geräte", divider = false) {}
+                            else -> devices.forEachIndexed { index, device ->
+                                SettingRow(
+                                    ch.fasrv.fanotes.sync.syncDeviceTitle(device.name.ifBlank { "Gerät" }, device.current),
+                                    "Zuletzt aktiv: ${ch.fasrv.fanotes.sync.syncDeviceSeenLabel(device.lastSeenAt)}",
+                                    divider = index != devices.lastIndex,
+                                ) {
+                                    if (ch.fasrv.fanotes.sync.syncDeviceCanSignOut(device.current)) {
+                                        TextButton(onClick = { model.removeSyncDevice(device.id, device.name) }) { Text("Abmelden") }
+                                    }
+                                }
+                            }
                         }
                     }
                     Text("Ein Konflikt behält die Serverfassung auf dem ursprünglichen Pfad. Die Tablet-Fassung liegt daneben.", fontSize = 12.sp, color = LocalStatusInk.current.muted)
