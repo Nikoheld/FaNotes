@@ -1852,6 +1852,11 @@ fn skip_clock_digits(bytes: &[u8], start: usize) -> usize {
 }
 
 fn unix_millis_from_iso(value: &str) -> Option<u64> {
+    if let Some(next) = tighten_slash_spaces(value) {
+        // `2026/ 10/13` is the slash date. A space after a clock stays, so
+        // `16:00 / 10/13/2026` does not become `16:00/10/13/2026`.
+        return unix_millis_from_iso(&next);
+    }
     if value.contains('(') {
         // `(comment)` is skipped, and an unclosed `(` consumes the rest.
         // The mark is a separator: `2026-10-13(EST)` stays local, while
@@ -3381,9 +3386,64 @@ fn suffix_is_legacy_clock(suffix: &str) -> bool {
         }
         if *byte == b':' {
             saw_colon = true;
+            continue;
         }
+        // `2026!16:00` is a year and a clock, not one clock. `!` is ignored
+        // later. `16:00+5` still belongs to the clock.
+        if byte.is_ascii_digit() || matches!(*byte, b'.' | b'+' | b'-') {
+            continue;
+        }
+        return false;
     }
     saw_colon
+}
+
+fn tighten_slash_spaces(value: &str) -> Option<String> {
+    if !value.contains('/') {
+        return None;
+    }
+    let chars: Vec<char> = value.chars().collect();
+    let mut out = String::with_capacity(value.len());
+    let mut changed = false;
+    let mut index = 0;
+    while index < chars.len() {
+        if is_date_parse_space(chars[index]) {
+            let mut end = index;
+            while end < chars.len() && is_date_parse_space(chars[end]) {
+                end += 1;
+            }
+            if end < chars.len() && chars[end] == '/' && !token_before_has_colon(&out) {
+                changed = true;
+                index = end;
+                continue;
+            }
+            out.extend(chars[index..end].iter());
+            index = end;
+            continue;
+        }
+        if chars[index] == '/' {
+            out.push('/');
+            let mut end = index + 1;
+            while end < chars.len() && is_date_parse_space(chars[end]) {
+                end += 1;
+            }
+            if end > index + 1 {
+                changed = true;
+            }
+            index = end;
+            continue;
+        }
+        out.push(chars[index]);
+        index += 1;
+    }
+    if changed { Some(out) } else { None }
+}
+
+fn token_before_has_colon(text: &str) -> bool {
+    text.chars()
+        .rev()
+        .take_while(|character| !is_date_parse_space(*character))
+        .any(|character| character == ':')
 }
 
 /// The dot is a second dot after a real clock fraction, as in
@@ -8646,6 +8706,20 @@ mod local_zone_tests {
             Some(1_791_921_600_000)
         );
         assert_eq!(unix_millis_from_iso("16:00/10/13/2026"), None);
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026!16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026/ 10/13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026 /10 /13"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("10/ 13/ 2026 16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:00 / 10/13/2026"),
+            Some(1_791_921_600_000)
+        );
         assert_eq!(unix_millis_from_iso("16:00 13/10/2026"), None);
         assert_eq!(unix_millis_from_iso("16:00 10/13/2026 30"), None);
         assert_eq!(unix_millis_from_iso("16:00 10/13/1950"), None);
