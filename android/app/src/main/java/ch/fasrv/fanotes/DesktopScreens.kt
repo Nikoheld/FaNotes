@@ -4182,7 +4182,45 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     var automatic by remember { mutableStateOf(model.syncAutomatic()) }
                     val historySync = settings["sync-history"] == "on"
                     SettingCard("Konto & Status", Icons.Filled.Cloud, Modifier.settingsAnchor("sync", "settings-sync-account", anchorY)) {
-                        SettingRow("Konto", sync.account?.email) {
+                        if (sync.account != null) {
+                            Column(Modifier.fillMaxWidth().padding(15.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(sync.account?.email.orEmpty(), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    "${ch.fasrv.fanotes.sync.syncStatusLabel(sync)} · Zuletzt: ${ch.fasrv.fanotes.sync.syncDeviceSeenLabel(sync.lastSyncAt)}",
+                                    fontSize = 12.sp,
+                                    color = LocalStatusInk.current.muted,
+                                )
+                                if (!sync.error.isNullOrBlank()) {
+                                    Text(sync.error.orEmpty(), fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                                }
+                                val info = sync.info
+                                if (info != null) {
+                                    Text(
+                                        ch.fasrv.fanotes.sync.syncUsageLabel(info.files, info.bytes, info.quotaBytes),
+                                        fontSize = 12.sp,
+                                        color = LocalStatusInk.current.muted,
+                                    )
+                                    val fraction = ch.fasrv.fanotes.sync.syncUsagePercent(info.bytes, info.quotaBytes) / 100f
+                                    Box(
+                                        Modifier
+                                            .padding(top = 4.dp)
+                                            .fillMaxWidth()
+                                            .height(4.dp)
+                                            .clip(RoundedCornerShape(2.dp))
+                                            .background(LocalStatusInk.current.muted.copy(alpha = 0.2f)),
+                                    ) {
+                                        Box(
+                                            Modifier
+                                                .fillMaxWidth(fraction)
+                                                .height(4.dp)
+                                                .background(MaterialTheme.colorScheme.primary),
+                                        )
+                                    }
+                                }
+                            }
+                            Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
+                        }
+                        SettingRow("Konto") {
                             if (sync.account == null) {
                                 TextButton(onClick = onSync) { Text("Konto und Abgleich") }
                             } else {
@@ -4194,7 +4232,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                                 }
                             }
                         }
-                        SettingRow("Automatisch synchronisieren", "Nach jedem Speichern und im Hintergrund. Aus: nur über Konto und Abgleich.") {
+                        SettingRow("Automatisch synchronisieren", "Nach jedem Speichern und im Hintergrund. Aus: nur über „Jetzt synchronisieren“.") {
                             Switch(checked = automatic, onCheckedChange = {
                                 automatic = it
                                 model.setSyncAutomatic(it)
