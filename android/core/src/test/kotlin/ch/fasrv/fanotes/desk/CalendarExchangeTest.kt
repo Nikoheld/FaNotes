@@ -139,6 +139,41 @@ class CalendarExchangeTest {
     }
 
     @Test
+    fun exdateSkipsThoseDaysAndSurvivesExport() {
+        val zone = ZoneId.of("Europe/Zurich")
+        val imported = importIcs(
+            listOf(
+                "BEGIN:VCALENDAR",
+                "BEGIN:VEVENT",
+                "UID:series",
+                "SUMMARY:Kurs",
+                "DTSTART:20261014T153000",
+                "DURATION:PT45M",
+                "RRULE:FREQ=WEEKLY",
+                "EXDATE;VALUE=DATE:20261021",
+                "EXDATE:20261028T153000,20261104T153000",
+                "END:VEVENT",
+                "END:VCALENDAR",
+            ).joinToString("\n"),
+            "personal",
+            zone,
+        )
+        assertEquals(listOf("2026-10-21", "2026-10-28", "2026-11-04"), imported[0].exceptionDates)
+        val zoned = importIcs(
+            "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:zoned\nSUMMARY:Kurs\nDTSTART:20261014T153000\nRRULE:FREQ=WEEKLY\nEXDATE:20261021T230000Z\nEND:VEVENT\nEND:VCALENDAR\n",
+            "personal",
+            zone,
+        )
+        assertEquals(listOf("2026-10-22"), zoned[0].exceptionDates)
+        val existing = emptyCalendar().copy(events = listOf(imported[0].copy(calendarId = "school", exceptionDates = listOf("2026-10-14"))))
+        val united = applyIcsImport(existing, "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:series\nSUMMARY:Kurs\nDTSTART:20261014T153000\nRRULE:FREQ=WEEKLY\nEXDATE;VALUE=DATE:20261021\nEND:VEVENT\nEND:VCALENDAR\n", "personal", zone)
+        assertEquals(listOf("2026-10-14", "2026-10-21"), united.document.events[0].exceptionDates)
+        val exported = exportIcs(emptyCalendar().copy(events = imported))
+        assertTrue(exported.contains("EXDATE;VALUE=DATE:20261021,20261028,20261104"))
+        assertEquals(imported[0].exceptionDates, importIcs(exported, "personal", zone)[0].exceptionDates)
+    }
+
+    @Test
     fun remindersFireInsideTheLeadAndSkipHiddenOrDoneHomework() {
         val zone = ZoneId.of("Europe/Zurich")
         val now = ZonedDateTime.of(2026, 10, 14, 15, 0, 0, 0, zone)
@@ -160,6 +195,16 @@ class CalendarExchangeTest {
         val done = withSoon.copy(events = listOf(event.copy(title = "✓ Seite 4")))
         assertTrue(dueReminders(done, now, 15).isEmpty())
         assertTrue(dueReminders(withSoon, now, 3).isEmpty())
+        val allDay = CalendarEvent(
+            id = "day",
+            calendarId = "personal",
+            title = "Abgabe",
+            start = "2026-10-15",
+            end = "2026-10-15",
+            allDay = true,
+        )
+        val beforeMidnight = ZonedDateTime.of(2026, 10, 14, 23, 50, 0, 0, zone)
+        assertTrue(dueReminders(emptyCalendar().copy(events = listOf(allDay)), beforeMidnight, 15).isEmpty())
         val rent = CalendarEvent(
             id = "rent",
             calendarId = "personal",

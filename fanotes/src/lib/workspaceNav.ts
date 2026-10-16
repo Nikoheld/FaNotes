@@ -123,6 +123,13 @@ export const SPLIT_RATIO_STEP = 0.05
 export const DEFAULT_SPLIT_LAYOUT: SplitLayout = { ratio: 0.5, orientation: 'columns' }
 export const SPLIT_LAYOUT_STORAGE_KEY = 'fanotes.splitLayout.v1'
 
+export type EditorPane = 'main' | 'split'
+
+/** Date insert and the format toolbar follow the pane the user is writing in. */
+export const editorPaneForCommand = (focused: EditorPane, splitOpen: boolean): EditorPane => (
+  focused === 'split' && splitOpen ? 'split' : 'main'
+)
+
 export const clampSplitRatio = (ratio: number) => {
   if (!Number.isFinite(ratio)) return DEFAULT_SPLIT_LAYOUT.ratio
   return Math.min(SPLIT_MAX_RATIO, Math.max(SPLIT_MIN_RATIO, ratio))

@@ -80,7 +80,7 @@ fun applyIcsImport(
         kept += next.copy(
             calendarId = event.calendarId,
             notePath = event.notePath.ifEmpty { next.notePath },
-            exceptionDates = event.exceptionDates,
+            exceptionDates = (event.exceptionDates + next.exceptionDates).distinct().take(400),
         )
     }
     val room = (2_000 - kept.size).coerceAtLeast(0)
@@ -117,6 +117,7 @@ private fun parseIcs(ics: String, calendarId: String, zone: ZoneId): ParsedIcs {
             "${raw.substring(0, 4)}-${raw.substring(4, 6)}-${raw.substring(6, 8)}"
         }
         val recurrence = recurrenceFromRule(rule)
+        val exceptions = if (recurrence == "none") emptyList() else exceptionDatesFrom(lines, zone)
         val built = eventFromRange(
             calendarId = calendarId,
             title = summary,
@@ -130,6 +131,7 @@ private fun parseIcs(ics: String, calendarId: String, zone: ZoneId): ParsedIcs {
             id = uid.ifEmpty { built.id },
             recurrence = recurrence,
             recurrenceUntil = if (recurrence == "none") null else until,
+            exceptionDates = exceptions,
         )
     }
     return ParsedIcs(events.take(2_000), cancelledIds)
@@ -171,6 +173,7 @@ fun dueReminders(document: CalendarDocument, now: ZonedDateTime, leadMinutes: In
     val hidden = document.calendars.filter { !it.visible }.map { it.id }.toSet()
     return expandOccurrences(document, from, to)
         .filter { it.event.calendarId !in hidden }
+        .filter { !it.event.allDay }
         .filter { !it.event.title.startsWith("✓ ") }
         .filter { !it.start.isBefore(from) && !it.start.isAfter(to) }
         .map { occurrence ->
@@ -274,6 +277,8 @@ private fun eventToIcs(event: CalendarEvent): String? {
         event.location.takeIf { it.isNotEmpty() }?.let { "LOCATION:${icsEscape(it)}" },
         event.notes.takeIf { it.isNotEmpty() }?.let { "DESCRIPTION:${icsEscape(it)}" },
         rule.takeIf { it.isNotEmpty() },
+        event.exceptionDates.takeIf { event.recurrence != "none" && it.isNotEmpty() }
+            ?.let { "EXDATE;VALUE=DATE:${it.joinToString(",") { day -> day.replace("-", "") }}" },
         "END:VEVENT",
     ).filterNotNull().joinToString("\n")
 }
@@ -291,6 +296,31 @@ private fun ruleFor(event: CalendarEvent): String {
     if (event.recurrence == "none") return ""
     val until = event.recurrenceUntil?.let { ";UNTIL=${it.replace("-", "")}" }.orEmpty()
     return "RRULE:FREQ=${event.recurrence.uppercase()}$until"
+}
+
+private fun exceptionDatesFrom(lines: List<String>, zone: ZoneId): List<String> {
+    val dates = linkedSetOf<String>()
+    for (line in lines) {
+        if (!line.startsWith("EXDATE")) continue
+        val colon = line.indexOf(':')
+        if (colon < 0) continue
+        val dateOnly = line.substring(0, colon).contains("VALUE=DATE", ignoreCase = true)
+        for (part in line.substring(colon + 1).split(',')) {
+            val raw = part.trim()
+            if (raw.isEmpty()) continue
+            if (dateOnly || Regex("""^\d{8}$""").matches(raw)) {
+                val day = Regex("""^(\d{4})(\d{2})(\d{2})$""").find(raw) ?: continue
+                val date = runCatching {
+                    LocalDate.of(day.groupValues[1].toInt(), day.groupValues[2].toInt(), day.groupValues[3].toInt())
+                }.getOrNull() ?: continue
+                dates += date.toString()
+                continue
+            }
+            val parsed = parseIcsDate(raw, zone) ?: continue
+            dates += parsed.moment.toLocalDate().toString()
+        }
+    }
+    return dates.take(400)
 }
 
 private fun recurrenceFromRule(rule: String): String {
