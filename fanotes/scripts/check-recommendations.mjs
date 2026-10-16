@@ -207,6 +207,8 @@ try {
   assert.match(read('src/components/HomeworkBoard.tsx'), /skipCalendarWrite/)
   assert.match(read('src/components/CalendarView.tsx'), /canWriteCalendar/)
   assert.match(read('src/components/HomeworkBoard.tsx'), /canWriteHomework/)
+  assert.match(read('src/components/SearchPanel.tsx'), /Die Suche ist fehlgeschlagen\./)
+  assert.match(read('src/App.tsx'), /setSearchFailed\(true\)/)
   assert.match(read('packaging/INSTALL_MAC.md'), /dist:mac/)
 
   console.log('recommendations ok')

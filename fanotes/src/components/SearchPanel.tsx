@@ -6,6 +6,7 @@ export function SearchPanel({
   query,
   hits,
   loading,
+  failed = false,
   onQueryChange,
   onOpen,
   onClose,
@@ -13,6 +14,7 @@ export function SearchPanel({
   query: string
   hits: SearchHit[]
   loading: boolean
+  failed?: boolean
   onQueryChange: (value: string) => void
   onOpen: (hit: SearchHit) => void
   onClose: () => void
@@ -29,10 +31,11 @@ export function SearchPanel({
     <aside className="search-panel" aria-label="Vault-Suche">
       <header><div><span className="eyebrow">Im gesamten Vault</span><h3>Notizen durchsuchen</h3></div><button className="icon-button" type="button" title="Suche schließen (Esc)" aria-label="Suche schließen" onClick={onClose}><X size={17} /></button></header>
       <div className="sidebar-search" role="search"><Search aria-hidden="true" size={15} /><input ref={inputRef} value={query} aria-label="Suchbegriff" placeholder="Text, Dateinamen, Handschrift …" onChange={(event) => onQueryChange(event.target.value)} onKeyDown={(event) => { if (event.key === 'ArrowDown' && hits.length) { event.preventDefault(); focusResult(0) } }} />{loading && <LoaderCircle className="spin" aria-label="Suche läuft" size={15} />}{query && !loading && <button className="search-clear" type="button" aria-label="Suchbegriff löschen" title="Suche leeren" onClick={() => onQueryChange('')}><X size={13} /></button>}</div>
-      <div className="search-summary" aria-live="polite">{query.trim().length >= 2 && !loading ? `${hits.length} ${hits.length === 1 ? 'Treffer' : 'Treffer'}` : 'Text und unsichtbare Handschrift'}</div>
+      <div className="search-summary" aria-live="polite">{failed && !loading ? 'Die Suche ist fehlgeschlagen.' : query.trim().length >= 2 && !loading ? `${hits.length} ${hits.length === 1 ? 'Treffer' : 'Treffer'}` : 'Text und unsichtbare Handschrift'}</div>
       <div className="search-results">
         {query.trim().length < 2 && <div className="empty-mini"><Search size={22} /><strong>Finde alles wieder</strong><p>Tippe mindestens zwei Zeichen. Auch noch nicht konvertierte Handschrift wird durchsucht.</p></div>}
-        {query.trim().length >= 2 && !loading && !hits.length && <div className="empty-mini"><p>Keine Treffer für „{query}“.</p></div>}
+        {query.trim().length >= 2 && !loading && failed && <div className="empty-mini"><p>Die Suche ist fehlgeschlagen.</p></div>}
+        {query.trim().length >= 2 && !loading && !failed && !hits.length && <div className="empty-mini"><p>Keine Treffer für „{query}“.</p></div>}
         {hits.map((hit, index) => (
           <button ref={(element) => { resultRefs.current[index] = element }} type="button" key={`${hit.kind ?? 'note'}:${hit.relativePath}`} onClick={() => onOpen(hit)} onKeyDown={(event) => {
             if (event.key === 'ArrowDown') { event.preventDefault(); focusResult(index + 1) }
