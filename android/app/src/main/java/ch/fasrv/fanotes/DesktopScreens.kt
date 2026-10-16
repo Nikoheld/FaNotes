@@ -2443,6 +2443,15 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 ) { Text(mark) }
             }
             Text(ch.fasrv.fanotes.desk.calendarHeading(view, anchor), fontSize = 15.sp, fontWeight = FontWeight(650), letterSpacing = (-0.01).em)
+            if (view == "week") {
+                val monday = ch.fasrv.fanotes.desk.calendarRange("week", anchor).first()
+                Text(
+                    "${ch.fasrv.fanotes.desk.CAL_WEEK} ${ch.fasrv.fanotes.desk.calendarIsoWeek(monday)}",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight(550),
+                    color = LocalStatusInk.current.muted,
+                )
+            }
             Row(
                 Modifier.height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp).widthIn(min = 120.dp).clip(calShape).border(1.dp, calRule, calShape).padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
