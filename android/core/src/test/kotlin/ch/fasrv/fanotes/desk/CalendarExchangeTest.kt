@@ -174,4 +174,28 @@ class CalendarExchangeTest {
             it.key == "rent@2026-03-31" && it.minutesUntil == 10
         })
     }
+
+    @Test
+    fun utcAndANumericOffsetBecomeLocalWallTime() {
+        val wall = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")
+        val imported = importIcs(
+            "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:utc\nSUMMARY:Pfad\\\\notes\nDTSTART:20261020T090000Z\nDTEND:20261020T100000Z\nDESCRIPTION:C:\\\\notes\nEND:VEVENT\nEND:VCALENDAR\n",
+            "personal",
+        )
+        val start = ZonedDateTime.of(2026, 10, 20, 9, 0, 0, 0, ZoneOffset.UTC).withZoneSameInstant(ZoneId.systemDefault())
+        assertEquals(start.format(wall), imported[0].start)
+        assertEquals(start.plusHours(1).format(wall), imported[0].end)
+        assertEquals("Pfad\\notes", imported[0].title)
+        assertEquals("C:\\notes", imported[0].notes)
+        val offset = importIcs(
+            "BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:Versetzt\nDTSTART:20261020T090000+0200\nEND:VEVENT\nEND:VCALENDAR\n",
+            "personal",
+        )
+        val shifted = ZonedDateTime.of(2026, 10, 20, 9, 0, 0, 0, ZoneOffset.ofHours(2)).withZoneSameInstant(ZoneId.systemDefault())
+        assertEquals(shifted.format(wall), offset[0].start)
+        assertTrue(importIcs(
+            "BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:Nein\nDTSTART:20260231T090000Z\nEND:VEVENT\nEND:VCALENDAR\n",
+            "personal",
+        ).isEmpty())
+    }
 }

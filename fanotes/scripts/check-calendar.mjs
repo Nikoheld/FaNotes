@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createServer } from 'vite'
@@ -224,6 +225,30 @@ assert.equal(utc[0].start, utcWall(utcStart), 'UTC stamp becomes the local clock
 assert.equal(utc[0].end, utcWall(new Date(utcStart.getTime() + 90 * 60_000)))
 if (utcStart.getTimezoneOffset() !== 0) assert.notEqual(utc[0].start, '2026-10-16T07:00')
 
+const wallOf = (date) => {
+  const pad = (part) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+const offsetEvents = ics.importIcs([
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'SUMMARY:Versetzt',
+  'DTSTART:20261020T090000+0200',
+  'DTEND:20261020T093000+0200',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+assert.equal(offsetEvents[0].start, wallOf(new Date(Date.UTC(2026, 9, 20, 7, 0))))
+assert.equal(offsetEvents[0].end, wallOf(new Date(Date.UTC(2026, 9, 20, 7, 30))))
+assert.equal(ics.importIcs([
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'SUMMARY:Nein',
+  'DTSTART:20260231T090000Z',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal).length, 0)
+
 const existing = {
   ...doc,
   events: [{
@@ -278,6 +303,20 @@ const cancelled = ics.applyIcsImport(again.document, [
 ].join('\n'), personal)
 assert.equal(cancelled.removed, 1)
 assert.equal(cancelled.document.events.length, 0)
+
+const reminders = await server.ssrLoadModule('/src/lib/calendarReminders.ts')
+const soon = { title: 'Mathe', minutesUntil: 5 }
+assert.equal(reminders.formatReminder(soon, 'de'), 'Mathe beginnt in 5 min.')
+assert.equal(reminders.formatReminder({ title: 'Math', minutesUntil: 0 }, 'en'), 'Math starts now.')
+assert.equal(reminders.formatReminder({ title: 'Math', minutesUntil: 1 }, 'en'), 'Math starts in 1 minute.')
+assert.equal(reminders.formatReminder(soon, 'en'), 'Mathe starts in 5 minutes.')
+assert.equal(reminders.formatMoreReminders(0, 'en'), '')
+assert.equal(reminders.formatMoreReminders(1, 'de'), 'Noch 1 Termin.')
+assert.equal(reminders.formatMoreReminders(2, 'en'), '2 more events.')
+const calendarView = readFileSync(join(root, 'src/components/CalendarView.tsx'), 'utf8')
+assert.match(calendarView, /formatReminder\(reminders\[0\], getUiLanguage\(\)\)/)
+assert.match(calendarView, /\{copy\.close\}/)
+assert.doesNotMatch(calendarView, /beginnt/)
 
 await server.close()
 console.log(JSON.stringify({

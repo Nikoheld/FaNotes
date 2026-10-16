@@ -154,6 +154,7 @@
     "check:note-link-back": "node scripts/check-note-link-back.mjs",
     "check:note-link-style": "node scripts/check-note-link-style.mjs",
     "check:note-link-remove": "node scripts/check-note-link-remove.mjs",
+    "check:note-qol": "node scripts/check-note-qol.mjs",
     "check:note-backup-roundtrip": "node scripts/check-note-backup-roundtrip.mjs",
     "check:note-backup-actions": "node scripts/check-note-backup-actions.mjs",
     "check:note-backup-ui": "node scripts/check-note-backup-ui.mjs",
@@ -203,6 +204,7 @@
     "check:arrow-lock": "node scripts/check-arrow-lock.mjs",
     "check:ink-pointer": "node scripts/check-ink-pointer-session.mjs",
     "check:homework-day": "cross-env TZ=Europe/Zurich node scripts/check-homework-day.mjs",
+    "check:clipboard-image": "node scripts/check-clipboard-image.mjs",
     "check:homework-api": "node scripts/check-homework-api.mjs",
     "check:remote-support": "node scripts/check-remote-support-session.mjs && node scripts/check-remote-support-ui.mjs"
   },

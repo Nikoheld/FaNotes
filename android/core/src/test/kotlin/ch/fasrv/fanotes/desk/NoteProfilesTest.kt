@@ -59,7 +59,7 @@ class NoteProfilesTest {
     fun theWelcomePreviewUsesTheDesktopWindow() {
         assertEquals(1, firstRunPreviewColumns(760))
         assertEquals(2, firstRunPreviewColumns(761))
-        assertEquals(12, FIRST_RUN_PREVIEW_RADIUS_DP)
+        assertEquals(18, FIRST_RUN_PREVIEW_RADIUS_DP)
         assertEquals(32, FIRST_RUN_PREVIEW_HEADER_DP)
         assertEquals(listOf("Mathematik", "Deutsch", "Französisch", "Physik", "Wirtschaft"), FIRST_RUN_PREVIEW_SUBJECTS)
         assertEquals("Ableitungen", FIRST_RUN_PREVIEW_HEADING)
@@ -326,6 +326,35 @@ class NoteProfilesTest {
         assertEquals(0xB5FF9295.toInt(), firstRunPreviewHeaderClose(0xFFFF8D90.toInt(), firstRunPreviewBorder("dark")))
         assertEquals(0xB5BA3542.toInt(), firstRunPreviewHeaderClose(0xFFC03543.toInt(), firstRunPreviewBorder("light")))
         assertEquals(0xB6BA3542.toInt(), firstRunPreviewHeaderClose(0xFFC03543.toInt(), firstRunPreviewBorder("sepia")))
+        assertEquals(0x25FFFFFF, firstRunPreviewWindowBorder("dark"))
+        assertEquals(0x25FFFFFF, firstRunPreviewWindowBorder("aurora"))
+        assertEquals(0x2537352F, firstRunPreviewWindowBorder("light"))
+        assertEquals(0x2537352F, firstRunPreviewWindowBorder("sepia"))
+        assertEquals(0, FIRST_RUN_PREVIEW_WINDOW_SHADOW_X_DP)
+        assertEquals(34, FIRST_RUN_PREVIEW_WINDOW_SHADOW_Y_DP)
+        assertEquals(95, FIRST_RUN_PREVIEW_WINDOW_SHADOW_BLUR_DP)
+        assertEquals(0.25f, FIRST_RUN_PREVIEW_WINDOW_SHADOW_ALPHA)
+        assertEquals(0x40000000, firstRunPreviewWindowShadowColor())
+        assertEquals(0x06FFFFFF, FIRST_RUN_PREVIEW_WINDOW_RING)
+    }
+
+    @Test
+    fun theWelcomePreviewGlowSitsBehindTheWindow() {
+        assertEquals(0.12f, FIRST_RUN_PREVIEW_GLOW_INSET_BLOCK)
+        assertEquals(0.08f, FIRST_RUN_PREVIEW_GLOW_INSET_INLINE)
+        assertEquals(65, FIRST_RUN_PREVIEW_GLOW_BLUR_DP)
+        assertEquals(0.22f, FIRST_RUN_PREVIEW_GLOW_COLOR_ALPHA)
+        assertEquals(0.7f, FIRST_RUN_PREVIEW_GLOW_OPACITY)
+        assertEquals(0x272A6F97, firstRunPreviewGlowColor(0xFF2A6F97.toInt()))
+        val frame = checkNotNull(firstRunPreviewGlowFrame(100f, 200f, 2f, 0xFF2A6F97.toInt()))
+        assertEquals(130f, frame.blurPx)
+        assertEquals(262f, frame.padPx)
+        assertEquals(270f, frame.ovalLeftPx)
+        assertEquals(286f, frame.ovalTopPx)
+        assertEquals(354f, frame.ovalRightPx)
+        assertEquals(438f, frame.ovalBottomPx)
+        assertEquals(0x272A6F97, frame.color)
+        assertEquals(null, firstRunPreviewGlowFrame(0f, 200f, 2f, 0xFF2A6F97.toInt()))
     }
 
     @Test

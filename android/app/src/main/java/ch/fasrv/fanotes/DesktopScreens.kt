@@ -3,6 +3,7 @@ package ch.fasrv.fanotes
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.drawBehind
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -4884,14 +4885,34 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
         bottomStart = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_RADIUS_BOTTOM_DP.dp,
     )
     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_RADIUS_DP.dp)
-    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val windowBorder = Color(ch.fasrv.fanotes.desk.firstRunPreviewWindowBorder(LocalDeskThemeId.current))
+    val windowShadow = Color(ch.fasrv.fanotes.desk.firstRunPreviewWindowShadowColor())
     Box(modifier.semantics { contentDescription = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_LABEL }) {
+        Box(Modifier.matchParentSize().welcomePreviewGlow(MaterialTheme.colorScheme.primary.toArgb()))
         Column(
             Modifier
                 .fillMaxWidth()
+                .shadow(
+                    elevation = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_WINDOW_SHADOW_Y_DP.dp,
+                    shape = shape,
+                    clip = false,
+                    ambientColor = windowShadow,
+                    spotColor = windowShadow,
+                )
+                .drawBehind {
+                    val stroke = 1.dp.toPx()
+                    val radius = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_RADIUS_DP.dp.toPx()
+                    drawRoundRect(
+                        color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_WINDOW_RING),
+                        topLeft = Offset(-stroke / 2f, -stroke / 2f),
+                        size = Size(size.width + stroke, size.height + stroke),
+                        cornerRadius = CornerRadius(radius + stroke / 2f, radius + stroke / 2f),
+                        style = Stroke(width = stroke),
+                    )
+                }
                 .clip(shape)
-                .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), shape)
+                .border(1.dp, windowBorder, shape)
                 .background(ink.panelStrong),
         ) {
             val headerBorder = Color(ch.fasrv.fanotes.desk.firstRunPreviewBorder(LocalDeskThemeId.current))
@@ -7955,6 +7976,15 @@ private fun SettingsPage(
                             Switch(
                                 checked = metrics.showLineNumbers,
                                 onCheckedChange = { model.updateDesk("line-numbers", if (it) "on" else "off") },
+                            )
+                        }
+                        SettingRow(
+                            "Rechtschreibprüfung",
+                            "Unterstreicht Tippfehler lokal rot und erkennt Deutsch oder Englisch automatisch. Mathematik und Code bleiben unberührt. Ein langes Drücken oder Strg+. zeigt Vorschläge.",
+                        ) {
+                            Switch(
+                                checked = settings["spellcheck"] != "off",
+                                onCheckedChange = { model.updateDesk("spellcheck", if (it) "on" else "off") },
                             )
                         }
                         SettingRow("Wortzahl in Statusleiste") {

@@ -47,6 +47,9 @@ import kotlin.math.abs
  * details block.
  */
 class SplitEditorView(context: Context) : EditText(context) {
+    val spelling = SpellingController(this)
+    private var touchX = 0f
+    private var touchY = 0f
     var onVisibleEdit: (String, String) -> Unit = { _, _ -> }
     var onFollowLink: (String, Boolean, String?) -> Unit = { _, _, _ -> }
     var paperImages: Map<String, Bitmap> = emptyMap()
@@ -132,6 +135,7 @@ class SplitEditorView(context: Context) : EditText(context) {
             }
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(s: Editable?) {
+                spelling.schedule(360)
                 if (!ready) return
                 paintPreview()
                 if (writing) {
@@ -278,12 +282,18 @@ class SplitEditorView(context: Context) : EditText(context) {
     override fun onSelectionChanged(selStart: Int, selEnd: Int) {
         super.onSelectionChanged(selStart, selEnd)
         if (!applyingHistory) history.noteSelection(selStart, selEnd, text?.length ?: 0, System.currentTimeMillis())
+        spelling.schedule(220)
         invalidate()
         if (ready && !painting) paintPreview()
         tags?.onCaretMoved()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        touchX = event.x
+        touchY = event.y
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && event.buttonState and MotionEvent.BUTTON_SECONDARY != 0) {
+            if (spelling.showAt(getOffsetForPosition(event.x, event.y))) return true
+        }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downX = event.x
@@ -327,7 +337,17 @@ class SplitEditorView(context: Context) : EditText(context) {
         }
     }
 
+    override fun performLongClick(): Boolean {
+        if (spelling.showAt(getOffsetForPosition(touchX, touchY))) return true
+        return super.performLongClick()
+    }
+
     override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_PERIOD &&
+            (event.isCtrlPressed || event.isMetaPressed) && !event.isAltPressed
+        ) {
+            if (spelling.showAtCursor()) return true
+        }
         if (keyCode == KeyEvent.KEYCODE_ESCAPE && !event.isCtrlPressed && !event.isAltPressed &&
             !event.isMetaPressed && !event.isShiftPressed
         ) {
@@ -852,6 +872,7 @@ class SplitEditorView(context: Context) : EditText(context) {
             mark.textAlign = oldAlign
         }
         super.onDraw(canvas)
+        spelling.draw(canvas)
     }
 
     private fun toggleFoldAt(y: Float): Boolean {

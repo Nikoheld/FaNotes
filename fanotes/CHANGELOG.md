@@ -2,7 +2,10 @@
 
 ## 2026.10.7
 
+- **Alltag.** Eine Notiz lässt sich duplizieren: Text, Handschrift, Verlinkungen und Arbeitsblätter kommen in eine neue Datei, die Antworten des Originals bleiben dort. Wiki-Link und Pfad kopierst du aus dem Dateimenü, `Strg+Umschalt+D` setzt das Datum an der Schreibmarke ein, alle Ordner klappen mit einem Klick zu, und die leere Seite zeigt die zuletzt geöffneten Notizen.
 - **Kalenderdatei.** Eine ICS-Datei mit Weltzeit oder einer Dauer landet auf der örtlichen Uhrzeit. Dieselbe Datei noch einmal importieren aktualisiert den Termin und nimmt abgesagte Einträge heraus, statt ihn zu verdoppeln.
+- **Bild einfügen.** Ein Screenshot aus der Zwischenablage landet auf der offenen Notiz, auch während der Cursor im Text steht. Text bleibt Text.
+- **Terminerinnerung.** Der Hinweis im Kalender folgt der Sprache der Oberfläche und nennt weitere Termine, die gleich beginnen.
 - **Android-Tablet.** Der Text liegt auf dem Papier, die Leiste klappt beim Schreiben ein, und der Radierer folgt der Spitze.
 - **Sync.** Der Abgleich zeigt den Fortschritt, und ein zweiter Start geht nicht verloren.
 - **Version.** Die Version lässt sich in GitHub Actions unter Update version setzen. Der Android-Release installiert das SDK, ohne am Lizenzdialog abzubrechen.

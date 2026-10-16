@@ -329,21 +329,35 @@ private fun parseIcsDate(raw: String, zone: ZoneId): IcsMoment? {
         }.getOrNull() ?: return null
         return IcsMoment(date.atStartOfDay(), true)
     }
-    val timed = Regex("""^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(?:(\d{2})(?:\.\d+)?)?(Z)?$""", RegexOption.IGNORE_CASE).find(value)
-        ?: return null
+    val timed = Regex(
+        """^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(?:(\d{2})(?:\.\d+)?)?(Z|[+-]\d{4})?$""",
+        RegexOption.IGNORE_CASE,
+    ).find(value) ?: return null
     val year = timed.groupValues[1].toInt()
     val month = timed.groupValues[2].toInt()
     val dayOfMonth = timed.groupValues[3].toInt()
     val hour = timed.groupValues[4].toInt()
     val minute = timed.groupValues[5].toInt()
     val second = timed.groupValues[6].toIntOrNull() ?: 0
+    val zoneText = timed.groupValues[7]
     val moment = runCatching {
-        if (timed.groupValues[7].equals("Z", ignoreCase = true)) {
-            ZonedDateTime.of(year, month, dayOfMonth, hour, minute, second, 0, ZoneOffset.UTC)
-                .withZoneSameInstant(zone)
-                .toLocalDateTime()
-        } else {
-            LocalDateTime.of(year, month, dayOfMonth, hour, minute, second)
+        when {
+            zoneText.equals("Z", ignoreCase = true) -> {
+                ZonedDateTime.of(year, month, dayOfMonth, hour, minute, second, 0, ZoneOffset.UTC)
+                    .withZoneSameInstant(zone)
+                    .toLocalDateTime()
+            }
+            zoneText.isNotEmpty() -> {
+                val sign = if (zoneText.startsWith("-")) -1 else 1
+                val offsetHours = zoneText.substring(1, 3).toInt()
+                val offsetMinutes = zoneText.substring(3, 5).toInt()
+                if (offsetHours > 23 || offsetMinutes > 59) return null
+                LocalDateTime.of(year, month, dayOfMonth, hour, minute, second)
+                    .atOffset(ZoneOffset.ofHoursMinutes(sign * offsetHours, sign * offsetMinutes))
+                    .atZoneSameInstant(zone)
+                    .toLocalDateTime()
+            }
+            else -> LocalDateTime.of(year, month, dayOfMonth, hour, minute, second)
         }
     }.getOrNull() ?: return null
     return IcsMoment(moment, false)
