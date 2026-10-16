@@ -29,6 +29,18 @@ type InkPaintContext = CanvasRenderingContext2D
 
 const clamp = (value: number, min = 0, max = 1) => Math.max(min, Math.min(max, value))
 
+/**
+ * How far an interior segment slides its end off the sample toward the next
+ * midpoint. `smoothing` 0 stays on the polyline; 1 pulls 85% of the way.
+ * The slide is capped so the sample stays inside the nib: a sharp corner
+ * cannot bow past the pen, and the open tip cannot leave the last sample.
+ */
+export const inkInteriorPull = (smoothing: number, legPx: number, nibPx: number) => {
+  const wanted = clamp(smoothing, 0, 1) * 0.85
+  if (!(legPx > 0.01) || !(nibPx > 0)) return wanted
+  return Math.min(wanted, (nibPx * 0.35) / legPx)
+}
+
 export const pressureWidth = (stroke: { baseWidth: number; pressureEnabled?: boolean }, pressure: number) => {
   if (!stroke.pressureEnabled) return stroke.baseWidth
   return stroke.baseWidth * (0.4 + Math.max(0.08, pressure) * 1.12)
@@ -326,8 +338,34 @@ export const drawInkStroke = (
     return
   }
 
-  const blend = clamp(smoothing, 0, .92)
-  /** Curve of segment `index` (points index-1 → index), as `segment` painted it. */
+  const nibBetween = (a: InkPaintPoint, b: InkPaintPoint) => inkStrokeBitmapWidth(
+    stroke,
+    ((a.pressure ?? 0.5) + (b.pressure ?? 0.5)) / 2,
+    scale,
+  )
+  /**
+   * Where the segment that arrives at `sampleIndex` ends. Interior segments
+   * stop a nib-limited step toward the next sample; the open tip stops on
+   * the sample itself. The next piece starts at this same point, so a new
+   * sample cannot leave a step or a hook in the previous direction.
+   */
+  const segmentEnd = (sampleIndex: number, pointCount: number) => {
+    const sample = stroke.points[sampleIndex]
+    const sx = sample.x * width
+    const sy = sample.y * height
+    if (!(smoothing > 0) || sampleIndex >= pointCount - 1) return { x: sx, y: sy }
+    const next = stroke.points[sampleIndex + 1]
+    const nx = next.x * width
+    const ny = next.y * height
+    const before = sampleIndex > 0 ? stroke.points[sampleIndex - 1] : sample
+    const pull = inkInteriorPull(
+      smoothing,
+      Math.hypot(nx - sx, ny - sy),
+      Math.min(nibBetween(before, sample), nibBetween(sample, next)),
+    )
+    return { x: sx + (nx - sx) * pull * 0.5, y: sy + (ny - sy) * pull * 0.5 }
+  }
+  /** Curve of segment `index` (points index-1 → index). */
   const segmentCurve = (
     index: number,
     offsetX: number,
@@ -336,26 +374,21 @@ export const drawInkStroke = (
     connected: boolean,
     pointCount = stroke.points.length,
   ) => {
-    const previous = stroke.points[index - 1]
     const point = stroke.points[index]
-    const previousX = previous.x * width
-    const previousY = previous.y * height
     const pointX = point.x * width
     const pointY = point.y * height
-    if (!connected) target.moveTo(previousX + offsetX, previousY + offsetY)
+    const start = index <= 1
+      ? { x: stroke.points[0].x * width, y: stroke.points[0].y * height }
+      : segmentEnd(index - 1, pointCount)
+    if (!connected) target.moveTo(start.x + offsetX, start.y + offsetY)
     if (smoothing > 0 && index < pointCount - 1) {
-      const next = stroke.points[index + 1]
-      const midpointX = pointX * (1 - blend * .35) + ((pointX + next.x * width) / 2) * blend * .35
-      const midpointY = pointY * (1 - blend * .35) + ((pointY + next.y * height) / 2) * blend * .35
-      target.quadraticCurveTo(pointX + offsetX, pointY + offsetY, midpointX + offsetX, midpointY + offsetY)
-    } else if (smoothing > 0 && index >= 2) {
-      const before = stroke.points[index - 2]
-      const controlX = previousX + (previous.x - before.x) * width * blend * 0.4
-      const controlY = previousY + (previous.y - before.y) * height * blend * 0.4
-      target.quadraticCurveTo(controlX + offsetX, controlY + offsetY, pointX + offsetX, pointY + offsetY)
-    } else {
-      target.lineTo(pointX + offsetX, pointY + offsetY)
+      const end = segmentEnd(index, pointCount)
+      if (Math.hypot(end.x - pointX, end.y - pointY) > 0.15) {
+        target.quadraticCurveTo(pointX + offsetX, pointY + offsetY, end.x + offsetX, end.y + offsetY)
+        return
+      }
     }
+    target.lineTo(pointX + offsetX, pointY + offsetY)
   }
   const segmentWidth = (index: number, widthFactor: number) => inkStrokeBitmapWidth(
     stroke,
@@ -483,9 +516,8 @@ export const drawInkStroke = (
   const translucent = inkStrokeIsTranslucent(stroke)
   let compositeBox: { x: number; y: number; w: number; h: number; ex: number; ey: number } | null = null
   if (translucent && canComposite(context)) {
-    // Device-pixel box of this range — including the smoothing neighbours,
-    // the closing control point and every pass's reach — clipped to the
-    // bitmap the caller is painting into.
+    // Device-pixel box of this range — the samples and one neighbour on
+    // each side, since the curve stays inside them — clipped to the bitmap.
     const margin = inkStrokePaintMargin(stroke, scale)
     const transform = context.getTransform()
     const ex = transform.e
@@ -503,11 +535,6 @@ export const drawInkStroke = (
     const last = stroke.points.length - 1
     for (let index = Math.max(0, firstSegment - 2); index <= Math.min(last, lastSegment); index += 1) {
       include(stroke.points[index].x * width, stroke.points[index].y * height)
-    }
-    if (lastSegment >= last && last >= 2) {
-      const previous = stroke.points[last - 1]
-      const before = stroke.points[last - 2]
-      include((previous.x + (previous.x - before.x) * .4) * width, (previous.y + (previous.y - before.y) * .4) * height)
     }
     const targetCanvas = (context as unknown as { canvas: { width: number; height: number } }).canvas
     const dx0 = Math.max(0, Math.floor(x0 - margin + ex))

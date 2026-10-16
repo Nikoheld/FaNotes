@@ -3,6 +3,7 @@ package ch.fasrv.fanotes
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.drawBehind
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -246,6 +247,9 @@ internal data class StatusInk(
 internal val LocalStatusInk = staticCompositionLocalOf {
     StatusInk(Color(0xFF5E5C57), Color(0xFF1F7A48), Color(0xFF8A5A12), Color(0xFF4E4C47), Color(0xFFE3E2DE), Color(0xFFFFFFFF))
 }
+
+/** Resolved theme id from [ch.fasrv.fanotes.desk.themePalette], never the raw `system` token. */
+internal val LocalDeskThemeId = staticCompositionLocalOf { "light" }
 
 /** True when the settings viewport stacks each `.setting-row`. */
 private val LocalSettingsContentStacks = staticCompositionLocalOf { false }
@@ -4620,11 +4624,11 @@ fun FirstRunDialog(
                             if (wide) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(copyWeight)) { FirstRunWelcomeCopy(accent) { go(1) } }
-                                    WelcomePreview(Modifier.weight(panelWeight), accent)
+                                    WelcomePreview(Modifier.weight(panelWeight))
                                 }
                             } else {
                                 FirstRunWelcomeCopy(accent) { go(1) }
-                                WelcomePreview(Modifier.fillMaxWidth().padding(top = gap), accent)
+                                WelcomePreview(Modifier.fillMaxWidth().padding(top = gap))
                             }
                         }
                     }
@@ -4664,11 +4668,11 @@ fun FirstRunDialog(
                             if (wide) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(copyWeight)) { FirstRunWritingCopy(accent) { go(it) } }
-                                    WritingPreview(Modifier.weight(panelWeight), accent)
+                                    WritingPreview(Modifier.weight(panelWeight))
                                 }
                             } else {
                                 FirstRunWritingCopy(accent) { go(it) }
-                                WritingPreview(Modifier.fillMaxWidth().padding(top = gap), accent)
+                                WritingPreview(Modifier.fillMaxWidth().padding(top = gap))
                             }
                         }
                     }
@@ -4864,8 +4868,10 @@ private fun FirstRunWelcomeCopy(accent: Color, onContinue: () -> Unit) {
 }
 
 @Composable
-private fun WelcomePreview(modifier: Modifier, accent: Color) {
+private fun WelcomePreview(modifier: Modifier) {
     val ink = LocalStatusInk.current
+    // Subject mark, formula, and hit count use `--accent`, not the readable label color.
+    val accent = MaterialTheme.colorScheme.primary
     val screen = LocalConfiguration.current
     val screenWidth = screen.screenWidthDp
     val screenHeight = screen.screenHeightDp
@@ -4881,25 +4887,70 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
         bottomStart = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_RADIUS_BOTTOM_DP.dp,
     )
     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_RADIUS_DP.dp)
-    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val windowBorder = Color(ch.fasrv.fanotes.desk.firstRunPreviewWindowBorder(LocalDeskThemeId.current))
+    val windowShadow = Color(ch.fasrv.fanotes.desk.firstRunPreviewWindowShadowColor())
     Box(modifier.semantics { contentDescription = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_LABEL }) {
+        Box(Modifier.matchParentSize().welcomePreviewGlow(MaterialTheme.colorScheme.primary.toArgb()))
         Column(
             Modifier
                 .fillMaxWidth()
+                .shadow(
+                    elevation = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_WINDOW_SHADOW_Y_DP.dp,
+                    shape = shape,
+                    clip = false,
+                    ambientColor = windowShadow,
+                    spotColor = windowShadow,
+                )
+                .drawBehind {
+                    val stroke = 1.dp.toPx()
+                    val radius = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_RADIUS_DP.dp.toPx()
+                    drawRoundRect(
+                        color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_WINDOW_RING),
+                        topLeft = Offset(-stroke / 2f, -stroke / 2f),
+                        size = Size(size.width + stroke, size.height + stroke),
+                        cornerRadius = CornerRadius(radius + stroke / 2f, radius + stroke / 2f),
+                        style = Stroke(width = stroke),
+                    )
+                }
                 .clip(shape)
-                .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), shape)
+                .border(1.dp, windowBorder, shape)
                 .background(ink.panelStrong),
         ) {
-            Row(
-                Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_DP.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)).padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                listOf(MaterialTheme.colorScheme.error, Color(0xFFD8A643), LocalStatusInk.current.success).forEach { dot ->
-                    Box(Modifier.size(6.dp).clip(CircleShape).background(dot))
+            val headerBorder = Color(ch.fasrv.fanotes.desk.firstRunPreviewBorder(LocalDeskThemeId.current))
+            Column(Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_DP.dp)) {
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .background(Color(ch.fasrv.fanotes.desk.firstRunPreviewHeaderFill(MaterialTheme.colorScheme.surface.toArgb())))
+                        .padding(horizontal = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_PAD_DP.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_GAP_DP.dp),
+                ) {
+                    val dots = listOf(
+                        Color(ch.fasrv.fanotes.desk.firstRunPreviewHeaderClose(MaterialTheme.colorScheme.error.toArgb(), headerBorder.toArgb())),
+                        Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_MIDDLE_DOT),
+                        ink.success,
+                    )
+                    dots.forEach { dot ->
+                        Box(
+                            Modifier
+                                .size(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_DOT_DP.dp)
+                                .clip(CircleShape)
+                                .background(dot),
+                        )
+                    }
+                    Text(
+                        ch.fasrv.fanotes.desk.FIRST_RUN_BRAND,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.End,
+                        fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_TITLE_SP.sp,
+                        fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_TITLE_WEIGHT),
+                        color = ink.muted,
+                    )
                 }
-                Text(ch.fasrv.fanotes.desk.FIRST_RUN_BRAND, modifier = Modifier.weight(1f), textAlign = TextAlign.End, fontSize = 11.sp, color = ink.muted)
+                Box(Modifier.fillMaxWidth().height(1.dp).background(headerBorder))
             }
             // The body does not clip, so the sheet shadow can paint. The window clip above still cuts blur that leaves the window.
             Row(Modifier.fillMaxWidth().heightIn(min = bodyMin)) {
@@ -5174,8 +5225,10 @@ private fun FirstRunWritingCopy(accent: Color, onStep: (Int) -> Unit) {
 }
 
 @Composable
-private fun WritingPreview(modifier: Modifier, accent: Color) {
+private fun WritingPreview(modifier: Modifier) {
     val ink = LocalStatusInk.current
+    // Toolbar, ink, transcript, and selection use `--accent`, not the readable label color.
+    val accent = MaterialTheme.colorScheme.primary
     val screen = LocalConfiguration.current
     val framePad = ch.fasrv.fanotes.desk.firstRunWritingFramePad(screen.screenWidthDp, screen.screenHeightDp)
     val sheetPad = ch.fasrv.fanotes.desk.firstRunWritingSheetPad(screen.screenWidthDp, screen.screenHeightDp)
@@ -7925,6 +7978,15 @@ private fun SettingsPage(
                                 onCheckedChange = { model.updateDesk("line-numbers", if (it) "on" else "off") },
                             )
                         }
+                        SettingRow(
+                            "Rechtschreibprüfung",
+                            "Unterstreicht Tippfehler lokal rot und erkennt Deutsch oder Englisch automatisch. Mathematik und Code bleiben unberührt. Ein langes Drücken oder Strg+. zeigt Vorschläge.",
+                        ) {
+                            Switch(
+                                checked = settings["spellcheck"] != "off",
+                                onCheckedChange = { model.updateDesk("spellcheck", if (it) "on" else "off") },
+                            )
+                        }
                         SettingRow("Wortzahl in Statusleiste") {
                             Switch(
                                 checked = settings["words"] != "off",
@@ -7998,9 +8060,25 @@ private fun SettingsPage(
                         SettingRow(
                             "Form-Erkennung",
                             "Wie bereitwillig Stillhalten eine Linie, einen Kreis oder ein Vieleck glättet. Niedrig nur bei sehr klaren Figuren; hoch früher und auch bei unsaubereren Strichen.",
-                            divider = false,
                         ) {
                             SettingSlider(pen.shapeSnap.toFloat(), 0f, 100f, 5f, " %") { model.updateDesk("shape-snap", it.toInt().toString()) }
+                        }
+                        val standardBusy by model.noteStandardBusy.collectAsStateWithLifecycle()
+                        val standardStatus by model.noteStandardStatus.collectAsStateWithLifecycle()
+                        SettingRow(
+                            "Alte Notizen auf den aktuellen Standard",
+                            "Bringt vorhandene Handschrift auf die aktuelle scharfe HiDPI-Anzeige. Markdown, Tinte, Arbeitsblätter und Seitenstatistik bleiben erhalten.",
+                            divider = false,
+                            modifier = Modifier.settingsAnchor("drawing", "settings-note-standard", anchorY),
+                        ) {
+                            Column(horizontalAlignment = Alignment.End) {
+                                TextButton(onClick = { model.convertOldNotes() }, enabled = !standardBusy) {
+                                    Text(if (standardBusy) "Aktualisiert …" else "Aktualisieren")
+                                }
+                                if (!standardStatus.isNullOrBlank()) {
+                                    Text(standardStatus.orEmpty(), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                                }
+                            }
                         }
                     }
                 }
