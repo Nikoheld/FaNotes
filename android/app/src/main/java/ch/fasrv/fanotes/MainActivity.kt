@@ -1032,59 +1032,77 @@ fun FaNotesScreen(
         FaNotesConfirmDialog(request, onConfirm = { model.acceptConfirm() }, onDismiss = { model.dismissConfirm() }, glass = glass, radiusDp = chrome.radiusDp)
     }
     if (mathOpen) {
-        AlertDialog(
-            onDismissRequest = { mathOpen = false },
-            title = { Text("Mathe") },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text("Ausrechnen, Vereinfachen, Ausmultiplizieren, Faktorisieren und Gleichungen bis Grad 2.", fontSize = 13.sp)
-                    OutlinedTextField(mathInput, { mathInput = it }, label = { Text("Ausdruck") }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-                    listOf(
-                        "calculate" to "Ausrechnen",
-                        "solve" to "Lösen",
-                        "simplify" to "Vereinfachen",
-                        "expand" to "Ausmultiplizieren",
-                        "factor" to "Faktorisieren",
-                    ).forEach { (action, label) ->
-                        TextButton(onClick = {
-                            runCatching { solveMathExpression(mathInput, action) }
-                                .onSuccess { result ->
-                                    mathOk = true
-                                    mathOutput = result.steps.joinToString("\n") { it.display }
-                                }
-                                .onFailure { error ->
-                                    mathOk = false
-                                    mathOutput = error.message ?: "Der Ausdruck ist ungültig."
-                                }
-                        }) { Text(label) }
+        PromptCard(
+            "Mathe",
+            onDismiss = { mathOpen = false },
+            confirmLabel = "In die Notiz",
+            confirmEnabled = mathOk,
+            dismissLabel = "Schließen",
+            onConfirm = {
+                if (mathOk) model.insertMath(mathOutput)
+                mathOpen = false
+            },
+        ) {
+            Text("Ausrechnen, Vereinfachen, Ausmultiplizieren, Faktorisieren und Gleichungen bis Grad 2.", fontSize = 12.sp, color = LocalStatusInk.current.muted, lineHeight = 17.sp)
+            PromptField(mathInput, { mathInput = it }, "Ausdruck", onDone = {})
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(
+                    "calculate" to "Ausrechnen",
+                    "solve" to "Lösen",
+                    "simplify" to "Vereinfachen",
+                    "expand" to "Ausmultiplizieren",
+                    "factor" to "Faktorisieren",
+                ).forEach { (action, label) ->
+                    PromptChoice(label) {
+                        runCatching { solveMathExpression(mathInput, action) }
+                            .onSuccess { result ->
+                                mathOk = true
+                                mathOutput = result.steps.joinToString("\n") { it.display }
+                            }
+                            .onFailure { error ->
+                                mathOk = false
+                                mathOutput = error.message ?: "Der Ausdruck ist ungültig."
+                            }
                     }
-                    if (mathOutput.isNotBlank()) Text(mathOutput, modifier = Modifier.padding(top = 8.dp))
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    if (mathOk) model.insertMath(mathOutput)
-                    mathOpen = false
-                }, enabled = mathOk) { Text("In die Notiz") }
-            },
-            dismissButton = { TextButton(onClick = { mathOpen = false }) { Text("Schließen") } },
-        )
+            }
+            if (mathOutput.isNotBlank()) {
+                Text(mathOutput, fontSize = 13.sp, color = if (mathOk) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error)
+            }
+        }
     }
     editingBox?.let { id ->
-        AlertDialog(
-            onDismissRequest = { editingBox = null },
-            title = { Text("Textfeld") },
-            text = {
-                Column {
-                    OutlinedTextField(boxText, { boxText = it }, label = { Text("Text") })
-                    TextButton(onClick = { model.removeWorksheetBox(id); editingBox = null }) { Text("Textfeld entfernen") }
-                }
+        PromptCard(
+            ch.fasrv.fanotes.desk.BOX_EDITOR_TITLE,
+            onDismiss = { editingBox = null },
+            confirmLabel = ch.fasrv.fanotes.desk.BOX_EDITOR_SAVE,
+            onConfirm = {
+                model.updateWorksheetBox(id, boxText)
+                editingBox = null
             },
-            confirmButton = {
-                TextButton(onClick = { model.updateWorksheetBox(id, boxText); editingBox = null }) { Text("Speichern") }
-            },
-            dismissButton = { TextButton(onClick = { editingBox = null }) { Text("Abbrechen") } },
-        )
+        ) {
+            PromptField(
+                boxText,
+                { boxText = it },
+                ch.fasrv.fanotes.desk.BOX_EDITOR_PLACEHOLDER,
+                onDone = {
+                    model.updateWorksheetBox(id, boxText)
+                    editingBox = null
+                },
+                singleLine = false,
+                minHeightDp = ch.fasrv.fanotes.desk.BOX_EDITOR_MIN_DP,
+                radiusDp = ch.fasrv.fanotes.desk.BOX_EDITOR_RADIUS_DP,
+            )
+            Text(
+                ch.fasrv.fanotes.desk.BOX_EDITOR_REMOVE,
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.clickable {
+                    model.removeWorksheetBox(id)
+                    editingBox = null
+                },
+            )
+        }
     }
     if (firstRun) {
         FirstRunDialog(
@@ -3220,6 +3238,7 @@ private fun PromptCard(
     confirmLabel: String?,
     onConfirm: () -> Unit,
     confirmEnabled: Boolean = true,
+    dismissLabel: String = ch.fasrv.fanotes.desk.PROMPT_CANCEL,
     content: @Composable () -> Unit,
 ) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -3248,7 +3267,7 @@ private fun PromptCard(
                 Text(title, fontSize = ch.fasrv.fanotes.desk.PROMPT_TITLE_SP.sp, fontWeight = FontWeight(650), letterSpacing = (-0.02).em)
                 content()
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-                    PromptButton(ch.fasrv.fanotes.desk.PROMPT_CANCEL, primary = false, onClick = onDismiss)
+                    PromptButton(dismissLabel, primary = false, onClick = onDismiss)
                     if (confirmLabel != null) PromptButton(confirmLabel, primary = true, enabled = confirmEnabled, onClick = onConfirm)
                 }
             }
@@ -3257,21 +3276,29 @@ private fun PromptCard(
 }
 
 @Composable
-private fun PromptField(value: String, onChange: (String) -> Unit, placeholder: String, onDone: () -> Unit) {
-    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.PROMPT_FIELD_RADIUS_DP.dp)
+private fun PromptField(
+    value: String,
+    onChange: (String) -> Unit,
+    placeholder: String,
+    onDone: () -> Unit,
+    singleLine: Boolean = true,
+    minHeightDp: Int = 0,
+    radiusDp: Int = ch.fasrv.fanotes.desk.PROMPT_FIELD_RADIUS_DP,
+) {
+    val shape = RoundedCornerShape(radiusDp.dp)
     val strong = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
     BasicTextField(
         value = value,
         onValueChange = onChange,
-        singleLine = true,
-        textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp),
+        singleLine = singleLine,
+        textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, lineHeight = 22.sp),
         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        keyboardOptions = KeyboardOptions(imeAction = if (singleLine) ImeAction.Done else ImeAction.Default),
         keyboardActions = KeyboardActions(onDone = { onDone() }),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().heightIn(min = minHeightDp.dp),
         decorationBox = { inner ->
             Box(
-                Modifier.fillMaxWidth().border(1.dp, strong, shape).clip(shape).background(MaterialTheme.colorScheme.background).padding(horizontal = ch.fasrv.fanotes.desk.PROMPT_FIELD_PAD_X_DP.dp, vertical = ch.fasrv.fanotes.desk.PROMPT_FIELD_PAD_Y_DP.dp),
+                Modifier.fillMaxWidth().heightIn(min = minHeightDp.dp).border(1.dp, strong, shape).clip(shape).background(MaterialTheme.colorScheme.background).padding(horizontal = ch.fasrv.fanotes.desk.PROMPT_FIELD_PAD_X_DP.dp, vertical = ch.fasrv.fanotes.desk.PROMPT_FIELD_PAD_Y_DP.dp),
             ) {
                 if (value.isEmpty()) Text(placeholder, fontSize = 16.sp, color = LocalStatusInk.current.muted)
                 inner()

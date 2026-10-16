@@ -158,6 +158,16 @@ fun worksheetPlaceHint(placingText: Boolean, placingHighlight: Boolean): String?
     else -> null
 }
 
+/** Worksheet text box from `.worksheet-textbox`: placeholder, 5px corners, remove control. */
+const val BOX_EDITOR_TITLE = "Textfeld"
+const val BOX_EDITOR_PLACEHOLDER = "Antwort eingeben …"
+const val BOX_EDITOR_REMOVE = "Textfeld entfernen"
+const val BOX_EDITOR_SAVE = "Speichern"
+const val BOX_EDITOR_MIN_DP = 80
+const val BOX_EDITOR_RADIUS_DP = 5
+const val BOX_EDITOR_PAD_X_DP = 7
+const val BOX_EDITOR_PAD_Y_DP = 5
+
 /** Arbeitsblatt import after the later chrome pass: 12px card, min(620px, 92vw), options stack at 560px. */
 const val SHEET_IMPORT_MAX_DP = 620
 const val SHEET_IMPORT_WIDTH_FRACTION = 0.92f

@@ -95,6 +95,10 @@ class WorksheetLayoutTest {
         assertEquals(WORKSHEET_TEXT_HINT, worksheetPlaceHint(true, false))
         assertEquals(WORKSHEET_HIGHLIGHT_HINT, worksheetPlaceHint(false, true))
         assertEquals(WORKSHEET_HIGHLIGHT_HINT, worksheetPlaceHint(true, true))
+        assertEquals("Antwort eingeben …", BOX_EDITOR_PLACEHOLDER)
+        assertEquals("Textfeld entfernen", BOX_EDITOR_REMOVE)
+        assertEquals(5, BOX_EDITOR_RADIUS_DP)
+        assertEquals(80, BOX_EDITOR_MIN_DP)
     }
 
     @Test
