@@ -114,10 +114,16 @@ class InkSessionTest {
         }
         val stroke = InkStroke(points, 4.5, true, "#2457d6", brush = "fineliner")
         val png = renderRibbonPng(stroke, 640, 360)
-        val file = java.io.File("/opt/cursor/artifacts/ink-stroke.png")
-        file.parentFile.mkdirs()
-        file.writeBytes(png)
         assertTrue(png.size > 500)
+        assertEquals(137.toByte(), png[0])
+        assertEquals('P'.code.toByte(), png[1])
+        assertEquals('N'.code.toByte(), png[2])
+        assertEquals('G'.code.toByte(), png[3])
+        // Cursor agents keep a preview. GitHub runners cannot create that directory.
+        val artifacts = java.io.File("/opt/cursor/artifacts")
+        if ((artifacts.isDirectory || artifacts.mkdirs()) && artifacts.canWrite()) {
+            java.io.File(artifacts, "ink-stroke.png").writeBytes(png)
+        }
     }
 
     private fun point(x: Double, y: Double) = StrokePoint(x, y, 0.0, 0.6, 0.0, 0.0, "pen")
