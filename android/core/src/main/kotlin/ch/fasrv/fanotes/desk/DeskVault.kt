@@ -593,8 +593,23 @@ private val CAL_WEEKDAYS = listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
 
 fun calendarWeekdayShort(date: LocalDate): String = CAL_WEEKDAYS[date.dayOfWeek.value - 1]
 
+/** Desktop `.cal-hour-line` / `.cal-hours`: each of the 24 rows is 48px. */
+const val CAL_HOUR_DP = 48
+
+/**
+ * Height of the day/week hour scroller.
+ * Desktop `.cal-scroll` is `flex: 1; min-height: 0; overflow: auto` under the
+ * toolbar, weekday headers, and all-day row, while `.cal-hours` stays `24 * 48px`.
+ * [availableDp] is that leftover. The result is the leftover when it is at least
+ * [minDp], and [minDp] otherwise, so the viewport never goes negative or collapses to zero.
+ */
+fun hourViewportDp(availableDp: Int, minDp: Int = CAL_HOUR_DP): Int {
+    val floor = minDp.coerceAtLeast(0)
+    return availableDp.coerceAtLeast(floor)
+}
+
 /** Distance from midnight down the 48dp hour grid. */
-fun calendarNowOffsetDp(hour: Int, minute: Int, hourDp: Int = 48): Float =
+fun calendarNowOffsetDp(hour: Int, minute: Int, hourDp: Int = CAL_HOUR_DP): Float =
     ((hour.coerceIn(0, 23) * 60 + minute.coerceIn(0, 59)) / 60f) * hourDp
 
 fun eventClock(event: CalendarEvent): String? {
