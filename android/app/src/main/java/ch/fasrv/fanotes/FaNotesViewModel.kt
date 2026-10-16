@@ -194,6 +194,9 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val sidebarOpen = MutableStateFlow(true)
     val inspectorOpen = MutableStateFlow(false)
     val message = MutableStateFlow<String?>(null)
+    val undoTrash = MutableStateFlow<ch.fasrv.fanotes.vault.TrashItem?>(null)
+    val trashOpen = MutableStateFlow(false)
+    val trashItems = MutableStateFlow<List<ch.fasrv.fanotes.vault.TrashItem>>(emptyList())
     val backdrop = MutableStateFlow<List<BackdropSlice>>(emptyList())
     val paperImages = MutableStateFlow<Map<String, Bitmap>>(emptyMap())
     val previewImages = MutableStateFlow<Map<String, Bitmap>>(emptyMap())
@@ -1209,30 +1212,204 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun delete(path: String) {
         viewModelScope.launch {
-            noteTrail.value = forgetNoteHistory(noteTrail.value, path)
-            openTabs.value = openTabs.value.filterNot { isSelfOrInside(it, path) }
-            pinnedTabs.value = pinnedTabs.value.filterNot { isSelfOrInside(it, path) }.toSet()
-            closedTabs.value = closedTabs.value.filterNot { isSelfOrInside(it, path) }
-            tagIndex.value = tagIndex.value.filterKeys { !isSelfOrInside(it, path) }
-            if (deskSettings.value["last-open"]?.let { isSelfOrInside(it, path) } == true) updateDesk("last-open", "")
-            if (splitPath.value?.let { isSelfOrInside(it, path) } == true) splitPath.value = null
             if (open.value?.path?.let { isSelfOrInside(it, path) } == true) {
-                open.value = null
-                markdown.value = ""
-                foldedHeadings.value = emptySet()
-                session.replace(newInkDocument("Note", "dots", isoNow()))
-                openTabs.value.firstOrNull()?.let { openPath(it, force = true) }
+                try {
+                    saveNow()
+                } catch (error: Exception) {
+                    undoTrash.value = null
+                    message.value = error.message ?: "Verschieben abgebrochen: die letzten Änderungen konnten nicht gespeichert werden."
+                    return@launch
+                }
             }
-            withContext(Dispatchers.IO) {
-                val parent = path.substringBeforeLast('/', "")
-                val folder = graph.vault.list(parent).any { it.directory && it.path.trim('/') == path.trim('/') }
-                if (folder) graph.vault.delete(path) else graph.store.delete(path)
+            if (splitPath.value?.let { isSelfOrInside(it, path) } == true) {
+                try {
+                    flushSplitNow()
+                } catch (error: Exception) {
+                    undoTrash.value = null
+                    message.value = error.message ?: "Verschieben abgebrochen: die letzten Änderungen konnten nicht gespeichert werden."
+                    return@launch
+                }
+            }
+            val item = try {
+                withContext(Dispatchers.IO) {
+                    graph.store.trashEntry(path, java.util.UUID.randomUUID().toString(), isoNow())
+                }
+            } catch (error: Exception) {
+                undoTrash.value = null
+                message.value = error.message ?: "Der Eintrag konnte nicht in den Papierkorb verschoben werden."
+                return@launch
+            }
+            detachTrashed(path)
+            val colors = ch.fasrv.fanotes.desk.dropFolderColors(folderColors.value, path)
+            if (colors != folderColors.value) {
+                folderColors.value = colors
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        graph.vault.write(FOLDER_COLORS_PATH, serializeFolderColors(colors).encodeToByteArray())
+                    }
+                }
             }
             forgetPaperCamerasUnder(path)
             loadTree()
             graph.engine.notifyLocalChange()
             persistWorkspace()
+            if (trashOpen.value) trashItems.value = withContext(Dispatchers.IO) { graph.store.listTrash() }
+            undoTrash.value = item
+            message.value = ch.fasrv.fanotes.vault.TRASH_NOTICE
         }
+    }
+
+    private fun detachTrashed(path: String) {
+        noteTrail.value = forgetNoteHistory(noteTrail.value, path)
+        openTabs.value = openTabs.value.filterNot { isSelfOrInside(it, path) }
+        pinnedTabs.value = pinnedTabs.value.filterNot { isSelfOrInside(it, path) }.toSet()
+        closedTabs.value = closedTabs.value.filterNot { isSelfOrInside(it, path) }
+        tagIndex.value = tagIndex.value.filterKeys { !isSelfOrInside(it, path) }
+        if (deskSettings.value["last-open"]?.let { isSelfOrInside(it, path) } == true) updateDesk("last-open", "")
+        if (splitPath.value?.let { isSelfOrInside(it, path) } == true) {
+            splitPath.value = null
+            splitNote = null
+            splitMarkdown.value = ""
+            splitUnsaved.value = false
+        }
+        if (open.value?.path?.let { isSelfOrInside(it, path) } == true) {
+            open.value = null
+            markdown.value = ""
+            foldedHeadings.value = emptySet()
+            session.replace(newInkDocument("Note", "dots", isoNow()))
+            openTabs.value.firstOrNull()?.let { openPath(it, force = true) }
+        }
+    }
+
+    private suspend fun flushSplitNow() {
+        splitSaveJob?.cancel()
+        splitSaveGeneration += 1
+        val note = splitNote ?: return
+        if (!splitUnsaved.value) return
+        val text = splitMarkdown.value
+        val document = splitSession.document
+        splitNote = withContext(Dispatchers.IO) { graph.store.save(note.copy(markdown = text), document, text) }
+        splitUnsaved.value = false
+    }
+
+    fun openTrash() {
+        paletteOpen.value = false
+        trashOpen.value = true
+        viewModelScope.launch {
+            trashItems.value = withContext(Dispatchers.IO) { graph.store.listTrash() }
+        }
+    }
+
+    fun closeTrash() {
+        trashOpen.value = false
+    }
+
+    fun undoLastTrash() {
+        val item = undoTrash.value ?: return
+        undoTrash.value = null
+        message.value = null
+        restoreTrash(item.id, item)
+    }
+
+    fun restoreTrash(id: String, known: ch.fasrv.fanotes.vault.TrashItem? = trashItems.value.find { it.id == id }) {
+        viewModelScope.launch {
+            val restored = try {
+                withContext(Dispatchers.IO) { graph.store.restoreTrash(id) }
+            } catch (error: Exception) {
+                message.value = error.message ?: "Wiederherstellen ist fehlgeschlagen."
+                return@launch
+            }
+            undoTrash.value = null
+            loadTree()
+            graph.engine.notifyLocalChange()
+            if (trashOpen.value) trashItems.value = withContext(Dispatchers.IO) { graph.store.listTrash() }
+            if (known?.folder != true) {
+                openPath(restored)
+                destination.value = "notes"
+            }
+            val name = known?.name ?: restored.substringAfterLast('/').substringBeforeLast('.')
+            message.value = ch.fasrv.fanotes.vault.trashRestoredNotice(name)
+        }
+    }
+
+    fun askPurgeTrash(id: String) {
+        val name = trashItems.value.find { it.id == id }?.name ?: return
+        askConfirm(
+            ch.fasrv.fanotes.desk.PendingConfirm("Endgültig löschen", ch.fasrv.fanotes.vault.trashPurgeMessage(name), "Löschen"),
+        ) {
+            viewModelScope.launch {
+                withContext(Dispatchers.IO) { graph.store.purgeTrash(id) }
+                trashItems.value = withContext(Dispatchers.IO) { graph.store.listTrash() }
+                if (undoTrash.value?.id == id) undoTrash.value = null
+                message.value = ch.fasrv.fanotes.vault.TRASH_PURGED_NOTICE
+            }
+        }
+    }
+
+    fun askEmptyTrash() {
+        val count = trashItems.value.size
+        if (count == 0) {
+            message.value = "Der Papierkorb ist leer."
+            return
+        }
+        askConfirm(
+            ch.fasrv.fanotes.desk.PendingConfirm("Papierkorb leeren", ch.fasrv.fanotes.vault.trashEmptyMessage(count), "Löschen"),
+        ) {
+            viewModelScope.launch {
+                withContext(Dispatchers.IO) { graph.store.emptyTrash() }
+                trashItems.value = emptyList()
+                undoTrash.value = null
+                message.value = ch.fasrv.fanotes.vault.TRASH_EMPTY_NOTICE
+            }
+        }
+    }
+
+    fun duplicateNote(path: String? = open.value?.path) {
+        if (path.isNullOrBlank()) {
+            message.value = "Öffne zuerst eine Notiz."
+            return
+        }
+        viewModelScope.launch {
+            if (open.value?.path == path) {
+                try {
+                    saveNow()
+                } catch (error: Exception) {
+                    message.value = error.message ?: "Die Kopie konnte nicht erstellt werden."
+                    return@launch
+                }
+            }
+            val created = try {
+                withContext(Dispatchers.IO) { graph.store.duplicateNote(path) }
+            } catch (error: Exception) {
+                message.value = error.message ?: "Die Kopie konnte nicht erstellt werden."
+                return@launch
+            }
+            loadTree()
+            graph.engine.notifyLocalChange()
+            openPath(created)
+            destination.value = "notes"
+            message.value = ch.fasrv.fanotes.vault.DUPLICATE_NOTICE
+        }
+    }
+
+    fun insertDateStamp() {
+        val note = open.value
+        if (note == null) {
+            message.value = "Öffne zuerst eine Notiz."
+            return
+        }
+        if (note.kind != NoteKind.MARKDOWN) {
+            message.value = "Das Datum gehört in eine Markdown-Notiz."
+            return
+        }
+        val stamp = ch.fasrv.fanotes.vault.noteDateStamp(
+            java.time.LocalDate.now(),
+            java.time.LocalTime.now(),
+            deskSettings.value["date-format"].orEmpty(),
+        )
+        showText.value = true
+        updateMarkdown(ch.fasrv.fanotes.vault.insertNoteStamp(markdown.value, stamp))
+        message.value = ch.fasrv.fanotes.vault.STAMP_NOTICE
     }
 
     fun importBytes(name: String, bytes: ByteArray, pdf: Boolean, mime: String = "") {
@@ -1824,7 +2001,15 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         action?.invoke()
     }
 
+    @Volatile var penAwakeUntilMs: Long = 0L
+
+    /** Keeps the screen on for three minutes after the latest pen sample. */
+    fun notePenActivity() {
+        penAwakeUntilMs = System.currentTimeMillis() + 180_000L
+    }
+
     fun recordPenSample(x: Double, y: Double) {
+        notePenActivity()
         val now = System.currentTimeMillis()
         bugLog.recordPen(
             ch.fasrv.fanotes.desk.BugReportEvent(
@@ -1966,7 +2151,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun askDelete(path: String, folder: Boolean, name: String) {
         askConfirm(
-            ch.fasrv.fanotes.desk.PendingConfirm("Löschen", ch.fasrv.fanotes.desk.vaultDeleteMessage(folder, name), "Löschen"),
+            ch.fasrv.fanotes.desk.PendingConfirm("In den Papierkorb", ch.fasrv.fanotes.desk.vaultDeleteMessage(folder, name), "Verschieben"),
         ) { delete(path) }
     }
 

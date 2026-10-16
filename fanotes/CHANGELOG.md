@@ -2,6 +2,7 @@
 
 ## 2026.10.7
 
+- **Android-Tablet.** Löschen verschiebt in den Papierkorb auf dem Gerät, mit Rückgängig, Wiederherstellen und endgültigem Leeren. Eine Notiz lässt sich duplizieren, und Datum und Uhrzeit lassen sich einfügen. Im Stiftmodus bleibt der Bildschirm nach dem Wechsel und nach jedem Strich drei Minuten an.
 - **Android-Tablet.** Der Text liegt auf dem Papier, die Leiste klappt beim Schreiben ein, und der Radierer folgt der Spitze.
 - **Sync.** Der Abgleich zeigt den Fortschritt, und ein zweiter Start geht nicht verloren.
 - **Version.** Die Version lässt sich in GitHub Actions unter Update version setzen. Der Android-Release installiert das SDK, ohne am Lizenzdialog abzubrechen.

@@ -350,7 +350,13 @@ private fun RibbonButton(
 }
 
 @Composable
-fun FaNotesToast(message: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+fun FaNotesToast(
+    message: String,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.TOAST_RADIUS_DP.dp)
     Row(
         modifier
@@ -377,6 +383,15 @@ fun FaNotesToast(message: String, onDismiss: () -> Unit, modifier: Modifier = Mo
             lineHeight = 18.sp,
             color = LocalStatusInk.current.soft,
         )
+        if (!actionLabel.isNullOrBlank() && onAction != null) {
+            Text(
+                actionLabel,
+                modifier = Modifier.clickable(onClickLabel = actionLabel, onClick = onAction),
+                fontSize = ch.fasrv.fanotes.desk.TOAST_FONT_SP.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
         Box(
             Modifier
                 .size(ch.fasrv.fanotes.desk.TOAST_CLOSE_DP.dp)

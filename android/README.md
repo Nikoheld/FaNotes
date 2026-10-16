@@ -7,7 +7,7 @@ Native tablet client (Kotlin, Jetpack Compose) for the FaNotes vault. The writin
 - Pen, eraser, and selection on a paper page, with pressure, tilt, orientation, the stylus eraser, the barrel button, and hover. The eraser ring follows the nib. Typed Markdown is drawn on the page, under the ink, at the desktop column (72×78 padding on a 900-wide sheet) and is laid out at the current zoom so the glyphs stay sharp.
 - The tool bar is a thin desktop-style strip. It can be collapsed, and it hides while the pen is down unless **Leiste fest** is on. Zooming stays inside the page frame.
 - Palm rejection for 850 ms after the pen lifts, the same window as the desktop. A finger scrolls, pinches to zoom, long-presses to select, and swipes between notes. A finger does not lay ink unless **Finger zeichnet** is on.
-- Notes and folders: create, open, rename is available on the store, delete. Markdown sits beside the page. PDF and image worksheets can be annotated.
+- Notes and folders: create, open, rename, duplicate, and move to an on-device trash that can be restored. Markdown sits beside the page. PDF and image worksheets can be annotated. After a pen stroke the screen stays awake for three minutes. A command inserts the date and time.
 - Autosave, undo/redo, paper styles, and the desktop brushes (fineliner, pencil, marker, highlighter, calligraphy).
 - Account login and bidirectional sync with `https://fanotes.fasrv.ch`. Offline writes sync when the network returns. Conflicts keep both copies under the desktop name `Konflikt`.
 
