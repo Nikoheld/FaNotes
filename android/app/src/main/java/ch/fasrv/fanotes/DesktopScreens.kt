@@ -112,6 +112,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
@@ -242,6 +243,9 @@ internal data class StatusInk(
 internal val LocalStatusInk = staticCompositionLocalOf {
     StatusInk(Color(0xFF5E5C57), Color(0xFF1F7A48), Color(0xFF8A5A12), Color(0xFF4E4C47), Color(0xFFE3E2DE), Color(0xFFFFFFFF))
 }
+
+/** True when the settings viewport stacks each `.setting-row`. */
+private val LocalSettingsContentStacks = staticCompositionLocalOf { false }
 
 @Composable
 fun DeskRibbon(
@@ -6530,9 +6534,10 @@ private fun SettingRow(
     content: @Composable () -> Unit,
 ) {
     val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    val viewportStacks = LocalSettingsContentStacks.current
     Column(modifier.fillMaxWidth()) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val stacked = maxWidth < 420.dp
+            val stacked = viewportStacks || maxWidth < 420.dp
             if (stacked) {
                 Column(
                     Modifier
@@ -6542,10 +6547,15 @@ private fun SettingRow(
                             horizontal = ch.fasrv.fanotes.desk.SETTING_ROW_PAD_X_DP.dp,
                             vertical = ch.fasrv.fanotes.desk.SETTING_ROW_PAD_Y_DP.dp,
                         ),
-                    verticalArrangement = Arrangement.spacedBy(9.dp),
+                    horizontalAlignment = Alignment.Start,
+                    verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTING_ROW_STACK_GAP_DP.dp),
                 ) {
                     SettingCopy(title, description, glyph = glyph, mark = mark)
-                    content()
+                    if (viewportStacks) {
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) { content() }
+                    } else {
+                        content()
+                    }
                 }
             } else {
                 Row(
@@ -7002,7 +7012,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                         )
                         .background(MaterialTheme.colorScheme.background),
                 ) {
-                    SettingsPage(model, onSync, onOpenVault, onPrivate, dismiss, ch.fasrv.fanotes.desk.settingsNavCollapses(viewportWidth))
+                    SettingsPage(model, onSync, onOpenVault, onPrivate, dismiss, viewportWidth)
                 }
             }
         }
@@ -7016,8 +7026,10 @@ private fun SettingsPage(
     onOpenVault: () -> Unit,
     onPrivate: () -> Unit,
     onClose: () -> Unit,
-    navCollapsed: Boolean,
+    viewportWidth: Int,
 ) {
+    val navCollapsed = ch.fasrv.fanotes.desk.settingsNavCollapses(viewportWidth)
+    val content = ch.fasrv.fanotes.desk.settingsContentLayout(viewportWidth)
     val settings by model.deskSettings.collectAsStateWithLifecycle()
     val sync by model.sync.collectAsStateWithLifecycle()
     val syncDeviceNote by model.syncDeviceNote.collectAsStateWithLifecycle()
@@ -7041,6 +7053,7 @@ private fun SettingsPage(
         scrollTarget = null
     }
     val navPadX = if (navCollapsed) ch.fasrv.fanotes.desk.SETTINGS_NAV_NARROW_PAD_X_DP else ch.fasrv.fanotes.desk.SETTINGS_NAV_PAD_X_DP
+    CompositionLocalProvider(LocalSettingsContentStacks provides content.rowsStack) {
     Row(Modifier.fillMaxSize()) {
         Column(
             (if (navCollapsed) Modifier.width(ch.fasrv.fanotes.desk.SETTINGS_NAV_NARROW_DP.dp) else Modifier.weight(0.38f))
@@ -7192,8 +7205,8 @@ private fun SettingsPage(
                 Modifier
                     .fillMaxWidth()
                     .padding(
-                        start = ch.fasrv.fanotes.desk.SETTINGS_HEADER_PAD_X_DP.dp,
-                        end = ch.fasrv.fanotes.desk.SETTINGS_HEADER_PAD_X_DP.dp,
+                        start = content.headerPadXDp.dp,
+                        end = content.headerPadXDp.dp,
                         top = ch.fasrv.fanotes.desk.SETTINGS_HEADER_PAD_TOP_DP.dp,
                         bottom = ch.fasrv.fanotes.desk.SETTINGS_HEADER_PAD_BOTTOM_DP.dp,
                     ),
@@ -7226,10 +7239,10 @@ private fun SettingsPage(
             )
             Column(
                 Modifier.weight(1f).verticalScroll(paneScroll).padding(
-                    start = ch.fasrv.fanotes.desk.SETTINGS_SCROLL_PAD_X_DP.dp,
-                    end = ch.fasrv.fanotes.desk.SETTINGS_SCROLL_PAD_X_DP.dp,
-                    top = ch.fasrv.fanotes.desk.SETTINGS_SCROLL_PAD_TOP_DP.dp,
-                    bottom = ch.fasrv.fanotes.desk.SETTINGS_SCROLL_PAD_BOTTOM_DP.dp,
+                    start = content.scrollPadXDp.dp,
+                    end = content.scrollPadXDp.dp,
+                    top = content.scrollPadTopDp.dp,
+                    bottom = content.scrollPadBottomDp.dp,
                 ),
                 verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTING_CARD_MARGIN_DP.dp),
             ) {
@@ -7741,6 +7754,7 @@ private fun SettingsPage(
                 }
             }
         }
+    }
     }
 }
 
