@@ -1370,6 +1370,13 @@ fn fold_ampm(trimmed: &str) -> Option<String> {
     if ampm_at == 0 {
         return None;
     }
+    // `13:Oct:2026 4:00 PM` already has a clock. Folding `4:00 PM` into
+    // `16:00` would fill the open minute. The second clock is empty.
+    if words[..ampm_at - 1].iter().any(|word| {
+        word.contains(':') && word.starts_with(|character: char| character.is_ascii_digit())
+    }) {
+        return None;
+    }
     let pm = words[ampm_at].eq_ignore_ascii_case("pm");
     let clock = ampm_clock(words[ampm_at - 1], pm)?;
     let mut kept = Vec::new();
@@ -10419,6 +10426,22 @@ mod tests {
             for (input, expected) in cases {
                 assert_eq!(super::canonical_iso(input).as_deref(), expected, "{input}");
             }
+        });
+    }
+
+    #[test]
+    fn a_second_clock_after_a_time_colon_month_is_empty() {
+        with_tz("America/New_York", || {
+            assert_eq!(super::canonical_iso("13:Oct:2026 4:00 PM"), None);
+            assert_eq!(super::canonical_iso("Monday 13:Oct:2026 4:00 PM"), None);
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:00 PM").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("13:Oct:2026").as_deref(),
+                Some("2026-10-01T17:00:00.000Z")
+            );
         });
     }
 }

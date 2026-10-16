@@ -2728,6 +2728,13 @@ fn fold_ampm(trimmed: &str) -> Option<String> {
     if ampm_at == 0 {
         return None;
     }
+    // `13:Oct:2026 4:00 PM` already has a clock. Folding `4:00 PM` into
+    // `16:00` would fill the open minute. The second clock is empty.
+    if words[..ampm_at - 1].iter().any(|word| {
+        word.contains(':') && word.starts_with(|character: char| character.is_ascii_digit())
+    }) {
+        return None;
+    }
     let pm = words[ampm_at].eq_ignore_ascii_case("pm");
     let mut clock = convert_ampm_clock(words[ampm_at - 1], pm)?;
     let mut skip_zone = false;
@@ -12455,4 +12462,18 @@ mod local_zone_tests {
         }
     }
 
+    #[test]
+    fn a_second_clock_after_a_time_colon_month_is_empty() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `4:00 PM` must not be folded into the open minute of `13:`.
+        assert_eq!(unix_millis_from_iso("13:Oct:2026 4:00 PM"), None);
+        assert_eq!(unix_millis_from_iso("Monday 13:Oct:2026 4:00 PM"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 4:00 PM"), Some(1_791_921_600_000));
+        assert_eq!(unix_millis_from_iso("13:Oct:2026"), Some(1_790_874_000_000));
+    }
 }
