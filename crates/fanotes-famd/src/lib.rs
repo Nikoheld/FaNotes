@@ -995,6 +995,9 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     let trimmed = value.trim_matches(is_date_parse_space);
     // `+002026-10-13 16:00` is local 16:00. The plus and six digits are the
     // numeric year, then the usual hyphen rules. A date with no clock stays UTC.
+    if positive_expanded_bare_offset(trimmed) {
+        return None;
+    }
     if let Some(next) = rewrite_positive_expanded_clock(trimmed) {
         return canonical_iso(&next);
     }
@@ -1344,10 +1347,39 @@ fn has_ampm_word(value: &str) -> bool {
 
 /// `+002026-10-13 16:00` becomes `2026-10-13 16:00`. `+000001-10-13 16:00`
 /// becomes `1-10-13 16:00`, which is 10 January 2013.
+fn positive_expanded_bare_offset(trimmed: &str) -> bool {
+    let Some((date, time)) = trimmed.split_once(is_date_parse_space) else {
+        return false;
+    };
+    let time = time.trim_start_matches(is_date_parse_space);
+    if time.is_empty() {
+        return false;
+    }
+    let Some(rest) = date.strip_prefix('+') else {
+        return false;
+    };
+    if rest.len() < 6 || !rest.as_bytes()[..6].iter().all(|byte| byte.is_ascii_digit()) {
+        return false;
+    }
+    if !expanded_year_tail(&rest[6..]) {
+        return false;
+    }
+    let Some(first) = time.split(is_date_parse_space).find(|word| !word.is_empty()) else {
+        return false;
+    };
+    first.starts_with(['+', '-']) || (named_zone_offset_tail(first).is_some() && !utc_zone_word(first))
+}
+
 fn rewrite_positive_expanded_clock(trimmed: &str) -> Option<String> {
     let (date, time) = trimmed.split_once(is_date_parse_space)?;
     let time = time.trim_start_matches(is_date_parse_space);
     if time.is_empty() {
+        return None;
+    }
+    let first = time.split(is_date_parse_space).find(|word| !word.is_empty())?;
+    // `+002026-10-13 +5` is empty. `EST+5` is empty. `EST` and `GMT+5` stay.
+    if first.starts_with(['+', '-']) || (named_zone_offset_tail(first).is_some() && !utc_zone_word(first))
+    {
         return None;
     }
     let rest = date.strip_prefix('+')?;
@@ -10517,6 +10549,16 @@ mod tests {
                 super::canonical_iso("+000100-10-13 16:00").as_deref(),
                 Some("0100-10-13T20:56:02.000Z")
             );
+            assert_eq!(
+                super::canonical_iso("+002026-10-13 EST").as_deref(),
+                Some("2026-10-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+002026-10-13 GMT+5").as_deref(),
+                Some("2026-10-12T19:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("+002026-10-13 +5"), None);
+            assert_eq!(super::canonical_iso("+002026-10-13 PST+5"), None);
         });
     }
 }

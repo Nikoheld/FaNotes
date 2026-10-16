@@ -1908,6 +1908,12 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         return unix_millis_from_iso(&next);
     }
     let trimmed = value.trim_matches(is_date_parse_space);
+    if positive_expanded_bare_offset(trimmed) {
+        return None;
+    }
+    if let Some(next) = rewrite_positive_expanded_clock(trimmed) {
+        return unix_millis_from_iso(&next);
+    }
     if let Some(rest) = strip_leading_signs(trimmed) {
         // Signs before the first number are padding. The space keeps a
         // date-only value local and rejects a `T` form.
@@ -2014,11 +2020,6 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
             let surrounded = value.trim_matches(is_date_parse_space).len() != value.len();
             if !surrounded && negative_expanded_date(date) {
                 return None;
-            }
-            // `+002026-10-13 16:00` is local 16:00. The plus and six digits
-            // are the numeric year. A date with no clock stays UTC.
-            if let Some(next) = rewrite_positive_expanded_clock(trimmed) {
-                return unix_millis_from_iso(&next);
             }
             return legacy_numeric_millis(trimmed);
         }
@@ -2544,10 +2545,45 @@ fn datetime_calendar(date: &str) -> Option<(i32, u32, u32)> {
 /// `-000000-10-13 16:00` is year zero and stays on the legacy path.
 /// `+002026-10-13 16:00` becomes `2026-10-13 16:00`. `+000001-10-13 16:00`
 /// becomes `1-10-13 16:00`, which is 10 January 2013.
-fn rewrite_positive_expanded_clock(trimmed: &str) -> Option<String> {
+fn positive_expanded_parts(trimmed: &str) -> Option<(&str, &str)> {
     let (date, time) = trimmed.split_once(is_date_parse_space)?;
     let time = time.trim_start_matches(is_date_parse_space);
-    if time.is_empty() {
+    if time.is_empty() || !positive_expanded_date(date) {
+        return None;
+    }
+    Some((date, time))
+}
+
+fn positive_expanded_date(date: &str) -> bool {
+    let Some(rest) = date.strip_prefix('+') else {
+        return false;
+    };
+    if rest.len() < 6 || !rest.as_bytes()[..6].iter().all(|byte| byte.is_ascii_digit()) {
+        return false;
+    }
+    expanded_year_tail(&rest[6..])
+}
+
+fn bare_expanded_offset(time: &str) -> bool {
+    let Some(first) = time.split(is_date_parse_space).find(|word| !word.is_empty()) else {
+        return false;
+    };
+    first.starts_with(['+', '-']) || (named_zone_offset_tail(first).is_some() && !utc_zone_word(first))
+}
+
+fn positive_expanded_bare_offset(trimmed: &str) -> bool {
+    positive_expanded_parts(trimmed).is_some_and(|(_, time)| bare_expanded_offset(time))
+}
+
+fn rewrite_positive_expanded_clock(trimmed: &str) -> Option<String> {
+    let (date, time) = positive_expanded_parts(trimmed)?;
+    if bare_expanded_offset(time) {
+        return None;
+    }
+    let first = time.split(is_date_parse_space).find(|word| !word.is_empty())?;
+    // `+002026-10-13 +5` is empty. `EST+5` is empty. `EST` and `GMT+5` stay.
+    if first.starts_with(['+', '-']) || (named_zone_offset_tail(first).is_some() && !utc_zone_word(first))
+    {
         return None;
     }
     let rest = date.strip_prefix('+')?;
@@ -12558,5 +12594,15 @@ mod local_zone_tests {
             Some(253_427_083_200_000)
         );
         assert_eq!(unix_millis_from_iso("+000100-10-13 16:00"), None);
+        assert_eq!(
+            unix_millis_from_iso("+002026-10-13 EST"),
+            Some(1_791_867_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("+002026-10-13 GMT+5"),
+            Some(1_791_831_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("+002026-10-13 +5"), None);
+        assert_eq!(unix_millis_from_iso("+002026-10-13 PST+5"), None);
     }
 }
