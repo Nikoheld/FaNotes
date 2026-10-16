@@ -77,11 +77,16 @@ const sanitizePublishedIds = (value: unknown): string[] | undefined => {
   return ids.length ? ids : undefined
 }
 
-export const parseHomeworkMarkdown = (markdown: string): HomeworkDocument => {
-  if (typeof markdown !== 'string' || !markdown.includes(MARKER_START)) return emptyDocument()
+export type HomeworkMarkdownLoad =
+  | { ok: true, document: HomeworkDocument }
+  | { ok: false }
+
+/** No marker is a fresh list. A broken marker stays on disk instead of becoming an empty list. */
+export const loadHomeworkMarkdown = (markdown: string): HomeworkMarkdownLoad => {
+  if (typeof markdown !== 'string' || !markdown.includes(MARKER_START)) return { ok: true, document: emptyDocument() }
   const start = markdown.indexOf(MARKER_START)
   const end = markdown.indexOf(MARKER_END, start + MARKER_START.length)
-  if (start < 0 || end < 0) return emptyDocument()
+  if (end < 0) return { ok: false }
   const jsonText = markdown.slice(start + MARKER_START.length, end).trim()
   try {
     const parsed = JSON.parse(jsonText) as Partial<HomeworkDocument>
@@ -89,10 +94,15 @@ export const parseHomeworkMarkdown = (markdown: string): HomeworkDocument => {
       ? parsed.tasks.map(sanitizeTask).filter((task): task is HomeworkTask => Boolean(task))
       : []
     const publishedIds = sanitizePublishedIds(parsed.publishedIds)
-    return { version: 1, tasks, ...(publishedIds ? { publishedIds } : {}) }
+    return { ok: true, document: { version: 1, tasks, ...(publishedIds ? { publishedIds } : {}) } }
   } catch {
-    return emptyDocument()
+    return { ok: false }
   }
+}
+
+export const parseHomeworkMarkdown = (markdown: string): HomeworkDocument => {
+  const loaded = loadHomeworkMarkdown(markdown)
+  return loaded.ok ? loaded.document : emptyDocument()
 }
 
 export const serializeHomeworkMarkdown = (document: HomeworkDocument): string => {
