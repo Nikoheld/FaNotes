@@ -2595,18 +2595,45 @@ fun StudyScreen(model: FaNotesViewModel) {
 @Composable
 fun ConflictList(model: FaNotesViewModel) {
     val sync by model.sync.collectAsStateWithLifecycle()
+    val review by model.conflictReview.collectAsStateWithLifecycle()
     if (sync.conflicts.isEmpty()) return
     SettingCard("Konfliktkopien", Icons.Filled.Warning, action = {
         SyncCardAction("Liste leeren") { model.clearSyncConflicts() }
     }) {
         sync.conflicts.asReversed().forEachIndexed { index, conflict ->
-            SettingRow(conflict.path, "Lokale Fassung gesichert als „${conflict.copyPath}“", divider = index != sync.conflicts.lastIndex) {
+            val markdown = ch.fasrv.fanotes.desk.isMarkdownConflictPath(conflict.path)
+            val current = review?.takeIf { it.copyPath == conflict.copyPath }
+            SettingRow(conflict.path, "Lokale Fassung gesichert als „${conflict.copyPath}“", divider = index != sync.conflicts.lastIndex || current != null) {
                 Row {
-                    TextButton(onClick = { model.resolveConflict(conflict, "remote") }) { Text("Server") }
-                    TextButton(onClick = { model.resolveConflict(conflict, "local") }) { Text("Tablet") }
-                    if (ch.fasrv.fanotes.desk.isMarkdownConflictPath(conflict.path)) {
-                        TextButton(onClick = { model.resolveConflict(conflict, "both") }) { Text("Beide") }
+                    if (markdown) {
+                        TextButton(onClick = { model.openConflictReview(conflict) }) { Text("Vergleichen") }
                     }
+                    TextButton(onClick = { model.resolveConflict(conflict, "remote") }) { Text(ch.fasrv.fanotes.sync.conflictChoiceLabel("remote")) }
+                    TextButton(onClick = { model.resolveConflict(conflict, "local") }) { Text(ch.fasrv.fanotes.sync.conflictChoiceLabel("local")) }
+                    if (markdown) {
+                        TextButton(onClick = { model.resolveConflict(conflict, "both") }) { Text(ch.fasrv.fanotes.sync.conflictChoiceLabel("both")) }
+                    }
+                }
+            }
+            if (current != null) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Markdown-Konflikt. Die Serverfassung behält den Pfad, die lokale Fassung liegt in der Kopie.", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                    Column(Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
+                        ch.fasrv.fanotes.sync.conflictDiffRows(current.local, current.remote).forEach { row ->
+                            val color = when (row.kind) {
+                                "added" -> LocalStatusInk.current.success
+                                "removed" -> MaterialTheme.colorScheme.error
+                                else -> LocalStatusInk.current.soft
+                            }
+                            Text(
+                                "${ch.fasrv.fanotes.sync.conflictDiffMark(row.kind)} ${row.text}",
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = color,
+                            )
+                        }
+                    }
+                    TextButton(onClick = { model.closeConflictReview() }) { Text("Schließen") }
                 }
             }
         }
@@ -4155,8 +4182,17 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     var automatic by remember { mutableStateOf(model.syncAutomatic()) }
                     val historySync = settings["sync-history"] == "on"
                     SettingCard("Konto & Status", Icons.Filled.Cloud, Modifier.settingsAnchor("sync", "settings-sync-account", anchorY)) {
-                        SettingRow("Konto") {
-                            TextButton(onClick = onSync) { Text("Konto und Abgleich") }
+                        SettingRow("Konto", sync.account?.email) {
+                            if (sync.account == null) {
+                                TextButton(onClick = onSync) { Text("Konto und Abgleich") }
+                            } else {
+                                Row {
+                                    TextButton(onClick = onSync, enabled = sync.status != ch.fasrv.fanotes.sync.SyncStatus.SYNCING) {
+                                        Text("Jetzt synchronisieren")
+                                    }
+                                    TextButton(onClick = { model.logout() }) { Text("Abmelden") }
+                                }
+                            }
                         }
                         SettingRow("Automatisch synchronisieren", "Nach jedem Speichern und im Hintergrund. Aus: nur über Konto und Abgleich.") {
                             Switch(checked = automatic, onCheckedChange = {

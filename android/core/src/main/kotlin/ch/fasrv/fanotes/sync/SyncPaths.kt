@@ -128,6 +128,23 @@ fun diffLines(before: String, after: String): List<DiffRow> {
 
 data class DiffRow(val kind: String, val text: String)
 
+/** The conflict review shows at most 80 diff lines, local against the server copy. */
+const val CONFLICT_DIFF_LIMIT = 80
+
+fun conflictDiffRows(local: String, remote: String): List<DiffRow> = diffLines(local, remote).take(CONFLICT_DIFF_LIMIT)
+
+fun conflictDiffMark(kind: String) = when (kind) {
+    "added" -> "+"
+    "removed" -> "-"
+    else -> " "
+}
+
+fun conflictChoiceLabel(choice: String) = when (choice) {
+    "remote" -> "Serverfassung behalten"
+    "local" -> "Lokale Fassung behalten"
+    else -> "Zusammenführen"
+}
+
 fun isMarkdownConflictPath(path: String) = Regex("""\.(md|markdown|famd)$""", RegexOption.IGNORE_CASE).containsMatchIn(path)
 
 fun mergeMarkdownKeepingBoth(remote: String, local: String): String {
