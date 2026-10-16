@@ -501,6 +501,7 @@ const val CAL_ALL_DAY = "Ganztägig"
 const val CAL_DAILY = "Tagesnotiz"
 const val CAL_EMPTY = "Keine Termine in diesem Zeitraum."
 const val CAL_NEW_EVENT = "Neuer Termin"
+const val CAL_WEEK = "KW"
 const val CAL_EVENT_RADIUS_DP = 6
 const val CAL_EVENT_PAD_X_DP = 6
 const val CAL_EVENT_PAD_Y_DP = 3
@@ -541,6 +542,10 @@ fun calendarHeading(view: String, anchor: LocalDate): String {
 }
 
 fun agendaWhenLabel(event: CalendarEvent): String = eventClock(event) ?: CAL_ALL_DAY
+
+/** ISO week number, the same Monday-based week the desktop calendar prints as KW. */
+fun calendarIsoWeek(date: LocalDate): Int =
+    date.get(java.time.temporal.WeekFields.ISO.weekOfWeekBasedYear())
 
 data class SnappedClock(val dayOffset: Int, val hour: Int, val minute: Int)
 
