@@ -1365,13 +1365,19 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    val syncAccountBusy = MutableStateFlow(false)
+
     fun login(email: String, password: String, register: Boolean) {
+        if (syncAccountBusy.value) return
+        syncAccountBusy.value = true
         viewModelScope.launch {
             try {
                 if (register) graph.engine.register(email, password) else graph.engine.login(email, password)
-                message.value = null
+                message.value = if (register) ch.fasrv.fanotes.sync.SYNC_ACCOUNT_REGISTERED else ch.fasrv.fanotes.sync.SYNC_ACCOUNT_SIGNED_IN
             } catch (error: Exception) {
-                message.value = error.message ?: "Sign-in failed"
+                message.value = error.message ?: ch.fasrv.fanotes.sync.SYNC_ACCOUNT_FAILED
+            } finally {
+                syncAccountBusy.value = false
             }
         }
     }

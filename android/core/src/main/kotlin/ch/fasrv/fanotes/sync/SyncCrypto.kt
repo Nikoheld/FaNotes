@@ -186,6 +186,49 @@ fun syncPasswordChangeError(next: String, repeat: String): String? {
     return passwordProblems(next)
 }
 
+const val SYNC_ACCOUNT_MISMATCH = "Die beiden Passwörter stimmen nicht überein."
+const val SYNC_ACCOUNT_REGISTERED = "Konto erstellt – dieses Gerät synchronisiert ab jetzt."
+const val SYNC_ACCOUNT_SIGNED_IN = "Angemeldet – die Notizen des Kontos werden geholt."
+const val SYNC_ACCOUNT_FAILED = "Das hat nicht geklappt."
+const val SYNC_ACCOUNT_BUSY = "Schlüssel wird berechnet …"
+const val SYNC_ACCOUNT_EMAIL = "E-Mail-Adresse"
+const val SYNC_ACCOUNT_EMAIL_HINT = "du@example.com"
+const val SYNC_ACCOUNT_PASSWORD = "Passwort"
+const val SYNC_ACCOUNT_PASSWORD_HINT = "Mindestens 10 Zeichen"
+const val SYNC_ACCOUNT_REPEAT = "Passwort wiederholen"
+const val SYNC_ACCOUNT_DEVICE = "Name dieses Geräts"
+const val SYNC_ACCOUNT_DEVICE_HINT = "z. B. Laptop"
+const val SYNC_ACCOUNT_LOGIN = "Anmelden"
+const val SYNC_ACCOUNT_REGISTER = "Konto erstellen"
+const val SYNC_ACCOUNT_LOGIN_NOTE = "Bereits vorhandene Notizen bleiben erhalten. Gleichnamige Dateien mit anderem Inhalt werden als Konfliktkopie gesichert."
+const val SYNC_ACCOUNT_REGISTER_NOTE = "Aus dem Passwort wird auf diesem Gerät ein Schlüssel abgeleitet (PBKDF2, 600 000 Runden); der Server sieht das Passwort nie."
+const val SYNC_ACCOUNT_CALLOUT = "Deine Notizen auf allen Geräten – Ende-zu-Ende verschlüsselt"
+const val SYNC_ACCOUNT_CALLOUT_BODY = "Sync verschlüsselt jede Datei auf diesem Gerät mit einem Schlüssel, den nur dein Passwort entsperrt. Der Server speichert ausschließlich Chiffrate und zufällige IDs – weder Inhalte noch Dateinamen sind dort lesbar. Deshalb kann ein vergessenes Passwort nicht zurückgesetzt werden."
+const val SYNC_FORM_FIELD_DP = 31
+const val SYNC_FORM_FIELD_RADIUS_DP = 7
+const val SYNC_FORM_PAD_DP = 9
+const val SYNC_MODE_DP = 24
+const val SYNC_MODE_RADIUS_DP = 6
+const val SYNC_MODE_TRACK_RADIUS_DP = 8
+const val SYNC_CALLOUT_RADIUS_DP = 12
+const val SYNC_CALLOUT_ICON_DP = 35
+
+/** Register checks the repeat field before the key derivation starts. Login does not. */
+fun syncAccountSubmitError(register: Boolean, password: String, repeat: String): String? {
+    if (!register) return null
+    if (password != repeat) return SYNC_ACCOUNT_MISMATCH
+    return passwordProblems(password)
+}
+
+fun syncAccountCanSubmit(email: String, password: String, busy: Boolean): Boolean =
+    !busy && email.trim().isNotEmpty() && password.isNotEmpty()
+
+fun syncAccountButtonLabel(register: Boolean, busy: Boolean): String = when {
+    busy -> SYNC_ACCOUNT_BUSY
+    register -> SYNC_ACCOUNT_REGISTER
+    else -> SYNC_ACCOUNT_LOGIN
+}
+
 fun passwordProblems(password: String): String? {
     if (password.length < 10) return "Das Passwort braucht mindestens 10 Zeichen."
     if (password.length > 256) return "Das Passwort ist zu lang."

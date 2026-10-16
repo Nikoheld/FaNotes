@@ -27,5 +27,17 @@ class SyncCryptoTest {
     fun rejectsShortPasswords() {
         assertTrue(passwordProblems("short") != null)
         assertEquals(null, passwordProblems("a real passphrase"))
+        assertEquals(SYNC_ACCOUNT_MISMATCH, syncAccountSubmitError(true, "a real passphrase", "other phrase"))
+        assertEquals("Das Passwort braucht mindestens 10 Zeichen.", syncAccountSubmitError(true, "short", "short"))
+        assertEquals(null, syncAccountSubmitError(true, "a real passphrase", "a real passphrase"))
+        assertEquals(null, syncAccountSubmitError(false, "short", ""))
+        assertEquals(false, syncAccountCanSubmit("  ", "secret", false))
+        assertEquals(false, syncAccountCanSubmit("a@b.c", "secret", true))
+        assertEquals(true, syncAccountCanSubmit("a@b.c", "secret", false))
+        assertEquals(SYNC_ACCOUNT_BUSY, syncAccountButtonLabel(false, true))
+        assertEquals(SYNC_ACCOUNT_REGISTER, syncAccountButtonLabel(true, false))
+        assertEquals(SYNC_ACCOUNT_LOGIN, syncAccountButtonLabel(false, false))
+        assertEquals(31, SYNC_FORM_FIELD_DP)
+        assertEquals(7, SYNC_FORM_FIELD_RADIUS_DP)
     }
 }
