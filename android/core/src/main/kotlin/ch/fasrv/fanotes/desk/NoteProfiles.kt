@@ -308,6 +308,20 @@ const val FIRST_RUN_PREVIEW_ASIDE_PAD_INLINE_DP = 10
 const val FIRST_RUN_PREVIEW_ASIDE_PAD_INLINE_NARROW_DP = 7
 const val FIRST_RUN_PREVIEW_SPLIT_DP = 760
 const val FIRST_RUN_MEDIUM_DP = 980
+/** `.first-run-preview-body > aside strong` is 7.5px. */
+const val FIRST_RUN_PREVIEW_HEADING_SP = 7.5f
+/** `.first-run-preview-body > aside > span` is 7px, with 7px padding, a 6px radius, and a 7px gap. */
+const val FIRST_RUN_PREVIEW_SUBJECT_SP = 7
+const val FIRST_RUN_PREVIEW_SUBJECT_PAD_DP = 7
+const val FIRST_RUN_PREVIEW_SUBJECT_RADIUS_DP = 6
+const val FIRST_RUN_PREVIEW_SUBJECT_GAP_DP = 7
+/** `.first-run-preview-body > aside i` is 6px with a 2px radius. */
+const val FIRST_RUN_PREVIEW_MARK_DP = 6
+const val FIRST_RUN_PREVIEW_MARK_RADIUS_DP = 2
+/** `.first-run-preview-body` min-height is 360px, or 325px at `max-height: 680px` and `min-width: 761px`. */
+const val FIRST_RUN_PREVIEW_BODY_MIN_DP = 360
+const val FIRST_RUN_PREVIEW_BODY_MIN_SHORT_DP = 325
+const val FIRST_RUN_PREVIEW_SHORT_HEIGHT_DP = 680
 const val FIRST_RUN_PREVIEW_KICKER = "MATHEMATIK · ANALYSIS"
 const val FIRST_RUN_PREVIEW_HEADING = "Ableitungen"
 const val FIRST_RUN_PREVIEW_TYPED = "Die Änderungsrate beschreibt die Steigung."
@@ -354,6 +368,33 @@ fun firstRunPreviewAsidePad(screenWidthDp: Int): FirstRunPreviewAsidePad {
         start = inline,
     )
 }
+
+/**
+ * Color marks of `.first-run-preview-body > aside i`.
+ * The heading is a `strong`, so `span:nth-of-type` counts the subject rows in order:
+ * Mathematik keeps `var(--accent)`, Deutsch is #c76868, Französisch #3d8be0, Physik #5e9abd, Wirtschaft #cf9a48.
+ * [accentArgb] is the theme accent for Mathematik.
+ */
+fun firstRunPreviewMarkColors(accentArgb: Int): List<Int> = listOf(
+    accentArgb,
+    0xFFC76868.toInt(),
+    0xFF3D8BE0.toInt(),
+    0xFF5E9ABD.toInt(),
+    0xFFCF9A48.toInt(),
+)
+
+/**
+ * Min height of `.first-run-preview-body`.
+ * Desktop is 360px, and 325px when the viewport is at most 680px tall and wider than 760px.
+ * A tall window stays 360, including a tall narrow one. A short window that is 760px wide or narrower also stays 360.
+ * [screenWidthDp] and [screenHeightDp] are the viewport from `LocalConfiguration`.
+ */
+fun firstRunPreviewBodyMinDp(screenWidthDp: Int, screenHeightDp: Int): Int =
+    if (screenHeightDp <= FIRST_RUN_PREVIEW_SHORT_HEIGHT_DP && screenWidthDp > FIRST_RUN_PREVIEW_SPLIT_DP) {
+        FIRST_RUN_PREVIEW_BODY_MIN_SHORT_DP
+    } else {
+        FIRST_RUN_PREVIEW_BODY_MIN_DP
+    }
 
 /** Copy and panel weights from the desktop first-run grids above 980dp. */
 fun firstRunColumnWeights(step: Int): Pair<Float, Float> = firstRunColumnWeights(step, FIRST_RUN_MAX_DP)

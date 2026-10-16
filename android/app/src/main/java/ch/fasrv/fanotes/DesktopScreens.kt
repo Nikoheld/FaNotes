@@ -4866,9 +4866,13 @@ private fun FirstRunWelcomeCopy(accent: Color, onContinue: () -> Unit) {
 @Composable
 private fun WelcomePreview(modifier: Modifier, accent: Color) {
     val ink = LocalStatusInk.current
-    val screenWidth = LocalConfiguration.current.screenWidthDp
+    val screen = LocalConfiguration.current
+    val screenWidth = screen.screenWidthDp
+    val screenHeight = screen.screenHeightDp
     val aside = ch.fasrv.fanotes.desk.firstRunPreviewAsideDp(screenWidth).dp
     val asidePad = ch.fasrv.fanotes.desk.firstRunPreviewAsidePad(screenWidth)
+    val bodyMin = ch.fasrv.fanotes.desk.firstRunPreviewBodyMinDp(screenWidth, screenHeight).dp
+    val marks = ch.fasrv.fanotes.desk.firstRunPreviewMarkColors(accent.toArgb())
     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_RADIUS_DP.dp)
     val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
     Column(modifier.semantics { contentDescription = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_LABEL }) {
@@ -4889,7 +4893,7 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
                 }
                 Text(ch.fasrv.fanotes.desk.FIRST_RUN_BRAND, modifier = Modifier.weight(1f), textAlign = TextAlign.End, fontSize = 11.sp, color = ink.muted)
             }
-            Row(Modifier.fillMaxWidth().heightIn(min = 220.dp)) {
+            Row(Modifier.fillMaxWidth().heightIn(min = bodyMin)) {
                 Column(
                     Modifier.width(aside).fillMaxHeight().padding(
                         start = asidePad.start.dp,
@@ -4899,18 +4903,29 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
                     ),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Text("Meine Fächer", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Meine Fächer", fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_SP.sp, fontWeight = FontWeight.SemiBold)
                     ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SUBJECTS.forEachIndexed { index, subject ->
-                        Text(
-                            subject,
-                            fontSize = 12.sp,
-                            color = if (index == 0) MaterialTheme.colorScheme.onSurface else ink.muted,
-                            modifier = Modifier
+                        Row(
+                            Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(6.dp))
+                                .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SUBJECT_RADIUS_DP.dp))
                                 .background(if (index == 0) ink.panelActive else Color.Transparent)
-                                .padding(horizontal = 6.dp, vertical = 3.dp),
-                        )
+                                .padding(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SUBJECT_PAD_DP.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SUBJECT_GAP_DP.dp),
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_MARK_DP.dp)
+                                    .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_MARK_RADIUS_DP.dp))
+                                    .background(Color(marks[index])),
+                            )
+                            Text(
+                                subject,
+                                fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SUBJECT_SP.sp,
+                                color = if (index == 0) MaterialTheme.colorScheme.onSurface else ink.muted,
+                            )
+                        }
                     }
                 }
                 Column(Modifier.weight(1f).padding(16.dp)) {
