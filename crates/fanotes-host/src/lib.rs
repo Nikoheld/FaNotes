@@ -1981,8 +1981,17 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
     }
     if let Some(normalized) = fold_trailing_zone(trimmed) {
         // `16:00 EST` is a fixed offset. `(EST)` is a comment, so the clock
-        // stays local.
-        return unix_millis_from_iso(&normalized);
+        // stays local. A leading space on `-000001-10-13 16:00 GMT+5` is the
+        // legacy 2013 date. Folding the zone would drop that space and make
+        // the year -1.
+        let legacy_negative_year = value.starts_with(is_date_parse_space)
+            && trimmed
+                .split(is_date_parse_space)
+                .next()
+                .is_some_and(negative_expanded_date);
+        if !legacy_negative_year {
+            return unix_millis_from_iso(&normalized);
+        }
     }
     if has_english_month(trimmed) {
         // `Oct 13, 2026` is local midnight. `GMT` and `EST` name an offset.
@@ -12793,6 +12802,23 @@ mod local_zone_tests {
         assert_eq!(
             unix_millis_from_iso("+010000-10-13 16:00 +5"),
             Some(253_427_050_800_000)
+        );
+        // `+5:30` needs a clock. A leading space on a negative expanded year
+        // is still the legacy 2013 reading, including `GMT+5`.
+        assert_eq!(unix_millis_from_iso("2026-10-13 +5:30"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 +5"), None);
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00 +5:30"),
+            Some(1_791_887_400_000)
+        );
+        assert_eq!(unix_millis_from_iso("-000001-10-13 16:00 GMT+5"), None);
+        assert_eq!(
+            unix_millis_from_iso(" -000001-10-13 16:00 GMT+5"),
+            Some(1_357_815_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso(" -000001-10-13 16:00 +5"),
+            Some(1_357_815_600_000)
         );
     }
 

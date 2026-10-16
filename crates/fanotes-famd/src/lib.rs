@@ -1090,8 +1090,16 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     if !has_iso_t(trimmed) {
         if let Some(normalized) = fold_trailing_zone(trimmed) {
             // `16:00 EST` is a fixed offset. `(EST)` is a comment, so the
-            // clock stays local.
-            return canonical_iso(&normalized);
+            // clock stays local. A leading space on `-000001-10-13 16:00 GMT+5`
+            // is the legacy 2013 date. Folding the zone would drop that space.
+            let legacy_negative_year = value.starts_with(is_date_parse_space)
+                && trimmed
+                    .split(is_date_parse_space)
+                    .next()
+                    .is_some_and(|date| negative_expanded_ymd(date).is_some());
+            if !legacy_negative_year {
+                return canonical_iso(&normalized);
+            }
         }
     }
     if finished_date_has_an_extra_hyphen(trimmed) {
@@ -4657,8 +4665,16 @@ fn parse_clock(time: &str) -> Option<(i32, i32, i32, u32, &str)> {
     if bytes.len() < 5 || bytes.get(2) != Some(&b':') {
         return None;
     }
-    let hour: i32 = time.get(0..2)?.parse().ok()?;
-    let minute: i32 = time.get(3..5)?.parse().ok()?;
+    let hour_text = time.get(0..2)?;
+    let minute_text = time.get(3..5)?;
+    // `+5:30` is a signed offset, not a clock. The hour and minute are digits.
+    if !hour_text.bytes().all(|byte| byte.is_ascii_digit())
+        || !minute_text.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let hour: i32 = hour_text.parse().ok()?;
+    let minute: i32 = minute_text.parse().ok()?;
     // `2026-01-02T03:04Z` has no seconds. A fraction there is not a time.
     let (second, mut index) = if bytes.get(5) == Some(&b':') {
         let second = time.get(6..8)?.parse().ok()?;
@@ -10386,6 +10402,26 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("+010000-10-13 16:00 +5").as_deref(),
                 Some("+010000-10-13T11:00:00.000Z")
+            );
+            // `+5:30` needs a clock. A leading space keeps the 2013 reading.
+            // Without that space, `GMT+5` stays on year -1.
+            assert_eq!(super::canonical_iso("2026-10-13 +5:30"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 +5"), None);
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 +5:30").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 16:00 GMT+5").as_deref(),
+                Some("-000001-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(" -000001-10-13 16:00 GMT+5").as_deref(),
+                Some("2013-01-10T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(" -000001-10-13 16:00 +5").as_deref(),
+                Some("2013-01-10T11:00:00.000Z")
             );
             // `+275760-09-13` is the last UTC midnight. Local time that day,
             // and one millisecond past that midnight, are empty.
