@@ -860,6 +860,7 @@ fun FaNotesScreen(
         DeskStatusBar(
             model.wordCountNow(),
             syncText,
+            sync.status.name.lowercase(),
             ch.fasrv.fanotes.desk.statusLanguageLabel(ch.fasrv.fanotes.desk.detectNoteLanguage(markdown)).orEmpty(),
             desk["words"] != "off",
             sync.conflicts.size,
