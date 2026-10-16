@@ -304,6 +304,7 @@ private fun expandOccurrences(document: CalendarDocument, rangeStart: ZonedDateT
         val until = event.recurrenceUntil?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
         val untilEnd = until?.plusDays(1)?.atStartOfDay(zone)
         val skipped = event.exceptionDates.toSet()
+        var step = 0
         var cursor = bounds.first
         var guard = 0
         while (cursor.isBefore(rangeEnd) && guard < 500) {
@@ -314,7 +315,8 @@ private fun expandOccurrences(document: CalendarDocument, rangeStart: ZonedDateT
                 occurrences += Occurrence(event, cursor, end, "${event.id}@$dayKey")
             }
             if (event.recurrence == "none") break
-            val next = nextInstance(cursor, event.recurrence)
+            step += 1
+            val next = nextInstance(bounds.first, step, event.recurrence)
             if (!next.isAfter(cursor)) break
             cursor = next
             guard += 1
@@ -335,10 +337,7 @@ private fun eventBounds(event: CalendarEvent, zone: ZoneId): Pair<ZonedDateTime,
     return start to end
 }
 
-private fun nextInstance(cursor: ZonedDateTime, recurrence: String): ZonedDateTime = when (recurrence) {
-    "daily" -> cursor.plusDays(1)
-    "weekly" -> cursor.plusDays(7)
-    "monthly" -> cursor.plusMonths(1)
-    "yearly" -> cursor.plusMonths(12)
-    else -> cursor.plusDays(1)
+private fun nextInstance(origin: ZonedDateTime, step: Int, recurrence: String): ZonedDateTime {
+    val local = calendarInstanceStart(origin.toLocalDateTime(), step, recurrence)
+    return ZonedDateTime.ofLocal(local, origin.zone, origin.offset)
 }
