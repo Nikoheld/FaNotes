@@ -129,6 +129,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
@@ -826,6 +827,9 @@ fun FaNotesScreen(
                                     showRelations = !panels.inspector,
                                     onExportPdf = onExportPdf,
                                     onImportSheet = onImportSheet,
+                                    onImportPdf = onImportPdf,
+                                    onCreateNote = { createParent = model.defaultCreateFolder(); createNote = true },
+                                    onPalette = { model.showPalette(notes = false) },
                                     onDownload = onDownload,
                                     onDeskShortcut = ::runDeskShortcut,
                                 )
@@ -846,6 +850,9 @@ fun FaNotesScreen(
                                 showRelations = !panels.inspector,
                                 onExportPdf = onExportPdf,
                                 onImportSheet = onImportSheet,
+                                onImportPdf = onImportPdf,
+                                onCreateNote = { createParent = model.defaultCreateFolder(); createNote = true },
+                                onPalette = { model.showPalette(notes = false) },
                                 onDownload = onDownload,
                                 onDeskShortcut = ::runDeskShortcut,
                             )
@@ -2335,6 +2342,88 @@ private fun SplitPane(
 }
 
 @Composable
+private fun EmptyEditor(
+    onCreate: () -> Unit,
+    onPdf: () -> Unit,
+    onSheet: () -> Unit,
+    onPalette: () -> Unit,
+    modifier: Modifier,
+) {
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    val ink = LocalStatusInk.current
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Column(
+            Modifier.widthIn(max = ch.fasrv.fanotes.desk.PLACEHOLDER_MAX_DP.dp).padding(ch.fasrv.fanotes.desk.PLACEHOLDER_PAD_DP.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                Modifier.size(ch.fasrv.fanotes.desk.PLACEHOLDER_GLYPH_DP.dp).clip(RoundedCornerShape(ch.fasrv.fanotes.desk.PLACEHOLDER_GLYPH_RADIUS_DP.dp)).background(MaterialTheme.colorScheme.onSurface),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.PLACEHOLDER_GLYPH_ICON_DP.dp), tint = MaterialTheme.colorScheme.background)
+            }
+            Text(
+                ch.fasrv.fanotes.desk.PLACEHOLDER_EYEBROW.uppercase(java.util.Locale.GERMAN),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.08.em,
+                color = accent,
+                modifier = Modifier.padding(top = 20.dp, bottom = 7.dp),
+            )
+            Text(
+                ch.fasrv.fanotes.desk.PLACEHOLDER_TITLE,
+                fontSize = ch.fasrv.fanotes.desk.PLACEHOLDER_TITLE_SP.sp,
+                letterSpacing = (-0.03).em,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                ch.fasrv.fanotes.desk.PLACEHOLDER_BODY,
+                fontSize = ch.fasrv.fanotes.desk.PLACEHOLDER_BODY_SP.sp,
+                lineHeight = 21.sp,
+                color = ink.muted,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 8.dp, bottom = 20.dp),
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                EmptyEditorButton(ch.fasrv.fanotes.desk.PLACEHOLDER_NOTE, Icons.AutoMirrored.Filled.NoteAdd, primary = true, onClick = onCreate)
+                EmptyEditorButton(ch.fasrv.fanotes.desk.PLACEHOLDER_PDF, Icons.Filled.Description, primary = false, onClick = onPdf)
+                EmptyEditorButton(ch.fasrv.fanotes.desk.PLACEHOLDER_SHEET, Icons.Filled.FileUpload, primary = false, onClick = onSheet)
+            }
+            Row(
+                Modifier.padding(top = 16.dp).clip(RoundedCornerShape(7.dp)).clickable(onClick = onPalette).padding(horizontal = 7.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(13.dp), tint = ink.muted)
+                Text(ch.fasrv.fanotes.desk.PLACEHOLDER_COMMAND, fontSize = 12.sp, color = ink.muted)
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyEditorButton(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    primary: Boolean,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(6.dp)
+    val fill = if (primary) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.panelStrong
+    val ink = if (primary) MaterialTheme.colorScheme.background else LocalStatusInk.current.soft
+    val border = if (primary) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
+    Row(
+        Modifier.height(31.dp).clip(shape).background(fill).border(1.dp, border, shape).clickable(onClick = onClick).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp), tint = ink)
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = ink)
+    }
+}
+
+@Composable
 private fun NotePage(
     model: FaNotesViewModel,
     tool: InkTool,
@@ -2355,6 +2444,9 @@ private fun NotePage(
     showRelations: Boolean = true,
     onExportPdf: () -> Unit = {},
     onImportSheet: () -> Unit = {},
+    onImportPdf: () -> Unit = {},
+    onCreateNote: () -> Unit = {},
+    onPalette: () -> Unit = {},
     onDownload: () -> Unit = {},
     onDeskShortcut: (String) -> Unit = {},
 ) {
@@ -2400,6 +2492,10 @@ private fun NotePage(
                 model.closeGotoLine()
                 if (input != null) model.requestGotoLine(input)
             }
+        }
+        if (path == null) {
+            EmptyEditor(onCreateNote, onImportPdf, onImportSheet, onPalette, Modifier.weight(1f).fillMaxWidth())
+            return@Column
         }
         PageSurface(
         model = model,

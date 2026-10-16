@@ -262,4 +262,16 @@ class WorkspaceChromeTest {
         assertTrue(!ribbonItemActive("notes", "notes", penOpen = true))
         assertTrue(ribbonItemActive("calendar", "calendar", penOpen = true))
     }
+
+    @Test
+    fun theEmptyEditorUsesTheDesktopPlaceholder() {
+        assertEquals(390, PLACEHOLDER_MAX_DP)
+        assertEquals(66, PLACEHOLDER_GLYPH_DP)
+        assertEquals(12, PLACEHOLDER_GLYPH_RADIUS_DP)
+        assertEquals(21, PLACEHOLDER_TITLE_SP)
+        assertEquals("Bereit für deine nächste Idee", PLACEHOLDER_EYEBROW)
+        assertEquals("Dein Wissen, in deiner Hand", PLACEHOLDER_TITLE)
+        assertEquals("Neue Notiz", PLACEHOLDER_NOTE)
+        assertEquals("Alle Aktionen mit Strg P", PLACEHOLDER_COMMAND)
+    }
 }
