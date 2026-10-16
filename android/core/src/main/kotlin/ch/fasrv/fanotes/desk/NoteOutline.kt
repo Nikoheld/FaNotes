@@ -57,14 +57,37 @@ fun headingAnchorLine(markdown: String, anchor: String): Int? {
     return null
 }
 
-private val HEADING = Regex("""^(#{1,6})\s+(.+?)\s*#*$""")
+private val FENCE = Regex("""^ {0,3}(`{3,}|~{3,})(.*)$""")
+private val HEADING = Regex("^(#{1,6})[ \\t]+(.+?)(?:[ \\t]+#+)?[ \\t]*$")
 
+/** Headings outside fenced code. A closing hash sequence needs a space before it, so `C#` stays. */
 fun parseNoteOutline(content: String): List<NoteOutlineHeading> {
     val lines = content.replace("\r\n", "\n").replace('\r', '\n').split('\n')
-    return lines.mapIndexedNotNull { index, line ->
-        val match = HEADING.matchEntire(line) ?: return@mapIndexedNotNull null
-        NoteOutlineHeading(match.groupValues[1].length, match.groupValues[2], index + 1)
+    val headings = mutableListOf<NoteOutlineHeading>()
+    var fenceMarker = ""
+    var fenceLength = 0
+    for ((index, line) in lines.withIndex()) {
+        val fence = FENCE.matchEntire(line)
+        if (fence != null) {
+            val token = fence.groupValues[1]
+            val marker = token.first().toString()
+            val rest = fence.groupValues[2]
+            if (fenceMarker.isEmpty()) {
+                if (marker != "`" || !rest.contains('`')) {
+                    fenceMarker = marker
+                    fenceLength = token.length
+                }
+            } else if (marker == fenceMarker && token.length >= fenceLength && rest.isBlank()) {
+                fenceMarker = ""
+                fenceLength = 0
+            }
+            continue
+        }
+        if (fenceMarker.isNotEmpty()) continue
+        val match = HEADING.matchEntire(line) ?: continue
+        headings += NoteOutlineHeading(match.groupValues[1].length, match.groupValues[2], index + 1)
     }
+    return headings
 }
 
 /** Desktop `revealLine` keeps the target 48px below the top of the scroller. */

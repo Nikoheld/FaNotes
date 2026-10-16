@@ -35,6 +35,32 @@ class NoteOutlineTest {
         assertEquals(0, revealScrollTop(40, 0))
         assertEquals(1, revealScrollTop(49, 0))
         assertEquals(REVEAL_LINE_MARGIN_PX, 48)
+        val fenced = listOf(
+            "# Davor",
+            "",
+            "```md",
+            "# Im Code",
+            "```",
+            "",
+            "# C#",
+            "",
+            "~~~",
+            "# Auch Code",
+            "~~~",
+            "",
+            "## Danach ##",
+            "",
+            "```",
+            "# Versteckt",
+        ).joinToString("\n")
+        assertEquals(
+            listOf(
+                NoteOutlineHeading(1, "Davor", 1),
+                NoteOutlineHeading(1, "C#", 7),
+                NoteOutlineHeading(2, "Danach", 13),
+            ),
+            parseNoteOutline(fenced),
+        )
         assertEquals(2, headingLineForSection(markdown, 0))
         assertEquals(6, headingLineForSection(markdown, 1))
         assertNull(headingLineForSection(markdown, 5))
