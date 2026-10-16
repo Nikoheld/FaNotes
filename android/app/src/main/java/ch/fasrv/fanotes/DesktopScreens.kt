@@ -4889,6 +4889,7 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
     val windowBorder = Color(ch.fasrv.fanotes.desk.firstRunPreviewWindowBorder(LocalDeskThemeId.current))
     val windowShadow = Color(ch.fasrv.fanotes.desk.firstRunPreviewWindowShadowColor())
     Box(modifier.semantics { contentDescription = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_LABEL }) {
+        Box(Modifier.matchParentSize().welcomePreviewGlow(MaterialTheme.colorScheme.primary.toArgb()))
         Column(
             Modifier
                 .fillMaxWidth()
