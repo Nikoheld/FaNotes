@@ -4682,25 +4682,99 @@ fun FirstRunDialog(
                             val (copyWeight, panelWeight) = ch.fasrv.fanotes.desk.firstRunColumnWeights(3, screenWidth)
                             val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(3, screenWidth).dp
                             val intro: @Composable () -> Unit = {
+                                val screenHeight = LocalConfiguration.current.screenHeightDp
+                                val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+                                val readable = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(dark))
+                                val secondary = Color(ch.fasrv.fanotes.desk.firstRunNoteSecondary(dark))
+                                val inboxShape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_RADIUS_DP.dp)
+                                val inboxWash = MaterialTheme.colorScheme.primary.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_WASH_ALPHA)
+                                val inboxPanel = MaterialTheme.colorScheme.surface.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_PANEL_ALPHA)
                                 Text(ch.fasrv.fanotes.desk.FIRST_RUN_FOLDER_TITLE, fontSize = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.052).em, lineHeight = 34.sp, modifier = Modifier.padding(top = 18.dp))
                                 Text(ch.fasrv.fanotes.desk.firstRunFolderIntro(profile?.title ?: "Schule"), fontSize = 12.sp, lineHeight = 21.sp, color = ink.muted, modifier = Modifier.padding(top = 13.dp).widthIn(max = 540.dp))
                                 Row(
-                                    Modifier.padding(top = 24.dp).heightIn(min = 67.dp).fillMaxWidth().clip(RoundedCornerShape(13.dp)).border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f), RoundedCornerShape(13.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)).padding(horizontal = 13.dp, vertical = 10.dp),
+                                    Modifier
+                                        .padding(top = ch.fasrv.fanotes.desk.firstRunInboxMarginTopDp(screenWidth, screenHeight).dp)
+                                        .heightIn(min = ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_MIN_DP.dp)
+                                        .fillMaxWidth()
+                                        .shadow(
+                                            elevation = ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_SHADOW_Y_DP.dp,
+                                            shape = inboxShape,
+                                            ambientColor = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_SHADOW_ALPHA),
+                                            spotColor = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_SHADOW_ALPHA),
+                                        )
+                                        .clip(inboxShape)
+                                        .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_BORDER_ALPHA), inboxShape)
+                                        .drawBehind {
+                                            val radians = Math.toRadians(ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_ANGLE_DEG.toDouble())
+                                            val dx = kotlin.math.sin(radians).toFloat()
+                                            val dy = -kotlin.math.cos(radians).toFloat()
+                                            val reach = size.maxDimension
+                                            val center = Offset(size.width / 2f, size.height / 2f)
+                                            drawRect(
+                                                Brush.linearGradient(
+                                                    listOf(inboxWash, inboxPanel),
+                                                    start = center - Offset(dx, dy) * reach,
+                                                    end = center + Offset(dx, dy) * reach,
+                                                ),
+                                            )
+                                        }
+                                        .padding(
+                                            horizontal = ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_PAD_INLINE_DP.dp,
+                                            vertical = ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_PAD_BLOCK_DP.dp,
+                                        ),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(11.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_GAP_DP.dp),
                                 ) {
-                                    Box(Modifier.size(39.dp).clip(RoundedCornerShape(11.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.13f)), contentAlignment = Alignment.Center) {
-                                        Icon(Icons.Filled.Inbox, contentDescription = null, modifier = Modifier.size(21.dp), tint = accent)
+                                    Box(
+                                        Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_MARK_DP.dp).clip(RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_MARK_RADIUS_DP.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_MARK_ALPHA)),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(Icons.Filled.Inbox, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_ICON_DP.dp), tint = readable)
                                     }
                                     Column(Modifier.weight(1f)) {
                                         Text(ch.fasrv.fanotes.desk.FIRST_RUN_INBOX, fontSize = 12.sp)
-                                        Text(ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_DETAIL, fontSize = 12.sp, color = ink.muted, modifier = Modifier.padding(top = 4.dp))
+                                        Text(
+                                            ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_DETAIL,
+                                            fontSize = 12.sp,
+                                            lineHeight = (12 * ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_DETAIL_LINE).sp,
+                                            color = ink.muted,
+                                            modifier = Modifier.padding(top = ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_DETAIL_GAP_DP.dp),
+                                        )
                                     }
-                                    Icon(Icons.Filled.Check, contentDescription = "Ausgewählt", modifier = Modifier.size(17.dp), tint = accent)
+                                    Box(Modifier.width(ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_CHECK_COLUMN_DP.dp), contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Filled.Check, contentDescription = "Ausgewählt", modifier = Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_CHECK_DP.dp), tint = readable)
+                                    }
                                 }
-                                Text(ch.fasrv.fanotes.desk.FIRST_RUN_PREPARED, fontSize = 12.sp, color = ink.soft, modifier = Modifier.padding(top = 15.dp))
-                                Text(ch.fasrv.fanotes.desk.FIRST_RUN_PREPARED_DETAIL, fontSize = 12.sp, color = ink.muted, lineHeight = 19.sp)
-                                FirstRunQuiet(ch.fasrv.fanotes.desk.FIRST_RUN_BACK, leading = true) { go(2) }
+                                Row(
+                                    Modifier
+                                        .padding(
+                                            top = ch.fasrv.fanotes.desk.firstRunNoteMarginTopDp(screenWidth, screenHeight).dp,
+                                            start = ch.fasrv.fanotes.desk.FIRST_RUN_NOTE_PAD_INLINE_DP.dp,
+                                            end = ch.fasrv.fanotes.desk.FIRST_RUN_NOTE_PAD_INLINE_DP.dp,
+                                        ),
+                                    verticalAlignment = Alignment.Top,
+                                    horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_NOTE_GAP_DP.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Folder,
+                                        contentDescription = null,
+                                        modifier = Modifier.padding(top = ch.fasrv.fanotes.desk.FIRST_RUN_NOTE_ICON_NUDGE_DP.dp).size(ch.fasrv.fanotes.desk.FIRST_RUN_NOTE_ICON_DP.dp),
+                                        tint = secondary,
+                                    )
+                                    Text(
+                                        buildAnnotatedString {
+                                            withStyle(SpanStyle(color = ink.soft, fontWeight = FontWeight.Bold)) { append(ch.fasrv.fanotes.desk.FIRST_RUN_PREPARED) }
+                                            append(ch.fasrv.fanotes.desk.FIRST_RUN_NOTE_JOIN)
+                                            append(ch.fasrv.fanotes.desk.FIRST_RUN_PREPARED_DETAIL)
+                                        },
+                                        fontSize = 12.sp,
+                                        lineHeight = (12 * ch.fasrv.fanotes.desk.FIRST_RUN_NOTE_LINE).sp,
+                                        color = ink.muted,
+                                    )
+                                }
+                                Box(Modifier.padding(top = ch.fasrv.fanotes.desk.FIRST_RUN_BACK_INLINE_MARGIN_TOP_DP.dp)) {
+                                    FirstRunQuiet(ch.fasrv.fanotes.desk.FIRST_RUN_BACK, leading = true) { go(2) }
+                                }
                             }
                             val picker: @Composable () -> Unit = {
                                 val pickerShape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_PICKER_RADIUS_DP.dp)

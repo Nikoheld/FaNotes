@@ -321,6 +321,48 @@ const val FIRST_RUN_INBOX_DETAIL = "Der schnelle Sammelplatz für neue Notizen u
 const val FIRST_RUN_PREPARED = "Sauber vorbereitet"
 const val FIRST_RUN_PREPARED_DETAIL = "jeder Ordner erhält eine eigene Farbe und erscheint direkt in der Seitenleiste."
 /**
+ * `.first-run-inbox` is a 67px card: padding 10px 13px, gap 11px, radius 13px,
+ * accent border at 25%, and a 130° wash from the accent at 12% into the panel at 88%.
+ * Shadow is `0 13px 35px rgba(0,0,0,.08)`. Top margin is 24px, or 15px when short and wide.
+ * The mark is 39px with an 11px radius and a 21px icon. The check sits in a 20px column at 17px.
+ */
+const val FIRST_RUN_INBOX_MARGIN_TOP_DP = 24
+const val FIRST_RUN_INBOX_MARGIN_TOP_SHORT_DP = 15
+const val FIRST_RUN_INBOX_MIN_DP = 67
+const val FIRST_RUN_INBOX_RADIUS_DP = 13
+const val FIRST_RUN_INBOX_PAD_BLOCK_DP = 10
+const val FIRST_RUN_INBOX_PAD_INLINE_DP = 13
+const val FIRST_RUN_INBOX_GAP_DP = 11
+const val FIRST_RUN_INBOX_MARK_DP = 39
+const val FIRST_RUN_INBOX_MARK_RADIUS_DP = 11
+const val FIRST_RUN_INBOX_MARK_ALPHA = 0.13f
+const val FIRST_RUN_INBOX_ICON_DP = 21
+const val FIRST_RUN_INBOX_CHECK_DP = 17
+const val FIRST_RUN_INBOX_CHECK_COLUMN_DP = 20
+const val FIRST_RUN_INBOX_BORDER_ALPHA = 0.25f
+const val FIRST_RUN_INBOX_WASH_ALPHA = 0.12f
+const val FIRST_RUN_INBOX_PANEL_ALPHA = 0.88f
+const val FIRST_RUN_INBOX_ANGLE_DEG = 130
+const val FIRST_RUN_INBOX_SHADOW_Y_DP = 13
+const val FIRST_RUN_INBOX_SHADOW_ALPHA = 0.08f
+const val FIRST_RUN_INBOX_DETAIL_GAP_DP = 4
+const val FIRST_RUN_INBOX_DETAIL_LINE = 1.4f
+/**
+ * `.first-run-note` is a 12px row: gap 9px, padding `0 4px`, line-height 1.55, a 17px folder.
+ * Top margin is 15px, or 9px when short and wide. The folder uses `--accent-secondary-readable`.
+ */
+const val FIRST_RUN_NOTE_MARGIN_TOP_DP = 15
+const val FIRST_RUN_NOTE_MARGIN_TOP_SHORT_DP = 9
+const val FIRST_RUN_NOTE_GAP_DP = 9
+const val FIRST_RUN_NOTE_PAD_INLINE_DP = 4
+const val FIRST_RUN_NOTE_ICON_DP = 17
+const val FIRST_RUN_NOTE_ICON_NUDGE_DP = 1
+const val FIRST_RUN_NOTE_LINE = 1.55f
+const val FIRST_RUN_NOTE_JOIN = " – "
+const val FIRST_RUN_NOTE_SECONDARY_DARK = 0xFFC5C8CE.toInt()
+const val FIRST_RUN_NOTE_SECONDARY_LIGHT = 0xFF4B5563.toInt()
+const val FIRST_RUN_BACK_INLINE_MARGIN_TOP_DP = 12
+/**
  * `.first-run-preview-window` sets 18px, then the shared chrome rule sets 12px.
  * The later rule wins.
  */
@@ -634,6 +676,18 @@ val FIRST_RUN_PREVIEW_SUBJECTS = listOf("Mathematik", "Deutsch", "Französisch",
 
 /** Top, end, bottom, and start padding. */
 data class FirstRunWritingPad(val top: Int, val end: Int, val bottom: Int, val start: Int)
+
+/** Top margin of `.first-run-inbox`. The short wide window uses 15px. */
+fun firstRunInboxMarginTopDp(screenWidthDp: Int, screenHeightDp: Int): Int =
+    if (firstRunWritingShort(screenWidthDp, screenHeightDp)) FIRST_RUN_INBOX_MARGIN_TOP_SHORT_DP else FIRST_RUN_INBOX_MARGIN_TOP_DP
+
+/** Top margin of `.first-run-note`. The short wide window uses 9px. */
+fun firstRunNoteMarginTopDp(screenWidthDp: Int, screenHeightDp: Int): Int =
+    if (firstRunWritingShort(screenWidthDp, screenHeightDp)) FIRST_RUN_NOTE_MARGIN_TOP_SHORT_DP else FIRST_RUN_NOTE_MARGIN_TOP_DP
+
+/** `--accent-secondary-readable`: `#c5c8ce` on dark themes, `#4b5563` on light and sepia. */
+fun firstRunNoteSecondary(dark: Boolean): Int =
+    if (dark) FIRST_RUN_NOTE_SECONDARY_DARK else FIRST_RUN_NOTE_SECONDARY_LIGHT
 
 /** True for `@media (max-height: 680px) and (min-width: 761px)`. */
 fun firstRunWritingShort(screenWidthDp: Int, screenHeightDp: Int): Boolean =

@@ -293,6 +293,30 @@ class NoteProfilesTest {
     }
 
     @Test
+    fun theFolderStepInboxFollowsTheDesktopCard() {
+        assertEquals(24, firstRunInboxMarginTopDp(1200, 800))
+        assertEquals(15, firstRunInboxMarginTopDp(900, 680))
+        assertEquals(24, firstRunInboxMarginTopDp(760, 680))
+        assertEquals(15, firstRunNoteMarginTopDp(1200, 800))
+        assertEquals(9, firstRunNoteMarginTopDp(761, 680))
+        assertEquals(15, firstRunNoteMarginTopDp(760, 400))
+        assertEquals(0xFFC5C8CE.toInt(), firstRunNoteSecondary(true))
+        assertEquals(0xFF4B5563.toInt(), firstRunNoteSecondary(false))
+        assertEquals(13, FIRST_RUN_INBOX_RADIUS_DP)
+        assertEquals(67, FIRST_RUN_INBOX_MIN_DP)
+        assertEquals(0.12f, FIRST_RUN_INBOX_WASH_ALPHA)
+        assertEquals(0.88f, FIRST_RUN_INBOX_PANEL_ALPHA)
+        assertEquals(130, FIRST_RUN_INBOX_ANGLE_DEG)
+        assertEquals(13, FIRST_RUN_INBOX_SHADOW_Y_DP)
+        assertEquals(0.08f, FIRST_RUN_INBOX_SHADOW_ALPHA)
+        assertEquals(20, FIRST_RUN_INBOX_CHECK_COLUMN_DP)
+        assertEquals(17, FIRST_RUN_NOTE_ICON_DP)
+        assertEquals(1.55f, FIRST_RUN_NOTE_LINE)
+        assertEquals(" – ", FIRST_RUN_NOTE_JOIN)
+        assertEquals(12, FIRST_RUN_BACK_INLINE_MARGIN_TOP_DP)
+    }
+
+    @Test
     fun theFirstRunGridFollowsTheDesktopBreakpoints() {
         assertEquals(0.78f to 1.22f, firstRunColumnWeights(0, 980))
         assertEquals(0.78f to 1.22f, firstRunColumnWeights(1, 800))
