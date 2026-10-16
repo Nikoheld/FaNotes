@@ -3074,18 +3074,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
     val settings by model.deskSettings.collectAsStateWithLifecycle()
     val css by model.customCss.collectAsStateWithLifecycle()
     val update by model.updateLabel.collectAsStateWithLifecycle()
-    val sections = listOf(
-        "appearance" to "Erscheinungsbild",
-        "editor" to "Editor",
-        "drawing" to "Zeichnen",
-        "files" to "Dateien",
-        "sync" to "Sync",
-        "addons" to "Add-ons",
-        "updates" to "Updates",
-        "accessibility" to "Bedienung",
-        "experimental" to "Experimentell",
-        "advanced" to "Erweitert",
-    )
+    val sections = ch.fasrv.fanotes.desk.SETTINGS_NAV
     var section by remember { mutableStateOf("appearance") }
     var settingsQuery by remember { mutableStateOf("") }
     var scrollTarget by remember { mutableStateOf<String?>(null) }
@@ -3139,13 +3128,42 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     }
                 }
             } else {
-                sections.forEach { (id, label) ->
-                    Text(label, modifier = Modifier.fillMaxWidth().background(if (section == id) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent).clickable { section = id }.padding(10.dp))
+                ch.fasrv.fanotes.desk.settingsNavGroups().forEach { (group, items) ->
+                    Text(
+                        group.uppercase(java.util.Locale.GERMAN),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTINGS_NAV_GROUP_WEIGHT),
+                        letterSpacing = ch.fasrv.fanotes.desk.SETTINGS_NAV_GROUP_TRACKING.em,
+                        color = LocalStatusInk.current.muted,
+                        modifier = Modifier.padding(start = 8.dp, top = 9.dp, end = 8.dp, bottom = 4.dp),
+                    )
+                    items.forEach { item ->
+                        val active = section == item.id
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 2.dp)
+                                .heightIn(min = ch.fasrv.fanotes.desk.SETTINGS_NAV_ROW_DP.dp)
+                                .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SETTINGS_NAV_RADIUS_DP.dp))
+                                .background(if (active) LocalStatusInk.current.panelActive else Color.Transparent)
+                                .clickable { section = item.id }
+                                .padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Text(
+                                item.label,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTINGS_NAV_LABEL_WEIGHT),
+                                color = if (active) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
+                            )
+                            Text(item.detail, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                        }
+                    }
                 }
             }
         }
         Column(Modifier.weight(0.62f).verticalScroll(paneScroll).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(sections.first { it.first == section }.second, style = MaterialTheme.typography.titleLarge)
+            Text(sections.first { it.id == section }.label, style = MaterialTheme.typography.titleLarge)
             when (section) {
                 "appearance" -> {
                     Box(Modifier.settingsAnchor("appearance", "settings-surface", anchorY))
