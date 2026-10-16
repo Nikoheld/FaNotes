@@ -3846,12 +3846,46 @@ fn digits_follow_zone(zone: &str, next: &str) -> bool {
         && zone.as_bytes().as_ptr_range().end == next.as_ptr()
 }
 
-/// `foo13` and `~6` glue a non-keyword to a digit. `Oct_13` was already split.
+/// `foo13` and `T16:00` glue a word to a digit. `Oct_13` was already split.
+/// A colon later in the token does not separate that word from the digit.
 fn glued_non_month(word: &str) -> bool {
-    if word.contains(':') || named_zone_offset(word).is_some() {
+    if named_zone_offset(word).is_some() {
+        return false;
+    }
+    if keyword_touches_digit(word) {
+        return true;
+    }
+    if word.contains(':') {
         return false;
     }
     word.bytes().any(|byte| byte.is_ascii_digit()) && word.chars().any(is_v8_word_char)
+}
+
+/// `T16:00` is the keyword `T` and then a number. `T:16:00` has a separator
+/// between them, so the clock remains. `16:00Z5` is a zone after the clock.
+fn keyword_touches_digit(word: &str) -> bool {
+    let chars: Vec<char> = word.chars().collect();
+    let mut index = 0;
+    let mut saw_colon = false;
+    while index < chars.len() {
+        if chars[index] == ':' {
+            saw_colon = true;
+            index += 1;
+            continue;
+        }
+        if !is_v8_word_char(chars[index]) {
+            index += 1;
+            continue;
+        }
+        let after_colon = saw_colon;
+        while index < chars.len() && is_v8_word_char(chars[index]) {
+            index += 1;
+        }
+        if !after_colon && index < chars.len() && chars[index].is_ascii_digit() {
+            return true;
+        }
+    }
+    false
 }
 
 /// `13-Oct-26`, `13/Oct/26`, and `13.Oct.26` are three date fields. A leading
@@ -8827,6 +8861,41 @@ mod local_zone_tests {
             Some(1_357_851_600_000)
         );
         assert_eq!(unix_millis_from_iso(" -000000-10-13"), Some(971_409_600_000));
+    }
+
+    #[test]
+    fn a_keyword_glued_to_a_number_is_empty() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Node 22. `T` is a keyword. Glued to a number it is empty, even when
+        // a colon follows that number. A separator before the number leaves
+        // the clock, and a separated `T` is an ordinary word.
+        assert_eq!(unix_millis_from_iso("T16:00 2026-10-13"), None);
+        assert_eq!(unix_millis_from_iso("t16:00 2026-10-13"), None);
+        assert_eq!(unix_millis_from_iso("T2026-10-13"), None);
+        assert_eq!(unix_millis_from_iso("xx16:00 2026-10-13"), None);
+        assert_eq!(unix_millis_from_iso("note16:00 2026-10-13"), None);
+        assert_eq!(unix_millis_from_iso("Z16:00 2026-10-13"), None);
+        assert_eq!(unix_millis_from_iso("hello16:00 10/13/2026"), None);
+        assert_eq!(unix_millis_from_iso("  T16:00 2026-10-13"), None);
+        assert_eq!(
+            unix_millis_from_iso("T 16:00 2026-10-13"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("T 2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("T:16:00 2026-10-13"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("T: 2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("hello 2026-10-13"),
+            Some(1_791_864_000_000)
+        );
     }
 
     #[test]
