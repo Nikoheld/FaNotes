@@ -35,6 +35,20 @@ val TABLET_BUTTON_ACTION_LABELS = mapOf(
     "os" to "System / Rechtsklick",
 )
 
+/** Button map inside the Grafiktablett card, from `.tablet-button-map`. */
+const val TABLET_MAP_PAD_X_DP = 15
+const val TABLET_MAP_PAD_TOP_DP = 12
+const val TABLET_MAP_PAD_BOTTOM_DP = 14
+const val TABLET_MAP_GAP_DP = 12
+const val TABLET_MAP_WASH_ALPHA = 0.04f
+const val TABLET_GROUP_RADIUS_DP = 10
+const val TABLET_GROUP_PAD_DP = 8
+const val TABLET_GROUP_GAP_DP = 6
+const val TABLET_GROUP_FILL_ALPHA = 0.78f
+const val TABLET_ROW_MIN_DP = 38
+const val TABLET_ACTION_WIDTH_DP = 168
+const val TABLET_MAP_NOTE = "Belegt die Tasten, die FaNotes vom Stift und vom Tablett wirklich empfängt. ExpressKeys, die nur der Wacom-Treiber sieht, stellst du weiter in Wacom Center ein."
+
 val DEFAULT_TABLET_BUTTON_ACTIONS = mapOf(
     "pen-tip" to "ink",
     "pen-barrel" to "eraser",

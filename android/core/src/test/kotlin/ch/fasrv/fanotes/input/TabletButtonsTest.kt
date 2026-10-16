@@ -75,5 +75,11 @@ class TabletButtonsTest {
         assertTrue(rejectsUnmappedMouseButton(null, ANDROID_TOOL_MOUSE, ANDROID_BUTTON_SECONDARY))
         assertFalse(rejectsUnmappedMouseButton("tablet-1", ANDROID_TOOL_MOUSE, ANDROID_BUTTON_BACK))
         assertEquals("Wiederholen", TABLET_BUTTON_ACTION_LABELS[nextTabletButtonAction("undo")])
+        assertEquals(168, TABLET_ACTION_WIDTH_DP)
+        assertEquals(38, TABLET_ROW_MIN_DP)
+        assertEquals(10, TABLET_GROUP_RADIUS_DP)
+        assertEquals(0.04f, TABLET_MAP_WASH_ALPHA)
+        assertEquals(0.78f, TABLET_GROUP_FILL_ALPHA)
+        assertTrue(TABLET_MAP_NOTE.startsWith("Belegt die Tasten"))
     }
 }
