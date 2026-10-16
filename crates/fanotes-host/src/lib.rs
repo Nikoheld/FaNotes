@@ -9294,6 +9294,20 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("24:00: 2026-10-13"), None);
         assert_eq!(unix_millis_from_iso("16:602026-10-13"), None);
         assert_eq!(unix_millis_from_iso("16:1002026-10-13"), None);
+        // `GMT+5` before any number ignores the keyword and the sign. 5 is the
+        // day, 13 is the year, and 2026 is an extra field.
+        assert_eq!(
+            unix_millis_from_iso("GMT+5 Oct 13 2026"),
+            Some(1_380_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13:Oct:2026"),
+            Some(1_790_874_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13:Oct-2026"),
+            Some(1_790_874_000_000)
+        );
         assert_eq!(
             unix_millis_from_iso("16:00Z2026-10-13"),
             Some(1_791_907_200_000)

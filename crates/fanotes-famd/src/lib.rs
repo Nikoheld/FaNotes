@@ -8914,6 +8914,20 @@ mod tests {
             assert_eq!(super::canonical_iso("24:00: 2026-10-13"), None);
             assert_eq!(super::canonical_iso("16:602026-10-13"), None);
             assert_eq!(super::canonical_iso("16:1002026-10-13"), None);
+            // `GMT+5` before any number ignores the keyword and the sign. 5 is
+            // the day, 13 is the year, and 2026 is an extra field.
+            assert_eq!(
+                super::canonical_iso("GMT+5 Oct 13 2026").as_deref(),
+                Some("2013-10-05T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("13:Oct:2026").as_deref(),
+                Some("2026-10-01T17:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("13:Oct-2026").as_deref(),
+                Some("2026-10-01T17:00:00.000Z")
+            );
             assert_eq!(
                 super::canonical_iso("16:00Z2026-10-13").as_deref(),
                 Some("2026-10-13T16:00:00.000Z")
