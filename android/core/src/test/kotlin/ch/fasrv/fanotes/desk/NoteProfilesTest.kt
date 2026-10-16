@@ -91,6 +91,18 @@ class NoteProfilesTest {
         assertEquals(FirstRunPreviewAsidePad(top = 17, end = 10, bottom = 17, start = 10), firstRunPreviewAsidePad(981))
         assertEquals(FirstRunPreviewAsidePad(top = 17, end = 7, bottom = 17, start = 7), firstRunPreviewAsidePad(980))
         assertEquals(FirstRunPreviewAsidePad(top = 17, end = 7, bottom = 17, start = 7), firstRunPreviewAsidePad(760))
+        assertEquals(5, FIRST_RUN_PREVIEW_ASIDE_GAP_DP)
+        assertEquals(1, FIRST_RUN_PREVIEW_ASIDE_RULE_DP)
+        assertEquals(0.76f, FIRST_RUN_PREVIEW_ASIDE_FILL_MIX)
+        assertEquals(0xFF1B1B1B.toInt(), firstRunPreviewAsideFill(0xFF191919.toInt(), 0xFF202020.toInt()))
+        assertEquals(0xFFFDFDFC.toInt(), firstRunPreviewAsideFill(0xFFFFFFFF.toInt(), 0xFFF7F6F3.toInt()))
+        assertEquals(0xFFF9F8F4.toInt(), firstRunPreviewAsideFill(0xFFFBFAF7.toInt(), 0xFFF4F1EA.toInt()))
+        assertEquals("Meine Fächer", FIRST_RUN_PREVIEW_ASIDE_TITLE)
+        assertEquals(700, FIRST_RUN_PREVIEW_ASIDE_TITLE_WEIGHT)
+        assertEquals(6, FIRST_RUN_PREVIEW_ASIDE_TITLE_GAP_DP)
+        assertEquals(12, FIRST_RUN_PREVIEW_ASIDE_TITLE_ICON_DP)
+        assertEquals(4, FIRST_RUN_PREVIEW_ASIDE_TITLE_MARGIN_INLINE_DP)
+        assertEquals(8, FIRST_RUN_PREVIEW_ASIDE_TITLE_MARGIN_BOTTOM_DP)
     }
 
     @Test

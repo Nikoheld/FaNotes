@@ -4955,15 +4955,45 @@ private fun WelcomePreview(modifier: Modifier) {
             // The body does not clip, so the sheet shadow can paint. The window clip above still cuts blur that leaves the window.
             Row(Modifier.fillMaxWidth().heightIn(min = bodyMin)) {
                 Column(
-                    Modifier.width(aside).fillMaxHeight().padding(
-                        start = asidePad.start.dp,
-                        top = asidePad.top.dp,
-                        end = asidePad.end.dp,
-                        bottom = asidePad.bottom.dp,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    Modifier
+                        .width(aside)
+                        .fillMaxHeight()
+                        .background(Color(ch.fasrv.fanotes.desk.firstRunPreviewAsideFill(MaterialTheme.colorScheme.background.toArgb(), MaterialTheme.colorScheme.surface.toArgb())))
+                        .drawBehind {
+                            val stroke = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_RULE_DP.dp.toPx()
+                            val x = size.width - stroke / 2f
+                            drawLine(headerBorder, Offset(x, 0f), Offset(x, size.height), strokeWidth = stroke)
+                        }
+                        .padding(
+                            start = asidePad.start.dp,
+                            top = asidePad.top.dp,
+                            end = asidePad.end.dp + ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_RULE_DP.dp,
+                            bottom = asidePad.bottom.dp,
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_GAP_DP.dp),
                 ) {
-                    Text("Meine Fächer", fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_SP.sp, fontWeight = FontWeight.SemiBold)
+                    Row(
+                        Modifier.padding(
+                            start = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_TITLE_MARGIN_INLINE_DP.dp,
+                            end = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_TITLE_MARGIN_INLINE_DP.dp,
+                            bottom = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_TITLE_MARGIN_BOTTOM_DP.dp,
+                        ),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_TITLE_GAP_DP.dp),
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.MenuBook,
+                            contentDescription = null,
+                            modifier = Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_TITLE_ICON_DP.dp),
+                            tint = ink.soft,
+                        )
+                        Text(
+                            ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_TITLE,
+                            fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_SP.sp,
+                            fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_TITLE_WEIGHT),
+                            color = ink.soft,
+                        )
+                    }
                     ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SUBJECTS.forEachIndexed { index, subject ->
                         Row(
                             Modifier

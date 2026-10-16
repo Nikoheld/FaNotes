@@ -362,6 +362,21 @@ const val FIRST_RUN_PREVIEW_ASIDE_NARROW_DP = 102
 const val FIRST_RUN_PREVIEW_ASIDE_PAD_BLOCK_DP = 17
 const val FIRST_RUN_PREVIEW_ASIDE_PAD_INLINE_DP = 10
 const val FIRST_RUN_PREVIEW_ASIDE_PAD_INLINE_NARROW_DP = 7
+/** `.first-run-preview-body > aside` is a column with a 5px gap and a 1px `--border` on the right. */
+const val FIRST_RUN_PREVIEW_ASIDE_GAP_DP = 5
+const val FIRST_RUN_PREVIEW_ASIDE_RULE_DP = 1
+/** Fill is `color-mix(in srgb, var(--bg) 76%, var(--panel))`. */
+const val FIRST_RUN_PREVIEW_ASIDE_FILL_MIX = 0.76f
+/**
+ * The heading is a `strong` with a 12px book icon, a 6px gap, and margin `0 4px 8px`.
+ * It is 7.5px, weight 700, in `--text-soft`.
+ */
+const val FIRST_RUN_PREVIEW_ASIDE_TITLE = "Meine Fächer"
+const val FIRST_RUN_PREVIEW_ASIDE_TITLE_WEIGHT = 700
+const val FIRST_RUN_PREVIEW_ASIDE_TITLE_GAP_DP = 6
+const val FIRST_RUN_PREVIEW_ASIDE_TITLE_ICON_DP = 12
+const val FIRST_RUN_PREVIEW_ASIDE_TITLE_MARGIN_INLINE_DP = 4
+const val FIRST_RUN_PREVIEW_ASIDE_TITLE_MARGIN_BOTTOM_DP = 8
 const val FIRST_RUN_PREVIEW_SPLIT_DP = 760
 const val FIRST_RUN_MEDIUM_DP = 980
 /** `.first-run-preview-body > aside strong` is 7.5px. */
@@ -687,6 +702,10 @@ fun firstRunPreviewAsidePad(screenWidthDp: Int): FirstRunPreviewAsidePad {
         start = inline,
     )
 }
+
+/** Subject column fill: background mixed 76% into the panel. */
+fun firstRunPreviewAsideFill(backgroundArgb: Int, panelArgb: Int): Int =
+    mixArgb(backgroundArgb, panelArgb, FIRST_RUN_PREVIEW_ASIDE_FILL_MIX)
 
 /**
  * Color marks of `.first-run-preview-body > aside i`.
