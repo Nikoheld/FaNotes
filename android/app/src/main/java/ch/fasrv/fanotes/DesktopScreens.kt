@@ -77,6 +77,7 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.ViewColumn
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -144,6 +145,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -3964,6 +3966,8 @@ private fun SettingRow(
     description: String? = null,
     divider: Boolean = true,
     modifier: Modifier = Modifier,
+    glyph: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    mark: String? = null,
     content: @Composable () -> Unit,
 ) {
     val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
@@ -3981,7 +3985,7 @@ private fun SettingRow(
                         ),
                     verticalArrangement = Arrangement.spacedBy(9.dp),
                 ) {
-                    SettingCopy(title, description)
+                    SettingCopy(title, description, glyph = glyph, mark = mark)
                     content()
                 }
             } else {
@@ -3996,7 +4000,7 @@ private fun SettingRow(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTING_ROW_GAP_DP.dp),
                 ) {
-                    SettingCopy(title, description, Modifier.weight(1f))
+                    SettingCopy(title, description, Modifier.weight(1f), glyph, mark)
                     Box(Modifier.widthIn(max = 360.dp)) { content() }
                 }
             }
@@ -4006,9 +4010,49 @@ private fun SettingRow(
 }
 
 @Composable
-private fun SettingCopy(title: String, description: String?, modifier: Modifier = Modifier) {
+private fun SettingCopy(
+    title: String,
+    description: String?,
+    modifier: Modifier = Modifier,
+    glyph: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    mark: String? = null,
+) {
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
     Column(modifier) {
-        Text(title, fontSize = 12.sp, fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTING_COPY_WEIGHT), color = MaterialTheme.colorScheme.onSurface)
+        if (glyph == null && mark == null) {
+            Text(title, fontSize = 12.sp, fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTING_COPY_WEIGHT), color = MaterialTheme.colorScheme.onSurface)
+        } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.sync.SYNC_DEVICE_ICON_GAP_DP.dp),
+            ) {
+                if (glyph != null) {
+                    Icon(
+                        glyph,
+                        contentDescription = null,
+                        modifier = Modifier.size(ch.fasrv.fanotes.sync.SYNC_DEVICE_ICON_DP.dp),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                Text(
+                    buildAnnotatedString {
+                        append(title)
+                        if (!mark.isNullOrEmpty()) {
+                            withStyle(
+                                SpanStyle(
+                                    color = accent,
+                                    fontSize = ch.fasrv.fanotes.sync.SYNC_DEVICE_MARK_SP.sp,
+                                    fontWeight = FontWeight(ch.fasrv.fanotes.sync.SYNC_DEVICE_MARK_WEIGHT),
+                                ),
+                            ) { append(mark) }
+                        }
+                    },
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTING_COPY_WEIGHT),
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
         if (!description.isNullOrBlank()) {
             Text(description, fontSize = 12.sp, color = LocalStatusInk.current.muted, lineHeight = 17.sp, modifier = Modifier.padding(top = 3.dp))
         }
@@ -4781,9 +4825,11 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                             devices.isEmpty() -> SettingRow("Keine weiteren Geräte", divider = false) {}
                             else -> devices.forEachIndexed { index, device ->
                                 SettingRow(
-                                    ch.fasrv.fanotes.sync.syncDeviceTitle(device.name.ifBlank { "Gerät" }, device.current),
+                                    device.name.ifBlank { "Gerät" },
                                     "Zuletzt aktiv: ${ch.fasrv.fanotes.sync.syncDeviceSeenLabel(device.lastSeenAt)}",
                                     divider = index != devices.lastIndex,
+                                    glyph = if (ch.fasrv.fanotes.sync.syncDeviceGlyph(device.platform) == "phone") Icons.Filled.Smartphone else Icons.Filled.Laptop,
+                                    mark = if (device.current) ch.fasrv.fanotes.sync.SYNC_DEVICE_MARK else null,
                                 ) {
                                     if (ch.fasrv.fanotes.sync.syncDeviceCanSignOut(device.current)) {
                                         TextButton(onClick = { model.removeSyncDevice(device.id, device.name) }) { Text("Abmelden") }

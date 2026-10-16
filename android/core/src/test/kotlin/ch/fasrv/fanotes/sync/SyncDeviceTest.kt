@@ -20,6 +20,14 @@ class SyncDeviceTest {
         assertTrue(syncDeviceIsPhone("web"))
         assertTrue(syncDeviceIsPhone("browser-preview"))
         assertFalse(syncDeviceIsPhone("android"))
+        assertEquals("phone", syncDeviceGlyph("web"))
+        assertEquals("phone", syncDeviceGlyph("browser-preview"))
+        assertEquals("laptop", syncDeviceGlyph("android"))
+        assertEquals("laptop", syncDeviceGlyph("linux"))
+        assertEquals(13, SYNC_DEVICE_ICON_DP)
+        assertEquals(6, SYNC_DEVICE_ICON_GAP_DP)
+        assertEquals(" · dieses Gerät", SYNC_DEVICE_MARK)
+        assertEquals(600, SYNC_DEVICE_MARK_WEIGHT)
         val log = listOf(
             SyncLogEntry("2026-10-15T12:00:00Z", "info", "eins"),
             SyncLogEntry("2026-10-15T12:01:00Z", "warn", "zwei"),

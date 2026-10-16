@@ -43,12 +43,21 @@ fun syncDeviceSeenLabel(iso: String?, zone: ZoneId = ZoneId.systemDefault()): St
     return SYNC_SEEN.format(instant.atZone(zone))
 }
 
-fun syncDeviceTitle(name: String, current: Boolean) = if (current) "$name · dieses Gerät" else name
+fun syncDeviceTitle(name: String, current: Boolean) = if (current) "$name$SYNC_DEVICE_MARK" else name
 
 /** The signed-in device stays. Every other device can be signed out. */
 fun syncDeviceCanSignOut(current: Boolean) = !current
 
 fun syncDeviceIsPhone(platform: String) = platform == "web" || platform == "browser-preview"
+
+/** Web sessions use the phone glyph. Every other platform uses the laptop glyph. */
+fun syncDeviceGlyph(platform: String) = if (syncDeviceIsPhone(platform)) "phone" else "laptop"
+
+const val SYNC_DEVICE_ICON_DP = 13
+const val SYNC_DEVICE_ICON_GAP_DP = 6
+const val SYNC_DEVICE_MARK = " · dieses Gerät"
+const val SYNC_DEVICE_MARK_SP = 12
+const val SYNC_DEVICE_MARK_WEIGHT = 600
 
 data class SyncAccountInfo(
     val accountId: String,
