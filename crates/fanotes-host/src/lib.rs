@@ -2017,6 +2017,10 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         return unix_millis_from_iso(&normalized);
     }
     if trimmed.contains('/') {
+        // `16:00: 10/13/2026` finalizes the second and then sees `/`.
+        if open_clock_before_slash(trimmed) {
+            return None;
+        }
         // `2026/10/13` is local midnight. `10/13/2026` is the same legacy form.
         // A slash that is not that date is ignored, so `/2026-10-13` is local.
         if let Some(normalized) = rewrite_slash_date(trimmed) {
@@ -2337,12 +2341,22 @@ fn split_second_offset_sign(token: &str, clock_before: bool) -> Option<String> {
     let bytes = token.as_bytes();
     let mut offset_started = false;
     let mut seen_clock = clock_before;
+    let mut saw_zone = false;
     let mut split_at = None;
     for (index, byte) in bytes.iter().copied().enumerate() {
         if byte == b':' {
             if index > 0 && bytes[index - 1].is_ascii_digit() {
                 seen_clock = true;
             }
+            continue;
+        }
+        if byte.eq_ignore_ascii_case(&b'z') && seen_clock && index > 0 && bytes[index - 1].is_ascii_digit()
+        {
+            // `16:00Z2026-10-13` is a date after UTC. Those hyphens stay.
+            saw_zone = true;
+            continue;
+        }
+        if saw_zone {
             continue;
         }
         if byte != b'+' && byte != b'-' {
@@ -3087,6 +3101,25 @@ fn legacy_words(value: &str) -> Vec<&str> {
         }
     }
     words
+}
+
+/// `16:00: 10/13/2026` is empty. The slash follows a finished field.
+fn open_clock_before_slash(value: &str) -> bool {
+    let mut open = false;
+    for token in value
+        .split(is_date_parse_space)
+        .filter(|token| !token.is_empty())
+    {
+        if open && token.contains('/') {
+            return true;
+        }
+        if token_is_open_clock(token) {
+            open = true;
+        } else if token.chars().any(|character| character.is_ascii_digit()) {
+            open = false;
+        }
+    }
+    false
 }
 
 /// `16:00:` still has an open second. `16:00` and `16:00:5` do not.
@@ -4538,6 +4571,19 @@ fn take_open_clock_hyphen(
     if !(1..=3).contains(&time.index) || !is_hyphen_number_run(word) {
         return None;
     }
+    take_open_clock_hyphen_tail(word, time, dates, offset, minute_sign)
+}
+
+fn take_open_clock_hyphen_tail(
+    word: &str,
+    time: &mut LegacyTime,
+    dates: &mut Vec<i32>,
+    offset: &mut Option<i64>,
+    minute_sign: &mut i64,
+) -> Option<bool> {
+    if !(1..=3).contains(&time.index) {
+        return None;
+    }
     let bytes = word.as_bytes();
     let mut index = 0;
     loop {
@@ -4697,6 +4743,19 @@ fn take_clock_word(
             index += 1;
             continue;
         }
+        // `16:00:2026-10-13` keeps going. 2026 is the year, 10 is the open
+        // second, and `-13` is the offset.
+        if index < bytes.len() && matches!(bytes[index], b'+' | b'-') {
+            let rest = &body[index..];
+            if let Some(done) =
+                take_open_clock_hyphen_tail(rest, time, dates, offset, minute_sign)
+            {
+                if !done {
+                    return None;
+                }
+                return Some(());
+            }
+        }
         if index != bytes.len() {
             return None;
         }
@@ -4747,11 +4806,22 @@ fn consume_glued_z(
         return None;
     }
     let (number, _, end) = read_clock_number(bytes, next)?;
-    if end != bytes.len() {
-        return None;
-    }
     push_date_number(dates, number)?;
-    Some(true)
+    if end == bytes.len() {
+        return Some(true);
+    }
+    // `16:00Z2026-10-13` is 16:00 UTC on that date. The hyphen is not an offset.
+    if bytes[end] == b'-' {
+        let rest = std::str::from_utf8(&bytes[end + 1..]).ok()?;
+        if rest.is_empty() {
+            return Some(true);
+        }
+        for part in rest.split('-') {
+            push_date_number(dates, unsigned_number(part)?)?;
+        }
+        return Some(true);
+    }
+    None
 }
 
 fn split_clock_tail(token: &str) -> (&str, &str) {
@@ -4761,10 +4831,33 @@ fn split_clock_tail(token: &str) -> (&str, &str) {
             return (body, &token[body.len()..]);
         }
     }
-    if let Some(sign_at) = token.rfind(['+', '-']) {
-        if sign_at > 0 && token[..sign_at].contains(':') {
-            return token.split_at(sign_at);
+    let bytes = token.as_bytes();
+    let mut saw_colon = false;
+    for (index, byte) in bytes.iter().copied().enumerate() {
+        if byte == b':' {
+            saw_colon = true;
+            continue;
         }
+        if !saw_colon || index == 0 || (byte != b'+' && byte != b'-') {
+            continue;
+        }
+        // `16:00-5` and `4:00:00.5PM+5` are offsets. `16:00:2026-10-13` is
+        // the next field: a long digit run before `-` stays in the clock word.
+        let mut start = index;
+        while start > 0 && bytes[start - 1].is_ascii_digit() {
+            start -= 1;
+        }
+        let digits = index - start;
+        let clock_field = (1..=2).contains(&digits)
+            && std::str::from_utf8(&bytes[start..index])
+                .ok()
+                .and_then(|text| text.parse::<i32>().ok())
+                .is_some_and(|number| (0..=59).contains(&number));
+        let tail = &token[index + 1..];
+        if byte == b'+' || tail.contains(':') || clock_field || !bytes[index - 1].is_ascii_digit() {
+            return token.split_at(index);
+        }
+        break;
     }
     (token, "")
 }
@@ -9180,6 +9273,24 @@ mod local_zone_tests {
             Some(1_791_907_200_000)
         );
         assert_eq!(unix_millis_from_iso("2026-10-13-EST"), None);
+        assert_eq!(
+            unix_millis_from_iso("16:00:2026-10-13"),
+            Some(1_767_330_010_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:0002026-10-13"),
+            Some(1_767_330_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:00Z2026-10-13"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("16:00: 10/13/2026"), None);
+        assert_eq!(unix_millis_from_iso("16:00: 2026/10/13"), None);
+        assert_eq!(
+            unix_millis_from_iso("16:00 10/13/2026"),
+            Some(1_791_921_600_000)
+        );
         assert_eq!(unix_millis_from_iso("hello16:00 10/13/2026"), None);
         assert_eq!(unix_millis_from_iso("  T16:00 2026-10-13"), None);
         assert_eq!(
