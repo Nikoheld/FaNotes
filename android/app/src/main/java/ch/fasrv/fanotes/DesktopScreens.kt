@@ -7201,7 +7201,7 @@ private fun SettingsPage(
         }
         Column(Modifier.weight(0.62f)) {
             val current = sections.first { it.id == section }
-            Column(
+            Row(
                 Modifier
                     .fillMaxWidth()
                     .padding(
@@ -7210,26 +7210,50 @@ private fun SettingsPage(
                         top = ch.fasrv.fanotes.desk.SETTINGS_HEADER_PAD_TOP_DP.dp,
                         bottom = ch.fasrv.fanotes.desk.SETTINGS_HEADER_PAD_BOTTOM_DP.dp,
                     ),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = if (content.headingIconVisible) {
+                    Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTINGS_HEADING_GAP_DP.dp)
+                } else {
+                    Arrangement.Start
+                },
             ) {
-                Text(
-                    ch.fasrv.fanotes.desk.settingsEyebrow(current.count),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = ch.fasrv.fanotes.desk.SETTINGS_EYEBROW_TRACKING.em,
-                    color = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f)),
-                )
-                Text(
-                    current.label,
-                    fontSize = ch.fasrv.fanotes.desk.SETTINGS_TITLE_SP.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = ch.fasrv.fanotes.desk.SETTINGS_TITLE_TRACKING.em,
-                )
-                Text(
-                    current.detail,
-                    fontSize = 12.sp,
-                    color = LocalStatusInk.current.muted,
-                    modifier = Modifier.padding(top = 3.dp),
-                )
+                if (content.headingIconVisible) {
+                    Box(
+                        Modifier
+                            .size(ch.fasrv.fanotes.desk.SETTINGS_HEADING_ICON_DP.dp)
+                            .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SETTINGS_HEADING_ICON_RADIUS_DP.dp))
+                            .background(MaterialTheme.colorScheme.onSurface),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            settingsSectionIcon(current.id),
+                            contentDescription = null,
+                            modifier = Modifier.size(ch.fasrv.fanotes.desk.SETTINGS_HEADING_ICON_GLYPH_DP.dp),
+                            tint = MaterialTheme.colorScheme.background,
+                        )
+                    }
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        ch.fasrv.fanotes.desk.settingsEyebrow(current.count),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = ch.fasrv.fanotes.desk.SETTINGS_EYEBROW_TRACKING.em,
+                        color = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f)),
+                    )
+                    Text(
+                        current.label,
+                        fontSize = ch.fasrv.fanotes.desk.SETTINGS_TITLE_SP.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = ch.fasrv.fanotes.desk.SETTINGS_TITLE_TRACKING.em,
+                    )
+                    Text(
+                        current.detail,
+                        fontSize = 12.sp,
+                        color = LocalStatusInk.current.muted,
+                        modifier = Modifier.padding(top = 3.dp),
+                    )
+                }
             }
             Box(
                 Modifier
