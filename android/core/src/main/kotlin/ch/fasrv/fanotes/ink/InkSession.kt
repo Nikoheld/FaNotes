@@ -1,5 +1,9 @@
 package ch.fasrv.fanotes.ink
 
+import ch.fasrv.fanotes.desk.formatTranscriptLine
+import ch.fasrv.fanotes.json.JsonValue
+import ch.fasrv.fanotes.json.deepCopy
+import ch.fasrv.fanotes.json.jsonString
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.max
@@ -90,6 +94,34 @@ class InkSession(document: InkDocument) {
             "restart" -> listOf(mapped)
             else -> return false
         }
+        return true
+    }
+
+    /**
+     * Places synthesized handwriting in one undo step. Existing ink stays on
+     * the same page pixels when the sheet has to grow.
+     */
+    fun insertSynthesized(result: HandwritingSynthesisResult, now: String): Boolean {
+        if (result.strokes.isEmpty()) return false
+        val extended = extendPage(document, result.pageWidth, result.pageHeight)
+        val scaleX = if (extended.sourceWidth > 0.0) result.pageWidth / extended.sourceWidth else 1.0
+        val scaleY = if (extended.sourceHeight > 0.0) result.pageHeight / extended.sourceHeight else 1.0
+        val placed = result.strokes.map { stroke ->
+            stroke.copy(points = stroke.points.map { point ->
+                point.copy(
+                    x = (point.x * scaleX).coerceIn(0.0, 1.0),
+                    y = (point.y * scaleY).coerceIn(0.0, 1.0),
+                )
+            })
+        }
+        val anchorY = placed.flatMap { it.points }.minOfOrNull { it.y } ?: 0.0
+        val extras = extended.extras.deepCopy() as JsonValue.Obj
+        val previous = extras.string("searchTranscript").orEmpty().trim()
+        val line = formatTranscriptLine(anchorY, result.normalizedText)
+        val transcript = listOf(previous, line).filter { it.isNotEmpty() }.joinToString("\n")
+        extras.put("searchTranscript", jsonString(transcript))
+        pushUndo()
+        document = extended.copy(strokes = extended.strokes + placed, extras = extras, updatedAt = now)
         return true
     }
 
