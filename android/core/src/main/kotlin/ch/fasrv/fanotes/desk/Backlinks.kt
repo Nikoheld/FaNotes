@@ -150,8 +150,24 @@ private fun titleFromPath(path: String): String {
     return name.replace(Regex("""\.(md|markdown|pdf)$""", RegexOption.IGNORE_CASE), "").ifEmpty { path }
 }
 
+/** Index in [text] of a German case match. `İ` lowercases to two units, so the folded index is not the original one. */
+private fun localeIndex(text: String, needle: String): Int {
+    val needleFold = needle.lowercase(GERMAN)
+    if (needleFold.isEmpty()) return -1
+    val origin = ArrayList<Int>(text.length)
+    val folded = StringBuilder(text.length)
+    text.forEachIndexed { index, character ->
+        val piece = character.toString().lowercase(GERMAN)
+        repeat(piece.length) { origin += index }
+        folded.append(piece)
+    }
+    val found = folded.indexOf(needleFold)
+    if (found < 0) return -1
+    return origin[found]
+}
+
 private fun excerptAround(markdown: String, needle: String): String {
-    val index = maskMarkdownCode(markdown).lowercase(GERMAN).indexOf(needle.lowercase(GERMAN))
+    val index = localeIndex(maskMarkdownCode(markdown), needle)
     if (index < 0) return ""
     val end = minOf(markdown.length, index + needle.length + 72)
     return markdown.substring(maxOf(0, index - 48), end).replace(Regex("\\s+"), " ").trim()

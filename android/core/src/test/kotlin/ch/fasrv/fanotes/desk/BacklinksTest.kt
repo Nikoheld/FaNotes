@@ -33,6 +33,10 @@ class BacklinksTest {
             ),
         )
         assertEquals(listOf("Extra.md", "Index.md"), byPath.map { it.path }.sorted())
+        val dotted = "İ".repeat(50) + "[[Algebra]] Ende"
+        val shifted = backlinksFor("Mathe/Algebra.md", listOf("Deutsch/Text.md" to dotted))
+        assertEquals(1, shifted.size)
+        assertTrue(shifted[0].excerpt.contains("[[Algebra]]"))
     }
 
     @Test

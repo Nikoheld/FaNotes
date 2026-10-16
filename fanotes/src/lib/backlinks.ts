@@ -39,9 +39,23 @@ export const wikilinkTargets = (markdown: string) => {
   return [...found]
 }
 
+/** Index in `text` of a `de-DE` case match. `İ` lowercases to two units, so the folded index is not the original one. */
+const localeIndex = (text: string, needle: string) => {
+  const needleFold = needle.toLocaleLowerCase('de-DE')
+  if (!needleFold) return -1
+  const origin: number[] = []
+  let folded = ''
+  for (let index = 0; index < text.length; index += 1) {
+    const piece = text[index].toLocaleLowerCase('de-DE')
+    for (let unit = 0; unit < piece.length; unit += 1) origin.push(index)
+    folded += piece
+  }
+  const found = folded.indexOf(needleFold)
+  return found < 0 ? -1 : origin[found] ?? -1
+}
+
 const excerptAround = (markdown: string, needle: string) => {
-  const visible = maskMarkdownCode(markdown)
-  const index = visible.toLocaleLowerCase('de-DE').indexOf(needle.toLocaleLowerCase('de-DE'))
+  const index = localeIndex(maskMarkdownCode(markdown), needle)
   if (index < 0) return ''
   return markdown.slice(Math.max(0, index - 48), Math.min(markdown.length, index + needle.length + 72)).replace(/\s+/gu, ' ').trim()
 }

@@ -41,6 +41,10 @@ try {
     { path: 'Extra.md', content: '[[Algebra.md]]' },
   ])
   assert.deepEqual(pathLinks.map((link) => link.path).sort(), ['Extra.md', 'Index.md'])
+  const dotted = `${'İ'.repeat(50)}[[Algebra]] Ende`
+  const dottedLinks = backlinksFor('Mathe/Algebra.md', [{ path: 'Deutsch/Text.md', content: dotted }])
+  assert.equal(dottedLinks.length, 1)
+  assert.match(dottedLinks[0].excerpt, /\[\[Algebra\]\]/)
   console.log('markdown-code ok')
 } finally {
   await server.close()
