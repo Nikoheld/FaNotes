@@ -3590,17 +3590,30 @@ fn slash_clock(time: &str) -> Option<String> {
     if !(2..=3).contains(&numbers.len()) || numbers.iter().any(|number| *number > 99) {
         return legacy_clock_text(time);
     }
-    let mut padded = if numbers.len() == 3 {
-        format!("{:02}:{:02}:{:02}", numbers[0], numbers[1], numbers[2])
+    // `16:00.05` is 50 seconds. The dot scales into the open seconds field.
+    // `16:00:00.05` is 50 milliseconds, and `16:00.5` is 500 seconds, which is empty.
+    let padded = if numbers.len() == 2 {
+        if let Some(fraction) = fraction {
+            let digits = if fraction.len() > 9 {
+                &fraction[..9]
+            } else {
+                fraction
+            };
+            let value: i32 = digits.parse().ok()?;
+            let seconds = clock_milliseconds(value, digits.len());
+            format!("{:02}:{:02}:{:02}", numbers[0], numbers[1], seconds)
+        } else {
+            format!("{:02}:{:02}:00", numbers[0], numbers[1])
+        }
     } else {
-        format!("{:02}:{:02}:00", numbers[0], numbers[1])
+        let mut padded = format!("{:02}:{:02}:{:02}", numbers[0], numbers[1], numbers[2]);
+        if let Some(fraction) = fraction {
+            padded.push('.');
+            padded.push_str(fraction);
+        }
+        padded
     };
-    if let Some(fraction) = fraction {
-        padded.push('.');
-        padded.push_str(fraction);
-    }
-    padded.push_str(zone);
-    Some(padded)
+    Some(format!("{padded}{zone}"))
 }
 
 /// `16:` is 16:00:00. `16::30` is 16:00:30. `16:.5` skips the dot and is 16:05.
@@ -9749,6 +9762,74 @@ mod tests {
                 super::canonical_iso("2026/10/13 16:00:00Z").as_deref(),
                 Some("2026-10-13T16:00:00.000Z")
             );
+        });
+    }
+
+    #[test]
+    fn a_dot_after_minutes_fills_seconds() {
+        with_tz("America/New_York", || {
+            // `16:00.05` is 16:00:50. A fraction after the seconds stays
+            // milliseconds, and `.5` is 500 seconds, so that date is empty.
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00.05").as_deref(),
+                Some("2026-10-13T20:00:50.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00.005").as_deref(),
+                Some("2026-10-13T20:00:05.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00.059").as_deref(),
+                Some("2026-10-13T20:00:59.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00.00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 4:5.05").as_deref(),
+                Some("2026-10-13T08:05:50.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00:00.05").as_deref(),
+                Some("2026-10-13T20:00:00.050Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00.05Z").as_deref(),
+                Some("2026-10-13T16:00:50.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00.05 EST").as_deref(),
+                Some("2026-10-13T21:00:50.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00.05 +5").as_deref(),
+                Some("2026-10-13T11:00:50.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00.005 +5").as_deref(),
+                Some("2026-10-13T11:00:05.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:5.05 +5").as_deref(),
+                Some("2026-10-12T23:05:50.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00:00.05 +5").as_deref(),
+                Some("2026-10-13T11:00:00.050Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 16:00.05 +5").as_deref(),
+                Some("1950-10-13T11:00:50.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/1950 16:00.05").as_deref(),
+                Some("1950-10-13T21:00:50.000Z")
+            );
+            assert_eq!(super::canonical_iso("10/13/2026 16:00.5"), None);
+            assert_eq!(super::canonical_iso("10/13/2026 16:00.60"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00.5 +5"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00.60 +5"), None);
         });
     }
 
