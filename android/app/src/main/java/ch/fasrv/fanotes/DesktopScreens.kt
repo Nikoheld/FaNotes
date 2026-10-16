@@ -247,6 +247,9 @@ internal val LocalStatusInk = staticCompositionLocalOf {
 /** True when the settings viewport stacks each `.setting-row`. */
 private val LocalSettingsContentStacks = staticCompositionLocalOf { false }
 
+/** True when `.range-setting` is `width: 100%` at max-width 760px. */
+private val LocalSettingsRangeFillsWidth = staticCompositionLocalOf { false }
+
 @Composable
 fun DeskRibbon(
     destination: String,
@@ -6371,7 +6374,12 @@ private fun previewMarks(
 @Composable
 private fun SettingSlider(value: Float, min: Float, max: Float, step: Float, suffix: String, onChange: (Float) -> Unit) {
     val shown = if (step < 1f) "%.2f".format(java.util.Locale.US, value) else value.toInt().toString()
-    Column(Modifier.widthIn(min = 170.dp, max = 360.dp)) {
+    val width = if (LocalSettingsRangeFillsWidth.current) {
+        Modifier.fillMaxWidth()
+    } else {
+        Modifier.widthIn(min = 170.dp, max = 360.dp)
+    }
+    Column(width) {
         Text("$shown$suffix", fontSize = 12.sp, color = LocalStatusInk.current.muted)
         Slider(
             value = value.coerceIn(min, max),
@@ -7053,7 +7061,10 @@ private fun SettingsPage(
         scrollTarget = null
     }
     val navPadX = if (navCollapsed) ch.fasrv.fanotes.desk.SETTINGS_NAV_NARROW_PAD_X_DP else ch.fasrv.fanotes.desk.SETTINGS_NAV_PAD_X_DP
-    CompositionLocalProvider(LocalSettingsContentStacks provides content.rowsStack) {
+    CompositionLocalProvider(
+        LocalSettingsContentStacks provides content.rowsStack,
+        LocalSettingsRangeFillsWidth provides ch.fasrv.fanotes.desk.settingsRangeFillsWidth(viewportWidth),
+    ) {
     Row(Modifier.fillMaxSize()) {
         Column(
             (if (navCollapsed) Modifier.width(ch.fasrv.fanotes.desk.SETTINGS_NAV_NARROW_DP.dp) else Modifier.weight(0.38f))
