@@ -88,6 +88,13 @@ class NoteProfilesTest {
     }
 
     @Test
+    fun theWelcomePreviewAsideMatchesTheDesktopColumn() {
+        assertEquals(0.76f, FIRST_RUN_PREVIEW_ASIDE_FILL_MIX)
+        assertEquals(0xFF1B1B1B.toInt(), firstRunPreviewAsideFill(0xFF191919.toInt(), 0xFF202020.toInt()))
+        assertEquals(0xFFFDFDFC.toInt(), firstRunPreviewAsideFill(0xFFFFFFFF.toInt(), 0xFFF7F6F3.toInt()))
+    }
+
+    @Test
     fun theWelcomePreviewAsidePaddingFollowsTheDesktopBreakpoint() {
         assertEquals(FirstRunPreviewAsidePad(top = 17, end = 10, bottom = 17, start = 10), firstRunPreviewAsidePad(981))
         assertEquals(FirstRunPreviewAsidePad(top = 17, end = 7, bottom = 17, start = 7), firstRunPreviewAsidePad(980))
