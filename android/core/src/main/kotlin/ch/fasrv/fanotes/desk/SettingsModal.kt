@@ -30,6 +30,66 @@ const val SETTINGS_NAV_NARROW_BUTTON_PAD_DP = 5
  */
 fun settingsNavCollapses(widthDp: Int): Boolean = widthDp <= SETTINGS_MODAL_FULL_DP
 
+/**
+ * `.settings-content > header { padding-inline: 16px }` at max-width 760px.
+ * Top and bottom stay 18 and 15.
+ */
+const val SETTINGS_HEADER_NARROW_PAD_X_DP = 16
+
+/** `.settings-scroll { padding: 15px 16px 28px }` — top, horizontal, bottom. */
+const val SETTINGS_SCROLL_NARROW_PAD_TOP_DP = 15
+const val SETTINGS_SCROLL_NARROW_PAD_X_DP = 16
+const val SETTINGS_SCROLL_NARROW_PAD_BOTTOM_DP = 28
+
+/** `.setting-row { gap: 9px }` once the row stacks. */
+const val SETTING_ROW_STACK_GAP_DP = 9
+
+/**
+ * Same viewport as [settingsNavCollapses].
+ * At 760 and below, `.settings-heading-icon` is `display: none`, the header
+ * padding-inline is 16, the scroll padding is `15px 16px 28px`, and each
+ * `.setting-row` stacks (`flex-direction: column`, `align-items: flex-start`,
+ * gap 9) with `.setting-control { width: 100%; max-width: none; justify-content: flex-start }`.
+ * The later heading-icon color rule does not set `display`, so `display: none` still wins.
+ * At 761 the side-by-side row, the wide padding, and the absent wide heading icon stay.
+ */
+fun settingsContentStacks(widthDp: Int): Boolean = settingsNavCollapses(widthDp)
+
+data class SettingsContentLayout(
+    val headerPadXDp: Int,
+    val scrollPadTopDp: Int,
+    val scrollPadXDp: Int,
+    val scrollPadBottomDp: Int,
+    val rowsStack: Boolean,
+    val rowGapDp: Int,
+    val headingIconVisible: Boolean,
+)
+
+fun settingsContentLayout(widthDp: Int): SettingsContentLayout {
+    val stacks = settingsContentStacks(widthDp)
+    return if (stacks) {
+        SettingsContentLayout(
+            headerPadXDp = SETTINGS_HEADER_NARROW_PAD_X_DP,
+            scrollPadTopDp = SETTINGS_SCROLL_NARROW_PAD_TOP_DP,
+            scrollPadXDp = SETTINGS_SCROLL_NARROW_PAD_X_DP,
+            scrollPadBottomDp = SETTINGS_SCROLL_NARROW_PAD_BOTTOM_DP,
+            rowsStack = true,
+            rowGapDp = SETTING_ROW_STACK_GAP_DP,
+            headingIconVisible = false,
+        )
+    } else {
+        SettingsContentLayout(
+            headerPadXDp = SETTINGS_HEADER_PAD_X_DP,
+            scrollPadTopDp = SETTINGS_SCROLL_PAD_TOP_DP,
+            scrollPadXDp = SETTINGS_SCROLL_PAD_X_DP,
+            scrollPadBottomDp = SETTINGS_SCROLL_PAD_BOTTOM_DP,
+            rowsStack = false,
+            rowGapDp = SETTING_ROW_GAP_DP,
+            headingIconVisible = false,
+        )
+    }
+}
+
 data class SettingsModalSize(
     val widthDp: Int,
     val heightDp: Int,
