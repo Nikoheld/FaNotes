@@ -1737,6 +1737,41 @@ mod tests {
     }
 
     #[test]
+    fn a_sign_after_a_leading_word_is_padding() {
+        with_tz("America/New_York", || {
+            // `hello+5` is May. The word and the sign are ignored before the
+            // first number. A month keeps the sign as a separator, and a
+            // clock after the sign is empty.
+            assert_eq!(
+                super::canonical_iso("hello+5").as_deref(),
+                Some("2001-05-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("GMe-5").as_deref(),
+                Some("2001-05-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("x+5").as_deref(),
+                Some("2001-05-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("note+2026").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct+5").as_deref(),
+                Some("2001-10-05T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("GMT+5").as_deref(),
+                Some("2001-05-01T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("hello+5:30"), None);
+            assert_eq!(super::canonical_iso("abc+13"), None);
+        });
+    }
+
+    #[test]
     fn a_numeric_offset_after_a_time_is_a_fixed_zone() {
         with_tz("America/New_York", || {
             // `+5` after a clock is five hours east of UTC. A sign with no clock
