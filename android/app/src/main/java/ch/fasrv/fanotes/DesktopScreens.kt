@@ -46,6 +46,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Assignment
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -55,7 +56,9 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.Circle
@@ -174,6 +177,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -1221,188 +1225,806 @@ fun HomeworkScreen(model: FaNotesViewModel) {
     )
     var title by remember { mutableStateOf("") }
     var subject by remember { mutableStateOf("") }
-    var due by remember { mutableStateOf(LocalDate.now().plusDays(1).toString()) }
+    var due by remember { mutableStateOf(ch.fasrv.fanotes.desk.HOMEWORK_DEFAULT_DUE) }
     var planner by remember { mutableStateOf("list") }
     var filter by remember { mutableStateOf("open") }
     var showDone by remember { mutableStateOf(false) }
     var cursor by remember { mutableStateOf(LocalDate.now()) }
     var dueTime by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
-    var priority by remember { mutableStateOf("normal") }
+    var kind by remember { mutableStateOf(ch.fasrv.fanotes.desk.HOMEWORK_DEFAULT_KIND) }
+    var priority by remember { mutableStateOf(ch.fasrv.fanotes.desk.HOMEWORK_DEFAULT_PRIORITY) }
     val stats = ch.fasrv.fanotes.desk.homeworkStats(document.tasks)
     val shownTasks = ch.fasrv.fanotes.desk.visibleHomeworkTasks(document.tasks, filter)
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState())
-            .pointerInput(planner) {
-                detectDeskSwipe { direction ->
-                    if (planner == "list") return@detectDeskSwipe
-                    val step = ch.fasrv.fanotes.desk.calendarSwipeStep(direction) ?: return@detectDeskSwipe
-                    cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, step)
-                }
-            },
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Hausaufgaben & Termine", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-            TextButton(onClick = { model.openHomeworkNote() }) { Text("Als Notiz öffnen") }
-        }
-        Text("Gespeichert in Hausaufgaben.md, dieselbe Datei wie auf dem Desktop.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-        Text("Freigabe", modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.SemiBold)
-        Text("Dieselbe Schnittstelle wie der Desktop: PUT an fanotes.fasrv.ch, Kanal-ID und Geheimnis bleiben auf diesem Tablet.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-        OutlinedTextField(
-            settings["homework-channel"].orEmpty(),
-            { model.updateDesk("homework-channel", it.trim()) },
-            label = { Text("Kanal-ID") },
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        )
-        OutlinedTextField(
-            settings["homework-secret"].orEmpty(),
-            { model.updateDesk("homework-secret", it.trim()) },
-            label = { Text("Geheimnis") },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Row {
-            TextButton(onClick = { model.generateHomeworkAccess() }) { Text("Kanal erzeugen") }
-            TextButton(onClick = { model.publishHomework() }) { Text("Veröffentlichen") }
-        }
-        if (!status.isNullOrBlank()) Text(status.orEmpty(), fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 12.dp)) {
-            OutlinedTextField(title, { title = it }, label = { Text("Aufgabe") }, modifier = Modifier.weight(1f))
-            OutlinedTextField(subject, { subject = it }, label = { Text("Fach") }, modifier = Modifier.weight(0.6f))
-        }
-        val offered = subjectChoices.filter { choice ->
-            subject.isBlank() || choice.startsWith(subject, ignoreCase = true)
-        }.take(8)
-        if (offered.isNotEmpty()) {
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                offered.forEach { choice ->
-                    TextButton(onClick = { subject = choice }) { Text(choice) }
-                }
+    val offered = subjectChoices.filter { choice ->
+        subject.isBlank() || choice.startsWith(subject, ignoreCase = true)
+    }.take(8)
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val inset = ch.fasrv.fanotes.desk.HOMEWORK_SHELL_INSET_DP.dp
+        val shell = (maxWidth - inset * 2)
+            .coerceAtLeast(0.dp)
+            .coerceAtMost(ch.fasrv.fanotes.desk.HOMEWORK_SHELL_MAX_DP.dp)
+        val columns = ch.fasrv.fanotes.desk.homeworkComposerColumns(shell.value.roundToInt())
+        Column(
+            Modifier
+                .align(Alignment.TopCenter)
+                .width(shell)
+                .fillMaxHeight()
+                .verticalScroll(rememberScrollState())
+                .padding(
+                    top = ch.fasrv.fanotes.desk.HOMEWORK_SHELL_PAD_TOP_DP.dp,
+                    bottom = ch.fasrv.fanotes.desk.HOMEWORK_SHELL_PAD_BOTTOM_DP.dp,
+                )
+                .pointerInput(planner) {
+                    detectDeskSwipe { direction ->
+                        if (planner == "list") return@detectDeskSwipe
+                        val step = ch.fasrv.fanotes.desk.calendarSwipeStep(direction) ?: return@detectDeskSwipe
+                        cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, step)
+                    }
+                },
+        ) {
+            HomeworkHeader(
+                narrow = columns < ch.fasrv.fanotes.desk.HOMEWORK_COMPOSER_WIDE_COLUMNS,
+                onOpen = { model.openHomeworkNote() },
+                onClose = { model.showDestination("notes") },
+            )
+            HomeworkStatsRow(stats)
+            HomeworkComposer(
+                columns = columns,
+                title = title,
+                onTitle = { title = it.take(ch.fasrv.fanotes.desk.HOMEWORK_TITLE_LIMIT) },
+                kind = kind,
+                onKind = { kind = it },
+                subject = subject,
+                onSubject = { subject = it.take(ch.fasrv.fanotes.desk.HOMEWORK_SUBJECT_LIMIT) },
+                suggestions = offered,
+                due = due,
+                onDue = { due = it },
+                dueTime = dueTime,
+                onDueTime = { dueTime = it },
+                priority = priority,
+                onPriority = { priority = it },
+                notes = notes,
+                onNotes = { notes = it.take(ch.fasrv.fanotes.desk.HOMEWORK_NOTES_LIMIT) },
+                onSubmit = {
+                    if (title.isNotBlank()) {
+                        model.addHomework(title, subject, due, kind, dueTime, notes, priority)
+                        title = ""
+                        notes = ""
+                        dueTime = ""
+                        priority = ch.fasrv.fanotes.desk.HOMEWORK_DEFAULT_PRIORITY
+                    }
+                },
+            )
+            HomeworkChoiceRow(
+                listOf(
+                    "list" to ch.fasrv.fanotes.desk.HOMEWORK_VIEW_LIST,
+                    "week" to ch.fasrv.fanotes.desk.HOMEWORK_VIEW_WEEK,
+                    "month" to ch.fasrv.fanotes.desk.HOMEWORK_VIEW_MONTH,
+                ),
+                planner,
+            ) { planner = it }
+            HomeworkChoiceRow(
+                listOf(
+                    "open" to ch.fasrv.fanotes.desk.HOMEWORK_FILTER_OPEN,
+                    "homework" to ch.fasrv.fanotes.desk.HOMEWORK_FILTER_HOMEWORK,
+                    "appointment" to ch.fasrv.fanotes.desk.HOMEWORK_FILTER_APPOINTMENTS,
+                    "done" to ch.fasrv.fanotes.desk.HOMEWORK_FILTER_DONE,
+                    "all" to ch.fasrv.fanotes.desk.HOMEWORK_FILTER_ALL,
+                ),
+                filter,
+            ) { filter = it }
+            Text("Freigabe", modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.SemiBold)
+            Text(
+                "Dieselbe Schnittstelle wie der Desktop: PUT an fanotes.fasrv.ch, Kanal-ID und Geheimnis bleiben auf diesem Tablet.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            )
+            OutlinedTextField(
+                settings["homework-channel"].orEmpty(),
+                { model.updateDesk("homework-channel", it.trim()) },
+                label = { Text("Kanal-ID") },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            )
+            OutlinedTextField(
+                settings["homework-secret"].orEmpty(),
+                { model.updateDesk("homework-secret", it.trim()) },
+                label = { Text("Geheimnis") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row {
+                TextButton(onClick = { model.generateHomeworkAccess() }) { Text("Kanal erzeugen") }
+                TextButton(onClick = { model.publishHomework() }) { Text("Veröffentlichen") }
             }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(due, { due = it }, label = { Text("Fällig") })
-            OutlinedTextField(dueTime, { dueTime = it }, label = { Text("Uhrzeit") }, modifier = Modifier.padding(start = 8.dp))
-            TextButton(onClick = { priority = if (priority == "high") "normal" else "high" }) {
-                Text(if (priority == "high") "Wichtig" else "Normal", fontWeight = if (priority == "high") FontWeight.Bold else FontWeight.Normal)
-            }
-        }
-        OutlinedTextField(notes, { notes = it }, label = { Text("Notizen") }, modifier = Modifier.fillMaxWidth())
-        Row {
-            TextButton(onClick = {
-                if (title.isNotBlank()) {
-                    model.addHomework(title, subject, due, "homework", dueTime, notes, priority)
-                    title = ""
-                    notes = ""
-                    dueTime = ""
-                    priority = "normal"
+            if (!status.isNullOrBlank()) Text(status.orEmpty(), fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+            if (planner != "list") {
+                val days = ch.fasrv.fanotes.desk.homeworkPlannerDays(cursor, planner)
+                val byDate = shownTasks.filter { it.dueDate != null }.groupBy { it.dueDate }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                    TextButton(onClick = { cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, -1) }) { Text("‹") }
+                    Text(ch.fasrv.fanotes.desk.homeworkPlannerLabel(cursor, planner), modifier = Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.SemiBold)
+                    TextButton(onClick = { cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, 1) }) { Text("›") }
+                    TextButton(onClick = { cursor = LocalDate.now() }) { Text("Heute") }
                 }
-            }) { Text("Hinzufügen") }
-            TextButton(onClick = {
-                if (title.isNotBlank()) {
-                    model.addHomework(title, subject, due, "appointment", dueTime, notes, priority)
-                    title = ""
-                    notes = ""
-                    dueTime = ""
-                    priority = "normal"
-                }
-            }) { Text("Termin") }
-        }
-        Text(
-            "${stats.open} offen · ${stats.overdue} überfällig · ${stats.today} heute · ${stats.appointments} Termine · ${stats.done} erledigt",
-            modifier = Modifier.padding(top = 8.dp),
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-        )
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp)) {
-            listOf("list" to "Liste", "week" to "Woche", "month" to "Monat").forEach { (id, label) ->
-                TextButton(onClick = { planner = id }) {
-                    Text(label, color = if (planner == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontWeight = if (planner == id) FontWeight.SemiBold else FontWeight.Normal)
-                }
-            }
-        }
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-            listOf("open" to "Offen", "homework" to "Hausaufgaben", "appointment" to "Termine", "done" to "Erledigt", "all" to "Alle").forEach { (id, label) ->
-                TextButton(onClick = { filter = id }) {
-                    Text(label, color = if (filter == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontWeight = if (filter == id) FontWeight.SemiBold else FontWeight.Normal)
-                }
-            }
-        }
-        if (planner != "list") {
-            val days = ch.fasrv.fanotes.desk.homeworkPlannerDays(cursor, planner)
-            val byDate = shownTasks.filter { it.dueDate != null }.groupBy { it.dueDate }
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-                TextButton(onClick = { cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, -1) }) { Text("‹") }
-                Text(ch.fasrv.fanotes.desk.homeworkPlannerLabel(cursor, planner), modifier = Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.SemiBold)
-                TextButton(onClick = { cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, 1) }) { Text("›") }
-                TextButton(onClick = { cursor = LocalDate.now() }) { Text("Heute") }
-            }
-            Row(Modifier.fillMaxWidth()) {
-                ch.fasrv.fanotes.desk.homeworkWeekdays().forEach { label ->
-                    Text(label, modifier = Modifier.weight(1f), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                }
-            }
-            days.chunked(7).forEach { week ->
                 Row(Modifier.fillMaxWidth()) {
-                    week.forEach { day ->
-                        val items = byDate[day.date.toString()].orEmpty()
-                        Column(
-                            Modifier
-                                .weight(1f)
-                                .heightIn(min = if (planner == "week") 72.dp else 48.dp)
-                                .clickable { due = day.date.toString() }
-                                .padding(2.dp),
-                        ) {
-                            Text(
-                                day.date.dayOfMonth.toString(),
-                                fontSize = 12.sp,
-                                color = when {
-                                    day.date == LocalDate.now() -> MaterialTheme.colorScheme.primary
-                                    day.outside -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
-                                    else -> MaterialTheme.colorScheme.onSurface
-                                },
-                                fontWeight = if (day.date == LocalDate.now()) FontWeight.Bold else FontWeight.Normal,
-                            )
-                            items.take(if (planner == "week") 8 else 3).forEach { task ->
-                                val clock = task.dueTime?.takeIf { it.isNotBlank() }
+                    ch.fasrv.fanotes.desk.homeworkWeekdays().forEach { label ->
+                        Text(label, modifier = Modifier.weight(1f), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                    }
+                }
+                days.chunked(7).forEach { week ->
+                    Row(Modifier.fillMaxWidth()) {
+                        week.forEach { day ->
+                            val items = byDate[day.date.toString()].orEmpty()
+                            Column(
+                                Modifier
+                                    .weight(1f)
+                                    .heightIn(min = if (planner == "week") 72.dp else 48.dp)
+                                    .clickable { due = day.date.toString() }
+                                    .padding(2.dp),
+                            ) {
                                 Text(
-                                    if (clock == null) task.title else "$clock · ${task.title}",
-                                    fontSize = 10.sp,
-                                    maxLines = 1,
-                                    fontWeight = if (task.priority == "high") FontWeight.Bold else FontWeight.Normal,
-                                    textDecoration = if (task.done) TextDecoration.LineThrough else null,
-                                    color = if (task.done) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f) else MaterialTheme.colorScheme.onSurface,
+                                    day.date.dayOfMonth.toString(),
+                                    fontSize = 12.sp,
+                                    color = when {
+                                        day.date == LocalDate.now() -> MaterialTheme.colorScheme.primary
+                                        day.outside -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+                                        else -> MaterialTheme.colorScheme.onSurface
+                                    },
+                                    fontWeight = if (day.date == LocalDate.now()) FontWeight.Bold else FontWeight.Normal,
                                 )
+                                items.take(if (planner == "week") 8 else 3).forEach { task ->
+                                    val clock = task.dueTime?.takeIf { it.isNotBlank() }
+                                    Text(
+                                        if (clock == null) task.title else "$clock · ${task.title}",
+                                        fontSize = 10.sp,
+                                        maxLines = 1,
+                                        fontWeight = if (task.priority == "high") FontWeight.Bold else FontWeight.Normal,
+                                        textDecoration = if (task.done) TextDecoration.LineThrough else null,
+                                        color = if (task.done) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f) else MaterialTheme.colorScheme.onSurface,
+                                    )
+                                }
+                                val hidden = items.size - (if (planner == "week") 8 else 3)
+                                if (hidden > 0) Text("+$hidden", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
                             }
-                            val hidden = items.size - (if (planner == "week") 8 else 3)
-                            if (hidden > 0) Text("+$hidden", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
             }
+            val ordered = ch.fasrv.fanotes.desk.sortHomeworkTasks(shownTasks)
+            if (ordered.isEmpty()) {
+                HomeworkEmpty()
+            }
+            listOf("overdue", "today", "upcoming", "undated").forEach { bucket ->
+                val items = ordered.filter { ch.fasrv.fanotes.desk.classifyHomeworkTask(it) == bucket }
+                if (items.isNotEmpty()) HomeworkBucket(bucket, items, model)
+            }
+            if (ch.fasrv.fanotes.desk.homeworkDoneBucketVisible(filter, showDone)) {
+                val finished = ordered.filter { ch.fasrv.fanotes.desk.classifyHomeworkTask(it) == "done" }
+                if (finished.isNotEmpty()) {
+                    HomeworkBucket(
+                        "done",
+                        finished,
+                        model,
+                        toggle = ch.fasrv.fanotes.desk.homeworkDoneToggleLabel(filter, showDone),
+                        onToggle = { showDone = !showDone },
+                    )
+                }
+            }
         }
-        val ordered = ch.fasrv.fanotes.desk.sortHomeworkTasks(shownTasks)
-        if (ordered.isEmpty()) {
-            HomeworkEmpty()
+    }
+}
+
+@Composable
+private fun HomeworkHeader(narrow: Boolean, onOpen: () -> Unit, onClose: () -> Unit) {
+    val gap = ch.fasrv.fanotes.desk.HOMEWORK_HEADER_GAP_DP.dp
+    if (narrow) {
+        Column(
+            Modifier.fillMaxWidth().padding(bottom = ch.fasrv.fanotes.desk.HOMEWORK_HEADER_MARGIN_DP.dp),
+            verticalArrangement = Arrangement.spacedBy(gap),
+        ) {
+            HomeworkHeading()
+            HomeworkHeaderActions(onOpen, onClose)
         }
-        listOf("overdue", "today", "upcoming", "undated").forEach { bucket ->
-            val items = ordered.filter { ch.fasrv.fanotes.desk.classifyHomeworkTask(it) == bucket }
-            if (items.isNotEmpty()) HomeworkBucket(bucket, items, model)
+    } else {
+        Row(
+            Modifier.fillMaxWidth().padding(bottom = ch.fasrv.fanotes.desk.HOMEWORK_HEADER_MARGIN_DP.dp),
+            horizontalArrangement = Arrangement.spacedBy(gap),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Column(Modifier.weight(1f)) { HomeworkHeading() }
+            HomeworkHeaderActions(onOpen, onClose)
         }
-        if (ch.fasrv.fanotes.desk.homeworkDoneBucketVisible(filter, showDone)) {
-            val finished = ordered.filter { ch.fasrv.fanotes.desk.classifyHomeworkTask(it) == "done" }
-            if (finished.isNotEmpty()) {
-                HomeworkBucket(
-                    "done",
-                    finished,
-                    model,
-                    toggle = ch.fasrv.fanotes.desk.homeworkDoneToggleLabel(filter, showDone),
-                    onToggle = { showDone = !showDone },
+    }
+}
+
+@Composable
+private fun HomeworkHeading() {
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    Row(
+        Modifier.padding(bottom = ch.fasrv.fanotes.desk.HOMEWORK_EYEBROW_MARGIN_DP.dp),
+        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_EYEBROW_GAP_DP.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.AutoMirrored.Outlined.Assignment,
+            contentDescription = null,
+            modifier = Modifier.size(ch.fasrv.fanotes.desk.HOMEWORK_EYEBROW_ICON_DP.dp),
+            tint = accent,
+        )
+        Text(
+            ch.fasrv.fanotes.desk.HOMEWORK_EYEBROW.uppercase(java.util.Locale.GERMAN),
+            color = accent,
+            fontSize = ch.fasrv.fanotes.desk.HOMEWORK_EYEBROW_SP.sp,
+            fontWeight = FontWeight(ch.fasrv.fanotes.desk.HOMEWORK_EYEBROW_WEIGHT),
+            letterSpacing = ch.fasrv.fanotes.desk.HOMEWORK_EYEBROW_TRACKING.em,
+        )
+    }
+    Text(
+        ch.fasrv.fanotes.desk.HOMEWORK_TITLE,
+        color = MaterialTheme.colorScheme.onSurface,
+        fontSize = ch.fasrv.fanotes.desk.HOMEWORK_TITLE_SP.sp,
+        fontWeight = FontWeight(ch.fasrv.fanotes.desk.HOMEWORK_TITLE_WEIGHT),
+        letterSpacing = ch.fasrv.fanotes.desk.HOMEWORK_TITLE_TRACKING.em,
+    )
+    HomeworkIntro()
+}
+
+@Composable
+private fun HomeworkIntro() {
+    val ink = LocalStatusInk.current
+    val density = LocalDensity.current
+    val path = ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH
+    val codeStyle = TextStyle(
+        color = ink.muted,
+        fontSize = ch.fasrv.fanotes.desk.HOMEWORK_CODE_SP.sp,
+        fontFamily = FontFamily.Monospace,
+    )
+    val measured = rememberTextMeasurer().measure(path, style = codeStyle)
+    val chipWidth = with(density) {
+        measured.size.width.toDp() + (ch.fasrv.fanotes.desk.HOMEWORK_CODE_PAD_X_DP * 2).dp + 2.dp
+    }
+    val chipHeight = with(density) {
+        measured.size.height.toDp() + (ch.fasrv.fanotes.desk.HOMEWORK_CODE_PAD_Y_DP * 2).dp
+    }
+    val chip = "homework-note"
+    Text(
+        text = buildAnnotatedString {
+            append(ch.fasrv.fanotes.desk.HOMEWORK_INTRO)
+            append(" ")
+            appendInlineContent(chip, path)
+            append(".")
+        },
+        modifier = Modifier
+            .widthIn(max = ch.fasrv.fanotes.desk.HOMEWORK_INTRO_MAX_DP.dp)
+            .padding(top = ch.fasrv.fanotes.desk.HOMEWORK_INTRO_GAP_DP.dp),
+        color = ink.muted,
+        fontSize = ch.fasrv.fanotes.desk.HOMEWORK_INTRO_SP.sp,
+        lineHeight = (ch.fasrv.fanotes.desk.HOMEWORK_INTRO_SP * ch.fasrv.fanotes.desk.HOMEWORK_INTRO_LINE).sp,
+        inlineContent = mapOf(
+            chip to InlineTextContent(
+                Placeholder(
+                    width = with(density) { chipWidth.toSp() },
+                    height = with(density) { chipHeight.toSp() },
+                    placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter,
+                ),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.HOMEWORK_CODE_RADIUS_DP.dp))
+                        .background(ink.panelStrong.copy(alpha = ch.fasrv.fanotes.desk.HOMEWORK_CODE_FILL)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(path, style = codeStyle, maxLines = 1)
+                }
+            },
+        ),
+    )
+}
+
+@Composable
+private fun HomeworkHeaderActions(onOpen: () -> Unit, onClose: () -> Unit) {
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.HOMEWORK_ACTION_RADIUS_DP.dp)
+    val ink = LocalStatusInk.current
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    val fill = ink.panelStrong.copy(alpha = ch.fasrv.fanotes.desk.HOMEWORK_SECONDARY_FILL)
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_ACTION_GAP_DP.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .height(ch.fasrv.fanotes.desk.HOMEWORK_ACTION_DP.dp)
+                .clip(shape)
+                .border(1.dp, rule, shape)
+                .background(fill)
+                .clickable(onClick = onOpen)
+                .padding(horizontal = ch.fasrv.fanotes.desk.HOMEWORK_SECONDARY_PAD_X_DP.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                ch.fasrv.fanotes.desk.HOMEWORK_OPEN_NOTE,
+                color = ink.soft,
+                fontSize = 12.sp,
+                fontWeight = FontWeight(ch.fasrv.fanotes.desk.HOMEWORK_SECONDARY_WEIGHT),
+            )
+        }
+        Box(
+            Modifier
+                .size(ch.fasrv.fanotes.desk.HOMEWORK_ACTION_DP.dp)
+                .clip(shape)
+                .border(1.dp, rule, shape)
+                .background(fill)
+                .clickable(onClick = onClose),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = ch.fasrv.fanotes.desk.HOMEWORK_CLOSE,
+                modifier = Modifier.size(ch.fasrv.fanotes.desk.HOMEWORK_CLOSE_ICON_DP.dp),
+                tint = ink.soft,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeworkStatsRow(stats: ch.fasrv.fanotes.desk.HomeworkStats) {
+    FlowRow(
+        Modifier.fillMaxWidth().padding(bottom = ch.fasrv.fanotes.desk.HOMEWORK_STATS_MARGIN_DP.dp),
+        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_STATS_GAP_DP.dp),
+        verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_STATS_GAP_DP.dp),
+    ) {
+        HomeworkStat(stats.open, ch.fasrv.fanotes.desk.HOMEWORK_STAT_OPEN, warn = false)
+        HomeworkStat(stats.overdue, ch.fasrv.fanotes.desk.HOMEWORK_STAT_OVERDUE, warn = true)
+        HomeworkStat(stats.today, ch.fasrv.fanotes.desk.HOMEWORK_STAT_TODAY, warn = false)
+        HomeworkStat(stats.appointments, ch.fasrv.fanotes.desk.HOMEWORK_STAT_APPOINTMENTS, warn = false)
+        HomeworkStat(stats.done, ch.fasrv.fanotes.desk.HOMEWORK_STAT_DONE, warn = false)
+    }
+}
+
+@Composable
+private fun HomeworkStat(count: Int, label: String, warn: Boolean) {
+    val ink = LocalStatusInk.current
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    val border = if (warn) homeworkMix(rule, ink.warning, ch.fasrv.fanotes.desk.HOMEWORK_STAT_WARN_MIX) else rule
+    val shape = RoundedCornerShape(999.dp)
+    Row(
+        Modifier
+            .heightIn(min = ch.fasrv.fanotes.desk.HOMEWORK_STAT_MIN_DP.dp)
+            .clip(shape)
+            .border(1.dp, border, shape)
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = ch.fasrv.fanotes.desk.HOMEWORK_STAT_FILL))
+            .padding(horizontal = ch.fasrv.fanotes.desk.HOMEWORK_STAT_PAD_X_DP.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_STAT_GAP_DP.dp),
+    ) {
+        Text(
+            count.toString(),
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = ch.fasrv.fanotes.desk.HOMEWORK_STAT_SP.sp,
+            fontWeight = FontWeight(ch.fasrv.fanotes.desk.HOMEWORK_STAT_WEIGHT),
+        )
+        Text(
+            label,
+            color = if (warn) ink.warning else ink.muted,
+            fontSize = ch.fasrv.fanotes.desk.HOMEWORK_STAT_SP.sp,
+        )
+    }
+}
+
+@Composable
+private fun HomeworkComposer(
+    columns: Int,
+    title: String,
+    onTitle: (String) -> Unit,
+    kind: String,
+    onKind: (String) -> Unit,
+    subject: String,
+    onSubject: (String) -> Unit,
+    suggestions: List<String>,
+    due: String,
+    onDue: (String) -> Unit,
+    dueTime: String,
+    onDueTime: (String) -> Unit,
+    priority: String,
+    onPriority: (String) -> Unit,
+    notes: String,
+    onNotes: (String) -> Unit,
+    onSubmit: () -> Unit,
+) {
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.HOMEWORK_COMPOSER_RADIUS_DP.dp)
+    val strong = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
+    val suggestionScroll = rememberScrollState()
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = ch.fasrv.fanotes.desk.HOMEWORK_COMPOSER_MARGIN_DP.dp)
+            .shadow(
+                elevation = ch.fasrv.fanotes.desk.HOMEWORK_COMPOSER_SHADOW_DP.dp,
+                shape = shape,
+                ambientColor = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.HOMEWORK_COMPOSER_SHADOW_ALPHA),
+                spotColor = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.HOMEWORK_COMPOSER_SHADOW_ALPHA),
+            )
+            .clip(shape)
+            .border(1.dp, strong, shape)
+            .background(LocalStatusInk.current.panelStrong.copy(alpha = ch.fasrv.fanotes.desk.HOMEWORK_COMPOSER_FILL))
+            .padding(ch.fasrv.fanotes.desk.HOMEWORK_COMPOSER_PAD_DP.dp),
+        verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_COMPOSER_GAP_DP.dp),
+    ) {
+        HomeworkComposerFields(columns, title, onTitle, kind, onKind, subject, onSubject, due, onDue, dueTime, onDueTime, priority, onPriority)
+        if (suggestions.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(suggestionScroll),
+                horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_CHIP_GAP_DP.dp),
+            ) {
+                suggestions.forEach { choice ->
+                    HomeworkSuggestion(choice) { onSubject(choice) }
+                }
+            }
+        }
+        HomeworkTextField(
+            ch.fasrv.fanotes.desk.HOMEWORK_NOTES_LABEL,
+            notes,
+            onNotes,
+            ch.fasrv.fanotes.desk.HOMEWORK_NOTES_PLACEHOLDER,
+            singleLine = false,
+            minHeight = ch.fasrv.fanotes.desk.HOMEWORK_NOTES_MIN_DP.dp,
+            textWeight = ch.fasrv.fanotes.desk.HOMEWORK_NOTES_WEIGHT,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            HomeworkAddButton(enabled = title.isNotBlank(), onClick = onSubmit)
+        }
+    }
+}
+
+@Composable
+private fun HomeworkComposerFields(
+    columns: Int,
+    title: String,
+    onTitle: (String) -> Unit,
+    kind: String,
+    onKind: (String) -> Unit,
+    subject: String,
+    onSubject: (String) -> Unit,
+    due: String,
+    onDue: (String) -> Unit,
+    dueTime: String,
+    onDueTime: (String) -> Unit,
+    priority: String,
+    onPriority: (String) -> Unit,
+) {
+    val gap = ch.fasrv.fanotes.desk.HOMEWORK_COMPOSER_ROW_GAP_DP.dp
+    if (columns >= ch.fasrv.fanotes.desk.HOMEWORK_COMPOSER_WIDE_COLUMNS) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.Top) {
+            HomeworkTextField(
+                ch.fasrv.fanotes.desk.HOMEWORK_TASK_LABEL,
+                title,
+                onTitle,
+                ch.fasrv.fanotes.desk.HOMEWORK_TASK_PLACEHOLDER,
+                modifier = Modifier.weight(ch.fasrv.fanotes.desk.HOMEWORK_GROW_FR),
+            )
+            HomeworkSelect(
+                ch.fasrv.fanotes.desk.HOMEWORK_KIND_FIELD,
+                kind,
+                listOf(
+                    "homework" to ch.fasrv.fanotes.desk.HOMEWORK_KIND_HOMEWORK,
+                    "appointment" to ch.fasrv.fanotes.desk.HOMEWORK_KIND_APPOINTMENT,
+                ),
+                onKind,
+                Modifier.weight(ch.fasrv.fanotes.desk.HOMEWORK_TRACK_FR),
+            )
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.Top) {
+            HomeworkTextField(ch.fasrv.fanotes.desk.HOMEWORK_SUBJECT_LABEL, subject, onSubject, ch.fasrv.fanotes.desk.HOMEWORK_SUBJECT_PLACEHOLDER, modifier = Modifier.weight(ch.fasrv.fanotes.desk.HOMEWORK_GROW_FR))
+            HomeworkTextField(ch.fasrv.fanotes.desk.HOMEWORK_DATE_LABEL, due, onDue, modifier = Modifier.weight(ch.fasrv.fanotes.desk.HOMEWORK_TRACK_FR))
+            HomeworkTextField(ch.fasrv.fanotes.desk.HOMEWORK_TIME_LABEL, dueTime, onDueTime, modifier = Modifier.weight(ch.fasrv.fanotes.desk.HOMEWORK_TRACK_FR))
+            HomeworkSelect(
+                ch.fasrv.fanotes.desk.HOMEWORK_PRIORITY_FIELD,
+                priority,
+                listOf(
+                    "normal" to ch.fasrv.fanotes.desk.HOMEWORK_PRIORITY_NORMAL,
+                    "high" to ch.fasrv.fanotes.desk.HOMEWORK_PRIORITY_HIGH,
+                ),
+                onPriority,
+                Modifier.weight(ch.fasrv.fanotes.desk.HOMEWORK_TRACK_FR),
+            )
+        }
+    } else if (columns == 2) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.Top) {
+                HomeworkTextField(ch.fasrv.fanotes.desk.HOMEWORK_TASK_LABEL, title, onTitle, ch.fasrv.fanotes.desk.HOMEWORK_TASK_PLACEHOLDER, modifier = Modifier.weight(1f))
+                HomeworkSelect(
+                    ch.fasrv.fanotes.desk.HOMEWORK_KIND_FIELD,
+                    kind,
+                    listOf(
+                        "homework" to ch.fasrv.fanotes.desk.HOMEWORK_KIND_HOMEWORK,
+                        "appointment" to ch.fasrv.fanotes.desk.HOMEWORK_KIND_APPOINTMENT,
+                    ),
+                    onKind,
+                    Modifier.weight(1f),
+                )
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.Top) {
+                HomeworkTextField(ch.fasrv.fanotes.desk.HOMEWORK_SUBJECT_LABEL, subject, onSubject, ch.fasrv.fanotes.desk.HOMEWORK_SUBJECT_PLACEHOLDER, modifier = Modifier.weight(1f))
+                HomeworkTextField(ch.fasrv.fanotes.desk.HOMEWORK_DATE_LABEL, due, onDue, modifier = Modifier.weight(1f))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.Top) {
+                HomeworkTextField(ch.fasrv.fanotes.desk.HOMEWORK_TIME_LABEL, dueTime, onDueTime, modifier = Modifier.weight(1f))
+                HomeworkSelect(
+                    ch.fasrv.fanotes.desk.HOMEWORK_PRIORITY_FIELD,
+                    priority,
+                    listOf(
+                        "normal" to ch.fasrv.fanotes.desk.HOMEWORK_PRIORITY_NORMAL,
+                        "high" to ch.fasrv.fanotes.desk.HOMEWORK_PRIORITY_HIGH,
+                    ),
+                    onPriority,
+                    Modifier.weight(1f),
                 )
             }
         }
+    } else {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
+            HomeworkTextField(ch.fasrv.fanotes.desk.HOMEWORK_TASK_LABEL, title, onTitle, ch.fasrv.fanotes.desk.HOMEWORK_TASK_PLACEHOLDER, modifier = Modifier.fillMaxWidth())
+            HomeworkSelect(
+                ch.fasrv.fanotes.desk.HOMEWORK_KIND_FIELD,
+                kind,
+                listOf(
+                    "homework" to ch.fasrv.fanotes.desk.HOMEWORK_KIND_HOMEWORK,
+                    "appointment" to ch.fasrv.fanotes.desk.HOMEWORK_KIND_APPOINTMENT,
+                ),
+                onKind,
+                Modifier.fillMaxWidth(),
+            )
+            HomeworkTextField(ch.fasrv.fanotes.desk.HOMEWORK_SUBJECT_LABEL, subject, onSubject, ch.fasrv.fanotes.desk.HOMEWORK_SUBJECT_PLACEHOLDER, modifier = Modifier.fillMaxWidth())
+            HomeworkTextField(ch.fasrv.fanotes.desk.HOMEWORK_DATE_LABEL, due, onDue, modifier = Modifier.fillMaxWidth())
+            HomeworkTextField(ch.fasrv.fanotes.desk.HOMEWORK_TIME_LABEL, dueTime, onDueTime, modifier = Modifier.fillMaxWidth())
+            HomeworkSelect(
+                ch.fasrv.fanotes.desk.HOMEWORK_PRIORITY_FIELD,
+                priority,
+                listOf(
+                    "normal" to ch.fasrv.fanotes.desk.HOMEWORK_PRIORITY_NORMAL,
+                    "high" to ch.fasrv.fanotes.desk.HOMEWORK_PRIORITY_HIGH,
+                ),
+                onPriority,
+                Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeworkField(label: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_FIELD_GAP_DP.dp)) {
+        Text(
+            label.uppercase(java.util.Locale.GERMAN),
+            color = LocalStatusInk.current.muted,
+            fontSize = ch.fasrv.fanotes.desk.HOMEWORK_FIELD_SP.sp,
+            fontWeight = FontWeight(ch.fasrv.fanotes.desk.HOMEWORK_FIELD_WEIGHT),
+            letterSpacing = ch.fasrv.fanotes.desk.HOMEWORK_FIELD_TRACKING.em,
+        )
+        content()
+    }
+}
+
+@Composable
+private fun HomeworkTextField(
+    label: String,
+    value: String,
+    onValue: (String) -> Unit,
+    placeholder: String = "",
+    singleLine: Boolean = true,
+    minHeight: Dp = ch.fasrv.fanotes.desk.HOMEWORK_INPUT_MIN_DP.dp,
+    textWeight: Int = ch.fasrv.fanotes.desk.HOMEWORK_INPUT_WEIGHT,
+    modifier: Modifier = Modifier,
+) {
+    var focused by remember { mutableStateOf(false) }
+    HomeworkField(label, modifier) {
+        HomeworkChrome(focused = focused, minHeight = minHeight) {
+            BasicTextField(
+                value = value,
+                onValueChange = onValue,
+                singleLine = singleLine,
+                textStyle = TextStyle(
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = ch.fasrv.fanotes.desk.HOMEWORK_INPUT_SP.sp,
+                    fontWeight = FontWeight(textWeight),
+                    lineHeight = (ch.fasrv.fanotes.desk.HOMEWORK_INPUT_SP * ch.fasrv.fanotes.desk.HOMEWORK_INPUT_LINE).sp,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused },
+                decorationBox = { inner ->
+                    Box(Modifier.fillMaxWidth()) {
+                        if (value.isEmpty() && placeholder.isNotEmpty()) {
+                            Text(
+                                placeholder,
+                                color = LocalStatusInk.current.muted,
+                                fontSize = ch.fasrv.fanotes.desk.HOMEWORK_INPUT_SP.sp,
+                                fontWeight = FontWeight(textWeight),
+                                maxLines = if (singleLine) 1 else Int.MAX_VALUE,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        inner()
+                    }
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeworkSelect(
+    label: String,
+    value: String,
+    options: List<Pair<String, String>>,
+    onPick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var open by remember { mutableStateOf(false) }
+    val current = options.firstOrNull { it.first == value }?.second ?: options.firstOrNull()?.second.orEmpty()
+    HomeworkField(label, modifier) {
+        Box(Modifier.fillMaxWidth()) {
+            HomeworkChrome(focused = open, minHeight = ch.fasrv.fanotes.desk.HOMEWORK_INPUT_MIN_DP.dp, onClick = { open = true }) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        current,
+                        modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = ch.fasrv.fanotes.desk.HOMEWORK_INPUT_SP.sp,
+                        fontWeight = FontWeight(ch.fasrv.fanotes.desk.HOMEWORK_INPUT_WEIGHT),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Icon(
+                        Icons.Filled.ArrowDropDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = LocalStatusInk.current.muted,
+                    )
+                }
+            }
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                options.forEach { (id, name) ->
+                    DropdownMenuItem(text = { Text(name) }, onClick = { onPick(id); open = false })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeworkChrome(
+    focused: Boolean,
+    minHeight: Dp,
+    onClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.HOMEWORK_INPUT_RADIUS_DP.dp)
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    val primary = MaterialTheme.colorScheme.primary
+    val border = if (focused) homeworkMix(rule, primary, ch.fasrv.fanotes.desk.HOMEWORK_FOCUS_BORDER) else rule
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = minHeight)
+            .drawBehind {
+                if (!focused) return@drawBehind
+                val stroke = ch.fasrv.fanotes.desk.HOMEWORK_FOCUS_RING_DP.dp.toPx()
+                drawRoundRect(
+                    color = primary.copy(alpha = ch.fasrv.fanotes.desk.HOMEWORK_FOCUS_RING),
+                    topLeft = Offset(-stroke / 2f, -stroke / 2f),
+                    size = Size(size.width + stroke, size.height + stroke),
+                    cornerRadius = CornerRadius(ch.fasrv.fanotes.desk.HOMEWORK_INPUT_RADIUS_DP.dp.toPx() + stroke / 2f),
+                    style = Stroke(width = stroke),
+                )
+            }
+            .clip(shape)
+            .border(1.dp, border, shape)
+            .background(MaterialTheme.colorScheme.surface)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(
+                horizontal = ch.fasrv.fanotes.desk.HOMEWORK_INPUT_PAD_X_DP.dp,
+                vertical = ch.fasrv.fanotes.desk.HOMEWORK_INPUT_PAD_Y_DP.dp,
+            ),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun HomeworkAddButton(enabled: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.HOMEWORK_INPUT_RADIUS_DP.dp)
+    val ink = MaterialTheme.colorScheme.background
+    val fill = MaterialTheme.colorScheme.onSurface
+    Row(
+        Modifier
+            .heightIn(min = ch.fasrv.fanotes.desk.HOMEWORK_INPUT_MIN_DP.dp)
+            .alpha(if (enabled) 1f else ch.fasrv.fanotes.desk.HOMEWORK_PRIMARY_DISABLED)
+            .clip(shape)
+            .border(1.dp, fill, shape)
+            .background(fill)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = ch.fasrv.fanotes.desk.HOMEWORK_PRIMARY_PAD_X_DP.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_PRIMARY_GAP_DP.dp),
+    ) {
+        Icon(
+            Icons.Filled.Add,
+            contentDescription = null,
+            modifier = Modifier.size(ch.fasrv.fanotes.desk.HOMEWORK_PRIMARY_ICON_DP.dp),
+            tint = ink,
+        )
+        Text(
+            ch.fasrv.fanotes.desk.HOMEWORK_ADD,
+            color = ink,
+            fontSize = 12.sp,
+            fontWeight = FontWeight(ch.fasrv.fanotes.desk.HOMEWORK_PRIMARY_WEIGHT),
+        )
+    }
+}
+
+@Composable
+private fun HomeworkSuggestion(label: String, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(999.dp)
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    Box(
+        Modifier
+            .heightIn(min = ch.fasrv.fanotes.desk.HOMEWORK_STAT_MIN_DP.dp)
+            .clip(shape)
+            .border(1.dp, rule, shape)
+            .background(LocalStatusInk.current.panelStrong.copy(alpha = ch.fasrv.fanotes.desk.HOMEWORK_SECONDARY_FILL))
+            .clickable(onClick = onClick)
+            .padding(horizontal = ch.fasrv.fanotes.desk.HOMEWORK_STAT_PAD_X_DP.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = LocalStatusInk.current.muted, fontSize = 12.sp, fontWeight = FontWeight(650))
+    }
+}
+
+@Composable
+private fun HomeworkChoiceRow(options: List<Pair<String, String>>, selected: String, onSelect: (String) -> Unit) {
+    FlowRow(
+        Modifier.fillMaxWidth().padding(bottom = ch.fasrv.fanotes.desk.HOMEWORK_CHIP_MARGIN_DP.dp),
+        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_CHIP_GAP_DP.dp),
+        verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_CHIP_GAP_DP.dp),
+    ) {
+        options.forEach { (id, label) ->
+            HomeworkChoice(label, active = selected == id) { onSelect(id) }
+        }
+    }
+}
+
+@Composable
+private fun HomeworkChoice(label: String, active: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(999.dp)
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    val primary = MaterialTheme.colorScheme.primary
+    val border = if (active) homeworkMix(rule, primary, ch.fasrv.fanotes.desk.HOMEWORK_CHIP_ACTIVE_BORDER) else rule
+    val fill = if (active) {
+        primary.copy(alpha = ch.fasrv.fanotes.desk.HOMEWORK_CHIP_ACTIVE_FILL)
+    } else {
+        LocalStatusInk.current.panelStrong.copy(alpha = ch.fasrv.fanotes.desk.HOMEWORK_SECONDARY_FILL)
+    }
+    val color = if (active) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft
+    Box(
+        Modifier
+            .heightIn(min = ch.fasrv.fanotes.desk.HOMEWORK_CHIP_MIN_DP.dp)
+            .clip(shape)
+            .border(1.dp, border, shape)
+            .background(fill)
+            .clickable(onClick = onClick)
+            .padding(horizontal = ch.fasrv.fanotes.desk.HOMEWORK_CHIP_PAD_X_DP.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = color,
+            fontSize = ch.fasrv.fanotes.desk.HOMEWORK_CHIP_SP.sp,
+            fontWeight = FontWeight(ch.fasrv.fanotes.desk.HOMEWORK_CHIP_WEIGHT),
+        )
     }
 }
 
