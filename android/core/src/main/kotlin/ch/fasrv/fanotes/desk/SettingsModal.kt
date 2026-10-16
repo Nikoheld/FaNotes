@@ -70,8 +70,11 @@ fun settingsContentStacks(widthDp: Int): Boolean = settingsNavCollapses(widthDp)
 /**
  * `.range-setting` above 760px:
  * `width: 220px; display: grid; grid-template-columns: minmax(90px, 1fr) 57px; align-items: center; gap: 10px`.
- * The value is `.range-setting output { height: 27px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px }`, centered.
- * No later rule changes those sizes. The 760px block only sets `width: 100%`.
+ * The value is
+ * `.range-setting output { height: 27px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 6px; color: var(--text-soft); font-family: var(--editor-font); font-size: 12px }`.
+ * `:root` sets `--editor-font: 'JetBrains Mono', ui-monospace, monospace`.
+ * `button, input, select, textarea { font: inherit }` does not cover `output`.
+ * No later rule changes this face, color, or these sizes. The 760px block only sets `width: 100%`.
  */
 const val RANGE_SETTING_WIDTH_DP = 220
 const val RANGE_SETTING_TRACK_MIN_DP = 90
@@ -81,6 +84,29 @@ const val RANGE_SETTING_VALUE_RADIUS_DP = 6
 const val RANGE_SETTING_VALUE_BORDER_DP = 1
 const val RANGE_SETTING_VALUE_SP = 12
 const val RANGE_SETTING_GAP_DP = 10
+
+/** `.range-setting output` uses `font-family: var(--editor-font)`, not `--ui-font`. */
+const val RANGE_SETTING_VALUE_USES_EDITOR_FONT = true
+
+/** Face role for the value box. `"editor"` is `--editor-font`. `"ui"` would be the interface face. */
+const val RANGE_SETTING_VALUE_FONT = "editor"
+
+/** `color: var(--text-soft)`. The palette `soft` field, not `muted`. */
+const val RANGE_SETTING_VALUE_INK = "soft"
+
+/**
+ * Editor-face id for the value box. A UI stack is not an editor face, so it
+ * stays the default JetBrains Mono stack from `:root`.
+ */
+fun rangeSettingValueFontId(editorFace: String?): String =
+    if (RANGE_SETTING_VALUE_USES_EDITOR_FONT && RANGE_SETTING_VALUE_FONT == "editor") {
+        editorFontId(editorFace)
+    } else {
+        uiFontId(editorFace)
+    }
+
+/** Named soft-color role. `"muted"` is the quieter ink and is not this box. */
+fun rangeSettingValueInkRole(): String = RANGE_SETTING_VALUE_INK
 
 /**
  * `.range-setting { width: 100%; }` inside `@media (max-width: 760px)`.

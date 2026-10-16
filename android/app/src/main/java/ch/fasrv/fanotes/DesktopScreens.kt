@@ -170,6 +170,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.Placeholder
@@ -249,6 +250,12 @@ private val LocalSettingsContentStacks = staticCompositionLocalOf { false }
 
 /** True when `.range-setting` is `width: 100%` at max-width 760px. The value box stays beside the track. */
 private val LocalSettingsRangeFillsWidth = staticCompositionLocalOf { false }
+
+/**
+ * `.range-setting output` face. The settings page replaces this with the loaded
+ * editor typeface. The fallback is the fenced-code monospace, not the UI face.
+ */
+private val LocalRangeSettingValueFont = staticCompositionLocalOf<FontFamily> { FontFamily.Monospace }
 
 @Composable
 fun DeskRibbon(
@@ -6410,7 +6417,12 @@ private fun SettingSlider(value: Float, min: Float, max: Float, step: Float, suf
             Text(
                 "$shown$suffix",
                 fontSize = ch.fasrv.fanotes.desk.RANGE_SETTING_VALUE_SP.sp,
-                color = LocalStatusInk.current.soft,
+                fontFamily = LocalRangeSettingValueFont.current,
+                color = if (ch.fasrv.fanotes.desk.rangeSettingValueInkRole() == "muted") {
+                    LocalStatusInk.current.muted
+                } else {
+                    LocalStatusInk.current.soft
+                },
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 softWrap = false,
@@ -7088,9 +7100,15 @@ private fun SettingsPage(
         scrollTarget = null
     }
     val navPadX = if (navCollapsed) ch.fasrv.fanotes.desk.SETTINGS_NAV_NARROW_PAD_X_DP else ch.fasrv.fanotes.desk.SETTINGS_NAV_PAD_X_DP
+    val rangeValueFontId = ch.fasrv.fanotes.desk.rangeSettingValueFontId(settings["editor-face"])
+    val rangeValueContext = LocalContext.current
+    val rangeValueFont = remember(rangeValueFontId) {
+        FontFamily(loadEditorTypeface(rangeValueContext, rangeValueFontId))
+    }
     CompositionLocalProvider(
         LocalSettingsContentStacks provides content.rowsStack,
         LocalSettingsRangeFillsWidth provides ch.fasrv.fanotes.desk.settingsRangeFillsWidth(viewportWidth),
+        LocalRangeSettingValueFont provides rangeValueFont,
     ) {
     Row(Modifier.fillMaxSize()) {
         Column(
