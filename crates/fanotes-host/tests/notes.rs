@@ -1012,7 +1012,13 @@ fn a_companion_read_follows_the_desktop_file_check() {
     let (mut host, vault) = host();
     std::fs::create_dir(vault.join("Mathe/Ordner.md")).unwrap();
     let mut payload = fanotes_famd::empty_famd_payload("2026-01-02T03:04:05.000Z");
-    payload.page_stats = Some(json!({"words": 2}));
+    // A directory named like the note must not hide the companion. Stats
+    // without a creation time are omitted, the same way the desktop codec
+    // drops them, so the fixture carries `createdAt` and the editor's `words`.
+    payload.page_stats = Some(json!({
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "words": 2
+    }));
     std::fs::write(
         vault.join("Mathe/Ordner.famd"),
         fanotes_famd::serialize_famd("", &payload),
@@ -1021,7 +1027,14 @@ fn a_companion_read_follows_the_desktop_file_check() {
     assert_eq!(
         host.dispatch("fanotes:read-note-page-stats", &[json!("Mathe/Ordner.md")])
             .unwrap(),
-        json!({"words": 2})
+        json!({
+            "createdAt": "2026-01-02T03:04:05.000Z",
+            "words": 2,
+            "modifiedAt": "2026-01-02T03:04:05.000Z",
+            "lastOpenedAt": "2026-01-02T03:04:05.000Z",
+            "dwellMs": 0,
+            "openCount": 0
+        })
     );
     assert_eq!(
         host.dispatch("fanotes:read-note-links", &[json!("Mathe/Leer.md")])

@@ -67,6 +67,32 @@ assert.equal(companionNotePath('Mathe/Analysis.md', '.famd'), 'Mathe/Analysis.fa
 assert.equal(companionNotePath('Mathe/Analysis.famd', '.md'), 'Mathe/Analysis.md')
 assert.equal(companionNotePath('Mathe/Skript.pdf', '.famd'), 'Mathe/Skript.famd')
 
+const richPageStats = {
+  version: 2,
+  createdAt: '2026-01-02T03:04:05.000Z',
+  modifiedAt: '2026-01-02T03:04:05.000Z',
+  lastOpenedAt: '2026-01-02T03:05:05.000Z',
+  dwellMs: 1500.9,
+  openCount: 2.2,
+  typing: { wordsAdded: 4, wordsRemoved: 1 },
+  document: { words: 10 },
+}
+const richEncoded = serializeFamd('# Hi\n', {
+  ...emptyFamdPayload('2026-01-02T03:04:05.000Z'),
+  pageStats: richPageStats,
+})
+const richStats = parseFamd(richEncoded).payload?.pageStats
+assert.equal(richStats?.typing?.wordsAdded, 4)
+assert.equal(richStats?.document?.words, 10)
+assert.equal(richStats?.dwellMs, 1500)
+assert.equal(richStats?.openCount, 2)
+assert.equal(richStats?.version, 2)
+const bareStats = serializeFamd('', {
+  ...emptyFamdPayload('2026-01-02T03:04:05.000Z'),
+  pageStats: { words: 2 },
+})
+assert.equal(bareStats.includes('pageStats'), false)
+
 const poisoned = `${encoded}\n<!-- fanotes-famd:v1 chars=2 -->\n{}`
 const last = parseFamd(poisoned)
 assert.equal(last.payload, null)
