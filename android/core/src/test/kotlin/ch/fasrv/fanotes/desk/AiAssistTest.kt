@@ -101,4 +101,17 @@ class AiAssistTest {
         assertEquals("AI-Menü schließen", AI_CLOSE)
         assertEquals("3 · Prüfen", AI_PREVIEW_EYEBROW)
     }
+
+    @Test
+    fun thePanelRadiusClearsWhenTheColumnsStack() {
+        assertEquals(0, aiPanelRadiusDp(0))
+        assertEquals(0, aiPanelRadiusDp(760))
+        assertEquals(12, aiPanelRadiusDp(761))
+        assertEquals(12, aiPanelRadiusDp(1230))
+        assertEquals(42, AI_MARK_DP)
+        assertEquals(22, AI_MARK_ICON_DP)
+        assertEquals(55, AI_PREVIEW_TOOLBAR_DP)
+        assertEquals(58, AI_FOOTER_DP)
+        assertEquals(145, AI_RUN_MIN_DP)
+    }
 }

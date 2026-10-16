@@ -174,8 +174,8 @@ fun previewMathChrome() = PreviewMathChrome(1.45f, 1.05f, 12f, 0.075f, 0.05f, 0.
 fun previewBlockTop(marginEm: Float, first: Boolean) = if (first) 0f else marginEm
 
 /**
- * Paragraph and list rhythm from `.markdown-preview`. List indent is the
- * 1.5em padding of `ul`/`ol` plus the 0.2em on each item.
+ * Paragraph and list rhythm from `.markdown-preview`. Each nested `ul`/`ol`
+ * adds [PreviewFlowBox.listIndentEm], and each item adds [PreviewFlowBox.listPadEm].
  */
 data class PreviewFlowBox(
     val paragraphTopEm: Float,
@@ -186,6 +186,12 @@ data class PreviewFlowBox(
 )
 
 fun previewFlowBox() = PreviewFlowBox(0.65f, 1f, 0.28f, 0.2f, 1.5f)
+
+/** Em space, one em wide in the preview font. */
+const val PREVIEW_LIST_EM_SPACE = '\u2003'
+
+/** En space, half an em wide in the preview font. */
+const val PREVIEW_LIST_EN_SPACE = '\u2002'
 
 fun previewFlowTop(kind: String, first: Boolean): Float = when (kind) {
     "paragraph" -> previewBlockTop(previewFlowBox().paragraphTopEm, first)
@@ -199,9 +205,92 @@ fun previewFlowBottom(kind: String): Float = when (kind) {
     else -> 0f
 }
 
+/**
+ * Inset of a top-level list item: the 1.5em list padding plus the 0.2em on the item.
+ * Deeper levels add another 1.5em each. The reading line carries that extra pad,
+ * because the preview chrome already applies this single inset.
+ */
 fun previewFlowStart(kind: String): Float {
     val flow = previewFlowBox()
     return if (kind == "bullet" || kind == "number" || kind == "task") flow.listIndentEm + flow.listPadEm else 0f
+}
+
+/** Marker column of a list indent. A tab advances to the next stop of 4. */
+fun previewListColumns(indent: String): Int {
+    var column = 0
+    for (ch in indent) {
+        when (ch) {
+            ' ' -> column += 1
+            '\t' -> column += 4 - (column % 4)
+            else -> break
+        }
+    }
+    return column
+}
+
+/**
+ * Nesting level of each list item, in document order. Level 1 is the outermost
+ * list. A deeper marker column opens one nested list, the way a desktop `ul`
+ * inside an `li` does. Extra spaces do not skip a level, and a shallower marker
+ * closes the inner lists.
+ */
+fun previewListLevels(indents: List<String>): List<Int> {
+    val levels = ArrayList<Int>(indents.size)
+    val stack = ArrayList<Int>()
+    for (indent in indents) {
+        val column = previewListColumns(indent)
+        while (stack.isNotEmpty() && stack.last() > column) stack.removeAt(stack.lastIndex)
+        if (stack.isEmpty() || stack.last() < column) stack.add(column)
+        levels += stack.size
+    }
+    return levels
+}
+
+/**
+ * Start inset of a preview list item. Each level adds the 1.5em of `ul`/`ol`,
+ * and the item keeps its 0.2em once.
+ */
+fun previewListStartEm(level: Int): Float {
+    if (level <= 0) return 0f
+    val flow = previewFlowBox()
+    return level * flow.listIndentEm + flow.listPadEm
+}
+
+/** [previewListStartEm] in pixels of the preview font. */
+fun previewListIndentPx(level: Int, textSizePx: Float): Float {
+    val base = if (textSizePx <= 0f) 16f else textSizePx
+    return base * previewListStartEm(level)
+}
+
+/**
+ * Pad drawn after the single top-level inset. One deeper level is an em space
+ * plus an en space, which is the extra 1.5em. Level 1 adds nothing.
+ */
+fun previewListExtraPad(level: Int): String {
+    if (level <= 1) return ""
+    return "$PREVIEW_LIST_EM_SPACE$PREVIEW_LIST_EN_SPACE".repeat(level - 1)
+}
+
+/** Level encoded by [previewListExtraPad]. A raw source indent is the outermost list. */
+fun previewListLevelOfPrefix(prefix: String): Int {
+    val unit = previewListExtraPad(2)
+    if (prefix.isEmpty() || unit.isEmpty() || prefix.length % unit.length != 0) return 1
+    if (prefix.chunked(unit.length).all { it == unit }) return 1 + prefix.length / unit.length
+    return 1
+}
+
+/**
+ * Indent already stored on a reading line: the original spaces, or the 1.5em
+ * pad that replaced them.
+ */
+fun previewReadingListPrefix(text: String): String {
+    val raw = text.takeWhile { it == ' ' || it == '\t' }
+    if (raw.isNotEmpty()) return raw
+    val unit = previewListExtraPad(2)
+    if (unit.isEmpty()) return ""
+    var end = 0
+    while (end + unit.length <= text.length && text.startsWith(unit, end)) end += unit.length
+    return text.substring(0, end)
 }
 
 /**
@@ -221,7 +310,7 @@ data class PreviewTaskLine(
 
 /** Splits a Schön task into its indent, checkbox, and label. */
 fun previewTaskLine(text: String, inlines: List<DetailsInline>): PreviewTaskLine? {
-    val indent = text.takeWhile { it == ' ' || it == '\t' }
+    val indent = previewReadingListPrefix(text)
     val rest = text.drop(indent.length)
     val checked = when {
         rest.startsWith("☑ ") -> true
@@ -363,11 +452,11 @@ fun previewTableCells(text: String, inlines: List<DetailsInline>, alignTokens: S
 
 /** Accent list marker from `.markdown-preview li::marker`, including the trailing space. */
 fun previewMarkerEnd(text: String, kind: String): Int {
-    val indent = text.takeWhile { it == ' ' || it == '\t' }.length
+    val indent = previewReadingListPrefix(text).length
     val rest = text.drop(indent)
     val marker = when (kind) {
         "bullet" -> if (rest.startsWith("• ")) "• " else ""
-        "number" -> Regex("""^\d+\.\s+""").find(rest)?.value.orEmpty()
+        "number" -> Regex("""^\d+[.)]\s+""").find(rest)?.value.orEmpty()
         else -> ""
     }
     return if (marker.isEmpty()) 0 else indent + marker.length

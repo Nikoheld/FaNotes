@@ -481,6 +481,15 @@ fun calendarRange(view: String, anchor: java.time.LocalDate): List<java.time.Loc
     else -> emptyList()
 }
 
+/** Desktop calendar rail: 248px beside the grid, hidden at 960px and below. */
+const val CAL_SIDE_DP = 248
+const val CAL_SIDE_BREAK_DP = 960
+const val CAL_MINI_CELL_DP = 28
+const val CAL_MINI_DOT_DP = 4
+const val CAL_ICON_DP = 28
+
+fun calendarShowsSide(widthDp: Int): Boolean = widthDp > CAL_SIDE_BREAK_DP
+
 /** How far the desktop calendar moves: a week for Woche and Agenda, a month for Monat. */
 fun calendarShift(view: String, anchor: java.time.LocalDate, step: Int): java.time.LocalDate = when (view) {
     "three" -> anchor.plusDays(3L * step)
@@ -581,6 +590,11 @@ const val FOLDER_COLORS_PATH = ".fanotes/folder-colors.json"
 /** Swatches from the desktop file tree. */
 const val FOLDER_COLOR_MENU = "Darstellung"
 const val FOLDER_COLOR_CLEAR = "Standardfarbe"
+const val FOLDER_COLOR_PICK = "Ordnerfarbe wählen"
+const val FOLDER_COLOR_REMOVE = "Ordnerfarbe entfernen"
+const val FOLDER_SWATCH_DP = 23
+const val FOLDER_SWATCH_GAP_DP = 5
+const val FOLDER_SWATCH_COLUMNS = 6
 
 /** Folder titles mix 54% of the folder color into the text and use weight 620. */
 const val FOLDER_NAME_WEIGHT = 620

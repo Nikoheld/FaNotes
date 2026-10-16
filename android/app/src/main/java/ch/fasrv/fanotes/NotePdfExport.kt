@@ -159,9 +159,9 @@ fun writeNotePdf(
                 val lines = wrapBoxLines(anchored.box.text.ifEmpty { "Text" }, chars)
                 val lineHeight = fontSize * 1.35f
                 val boxHeight = worksheetCardHeightPx(anchored.box.text, boxWidth, fontSize, scale)
-                val top = sy - boxHeight + 8f * scale
+                val top = sy
                 val card = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(184, 255, 255, 255) }
-                canvas.drawRect(sx, top, sx + boxWidth, sy + 8f * scale, card)
+                canvas.drawRect(sx, top, sx + boxWidth, sy + boxHeight, card)
                 text.color = if (anchored.box.text.isEmpty()) Color.parseColor("#747887") else Color.parseColor("#202333")
                 text.textSize = fontSize
                 var baseline = top + 6f * scale + fontSize

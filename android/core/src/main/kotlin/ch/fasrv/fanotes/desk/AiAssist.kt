@@ -70,11 +70,18 @@ const val AI_FIELD_AREA_DP = 82
 const val AI_FIELD_RADIUS_DP = 8
 const val AI_CLOSE = "AI-Menü schließen"
 const val AI_PREVIEW_EYEBROW = "3 · Prüfen"
+const val AI_MARK_ICON_DP = 22
+const val AI_PREVIEW_TOOLBAR_DP = 55
+const val AI_FOOTER_DP = 58
+const val AI_RUN_MIN_DP = 145
 
 fun aiProviderKind(local: Boolean): String = if (local) "Lokal" else "Cloud"
 
 /** One column at the desktop 760px stack, otherwise config beside the preview. */
 fun aiPanelStacks(widthDp: Int): Boolean = widthDp <= AI_STACK_BREAK_DP
+
+/** Later shell CSS keeps radius 12, and the 760px rule clears it when the body stacks. */
+fun aiPanelRadiusDp(widthDp: Int): Int = if (aiPanelStacks(widthDp)) 0 else AI_PANEL_RADIUS_DP
 
 /** Config track: full width when stacked, 43% from 761–980, otherwise 430–510. */
 fun aiConfigWidthDp(widthDp: Int): Int = when {

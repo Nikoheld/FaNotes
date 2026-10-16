@@ -1340,51 +1340,113 @@ fun HomeworkScreen(model: FaNotesViewModel) {
             if (planner != "list") {
                 val days = ch.fasrv.fanotes.desk.homeworkPlannerDays(cursor, planner)
                 val byDate = shownTasks.filter { it.dueDate != null }.groupBy { it.dueDate }
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-                    TextButton(onClick = { cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, -1) }) { Text("‹") }
-                    Text(ch.fasrv.fanotes.desk.homeworkPlannerLabel(cursor, planner), modifier = Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.SemiBold)
-                    TextButton(onClick = { cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, 1) }) { Text("›") }
-                    TextButton(onClick = { cursor = LocalDate.now() }) { Text("Heute") }
-                }
-                Row(Modifier.fillMaxWidth()) {
-                    ch.fasrv.fanotes.desk.homeworkWeekdays().forEach { label ->
-                        Text(label, modifier = Modifier.weight(1f), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                val calShape = RoundedCornerShape(ch.fasrv.fanotes.desk.HOMEWORK_CAL_RADIUS_DP.dp)
+                val dayShape = RoundedCornerShape(ch.fasrv.fanotes.desk.HOMEWORK_DAY_RADIUS_DP.dp)
+                val navShape = RoundedCornerShape(6.dp)
+                val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+                val limit = ch.fasrv.fanotes.desk.homeworkDayLimit(planner)
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp, bottom = 18.dp)
+                        .clip(calShape)
+                        .border(1.dp, rule, calShape)
+                        .background(LocalStatusInk.current.panelStrong.copy(alpha = 0.82f))
+                        .padding(ch.fasrv.fanotes.desk.HOMEWORK_CAL_PAD_DP.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Box(
+                            Modifier
+                                .size(ch.fasrv.fanotes.desk.HOMEWORK_NAV_DP.dp)
+                                .clip(navShape)
+                                .border(1.dp, rule, navShape)
+                                .background(MaterialTheme.colorScheme.surface)
+                                .clickable(onClickLabel = ch.fasrv.fanotes.desk.HOMEWORK_PREVIOUS) {
+                                    cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, -1)
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) { Text("‹") }
+                        Text(
+                            ch.fasrv.fanotes.desk.homeworkPlannerLabel(cursor, planner),
+                            modifier = Modifier.weight(1f),
+                            textAlign = TextAlign.Center,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Box(
+                            Modifier
+                                .size(ch.fasrv.fanotes.desk.HOMEWORK_NAV_DP.dp)
+                                .clip(navShape)
+                                .border(1.dp, rule, navShape)
+                                .background(MaterialTheme.colorScheme.surface)
+                                .clickable(onClickLabel = ch.fasrv.fanotes.desk.HOMEWORK_NEXT) {
+                                    cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, 1)
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) { Text("›") }
+                        Text(
+                            "Heute",
+                            color = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f)),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight(700),
+                            modifier = Modifier.clickable { cursor = LocalDate.now() },
+                        )
                     }
-                }
-                days.chunked(7).forEach { week ->
-                    Row(Modifier.fillMaxWidth()) {
-                        week.forEach { day ->
-                            val items = byDate[day.date.toString()].orEmpty()
-                            Column(
-                                Modifier
-                                    .weight(1f)
-                                    .heightIn(min = if (planner == "week") 72.dp else 48.dp)
-                                    .clickable { due = day.date.toString() }
-                                    .padding(2.dp),
-                            ) {
-                                Text(
-                                    day.date.dayOfMonth.toString(),
-                                    fontSize = 12.sp,
-                                    color = when {
-                                        day.date == LocalDate.now() -> MaterialTheme.colorScheme.primary
-                                        day.outside -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
-                                        else -> MaterialTheme.colorScheme.onSurface
-                                    },
-                                    fontWeight = if (day.date == LocalDate.now()) FontWeight.Bold else FontWeight.Normal,
-                                )
-                                items.take(if (planner == "week") 8 else 3).forEach { task ->
-                                    val clock = task.dueTime?.takeIf { it.isNotBlank() }
-                                    Text(
-                                        if (clock == null) task.title else "$clock · ${task.title}",
-                                        fontSize = 10.sp,
-                                        maxLines = 1,
-                                        fontWeight = if (task.priority == "high") FontWeight.Bold else FontWeight.Normal,
-                                        textDecoration = if (task.done) TextDecoration.LineThrough else null,
-                                        color = if (task.done) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f) else MaterialTheme.colorScheme.onSurface,
-                                    )
+                    Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_DAY_GAP_DP.dp)) {
+                        ch.fasrv.fanotes.desk.homeworkWeekdays().forEach { label ->
+                            Text(
+                                label.uppercase(java.util.Locale.GERMAN),
+                                modifier = Modifier.weight(1f),
+                                textAlign = TextAlign.Center,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight(720),
+                                letterSpacing = 0.06.em,
+                                color = LocalStatusInk.current.muted,
+                            )
+                        }
+                    }
+                    days.chunked(7).forEach { week ->
+                        Row(Modifier.fillMaxWidth().padding(bottom = ch.fasrv.fanotes.desk.HOMEWORK_DAY_GAP_DP.dp), horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_DAY_GAP_DP.dp)) {
+                            week.forEach { day ->
+                                val items = byDate[day.date.toString()].orEmpty()
+                                val today = day.date == LocalDate.now()
+                                Column(
+                                    Modifier
+                                        .weight(1f)
+                                        .heightIn(min = ch.fasrv.fanotes.desk.homeworkDayMinDp(planner).dp)
+                                        .clip(dayShape)
+                                        .border(1.dp, if (today) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f) else rule, dayShape)
+                                        .background(MaterialTheme.colorScheme.background.copy(alpha = 0.8f))
+                                        .alpha(if (day.outside) 0.45f else 1f)
+                                        .clickable { due = day.date.toString() }
+                                        .padding(ch.fasrv.fanotes.desk.HOMEWORK_DAY_PAD_DP.dp),
+                                ) {
+                                    Text(day.date.dayOfMonth.toString(), fontSize = 12.sp, fontWeight = FontWeight(720))
+                                    items.take(limit).forEach { task ->
+                                        val clock = task.dueTime?.takeIf { it.isNotBlank() }
+                                        val chip = ch.fasrv.fanotes.desk.homeworkDayChip(task.kind, task.priority)
+                                        val chipFill = when (chip) {
+                                            "high" -> LocalStatusInk.current.warning.copy(alpha = 0.22f)
+                                            "appointment" -> MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                                            else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                        }
+                                        Text(
+                                            if (clock == null) task.title else "$clock · ${task.title}",
+                                            modifier = Modifier
+                                                .padding(top = 3.dp)
+                                                .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.HOMEWORK_CHIP_RADIUS_DP.dp))
+                                                .background(chipFill)
+                                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                                                .alpha(if (task.done) 0.55f else 1f),
+                                            fontSize = 12.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            textDecoration = if (task.done) TextDecoration.LineThrough else null,
+                                        )
+                                    }
+                                    val hidden = items.size - limit
+                                    if (hidden > 0) Text("+$hidden", fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 2.dp))
                                 }
-                                val hidden = items.size - (if (planner == "week") 8 else 3)
-                                if (hidden > 0) Text("+$hidden", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
                             }
                         }
                     }
@@ -2295,21 +2357,70 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
         anchor = next
         if (view == "month") month = YearMonth.from(next)
     }
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState())
-            .pointerInput(view) {
-                detectDeskSwipe { direction ->
-                    ch.fasrv.fanotes.desk.calendarSwipeStep(direction)?.let(::shiftCalendar)
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val showSide = ch.fasrv.fanotes.desk.calendarShowsSide(maxWidth.value.toInt())
+        Row(Modifier.fillMaxSize()) {
+            if (showSide) {
+                Column(
+                    Modifier
+                        .width(ch.fasrv.fanotes.desk.CAL_SIDE_DP.dp)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState())
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Kalender", modifier = Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight(650), letterSpacing = (-0.01).em)
+                        Box(
+                            Modifier
+                                .size(ch.fasrv.fanotes.desk.CAL_ICON_DP.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA), RoundedCornerShape(8.dp))
+                                .clickable { model.showDestination("notes") },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = "Schließen", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
+                    CalendarMini(anchor, shown.events, onSelect = {
+                        anchor = it
+                        month = YearMonth.from(it)
+                    }) { step ->
+                        val next = ch.fasrv.fanotes.desk.calendarShift("month", anchor, step)
+                        anchor = next
+                        month = YearMonth.from(next)
+                    }
+                    CalendarLists(model, document, calendarName) { calendarName = it }
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA), RoundedCornerShape(8.dp))
+                            .clickable { onOpenNote(CALENDAR_NOTE_PATH) }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                    ) { Text("Als Notiz öffnen", fontSize = 12.sp) }
                 }
-            },
-    ) {
-        Text("Kalender", style = MaterialTheme.typography.titleLarge)
-        Text("Gespeichert in Kalender.md.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-        TextButton(onClick = { onOpenNote(CALENDAR_NOTE_PATH) }) { Text("Als Notiz öffnen") }
-        CalendarLists(model, document, calendarName) { calendarName = it }
+                Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
+            }
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+                    .pointerInput(view) {
+                        detectDeskSwipe { direction ->
+                            ch.fasrv.fanotes.desk.calendarSwipeStep(direction)?.let(::shiftCalendar)
+                        }
+                    },
+            ) {
+        if (!showSide) {
+            Text("Kalender", style = MaterialTheme.typography.titleLarge)
+            Text("Gespeichert in Kalender.md.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            TextButton(onClick = { onOpenNote(CALENDAR_NOTE_PATH) }) { Text("Als Notiz öffnen") }
+            CalendarLists(model, document, calendarName) { calendarName = it }
+        }
         OutlinedTextField(calendarQuery, { calendarQuery = it }, label = { Text("Im Kalender suchen") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         if (reminder != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2414,6 +2525,70 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
             }) { Text("Eintragen") }
             TextButton(onClick = onExportIcs) { Text("Exportieren") }
             TextButton(onClick = onImportIcs) { Text("Importieren") }
+        }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarMini(
+    anchor: LocalDate,
+    events: List<ch.fasrv.fanotes.desk.CalendarEvent>,
+    onSelect: (LocalDate) -> Unit,
+    onShift: (Int) -> Unit,
+) {
+    val days = ch.fasrv.fanotes.desk.calendarRange("month", anchor)
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    val label = anchor.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.GERMAN))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("‹", modifier = Modifier.clickable(onClickLabel = "Vorheriger Zeitraum") { onShift(-1) }.padding(4.dp))
+        Text(label, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 12.sp, fontWeight = FontWeight(650))
+        Text("›", modifier = Modifier.clickable(onClickLabel = "Nächster Zeitraum") { onShift(1) }.padding(4.dp))
+    }
+    Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So").forEach { day ->
+            Text(day.uppercase(java.util.Locale.GERMAN), modifier = Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 12.sp, fontWeight = FontWeight(700), letterSpacing = 0.04.em, color = LocalStatusInk.current.muted)
+        }
+    }
+    days.chunked(7).forEach { week ->
+        Row(Modifier.fillMaxWidth()) {
+            week.forEach { date ->
+                val outside = date.month != anchor.month
+                val selected = date == anchor
+                val today = date == LocalDate.now()
+                val busy = events.any { ch.fasrv.fanotes.desk.occurrencesOn(it, date) }
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(ch.fasrv.fanotes.desk.CAL_MINI_CELL_DP.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (selected) LocalStatusInk.current.panelActive else Color.Transparent)
+                        .clickable { onSelect(date) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        date.dayOfMonth.toString(),
+                        fontSize = 12.sp,
+                        color = when {
+                            today -> accent
+                            outside -> LocalStatusInk.current.muted
+                            else -> MaterialTheme.colorScheme.onSurface
+                        },
+                        modifier = Modifier.alpha(if (outside) 0.55f else 1f),
+                    )
+                    if (busy) {
+                        Box(
+                            Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 3.dp)
+                                .size(ch.fasrv.fanotes.desk.CAL_MINI_DOT_DP.dp)
+                                .clip(CircleShape)
+                                .background(accent),
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -4488,17 +4663,41 @@ private fun AiChoiceCard(title: String, detail: String, badge: String, selected:
 }
 
 @Composable
-private fun AiPanelButton(label: String, primary: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+private fun AiPanelButton(label: String, primary: Boolean, enabled: Boolean = true, minWidth: Int = 0, onClick: () -> Unit) {
     val shape = RoundedCornerShape(6.dp)
     val fill = if (primary) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.panelStrong
     val ink = if (primary) MaterialTheme.colorScheme.background else LocalStatusInk.current.soft
     val border = if (primary) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
     Box(
-        Modifier.height(34.dp).alpha(if (enabled) 1f else 0.45f).clip(shape).background(fill).border(1.dp, border, shape).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 12.dp),
+        Modifier
+            .height(34.dp)
+            .widthIn(min = minWidth.dp)
+            .alpha(if (enabled) 1f else 0.45f)
+            .clip(shape)
+            .background(fill)
+            .border(1.dp, border, shape)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = ink)
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = ink, maxLines = 1)
     }
+}
+
+@Composable
+private fun AiSegment(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        fontSize = 12.sp,
+        color = if (selected) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
+        modifier = Modifier
+            .height(27.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp)
+            .wrapContentHeight(Alignment.CenterVertically),
+    )
 }
 
 @Composable
@@ -4511,7 +4710,13 @@ private fun AiField(
     minLines: Int = 1,
 ) {
     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.AI_FIELD_RADIUS_DP.dp)
-    Column(Modifier.fillMaxWidth().padding(top = 9.dp)) {
+    var focused by remember { mutableStateOf(false) }
+    val border = if (focused) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
+    }
+    Column(Modifier.fillMaxWidth().padding(top = 9.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Text(label, fontSize = 12.sp, fontWeight = FontWeight(650), color = LocalStatusInk.current.soft)
         BasicTextField(
             value = value,
@@ -4519,23 +4724,26 @@ private fun AiField(
             singleLine = minLines == 1,
             minLines = minLines,
             visualTransformation = if (password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
-            textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp),
+            textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, lineHeight = 17.4.sp),
             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 5.dp)
-                .heightIn(min = if (minLines > 1) ch.fasrv.fanotes.desk.AI_FIELD_AREA_DP.dp else ch.fasrv.fanotes.desk.AI_FIELD_HEIGHT_DP.dp)
+                .then(
+                    if (minLines > 1) Modifier.heightIn(min = ch.fasrv.fanotes.desk.AI_FIELD_AREA_DP.dp)
+                    else Modifier.height(ch.fasrv.fanotes.desk.AI_FIELD_HEIGHT_DP.dp),
+                )
                 .clip(shape)
-                .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), shape)
+                .border(1.dp, border, shape)
                 .background(MaterialTheme.colorScheme.background)
+                .onFocusChanged { focused = it.isFocused }
                 .padding(horizontal = 9.dp, vertical = if (minLines > 1) 8.dp else 0.dp),
             decorationBox = { inner ->
                 Box(
-                    Modifier.fillMaxWidth().heightIn(min = ch.fasrv.fanotes.desk.AI_FIELD_HEIGHT_DP.dp),
-                    contentAlignment = Alignment.CenterStart,
+                    Modifier.fillMaxWidth().then(if (minLines == 1) Modifier.fillMaxHeight() else Modifier),
+                    contentAlignment = if (minLines == 1) Alignment.CenterStart else Alignment.TopStart,
                 ) {
                     if (value.isEmpty() && hint.isNotEmpty()) {
-                        Text(hint, color = LocalStatusInk.current.muted, fontSize = 12.sp, maxLines = 1)
+                        Text(hint, color = LocalStatusInk.current.muted, fontSize = 12.sp, maxLines = if (minLines == 1) 1 else 4)
                     }
                     inner()
                 }
@@ -4570,12 +4778,26 @@ fun AiScreen(model: FaNotesViewModel) {
     val calmMotion = ch.fasrv.fanotes.desk.reduceMotion(settings["reduce-motion"])
     val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
     val canRun = !busy && note != null && setting("model").isNotBlank() && actions.isNotEmpty()
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val screenDp = maxWidth.value.toInt()
+        val panelRadius = ch.fasrv.fanotes.desk.aiPanelRadiusDp(screenDp)
+        val panelShape = RoundedCornerShape(panelRadius.dp)
+        val panelRule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    Column(
+        Modifier
+            .fillMaxSize()
+            .clip(panelShape)
+            .then(
+                if (panelRadius == 0) Modifier
+                else Modifier.border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), panelShape),
+            )
+            .background(MaterialTheme.colorScheme.surface),
+    ) {
+        Column(Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.AI_HEADER_DP.dp).background(MaterialTheme.colorScheme.background)) {
         Row(
             Modifier
+                .weight(1f)
                 .fillMaxWidth()
-                .heightIn(min = ch.fasrv.fanotes.desk.AI_HEADER_DP.dp)
-                .background(MaterialTheme.colorScheme.background)
                 .padding(horizontal = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -4584,11 +4806,11 @@ fun AiScreen(model: FaNotesViewModel) {
                 Modifier.size(ch.fasrv.fanotes.desk.AI_MARK_DP.dp).clip(RoundedCornerShape(ch.fasrv.fanotes.desk.AI_MARK_RADIUS_DP.dp)).background(MaterialTheme.colorScheme.onSurface),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.background)
+                Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.AI_MARK_ICON_DP.dp), tint = MaterialTheme.colorScheme.background)
             }
             Column(Modifier.weight(1f)) {
-                Text(ch.fasrv.fanotes.desk.AI_PANEL_EYEBROW.uppercase(java.util.Locale.GERMAN), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.08.em, color = accent)
-                Text(ch.fasrv.fanotes.desk.AI_PANEL_TITLE, fontSize = 18.sp, letterSpacing = (-0.035).em)
+                Text(ch.fasrv.fanotes.desk.AI_PANEL_EYEBROW.uppercase(java.util.Locale.GERMAN), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.12.em, color = accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(ch.fasrv.fanotes.desk.AI_PANEL_TITLE, fontSize = 18.sp, letterSpacing = (-0.035).em, maxLines = 1)
                 Text(ch.fasrv.fanotes.desk.AI_PANEL_DETAIL, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
             }
             Box(
@@ -4598,7 +4820,8 @@ fun AiScreen(model: FaNotesViewModel) {
                 Icon(Icons.Filled.Close, contentDescription = ch.fasrv.fanotes.desk.AI_CLOSE, modifier = Modifier.size(18.dp), tint = LocalStatusInk.current.muted)
             }
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(panelRule))
+        }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             val panelWidth = maxWidth.value.toInt()
             val configPane: @Composable () -> Unit = {
@@ -4704,15 +4927,6 @@ fun AiScreen(model: FaNotesViewModel) {
             }
             val previewPane: @Composable () -> Unit = {
         Column(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 12.dp)) {
-        Text(ch.fasrv.fanotes.desk.AI_PREVIEW_EYEBROW.uppercase(java.util.Locale.GERMAN), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.08.em, color = accent)
-        Text(
-            if (preview != null) "${definition.title} · Ergebnis" else note?.path ?: "Keine Notiz geöffnet",
-            fontSize = 12.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(bottom = 12.dp),
-        )
-        if (status.isNotBlank()) Text(status, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(bottom = 8.dp))
         val result = preview
         if (result == null) {
             Text("Deine Notiz bleibt unverändert", fontWeight = FontWeight.SemiBold)
@@ -5073,25 +5287,68 @@ fun AiScreen(model: FaNotesViewModel) {
                 }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 12.dp)) {
-            if (preview != null) {
-                AiPanelButton(ch.fasrv.fanotes.desk.AI_RESET, primary = false) { model.aiPreview.value = null }
-                AiPanelButton(ch.fasrv.fanotes.desk.AI_APPLY, primary = true) { model.applyAiPreview() }
-            } else {
-                AiPanelButton(ch.fasrv.fanotes.desk.AI_RUN, primary = true, enabled = canRun) {
-                    model.runAi(provider, setting("url"), setting("model"), setting("key"), setting("user"), actions.toList(), instruction)
-                }
-            }
-        }
         }
             }
             val previewScroll = Modifier
                 .onGloballyPositioned { previewColumnTop = it.positionInRoot().y.roundToInt() }
                 .verticalScroll(pageScroll)
+            val previewHeading = if (preview != null) "${definition.title} · Ergebnis" else note?.title?.ifBlank { null } ?: note?.path ?: "Keine Notiz geöffnet"
+            val previewToolbar: @Composable () -> Unit = {
+                Row(
+                    Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.AI_PREVIEW_TOOLBAR_DP.dp).padding(horizontal = 15.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(ch.fasrv.fanotes.desk.AI_PREVIEW_EYEBROW.uppercase(java.util.Locale.GERMAN), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.12.em, color = accent, maxLines = 1)
+                        Text(previewHeading, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    if (preview != null) {
+                        Row(
+                            Modifier.padding(start = 12.dp).clip(RoundedCornerShape(8.dp)).border(1.dp, panelRule, RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surface).padding(2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            AiSegment("Schön", pretty) { pretty = true }
+                            AiSegment("Markdown", !pretty) { pretty = false }
+                        }
+                    }
+                }
+            }
+            val previewFooter: @Composable () -> Unit = {
+                Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
+                    if (status.isNotBlank()) {
+                        Text(status, fontSize = 12.sp, color = LocalStatusInk.current.soft, modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 9.dp))
+                    }
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(panelRule))
+                    Row(
+                        Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.AI_FOOTER_DP.dp).padding(horizontal = 13.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    ) {
+                        if (preview != null) {
+                            AiPanelButton(ch.fasrv.fanotes.desk.AI_RESET, primary = false) { model.aiPreview.value = null }
+                            AiPanelButton(ch.fasrv.fanotes.desk.AI_APPLY, primary = true) { model.applyAiPreview() }
+                        } else {
+                            AiPanelButton(
+                                ch.fasrv.fanotes.desk.AI_RUN,
+                                primary = true,
+                                enabled = canRun,
+                                minWidth = ch.fasrv.fanotes.desk.AI_RUN_MIN_DP,
+                            ) {
+                                model.runAi(provider, setting("url"), setting("model"), setting("key"), setting("user"), actions.toList(), instruction)
+                            }
+                        }
+                    }
+                }
+            }
             if (ch.fasrv.fanotes.desk.aiPanelStacks(panelWidth)) {
-                Column(Modifier.fillMaxSize().then(previewScroll)) {
-                    Column(Modifier.padding(15.dp)) { configPane() }
-                    previewPane()
+                Column(Modifier.fillMaxSize()) {
+                    Column(Modifier.weight(1f).fillMaxWidth().then(previewScroll)) {
+                        Column(Modifier.padding(15.dp)) { configPane() }
+                        previewToolbar()
+                        previewPane()
+                    }
+                    previewFooter()
                 }
             } else {
                 Row(Modifier.fillMaxSize()) {
@@ -5103,13 +5360,17 @@ fun AiScreen(model: FaNotesViewModel) {
                             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.84f))
                             .padding(15.dp),
                     ) { configPane() }
-                    Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
-                    Column(
-                        Modifier.weight(1f).fillMaxHeight().background(MaterialTheme.colorScheme.background).then(previewScroll),
-                    ) { previewPane() }
+                    Box(Modifier.width(1.dp).fillMaxHeight().background(panelRule))
+                    Column(Modifier.weight(1f).fillMaxHeight().background(MaterialTheme.colorScheme.background)) {
+                        previewToolbar()
+                        Box(Modifier.fillMaxWidth().height(1.dp).background(panelRule))
+                        Column(Modifier.weight(1f).fillMaxWidth().then(previewScroll)) { previewPane() }
+                        previewFooter()
+                    }
                 }
             }
         }
+    }
     }
 }
 

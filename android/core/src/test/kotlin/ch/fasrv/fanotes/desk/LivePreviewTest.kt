@@ -356,6 +356,7 @@ class LivePreviewTest {
     @Test
     fun detailsListsKeepThePreviewMarker() {
         assertEquals("1. ", detailsNumberMarker("1. Eins"))
+        assertEquals("1) ", detailsNumberMarker("1) Eins"))
         assertEquals("12. ", detailsNumberMarker("12. Zwei"))
         assertEquals("", detailsNumberMarker("Eins"))
         assertEquals(false, detailsTaskChecked("☐ Offen"))
@@ -365,6 +366,10 @@ class LivePreviewTest {
         val numbered = detailsReadingLines("1. **Eins**")
         assertEquals("number", numbered.single().kind)
         assertEquals("1. ", detailsNumberMarker(numbered.single().text))
+        val paren = detailsReadingLines("1) **Eins**")
+        assertEquals("number", paren.single().kind)
+        assertEquals("1) ", detailsNumberMarker(paren.single().text))
+        assertEquals("1) ".length, previewMarkerEnd(paren.single().text, "number"))
         val strong = numbered.single().inlines.single()
         assertEquals("Eins", numbered.single().text.substring(strong.start, strong.end))
         val task = detailsReadingLines("- [x] **Fertig**")
@@ -372,12 +377,13 @@ class LivePreviewTest {
         assertEquals(true, detailsTaskChecked(task.single().text))
         assertEquals("Fertig", task.single().text.substring(task.single().inlines.single().start, task.single().inlines.single().end))
         val nested = detailsReadingLines("- a\n    - **nest**\n    1. **zwei**\n    - [ ] **drei**")
-        assertEquals(listOf("• a", "    • nest"), nested.filter { it.kind == "bullet" }.map { it.text })
-        assertEquals(4, nested.first { it.kind == "number" }.let { detailsListIndent(it.text).length })
+        val pad = previewListExtraPad(2)
+        assertEquals(listOf("• a", "$pad• nest"), nested.filter { it.kind == "bullet" }.map { it.text })
+        assertEquals(pad, previewReadingListPrefix(nested.first { it.kind == "number" }.text))
         assertEquals("1. ", detailsNumberMarker(nested.first { it.kind == "number" }.text))
         val nestedTask = nested.first { it.kind == "task" }
         assertEquals(false, detailsTaskChecked(nestedTask.text))
-        assertEquals(4, detailsListIndent(nestedTask.text).length)
+        assertEquals(pad, previewReadingListPrefix(nestedTask.text))
         assertEquals("drei", nestedTask.text.substring(nestedTask.inlines.single().start, nestedTask.inlines.single().end))
     }
 }

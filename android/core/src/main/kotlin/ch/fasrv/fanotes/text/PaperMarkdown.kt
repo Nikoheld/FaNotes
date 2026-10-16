@@ -14,7 +14,8 @@ data class PaperLine(val kind: PaperKind, val text: String, val sourceLine: Int 
 
 private val COMMENT = Regex("""<!--[\s\S]*?-->""")
 private val BULLET = Regex("""^\s*[-*+]\s+""")
-private val NUMBER = Regex("""^\s*(\d+)\.\s+""")
+/** CommonMark ordered marker. The desktop preview accepts both `1.` and `1)`. */
+private val NUMBER = Regex("""^\s*(\d+)[.)]\s+""")
 private val TASK = Regex("""^\s*[-*+]\s+\[([ xX])](?:\s+(.*))?$""")
 private val TABLE_RULE = Regex("""^:?-{3,}:?$""")
 private val IMAGE_LINE = Regex("""^!\[([^\]]*)]\(([^)\s]+)(?:\s+"[^"]*")?\)\s*$""")
