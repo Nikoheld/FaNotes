@@ -49,7 +49,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Accessibility
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -60,6 +62,12 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Inbox
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Work
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.Person
@@ -3018,78 +3026,276 @@ fun FirstRunDialog(
     val folders = ch.fasrv.fanotes.desk.profileFolders(draft.profile)
     val chosen = ch.fasrv.fanotes.desk.firstRunChosenFolders(draft)
     val allSelected = folders.isNotEmpty() && folders.all { it.name in draft.selected }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(ch.fasrv.fanotes.desk.FIRST_RUN_STEPS[draft.step]) },
-        text = {
-            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val profile = ch.fasrv.fanotes.desk.firstRunProfiles().firstOrNull { it.id == draft.profile }
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    val ink = LocalStatusInk.current
+    val go = { step: Int -> onDraft(ch.fasrv.fanotes.desk.firstRunStep(draft, step)) }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Column(
+                Modifier
+                    .widthIn(max = ch.fasrv.fanotes.desk.FIRST_RUN_MAX_DP.dp)
+                    .fillMaxWidth()
+                    .padding(horizontal = ch.fasrv.fanotes.desk.FIRST_RUN_GUTTER_DP.dp, vertical = 25.dp),
+            ) {
+                FirstRunBrand(draft.step) { go(it) }
+                Spacer(Modifier.height(31.dp))
+                FirstRunEyebrow(ch.fasrv.fanotes.desk.firstRunEyebrow(draft.step), accent)
                 when (draft.step) {
                     0 -> {
-                        Text("Willkommen bei FaNotes", fontWeight = FontWeight.SemiBold)
-                        Text("Alles, was dir wichtig ist. An einem ruhigen Ort.")
-                        Text("Schreibe mit Tastatur oder Stift, ordne deine Themen und finde jeden Gedanken wieder – in Schule, UNI, Privatleben oder Arbeit.")
-                        Text("Lokal & privat · Stift & Tastatur · Markdown inklusive", fontSize = 13.sp)
-                    }
-                    1 -> {
-                        Text("Wofür möchtest du FaNotes verwenden?")
-                        Text("Deine Auswahl bestimmt nur die vorgeschlagenen Startordner. Alle Funktionen bleiben in jedem Profil verfügbar.", fontSize = 13.sp)
-                        ch.fasrv.fanotes.desk.firstRunProfiles().forEach { profile ->
-                            val selected = profile.id == draft.profile
-                            Text(
-                                "${profile.title} · ${profile.description}",
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.fillMaxWidth().clickable { onDraft(ch.fasrv.fanotes.desk.firstRunChooseProfile(draft, profile.id)) }.padding(vertical = 4.dp),
-                            )
+                        Text(ch.fasrv.fanotes.desk.FIRST_RUN_TITLE_WELCOME, fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_TITLE_SP.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.058).em, lineHeight = 38.sp, modifier = Modifier.padding(top = 18.dp))
+                        Text(ch.fasrv.fanotes.desk.FIRST_RUN_TITLE_EMPHASIS, fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_TITLE_SP.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.058).em, lineHeight = 38.sp, color = accent)
+                        Text(ch.fasrv.fanotes.desk.FIRST_RUN_BODY_WELCOME, fontSize = 13.sp, lineHeight = 22.sp, color = ink.muted, modifier = Modifier.padding(top = 15.dp).widthIn(max = 500.dp))
+                        FlowRow(Modifier.padding(top = 25.dp), horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                            ch.fasrv.fanotes.desk.FIRST_RUN_BENEFITS.forEach { benefit ->
+                                FirstRunChip(benefit, accent)
+                            }
+                        }
+                        Row(Modifier.padding(top = 28.dp), horizontalArrangement = Arrangement.spacedBy(15.dp), verticalAlignment = Alignment.CenterVertically) {
+                            FirstRunContinue(ch.fasrv.fanotes.desk.FIRST_RUN_GO) { go(1) }
+                            FirstRunQuiet(ch.fasrv.fanotes.desk.FIRST_RUN_SKIP) { go(1) }
                         }
                     }
-                    2 -> {
-                        Text("Eine Seite. Zwei Arten zu schreiben.")
-                        Text("Tippe und schreibe frei auf derselben Seite. Handschrift bleibt Handschrift, bis du sie bewusst umwandelst.", fontSize = 13.sp)
-                        Text("Einfach losschreiben. Markdown wird direkt dargestellt.", fontSize = 13.sp)
-                        Text("Natürlich mit dem Stift. Ganze Seiten oder Ergänzungen zwischen Text.", fontSize = 13.sp)
-                        Text("Trotzdem alles finden. Die unsichtbare Transkription bleibt durchsuchbar.", fontSize = 13.sp)
+                    1 -> {
+                        Text(ch.fasrv.fanotes.desk.FIRST_RUN_PROFILE_TITLE, fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.055).em, lineHeight = 36.sp, modifier = Modifier.padding(top = 18.dp))
+                        Text(ch.fasrv.fanotes.desk.FIRST_RUN_PROFILE_BODY, fontSize = 13.sp, lineHeight = 22.sp, color = ink.muted, modifier = Modifier.padding(top = 15.dp).widthIn(max = 480.dp))
+                        Row(Modifier.padding(top = 25.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            FirstRunQuiet(ch.fasrv.fanotes.desk.FIRST_RUN_BACK, leading = true) { go(0) }
+                            FirstRunContinue(ch.fasrv.fanotes.desk.FIRST_RUN_NEXT) { go(2) }
+                        }
+                        FirstRunProfiles(draft.profile) { onDraft(ch.fasrv.fanotes.desk.firstRunChooseProfile(draft, it)) }
                     }
-                    else -> {
-                        Text("Welche Ordner möchtest du verwenden?")
-                        Text("Eingang ist immer dabei. Der schnelle Sammelplatz für neue Notizen und Ideen.", fontSize = 13.sp)
-                        Text(ch.fasrv.fanotes.desk.firstRunSelectionLine(chosen.size, folders.size), fontSize = 12.sp)
-                        Text(
-                            if (allSelected) "Auswahl aufheben" else "Alle auswählen",
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.clickable { onDraft(ch.fasrv.fanotes.desk.firstRunToggleAll(draft)) },
-                        )
-                        folders.forEach { folder ->
-                            val on = folder.name in draft.selected
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                Checkbox(checked = on, onCheckedChange = { onDraft(ch.fasrv.fanotes.desk.firstRunToggleFolder(draft, folder.name)) })
-                                Column(Modifier.clickable { onDraft(ch.fasrv.fanotes.desk.firstRunToggleFolder(draft, folder.name)) }) {
-                                    Text("${ch.fasrv.fanotes.desk.firstRunFolderMark(folder.name)}  ${folder.name}", fontWeight = FontWeight.SemiBold)
-                                    Text(ch.fasrv.fanotes.desk.firstRunFolderBlurb(folder.name), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                    2 -> {
+                        Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TITLE, fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.055).em, lineHeight = 36.sp, modifier = Modifier.padding(top = 18.dp))
+                        Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_BODY, fontSize = 13.sp, lineHeight = 22.sp, color = ink.muted, modifier = Modifier.padding(top = 15.dp).widthIn(max = 490.dp))
+                        Column(Modifier.padding(top = 21.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            val icons = listOf(Icons.Filled.Keyboard, Icons.Filled.Edit, Icons.Filled.Search)
+                            ch.fasrv.fanotes.desk.FIRST_RUN_WRITING.forEachIndexed { index, (title, detail) ->
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
+                                    Box(
+                                        Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(icons[index], contentDescription = null, modifier = Modifier.size(17.dp), tint = accent)
+                                    }
+                                    Column {
+                                        Text(title, fontSize = 12.sp, color = ink.soft)
+                                        Text(detail, fontSize = 12.sp, color = ink.muted, lineHeight = 17.sp, modifier = Modifier.padding(top = 3.dp))
+                                    }
                                 }
                             }
                         }
-                        Text(ch.fasrv.fanotes.desk.firstRunPlanLine(chosen.size), fontSize = 13.sp)
+                        Row(Modifier.fillMaxWidth().padding(top = 21.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            FirstRunQuiet(ch.fasrv.fanotes.desk.FIRST_RUN_BACK, leading = true) { go(1) }
+                            FirstRunContinue(ch.fasrv.fanotes.desk.FIRST_RUN_CHOOSE_FOLDERS) { go(3) }
+                        }
+                    }
+                    else -> {
+                        Text(ch.fasrv.fanotes.desk.FIRST_RUN_FOLDER_TITLE, fontSize = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.052).em, lineHeight = 34.sp, modifier = Modifier.padding(top = 18.dp))
+                        Text(ch.fasrv.fanotes.desk.firstRunFolderIntro(profile?.title ?: "Schule"), fontSize = 12.sp, lineHeight = 21.sp, color = ink.muted, modifier = Modifier.padding(top = 13.dp).widthIn(max = 540.dp))
+                        Row(
+                            Modifier.padding(top = 24.dp).heightIn(min = 67.dp).fillMaxWidth().clip(RoundedCornerShape(13.dp)).border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f), RoundedCornerShape(13.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)).padding(horizontal = 13.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(11.dp),
+                        ) {
+                            Box(Modifier.size(39.dp).clip(RoundedCornerShape(11.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.13f)), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Filled.Inbox, contentDescription = null, modifier = Modifier.size(21.dp), tint = accent)
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text(ch.fasrv.fanotes.desk.FIRST_RUN_INBOX, fontSize = 12.sp)
+                                Text(ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_DETAIL, fontSize = 12.sp, color = ink.muted, modifier = Modifier.padding(top = 4.dp))
+                            }
+                            Icon(Icons.Filled.Check, contentDescription = "Ausgewählt", modifier = Modifier.size(17.dp), tint = accent)
+                        }
+                        Text(ch.fasrv.fanotes.desk.FIRST_RUN_PREPARED, fontSize = 12.sp, color = ink.soft, modifier = Modifier.padding(top = 15.dp))
+                        Text(ch.fasrv.fanotes.desk.FIRST_RUN_PREPARED_DETAIL, fontSize = 12.sp, color = ink.muted, lineHeight = 19.sp)
+                        FirstRunQuiet(ch.fasrv.fanotes.desk.FIRST_RUN_BACK, leading = true) { go(2) }
+                        val pickerShape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_PICKER_RADIUS_DP.dp)
+                        Column(
+                            Modifier.padding(top = 16.dp).fillMaxWidth().clip(pickerShape).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), pickerShape).background(MaterialTheme.colorScheme.surface).padding(18.dp),
+                        ) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Column {
+                                    Text(profile?.title ?: "Schule", fontSize = 13.sp)
+                                    Text(ch.fasrv.fanotes.desk.firstRunSelectionLine(chosen.size, folders.size), fontSize = 12.sp, color = ink.muted, modifier = Modifier.padding(top = 3.dp))
+                                }
+                                FirstRunQuiet(if (allSelected) "Auswahl aufheben" else "Alle auswählen") { onDraft(ch.fasrv.fanotes.desk.firstRunToggleAll(draft)) }
+                            }
+                            FlowRow(Modifier.padding(top = 11.dp), horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                                folders.forEach { folder ->
+                                    val on = folder.name in draft.selected
+                                    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_SUBJECT_RADIUS_DP.dp)
+                                    Row(
+                                        Modifier.widthIn(min = 220.dp).heightIn(min = 59.dp).clip(shape).border(1.dp, if (on) MaterialTheme.colorScheme.primary.copy(alpha = 0.61f) else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA), shape).background(if (on) MaterialTheme.colorScheme.primary.copy(alpha = 0.13f) else MaterialTheme.colorScheme.surface).clickable { onDraft(ch.fasrv.fanotes.desk.firstRunToggleFolder(draft, folder.name)) }.padding(horizontal = 9.dp, vertical = 7.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(9.dp),
+                                    ) {
+                                        Box(Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.13f)), contentAlignment = Alignment.Center) {
+                                            Text(ch.fasrv.fanotes.desk.firstRunFolderMark(folder.name), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = accent)
+                                        }
+                                        Column(Modifier.widthIn(max = 180.dp)) {
+                                            Text(folder.name, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Text(ch.fasrv.fanotes.desk.firstRunFolderBlurb(folder.name), fontSize = 12.sp, color = ink.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+                                        }
+                                        if (on) Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onPrimary)
+                                    }
+                                }
+                            }
+                            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Text(ch.fasrv.fanotes.desk.firstRunPlanLine(chosen.size), fontSize = 12.sp, color = ink.muted)
+                                FirstRunContinue(ch.fasrv.fanotes.desk.FIRST_RUN_FINISH) { onFinish(draft) }
+                            }
+                        }
                     }
                 }
             }
-        },
-        confirmButton = {
-            when (draft.step) {
-                0 -> TextButton(onClick = { onDraft(ch.fasrv.fanotes.desk.firstRunStep(draft, 1)) }) { Text("Los geht’s") }
-                1 -> TextButton(onClick = { onDraft(ch.fasrv.fanotes.desk.firstRunStep(draft, 2)) }) { Text("Weiter") }
-                2 -> TextButton(onClick = { onDraft(ch.fasrv.fanotes.desk.firstRunStep(draft, 3)) }) { Text("Ordner auswählen") }
-                else -> TextButton(onClick = { onFinish(draft) }) { Text("FaNotes einrichten") }
+        }
+    }
+}
+
+@Composable
+private fun FirstRunBrand(step: Int, onStep: (Int) -> Unit) {
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    val ink = LocalStatusInk.current
+    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
+        Box(
+            Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_LOGO_DP.dp).clip(RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_LOGO_RADIUS_DP.dp)).background(MaterialTheme.colorScheme.onSurface),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_LOGO_ICON_DP.dp), tint = MaterialTheme.colorScheme.background)
+        }
+        Column(Modifier.widthIn(min = 120.dp)) {
+            Text(ch.fasrv.fanotes.desk.FIRST_RUN_BRAND, fontSize = 14.sp, letterSpacing = (-0.01).em)
+            Text(ch.fasrv.fanotes.desk.FIRST_RUN_BRAND_DETAIL, fontSize = 12.sp, color = ink.muted, modifier = Modifier.padding(top = 2.dp))
+        }
+        Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+            ch.fasrv.fanotes.desk.FIRST_RUN_STEPS.forEachIndexed { index, label ->
+                if (index > 0) {
+                    Box(
+                        Modifier.padding(end = 2.dp).width(22.dp).height(1.dp).background(
+                            if (index <= step) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f) else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA),
+                        ),
+                    )
+                }
+                val active = index == step
+                val complete = index < step
+                val circle = if (active) MaterialTheme.colorScheme.primary else if (complete) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surface
+                val ring = if (active) MaterialTheme.colorScheme.primary else if (complete) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f) else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
+                val number = if (active) MaterialTheme.colorScheme.onPrimary else if (complete) accent else ink.muted
+                Row(
+                    Modifier.padding(end = 10.dp).clickable { onStep(index) },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    Box(
+                        Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_STEP_DP.dp).clip(CircleShape).border(1.dp, ring, CircleShape).background(circle),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (complete) Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(12.dp), tint = number)
+                        else Text("${index + 1}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = number)
+                    }
+                    Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (active) MaterialTheme.colorScheme.onSurface else ink.muted, maxLines = 1)
+                }
             }
-        },
-        dismissButton = {
-            if (draft.step == 0) {
-                TextButton(onClick = { onDraft(ch.fasrv.fanotes.desk.firstRunStep(draft, 1)) }) { Text("Einsatzprofil auswählen") }
-            } else {
-                TextButton(onClick = { onDraft(ch.fasrv.fanotes.desk.firstRunStep(draft, draft.step - 1)) }) { Text("Zurück") }
-            }
-        },
+        }
+        Row(
+            Modifier.padding(start = 9.dp).clip(RoundedCornerShape(99.dp)).border(1.dp, ink.success.copy(alpha = 0.25f), RoundedCornerShape(99.dp)).background(ink.success.copy(alpha = 0.07f)).padding(horizontal = 9.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(Icons.Filled.Shield, contentDescription = null, modifier = Modifier.size(15.dp), tint = ink.success)
+            Text(ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = ink.success)
+        }
+    }
+}
+
+@Composable
+private fun FirstRunEyebrow(label: String, accent: Color) {
+    Row(
+        Modifier.clip(RoundedCornerShape(99.dp)).border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.22f), RoundedCornerShape(99.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)).padding(horizontal = 9.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(label.uppercase(java.util.Locale.GERMAN), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.085.em, color = accent)
+    }
+}
+
+@Composable
+private fun FirstRunChip(label: String, accent: Color) {
+    Row(
+        Modifier.clip(RoundedCornerShape(9.dp)).border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA), RoundedCornerShape(9.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)).padding(horizontal = 9.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp), tint = accent)
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = LocalStatusInk.current.soft)
+    }
+}
+
+@Composable
+private fun FirstRunContinue(label: String, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_CONTINUE_RADIUS_DP.dp)
+    Row(
+        Modifier.height(ch.fasrv.fanotes.desk.FIRST_RUN_CONTINUE_DP.dp).widthIn(min = 160.dp).clip(shape).background(MaterialTheme.colorScheme.onSurface).clickable(onClick = onClick).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+    ) {
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.background)
+        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(17.dp), tint = MaterialTheme.colorScheme.background)
+    }
+}
+
+@Composable
+private fun FirstRunQuiet(label: String, leading: Boolean = false, onClick: () -> Unit) {
+    Row(
+        Modifier.height(34.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(horizontal = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (leading) Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp), tint = LocalStatusInk.current.muted)
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = LocalStatusInk.current.muted)
+    }
+}
+
+@Composable
+private fun FirstRunProfiles(selectedId: String, onPick: (String) -> Unit) {
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    val icons = mapOf(
+        "school" to Icons.AutoMirrored.Filled.MenuBook,
+        "university" to Icons.Filled.School,
+        "private" to Icons.Filled.Home,
+        "work" to Icons.Filled.Work,
     )
+    FlowRow(Modifier.padding(top = 28.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(11.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+        ch.fasrv.fanotes.desk.firstRunProfiles().forEach { profile ->
+            val selected = profile.id == selectedId
+            val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_PROFILE_RADIUS_DP.dp)
+            Row(
+                Modifier.widthIn(min = 240.dp).heightIn(min = ch.fasrv.fanotes.desk.FIRST_RUN_PROFILE_MIN_DP.dp).clip(shape).border(1.dp, if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA), shape).background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surface).clickable { onPick(profile.id) }.padding(21.dp),
+                horizontalArrangement = Arrangement.spacedBy(13.dp),
+            ) {
+                Box(Modifier.size(45.dp).clip(RoundedCornerShape(13.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.11f)), contentAlignment = Alignment.Center) {
+                    Icon(icons[profile.id] ?: Icons.Filled.Folder, contentDescription = null, modifier = Modifier.size(23.dp), tint = accent)
+                }
+                Column(Modifier.weight(1f, fill = false)) {
+                    Text(profile.title, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = 2.dp))
+                    Text(profile.description, fontSize = 12.sp, color = LocalStatusInk.current.muted, lineHeight = 19.sp, modifier = Modifier.padding(top = 8.dp))
+                }
+                Box(
+                    Modifier.size(20.dp).clip(CircleShape).border(1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), CircleShape).background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (selected) Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onPrimary)
+                }
+            }
+        }
+    }
 }
 
 @Composable
