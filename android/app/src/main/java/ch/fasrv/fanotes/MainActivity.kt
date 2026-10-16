@@ -466,6 +466,7 @@ fun FaNotesScreen(
     val pinned by model.pinnedTabs.collectAsStateWithLifecycle()
     val trail by model.noteTrail.collectAsStateWithLifecycle()
     val rawDesk by model.deskSettings.collectAsStateWithLifecycle()
+    val spellingLanguage by model.spellingLanguage.collectAsStateWithLifecycle()
     val css by model.customCss.collectAsStateWithLifecycle()
     val desk = ch.fasrv.fanotes.desk.deskWithCustomCss(rawDesk, css)
     val chrome = ch.fasrv.fanotes.desk.parseCustomChrome(css)
@@ -937,7 +938,10 @@ fun FaNotesScreen(
             model.wordCountNow(),
             syncText,
             sync.status.name.lowercase(),
-            ch.fasrv.fanotes.desk.statusLanguageLabel(ch.fasrv.fanotes.desk.detectNoteLanguage(markdown)).orEmpty(),
+            if (rawDesk["spellcheck"] == "off" || !showText || open == null) "" else {
+                val code = if (spellingLanguage == "unknown") ch.fasrv.fanotes.desk.detectNoteLanguage(markdown) else spellingLanguage
+                ch.fasrv.fanotes.desk.statusLanguageLabel(code)?.let { "Aa $it" }.orEmpty()
+            },
             desk["words"] != "off",
             sync.conflicts.size,
             onConflicts = { model.showDestination("settings") },
@@ -2404,6 +2408,11 @@ private fun SplitPane(
     val folded = model.splitFolded.collectAsStateWithLifecycle().value
     val visible = ch.fasrv.fanotes.desk.markdownWithFolds(markdown, folded)
     val splitUnsaved = model.splitUnsaved.collectAsStateWithLifecycle().value
+    val spellingEpoch by model.spellingEpoch.collectAsStateWithLifecycle()
+    val spellOn = model.deskSettings.collectAsStateWithLifecycle().value["spellcheck"] != "off"
+    val spellWave = MaterialTheme.colorScheme.error.toArgb()
+    val spellInk = MaterialTheme.colorScheme.onSurface.toArgb()
+    val spellPaper = MaterialTheme.colorScheme.surface.toArgb()
     val title = path?.let { ch.fasrv.fanotes.vault.titleOf(it) }.orEmpty()
     var typing by remember(path) { mutableStateOf(false) }
     var splitEditor by remember(path) { mutableStateOf<SplitEditorView?>(null) }
@@ -2523,6 +2532,17 @@ private fun SplitPane(
                     )
                     editor.typeface = loadEditorTypeface(editor.context, metrics.editorFontId)
                     editor.showLineNumbers = metrics.showLineNumbers
+                    editor.spelling.configure(
+                        spellOn,
+                        spellWave,
+                        spellInk,
+                        spellPaper,
+                        spellingEpoch,
+                        { model.spellingAcceptedWords() },
+                        {},
+                        { model.learnSpellingWord(it) },
+                        { model.ignoreSpellingWord(it) },
+                    )
                     editor.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, metrics.fontSizePx.toFloat())
                     editor.setLineSpacing(0f, metrics.lineHeight.toFloat())
                     applyPaperCaret(editor, editor.accent, metrics.fontSizePx.toFloat())
@@ -2751,6 +2771,11 @@ private fun PageSurface(
         onDeskShortcut: (String) -> Unit,
         modifier: Modifier,
 ) {
+    val spellOn = model.deskSettings.collectAsStateWithLifecycle().value["spellcheck"] != "off"
+    val spellingEpoch by model.spellingEpoch.collectAsStateWithLifecycle()
+    val spellWave = MaterialTheme.colorScheme.error.toArgb()
+    val spellInk = MaterialTheme.colorScheme.onSurface.toArgb()
+    val spellPaper = MaterialTheme.colorScheme.surface.toArgb()
     var bound by remember { mutableStateOf("") }
     var inkNotice by remember { mutableStateOf<ch.fasrv.fanotes.ink.InkNotice?>(null) }
     val links by model.noteLinks.collectAsStateWithLifecycle()
@@ -2822,6 +2847,17 @@ private fun PageSurface(
             }
             page.onSync = onSync
             page.onMarkdown = { model.updateMarkdown(it) }
+            page.configureSpelling(
+                spellOn,
+                spellWave,
+                spellInk,
+                spellPaper,
+                spellingEpoch,
+                { model.spellingAcceptedWords() },
+                { model.reportSpellingLanguage(it) },
+                { model.learnSpellingWord(it) },
+                { model.ignoreSpellingWord(it) },
+            )
             page.onPasteImage = { name, bytes, mime -> model.importBytes(name, bytes, pdf = false, mime = mime) }
             page.onFollowLink = { target, web, anchor -> openFollowedLink(page.context, model, target, web, anchor) }
             page.onVisibleMarkdown = { previous, next -> model.updateVisibleMarkdown(previous, next) }
