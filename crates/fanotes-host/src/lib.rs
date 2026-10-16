@@ -15487,4 +15487,27 @@ mod local_zone_tests {
         );
     }
 
+    #[test]
+    fn a_newline_before_a_negative_year_clock_is_a_separator() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Year -1 is before 1970. A newline must not store 10 January 2013.
+        assert_eq!(unix_millis_from_iso("-000001-10-13\n16:00"), None);
+        assert_eq!(unix_millis_from_iso("-000001-10-13\t16:00"), None);
+        assert_eq!(unix_millis_from_iso("-000001-10-13\u{00a0}16:00"), None);
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13\n16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026\n10-13"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("-000001-10-13\u{2028}16:00"), None);
+    }
+
 }

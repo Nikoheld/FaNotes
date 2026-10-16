@@ -5330,10 +5330,10 @@ fn is_date_only_shape(value: &str) -> bool {
         return false;
     }
     let body = value.strip_prefix(['+', '-']).unwrap_or(value);
-    !body
-        .bytes()
-        .any(|byte| matches!(byte, b'T' | b't' | b' ' | b'+'))
-        && body.bytes().filter(|byte| *byte == b'-').count() <= 2
+    // A newline or a no-break space before a clock is still a time.
+    !body.chars().any(|character| {
+        character == 'T' || character == 't' || character == '+' || is_date_parse_space(character)
+    }) && body.bytes().filter(|byte| *byte == b'-').count() <= 2
 }
 
 /// `YYYY` or `+YYYYYY` / `-YYYYYY`. `02026` and `+2026` are not this form.
@@ -6196,8 +6196,8 @@ fn split_calendar(value: &str) -> Option<(i32, i32, i32, usize)> {
         }
         (value[..4].parse().ok()?, 4)
     };
-    if matches!(bytes.get(index), Some(b'T' | b't' | b' ')) {
-        return Some((year, 1, 1, index + 1));
+    if let Some(separator) = calendar_separator_len(value, index) {
+        return Some((year, 1, 1, index + separator));
     }
     if bytes.get(index) != Some(&b'-')
         || bytes.len() < index + 4
@@ -6207,18 +6207,28 @@ fn split_calendar(value: &str) -> Option<(i32, i32, i32, usize)> {
     }
     let month: i32 = value[index + 1..index + 3].parse().ok()?;
     index += 3;
-    if matches!(bytes.get(index), Some(b'T' | b't' | b' ')) {
-        return Some((year, month, 1, index + 1));
+    if let Some(separator) = calendar_separator_len(value, index) {
+        return Some((year, month, 1, index + separator));
     }
     if bytes.get(index) != Some(&b'-')
-        || bytes.len() < index + 4
+        || bytes.len() < index + 3
         || !bytes[index + 1..index + 3].iter().all(u8::is_ascii_digit)
-        || !matches!(bytes.get(index + 3), Some(b'T' | b't' | b' '))
     {
         return None;
     }
+    let Some(separator) = calendar_separator_len(value, index + 3) else {
+        return None;
+    };
     let day: i32 = value[index + 1..index + 3].parse().ok()?;
-    Some((year, month, day, index + 4))
+    Some((year, month, day, index + 3 + separator))
+}
+
+/// `T` or a date-parse space ends the calendar and starts the clock.
+/// A newline or a no-break space is the same break as an ordinary space.
+fn calendar_separator_len(value: &str, index: usize) -> Option<usize> {
+    let character = value.get(index..)?.chars().next()?;
+    (character == 'T' || character == 't' || is_date_parse_space(character))
+        .then_some(character.len_utf8())
 }
 
 /// `HH:mm`, optional seconds, and an optional fraction. The remainder is the zone.
@@ -13905,6 +13915,39 @@ mod tests {
                 Some("2026-10-13T04:00:00.000Z")
             );
             assert_eq!(super::canonical_iso("-000001-13."), None);
+        });
+    }
+
+    #[test]
+    fn a_newline_before_a_negative_year_clock_is_a_separator() {
+        with_tz("America/New_York", || {
+            // Tab, newline, and a no-break space are the same break as a space.
+            // Year -1 keeps its local mean time instead of becoming 2013.
+            assert_eq!(
+                super::canonical_iso("-000001-10-13\n16:00").as_deref(),
+                Some("-000001-10-13T20:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13\t16:00").as_deref(),
+                Some("-000001-10-13T20:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13\u{00a0}16:00").as_deref(),
+                Some("-000001-10-13T20:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13\n\n16:00").as_deref(),
+                Some("-000001-10-13T20:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13\n16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026\n10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("-000001-10-13\u{2028}16:00"), None);
         });
     }
 }
