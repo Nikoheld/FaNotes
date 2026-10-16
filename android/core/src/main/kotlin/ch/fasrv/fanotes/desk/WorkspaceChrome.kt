@@ -287,3 +287,16 @@ fun statusSaveTone(label: String): String = when (label) {
 }
 
 const val STATUS_LOCAL_PRIVATE = "Lokal & privat"
+
+/** Floating notice from `.toast` after the later chrome pass. */
+const val TOAST_MIN_DP = 44
+const val TOAST_RADIUS_DP = 8
+const val TOAST_MAX_DP = 360
+const val TOAST_FONT_SP = 13
+const val TOAST_CLOSE_DP = 25
+const val TOAST_CLOSE_RADIUS_DP = 7
+const val TOAST_GAP_DP = 9
+const val TOAST_PAD_START_DP = 11
+const val TOAST_PAD_DP = 8
+const val TOAST_INSET_END_DP = 14
+const val TOAST_INSET_BOTTOM_DP = 12
