@@ -485,6 +485,12 @@ fun calendarRange(view: String, anchor: java.time.LocalDate): List<java.time.Loc
 /** Desktop calendar rail: 248px beside the grid, hidden at 960px and below. */
 const val CAL_SIDE_DP = 248
 const val CAL_SIDE_BREAK_DP = 960
+
+/**
+ * Desktop `.cal-side` gap. The Notion chrome block does not restyle it.
+ * `.cal-file` is the last child and `margin-top: auto` pins it to the bottom.
+ */
+const val CAL_SIDE_GAP_DP = 14
 const val CAL_MINI_CELL_DP = 28
 const val CAL_MINI_DOT_DP = 4
 const val CAL_ICON_DP = 28
@@ -526,6 +532,19 @@ const val CAL_NOW_DOT_DP = 8
 const val CAL_HEAD_NUM_SP = 16
 
 fun calendarShowsSide(widthDp: Int): Boolean = widthDp > CAL_SIDE_BREAK_DP
+
+/**
+ * Where "Als Notiz öffnen" sits in the side rail.
+ * It is the last child. It pins only while the rail is visible; at 960dp and
+ * below the rail stays hidden and the narrow header keeps its own button.
+ */
+data class CalendarNotePin(val lastChild: Boolean, val pins: Boolean, val gapDp: Int)
+
+fun calendarNoteButtonPins(sideVisible: Boolean): CalendarNotePin = CalendarNotePin(
+    lastChild = true,
+    pins = sideVisible,
+    gapDp = CAL_SIDE_GAP_DP,
+)
 
 fun calendarMoreLabel(hidden: Int): String = "+$hidden $CAL_MORE"
 

@@ -2417,16 +2417,17 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
             },
     ) {
         val showSide = ch.fasrv.fanotes.desk.calendarShowsSide(maxWidth.value.toInt())
+        val notePin = ch.fasrv.fanotes.desk.calendarNoteButtonPins(showSide)
+        val sideListScroll = rememberScrollState()
         Row(Modifier.fillMaxSize()) {
             if (showSide) {
                 Column(
                     Modifier
                         .width(ch.fasrv.fanotes.desk.CAL_SIDE_DP.dp)
                         .fillMaxHeight()
-                        .verticalScroll(rememberScrollState())
                         .background(MaterialTheme.colorScheme.surface)
                         .padding(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(notePin.gapDp.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Kalender", modifier = Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight(650), letterSpacing = (-0.01).em)
@@ -2449,15 +2450,32 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                         anchor = next
                         month = YearMonth.from(next)
                     }
-                    CalendarLists(model, document, calendarName) { calendarName = it }
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA), RoundedCornerShape(8.dp))
-                            .clickable { onOpenNote(CALENDAR_NOTE_PATH) }
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                    ) { Text("Als Notiz öffnen", fontSize = 12.sp) }
+                    val calendarList: @Composable () -> Unit = {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .then(if (notePin.pins) Modifier.weight(1f).verticalScroll(sideListScroll) else Modifier),
+                        ) {
+                            CalendarLists(model, document, calendarName) { calendarName = it }
+                        }
+                    }
+                    val openNote: @Composable () -> Unit = {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA), RoundedCornerShape(8.dp))
+                                .clickable { onOpenNote(CALENDAR_NOTE_PATH) }
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                        ) { Text("Als Notiz öffnen", fontSize = 12.sp) }
+                    }
+                    if (notePin.lastChild) {
+                        calendarList()
+                        openNote()
+                    } else {
+                        openNote()
+                        calendarList()
+                    }
                 }
                 Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
             }
