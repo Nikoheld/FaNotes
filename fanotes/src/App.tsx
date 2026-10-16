@@ -671,6 +671,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [glyphenWerkSampleCount, setGlyphenWerkSampleCount] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchHits, setSearchHits] = useState<SearchHit[]>([])
+  const [searchFailed, setSearchFailed] = useState(false)
   const [inkReveal, setInkReveal] = useState<{ path: string; y: number; token: number } | null>(null)
   const [studyOpen, setStudyOpen] = useState(false)
   const [cardsOpen, setCardsOpen] = useState(false)
@@ -3119,6 +3120,7 @@ export default function App({ startupBootstrap }: AppProps) {
       workspaceRestoredRef.current = false
       setSearchQuery('')
       setSearchHits([])
+      setSearchFailed(false)
       const nextTree = await refreshTree()
       const remembered = chooseRestoredNote(selectedSettings.lastOpenNotePath, collectNotePaths(nextTree), firstNote(nextTree))
       if (remembered) await openNote(remembered)
@@ -3188,15 +3190,21 @@ export default function App({ startupBootstrap }: AppProps) {
     const query = searchQuery.trim()
     const session = vaultSessionGenerationRef.current
     const requestId = ++searchRequestRef.current
-    if (query.length < 2) { setSearchHits([]); setSearchLoading(false); return }
+    if (query.length < 2) { setSearchHits([]); setSearchFailed(false); setSearchLoading(false); return }
     setSearchLoading(true)
     const timer = window.setTimeout(() => {
       void window.fanotes.search(query)
         .then((hits) => {
-          if (session === vaultSessionGenerationRef.current && requestId === searchRequestRef.current) setSearchHits(hits)
+          if (session === vaultSessionGenerationRef.current && requestId === searchRequestRef.current) {
+            setSearchHits(hits)
+            setSearchFailed(false)
+          }
         })
         .catch(() => {
-          if (session === vaultSessionGenerationRef.current && requestId === searchRequestRef.current) setSearchHits([])
+          if (session === vaultSessionGenerationRef.current && requestId === searchRequestRef.current) {
+            setSearchHits([])
+            setSearchFailed(true)
+          }
         })
         .finally(() => {
           if (session === vaultSessionGenerationRef.current && requestId === searchRequestRef.current) setSearchLoading(false)
@@ -4542,7 +4550,7 @@ export default function App({ startupBootstrap }: AppProps) {
             <div className="sidebar-search" role="search" title="Notizen und Handschrift durchsuchen">
               <Search aria-hidden="true" size={14} />
               <input value={searchQuery} placeholder="Suchen …" aria-label="Notizen suchen" onChange={(event) => { setSearchQuery(event.target.value); setSearchOpen(true) }} onFocus={() => setSearchOpen(true)} />
-              {searchQuery ? <button className="search-clear" type="button" aria-label="Suche leeren" title="Suche leeren" onMouseDown={(event) => event.preventDefault()} onClick={() => { setSearchQuery(''); setSearchHits([]) }}><X size={13} /></button> : null}
+              {searchQuery ? <button className="search-clear" type="button" aria-label="Suche leeren" title="Suche leeren" onMouseDown={(event) => event.preventDefault()} onClick={() => { setSearchQuery(''); setSearchHits([]); setSearchFailed(false) }}><X size={13} /></button> : null}
             </div>
             {knownTags.length > 0 && (
               <div className="tag-filter" aria-label="Nach Schlagwort filtern">
@@ -5092,7 +5100,7 @@ export default function App({ startupBootstrap }: AppProps) {
 
         {inspectorVisible && settings.showOutline && !overviewOpen && !studyOpen && !homeworkOpen && !calendarOpen && !glyphenWerkOpen && !isPdfActive && <Suspense fallback={null}><RightInspector content={activeTab?.content ?? ''} path={activeTab?.path} notes={tabs.map((tab) => ({ path: tab.path, content: tab.content }))} history={historySnapshots} onShowHistory={() => { void openHistory() }} onRestoreHistory={(id) => { void restoreHistory(id) }} onJumpToLine={(line) => { editorRef.current?.revealLine(line) }} onOpenNote={(path) => { void openNote(path) }} /></Suspense>}
         {addonState.dockOpen && addonState.panels.length > 0 && !glyphenWerkOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Dock" fallbackTitle="Das Add-on-Dock ist abgestürzt"><AddonPanelDock panels={addonState.panels} activeKey={addonState.activePanel} runtime={addonRuntime} onClose={() => addonRuntime.setDockOpen(false)} /></SafeBoundary></Suspense>}
-        {searchOpen && <Suspense fallback={null}><SearchPanel query={searchQuery} hits={searchHits} loading={searchLoading} onQueryChange={setSearchQuery} onOpen={(hit) => { void openSearchHit(hit) }} onClose={() => setSearchOpen(false)} /></Suspense>}
+        {searchOpen && <Suspense fallback={null}><SearchPanel query={searchQuery} hits={searchHits} loading={searchLoading} failed={searchFailed} onQueryChange={setSearchQuery} onOpen={(hit) => { void openSearchHit(hit) }} onClose={() => setSearchOpen(false)} /></Suspense>}
       </div>
 
       <footer className="statusbar">
