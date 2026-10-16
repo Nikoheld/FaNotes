@@ -9354,6 +9354,50 @@ mod local_zone_tests {
             unix_millis_from_iso("Oct 13-5:30"),
             Some(1_002_965_400_000)
         );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13-5:30:10"),
+            Some(1_002_965_410_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13-16:00 EST"),
+            Some(1_003_006_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13-Oct-5:30"),
+            Some(1_002_965_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct-13-5:30"),
+            Some(1_002_965_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-Oct-13-5:30"),
+            Some(1_791_883_800_000)
+        );
+        assert_eq!(unix_millis_from_iso("Oct 13--5:30"), None);
+        assert_eq!(
+            unix_millis_from_iso("Oct 13-5:30 GMT"),
+            Some(1_002_951_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("16:.5/5"), None);
+        assert_eq!(unix_millis_from_iso("16:00:.5/1"), None);
+        assert_eq!(
+            unix_millis_from_iso("16:00:00.5/1"),
+            Some(978_382_800_500)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13-5:30 Oct"),
+            Some(1_002_965_400_000)
+        );
+        assert_eq!(unix_millis_from_iso("13-5:30-2026"), None);
+        assert_eq!(
+            unix_millis_from_iso("Oct 13-24:00"),
+            Some(1_003_032_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13-4:00 PM"),
+            Some(1_003_003_200_000)
+        );
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00:.500"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00.5 GMT"), None);
         assert_eq!(unix_millis_from_iso("16:00.5.1"), None);

@@ -8974,6 +8974,50 @@ mod tests {
                 super::canonical_iso("Oct 13-5:30").as_deref(),
                 Some("2001-10-13T09:30:00.000Z")
             );
+            assert_eq!(
+                super::canonical_iso("Oct 13-5:30:10").as_deref(),
+                Some("2001-10-13T09:30:10.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13-16:00 EST").as_deref(),
+                Some("2001-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("13-Oct-5:30").as_deref(),
+                Some("2001-10-13T09:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct-13-5:30").as_deref(),
+                Some("2001-10-13T09:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-Oct-13-5:30").as_deref(),
+                Some("2026-10-13T09:30:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("Oct 13--5:30"), None);
+            assert_eq!(
+                super::canonical_iso("Oct 13-5:30 GMT").as_deref(),
+                Some("2001-10-13T05:30:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("16:.5/5"), None);
+            assert_eq!(super::canonical_iso("16:00:.5/1"), None);
+            assert_eq!(
+                super::canonical_iso("16:00:00.5/1").as_deref(),
+                Some("2001-01-01T21:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("13-5:30 Oct").as_deref(),
+                Some("2001-10-13T09:30:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("13-5:30-2026"), None);
+            assert_eq!(
+                super::canonical_iso("Oct 13-24:00").as_deref(),
+                Some("2001-10-14T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13-4:00 PM").as_deref(),
+                Some("2001-10-13T20:00:00.000Z")
+            );
             assert_eq!(super::canonical_iso("2026-10-13 16:00:.500"), None);
             assert_eq!(super::canonical_iso("2026-10-13 16:00.5 GMT"), None);
             assert_eq!(super::canonical_iso("16:00.5.1"), None);
