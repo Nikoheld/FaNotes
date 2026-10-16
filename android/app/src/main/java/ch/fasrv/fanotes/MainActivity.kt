@@ -2542,6 +2542,9 @@ private fun SplitPane(
                         {},
                         { model.learnSpellingWord(it) },
                         { model.ignoreSpellingWord(it) },
+                        spellOn && model.effectiveDesk()["autocorrect"] != "off",
+                        { model.spellingDeclined(it) },
+                        { model.declineAutocorrectWord(it) },
                     )
                     editor.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, metrics.fontSizePx.toFloat())
                     editor.setLineSpacing(0f, metrics.lineHeight.toFloat())
@@ -2857,6 +2860,9 @@ private fun PageSurface(
                 { model.reportSpellingLanguage(it) },
                 { model.learnSpellingWord(it) },
                 { model.ignoreSpellingWord(it) },
+                spellOn && model.deskSettings.value["autocorrect"] != "off",
+                { model.spellingDeclined(it) },
+                { model.declineAutocorrectWord(it) },
             )
             page.onPasteImage = { name, bytes, mime -> model.importBytes(name, bytes, pdf = false, mime = mime) }
             page.onFollowLink = { target, web, anchor -> openFollowedLink(page.context, model, target, web, anchor) }
