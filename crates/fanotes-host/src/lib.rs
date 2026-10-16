@@ -6401,7 +6401,14 @@ fn pad_legacy_clock(time: &str) -> Option<String> {
         }
         numbers.push(part.parse::<u32>().ok()?);
     }
-    if !(2..=3).contains(&numbers.len()) || numbers.iter().any(|number| *number > 99) {
+    // `16:00:60` is not 60 seconds. The field is a date number, so `10/13`
+    // becomes 13 October 1960. A second past 99 already took that path.
+    let spilled_clock_field = numbers.get(1).is_some_and(|number| *number > 59)
+        || numbers.get(2).is_some_and(|number| *number > 59);
+    if !(2..=3).contains(&numbers.len())
+        || numbers.iter().any(|number| *number > 99)
+        || spilled_clock_field
+    {
         return legacy_clock_text(time);
     }
     // `16:00.05` is 50 seconds. The dot scales into the open seconds field.
@@ -10749,6 +10756,23 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00:60"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 4:00:60 PM"), None);
         assert_eq!(unix_millis_from_iso("10/13/2026 16:00:60"), None);
+        // `10/13 16:00:70` has no year yet, so 70 is 1970. 59 stays a second.
+        assert_eq!(
+            unix_millis_from_iso("10/13 16:00:70"),
+            Some(24_696_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13 16:70"),
+            Some(24_696_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13 16:00:99"),
+            Some(939_844_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13 16:00:59"),
+            Some(1_003_003_259_000)
+        );
         assert_eq!(unix_millis_from_iso("2026/10/13 16:00:60"), None);
         assert_eq!(unix_millis_from_iso("Oct 13 2026 16:60:00"), None);
         assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00:60 61"), None);
