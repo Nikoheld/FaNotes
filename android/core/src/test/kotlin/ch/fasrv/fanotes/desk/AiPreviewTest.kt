@@ -4,6 +4,7 @@ import ch.fasrv.fanotes.text.PaperKind
 import ch.fasrv.fanotes.text.TableAlign
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class AiPreviewTest {
@@ -204,5 +205,43 @@ class AiPreviewTest {
         val untouched = previewCodeDisplay("Hallo", emptyList(), 0)
         assertEquals("Hallo", untouched.text)
         assertEquals(2, previewSourceOffset(untouched.sourceAt, 2))
+    }
+
+    @Test
+    fun previewLinkHoverIsSolidOnThatLinkOnly() {
+        val rest = previewLinkChrome(false)
+        val hover = previewLinkChrome(true)
+        assertEquals(0.45f, PREVIEW_LINK_UNDERLINE)
+        assertEquals(1f, PREVIEW_LINK_HOVER_UNDERLINE)
+        assertEquals(1f, PREVIEW_LINK_BORDER_DP)
+        assertEquals(0.45f, rest.alpha)
+        assertEquals(1f, hover.alpha)
+        assertEquals(1f, rest.borderDp)
+        assertEquals(1f, hover.borderDp)
+        assertNotEquals(rest, hover)
+        assertEquals(1f, previewLinkBorderPx(16f))
+        assertEquals(2f, previewLinkBorderPx(32f))
+        val accent = 0xFF2A6F97.toInt()
+        val restInk = previewLinkUnderlineArgb(accent, false)
+        val hoverInk = previewLinkUnderlineArgb(accent, true)
+        assertEquals(accent and 0x00FFFFFF, restInk and 0x00FFFFFF)
+        assertEquals(accent and 0x00FFFFFF, hoverInk and 0x00FFFFFF)
+        assertEquals(115, restInk ushr 24)
+        assertEquals(255, hoverInk ushr 24)
+        assertNotEquals(restInk, hoverInk)
+        val marks = listOf(
+            DetailsInline(0, 5, "link", "https://a.example"),
+            DetailsInline(6, 10, "strong"),
+            DetailsInline(11, 15, "link", "https://b.example"),
+        )
+        assertEquals(0, previewLinkIndexAt(marks, 0))
+        assertEquals(0, previewLinkIndexAt(marks, 4))
+        assertEquals(null, previewLinkIndexAt(marks, 5))
+        assertEquals(2, previewLinkIndexAt(marks, 12))
+        assertEquals(null, previewLinkIndexAt(marks, 15))
+        assertEquals(null, previewLinkIndexAt(emptyList(), 0))
+        val hot = previewLinkIndexAt(marks, 12)
+        assertEquals(PREVIEW_LINK_UNDERLINE, previewLinkChrome(previewLinkIndexAt(marks, 1) == hot).alpha)
+        assertEquals(PREVIEW_LINK_HOVER_UNDERLINE, previewLinkChrome(previewLinkIndexAt(marks, 12) == hot).alpha)
     }
 }

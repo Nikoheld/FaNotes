@@ -91,6 +91,7 @@ class SplitEditorView(context: Context) : EditText(context) {
     private var ready = false
     private var downX = 0f
     private var downY = 0f
+    private val linkPointer = PreviewLinkPointer()
     private var editBefore = ""
     private var changeStart = 0
     private var changeDeleted = 0
@@ -287,14 +288,24 @@ class SplitEditorView(context: Context) : EditText(context) {
             MotionEvent.ACTION_DOWN -> {
                 downX = event.x
                 downY = event.y
+                followPreviewLinkPointer(linkPointer, event, true)
             }
+            MotionEvent.ACTION_MOVE -> followPreviewLinkPointer(linkPointer, event, true)
             MotionEvent.ACTION_UP -> {
                 val tapped = abs(event.x - downX) < 24f && abs(event.y - downY) < 24f
-                if (tapped && event.x < foldColumn() && toggleFoldAt(event.y)) return true
-                if (tapped && toggleAt(event.x, event.y)) return true
+                val fold = tapped && event.x < foldColumn() && toggleFoldAt(event.y)
+                val handled = fold || (tapped && toggleAt(event.x, event.y))
+                followPreviewLinkPointer(linkPointer, event, false)
+                if (handled) return true
             }
+            MotionEvent.ACTION_CANCEL -> followPreviewLinkPointer(linkPointer, event, false)
         }
         return super.onTouchEvent(event)
+    }
+
+    override fun onHoverEvent(event: MotionEvent): Boolean {
+        followPreviewLinkPointer(linkPointer, event, event.actionMasked != MotionEvent.ACTION_HOVER_EXIT)
+        return super.onHoverEvent(event)
     }
 
     override fun onTextContextMenuItem(id: Int): Boolean {
@@ -774,6 +785,7 @@ class SplitEditorView(context: Context) : EditText(context) {
                 paperImages,
                 imageColumn,
             )
+            editable.bindPreviewLinkPointer(linkPointer)
         } finally {
             painting = false
         }
