@@ -36,5 +36,6 @@ class EscapeDismissTest {
         assertNull(escapeDismisses(EscapeLayer(destination = "books")))
         assertEquals("goto-line", escapeDismisses(EscapeLayer(gotoLine = true, destination = "search")))
         assertEquals("math", escapeDismisses(EscapeLayer(math = true, palette = true)))
+        assertEquals("handwriting", escapeDismisses(EscapeLayer(handwriting = true, palette = true)))
     }
 }

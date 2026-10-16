@@ -17,7 +17,7 @@ import {
   createHomeworkTask,
   HOMEWORK_NOTE_PATH,
   HOMEWORK_NOTE_TITLE,
-  parseHomeworkMarkdown,
+  loadHomeworkMarkdown,
   serializeHomeworkMarkdown,
   sortHomeworkTasks,
   type HomeworkBucket,
@@ -25,7 +25,7 @@ import {
   type HomeworkKind,
   type HomeworkTask,
 } from '../lib/homeworkStore'
-import { CALENDAR_NOTE_PATH, CALENDAR_NOTE_TITLE } from '../lib/calendarModel'
+import { CALENDAR_NOTE_PATH, CALENDAR_NOTE_TITLE, isMissingNoteError } from '../lib/calendarModel'
 import { calendarMarkdownWithHomework } from '../lib/homeworkCalendar'
 import { bindHandGestures } from '../../../src/lib/handGestures'
 import { getUiLanguage } from '../i18n'
@@ -96,6 +96,7 @@ const HOMEWORK_COPY = {
     expand: 'anzeigen',
     saveError: 'Hausaufgaben konnten nicht gespeichert werden.',
     loadError: 'Hausaufgaben konnten nicht geladen werden.',
+    unreadable: 'Hausaufgaben.md konnte nicht gelesen werden. Die Datei bleibt unverändert.',
   },
   en: {
     aria: 'Homework and appointments',
@@ -154,6 +155,7 @@ const HOMEWORK_COPY = {
     expand: 'show',
     saveError: 'Homework could not be saved.',
     loadError: 'Homework could not be loaded.',
+    unreadable: 'Hausaufgaben.md could not be read. The file was left unchanged.',
   },
 } as const
 
@@ -226,9 +228,15 @@ export function HomeworkBoard({ subjects, reloadToken = 0, onClose, onOpenNote, 
   })
   const persistQueueRef = useRef(Promise.resolve())
   const persistGenerationRef = useRef(0)
+  const canWriteHomework = useRef(false)
 
-  const persist = useCallback(async (next: HomeworkDocument) => {
+  const persist = useCallback(async (next: HomeworkDocument): Promise<boolean> => {
+    if (!canWriteHomework.current) {
+      setError(homeworkText().unreadable)
+      return false
+    }
     const generation = ++persistGenerationRef.current
+    let saved = false
     const run = async () => {
       if (generation !== persistGenerationRef.current) return
       setSaving(true)
@@ -249,20 +257,27 @@ export function HomeworkBoard({ subjects, reloadToken = 0, onClose, onOpenNote, 
         }
         try {
           let calendarMarkdown = ''
+          let skipCalendarWrite = false
           try {
             calendarMarkdown = await window.fanotes.readFile(CALENDAR_NOTE_PATH)
-          } catch {
-            const created = await window.fanotes.createNote('', CALENDAR_NOTE_TITLE)
-            calendarMarkdown = created.relativePath === CALENDAR_NOTE_PATH ? '' : await window.fanotes.readFile(created.relativePath).catch(() => '')
+          } catch (readError) {
+            if (!isMissingNoteError(readError)) skipCalendarWrite = true
+            else {
+              const created = await window.fanotes.createNote('', CALENDAR_NOTE_TITLE)
+              calendarMarkdown = created.relativePath === CALENDAR_NOTE_PATH ? '' : await window.fanotes.readFile(created.relativePath).catch(() => '')
+            }
           }
-          const synced = calendarMarkdownWithHomework(calendarMarkdown, next)
-          await window.fanotes.writeFile(CALENDAR_NOTE_PATH, synced)
+          if (!skipCalendarWrite) {
+            const synced = calendarMarkdownWithHomework(calendarMarkdown, next)
+            if (synced !== null) await window.fanotes.writeFile(CALENDAR_NOTE_PATH, synced)
+          }
         } catch {
           /* the homework list itself is already stored */
         }
         if (generation === persistGenerationRef.current) {
           setDocument(next)
           onDocumentPersisted?.(next)
+          saved = true
         }
       } catch (persistError) {
         if (generation === persistGenerationRef.current) {
@@ -274,21 +289,34 @@ export function HomeworkBoard({ subjects, reloadToken = 0, onClose, onOpenNote, 
     }
     persistQueueRef.current = persistQueueRef.current.then(run, run)
     await persistQueueRef.current
+    return saved
   }, [onDocumentPersisted])
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
+    canWriteHomework.current = false
     void (async () => {
       try {
-        try {
-          const markdown = await window.fanotes.readFile(HOMEWORK_NOTE_PATH)
-          if (!cancelled) setDocument(parseHomeworkMarkdown(markdown))
-        } catch {
-          if (!cancelled) setDocument({ version: 1, tasks: [] })
+        const markdown = await window.fanotes.readFile(HOMEWORK_NOTE_PATH)
+        if (cancelled) return
+        const loaded = loadHomeworkMarkdown(markdown)
+        if (!loaded.ok) {
+          setError(homeworkText().unreadable)
+          return
         }
+        canWriteHomework.current = true
+        setDocument(loaded.document)
+        setError(null)
       } catch (loadError) {
-        if (!cancelled) setError(loadError instanceof Error ? loadError.message : homeworkText().loadError)
+        if (cancelled) return
+        if (isMissingNoteError(loadError)) {
+          canWriteHomework.current = true
+          setDocument({ version: 1, tasks: [] })
+          setError(null)
+          return
+        }
+        setError(loadError instanceof Error ? loadError.message : homeworkText().unreadable)
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -347,7 +375,7 @@ export function HomeworkBoard({ subjects, reloadToken = 0, onClose, onOpenNote, 
       priority,
     })
     const next = { ...document, version: 1 as const, tasks: [task, ...document.tasks] }
-    await persist(next)
+    if (!await persist(next)) return
     setTitle('')
     setNotes('')
     setDueTime('')

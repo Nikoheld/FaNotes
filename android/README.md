@@ -9,6 +9,7 @@ Native tablet client (Kotlin, Jetpack Compose) for the FaNotes vault. The writin
 - Palm rejection for 850 ms after the pen lifts, the same window as the desktop. A finger scrolls, pinches to zoom, long-presses to select, and swipes between notes. A finger does not lay ink unless **Finger zeichnet** is on.
 - Notes and folders: create, open, rename is available on the store, delete. Markdown sits beside the page. PDF and image worksheets can be annotated.
 - Autosave, undo/redo, paper styles, and the desktop brushes (fineliner, pencil, marker, highlighter, calligraphy).
+- Text → Handschrift in the pen bar and the command palette. A GlyphenWerk training ZIP supplies the personal strokes; letters without a sample use the built-in school script. The sheet grows when the text needs more paper, and the inserted words stay in the handwriting search transcript.
 - Account login and bidirectional sync with `https://fanotes.fasrv.ch`. Offline writes sync when the network returns. Conflicts keep both copies under the desktop name `Konflikt`.
 
 Handwriting recognition is a `HandwritingRecognizer` seam. The stroke JSON already matches the desktop, so a later NDK build of GlyphenWerk can plug in without a format change. Math editing and collapsible sections are preserved in the file and not edited here yet.
