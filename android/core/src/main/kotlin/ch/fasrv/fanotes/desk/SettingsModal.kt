@@ -68,10 +68,25 @@ const val SETTINGS_HEADING_GAP_DP = 11
 fun settingsContentStacks(widthDp: Int): Boolean = settingsNavCollapses(widthDp)
 
 /**
+ * `.range-setting` above 760px:
+ * `width: 220px; display: grid; grid-template-columns: minmax(90px, 1fr) 57px; align-items: center; gap: 10px`.
+ * The value is `.range-setting output { height: 27px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px }`, centered.
+ * No later rule changes those sizes. The 760px block only sets `width: 100%`.
+ */
+const val RANGE_SETTING_WIDTH_DP = 220
+const val RANGE_SETTING_TRACK_MIN_DP = 90
+const val RANGE_SETTING_VALUE_WIDTH_DP = 57
+const val RANGE_SETTING_VALUE_HEIGHT_DP = 27
+const val RANGE_SETTING_VALUE_RADIUS_DP = 6
+const val RANGE_SETTING_VALUE_BORDER_DP = 1
+const val RANGE_SETTING_VALUE_SP = 12
+const val RANGE_SETTING_GAP_DP = 10
+
+/**
  * `.range-setting { width: 100%; }` inside `@media (max-width: 760px)`.
- * The base rule is `width: 220px`. That media-query block is the last
- * `.range-setting` rule, and it sets width rather than a max-width, so the
- * stacked slider fills its control. Above 760 the existing cap stays.
+ * That block is the last `.range-setting` rule. It widens the row and leaves
+ * the two columns in place, so the value box stays beside the track.
+ * Above 760 the row is [RANGE_SETTING_WIDTH_DP].
  */
 fun settingsRangeFillsWidth(widthDp: Int): Boolean = widthDp <= SETTINGS_MODAL_FULL_DP
 

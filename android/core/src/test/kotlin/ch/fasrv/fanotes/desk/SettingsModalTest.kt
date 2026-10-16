@@ -3,6 +3,7 @@ package ch.fasrv.fanotes.desk
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class SettingsModalTest {
@@ -72,6 +73,22 @@ class SettingsModalTest {
         assertFalse(settingsRangeFillsWidth(800))
         assertEquals(settingsContentStacks(760), settingsRangeFillsWidth(760))
         assertEquals(settingsContentStacks(761), settingsRangeFillsWidth(761))
+    }
+
+    @Test
+    fun theWideRangeSettingIsA220RowBesideItsValue() {
+        assertEquals(220, RANGE_SETTING_WIDTH_DP)
+        assertEquals(90, RANGE_SETTING_TRACK_MIN_DP)
+        assertEquals(57, RANGE_SETTING_VALUE_WIDTH_DP)
+        assertEquals(27, RANGE_SETTING_VALUE_HEIGHT_DP)
+        assertEquals(6, RANGE_SETTING_VALUE_RADIUS_DP)
+        assertEquals(1, RANGE_SETTING_VALUE_BORDER_DP)
+        assertEquals(12, RANGE_SETTING_VALUE_SP)
+        assertEquals(10, RANGE_SETTING_GAP_DP)
+        assertNotEquals(360, RANGE_SETTING_WIDTH_DP)
+        assertTrue(RANGE_SETTING_TRACK_MIN_DP + RANGE_SETTING_GAP_DP + RANGE_SETTING_VALUE_WIDTH_DP <= RANGE_SETTING_WIDTH_DP)
+        assertFalse(settingsRangeFillsWidth(761))
+        assertTrue(settingsRangeFillsWidth(760))
     }
 
     @Test
