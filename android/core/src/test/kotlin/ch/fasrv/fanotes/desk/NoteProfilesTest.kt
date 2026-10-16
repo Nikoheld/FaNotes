@@ -73,5 +73,9 @@ class NoteProfilesTest {
         assertEquals("∫₀¹ (x + 2) dx = 2,5", FIRST_RUN_WRITING_FORMULA)
         assertEquals("Optional umwandeln", FIRST_RUN_WRITING_CONVERT)
         assertEquals("Vorschau einer Seite mit Text und Handschrift", FIRST_RUN_WRITING_PREVIEW_LABEL)
+        assertEquals(0.87f to 1.13f, firstRunColumnWeights(0))
+        assertEquals(0.75f to 1.25f, firstRunColumnWeights(1))
+        assertEquals(0.78f to 1.22f, firstRunColumnWeights(2))
+        assertEquals(0.82f to 1.18f, firstRunColumnWeights(3))
     }
 }
