@@ -53,7 +53,9 @@ import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.Person
@@ -141,6 +143,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -2648,6 +2651,48 @@ private fun SyncLogCard(log: List<ch.fasrv.fanotes.sync.SyncLogEntry>) {
 }
 
 @Composable
+private fun SyncPasswordCards(model: FaNotesViewModel) {
+    var current by remember { mutableStateOf("") }
+    var next by remember { mutableStateOf("") }
+    var repeatPassword by remember { mutableStateOf("") }
+    var deleteOpen by remember { mutableStateOf(false) }
+    var deletePassword by remember { mutableStateOf("") }
+    val mask = PasswordVisualTransformation()
+    SettingCard("Passwort ändern", Icons.Filled.Key) {
+        SettingRow("Aktuelles Passwort") {
+            OutlinedTextField(current, { current = it }, modifier = Modifier.widthIn(min = 170.dp), singleLine = true, visualTransformation = mask)
+        }
+        SettingRow("Neues Passwort") {
+            OutlinedTextField(next, { next = it }, modifier = Modifier.widthIn(min = 170.dp), singleLine = true, visualTransformation = mask)
+        }
+        SettingRow("Neues Passwort wiederholen", "Der Vault-Schlüssel wird nur neu verpackt. Keine Datei muss neu hochgeladen werden.", divider = false) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(repeatPassword, { repeatPassword = it }, modifier = Modifier.widthIn(min = 170.dp), singleLine = true, visualTransformation = mask)
+                TextButton(onClick = { model.changeSyncPassword(current, next, repeatPassword) }, enabled = current.isNotEmpty() && next.isNotEmpty()) {
+                    Text("Passwort ändern")
+                }
+            }
+        }
+    }
+    SettingCard("Konto löschen", Icons.Filled.Delete) {
+        SettingRow("Konto und alle Daten auf dem Server löschen", "Die Notizen auf deinen Geräten bleiben erhalten. Andere Geräte werden abgemeldet.", divider = false) {
+            if (!deleteOpen) {
+                TextButton(onClick = { deleteOpen = true }) { Text("Konto löschen") }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Zur Bestätigung dein Passwort:", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                    OutlinedTextField(deletePassword, { deletePassword = it }, modifier = Modifier.widthIn(min = 170.dp), singleLine = true, visualTransformation = mask)
+                    Row {
+                        TextButton(onClick = { deleteOpen = false; deletePassword = "" }) { Text("Abbrechen") }
+                        TextButton(onClick = { model.deleteSyncAccount(deletePassword) }, enabled = deletePassword.isNotEmpty()) { Text("Endgültig löschen") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SyncCardAction(label: String, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
@@ -4171,6 +4216,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                             }
                         }
                     }
+                    if (sync.account != null) SyncPasswordCards(model)
                     Text("Ein Konflikt behält die Serverfassung auf dem ursprünglichen Pfad. Die Tablet-Fassung liegt daneben.", fontSize = 12.sp, color = LocalStatusInk.current.muted)
                     ConflictList(model)
                     SyncLogCard(sync.log)

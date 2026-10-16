@@ -11,6 +11,57 @@ import kotlin.test.assertTrue
 
 class SyncEngineTest {
     @Test
+    fun passwordChangeKeepsNotesAndDeletingTheAccountSignsOut() = runBlocking {
+        val server = MemorySyncServer()
+        val host = MemoryHost("vault")
+        val engine = engine(SyncApi(server), host, "Tablet")
+        try {
+            engine.register("ada@example.com", "correct horse")
+            host.put("Notes/Hello.md", "Hello\n".encodeToByteArray(), 1_000)
+            engine.syncNow()
+            var rejected = false
+            try {
+                engine.changePassword("wrong password", "brand new secret")
+            } catch (_: Exception) {
+                rejected = true
+            }
+            assertTrue(rejected)
+            assertEquals(SyncStatus.IDLE, engine.state.value.status)
+            engine.changePassword("correct horse", "brand new secret")
+            assertTrue(engine.state.value.log.any { it.text.contains("Passwort geändert") })
+            val otherHost = MemoryHost("other")
+            val other = engine(SyncApi(server), otherHost, "Other")
+            try {
+                var oldRejected = false
+                try {
+                    other.login("ada@example.com", "correct horse")
+                } catch (_: Exception) {
+                    oldRejected = true
+                }
+                assertTrue(oldRejected)
+                other.login("ada@example.com", "brand new secret")
+                other.syncNow()
+                assertEquals("Hello\n", otherHost.read("Notes/Hello.md").decodeToString())
+            } finally {
+                other.close()
+            }
+            var deleteRejected = false
+            try {
+                engine.deleteAccount("correct horse")
+            } catch (_: Exception) {
+                deleteRejected = true
+            }
+            assertTrue(deleteRejected)
+            assertEquals(SyncStatus.IDLE, engine.state.value.status)
+            engine.deleteAccount("brand new secret")
+            assertEquals(SyncStatus.SIGNED_OUT, engine.state.value.status)
+            assertTrue(engine.state.value.log.any { it.text.contains("gelöscht") })
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
     fun twoDevicesRoundTripAndKeepBothSidesOfAConflict() = runBlocking {
         val server = MemorySyncServer()
         val apiA = SyncApi(server)
@@ -96,6 +147,8 @@ private class MemorySyncServer : SyncTransport {
                 path == "/prelogin" && request.method == "POST" -> prelogin(request)
                 path == "/register" && request.method == "POST" -> register(request)
                 path == "/login" && request.method == "POST" -> login(request)
+                path == "/password" && request.method == "POST" -> changePassword(requireNotNull(account), request)
+                path == "/account" && request.method == "DELETE" -> deleteAccount(requireNotNull(account), request)
                 path == "/changes" || path.startsWith("/changes?") -> {
                     val since = path.substringAfter("since=", "0").toLong()
                     changes(requireNotNull(account), since)
@@ -133,6 +186,25 @@ private class MemorySyncServer : SyncTransport {
         accounts[account.id] = account
         val device = openDevice(account, body.obj("device")?.string("name") ?: "device")
         return json(201, """{"accountId":"${account.id}","deviceId":"${device.id}","token":"${device.token}","expiresAt":"2099-01-01T00:00:00.000Z","revision":0}""")
+    }
+
+    private fun changePassword(account: Account, request: SyncHttpRequest): SyncHttpResponse {
+        val body = parseJson(request.body!!.decodeToString()) as JsonValue.Obj
+        if (body.string("authKey") != account.authKey) return json(401, """{"error":"unauthorized"}""")
+        val kdf = body.obj("kdf") ?: return json(400, """{"error":"kdf"}""")
+        val wrap = body.obj("vaultKeyWrap") ?: return json(400, """{"error":"wrap"}""")
+        account.authKey = body.string("newAuthKey") ?: return json(400, """{"error":"auth"}""")
+        account.kdf = SyncKdf(kdf.string("algorithm") ?: "", kdf.double("iterations")?.toInt() ?: 0, kdf.string("salt") ?: "")
+        account.wrap = SyncKeyWrap(wrap.string("iv") ?: "", wrap.string("data") ?: "")
+        return json(200, "{}")
+    }
+
+    private fun deleteAccount(account: Account, request: SyncHttpRequest): SyncHttpResponse {
+        val body = parseJson(request.body!!.decodeToString()) as JsonValue.Obj
+        if (body.string("authKey") != account.authKey) return json(401, """{"error":"unauthorized"}""")
+        accounts.remove(account.id)
+        sessions.entries.removeAll { it.value == account.id }
+        return json(200, "{}")
     }
 
     private fun login(request: SyncHttpRequest): SyncHttpResponse {
@@ -223,9 +295,9 @@ private class MemorySyncServer : SyncTransport {
     private class Account(
         val id: String,
         val email: String,
-        val authKey: String,
-        val kdf: SyncKdf,
-        val wrap: SyncKeyWrap,
+        var authKey: String,
+        var kdf: SyncKdf,
+        var wrap: SyncKeyWrap,
         var revision: Long = 0,
         val files: LinkedHashMap<String, FileEntry> = linkedMapOf(),
         val devices: MutableList<Device> = mutableListOf(),

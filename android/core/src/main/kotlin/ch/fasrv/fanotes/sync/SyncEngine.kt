@@ -231,6 +231,33 @@ class SyncEngine(
         log("info", "Account created. The vault key was generated on this device.")
     }
 
+    suspend fun changePassword(currentPassword: String, nextPassword: String) = onEngine {
+        val active = session ?: throw IllegalStateException("Nicht angemeldet.")
+        val secretText = vaultSecretBase64 ?: throw IllegalStateException("Nicht angemeldet.")
+        passwordProblems(nextPassword)?.let { throw IllegalArgumentException(it) }
+        val currentKdf = api.prelogin(active.email)
+        val current = deriveFromPassword(currentPassword, currentKdf)
+        val kdf = newKdf()
+        val next = deriveFromPassword(nextPassword, kdf)
+        val secret = fromBase64(secretText)
+        try {
+            val wrap = wrapVaultSecret(secret, next.wrappingKey)
+            api.changePassword(active, current.authKey, next.authKey, kdf, wrap)
+        } finally {
+            secret.fill(0)
+        }
+        log("info", "Passwort geändert; alle anderen Geräte müssen sich neu anmelden.")
+    }
+
+    suspend fun deleteAccount(password: String) = onEngine {
+        val active = session ?: throw IllegalStateException("Nicht angemeldet.")
+        val kdf = api.prelogin(active.email)
+        val authKey = deriveFromPassword(password, kdf).authKey
+        api.deleteAccount(active, authKey)
+        forgetSession()
+        log("info", "Konto und alle Daten auf dem Server gelöscht.")
+    }
+
     suspend fun logout() = onEngine {
         requireHost()
         val active = session

@@ -180,6 +180,12 @@ fun decryptMeta(keys: SyncKeys, fileId: String, encoded: String): SyncFileMeta {
     return SyncFileMeta(path, parsed.double("mtimeMs")?.toLong() ?: 0L, parsed.double("size")?.toLong() ?: 0L, hash)
 }
 
+/** Local check before the desktop password form is sent. */
+fun syncPasswordChangeError(next: String, repeat: String): String? {
+    if (next != repeat) return "Die beiden neuen Passwörter stimmen nicht überein."
+    return passwordProblems(next)
+}
+
 fun passwordProblems(password: String): String? {
     if (password.length < 10) return "Das Passwort braucht mindestens 10 Zeichen."
     if (password.length > 256) return "Das Passwort ist zu lang."
