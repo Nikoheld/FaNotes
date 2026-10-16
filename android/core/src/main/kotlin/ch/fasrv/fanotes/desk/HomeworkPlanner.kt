@@ -145,6 +145,81 @@ fun prepareHomeworkDraft(
 private val ISO_DATE = Regex("""\d{4}-\d{2}-\d{2}""")
 private val ISO_TIME = Regex("""\d{2}:\d{2}""")
 
+/** Card chrome from `.homework-card` and `.homework-bucket` in the desktop board. */
+const val HOMEWORK_CARD_RADIUS_DP = 12
+const val HOMEWORK_CARD_PAD_DP = 10
+const val HOMEWORK_CARD_GAP_DP = 4
+const val HOMEWORK_CARD_ACTION_DP = 34
+const val HOMEWORK_CARD_ACTION_RADIUS_DP = 6
+const val HOMEWORK_CARD_INSET_DP = 3
+const val HOMEWORK_CARD_DONE_ALPHA = 0.72f
+const val HOMEWORK_CARD_FILL_ALPHA = 0.90f
+const val HOMEWORK_OVERDUE_BORDER = 0.40f
+const val HOMEWORK_OVERDUE_FILL = 0.06f
+const val HOMEWORK_COUNT_DP = 18
+const val HOMEWORK_CARDS_GAP_DP = 8
+const val HOMEWORK_BUCKET_GAP_DP = 8
+const val HOMEWORK_EMPTY_MIN_DP = 180
+const val HOMEWORK_KIND_HOMEWORK = "Hausaufgabe"
+const val HOMEWORK_KIND_APPOINTMENT = "Termin"
+const val HOMEWORK_PRIORITY_HIGH = "Wichtig"
+const val HOMEWORK_NO_DATE = "Kein Termin"
+const val HOMEWORK_MARK_OPEN = "Als offen markieren"
+const val HOMEWORK_MARK_DONE = "Als erledigt markieren"
+const val HOMEWORK_DELETE = "Eintrag löschen"
+const val HOMEWORK_COLLAPSE = "einklappen"
+const val HOMEWORK_EXPAND = "anzeigen"
+const val HOMEWORK_EMPTY_TITLE = "Noch keine Einträge"
+const val HOMEWORK_EMPTY_BODY = "Lege deine erste Hausaufgabe oder den nächsten Termin oben an."
+
+private val HOMEWORK_DUE_FORMAT = DateTimeFormatter.ofPattern("EEE, dd. MMM", Locale.forLanguageTag("de-CH"))
+
+fun homeworkKindLabel(kind: String): String =
+    if (kind == "appointment") HOMEWORK_KIND_APPOINTMENT else HOMEWORK_KIND_HOMEWORK
+
+fun homeworkBucketLabel(bucket: String): String = when (bucket) {
+    "overdue" -> "Überfällig"
+    "today" -> "Heute"
+    "upcoming" -> "Demnächst"
+    "undated" -> "Ohne Termin"
+    "done" -> "Erledigt"
+    else -> bucket
+}
+
+/** de-CH short date, with the clock after a middot when the task has one. */
+fun homeworkDueLabel(task: HomeworkTask): String {
+    val raw = task.dueDate ?: return HOMEWORK_NO_DATE
+    val date = runCatching { LocalDate.parse(raw) }.getOrNull() ?: return HOMEWORK_NO_DATE
+    val label = date.format(HOMEWORK_DUE_FORMAT)
+    val time = task.dueTime?.takeIf { it.isNotBlank() }
+    return if (time == null) label else "$label · $time"
+}
+
+/** Classes the desktop card sets: done, overdue, high, appointment. */
+fun homeworkCardMarks(task: HomeworkTask, today: LocalDate = LocalDate.now()): List<String> = buildList {
+    if (task.done) add("done")
+    if (classifyHomeworkTask(task, today) == "overdue") add("overdue")
+    if (task.priority == "high") add("high")
+    if (task.kind == "appointment") add("appointment")
+}
+
+/** The later desktop rule paints the accent bar over the warning bar. */
+fun homeworkCardInset(task: HomeworkTask): String = when {
+    task.kind == "appointment" -> "accent"
+    task.priority == "high" -> "warning"
+    else -> "none"
+}
+
+/** The done bucket stays hidden until the filter is Erledigt or Alle, or the list is expanded. */
+fun homeworkDoneBucketVisible(filter: String, expanded: Boolean): Boolean =
+    filter == "done" || filter == "all" || expanded
+
+/** Null on the Erledigt filter, which has no collapse control. */
+fun homeworkDoneToggleLabel(filter: String, expanded: Boolean): String? {
+    if (filter == "done") return null
+    return if (expanded || filter == "all") HOMEWORK_COLLAPSE else HOMEWORK_EXPAND
+}
+
 /** Offen, Hausaufgaben, Termine, Erledigt, Alle — the desktop filter row. */
 fun visibleHomeworkTasks(tasks: List<HomeworkTask>, filter: String): List<HomeworkTask> = tasks.filter { task ->
     when (filter) {
