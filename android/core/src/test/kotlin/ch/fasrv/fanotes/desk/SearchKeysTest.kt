@@ -45,4 +45,30 @@ class SearchKeysTest {
         assertEquals(0.14f, SEARCH_SHADOW_ALPHA)
         assertTrue(workspaceKeepsNoteChrome("search"))
     }
+
+    @Test
+    fun theSearchPanelShadowIsOffsetToTheRight() {
+        val shadow = searchPanelShadow()
+        assertEquals(16, shadow.xDp)
+        assertEquals(0, shadow.yDp)
+        assertEquals(32, shadow.blurDp)
+        assertEquals(0.14f, shadow.alpha)
+        assertTrue(shadow.xDp != 0)
+        val reach = searchShadowReach(shadow)
+        assertEquals(16, reach.leftDp)
+        assertEquals(32, reach.topDp)
+        assertEquals(48, reach.rightDp)
+        assertEquals(32, reach.bottomDp)
+        assertTrue(reach.rightDp > reach.leftDp)
+        val frame = checkNotNull(searchShadowFrame(400f, 900f, 2f))
+        assertEquals(64f, frame.blurPx)
+        assertEquals(32f, frame.shapeLeftPx - frame.padPx)
+        assertEquals(0f, frame.shapeTopPx - frame.padPx)
+        assertEquals(0x24000000, frame.color)
+        assertEquals(0x24000000, searchShadowColor(0.14f))
+        assertTrue(frame.shapeRightPx + frame.blurPx < frame.bitmapWidthPx)
+        assertTrue(searchShadowFavorsRight(frame, 400f))
+        val centered = frame.copy(shapeLeftPx = frame.padPx, shapeRightPx = frame.padPx + 400f)
+        assertTrue(!searchShadowFavorsRight(centered, 400f))
+    }
 }
