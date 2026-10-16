@@ -224,6 +224,30 @@ assert.equal(utc[0].start, utcWall(utcStart), 'UTC stamp becomes the local clock
 assert.equal(utc[0].end, utcWall(new Date(utcStart.getTime() + 90 * 60_000)))
 if (utcStart.getTimezoneOffset() !== 0) assert.notEqual(utc[0].start, '2026-10-16T07:00')
 
+const wallOf = (date) => {
+  const pad = (part) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+const offsetEvents = ics.importIcs([
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'SUMMARY:Versetzt',
+  'DTSTART:20261020T090000+0200',
+  'DTEND:20261020T093000+0200',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+assert.equal(offsetEvents[0].start, wallOf(new Date(Date.UTC(2026, 9, 20, 7, 0))))
+assert.equal(offsetEvents[0].end, wallOf(new Date(Date.UTC(2026, 9, 20, 7, 30))))
+assert.equal(ics.importIcs([
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'SUMMARY:Nein',
+  'DTSTART:20260231T090000Z',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal).length, 0)
+
 const existing = {
   ...doc,
   events: [{

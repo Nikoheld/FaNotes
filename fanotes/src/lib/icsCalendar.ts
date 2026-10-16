@@ -35,14 +35,40 @@ const dateStamp = (date: Date) => {
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
 }
 
+const realCivilTime = (year: number, monthIndex: number, day: number, hour: number, minute: number, second: number) => {
+  const date = new Date(0)
+  date.setFullYear(year, monthIndex, day)
+  date.setHours(hour, minute, second, 0)
+  return date.getFullYear() === year
+    && date.getMonth() === monthIndex
+    && date.getDate() === day
+    && date.getHours() === hour
+    && date.getMinutes() === minute
+    && date.getSeconds() === second
+}
+
+/** Minutes east of UTC. `+0200` is 120. */
+const icsOffsetMinutes = (zone: string) => {
+  const match = /^([+-])(\d{2})(\d{2})$/u.exec(zone)
+  if (!match) return null
+  const hours = Number(match[2])
+  const minutes = Number(match[3])
+  if (hours > 23 || minutes > 59) return null
+  return (match[1] === '-' ? -1 : 1) * (hours * 60 + minutes)
+}
+
 const parseIcsDate = (raw: string): { date: Date; allDay: boolean } | null => {
   const value = raw.trim()
   const day = /^(\d{4})(\d{2})(\d{2})$/u.exec(value)
   if (day) {
+    const year = Number(day[1])
+    const month = Number(day[2])
+    const dayNum = Number(day[3])
+    if (!realCivilTime(year, month - 1, dayNum, 0, 0, 0)) return null
     const date = parseDateKey(`${day[1]}-${day[2]}-${day[3]}`)
     return date ? { date, allDay: true } : null
   }
-  const timed = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(?:(\d{2})(?:\.\d+)?)?(Z)?$/iu.exec(value)
+  const timed = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(?:(\d{2})(?:\.\d+)?)?(Z|[+-]\d{4})?$/iu.exec(value)
   if (!timed) return null
   const year = Number(timed[1])
   const month = Number(timed[2]) - 1
@@ -50,9 +76,12 @@ const parseIcsDate = (raw: string): { date: Date; allDay: boolean } | null => {
   const hour = Number(timed[4])
   const minute = Number(timed[5])
   const second = Number(timed[6] ?? 0)
-  const date = timed[7]
-    ? new Date(Date.UTC(year, month, dayOfMonth, hour, minute, second))
-    : new Date(year, month, dayOfMonth, hour, minute, second)
+  if (!realCivilTime(year, month, dayOfMonth, hour, minute, second)) return null
+  const zone = timed[7] ?? ''
+  if (!zone) return { date: new Date(year, month, dayOfMonth, hour, minute, second), allDay: false }
+  const offset = /^z$/iu.test(zone) ? 0 : icsOffsetMinutes(zone)
+  if (offset === null) return null
+  const date = new Date(Date.UTC(year, month, dayOfMonth, hour, minute, second) - offset * 60_000)
   return Number.isNaN(date.getTime()) ? null : { date, allDay: false }
 }
 
