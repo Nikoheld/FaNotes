@@ -547,6 +547,23 @@ fun agendaWhenLabel(event: CalendarEvent): String = eventClock(event) ?: CAL_ALL
 fun calendarIsoWeek(date: LocalDate): Int =
     date.get(java.time.temporal.WeekFields.ISO.weekOfWeekBasedYear())
 
+/** Plain keys while the calendar is open and no field is focused. Ctrl+N stays the new-note shortcut. */
+fun calendarKeyAction(key: String, ctrl: Boolean, alt: Boolean, meta: Boolean): String? {
+    if (ctrl || alt || meta) return null
+    return when (key) {
+        "t" -> "today"
+        "n" -> "new"
+        "left" -> "previous"
+        "right" -> "next"
+        "1" -> "day"
+        "2" -> "three"
+        "3" -> "week"
+        "4" -> "month"
+        "5" -> "agenda"
+        else -> null
+    }
+}
+
 data class SnappedClock(val dayOffset: Int, val hour: Int, val minute: Int)
 
 /** Round to the desktop 15-minute step. 24:00 rolls into the next day. */
