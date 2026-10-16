@@ -49,13 +49,11 @@ fun escapeDismisses(layer: EscapeLayer): String? {
     if (layer.placingSection) return "placing-section"
     if (layer.selectedLink) return "selected-link"
     if (layer.worksheetImport) return "worksheet"
+    if (layer.ai || layer.destination == "ai") return "ai"
     if (layer.palette) return "palette"
     when (layer.destination) {
         "search" -> return "search"
         "settings" -> return "settings"
-    }
-    if (layer.ai || layer.destination == "ai") return "ai"
-    when (layer.destination) {
         "calendar" -> return "calendar"
         "tasks" -> return "tasks"
         "overview" -> return "overview"
