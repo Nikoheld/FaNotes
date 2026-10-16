@@ -152,6 +152,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
@@ -183,6 +184,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
@@ -2458,18 +2460,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 }
                 Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
             }
-            Column(
-                Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .padding(16.dp)
-                    .verticalScroll(rememberScrollState())
-                    .pointerInput(view) {
-                        detectDeskSwipe { direction ->
-                            ch.fasrv.fanotes.desk.calendarSwipeStep(direction)?.let(::shiftCalendar)
-                        }
-                    },
-            ) {
+            val calendarHeader: @Composable () -> Unit = {
         if (!showSide) {
             Text("Kalender", style = MaterialTheme.typography.titleLarge)
             Text("Gespeichert in Kalender.md.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
@@ -2569,37 +2560,8 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
             }
         }
         if (!status.isNullOrBlank()) Text(status.orEmpty(), fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
-        when (view) {
-            "month" -> MonthGrid(
-                anchor,
-                shown,
-                onSelect = { day ->
-                    anchor = day
-                    month = java.time.YearMonth.from(day)
-                    view = "day"
-                },
-                onEdit = { event, date -> editor = draftFor(event, date) },
-            )
-            "agenda" -> AgendaList(anchor, shown, { event, date -> editor = draftFor(event, date) }) { model.openDaily(it) }
-            else -> DayColumns(
-                ch.fasrv.fanotes.desk.calendarRange(view, anchor),
-                anchor,
-                shown,
-                { event, date -> editor = draftFor(event, date) },
-                { anchor = it },
-                { key, start -> model.moveCalendarOccurrence(key, start) },
-                { key, end -> model.resizeCalendarOccurrence(key, end) },
-                { date, start, end, allDay -> editor = draftForCreate(document, date, start, end, allDay) },
-                { model.openDaily(it) },
-            )
-        }
-        if (view != "month") {
-            val range = ch.fasrv.fanotes.desk.calendarRange(view, anchor)
-            val occupied = range.count { date -> shown.events.any { ch.fasrv.fanotes.desk.occurrencesOn(it, date) } }
-            if (ch.fasrv.fanotes.desk.calendarRangeIsEmpty(view, occupied)) {
-                Text(ch.fasrv.fanotes.desk.CAL_EMPTY, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(vertical = 8.dp))
             }
-        }
+            val calendarTail: @Composable () -> Unit = {
         Text("Am $day", modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.SemiBold)
         EventsOn(model, shown, anchor) { editor = draftFor(it, anchor) }
         editor?.let { current ->
@@ -2650,6 +2612,104 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
             TextButton(onClick = onImportIcs) { Text("Importieren") }
         }
             }
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .padding(16.dp)
+                    .pointerInput(view) {
+                        detectDeskSwipe { direction ->
+                            ch.fasrv.fanotes.desk.calendarSwipeStep(direction)?.let(::shiftCalendar)
+                        }
+                    },
+            ) {
+                if (view == "month") {
+                    FillingMonth(
+                        Modifier.fillMaxSize(),
+                        header = { calendarHeader() },
+                        month = {
+                            MonthGrid(
+                                anchor,
+                                shown,
+                                onSelect = { day ->
+                                    anchor = day
+                                    month = java.time.YearMonth.from(day)
+                                    view = "day"
+                                },
+                                onEdit = { event, date -> editor = draftFor(event, date) },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        },
+                        tail = { calendarTail() },
+                    )
+                } else {
+                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                        calendarHeader()
+        when (view) {
+            "agenda" -> AgendaList(anchor, shown, { event, date -> editor = draftFor(event, date) }) { model.openDaily(it) }
+            else -> DayColumns(
+                ch.fasrv.fanotes.desk.calendarRange(view, anchor),
+                anchor,
+                shown,
+                { event, date -> editor = draftFor(event, date) },
+                { anchor = it },
+                { key, start -> model.moveCalendarOccurrence(key, start) },
+                { key, end -> model.resizeCalendarOccurrence(key, end) },
+                { date, start, end, allDay -> editor = draftForCreate(document, date, start, end, allDay) },
+                { model.openDaily(it) },
+            )
+        }
+        if (view != "month") {
+            val range = ch.fasrv.fanotes.desk.calendarRange(view, anchor)
+            val occupied = range.count { date -> shown.events.any { ch.fasrv.fanotes.desk.occurrencesOn(it, date) } }
+            if (ch.fasrv.fanotes.desk.calendarRangeIsEmpty(view, occupied)) {
+                Text(ch.fasrv.fanotes.desk.CAL_EMPTY, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(vertical = 8.dp))
+            }
+        }
+                        calendarTail()
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun FillingMonth(
+    modifier: Modifier,
+    header: @Composable () -> Unit,
+    month: @Composable () -> Unit,
+    tail: @Composable () -> Unit,
+) {
+    val tailScroll = rememberScrollState()
+    SubcomposeLayout(modifier) { constraints ->
+        val width = if (constraints.hasBoundedWidth) constraints.maxWidth else 0
+        val height = if (constraints.hasBoundedHeight) constraints.maxHeight else 0
+        val headerPlaceable = subcompose("header") {
+            Column(Modifier.fillMaxWidth()) { header() }
+        }.first().measure(Constraints(maxWidth = width, maxHeight = height))
+        val space = (height - headerPlaceable.height).coerceAtLeast(0)
+        // Six minimum rows plus the weekday header. A taller quick-add scrolls
+        // instead of shrinking the month below that floor.
+        val floor = (ch.fasrv.fanotes.desk.CAL_MONTH_CELL_MIN_DP * ch.fasrv.fanotes.desk.CAL_MONTH_ROWS).dp.roundToPx() + 32.dp.roundToPx()
+        val tailCap = if (space > floor) space - floor else (space * 2 / 5)
+        val tailPlaceable = subcompose("tail") {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = tailCap.toDp())
+                    .verticalScroll(tailScroll),
+            ) { tail() }
+        }.first().measure(Constraints(maxWidth = width, maxHeight = space))
+        val monthHeight = (space - tailPlaceable.height).coerceAtLeast(0)
+        val monthPlaceable = subcompose("month") {
+            Box(Modifier.fillMaxSize()) { month() }
+        }.first().measure(Constraints.fixed(width, monthHeight))
+        layout(width, height) {
+            headerPlaceable.place(0, 0)
+            monthPlaceable.place(0, headerPlaceable.height)
+            tailPlaceable.place(0, headerPlaceable.height + monthHeight)
         }
     }
 }
@@ -2722,10 +2782,13 @@ private fun MonthGrid(
     document: ch.fasrv.fanotes.desk.CalendarDocument,
     onSelect: (LocalDate) -> Unit,
     onEdit: (CalendarEvent, LocalDate) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val days = ch.fasrv.fanotes.desk.calendarRange("month", anchor)
+    val weeks = days.chunked(7)
     val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
     val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    Column(modifier.fillMaxWidth().fillMaxHeight()) {
     Row(Modifier.fillMaxWidth()) {
         listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So").forEach { label ->
             Text(
@@ -2739,8 +2802,23 @@ private fun MonthGrid(
             )
         }
     }
-    days.chunked(7).forEach { week ->
-        Row(Modifier.fillMaxWidth()) {
+    BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+        val rowCount = weeks.size.coerceAtLeast(1)
+        val availableDp = maxHeight.value.roundToInt().coerceAtLeast(0)
+        val rowDp = ch.fasrv.fanotes.desk.monthRowHeightDp(availableDp, rowCount, ch.fasrv.fanotes.desk.CAL_MONTH_CELL_MIN_DP)
+        val scrolls = with(LocalDensity.current) { (rowDp * rowCount).dp.roundToPx() > maxHeight.roundToPx() }
+        val rowScroll = rememberScrollState()
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .then(if (scrolls) Modifier.verticalScroll(rowScroll) else Modifier.fillMaxHeight()),
+        ) {
+    weeks.forEach { week ->
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .then(if (scrolls) Modifier.height(rowDp.dp) else Modifier.weight(1f).heightIn(min = rowDp.dp)),
+        ) {
             week.forEach { date ->
                 val outside = date.month != anchor.month
                 val today = date == LocalDate.now()
@@ -2748,7 +2826,7 @@ private fun MonthGrid(
                 Column(
                     Modifier
                         .weight(1f)
-                        .heightIn(min = ch.fasrv.fanotes.desk.CAL_MONTH_CELL_MIN_DP.dp)
+                        .fillMaxHeight()
                         .drawBehind {
                             val stroke = 1.dp.toPx()
                             drawLine(rule, Offset(0f, 0f), Offset(size.width, 0f), stroke)
@@ -2794,6 +2872,9 @@ private fun MonthGrid(
                 }
             }
         }
+        }
+        }
+    }
     }
 }
 
