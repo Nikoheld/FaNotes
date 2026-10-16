@@ -4866,6 +4866,7 @@ private fun FirstRunWelcomeCopy(accent: Color, onContinue: () -> Unit) {
 @Composable
 private fun WelcomePreview(modifier: Modifier, accent: Color) {
     val ink = LocalStatusInk.current
+    val aside = ch.fasrv.fanotes.desk.firstRunPreviewAsideDp(LocalConfiguration.current.screenWidthDp).dp
     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_RADIUS_DP.dp)
     val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
     Column(modifier.semantics { contentDescription = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_LABEL }) {
@@ -4887,7 +4888,7 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
                 Text(ch.fasrv.fanotes.desk.FIRST_RUN_BRAND, modifier = Modifier.weight(1f), textAlign = TextAlign.End, fontSize = 11.sp, color = ink.muted)
             }
             Row(Modifier.fillMaxWidth().heightIn(min = 220.dp)) {
-                Column(Modifier.width(102.dp).fillMaxHeight().padding(7.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(Modifier.width(aside).fillMaxHeight().padding(7.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Meine Fächer", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SUBJECTS.forEachIndexed { index, subject ->
                         Text(
