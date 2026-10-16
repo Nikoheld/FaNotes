@@ -3188,7 +3188,7 @@ private fun TimedBlock(
             .pointerInput(slice.key, slice.originStart, slice.originEnd) {
                 val hourPx = HOUR_DP.dp.toPx()
                 val columnPx = size.width.toFloat().coerceAtLeast(1f)
-                val handlePx = 16.dp.toPx()
+                val handlePx = ch.fasrv.fanotes.desk.CAL_RESIZE_DP.dp.toPx()
                 val slop = viewConfiguration.touchSlop
                 awaitEachGesture {
                     val down = awaitFirstDown()
