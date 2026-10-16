@@ -499,6 +499,9 @@ const val CAL_VIEW_RADIUS_DP = 9
 const val CAL_SEARCH = "Termine suchen"
 const val CAL_ALL_DAY = "Ganztägig"
 const val CAL_DAILY = "Tagesnotiz"
+const val CAL_GUTTER_DP = 56
+const val CAL_NOW_DOT_DP = 8
+const val CAL_HEAD_NUM_SP = 16
 
 fun calendarShowsSide(widthDp: Int): Boolean = widthDp > CAL_SIDE_BREAK_DP
 
@@ -532,6 +535,14 @@ fun calendarHeading(view: String, anchor: LocalDate): String {
 }
 
 fun agendaWhenLabel(event: CalendarEvent): String = eventClock(event) ?: CAL_ALL_DAY
+
+private val CAL_WEEKDAYS = listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
+
+fun calendarWeekdayShort(date: LocalDate): String = CAL_WEEKDAYS[date.dayOfWeek.value - 1]
+
+/** Distance from midnight down the 48dp hour grid. */
+fun calendarNowOffsetDp(hour: Int, minute: Int, hourDp: Int = 48): Float =
+    ((hour.coerceIn(0, 23) * 60 + minute.coerceIn(0, 59)) / 60f) * hourDp
 
 fun eventClock(event: CalendarEvent): String? {
     if (event.allDay || !event.start.contains('T')) return null
