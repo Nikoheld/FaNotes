@@ -274,7 +274,7 @@ fun detailsImageFrame(pixelWidth: Int, pixelHeight: Int, contentPx: Float): Pair
     return frameW to frameH
 }
 
-private val DETAILS_NUMBER_MARKER = Regex("""^\d+\.\s+""")
+private val DETAILS_NUMBER_MARKER = Regex("""^\d+[.)]\s+""")
 
 fun detailsListIndent(text: String): String = text.takeWhile { it == ' ' || it == '\t' }
 

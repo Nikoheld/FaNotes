@@ -356,6 +356,7 @@ class LivePreviewTest {
     @Test
     fun detailsListsKeepThePreviewMarker() {
         assertEquals("1. ", detailsNumberMarker("1. Eins"))
+        assertEquals("1) ", detailsNumberMarker("1) Eins"))
         assertEquals("12. ", detailsNumberMarker("12. Zwei"))
         assertEquals("", detailsNumberMarker("Eins"))
         assertEquals(false, detailsTaskChecked("☐ Offen"))
@@ -365,6 +366,10 @@ class LivePreviewTest {
         val numbered = detailsReadingLines("1. **Eins**")
         assertEquals("number", numbered.single().kind)
         assertEquals("1. ", detailsNumberMarker(numbered.single().text))
+        val paren = detailsReadingLines("1) **Eins**")
+        assertEquals("number", paren.single().kind)
+        assertEquals("1) ", detailsNumberMarker(paren.single().text))
+        assertEquals("1) ".length, previewMarkerEnd(paren.single().text, "number"))
         val strong = numbered.single().inlines.single()
         assertEquals("Eins", numbered.single().text.substring(strong.start, strong.end))
         val task = detailsReadingLines("- [x] **Fertig**")
