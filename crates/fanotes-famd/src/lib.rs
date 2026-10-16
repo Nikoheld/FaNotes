@@ -1086,6 +1086,11 @@ pub fn canonical_iso(value: &str) -> Option<String> {
             return canonical_iso(&keep_leading_space(value, normalized));
         }
     }
+    if !value.starts_with(is_date_parse_space) && finished_date_has_an_extra_hyphen(trimmed) {
+        // `2026-10-13-` and `2026-10-13- January` already finished the strict
+        // date. A leading space is legacy, so that hyphen is skipped.
+        return None;
+    }
     if has_english_month(trimmed) {
         let normalized = rewrite_month_name(trimmed)?;
         return canonical_iso(&normalized);
@@ -1125,10 +1130,6 @@ pub fn canonical_iso(value: &str) -> Option<String> {
                 return canonical_iso(&keep_leading_space(value, normalized));
             }
         }
-    }
-    if finished_date_has_an_extra_hyphen(trimmed) {
-        // `2026-10-13-` and `2026-10-13-EST` already finished the strict date.
-        return None;
     }
     if let Some(iso) = trailing_hyphen_iso(trimmed) {
         // `2026-10-` stops before a strict ISO date, so that midnight is local.
@@ -1804,9 +1805,7 @@ fn month_words(value: &str) -> Vec<&str> {
 /// `2026-10-13` next to `GMT` is three numbers and a zone. A month word such
 /// as `13-Oct-26` stays one token for the month scan.
 fn expand_hyphen_numbers(token: &str) -> Vec<&str> {
-    if token.contains(':') || !token.contains('-') || finished_iso_hyphen(token) {
-        // `2026-10-13-` already finished a strict date. The extra hyphen
-        // makes `2026-10-13- January` empty.
+    if token.contains(':') || !token.contains('-') {
         return vec![token];
     }
     // `-10-13` keeps its sign. After a number it is an extra sign. At the
@@ -1831,22 +1830,6 @@ fn expand_hyphen_numbers(token: &str) -> Vec<&str> {
         return vec![token];
     }
     parts
-}
-
-/// `2026-10-13-` is a finished strict date plus one hyphen.
-fn finished_iso_hyphen(token: &str) -> bool {
-    let Some(body) = token.strip_suffix('-') else {
-        return false;
-    };
-    if body.ends_with('-') {
-        return false;
-    }
-    let parts: Vec<&str> = body.split('-').collect();
-    parts.len() == 3
-        && parts[0].len() == 4
-        && parts[1].len() == 2
-        && parts[2].len() == 2
-        && parts.iter().all(|part| unsigned_number(part).is_some())
 }
 
 /// `13)` is the number 13 and then a `)`. The `)` is its own word.
@@ -1977,6 +1960,20 @@ fn separate_colon_after_hyphen_date(value: &str) -> Option<String> {
         }
         let raw_prefix = &value[..index];
         let prefix = raw_prefix.trim_start_matches(is_date_parse_space);
+        if prefix_is_strict_hyphen_date(prefix) {
+            let suffix = value[index + 1..].trim_start_matches(is_date_parse_space);
+            // `2026-10-13:` and `2026-10-13:EST` ignore the colon. A digit
+            // there is another field, so `2026-10-13:16` stays empty.
+            if !suffix_is_legacy_clock(suffix)
+                && !suffix.starts_with(|character: char| character.is_ascii_digit())
+            {
+                let mut next = String::with_capacity(value.len() + 1);
+                next.push_str(raw_prefix);
+                next.push(' ');
+                next.push_str(&value[index + 1..]);
+                return Some(next);
+            }
+        }
         if prefix_is_strict_hyphen_date(prefix)
             && suffix_is_legacy_clock(value[index + 1..].trim_start_matches(is_date_parse_space))
         {
@@ -2476,6 +2473,9 @@ fn skip_separator_after_month(token: &str, mut index: usize) -> usize {
 /// month word and the digits are the next field. `13:Oct` is hour 13 and
 /// October: a month after a time colon is its own word.
 fn expand_glued_month(token: &str) -> Vec<&str> {
+    if let Some(parts) = split_zone_before_clock(token) {
+        return parts;
+    }
     if let Some(parts) = split_time_colon_month(token) {
         return parts;
     }
@@ -2595,6 +2595,25 @@ fn exact_zone_keyword(token: &str) -> bool {
 /// `GMT5` has no byte between the zone and the number. `GMT 5` does.
 fn digits_follow_zone(zone: &str, next: &str) -> bool {
     unsigned_number(next).is_some() && zone.as_bytes().as_ptr_range().end == next.as_ptr()
+}
+
+/// `Z16:00` is the zone and then a clock. The digit is glued to the keyword.
+fn glued_clock_follows_zone(zone: &str, next: &str) -> bool {
+    next.starts_with(|character: char| character.is_ascii_digit())
+        && zone.as_bytes().as_ptr_range().end == next.as_ptr()
+}
+
+/// `Z16:00` and `EST16:00` are a zone keyword and then a clock.
+fn split_zone_before_clock(token: &str) -> Option<Vec<&str>> {
+    let bytes = token.as_bytes();
+    let mut end = bytes.len().min(3);
+    while end > 0 {
+        if bytes.get(end).is_some_and(u8::is_ascii_digit) && exact_zone_keyword(&token[..end]) {
+            return Some(vec![&token[..end], &token[end..]]);
+        }
+        end -= 1;
+    }
+    None
 }
 
 /// `foo13` and `T16:00` glue a word to a digit. `Oct_13` was already split.
@@ -3457,7 +3476,7 @@ fn compose_month_date(
                 if words
                     .get(index + 1)
                     .copied()
-                    .is_some_and(|next| digits_follow_zone(word, next))
+                    .is_some_and(|next| glued_clock_follows_zone(word, next))
                 {
                     return None;
                 }
@@ -8502,6 +8521,50 @@ mod tests {
             assert_eq!(super::canonical_iso("xx16:00 2026-10-13"), None);
             assert_eq!(super::canonical_iso("note16:00 2026-10-13"), None);
             assert_eq!(super::canonical_iso("Z16:00 2026-10-13"), None);
+            assert_eq!(super::canonical_iso("GMT16:00 2026-10-13"), None);
+            assert_eq!(
+                super::canonical_iso("2026-10-13 Z16:00").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 EST16:00").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 PST16:00").as_deref(),
+                Some("2026-10-14T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13:").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13::").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13:16"), None);
+            assert_eq!(
+                super::canonical_iso("2026-10-13:EST").as_deref(),
+                Some("2026-10-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13: GMT").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13:16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00 2026-10-13-").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13-"), None);
+            assert_eq!(
+                super::canonical_iso(" 2026-10-13-").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("16:00 2026-10-13--"), None);
             assert_eq!(super::canonical_iso("hello16:00 10/13/2026"), None);
             assert_eq!(super::canonical_iso("  T16:00 2026-10-13"), None);
             assert_eq!(
