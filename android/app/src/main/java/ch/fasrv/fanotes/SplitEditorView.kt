@@ -180,8 +180,26 @@ class SplitEditorView(context: Context) : EditText(context) {
                             )
                             closedBrackets.clear()
                             closedBrackets.addAll(bracketsOnCursorLine(next, selectionStart, shifted))
-                            rememberChange(editBefore, next)
-                            onVisibleEdit(editBefore, next)
+                            val corrected = spelling.autocorrectEdit(editBefore, next, changeStart, changeDeleted)
+                            if (corrected != null) {
+                                writing = true
+                                setText(corrected.text)
+                                setSelection(corrected.cursor.coerceIn(0, corrected.text.length))
+                                writing = false
+                                val origin = editBefore
+                                editBefore = corrected.text
+                                val boundaryCursor = (changeStart + 1).coerceIn(0, next.length)
+                                if (corrected.splitHistory) {
+                                    rememberChange(origin, next, cursorAfter = boundaryCursor)
+                                    rememberChange(next, corrected.text, boundaryCursor, corrected.cursor)
+                                } else {
+                                    rememberChange(origin, corrected.text, cursorAfter = corrected.cursor)
+                                }
+                                onVisibleEdit(origin, corrected.text)
+                            } else {
+                                rememberChange(editBefore, next)
+                                onVisibleEdit(editBefore, next)
+                            }
                         }
                     }
                 }
@@ -201,8 +219,13 @@ class SplitEditorView(context: Context) : EditText(context) {
         tags?.onCaretMoved()
     }
 
-    private fun rememberChange(before: String, after: String, cursorBefore: Int = cursorBeforeEdit) {
-        history.record(before, after, cursorBefore, selectionEnd.coerceAtLeast(0), System.currentTimeMillis())
+    private fun rememberChange(
+        before: String,
+        after: String,
+        cursorBefore: Int = cursorBeforeEdit,
+        cursorAfter: Int = selectionEnd.coerceAtLeast(0),
+    ) {
+        history.record(before, after, cursorBefore, cursorAfter, System.currentTimeMillis())
     }
 
     private fun undoTyping(): Boolean = restoreHistory(history.undo(text?.toString().orEmpty()))

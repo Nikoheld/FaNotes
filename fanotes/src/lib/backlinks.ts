@@ -1,3 +1,5 @@
+import { maskMarkdownCode } from './markdownCode'
+
 const WIKILINK = /\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/gu
 
 export type Backlink = {
@@ -8,10 +10,10 @@ export type Backlink = {
 
 const titleFromPath = (path: string) => path.split('/').pop()?.replace(/\.(md|markdown|pdf)$/iu, '') ?? path
 
-/** Titles a note points at with wiki links such as `[[Mechanik]]`. */
+/** Titles a note points at with wiki links such as `[[Mechanik]]`. Examples in code do not count. */
 export const wikilinkTargets = (markdown: string) => {
   const found = new Set<string>()
-  for (const match of markdown.matchAll(WIKILINK)) {
+  for (const match of maskMarkdownCode(markdown).matchAll(WIKILINK)) {
     const target = match[1]?.trim()
     if (target) found.add(target)
   }
@@ -19,7 +21,8 @@ export const wikilinkTargets = (markdown: string) => {
 }
 
 const excerptAround = (markdown: string, needle: string) => {
-  const index = markdown.toLocaleLowerCase('de-DE').indexOf(needle.toLocaleLowerCase('de-DE'))
+  const visible = maskMarkdownCode(markdown)
+  const index = visible.toLocaleLowerCase('de-DE').indexOf(needle.toLocaleLowerCase('de-DE'))
   if (index < 0) return ''
   return markdown.slice(Math.max(0, index - 48), Math.min(markdown.length, index + needle.length + 72)).replace(/\s+/gu, ' ').trim()
 }

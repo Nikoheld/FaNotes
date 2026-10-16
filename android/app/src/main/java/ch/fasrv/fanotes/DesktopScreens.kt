@@ -4957,7 +4957,14 @@ private fun WelcomePreview(modifier: Modifier) {
                     Modifier
                         .width(aside)
                         .fillMaxHeight()
-                        .background(Color(ch.fasrv.fanotes.desk.firstRunPreviewAsideFill(MaterialTheme.colorScheme.background.toArgb(), MaterialTheme.colorScheme.surface.toArgb())))
+                        .background(
+                            Color(
+                                ch.fasrv.fanotes.desk.firstRunPreviewAsideFill(
+                                    MaterialTheme.colorScheme.background.toArgb(),
+                                    MaterialTheme.colorScheme.surface.toArgb(),
+                                ),
+                            ),
+                        )
                         .drawBehind {
                             val stroke = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_RULE_DP.dp.toPx()
                             val x = size.width - stroke / 2f
@@ -7997,6 +8004,16 @@ private fun SettingsPage(
                             Switch(
                                 checked = settings["spellcheck"] != "off",
                                 onCheckedChange = { model.updateDesk("spellcheck", if (it) "on" else "off") },
+                            )
+                        }
+                        SettingRow(
+                            "Autokorrektur",
+                            "Ersetzt einen eindeutigen Tippfehler, sobald das Wort mit Leerzeichen oder Satzzeichen endet. Rückschritt direkt danach stellt das getippte Wort wieder her.",
+                        ) {
+                            Switch(
+                                checked = settings["spellcheck"] != "off" && settings["autocorrect"] != "off",
+                                enabled = settings["spellcheck"] != "off",
+                                onCheckedChange = { model.updateDesk("autocorrect", if (it) "on" else "off") },
                             )
                         }
                         SettingRow("Wortzahl in Statusleiste") {

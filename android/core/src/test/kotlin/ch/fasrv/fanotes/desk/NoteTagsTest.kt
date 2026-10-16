@@ -17,6 +17,7 @@ class NoteTagsTest {
         assertEquals("zwei-worte", normalizeTag("  #Zwei Worte "))
         assertEquals("a".repeat(40), normalizeTag("A".repeat(45)))
         assertEquals(emptyList(), parseHashtags("<!-- fanotes-tags: #geheim -->"))
+        assertEquals(listOf("übung"), parseHashtags("#Übung und `#geheim`\n```\n#code\n```\n"))
     }
 
     @Test

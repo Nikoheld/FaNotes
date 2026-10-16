@@ -15,6 +15,9 @@ import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.ScrollView
 import android.widget.TextView
+import ch.fasrv.fanotes.desk.AutocorrectResult
+import ch.fasrv.fanotes.desk.AutocorrectMark
+import ch.fasrv.fanotes.desk.autocorrectTyping
 import ch.fasrv.fanotes.desk.SpellingDictionaries
 import ch.fasrv.fanotes.desk.SpellingError
 import ch.fasrv.fanotes.desk.SpellingLexicon
@@ -37,9 +40,13 @@ class SpellingController(private val view: EditText) {
     var onLanguage: (String) -> Unit = {}
     var onLearn: (String) -> Unit = {}
     var onIgnore: (String) -> Unit = {}
+    var autocorrect: Boolean = true
+    var declined: (String) -> Boolean = { false }
+    var onDecline: (String) -> Unit = {}
 
     private var epoch = -1
     private var token = 0
+    private var autocorrectMark: AutocorrectMark? = null
     private var errors: List<SpellingError> = emptyList()
     private var lines: List<SpellingLine> = emptyList()
     private var popup: PopupWindow? = null
@@ -59,9 +66,16 @@ class SpellingController(private val view: EditText) {
         onLanguage: (String) -> Unit,
         onLearn: (String) -> Unit,
         onIgnore: (String) -> Unit,
+        autocorrect: Boolean = this.autocorrect,
+        declined: (String) -> Boolean = this.declined,
+        onDecline: (String) -> Unit = this.onDecline,
     ) {
         val turned = enabled != this.enabled || epoch != this.epoch
         this.enabled = enabled
+        this.autocorrect = autocorrect && enabled
+        this.declined = declined
+        this.onDecline = onDecline
+        if (!this.autocorrect) autocorrectMark = null
         this.waveColor = waveColor
         this.inkColor = inkColor
         this.paperColor = paperColor
@@ -138,6 +152,35 @@ class SpellingController(private val view: EditText) {
     }
 
     fun showAtCursor(): Boolean = showAt(view.selectionEnd.coerceAtLeast(0))
+
+    /**
+     * Applies a finished-word correction, or puts the typed word back when
+     * Backspace lands on the boundary that triggered it. Null leaves the edit alone.
+     */
+    fun autocorrectEdit(before: String, next: String, changeStart: Int, changeDeleted: Int): AutocorrectResult? {
+        if (!enabled || !autocorrect) {
+            autocorrectMark = null
+            return null
+        }
+        val result = autocorrectTyping(
+            before,
+            next,
+            changeStart,
+            changeDeleted,
+            SpellingBundle.readyLexicon(acceptedWords()),
+            true,
+            autocorrectMark,
+            declined,
+            { offset -> lines.firstOrNull { offset in it.from..it.to }?.language },
+        )
+        if (result == null) {
+            autocorrectMark = null
+            return null
+        }
+        result.declined?.let(onDecline)
+        autocorrectMark = result.mark
+        return result
+    }
 
     private fun clear() {
         errors = emptyList()
@@ -297,6 +340,12 @@ private object SpellingBundle {
 
     fun warm() {
         lexicon(emptySet())
+    }
+
+    fun readyLexicon(personal: Set<String>): SpellingLexicon? = synchronized(gate) {
+        val dictionaries = full ?: return null
+        if (dictionaries.deWords == null || dictionaries.enWords == null) return null
+        SpellingLexicon(dictionaries, personal)
     }
 
     fun lexicon(personal: Set<String>): SpellingLexicon? = synchronized(gate) {
