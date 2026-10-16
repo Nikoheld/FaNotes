@@ -139,6 +139,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
@@ -4466,20 +4467,28 @@ fun FirstRunDialog(
                                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                                                 row.forEach { folder ->
                                                     val on = folder.name in draft.selected
+                                                    val subject = Color(ch.fasrv.fanotes.desk.firstRunFolderArgb(folder.color))
+                                                    val mark = Color(ch.fasrv.fanotes.desk.firstRunSubjectInk(folder.color, MaterialTheme.colorScheme.onSurface.toArgb()))
                                                     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_SUBJECT_RADIUS_DP.dp)
+                                                    val checkShape = RoundedCornerShape(6.dp)
                                                     Row(
-                                                        Modifier.weight(1f).heightIn(min = 59.dp).clip(shape).border(1.dp, if (on) MaterialTheme.colorScheme.primary.copy(alpha = 0.61f) else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA), shape).background(if (on) MaterialTheme.colorScheme.primary.copy(alpha = 0.13f) else MaterialTheme.colorScheme.surface).clickable { onDraft(ch.fasrv.fanotes.desk.firstRunToggleFolder(draft, folder.name)) }.padding(horizontal = 9.dp, vertical = 7.dp),
+                                                        Modifier.weight(1f).heightIn(min = 59.dp).clip(shape).border(1.dp, if (on) subject.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_SUBJECT_LINE) else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA), shape).background(if (on) subject.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_SUBJECT_FILL) else MaterialTheme.colorScheme.surface).clickable { onDraft(ch.fasrv.fanotes.desk.firstRunToggleFolder(draft, folder.name)) }.padding(horizontal = 9.dp, vertical = 7.dp),
                                                         verticalAlignment = Alignment.CenterVertically,
                                                         horizontalArrangement = Arrangement.spacedBy(9.dp),
                                                     ) {
-                                                        Box(Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.13f)), contentAlignment = Alignment.Center) {
-                                                            Text(ch.fasrv.fanotes.desk.firstRunFolderMark(folder.name), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = accent)
+                                                        Box(Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(subject.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_SUBJECT_FILL)), contentAlignment = Alignment.Center) {
+                                                            Text(ch.fasrv.fanotes.desk.firstRunFolderMark(folder.name), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = mark)
                                                         }
                                                         Column(Modifier.weight(1f)) {
                                                             Text(folder.name, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                             Text(ch.fasrv.fanotes.desk.firstRunFolderBlurb(folder.name), fontSize = 12.sp, color = ink.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
                                                         }
-                                                        if (on) Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onPrimary)
+                                                        Box(
+                                                            Modifier.size(17.dp).clip(checkShape).border(1.dp, if (on) subject else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), checkShape).background(if (on) subject else Color.Transparent),
+                                                            contentAlignment = Alignment.Center,
+                                                        ) {
+                                                            if (on) Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.background)
+                                                        }
                                                     }
                                                 }
                                                 if (row.size == 1) Spacer(Modifier.weight(1f))
