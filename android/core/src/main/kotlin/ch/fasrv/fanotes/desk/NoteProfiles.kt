@@ -1,5 +1,7 @@
 package ch.fasrv.fanotes.desk
 
+import kotlin.math.roundToInt
+
 /** Starter folders and note templates from the desktop first-run profile. */
 data class ProfileFolder(val name: String, val color: String)
 data class NoteTemplate(val id: String, val profile: String, val title: String, val fileName: String, val markdown: String)
@@ -234,6 +236,31 @@ private val FOLDER_BLURBS = mapOf(
 )
 
 fun firstRunFolderMark(name: String): String = FOLDER_BLURBS[name]?.first ?: name.take(2)
+
+const val FIRST_RUN_SUBJECT_FILL = 0.13f
+const val FIRST_RUN_SUBJECT_LINE = 0.61f
+const val FIRST_RUN_SUBJECT_INK = 0.80f
+
+/** Opaque ARGB for a `#rrggbb` folder color. */
+fun firstRunFolderArgb(hex: String): Int {
+    val rgb = hex.trim().removePrefix("#").toInt(16) and 0xFFFFFF
+    return (0xFF shl 24) or rgb
+}
+
+/** `color-mix` of [source] into [into] by [sourceShare]. */
+fun mixArgb(source: Int, into: Int, sourceShare: Float): Int {
+    val share = sourceShare.coerceIn(0f, 1f)
+    fun channel(shift: Int): Int {
+        val from = (source ushr shift) and 0xFF
+        val to = (into ushr shift) and 0xFF
+        return (from * share + to * (1f - share)).roundToInt().coerceIn(0, 255)
+    }
+    return (0xFF shl 24) or (channel(16) shl 16) or (channel(8) shl 8) or channel(0)
+}
+
+/** Mark ink: 80% folder color mixed into the theme text. */
+fun firstRunSubjectInk(colorHex: String, textArgb: Int): Int =
+    mixArgb(firstRunFolderArgb(colorHex), textArgb, FIRST_RUN_SUBJECT_INK)
 
 fun firstRunFolderBlurb(name: String): String = FOLDER_BLURBS[name]?.second ?: "Organisierter Startordner"
 

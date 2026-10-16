@@ -93,4 +93,14 @@ class NoteProfilesTest {
         assertEquals(45, firstRunColumnGap(0, 1000))
         assertEquals(45, firstRunColumnGap(3, 1180))
     }
+
+    @Test
+    fun folderButtonsUseTheirOwnColor() {
+        assertEquals(0xFF2A6F97.toInt(), firstRunFolderArgb("#2a6f97"))
+        assertEquals(0xFF2A6F97.toInt(), firstRunFolderArgb(profileFolders("school").first { it.name == "Mathematik" }.color))
+        assertEquals(0xFF333333.toInt(), mixArgb(0xFF000000.toInt(), 0xFFFFFFFF.toInt(), 0.80f))
+        assertEquals(0xFF333333.toInt(), firstRunSubjectInk("#000000", 0xFFFFFFFF.toInt()))
+        assertEquals(0.13f, FIRST_RUN_SUBJECT_FILL)
+        assertEquals(0.61f, FIRST_RUN_SUBJECT_LINE)
+    }
 }
