@@ -1801,6 +1801,11 @@ fn expand_hyphen_numbers(token: &str) -> Vec<&str> {
         // makes `2026-10-13- January` empty.
         return vec![token];
     }
+    // `-10-13` keeps its sign. After a number it is an extra sign. At the
+    // start it is still 10 and 13, which the date composer decides.
+    if token.starts_with(['+', '-']) && token[1..].contains('-') {
+        return vec![token];
+    }
     let body = token.strip_prefix('-').unwrap_or(token);
     if !body.contains('-') && !body.ends_with('-') {
         return vec![token];
@@ -3299,6 +3304,21 @@ fn compose_month_date(
         }
         if glued_non_month(word) {
             return None;
+        }
+        // `2026 -10-13` is an extra sign after a number. `-10-13` at the
+        // start is 13 October. A clock may still read `-10-13` as offsets.
+        if let Some(body) = word.strip_prefix(['+', '-']) {
+            if body.contains('-') && time.index == 0 && offset != Some(0) {
+                if number_seen {
+                    return None;
+                }
+                for part in body.split('-').filter(|part| !part.is_empty()) {
+                    let number = unsigned_number(part)?;
+                    push_date_number(&mut dates, number)?;
+                }
+                number_seen = true;
+                continue;
+            }
         }
         // `16:00 EST+5:30` is 16:00 at UTC+5:30. The number replaces the name.
         // Before a clock, `EST+5:30` is empty. `EST` alone stays EST, and
@@ -8323,6 +8343,66 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("10/13/2026 16:00 +5").as_deref(),
                 Some("2026-10-13T11:00:00.000Z")
+            );
+        });
+    }
+
+    #[test]
+    fn an_extra_sign_after_a_number_is_empty() {
+        with_tz("America/New_York", || {
+            // Node 22. A `+` or `-` after a number is an offset only when a clock
+            // was already seen and the digits are glued to the sign. `-10-13` at
+            // the start is still 13 October 2001. A later offset replaces an
+            // earlier one, so `16:00 -10-13` ends at UTC−13.
+            assert_eq!(super::canonical_iso("2026 -10-13"), None);
+            assert_eq!(super::canonical_iso("2026 -10-13 16:00"), None);
+            assert_eq!(super::canonical_iso("2026-10 -13"), None);
+            assert_eq!(super::canonical_iso("2026-10 -13 16:00"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 -5"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 +10-13"), None);
+            assert_eq!(super::canonical_iso("Oct 13 -2026"), None);
+            assert_eq!(super::canonical_iso("13 -Oct 2026"), None);
+            assert_eq!(super::canonical_iso("2026 - 10 - 13"), None);
+            assert_eq!(super::canonical_iso("2026 +10-13"), None);
+            assert_eq!(super::canonical_iso("+5 2026-10-13"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00 - 5"), None);
+            assert_eq!(super::canonical_iso("16:00 -10-13"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 -10-13"), None);
+            assert_eq!(
+                super::canonical_iso("Oct -13 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-10-13").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-10-13 16:00").as_deref(),
+                Some("2001-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 -5").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 -5:30").as_deref(),
+                Some("2026-10-13T21:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 GMT -5").as_deref(),
+                Some("2026-10-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 -10-13").as_deref(),
+                Some("2026-10-14T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(" -000001-10-13 16:00").as_deref(),
+                Some("2013-01-10T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(" -000000-10-13").as_deref(),
+                Some("2000-10-13T04:00:00.000Z")
             );
         });
     }
