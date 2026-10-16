@@ -4872,6 +4872,11 @@ fn trailing_hyphen_iso(trimmed: &str) -> Option<String> {
     }
     let (year, month, day) = unfinished_hyphen_ymd(body)?;
     if let Some(zone) = zone {
+        // `(10)` is a comment, so `2026-(10)-13` is `2026- -13`. A bare
+        // signed number is not a zone. `GMT-5` and `EST` still are.
+        if zone.starts_with(['+', '-']) {
+            return None;
+        }
         let parsed = legacy_zone_offset(zone).or_else(|| parse_legacy_offset(zone))?;
         if !parsed.time_fields.is_empty() || !parsed.spilled.is_empty() {
             return None;
@@ -10830,6 +10835,35 @@ mod tests {
                 super::canonical_iso("2026-10- EST").as_deref(),
                 Some("2026-10-01T05:00:00.000Z")
             );
+            assert_eq!(
+                super::canonical_iso("2026- EST").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10- GMT").as_deref(),
+                Some("2026-10-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026- GMT-5").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026- GMT-0500").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-(10)-13"), None);
+            assert_eq!(super::canonical_iso("2026-(10)-13 16:00"), None);
+            assert_eq!(super::canonical_iso("2026- -13"), None);
+            assert_eq!(super::canonical_iso("2026- -5"), None);
+            assert_eq!(super::canonical_iso("2026- +5"), None);
+            assert_eq!(super::canonical_iso("2026- +5:30"), None);
+            assert_eq!(super::canonical_iso("2026- +13"), None);
+            assert_eq!(super::canonical_iso("2026-10- -5"), None);
+            assert_eq!(super::canonical_iso("2026-10- -13"), None);
+            assert_eq!(super::canonical_iso("2026-10- +5:30"), None);
+            assert_eq!(super::canonical_iso("2026--13"), None);
+            assert_eq!(super::canonical_iso("2026-(10)-"), None);
+            assert_eq!(super::canonical_iso("2026-10-13-(5)"), None);
             assert_eq!(super::canonical_iso("2026-10-13-"), None);
             assert_eq!(super::canonical_iso("2026-10-01-"), None);
             assert_eq!(super::canonical_iso("2026--"), None);

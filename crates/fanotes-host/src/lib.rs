@@ -5843,6 +5843,11 @@ fn trailing_hyphen_millis(trimmed: &str) -> Option<u64> {
     }
     let (year, month, day) = unfinished_hyphen_ymd(body)?;
     if let Some(zone) = zone {
+        // `(10)` is a comment, so `2026-(10)-13` is `2026- -13`. A bare
+        // signed number is not a zone. `GMT-5` and `EST` still are.
+        if zone.starts_with(['+', '-']) {
+            return None;
+        }
         let parsed = legacy_zone_offset(zone).or_else(|| parse_legacy_offset(zone))?;
         if !parsed.time_fields.is_empty() || !parsed.spilled.is_empty() {
             return None;
@@ -12847,6 +12852,23 @@ mod local_zone_tests {
             unix_millis_from_iso("2026-10- EST"),
             Some(1_790_830_800_000)
         );
+        assert_eq!(unix_millis_from_iso("2026- EST"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10- GMT"), Some(1_790_812_800_000));
+        assert_eq!(unix_millis_from_iso("2026- GMT-5"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("2026- GMT-0500"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("2026-(10)-13"), None);
+        assert_eq!(unix_millis_from_iso("2026-(10)-13 16:00"), None);
+        assert_eq!(unix_millis_from_iso("2026- -13"), None);
+        assert_eq!(unix_millis_from_iso("2026- -5"), None);
+        assert_eq!(unix_millis_from_iso("2026- +5"), None);
+        assert_eq!(unix_millis_from_iso("2026- +5:30"), None);
+        assert_eq!(unix_millis_from_iso("2026- +13"), None);
+        assert_eq!(unix_millis_from_iso("2026-10- -5"), None);
+        assert_eq!(unix_millis_from_iso("2026-10- -13"), None);
+        assert_eq!(unix_millis_from_iso("2026-10- +5:30"), None);
+        assert_eq!(unix_millis_from_iso("2026--13"), None);
+        assert_eq!(unix_millis_from_iso("2026-(10)-"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13-(5)"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13-"), None);
         assert_eq!(unix_millis_from_iso("2026-10-01-"), None);
         assert_eq!(unix_millis_from_iso("2026--"), None);
