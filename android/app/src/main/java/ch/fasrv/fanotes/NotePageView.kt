@@ -1178,6 +1178,19 @@ class NotePageView(context: Context) : FrameLayout(context) {
         editor.scrollTo(0, y.coerceAtLeast(0))
     }
 
+    /** Inserts a date stamp at the caret. Fails while the pen is the editor. */
+    fun insertStamp(stamp: String): Boolean {
+        if (!textMode) return false
+        val editable = editor.text ?: return false
+        val start = editor.selectionStart.coerceIn(0, editable.length)
+        val end = editor.selectionEnd.coerceIn(0, editable.length).coerceAtLeast(start)
+        val insert = ch.fasrv.fanotes.vault.stampToInsert(editable.subSequence(0, start).toString(), stamp)
+        if (insert.isEmpty()) return false
+        editable.replace(start, end, insert)
+        editor.setSelection((start + insert.length).coerceIn(0, editable.length))
+        return true
+    }
+
     fun revealRange(start: Int, end: Int) {
         if (!textMode) setTextMode(true)
         val length = editor.text?.length ?: 0

@@ -302,6 +302,21 @@ const val FIRST_RUN_TITLE_SP = 36
 const val FIRST_RUN_BRAND = "FaNotes"
 const val FIRST_RUN_BRAND_DETAIL = "Dein persönlicher Denkraum"
 const val FIRST_RUN_LOCAL = "Bleibt lokal"
+/**
+ * `.first-run-local` is 12px at weight 600, padding `6px 9px`, gap 6px, and a 15px icon.
+ * The border mixes success 25% into `--border`. The label mixes success 74% into the text.
+ * The fill is success at 7%.
+ */
+const val FIRST_RUN_LOCAL_SP = 12
+const val FIRST_RUN_LOCAL_WEIGHT = 600
+const val FIRST_RUN_LOCAL_PAD_BLOCK_DP = 6
+const val FIRST_RUN_LOCAL_PAD_INLINE_DP = 9
+const val FIRST_RUN_LOCAL_GAP_DP = 6
+const val FIRST_RUN_LOCAL_MARGIN_START_DP = 9
+const val FIRST_RUN_LOCAL_ICON_DP = 15
+const val FIRST_RUN_LOCAL_BORDER_MIX = 0.25f
+const val FIRST_RUN_LOCAL_INK_MIX = 0.74f
+const val FIRST_RUN_LOCAL_FILL_ALPHA = 0.07f
 const val FIRST_RUN_GO = "Los geht’s"
 const val FIRST_RUN_SKIP = "Einsatzprofil auswählen"
 const val FIRST_RUN_NEXT = "Weiter"
@@ -1062,6 +1077,20 @@ fun firstRunPreviewFloatBorder(dark: Boolean): Int {
 fun firstRunPreviewHeaderFill(panelArgb: Int): Int {
     val alpha = (FIRST_RUN_PREVIEW_HEADER_FILL_ALPHA * 255f).roundToInt().coerceIn(0, 255)
     return (alpha shl 24) or (panelArgb and 0xFFFFFF)
+}
+
+/** Border of `.first-run-local`: success mixed 25% into `--border`. */
+fun firstRunLocalBorder(successArgb: Int, borderArgb: Int): Int =
+    cssColorMix(successArgb, borderArgb, FIRST_RUN_LOCAL_BORDER_MIX)
+
+/** Label and icon of `.first-run-local`: success mixed 74% into the text color. */
+fun firstRunLocalInk(successArgb: Int, textArgb: Int): Int =
+    mixArgb(successArgb, textArgb, FIRST_RUN_LOCAL_INK_MIX)
+
+/** Fill of `.first-run-local`: success at 7% over a transparent backdrop. */
+fun firstRunLocalFill(successArgb: Int): Int {
+    val alpha = (FIRST_RUN_LOCAL_FILL_ALPHA * 255f).roundToInt().coerceIn(0, 255)
+    return (alpha shl 24) or (successArgb and 0xFFFFFF)
 }
 
 /** `--border` for the welcome preview, including the sepia 10% rule. */

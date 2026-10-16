@@ -111,7 +111,7 @@ The desktop engine transfers up to 3 files at once. This client transfers sequen
 
 Secrets (`v`, `accountId`, `deviceId`, `token`, `expiresAt`, `email`, `vaultSecret`) are sealed with an Android Keystore AES-GCM key (`fanotes-sync`) and are not written into the vault. Per-vault state (`version`, `accountId`, `cursor`, `lastSyncAt`, `files`, `conflicts`) lives under the app's files directory, keyed by a hash of the vault path or tree URI.
 
-Skip rules match the desktop: dot paths other than `.fanotes/` children, `.fanotes/history` unless history is included, `onboarding.json`, `tree-cache`, `.DS_Store`, `Thumbs.db`, `desktop.ini`, `*.tmp`, `.~lock.*`, `~$*`, the recognition model unless opted in, excluded prefixes, and files over 100 MB.
+Skip rules match the desktop: dot paths other than `.fanotes/` children, `.fanotes/history` unless history is included, `.fanotes/trash` (the tablet trash stays on the device), `onboarding.json`, `tree-cache`, `.DS_Store`, `Thumbs.db`, `desktop.ini`, `*.tmp`, `.~lock.*`, `~$*`, the recognition model unless opted in, excluded prefixes, and files over 100 MB.
 
 ## Recognition, math, sections
 

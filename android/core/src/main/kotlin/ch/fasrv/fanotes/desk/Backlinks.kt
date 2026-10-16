@@ -98,12 +98,28 @@ fun wikilinkTargets(markdown: String): List<String> {
     return found.toList()
 }
 
+private val NOTE_EXT = Regex("""\.(md|markdown|pdf)$""", RegexOption.IGNORE_CASE)
+
+/**
+ * A wiki target names this note by title (`[[Algebra]]`, `[[Algebra.md]]`)
+ * or by vault path (`[[Mathe/Algebra]]`). A path does not match a different
+ * folder that happens to use the same title.
+ */
+fun wikiTargetMatchesNote(target: String, path: String): Boolean {
+    val link = target.trim().replace('\\', '/').trim('/')
+    val note = path.trim().replace('\\', '/').trim('/')
+    if (link.isEmpty() || note.isEmpty()) return false
+    val linkBare = NOTE_EXT.replace(link, "").lowercase(GERMAN)
+    val noteBare = NOTE_EXT.replace(note, "").lowercase(GERMAN)
+    if (link.contains('/')) return linkBare == noteBare
+    return linkBare == titleFromPath(note).lowercase(GERMAN)
+}
+
 fun backlinksFor(path: String, notes: List<Pair<String, String>>): List<Backlink> {
-    val stem = titleFromPath(path).lowercase(GERMAN)
     return notes.flatMap { (notePath, content) ->
         if (notePath == path) return@flatMap emptyList()
         val hit = wikilinkTargets(content).find { target ->
-            target.lowercase(GERMAN) == stem || target == path
+            wikiTargetMatchesNote(target, path)
         } ?: return@flatMap emptyList()
         listOf(Backlink(notePath, titleFromPath(notePath), excerptAround(content, "[[$hit")))
     }

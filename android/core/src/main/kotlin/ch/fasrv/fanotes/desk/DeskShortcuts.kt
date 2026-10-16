@@ -23,5 +23,6 @@ fun deskShortcut(ctrl: Boolean, shift: Boolean, alt: Boolean, meta: Boolean, key
     if (mod && !shift && !alt && key == ",") return "settings"
     if (mod && shift && !alt && key == "e") return "focus"
     if (mod && !shift && !alt && key == "d") return "pen"
+    if (mod && shift && !alt && key == "d") return "stamp"
     return null
 }

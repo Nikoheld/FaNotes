@@ -69,7 +69,7 @@ const MAX_FILE_BYTES = 100 * 1024 * 1024
 const CONCURRENCY = 3
 
 const INTERNAL_DIRECTORY = '.fanotes'
-const SKIPPED_INTERNAL = new Set(['history', 'onboarding.json', 'tree-cache'])
+const SKIPPED_INTERNAL = new Set(['history', 'onboarding.json', 'tree-cache', 'trash'])
 const SKIPPED_NAMES = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini'])
 
 export type SyncPathOptions = {

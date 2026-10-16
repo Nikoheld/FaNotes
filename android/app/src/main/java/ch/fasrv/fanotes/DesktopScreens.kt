@@ -353,7 +353,13 @@ private fun RibbonButton(
 }
 
 @Composable
-fun FaNotesToast(message: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+fun FaNotesToast(
+    message: String,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.TOAST_RADIUS_DP.dp)
     Row(
         modifier
@@ -380,6 +386,15 @@ fun FaNotesToast(message: String, onDismiss: () -> Unit, modifier: Modifier = Mo
             lineHeight = 18.sp,
             color = LocalStatusInk.current.soft,
         )
+        if (!actionLabel.isNullOrBlank() && onAction != null) {
+            Text(
+                actionLabel,
+                modifier = Modifier.clickable(onClickLabel = actionLabel, onClick = onAction),
+                fontSize = ch.fasrv.fanotes.desk.TOAST_FONT_SP.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
         Box(
             Modifier
                 .size(ch.fasrv.fanotes.desk.TOAST_CLOSE_DP.dp)
@@ -4889,13 +4904,29 @@ private fun FirstRunBrand(step: Int, onStep: (Int) -> Unit) {
                 }
             }
         }
+        val localBorder = Color(ch.fasrv.fanotes.desk.firstRunLocalBorder(ink.success.toArgb(), ch.fasrv.fanotes.desk.firstRunPreviewBorder(LocalDeskThemeId.current)))
+        val localInk = Color(ch.fasrv.fanotes.desk.firstRunLocalInk(ink.success.toArgb(), MaterialTheme.colorScheme.onSurface.toArgb()))
+        val localShape = RoundedCornerShape(99.dp)
         Row(
-            Modifier.padding(start = 9.dp).clip(RoundedCornerShape(99.dp)).border(1.dp, ink.success.copy(alpha = 0.25f), RoundedCornerShape(99.dp)).background(ink.success.copy(alpha = 0.07f)).padding(horizontal = 9.dp, vertical = 6.dp),
+            Modifier
+                .padding(start = ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL_MARGIN_START_DP.dp)
+                .clip(localShape)
+                .border(1.dp, localBorder, localShape)
+                .background(Color(ch.fasrv.fanotes.desk.firstRunLocalFill(ink.success.toArgb())))
+                .padding(
+                    horizontal = ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL_PAD_INLINE_DP.dp,
+                    vertical = ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL_PAD_BLOCK_DP.dp,
+                ),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL_GAP_DP.dp),
         ) {
-            Icon(Icons.Filled.Shield, contentDescription = null, modifier = Modifier.size(15.dp), tint = ink.success)
-            Text(ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = ink.success)
+            Icon(Icons.Filled.Shield, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL_ICON_DP.dp), tint = localInk)
+            Text(
+                ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL,
+                fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL_SP.sp,
+                fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL_WEIGHT),
+                color = localInk,
+            )
         }
     }
 }
@@ -7694,6 +7725,9 @@ private fun SettingsPage(
     val syncDeviceNote by model.syncDeviceNote.collectAsStateWithLifecycle()
     val css by model.customCss.collectAsStateWithLifecycle()
     val update by model.updateLabel.collectAsStateWithLifecycle()
+    val updateOffer by model.updateOffer.collectAsStateWithLifecycle()
+    val updateBusy by model.updateBusy.collectAsStateWithLifecycle()
+    val settingsContext = androidx.compose.ui.platform.LocalContext.current
     val sections = ch.fasrv.fanotes.desk.SETTINGS_NAV
     var section by remember { mutableStateOf("appearance") }
     LaunchedEffect(section, sync.account?.accountId) {
@@ -8396,12 +8430,51 @@ private fun SettingsPage(
                 "addons" -> SettingCard("Add-ons", Icons.Filled.Extension) {
                     SettingRow("Erweiterungen", "Add-ons des Desktops bleiben Dateien im Vault. Andere Erweiterungen werden nicht ausgeführt.", divider = false) {}
                 }
-                "updates" -> SettingCard("Updates", Icons.Filled.SystemUpdate, Modifier.settingsAnchor("updates", "settings-updates", anchorY)) {
-                    SettingRow("Installiert", divider = false) {
-                        Column {
-                            Text("2026.10.7", fontSize = 12.sp)
-                            Text(update, fontSize = 12.sp, color = LocalStatusInk.current.muted)
-                            TextButton(onClick = { model.checkUpdate() }) { Text("Nach einem Release suchen") }
+                "updates" -> {
+                    val channel = ch.fasrv.fanotes.desk.updateChannelId(settings["update-channel"])
+                    val copy = ch.fasrv.fanotes.desk.updateChannelCopy(channel)
+                    val offer = updateOffer
+                    val busy = updateBusy
+                    val context = settingsContext
+                    SettingCard("Updates", Icons.Filled.SystemUpdate, Modifier.settingsAnchor("updates", "settings-updates", anchorY)) {
+                        SettingRow("Installiert", copy.small) {
+                            Column {
+                                Text(model.installedVersion.ifBlank { "—" }, fontSize = 12.sp)
+                                if (update.isNotBlank()) Text(update, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                            }
+                        }
+                        SettingRow("Update-Kanal", copy.description) {
+                            Column {
+                                listOf("stable" to "Stable", "beta" to "Beta", "nightly" to "Nightly").forEach { (id, label) ->
+                                    Text(
+                                        label,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (channel == id) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (channel == id) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft,
+                                        modifier = Modifier.clickable {
+                                            model.updateDesk("update-channel", id)
+                                            model.clearUpdateOffer()
+                                        }.padding(vertical = 4.dp),
+                                    )
+                                }
+                            }
+                        }
+                        SettingRow("Automatisch nach Updates suchen", copy.auto) {
+                            Switch(
+                                checked = settings["update-check"] != "off",
+                                onCheckedChange = { model.updateDesk("update-check", if (it) "on" else "off") },
+                            )
+                        }
+                        SettingRow("Release", divider = false) {
+                            Column {
+                                TextButton(onClick = { model.checkUpdate() }, enabled = !busy) { Text("Nach einem Release suchen") }
+                                if (offer != null) {
+                                    TextButton(
+                                        onClick = { model.downloadAndroidUpdate { file -> installAndroidApk(context, file) } },
+                                        enabled = !busy,
+                                    ) { Text("APK laden und installieren") }
+                                }
+                            }
                         }
                     }
                 }
