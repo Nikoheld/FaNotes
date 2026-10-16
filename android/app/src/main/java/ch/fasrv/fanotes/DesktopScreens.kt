@@ -245,10 +245,11 @@ fun DeskRibbon(
     onFocus: () -> Unit,
     onDaily: () -> Unit,
     onPen: () -> Unit,
+    aiOpen: Boolean = false,
 ) {
     var toolsOpen by remember { mutableStateOf(false) }
     val toolIds = ch.fasrv.fanotes.desk.RIBBON_TOOLS.map { it.id }.toSet()
-    LaunchedEffect(destination) { if (destination in toolIds) toolsOpen = true }
+    LaunchedEffect(destination, aiOpen) { if (aiOpen || destination in toolIds) toolsOpen = true }
     Row(
         Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.RIBBON_HEIGHT_DP.dp).background(MaterialTheme.colorScheme.surface).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -260,7 +261,7 @@ fun DeskRibbon(
             return@Row
         }
         ch.fasrv.fanotes.desk.RIBBON_PRIMARY.forEach { item ->
-            val active = ch.fasrv.fanotes.desk.ribbonItemActive(item.id, destination, penOpen)
+            val active = ch.fasrv.fanotes.desk.ribbonItemActive(item.id, destination, penOpen, aiOpen)
             RibbonButton(
                 item.label,
                 active,
@@ -276,7 +277,7 @@ fun DeskRibbon(
         ) { toolsOpen = !toolsOpen }
         if (toolsOpen) {
             ch.fasrv.fanotes.desk.RIBBON_TOOLS.forEach { item ->
-                val active = ch.fasrv.fanotes.desk.ribbonItemActive(item.id, destination, penOpen)
+                val active = ch.fasrv.fanotes.desk.ribbonItemActive(item.id, destination, penOpen, aiOpen)
                 val label = if (item.id == "focus") "Fokus" else item.label
                 RibbonButton(
                     label,
@@ -5228,17 +5229,31 @@ fun AiScreen(model: FaNotesViewModel) {
     val calmMotion = ch.fasrv.fanotes.desk.reduceMotion(settings["reduce-motion"])
     val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
     val canRun = !busy && note != null && setting("model").isNotBlank() && actions.isNotEmpty()
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val screenDp = maxWidth.value.toInt()
-        val panelRadius = ch.fasrv.fanotes.desk.aiPanelRadiusDp(screenDp)
-        val panelShape = RoundedCornerShape(panelRadius.dp)
-        val panelRule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    val dismiss = { if (!busy) model.closeAi() }
+    Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        val scrim = remember { MutableInteractionSource() }
+        val card = remember { MutableInteractionSource() }
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val viewportWidth = maxWidth.value.toInt().coerceAtLeast(0)
+            val viewportHeight = maxHeight.value.toInt().coerceAtLeast(0)
+            val panel = ch.fasrv.fanotes.desk.aiPanelSize(viewportWidth, viewportHeight)
+            val panelShape = RoundedCornerShape(panel.radiusDp.dp)
+            val panelRule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM))
+                    .clickable(interactionSource = scrim, indication = null, enabled = !busy, onClick = dismiss),
+                contentAlignment = Alignment.Center,
+            ) {
     Column(
         Modifier
-            .fillMaxSize()
+            .width(panel.widthDp.dp)
+            .height(panel.heightDp.dp)
+            .clickable(interactionSource = card, indication = null, onClick = {})
             .clip(panelShape)
             .then(
-                if (panelRadius == 0) Modifier
+                if (panel.radiusDp == 0) Modifier
                 else Modifier.border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), panelShape),
             )
             .background(MaterialTheme.colorScheme.surface),
@@ -5264,7 +5279,7 @@ fun AiScreen(model: FaNotesViewModel) {
                 Text(ch.fasrv.fanotes.desk.AI_PANEL_DETAIL, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
             }
             Box(
-                Modifier.size(34.dp).clip(RoundedCornerShape(6.dp)).clickable(enabled = !busy) { model.showDestination("notes") },
+                Modifier.size(34.dp).clip(RoundedCornerShape(6.dp)).clickable(enabled = !busy, onClick = dismiss),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Filled.Close, contentDescription = ch.fasrv.fanotes.desk.AI_CLOSE, modifier = Modifier.size(18.dp), tint = LocalStatusInk.current.muted)
@@ -5273,7 +5288,7 @@ fun AiScreen(model: FaNotesViewModel) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(panelRule))
         }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-            val panelWidth = maxWidth.value.toInt()
+            val panelWidth = viewportWidth
             val configPane: @Composable () -> Unit = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     AiStep(1, ch.fasrv.fanotes.desk.AI_STEP_PROVIDERS, ch.fasrv.fanotes.desk.AI_STEP_PROVIDERS_DETAIL) {
@@ -5821,6 +5836,8 @@ fun AiScreen(model: FaNotesViewModel) {
             }
         }
     }
+            }
+        }
     }
 }
 

@@ -59,6 +59,8 @@ const val AI_FACTS_WARNING = "Die Faktenprüfung verwendet das Modellwissen. FaN
 const val AI_INSTRUCTION_LABEL = "Dein freier Auftrag"
 const val AI_INSTRUCTION_HINT = "Zum Beispiel: Erkläre jeden Fachbegriff einfacher und ergänze pro Abschnitt ein Beispiel …"
 const val AI_PANEL_RADIUS_DP = 12
+const val AI_PANEL_MAX_WIDTH_DP = 1230
+const val AI_PANEL_MAX_HEIGHT_DP = 850
 const val AI_CONFIG_MAX_DP = 510
 const val AI_CONFIG_MIN_DP = 430
 const val AI_CONFIG_COMPACT_MIN_DP = 360
@@ -82,6 +84,36 @@ fun aiPanelStacks(widthDp: Int): Boolean = widthDp <= AI_STACK_BREAK_DP
 
 /** Later shell CSS keeps radius 12, and the 760px rule clears it when the body stacks. */
 fun aiPanelRadiusDp(widthDp: Int): Int = if (aiPanelStacks(widthDp)) 0 else AI_PANEL_RADIUS_DP
+
+/**
+ * Centered AI dialog from `.lm-studio-panel`.
+ * Above 980: min(1230, 97vw) by min(850, 94vh), radius 12.
+ * From 761 to 980: 98vw by 96vh, radius 12.
+ * At 760 and below: the full viewport, with the radius cleared.
+ */
+data class AiPanelSize(val widthDp: Int, val heightDp: Int, val radiusDp: Int)
+
+fun aiPanelSize(widthDp: Int, heightDp: Int): AiPanelSize {
+    val width = widthDp.coerceAtLeast(0)
+    val height = heightDp.coerceAtLeast(0)
+    val radius = aiPanelRadiusDp(width)
+    if (width <= AI_STACK_BREAK_DP) return AiPanelSize(width, height, radius)
+    if (width <= AI_COMPACT_BREAK_DP) {
+        return AiPanelSize(
+            viewportShare(width, 98).coerceAtMost(width),
+            viewportShare(height, 96).coerceAtMost(height),
+            radius,
+        )
+    }
+    return AiPanelSize(
+        minOf(AI_PANEL_MAX_WIDTH_DP, viewportShare(width, 97)).coerceAtMost(width),
+        minOf(AI_PANEL_MAX_HEIGHT_DP, viewportShare(height, 94)).coerceAtMost(height),
+        radius,
+    )
+}
+
+private fun viewportShare(viewportDp: Int, percent: Int): Int =
+    (viewportDp.toLong() * percent / 100.0).roundToInt()
 
 /** Config track: full width when stacked, 43% from 761–980, otherwise 430–510. */
 fun aiConfigWidthDp(widthDp: Int): Int = when {

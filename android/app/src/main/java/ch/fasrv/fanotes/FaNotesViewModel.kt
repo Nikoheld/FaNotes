@@ -2333,6 +2333,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val aiReply = MutableStateFlow("")
     val aiPreview = MutableStateFlow<String?>(null)
     val aiBusy = MutableStateFlow(false)
+    val aiOpen = MutableStateFlow(false)
     val aiStatus = MutableStateFlow("")
     val aiModels = MutableStateFlow<List<ch.fasrv.fanotes.desk.AiListedModel>>(emptyList())
     val paletteOpen = MutableStateFlow(false)
@@ -2370,9 +2371,24 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         clearLinkRequest.value += 1
     }
 
+    /** The desktop dialog covers the note. A full screen steps aside so the editor stays underneath. */
+    fun openAi() {
+        if (!ch.fasrv.fanotes.desk.workspaceKeepsNoteChrome(destination.value)) destination.value = "notes"
+        paletteOpen.value = false
+        aiOpen.value = true
+    }
+
+    fun closeAi() {
+        aiOpen.value = false
+    }
+
     fun showDestination(id: String) {
         if (id == "history") {
             openHistory()
+            return
+        }
+        if (id == "ai") {
+            openAi()
             return
         }
         destination.value = id
