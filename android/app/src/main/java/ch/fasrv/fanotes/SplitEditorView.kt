@@ -79,6 +79,11 @@ class SplitEditorView(context: Context) : EditText(context) {
     private var cursorBeforeEdit = 0
     private var applyingHistory = false
     private val activeLinePaint = Paint()
+    var spellcheckEnabled = true
+    var autocorrectEnabled = true
+    var acceptedWords: Set<String> = emptySet()
+    private val declinedWords = HashSet<String>()
+    private var lastAutocorrect: ch.fasrv.fanotes.desk.AutocorrectMark? = null
     var showLineNumbers: Boolean = false
         set(value) {
             if (field == value) return
@@ -176,8 +181,32 @@ class SplitEditorView(context: Context) : EditText(context) {
                             )
                             closedBrackets.clear()
                             closedBrackets.addAll(bracketsOnCursorLine(next, selectionStart, shifted))
-                            rememberChange(editBefore, next)
-                            onVisibleEdit(editBefore, next)
+                            val correction = if (autocorrectEnabled) {
+                                ch.fasrv.fanotes.desk.autocorrectBoundaryEdit(
+                                    editBefore,
+                                    next,
+                                    changeStart,
+                                    changeDeleted,
+                                    acceptedWords,
+                                    declinedWords,
+                                )
+                            } else {
+                                null
+                            }
+                            if (correction != null) {
+                                writing = true
+                                setText(correction.text)
+                                setSelection(correction.cursor.coerceIn(0, correction.text.length))
+                                writing = false
+                                lastAutocorrect = correction.mark
+                                rememberChange(editBefore, next)
+                                rememberChange(next, correction.text)
+                                onVisibleEdit(editBefore, correction.text)
+                            } else {
+                                lastAutocorrect = null
+                                rememberChange(editBefore, next)
+                                onVisibleEdit(editBefore, next)
+                            }
                         }
                     }
                 }
@@ -342,6 +371,25 @@ class SplitEditorView(context: Context) : EditText(context) {
             }
         }
         if (tags?.onKey(keyCode, event) == true) return true
+        if (keyCode == KeyEvent.KEYCODE_DEL && event.action == KeyEvent.ACTION_DOWN &&
+            !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed && selectionStart == selectionEnd
+        ) {
+            val mark = lastAutocorrect
+            val current = text?.toString().orEmpty()
+            val restored = mark?.let { ch.fasrv.fanotes.desk.revertAutocorrectEdit(current, selectionEnd, it) }
+            if (restored != null) {
+                declinedWords += ch.fasrv.fanotes.desk.normalizeForDictionary(mark.original)
+                lastAutocorrect = null
+                writing = true
+                setText(restored.first)
+                setSelection(restored.second.coerceIn(0, restored.first.length))
+                writing = false
+                rememberChange(current, restored.first)
+                onVisibleEdit(current, restored.first)
+                paintPreview()
+                return true
+            }
+        }
         val historyKey = when (keyCode) {
             KeyEvent.KEYCODE_Z -> "z"
             KeyEvent.KEYCODE_Y -> "y"
@@ -786,6 +834,8 @@ class SplitEditorView(context: Context) : EditText(context) {
                 imageColumn,
             )
             editable.bindPreviewLinkPointer(linkPointer)
+            if (spellcheckEnabled) ch.fasrv.fanotes.desk.SpellingDictionary.warm()
+            applySpellingUnderlines(editable, editable.toString(), selectionEnd, spellcheckEnabled, context, acceptedWords)
         } finally {
             painting = false
         }

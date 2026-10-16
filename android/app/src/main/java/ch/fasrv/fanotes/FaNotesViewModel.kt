@@ -219,6 +219,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val textHandOpen = MutableStateFlow(false)
     val noteStandardStatus = MutableStateFlow<String?>(null)
     val noteStandardBusy = MutableStateFlow(false)
+    val personalSpelling = MutableStateFlow(graph.readPersonalSpelling())
     private val glyphImportRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val glyphImports = glyphImportRequests.asSharedFlow()
     private var saveJob: Job? = null
@@ -2936,6 +2937,14 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             calendar.value = next
             persistSpecial(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH, "Kalender", serializeCalendarMarkdown(next))
         }
+    }
+
+    fun learnSpelling(word: String) {
+        val normalized = ch.fasrv.fanotes.desk.normalizeForDictionary(word)
+        if (normalized.isEmpty()) return
+        val next = (personalSpelling.value + normalized).toList().takeLast(5_000).toSet()
+        personalSpelling.value = next
+        graph.writePersonalSpelling(next)
     }
 
     fun openTextHand() {

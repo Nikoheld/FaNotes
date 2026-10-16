@@ -133,6 +133,16 @@ class AppGraph(context: Context) {
         prefs.edit().putString("custom-css", value.take(ch.fasrv.fanotes.desk.CUSTOM_CSS_MAX)).apply()
     }
 
+    fun readPersonalSpelling(): Set<String> = prefs.getString("spelling-personal", null).orEmpty()
+        .lineSequence()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .toSet()
+
+    fun writePersonalSpelling(words: Set<String>) {
+        prefs.edit().putString("spelling-personal", words.joinToString("\n")).apply()
+    }
+
     fun writeDesk(values: Map<String, String>) {
         val text = values.entries.joinToString("\n") { (key, value) -> "$key=${value.replace("\n", " ")}" }
         prefs.edit().putString("desk-settings", text).apply()

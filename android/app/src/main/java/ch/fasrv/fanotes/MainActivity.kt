@@ -2522,6 +2522,10 @@ private fun SplitPane(
                         ch.fasrv.fanotes.desk.normalizeAccent(model.effectiveDesk()["accent"]),
                     )
                     editor.typeface = loadEditorTypeface(editor.context, metrics.editorFontId)
+                    val splitDesk = model.effectiveDesk()
+                    editor.spellcheckEnabled = splitDesk["spellcheck"] != "off"
+                    editor.autocorrectEnabled = editor.spellcheckEnabled && splitDesk["autocorrect"] != "off"
+                    editor.acceptedWords = model.personalSpelling.value
                     editor.showLineNumbers = metrics.showLineNumbers
                     editor.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, metrics.fontSizePx.toFloat())
                     editor.setLineSpacing(0f, metrics.lineHeight.toFloat())
@@ -2878,6 +2882,12 @@ private fun PageSurface(
             page.ink.onEditBox = onEditBox
             page.onMath = onMath
             page.onTextHand = { model.openTextHand() }
+            val spellingDesk = model.effectiveDesk()
+            page.spellcheckEnabled = spellingDesk["spellcheck"] != "off"
+            page.autocorrectEnabled = page.spellcheckEnabled && spellingDesk["autocorrect"] != "off"
+            page.acceptedWords = model.personalSpelling.value
+            page.onLearnWord = { model.learnSpelling(it) }
+            if (page.spellcheckEnabled) ch.fasrv.fanotes.desk.SpellingDictionary.warm()
             page.pdfNote = model.open.value?.kind == NoteKind.PDF
             page.onPdfKey = { action ->
                 when (action) {

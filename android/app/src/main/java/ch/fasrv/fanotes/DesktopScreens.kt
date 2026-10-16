@@ -7927,6 +7927,25 @@ private fun SettingsPage(
                                 onCheckedChange = { model.updateDesk("line-numbers", if (it) "on" else "off") },
                             )
                         }
+                        val spellcheck = settings["spellcheck"] != "off"
+                        val autocorrect = spellcheck && settings["autocorrect"] != "off"
+                        SettingRow(
+                            "Rechtschreibprüfung",
+                            "Unterstreicht Tippfehler lokal rot und erkennt Deutsch oder Englisch automatisch. Mathematik und Code bleiben unberührt.",
+                            modifier = Modifier.settingsAnchor("editor", "settings-spell", anchorY),
+                        ) {
+                            Switch(checked = spellcheck, onCheckedChange = { model.updateDesk("spellcheck", if (it) "on" else "off") })
+                        }
+                        SettingRow(
+                            "Autokorrektur",
+                            "Ersetzt einen eindeutigen Tippfehler, sobald du das Wort mit Leerzeichen, Satzzeichen oder Enter abschliesst. Rückschritt direkt danach stellt dein Wort wieder her.",
+                        ) {
+                            Switch(
+                                checked = autocorrect,
+                                enabled = spellcheck,
+                                onCheckedChange = { model.updateDesk("autocorrect", if (it) "on" else "off") },
+                            )
+                        }
                         SettingRow("Wortzahl in Statusleiste") {
                             Switch(
                                 checked = settings["words"] != "off",

@@ -209,6 +209,25 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 }
             }
             if (tags?.onKey(keyCode, event) == true) return true
+            if (keyCode == KeyEvent.KEYCODE_DEL && event.action == KeyEvent.ACTION_DOWN &&
+                !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed && selectionStart == selectionEnd
+            ) {
+                val mark = lastAutocorrect
+                val current = text?.toString().orEmpty()
+                val restored = mark?.let { ch.fasrv.fanotes.desk.revertAutocorrectEdit(current, selectionEnd, it) }
+                if (restored != null) {
+                    declinedWords += ch.fasrv.fanotes.desk.normalizeForDictionary(mark.original)
+                    lastAutocorrect = null
+                    writing = true
+                    setText(restored.first)
+                    setSelection(restored.second.coerceIn(0, restored.first.length))
+                    writing = false
+                    rememberChange(current, restored.first)
+                    onVisibleMarkdown(current, restored.first)
+                    paintLivePreview()
+                    return true
+                }
+            }
             val historyKey = when (keyCode) {
                 KeyEvent.KEYCODE_Z -> "z"
                 KeyEvent.KEYCODE_Y -> "y"
@@ -723,6 +742,12 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onFinger: (Boolean) -> Unit = {}
     var onMath: () -> Unit = {}
     var onTextHand: () -> Unit = {}
+    var spellcheckEnabled = true
+    var autocorrectEnabled = true
+    var acceptedWords: Set<String> = emptySet()
+    var onLearnWord: (String) -> Unit = {}
+    private val declinedWords = HashSet<String>()
+    private var lastAutocorrect: ch.fasrv.fanotes.desk.AutocorrectMark? = null
     var onWorksheetBoxText: (String, String) -> Unit = { _, _ -> }
     var onWorksheetBoxRemove: (String) -> Unit = {}
     var onWorksheetBoxClosed: () -> Unit = {}
@@ -849,8 +874,32 @@ class NotePageView(context: Context) : FrameLayout(context) {
                             closedBrackets.addAll(
                                 ch.fasrv.fanotes.desk.bracketsOnCursorLine(next, editor.selectionStart, shifted),
                             )
-                            editor.rememberChange(editBefore, next)
-                            onVisibleMarkdown(editBefore, next)
+                            val correction = if (autocorrectEnabled) {
+                                ch.fasrv.fanotes.desk.autocorrectBoundaryEdit(
+                                    editBefore,
+                                    next,
+                                    changeStart,
+                                    changeDeleted,
+                                    acceptedWords,
+                                    declinedWords,
+                                )
+                            } else {
+                                null
+                            }
+                            if (correction != null) {
+                                writing = true
+                                editor.setText(correction.text)
+                                editor.setSelection(correction.cursor.coerceIn(0, correction.text.length))
+                                writing = false
+                                lastAutocorrect = correction.mark
+                                editor.rememberChange(editBefore, next)
+                                editor.rememberChange(next, correction.text)
+                                onVisibleMarkdown(editBefore, correction.text)
+                            } else {
+                                lastAutocorrect = null
+                                editor.rememberChange(editBefore, next)
+                                onVisibleMarkdown(editBefore, next)
+                            }
                         }
                     }
                 }
@@ -1085,6 +1134,15 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 editor.isFocused,
                 ink.paperImages,
                 imageColumn,
+            )
+            if (spellcheckEnabled) ch.fasrv.fanotes.desk.SpellingDictionary.warm()
+            applySpellingUnderlines(
+                editable,
+                editable.toString(),
+                editor.selectionEnd,
+                spellcheckEnabled,
+                context,
+                acceptedWords,
             )
             editor.bindLinkPointer()
         } finally {
@@ -1587,6 +1645,12 @@ class NotePageView(context: Context) : FrameLayout(context) {
             tools.addView(chip("Zeile runter") { moveLines(true) })
             tools.addView(chip("Kommentar") { commentLines() })
             tools.addView(chip("Zeile löschen") { deleteCurrentLines() })
+            tools.addView(chip("Ins Wörterbuch") {
+                val start = editor.selectionStart.coerceAtLeast(0)
+                val end = editor.selectionEnd.coerceAtLeast(start)
+                val selected = editor.text?.subSequence(start, end)?.toString().orEmpty().trim()
+                if (selected.isNotEmpty()) onLearnWord(selected)
+            })
             tools.addView(chip("Leerzeile") { insertBlank() })
             tools.addView(chip("Umbruch") { insertIndentedNewline() })
             tools.addView(chip("Ganze Zeile") { selectLine() })
