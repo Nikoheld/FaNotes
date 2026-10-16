@@ -635,6 +635,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private val lineNumbers = TextView(context)
     private val foldMarks = TextView(context)
     private val toolbar = HorizontalScrollView(context)
+    private val toolbarRule = View(context)
     private val tools = LinearLayout(context)
     private val handle = TextView(context)
     private val syncPill = TextView(context)
@@ -827,9 +828,16 @@ class NotePageView(context: Context) : FrameLayout(context) {
         tools.orientation = LinearLayout.HORIZONTAL
         tools.gravity = Gravity.CENTER_VERTICAL
         toolbar.isHorizontalScrollBarEnabled = false
+        toolbar.setPadding(dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_PAD_DP), 0, dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_PAD_DP), 0)
         toolbar.addView(tools, LayoutParams(LayoutParams.WRAP_CONTENT, dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_DP)))
         toolbar.elevation = 12f
         addView(toolbar, LayoutParams(LayoutParams.MATCH_PARENT, dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_DP), Gravity.TOP))
+        addView(
+            toolbarRule,
+            LayoutParams(LayoutParams.MATCH_PARENT, dp(1).coerceAtLeast(1), Gravity.TOP).apply {
+                topMargin = dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_DP) - dp(1).coerceAtLeast(1)
+            },
+        )
         handle.text = "Werkzeuge"
         handle.gravity = Gravity.CENTER
         handle.textSize = 12f
@@ -1310,6 +1318,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private fun applyChromeVisibility() {
         val visible = userOpen && !(followPen && penDown)
         toolbar.visibility = if (visible) VISIBLE else GONE
+        toolbarRule.visibility = if (visible) VISIBLE else GONE
         handle.visibility = if (visible) GONE else VISIBLE
     }
 
@@ -1543,7 +1552,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         view.setTextColor(ch.fasrv.fanotes.desk.formatChipInk(dark))
         view.setOnClickListener { if (enabled) click() }
         val params = LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, dp(ch.fasrv.fanotes.desk.FORMAT_BUTTON_DP))
-        params.marginStart = dp(4)
+        params.marginStart = dp(ch.fasrv.fanotes.desk.FORMAT_BUTTON_GAP_DP)
         view.layoutParams = params
         return view
     }
@@ -1583,7 +1592,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
     }
 
     private fun applyChromeColors() {
-        val bg = if (dark) 0xFF191919.toInt() else 0xFFF7F6F3.toInt()
+        val bg = ch.fasrv.fanotes.desk.editorToolbarColor(dark)
+        toolbarRule.setBackgroundColor(ch.fasrv.fanotes.desk.editorToolbarRule(dark))
         val fg = if (dark) 0xFFEDEDEC.toInt() else 0xFF252630.toInt()
         toolbar.setBackgroundColor(bg)
         handle.setBackgroundColor(bg)
