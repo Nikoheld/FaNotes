@@ -31,6 +31,14 @@ class PaletteKeysTest {
         assertEquals(29, PALETTE_ICON_DP)
         assertEquals(30, PALETTE_FOOTER_DP)
         assertEquals(0.1f, PALETTE_GROUP_TRACKING)
+        assertEquals(0.13f, PALETTE_TOP_FRACTION)
+        assertEquals(130, paletteTopDp(1000))
+        assertEquals(104, paletteTopDp(800))
+        assertEquals(0, paletteTopDp(0))
+        assertEquals(16, PALETTE_SHADOW_Y_DP)
+        assertEquals(70, PALETTE_SHADOW_BLUR_DP)
+        assertEquals(0.16f, PALETTE_SHADOW_ALPHA)
+        assertEquals(0x590F0F0F, PALETTE_SCRIM)
     }
 
     @Test

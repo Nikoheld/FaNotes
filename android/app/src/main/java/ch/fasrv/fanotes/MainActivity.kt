@@ -894,7 +894,27 @@ fun FaNotesScreen(
         )
     }
     if (palette) {
-        androidx.compose.ui.window.Dialog(onDismissRequest = { model.paletteOpen.value = false }) {
+        val dismissPalette = { model.paletteOpen.value = false }
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = dismissPalette,
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            val scrim = remember { MutableInteractionSource() }
+            val card = remember { MutableInteractionSource() }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM))
+                    .clickable(interactionSource = scrim, indication = null, onClick = dismissPalette),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+            Box(
+                Modifier
+                    .padding(top = ch.fasrv.fanotes.desk.paletteTopDp(LocalConfiguration.current.screenHeightDp).dp)
+                    .fillMaxWidth(0.9f)
+                    .widthIn(max = ch.fasrv.fanotes.desk.PALETTE_MAX_DP.dp)
+                    .clickable(interactionSource = card, indication = null, onClick = {}),
+            ) {
             CommandPalette(
                 onDismiss = { model.paletteOpen.value = false },
                 reduceMotion = ch.fasrv.fanotes.desk.reduceMotion(desk["reduce-motion"]),
@@ -973,6 +993,8 @@ fun FaNotesScreen(
                     "cycle-tab" -> model.cycleTabs(1)
                     else -> if (id.startsWith("template-")) model.createFromTemplate(id.removePrefix("template-")) else model.showDestination(id)
                 }
+            }
+            }
             }
         }
     }
