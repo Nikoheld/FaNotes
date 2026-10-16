@@ -336,12 +336,17 @@ fun firstRunColumnWeights(step: Int, widthDp: Int): Pair<Float, Float> = when {
     else -> 0.82f to 1.18f
 }
 
-/** Column gap in dp. Wide screens use the clamp minimum; the 980px band uses the fixed gaps. */
+/**
+ * Column gap in dp.
+ * At 760 and below every step uses 30. From 761 to 980 the gap is 28, or 35 on the folder step.
+ * Above 980 it follows the desktop clamp: round(7% of [widthDp]), held to 45–100 on steps 0–2 and 45–105 on the folder step.
+ * [widthDp] is the viewport (CSS 7vw and the 760/980 media queries), not the capped content column.
+ */
 fun firstRunColumnGap(step: Int, widthDp: Int): Int = when {
     widthDp <= FIRST_RUN_PREVIEW_SPLIT_DP -> 30
     widthDp <= FIRST_RUN_MEDIUM_DP && step >= 3 -> 35
     widthDp <= FIRST_RUN_MEDIUM_DP -> 28
-    else -> 45
+    else -> (widthDp.toLong() * 7 / 100.0).roundToInt().coerceIn(45, if (step >= 3) 105 else 100)
 }
 
 val FIRST_RUN_BENEFITS = listOf("Lokal & privat", "Stift & Tastatur", "Markdown inklusive")

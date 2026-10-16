@@ -171,6 +171,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -4615,7 +4616,7 @@ fun FirstRunDialog(
                             val width = maxWidth.value.toInt()
                             val wide = ch.fasrv.fanotes.desk.firstRunPreviewColumns(width) == 2
                             val (copyWeight, panelWeight) = ch.fasrv.fanotes.desk.firstRunColumnWeights(0, width)
-                            val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(0, width).dp
+                            val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(0, LocalConfiguration.current.screenWidthDp).dp
                             if (wide) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(copyWeight)) { FirstRunWelcomeCopy(accent) { go(1) } }
@@ -4632,7 +4633,7 @@ fun FirstRunDialog(
                             val width = maxWidth.value.toInt()
                             val wide = ch.fasrv.fanotes.desk.firstRunPreviewColumns(width) == 2
                             val (copyWeight, panelWeight) = ch.fasrv.fanotes.desk.firstRunColumnWeights(1, width)
-                            val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(1, width).dp
+                            val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(1, LocalConfiguration.current.screenWidthDp).dp
                             val copy: @Composable () -> Unit = {
                                 Text(ch.fasrv.fanotes.desk.FIRST_RUN_PROFILE_TITLE, fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.055).em, lineHeight = 36.sp, modifier = Modifier.padding(top = 18.dp))
                                 Text(ch.fasrv.fanotes.desk.FIRST_RUN_PROFILE_BODY, fontSize = 13.sp, lineHeight = 22.sp, color = ink.muted, modifier = Modifier.padding(top = 15.dp).widthIn(max = 480.dp))
@@ -4659,7 +4660,7 @@ fun FirstRunDialog(
                             val width = maxWidth.value.toInt()
                             val wide = ch.fasrv.fanotes.desk.firstRunPreviewColumns(width) == 2
                             val (copyWeight, panelWeight) = ch.fasrv.fanotes.desk.firstRunColumnWeights(2, width)
-                            val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(2, width).dp
+                            val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(2, LocalConfiguration.current.screenWidthDp).dp
                             if (wide) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(copyWeight)) { FirstRunWritingCopy(accent) { go(it) } }
@@ -4676,7 +4677,7 @@ fun FirstRunDialog(
                             val width = maxWidth.value.toInt()
                             val wide = ch.fasrv.fanotes.desk.firstRunPreviewColumns(width) == 2
                             val (copyWeight, panelWeight) = ch.fasrv.fanotes.desk.firstRunColumnWeights(3, width)
-                            val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(3, width).dp
+                            val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(3, LocalConfiguration.current.screenWidthDp).dp
                             val intro: @Composable () -> Unit = {
                                 Text(ch.fasrv.fanotes.desk.FIRST_RUN_FOLDER_TITLE, fontSize = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.052).em, lineHeight = 34.sp, modifier = Modifier.padding(top = 18.dp))
                                 Text(ch.fasrv.fanotes.desk.firstRunFolderIntro(profile?.title ?: "Schule"), fontSize = 12.sp, lineHeight = 21.sp, color = ink.muted, modifier = Modifier.padding(top = 13.dp).widthIn(max = 540.dp))
