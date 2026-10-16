@@ -1061,8 +1061,21 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         let normalized = rewrite_periods(&trimmed);
         if normalized != trimmed {
             if is_date_only_shape(&normalized) && !normalized.contains(',') {
-                if let Some(iso) = date_only_iso(&normalized, true) {
-                    return Some(iso);
+                // A trailing dot was removed. `-000001-10-13.` keeps year -1
+                // and is local. A leading space is not this path.
+                match negative_dot_year(&normalized) {
+                    DotYear::Local(year, month, day) => {
+                        let (year, month, day) = normalize_ymd(year, month, day)?;
+                        let (year, month, day, hour, minute, second) =
+                            local_civil_to_utc(year, month, day, 0, 0, 0)?;
+                        return format_civil_iso(year, month, day, hour, minute, second, 0);
+                    }
+                    DotYear::Empty => return None,
+                    DotYear::Other => {
+                        if let Some(iso) = date_only_iso(&normalized, true) {
+                            return Some(iso);
+                        }
+                    }
                 }
             }
             return canonical_iso(&normalized);
@@ -1182,6 +1195,12 @@ pub fn canonical_iso(value: &str) -> Option<String> {
                     local_civil_to_utc(year, month, day, 0, 0, 0)?;
                 return format_civil_iso(year, month, day, hour, minute, second, 0);
             }
+        }
+        if !value.starts_with(is_date_parse_space) && strict_expanded_date(trimmed) {
+            // TimeClip already failed inside `iso_hyphen_date`. A later legacy
+            // read would drop the sign and keep the positive year. A leading
+            // space never entered ES5, so that year stays in the legacy window.
+            return iso_hyphen_date(trimmed);
         }
         if let Some(iso) = date_only_iso(trimmed, surrounded) {
             return Some(iso);
@@ -5932,23 +5951,14 @@ fn unfinished_hyphen_ymd(body: &str) -> Option<(i32, i32, i32)> {
 }
 
 fn date_only_iso(value: &str, surrounded: bool) -> Option<String> {
-    if surrounded {
-        // `-000001-10-13.` keeps year -1 and makes midnight local. Stripping
-        // the sign would read `000001-10-13` as 10 January 2013.
-        match negative_dot_year(value) {
-            DotYear::Local(year, month, day) => {
-                let (year, month, day) = normalize_ymd(year, month, day)?;
-                let (year, month, day, hour, minute, second) =
-                    local_civil_to_utc(year, month, day, 0, 0, 0)?;
-                return format_civil_iso(year, month, day, hour, minute, second, 0);
-            }
-            DotYear::Empty => return None,
-            DotYear::Other => {}
-        }
-    }
     if !surrounded {
         if let Some(instant) = iso_hyphen_date(value) {
             return Some(instant);
+        }
+        // `-271821-01-01` is a finished ES5 date before the first instant.
+        // Dropping the sign would read year +271821.
+        if strict_expanded_date(value) {
+            return None;
         }
     }
     legacy_hyphen_date(value)
@@ -6006,6 +6016,41 @@ fn negative_dot_year(value: &str) -> DotYear {
         return DotYear::Empty;
     }
     DotYear::Local(year, month, day)
+}
+
+/// `±YYYYYY`, optional `-MM` and `-DD`, with a real month and day.
+///
+/// `iso_hyphen_date` already returned `None`, so this date was clipped.
+fn strict_expanded_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.first().is_none_or(|byte| !matches!(byte, b'+' | b'-'))
+        || bytes.len() < 7
+        || !bytes[1..7].iter().all(u8::is_ascii_digit)
+        || bytes.get(7).is_some_and(u8::is_ascii_digit)
+    {
+        return false;
+    }
+    let rest = &value[7..];
+    if rest.is_empty() {
+        return true;
+    }
+    let Some(body) = rest.strip_prefix('-') else {
+        return false;
+    };
+    let two = |text: &str| text.len() == 2 && text.bytes().all(|byte| byte.is_ascii_digit());
+    let parts: Vec<&str> = body.split('-').collect();
+    match parts.as_slice() {
+        [month] => {
+            two(month) && (1..=12).contains(&month.parse::<i32>().unwrap_or(0))
+        }
+        [month, day] => {
+            two(month)
+                && two(day)
+                && (1..=12).contains(&month.parse::<i32>().unwrap_or(0))
+                && (1..=31).contains(&day.parse::<i32>().unwrap_or(0))
+        }
+        _ => false,
+    }
 }
 
 /// `YYYY` and `±YYYYYY`, with optional month and day. A short month or day is
@@ -13905,6 +13950,35 @@ mod tests {
                 Some("2026-10-13T04:00:00.000Z")
             );
             assert_eq!(super::canonical_iso("-000001-13."), None);
+        });
+    }
+
+    #[test]
+    fn a_clipped_expanded_year_is_empty() {
+        with_tz("America/New_York", || {
+            // `-271821-04-20` is the first UTC instant. Earlier dates are empty.
+            // The sign stays on the year, so January does not become +271821.
+            assert_eq!(
+                super::canonical_iso("-271821-04-20").as_deref(),
+                Some("-271821-04-20T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-271821-10-01").as_deref(),
+                Some("-271821-10-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+275760-09-13").as_deref(),
+                Some("+275760-09-13T00:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("-271821-01-01"), None);
+            assert_eq!(super::canonical_iso("-271821-04-19"), None);
+            assert_eq!(super::canonical_iso("-271821-02-31"), None);
+            assert_eq!(super::canonical_iso("-271821"), None);
+            assert_eq!(super::canonical_iso("+275760-09-14"), None);
+            assert_eq!(
+                super::canonical_iso("-000001-01-01").as_deref(),
+                Some("-000001-01-01T00:00:00.000Z")
+            );
         });
     }
 }

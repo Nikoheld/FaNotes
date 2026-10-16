@@ -15487,4 +15487,26 @@ mod local_zone_tests {
         );
     }
 
+    #[test]
+    fn a_clipped_expanded_year_is_empty() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Before `-271821-04-20` the instant does not exist. A `u64` also
+        // cannot store the first valid day of that year.
+        assert_eq!(unix_millis_from_iso("-271821-01-01"), None);
+        assert_eq!(unix_millis_from_iso("-271821-04-19"), None);
+        assert_eq!(unix_millis_from_iso("-271821-04-20"), None);
+        assert_eq!(unix_millis_from_iso("-271821-02-31"), None);
+        assert_eq!(unix_millis_from_iso("-271821"), None);
+        assert_eq!(unix_millis_from_iso("+275760-09-14"), None);
+        assert_eq!(
+            unix_millis_from_iso("+275760-09-13"),
+            Some(8_640_000_000_000_000)
+        );
+    }
+
 }
