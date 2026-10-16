@@ -151,6 +151,13 @@ class AiPreviewTest {
         assertEquals(12f, chrome.radiusDp)
         assertEquals(1.4f, chrome.marginEm)
         assertEquals(1f, chrome.borderDp)
+        assertEquals(13f, chrome.shadowYDp)
+        assertEquals(32f, chrome.shadowBlurDp)
+        assertEquals(0.16f, chrome.shadowAlpha)
+        assertEquals(1.25f, previewLineHeightEm("heading", 1.72))
+        assertEquals(1.72f, previewLineHeightEm("paragraph", 1.72))
+        assertEquals(2f, previewLineHeightEm("quote", 2.0))
+        assertEquals(1.72f, previewLineHeightEm("code", 1.72))
     }
 
     @Test
