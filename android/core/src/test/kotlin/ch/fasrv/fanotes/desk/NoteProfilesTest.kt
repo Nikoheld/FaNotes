@@ -78,4 +78,19 @@ class NoteProfilesTest {
         assertEquals(0.78f to 1.22f, firstRunColumnWeights(2))
         assertEquals(0.82f to 1.18f, firstRunColumnWeights(3))
     }
+
+    @Test
+    fun theFirstRunGridFollowsTheDesktopBreakpoints() {
+        assertEquals(0.78f to 1.22f, firstRunColumnWeights(0, 980))
+        assertEquals(0.78f to 1.22f, firstRunColumnWeights(1, 800))
+        assertEquals(0.78f to 1.22f, firstRunColumnWeights(2, 980))
+        assertEquals(0.72f to 1.28f, firstRunColumnWeights(3, 980))
+        assertEquals(0.87f to 1.13f, firstRunColumnWeights(0, 981))
+        assertEquals(0.82f to 1.18f, firstRunColumnWeights(3, 981))
+        assertEquals(30, firstRunColumnGap(3, 760))
+        assertEquals(28, firstRunColumnGap(1, 900))
+        assertEquals(35, firstRunColumnGap(3, 900))
+        assertEquals(45, firstRunColumnGap(0, 1000))
+        assertEquals(45, firstRunColumnGap(3, 1180))
+    }
 }
