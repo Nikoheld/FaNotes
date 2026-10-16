@@ -2479,6 +2479,24 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                     }
                 }
             }
+            Row(
+                Modifier
+                    .height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp)
+                    .clip(calShape)
+                    .background(MaterialTheme.colorScheme.primary)
+                    .clickable {
+                        val now = java.time.LocalTime.now()
+                        val snapped = ch.fasrv.fanotes.desk.snapCalendarClock(now.hour, now.minute)
+                        val start = LocalDate.now().plusDays(snapped.dayOffset.toLong()).atTime(snapped.hour, snapped.minute)
+                        editor = draftForCreate(document, start.toLocalDate(), start, start.plusHours(1), false)
+                    }
+                    .padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.background)
+                Text(ch.fasrv.fanotes.desk.CAL_NEW_EVENT, fontSize = 12.sp, color = MaterialTheme.colorScheme.background)
+            }
         }
         if (reminder != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2515,6 +2533,13 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 { date, start, end, allDay -> editor = draftForCreate(document, date, start, end, allDay) },
                 { model.openDaily(it) },
             )
+        }
+        if (view != "month") {
+            val range = ch.fasrv.fanotes.desk.calendarRange(view, anchor)
+            val occupied = range.count { date -> shown.events.any { ch.fasrv.fanotes.desk.occurrencesOn(it, date) } }
+            if (ch.fasrv.fanotes.desk.calendarRangeIsEmpty(view, occupied)) {
+                Text(ch.fasrv.fanotes.desk.CAL_EMPTY, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(vertical = 8.dp))
+            }
         }
         Text("Am $day", modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.SemiBold)
         EventsOn(model, shown, anchor) { editor = draftFor(it, anchor) }
@@ -2732,44 +2757,73 @@ private fun DayColumns(
     LaunchedEffect(days) {
         scroll.scrollTo(with(density) { (7 * HOUR_DP).dp.roundToPx() })
     }
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    val gutter = ch.fasrv.fanotes.desk.CAL_GUTTER_DP.dp
     Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
         Row {
-            Box(Modifier.width(44.dp))
+            Box(Modifier.width(gutter))
             days.forEach { date ->
-                Column(Modifier.width(148.dp).padding(end = 4.dp).padding(bottom = 4.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "${date.dayOfMonth}. ${date.monthValue}.",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            color = if (date == anchor) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f).clickable {
-                                onPick(date)
-                                onDaily(date)
-                            },
-                        )
-                        Text(
-                            "+",
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.clickable {
-                                onCreate(date, date.atStartOfDay(), date.plusDays(1).atStartOfDay(), true)
-                            }.padding(horizontal = 6.dp),
-                        )
-                    }
+                val today = date == LocalDate.now()
+                Column(
+                    Modifier
+                        .width(148.dp)
+                        .clickable {
+                            onPick(date)
+                            onDaily(date)
+                        }
+                        .padding(bottom = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        ch.fasrv.fanotes.desk.calendarWeekdayShort(date).uppercase(java.util.Locale.GERMAN),
+                        fontSize = 12.sp,
+                        color = LocalStatusInk.current.muted,
+                        letterSpacing = 0.04.em,
+                    )
+                    Text(
+                        date.dayOfMonth.toString(),
+                        fontSize = ch.fasrv.fanotes.desk.CAL_HEAD_NUM_SP.sp,
+                        fontWeight = FontWeight(650),
+                        color = if (today) accent else MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            Box(Modifier.width(gutter).padding(top = 8.dp), contentAlignment = Alignment.CenterEnd) {
+                Text(ch.fasrv.fanotes.desk.CAL_ALL_DAY, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(end = 8.dp))
+            }
+            days.forEach { date ->
+                Column(Modifier.width(148.dp).padding(end = 4.dp).heightIn(min = 34.dp)) {
                     allDaySpans(document, date).forEach { span ->
-                        val tint = document.calendars.find { it.id == span.event.calendarId }?.color ?: "#7f6df2"
+                        val tint = document.calendars.find { it.id == span.event.calendarId }?.color ?: "#2a6f97"
                         Text(
                             span.event.title,
                             fontSize = 12.sp,
-                            color = inkOn(tint),
-                            modifier = Modifier.fillMaxWidth().padding(top = 2.dp).background(calendarSwatch(tint)).clickable { onEdit(span.event, date) }.padding(horizontal = 4.dp, vertical = 2.dp),
+                            maxLines = 1,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 2.dp)
+                                .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.CAL_CHIP_RADIUS_DP.dp))
+                                .background(calendarSwatch(tint).copy(alpha = ch.fasrv.fanotes.desk.CAL_CHIP_ALPHA))
+                                .clickable { onEdit(span.event, date) }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
                         )
                     }
+                    Text(
+                        "+",
+                        fontSize = 12.sp,
+                        color = LocalStatusInk.current.muted,
+                        modifier = Modifier.clickable(onClickLabel = "Neuer Termin") {
+                            onCreate(date, date.atStartOfDay(), date.plusDays(1).atStartOfDay(), true)
+                        }.padding(horizontal = 6.dp),
+                    )
                 }
             }
         }
         Row(Modifier.height(420.dp).verticalScroll(scroll)) {
-            Column(Modifier.width(44.dp)) {
+            Column(Modifier.width(gutter)) {
                 for (hour in 0..23) {
                     Text(
                         "%02d:00".format(hour),
@@ -2804,9 +2858,15 @@ private fun HourColumn(
             )
         }
         if (day == LocalDate.now()) {
-            val minutes = java.time.LocalTime.now().hour * 60 + java.time.LocalTime.now().minute
+            val now = java.time.LocalTime.now()
+            val y = ch.fasrv.fanotes.desk.calendarNowOffsetDp(now.hour, now.minute, HOUR_DP).dp
+            Box(Modifier.fillMaxWidth().height(2.dp).offset(y = y).background(MaterialTheme.colorScheme.error))
             Box(
-                Modifier.fillMaxWidth().height(2.dp).offset(y = (minutes / 60f * HOUR_DP).dp).background(MaterialTheme.colorScheme.primary),
+                Modifier
+                    .size(ch.fasrv.fanotes.desk.CAL_NOW_DOT_DP.dp)
+                    .offset(x = (-4).dp, y = y - 3.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.error),
             )
         }
         BoxWithConstraints(
@@ -2845,7 +2905,13 @@ private fun HourColumn(
                 val top = startMin / 60f * HOUR_DP
                 val block = ((visualEnd - startMin) / 60f * HOUR_DP).coerceAtLeast(18f)
                 Box(
-                    Modifier.fillMaxWidth().offset(y = top.dp).height(block.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)),
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = ch.fasrv.fanotes.desk.CAL_EVENT_INSET_DP.dp)
+                        .offset(y = top.dp)
+                        .height(block.dp)
+                        .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.CAL_EVENT_RADIUS_DP.dp))
+                        .background(LocalStatusInk.current.panelActive),
                 )
             }
             slices.forEach { slice ->
@@ -2873,15 +2939,19 @@ private fun TimedBlock(
     val top = minutes / 60f * HOUR_DP
     val height = (duration / 60f * HOUR_DP).coerceAtLeast(18f)
     val extra = with(density) { extraPx.toDp() }
+    val inset = ch.fasrv.fanotes.desk.CAL_EVENT_INSET_DP.dp
     val columnWidth = width / slice.columns
     val tint = document.calendars.find { it.id == slice.event.calendarId }?.color ?: "#7f6df2"
+    val eventShape = RoundedCornerShape(ch.fasrv.fanotes.desk.CAL_EVENT_RADIUS_DP.dp)
     Box(
         Modifier
-            .offset { IntOffset((columnWidth * slice.column).roundToPx(), top.dp.roundToPx()) }
+            .offset { IntOffset((columnWidth * slice.column).roundToPx() + inset.roundToPx(), top.dp.roundToPx()) }
             .offset { IntOffset(dragOffset.x.roundToInt(), dragOffset.y.roundToInt()) }
-            .width(columnWidth)
+            .width((columnWidth - inset * 2).coerceAtLeast(1.dp))
             .height((height.dp + extra).coerceAtLeast(18.dp))
-            .background(calendarSwatch(tint).copy(alpha = 0.9f))
+            .clip(eventShape)
+            .border(1.dp, calendarSwatch(tint), eventShape)
+            .background(calendarSwatch(tint).copy(alpha = ch.fasrv.fanotes.desk.CAL_CHIP_ALPHA))
             .pointerInput(slice.key, slice.originStart, slice.originEnd) {
                 val hourPx = HOUR_DP.dp.toPx()
                 val columnPx = size.width.toFloat().coerceAtLeast(1f)
@@ -2919,18 +2989,15 @@ private fun TimedBlock(
                     }
                 }
             }
-            .padding(horizontal = 4.dp, vertical = 2.dp),
+            .padding(horizontal = ch.fasrv.fanotes.desk.CAL_EVENT_PAD_X_DP.dp, vertical = ch.fasrv.fanotes.desk.CAL_EVENT_PAD_Y_DP.dp),
     ) {
-        Text(slice.event.title, color = inkOn(tint), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
-        Text("%02d:%02d".format(slice.originStart.hour, slice.originStart.minute), color = inkOn(tint), fontSize = 11.sp)
-        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(4.dp).background(inkOn(tint).copy(alpha = 0.45f)))
+        Text(slice.event.title, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight(650), maxLines = 2)
+        Text(
+            "%02d:%02d".format(slice.originStart.hour, slice.originStart.minute),
+            color = LocalStatusInk.current.muted,
+            fontSize = 12.sp,
+        )
     }
-}
-
-private fun inkOn(hex: String): Color {
-    val color = calendarSwatch(hex)
-    val luminance = 0.2126f * color.red + 0.7152f * color.green + 0.0722f * color.blue
-    return if (luminance > 0.62f) Color(0xFF1A1A1A) else Color.White
 }
 
 @Composable
