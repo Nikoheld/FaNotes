@@ -102,6 +102,87 @@ class WorksheetLayoutTest {
     }
 
     @Test
+    fun anInlineWorksheetFieldSitsOnThePage() {
+        assertEquals("Antwort eingeben …", BOX_EDITOR_PLACEHOLDER)
+        assertEquals(5, BOX_EDITOR_RADIUS_DP)
+        assertEquals(7, BOX_EDITOR_PAD_X_DP)
+        assertEquals(5, BOX_EDITOR_PAD_Y_DP)
+        assertEquals("Textfeld entfernen", BOX_EDITOR_REMOVE)
+        assertEquals(38, BOX_FIELD_MIN_DP)
+        assertEquals(23, BOX_FIELD_REMOVE_DP)
+        assertEquals(9, BOX_FIELD_REMOVE_OUTSET_DP)
+        assertEquals(0.72f, BOX_FIELD_BG_ALPHA)
+        assertEquals(0.94f, BOX_FIELD_FOCUS_BG_ALPHA)
+        assertEquals(80f, worksheetFieldHeightPx(20f, 38f, 80f))
+        assertEquals(38f, worksheetFieldHeightPx(20f, 38f, 10f))
+        assertEquals(140f, worksheetFieldHeightPx(140f, 38f, 80f))
+        val inside = worksheetFieldFrame(
+            anchorX = 100f,
+            anchorY = 200f,
+            widthPx = 120f,
+            canvasHeightPx = 40f,
+            lipPx = 8f,
+            pageLeft = 10f,
+            pageTop = 20f,
+            pageRight = 400f,
+            pageBottom = 500f,
+            desktopMinPx = 38f,
+            editorMinPx = 80f,
+        )
+        assertEquals(100f, inside?.left)
+        assertEquals(128f, inside?.top)
+        assertEquals(120f, inside?.width)
+        assertEquals(80f, inside?.height)
+        val clamped = worksheetFieldFrame(
+            anchorX = 360f,
+            anchorY = 470f,
+            widthPx = 120f,
+            canvasHeightPx = 40f,
+            lipPx = 8f,
+            pageLeft = 0f,
+            pageTop = 0f,
+            pageRight = 400f,
+            pageBottom = 500f,
+            desktopMinPx = 38f,
+            editorMinPx = 80f,
+        )
+        assertEquals(280f, clamped?.left)
+        assertEquals(398f, clamped?.top)
+        assertEquals(120f, clamped?.width)
+        assertEquals(80f, clamped?.height)
+        val shortPage = worksheetFieldFrame(
+            anchorX = 10f,
+            anchorY = 40f,
+            widthPx = 40f,
+            canvasHeightPx = 20f,
+            lipPx = 0f,
+            pageLeft = 0f,
+            pageTop = 0f,
+            pageRight = 100f,
+            pageBottom = 50f,
+            desktopMinPx = 38f,
+            editorMinPx = 80f,
+        )
+        assertEquals(0f, shortPage?.top)
+        assertEquals(50f, shortPage?.height)
+        assertNull(
+            worksheetFieldFrame(
+                anchorX = 0f,
+                anchorY = 0f,
+                widthPx = 10f,
+                canvasHeightPx = 10f,
+                lipPx = 0f,
+                pageLeft = 0f,
+                pageTop = 0f,
+                pageRight = 0f,
+                pageBottom = 10f,
+                desktopMinPx = 38f,
+                editorMinPx = 80f,
+            ),
+        )
+    }
+
+    @Test
     fun theImportDialogUsesTheDesktopCard() {
         assertEquals(620, SHEET_IMPORT_MAX_DP)
         assertEquals(0.92f, SHEET_IMPORT_WIDTH_FRACTION)

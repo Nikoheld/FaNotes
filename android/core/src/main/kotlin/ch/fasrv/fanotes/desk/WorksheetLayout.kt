@@ -168,6 +168,70 @@ const val BOX_EDITOR_RADIUS_DP = 5
 const val BOX_EDITOR_PAD_X_DP = 7
 const val BOX_EDITOR_PAD_Y_DP = 5
 
+/** Desktop `textarea` min-height. The field is at least this tall, and at least [BOX_EDITOR_MIN_DP]. */
+const val BOX_FIELD_MIN_DP = 38
+
+/** Desktop remove control: 23px circle, inset 9px past the textarea corner. */
+const val BOX_FIELD_REMOVE_DP = 23
+const val BOX_FIELD_REMOVE_OUTSET_DP = 9
+
+/** `rgba(255,255,255,.72)` at rest and `.94` while the textarea is focused. */
+const val BOX_FIELD_BG_ALPHA = 0.72f
+const val BOX_FIELD_FOCUS_BG_ALPHA = 0.94f
+
+data class WorksheetFieldRect(
+    val left: Float,
+    val top: Float,
+    val width: Float,
+    val height: Float,
+)
+
+/**
+ * Height of the on-sheet field. Never shorter than the desktop 38 or [BOX_EDITOR_MIN_DP].
+ * When the canvas card is taller than that floor, the field grows with the card.
+ */
+fun worksheetFieldHeightPx(canvasHeightPx: Float, desktopMinPx: Float, editorMinPx: Float): Float {
+    val desktop = if (desktopMinPx.isFinite()) desktopMinPx.coerceAtLeast(0f) else 0f
+    val editor = if (editorMinPx.isFinite()) editorMinPx.coerceAtLeast(0f) else 0f
+    val canvas = if (canvasHeightPx.isFinite()) canvasHeightPx.coerceAtLeast(0f) else 0f
+    return max(desktop, max(editor, canvas))
+}
+
+/**
+ * Places the inline worksheet field over the canvas card and clamps it onto the page.
+ * [anchorX] and [anchorY] are the box origin in screen pixels after zoom and scroll.
+ * The card bottom sits [lipPx] below that origin, matching the canvas draw.
+ * Null when the page has no area, so the caller can wait until the sheet is laid out.
+ */
+fun worksheetFieldFrame(
+    anchorX: Float,
+    anchorY: Float,
+    widthPx: Float,
+    canvasHeightPx: Float,
+    lipPx: Float,
+    pageLeft: Float,
+    pageTop: Float,
+    pageRight: Float,
+    pageBottom: Float,
+    desktopMinPx: Float,
+    editorMinPx: Float,
+): WorksheetFieldRect? {
+    if (!anchorX.isFinite() || !anchorY.isFinite() || !widthPx.isFinite() || !lipPx.isFinite()) return null
+    if (!pageLeft.isFinite() || !pageTop.isFinite() || !pageRight.isFinite() || !pageBottom.isFinite()) return null
+    val pageWidth = pageRight - pageLeft
+    val pageHeight = pageBottom - pageTop
+    if (pageWidth < 1f || pageHeight < 1f) return null
+    val width = widthPx.coerceAtLeast(1f).coerceAtMost(pageWidth)
+    val height = worksheetFieldHeightPx(canvasHeightPx, desktopMinPx, editorMinPx).coerceAtMost(pageHeight)
+    var left = anchorX
+    var top = anchorY + lipPx - height
+    if (left < pageLeft) left = pageLeft
+    if (top < pageTop) top = pageTop
+    if (left + width > pageRight) left = (pageRight - width).coerceAtLeast(pageLeft)
+    if (top + height > pageBottom) top = (pageBottom - height).coerceAtLeast(pageTop)
+    return WorksheetFieldRect(left, top, width, height)
+}
+
 /** Arbeitsblatt import after the later chrome pass: 12px card, min(620px, 92vw), options stack at 560px. */
 const val SHEET_IMPORT_MAX_DP = 620
 const val SHEET_IMPORT_WIDTH_FRACTION = 0.92f
