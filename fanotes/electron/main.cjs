@@ -3464,7 +3464,7 @@ function registerIpcHandlers() {
   })
 
   handle(IPC.search, async (_event, rawQuery) => {
-    const { inkAnchorForQuery } = require('./search-ink.cjs')
+    const { inkAnchorForQuery, noteSearchExcerpt } = require('./search-ink.cjs')
     await ensureBootstrap()
     if (typeof rawQuery !== 'string') throw new Error('Ungültige Suchanfrage.')
     const query = rawQuery.trim().slice(0, 500)
@@ -3518,8 +3518,6 @@ function registerIpcHandlers() {
         }
       }
       rememberDrawingOwner(drawingOwners, relativePath, content, ownerInk)
-      const contentHaystack = content.toLocaleLowerCase('de-DE')
-      const firstContentIndex = contentHaystack.indexOf(needle)
       const haystack = `${relativePath}\n${content}\n${inkTranscript}`.toLocaleLowerCase('de-DE')
       const firstIndex = haystack.indexOf(needle)
       if (firstIndex < 0) continue
@@ -3535,9 +3533,14 @@ function registerIpcHandlers() {
       hits.push({
         relativePath,
         title: splitName(path.basename(file.absolutePath)).stem,
-        excerpt: firstContentIndex >= 0
-          ? createExcerpt(content, firstContentIndex, query.length)
-          : `Dateiname · ${relativePath}`,
+        excerpt: noteSearchExcerpt({
+          relativePath,
+          content,
+          transcript: inkTranscript,
+          needle,
+          queryLength: query.length,
+          excerpt: createExcerpt,
+        }),
         matches,
         kind: 'note',
         ...(inkAnchor ? { inkAnchor } : {}),

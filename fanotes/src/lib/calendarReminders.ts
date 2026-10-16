@@ -9,7 +9,7 @@ export type CalendarReminder = {
   minutesUntil: number
 }
 
-/** Events that start within the lead window while the app is open. */
+/** Timed events that start within the lead window. An all-day event has no clock, so it does not announce midnight. */
 export const dueReminders = (
   document: CalendarDocument,
   now: Date,
@@ -20,6 +20,7 @@ export const dueReminders = (
   const hidden = new Set(document.calendars.filter((calendar) => !calendar.visible).map((calendar) => calendar.id))
   return expandOccurrences(document, from, to)
     .filter((occurrence) => !hidden.has(occurrence.event.calendarId))
+    .filter((occurrence) => !occurrence.event.allDay)
     .filter((occurrence) => !occurrence.event.title.startsWith('✓ '))
     .filter((occurrence) => occurrence.start.getTime() >= from.getTime() && occurrence.start.getTime() <= to.getTime())
     .map((occurrence) => ({

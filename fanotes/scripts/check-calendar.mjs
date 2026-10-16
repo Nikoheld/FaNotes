@@ -249,6 +249,30 @@ assert.equal(ics.importIcs([
   'END:VCALENDAR',
 ].join('\n'), personal).length, 0)
 
+const dstUtc = new Date(Date.UTC(2026, 2, 8, 2, 30, 0))
+const dstZoned = ics.importIcs([
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'SUMMARY:Lücke',
+  'DTSTART:20260308T023000Z',
+  'DTEND:20260308T033000Z',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+assert.equal(dstZoned.length, 1, 'a Zulu time inside a local gap still imports')
+assert.equal(dstZoned[0].start, utcWall(dstUtc))
+assert.equal(dstZoned[0].end, utcWall(new Date(Date.UTC(2026, 2, 8, 3, 30, 0))))
+const dstOffset = ics.importIcs([
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'SUMMARY:Offset',
+  'DTSTART:20260308T023000+0000',
+  'DTEND:20260308T033000+0000',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+assert.equal(dstOffset[0].start, utcWall(dstUtc))
+
 const existing = {
   ...doc,
   events: [{
@@ -317,6 +341,24 @@ const calendarView = readFileSync(join(root, 'src/components/CalendarView.tsx'),
 assert.match(calendarView, /formatReminder\(reminders\[0\], getUiLanguage\(\)\)/)
 assert.match(calendarView, /\{copy\.close\}/)
 assert.doesNotMatch(calendarView, /beginnt/)
+
+const reminderNow = new Date(2026, 9, 16, 23, 50, 0)
+const allDayTomorrow = createEvent({
+  calendarId: personal,
+  title: 'Abgabe',
+  start: new Date(2026, 9, 17),
+  end: new Date(2026, 9, 18),
+  allDay: true,
+})
+const call = createEvent({
+  calendarId: personal,
+  title: 'Anruf',
+  start: new Date(2026, 9, 16, 23, 55, 0),
+  end: new Date(2026, 9, 17, 0, 25, 0),
+})
+const due = reminders.dueReminders({ ...doc, events: [allDayTomorrow, call] }, reminderNow, 15)
+assert.equal(due.some((item) => item.title === 'Abgabe'), false)
+assert.equal(due.some((item) => item.title === 'Anruf' && item.minutesUntil === 5), true)
 
 const seriesIcs = [
   'BEGIN:VCALENDAR',

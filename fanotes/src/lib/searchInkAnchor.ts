@@ -36,6 +36,32 @@ export const inkAnchorForQuery = (transcript: string, query: string): InkSearchA
   return { y: index / (parsed.length - 1) }
 }
 
+/**
+ * A hit in the note text shows that text. A hit only in the handwriting
+ * transcript shows those words. The filename line is for a path match.
+ */
+export const noteSearchExcerpt = ({
+  relativePath,
+  content,
+  transcript,
+  needle,
+  queryLength,
+  excerpt,
+}: {
+  relativePath: string
+  content: string
+  transcript: string
+  needle: string
+  queryLength: number
+  excerpt: (text: string, index: number, queryLength: number) => string
+}): string => {
+  const contentIndex = content.toLocaleLowerCase('de-DE').indexOf(needle)
+  if (contentIndex >= 0) return excerpt(content, contentIndex, queryLength)
+  const transcriptIndex = transcript.toLocaleLowerCase('de-DE').indexOf(needle)
+  if (transcriptIndex >= 0) return excerpt(transcript, transcriptIndex, queryLength)
+  return `Dateiname · ${relativePath}`
+}
+
 export const scrollTopForNormalizedY = (scrollHeight: number, clientHeight: number, y: number) => {
   const span = Math.max(0, scrollHeight - clientHeight)
   const clamped = Math.min(1, Math.max(0, y))
