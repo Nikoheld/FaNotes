@@ -1,8 +1,9 @@
 package ch.fasrv.fanotes.desk
 
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.ceil
-import java.util.Locale
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /** Starter folders and note templates from the desktop first-run profile. */
@@ -427,35 +428,60 @@ const val FIRST_RUN_PREVIEW_PAPER_SHADOW_X_DP = 0
 const val FIRST_RUN_PREVIEW_PAPER_SHADOW_Y_DP = 10
 const val FIRST_RUN_PREVIEW_PAPER_SHADOW_BLUR_DP = 30
 const val FIRST_RUN_PREVIEW_PAPER_SHADOW_ALPHA = 0.14f
-/** `.first-run-preview-rule` is 1px `#e7e5df` with margin `11px 0 4px`. */
-const val FIRST_RUN_PREVIEW_RULE_ARGB = 0xFFE7E5DF.toInt()
-const val FIRST_RUN_PREVIEW_RULE_MARGIN_TOP_DP = 11
-const val FIRST_RUN_PREVIEW_RULE_MARGIN_BOTTOM_DP = 4
 /**
- * `.first-run-preview-ink` is 98px tall on a `0 0 330 98` viewBox.
- * The stroke is 3.4 user units of `color-mix(in srgb, var(--accent) 78%, #222)`.
+ * `.first-run-preview-rule` still wins. No later rule changes this line.
+ * Height is 1px. Margin is 11px 0 4px. Color is `#e7e5df`.
+ * Shown at full width; the desktop scale-in animation is not played.
  */
-const val FIRST_RUN_PREVIEW_INK_VIEW_WIDTH = 330
-const val FIRST_RUN_PREVIEW_INK_VIEW_HEIGHT = 98
+const val FIRST_RUN_PREVIEW_RULE_HEIGHT_DP = 1
+const val FIRST_RUN_PREVIEW_RULE_MARGIN_TOP_DP = 11
+const val FIRST_RUN_PREVIEW_RULE_MARGIN_INLINE_DP = 0
+const val FIRST_RUN_PREVIEW_RULE_MARGIN_BOTTOM_DP = 4
+const val FIRST_RUN_PREVIEW_RULE_COLOR = 0xFFE7E5DF.toInt()
+/**
+ * `.first-run-preview-ink` is 100% wide and 98px tall. The SVG viewBox is 330×98.
+ * The draw animation is not played, so the stroke is the finished line.
+ */
 const val FIRST_RUN_PREVIEW_INK_HEIGHT_DP = 98
-const val FIRST_RUN_PREVIEW_INK_WIDTH_DP = 3.4f
+const val FIRST_RUN_PREVIEW_INK_VIEW_WIDTH = 330f
+const val FIRST_RUN_PREVIEW_INK_VIEW_HEIGHT = 98
+/** `.first-run-preview-ink path` stroke is 3.4 user units, `color-mix` of the accent at 78% into `#222`. */
+const val FIRST_RUN_PREVIEW_INK_STROKE = 3.4f
 const val FIRST_RUN_PREVIEW_INK_MIX = 0.78f
-const val FIRST_RUN_PREVIEW_INK_INTO_ARGB = 0xFF222222.toInt()
-/** `.first-run-preview-search` is 27px tall, 7px type, 7px radius, gap 6px, padding `0 8px`, `#66676b` on white, border `#dfddd7`. */
+const val FIRST_RUN_PREVIEW_INK_INTO = 0xFF222222.toInt()
+/**
+ * Desktop formula from the welcome SVG. Coordinates are the 330×98 viewBox.
+ * Shown in full; `stroke-dashoffset` stays at the finished end of the draw.
+ */
+const val FIRST_RUN_PREVIEW_INK_PATH =
+    "M15 58 C29 50 33 32 39 26 C47 18 41 67 51 70 C62 72 69 50 76 40 M61 55 C75 58 90 55 103 49 M119 62 C130 49 134 31 140 27 C148 22 143 64 153 66 C166 68 173 43 182 40 C192 37 191 63 202 62 M220 48 L247 48 M234 35 L234 63 M267 28 C290 20 308 30 308 48 C308 66 286 72 268 62"
+/**
+ * `.first-run-preview-search` still wins. No later rule changes this chip.
+ * Height 27px, gap 6px, padding 0 8px, 1px border `#dfddd7`, radius 7px,
+ * text `#66676b`, fill `#ffffff`, shadow `0 5px 15px rgba(0,0,0,.06)`, font `7px/1`.
+ * Shown in place; the desktop fade-in is not played.
+ */
 const val FIRST_RUN_PREVIEW_SEARCH_HEIGHT_DP = 27
-const val FIRST_RUN_PREVIEW_SEARCH_SP = 7
-const val FIRST_RUN_PREVIEW_SEARCH_RADIUS_DP = 7
 const val FIRST_RUN_PREVIEW_SEARCH_GAP_DP = 6
-const val FIRST_RUN_PREVIEW_SEARCH_PAD_DP = 8
-const val FIRST_RUN_PREVIEW_SEARCH_ICON_DP = 11
-const val FIRST_RUN_PREVIEW_SEARCH_ARGB = 0xFF66676B.toInt()
-const val FIRST_RUN_PREVIEW_SEARCH_BORDER_ARGB = 0xFFDFDDD7.toInt()
-const val FIRST_RUN_PREVIEW_SEARCH_FILL_ARGB = 0xFFFFFFFF.toInt()
+const val FIRST_RUN_PREVIEW_SEARCH_PAD_INLINE_DP = 8
+const val FIRST_RUN_PREVIEW_SEARCH_PAD_BLOCK_DP = 0
+const val FIRST_RUN_PREVIEW_SEARCH_BORDER_DP = 1
+const val FIRST_RUN_PREVIEW_SEARCH_RADIUS_DP = 7
+const val FIRST_RUN_PREVIEW_SEARCH_FONT_SP = 7
+const val FIRST_RUN_PREVIEW_SEARCH_LINE = 1f
+const val FIRST_RUN_PREVIEW_SEARCH_BORDER = 0xFFDFDDD7.toInt()
+const val FIRST_RUN_PREVIEW_SEARCH_INK = 0xFF66676B.toInt()
+const val FIRST_RUN_PREVIEW_SEARCH_FILL = 0xFFFFFFFF.toInt()
+const val FIRST_RUN_PREVIEW_SEARCH_SHADOW_X_DP = 0
 const val FIRST_RUN_PREVIEW_SEARCH_SHADOW_Y_DP = 5
+const val FIRST_RUN_PREVIEW_SEARCH_SHADOW_BLUR_DP = 15
 const val FIRST_RUN_PREVIEW_SEARCH_SHADOW_ALPHA = 0.06f
-/** `.first-run-preview-search b` is 6.5px and `color-mix(in srgb, var(--accent) 78%, #333)`. */
-const val FIRST_RUN_PREVIEW_HITS_SP = 6.5f
-const val FIRST_RUN_PREVIEW_HITS_INTO_ARGB = 0xFF333333.toInt()
+/** `.first-run-preview-search b` is 6.5px. Its color is the accent mixed 78% into `#333`. */
+const val FIRST_RUN_PREVIEW_SEARCH_HITS_SP = 6.5f
+const val FIRST_RUN_PREVIEW_SEARCH_HIT_MIX = 0.78f
+const val FIRST_RUN_PREVIEW_SEARCH_HIT_INTO = 0xFF333333.toInt()
+/** Lucide `Search size={11}` inside the chip. CSS does not resize it. */
+const val FIRST_RUN_PREVIEW_SEARCH_ICON_DP = 11
 const val FIRST_RUN_PREVIEW_QUERY = "„Änderungsrate“"
 const val FIRST_RUN_PREVIEW_HITS = "1 Treffer"
 const val FIRST_RUN_PREVIEW_INK = "Handschrift"
@@ -710,10 +736,6 @@ fun firstRunPreviewAsidePad(screenWidthDp: Int): FirstRunPreviewAsidePad {
  * Mathematik keeps `var(--accent)`, Deutsch is #c76868, Französisch #3d8be0, Physik #5e9abd, Wirtschaft #cf9a48.
  * [accentArgb] is the theme accent for Mathematik.
  */
-/** Stroke of `.first-run-preview-ink path`: accent mixed 78% into #222. */
-fun firstRunPreviewInkStroke(accentArgb: Int): Int =
-    mixArgb(accentArgb, FIRST_RUN_PREVIEW_INK_INTO_ARGB, FIRST_RUN_PREVIEW_INK_MIX)
-
 /**
  * Default SVG placement, `xMidYMid meet`.
  * The formula and the integral keep their shape. A wide sheet letterboxes them
@@ -734,10 +756,6 @@ fun previewInkMeet(widthPx: Float, heightPx: Float, viewWidth: Float, viewHeight
 
 /** A preview stroke is in viewBox units, so the meet scale is its pixel width. */
 fun previewInkStrokePx(strokeUnits: Float, scale: Float): Float = strokeUnits * scale
-
-/** Hit count on `.first-run-preview-search b`: accent mixed 78% into #333. */
-fun firstRunPreviewSearchHits(accentArgb: Int): Int =
-    mixArgb(accentArgb, FIRST_RUN_PREVIEW_HITS_INTO_ARGB, FIRST_RUN_PREVIEW_INK_MIX)
 
 fun firstRunPreviewMarkColors(accentArgb: Int): List<Int> = listOf(
     accentArgb,
@@ -833,6 +851,93 @@ fun firstRunPreviewPaperShadowFrame(widthPx: Float, heightPx: Float, density: Fl
         blurPx = blurPx,
         color = firstRunPreviewPaperShadowColor(shadow.alpha),
     )
+}
+
+/** One command of the welcome-preview handwriting path. */
+sealed class FirstRunPreviewInkOp {
+    data class Move(val x: Float, val y: Float) : FirstRunPreviewInkOp()
+    data class Line(val x: Float, val y: Float) : FirstRunPreviewInkOp()
+    data class Cubic(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val x: Float, val y: Float) : FirstRunPreviewInkOp()
+}
+
+/** Parses the desktop `M` / `L` / `C` path. A command may sit against its first number, as in `M15`. */
+fun firstRunPreviewInkOps(path: String = FIRST_RUN_PREVIEW_INK_PATH): List<FirstRunPreviewInkOp> {
+    val tokens = Regex("""[MLC]|-?\d+(?:\.\d+)?""").findAll(path).map { it.value }.toList()
+    val ops = ArrayList<FirstRunPreviewInkOp>()
+    var index = 0
+    fun number(): Float {
+        val value = tokens[index].toFloat()
+        index += 1
+        return value
+    }
+    while (index < tokens.size) {
+        val command = tokens[index]
+        index += 1
+        ops += when (command) {
+            "M" -> FirstRunPreviewInkOp.Move(number(), number())
+            "L" -> FirstRunPreviewInkOp.Line(number(), number())
+            "C" -> FirstRunPreviewInkOp.Cubic(number(), number(), number(), number(), number(), number())
+            else -> throw IllegalArgumentException("Bad welcome ink command $command")
+        }
+    }
+    return ops
+}
+
+val FIRST_RUN_PREVIEW_INK_OPS: List<FirstRunPreviewInkOp> = firstRunPreviewInkOps()
+
+/**
+ * `xMidYMid meet` of the 330×98 viewBox into the CSS box, plus the 3.4 user-unit stroke.
+ * [widthPx] and [heightPx] are the ink element's pixel size. A wide box letterboxes on the sides.
+ */
+data class FirstRunPreviewInkFit(
+    val scale: Float,
+    val offsetX: Float,
+    val offsetY: Float,
+    val strokePx: Float,
+)
+
+fun firstRunPreviewInkFit(widthPx: Float, heightPx: Float): FirstRunPreviewInkFit? {
+    if (widthPx < 1f || heightPx < 1f) return null
+    val viewWidth = FIRST_RUN_PREVIEW_INK_VIEW_WIDTH
+    val viewHeight = FIRST_RUN_PREVIEW_INK_HEIGHT_DP.toFloat()
+    if (viewWidth <= 0f || viewHeight <= 0f) return null
+    val scale = min(widthPx / viewWidth, heightPx / viewHeight)
+    if (scale <= 0f) return null
+    return FirstRunPreviewInkFit(
+        scale = scale,
+        offsetX = (widthPx - viewWidth * scale) / 2f,
+        offsetY = (heightPx - viewHeight * scale) / 2f,
+        strokePx = FIRST_RUN_PREVIEW_INK_STROKE * scale,
+    )
+}
+
+/** Finished stroke: `color-mix(in srgb, var(--accent) 78%, #222)`. */
+fun firstRunPreviewInkStroke(accentArgb: Int): Int =
+    mixArgb(accentArgb, FIRST_RUN_PREVIEW_INK_INTO, FIRST_RUN_PREVIEW_INK_MIX)
+
+/** Hit label: `color-mix(in srgb, var(--accent) 78%, #333)`. */
+fun firstRunPreviewSearchHit(accentArgb: Int): Int =
+    mixArgb(accentArgb, FIRST_RUN_PREVIEW_SEARCH_HIT_INTO, FIRST_RUN_PREVIEW_SEARCH_HIT_MIX)
+
+data class FirstRunPreviewSearchShadow(
+    val xDp: Int,
+    val yDp: Int,
+    val blurDp: Int,
+    val alpha: Float,
+)
+
+/** Desktop shadow for the welcome search chip. The same literal applies in every theme. */
+fun firstRunPreviewSearchShadow() = FirstRunPreviewSearchShadow(
+    FIRST_RUN_PREVIEW_SEARCH_SHADOW_X_DP,
+    FIRST_RUN_PREVIEW_SEARCH_SHADOW_Y_DP,
+    FIRST_RUN_PREVIEW_SEARCH_SHADOW_BLUR_DP,
+    FIRST_RUN_PREVIEW_SEARCH_SHADOW_ALPHA,
+)
+
+/** Black at 6%, packed ARGB. */
+fun firstRunPreviewSearchShadowColor(alpha: Float = FIRST_RUN_PREVIEW_SEARCH_SHADOW_ALPHA): Int {
+    val channel = (alpha.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
+    return channel shl 24
 }
 
 /**
@@ -979,6 +1084,49 @@ fun firstRunPreviewGlowFrame(widthPx: Float, heightPx: Float, density: Float, ac
 fun firstRunPreviewFloatShadowColor(alpha: Float = FIRST_RUN_PREVIEW_FLOAT_SHADOW_ALPHA): Int {
     val channel = (alpha.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
     return channel shl 24
+}
+
+/**
+ * Software-bitmap placement of the chip rectangle shifted by `0 5px`.
+ * Every corner uses the 7px chip radius. [padPx] leaves room for the 15px blur.
+ */
+data class FirstRunPreviewSearchShadowFrame(
+    val bitmapWidthPx: Int,
+    val bitmapHeightPx: Int,
+    val padPx: Float,
+    val shapeLeftPx: Float,
+    val shapeTopPx: Float,
+    val shapeRightPx: Float,
+    val shapeBottomPx: Float,
+    val radiusPx: Float,
+    val blurPx: Float,
+    val color: Int,
+)
+
+fun firstRunPreviewSearchShadowFrame(widthPx: Float, heightPx: Float, density: Float): FirstRunPreviewSearchShadowFrame? {
+    if (widthPx < 1f || heightPx < 1f || density <= 0f) return null
+    val shadow = firstRunPreviewSearchShadow()
+    if (shadow.blurDp <= 0) return null
+    val blurPx = shadow.blurDp * density
+    if (blurPx <= 0.5f) return null
+    val offsetX = shadow.xDp * density
+    val offsetY = shadow.yDp * density
+    val pad = blurPx * 2f + abs(offsetX) + abs(offsetY) + 2f
+    val bitmapWidth = ceil(widthPx + pad * 2f).toInt()
+    val bitmapHeight = ceil(heightPx + pad * 2f).toInt()
+    if (bitmapWidth < 1 || bitmapHeight < 1) return null
+    return FirstRunPreviewSearchShadowFrame(
+        bitmapWidthPx = bitmapWidth,
+        bitmapHeightPx = bitmapHeight,
+        padPx = pad,
+        shapeLeftPx = pad + offsetX,
+        shapeTopPx = pad + offsetY,
+        shapeRightPx = pad + offsetX + widthPx,
+        shapeBottomPx = pad + offsetY + heightPx,
+        radiusPx = FIRST_RUN_PREVIEW_SEARCH_RADIUS_DP * density,
+        blurPx = blurPx,
+        color = firstRunPreviewSearchShadowColor(shadow.alpha),
+    )
 }
 
 /** Copy and panel weights from the desktop first-run grids above 980dp. */
