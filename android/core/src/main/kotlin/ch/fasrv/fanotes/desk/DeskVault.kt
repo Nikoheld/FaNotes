@@ -7,6 +7,7 @@ import ch.fasrv.fanotes.json.jsonString
 import ch.fasrv.fanotes.json.parseJson
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
 
@@ -493,6 +494,11 @@ const val CAL_CHIP_RADIUS_DP = 6
 const val CAL_MONTH_LIMIT = 3
 const val CAL_CHIP_ALPHA = 0.22f
 const val CAL_MORE = "weitere"
+const val CAL_TOOL_DP = 30
+const val CAL_VIEW_RADIUS_DP = 9
+const val CAL_SEARCH = "Termine suchen"
+const val CAL_ALL_DAY = "Ganztägig"
+const val CAL_DAILY = "Tagesnotiz"
 
 fun calendarShowsSide(widthDp: Int): Boolean = widthDp > CAL_SIDE_BREAK_DP
 
@@ -515,6 +521,17 @@ fun monthEventLabel(event: CalendarEvent): String {
 
 /** Agenda place line. Blank locations stay hidden, matching a missing map pin. */
 fun agendaPlace(event: CalendarEvent): String? = event.location.trim().takeIf { it.isNotEmpty() }
+
+fun calendarHeading(view: String, anchor: LocalDate): String {
+    val german = Locale.GERMAN
+    if (view == "month") return anchor.format(DateTimeFormatter.ofPattern("MMMM yyyy", german))
+    if (view == "day") return anchor.format(DateTimeFormatter.ofPattern("EEEE, d. MMMM", german))
+    val days = calendarRange(view, anchor)
+    val format = DateTimeFormatter.ofPattern("d. MMM", german)
+    return "${days.first().format(format)} – ${days.last().format(format)}"
+}
+
+fun agendaWhenLabel(event: CalendarEvent): String = eventClock(event) ?: CAL_ALL_DAY
 
 fun eventClock(event: CalendarEvent): String? {
     if (event.allDay || !event.start.contains('T')) return null

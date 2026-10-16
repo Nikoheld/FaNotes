@@ -2421,7 +2421,65 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
             TextButton(onClick = { onOpenNote(CALENDAR_NOTE_PATH) }) { Text("Als Notiz öffnen") }
             CalendarLists(model, document, calendarName) { calendarName = it }
         }
-        OutlinedTextField(calendarQuery, { calendarQuery = it }, label = { Text("Im Kalender suchen") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+        val calRule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+        val calShape = RoundedCornerShape(8.dp)
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(
+                Modifier.height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp).clip(calShape).border(1.dp, calRule, calShape).background(MaterialTheme.colorScheme.surface).clickable {
+                    anchor = LocalDate.now()
+                    month = YearMonth.now()
+                }.padding(horizontal = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) { Text("Heute", fontSize = 12.sp) }
+            listOf(-1 to "‹", 1 to "›").forEach { (step, mark) ->
+                Box(
+                    Modifier.size(ch.fasrv.fanotes.desk.CAL_ICON_DP.dp).clip(calShape).border(1.dp, calRule, calShape).background(MaterialTheme.colorScheme.surface).clickable(onClickLabel = if (step < 0) "Vorheriger Zeitraum" else "Nächster Zeitraum") { shiftCalendar(step) },
+                    contentAlignment = Alignment.Center,
+                ) { Text(mark) }
+            }
+            Text(ch.fasrv.fanotes.desk.calendarHeading(view, anchor), fontSize = 15.sp, fontWeight = FontWeight(650), letterSpacing = (-0.01).em)
+            Row(
+                Modifier.height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp).widthIn(min = 120.dp).clip(calShape).border(1.dp, calRule, calShape).padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(14.dp), tint = LocalStatusInk.current.muted)
+                BasicTextField(
+                    calendarQuery,
+                    { calendarQuery = it },
+                    singleLine = true,
+                    textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.widthIn(min = 80.dp),
+                    decorationBox = { inner ->
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (calendarQuery.isEmpty()) Text(ch.fasrv.fanotes.desk.CAL_SEARCH, color = LocalStatusInk.current.muted, fontSize = 12.sp)
+                            inner()
+                        }
+                    },
+                )
+            }
+            Row(
+                Modifier.clip(RoundedCornerShape(ch.fasrv.fanotes.desk.CAL_VIEW_RADIUS_DP.dp)).border(1.dp, calRule, RoundedCornerShape(ch.fasrv.fanotes.desk.CAL_VIEW_RADIUS_DP.dp)).padding(2.dp),
+            ) {
+                listOf("day" to "Tag", "three" to "3 Tage", "week" to "Woche", "month" to "Monat", "agenda" to "Agenda").forEach { (id, label) ->
+                    val active = view == id
+                    Box(
+                        Modifier.height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp).clip(RoundedCornerShape(8.dp)).background(if (active) MaterialTheme.colorScheme.primary else Color.Transparent).clickable {
+                            view = id
+                            if (id == "month") month = YearMonth.from(anchor)
+                        }.padding(horizontal = 10.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(label, fontSize = 12.sp, color = if (active) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface)
+                    }
+                }
+            }
+        }
         if (reminder != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -2434,25 +2492,6 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
             }
         }
         if (!status.isNullOrBlank()) Text(status.orEmpty(), fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-            listOf("day" to "Tag", "three" to "3 Tage", "week" to "Woche", "month" to "Monat", "agenda" to "Agenda").forEach { (id, label) ->
-                TextButton(onClick = {
-                    view = id
-                    if (id == "month") month = YearMonth.from(anchor)
-                }) {
-                    Text(label, color = if (view == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontWeight = if (view == id) FontWeight.SemiBold else FontWeight.Normal)
-                }
-            }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = {
-                anchor = LocalDate.now()
-                month = YearMonth.now()
-            }) { Text("Heute") }
-            TextButton(onClick = { shiftCalendar(-1) }) { Text("‹") }
-            Text(if (view == "month") month.toString() else day, modifier = Modifier.padding(horizontal = 8.dp))
-            TextButton(onClick = { shiftCalendar(1) }) { Text("›") }
-        }
         when (view) {
             "month" -> MonthGrid(
                 anchor,
@@ -2904,19 +2943,30 @@ private fun AgendaList(
     ch.fasrv.fanotes.desk.calendarRange("agenda", anchor).forEach { date ->
         val events = document.events.filter { ch.fasrv.fanotes.desk.occurrencesOn(it, date) }
         if (events.isNotEmpty()) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-                Text(date.toString(), fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                TextButton(onClick = { onDaily(date) }) { Text("Tagesnotiz") }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(ch.fasrv.fanotes.desk.calendarHeading("day", date), fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text(
+                    ch.fasrv.fanotes.desk.CAL_DAILY,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.clickable { onDaily(date) },
+                )
             }
             events.forEach { event ->
-                val clock = ch.fasrv.fanotes.desk.eventClock(event)?.let { "$it " }.orEmpty()
                 val color = calendarSwatch(document.calendars.find { it.id == event.calendarId }?.color ?: "#2a6f97")
-                Column(Modifier.clickable { onEdit(event, date) }.padding(vertical = 2.dp)) {
-                    Text(clock + event.title, color = color)
+                Row(
+                    Modifier.fillMaxWidth().clickable { onEdit(event, date) }.padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(color))
+                    Text(ch.fasrv.fanotes.desk.agendaWhenLabel(event), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                    Text(event.title, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
                     ch.fasrv.fanotes.desk.agendaPlace(event)?.let { place ->
-                        Text(place, color = color.copy(alpha = 0.8f), fontSize = 12.sp)
+                        Text(place, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1)
                     }
                 }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
             }
         }
     }
