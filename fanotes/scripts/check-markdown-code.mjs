@@ -35,6 +35,12 @@ try {
   assert.equal(links[0].path, 'Deutsch/Text.md')
   assert.match(links[0].excerpt, /wirklich \[\[Algebra\]\]/)
   assert.equal(links[0].excerpt.includes('`[[Algebra]]`'), false)
+  const pathLinks = backlinksFor('Mathe/Algebra.md', [
+    { path: 'Index.md', content: 'Siehe [[Mathe/Algebra]] und [[Mathe/Algebra.md]].' },
+    { path: 'Deutsch/Text.md', content: '[[Deutsch/Algebra]] ist ein anderes Fach.' },
+    { path: 'Extra.md', content: '[[Algebra.md]]' },
+  ])
+  assert.deepEqual(pathLinks.map((link) => link.path).sort(), ['Extra.md', 'Index.md'])
   console.log('markdown-code ok')
 } finally {
   await server.close()

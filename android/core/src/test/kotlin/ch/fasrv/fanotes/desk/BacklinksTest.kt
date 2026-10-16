@@ -24,6 +24,15 @@ class BacklinksTest {
         assertEquals(listOf("Algebra"), wikilinkTargets(example))
         val onlyCode = backlinksFor("Mathe/Physik.md", listOf("Deutsch/Text.md" to "Beispiel `[[Physik]]`."))
         assertEquals(0, onlyCode.size)
+        val byPath = backlinksFor(
+            "Mathe/Algebra.md",
+            listOf(
+                "Index.md" to "Siehe [[Mathe/Algebra]] und [[Mathe/Algebra.md]].",
+                "Deutsch/Text.md" to "[[Deutsch/Algebra]] ist ein anderes Fach.",
+                "Extra.md" to "[[Algebra.md]]",
+            ),
+        )
+        assertEquals(listOf("Extra.md", "Index.md"), byPath.map { it.path }.sorted())
     }
 
     @Test
