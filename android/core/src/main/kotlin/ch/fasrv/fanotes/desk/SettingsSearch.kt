@@ -63,3 +63,32 @@ fun searchSettings(query: String, items: List<SettingsSearchItem> = SETTINGS_SEA
         terms.all { term -> haystack.contains(term) }
     }
 }
+
+/** One row in the desktop settings navigation. */
+data class SettingsNavItem(val id: String, val label: String, val detail: String, val group: String)
+
+val SETTINGS_NAV: List<SettingsNavItem> = listOf(
+    SettingsNavItem("appearance", "Darstellung", "Farben, Schriften und Dichte", "Aussehen & Schreiben"),
+    SettingsNavItem("editor", "Editor", "Markdown und Schreiben", "Aussehen & Schreiben"),
+    SettingsNavItem("drawing", "Stift & Erkennung", "Tablet, Papier und Handschrift", "Stift & Arbeitsbereich"),
+    SettingsNavItem("files", "Dateien & Vault", "Import, Ordner und Speichern", "Stift & Arbeitsbereich"),
+    SettingsNavItem("sync", "Sync", "Konto, Geräte und Verschlüsselung", "FaNotes & System"),
+    SettingsNavItem("addons", "Add-ons", "Store, Quelle und Updates", "FaNotes & System"),
+    SettingsNavItem("updates", "Updates", "Stable, Beta und Sicherheit", "FaNotes & System"),
+    SettingsNavItem("accessibility", "Bedienung", "Bewegung und Lesbarkeit", "FaNotes & System"),
+    SettingsNavItem("experimental", "Experimentell", "Unfertige Funktionen, standardmässig aus", "FaNotes & System"),
+    SettingsNavItem("advanced", "Erweitert", "Ressourcen, Datenschutz und App-Daten", "FaNotes & System"),
+)
+
+/** Groups in desktop order, each with its rows. */
+fun settingsNavGroups(items: List<SettingsNavItem> = SETTINGS_NAV): List<Pair<String, List<SettingsNavItem>>> {
+    val order = items.map { it.group }.distinct()
+    return order.map { group -> group to items.filter { it.group == group } }
+}
+
+/** Nav metrics from `.settings-nav`. The later pass paints the active row as panel-active. */
+const val SETTINGS_NAV_ROW_DP = 43
+const val SETTINGS_NAV_RADIUS_DP = 9
+const val SETTINGS_NAV_LABEL_WEIGHT = 650
+const val SETTINGS_NAV_GROUP_WEIGHT = 750
+const val SETTINGS_NAV_GROUP_TRACKING = 0.08f
