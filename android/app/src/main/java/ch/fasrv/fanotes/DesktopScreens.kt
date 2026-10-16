@@ -48,6 +48,7 @@ import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
@@ -3743,6 +3744,101 @@ private fun AccentSwatches(selected: String, onPick: (String) -> Unit) {
 }
 
 @Composable
+private fun SettingsSearchField(query: String, onQuery: (String) -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.SETTINGS_SEARCH_RADIUS_DP.dp)
+    val accent = MaterialTheme.colorScheme.primary
+    val readable = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 2.dp)
+            .padding(bottom = 12.dp)
+            .height(ch.fasrv.fanotes.desk.SETTINGS_SEARCH_DP.dp)
+            .clip(shape)
+            .border(
+                1.dp,
+                if (focused) accent.copy(alpha = ch.fasrv.fanotes.desk.SETTINGS_SEARCH_FOCUS_ALPHA)
+                else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA),
+                shape,
+            )
+            .background(MaterialTheme.colorScheme.background.copy(alpha = ch.fasrv.fanotes.desk.SETTINGS_SEARCH_FILL_ALPHA))
+            .drawBehind {
+                if (!focused) return@drawBehind
+                val stroke = 3.dp.toPx()
+                val radius = ch.fasrv.fanotes.desk.SETTINGS_SEARCH_RADIUS_DP.dp.toPx() + stroke
+                drawRoundRect(
+                    color = accent.copy(alpha = ch.fasrv.fanotes.desk.SETTINGS_SEARCH_RING_ALPHA),
+                    topLeft = Offset(-stroke / 2f, -stroke / 2f),
+                    size = androidx.compose.ui.geometry.Size(size.width + stroke, size.height + stroke),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius, radius),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(stroke),
+                )
+            }
+            .padding(horizontal = ch.fasrv.fanotes.desk.SETTINGS_SEARCH_PAD_DP.dp)
+            .semantics { contentDescription = ch.fasrv.fanotes.desk.SETTINGS_SEARCH_LABEL },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTINGS_SEARCH_GAP_DP.dp),
+    ) {
+        Icon(
+            Icons.Filled.Search,
+            contentDescription = null,
+            modifier = Modifier.size(ch.fasrv.fanotes.desk.SETTINGS_SEARCH_ICON_DP.dp),
+            tint = if (focused) readable else LocalStatusInk.current.muted,
+        )
+        BasicTextField(
+            value = query,
+            onValueChange = onQuery,
+            modifier = Modifier.weight(1f).onFocusChanged { focused = it.isFocused },
+            singleLine = true,
+            textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp),
+            cursorBrush = SolidColor(accent),
+            decorationBox = { inner ->
+                Box {
+                    if (query.isEmpty()) {
+                        Text(ch.fasrv.fanotes.desk.SETTINGS_SEARCH_PLACEHOLDER, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                    }
+                    inner()
+                }
+            },
+        )
+        if (query.isNotEmpty()) {
+            val clear = remember { MutableInteractionSource() }
+            val hot by clear.collectIsHoveredAsState()
+            Box(
+                Modifier
+                    .size(ch.fasrv.fanotes.desk.SETTINGS_SEARCH_CLEAR_DP.dp)
+                    .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SETTINGS_SEARCH_CLEAR_RADIUS_DP.dp))
+                    .background(if (hot) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+                    .hoverable(clear)
+                    .clickable(interactionSource = clear, indication = null, onClickLabel = ch.fasrv.fanotes.desk.SETTINGS_SEARCH_CLEAR) { onQuery("") },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = ch.fasrv.fanotes.desk.SETTINGS_SEARCH_CLEAR,
+                    modifier = Modifier.size(ch.fasrv.fanotes.desk.SETTINGS_SEARCH_CLEAR_ICON_DP.dp),
+                    tint = if (hot) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
+                )
+            }
+        }
+    }
+}
+
+private fun settingsSectionIcon(section: String) = when (section) {
+    "appearance" -> Icons.Filled.Palette
+    "editor" -> Icons.Filled.Description
+    "drawing" -> Icons.Filled.Brush
+    "files" -> Icons.Filled.Folder
+    "sync" -> Icons.Filled.Cloud
+    "addons" -> Icons.Filled.Extension
+    "updates" -> Icons.Filled.SystemUpdate
+    "accessibility" -> Icons.Filled.Accessibility
+    "experimental" -> Icons.Filled.Science
+    else -> Icons.Filled.Code
+}
+
+@Composable
 fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () -> Unit, onPrivate: () -> Unit) {
     val settings by model.deskSettings.collectAsStateWithLifecycle()
     val sync by model.sync.collectAsStateWithLifecycle()
@@ -3767,42 +3863,83 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
         scrollTarget = null
     }
     Row(Modifier.fillMaxSize()) {
-        Column(Modifier.weight(0.38f).verticalScroll(rememberScrollState()).padding(8.dp)) {
-            OutlinedTextField(
-                settingsQuery,
-                { settingsQuery = it },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                label = { Text("Einstellungen durchsuchen") },
-                placeholder = { Text("Einstellungen suchen") },
-            )
-            if (settingsQuery.isNotBlank()) {
-                TextButton(onClick = { settingsQuery = "" }) { Text("Einstellungssuche leeren") }
-                Text(
-                    if (settingsResults.isEmpty()) "Keine Treffer" else "${settingsResults.size} Treffer",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                )
-                if (settingsResults.isEmpty()) {
-                    Text(
-                        "Versuche zum Beispiel „Schrift“, „Backup“ oder „Handschrift“.",
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(vertical = 6.dp),
-                    )
+        Column(
+            Modifier
+                .weight(0.38f)
+                .verticalScroll(rememberScrollState())
+                .padding(
+                    start = ch.fasrv.fanotes.desk.SETTINGS_NAV_PAD_X_DP.dp,
+                    end = ch.fasrv.fanotes.desk.SETTINGS_NAV_PAD_X_DP.dp,
+                    top = ch.fasrv.fanotes.desk.SETTINGS_NAV_PAD_TOP_DP.dp,
+                    bottom = ch.fasrv.fanotes.desk.SETTINGS_NAV_PAD_BOTTOM_DP.dp,
+                ),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTINGS_BRAND_GAP_DP.dp),
+            ) {
+                Box(
+                    Modifier
+                        .size(ch.fasrv.fanotes.desk.SETTINGS_BRAND_DP.dp)
+                        .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SETTINGS_BRAND_RADIUS_DP.dp))
+                        .background(MaterialTheme.colorScheme.onSurface),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(17.dp), tint = MaterialTheme.colorScheme.background)
                 }
-                settingsResults.forEach { item ->
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                section = item.section
-                                scrollTarget = item.target
-                                settingsQuery = ""
+                Column(Modifier.weight(1f)) {
+                    Text(ch.fasrv.fanotes.desk.SETTINGS_BRAND, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text(ch.fasrv.fanotes.desk.SETTINGS_BRAND_DETAIL, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 2.dp))
+                }
+            }
+            SettingsSearchField(settingsQuery, { settingsQuery = it })
+            if (settingsQuery.isNotBlank()) {
+                Column(verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTINGS_RESULT_GAP_DP.dp)) {
+                    Text(
+                        ch.fasrv.fanotes.desk.settingsSearchCount(settingsResults.size).uppercase(java.util.Locale.GERMAN),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTINGS_NAV_GROUP_WEIGHT),
+                        letterSpacing = ch.fasrv.fanotes.desk.SETTINGS_NAV_GROUP_TRACKING.em,
+                        color = LocalStatusInk.current.muted,
+                        modifier = Modifier.padding(start = 8.dp, top = 2.dp, end = 8.dp, bottom = 4.dp),
+                    )
+                    settingsResults.forEach { item ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = ch.fasrv.fanotes.desk.SETTINGS_NAV_ROW_DP.dp)
+                                .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SETTINGS_NAV_RADIUS_DP.dp))
+                                .clickable {
+                                    section = item.section
+                                    scrollTarget = item.target
+                                    settingsQuery = ""
+                                }
+                                .padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(9.dp),
+                        ) {
+                            Icon(settingsSectionIcon(item.section), contentDescription = null, modifier = Modifier.size(15.dp), tint = LocalStatusInk.current.muted)
+                            Column(Modifier.weight(1f)) {
+                                Text(item.label, fontSize = 12.sp, fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTINGS_NAV_LABEL_WEIGHT))
+                                Text(item.detail, fontSize = 12.sp, color = LocalStatusInk.current.muted)
                             }
-                            .padding(vertical = 8.dp),
-                    ) {
-                        Text(item.label, fontWeight = FontWeight.SemiBold)
-                        Text(item.detail, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                            Icon(
+                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = LocalStatusInk.current.muted.copy(alpha = 0.45f),
+                            )
+                        }
+                    }
+                    if (settingsResults.isEmpty()) {
+                        Text(
+                            ch.fasrv.fanotes.desk.SETTINGS_SEARCH_HINT,
+                            fontSize = 12.sp,
+                            lineHeight = 18.sp,
+                            color = LocalStatusInk.current.muted,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                        )
                     }
                 }
             } else {
