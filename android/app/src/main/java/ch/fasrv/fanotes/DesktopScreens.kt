@@ -2479,6 +2479,24 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                     }
                 }
             }
+            Row(
+                Modifier
+                    .height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp)
+                    .clip(calShape)
+                    .background(MaterialTheme.colorScheme.primary)
+                    .clickable {
+                        val now = java.time.LocalTime.now()
+                        val snapped = ch.fasrv.fanotes.desk.snapCalendarClock(now.hour, now.minute)
+                        val start = LocalDate.now().plusDays(snapped.dayOffset.toLong()).atTime(snapped.hour, snapped.minute)
+                        editor = draftForCreate(document, start.toLocalDate(), start, start.plusHours(1), false)
+                    }
+                    .padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.background)
+                Text(ch.fasrv.fanotes.desk.CAL_NEW_EVENT, fontSize = 12.sp, color = MaterialTheme.colorScheme.background)
+            }
         }
         if (reminder != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2515,6 +2533,13 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 { date, start, end, allDay -> editor = draftForCreate(document, date, start, end, allDay) },
                 { model.openDaily(it) },
             )
+        }
+        if (view != "month") {
+            val range = ch.fasrv.fanotes.desk.calendarRange(view, anchor)
+            val occupied = range.count { date -> shown.events.any { ch.fasrv.fanotes.desk.occurrencesOn(it, date) } }
+            if (ch.fasrv.fanotes.desk.calendarRangeIsEmpty(view, occupied)) {
+                Text(ch.fasrv.fanotes.desk.CAL_EMPTY, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(vertical = 8.dp))
+            }
         }
         Text("Am $day", modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.SemiBold)
         EventsOn(model, shown, anchor) { editor = draftFor(it, anchor) }
