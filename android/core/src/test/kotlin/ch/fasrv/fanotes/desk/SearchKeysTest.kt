@@ -27,5 +27,9 @@ class SearchKeysTest {
         assertEquals(50, SEARCH_EMPTY_PAD_TOP_DP)
         assertEquals(34, SEARCH_FOOTER_DP)
         assertEquals(0.09f, SEARCH_RULE_ALPHA)
+        assertEquals("Suche schließen", SEARCH_CLOSE)
+        assertEquals("Text, Dateinamen, Handschrift …", SEARCH_PLACEHOLDER)
+        assertEquals("Ergebnis wählen", SEARCH_CHOOSE)
+        assertEquals(5, SEARCH_KBD_RADIUS_DP)
     }
 }
