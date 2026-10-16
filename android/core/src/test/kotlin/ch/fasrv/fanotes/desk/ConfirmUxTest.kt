@@ -3,6 +3,7 @@ package ch.fasrv.fanotes.desk
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class ConfirmUxTest {
     @Test
@@ -40,5 +41,52 @@ class ConfirmUxTest {
         assertEquals(34, CONFIRM_BUTTON_DP)
         assertEquals(6, CONFIRM_BUTTON_RADIUS_DP)
         assertEquals("ACHTUNG", CONFIRM_EYEBROW)
+    }
+
+    @Test
+    fun theConfirmDialogShadowIsOffsetDownward() {
+        assertEquals(0, CONFIRM_SHADOW_X_DP)
+        assertEquals(12, CONFIRM_SHADOW_Y_DP)
+        assertEquals(40, CONFIRM_SHADOW_BLUR_DP)
+        assertEquals(0.08f, CONFIRM_SHADOW_ALPHA)
+        val shadow = confirmDialogShadow()
+        assertEquals(0, shadow.xDp)
+        assertEquals(12, shadow.yDp)
+        assertEquals(40, shadow.blurDp)
+        assertEquals(0.08f, shadow.alpha)
+        assertTrue(shadow.yDp != 0)
+        val reach = confirmShadowReach(shadow)
+        assertEquals(40, reach.leftDp)
+        assertEquals(28, reach.topDp)
+        assertEquals(40, reach.rightDp)
+        assertEquals(52, reach.bottomDp)
+        assertEquals(reach.leftDp, reach.rightDp)
+        assertTrue(reach.bottomDp > reach.topDp)
+        val frame = checkNotNull(confirmShadowFrame(400f, 200f, 2f))
+        assertEquals(80f, frame.blurPx)
+        assertEquals(0f, frame.shapeLeftPx - frame.padPx)
+        assertEquals(24f, frame.shapeTopPx - frame.padPx)
+        assertTrue(frame.shapeTopPx - frame.padPx != 0f)
+        assertEquals(0x140F0F0F, frame.color)
+        assertEquals(0x140F0F0F, confirmShadowColor(0.08f))
+        val dark = confirmDialogShadow("dark")
+        assertEquals(16, dark.yDp)
+        assertEquals(48, dark.blurDp)
+        assertEquals(0.28f, dark.alpha)
+        assertEquals(0, dark.red)
+        assertEquals(0.32f, confirmDialogShadow("midnight").alpha)
+        assertEquals(0.32f, confirmDialogShadow("forest").alpha)
+        assertEquals(0.32f, confirmDialogShadow("aurora").alpha)
+        val sepia = confirmDialogShadow("sepia")
+        assertEquals(12, sepia.yDp)
+        assertEquals(55, sepia.red)
+        assertEquals(48, sepia.green)
+        assertEquals(36, sepia.blue)
+        assertEquals(0x14373024, confirmShadowColor(sepia.alpha, sepia.red, sepia.green, sepia.blue))
+        assertTrue(frame.shapeBottomPx + frame.blurPx < frame.bitmapHeightPx)
+        assertTrue(confirmShadowFavorsDown(frame, 200f))
+        val flat = frame.copy(shapeTopPx = frame.padPx, shapeBottomPx = frame.padPx + 200f)
+        assertTrue(!confirmShadowFavorsDown(flat, 200f))
+        assertTrue(confirmShadowFrame(0f, 200f, 2f) == null)
     }
 }
