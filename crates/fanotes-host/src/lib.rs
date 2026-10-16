@@ -4284,7 +4284,7 @@ fn expand_glued_month(token: &str) -> Vec<&str> {
         return vec![token];
     }
     let bytes = token.as_bytes();
-    let mut runs = Vec::new();
+    let mut runs: Vec<&str> = Vec::new();
     let mut index = 0;
     while index < bytes.len() {
         if token[index..].chars().next().is_some_and(is_v8_word_char) {
@@ -4303,7 +4303,16 @@ fn expand_glued_month(token: &str) -> Vec<&str> {
                 && !exact_zone_keyword(letters)
                 && !is_ampm(letters)
             {
-                return vec![token];
+                // `hello-10-13` drops `hello`. The hyphen separates it from
+                // the first number. `２026` has no separator, and `p.m.5`
+                // uses a dot, so those tokens stay whole.
+                let number_seen = runs
+                    .iter()
+                    .any(|run| run.bytes().any(|byte| byte.is_ascii_digit()));
+                if number_seen || bytes.get(index) != Some(&b'-') {
+                    return vec![token];
+                }
+                continue;
             }
             // `+5.30EST` and `16:00EST` stay one token. `2026.EST` splits:
             // the dot is only a separator. `13.Oct` still splits.
@@ -6445,8 +6454,8 @@ fn finished_date_has_an_extra_hyphen(trimmed: &str) -> bool {
     if bytes.len() < date_at + 6 {
         return false;
     }
-    // `Oct<U+2028>13<U+2028>2026` is not a four-digit year. The fourth byte
-    // sits inside the line separator, so a byte slice would panic.
+    // `Oct<U+2028>13` and `２０２６-10-13` are not four-digit years. The
+    // fourth byte sits inside a multibyte character, so a byte slice panics.
     let year_ok = if expanded {
         head.is_char_boundary(7) && datetime_year_ok(&head[..7])
     } else {
@@ -14874,6 +14883,40 @@ mod local_zone_tests {
             unix_millis_from_iso("Oct\u{2029}13 2026"),
             Some(1_791_864_000_000)
         );
+    }
+
+    #[test]
+    fn a_fullwidth_digit_prefix_is_a_word() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Fullwidth digits are letters to `Date.parse`. `２０２６` is a
+        // garbage word, then `-` is skipped, and `10-13` is 13 October 2001.
+        assert_eq!(
+            unix_millis_from_iso("２０２６-10-13"),
+            Some(1_002_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("２０２６-10-13-"),
+            Some(1_002_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("２-10-13"),
+            Some(1_002_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("hello-10-13"),
+            Some(1_002_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Monday-1-"),
+            Some(978_325_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("２026-10-13"), None);
+        assert_eq!(unix_millis_from_iso("10-hello-13"), None);
     }
 
 }

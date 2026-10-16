@@ -2819,7 +2819,7 @@ fn expand_glued_month(token: &str) -> Vec<&str> {
         return vec![token];
     }
     let bytes = token.as_bytes();
-    let mut runs = Vec::new();
+    let mut runs: Vec<&str> = Vec::new();
     let mut index = 0;
     while index < bytes.len() {
         if token[index..].chars().next().is_some_and(is_v8_word_char) {
@@ -2839,7 +2839,16 @@ fn expand_glued_month(token: &str) -> Vec<&str> {
                 && !letters.eq_ignore_ascii_case("am")
                 && !letters.eq_ignore_ascii_case("pm")
             {
-                return vec![token];
+                // `hello-10-13` drops `hello`. The hyphen separates it from
+                // the first number. `２026` has no separator, and `p.m.5`
+                // uses a dot, so those tokens stay whole.
+                let number_seen = runs
+                    .iter()
+                    .any(|run| run.bytes().any(|byte| byte.is_ascii_digit()));
+                if number_seen || bytes.get(index) != Some(&b'-') {
+                    return vec![token];
+                }
+                continue;
             }
             // `+5.30EST` and `16:00EST` stay one token. `2026.EST` splits:
             // the dot is only a separator. `13.Oct` still splits.
@@ -5469,8 +5478,8 @@ fn finished_date_has_an_extra_hyphen(trimmed: &str) -> bool {
     if bytes.len() < date_at + 6 {
         return false;
     }
-    // `Oct<U+2028>13<U+2028>2026` is not a four-digit year. The fourth byte
-    // sits inside the line separator, so a byte slice would panic.
+    // `Oct<U+2028>13` and `２０２６-10-13` are not four-digit years. The
+    // fourth byte sits inside a multibyte character, so a byte slice panics.
     let year_ok = if expanded {
         head.is_char_boundary(7) && iso_date_year(&head[..7])
     } else {
@@ -13136,6 +13145,36 @@ mod tests {
                 super::canonical_iso("Oct\u{2029}13 2026").as_deref(),
                 Some("2026-10-13T04:00:00.000Z")
             );
+        });
+    }
+
+    #[test]
+    fn a_fullwidth_digit_prefix_is_a_word() {
+        with_tz("America/New_York", || {
+            // Fullwidth digits are letters to `Date.parse`. `２０２６` is a
+            // garbage word, then `-` is skipped, and `10-13` is 13 October 2001.
+            assert_eq!(
+                super::canonical_iso("２０２６-10-13").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("２０２６-10-13-").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("２-10-13").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("hello-10-13").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Monday-1-").as_deref(),
+                Some("2001-01-01T05:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("２026-10-13"), None);
+            assert_eq!(super::canonical_iso("10-hello-13"), None);
         });
     }
 }
