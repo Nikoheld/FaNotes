@@ -4274,13 +4274,13 @@ fn fold_spaced_numeric_offset(trimmed: &str) -> Option<String> {
         return None;
     }
     // `16:00+5 -30` keeps `-30`. The sign glued to the clock was replaced.
-    // `16:00Z +5` drops `Z`. The number is the later zone. `16:00ZZ` is
-    // one garbage word, so that `Z` stays.
-    let clock_word = match words[1].strip_suffix(['Z', 'z']) {
+    // `16:00Z-10 -13` drops both `Z` and `-10`. `16:00ZZ` keeps its letters.
+    let without_offset = strip_glued_offset(words[1]);
+    let clock_word = match without_offset.strip_suffix(['Z', 'z']) {
         Some(body) if !body.ends_with(['Z', 'z']) => body,
-        _ => words[1],
+        _ => without_offset,
     };
-    let clock = slash_clock(strip_glued_offset(clock_word))?;
+    let clock = slash_clock(clock_word)?;
     let (delta, suffix) = fold_offset_days(parsed.minutes)?;
     let date = shift_hyphen_date(words[0], delta)?;
     Some(format!("{date}T{clock}{suffix}"))
@@ -4797,7 +4797,11 @@ fn split_second_offset_sign(token: &str, clock_before: bool) -> Option<String> {
         if byte.eq_ignore_ascii_case(&b'z') && seen_clock && index > 0 && bytes[index - 1].is_ascii_digit()
         {
             // `16:00Z2026-10-13` is a date after UTC. Those hyphens stay.
-            saw_zone = true;
+            // `16:00Z-10-13` is an offset, and the later sign replaces it.
+            let next = bytes.get(index + 1).copied();
+            if next.is_none_or(|next| next != b'+' && next != b'-') {
+                saw_zone = true;
+            }
             continue;
         }
         if saw_zone {
@@ -8175,6 +8179,44 @@ mod tests {
                 super::canonical_iso("1950-10-13 16:00 EST+5-3").as_deref(),
                 Some("1950-10-13T19:00:00.000Z")
             );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z-10-13").as_deref(),
+                Some("2026-10-14T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z-10").as_deref(),
+                Some("2026-10-14T02:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z-13").as_deref(),
+                Some("2026-10-14T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00-10-13").as_deref(),
+                Some("2026-10-14T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z+5-30").as_deref(),
+                Some("2026-10-14T22:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z+10-13").as_deref(),
+                Some("2026-10-14T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z +10 -13").as_deref(),
+                Some("2026-10-14T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z-10-13 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 16:00Z-13").as_deref(),
+                Some("1950-10-14T05:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("16:00Z-10-13"), None);
+            assert_eq!(super::canonical_iso("2026-10-13T16:00Z-10-13"), None);
         });
     }
 

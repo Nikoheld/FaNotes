@@ -2353,7 +2353,11 @@ fn split_second_offset_sign(token: &str, clock_before: bool) -> Option<String> {
         if byte.eq_ignore_ascii_case(&b'z') && seen_clock && index > 0 && bytes[index - 1].is_ascii_digit()
         {
             // `16:00Z2026-10-13` is a date after UTC. Those hyphens stay.
-            saw_zone = true;
+            // `16:00Z-10-13` is an offset, and the later sign replaces it.
+            let next = bytes.get(index + 1).copied();
+            if next.is_none_or(|next| next != b'+' && next != b'-') {
+                saw_zone = true;
+            }
             continue;
         }
         if saw_zone {
@@ -5125,13 +5129,13 @@ fn fold_spaced_numeric_offset(trimmed: &str) -> Option<String> {
         return None;
     }
     // `16:00+5 -30` keeps `-30`. The sign glued to the clock was replaced.
-    // `16:00Z +5` drops `Z`. The number is the later zone. `16:00ZZ` is
-    // one garbage word, so that `Z` stays.
-    let clock_word = match words[1].strip_suffix(['Z', 'z']) {
+    // `16:00Z-10 -13` drops both `Z` and `-10`. `16:00ZZ` keeps its letters.
+    let without_offset = strip_glued_offset(words[1]);
+    let clock_word = match without_offset.strip_suffix(['Z', 'z']) {
         Some(body) if !body.ends_with(['Z', 'z']) => body,
-        _ => words[1],
+        _ => without_offset,
     };
-    let clock = pad_legacy_clock(strip_glued_offset(clock_word))?;
+    let clock = pad_legacy_clock(clock_word)?;
     let (delta, suffix) = fold_offset_days(parsed.minutes)?;
     let date = shift_hyphen_date(words[0], delta)?;
     Some(format!("{date}T{clock}{suffix}"))
@@ -11651,6 +11655,39 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("Oct-13-2026"), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso("+5-30"), Some(991_195_200_000));
         assert_eq!(unix_millis_from_iso("GMT+5-30"), Some(991_195_200_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00Z-10-13"),
+            Some(1_791_954_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00Z-10"),
+            Some(1_791_943_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00Z-13"),
+            Some(1_791_954_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00-10-13"),
+            Some(1_791_954_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00Z+5-30"),
+            Some(1_792_015_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00Z+10-13"),
+            Some(1_791_954_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00Z +10 -13"),
+            Some(1_791_954_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00Z-10-13 EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("16:00Z-10-13"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13T16:00+5-30"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13-5"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00 --5"), None);
