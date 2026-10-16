@@ -449,7 +449,8 @@ private fun expandOccurrences(document: CalendarDocument, rangeStart: ZonedDateT
         if (event.calendarId !in visible) continue
         val bounds = eventBounds(event, zone) ?: continue
         val duration = Duration.between(bounds.first, bounds.second)
-        if (!duration.isPositive) continue
+        // Java 17 has isZero and isNegative. isPositive arrived in Java 18.
+        if (duration.isZero || duration.isNegative) continue
         val until = event.recurrenceUntil?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
         val untilEnd = until?.plusDays(1)?.atStartOfDay(zone)
         val skipped = event.exceptionDates.toSet()
