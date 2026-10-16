@@ -48,6 +48,7 @@ import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
@@ -3327,6 +3328,87 @@ private fun EditorSlider(title: String, value: Float, min: Float, max: Float, st
 }
 
 @Composable
+private fun TabletButtonMap(raw: String?, modifier: Modifier = Modifier, onChange: (String) -> Unit) {
+    val map = ch.fasrv.fanotes.input.parseTabletButtonMap(raw)
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    Column(
+        modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = ch.fasrv.fanotes.input.TABLET_MAP_WASH_ALPHA))
+            .padding(
+                start = ch.fasrv.fanotes.input.TABLET_MAP_PAD_X_DP.dp,
+                end = ch.fasrv.fanotes.input.TABLET_MAP_PAD_X_DP.dp,
+                top = ch.fasrv.fanotes.input.TABLET_MAP_PAD_TOP_DP.dp,
+                bottom = ch.fasrv.fanotes.input.TABLET_MAP_PAD_BOTTOM_DP.dp,
+            ),
+        verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.input.TABLET_MAP_GAP_DP.dp),
+    ) {
+        Text(ch.fasrv.fanotes.input.TABLET_MAP_NOTE, fontSize = 12.sp, color = LocalStatusInk.current.muted, lineHeight = 17.sp)
+        listOf("pen" to "Stift", "tablet" to "Tablett").forEach { (group, title) ->
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(ch.fasrv.fanotes.input.TABLET_GROUP_RADIUS_DP.dp))
+                    .border(1.dp, rule, RoundedCornerShape(ch.fasrv.fanotes.input.TABLET_GROUP_RADIUS_DP.dp))
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = ch.fasrv.fanotes.input.TABLET_GROUP_FILL_ALPHA))
+                    .padding(ch.fasrv.fanotes.input.TABLET_GROUP_PAD_DP.dp),
+                verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.input.TABLET_GROUP_GAP_DP.dp),
+            ) {
+                Text(
+                    title.uppercase(java.util.Locale.GERMAN),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.05.em,
+                    color = LocalStatusInk.current.soft,
+                )
+                ch.fasrv.fanotes.input.TABLET_BUTTON_CONTROLS.filter { it.group == group }.forEach { control ->
+                    val action = map[control.id].orEmpty()
+                    var open by remember(control.id) { mutableStateOf(false) }
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = ch.fasrv.fanotes.input.TABLET_ROW_MIN_DP.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(control.label, fontSize = 12.sp, fontWeight = FontWeight(600), color = MaterialTheme.colorScheme.onSurface)
+                            Text(control.hint, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                        }
+                        Box {
+                            Text(
+                                ch.fasrv.fanotes.input.TABLET_BUTTON_ACTION_LABELS[action] ?: action,
+                                fontSize = 12.sp,
+                                color = LocalStatusInk.current.soft,
+                                modifier = Modifier
+                                    .width(ch.fasrv.fanotes.input.TABLET_ACTION_WIDTH_DP.dp)
+                                    .height(31.dp)
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), RoundedCornerShape(7.dp))
+                                    .background(MaterialTheme.colorScheme.surface)
+                                    .clickable { open = true }
+                                    .wrapContentHeight(Alignment.CenterVertically)
+                                    .padding(horizontal = 8.dp),
+                            )
+                            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                                ch.fasrv.fanotes.input.TABLET_BUTTON_ACTIONS.forEach { choice ->
+                                    DropdownMenuItem(
+                                        text = { Text(ch.fasrv.fanotes.input.TABLET_BUTTON_ACTION_LABELS[choice] ?: choice) },
+                                        onClick = {
+                                            open = false
+                                            onChange(ch.fasrv.fanotes.input.serializeTabletButtonMap(map + (control.id to choice)))
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
+}
+
+@Composable
 private fun SettingCard(
     title: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -3825,50 +3907,67 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                 }
                 "drawing" -> {
                     val pen = ch.fasrv.fanotes.desk.penSettings(settings)
-                    Text("Druckempfindlichkeit: ${if (pen.pressure) "an" else "aus"}", modifier = Modifier.clickable { model.setPenPressure(!pen.pressure) }.settingsAnchor("drawing", "settings-tablet", anchorY))
                     val penOnly = ch.fasrv.fanotes.input.penOnlyEnabled(settings["pen-only"])
-                    Text(
-                        "Nur Stift: ${if (penOnly) "an" else "aus"}",
-                        modifier = Modifier.clickable { model.updateDesk("pen-only", if (penOnly) "off" else "on") }.padding(vertical = 4.dp),
-                    )
-                    EditorSlider("Stiftbreite", pen.width.toFloat(), 1f, 18f, 0.5f, " px") { model.setPenWidth(it.toDouble()) }
-                    EditorSlider("Form-Erkennung", pen.shapeSnap.toFloat(), 0f, 100f, 5f, " %") { model.updateDesk("shape-snap", it.toInt().toString()) }
-                    EditorSlider("Durchkritzel-Empfindlichkeit", pen.scribble.toFloat(), 0f, 100f, 5f, " %") { model.updateDesk("scribble", it.toInt().toString()) }
-                    EditorSlider("Strichglättung", pen.smoothing.toFloat(), 0f, 1f, 0.05f, "") { model.updateDesk("smoothing", "%.2f".format(java.util.Locale.US, it)) }
-                    Text("Papier", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                    Text("Standard für neue Notizen. Jede Notiz kann ihren Hintergrund selbst wählen.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                    ch.fasrv.fanotes.desk.PAPER_STYLES.forEach { option ->
-                        Text(
-                            ch.fasrv.fanotes.desk.paperStyleSettingsLabel(option.id),
-                            fontWeight = if (pen.paper == option.id) FontWeight.SemiBold else FontWeight.Normal,
-                            modifier = Modifier.clickable { model.updateDesk("paper", option.id) }.padding(vertical = 4.dp),
-                        )
-                    }
-                    Text("Grafiktablett", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp).settingsAnchor("drawing", "settings-tablet-buttons", anchorY))
-                    Text("Belegt die Tasten, die FaNotes vom Stift und vom Tablett empfängt.", fontSize = 12.sp)
-                    val tabletMap = ch.fasrv.fanotes.input.parseTabletButtonMap(settings["tablet-buttons"])
-                    listOf("pen" to "Stift", "tablet" to "Tablett").forEach { (group, title) ->
-                        Text(title, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
-                        ch.fasrv.fanotes.input.TABLET_BUTTON_CONTROLS.filter { it.group == group }.forEach { control ->
-                            val action = tabletMap[control.id].orEmpty()
-                            Text(
-                                "${control.label}: ${ch.fasrv.fanotes.input.TABLET_BUTTON_ACTION_LABELS[action] ?: action}",
-                                modifier = Modifier.clickable {
-                                    val next = tabletMap + (control.id to ch.fasrv.fanotes.input.nextTabletButtonAction(action))
-                                    model.updateDesk("tablet-buttons", ch.fasrv.fanotes.input.serializeTabletButtonMap(next))
-                                }.padding(vertical = 4.dp),
-                            )
-                            Text(control.hint, fontSize = 12.sp)
+                    SettingCard(
+                        "Grafiktablett",
+                        Icons.Filled.Brush,
+                        Modifier.settingsAnchor("drawing", "settings-tablet", anchorY),
+                    ) {
+                        SettingRow("Papier", "Standard für neue Notizen. Jede Notiz kann ihren Hintergrund selbst wählen.") {
+                            Column {
+                                ch.fasrv.fanotes.desk.PAPER_STYLES.forEach { option ->
+                                    val on = pen.paper == option.id
+                                    Text(
+                                        ch.fasrv.fanotes.desk.paperStyleSettingsLabel(option.id),
+                                        fontSize = 12.sp,
+                                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (on) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft,
+                                        modifier = Modifier.clickable { model.updateDesk("paper", option.id) }.padding(vertical = 4.dp),
+                                    )
+                                }
+                            }
                         }
-                    }
-                    Text("Stiftfarbe", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                    listOf("#202333", "#2457d6", "#d23b4a", "#1f8a4c", "#e2a21b", "#7a4dd6").forEach { color ->
-                        Text(
-                            color,
-                            color = Color(android.graphics.Color.parseColor(color)),
-                            fontWeight = if (pen.color == color) FontWeight.SemiBold else FontWeight.Normal,
-                            modifier = Modifier.clickable { model.setPenColor(color) }.padding(vertical = 4.dp),
-                        )
+                        SettingRow("Stiftfarbe") {
+                            Row(horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SWATCH_GAP_DP.dp)) {
+                                listOf("#202333", "#2457d6", "#d23b4a", "#1f8a4c", "#e2a21b", "#7a4dd6").forEach { color ->
+                                    val on = pen.color.equals(color, ignoreCase = true)
+                                    Box(
+                                        Modifier
+                                            .size(ch.fasrv.fanotes.desk.SWATCH_DP.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(android.graphics.Color.parseColor(color)))
+                                            .border(if (on) 2.dp else 0.dp, if (on) MaterialTheme.colorScheme.onSurface else Color.Transparent, CircleShape)
+                                            .clickable { model.setPenColor(color) },
+                                    )
+                                }
+                            }
+                        }
+                        SettingRow("Stiftbreite") {
+                            SettingSlider(pen.width.toFloat(), 1f, 18f, 0.5f, " px") { model.setPenWidth(it.toDouble()) }
+                        }
+                        SettingRow("Druckempfindlichkeit", "Nutzt den Druckwert deines Stifts.") {
+                            Switch(checked = pen.pressure, onCheckedChange = { model.setPenPressure(it) })
+                        }
+                        SettingRow("Nur Stift", "Im Handschriftmodus schreiben nur echte Stifte. Finger, Handfläche und Maus zeichnen nicht. Zoom und Tasten bleiben nutzbar.") {
+                            Switch(checked = penOnly, onCheckedChange = { model.updateDesk("pen-only", if (it) "on" else "off") })
+                        }
+                        TabletButtonMap(
+                            settings["tablet-buttons"],
+                            Modifier.settingsAnchor("drawing", "settings-tablet-buttons", anchorY),
+                        ) { encoded -> model.updateDesk("tablet-buttons", encoded) }
+                        SettingRow("Strichglättung") {
+                            SettingSlider(pen.smoothing.toFloat(), 0f, 1f, 0.05f, "") { model.updateDesk("smoothing", "%.2f".format(java.util.Locale.US, it)) }
+                        }
+                        SettingRow("Durchkritzel-Empfindlichkeit", "Niedrig verlangt mehr Überkreuzungen; hoch löscht schon nach einem kürzeren, eindeutigen Durchkritzeln.") {
+                            SettingSlider(pen.scribble.toFloat(), 0f, 100f, 5f, " %") { model.updateDesk("scribble", it.toInt().toString()) }
+                        }
+                        SettingRow(
+                            "Form-Erkennung",
+                            "Wie bereitwillig Stillhalten eine Linie, einen Kreis oder ein Vieleck glättet. Niedrig nur bei sehr klaren Figuren; hoch früher und auch bei unsaubereren Strichen.",
+                            divider = false,
+                        ) {
+                            SettingSlider(pen.shapeSnap.toFloat(), 0f, 100f, 5f, " %") { model.updateDesk("shape-snap", it.toInt().toString()) }
+                        }
                     }
                 }
                 "files" -> {
