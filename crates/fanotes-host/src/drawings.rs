@@ -563,6 +563,10 @@ mod tests {
 
     #[test]
     fn drawing_dates_become_utc_with_milliseconds() {
+        with_tz("America/New_York", || drawing_dates_in_new_york());
+    }
+
+    fn drawing_dates_in_new_york() {
         assert_eq!(
             canonical_iso("2026-01-02T03:04:05.000Z").as_deref(),
             Some("2026-01-02T03:04:05.000Z")
@@ -587,17 +591,18 @@ mod tests {
             canonical_iso("2026-01-02").as_deref(),
             Some("2026-01-02T00:00:00.000Z")
         );
+        // A month or day that is not two digits is a legacy local date.
         assert_eq!(
             canonical_iso("2026-1-2").as_deref(),
-            Some("2026-01-02T00:00:00.000Z")
+            Some("2026-01-02T05:00:00.000Z")
         );
         assert_eq!(
             canonical_iso(" 2026-01-2 ").as_deref(),
-            Some("2026-01-02T00:00:00.000Z")
+            Some("2026-01-02T05:00:00.000Z")
         );
         assert_eq!(
             canonical_iso("2026-2-31").as_deref(),
-            Some("2026-03-03T00:00:00.000Z")
+            Some("2026-03-03T05:00:00.000Z")
         );
         assert_eq!(canonical_iso("2026-1-2T00:00:00Z"), None);
         assert_eq!(
@@ -660,6 +665,31 @@ mod tests {
         );
         assert_eq!(canonical_iso("2026-01-02T03:04:60Z"), None);
         assert_eq!(canonical_iso("2026-13-01T00:00:00Z"), None);
+    }
+
+    fn with_tz(tz: &str, check: impl FnOnce()) {
+        unsafe extern "C" {
+            fn tzset();
+        }
+        let _lock = crate::TRASH_CLOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let previous = std::env::var("TZ").ok();
+        unsafe { std::env::set_var("TZ", tz) };
+        unsafe { tzset() };
+        struct Restore(Option<String>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                unsafe extern "C" {
+                    fn tzset();
+                }
+                match self.0.take() {
+                    Some(value) => unsafe { std::env::set_var("TZ", value) },
+                    None => unsafe { std::env::remove_var("TZ") },
+                }
+                unsafe { tzset() };
+            }
+        }
+        let _restore = Restore(previous);
+        check();
     }
 
     #[test]

@@ -15,7 +15,12 @@ const val TRASH_INDEX = ".fanotes/trash/index.json"
 const val TRASH_NOTICE = "In den Papierkorb verschoben."
 const val TRASH_EMPTY_NOTICE = "Papierkorb geleert."
 const val TRASH_PURGED_NOTICE = "Endgültig gelöscht."
-const val DUPLICATE_NOTICE = "Kopie erstellt."
+const val DUPLICATE_NOTICE = "Notiz dupliziert."
+const val PDF_DUPLICATE_REFUSED = "Eine PDF-Notiz bleibt die Datei selbst."
+const val STAMP_NEEDS_MARKDOWN = "Öffne eine Markdown-Notiz, um das Datum einzufügen."
+const val STAMP_NEEDS_KEYBOARD = "Wechsle zur Tastatur, um das Datum in den Text zu setzen."
+const val STAMP_FAILED = "Das Datum konnte nicht eingefügt werden."
+const val WIKI_LINK_COPIED = "Wiki-Link kopiert."
 const val STAMP_NOTICE = "Datum eingefügt."
 const val TRASH_UNDO = "Rückgängig"
 
@@ -45,11 +50,65 @@ fun trashEmptyMessage(count: Int): String = when {
     else -> "$count Einträge endgültig löschen?"
 }
 
-/** `Algebra` becomes `Algebra Kopie`. A name that is already a copy stays one copy. */
-fun duplicatePreferredStem(title: String): String {
-    val trimmed = title.trim().ifBlank { "Notiz" }
-    val base = trimmed.replace(Regex(""" Kopie(?: \d+)?$"""), "").trim().ifBlank { trimmed }
-    return "$base Kopie"
+/**
+ * The name a duplicate should ask for. A second copy of "Mechanik Kopie" still
+ * asks for "Mechanik Kopie"; the vault adds the number. An older German or
+ * English suffix is peeled off too. Matches `duplicatePreferredStem` in `noteQoL.ts`.
+ */
+fun duplicatePreferredStem(fileName: String, copyWord: String = "Kopie"): String {
+    val suffix = copyWord.trim().ifBlank { "Kopie" }
+    val words = listOf(suffix, "Kopie", "Copy").distinct()
+    var base = fileName.replace(Regex("""\.(md|markdown|famd|pdf)$""", RegexOption.IGNORE_CASE), "").trim()
+    var changed = true
+    while (changed && base.isNotEmpty()) {
+        changed = false
+        for (word in words) {
+            val next = base.replace(Regex(""" ${Regex.escape(word)}(?: \d+)?$"""), "").trim()
+            if (next.isNotEmpty() && next != base) {
+                base = next
+                changed = true
+            }
+        }
+    }
+    return "${base.ifBlank { "Notiz" }} $suffix"
+}
+
+/** `[[Title]]` for the note. Brackets and pipes in the title would break the link. */
+fun wikiLinkForNote(relativePath: String): String {
+    val title = titleOf(relativePath).replace(Regex("""[\[\]|]"""), " ").replace(Regex("""\s+"""), " ").trim()
+    return "[[${title.ifBlank { "Notiz" }}]]"
+}
+
+/** A stamp typed against a word gets one separating space. A line start stays flush. */
+fun stampToInsert(textBeforeCursor: String, stamp: String): String {
+    if (stamp.isEmpty()) return ""
+    if (textBeforeCursor.isEmpty() || textBeforeCursor.last().isWhitespace()) return stamp
+    return " $stamp"
+}
+
+/** Newest existing visits first, each path once. The open note can be left out. */
+fun recentNotePaths(
+    history: List<String>,
+    exists: (String) -> Boolean,
+    limit: Int = 5,
+    skip: String? = null,
+): List<String> {
+    val seen = linkedSetOf<String>()
+    val result = mutableListOf<String>()
+    for (index in history.lastIndex downTo 0) {
+        if (result.size >= limit) break
+        val path = history[index]
+        if (path.isEmpty() || path == skip || path in seen || !exists(path)) continue
+        seen += path
+        result += path
+    }
+    return result
+}
+
+/** One click folds every open folder, or opens every folder when all are shut. */
+fun nextExpandedFolders(current: Set<String>, folders: List<String>): Set<String> {
+    val anyOpen = folders.any { it in current }
+    return if (anyOpen) emptySet() else folders.toSet()
 }
 
 /**

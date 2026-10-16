@@ -18,6 +18,11 @@ class WorkspaceChromeTest {
         assertFalse(workspaceKeepsNoteChrome("calendar"))
         assertFalse(workspaceKeepsNoteChrome("tasks"))
         assertFalse(workspaceKeepsNoteChrome("overview"))
+        assertEquals("calendar", destinationUnderOverlay("calendar"))
+        assertEquals("tasks", destinationUnderOverlay("tasks"))
+        assertEquals("overview", destinationUnderOverlay("overview"))
+        assertEquals("notes", destinationUnderOverlay("notes"))
+        assertEquals("search", destinationUnderOverlay("search"))
     }
 
     @Test
@@ -303,6 +308,7 @@ class WorkspaceChromeTest {
         assertEquals("pencil", treeMenuIcon(TREE_MENU_RENAME))
         assertEquals("move", treeMenuIcon(TREE_MENU_MOVE))
         assertEquals("copy", treeMenuIcon(TREE_MENU_DUPLICATE))
+        assertEquals("copy", treeMenuIcon(TREE_MENU_WIKI))
         assertEquals("trash", treeMenuIcon(TREE_MENU_DELETE))
         assertEquals("folder", treeMenuIcon("Nur auf diesem Gerät"))
         assertEquals("folder", treeMenuIcon("Wieder synchronisieren"))

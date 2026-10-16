@@ -198,6 +198,11 @@ class MainActivity : ComponentActivity() {
         val bytes = model.readUri(uri) ?: return@registerForActivityResult
         model.importWorksheetFile(name, bytes, mime, sheetIntoCurrent)
     }
+    private val importGlyph = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@registerForActivityResult
+        model.importGlyphBytes(bytes)
+    }
     private val importIcs = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@registerForActivityResult
         val text = contentResolver.openInputStream(uri)?.use { it.readBytes() }?.toString(Charsets.UTF_8) ?: return@registerForActivityResult
@@ -229,6 +234,11 @@ class MainActivity : ComponentActivity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 21)
         }
         setContent {
+            LaunchedEffect(model) {
+                model.glyphImports.collect {
+                    importGlyph.launch(arrayOf("*/*"))
+                }
+            }
             val rawDesk by model.deskSettings.collectAsStateWithLifecycle()
             val css by model.customCss.collectAsStateWithLifecycle()
             var sheetDialog by remember { mutableStateOf(false) }
@@ -392,7 +402,7 @@ fun FaNotesTheme(
         onSurface = chrome.text?.let { Color(android.graphics.Color.parseColor(it)) } ?: baseScheme.onSurface,
         error = danger,
     )
-    CompositionLocalProvider(LocalStatusInk provides statusInk) {
+    CompositionLocalProvider(LocalStatusInk provides statusInk, LocalDeskThemeId provides palette.id) {
         MaterialTheme(colorScheme = scheme, typography = chromeTypography(family), content = content)
     }
 }
@@ -456,6 +466,7 @@ fun FaNotesScreen(
     val pinned by model.pinnedTabs.collectAsStateWithLifecycle()
     val trail by model.noteTrail.collectAsStateWithLifecycle()
     val rawDesk by model.deskSettings.collectAsStateWithLifecycle()
+    val spellingLanguage by model.spellingLanguage.collectAsStateWithLifecycle()
     val css by model.customCss.collectAsStateWithLifecycle()
     val desk = ch.fasrv.fanotes.desk.deskWithCustomCss(rawDesk, css)
     val chrome = ch.fasrv.fanotes.desk.parseCustomChrome(css)
@@ -489,6 +500,8 @@ fun FaNotesScreen(
     var moving by remember { mutableStateOf<String?>(null) }
     var syncPending by remember { mutableStateOf(false) }
     var mathOpen by remember { mutableStateOf(false) }
+    val textHandOpen by model.textHandOpen.collectAsStateWithLifecycle()
+    val glyphSamples by model.glyphSamples.collectAsStateWithLifecycle()
     var mathInput by remember { mutableStateOf("") }
     var mathOutput by remember { mutableStateOf("") }
     var mathOk by remember { mutableStateOf(false) }
@@ -534,6 +547,7 @@ fun FaNotesScreen(
             "save" -> model.saveFromShortcut()
             "vault-search" -> model.showDestination("search")
             "ai" -> model.showDestination("ai")
+            "text-hand" -> model.openTextHand()
             "worksheet" -> onImportSheet()
             "new-note" -> {
                 createParent = model.defaultCreateFolder()
@@ -542,6 +556,7 @@ fun FaNotesScreen(
             "settings" -> model.showDestination("settings")
             "focus" -> model.toggleFocusMode()
             "pen" -> model.togglePen()
+            "stamp" -> model.insertDateStamp()
             else -> if (id.startsWith("tab-")) id.removePrefix("tab-").toIntOrNull()?.let(model::openTabByDigit)
         }
     }
@@ -585,6 +600,7 @@ fun FaNotesScreen(
                             history = historyOpen,
                             gotoLine = gotoLine != null,
                             math = mathOpen,
+                            handwriting = textHandOpen,
                             textBox = editingBox != null,
                             firstRun = firstRun,
                             sync = syncOpen,
@@ -612,6 +628,7 @@ fun FaNotesScreen(
                         "history" -> model.closeHistory()
                         "goto-line" -> model.closeGotoLine()
                         "math" -> mathOpen = false
+                        "handwriting" -> model.closeTextHand()
                         "text-box" -> editingBox = null
                         "first-run" -> {
                             firstRun = false
@@ -817,6 +834,13 @@ fun FaNotesScreen(
                     onFolderColor = { path, color -> model.setFolderColor(path, color) },
                     expanded = model.expandedFolders.collectAsStateWithLifecycle().value,
                     onToggleFolder = { model.toggleFolder(it) },
+                    onToggleFolders = { model.toggleAllFolders() },
+                    onCopyWiki = { path ->
+                        val link = ch.fasrv.fanotes.vault.wikiLinkForNote(path)
+                        val clipboard = context.getSystemService(ClipboardManager::class.java)
+                        clipboard?.setPrimaryClip(ClipData.newPlainText("Wiki-Link", link))
+                        model.message.value = ch.fasrv.fanotes.vault.WIKI_LINK_COPIED
+                    },
                     onSetFolderExpanded = { path, open -> model.setFolderExpanded(path, open) },
                     onOpenSplit = { model.openInSplit(it) },
                     onCreateNoteIn = { model.createNoteIn(it) },
@@ -957,7 +981,10 @@ fun FaNotesScreen(
             model.wordCountNow(),
             syncText,
             sync.status.name.lowercase(),
-            ch.fasrv.fanotes.desk.statusLanguageLabel(ch.fasrv.fanotes.desk.detectNoteLanguage(markdown)).orEmpty(),
+            if (rawDesk["spellcheck"] == "off" || !showText || open == null) "" else {
+                val code = if (spellingLanguage == "unknown") ch.fasrv.fanotes.desk.detectNoteLanguage(markdown) else spellingLanguage
+                ch.fasrv.fanotes.desk.statusLanguageLabel(code)?.let { "Aa $it" }.orEmpty()
+            },
             desk["words"] != "off",
             sync.conflicts.size,
             onConflicts = { model.showDestination("settings") },
@@ -1083,6 +1110,7 @@ fun FaNotesScreen(
                     "close-others" -> model.closeTabs("others")
                     "close-right" -> model.closeTabs("right")
                     "cycle-tab" -> model.cycleTabs(1)
+                    "text-hand" -> model.openTextHand()
                     else -> if (id.startsWith("template-")) model.createFromTemplate(id.removePrefix("template-")) else model.showDestination(id)
                 }
             }
@@ -1114,6 +1142,21 @@ fun FaNotesScreen(
             glass = glass,
             radiusDp = chrome.radiusDp,
             themeId = ch.fasrv.fanotes.desk.themePalette(desk["theme"], androidx.compose.foundation.isSystemInDarkTheme()).id,
+        )
+    }
+    if (textHandOpen) {
+        TextToHandwritingDialog(
+            personal = glyphSamples,
+            pageWidth = model.session.document.sourceWidth,
+            pageHeight = model.session.document.sourceHeight,
+            startY = ch.fasrv.fanotes.ink.suggestedHandwritingStartY(model.session.document),
+            color = style.color,
+            baseWidth = style.baseWidth,
+            pressure = style.pressureEnabled,
+            onDismiss = { model.closeTextHand() },
+            onImport = { model.requestGlyphImport() },
+            onClear = { model.clearGlyphSamples() },
+            onInsert = { model.insertHandwriting(it) },
         )
     }
     if (mathOpen) {
@@ -1417,6 +1460,8 @@ private fun VaultPane(
     onFolderColor: (String, String?) -> Unit,
     expanded: Set<String>,
     onToggleFolder: (String) -> Unit,
+    onToggleFolders: () -> Unit = {},
+    onCopyWiki: (String) -> Unit = {},
     onSetFolderExpanded: (String, Boolean) -> Unit = { _, _ -> },
     onOpenSplit: (String) -> Unit,
     onCreateNoteIn: (String) -> Unit = {},
@@ -1482,6 +1527,11 @@ private fun VaultPane(
             SidebarLabelButton("Sync", onSync, description = syncLabel.ifBlank { "Sync" })
             SidebarLabelButton("Bild", onImportImage)
             SidebarLabelButton("Blatt", onImportSheet)
+            SidebarLabelButton(
+                if (expanded.isEmpty()) "Aufklappen" else "Zuklappen",
+                onToggleFolders,
+                description = if (expanded.isEmpty()) "Alle Ordner aufklappen" else "Alle Ordner zuklappen",
+            )
         }
         if (conflicts.isNotEmpty()) {
             Text("Konflikte", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 12.dp))
@@ -1586,7 +1636,7 @@ private fun VaultPane(
         ) {
             items(tree, key = { it.path }) { node ->
                 NoteRow(
-                    node, selected, splitPath, treeFocus, colors, expanded, onOpen, onDelete, onDuplicate, onRename, renamingPath, onCommitRename, onCancelRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
+                    node, selected, splitPath, treeFocus, colors, expanded, onOpen, onDelete, onDuplicate, onCopyWiki, onRename, renamingPath, onCommitRename, onCancelRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
                     onCreateNoteIn, onCreateFolderIn, bookFolders, onImportPdfIn, onImportBook, onDetachBook,
                     {
                         treeFocus = it
@@ -1717,6 +1767,7 @@ private fun NoteRow(
     onOpen: (String) -> Unit,
     onDelete: (String, Boolean, String) -> Unit,
     onDuplicate: (String) -> Unit = {},
+    onCopyWiki: (String) -> Unit = {},
     onRename: (String, String) -> Unit,
     renamingPath: String? = null,
     onCommitRename: (String, String) -> Unit = { _, _ -> },
@@ -2121,6 +2172,7 @@ private fun NoteRow(
                         TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_RENAME) { menu = false; onRename(node.path, node.name) }
                         TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_MOVE) { menu = false; onMove(node.path) }
                         if (!folder) TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_DUPLICATE) { menu = false; onDuplicate(node.path) }
+                        if (!folder) TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_WIKI) { menu = false; onCopyWiki(node.path) }
                         TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_DELETE, danger = true) { menu = false; onDelete(node.path, folder, node.name) }
                     }
                 }
@@ -2195,7 +2247,7 @@ private fun NoteRow(
     if (openFolder) {
         node.children.forEach {
             NoteRow(
-                it, selected, splitPath, treeFocus, colors, expanded, onOpen, onDelete, onDuplicate, onRename, renamingPath, onCommitRename, onCancelRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
+                it, selected, splitPath, treeFocus, colors, expanded, onOpen, onDelete, onDuplicate, onCopyWiki, onRename, renamingPath, onCommitRename, onCancelRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
                 onCreateNoteIn, onCreateFolderIn, bookFolders, onImportPdfIn, onImportBook, onDetachBook,
                 onTreeFocus,
                 localFolders, onToggleLocal, compact, rowHeightDp, radiusDp,
@@ -2424,6 +2476,11 @@ private fun SplitPane(
     val folded = model.splitFolded.collectAsStateWithLifecycle().value
     val visible = ch.fasrv.fanotes.desk.markdownWithFolds(markdown, folded)
     val splitUnsaved = model.splitUnsaved.collectAsStateWithLifecycle().value
+    val spellingEpoch by model.spellingEpoch.collectAsStateWithLifecycle()
+    val spellOn = model.deskSettings.collectAsStateWithLifecycle().value["spellcheck"] != "off"
+    val spellWave = MaterialTheme.colorScheme.error.toArgb()
+    val spellInk = MaterialTheme.colorScheme.onSurface.toArgb()
+    val spellPaper = MaterialTheme.colorScheme.surface.toArgb()
     val title = path?.let { ch.fasrv.fanotes.vault.titleOf(it) }.orEmpty()
     var typing by remember(path) { mutableStateOf(false) }
     var splitEditor by remember(path) { mutableStateOf<SplitEditorView?>(null) }
@@ -2543,6 +2600,20 @@ private fun SplitPane(
                     )
                     editor.typeface = loadEditorTypeface(editor.context, metrics.editorFontId)
                     editor.showLineNumbers = metrics.showLineNumbers
+                    editor.spelling.configure(
+                        spellOn,
+                        spellWave,
+                        spellInk,
+                        spellPaper,
+                        spellingEpoch,
+                        { model.spellingAcceptedWords() },
+                        {},
+                        { model.learnSpellingWord(it) },
+                        { model.ignoreSpellingWord(it) },
+                        spellOn && model.effectiveDesk()["autocorrect"] != "off",
+                        { model.spellingDeclined(it) },
+                        { model.declineAutocorrectWord(it) },
+                    )
                     editor.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, metrics.fontSizePx.toFloat())
                     editor.setLineSpacing(0f, metrics.lineHeight.toFloat())
                     applyPaperCaret(editor, editor.accent, metrics.fontSizePx.toFloat())
@@ -2565,6 +2636,8 @@ private fun EmptyEditor(
     onPdf: () -> Unit,
     onSheet: () -> Unit,
     onPalette: () -> Unit,
+    recent: List<Pair<String, String>> = emptyList(),
+    onOpenRecent: (String) -> Unit = {},
     modifier: Modifier,
 ) {
     val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
@@ -2615,6 +2688,28 @@ private fun EmptyEditor(
             ) {
                 Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(13.dp), tint = ink.muted)
                 Text(ch.fasrv.fanotes.desk.PLACEHOLDER_COMMAND, fontSize = 12.sp, color = ink.muted)
+            }
+            if (recent.isNotEmpty()) {
+                Text(
+                    "Zuletzt geöffnete Notizen",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = ink.muted,
+                    modifier = Modifier.padding(top = 18.dp, bottom = 6.dp),
+                )
+                recent.forEach { (path, title) ->
+                    Text(
+                        title,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { onOpenRecent(path) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
             }
         }
     }
@@ -2714,7 +2809,15 @@ private fun NotePage(
             }
         }
         if (path == null) {
-            EmptyEditor(onCreateNote, onImportPdf, onImportSheet, onPalette, Modifier.weight(1f).fillMaxWidth())
+            EmptyEditor(
+                onCreateNote,
+                onImportPdf,
+                onImportSheet,
+                onPalette,
+                recent = model.recentNotePaths().map { path -> path to path.substringAfterLast('/').substringBeforeLast('.') },
+                onOpenRecent = { model.openPath(it) },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
             return@Column
         }
         PageSurface(
@@ -2771,6 +2874,11 @@ private fun PageSurface(
         onDeskShortcut: (String) -> Unit,
         modifier: Modifier,
 ) {
+    val spellOn = model.deskSettings.collectAsStateWithLifecycle().value["spellcheck"] != "off"
+    val spellingEpoch by model.spellingEpoch.collectAsStateWithLifecycle()
+    val spellWave = MaterialTheme.colorScheme.error.toArgb()
+    val spellInk = MaterialTheme.colorScheme.onSurface.toArgb()
+    val spellPaper = MaterialTheme.colorScheme.surface.toArgb()
     var bound by remember { mutableStateOf("") }
     var inkNotice by remember { mutableStateOf<ch.fasrv.fanotes.ink.InkNotice?>(null) }
     val links by model.noteLinks.collectAsStateWithLifecycle()
@@ -2842,9 +2950,28 @@ private fun PageSurface(
             }
             page.onSync = onSync
             page.onMarkdown = { model.updateMarkdown(it) }
+            page.configureSpelling(
+                spellOn,
+                spellWave,
+                spellInk,
+                spellPaper,
+                spellingEpoch,
+                { model.spellingAcceptedWords() },
+                { model.reportSpellingLanguage(it) },
+                { model.learnSpellingWord(it) },
+                { model.ignoreSpellingWord(it) },
+                spellOn && model.deskSettings.value["autocorrect"] != "off",
+                { model.spellingDeclined(it) },
+                { model.declineAutocorrectWord(it) },
+            )
             page.onPasteImage = { name, bytes, mime -> model.importBytes(name, bytes, pdf = false, mime = mime) }
             page.onFollowLink = { target, web, anchor -> openFollowedLink(page.context, model, target, web, anchor) }
             page.onVisibleMarkdown = { previous, next -> model.updateVisibleMarkdown(previous, next) }
+            val pendingStamp = model.stampRequest.value
+            if (!pendingStamp.isNullOrEmpty()) {
+                model.consumeStamp()
+                if (!page.insertStamp(pendingStamp)) model.message.value = ch.fasrv.fanotes.vault.STAMP_FAILED
+            }
             page.onRememberCamera = { path, zoom, rotation, centreX, centreY, pageWidth, pageHeight, anchor ->
                 model.rememberPaperCamera(path, zoom, rotation, centreX, centreY, pageWidth, pageHeight, anchor)
             }
@@ -2897,6 +3024,7 @@ private fun PageSurface(
             page.ink.onToggleSection = { model.toggleInkSection(it) }
             page.ink.onEditBox = onEditBox
             page.onMath = onMath
+            page.onTextHand = { model.openTextHand() }
             page.pdfNote = model.open.value?.kind == NoteKind.PDF
             page.onPdfKey = { action ->
                 when (action) {

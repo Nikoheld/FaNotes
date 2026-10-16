@@ -409,6 +409,7 @@ class NoteStore(private val io: VaultIo) {
             throw IllegalArgumentException("Die Notiz wurde nicht gefunden.")
         }
         val note = readNote(normalized)
+        if (note.kind == NoteKind.PDF) throw IllegalArgumentException(PDF_DUPLICATE_REFUSED)
         val parent = normalized.substringBeforeLast('/', "")
         val extension = if (note.kind == NoteKind.PDF) ".pdf" else ".md"
         val stem = duplicateLeaf(parent, note.title, extension)
@@ -421,8 +422,14 @@ class NoteStore(private val io: VaultIo) {
         val body = copyWorksheets(withFreshInkId(note.markdown, inkId))
         val payload = (note.payload.deepCopy() as JsonValue.Obj).also {
             it.put("pageStats", null)
-            it.put("noteLinks", null)
             it.put("noteBackups", null)
+            val links = ch.fasrv.fanotes.desk.parseNoteLinkMarks(it).map { link ->
+                link.copy(
+                    id = "nl-${UUID.randomUUID().toString().replace("-", "").take(12)}",
+                    sourcePath = newPath,
+                )
+            }
+            if (links.isEmpty()) it.put("noteLinks", null) else it.put("noteLinks", ch.fasrv.fanotes.desk.noteLinksJson(links))
         }
         val copy = OpenNote(
             newPath,

@@ -92,6 +92,8 @@ class PaletteKeysTest {
         assertTrue(paletteCommandMatches(commands.first { it.id == "stamp" }, "uhrzeit"))
         assertTrue(commands.any { it.id == "reveal" && it.group == "Dateien" })
         assertTrue(commands.any { it.id == "sync-settings" && it.label == "Sync einrichten" })
+        assertEquals("Werkzeuge", commands.first { it.id == "text-hand" }.group)
+        assertTrue(paletteCommandMatches(commands.first { it.id == "text-hand" }, "glyphenwerk"))
         val opener = commands.first { it.id == "quick-open" }
         assertEquals("Notiz öffnen …", opener.label)
         assertEquals("Navigation", opener.group)

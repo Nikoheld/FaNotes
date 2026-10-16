@@ -56,6 +56,9 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private val editor = object : EditText(context) {
         private var detailsDownX = 0f
         private var detailsDownY = 0f
+        private var touchX = 0f
+        private var touchY = 0f
+        val spelling = SpellingController(this)
         private val linkPointer = PreviewLinkPointer()
 
         fun bindLinkPointer() {
@@ -74,8 +77,13 @@ class NotePageView(context: Context) : FrameLayout(context) {
             history.reset()
         }
 
-        fun rememberChange(before: String, after: String, cursorBefore: Int = cursorBeforeEdit) {
-            history.record(before, after, cursorBefore, selectionEnd.coerceAtLeast(0), System.currentTimeMillis())
+        fun rememberChange(
+            before: String,
+            after: String,
+            cursorBefore: Int = cursorBeforeEdit,
+            cursorAfter: Int = selectionEnd.coerceAtLeast(0),
+        ) {
+            history.record(before, after, cursorBefore, cursorAfter, System.currentTimeMillis())
         }
 
         fun undoTyping(): Boolean = restoreHistory(history.undo(text?.toString().orEmpty()))
@@ -141,17 +149,29 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 )
             }
             super.onDraw(canvas)
+            spelling.draw(canvas)
         }
 
         override fun onSelectionChanged(selStart: Int, selEnd: Int) {
             super.onSelectionChanged(selStart, selEnd)
             trackSelection(selStart, selEnd)
+            spelling.schedule(220)
             invalidate()
             if (previewReady && !paintingPreview) paintLivePreview()
             tags?.onCaretMoved()
         }
 
+        override fun performLongClick(): Boolean {
+            if (spelling.showAt(getOffsetForPosition(touchX, touchY))) return true
+            return super.performLongClick()
+        }
+
         override fun onTouchEvent(event: MotionEvent): Boolean {
+            touchX = event.x
+            touchY = event.y
+            if (event.actionMasked == MotionEvent.ACTION_DOWN && event.buttonState and MotionEvent.BUTTON_SECONDARY != 0) {
+                if (spelling.showAt(getOffsetForPosition(event.x, event.y))) return true
+            }
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     detailsDownX = event.x
@@ -195,6 +215,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
 
         override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+            if (event.action == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_PERIOD &&
+                (event.isCtrlPressed || event.isMetaPressed) && !event.isAltPressed
+            ) {
+                if (spelling.showAtCursor()) return true
+            }
             if (keyCode == KeyEvent.KEYCODE_ESCAPE && !event.isCtrlPressed && !event.isAltPressed &&
                 !event.isMetaPressed && !event.isShiftPressed
             ) {
@@ -722,6 +747,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onClear: () -> Unit = {}
     var onFinger: (Boolean) -> Unit = {}
     var onMath: () -> Unit = {}
+    var onTextHand: () -> Unit = {}
     var onWorksheetBoxText: (String, String) -> Unit = { _, _ -> }
     var onWorksheetBoxRemove: (String) -> Unit = {}
     var onWorksheetBoxClosed: () -> Unit = {}
@@ -803,6 +829,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             }
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(s: android.text.Editable?) {
+                editor.spelling.schedule(360)
                 if (lineNumbers.visibility == VISIBLE || foldMarks.visibility == VISIBLE) placeEditor()
                 if (writing) {
                     closedBrackets.clear()
@@ -848,8 +875,26 @@ class NotePageView(context: Context) : FrameLayout(context) {
                             closedBrackets.addAll(
                                 ch.fasrv.fanotes.desk.bracketsOnCursorLine(next, editor.selectionStart, shifted),
                             )
-                            editor.rememberChange(editBefore, next)
-                            onVisibleMarkdown(editBefore, next)
+                            val corrected = editor.spelling.autocorrectEdit(editBefore, next, changeStart, changeDeleted)
+                            if (corrected != null) {
+                                writing = true
+                                editor.setText(corrected.text)
+                                editor.setSelection(corrected.cursor.coerceIn(0, corrected.text.length))
+                                writing = false
+                                val origin = editBefore
+                                editBefore = corrected.text
+                                val boundaryCursor = (changeStart + 1).coerceIn(0, next.length)
+                                if (corrected.splitHistory) {
+                                    editor.rememberChange(origin, next, cursorAfter = boundaryCursor)
+                                    editor.rememberChange(next, corrected.text, boundaryCursor, corrected.cursor)
+                                } else {
+                                    editor.rememberChange(origin, corrected.text, cursorAfter = corrected.cursor)
+                                }
+                                onVisibleMarkdown(origin, corrected.text)
+                            } else {
+                                editor.rememberChange(editBefore, next)
+                                onVisibleMarkdown(editBefore, next)
+                            }
                         }
                     }
                 }
@@ -1133,6 +1178,19 @@ class NotePageView(context: Context) : FrameLayout(context) {
         editor.scrollTo(0, y.coerceAtLeast(0))
     }
 
+    /** Inserts a date stamp at the caret. Fails while the pen is the editor. */
+    fun insertStamp(stamp: String): Boolean {
+        if (!textMode) return false
+        val editable = editor.text ?: return false
+        val start = editor.selectionStart.coerceIn(0, editable.length)
+        val end = editor.selectionEnd.coerceIn(0, editable.length).coerceAtLeast(start)
+        val insert = ch.fasrv.fanotes.vault.stampToInsert(editable.subSequence(0, start).toString(), stamp)
+        if (insert.isEmpty()) return false
+        editable.replace(start, end, insert)
+        editor.setSelection((start + insert.length).coerceIn(0, editable.length))
+        return true
+    }
+
     fun revealRange(start: Int, end: Int) {
         if (!textMode) setTextMode(true)
         val length = editor.text?.length ?: 0
@@ -1329,6 +1387,25 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private var builtRedo = false
     private var widthBar: SeekBar? = null
     private var widthFromUser = false
+
+    fun configureSpelling(
+        enabled: Boolean,
+        wave: Int,
+        ink: Int,
+        paper: Int,
+        epoch: Int,
+        accepted: () -> Set<String>,
+        onLanguage: (String) -> Unit,
+        onLearn: (String) -> Unit,
+        onIgnore: (String) -> Unit,
+        autocorrect: Boolean = true,
+        declined: (String) -> Boolean = { false },
+        onDecline: (String) -> Unit = {},
+    ) {
+        editor.spelling.configure(
+            enabled, wave, ink, paper, epoch, accepted, onLanguage, onLearn, onIgnore, autocorrect, declined, onDecline,
+        )
+    }
 
     fun attachSession(session: ch.fasrv.fanotes.ink.InkSession) {
         ink.session = session
@@ -1599,6 +1676,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             ink.drawCompassCircle()
         })
         tools.addView(chip("Mathe") { onMath() })
+        tools.addView(chip("Text → Handschrift") { onTextHand() })
         val textChip = chip(if (ink.placingText) "Auf Seite platzieren" else "Textfeld") {}
         val mark = chip(if (ink.placingHighlight) "Markieren ●" else "Markieren") {}
         ink.onWorksheetTool = { text, highlight ->

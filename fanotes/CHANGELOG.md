@@ -2,7 +2,13 @@
 
 ## 2026.10.7
 
-- **Android-Tablet.** Löschen verschiebt in den Papierkorb auf dem Gerät, mit Rückgängig, Wiederherstellen und endgültigem Leeren. Eine Notiz lässt sich duplizieren, und Datum und Uhrzeit lassen sich einfügen. Im Stiftmodus bleibt der Bildschirm nach dem Wechsel und nach jedem Strich drei Minuten an.
+- **Android-Tablet.** Löschen verschiebt in den Papierkorb auf dem Gerät, mit Rückgängig, Wiederherstellen und endgültigem Leeren. Eine Notiz lässt sich wie am Desktop duplizieren, der Wiki-Link kopieren, und `Strg+Umschalt+D` setzt das Datum an der Schreibmarke. Alle Ordner klappen mit einem Klick, die leere Seite zeigt die letzten Notizen, und im Stiftmodus bleibt der Bildschirm drei Minuten an.
+- **Alltag.** Eine Notiz lässt sich duplizieren: Text, Handschrift, Verlinkungen und Arbeitsblätter kommen in eine neue Datei, die Antworten des Originals bleiben dort. Wiki-Link und Pfad kopierst du aus dem Dateimenü, `Strg+Umschalt+D` setzt das Datum an der Schreibmarke ein, alle Ordner klappen mit einem Klick zu, und die leere Seite zeigt die zuletzt geöffneten Notizen.
+- **Kalenderdatei.** Eine ICS-Datei mit Weltzeit oder einer Dauer landet auf der örtlichen Uhrzeit. Dieselbe Datei noch einmal importieren aktualisiert den Termin und nimmt abgesagte Einträge heraus, statt ihn zu verdoppeln.
+- **Bild einfügen.** Ein Screenshot aus der Zwischenablage landet auf der offenen Notiz, auch während der Cursor im Text steht. Text bleibt Text.
+- **Terminerinnerung.** Der Hinweis im Kalender folgt der Sprache der Oberfläche und nennt weitere Termine, die gleich beginnen.
+- **Karteikarten.** Nochmal legt die Karte hinter die anderen fälligen Karten, statt sie sofort wieder zu zeigen. Leertaste zeigt die Antwort, 1 bis 4 bewertet, und die Karte folgt der Sprache der Oberfläche.
+- **Ausgefallene Termine.** Eine wiederkehrende Kalenderdatei behält die ausgelassenen Tage. Ein erneuter Import ergänzt sie, ohne einen lokal übersprungenen Tag zurückzuholen.
 - **Android-Tablet.** Der Text liegt auf dem Papier, die Leiste klappt beim Schreiben ein, und der Radierer folgt der Spitze.
 - **Sync.** Der Abgleich zeigt den Fortschritt, und ein zweiter Start geht nicht verloren.
 - **Version.** Die Version lässt sich in GitHub Actions unter Update version setzen. Der Android-Release installiert das SDK, ohne am Lizenzdialog abzubrechen.

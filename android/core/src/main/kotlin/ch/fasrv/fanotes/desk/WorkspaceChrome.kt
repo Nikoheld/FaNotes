@@ -84,6 +84,13 @@ data class NoteWorkspacePanels(val sidebar: Boolean, val inspector: Boolean)
 fun workspaceKeepsNoteChrome(destination: String): Boolean =
     destination == "notes" || destination == "search"
 
+/**
+ * Settings and the AI assistant are dialogs over the current screen.
+ * Kalender, Hausaufgaben, and the overview stay where they are. Switching
+ * them to the note editor left that editor behind after the dialog closed.
+ */
+fun destinationUnderOverlay(current: String): String = current
+
 fun noteWorkspacePanels(
     focus: Boolean,
     wide: Boolean,
@@ -266,6 +273,7 @@ const val TREE_MENU_SPLIT = "Rechts öffnen"
 const val TREE_MENU_RENAME = "Umbenennen"
 const val TREE_MENU_MOVE = "Verschieben"
 const val TREE_MENU_DUPLICATE = "Duplizieren"
+const val TREE_MENU_WIKI = "Wiki-Link kopieren"
 const val TREE_MENU_DELETE = "Löschen"
 const val TREE_MENU_ICON_DP = 15
 const val TREE_MENU_ICON_GAP_DP = 9
@@ -285,6 +293,7 @@ fun treeMenuIcon(label: String): String = when (label) {
     TREE_MENU_RENAME -> "pencil"
     TREE_MENU_MOVE -> "move"
     TREE_MENU_DUPLICATE -> "copy"
+    TREE_MENU_WIKI -> "copy"
     TREE_MENU_DELETE -> "trash"
     else -> "folder"
 }

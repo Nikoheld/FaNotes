@@ -1,7 +1,12 @@
 package ch.fasrv.fanotes.vault
 
+import ch.fasrv.fanotes.desk.NoteLinkMark
 import ch.fasrv.fanotes.desk.dropFolderColors
+import ch.fasrv.fanotes.desk.noteLinksJson
+import ch.fasrv.fanotes.desk.parseNoteLinkMarks
 import ch.fasrv.fanotes.famd.worksheetIdsFromMarkdown
+import ch.fasrv.fanotes.json.JsonValue
+import ch.fasrv.fanotes.json.deepCopy
 import ch.fasrv.fanotes.ink.StrokePoint
 import java.nio.file.Files
 import java.time.LocalDate
@@ -99,6 +104,19 @@ class NoteTrashTest {
         assertTrue(vault.exists(".fanotes/assets/${original.inkId}.json"))
         assertTrue(vault.exists(".fanotes/assets/${copied.inkId}.json"))
         assertFailsWith<IllegalArgumentException> { store.duplicateNote("Fehlt.md") }
+        val linked = store.readNote(path)
+        val payload = (linked.payload.deepCopy() as JsonValue.Obj).also {
+            it.put("noteLinks", noteLinksJson(listOf(NoteLinkMark("nl-old", path, "Andere.md", 0.2, 0.4))))
+        }
+        store.save(linked.copy(payload = payload), linked.document, linked.markdown)
+        val again = store.duplicateNote(path)
+        val marks = parseNoteLinkMarks(store.readNote(again).payload)
+        assertEquals("Andere.md", marks.single().targetPath)
+        assertEquals(again, marks.single().sourcePath)
+        assertTrue(marks.single().id != "nl-old")
+        val pdf = store.importPdf("", "Buch.pdf", byteArrayOf(0x25, 0x50, 0x44, 0x46))
+        val refused = assertFailsWith<IllegalArgumentException> { store.duplicateNote(pdf) }
+        assertEquals(PDF_DUPLICATE_REFUSED, refused.message)
     }
 
     @Test
@@ -106,6 +124,13 @@ class NoteTrashTest {
         assertEquals("Algebra Kopie", duplicatePreferredStem("Algebra"))
         assertEquals("Algebra Kopie", duplicatePreferredStem("Algebra Kopie"))
         assertEquals("Algebra Kopie", duplicatePreferredStem("Algebra Kopie 2"))
+        assertEquals("Algebra Kopie", duplicatePreferredStem("Algebra Copy"))
+        assertEquals("[[Algebra]]", wikiLinkForNote("Math/Algebra.md"))
+        assertEquals(" 2026-10-16 16:19", stampToInsert("Wort", "2026-10-16 16:19"))
+        assertEquals("2026-10-16 16:19", stampToInsert("Wort\n", "2026-10-16 16:19"))
+        assertEquals(listOf("b.md"), recentNotePaths(listOf("a.md", "b.md", "a.md"), { true }, skip = "a.md"))
+        assertEquals(emptySet(), nextExpandedFolders(setOf("Math"), listOf("Math", "Physik")))
+        assertEquals(setOf("Math"), nextExpandedFolders(emptySet(), listOf("Math")))
         assertEquals("Lecture 2.md", restoredVaultPath("Lecture.md", folder = false) { it == "Lecture.md" })
         assertEquals("Math/Algebra.md", restoredVaultPath("Math/Algebra.md", folder = false) { false })
         assertEquals(".fanotes/assets/ink.json", remapRestoredFile("Math/Algebra.md", "Math/Algebra 2.md", ".fanotes/assets/ink.json"))

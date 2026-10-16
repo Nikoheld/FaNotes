@@ -37,6 +37,15 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Spelling suggestion menu (right-click / Strg+.) with Ignore and Add to dictionary | `src/lib/spellingCorrections.ts` | `cm-spelling-menu__learn` |
 | Correction candidates, ranking and the autocorrect decision | `src/lib/spellingSuggest.ts` | `export const decideAutocorrect` |
 | Autokorrektur setting | `src/components/SettingsModal.tsx` | `title="Autokorrektur"` |
+| Lernzeit | `src/App.tsx` | `id: 'study'` |
+| Karteikarten | `src/App.tsx` | `id: 'flashcards'` |
+| Duplicate a note (text, ink, links, worksheets) | `src/App.tsx` | `id: 'duplicate-note'` |
+| Duplicate name, wiki link, date stamp, recent notes | `src/lib/noteQoL.ts` | `export const duplicatePreferredStem` |
+| Copy wiki link | `src/App.tsx` | `id: 'copy-wiki-link'` |
+| Insert date | `src/App.tsx` | `id: 'insert-date'` |
+| Insert date and time | `src/App.tsx` | `id: 'insert-date-time'` |
+| Collapse or expand every folder | `src/components/FileTree.tsx` | `Alle Ordner einklappen` |
+| Recent notes on the empty page | `src/App.tsx` | `placeholder-recent` |
 | Note backup snapshots | `src/lib/noteBackup.ts` | `export const createNoteBackup` |
 | Backup control policy | `src/lib/noteBackup.ts` | `export const noteBackupControlPolicy` |
 | Backup top chrome | `src/App.tsx` | `note-backup-control` |

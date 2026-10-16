@@ -1,7 +1,9 @@
 package ch.fasrv.fanotes.desk
 
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -60,6 +62,115 @@ class CalendarExchangeTest {
         assertFalse(folded[0].allDay)
         assertEquals("kalender.ics", icsFileName("!!!"))
         assertEquals("Mein-Kalender.ics", icsFileName("Mein Kalender"))
+
+        val zone = ZoneId.of("Europe/Zurich")
+        val timed = importIcs(
+            listOf(
+                "BEGIN:VCALENDAR",
+                "BEGIN:VEVENT",
+                "UID:lesson",
+                "SUMMARY:Hello\\, Welt",
+                "DESCRIPTION:Zeile\\\\n2",
+                "DTSTART:20261014T153000",
+                "DURATION:PT45M",
+                "END:VEVENT",
+                "BEGIN:VEVENT",
+                "UID:gone",
+                "STATUS:CANCELLED",
+                "SUMMARY:Entfällt",
+                "DTSTART:20261014T180000",
+                "END:VEVENT",
+                "END:VCALENDAR",
+            ).joinToString("\n"),
+            "personal",
+            zone,
+        )
+        assertEquals(1, timed.size)
+        assertEquals("Hello, Welt", timed[0].title)
+        assertEquals("Zeile\\n2", timed[0].notes)
+        assertEquals("2026-10-14T15:30", timed[0].start)
+        assertEquals("2026-10-14T16:15", timed[0].end)
+
+        val utc = importIcs(
+            "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:utc-call\nSUMMARY:Anruf\nDTSTART:20261016T070000Z\nDURATION:PT90M\nEND:VEVENT\nEND:VCALENDAR\n",
+            "personal",
+            zone,
+        )
+        val utcStart = ZonedDateTime.of(2026, 10, 16, 7, 0, 0, 0, ZoneOffset.UTC).withZoneSameInstant(zone)
+        val wall = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")
+        assertEquals(utcStart.format(wall), utc[0].start)
+        assertEquals(utcStart.plusMinutes(90).format(wall), utc[0].end)
+        assertEquals("2026-10-16T09:00", utc[0].start)
+
+        val existing = emptyCalendar().copy(
+            events = listOf(
+                CalendarEvent(
+                    id = "lesson",
+                    calendarId = "school",
+                    title = "Alt",
+                    start = "2026-10-14T15:30",
+                    end = "2026-10-14T16:15",
+                    allDay = false,
+                    notePath = "Schule/Mathe.md",
+                    exceptionDates = listOf("2026-10-21"),
+                ),
+            ),
+        )
+        val merged = applyIcsImport(
+            existing,
+            "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:lesson\nSUMMARY:Neu\nDTSTART:20261014T153000\nDURATION:PT45M\nEND:VEVENT\nEND:VCALENDAR\n",
+            "personal",
+            zone,
+        )
+        assertEquals(1, merged.updated)
+        assertEquals(0, merged.added)
+        assertEquals("Neu", merged.document.events[0].title)
+        assertEquals("school", merged.document.events[0].calendarId)
+        assertEquals("Schule/Mathe.md", merged.document.events[0].notePath)
+        assertEquals(listOf("2026-10-21"), merged.document.events[0].exceptionDates)
+        val removed = applyIcsImport(
+            merged.document,
+            "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:lesson\nSTATUS:CANCELLED\nSUMMARY:Neu\nDTSTART:20261014T153000\nEND:VEVENT\nEND:VCALENDAR\n",
+            "personal",
+            zone,
+        )
+        assertEquals(1, removed.removed)
+        assertTrue(removed.document.events.isEmpty())
+    }
+
+    @Test
+    fun exdateSkipsThoseDaysAndSurvivesExport() {
+        val zone = ZoneId.of("Europe/Zurich")
+        val imported = importIcs(
+            listOf(
+                "BEGIN:VCALENDAR",
+                "BEGIN:VEVENT",
+                "UID:series",
+                "SUMMARY:Kurs",
+                "DTSTART:20261014T153000",
+                "DURATION:PT45M",
+                "RRULE:FREQ=WEEKLY",
+                "EXDATE;VALUE=DATE:20261021",
+                "EXDATE:20261028T153000,20261104T153000",
+                "END:VEVENT",
+                "END:VCALENDAR",
+            ).joinToString("\n"),
+            "personal",
+            zone,
+        )
+        assertEquals(listOf("2026-10-21", "2026-10-28", "2026-11-04"), imported[0].exceptionDates)
+        val zoned = importIcs(
+            "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:zoned\nSUMMARY:Kurs\nDTSTART:20261014T153000\nRRULE:FREQ=WEEKLY\nEXDATE:20261021T230000Z\nEND:VEVENT\nEND:VCALENDAR\n",
+            "personal",
+            zone,
+        )
+        assertEquals(listOf("2026-10-22"), zoned[0].exceptionDates)
+        val existing = emptyCalendar().copy(events = listOf(imported[0].copy(calendarId = "school", exceptionDates = listOf("2026-10-14"))))
+        val united = applyIcsImport(existing, "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:series\nSUMMARY:Kurs\nDTSTART:20261014T153000\nRRULE:FREQ=WEEKLY\nEXDATE;VALUE=DATE:20261021\nEND:VEVENT\nEND:VCALENDAR\n", "personal", zone)
+        assertEquals(listOf("2026-10-14", "2026-10-21"), united.document.events[0].exceptionDates)
+        val exported = exportIcs(emptyCalendar().copy(events = imported))
+        assertTrue(exported.contains("EXDATE;VALUE=DATE:20261021,20261028,20261104"))
+        assertEquals(imported[0].exceptionDates, importIcs(exported, "personal", zone)[0].exceptionDates)
     }
 
     @Test
@@ -84,5 +195,42 @@ class CalendarExchangeTest {
         val done = withSoon.copy(events = listOf(event.copy(title = "✓ Seite 4")))
         assertTrue(dueReminders(done, now, 15).isEmpty())
         assertTrue(dueReminders(withSoon, now, 3).isEmpty())
+        val rent = CalendarEvent(
+            id = "rent",
+            calendarId = "personal",
+            title = "Miete",
+            start = "2026-01-31T09:00",
+            end = "2026-01-31T10:00",
+            allDay = false,
+            recurrence = "monthly",
+        )
+        val marchMorning = ZonedDateTime.of(2026, 3, 31, 8, 50, 0, 0, zone)
+        assertTrue(dueReminders(emptyCalendar().copy(events = listOf(rent)), marchMorning, 15).any {
+            it.key == "rent@2026-03-31" && it.minutesUntil == 10
+        })
+    }
+
+    @Test
+    fun utcAndANumericOffsetBecomeLocalWallTime() {
+        val wall = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")
+        val imported = importIcs(
+            "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:utc\nSUMMARY:Pfad\\\\notes\nDTSTART:20261020T090000Z\nDTEND:20261020T100000Z\nDESCRIPTION:C:\\\\notes\nEND:VEVENT\nEND:VCALENDAR\n",
+            "personal",
+        )
+        val start = ZonedDateTime.of(2026, 10, 20, 9, 0, 0, 0, ZoneOffset.UTC).withZoneSameInstant(ZoneId.systemDefault())
+        assertEquals(start.format(wall), imported[0].start)
+        assertEquals(start.plusHours(1).format(wall), imported[0].end)
+        assertEquals("Pfad\\notes", imported[0].title)
+        assertEquals("C:\\notes", imported[0].notes)
+        val offset = importIcs(
+            "BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:Versetzt\nDTSTART:20261020T090000+0200\nEND:VEVENT\nEND:VCALENDAR\n",
+            "personal",
+        )
+        val shifted = ZonedDateTime.of(2026, 10, 20, 9, 0, 0, 0, ZoneOffset.ofHours(2)).withZoneSameInstant(ZoneId.systemDefault())
+        assertEquals(shifted.format(wall), offset[0].start)
+        assertTrue(importIcs(
+            "BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:Nein\nDTSTART:20260231T090000Z\nEND:VEVENT\nEND:VCALENDAR\n",
+            "personal",
+        ).isEmpty())
     }
 }
