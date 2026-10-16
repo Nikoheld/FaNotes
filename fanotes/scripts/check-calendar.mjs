@@ -318,6 +318,46 @@ assert.match(calendarView, /formatReminder\(reminders\[0\], getUiLanguage\(\)\)/
 assert.match(calendarView, /\{copy\.close\}/)
 assert.doesNotMatch(calendarView, /beginnt/)
 
+const seriesIcs = [
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'UID:series',
+  'SUMMARY:Kurs',
+  'DTSTART:20261014T153000',
+  'DURATION:PT45M',
+  'RRULE:FREQ=WEEKLY',
+  'EXDATE;VALUE=DATE:20261021',
+  'EXDATE:20261028T153000,20261104T153000',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n')
+const series = ics.importIcs(seriesIcs, personal)
+assert.deepEqual(series[0].exceptionDates, ['2026-10-21', '2026-10-28', '2026-11-04'])
+const utcSkip = new Date(Date.UTC(2026, 9, 21, 23, 0, 0))
+const zoned = ics.importIcs([
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'UID:zoned',
+  'SUMMARY:Kurs',
+  'DTSTART:20261014T153000',
+  'RRULE:FREQ=WEEKLY',
+  'EXDATE:20261021T230000Z',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+assert.deepEqual(zoned[0].exceptionDates, [dateKey(utcSkip)])
+const united = ics.applyIcsImport({
+  ...doc,
+  events: [{ ...series[0], calendarId: school, exceptionDates: ['2026-10-14'] }],
+}, seriesIcs, personal)
+assert.deepEqual(united.document.events[0].exceptionDates, ['2026-10-14', '2026-10-21', '2026-10-28', '2026-11-04'])
+const exported = ics.exportIcs({ ...doc, events: series })
+assert.match(exported, /EXDATE;VALUE=DATE:20261021,20261028,20261104/)
+assert.deepEqual(ics.importIcs(exported, personal)[0].exceptionDates, series[0].exceptionDates)
+const shown = expandOccurrences({ ...doc, events: series }, startOfDay(new Date(2026, 9, 14)), addDays(startOfDay(new Date(2026, 9, 14)), 21))
+assert.equal(shown.some((item) => item.key.endsWith('@2026-10-14')), true)
+assert.equal(shown.some((item) => item.key.endsWith('@2026-10-21')), false)
+
 await server.close()
 console.log(JSON.stringify({
   events: roundTrip.events.length,
