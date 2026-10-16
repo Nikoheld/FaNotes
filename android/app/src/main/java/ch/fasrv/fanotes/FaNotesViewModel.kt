@@ -1393,6 +1393,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun clearSyncConflicts() {
+        graph.engine.clearConflicts()
+    }
+
     fun removeSyncDevice(deviceId: String, name: String) {
         viewModelScope.launch {
             runCatching { graph.engine.removeDevice(deviceId) }
