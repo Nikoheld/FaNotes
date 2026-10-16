@@ -45,13 +45,25 @@ const val SETTINGS_SCROLL_NARROW_PAD_BOTTOM_DP = 28
 const val SETTING_ROW_STACK_GAP_DP = 9
 
 /**
+ * `.settings-heading-icon { width: 38px; height: 38px; border-radius: 11px }`.
+ * The mark is the section icon, `ActiveSectionIcon size={17}`.
+ * `.settings-heading { gap: 11px }`.
+ * The later chrome rule replaces the accent fill and does not change this size:
+ * `color: var(--bg); background: var(--text); border-color: transparent; box-shadow: none`.
+ */
+const val SETTINGS_HEADING_ICON_DP = 38
+const val SETTINGS_HEADING_ICON_RADIUS_DP = 11
+const val SETTINGS_HEADING_ICON_GLYPH_DP = 17
+const val SETTINGS_HEADING_GAP_DP = 11
+
+/**
  * Same viewport as [settingsNavCollapses].
  * At 760 and below, `.settings-heading-icon` is `display: none`, the header
  * padding-inline is 16, the scroll padding is `15px 16px 28px`, and each
  * `.setting-row` stacks (`flex-direction: column`, `align-items: flex-start`,
  * gap 9) with `.setting-control { width: 100%; max-width: none; justify-content: flex-start }`.
  * The later heading-icon color rule does not set `display`, so `display: none` still wins.
- * At 761 the side-by-side row, the wide padding, and the absent wide heading icon stay.
+ * At 761 the side-by-side row and the wide padding stay, and the heading icon is shown.
  */
 fun settingsContentStacks(widthDp: Int): Boolean = settingsNavCollapses(widthDp)
 
@@ -85,7 +97,7 @@ fun settingsContentLayout(widthDp: Int): SettingsContentLayout {
             scrollPadBottomDp = SETTINGS_SCROLL_PAD_BOTTOM_DP,
             rowsStack = false,
             rowGapDp = SETTING_ROW_GAP_DP,
-            headingIconVisible = false,
+            headingIconVisible = true,
         )
     }
 }
