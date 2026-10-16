@@ -31,5 +31,14 @@ class ConfirmUxTest {
             "Verlinkung wirklich entfernen? Die verlinkte Notiz bleibt im Vault.",
             noteLinkRemoveMessage(),
         )
+        assertEquals(12, CONFIRM_RADIUS_DP)
+        assertEquals(440, CONFIRM_MAX_DP)
+        assertEquals(36, CONFIRM_ICON_DP)
+        assertEquals(11, CONFIRM_ICON_RADIUS_DP)
+        assertEquals(48, CONFIRM_BODY_INSET_DP)
+        assertEquals(16, CONFIRM_TITLE_SP)
+        assertEquals(34, CONFIRM_BUTTON_DP)
+        assertEquals(6, CONFIRM_BUTTON_RADIUS_DP)
+        assertEquals("ACHTUNG", CONFIRM_EYEBROW)
     }
 }

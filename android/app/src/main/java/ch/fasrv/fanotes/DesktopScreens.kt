@@ -4,6 +4,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -48,6 +49,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Checkbox
@@ -1830,7 +1832,9 @@ fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismi
     var focused by remember(request.message) { mutableStateOf(0) }
     LaunchedEffect(request.message) { runCatching { cancel.requestFocus() } }
     Dialog(onDismissRequest = onDismiss) {
-        Surface(Modifier.widthIn(max = 440.dp).onPreviewKeyEvent { event ->
+        val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.CONFIRM_RADIUS_DP.dp)
+        val buttonShape = RoundedCornerShape(ch.fasrv.fanotes.desk.CONFIRM_BUTTON_RADIUS_DP.dp)
+        Surface(Modifier.widthIn(max = ch.fasrv.fanotes.desk.CONFIRM_MAX_DP.dp).onPreviewKeyEvent { event ->
             if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
             val keyName = when (event.key) {
                 Key.Escape -> "Escape"
@@ -1845,20 +1849,84 @@ fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismi
             focused = next
             if (next == 0) cancel.requestFocus() else confirm.requestFocus()
             true
-        }, color = if (glass) MaterialTheme.colorScheme.surface.copy(alpha = 0.88f) else MaterialTheme.colorScheme.surface, shape = androidx.compose.foundation.shape.RoundedCornerShape((radiusDp ?: 12).dp)) {
-            Column(Modifier.padding(20.dp)) {
-                Text("Achtung", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
-                Text(request.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 4.dp))
-                Text(request.message, modifier = Modifier.padding(top = 12.dp, bottom = 16.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.focusRequester(cancel).onFocusChanged { if (it.isFocused) focused = 0 },
-                    ) { Text(request.cancelLabel) }
-                    TextButton(
-                        onClick = onConfirm,
-                        modifier = Modifier.focusRequester(confirm).onFocusChanged { if (it.isFocused) focused = 1 },
-                    ) { Text(request.confirmLabel, color = MaterialTheme.colorScheme.error) }
+        }, color = if (glass) MaterialTheme.colorScheme.surface.copy(alpha = 0.88f) else MaterialTheme.colorScheme.surface, shape = shape, border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA))) {
+            Column(
+                Modifier.padding(
+                    start = ch.fasrv.fanotes.desk.CONFIRM_PAD_X_DP.dp,
+                    end = ch.fasrv.fanotes.desk.CONFIRM_PAD_X_DP.dp,
+                    top = ch.fasrv.fanotes.desk.CONFIRM_PAD_TOP_DP.dp,
+                    bottom = ch.fasrv.fanotes.desk.CONFIRM_PAD_BOTTOM_DP.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.CONFIRM_GAP_DP.dp),
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.CONFIRM_HEADER_GAP_DP.dp), verticalAlignment = Alignment.Top) {
+                    Box(
+                        Modifier
+                            .size(ch.fasrv.fanotes.desk.CONFIRM_ICON_DP.dp)
+                            .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.CONFIRM_ICON_RADIUS_DP.dp))
+                            .background(MaterialTheme.colorScheme.error),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Warning,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.background,
+                        )
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            ch.fasrv.fanotes.desk.CONFIRM_EYEBROW,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.12.em,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        Text(
+                            request.title,
+                            fontSize = ch.fasrv.fanotes.desk.CONFIRM_TITLE_SP.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = (-0.02).em,
+                            lineHeight = 20.sp,
+                        )
+                    }
+                }
+                Text(
+                    request.message,
+                    fontSize = ch.fasrv.fanotes.desk.CONFIRM_BODY_SP.sp,
+                    lineHeight = 19.sp,
+                    color = LocalStatusInk.current.soft,
+                    modifier = Modifier.padding(start = ch.fasrv.fanotes.desk.CONFIRM_BODY_INSET_DP.dp),
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                    Box(
+                        Modifier
+                            .height(ch.fasrv.fanotes.desk.CONFIRM_BUTTON_DP.dp)
+                            .clip(buttonShape)
+                            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), buttonShape)
+                            .focusRequester(cancel)
+                            .onFocusChanged { if (it.isFocused) focused = 0 }
+                            .focusable()
+                            .clickable(onClick = onDismiss)
+                            .padding(horizontal = ch.fasrv.fanotes.desk.CONFIRM_BUTTON_PAD_DP.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(request.cancelLabel, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = LocalStatusInk.current.soft)
+                    }
+                    Box(
+                        Modifier
+                            .height(ch.fasrv.fanotes.desk.CONFIRM_BUTTON_DP.dp)
+                            .clip(buttonShape)
+                            .background(MaterialTheme.colorScheme.error)
+                            .focusRequester(confirm)
+                            .onFocusChanged { if (it.isFocused) focused = 1 }
+                            .focusable()
+                            .clickable(onClick = onConfirm)
+                            .padding(horizontal = ch.fasrv.fanotes.desk.CONFIRM_BUTTON_PAD_DP.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(request.confirmLabel, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.background)
+                    }
                 }
             }
         }
