@@ -699,6 +699,19 @@ fun inspectorDocument(content: String): InspectorDocument {
     return InspectorDocument(words, visible.length, reading)
 }
 
+/** Outline row inset from `.outline-list`: 10px plus 12px per level. */
+fun outlineIndentDp(level: Int) = 10 + (level - 1).coerceAtLeast(0) * 12
+
+/** Right inspector chrome from the stylesheet. */
+const val INSPECTOR_HEADER_DP = 36
+const val INSPECTOR_TAB_DP = 27
+const val INSPECTOR_TAB_RADIUS_DP = 6
+const val INSPECTOR_OUTLINE_DP = 26
+const val INSPECTOR_OUTLINE_RADIUS_DP = 6
+const val INSPECTOR_STAT_RADIUS_DP = 8
+const val INSPECTOR_HEADING_TRACKING = 0.07f
+const val INSPECTOR_VALUE_WEIGHT = 650
+
 fun occurrencesOn(event: CalendarEvent, day: java.time.LocalDate): Boolean {
     val startDay = runCatching { java.time.LocalDate.parse(event.start.take(10)) }.getOrNull() ?: return false
     if (day < startDay) return false

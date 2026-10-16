@@ -63,6 +63,14 @@ class DeskVaultTest {
         assertEquals(3, inspector.words)
         assertEquals(1, inspectorDocument("").readingMinutes)
         assertEquals(2, inspectorDocument("wort ".repeat(211)).readingMinutes)
+        assertEquals(10, outlineIndentDp(1))
+        assertEquals(22, outlineIndentDp(2))
+        assertEquals(36, INSPECTOR_HEADER_DP)
+        assertEquals(27, INSPECTOR_TAB_DP)
+        assertEquals(26, INSPECTOR_OUTLINE_DP)
+        assertEquals(8, INSPECTOR_STAT_RADIUS_DP)
+        assertEquals(0.07f, INSPECTOR_HEADING_TRACKING)
+        assertEquals(650, INSPECTOR_VALUE_WEIGHT)
     }
 
     @Test
