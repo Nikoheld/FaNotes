@@ -5,6 +5,7 @@ import ch.fasrv.fanotes.text.paperLines
 import ch.fasrv.fanotes.text.tableRows
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class NoteProfilesTest {
@@ -91,18 +92,11 @@ class NoteProfilesTest {
         assertEquals(FirstRunPreviewAsidePad(top = 17, end = 10, bottom = 17, start = 10), firstRunPreviewAsidePad(981))
         assertEquals(FirstRunPreviewAsidePad(top = 17, end = 7, bottom = 17, start = 7), firstRunPreviewAsidePad(980))
         assertEquals(FirstRunPreviewAsidePad(top = 17, end = 7, bottom = 17, start = 7), firstRunPreviewAsidePad(760))
-        assertEquals(5, FIRST_RUN_PREVIEW_ASIDE_GAP_DP)
         assertEquals(1, FIRST_RUN_PREVIEW_ASIDE_RULE_DP)
         assertEquals(0.76f, FIRST_RUN_PREVIEW_ASIDE_FILL_MIX)
         assertEquals(0xFF1B1B1B.toInt(), firstRunPreviewAsideFill(0xFF191919.toInt(), 0xFF202020.toInt()))
         assertEquals(0xFFFDFDFC.toInt(), firstRunPreviewAsideFill(0xFFFFFFFF.toInt(), 0xFFF7F6F3.toInt()))
         assertEquals(0xFFF9F8F4.toInt(), firstRunPreviewAsideFill(0xFFFBFAF7.toInt(), 0xFFF4F1EA.toInt()))
-        assertEquals("Meine Fächer", FIRST_RUN_PREVIEW_ASIDE_TITLE)
-        assertEquals(700, FIRST_RUN_PREVIEW_ASIDE_TITLE_WEIGHT)
-        assertEquals(6, FIRST_RUN_PREVIEW_ASIDE_TITLE_GAP_DP)
-        assertEquals(12, FIRST_RUN_PREVIEW_ASIDE_TITLE_ICON_DP)
-        assertEquals(4, FIRST_RUN_PREVIEW_ASIDE_TITLE_MARGIN_INLINE_DP)
-        assertEquals(8, FIRST_RUN_PREVIEW_ASIDE_TITLE_MARGIN_BOTTOM_DP)
     }
 
     @Test
@@ -202,6 +196,21 @@ class NoteProfilesTest {
         val accent = 0xFF226688.toInt()
         assertEquals(mixArgb(accent, 0xFF222222.toInt(), 0.78f), firstRunPreviewInkStroke(accent))
         assertEquals(mixArgb(accent, 0xFF333333.toInt(), 0.78f), firstRunPreviewSearchHits(accent))
+        assertEquals(98, FIRST_RUN_PREVIEW_INK_VIEW_HEIGHT)
+        assertEquals(5, FIRST_RUN_PREVIEW_ASIDE_GAP_DP)
+        assertEquals("Meine Fächer", FIRST_RUN_PREVIEW_SUBJECTS_HEADING)
+        assertEquals(700, FIRST_RUN_PREVIEW_HEADING_WEIGHT)
+        assertEquals(12, FIRST_RUN_PREVIEW_HEADING_ICON_DP)
+        assertEquals(8, FIRST_RUN_PREVIEW_HEADING_MARGIN_BOTTOM_DP)
+        assertEquals(PreviewInkMeet(1f, 0f, 0f), previewInkMeet(330f, 98f, 330f, 98f))
+        assertEquals(PreviewInkMeet(1f, 165f, 0f), previewInkMeet(660f, 98f, 330f, 98f))
+        assertEquals(PreviewInkMeet(0.5f, 0f, 24.5f), previewInkMeet(165f, 98f, 330f, 98f))
+        val short = checkNotNull(previewInkMeet(420f, 127f, 420f, 150f))
+        assertEquals(127f / 150f, short.scale)
+        assertEquals(32.2f, short.offsetX, 0.001f)
+        assertEquals(0f, short.offsetY, 0.001f)
+        assertEquals(6.8f, previewInkStrokePx(3.4f, 2f))
+        assertNull(previewInkMeet(0f, 98f, 330f, 98f))
     }
 
     @Test

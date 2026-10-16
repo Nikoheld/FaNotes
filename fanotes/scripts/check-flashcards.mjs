@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createServer } from 'vite'
 
+const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const server = await createServer({
   appType: 'custom',
   logLevel: 'error',
@@ -9,7 +13,7 @@ const server = await createServer({
 })
 
 try {
-  const { applyReview, cardsFromMarkdown } = await server.ssrLoadModule('/src/lib/flashcards.ts')
+  const { applyReview, cardsFromMarkdown, reviewQueue } = await server.ssrLoadModule('/src/lib/flashcards.ts')
   const now = new Date(2026, 9, 16, 12, 0, 0)
   const markdown = `## Lernfragen
 
@@ -32,6 +36,23 @@ try {
   const after = cardsFromMarkdown(applyReview(withNew, fresh.id, 'easy', now), now)
   assert.equal(after.find((card) => card.front === 'Was ist 2?').reps, 1)
   assert.equal(after.find((card) => card.front === 'Was ist 1?').reps, 1)
+
+  const card = (id) => ({ id, front: id, back: '', ease: 2.5, intervalDays: 1, due: '2026-10-16', reps: 1, lapses: 0 })
+  const due = [card('a'), card('b'), card('c')]
+  assert.deepEqual(reviewQueue(due, []).map((item) => item.id), ['a', 'b', 'c'])
+  assert.deepEqual(reviewQueue(due, ['a']).map((item) => item.id), ['b', 'c'])
+  assert.deepEqual(reviewQueue(due, ['a', 'b']).map((item) => item.id), ['c'])
+  assert.deepEqual(reviewQueue(due, ['a', 'b', 'c']).map((item) => item.id), ['a', 'b', 'c'])
+  assert.deepEqual(reviewQueue([card('b'), card('c')], ['a', 'b']).map((item) => item.id), ['c'])
+  assert.deepEqual(reviewQueue([card('a')], ['a']).map((item) => item.id), ['a'])
+
+  const view = readFileSync(join(root, 'src/components/FlashcardReview.tsx'), 'utf8')
+  assert.match(view, /reviewQueue\(due, later\)/)
+  assert.match(view, /value === 'again'/)
+  assert.match(view, /GRADE_KEYS/)
+  assert.match(view, /addEventListener\('keydown', onKey, true\)/)
+  assert.match(view, /bindHandGestures/)
+  assert.match(view, /copy\.show/)
   console.log('flashcards ok')
 } finally {
   await server.close()

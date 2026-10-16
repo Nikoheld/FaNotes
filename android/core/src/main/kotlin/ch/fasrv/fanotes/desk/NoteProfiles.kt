@@ -328,6 +328,14 @@ const val FIRST_RUN_PREVIEW_HEADER_TITLE_WEIGHT = 600
 const val FIRST_RUN_PREVIEW_HEADER_DOT_DP = 6
 const val FIRST_RUN_PREVIEW_HEADER_GAP_DP = 5
 const val FIRST_RUN_PREVIEW_HEADER_PAD_DP = 12
+/** `.first-run-preview-body > aside` gap is 5px. The heading is a bold `strong` with a 12px book icon, gap 6px, and `margin: 0 4px 8px`. */
+const val FIRST_RUN_PREVIEW_ASIDE_GAP_DP = 5
+const val FIRST_RUN_PREVIEW_SUBJECTS_HEADING = "Meine Fächer"
+const val FIRST_RUN_PREVIEW_HEADING_WEIGHT = 700
+const val FIRST_RUN_PREVIEW_HEADING_MARGIN_INLINE_DP = 4
+const val FIRST_RUN_PREVIEW_HEADING_MARGIN_BOTTOM_DP = 8
+const val FIRST_RUN_PREVIEW_HEADING_ICON_DP = 12
+const val FIRST_RUN_PREVIEW_HEADING_ICON_GAP_DP = 6
 /** Header fill is `color-mix(in srgb, var(--panel) 92%, transparent)`. */
 const val FIRST_RUN_PREVIEW_HEADER_FILL_ALPHA = 0.92f
 /** Close dot is `color-mix(in srgb, var(--danger) 68%, var(--border))`. The middle dot is `#d8a643`. */
@@ -362,21 +370,9 @@ const val FIRST_RUN_PREVIEW_ASIDE_NARROW_DP = 102
 const val FIRST_RUN_PREVIEW_ASIDE_PAD_BLOCK_DP = 17
 const val FIRST_RUN_PREVIEW_ASIDE_PAD_INLINE_DP = 10
 const val FIRST_RUN_PREVIEW_ASIDE_PAD_INLINE_NARROW_DP = 7
-/** `.first-run-preview-body > aside` is a column with a 5px gap and a 1px `--border` on the right. */
-const val FIRST_RUN_PREVIEW_ASIDE_GAP_DP = 5
+/** Right edge of the aside is a 1px `--border`. Fill is `color-mix(in srgb, var(--bg) 76%, var(--panel))`. */
 const val FIRST_RUN_PREVIEW_ASIDE_RULE_DP = 1
-/** Fill is `color-mix(in srgb, var(--bg) 76%, var(--panel))`. */
 const val FIRST_RUN_PREVIEW_ASIDE_FILL_MIX = 0.76f
-/**
- * The heading is a `strong` with a 12px book icon, a 6px gap, and margin `0 4px 8px`.
- * It is 7.5px, weight 700, in `--text-soft`.
- */
-const val FIRST_RUN_PREVIEW_ASIDE_TITLE = "Meine Fächer"
-const val FIRST_RUN_PREVIEW_ASIDE_TITLE_WEIGHT = 700
-const val FIRST_RUN_PREVIEW_ASIDE_TITLE_GAP_DP = 6
-const val FIRST_RUN_PREVIEW_ASIDE_TITLE_ICON_DP = 12
-const val FIRST_RUN_PREVIEW_ASIDE_TITLE_MARGIN_INLINE_DP = 4
-const val FIRST_RUN_PREVIEW_ASIDE_TITLE_MARGIN_BOTTOM_DP = 8
 const val FIRST_RUN_PREVIEW_SPLIT_DP = 760
 const val FIRST_RUN_MEDIUM_DP = 980
 /** `.first-run-preview-body > aside strong` is 7.5px. */
@@ -440,6 +436,7 @@ const val FIRST_RUN_PREVIEW_RULE_MARGIN_BOTTOM_DP = 4
  * The stroke is 3.4 user units of `color-mix(in srgb, var(--accent) 78%, #222)`.
  */
 const val FIRST_RUN_PREVIEW_INK_VIEW_WIDTH = 330
+const val FIRST_RUN_PREVIEW_INK_VIEW_HEIGHT = 98
 const val FIRST_RUN_PREVIEW_INK_HEIGHT_DP = 98
 const val FIRST_RUN_PREVIEW_INK_WIDTH_DP = 3.4f
 const val FIRST_RUN_PREVIEW_INK_MIX = 0.78f
@@ -716,6 +713,27 @@ fun firstRunPreviewAsideFill(backgroundArgb: Int, panelArgb: Int): Int =
 /** Stroke of `.first-run-preview-ink path`: accent mixed 78% into #222. */
 fun firstRunPreviewInkStroke(accentArgb: Int): Int =
     mixArgb(accentArgb, FIRST_RUN_PREVIEW_INK_INTO_ARGB, FIRST_RUN_PREVIEW_INK_MIX)
+
+/**
+ * Default SVG placement, `xMidYMid meet`.
+ * The formula and the integral keep their shape. A wide sheet letterboxes them
+ * instead of stretching the strokes, and a 127px writing box does not squash the 150-unit viewBox.
+ */
+data class PreviewInkMeet(val scale: Float, val offsetX: Float, val offsetY: Float)
+
+fun previewInkMeet(widthPx: Float, heightPx: Float, viewWidth: Float, viewHeight: Float): PreviewInkMeet? {
+    if (widthPx <= 0f || heightPx <= 0f || viewWidth <= 0f || viewHeight <= 0f) return null
+    val scale = minOf(widthPx / viewWidth, heightPx / viewHeight)
+    if (!scale.isFinite() || scale <= 0f) return null
+    return PreviewInkMeet(
+        scale = scale,
+        offsetX = (widthPx - viewWidth * scale) / 2f,
+        offsetY = (heightPx - viewHeight * scale) / 2f,
+    )
+}
+
+/** A preview stroke is in viewBox units, so the meet scale is its pixel width. */
+fun previewInkStrokePx(strokeUnits: Float, scale: Float): Float = strokeUnits * scale
 
 /** Hit count on `.first-run-preview-search b`: accent mixed 78% into #333. */
 fun firstRunPreviewSearchHits(accentArgb: Int): Int =
