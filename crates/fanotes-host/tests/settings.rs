@@ -4,6 +4,41 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use fanotes_host::{Host, SecretStore};
 use serde_json::json;
 
+fn fresh_local_date() -> (i32, u32, u32) {
+    // Date-only reset markers are local midnight. A fixed October day ages out
+    // of the 24 hour window and stops proving that the form is accepted.
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as libc::time_t;
+    let mut time = unsafe { std::mem::zeroed::<libc::tm>() };
+    unsafe {
+        libc::localtime_r(&seconds, &mut time);
+    }
+    (
+        (time.tm_year + 1900) as i32,
+        (time.tm_mon + 1) as u32,
+        time.tm_mday as u32,
+    )
+}
+
+/// The first day of next month stays inside `Date.parse`'s future, so a
+/// year-month marker does not age out of the 24 hour window.
+fn fresh_future_year_month() -> (i32, u32) {
+    let (year, month, _) = fresh_local_date();
+    if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    }
+}
+
+fn month_abbrev(month: u32) -> &'static str {
+    [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ][(month as usize) - 1]
+}
+
 fn fresh_reset_time() -> String {
     let ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -608,7 +643,8 @@ fn a_reset_marker_with_a_year_and_month_wipes_the_profile() {
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
     let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
-    let created = "2026-11";
+    let (year, month) = fresh_future_year_month();
+    let created = format!("{year:04}-{month:02}");
     fs::write(
         &marker,
         format!(
@@ -629,7 +665,8 @@ fn a_reset_marker_with_a_year_wipes_the_profile() {
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
     let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
-    let created = "2027";
+    let (year, _, _) = fresh_local_date();
+    let created = format!("{}", year + 1);
     fs::write(
         &marker,
         format!(
@@ -650,7 +687,8 @@ fn a_reset_marker_with_a_year_and_month_before_the_clock_wipes_the_profile() {
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
     let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
-    let created = "2026-11T00:00:00Z";
+    let (year, month) = fresh_future_year_month();
+    let created = format!("{year:04}-{month:02}T00:00:00Z");
     fs::write(
         &marker,
         format!(
@@ -692,7 +730,8 @@ fn a_reset_marker_with_slashes_wipes_the_profile() {
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
     let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
-    let created = "2026/10/13";
+    let (year, month, day) = fresh_local_date();
+    let created = format!("{year}/{month:02}/{day:02}");
     fs::write(
         &marker,
         format!(
@@ -713,7 +752,8 @@ fn a_reset_marker_with_a_month_name_wipes_the_profile() {
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
     let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
-    let created = "Oct 13, 2026";
+    let (year, month, day) = fresh_local_date();
+    let created = format!("{} {day}, {year}", month_abbrev(month));
     fs::write(
         &marker,
         format!(
@@ -734,7 +774,8 @@ fn a_reset_marker_at_four_pm_wipes_the_profile() {
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
     let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
-    let created = "Oct 13, 2026 4:00 PM";
+    let (year, month, day) = fresh_local_date();
+    let created = format!("{} {day}, {year} 4:00 PM", month_abbrev(month));
     fs::write(
         &marker,
         format!(
