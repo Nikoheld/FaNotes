@@ -6,6 +6,7 @@
 - **Kalenderdatei.** Eine ICS-Datei mit Weltzeit oder einer Dauer landet auf der örtlichen Uhrzeit. Dieselbe Datei noch einmal importieren aktualisiert den Termin und nimmt abgesagte Einträge heraus, statt ihn zu verdoppeln.
 - **Bild einfügen.** Ein Screenshot aus der Zwischenablage landet auf der offenen Notiz, auch während der Cursor im Text steht. Text bleibt Text.
 - **Terminerinnerung.** Der Hinweis im Kalender folgt der Sprache der Oberfläche und nennt weitere Termine, die gleich beginnen.
+- **Karteikarten.** Nochmal legt die Karte hinter die anderen fälligen Karten, statt sie sofort wieder zu zeigen. Leertaste zeigt die Antwort, 1 bis 4 bewertet, und die Karte folgt der Sprache der Oberfläche.
 - **Android-Tablet.** Der Text liegt auf dem Papier, die Leiste klappt beim Schreiben ein, und der Radierer folgt der Spitze.
 - **Sync.** Der Abgleich zeigt den Fortschritt, und ein zweiter Start geht nicht verloren.
 - **Version.** Die Version lässt sich in GitHub Actions unter Update version setzen. Der Android-Release installiert das SDK, ohne am Lizenzdialog abzubrechen.
