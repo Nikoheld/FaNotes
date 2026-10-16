@@ -3856,17 +3856,18 @@ fn take_month_clock(
 ) -> Option<()> {
     let (body, embedded) = split_clock_tail(word);
     let mut time_fields = Vec::new();
+    // `16:00Z+5` splits into `16:00Z` and `+5`. The body sets UTC, then the
+    // tail replaces it. Applying the tail first lets `Z` wipe `+5`.
+    let mut pending_offset = None;
     if !embedded.is_empty() {
         if embedded.eq_ignore_ascii_case("Z") {
-            *offset = Some(0);
-            *minute_sign = 0;
+            pending_offset = Some((0, 0));
         } else {
             let parsed = parse_legacy_offset(embedded)?;
             for number in parsed.spilled {
                 push_date_number(dates, number)?;
             }
-            *offset = Some(parsed.minutes);
-            *minute_sign = parsed.minute_sign;
+            pending_offset = Some((parsed.minutes, parsed.minute_sign));
             time_fields = parsed.time_fields;
         }
     }
@@ -3950,6 +3951,10 @@ fn take_month_clock(
             return None;
         }
         break;
+    }
+    if let Some((minutes, sign)) = pending_offset {
+        *offset = Some(minutes);
+        *minute_sign = sign;
     }
     for number in time_fields {
         time.add(number)?;
@@ -4235,7 +4240,9 @@ fn fold_spaced_numeric_offset(trimmed: &str) -> Option<String> {
         return None;
     }
     // `16:00+5 -30` keeps `-30`. The sign glued to the clock was replaced.
-    let clock = slash_clock(strip_glued_offset(words[1]))?;
+    // `16:00Z +5` drops `Z`. The number is the later zone.
+    let clock_word = words[1].strip_suffix(['Z', 'z']).unwrap_or(words[1]);
+    let clock = slash_clock(strip_glued_offset(clock_word))?;
     let (delta, suffix) = fold_offset_days(parsed.minutes)?;
     let date = shift_hyphen_date(words[0], delta)?;
     Some(format!("{date}T{clock}{suffix}"))
@@ -7466,6 +7473,58 @@ mod tests {
             );
             assert_eq!(
                 super::canonical_iso("2026-10-13 16:00 EST GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z+5").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z-5").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z+05:00").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z+0500").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z+5:30").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z +5").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z -5").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z EST GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z+5 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00Z+24").as_deref(),
+                Some("2026-10-12T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00Z2026-10-13").as_deref(),
                 Some("2026-10-13T16:00:00.000Z")
             );
             assert_eq!(
