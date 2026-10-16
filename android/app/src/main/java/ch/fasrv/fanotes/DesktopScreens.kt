@@ -141,8 +141,12 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
@@ -2358,7 +2362,55 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
         anchor = next
         if (view == "month") month = YearMonth.from(next)
     }
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    fun openNewEvent() {
+        val now = java.time.LocalTime.now()
+        val snapped = ch.fasrv.fanotes.desk.snapCalendarClock(now.hour, now.minute)
+        val start = LocalDate.now().plusDays(snapped.dayOffset.toLong()).atTime(snapped.hour, snapped.minute)
+        editor = draftForCreate(document, start.toLocalDate(), start, start.plusHours(1), false)
+    }
+    val calendarFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { calendarFocus.requestFocus() } }
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .focusRequester(calendarFocus)
+            .focusable()
+            .onKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                val name = when (event.key) {
+                    Key.T -> "t"
+                    Key.N -> "n"
+                    Key.DirectionLeft -> "left"
+                    Key.DirectionRight -> "right"
+                    Key.One, Key.NumPad1 -> "1"
+                    Key.Two, Key.NumPad2 -> "2"
+                    Key.Three, Key.NumPad3 -> "3"
+                    Key.Four, Key.NumPad4 -> "4"
+                    Key.Five, Key.NumPad5 -> "5"
+                    else -> return@onKeyEvent false
+                }
+                val action = ch.fasrv.fanotes.desk.calendarKeyAction(
+                    name,
+                    event.isCtrlPressed,
+                    event.isAltPressed,
+                    event.isMetaPressed,
+                ) ?: return@onKeyEvent false
+                when (action) {
+                    "today" -> {
+                        anchor = LocalDate.now()
+                        month = YearMonth.now()
+                    }
+                    "new" -> openNewEvent()
+                    "previous" -> shiftCalendar(-1)
+                    "next" -> shiftCalendar(1)
+                    "day", "three", "week", "month", "agenda" -> {
+                        view = action
+                        if (action == "month") month = YearMonth.from(anchor)
+                    }
+                }
+                true
+            },
+    ) {
         val showSide = ch.fasrv.fanotes.desk.calendarShowsSide(maxWidth.value.toInt())
         Row(Modifier.fillMaxSize()) {
             if (showSide) {
@@ -2494,12 +2546,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                     .height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp)
                     .clip(calShape)
                     .background(MaterialTheme.colorScheme.primary)
-                    .clickable {
-                        val now = java.time.LocalTime.now()
-                        val snapped = ch.fasrv.fanotes.desk.snapCalendarClock(now.hour, now.minute)
-                        val start = LocalDate.now().plusDays(snapped.dayOffset.toLong()).atTime(snapped.hour, snapped.minute)
-                        editor = draftForCreate(document, start.toLocalDate(), start, start.plusHours(1), false)
-                    }
+                    .clickable { openNewEvent() }
                     .padding(horizontal = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
