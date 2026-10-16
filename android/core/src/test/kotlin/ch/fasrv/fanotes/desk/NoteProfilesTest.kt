@@ -66,5 +66,12 @@ class NoteProfilesTest {
         assertEquals("1 Treffer", FIRST_RUN_PREVIEW_HITS)
         assertEquals("Handschrift", FIRST_RUN_PREVIEW_INK)
         assertEquals("Vorschau von FaNotes", FIRST_RUN_PREVIEW_LABEL)
+        assertEquals("Analysis.md", FIRST_RUN_WRITING_FILE)
+        assertEquals("Integralrechnung", FIRST_RUN_WRITING_HEADING)
+        assertEquals("Der Flächeninhalt lässt sich mit dem bestimmten Integral berechnen.", FIRST_RUN_WRITING_TYPED)
+        assertEquals("Im Hintergrund erkannt", FIRST_RUN_WRITING_RECOGNIZED)
+        assertEquals("∫₀¹ (x + 2) dx = 2,5", FIRST_RUN_WRITING_FORMULA)
+        assertEquals("Optional umwandeln", FIRST_RUN_WRITING_CONVERT)
+        assertEquals("Vorschau einer Seite mit Text und Handschrift", FIRST_RUN_WRITING_PREVIEW_LABEL)
     }
 }
