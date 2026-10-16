@@ -2347,6 +2347,12 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     fun ignoreSpellingWord(word: String) {
         if (spellingSession.ignore(word)) spellingEpoch.value += 1
     }
+
+    fun spellingDeclined(word: String) = spellingSession.isDeclined(word)
+
+    fun declineAutocorrectWord(word: String) {
+        spellingSession.decline(word)
+    }
     val customCss = MutableStateFlow(graph.readCustomCss())
     val splitPath = MutableStateFlow<String?>(null)
     val unsaved = MutableStateFlow(false)
