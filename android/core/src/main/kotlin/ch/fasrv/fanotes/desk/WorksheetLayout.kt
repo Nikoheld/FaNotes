@@ -179,6 +179,114 @@ const val BOX_FIELD_REMOVE_OUTSET_DP = 9
 const val BOX_FIELD_BG_ALPHA = 0.72f
 const val BOX_FIELD_FOCUS_BG_ALPHA = 0.94f
 
+/**
+ * `.worksheet-textbox textarea` resting shadow: `0 2px 8px rgba(0,0,0,.08)`.
+ * `.worksheet-textbox textarea:focus` replaces it with
+ * `0 0 0 3px color-mix(in srgb, var(--paper-accent-readable) 15%, transparent), 0 4px 14px rgba(0,0,0,.12)`.
+ */
+const val BOX_FIELD_SHADOW_Y_DP = 2
+const val BOX_FIELD_SHADOW_BLUR_DP = 8
+const val BOX_FIELD_SHADOW_ALPHA = 0.08f
+const val BOX_FIELD_FOCUS_RING_DP = 3
+const val BOX_FIELD_FOCUS_RING_ALPHA = 0.15f
+const val BOX_FIELD_FOCUS_SHADOW_Y_DP = 4
+const val BOX_FIELD_FOCUS_SHADOW_BLUR_DP = 14
+const val BOX_FIELD_FOCUS_SHADOW_ALPHA = 0.12f
+
+/** `.worksheet-textbox > button` shadow: `0 4px 10px rgba(0,0,0,.16)`. */
+const val BOX_REMOVE_SHADOW_Y_DP = 4
+const val BOX_REMOVE_SHADOW_BLUR_DP = 10
+const val BOX_REMOVE_SHADOW_ALPHA = 0.16f
+
+/** Resting border: `color-mix(in srgb, var(--paper-accent-readable) 34%, rgba(45,48,60,.18))`. */
+const val BOX_FIELD_REST_BORDER_WEIGHT = 0.34f
+const val BOX_FIELD_REST_BORDER_RED = 45
+const val BOX_FIELD_REST_BORDER_GREEN = 48
+const val BOX_FIELD_REST_BORDER_BLUE = 60
+const val BOX_FIELD_REST_BORDER_ALPHA = 0.18f
+
+data class WorksheetBoxChrome(
+    val shadowYDp: Int,
+    val shadowBlurDp: Int,
+    val shadowAlpha: Float,
+    val ringDp: Int,
+)
+
+/** Focused textarea uses the ring and the heavier shadow. A resting field has no ring. */
+fun worksheetBoxFieldChrome(focused: Boolean): WorksheetBoxChrome = if (focused) {
+    WorksheetBoxChrome(
+        BOX_FIELD_FOCUS_SHADOW_Y_DP,
+        BOX_FIELD_FOCUS_SHADOW_BLUR_DP,
+        BOX_FIELD_FOCUS_SHADOW_ALPHA,
+        BOX_FIELD_FOCUS_RING_DP,
+    )
+} else {
+    WorksheetBoxChrome(BOX_FIELD_SHADOW_Y_DP, BOX_FIELD_SHADOW_BLUR_DP, BOX_FIELD_SHADOW_ALPHA, 0)
+}
+
+/** Black shadow colour at the desktop alpha. */
+fun worksheetBoxShadowColor(alpha: Float): Int {
+    val channel = (alpha.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
+    return channel shl 24
+}
+
+/**
+ * `color-mix(in srgb, accent 15%, transparent)` keeps the accent channels and uses 15% alpha.
+ */
+fun worksheetBoxFocusRingColor(accent: Int): Int {
+    val channel = (BOX_FIELD_FOCUS_RING_ALPHA * 255f).roundToInt().coerceIn(0, 255)
+    return (channel shl 24) or (accent and 0x00FFFFFF)
+}
+
+/**
+ * Premultiplied sRGB mix. The accent weight is 34% and the rest is `rgba(45,48,60,.18)`.
+ */
+fun worksheetBoxRestBorder(accent: Int): Int {
+    val weight = BOX_FIELD_REST_BORDER_WEIGHT
+    val rest = 1f - weight
+    val accentAlpha = ((accent ushr 24) and 0xFF) / 255f
+    val baseAlpha = BOX_FIELD_REST_BORDER_ALPHA
+    val alpha = weight * accentAlpha + rest * baseAlpha
+    if (alpha <= 0f) return 0
+    fun mix(accentChannel: Int, baseChannel: Int): Int {
+        val value = (weight * accentChannel * accentAlpha + rest * baseChannel * baseAlpha) / alpha
+        return value.roundToInt().coerceIn(0, 255)
+    }
+    val a = (alpha * 255f).roundToInt().coerceIn(0, 255)
+    val r = mix((accent ushr 16) and 0xFF, BOX_FIELD_REST_BORDER_RED)
+    val g = mix((accent ushr 8) and 0xFF, BOX_FIELD_REST_BORDER_GREEN)
+    val b = mix(accent and 0xFF, BOX_FIELD_REST_BORDER_BLUE)
+    return (a shl 24) or (r shl 16) or (g shl 8) or b
+}
+
+data class WorksheetFocusRing(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+    val radius: Float,
+    val stroke: Float,
+)
+
+/**
+ * The 3px focus ring sits entirely outside the textarea border.
+ * Null when there is no ring, so a resting field does not paint one.
+ */
+fun worksheetFocusRing(
+    left: Float,
+    top: Float,
+    right: Float,
+    bottom: Float,
+    cornerPx: Float,
+    ringPx: Float,
+): WorksheetFocusRing? {
+    if (!left.isFinite() || !top.isFinite() || !right.isFinite() || !bottom.isFinite() || !ringPx.isFinite()) return null
+    if (ringPx <= 0f || right - left < 1f || bottom - top < 1f) return null
+    val half = ringPx / 2f
+    val corner = if (cornerPx.isFinite()) cornerPx.coerceAtLeast(0f) else 0f
+    return WorksheetFocusRing(left - half, top - half, right + half, bottom + half, corner + half, ringPx)
+}
+
 data class WorksheetFieldRect(
     val left: Float,
     val top: Float,

@@ -2882,6 +2882,7 @@ private fun PageSurface(
             }
             val pen = ch.fasrv.fanotes.desk.penSettings(model.effectiveDesk())
             page.ink.accentColor = android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccent(model.effectiveDesk()["accent"]))
+            page.refreshBoxChrome()
             page.ink.shapeSnapSensitivity = pen.shapeSnap
             page.ink.scribbleSensitivity = pen.scribble
             page.ink.strokeSmoothing = pen.smoothing.toFloat()
