@@ -4954,12 +4954,28 @@ private fun WelcomePreview(modifier: Modifier) {
             // The body does not clip, so the sheet shadow can paint. The window clip above still cuts blur that leaves the window.
             Row(Modifier.fillMaxWidth().heightIn(min = bodyMin)) {
                 Column(
-                    Modifier.width(aside).fillMaxHeight().padding(
-                        start = asidePad.start.dp,
-                        top = asidePad.top.dp,
-                        end = asidePad.end.dp,
-                        bottom = asidePad.bottom.dp,
-                    ),
+                    Modifier
+                        .width(aside)
+                        .fillMaxHeight()
+                        .background(
+                            Color(
+                                ch.fasrv.fanotes.desk.firstRunPreviewAsideFill(
+                                    MaterialTheme.colorScheme.background.toArgb(),
+                                    MaterialTheme.colorScheme.surface.toArgb(),
+                                ),
+                            ),
+                        )
+                        .drawBehind {
+                            val stroke = 1.dp.toPx()
+                            val x = size.width - stroke / 2f
+                            drawLine(headerBorder, Offset(x, 0f), Offset(x, size.height), strokeWidth = stroke)
+                        }
+                        .padding(
+                            start = asidePad.start.dp,
+                            top = asidePad.top.dp,
+                            end = asidePad.end.dp,
+                            bottom = asidePad.bottom.dp,
+                        ),
                     verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_GAP_DP.dp),
                 ) {
                     Row(
@@ -7988,6 +8004,16 @@ private fun SettingsPage(
                             Switch(
                                 checked = settings["spellcheck"] != "off",
                                 onCheckedChange = { model.updateDesk("spellcheck", if (it) "on" else "off") },
+                            )
+                        }
+                        SettingRow(
+                            "Autokorrektur",
+                            "Ersetzt einen eindeutigen Tippfehler, sobald das Wort mit Leerzeichen oder Satzzeichen endet. Rückschritt direkt danach stellt das getippte Wort wieder her.",
+                        ) {
+                            Switch(
+                                checked = settings["spellcheck"] != "off" && settings["autocorrect"] != "off",
+                                enabled = settings["spellcheck"] != "off",
+                                onCheckedChange = { model.updateDesk("autocorrect", if (it) "on" else "off") },
                             )
                         }
                         SettingRow("Wortzahl in Statusleiste") {
