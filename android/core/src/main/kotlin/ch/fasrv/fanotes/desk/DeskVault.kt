@@ -497,6 +497,14 @@ const val CAL_CHIP_ALPHA = 0.22f
 const val CAL_MORE = "weitere"
 const val CAL_TOOL_DP = 30
 const val CAL_VIEW_RADIUS_DP = 9
+/**
+ * Desktop `.cal-toolbar` gap. The shared flex rule is 8px; the later toolbar
+ * rule sets 6px and wins. The toolbar stays one line (`flex-wrap` is not set).
+ */
+const val CAL_TOOLBAR_GAP_DP = 6
+
+/** Desktop `.cal-search` is `flex: 1` and cannot shrink below this. */
+const val CAL_SEARCH_MIN_DP = 120
 const val CAL_SEARCH = "Termine suchen"
 const val CAL_ALL_DAY = "Ganztägig"
 const val CAL_DAILY = "Tagesnotiz"

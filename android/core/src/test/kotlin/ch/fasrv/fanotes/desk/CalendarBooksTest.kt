@@ -99,6 +99,12 @@ class CalendarBooksTest {
     }
 
     @Test
+    fun calendarToolbarStaysOneLineAndTheSearchCanShrink() {
+        assertEquals(6, CAL_TOOLBAR_GAP_DP)
+        assertEquals(120, CAL_SEARCH_MIN_DP)
+    }
+
+    @Test
     fun monthRowsShareTheLeftoverHeight() {
         assertEquals(88, monthRowHeightDp(0, minDp = 88))
         assertEquals(100, monthRowHeightDp(600, minDp = 88))
