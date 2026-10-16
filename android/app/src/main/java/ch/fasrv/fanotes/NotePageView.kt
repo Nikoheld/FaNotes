@@ -56,6 +56,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private val editor = object : EditText(context) {
         private var detailsDownX = 0f
         private var detailsDownY = 0f
+        private val linkPointer = PreviewLinkPointer()
+
+        fun bindLinkPointer() {
+            text?.bindPreviewLinkPointer(linkPointer)
+        }
         private var tabFocusMode = false
         private val history = ch.fasrv.fanotes.desk.EditorHistory()
         private var cursorBeforeEdit = 0
@@ -151,13 +156,23 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 MotionEvent.ACTION_DOWN -> {
                     detailsDownX = event.x
                     detailsDownY = event.y
+                    followPreviewLinkPointer(linkPointer, event, true)
                 }
+                MotionEvent.ACTION_MOVE -> followPreviewLinkPointer(linkPointer, event, true)
                 MotionEvent.ACTION_UP -> {
                     val tapped = kotlin.math.abs(event.x - detailsDownX) < 24f && kotlin.math.abs(event.y - detailsDownY) < 24f
-                    if (tapped && (followRenderedLink(event.x, event.y) || toggleDetailsSummary(event.x, event.y) || toggleTaskBox(event.x, event.y))) return true
+                    val handled = tapped && (followRenderedLink(event.x, event.y) || toggleDetailsSummary(event.x, event.y) || toggleTaskBox(event.x, event.y))
+                    followPreviewLinkPointer(linkPointer, event, false)
+                    if (handled) return true
                 }
+                MotionEvent.ACTION_CANCEL -> followPreviewLinkPointer(linkPointer, event, false)
             }
             return super.onTouchEvent(event)
+        }
+
+        override fun onHoverEvent(event: MotionEvent): Boolean {
+            followPreviewLinkPointer(linkPointer, event, event.actionMasked != MotionEvent.ACTION_HOVER_EXIT)
+            return super.onHoverEvent(event)
         }
 
         override fun onTextContextMenuItem(id: Int): Boolean {
@@ -1070,6 +1085,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 ink.paperImages,
                 imageColumn,
             )
+            editor.bindLinkPointer()
         } finally {
             paintingPreview = false
         }

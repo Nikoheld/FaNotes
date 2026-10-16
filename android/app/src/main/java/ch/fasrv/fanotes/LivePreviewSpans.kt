@@ -215,6 +215,51 @@ private fun spanFor(
 }
 
 /**
+ * Pointer over one rendered markdown-preview link. Empty coordinates mean the
+ * pointer has left, so every link stays on the resting rule.
+ */
+internal class PreviewLinkPointer {
+    var x = Float.NaN
+        private set
+    var y = Float.NaN
+        private set
+
+    fun place(x: Float, y: Float) {
+        this.x = x
+        this.y = y
+    }
+
+    fun clear() {
+        x = Float.NaN
+        y = Float.NaN
+    }
+
+    fun hits(rect: RectF): Boolean {
+        if (x.isNaN() || y.isNaN()) return false
+        return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+    }
+}
+
+internal fun Editable.bindPreviewLinkPointer(pointer: PreviewLinkPointer) {
+    for (span in getSpans(0, length, DetailsSummarySpan::class.java)) span.pointer = pointer
+}
+
+internal fun android.widget.TextView.followPreviewLinkPointer(
+    pointer: PreviewLinkPointer,
+    event: android.view.MotionEvent,
+    active: Boolean,
+) {
+    val layoutX = event.x - totalPaddingLeft + scrollX
+    val layoutY = event.y - totalPaddingTop + scrollY
+    val value = editableText ?: return
+    val spans = value.getSpans(0, value.length, DetailsSummarySpan::class.java)
+    val before = spans.firstNotNullOfOrNull { it.hoveredLinkKey() }
+    if (active) pointer.place(layoutX, layoutY) else pointer.clear()
+    val after = spans.firstNotNullOfOrNull { it.hoveredLinkKey() }
+    if (before != after) invalidate()
+}
+
+/**
  * Desktop paper details card: a rounded panel, a chevron, and „Bearbeiten“.
  * An open block keeps the summary band washed and lets the body continue below.
  */
@@ -236,6 +281,7 @@ internal class DetailsSummarySpan(
     private val imageColumnPx: Float = 0f,
 ) : ReplacementSpan(), LineBackgroundSpan, LivePreviewSpan {
     private val linkHits = ArrayList<Pair<RectF, String>>()
+    internal var pointer: PreviewLinkPointer? = null
     private val footnoteRefs = ArrayList<Pair<RectF, Int>>()
     private val footnoteReturns = ArrayList<Pair<RectF, Int>>()
     private val lineTops = HashMap<Int, Float>()
@@ -262,6 +308,12 @@ internal class DetailsSummarySpan(
             x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
         }?.second ?: return null
         return followedTarget(target)
+    }
+
+    internal fun hoveredLinkKey(): String? {
+        val aim = pointer ?: return null
+        val hit = linkHits.firstOrNull { (rect, _) -> aim.hits(rect) } ?: return null
+        return "${hit.first.left}:${hit.first.top}:${hit.first.right}:${hit.second}"
     }
 
     override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
@@ -721,10 +773,14 @@ internal class DetailsSummarySpan(
                         }
                     }
                     if (link) {
-                        val offset = paperLinkUnderlineOffset(textSizePx)
-                        val thickness = (textSizePx / 16f).coerceAtLeast(1f)
-                        paint.color = paperLinkUnderlineArgb(accent)
-                        canvas.drawRect(cursor, y + offset, cursor + width, y + offset + thickness, paint)
+                        // `.markdown-preview a` is a 1px rule at 45%. Hover paints that rule solid.
+                        val metrics = paint.fontMetrics
+                        val rect = RectF(cursor, y + metrics.ascent, cursor + width, y + metrics.descent)
+                        val thickness = ch.fasrv.fanotes.desk.previewLinkBorderPx(textSizePx)
+                        val ink = paint.color
+                        paint.color = ch.fasrv.fanotes.desk.previewLinkUnderlineArgb(accent, pointer?.hits(rect) == true)
+                        canvas.drawRect(rect.left, rect.bottom - thickness, rect.right, rect.bottom, paint)
+                        paint.color = ink
                         rememberLink(active, cursor, width, y, paint)
                     }
                 }

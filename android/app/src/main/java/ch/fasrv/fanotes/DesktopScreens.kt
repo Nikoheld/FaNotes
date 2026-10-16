@@ -151,6 +151,9 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.SubcomposeLayout
@@ -6213,31 +6216,53 @@ private fun PreviewRich(
         }
         annotated.spanStyles.forEach { addStyle(it.item, it.start, it.end) }
     }
-    var laid by remember(shown) { mutableStateOf<TextLayoutResult?>(null) }
+    val laidState = remember { mutableStateOf<TextLayoutResult?>(null) }
+    var hotLink by remember(text, marks) { mutableStateOf<Int?>(null) }
+    val hot = hotLink
     Text(
         shown,
-        modifier = modifier.drawBehind {
-            val result = laid ?: return@drawBehind
-            val stroke = 1.dp.toPx()
-            val ink = link.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_LINK_UNDERLINE)
-            for (mark in display.marks) {
-                if (mark.kind != "link") continue
-                val start = mark.start.coerceIn(0, shown.length)
-                val end = mark.end.coerceIn(start, shown.length)
-                if (end <= start) continue
-                val first = result.getLineForOffset(start)
-                val last = result.getLineForOffset(end - 1)
-                for (line in first..last) {
-                    val lineStart = maxOf(start, result.getLineStart(line))
-                    val lineEnd = minOf(end, result.getLineEnd(line, true))
-                    if (lineEnd <= lineStart) continue
-                    val left = result.getHorizontalPosition(lineStart, true)
-                    val right = result.getHorizontalPosition(lineEnd, true)
-                    val y = result.getLineBottom(line) - stroke
-                    drawLine(ink, Offset(left, y), Offset(right, y), stroke)
+        modifier = modifier
+            .pointerInput(text, marks) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Main)
+                        val change = event.changes.firstOrNull()
+                        val position = change?.position
+                        val result = laidState.value
+                        if (change == null || position == null || result == null || event.type == PointerEventType.Exit) {
+                            hotLink = null
+                            continue
+                        }
+                        val hoverTool = change.type == PointerType.Mouse ||
+                            change.type == PointerType.Stylus ||
+                            change.type == PointerType.Eraser
+                        val over = change.pressed || hoverTool
+                        hotLink = if (over) previewLinkHotIndex(result, display.marks, position) else null
+                    }
                 }
             }
-        },
+            .drawBehind {
+                val result = laidState.value ?: return@drawBehind
+                val stroke = ch.fasrv.fanotes.desk.PREVIEW_LINK_BORDER_DP.dp.toPx()
+                display.marks.forEachIndexed { index, mark ->
+                    if (mark.kind != "link") return@forEachIndexed
+                    val ink = link.copy(alpha = ch.fasrv.fanotes.desk.previewLinkChrome(index == hot).alpha)
+                    val start = mark.start.coerceIn(0, shown.length)
+                    val end = mark.end.coerceIn(start, shown.length)
+                    if (end <= start) return@forEachIndexed
+                    val first = result.getLineForOffset(start)
+                    val last = result.getLineForOffset((end - 1).coerceAtLeast(start))
+                    for (line in first..last) {
+                        val lineStart = maxOf(start, result.getLineStart(line))
+                        val lineEnd = minOf(end, result.getLineEnd(line, true))
+                        if (lineEnd <= lineStart) continue
+                        val left = result.getHorizontalPosition(lineStart, true)
+                        val right = result.getHorizontalPosition(lineEnd, true)
+                        val y = result.getLineBottom(line) - stroke
+                        drawLine(ink, Offset(left, y), Offset(right, y), stroke)
+                    }
+                }
+            },
         color = color,
         fontSize = (base * scale).sp,
         fontWeight = fontWeight,
@@ -6247,10 +6272,36 @@ private fun PreviewRich(
         textAlign = textAlign,
         inlineContent = chips,
         onTextLayout = {
-            laid = it
+            laidState.value = it
             onTextLayout(it)
         },
     )
+}
+
+private fun previewLinkHotIndex(
+    result: TextLayoutResult,
+    marks: List<ch.fasrv.fanotes.desk.DetailsInline>,
+    position: Offset,
+): Int? {
+    if (position.y < 0f || position.y > result.size.height.toFloat()) return null
+    val length = result.layoutInput.text.length
+    if (length == 0) return null
+    val offset = result.getOffsetForPosition(position).coerceIn(0, length)
+    val index = ch.fasrv.fanotes.desk.previewLinkIndexAt(marks, offset)
+        ?: ch.fasrv.fanotes.desk.previewLinkIndexAt(marks, offset - 1)
+        ?: return null
+    val mark = marks[index]
+    val probe = offset.coerceIn(mark.start, (mark.end - 1).coerceAtLeast(mark.start))
+    if (probe !in 0 until length) return null
+    val line = result.getLineForOffset(probe)
+    val lineStart = maxOf(mark.start, result.getLineStart(line))
+    val lineEnd = minOf(mark.end, result.getLineEnd(line, true))
+    if (lineEnd <= lineStart) return null
+    val left = result.getHorizontalPosition(lineStart, true)
+    val right = result.getHorizontalPosition(lineEnd, true)
+    if (position.x < minOf(left, right) || position.x > maxOf(left, right)) return null
+    if (position.y < result.getLineTop(line) || position.y > result.getLineBottom(line)) return null
+    return index
 }
 
 private fun previewAnnotated(
