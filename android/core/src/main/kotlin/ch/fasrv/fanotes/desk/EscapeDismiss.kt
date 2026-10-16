@@ -50,10 +50,10 @@ fun escapeDismisses(layer: EscapeLayer): String? {
     if (layer.placingSection) return "placing-section"
     if (layer.selectedLink) return "selected-link"
     if (layer.worksheetImport) return "worksheet"
+    if (layer.settings || layer.destination == "settings") return "settings"
     if (layer.ai || layer.destination == "ai") return "ai"
     if (layer.palette) return "palette"
     if (layer.destination == "search") return "search"
-    if (layer.settings || layer.destination == "settings") return "settings"
     when (layer.destination) {
         "calendar" -> return "calendar"
         "tasks" -> return "tasks"
