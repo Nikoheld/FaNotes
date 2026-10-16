@@ -90,8 +90,24 @@ class NoteProfilesTest {
         assertEquals(30, firstRunColumnGap(3, 760))
         assertEquals(28, firstRunColumnGap(1, 900))
         assertEquals(35, firstRunColumnGap(3, 900))
-        assertEquals(45, firstRunColumnGap(0, 1000))
-        assertEquals(45, firstRunColumnGap(3, 1180))
+        assertEquals(70, firstRunColumnGap(0, 1000))
+        assertEquals(83, firstRunColumnGap(3, 1180))
+    }
+
+    @Test
+    fun theWideFirstRunGapFollowsTheDesktopClamp() {
+        assertEquals(70, firstRunColumnGap(0, 1000))
+        assertEquals(83, firstRunColumnGap(0, 1180))
+        assertEquals(83, firstRunColumnGap(1, 1180))
+        assertEquals(83, firstRunColumnGap(2, 1180))
+        assertEquals(100, firstRunColumnGap(0, 2000))
+        assertEquals(100, firstRunColumnGap(1, 2000))
+        assertEquals(100, firstRunColumnGap(2, 2000))
+        assertEquals(105, firstRunColumnGap(3, 2000))
+        assertEquals(74, firstRunColumnGap(0, 1050))
+        assertEquals(30, firstRunColumnGap(3, 640))
+        assertEquals(28, firstRunColumnGap(1, 900))
+        assertEquals(35, firstRunColumnGap(3, 900))
     }
 
     @Test
