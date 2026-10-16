@@ -1,6 +1,7 @@
 package ch.fasrv.fanotes.desk
 
 import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
  * Arrow keys in the desktop command palette.
@@ -44,6 +45,15 @@ const val PALETTE_FOOTER_DP = 30
 const val PALETTE_EMPTY_PAD_TOP_DP = 50
 const val PALETTE_KBD_RADIUS_DP = 5
 const val PALETTE_GROUP_TRACKING = 0.1f
+
+/** The palette sits 13% down the window. The later pass uses a 16×70px shadow at 16% black. */
+const val PALETTE_TOP_FRACTION = 0.13f
+const val PALETTE_SHADOW_Y_DP = 16
+const val PALETTE_SHADOW_BLUR_DP = 70
+const val PALETTE_SHADOW_ALPHA = 0.16f
+const val PALETTE_SCRIM = 0x590F0F0F
+
+fun paletteTopDp(windowHeightDp: Int) = (windowHeightDp.coerceAtLeast(0) * PALETTE_TOP_FRACTION).roundToInt()
 
 /**
  * One command in the desktop palette: group, detail, shortcut, and the extra
