@@ -171,6 +171,30 @@ const val HOMEWORK_COLLAPSE = "einklappen"
 const val HOMEWORK_EXPAND = "anzeigen"
 const val HOMEWORK_EMPTY_TITLE = "Noch keine Einträge"
 const val HOMEWORK_EMPTY_BODY = "Lege deine erste Hausaufgabe oder den nächsten Termin oben an."
+const val HOMEWORK_CAL_RADIUS_DP = 12
+const val HOMEWORK_CAL_PAD_DP = 12
+const val HOMEWORK_DAY_RADIUS_DP = 10
+const val HOMEWORK_DAY_MIN_DP = 86
+const val HOMEWORK_WEEK_DAY_MIN_DP = 150
+const val HOMEWORK_DAY_PAD_DP = 7
+const val HOMEWORK_DAY_GAP_DP = 6
+const val HOMEWORK_NAV_DP = 32
+const val HOMEWORK_CHIP_RADIUS_DP = 5
+const val HOMEWORK_DAY_MONTH_LIMIT = 3
+const val HOMEWORK_DAY_WEEK_LIMIT = 8
+const val HOMEWORK_PREVIOUS = "Vorheriger Zeitraum"
+const val HOMEWORK_NEXT = "Nächster Zeitraum"
+
+fun homeworkDayMinDp(view: String): Int = if (view == "week") HOMEWORK_WEEK_DAY_MIN_DP else HOMEWORK_DAY_MIN_DP
+
+fun homeworkDayLimit(view: String): Int = if (view == "week") HOMEWORK_DAY_WEEK_LIMIT else HOMEWORK_DAY_MONTH_LIMIT
+
+/** High wins over an appointment fill, matching the later desktop chip rule. Done stays a separate treatment. */
+fun homeworkDayChip(kind: String, priority: String): String = when {
+    priority == "high" -> "high"
+    kind == "appointment" -> "appointment"
+    else -> "open"
+}
 
 private val HOMEWORK_DUE_FORMAT = DateTimeFormatter.ofPattern("EEE, dd. MMM", Locale.forLanguageTag("de-CH"))
 

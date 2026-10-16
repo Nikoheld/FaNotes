@@ -1340,51 +1340,113 @@ fun HomeworkScreen(model: FaNotesViewModel) {
             if (planner != "list") {
                 val days = ch.fasrv.fanotes.desk.homeworkPlannerDays(cursor, planner)
                 val byDate = shownTasks.filter { it.dueDate != null }.groupBy { it.dueDate }
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-                    TextButton(onClick = { cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, -1) }) { Text("‹") }
-                    Text(ch.fasrv.fanotes.desk.homeworkPlannerLabel(cursor, planner), modifier = Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.SemiBold)
-                    TextButton(onClick = { cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, 1) }) { Text("›") }
-                    TextButton(onClick = { cursor = LocalDate.now() }) { Text("Heute") }
-                }
-                Row(Modifier.fillMaxWidth()) {
-                    ch.fasrv.fanotes.desk.homeworkWeekdays().forEach { label ->
-                        Text(label, modifier = Modifier.weight(1f), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                val calShape = RoundedCornerShape(ch.fasrv.fanotes.desk.HOMEWORK_CAL_RADIUS_DP.dp)
+                val dayShape = RoundedCornerShape(ch.fasrv.fanotes.desk.HOMEWORK_DAY_RADIUS_DP.dp)
+                val navShape = RoundedCornerShape(6.dp)
+                val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+                val limit = ch.fasrv.fanotes.desk.homeworkDayLimit(planner)
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp, bottom = 18.dp)
+                        .clip(calShape)
+                        .border(1.dp, rule, calShape)
+                        .background(LocalStatusInk.current.panelStrong.copy(alpha = 0.82f))
+                        .padding(ch.fasrv.fanotes.desk.HOMEWORK_CAL_PAD_DP.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Box(
+                            Modifier
+                                .size(ch.fasrv.fanotes.desk.HOMEWORK_NAV_DP.dp)
+                                .clip(navShape)
+                                .border(1.dp, rule, navShape)
+                                .background(MaterialTheme.colorScheme.surface)
+                                .clickable(onClickLabel = ch.fasrv.fanotes.desk.HOMEWORK_PREVIOUS) {
+                                    cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, -1)
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) { Text("‹") }
+                        Text(
+                            ch.fasrv.fanotes.desk.homeworkPlannerLabel(cursor, planner),
+                            modifier = Modifier.weight(1f),
+                            textAlign = TextAlign.Center,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Box(
+                            Modifier
+                                .size(ch.fasrv.fanotes.desk.HOMEWORK_NAV_DP.dp)
+                                .clip(navShape)
+                                .border(1.dp, rule, navShape)
+                                .background(MaterialTheme.colorScheme.surface)
+                                .clickable(onClickLabel = ch.fasrv.fanotes.desk.HOMEWORK_NEXT) {
+                                    cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, 1)
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) { Text("›") }
+                        Text(
+                            "Heute",
+                            color = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f)),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight(700),
+                            modifier = Modifier.clickable { cursor = LocalDate.now() },
+                        )
                     }
-                }
-                days.chunked(7).forEach { week ->
-                    Row(Modifier.fillMaxWidth()) {
-                        week.forEach { day ->
-                            val items = byDate[day.date.toString()].orEmpty()
-                            Column(
-                                Modifier
-                                    .weight(1f)
-                                    .heightIn(min = if (planner == "week") 72.dp else 48.dp)
-                                    .clickable { due = day.date.toString() }
-                                    .padding(2.dp),
-                            ) {
-                                Text(
-                                    day.date.dayOfMonth.toString(),
-                                    fontSize = 12.sp,
-                                    color = when {
-                                        day.date == LocalDate.now() -> MaterialTheme.colorScheme.primary
-                                        day.outside -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
-                                        else -> MaterialTheme.colorScheme.onSurface
-                                    },
-                                    fontWeight = if (day.date == LocalDate.now()) FontWeight.Bold else FontWeight.Normal,
-                                )
-                                items.take(if (planner == "week") 8 else 3).forEach { task ->
-                                    val clock = task.dueTime?.takeIf { it.isNotBlank() }
-                                    Text(
-                                        if (clock == null) task.title else "$clock · ${task.title}",
-                                        fontSize = 10.sp,
-                                        maxLines = 1,
-                                        fontWeight = if (task.priority == "high") FontWeight.Bold else FontWeight.Normal,
-                                        textDecoration = if (task.done) TextDecoration.LineThrough else null,
-                                        color = if (task.done) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f) else MaterialTheme.colorScheme.onSurface,
-                                    )
+                    Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_DAY_GAP_DP.dp)) {
+                        ch.fasrv.fanotes.desk.homeworkWeekdays().forEach { label ->
+                            Text(
+                                label.uppercase(java.util.Locale.GERMAN),
+                                modifier = Modifier.weight(1f),
+                                textAlign = TextAlign.Center,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight(720),
+                                letterSpacing = 0.06.em,
+                                color = LocalStatusInk.current.muted,
+                            )
+                        }
+                    }
+                    days.chunked(7).forEach { week ->
+                        Row(Modifier.fillMaxWidth().padding(bottom = ch.fasrv.fanotes.desk.HOMEWORK_DAY_GAP_DP.dp), horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_DAY_GAP_DP.dp)) {
+                            week.forEach { day ->
+                                val items = byDate[day.date.toString()].orEmpty()
+                                val today = day.date == LocalDate.now()
+                                Column(
+                                    Modifier
+                                        .weight(1f)
+                                        .heightIn(min = ch.fasrv.fanotes.desk.homeworkDayMinDp(planner).dp)
+                                        .clip(dayShape)
+                                        .border(1.dp, if (today) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f) else rule, dayShape)
+                                        .background(MaterialTheme.colorScheme.background.copy(alpha = 0.8f))
+                                        .alpha(if (day.outside) 0.45f else 1f)
+                                        .clickable { due = day.date.toString() }
+                                        .padding(ch.fasrv.fanotes.desk.HOMEWORK_DAY_PAD_DP.dp),
+                                ) {
+                                    Text(day.date.dayOfMonth.toString(), fontSize = 12.sp, fontWeight = FontWeight(720))
+                                    items.take(limit).forEach { task ->
+                                        val clock = task.dueTime?.takeIf { it.isNotBlank() }
+                                        val chip = ch.fasrv.fanotes.desk.homeworkDayChip(task.kind, task.priority)
+                                        val chipFill = when (chip) {
+                                            "high" -> LocalStatusInk.current.warning.copy(alpha = 0.22f)
+                                            "appointment" -> MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                                            else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                        }
+                                        Text(
+                                            if (clock == null) task.title else "$clock · ${task.title}",
+                                            modifier = Modifier
+                                                .padding(top = 3.dp)
+                                                .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.HOMEWORK_CHIP_RADIUS_DP.dp))
+                                                .background(chipFill)
+                                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                                                .alpha(if (task.done) 0.55f else 1f),
+                                            fontSize = 12.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            textDecoration = if (task.done) TextDecoration.LineThrough else null,
+                                        )
+                                    }
+                                    val hidden = items.size - limit
+                                    if (hidden > 0) Text("+$hidden", fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 2.dp))
                                 }
-                                val hidden = items.size - (if (planner == "week") 8 else 3)
-                                if (hidden > 0) Text("+$hidden", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
                             }
                         }
                     }

@@ -191,4 +191,20 @@ class HomeworkPlannerTest {
         assertEquals("Offen", HOMEWORK_FILTER_OPEN)
         assertEquals("Alle", HOMEWORK_FILTER_ALL)
     }
+
+    @Test
+    fun theCalendarUsesTheDesktopDayCards() {
+        assertEquals(86, homeworkDayMinDp("month"))
+        assertEquals(150, homeworkDayMinDp("week"))
+        assertEquals(3, homeworkDayLimit("month"))
+        assertEquals(8, homeworkDayLimit("week"))
+        assertEquals("high", homeworkDayChip("appointment", "high"))
+        assertEquals("appointment", homeworkDayChip("appointment", "normal"))
+        assertEquals("open", homeworkDayChip("homework", "normal"))
+        assertEquals(12, HOMEWORK_CAL_RADIUS_DP)
+        assertEquals(10, HOMEWORK_DAY_RADIUS_DP)
+        assertEquals(32, HOMEWORK_NAV_DP)
+        assertEquals("Vorheriger Zeitraum", HOMEWORK_PREVIOUS)
+        assertEquals("Nächster Zeitraum", HOMEWORK_NEXT)
+    }
 }
