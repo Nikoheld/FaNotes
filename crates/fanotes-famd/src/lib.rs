@@ -1829,25 +1829,27 @@ fn token_is_open_clock(token: &str) -> bool {
         && token.contains(':')
 }
 
-/// `2026-10-13` is only digits and hyphens, with a digit on both sides.
+/// `2026-10-13` and `2026-10+13` are digits separated by one sign at a time.
 fn is_hyphen_number_run(token: &str) -> bool {
     let bytes = token.as_bytes();
-    if bytes.len() < 3 || !token.contains('-') || token.starts_with('-') || token.ends_with('-') {
+    if bytes.len() < 3 || !bytes[0].is_ascii_digit() || !bytes[bytes.len() - 1].is_ascii_digit() {
         return false;
     }
-    let mut previous_hyphen = false;
+    let mut saw_sign = false;
+    let mut previous_sign = false;
     for byte in bytes {
         if byte.is_ascii_digit() {
-            previous_hyphen = false;
+            previous_sign = false;
             continue;
         }
-        if *byte == b'-' && !previous_hyphen {
-            previous_hyphen = true;
+        if matches!(*byte, b'+' | b'-') && !previous_sign {
+            saw_sign = true;
+            previous_sign = true;
             continue;
         }
         return false;
     }
-    !previous_hyphen
+    saw_sign && !previous_sign
 }
 
 /// `2026-10-13` next to `GMT` is three numbers and a zone. A month word such
@@ -3714,37 +3716,62 @@ fn take_open_clock_hyphen(
     if !(1..=3).contains(&time.index) || !is_hyphen_number_run(word) {
         return None;
     }
-    let parts: Vec<&str> = word.split('-').collect();
+    let bytes = word.as_bytes();
     let mut index = 0;
-    while index < parts.len() {
-        let number = unsigned_number(parts[index])?;
+    loop {
+        if index >= bytes.len() {
+            return Some(true);
+        }
+        if matches!(bytes[index], b'+' | b'-') {
+            // The sign before a date number was skipped. The sign after the
+            // number that finishes the clock is the offset.
+            index += 1;
+        }
+        let start = index;
+        while index < bytes.len() && bytes[index].is_ascii_digit() {
+            index += 1;
+        }
+        if start == index {
+            return Some(false);
+        }
+        let number = unsigned_number(&word[start..index])?;
         if time.expecting(number) {
             time.add_final(number)?;
-            if index + 1 == parts.len() {
+            if index == bytes.len() {
                 return Some(true);
             }
-            let offset_text = parts[index + 1];
+            let sign = if bytes[index] == b'+' {
+                1i64
+            } else if bytes[index] == b'-' {
+                -1
+            } else {
+                return Some(false);
+            };
+            index += 1;
+            let offset_start = index;
+            while index < bytes.len() && bytes[index].is_ascii_digit() {
+                index += 1;
+            }
+            if offset_start == index || index != bytes.len() {
+                return Some(false);
+            }
+            let offset_text = &word[offset_start..index];
             let offset_number = unsigned_number(offset_text)?;
             let minutes = match offset_text.len() {
-                1 | 2 => -i64::from(offset_number) * 60,
+                1 | 2 => sign * i64::from(offset_number) * 60,
                 3 | 4 => {
                     let hour = i64::from(offset_number / 100);
                     let minute = i64::from(offset_number % 100);
-                    -(hour * 60 + minute)
+                    sign * (hour * 60 + minute)
                 }
                 _ => return Some(false),
             };
-            if index + 2 != parts.len() {
-                return Some(false);
-            }
             *offset = Some(minutes);
             *minute_sign = 0;
             return Some(true);
         }
         push_date_number(dates, number)?;
-        index += 1;
     }
-    Some(true)
 }
 
 fn date_number_word(word: &str) -> Option<(i32, bool)> {
@@ -8694,6 +8721,46 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("16:00: 2026-10-13").as_deref(),
                 Some("2026-01-02T05:00:10.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00: 2026-10+13").as_deref(),
+                Some("2026-01-01T03:00:10.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00: 2026-10+5").as_deref(),
+                Some("2026-01-01T11:00:10.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00: 2026-10+0530").as_deref(),
+                Some("2026-01-01T10:30:10.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00: 70-5").as_deref(),
+                Some("1970-01-01T21:00:05.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16: 2026-10-13").as_deref(),
+                Some("2026-01-02T05:10:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00: 10-5").as_deref(),
+                Some("2026-10-13T21:00:10.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00: 10-5").as_deref(),
+                Some("2026-10-13T21:00:10.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00: 2026-10-13 GMT").as_deref(),
+                Some("2026-01-01T16:00:10.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00: 5-30 2026").as_deref(),
+                Some("2026-01-02T22:00:05.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00: 2026-1").as_deref(),
+                Some("2026-01-01T21:00:01.000Z")
             );
             assert_eq!(
                 super::canonical_iso("4:00: PM 2026-10-13").as_deref(),
