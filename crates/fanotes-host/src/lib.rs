@@ -2003,15 +2003,17 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
     let (time, zone) = split_time_zone(time)?;
     let mut fraction_has_nonzero = false;
     let (clock, millis) = match time.split_once('.') {
-        // `Date.parse` keeps the first three fraction digits and ignores the rest.
+        // Nine significant digits, then three millisecond digits. Leading
+        // zeros count in the length, so `0001234567` is 1 ms, not 0.
         Some((clock, fraction))
             if !fraction.is_empty() && fraction.bytes().all(|byte| byte.is_ascii_digit()) =>
         {
             fraction_has_nonzero = fraction.bytes().any(|byte| byte != b'0');
-            let digits = &fraction[..fraction.len().min(3)];
-            let millis: u32 = digits.parse().ok()?;
-            let scale = 10u32.pow(3 - digits.len() as u32);
-            (clock, millis * scale)
+            let (number, length, end) = read_clock_number(fraction.as_bytes(), 0)?;
+            if end != fraction.len() {
+                return None;
+            }
+            (clock, clock_milliseconds(number, length) as u32)
         }
         None => (time, 0),
         Some(_) => return None,
@@ -2028,8 +2030,8 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         None => 0,
     };
     // `24:00:00` is the next midnight. A `T` form rejects any later nonzero
-    // fraction digit. A space before the clock keeps only the first three
-    // millisecond digits, so `.000000001` is still zero.
+    // fraction digit. A space before the clock uses the scaled milliseconds,
+    // so `.000000001` is still zero and `.0001234567` is not.
     let hour_24_fraction_rejected = if has_iso_t(value) {
         fraction_has_nonzero
     } else {
@@ -11457,5 +11459,72 @@ mod local_zone_tests {
             unix_millis_from_iso("13Oct2026GMT+5:30 16:00"),
             Some(1_791_887_400_000)
         );
+    }
+
+    #[test]
+    fn a_long_fraction_keeps_nine_significant_digits() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Node 22 `Date.parse`. The fraction keeps nine significant digits,
+        // then three millisecond digits. `0001234567` is 1 ms and
+        // `0123456789` is 123 ms. A `T` hour of 24 still rejects any nonzero
+        // fraction digit. Nine digits that scale to zero stay zero.
+        let cases = [
+            ("1970-01-01T00:00:00.0001234567Z", Some(1)),
+            ("1970-01-01T00:00:00.00012345678Z", Some(12)),
+            ("1970-01-01T00:00:00.000123456789Z", Some(123)),
+            ("1970-01-01T00:00:00.0123456789Z", Some(123)),
+            ("1970-01-01T00:00:00.00123456789Z", Some(123)),
+            ("1970-01-01T00:00:00.0000123456789Z", Some(123)),
+            ("1970-01-01T00:00:00.0001234567890123Z", Some(123)),
+            ("1970-01-01T00:00:00.1234567899Z", Some(123)),
+            ("1970-01-01T00:00:00.000000001234Z", Some(0)),
+            ("1970-01-01T00:00:00.000000001Z", Some(0)),
+            ("1970-01-01T00:00:00.5Z", Some(500)),
+            ("1970-01-01T00:00:00.05Z", Some(50)),
+            ("1970-01-01t00:00:00.0001234567z", Some(1)),
+            ("1970-01-01T00:00:00.0001234567", Some(18_000_001)),
+            ("1970-01-01T00:00:00.0123456789", Some(18_000_123)),
+            ("1970-01-01T00:00:00.0001234567-05:00", Some(18_000_001)),
+            ("1970-01-01 00:00:00.0001234567", Some(18_000_001)),
+            ("1970-01-01 00:00:00.0123456789", Some(18_000_123)),
+            ("1970-01-01 24:00:00.000000001", Some(104_400_000)),
+            (
+                "2026-10-13T16:00:00.0001234567Z",
+                Some(1_791_907_200_001),
+            ),
+            (
+                "2026-10-13T16:00:00.0123456789Z",
+                Some(1_791_907_200_123),
+            ),
+            (
+                "2026-10-13T16:00:00.0001234567+05:30",
+                Some(1_791_887_400_001),
+            ),
+            (
+                "2026-02-31T00:00:00.0001234567Z",
+                Some(1_772_496_000_001),
+            ),
+            (
+                "Oct 13 2026 16:00:00.0001234567",
+                Some(1_791_921_600_001),
+            ),
+            (
+                "10/13/2026 16:00:00.0123456789",
+                Some(1_791_921_600_123),
+            ),
+            ("1970-01-01T00:00:00.0001234567+05:30", None),
+            ("1970-01-01T24:00:00.0001234567Z", None),
+            ("1970-01-01T24:00:00.0000000001Z", None),
+            ("1970-01-01 24:00:00.0001234567", None),
+            ("1969-12-31T23:59:59.0001234567Z", None),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(unix_millis_from_iso(input), expected, "{input}");
+        }
     }
 }

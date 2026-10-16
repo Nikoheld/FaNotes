@@ -1119,8 +1119,8 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     let (mut year, mut month, mut day) = normalize_ymd(year, month, day)?;
     if hour == 24 {
         // A `T` form rejects any later nonzero fraction digit. A space before
-        // the clock keeps the first three millisecond digits, so
-        // `.000000001` is still zero.
+        // the clock uses the scaled milliseconds, so `.000000001` is still
+        // zero and `.0001234567` is not.
         if minute != 0
             || second != 0
             || millis != 0
@@ -3993,9 +3993,13 @@ fn parse_clock(time: &str) -> Option<(i32, i32, i32, u32, &str)> {
             return None;
         }
         let digits = time.get(start..index)?;
-        let taken = digits.chars().take(3).collect::<String>();
-        let parsed: u32 = taken.parse().ok()?;
-        millis = parsed * 10u32.pow((3 - taken.len()) as u32);
+        // Nine significant digits, then three millisecond digits. Leading
+        // zeros count in the length, so `0001234567` is 1 ms, not 0.
+        let (number, length, end) = read_clock_number(digits.as_bytes(), 0)?;
+        if end != digits.len() {
+            return None;
+        }
+        millis = clock_milliseconds(number, length) as u32;
     }
     Some((hour, minute, second, millis, time.get(index..)?))
 }
@@ -9367,6 +9371,112 @@ mod tests {
                 super::canonical_iso("13Oct2026GMT+5:30 16:00").as_deref(),
                 Some("2026-10-13T10:30:00.000Z")
             );
+        });
+    }
+
+    #[test]
+    fn a_long_fraction_keeps_nine_significant_digits() {
+        with_tz("America/New_York", || {
+            // Node 22 `Date.parse` plus `toISOString`. Nine significant
+            // digits, then three millisecond digits. `0001234567` is 1 ms.
+            // A space before hour 24 uses that scaled value, so a nonzero
+            // result is empty. A `T` hour of 24 still rejects any nonzero digit.
+            let cases = [
+                (
+                    "1970-01-01T00:00:00.0001234567Z",
+                    Some("1970-01-01T00:00:00.001Z"),
+                ),
+                (
+                    "1970-01-01T00:00:00.00012345678Z",
+                    Some("1970-01-01T00:00:00.012Z"),
+                ),
+                (
+                    "1970-01-01T00:00:00.000123456789Z",
+                    Some("1970-01-01T00:00:00.123Z"),
+                ),
+                (
+                    "1970-01-01T00:00:00.0123456789Z",
+                    Some("1970-01-01T00:00:00.123Z"),
+                ),
+                (
+                    "1970-01-01T00:00:00.00123456789Z",
+                    Some("1970-01-01T00:00:00.123Z"),
+                ),
+                (
+                    "1970-01-01T00:00:00.0000123456789Z",
+                    Some("1970-01-01T00:00:00.123Z"),
+                ),
+                (
+                    "1970-01-01T00:00:00.1234567899Z",
+                    Some("1970-01-01T00:00:00.123Z"),
+                ),
+                (
+                    "1970-01-01T00:00:00.000000001234Z",
+                    Some("1970-01-01T00:00:00.000Z"),
+                ),
+                (
+                    "1970-01-01T00:00:00.5Z",
+                    Some("1970-01-01T00:00:00.500Z"),
+                ),
+                (
+                    "1970-01-01t00:00:00.0001234567z",
+                    Some("1970-01-01T00:00:00.001Z"),
+                ),
+                (
+                    "1970-01-01T00:00:00.0001234567",
+                    Some("1970-01-01T05:00:00.001Z"),
+                ),
+                (
+                    "1970-01-01 00:00:00.0001234567",
+                    Some("1970-01-01T05:00:00.001Z"),
+                ),
+                (
+                    "1970-01-01 00:00:00.0123456789",
+                    Some("1970-01-01T05:00:00.123Z"),
+                ),
+                (
+                    "1970-01-01T00:00:00.0001234567+05:30",
+                    Some("1969-12-31T18:30:00.001Z"),
+                ),
+                (
+                    "1969-12-31T23:59:59.0001234567Z",
+                    Some("1969-12-31T23:59:59.001Z"),
+                ),
+                (
+                    "2026-10-13T16:00:00.0001234567Z",
+                    Some("2026-10-13T16:00:00.001Z"),
+                ),
+                (
+                    "2026-10-13T16:00:00.0123456789Z",
+                    Some("2026-10-13T16:00:00.123Z"),
+                ),
+                (
+                    "2026-10-13 16:00:00.0123456789",
+                    Some("2026-10-13T20:00:00.123Z"),
+                ),
+                (
+                    "2026-02-31T00:00:00.0001234567Z",
+                    Some("2026-03-03T00:00:00.001Z"),
+                ),
+                (
+                    "Oct 13 2026 16:00:00.0001234567",
+                    Some("2026-10-13T20:00:00.001Z"),
+                ),
+                (
+                    "10/13/2026 16:00:00.0123456789",
+                    Some("2026-10-13T20:00:00.123Z"),
+                ),
+                ("1970-01-01T24:00:00.0001234567Z", None),
+                ("1970-01-01T24:00:00.0000000001Z", None),
+                ("1970-01-01 24:00:00.0001234567", None),
+                (
+                    "1970-01-01 24:00:00.0000000001",
+                    Some("1970-01-02T05:00:00.000Z"),
+                ),
+            ];
+            for (input, expected) in cases {
+                assert_eq!(super::canonical_iso(input).as_deref(), expected, "{input}");
+            }
         });
     }
 }
