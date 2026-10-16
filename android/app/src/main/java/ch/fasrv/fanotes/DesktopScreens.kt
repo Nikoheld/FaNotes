@@ -996,7 +996,12 @@ private fun SearchKbd(label: String) {
 }
 
 @Composable
-fun SearchScreen(model: FaNotesViewModel, onOpen: (String) -> Unit, onClose: () -> Unit = {}) {
+fun SearchScreen(
+    model: FaNotesViewModel,
+    onOpen: (String) -> Unit,
+    onClose: () -> Unit = {},
+    modifier: Modifier = Modifier.fillMaxSize(),
+) {
     val query by model.searchQuery.collectAsStateWithLifecycle()
     val hits by model.searchHits.collectAsStateWithLifecycle()
     var selected by remember(query) { mutableIntStateOf(-1) }
@@ -1016,6 +1021,8 @@ fun SearchScreen(model: FaNotesViewModel, onOpen: (String) -> Unit, onClose: () 
         model.openSearchHit(hit)
         onOpen(hit.path)
     }
+    val searchRule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    Box(modifier) {
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
         Row(
             Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp, top = 14.dp, bottom = 10.dp),
@@ -1191,6 +1198,14 @@ fun SearchScreen(model: FaNotesViewModel, onOpen: (String) -> Unit, onClose: () 
                 Text(ch.fasrv.fanotes.desk.SEARCH_FOOTER_CLOSE, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.clickable(onClick = onClose))
             }
         }
+    }
+        Box(
+            Modifier
+                .align(Alignment.CenterEnd)
+                .width(1.dp)
+                .fillMaxHeight()
+                .background(searchRule),
+        )
     }
 }
 
