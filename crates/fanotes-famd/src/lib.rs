@@ -9092,4 +9092,32 @@ mod tests {
             assert_eq!(super::canonical_iso("Oct 13 2026 16:00 +5:30:00"), None);
         });
     }
+
+    #[test]
+    fn a_strict_iso_year_before_the_epoch_keeps_its_calendar() {
+        with_tz("America/New_York", || {
+            // Year 0 and year -1 are real ISO instants. A leading space still
+            // uses the legacy window.
+            assert_eq!(
+                super::canonical_iso("0000-01-01").as_deref(),
+                Some("0000-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0000-10-13").as_deref(),
+                Some("0000-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13").as_deref(),
+                Some("-000001-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-01-01").as_deref(),
+                Some("-000001-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(" -000001-01-01").as_deref(),
+                Some("2001-01-01T05:00:00.000Z")
+            );
+        });
+    }
 }

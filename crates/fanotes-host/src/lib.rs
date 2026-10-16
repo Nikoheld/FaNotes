@@ -1974,6 +1974,13 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         // `5GMT`, continues as a legacy number.
         IsoDate::DateOnly(date) => {
             let surrounded = value.trim_matches(is_date_parse_space).len() != value.len();
+            // `0000-01-01` and `-000001-10-13` are strict ISO dates before
+            // 1970. A `u64` cannot store them, and the legacy 0→2000 rule
+            // must not run after that year was read. ` 0000-01-01` and
+            // `0000-1-1` are still legacy.
+            if !surrounded && matches!(iso_hyphen_millis(date), IsoHyphenMillis::BeforeEpoch) {
+                return None;
+            }
             if let Some(millis) = date_only_millis(date, surrounded) {
                 return Some(millis);
             }
@@ -4704,33 +4711,50 @@ fn unfinished_hyphen_ymd(body: &str) -> Option<(i32, i32, i32)> {
 
 fn date_only_millis(value: &str, surrounded: bool) -> Option<u64> {
     if !surrounded {
-        if let Ok(millis) = iso_hyphen_millis(value) {
-            return millis;
+        match iso_hyphen_millis(value) {
+            IsoHyphenMillis::Ready(millis) => return millis,
+            // The caller stops before the legacy year window.
+            IsoHyphenMillis::BeforeEpoch => return None,
+            IsoHyphenMillis::NotIso => {}
         }
     }
     legacy_hyphen_millis(value)
 }
 
-/// `YYYY` and `±YYYYYY`. A short month or day is local. Any other shape is `Err`.
-fn iso_hyphen_millis(value: &str) -> Result<Option<u64>, ()> {
-    let (year_text, month_text, day_text) = split_hyphen_fields(value).ok_or(())?;
+enum IsoHyphenMillis {
+    Ready(Option<u64>),
+    /// A strict `YYYY-MM-DD` or `±YYYYYY-MM-DD` whose instant is before 1970.
+    BeforeEpoch,
+    NotIso,
+}
+
+/// `YYYY` and `±YYYYYY`. A short month or day is local. Any other shape is
+/// `NotIso`. A valid strict date before 1970 is `BeforeEpoch`.
+fn iso_hyphen_millis(value: &str) -> IsoHyphenMillis {
+    let Some((year_text, month_text, day_text)) = split_hyphen_fields(value) else {
+        return IsoHyphenMillis::NotIso;
+    };
     if !datetime_year_ok(year_text) {
-        return Err(());
+        return IsoHyphenMillis::NotIso;
     }
-    let year: i32 = year_text.parse().map_err(|_| ())?;
+    let Ok(year) = year_text.parse::<i32>() else {
+        return IsoHyphenMillis::NotIso;
+    };
     let mut legacy_local = false;
     let month = match month_text {
         None => 1,
         Some(text) => {
             if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
-                return Ok(None);
+                return IsoHyphenMillis::Ready(None);
             }
             if text.len() != 2 {
                 legacy_local = true;
             }
-            let month: u32 = text.parse().map_err(|_| ())?;
+            let Ok(month) = text.parse::<u32>() else {
+                return IsoHyphenMillis::NotIso;
+            };
             if !(1..=12).contains(&month) {
-                return Ok(None);
+                return IsoHyphenMillis::Ready(None);
             }
             month
         }
@@ -4739,19 +4763,27 @@ fn iso_hyphen_millis(value: &str) -> Result<Option<u64>, ()> {
         None => 1,
         Some(text) => {
             if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
-                return Ok(None);
+                return IsoHyphenMillis::Ready(None);
             }
             if text.len() != 2 {
                 legacy_local = true;
             }
-            let day: u32 = text.parse().map_err(|_| ())?;
+            let Ok(day) = text.parse::<u32>() else {
+                return IsoHyphenMillis::NotIso;
+            };
             if !(1..=31).contains(&day) {
-                return Ok(None);
+                return IsoHyphenMillis::Ready(None);
             }
             day
         }
     };
-    Ok(midnight_millis(year, month, day, legacy_local))
+    match midnight_millis(year, month, day, legacy_local) {
+        Some(millis) => IsoHyphenMillis::Ready(Some(millis)),
+        // `0000-1-1` is legacy, so year 0 still becomes 2000. A strict
+        // `0000-01-01` does not.
+        None if !legacy_local => IsoHyphenMillis::BeforeEpoch,
+        None => IsoHyphenMillis::Ready(None),
+    }
 }
 
 /// `2-1-1` is 1 February 2001. A month and day without a year use 2001.
@@ -11130,5 +11162,33 @@ mod local_zone_tests {
             Some(1_791_887_400_000)
         );
         assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00 +5:30:00"), None);
+    }
+
+    #[test]
+    fn a_strict_iso_year_before_the_epoch_is_empty() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `0000-01-01` is year 0 UTC. `-000001-10-13` is year -1. Neither fits
+        // in `u64`. A short field, or a leading space, is still the legacy
+        // year window.
+        assert_eq!(unix_millis_from_iso("0000-01-01"), None);
+        assert_eq!(unix_millis_from_iso("0000-10-13"), None);
+        assert_eq!(unix_millis_from_iso("+000000-01-01"), None);
+        assert_eq!(unix_millis_from_iso("-000001-10-13"), None);
+        assert_eq!(unix_millis_from_iso("-000001-01-01"), None);
+        assert_eq!(unix_millis_from_iso("-000001-10-13T00:00:00Z"), None);
+        assert_eq!(unix_millis_from_iso("0000-1-1"), Some(946_702_800_000));
+        assert_eq!(
+            unix_millis_from_iso(" -000001-01-01"),
+            Some(978_325_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso(" -000001-10-13"),
+            Some(1_357_794_000_000)
+        );
     }
 }
