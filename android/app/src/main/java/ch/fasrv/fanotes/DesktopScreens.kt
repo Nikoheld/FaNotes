@@ -38,7 +38,11 @@ import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -623,13 +627,26 @@ fun SearchScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
         model.openSearchHit(hit)
         onOpen(hit.path)
     }
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Notizen durchsuchen", style = MaterialTheme.typography.titleLarge)
-        Text("Im gesamten Vault", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 14.dp)) {
+            Text(
+                ch.fasrv.fanotes.desk.SEARCH_EYEBROW,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.12.em,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                "Notizen durchsuchen",
+                fontSize = ch.fasrv.fanotes.desk.SEARCH_TITLE_SP.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
         OutlinedTextField(
             query,
             { model.searchVaultText(it) },
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).onPreviewKeyEvent { event ->
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 when (event.key) {
                     Key.DirectionDown -> {
@@ -658,46 +675,128 @@ fun SearchScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
         )
         Text(
             if (query.trim().length >= 2) "${hits.size} Treffer" else "Text und unsichtbare Handschrift",
-            modifier = Modifier.padding(top = 8.dp),
+            modifier = Modifier.padding(start = 14.dp, top = 8.dp, end = 14.dp, bottom = 7.dp),
             fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            color = LocalStatusInk.current.muted,
         )
         if (query.trim().length < 2) {
-            Text("Tippe mindestens zwei Zeichen. Auch noch nicht konvertierte Handschrift wird durchsucht.", modifier = Modifier.padding(top = 12.dp), fontSize = 13.sp)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = ch.fasrv.fanotes.desk.SEARCH_EMPTY_PAD_TOP_DP.dp, start = 18.dp, end = 18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    ch.fasrv.fanotes.desk.SEARCH_EMPTY_TITLE,
+                    fontSize = 12.sp,
+                    color = LocalStatusInk.current.soft,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                Text(
+                    ch.fasrv.fanotes.desk.SEARCH_EMPTY_HINT,
+                    fontSize = 12.sp,
+                    color = LocalStatusInk.current.muted,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 18.sp,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
         } else if (hits.isEmpty()) {
-            Text("Keine Treffer für „${query.trim()}“.", modifier = Modifier.padding(top = 12.dp), fontSize = 13.sp)
+            Text(
+                "Keine Treffer für „${query.trim()}“.",
+                modifier = Modifier.padding(top = ch.fasrv.fanotes.desk.SEARCH_EMPTY_PAD_TOP_DP.dp, start = 18.dp, end = 18.dp),
+                fontSize = 12.sp,
+                color = LocalStatusInk.current.muted,
+                textAlign = TextAlign.Center,
+            )
         }
-        LazyColumn(state = listState, modifier = Modifier.padding(top = 8.dp).weight(1f)) {
+        LazyColumn(state = listState, modifier = Modifier.padding(horizontal = 7.dp).weight(1f)) {
             itemsIndexed(hits, key = { _, hit -> "${hit.kind}:${hit.path}:${hit.line}:${hit.anchorY}" }) { index, hit ->
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(if (index == selected) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f) else androidx.compose.ui.graphics.Color.Transparent)
-                        .clickable {
-                            selected = index
-                            model.openSearchHit(hit)
-                            onOpen(hit.path)
+                val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.SEARCH_RESULT_RADIUS_DP.dp)
+                Column(Modifier.fillMaxWidth().padding(bottom = 2.dp)) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = ch.fasrv.fanotes.desk.SEARCH_RESULT_MIN_DP.dp)
+                            .clip(shape)
+                            .background(if (index == selected) MaterialTheme.colorScheme.surfaceVariant else androidx.compose.ui.graphics.Color.Transparent)
+                            .clickable {
+                                selected = index
+                                model.openSearchHit(hit)
+                                onOpen(hit.path)
+                            }
+                            .padding(ch.fasrv.fanotes.desk.SEARCH_RESULT_PAD_DP.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SEARCH_RESULT_GAP_DP.dp),
+                        ) {
+                            Icon(
+                                if (hit.kind == "drawing" || hit.anchorY != null) Icons.Filled.Draw else Icons.Filled.Description,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = LocalStatusInk.current.soft,
+                            )
+                            Text(
+                                hit.title.ifBlank { hit.path.substringAfterLast('/') },
+                                modifier = Modifier.weight(1f),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = LocalStatusInk.current.soft,
+                                maxLines = 1,
+                            )
+                            Text(
+                                "${hit.matches}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SEARCH_BADGE_RADIUS_DP.dp))
+                                    .background(LocalStatusInk.current.panelActive)
+                                    .padding(
+                                        horizontal = ch.fasrv.fanotes.desk.SEARCH_BADGE_PAD_X_DP.dp,
+                                        vertical = ch.fasrv.fanotes.desk.SEARCH_BADGE_PAD_Y_DP.dp,
+                                    ),
+                            )
                         }
-                        .padding(vertical = 8.dp, horizontal = 8.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            hit.title.ifBlank { hit.path.substringAfterLast('/') },
-                            modifier = Modifier.weight(1f),
-                            fontWeight = FontWeight.SemiBold,
+                            if (hit.kind == "drawing" || hit.anchorY != null) "Handschrift-Seite · unsichtbar transkribiert" else hit.path,
+                            fontSize = 12.sp,
+                            color = LocalStatusInk.current.muted,
+                            maxLines = 1,
+                            modifier = Modifier.padding(
+                                start = ch.fasrv.fanotes.desk.SEARCH_PATH_INSET_DP.dp,
+                                top = 3.dp,
+                                bottom = 6.dp,
+                            ),
                         )
-                        Text("${hit.matches}", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                        Text(hit.text, maxLines = 2, fontSize = 12.sp, color = LocalStatusInk.current.muted, lineHeight = 17.sp)
                     }
-                    Text(
-                        if (hit.kind == "drawing" || hit.anchorY != null) "Handschrift-Seite · unsichtbar transkribiert" else hit.path,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)),
                     )
-                    Text(hit.text, maxLines = 2)
                 }
             }
         }
-        Text("↑ ↓ Ergebnis wählen · Esc schließen", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        Column(Modifier.fillMaxWidth()) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)),
+            )
+            Text(
+                "↑ ↓ Ergebnis wählen · Esc schließen",
+                fontSize = 12.sp,
+                color = LocalStatusInk.current.muted,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = ch.fasrv.fanotes.desk.SEARCH_FOOTER_DP.dp)
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+            )
+        }
     }
 }
 
