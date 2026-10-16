@@ -794,7 +794,7 @@ fun FaNotesScreen(
                 if (destination != "notes") {
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         when (destination) {
-                            "search" -> SearchScreen(model) { model.openPath(it); model.showDestination("notes") }
+                            "search" -> SearchScreen(model, { model.openPath(it); model.showDestination("notes") }, { model.showDestination("notes") })
                             "tasks" -> HomeworkScreen(model)
                             "calendar" -> CalendarScreen(model, { model.openPath(it); model.showDestination("notes") }, onImportIcs, onExportIcs)
                             "overview" -> OverviewScreen(

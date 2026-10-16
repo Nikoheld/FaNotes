@@ -930,7 +930,66 @@ private fun NoteTabChip(
 }
 
 @Composable
-fun SearchScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
+private fun VaultSearchField(query: String, onQuery: (String) -> Unit, keys: Modifier) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    var focused by remember { mutableStateOf(false) }
+    val hot = hovered || focused
+    val ink = LocalStatusInk.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_MARGIN_X_DP.dp)
+            .padding(bottom = ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_MARGIN_BOTTOM_DP.dp)
+            .height(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_DP.dp)
+            .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_RADIUS_DP.dp))
+            .background(if (hot) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+            .hoverable(interaction)
+            .padding(horizontal = ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_PAD_DP.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_GAP_DP.dp),
+    ) {
+        Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_ICON_DP.dp), tint = ink.muted)
+        BasicTextField(
+            value = query,
+            onValueChange = onQuery,
+            modifier = Modifier.weight(1f).onFocusChanged { focused = it.isFocused }.then(keys),
+            singleLine = true,
+            textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_SP.sp),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            decorationBox = { inner ->
+                Box {
+                    if (query.isEmpty()) Text(ch.fasrv.fanotes.desk.SEARCH_PLACEHOLDER, fontSize = ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_SP.sp, color = ink.muted, maxLines = 1)
+                    inner()
+                }
+            },
+        )
+        if (query.isNotEmpty()) {
+            Box(
+                Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_CLEAR_DP.dp).clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_CLEAR_RADIUS_DP.dp)).clickable(onClickLabel = "Suchbegriff löschen") { onQuery("") },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Close, contentDescription = "Suchbegriff löschen", modifier = Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_CLEAR_ICON_DP.dp), tint = ink.muted)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchKbd(label: String) {
+    Text(
+        label,
+        fontSize = 12.sp,
+        color = LocalStatusInk.current.muted,
+        modifier = Modifier
+            .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SEARCH_KBD_RADIUS_DP.dp))
+            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA), RoundedCornerShape(ch.fasrv.fanotes.desk.SEARCH_KBD_RADIUS_DP.dp))
+            .padding(horizontal = 5.dp, vertical = 1.dp),
+    )
+}
+
+@Composable
+fun SearchScreen(model: FaNotesViewModel, onOpen: (String) -> Unit, onClose: () -> Unit = {}) {
     val query by model.searchQuery.collectAsStateWithLifecycle()
     val hits by model.searchHits.collectAsStateWithLifecycle()
     var selected by remember(query) { mutableIntStateOf(-1) }
@@ -951,51 +1010,51 @@ fun SearchScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
         onOpen(hit.path)
     }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 14.dp)) {
-            Text(
-                ch.fasrv.fanotes.desk.SEARCH_EYEBROW,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.12.em,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                "Notizen durchsuchen",
-                fontSize = ch.fasrv.fanotes.desk.SEARCH_TITLE_SP.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 4.dp),
-            )
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp, top = 14.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    ch.fasrv.fanotes.desk.SEARCH_EYEBROW,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.12.em,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    "Notizen durchsuchen",
+                    fontSize = ch.fasrv.fanotes.desk.SEARCH_TITLE_SP.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            Box(
+                Modifier.size(30.dp).clip(RoundedCornerShape(6.dp)).clickable(onClick = onClose),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Close, contentDescription = ch.fasrv.fanotes.desk.SEARCH_CLOSE, modifier = Modifier.size(17.dp), tint = LocalStatusInk.current.muted)
+            }
         }
-        OutlinedTextField(
-            query,
-            { model.searchVaultText(it) },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                when (event.key) {
-                    Key.DirectionDown -> {
-                        selected = ch.fasrv.fanotes.desk.searchResultMove(selected, hits.size, true)
-                        true
-                    }
-                    Key.DirectionUp -> {
-                        selected = ch.fasrv.fanotes.desk.searchResultMove(selected, hits.size, false)
-                        true
-                    }
-                    Key.Enter, Key.NumPadEnter -> {
-                        if (selected in hits.indices) openSelected()
-                        selected in hits.indices
-                    }
-                    else -> false
+        val searchKeys = Modifier.onPreviewKeyEvent { event ->
+            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+            when (event.key) {
+                Key.DirectionDown -> {
+                    selected = ch.fasrv.fanotes.desk.searchResultMove(selected, hits.size, true)
+                    true
                 }
-            },
-            label = { Text("Suchbegriff") },
-            placeholder = { Text("Text, Dateinamen, Handschrift …") },
-            trailingIcon = if (query.isEmpty()) null else {
-                {
-                    TextButton(onClick = { model.searchVaultText("") }) { Text("Suchbegriff löschen") }
+                Key.DirectionUp -> {
+                    selected = ch.fasrv.fanotes.desk.searchResultMove(selected, hits.size, false)
+                    true
                 }
-            },
-            singleLine = true,
-        )
+                Key.Enter, Key.NumPadEnter -> {
+                    if (selected in hits.indices) openSelected()
+                    selected in hits.indices
+                }
+                else -> false
+            }
+        }
+        VaultSearchField(query, { model.searchVaultText(it) }, searchKeys)
         Text(
             if (query.trim().length >= 2) "${hits.size} Treffer" else "Text und unsichtbare Handschrift",
             modifier = Modifier.padding(start = 14.dp, top = 8.dp, end = 14.dp, bottom = 7.dp),
@@ -1110,15 +1169,20 @@ fun SearchScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                     .height(1.dp)
                     .background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)),
             )
-            Text(
-                "↑ ↓ Ergebnis wählen · Esc schließen",
-                fontSize = 12.sp,
-                color = LocalStatusInk.current.muted,
-                modifier = Modifier
+            Row(
+                Modifier
                     .fillMaxWidth()
                     .heightIn(min = ch.fasrv.fanotes.desk.SEARCH_FOOTER_DP.dp)
                     .padding(horizontal = 10.dp, vertical = 5.dp),
-            )
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                SearchKbd("↑")
+                SearchKbd("↓")
+                Text(ch.fasrv.fanotes.desk.SEARCH_CHOOSE, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(end = 7.dp))
+                SearchKbd("Esc")
+                Text(ch.fasrv.fanotes.desk.SEARCH_FOOTER_CLOSE, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.clickable(onClick = onClose))
+            }
         }
     }
 }
