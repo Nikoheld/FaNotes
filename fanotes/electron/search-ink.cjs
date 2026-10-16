@@ -10,6 +10,12 @@ const parseTranscriptLine = (line) => {
   return { y: Math.min(1, Math.max(0, y)), text: match[2].trim() }
 }
 
+const transcriptWords = (transcript) => String(transcript || '')
+  .split('\n')
+  .map((line) => parseTranscriptLine(line).text.trim())
+  .filter((line) => line.length > 0)
+  .join('\n')
+
 const inkAnchorForQuery = (transcript, query) => {
   const needle = String(query || '').trim().toLocaleLowerCase('de-DE')
   if (needle.length < 2 || !String(transcript || '').trim()) return null
@@ -26,9 +32,10 @@ const inkAnchorForQuery = (transcript, query) => {
 const noteSearchExcerpt = ({ relativePath, content, transcript, needle, queryLength, excerpt }) => {
   const contentIndex = String(content || '').toLocaleLowerCase('de-DE').indexOf(needle)
   if (contentIndex >= 0) return excerpt(content, contentIndex, queryLength)
-  const transcriptIndex = String(transcript || '').toLocaleLowerCase('de-DE').indexOf(needle)
-  if (transcriptIndex >= 0) return excerpt(transcript, transcriptIndex, queryLength)
+  const words = transcriptWords(transcript)
+  const transcriptIndex = words.toLocaleLowerCase('de-DE').indexOf(needle)
+  if (transcriptIndex >= 0) return excerpt(words, transcriptIndex, queryLength)
   return `Dateiname · ${relativePath}`
 }
 
-module.exports = { inkAnchorForQuery, noteSearchExcerpt }
+module.exports = { inkAnchorForQuery, noteSearchExcerpt, transcriptWords }

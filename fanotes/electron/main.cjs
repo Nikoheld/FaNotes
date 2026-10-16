@@ -3464,7 +3464,7 @@ function registerIpcHandlers() {
   })
 
   handle(IPC.search, async (_event, rawQuery) => {
-    const { inkAnchorForQuery, noteSearchExcerpt } = require('./search-ink.cjs')
+    const { inkAnchorForQuery, noteSearchExcerpt, transcriptWords } = require('./search-ink.cjs')
     await ensureBootstrap()
     if (typeof rawQuery !== 'string') throw new Error('Ungültige Suchanfrage.')
     const query = rawQuery.trim().slice(0, 500)
@@ -3518,7 +3518,7 @@ function registerIpcHandlers() {
         }
       }
       rememberDrawingOwner(drawingOwners, relativePath, content, ownerInk)
-      const haystack = `${relativePath}\n${content}\n${inkTranscript}`.toLocaleLowerCase('de-DE')
+      const haystack = `${relativePath}\n${content}\n${transcriptWords(inkTranscript)}`.toLocaleLowerCase('de-DE')
       const firstIndex = haystack.indexOf(needle)
       if (firstIndex < 0) continue
       let matches = 0
@@ -3571,7 +3571,7 @@ function registerIpcHandlers() {
         const transcript = typeof document.searchTranscript === 'string'
           ? document.searchTranscript.slice(0, 500_000)
           : ''
-        const searchable = `${metadata.title}\n${transcript}`
+        const searchable = `${metadata.title}\n${transcriptWords(transcript)}`
         const haystack = searchable.toLocaleLowerCase('de-DE')
         const firstIndex = haystack.indexOf(needle)
         if (firstIndex < 0) continue

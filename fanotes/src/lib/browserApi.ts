@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS } from '../defaults'
 import { getUiLanguage } from '../i18n'
 import type { AppSettings, BootstrapData, DrawingLibraryDocument, FaNotesApi, PaperStyle, ServerBackupState, UpdateState, VaultEntry, WorksheetDocument } from '../types'
 import { companionNotePath, emptyFamdPayload, parseFamd, serializeFamd } from './famd'
-import { inkAnchorForQuery, noteSearchExcerpt } from './searchInkAnchor'
+import { inkAnchorForQuery, noteSearchExcerpt, transcriptWords } from './searchInkAnchor'
 import { parseNoteBackups, type NoteBackupSnapshot } from './noteBackup'
 import { parseNoteLinks, type NoteLinkRecord } from './noteLink'
 import { parseSubjectBooks, type SubjectBookRecord } from './subjectBook'
@@ -1025,9 +1025,10 @@ export function createBrowserApi(): FaNotesApi {
         const companionInk = companion ? parseFamd(companion.content).payload?.ink : null
         const companionTranscript = companionInk && typeof companionInk.searchTranscript === 'string' ? companionInk.searchTranscript : ''
         const transcript = (ownTranscript || companionTranscript).slice(0, 500_000)
+        const words = transcriptWords(transcript)
         const pathMatch = record.path.toLocaleLowerCase('de').includes(needle)
         const contentMatch = content.toLocaleLowerCase('de').includes(needle)
-        const transcriptMatch = transcript.toLocaleLowerCase('de').includes(needle)
+        const transcriptMatch = words.toLocaleLowerCase('de').includes(needle)
         if (!contentMatch && !pathMatch && !transcriptMatch) return []
         const excerpt = noteSearchExcerpt({
           relativePath: record.path,
@@ -1037,7 +1038,7 @@ export function createBrowserApi(): FaNotesApi {
           queryLength: needle.length,
           excerpt: (text, index, length) => text.slice(Math.max(0, index - 60), Math.min(text.length, index + length + 120)).replace(/[#*_`]/gu, ''),
         })
-        const lower = `${record.path}\n${content}\n${transcript}`.toLocaleLowerCase('de')
+        const lower = `${record.path}\n${content}\n${words}`.toLocaleLowerCase('de')
         const inkAnchor = inkAnchorForQuery(transcript || content, query)
         return [{ relativePath: record.path, title: stem(fileName(record.path)), excerpt, matches: lower.split(needle).length - 1, kind: 'note' as const, ...(inkAnchor ? { inkAnchor } : {}) }]
       })
@@ -1045,7 +1046,7 @@ export function createBrowserApi(): FaNotesApi {
         try {
           const parsed = JSON.parse(drawing.drawingJson) as { searchTranscript?: unknown }
           const transcript = typeof parsed.searchTranscript === 'string' ? parsed.searchTranscript : ''
-          const haystack = `${drawing.title}\n${transcript}`
+          const haystack = `${drawing.title}\n${transcriptWords(transcript)}`
           if (!haystack.toLocaleLowerCase('de').includes(needle)) return []
           const inkAnchor = inkAnchorForQuery(transcript, query)
           return [{ relativePath: drawing.dataRelativePath, title: drawing.title, excerpt: haystack.slice(0, 180), matches: 1, kind: 'drawing' as const, drawingId: drawing.id, ...(inkAnchor ? { inkAnchor } : {}) }]

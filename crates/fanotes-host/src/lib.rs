@@ -1297,19 +1297,20 @@ impl Host {
                 }
             }
             remember_drawing_owner(&mut owners, &relative, &content, ink.as_ref());
-            let haystack = vault::locale_lower_de(&format!("{relative}\n{content}\n{transcript}"));
+            let words = transcript_words(&transcript);
+            let haystack = vault::locale_lower_de(&format!("{relative}\n{content}\n{words}"));
             if !haystack.contains(&needle) {
                 continue;
             }
             let matches = count_matches(&haystack, &needle);
             let content_index = vault::locale_lower_de(&content).find(&needle);
-            let transcript_index = vault::locale_lower_de(&transcript).find(&needle);
+            let transcript_index = vault::locale_lower_de(&words).find(&needle);
             let excerpt = if let Some(index) = content_index {
                 let (start, _) = original_match_span(&content, &needle, index);
                 excerpt(&content, start, vault::utf16_len(&query))
             } else if let Some(index) = transcript_index {
-                let (start, _) = original_match_span(&transcript, &needle, index);
-                excerpt(&transcript, start, vault::utf16_len(&query))
+                let (start, _) = original_match_span(&words, &needle, index);
+                excerpt(&words, start, vault::utf16_len(&query))
             } else {
                 format!("Dateiname · {relative}")
             };
@@ -3876,7 +3877,7 @@ fn search_drawings(
                 .and_then(Value::as_str)
                 .unwrap_or(""),
         );
-        let searchable = format!("{title}\n{transcript}");
+        let searchable = format!("{title}\n{}", transcript_words(&transcript));
         let haystack = vault::locale_lower_de(&searchable);
         let Some(first) = haystack.find(needle) else {
             continue;
@@ -4175,6 +4176,26 @@ fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
             Some(index as f64 / (parsed.len() - 1) as f64)
         }
     })
+}
+
+/// The handwriting words, without the page position stored in front of each line.
+fn transcript_words(transcript: &str) -> String {
+    transcript
+        .split('\n')
+        .filter_map(|line| {
+            let trimmed = vault::js_trim(line);
+            if trimmed.is_empty() {
+                return None;
+            }
+            let text = match transcript_position(trimmed) {
+                Some((_, text)) => text,
+                None => trimmed.to_owned(),
+            };
+            let text = vault::js_trim(&text).to_owned();
+            if text.is_empty() { None } else { Some(text) }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// `^(\d+(?:\.\d+)?)\t(.*)$` from the desktop handwriting search.

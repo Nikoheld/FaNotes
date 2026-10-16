@@ -45,6 +45,7 @@ try {
   }
   const handwriting = noteSearchExcerpt({ ...cases[0], excerpt })
   assert.match(handwriting, /Chlorophyll/)
+  assert.doesNotMatch(handwriting, /0\.4200/)
   assert.doesNotMatch(handwriting, /^Dateiname/)
   assert.match(noteSearchExcerpt({ ...cases[1], excerpt }), /Licht/)
   assert.equal(noteSearchExcerpt({ ...cases[2], excerpt }), 'Dateiname · Bio/Welt.md')

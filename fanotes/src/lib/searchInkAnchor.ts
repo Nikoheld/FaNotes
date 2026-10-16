@@ -21,6 +21,14 @@ export const parseTranscriptLine = (line: string): { y: number | null; text: str
   return { y: Math.min(1, Math.max(0, y)), text: match[2].trim() }
 }
 
+/** Handwriting lines without the stored page position. Search shows these words. */
+export const transcriptWords = (transcript: string) => transcript
+  .split('\n')
+  .map((line) => parseTranscriptLine(line).text)
+  .map((line) => line.trim())
+  .filter((line) => line.length > 0)
+  .join('\n')
+
 /** The page position of the first transcript line that contains `query`. */
 export const inkAnchorForQuery = (transcript: string, query: string): InkSearchAnchor | null => {
   const needle = query.trim().toLocaleLowerCase('de-DE')
@@ -57,8 +65,9 @@ export const noteSearchExcerpt = ({
 }): string => {
   const contentIndex = content.toLocaleLowerCase('de-DE').indexOf(needle)
   if (contentIndex >= 0) return excerpt(content, contentIndex, queryLength)
-  const transcriptIndex = transcript.toLocaleLowerCase('de-DE').indexOf(needle)
-  if (transcriptIndex >= 0) return excerpt(transcript, transcriptIndex, queryLength)
+  const words = transcriptWords(transcript)
+  const transcriptIndex = words.toLocaleLowerCase('de-DE').indexOf(needle)
+  if (transcriptIndex >= 0) return excerpt(words, transcriptIndex, queryLength)
   return `Dateiname · ${relativePath}`
 }
 
