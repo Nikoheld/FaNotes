@@ -482,13 +482,11 @@ class InkSurfaceView @JvmOverloads constructor(
             anchorY = sy,
             widthPx = boxWidth,
             canvasHeightPx = canvasHeight,
-            lipPx = BOX_LIP * scale,
             pageLeft = pageLeft,
             pageTop = pageTop,
             pageRight = pageLeft + pageWidth,
             pageBottom = pageTop + pageHeight,
             desktopMinPx = ch.fasrv.fanotes.desk.BOX_FIELD_MIN_DP * density,
-            editorMinPx = ch.fasrv.fanotes.desk.BOX_EDITOR_MIN_DP * density,
         )
     }
 
@@ -1370,12 +1368,11 @@ class InkSurfaceView @JvmOverloads constructor(
             val lines = ch.fasrv.fanotes.desk.wrapBoxLines(anchored.box.text.ifEmpty { "Text" }, chars)
             val lineHeight = fontSize * 1.35f
             val boxHeight = ch.fasrv.fanotes.desk.worksheetCardHeightPx(anchored.box.text, boxWidth, fontSize, scale)
-            val lip = BOX_LIP * scale
-            val top = sy - boxHeight + lip
+            val top = sy
             cardFill.color = Color.argb(184, 255, 255, 255)
-            canvas.drawRect(sx, top, sx + boxWidth, sy + lip, cardFill)
+            canvas.drawRect(sx, top, sx + boxWidth, sy + boxHeight, cardFill)
             cardEdge.strokeWidth = max(1f, scale * 0.6f)
-            canvas.drawRect(sx, top, sx + boxWidth, sy + lip, cardEdge)
+            canvas.drawRect(sx, top, sx + boxWidth, sy + boxHeight, cardEdge)
             cardFill.color = Color.WHITE
             textPaint.color = if (anchored.box.text.isEmpty()) Color.parseColor("#747887") else Color.parseColor("#202333")
             textPaint.textSize = fontSize
@@ -2501,7 +2498,7 @@ class InkSurfaceView @JvmOverloads constructor(
         val card = ch.fasrv.fanotes.desk.worksheetCardHeightPx(anchored.box.text, boxWidth, fontSize, scale)
         val normHeight = if (sessionHeight() > 0.0) card / (sessionHeight() * scale) else 0.04
         val boxSpan = anchored.box.width * place.width / width
-        return x >= sheet.first && x <= sheet.first + boxSpan && y >= sheet.second - normHeight && y <= sheet.second + 0.02
+        return x >= sheet.first && x <= sheet.first + boxSpan && y >= sheet.second && y <= sheet.second + normHeight
     }
 
     private fun commitHighlight() {
@@ -2582,7 +2579,6 @@ class InkSurfaceView @JvmOverloads constructor(
     private fun pxPerMm() = pixelsPerPageUnit() * (SOURCE_A4_PX / A4_WIDTH_MM).toFloat()
 
     private companion object {
-        const val BOX_LIP = 8f
         const val TILE_PAGE = 192
         const val MAX_TILES = 36
         const val MIN_CACHE_SCALE = 0.5f
