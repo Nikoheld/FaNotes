@@ -2448,7 +2448,10 @@ fn iso_date_time(value: &str) -> IsoDate<'_> {
 /// No zone means local time, the way `Date.parse` reads `YYYY-MM-DDTHH:mm:ss`.
 fn split_time_zone(time: &str) -> Option<(&str, Option<i64>)> {
     if let Some(clock) = time.strip_suffix(['Z', 'z']) {
-        return Some((clock, Some(0)));
+        // `16:00ZZ` is one garbage word. Only a lone `Z` after the clock is UTC.
+        if !clock.ends_with(['Z', 'z']) {
+            return Some((clock, Some(0)));
+        }
     }
     let Some(sign_at) = time.rfind(['+', '-']) else {
         return Some((time, None));
@@ -3042,7 +3045,12 @@ fn fold_trailing_zone(trimmed: &str) -> Option<String> {
         && named_zone_offset(words[end - 1]).is_some()
     {
         let suffix = named_zone_offset(words[end - 1])?;
-        let clock = format!("{}{suffix}", words[end - 2]);
+        // `16:00Z GMT` replaces `Z`. Gluing another `Z` would make `16:00ZZ`.
+        let clock_body = words[end - 2]
+            .strip_suffix(['Z', 'z'])
+            .filter(|body| !body.ends_with(['Z', 'z']))
+            .unwrap_or(words[end - 2]);
+        let clock = format!("{clock_body}{suffix}");
         let mut kept = Vec::new();
         for (index, word) in words.iter().enumerate() {
             if index == end - 2 {
@@ -4875,8 +4883,12 @@ fn consume_glued_z(
 
 fn split_clock_tail(token: &str) -> (&str, &str) {
     if let Some(body) = token.strip_suffix(['Z', 'z']) {
-        // `16:00Z` is UTC. `16:00+5Z` keeps the sign so `Z` can replace `+5`.
-        if body.contains(':') && !body.contains(['+', '-']) {
+        // `16:00Z` is UTC. `16:00ZZ` is one garbage word. `16:00+5Z` keeps
+        // the sign so `Z` can replace `+5`.
+        if body.contains(':')
+            && !body.contains(['+', '-'])
+            && !body.ends_with(['Z', 'z'])
+        {
             return (body, &token[body.len()..]);
         }
     }
@@ -5113,8 +5125,12 @@ fn fold_spaced_numeric_offset(trimmed: &str) -> Option<String> {
         return None;
     }
     // `16:00+5 -30` keeps `-30`. The sign glued to the clock was replaced.
-    // `16:00Z +5` drops `Z`. The number is the later zone.
-    let clock_word = words[1].strip_suffix(['Z', 'z']).unwrap_or(words[1]);
+    // `16:00Z +5` drops `Z`. The number is the later zone. `16:00ZZ` is
+    // one garbage word, so that `Z` stays.
+    let clock_word = match words[1].strip_suffix(['Z', 'z']) {
+        Some(body) if !body.ends_with(['Z', 'z']) => body,
+        _ => words[1],
+    };
     let clock = pad_legacy_clock(strip_glued_offset(clock_word))?;
     let (delta, suffix) = fold_offset_days(parsed.minutes)?;
     let date = shift_hyphen_date(words[0], delta)?;
@@ -5742,7 +5758,10 @@ fn legacy_iso_year(year: i32) -> String {
 }
 
 fn pad_legacy_clock(time: &str) -> Option<String> {
-    let (body, zone) = if let Some(clock) = time.strip_suffix(['Z', 'z']) {
+    let lone_z = time
+        .strip_suffix(['Z', 'z'])
+        .filter(|clock| !clock.ends_with(['Z', 'z']));
+    let (body, zone) = if let Some(clock) = lone_z {
         (clock, &time[clock.len()..])
     } else if let Some(sign_at) = time.rfind(['+', '-']) {
         if sign_at == 0 {
@@ -11150,6 +11169,17 @@ mod local_zone_tests {
         );
         assert_eq!(
             unix_millis_from_iso("16:00Z2026-10-13"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00ZZ"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00zz"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00Zz"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13T16:00ZZ"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00ZEST"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00Zfoo"), None);
+        assert_eq!(unix_millis_from_iso("16:00ZZ 2026-10-13"), None);
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00Z Z"),
             Some(1_791_907_200_000)
         );
         assert_eq!(
