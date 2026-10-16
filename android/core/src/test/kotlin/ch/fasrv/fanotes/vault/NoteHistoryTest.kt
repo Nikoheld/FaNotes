@@ -1,5 +1,8 @@
 package ch.fasrv.fanotes.vault
 
+import ch.fasrv.fanotes.desk.confirmDialogShadow
+import ch.fasrv.fanotes.desk.confirmShadowFavorsDown
+import ch.fasrv.fanotes.desk.confirmShadowFrame
 import java.nio.file.Files
 import java.time.ZoneOffset
 import kotlin.test.Test
@@ -56,10 +59,53 @@ class NoteHistoryTest {
         assertEquals(368, historyDialogWidthDp(400))
         assertEquals(640, historyDialogMaxHeightDp(1200))
         assertEquals(280, historyDialogMaxHeightDp(400))
-        assertEquals(HistoryDialogShadow(12, 40, 0.08f), historyDialogShadow(false))
-        assertEquals(HistoryDialogShadow(16, 48, 0.32f), historyDialogShadow(true))
         assertEquals("Frühere Versionen", HISTORY_TITLE)
         assertEquals("Noch keine älteren Stände. Nach dem nächsten Speichern erscheint hier die vorherige Version.", HISTORY_EMPTY)
+    }
+
+    @Test
+    fun theHistoryDialogUsesEachThemeShadow() {
+        for (theme in listOf("light", "sepia", "dark", "midnight", "forest", "aurora")) {
+            assertEquals(confirmDialogShadow(theme), historyDialogShadow(theme))
+            assertEquals(confirmShadowFrame(400f, 200f, 2f, theme), historyShadowFrame(400f, 200f, 2f, theme))
+        }
+        val dark = historyDialogShadow("dark")
+        assertEquals(0, dark.xDp)
+        assertEquals(16, dark.yDp)
+        assertEquals(48, dark.blurDp)
+        assertEquals(0.28f, dark.alpha)
+        assertEquals(0, dark.red)
+        assertEquals(0, dark.green)
+        assertEquals(0, dark.blue)
+        val sepia = historyDialogShadow("sepia")
+        assertEquals(0, sepia.xDp)
+        assertEquals(12, sepia.yDp)
+        assertEquals(40, sepia.blurDp)
+        assertEquals(0.08f, sepia.alpha)
+        assertEquals(55, sepia.red)
+        assertEquals(48, sepia.green)
+        assertEquals(36, sepia.blue)
+        val deep = historyDialogShadow("midnight")
+        assertEquals(16, deep.yDp)
+        assertEquals(48, deep.blurDp)
+        assertEquals(0.32f, deep.alpha)
+        assertEquals(deep, historyDialogShadow("forest"))
+        assertEquals(deep, historyDialogShadow("aurora"))
+        val light = historyDialogShadow("light")
+        assertEquals(12, light.yDp)
+        assertEquals(40, light.blurDp)
+        assertEquals(0.08f, light.alpha)
+        assertEquals(15, light.red)
+        assertEquals(15, light.green)
+        assertEquals(15, light.blue)
+        val sepiaFrame = checkNotNull(historyShadowFrame(400f, 200f, 2f, "sepia"))
+        assertEquals(24f, sepiaFrame.shapeTopPx - sepiaFrame.padPx)
+        assertEquals(0x14373024, sepiaFrame.color)
+        val darkFrame = checkNotNull(historyShadowFrame(400f, 200f, 2f, "dark"))
+        assertEquals(32f, darkFrame.shapeTopPx - darkFrame.padPx)
+        assertEquals(0x47000000, darkFrame.color)
+        assertTrue(confirmShadowFavorsDown(darkFrame, 200f))
+        assertTrue(darkFrame.shapeBottomPx + darkFrame.blurPx < darkFrame.bitmapHeightPx)
     }
 
     @Test

@@ -1,5 +1,9 @@
 package ch.fasrv.fanotes.vault
 
+import ch.fasrv.fanotes.desk.ConfirmDialogShadow
+import ch.fasrv.fanotes.desk.ConfirmShadowFrame
+import ch.fasrv.fanotes.desk.confirmDialogShadow
+import ch.fasrv.fanotes.desk.confirmShadowFrame
 import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.escapeJson
 import ch.fasrv.fanotes.json.parseJson
@@ -141,14 +145,19 @@ fun historyDialogMaxHeightDp(windowHeightDp: Int): Int {
     return min(HISTORY_DIALOG_MAX_HEIGHT_DP, fraction)
 }
 
-data class HistoryDialogShadow(val yDp: Int, val blurDp: Int, val alpha: Float)
+/**
+ * `.history-dialog` keeps `box-shadow: var(--shadow)`.
+ * The later "One dialog, button and type system" block only sets `border-radius: 12px`.
+ * Light is `0 12px 40px rgba(15, 15, 15, .08)`.
+ * Sepia is `0 12px 40px rgba(55, 48, 36, .08)`.
+ * Dark is `0 16px 48px rgba(0, 0, 0, .28)`.
+ * Midnight, forest, and aurora are `0 16px 48px rgba(0, 0, 0, .32)`.
+ */
+fun historyDialogShadow(themeId: String = "light"): ConfirmDialogShadow = confirmDialogShadow(themeId)
 
-/** Theme `--shadow`: light 12×40 at 8%, dark 16×48 at 32%. */
-fun historyDialogShadow(dark: Boolean): HistoryDialogShadow = if (dark) {
-    HistoryDialogShadow(16, 48, 0.32f)
-} else {
-    HistoryDialogShadow(12, 40, 0.08f)
-}
+/** Shared confirm-dialog frame: x is 0, y is down, then blur. */
+fun historyShadowFrame(widthPx: Float, heightPx: Float, density: Float, themeId: String = "light"): ConfirmShadowFrame? =
+    confirmShadowFrame(widthPx, heightPx, density, themeId)
 
 fun randomHistorySuffix(): String {
     val bytes = ByteArray(3)

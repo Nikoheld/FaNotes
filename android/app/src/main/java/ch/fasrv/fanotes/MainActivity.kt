@@ -1049,7 +1049,10 @@ fun FaNotesScreen(
     }
     if (aiOpen) AiScreen(model)
     if (bugReportOpen) BugReportDialog(model)
-    if (historyOpen) HistoryDialog(model)
+    if (historyOpen) HistoryDialog(
+        model,
+        themeId = ch.fasrv.fanotes.desk.themePalette(desk["theme"], androidx.compose.foundation.isSystemInDarkTheme()).id,
+    )
     confirm?.let { request ->
         FaNotesConfirmDialog(
             request,
