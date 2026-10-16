@@ -2015,6 +2015,11 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
             if !surrounded && negative_expanded_date(date) {
                 return None;
             }
+            // `+002026-10-13 16:00` is local 16:00. The plus and six digits
+            // are the numeric year. A date with no clock stays UTC.
+            if let Some(next) = rewrite_positive_expanded_clock(trimmed) {
+                return unix_millis_from_iso(&next);
+            }
             return legacy_numeric_millis(trimmed);
         }
         IsoDate::DateTime(date, time) => (date, time),
@@ -2537,6 +2542,41 @@ fn datetime_calendar(date: &str) -> Option<(i32, u32, u32)> {
 
 /// `-000001-10-13 16:00` is a negative expanded year plus a clock.
 /// `-000000-10-13 16:00` is year zero and stays on the legacy path.
+/// `+002026-10-13 16:00` becomes `2026-10-13 16:00`. `+000001-10-13 16:00`
+/// becomes `1-10-13 16:00`, which is 10 January 2013.
+fn rewrite_positive_expanded_clock(trimmed: &str) -> Option<String> {
+    let (date, time) = trimmed.split_once(is_date_parse_space)?;
+    let time = time.trim_start_matches(is_date_parse_space);
+    if time.is_empty() {
+        return None;
+    }
+    let rest = date.strip_prefix('+')?;
+    if rest.len() < 6 || !rest.as_bytes()[..6].iter().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let year: i32 = rest[..6].parse().ok()?;
+    let tail = &rest[6..];
+    if !expanded_year_tail(tail) {
+        return None;
+    }
+    Some(format!("{year}{tail} {time}"))
+}
+
+fn expanded_year_tail(tail: &str) -> bool {
+    if tail.is_empty() {
+        return true;
+    }
+    let Some(body) = tail.strip_prefix('-') else {
+        return false;
+    };
+    let parts: Vec<&str> = body.split('-').collect();
+    match parts.as_slice() {
+        [month] => two_digits(month),
+        [month, day] => two_digits(month) && two_digits(day),
+        _ => false,
+    }
+}
+
 fn negative_expanded_clock(value: &str) -> bool {
     let Some((date, time)) = value.split_once(is_date_parse_space) else {
         return false;
@@ -12475,5 +12515,48 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("Monday 13:Oct:2026 4:00 PM"), None);
         assert_eq!(unix_millis_from_iso("Oct 13 2026 4:00 PM"), Some(1_791_921_600_000));
         assert_eq!(unix_millis_from_iso("13:Oct:2026"), Some(1_790_874_000_000));
+    }
+
+    #[test]
+    fn a_positive_expanded_year_with_a_clock_is_local() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `+002026-10-13` alone is UTC. A space and a clock make it local.
+        // `+000001-10-13 16:00` is 10 January 2013, not year 1.
+        assert_eq!(unix_millis_from_iso("+002026-10-13"), Some(1_791_849_600_000));
+        assert_eq!(
+            unix_millis_from_iso("+002026-10-13 16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("+002026-10-13 4:5"),
+            Some(1_791_878_700_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("+002026-10-13 16:00 EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("+002026-10 16:00"),
+            Some(1_790_884_800_000)
+        );
+        assert_eq!(unix_millis_from_iso("+002026 16:00"), Some(1_767_301_200_000));
+        assert_eq!(
+            unix_millis_from_iso("+002026-10-13T16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("+000001-10-13 16:00"),
+            Some(1_357_851_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("+010000-10-13 16:00"),
+            Some(253_427_083_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("+000100-10-13 16:00"), None);
     }
 }

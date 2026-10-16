@@ -993,6 +993,11 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     // U+2028 and U+2029 are JavaScript trim characters, and `Date.parse` rejects
     // them. Only the date-parse spaces are padding.
     let trimmed = value.trim_matches(is_date_parse_space);
+    // `+002026-10-13 16:00` is local 16:00. The plus and six digits are the
+    // numeric year, then the usual hyphen rules. A date with no clock stays UTC.
+    if let Some(next) = rewrite_positive_expanded_clock(trimmed) {
+        return canonical_iso(&next);
+    }
     if let Some(rest) = strip_leading_signs(trimmed) {
         // Signs before the first number are padding. The space keeps a
         // date-only value local and rejects a `T` form.
@@ -1335,6 +1340,42 @@ fn has_ampm_word(value: &str) -> bool {
     value
         .split(char::is_whitespace)
         .any(|word| word.eq_ignore_ascii_case("am") || word.eq_ignore_ascii_case("pm"))
+}
+
+/// `+002026-10-13 16:00` becomes `2026-10-13 16:00`. `+000001-10-13 16:00`
+/// becomes `1-10-13 16:00`, which is 10 January 2013.
+fn rewrite_positive_expanded_clock(trimmed: &str) -> Option<String> {
+    let (date, time) = trimmed.split_once(is_date_parse_space)?;
+    let time = time.trim_start_matches(is_date_parse_space);
+    if time.is_empty() {
+        return None;
+    }
+    let rest = date.strip_prefix('+')?;
+    if rest.len() < 6 || !rest.as_bytes()[..6].iter().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let year: i32 = rest[..6].parse().ok()?;
+    let tail = &rest[6..];
+    if !expanded_year_tail(tail) {
+        return None;
+    }
+    Some(format!("{year}{tail} {time}"))
+}
+
+fn expanded_year_tail(tail: &str) -> bool {
+    if tail.is_empty() {
+        return true;
+    }
+    let Some(body) = tail.strip_prefix('-') else {
+        return false;
+    };
+    let two = |text: &str| text.len() == 2 && text.bytes().all(|byte| byte.is_ascii_digit());
+    let parts: Vec<&str> = body.split('-').collect();
+    match parts.as_slice() {
+        [month] => two(month),
+        [month, day] => two(month) && two(day),
+        _ => false,
+    }
 }
 
 fn has_iso_t(value: &str) -> bool {
@@ -10441,6 +10482,40 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("13:Oct:2026").as_deref(),
                 Some("2026-10-01T17:00:00.000Z")
+            );
+        });
+    }
+
+    #[test]
+    fn a_positive_expanded_year_with_a_clock_is_local() {
+        with_tz("America/New_York", || {
+            assert_eq!(
+                super::canonical_iso("+002026-10-13").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+002026-10-13 16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+002026-10-13 4:5").as_deref(),
+                Some("2026-10-13T08:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+002026-10-13 16:00 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+000001-10-13 16:00").as_deref(),
+                Some("2013-01-10T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+010000-10-13 16:00").as_deref(),
+                Some("+010000-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+000100-10-13 16:00").as_deref(),
+                Some("0100-10-13T20:56:02.000Z")
             );
         });
     }
