@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -6891,24 +6892,71 @@ private fun SettingsNavIconButton(
 }
 
 @Composable
-private fun SyncAccountCallout(modifier: Modifier = Modifier) {
+private fun SyncAccountCallout(
+    modifier: Modifier = Modifier,
+    viewportWidth: Int,
+    actions: (@Composable () -> Unit)? = null,
+) {
     val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
     val shape = RoundedCornerShape(ch.fasrv.fanotes.sync.SYNC_CALLOUT_RADIUS_DP.dp)
-    Row(
-        modifier.fillMaxWidth().clip(shape).border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.17f), shape).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.13f)).padding(13.dp),
-        horizontalArrangement = Arrangement.spacedBy(11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier.size(ch.fasrv.fanotes.sync.SYNC_CALLOUT_ICON_DP.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
-            contentAlignment = Alignment.Center,
+    val layout = ch.fasrv.fanotes.desk.settingCalloutLayout(viewportWidth)
+    val cross = if (layout.alignItems == ch.fasrv.fanotes.desk.SETTING_CALLOUT_ALIGN_NARROW) {
+        Alignment.Top
+    } else {
+        Alignment.CenterVertically
+    }
+    val actionsStart = if (layout.actionsFillWidth) layout.actionsPadStartDp.dp else 0.dp
+    val chrome = modifier
+        .fillMaxWidth()
+        .clip(shape)
+        .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.17f), shape)
+        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.13f))
+        .padding(13.dp)
+    if (layout.wraps) {
+        Column(chrome, verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(11.dp),
+                verticalAlignment = cross,
+            ) {
+                SyncCalloutBody(accent)
+            }
+            if (actions != null) {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = actionsStart),
+                    horizontalArrangement = Arrangement.spacedBy(layout.actionsGapDp.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) { actions() }
+            }
+        }
+    } else {
+        Row(
+            chrome,
+            horizontalArrangement = Arrangement.spacedBy(11.dp),
+            verticalAlignment = cross,
         ) {
-            Icon(Icons.Filled.Cloud, contentDescription = null, modifier = Modifier.size(18.dp), tint = accent)
+            SyncCalloutBody(accent)
+            if (actions != null) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(layout.actionsGapDp.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) { actions() }
+            }
         }
-        Column(Modifier.weight(1f)) {
-            Text(ch.fasrv.fanotes.sync.SYNC_ACCOUNT_CALLOUT, fontSize = 12.sp)
-            Text(ch.fasrv.fanotes.sync.SYNC_ACCOUNT_CALLOUT_BODY, fontSize = 12.sp, lineHeight = 17.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 3.dp))
-        }
+    }
+}
+
+@Composable
+private fun RowScope.SyncCalloutBody(accent: Color) {
+    Box(
+        Modifier.size(ch.fasrv.fanotes.sync.SYNC_CALLOUT_ICON_DP.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Filled.Cloud, contentDescription = null, modifier = Modifier.size(18.dp), tint = accent)
+    }
+    Column(Modifier.weight(1f)) {
+        Text(ch.fasrv.fanotes.sync.SYNC_ACCOUNT_CALLOUT, fontSize = 12.sp)
+        Text(ch.fasrv.fanotes.sync.SYNC_ACCOUNT_CALLOUT_BODY, fontSize = 12.sp, lineHeight = 17.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 3.dp))
     }
 }
 
@@ -7622,7 +7670,7 @@ private fun SettingsPage(
                     val historySync = settings["sync-history"] == "on"
                     val signedIn = sync.account != null
                     var registerMode by remember { mutableStateOf(false) }
-                    SyncAccountCallout(Modifier.padding(bottom = 13.dp))
+                    SyncAccountCallout(Modifier.padding(bottom = 13.dp), viewportWidth)
                     SettingCard(
                         if (signedIn) "Konto & Status" else if (registerMode) ch.fasrv.fanotes.sync.SYNC_ACCOUNT_REGISTER else ch.fasrv.fanotes.sync.SYNC_ACCOUNT_LOGIN,
                         if (signedIn) Icons.Filled.Cloud else Icons.Filled.Key,
