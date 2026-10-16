@@ -1397,6 +1397,27 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         graph.engine.clearConflicts()
     }
 
+    fun changeSyncPassword(current: String, next: String, repeat: String) {
+        val problem = ch.fasrv.fanotes.sync.syncPasswordChangeError(next, repeat)
+        if (problem != null) {
+            message.value = problem
+            return
+        }
+        viewModelScope.launch {
+            runCatching { graph.engine.changePassword(current, next) }
+                .onSuccess { message.value = "Passwort geändert. Alle anderen Geräte müssen sich neu anmelden." }
+                .onFailure { error -> message.value = error.message ?: "Das Passwort konnte nicht geändert werden." }
+        }
+    }
+
+    fun deleteSyncAccount(password: String) {
+        viewModelScope.launch {
+            runCatching { graph.engine.deleteAccount(password) }
+                .onSuccess { message.value = "Konto und Serverdaten wurden gelöscht." }
+                .onFailure { error -> message.value = error.message ?: "Das Konto konnte nicht gelöscht werden." }
+        }
+    }
+
     fun removeSyncDevice(deviceId: String, name: String) {
         viewModelScope.launch {
             runCatching { graph.engine.removeDevice(deviceId) }

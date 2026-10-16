@@ -34,5 +34,8 @@ class SyncDeviceTest {
         assertEquals(40, SYNC_LOG_VISIBLE)
         assertEquals(240, SYNC_LOG_MAX_DP)
         assertEquals(110, SYNC_LOG_TIME_DP)
+        assertEquals("Die beiden neuen Passwörter stimmen nicht überein.", syncPasswordChangeError("abcdefghij", "abcdefghjk"))
+        assertEquals("Das Passwort braucht mindestens 10 Zeichen.", syncPasswordChangeError("short", "short"))
+        assertEquals(null, syncPasswordChangeError("brand new secret", "brand new secret"))
     }
 }

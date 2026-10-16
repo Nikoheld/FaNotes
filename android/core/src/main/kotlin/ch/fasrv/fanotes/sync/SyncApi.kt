@@ -147,6 +147,21 @@ class SyncApi(
         request("DELETE", "/devices/$deviceId", session)
     }
 
+    suspend fun changePassword(session: SyncSession, currentAuth: String, newAuth: String, kdf: SyncKdf, wrap: SyncKeyWrap) {
+        val body = """{"authKey":${ch.fasrv.fanotes.json.escapeJson(currentAuth)},"newAuthKey":${ch.fasrv.fanotes.json.escapeJson(newAuth)},"kdf":{"algorithm":${ch.fasrv.fanotes.json.escapeJson(kdf.algorithm)},"iterations":${kdf.iterations},"salt":${ch.fasrv.fanotes.json.escapeJson(kdf.salt)}},"vaultKeyWrap":{"iv":${ch.fasrv.fanotes.json.escapeJson(wrap.iv)},"data":${ch.fasrv.fanotes.json.escapeJson(wrap.data)}}}"""
+        post("/password", body, session)
+    }
+
+    suspend fun deleteAccount(session: SyncSession, authKey: String) {
+        raw(
+            "DELETE",
+            "/account",
+            session,
+            """{"authKey":${ch.fasrv.fanotes.json.escapeJson(authKey)}}""".toByteArray(StandardCharsets.UTF_8),
+            mapOf("Content-Type" to "application/json"),
+        )
+    }
+
     suspend fun changes(session: SyncSession, since: Long): SyncChangesPage {
         val json = request("GET", "/changes?since=$since", session) as JsonValue.Obj
         val entries = json.array("entries")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toEntry() }
