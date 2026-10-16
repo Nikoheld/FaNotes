@@ -1974,7 +1974,16 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         return Some(millis);
     }
     let (date, time) = match iso_date_time(value) {
-        IsoDate::Invalid => return legacy_numeric_millis(trimmed),
+        IsoDate::Invalid => {
+            // `datetime_calendar` splits on `-`, so `-000001-10-13 16:00`
+            // never becomes a strict date. It is year -1, before 1970, not
+            // 10 January 2013. A leading space still uses that legacy reading.
+            let surrounded = value.trim_matches(is_date_parse_space).len() != value.len();
+            if !surrounded && negative_expanded_clock(trimmed) {
+                return None;
+            }
+            return legacy_numeric_millis(trimmed);
+        }
         // `YYYY-MM-DD` is UTC midnight. A short field, or whitespace around the
         // date, makes that midnight local. A value that is not a date, such as
         // `5GMT`, continues as a legacy number.
@@ -1994,7 +2003,13 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         }
         // A `T` clock is strict. A space before the clock is legacy: `16:` is
         // 16:00, `4:5` is 4:05, and `16:.5` is 16:05.
-        IsoDate::DateTime(_date, _time) if !has_iso_t(value) => {
+        // `-000001-10-13 16:00` is year -1, not 10 January 2013. That instant
+        // is before 1970. A leading space still uses the legacy reading.
+        IsoDate::DateTime(date, _time) if !has_iso_t(value) => {
+            let surrounded = value.trim_matches(is_date_parse_space).len() != value.len();
+            if !surrounded && negative_expanded_date(date) {
+                return None;
+            }
             return legacy_numeric_millis(trimmed);
         }
         IsoDate::DateTime(date, time) => (date, time),
@@ -2507,6 +2522,63 @@ fn datetime_calendar(date: &str) -> Option<(i32, u32, u32)> {
         }
     };
     Some((year, month, day))
+}
+
+/// `-000001-10-13 16:00` is a negative expanded year plus a clock.
+/// `-000000-10-13 16:00` is year zero and stays on the legacy path.
+fn negative_expanded_clock(value: &str) -> bool {
+    let Some((date, time)) = value.split_once(is_date_parse_space) else {
+        return false;
+    };
+    let time = time.trim_start_matches(is_date_parse_space);
+    if time.is_empty() || !time.contains(':') {
+        return false;
+    }
+    negative_expanded_date(date)
+}
+
+/// `-000001-10-13` is year -1. `-000000-10-13` is year zero, so a clock on
+/// that date stays on the legacy path. `split('-')` cannot see this year:
+/// the sign is the first hyphen.
+fn negative_expanded_date(date: &str) -> bool {
+    let bytes = date.as_bytes();
+    if bytes.first() != Some(&b'-') || bytes.len() < 7 {
+        return false;
+    }
+    if !bytes[1..7].iter().all(u8::is_ascii_digit) {
+        return false;
+    }
+    let Ok(year) = date[..7].parse::<i32>() else {
+        return false;
+    };
+    if year >= 0 {
+        return false;
+    }
+    let rest = &date[7..];
+    if rest.is_empty() {
+        return true;
+    }
+    let Some(rest) = rest.strip_prefix('-') else {
+        return false;
+    };
+    let (month, day) = if let Some((month, day)) = rest.split_once('-') {
+        if day.contains('-') {
+            return false;
+        }
+        (month, day)
+    } else {
+        (rest, "01")
+    };
+    if !two_digits(month) || !two_digits(day) {
+        return false;
+    }
+    let Ok(month) = month.parse::<i32>() else {
+        return false;
+    };
+    let Ok(day) = day.parse::<i32>() else {
+        return false;
+    };
+    (1..=12).contains(&month) && (1..=31).contains(&day)
 }
 
 fn datetime_year_ok(year_text: &str) -> bool {
@@ -11503,6 +11575,14 @@ mod local_zone_tests {
         assert_eq!(
             unix_millis_from_iso(" -000001-10-13"),
             Some(1_357_794_000_000)
+        );
+        // `-000001-10-13 16:00` is year -1, before 1970. A leading space is
+        // still 10 January 2013 at 16:00 EST.
+        assert_eq!(unix_millis_from_iso("-000001-10-13 16:00"), None);
+        assert_eq!(unix_millis_from_iso("-000001-10-13T16:00:00"), None);
+        assert_eq!(
+            unix_millis_from_iso(" -000001-10-13 16:00"),
+            Some(1_357_851_600_000)
         );
     }
 

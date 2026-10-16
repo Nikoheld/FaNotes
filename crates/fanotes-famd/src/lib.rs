@@ -1093,6 +1093,22 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         }
         return None;
     }
+    // A leading space keeps `-000001-10-13 16:00` on the legacy path, which
+    // reads 10 January 2013. Without that space the same text is year -1.
+    if surrounded {
+        if let Some((year, _, _, _)) = split_calendar(trimmed) {
+            if year < 0
+                && trimmed.as_bytes().first() == Some(&b'-')
+                && trimmed[1..]
+                    .bytes()
+                    .take_while(|byte| byte.is_ascii_digit())
+                    .count()
+                    == 6
+            {
+                return legacy_numeric_iso(trimmed);
+            }
+        }
+    }
     // `2026 10 13` is not a year plus a clock. A tail with no colon is a legacy
     // number, such as `2026 10`. A clock that fails to parse is not an ISO time.
     let Some((year, month, day, time_at)) = split_calendar(source) else {
@@ -9452,6 +9468,25 @@ mod tests {
             assert_eq!(
                 super::canonical_iso(" -000001-01-01").as_deref(),
                 Some("2001-01-01T05:00:00.000Z")
+            );
+            // `-000001-10-13 16:00` is year -1 local time. October -1 in New
+            // York is local mean time, UTC−4:56:02. A leading space is still
+            // 10 January 2013. `1950-10-13 16:00` stays local EST.
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 16:00").as_deref(),
+                Some("-000001-10-13T20:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13T16:00:00").as_deref(),
+                Some("-000001-10-13T20:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(" -000001-10-13 16:00").as_deref(),
+                Some("2013-01-10T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 16:00").as_deref(),
+                Some("1950-10-13T21:00:00.000Z")
             );
         });
     }
