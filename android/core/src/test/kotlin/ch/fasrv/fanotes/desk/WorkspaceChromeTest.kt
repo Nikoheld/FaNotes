@@ -279,5 +279,11 @@ class WorkspaceChromeTest {
         assertEquals(24, TREE_RENAME_DP)
         assertEquals(5, TREE_RENAME_RADIUS_DP)
         assertEquals(0.1f, TREE_RENAME_RING)
+        assertEquals("Ordner", treeMenuKind(folder = true, pdf = false))
+        assertEquals("PDF-Notiz", treeMenuKind(folder = false, pdf = true))
+        assertEquals("Notiz", treeMenuKind(folder = false, pdf = false))
+        assertEquals(220, TREE_MENU_WIDTH_DP)
+        assertEquals(12, TREE_MENU_RADIUS_DP)
+        assertEquals(34, TREE_MENU_ROW_DP)
     }
 }
