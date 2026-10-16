@@ -1092,8 +1092,11 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     }
     if trimmed.contains('/') {
         // `2026/10/13` is local midnight. `10/13/2026` is the same day.
-        let normalized = rewrite_slash_date(trimmed)?;
-        return canonical_iso(&normalized);
+        // A slash that is not that date is ignored, so `/2026-10-13` is local.
+        if let Some(normalized) = rewrite_slash_date(trimmed) {
+            return canonical_iso(&normalized);
+        }
+        return canonical_iso(&trimmed.replace('/', " "));
     }
     if let Some(normalized) = fold_spaced_numeric_offset(trimmed) {
         // `2026-10-13 16:00 +5` is 16:00 at a fixed offset. A leading space
@@ -4357,6 +4360,9 @@ fn has_date_parse_padding(value: &str) -> bool {
 }
 
 /// `:30` and `.5` at the start of a field are the numbers 30 and 5.
+/// `:30` and `.5` at the start of a field are the numbers 30 and 5.
+/// The mark is still a separator, so `.2026-10-13` is local and
+/// `.2026-10-13T16:00` is empty.
 fn strip_leading_field_marks(value: &str) -> Option<String> {
     let mut changed = false;
     let mut out = String::with_capacity(value.len());
@@ -4369,6 +4375,9 @@ fn strip_leading_field_marks(value: &str) -> Option<String> {
         }
         if at_token_start && matches!(character, ':' | '.') {
             changed = true;
+            if !out.ends_with(is_date_parse_space) {
+                out.push(' ');
+            }
             continue;
         }
         at_token_start = false;
@@ -8035,6 +8044,32 @@ mod tests {
             );
             assert_eq!(super::canonical_iso("Oct 13 2026 16:00 )"), None);
             assert_eq!(super::canonical_iso("Oct 13 2026 16:00 x"), None);
+            // Node 22. Junk glued to a finished field rejects the date even when
+            // a zone follows it. An open field still ignores the mark.
+            assert_eq!(super::canonical_iso("2026-10-13 16:00!GMT"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00#+5"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00!+5"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 24:00!GMT"), None);
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:!GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00:!GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 !GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00:00.5!GMT").as_deref(),
+                Some("2026-10-13T16:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("4:00 PM!5").as_deref(),
+                Some("2001-05-01T20:00:00.000Z")
+            );
             assert_eq!(
                 super::canonical_iso("Oct 13 2026 (16:00)").as_deref(),
                 Some("2026-10-13T04:00:00.000Z")
@@ -8301,6 +8336,15 @@ mod tests {
                 super::canonical_iso("10/13/2026").as_deref(),
                 Some("2026-10-13T04:00:00.000Z")
             );
+            assert_eq!(
+                super::canonical_iso("/2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13/").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("16:00/10/13/2026"), None);
             assert_eq!(
                 super::canonical_iso("2026/10/13 16:00:00Z").as_deref(),
                 Some("2026-10-13T16:00:00.000Z")
@@ -9377,6 +9421,16 @@ mod tests {
                 Some("2026-10-13T04:00:00.000Z")
             );
             assert_eq!(super::canonical_iso("13.10.2026"), None);
+            assert_eq!(
+                super::canonical_iso(".2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(":2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso(".2026-10-13T16:00"), None);
+            assert_eq!(super::canonical_iso(":2026-10-13T16:00"), None);
             assert_eq!(
                 super::canonical_iso("2026-10-13.16:00").as_deref(),
                 Some("2026-10-13T20:00:00.000Z")
