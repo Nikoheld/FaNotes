@@ -367,6 +367,34 @@ const val FIRST_RUN_PREVIEW_HITS = "1 Treffer"
 const val FIRST_RUN_PREVIEW_INK = "Handschrift"
 const val FIRST_RUN_PREVIEW_FOUND = "Sofort gefunden"
 const val FIRST_RUN_PREVIEW_LABEL = "Vorschau von FaNotes"
+/**
+ * `.first-run-preview-float` sits on `.first-run-app-preview`, not under the window.
+ * Padding is `8px 10px`, gap 6px, radius 9px, 8px type at weight 600, icon 15px.
+ * Tag one is `top: 24%` and `right: -25px`, or `right: -8px` at 760px and below.
+ * Tag two is `right: 28px` and `bottom: -16px`.
+ */
+const val FIRST_RUN_PREVIEW_FLOAT_PAD_BLOCK_DP = 8
+const val FIRST_RUN_PREVIEW_FLOAT_PAD_INLINE_DP = 10
+const val FIRST_RUN_PREVIEW_FLOAT_GAP_DP = 6
+const val FIRST_RUN_PREVIEW_FLOAT_RADIUS_DP = 9
+const val FIRST_RUN_PREVIEW_FLOAT_SP = 8
+const val FIRST_RUN_PREVIEW_FLOAT_WEIGHT = 600
+const val FIRST_RUN_PREVIEW_FLOAT_ICON_DP = 15
+const val FIRST_RUN_PREVIEW_FLOAT_ONE_TOP = 0.24f
+const val FIRST_RUN_PREVIEW_FLOAT_ONE_RIGHT_DP = -25
+const val FIRST_RUN_PREVIEW_FLOAT_ONE_RIGHT_NARROW_DP = -8
+const val FIRST_RUN_PREVIEW_FLOAT_TWO_RIGHT_DP = 28
+const val FIRST_RUN_PREVIEW_FLOAT_TWO_BOTTOM_DP = -16
+/** `color-mix(in srgb, var(--panel-strong) 93%, transparent)`. */
+const val FIRST_RUN_PREVIEW_FLOAT_FILL_ALPHA = 0.93f
+/** `--border-strong` is white at 16% on dark themes and `#37352f` at 16% on light themes. */
+const val FIRST_RUN_PREVIEW_FLOAT_BORDER_ALPHA = 0.16f
+const val FIRST_RUN_PREVIEW_FLOAT_BORDER_LIGHT_RGB = 0x37352F
+/** `box-shadow: 0 13px 35px rgba(0,0,0,.2)`. */
+const val FIRST_RUN_PREVIEW_FLOAT_SHADOW_X_DP = 0
+const val FIRST_RUN_PREVIEW_FLOAT_SHADOW_Y_DP = 13
+const val FIRST_RUN_PREVIEW_FLOAT_SHADOW_BLUR_DP = 35
+const val FIRST_RUN_PREVIEW_FLOAT_SHADOW_ALPHA = 0.2f
 const val FIRST_RUN_WRITING_PREVIEW_LABEL = "Vorschau einer Seite mit Text und Handschrift"
 const val FIRST_RUN_WRITING_FILE = "Analysis.md"
 const val FIRST_RUN_WRITING_DATE = "12. August · Mathematik"
@@ -506,6 +534,73 @@ fun firstRunPreviewPaperShadowFrame(widthPx: Float, heightPx: Float, density: Fl
         blurPx = blurPx,
         color = firstRunPreviewPaperShadowColor(shadow.alpha),
     )
+}
+
+/**
+ * A floating tag anchored to `.first-run-app-preview`.
+ * [fromTop] uses [topFraction] of the preview height. Otherwise [bottomDp] is the CSS `bottom`.
+ * [rightDp] is the CSS `right`, negative when the tag hangs past the window.
+ */
+data class FirstRunPreviewFloatAnchor(
+    val fromTop: Boolean,
+    val topFraction: Float,
+    val rightDp: Int,
+    val bottomDp: Int,
+)
+
+/** Handschrift tag. The 760px query only changes its right edge. */
+fun firstRunPreviewFloatOne(screenWidthDp: Int) = FirstRunPreviewFloatAnchor(
+    fromTop = true,
+    topFraction = FIRST_RUN_PREVIEW_FLOAT_ONE_TOP,
+    rightDp = if (screenWidthDp <= FIRST_RUN_PREVIEW_SPLIT_DP) {
+        FIRST_RUN_PREVIEW_FLOAT_ONE_RIGHT_NARROW_DP
+    } else {
+        FIRST_RUN_PREVIEW_FLOAT_ONE_RIGHT_DP
+    },
+    bottomDp = 0,
+)
+
+/** Sofort gefunden tag. Its place does not change with the viewport. */
+fun firstRunPreviewFloatTwo() = FirstRunPreviewFloatAnchor(
+    fromTop = false,
+    topFraction = 0f,
+    rightDp = FIRST_RUN_PREVIEW_FLOAT_TWO_RIGHT_DP,
+    bottomDp = FIRST_RUN_PREVIEW_FLOAT_TWO_BOTTOM_DP,
+)
+
+/**
+ * Offset from the preview's top-end or bottom-end corner.
+ * Positive x moves right and positive y moves down, which is how Compose applies `offset`.
+ * [yFraction] is only used for the top tag and is a fraction of the preview height.
+ */
+data class FirstRunPreviewFloatOffset(val xDp: Int, val yFraction: Float, val yDp: Int)
+
+fun firstRunPreviewFloatOffset(anchor: FirstRunPreviewFloatAnchor): FirstRunPreviewFloatOffset = if (anchor.fromTop) {
+    FirstRunPreviewFloatOffset(xDp = -anchor.rightDp, yFraction = anchor.topFraction, yDp = 0)
+} else {
+    FirstRunPreviewFloatOffset(xDp = -anchor.rightDp, yFraction = 0f, yDp = -anchor.bottomDp)
+}
+
+/** Icon on `.first-run-preview-float svg` is `--accent-readable`. */
+fun firstRunPreviewFloatIcon(dark: Boolean): Int = noteTabAccentArgb(dark)
+
+/** Chip fill: panel-strong at 93% over a transparent backdrop. */
+fun firstRunPreviewFloatFill(panelStrongArgb: Int): Int {
+    val alpha = (FIRST_RUN_PREVIEW_FLOAT_FILL_ALPHA * 255f).roundToInt().coerceIn(0, 255)
+    return (alpha shl 24) or (panelStrongArgb and 0xFFFFFF)
+}
+
+/** `--border-strong` for the floating tags. */
+fun firstRunPreviewFloatBorder(dark: Boolean): Int {
+    val rgb = if (dark) 0xFFFFFF else FIRST_RUN_PREVIEW_FLOAT_BORDER_LIGHT_RGB
+    val alpha = (FIRST_RUN_PREVIEW_FLOAT_BORDER_ALPHA * 255f).roundToInt().coerceIn(0, 255)
+    return (alpha shl 24) or rgb
+}
+
+/** Black at the floating-tag shadow alpha. */
+fun firstRunPreviewFloatShadowColor(alpha: Float = FIRST_RUN_PREVIEW_FLOAT_SHADOW_ALPHA): Int {
+    val channel = (alpha.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
+    return channel shl 24
 }
 
 /** Copy and panel weights from the desktop first-run grids above 980dp. */

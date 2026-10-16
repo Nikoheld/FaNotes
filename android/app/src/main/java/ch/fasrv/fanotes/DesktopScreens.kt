@@ -4882,7 +4882,8 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
     )
     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_RADIUS_DP.dp)
     val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
-    Column(modifier.semantics { contentDescription = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_LABEL }) {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    Box(modifier.semantics { contentDescription = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_LABEL }) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -5005,15 +5006,68 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
                 }
             }
         }
-        Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK, ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FOUND).forEach { label ->
-                Text(
-                    label,
-                    fontSize = 12.sp,
-                    modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, rule, RoundedCornerShape(999.dp)).background(ink.panelStrong).padding(horizontal = 10.dp, vertical = 6.dp),
-                )
-            }
+        BoxWithConstraints(Modifier.matchParentSize()) {
+            val handwriting = ch.fasrv.fanotes.desk.firstRunPreviewFloatOffset(ch.fasrv.fanotes.desk.firstRunPreviewFloatOne(screenWidth))
+            val found = ch.fasrv.fanotes.desk.firstRunPreviewFloatOffset(ch.fasrv.fanotes.desk.firstRunPreviewFloatTwo())
+            WelcomePreviewFloat(
+                ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK,
+                Icons.Filled.Edit,
+                dark,
+                ink,
+                Modifier.align(Alignment.TopEnd).offset(x = handwriting.xDp.dp, y = maxHeight * handwriting.yFraction + handwriting.yDp.dp),
+            )
+            WelcomePreviewFloat(
+                ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FOUND,
+                Icons.Filled.Search,
+                dark,
+                ink,
+                Modifier.align(Alignment.BottomEnd).offset(x = found.xDp.dp, y = maxHeight * found.yFraction + found.yDp.dp),
+            )
         }
+    }
+}
+
+@Composable
+private fun WelcomePreviewFloat(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    dark: Boolean,
+    ink: StatusInk,
+    modifier: Modifier,
+) {
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FLOAT_RADIUS_DP.dp)
+    val shadow = Color(ch.fasrv.fanotes.desk.firstRunPreviewFloatShadowColor())
+    Row(
+        modifier
+            .shadow(
+                elevation = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FLOAT_SHADOW_Y_DP.dp,
+                shape = shape,
+                clip = false,
+                ambientColor = shadow,
+                spotColor = shadow,
+            )
+            .clip(shape)
+            .border(1.dp, Color(ch.fasrv.fanotes.desk.firstRunPreviewFloatBorder(dark)), shape)
+            .background(Color(ch.fasrv.fanotes.desk.firstRunPreviewFloatFill(ink.panelStrong.toArgb())))
+            .padding(
+                horizontal = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FLOAT_PAD_INLINE_DP.dp,
+                vertical = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FLOAT_PAD_BLOCK_DP.dp,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FLOAT_GAP_DP.dp),
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FLOAT_ICON_DP.dp),
+            tint = Color(ch.fasrv.fanotes.desk.firstRunPreviewFloatIcon(dark)),
+        )
+        Text(
+            label,
+            fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FLOAT_SP.sp,
+            fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FLOAT_WEIGHT),
+            color = ink.soft,
+        )
     }
 }
 
