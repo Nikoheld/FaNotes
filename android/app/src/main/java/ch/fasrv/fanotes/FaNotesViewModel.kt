@@ -2321,6 +2321,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private var boxesNeedSave = false
     val aiReply = MutableStateFlow("")
     val aiPreview = MutableStateFlow<String?>(null)
+    val aiBusy = MutableStateFlow(false)
     val aiStatus = MutableStateFlow("")
     val aiModels = MutableStateFlow<List<ch.fasrv.fanotes.desk.AiListedModel>>(emptyList())
     val paletteOpen = MutableStateFlow(false)
@@ -3523,6 +3524,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         actions: List<String>,
         instruction: String,
     ) {
+        if (aiBusy.value) return
         val note = open.value
         if (note == null) {
             aiStatus.value = "Öffne zuerst eine Notiz."
@@ -3530,25 +3532,30 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
         val notes = flatNotes().filter { it.path != note.path }.map { it.name to it.path }
         val source = markdown.value
+        aiBusy.value = true
         viewModelScope.launch {
             aiStatus.value = "Die Notiz wird bearbeitet…"
-            val outcome = withContext(Dispatchers.IO) {
-                runCatching {
-                    val job = ch.fasrv.fanotes.desk.prepareAiJob(
-                        provider, baseUrl, modelName, actions, instruction, note.title, note.path, source, notes,
-                    )
-                    if (job.provider == "opencode") openCodeTransform(job, apiKey, username, note.title)
-                    else {
-                        val call = ch.fasrv.fanotes.desk.aiTransformCall(job, apiKey, username)
-                        ch.fasrv.fanotes.desk.aiReplyText(job.provider, executeAi(call))
+            try {
+                val outcome = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val job = ch.fasrv.fanotes.desk.prepareAiJob(
+                            provider, baseUrl, modelName, actions, instruction, note.title, note.path, source, notes,
+                        )
+                        if (job.provider == "opencode") openCodeTransform(job, apiKey, username, note.title)
+                        else {
+                            val call = ch.fasrv.fanotes.desk.aiTransformCall(job, apiKey, username)
+                            ch.fasrv.fanotes.desk.aiReplyText(job.provider, executeAi(call))
+                        }
                     }
                 }
-            }
-            outcome.onSuccess { text ->
-                aiPreview.value = text
-                aiStatus.value = "Vorschau bereit."
-            }.onFailure { error ->
-                aiStatus.value = error.message ?: "Die Anfrage ist fehlgeschlagen."
+                outcome.onSuccess { text ->
+                    aiPreview.value = text
+                    aiStatus.value = "Vorschau bereit."
+                }.onFailure { error ->
+                    aiStatus.value = error.message ?: "Die Anfrage ist fehlgeschlagen."
+                }
+            } finally {
+                aiBusy.value = false
             }
         }
     }

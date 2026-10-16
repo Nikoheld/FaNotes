@@ -72,5 +72,14 @@ class AiAssistTest {
         val missing = assertFailsWith<IllegalArgumentException> { parseAiModels("ollama", """{}""") }
         assertEquals("Ollama hat keine Modellliste geliefert.", missing.message)
         assertEquals("http://127.0.0.1:11434/api/tags", aiModelsGet("ollama", "http://127.0.0.1:11434", "", "").url)
+        assertEquals("Lokal", aiProviderKind(true))
+        assertEquals("Cloud", aiProviderKind(false))
+        assertEquals("2 ausgewählt · Mehrfachauswahl möglich", aiActionCountLabel(2))
+        assertEquals(listOf("expand", "summary", "study"), AI_ACTIONS.filter { it.additive }.map { it.id })
+        assertEquals(67, AI_PROVIDER_MIN_DP)
+        assertEquals(76, AI_ACTION_MIN_DP)
+        assertEquals(12, AI_STEP_RADIUS_DP)
+        assertEquals("Vorschau erzeugen", AI_RUN)
+        assertEquals("Ergebnis übernehmen", AI_APPLY)
     }
 }
