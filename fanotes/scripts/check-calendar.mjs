@@ -21,6 +21,8 @@ const {
   layoutDayColumns,
   moveOccurrence,
   healCalendarNames,
+  isMissingNoteError,
+  loadCalendarMarkdown,
   parseCalendarMarkdown,
   resizeOccurrence,
   saveOccurrenceEdit,
@@ -129,6 +131,21 @@ const removed = healCalendarNames({
   events: [],
 }, doc)
 assert.equal(removed.calendars.some((calendar) => calendar.id === personal), false)
+
+const brokenJson = serializeCalendarMarkdown(stored).replace('{\n', '{\n,')
+assert.equal(loadCalendarMarkdown(brokenJson).ok, false, 'broken calendar JSON is not an empty calendar')
+assert.equal(loadCalendarMarkdown(serializeCalendarMarkdown(stored).replace('-->', '')).ok, false, 'an unclosed calendar marker is not empty')
+assert.equal(loadCalendarMarkdown('').ok, true)
+assert.equal(isMissingNoteError(new Error('ENOENT: no such file or directory')), true)
+assert.equal(isMissingNoteError(new Error('Die Notiz wurde im Browser-Vault nicht gefunden.')), true)
+assert.equal(isMissingNoteError(new Error('EIO: i/o error')), false)
+
+const homeworkStore = await server.ssrLoadModule('/src/lib/homeworkStore.ts')
+const homeworkSync = await server.ssrLoadModule('/src/lib/homeworkCalendar.ts')
+assert.equal(homeworkStore.loadHomeworkMarkdown('<!-- fanotes-homework-v1\n{').ok, false)
+assert.equal(homeworkStore.loadHomeworkMarkdown('').ok, true)
+assert.equal(homeworkSync.calendarMarkdownWithHomework(brokenJson, { version: 1, tasks: [] }), null)
+assert.equal(typeof homeworkSync.calendarMarkdownWithHomework('', { version: 1, tasks: [] }), 'string')
 
 const month = viewRange('month', monday)
 assert.equal(month.days.length, 42)

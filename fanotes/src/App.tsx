@@ -208,14 +208,14 @@ import {
   type RemoteSupportCommand,
   type RemoteSupportSession,
 } from './lib/remoteSupport'
-import { HOMEWORK_NOTE_PATH, mergeHomeworkFromRemote, parseHomeworkMarkdown, rememberPublishedHomeworkIds, serializeHomeworkMarkdown, type HomeworkDocument } from './lib/homeworkStore'
+import { HOMEWORK_NOTE_PATH, loadHomeworkMarkdown, mergeHomeworkFromRemote, rememberPublishedHomeworkIds, serializeHomeworkMarkdown, type HomeworkDocument } from './lib/homeworkStore'
 import { scrollTopForNormalizedY } from './lib/searchInkAnchor'
 import { headingLineForSection } from './lib/inkSectionMarkdown'
 import { syncPrefixesFromSetting, toggleSyncPrefix, RECOGNITION_MODEL_SYNC_PATH } from './lib/sync/folderSync'
 import { parseRecognitionBundle, serializeRecognitionBundle, emptyRecognitionBundle } from './lib/sync/recognitionModelBundle'
 import { polishRecognizedText } from './lib/recognitionPolish'
 import { sanitizeAddonStrokes, inkDocumentWithStrokes } from './lib/addonInk'
-import { sanitizeCalendarDocument, serializeCalendarMarkdown, parseCalendarMarkdown, CALENDAR_NOTE_PATH } from './lib/calendarModel'
+import { sanitizeCalendarDocument, serializeCalendarMarkdown, emptyCalendarDocument, isMissingNoteError, loadCalendarMarkdown, CALENDAR_NOTE_PATH } from './lib/calendarModel'
 import { templatesToSeed, templatePath, NOTE_TEMPLATES, type NoteProfileId } from './lib/noteTemplates'
 import { backlinksFor } from './lib/backlinks'
 import { readPdfMarks, writePdfMarks, addPdfMark } from './lib/pdfTextMarks'
@@ -2869,8 +2869,11 @@ export default function App({ startupBootstrap }: AppProps) {
     let nextDocument = document
     if (!nextDocument) {
       try {
-        nextDocument = parseHomeworkMarkdown(await window.fanotes.readFile(HOMEWORK_NOTE_PATH))
-      } catch {
+        const loaded = loadHomeworkMarkdown(await window.fanotes.readFile(HOMEWORK_NOTE_PATH))
+        if (!loaded.ok) return
+        nextDocument = loaded.document
+      } catch (error) {
+        if (!isMissingNoteError(error)) return
         nextDocument = { version: 1, tasks: [] }
       }
     }
@@ -4093,9 +4096,12 @@ export default function App({ startupBootstrap }: AppProps) {
     },
     readCalendar: async () => {
       try {
-        return parseCalendarMarkdown(await window.fanotes.readFile(CALENDAR_NOTE_PATH))
-      } catch {
-        return parseCalendarMarkdown('')
+        const loaded = loadCalendarMarkdown(await window.fanotes.readFile(CALENDAR_NOTE_PATH))
+        if (!loaded.ok) throw new Error('Kalender.md konnte nicht gelesen werden.')
+        return loaded.document
+      } catch (error) {
+        if (isMissingNoteError(error)) return emptyCalendarDocument()
+        throw error
       }
     },
     writeCalendar: async (document) => {
@@ -4105,9 +4111,12 @@ export default function App({ startupBootstrap }: AppProps) {
     },
     readHomework: async () => {
       try {
-        return parseHomeworkMarkdown(await window.fanotes.readFile(HOMEWORK_NOTE_PATH))
-      } catch {
-        return parseHomeworkMarkdown('')
+        const loaded = loadHomeworkMarkdown(await window.fanotes.readFile(HOMEWORK_NOTE_PATH))
+        if (!loaded.ok) throw new Error('Hausaufgaben.md konnte nicht gelesen werden.')
+        return loaded.document
+      } catch (error) {
+        if (isMissingNoteError(error)) return { version: 1 as const, tasks: [] }
+        throw error
       }
     },
     writeHomework: async (document) => {
