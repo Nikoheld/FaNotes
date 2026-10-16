@@ -3464,6 +3464,12 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
     if fields.is_empty() || fields.len() > 3 {
         return None;
     }
+    // `01/01/+002026` already read a number. `+` is not an offset without a
+    // clock, and it is not the year. A sign on the first field, as in
+    // `+002026/10/13`, is still that year.
+    if fields.iter().skip(1).any(|part| part.starts_with(['+', '-'])) {
+        return None;
+    }
     let mut numbers = fields
         .iter()
         .map(|part| part.parse::<i32>().ok())
@@ -13256,6 +13262,31 @@ mod tests {
             );
             assert_eq!(super::canonical_iso("２026-10-13"), None);
             assert_eq!(super::canonical_iso("10-hello-13"), None);
+        });
+    }
+
+    #[test]
+    fn a_sign_after_a_slash_field_is_empty() {
+        with_tz("America/New_York", || {
+            // A later sign is not the year. The first field may still be signed.
+            assert_eq!(super::canonical_iso("01/01/+002026"), None);
+            assert_eq!(super::canonical_iso("01/01/-000000"), None);
+            assert_eq!(super::canonical_iso("10/13/+2026"), None);
+            assert_eq!(super::canonical_iso("2026/+10/13"), None);
+            assert_eq!(super::canonical_iso("1/1/+002026"), None);
+            assert_eq!(super::canonical_iso("10/13/-5"), None);
+            assert_eq!(
+                super::canonical_iso("+002026/10/13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+2026/10/13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
         });
     }
 }

@@ -6281,6 +6281,12 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
     if fields.is_empty() || fields.len() > 3 {
         return None;
     }
+    // `01/01/+002026` already read a number. `+` is not an offset without a
+    // clock, and it is not the year. A sign on the first field, as in
+    // `+002026/10/13`, is still that year.
+    if fields.iter().skip(1).any(|part| part.starts_with(['+', '-'])) {
+        return None;
+    }
     let mut numbers = fields
         .iter()
         .map(|part| part.parse::<i32>().ok())
@@ -14994,6 +15000,32 @@ mod local_zone_tests {
         );
         assert_eq!(unix_millis_from_iso("２026-10-13"), None);
         assert_eq!(unix_millis_from_iso("10-hello-13"), None);
+    }
+
+    #[test]
+    fn a_sign_after_a_slash_field_is_empty() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // A later sign is not the year. The first field may still be signed.
+        assert_eq!(unix_millis_from_iso("01/01/+002026"), None);
+        assert_eq!(unix_millis_from_iso("01/01/-000000"), None);
+        assert_eq!(unix_millis_from_iso("10/13/+2026"), None);
+        assert_eq!(unix_millis_from_iso("2026/+10/13"), None);
+        assert_eq!(unix_millis_from_iso("1/1/+002026"), None);
+        assert_eq!(unix_millis_from_iso("10/13/-5"), None);
+        assert_eq!(
+            unix_millis_from_iso("+002026/10/13"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("+2026/10/13"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("10/13/2026"), Some(1_791_864_000_000));
     }
 
 }
