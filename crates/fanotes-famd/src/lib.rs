@@ -1144,12 +1144,16 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     let Some((year, month, day, time_at)) = split_calendar(source) else {
         return legacy_numeric_iso(trimmed);
     };
-    // A finished `0000-01-01` is year 0. `0000-01-01 16:00` did not finish the
-    // ES5 date, so the legacy window makes that year 2000. `0100` stays 100.
-    let year = if !has_iso_t(source) && (0..=99).contains(&year) {
-        legacy_year_number(year)?
+    // A finished `0000-01-01` is year 0. A space before the clock did not
+    // finish that ES5 date, so the three numbers are read again. `0001-10-13`
+    // is 10 January 2013, because 1 can be a day. `0000-01-01` is 1 January
+    // 2000, because 0 cannot. A `T` form keeps the year it already read.
+    let (year, month, day) = if !has_iso_t(source) && (1..=31).contains(&year) {
+        (legacy_year_number(day)?, year, month)
+    } else if !has_iso_t(source) && (0..=99).contains(&year) {
+        (legacy_year_number(year)?, month, day)
     } else {
-        year
+        (year, month, day)
     };
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
@@ -3795,23 +3799,24 @@ fn strip_glued_offset(clock: &str) -> &str {
 }
 
 fn shift_hyphen_date(date: &str, delta: i32) -> Option<String> {
-    // `0000-01-01 16:00 +5` is a legacy date. Year 0 becomes 2000 before the
-    // offset is applied. A year of 100 or more stays put.
-    let short_year = date
-        .split('-')
-        .next()
-        .is_some_and(|year| year_in_legacy_window(year));
-    if delta == 0 && !short_year {
-        return Some(date.to_string());
-    }
+    // A leftover clock makes three hyphen fields legacy. `1-10-13` is 10
+    // January 2013, because 1 can be a day. `0000-01-01` is 1 January 2000,
+    // because 0 cannot. `10000-10-13` stays year 10000.
     let mut parts = date.split('-');
-    let mut year: i32 = parts.next()?.parse().ok()?;
-    if short_year {
-        year = legacy_year_number(year)?;
-    }
-    let month: i32 = parts.next()?.parse().ok()?;
-    let day: i32 = parts.next()?.parse().ok()?;
+    let first: i32 = parts.next()?.parse().ok()?;
+    let second: i32 = parts.next()?.parse().ok()?;
+    let third: i32 = parts.next()?.parse().ok()?;
     if parts.next().is_some() {
+        return None;
+    }
+    let (year, month, day) = if (1..=31).contains(&first) {
+        (legacy_year_number(third)?, first, second)
+    } else if (0..=99).contains(&first) {
+        (legacy_year_number(first)?, second, third)
+    } else {
+        (first, second, third)
+    };
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
     let (year, month, day) = if delta == 0 {
@@ -3819,14 +3824,7 @@ fn shift_hyphen_date(date: &str, delta: i32) -> Option<String> {
     } else {
         shift_ymd(year, month, day, delta)?
     };
-    let year_text = legacy_iso_year(year);
-    Some(format!("{year_text}-{month:02}-{day:02}"))
-}
-
-fn year_in_legacy_window(year: &str) -> bool {
-    (1..=4).contains(&year.len())
-        && year.bytes().all(|byte| byte.is_ascii_digit())
-        && year.parse::<i32>().ok().is_some_and(|year| (0..=99).contains(&year))
+    Some(format!("{}-{:02}-{:02}", legacy_iso_year(year), month, day))
 }
 
 /// Leading zeros count in the length and not in the value. Nine significant
@@ -10354,6 +10352,40 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("0100-01-01 16:00").as_deref(),
                 Some("0100-01-01T20:56:02.000Z")
+            );
+            // `0001-10-13 16:00` is 10 January 2013. The `T` form stays year 1.
+            assert_eq!(
+                super::canonical_iso("0001-10-13 16:00").as_deref(),
+                Some("2013-01-10T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0001-10-13 16:00 +5").as_deref(),
+                Some("2013-01-10T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+000001-10-13 16:00 +5").as_deref(),
+                Some("2013-01-10T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1-10-13 16:00 +5").as_deref(),
+                Some("2013-01-10T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0001-10 16:00").as_deref(),
+                Some("2001-01-10T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0001-10-13T16:00").as_deref(),
+                Some("0001-10-13T20:56:02.000Z")
+            );
+            assert_eq!(super::canonical_iso("0013-10-13 16:00"), None);
+            assert_eq!(
+                super::canonical_iso("10000-10-13 16:00 +5").as_deref(),
+                Some("+010000-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+010000-10-13 16:00 +5").as_deref(),
+                Some("+010000-10-13T11:00:00.000Z")
             );
             // `+275760-09-13` is the last UTC midnight. Local time that day,
             // and one millisecond past that midnight, are empty.
