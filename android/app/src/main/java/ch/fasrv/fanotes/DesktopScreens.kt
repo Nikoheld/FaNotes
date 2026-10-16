@@ -125,6 +125,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
@@ -2642,32 +2643,35 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                         },
                         tail = { calendarTail() },
                     )
-                } else {
+                } else if (view == "agenda") {
                     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                         calendarHeader()
-        when (view) {
-            "agenda" -> AgendaList(anchor, shown, { event, date -> editor = draftFor(event, date) }) { model.openDaily(it) }
-            else -> DayColumns(
-                ch.fasrv.fanotes.desk.calendarRange(view, anchor),
-                anchor,
-                shown,
-                { event, date -> editor = draftFor(event, date) },
-                { anchor = it },
-                { key, start -> model.moveCalendarOccurrence(key, start) },
-                { key, end -> model.resizeCalendarOccurrence(key, end) },
-                { date, start, end, allDay -> editor = draftForCreate(document, date, start, end, allDay) },
-                { model.openDaily(it) },
-            )
-        }
-        if (view != "month") {
-            val range = ch.fasrv.fanotes.desk.calendarRange(view, anchor)
-            val occupied = range.count { date -> shown.events.any { ch.fasrv.fanotes.desk.occurrencesOn(it, date) } }
-            if (ch.fasrv.fanotes.desk.calendarRangeIsEmpty(view, occupied)) {
-                Text(ch.fasrv.fanotes.desk.CAL_EMPTY, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(vertical = 8.dp))
-            }
-        }
+                        AgendaList(anchor, shown, { event, date -> editor = draftFor(event, date) }) { model.openDaily(it) }
+                        CalendarRangeEmpty(view, anchor, shown)
                         calendarTail()
                     }
+                } else {
+                    FillingHours(
+                        Modifier.fillMaxSize(),
+                        header = { calendarHeader() },
+                        grid = {
+                            DayColumns(
+                                ch.fasrv.fanotes.desk.calendarRange(view, anchor),
+                                anchor,
+                                shown,
+                                { event, date -> editor = draftFor(event, date) },
+                                { anchor = it },
+                                { key, start -> model.moveCalendarOccurrence(key, start) },
+                                { key, end -> model.resizeCalendarOccurrence(key, end) },
+                                { date, start, end, allDay -> editor = draftForCreate(document, date, start, end, allDay) },
+                                { model.openDaily(it) },
+                            )
+                        },
+                        tail = {
+                            CalendarRangeEmpty(view, anchor, shown)
+                            calendarTail()
+                        },
+                    )
                 }
             }
         }
@@ -2710,6 +2714,67 @@ private fun FillingMonth(
             headerPlaceable.place(0, 0)
             monthPlaceable.place(0, headerPlaceable.height)
             tailPlaceable.place(0, headerPlaceable.height + monthHeight)
+        }
+    }
+}
+
+@Composable
+private fun CalendarRangeEmpty(
+    view: String,
+    anchor: LocalDate,
+    document: ch.fasrv.fanotes.desk.CalendarDocument,
+) {
+    val range = ch.fasrv.fanotes.desk.calendarRange(view, anchor)
+    val occupied = range.count { date -> document.events.any { ch.fasrv.fanotes.desk.occurrencesOn(it, date) } }
+    if (ch.fasrv.fanotes.desk.calendarRangeIsEmpty(view, occupied)) {
+        Text(
+            ch.fasrv.fanotes.desk.CAL_EMPTY,
+            fontSize = 12.sp,
+            color = LocalStatusInk.current.muted,
+            modifier = Modifier.padding(vertical = 8.dp),
+        )
+    }
+}
+
+/**
+ * Day, three-day, and week views. The toolbar and the quick-add stay put.
+ * [grid] is the flexible remainder, the same split [FillingMonth] uses.
+ */
+@Composable
+private fun FillingHours(
+    modifier: Modifier,
+    header: @Composable () -> Unit,
+    grid: @Composable () -> Unit,
+    tail: @Composable () -> Unit,
+) {
+    val tailScroll = rememberScrollState()
+    SubcomposeLayout(modifier) { constraints ->
+        val width = if (constraints.hasBoundedWidth) constraints.maxWidth else 0
+        val height = if (constraints.hasBoundedHeight) constraints.maxHeight else 0
+        val headerPlaceable = subcompose("header") {
+            Column(Modifier.fillMaxWidth()) { header() }
+        }.first().measure(Constraints(maxWidth = width, maxHeight = height))
+        val space = (height - headerPlaceable.height).coerceAtLeast(0)
+        // The grid still has to show the weekday headers, the 34dp all-day row, and one hour.
+        // DayColumns measures the real header height and gives the scroller whatever is left.
+        val floor = (DAY_CHROME_MIN_DP + ch.fasrv.fanotes.desk.CAL_HOUR_DP).dp.roundToPx()
+        val tailCap = if (space > floor) space - floor else (space * 2 / 5)
+        val tailPlaceable = subcompose("tail") {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = tailCap.toDp())
+                    .verticalScroll(tailScroll),
+            ) { tail() }
+        }.first().measure(Constraints(maxWidth = width, maxHeight = space))
+        val gridHeight = (space - tailPlaceable.height).coerceAtLeast(0)
+        val gridPlaceable = subcompose("grid") {
+            Box(Modifier.fillMaxSize().clipToBounds()) { grid() }
+        }.first().measure(Constraints.fixed(width, gridHeight))
+        layout(width, height) {
+            headerPlaceable.place(0, 0)
+            gridPlaceable.place(0, headerPlaceable.height)
+            tailPlaceable.place(0, headerPlaceable.height + gridHeight)
         }
     }
 }
@@ -2878,7 +2943,10 @@ private fun MonthGrid(
     }
 }
 
-private const val HOUR_DP = 48
+private const val HOUR_DP = ch.fasrv.fanotes.desk.CAL_HOUR_DP
+
+/** Weekday header plus the all-day row minimum, reserved so the hour scroller can keep one row. */
+private const val DAY_CHROME_MIN_DP = 46 + 34
 
 @Composable
 private fun DayColumns(
@@ -2899,83 +2967,108 @@ private fun DayColumns(
     }
     val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
     val gutter = ch.fasrv.fanotes.desk.CAL_GUTTER_DP.dp
-    Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-        Row {
-            Box(Modifier.width(gutter))
-            days.forEach { date ->
-                val today = date == LocalDate.now()
-                Column(
-                    Modifier
-                        .width(148.dp)
-                        .clickable {
-                            onPick(date)
-                            onDaily(date)
+    // `.cal-scroll` is the flexible remainder under the weekday headers and the all-day row.
+    // One horizontal scroll keeps those rows aligned with the hour columns.
+    SubcomposeLayout(Modifier.fillMaxSize().horizontalScroll(rememberScrollState())) { constraints ->
+        val bodyHeight = if (constraints.hasBoundedHeight) constraints.maxHeight else 0
+        val chrome = subcompose("chrome") {
+            Column {
+                Row {
+                    Box(Modifier.width(gutter))
+                    days.forEach { date ->
+                        val today = date == LocalDate.now()
+                        Column(
+                            Modifier
+                                .width(148.dp)
+                                .clickable {
+                                    onPick(date)
+                                    onDaily(date)
+                                }
+                                .padding(bottom = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(
+                                ch.fasrv.fanotes.desk.calendarWeekdayShort(date).uppercase(java.util.Locale.GERMAN),
+                                fontSize = 12.sp,
+                                color = LocalStatusInk.current.muted,
+                                letterSpacing = 0.04.em,
+                            )
+                            Text(
+                                date.dayOfMonth.toString(),
+                                fontSize = ch.fasrv.fanotes.desk.CAL_HEAD_NUM_SP.sp,
+                                fontWeight = FontWeight(650),
+                                color = if (today) accent else MaterialTheme.colorScheme.onSurface,
+                            )
                         }
-                        .padding(bottom = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(
-                        ch.fasrv.fanotes.desk.calendarWeekdayShort(date).uppercase(java.util.Locale.GERMAN),
-                        fontSize = 12.sp,
-                        color = LocalStatusInk.current.muted,
-                        letterSpacing = 0.04.em,
-                    )
-                    Text(
-                        date.dayOfMonth.toString(),
-                        fontSize = ch.fasrv.fanotes.desk.CAL_HEAD_NUM_SP.sp,
-                        fontWeight = FontWeight(650),
-                        color = if (today) accent else MaterialTheme.colorScheme.onSurface,
-                    )
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                    Box(Modifier.width(gutter).padding(top = 8.dp), contentAlignment = Alignment.CenterEnd) {
+                        Text(ch.fasrv.fanotes.desk.CAL_ALL_DAY, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(end = 8.dp))
+                    }
+                    days.forEach { date ->
+                        Column(Modifier.width(148.dp).padding(end = 4.dp).heightIn(min = 34.dp)) {
+                            allDaySpans(document, date).forEach { span ->
+                                val tint = document.calendars.find { it.id == span.event.calendarId }?.color ?: "#2a6f97"
+                                Text(
+                                    span.event.title,
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 2.dp)
+                                        .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.CAL_CHIP_RADIUS_DP.dp))
+                                        .background(calendarSwatch(tint).copy(alpha = ch.fasrv.fanotes.desk.CAL_CHIP_ALPHA))
+                                        .clickable { onEdit(span.event, date) }
+                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                )
+                            }
+                            Text(
+                                "+",
+                                fontSize = 12.sp,
+                                color = LocalStatusInk.current.muted,
+                                modifier = Modifier.clickable(onClickLabel = "Neuer Termin") {
+                                    onCreate(date, date.atStartOfDay(), date.plusDays(1).atStartOfDay(), true)
+                                }.padding(horizontal = 6.dp),
+                            )
+                        }
+                    }
                 }
             }
-        }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-            Box(Modifier.width(gutter).padding(top = 8.dp), contentAlignment = Alignment.CenterEnd) {
-                Text(ch.fasrv.fanotes.desk.CAL_ALL_DAY, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(end = 8.dp))
-            }
-            days.forEach { date ->
-                Column(Modifier.width(148.dp).padding(end = 4.dp).heightIn(min = 34.dp)) {
-                    allDaySpans(document, date).forEach { span ->
-                        val tint = document.calendars.find { it.id == span.event.calendarId }?.color ?: "#2a6f97"
+        }.first().measure(Constraints(maxWidth = Constraints.Infinity, maxHeight = Constraints.Infinity))
+        val availablePx = (bodyHeight - chrome.height).coerceAtLeast(0)
+        val availableDp = availablePx.toDp().value.roundToInt().coerceAtLeast(0)
+        val viewportDp = ch.fasrv.fanotes.desk.hourViewportDp(availableDp, ch.fasrv.fanotes.desk.CAL_HOUR_DP)
+        val hourPx = if (viewportDp == availableDp) availablePx else viewportDp.dp.roundToPx()
+        val hourHeight = hourPx.toDp()
+        val hours = subcompose("hours") {
+            Row(Modifier.height(hourHeight).verticalScroll(scroll)) {
+                Column(Modifier.width(gutter)) {
+                    for (hour in 0..23) {
                         Text(
-                            span.event.title,
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 2.dp)
-                                .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.CAL_CHIP_RADIUS_DP.dp))
-                                .background(calendarSwatch(tint).copy(alpha = ch.fasrv.fanotes.desk.CAL_CHIP_ALPHA))
-                                .clickable { onEdit(span.event, date) }
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            "%02d:00".format(hour),
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                            modifier = Modifier.height(HOUR_DP.dp),
                         )
                     }
-                    Text(
-                        "+",
-                        fontSize = 12.sp,
-                        color = LocalStatusInk.current.muted,
-                        modifier = Modifier.clickable(onClickLabel = "Neuer Termin") {
-                            onCreate(date, date.atStartOfDay(), date.plusDays(1).atStartOfDay(), true)
-                        }.padding(horizontal = 6.dp),
-                    )
+                }
+                days.forEach { date ->
+                    HourColumn(date, timedDayLayout(document, date), document, onEdit, onMove, onResize, onCreate)
                 }
             }
+        }.first().measure(Constraints(maxWidth = Constraints.Infinity, maxHeight = hourPx.coerceAtLeast(0)))
+        val contentWidth = maxOf(chrome.width, hours.width)
+        val layoutWidth = contentWidth.coerceAtLeast(constraints.minWidth)
+        val layoutHeight = if (constraints.hasBoundedHeight) {
+            bodyHeight.coerceAtLeast(constraints.minHeight)
+        } else {
+            (chrome.height + hours.height).coerceAtLeast(constraints.minHeight)
         }
-        Row(Modifier.height(420.dp).verticalScroll(scroll)) {
-            Column(Modifier.width(gutter)) {
-                for (hour in 0..23) {
-                    Text(
-                        "%02d:00".format(hour),
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
-                        modifier = Modifier.height(HOUR_DP.dp),
-                    )
-                }
-            }
-            days.forEach { date ->
-                HourColumn(date, timedDayLayout(document, date), document, onEdit, onMove, onResize, onCreate)
-            }
+        layout(layoutWidth, layoutHeight) {
+            chrome.place(0, 0)
+            hours.place(0, chrome.height)
         }
     }
 }
