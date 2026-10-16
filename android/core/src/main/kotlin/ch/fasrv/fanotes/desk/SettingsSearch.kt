@@ -92,3 +92,13 @@ const val SETTINGS_NAV_RADIUS_DP = 9
 const val SETTINGS_NAV_LABEL_WEIGHT = 650
 const val SETTINGS_NAV_GROUP_WEIGHT = 750
 const val SETTINGS_NAV_GROUP_TRACKING = 0.08f
+
+/** Settings content header and footer from `.settings-content`. */
+const val SETTINGS_TITLE_SP = 21
+const val SETTINGS_TITLE_TRACKING = -0.03f
+const val SETTINGS_HEADER_PAD_TOP_DP = 18
+const val SETTINGS_HEADER_PAD_X_DP = 25
+const val SETTINGS_HEADER_PAD_BOTTOM_DP = 15
+const val SETTINGS_FOOTER_DP = 47
+const val SETTINGS_DONE = "Fertig"
+const val SETTINGS_SAVED = "Änderungen werden automatisch lokal gespeichert."
