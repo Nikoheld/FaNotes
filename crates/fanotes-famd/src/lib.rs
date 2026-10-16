@@ -2609,23 +2609,33 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
             .split(char::is_whitespace)
             .filter(|word| !word.is_empty())
             .collect();
-        if slash_clock_word(&trimmed[..index]) && words.first().is_some_and(|word| word.contains('/'))
-        {
-            let tail = &words[1..];
-            let (extra_clock, minutes, spill) = if tail.is_empty() {
-                (None, None, Vec::new())
+        if slash_clock_word(&trimmed[..index]) {
+            if let Some(slash_at) = words.iter().position(|word| word.contains('/')) {
+                let clock_word = &trimmed[..index];
+                let mut with_clock = vec![clock_word];
+                with_clock.extend_from_slice(&words[..slash_at]);
+                with_clock.extend_from_slice(&words[slash_at + 1..]);
+                let (clock, minutes, spill) = if with_clock.len() == 1 {
+                    (Some(clock_word.to_string()), None, Vec::new())
+                } else {
+                    let Some(parsed) = slash_offset_words(&with_clock) else {
+                        return None;
+                    };
+                    parsed
+                };
+                offset_minutes = minutes;
+                zone_spill = spill;
+                (words[slash_at], clock)
+            } else if let Some((clock, minutes, spill)) = slash_offset_words(&words) {
+                offset_minutes = minutes;
+                zone_spill = spill;
+                (&trimmed[..index], clock)
             } else {
-                let Some(parsed) = slash_offset_words(tail) else {
+                let Some(time) = slash_time_and_zone(rest) else {
                     return None;
                 };
-                parsed
-            };
-            if extra_clock.is_some() {
-                return None;
+                (&trimmed[..index], Some(time))
             }
-            offset_minutes = minutes;
-            zone_spill = spill;
-            (words[0], Some(trimmed[..index].to_string()))
         } else if let Some((clock, minutes, spill)) = slash_offset_words(&words) {
             offset_minutes = minutes;
             zone_spill = spill;
@@ -7850,6 +7860,22 @@ mod tests {
             );
             assert_eq!(super::canonical_iso("16:00/10/13/2026"), None);
             assert_eq!(super::canonical_iso("16:00 13/10/2026"), None);
+            assert_eq!(
+                super::canonical_iso("16:00 EST 10/13/2026").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00 GMT 10/13/2026").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("4:5 EST 10/13/2026").as_deref(),
+                Some("2026-10-13T09:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00 EST 10/13/1950").as_deref(),
+                Some("1950-10-13T21:00:00.000Z")
+            );
         });
     }
 

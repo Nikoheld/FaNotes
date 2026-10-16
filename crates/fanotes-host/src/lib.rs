@@ -4952,24 +4952,31 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
             .filter(|word| !word.is_empty())
             .collect();
         // `16:00 10/13/2026` puts the clock before the slash date.
-        if slash_clock_word(date) && words.first().is_some_and(|word| word.contains('/')) {
-            let tail = &words[1..];
-            let (extra_clock, minutes, spill) = if tail.is_empty() {
-                (None, None, Vec::new())
+        // `16:00 EST 10/13/2026` puts the zone between them.
+        if slash_clock_word(date) {
+            if let Some(slash_at) = words.iter().position(|word| word.contains('/')) {
+                let mut with_clock = vec![date];
+                with_clock.extend_from_slice(&words[..slash_at]);
+                with_clock.extend_from_slice(&words[slash_at + 1..]);
+                let (clock, minutes, spill) = if with_clock.len() == 1 {
+                    (Some(date.to_string()), None, Vec::new())
+                } else {
+                    slash_offset_words(&with_clock)?
+                };
+                offset_minutes = minutes;
+                zone_spill = spill;
+                (words[slash_at], clock)
             } else {
-                slash_offset_words(tail)?
-            };
-            if extra_clock.is_some() {
-                return None;
+                let (clock, minutes, spill) = slash_offset_words(&words)?;
+                offset_minutes = minutes;
+                zone_spill = spill;
+                (date, clock)
             }
+        } else {
+            let (clock, minutes, spill) = slash_offset_words(&words)?;
             offset_minutes = minutes;
             zone_spill = spill;
-            (words[0], Some(date.to_string()))
-        } else {
-        let (clock, minutes, spill) = slash_offset_words(&words)?;
-        offset_minutes = minutes;
-        zone_spill = spill;
-        (date, clock)
+            (date, clock)
         }
     } else {
         let (date, zone) = split_glued_slash_zone(trimmed);
@@ -8411,6 +8418,23 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("16:00 13/10/2026"), None);
         assert_eq!(unix_millis_from_iso("16:00 10/13/2026 30"), None);
         assert_eq!(unix_millis_from_iso("16:00 10/13/1950"), None);
+        assert_eq!(
+            unix_millis_from_iso("16:00 EST 10/13/2026"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:00 GMT 10/13/2026"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("4:5 EST 10/13/2026"),
+            Some(1_791_882_300_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:00 +5 10/13/2026"),
+            Some(1_791_889_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("16:00 EST 10/13/1950"), None);
     }
 
     #[test]
