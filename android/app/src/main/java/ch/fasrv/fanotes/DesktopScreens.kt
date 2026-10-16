@@ -2580,6 +2580,12 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.background)
                 Text(ch.fasrv.fanotes.desk.CAL_NEW_EVENT, fontSize = 12.sp, color = MaterialTheme.colorScheme.background)
             }
+            ch.fasrv.fanotes.desk.CAL_TOOLBAR_FILE_ACTIONS.zip(listOf(onExportIcs, onImportIcs)).forEach { (label, action) ->
+                Box(
+                    Modifier.height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp).clip(calShape).border(1.dp, calRule, calShape).background(MaterialTheme.colorScheme.surface).clickable(onClick = action).padding(horizontal = 10.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text(label, fontSize = 12.sp) }
+            }
         }
         if (reminder != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2641,8 +2647,6 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                     title = ""
                 }
             }) { Text("Eintragen") }
-            TextButton(onClick = onExportIcs) { Text("Exportieren") }
-            TextButton(onClick = onImportIcs) { Text("Importieren") }
         }
             }
             Column(

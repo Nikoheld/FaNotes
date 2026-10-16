@@ -105,6 +105,12 @@ class CalendarBooksTest {
     }
 
     @Test
+    fun toolbarFileActionsAreExportThenImport() {
+        assertEquals(2, CAL_TOOLBAR_FILE_ACTIONS.size)
+        assertEquals(listOf("Exportieren", "Importieren"), CAL_TOOLBAR_FILE_ACTIONS)
+    }
+
+    @Test
     fun openNoteButtonPinsToTheBottomOfTheSideRail() {
         assertEquals(14, CAL_SIDE_GAP_DP)
         val wide = calendarNoteButtonPins(calendarShowsSide(961))
