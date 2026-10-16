@@ -3593,7 +3593,14 @@ fn slash_clock(time: &str) -> Option<String> {
         }
         numbers.push(part.parse::<u32>().ok()?);
     }
-    if !(2..=3).contains(&numbers.len()) || numbers.iter().any(|number| *number > 99) {
+    // `16:00:60` is not 60 seconds. The field is a date number, so `10/13`
+    // becomes 13 October 1960. A second past 99 already took that path.
+    let spilled_clock_field = numbers.get(1).is_some_and(|number| *number > 59)
+        || numbers.get(2).is_some_and(|number| *number > 59);
+    if !(2..=3).contains(&numbers.len())
+        || numbers.iter().any(|number| *number > 99)
+        || spilled_clock_field
+    {
         return legacy_clock_text(time);
     }
     // `16:00.05` is 50 seconds. The dot scales into the open seconds field.
@@ -6866,6 +6873,40 @@ mod tests {
             assert_eq!(super::canonical_iso("2026-10-13 16:00:60"), None);
             assert_eq!(super::canonical_iso("2026-10-13 4:00:60 PM"), None);
             assert_eq!(super::canonical_iso("10/13/2026 16:00:60"), None);
+            // `10/13 16:00:60` has no year yet, so 60 is 1960. A finished
+            // slash date still rejects that second.
+            assert_eq!(
+                super::canonical_iso("10/13 16:00:60").as_deref(),
+                Some("1960-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13 16:60").as_deref(),
+                Some("1960-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13 16:00:60 EST").as_deref(),
+                Some("1960-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13 24:00:60").as_deref(),
+                Some("1960-10-14T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13 16:00:60 16").as_deref(),
+                Some("1960-10-13T20:00:16.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13 4:00:60 PM").as_deref(),
+                Some("1960-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13 16:00:70").as_deref(),
+                Some("1970-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13 16:00:59").as_deref(),
+                Some("2001-10-13T20:00:59.000Z")
+            );
             assert_eq!(super::canonical_iso("Oct 13 2026 16:60:00"), None);
             assert_eq!(super::canonical_iso("Oct 13 2026 16:00:60 61"), None);
             assert_eq!(super::canonical_iso("Oct 13 2026 16:00:60.500"), None);
