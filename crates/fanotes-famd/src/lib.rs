@@ -2585,6 +2585,18 @@ fn finish_slash_offset(
 }
 
 /// `YYYY/M/D` or `M/D/YYYY`. A date alone is local midnight. `T` is not a separator.
+/// `16:00` and `4:5` can sit in front of a slash date. `16:00/10/13` cannot.
+fn slash_clock_word(word: &str) -> bool {
+    let bytes = word.as_bytes();
+    !bytes.is_empty()
+        && bytes[0].is_ascii_digit()
+        && word.contains(':')
+        && !word.contains('/')
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || *byte == b':')
+}
+
 fn rewrite_slash_date(trimmed: &str) -> Option<String> {
     if has_iso_t(trimmed) {
         return None;
@@ -2597,7 +2609,24 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
             .split(char::is_whitespace)
             .filter(|word| !word.is_empty())
             .collect();
-        if let Some((clock, minutes, spill)) = slash_offset_words(&words) {
+        if slash_clock_word(&trimmed[..index]) && words.first().is_some_and(|word| word.contains('/'))
+        {
+            let tail = &words[1..];
+            let (extra_clock, minutes, spill) = if tail.is_empty() {
+                (None, None, Vec::new())
+            } else {
+                let Some(parsed) = slash_offset_words(tail) else {
+                    return None;
+                };
+                parsed
+            };
+            if extra_clock.is_some() {
+                return None;
+            }
+            offset_minutes = minutes;
+            zone_spill = spill;
+            (words[0], Some(trimmed[..index].to_string()))
+        } else if let Some((clock, minutes, spill)) = slash_offset_words(&words) {
             offset_minutes = minutes;
             zone_spill = spill;
             (&trimmed[..index], clock)
@@ -7793,6 +7822,34 @@ mod tests {
                 super::canonical_iso("2026/10/13 16:00:00Z").as_deref(),
                 Some("2026-10-13T16:00:00.000Z")
             );
+        });
+    }
+
+    #[test]
+    fn a_clock_before_a_slash_date_stays_on_that_day() {
+        with_tz("America/New_York", || {
+            assert_eq!(
+                super::canonical_iso("16:00 10/13/2026").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("4:5 10/13/2026").as_deref(),
+                Some("2026-10-13T08:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00 10/13/2026 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16:00 10/13/1950").as_deref(),
+                Some("1950-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("16:00/10/13/2026"), None);
+            assert_eq!(super::canonical_iso("16:00 13/10/2026"), None);
         });
     }
 

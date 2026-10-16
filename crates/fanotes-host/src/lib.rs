@@ -4924,6 +4924,18 @@ fn finish_slash_offset(
 /// `YYYY/M/D` or `M/D/YYYY`, then an optional legacy clock. A date alone is
 /// local midnight. `GMT` and `EST` name an offset. The `T` inside those words
 /// is not a time separator.
+/// `16:00` and `4:5` can sit in front of a slash date. `16:00/10/13` cannot.
+fn slash_clock_word(word: &str) -> bool {
+    let bytes = word.as_bytes();
+    !bytes.is_empty()
+        && bytes[0].is_ascii_digit()
+        && word.contains(':')
+        && !word.contains('/')
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || *byte == b':')
+}
+
 fn rewrite_slash_date(trimmed: &str) -> Option<String> {
     if has_iso_t(trimmed) {
         return None;
@@ -4939,10 +4951,26 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
             .split(is_date_parse_space)
             .filter(|word| !word.is_empty())
             .collect();
+        // `16:00 10/13/2026` puts the clock before the slash date.
+        if slash_clock_word(date) && words.first().is_some_and(|word| word.contains('/')) {
+            let tail = &words[1..];
+            let (extra_clock, minutes, spill) = if tail.is_empty() {
+                (None, None, Vec::new())
+            } else {
+                slash_offset_words(tail)?
+            };
+            if extra_clock.is_some() {
+                return None;
+            }
+            offset_minutes = minutes;
+            zone_spill = spill;
+            (words[0], Some(date.to_string()))
+        } else {
         let (clock, minutes, spill) = slash_offset_words(&words)?;
         offset_minutes = minutes;
         zone_spill = spill;
         (date, clock)
+        }
     } else {
         let (date, zone) = split_glued_slash_zone(trimmed);
         if let Some(zone) = zone {
@@ -8326,6 +8354,63 @@ mod local_zone_tests {
             unix_millis_from_iso("2026/10/13 16:00:00Z"),
             Some(1_791_907_200_000)
         );
+    }
+
+    #[test]
+    fn a_clock_before_a_slash_date_stays_on_that_day() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Node 22. The clock may come before the slash date. `10/13/2026 16:00`
+        // is the same instant. A slash glued to the clock is empty.
+        assert_eq!(
+            unix_millis_from_iso("16:00 10/13/2026"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("4:5 10/13/2026"),
+            Some(1_791_878_700_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:00:30 10/13/2026"),
+            Some(1_791_921_630_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:00 2026/10/13"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("16:00 10/13"), Some(1_003_003_200_000));
+        assert_eq!(
+            unix_millis_from_iso("16:00 10/13/2026 EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:00 10/13/2026 GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:00 10/13/2026 +5"),
+            Some(1_791_889_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("24:00 10/13/2026"),
+            Some(1_791_950_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("4:00 PM 10/13/2026"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("16:00/10/13/2026"), None);
+        assert_eq!(unix_millis_from_iso("16:00 13/10/2026"), None);
+        assert_eq!(unix_millis_from_iso("16:00 10/13/2026 30"), None);
+        assert_eq!(unix_millis_from_iso("16:00 10/13/1950"), None);
     }
 
     #[test]
