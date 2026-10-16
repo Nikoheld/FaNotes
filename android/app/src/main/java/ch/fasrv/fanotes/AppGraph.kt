@@ -52,6 +52,7 @@ class AppGraph(context: Context) {
     @Volatile var busyPaths: Set<String> = emptySet()
     val remoteListeners = mutableListOf<(List<String>, List<String>) -> Unit>()
     private val stateDir = File(context.filesDir, "sync-state").apply { mkdirs() }
+    private val glyphFile = File(context.filesDir, "glyph-samples.json")
 
     val engine: SyncEngine
 
@@ -153,6 +154,16 @@ class AppGraph(context: Context) {
 
     fun writePaperViews(json: String) {
         prefs.edit().putString(ch.fasrv.fanotes.desk.PAPER_VIEW_MEMORY_KEY, json).apply()
+    }
+
+    fun readGlyphLibrary(): String = if (glyphFile.isFile) glyphFile.readText() else ""
+
+    fun writeGlyphLibrary(text: String) {
+        if (text.isEmpty()) {
+            glyphFile.delete()
+        } else {
+            glyphFile.writeText(text)
+        }
     }
 
     private fun host() = IoSyncHost(

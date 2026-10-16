@@ -145,10 +145,17 @@ import ch.fasrv.fanotes.vault.OpenNote
 import ch.fasrv.fanotes.vault.VaultNode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import ch.fasrv.fanotes.ink.GlyphSample
+import ch.fasrv.fanotes.ink.HandwritingSynthesisResult
+import ch.fasrv.fanotes.ink.decodeGlyphLibrary
+import ch.fasrv.fanotes.ink.encodeGlyphLibrary
+import ch.fasrv.fanotes.ink.importGlyphArchive
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -205,6 +212,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private val _vaultLabel = MutableStateFlow(graph.initialVaultLabel)
     val vaultLabel = _vaultLabel.asStateFlow()
     val canvasToken = MutableStateFlow(0)
+    val glyphSamples = MutableStateFlow<List<GlyphSample>>(emptyList())
+    val textHandOpen = MutableStateFlow(false)
+    private val glyphImportRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val glyphImports = glyphImportRequests.asSharedFlow()
     private var saveJob: Job? = null
     private var editRevision = 0
     private var dirty = false
@@ -228,6 +239,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                     val famd = if (current.path.endsWith(".famd")) current.path else companionPath(current.path, ".famd")
                     if (!dirty && (current.path in written || famd in written)) openPath(current.path, force = true)
                 }
+            }
+        }
+        viewModelScope.launch {
+            glyphSamples.value = withContext(Dispatchers.IO) {
+                runCatching { decodeGlyphLibrary(graph.readGlyphLibrary()) }.getOrDefault(emptyList())
             }
         }
         viewModelScope.launch {
@@ -2911,6 +2927,62 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             calendar.value = next
             persistSpecial(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH, "Kalender", serializeCalendarMarkdown(next))
         }
+    }
+
+    fun openTextHand() {
+        textHandOpen.value = true
+    }
+
+    fun closeTextHand() {
+        textHandOpen.value = false
+    }
+
+    fun requestGlyphImport() {
+        glyphImportRequests.tryEmit(Unit)
+    }
+
+    fun importGlyphBytes(bytes: ByteArray) {
+        viewModelScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching {
+                    val imported = importGlyphArchive(bytes)
+                    val kept = glyphSamples.value.filter { old -> imported.samples.none { it.id == old.id } }
+                    val merged = (kept + imported.samples).takeLast(4_000)
+                    graph.writeGlyphLibrary(encodeGlyphLibrary(merged))
+                    val skipped = if (imported.warnings.isEmpty()) "" else " ${imported.warnings.size} Einträge übersprungen."
+                    merged to "${imported.samples.size} GlyphenWerk-Zeichen übernommen.$skipped"
+                }
+            }
+            outcome.onSuccess { (merged, notice) ->
+                glyphSamples.value = merged
+                message.value = notice
+            }.onFailure { error ->
+                message.value = error.message ?: "Das Training konnte nicht gelesen werden."
+            }
+        }
+    }
+
+    fun clearGlyphSamples() {
+        glyphSamples.value = emptyList()
+        viewModelScope.launch(Dispatchers.IO) { graph.writeGlyphLibrary("") }
+        message.value = "Persönliches Training entfernt. Die Schulschrift bleibt."
+    }
+
+    fun insertHandwriting(result: HandwritingSynthesisResult) {
+        if (result.strokes.isEmpty() || result.missingCharacters.isNotEmpty() || result.overflow) return
+        val before = session.document
+        if (!session.insertSynthesized(result, isoNow())) return
+        val after = session.document
+        if (before.sourceWidth != after.sourceWidth || before.sourceHeight != after.sourceHeight || before.originX != after.originX || before.originY != after.originY) {
+            pageGrew(before.sourceWidth, before.sourceHeight, after.sourceWidth, after.sourceHeight, after.originX - before.originX, after.originY - before.originY)
+        } else {
+            noteChanged()
+        }
+        val personal = result.usedSampleIds.any { !it.startsWith("school-") }
+        val kind = if (personal) "persönliche Handschrift" else "Schulschrift"
+        val links = if (result.connectionCount > 0) " · ${result.connectionCount} Verbindungen" else ""
+        message.value = "${result.glyphCount} Zeichen als $kind eingefügt$links."
+        textHandOpen.value = false
     }
 
     fun insertMath(expression: String) {

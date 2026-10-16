@@ -7,6 +7,7 @@ import ch.fasrv.fanotes.json.jsonBool
 import ch.fasrv.fanotes.json.jsonNumber
 import ch.fasrv.fanotes.json.jsonString
 import kotlin.math.max
+import kotlin.math.min
 
 /** Drawing document stored as `payload.ink` and as `.fanotes/assets/<id>.json`. */
 const val INK_SCHEMA_VERSION = 1
@@ -232,6 +233,33 @@ private fun remapSectionBands(document: InkDocument, prevHeight: Double, nextHei
             bodyTop = keepMarkOnPage(section.bodyTop, prevHeight, nextHeight, padY),
         )
     })
+}
+
+/**
+ * Grow the page to the right or the bottom without moving ink that is already there.
+ * Handwriting synthesis uses this when the typed text is taller than the sheet.
+ */
+fun extendPage(document: InkDocument, targetWidth: Double, targetHeight: Double): InkDocument {
+    val width = min(WRITE_CAP_WIDTH, max(document.sourceWidth, targetWidth))
+    val height = min(WRITE_CAP_HEIGHT, max(document.sourceHeight, targetHeight))
+    if (width == document.sourceWidth && height == document.sourceHeight) return document
+    return remapSectionBands(
+        document.copy(
+            sourceWidth = width,
+            sourceHeight = height,
+            strokes = document.strokes.map { stroke ->
+                stroke.copy(points = stroke.points.map { point ->
+                    point.copy(
+                        x = keepMarkOnPage(point.x, document.sourceWidth, width, 0.0),
+                        y = keepMarkOnPage(point.y, document.sourceHeight, height, 0.0),
+                    )
+                })
+            },
+        ),
+        document.sourceHeight,
+        height,
+        0.0,
+    )
 }
 
 fun rescale(document: InkDocument, width: Double, height: Double): InkDocument {
