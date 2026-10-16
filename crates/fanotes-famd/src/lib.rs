@@ -935,6 +935,11 @@ fn skip_clock_digits(bytes: &[u8], start: usize) -> usize {
 }
 
 pub fn canonical_iso(value: &str) -> Option<String> {
+    if let Some(end) = value.find('\0') {
+        // A NUL ends the date string. `2026-10-13\016:00` is the UTC date,
+        // and `\02026-10-13` is empty.
+        return canonical_iso(&value[..end]);
+    }
     if let Some(next) = tighten_slash_spaces(value) {
         // `2026/ 10/13` is the slash date. A space after a clock stays, so
         // `16:00 / 10/13/2026` does not become `16:00/10/13/2026`.
@@ -8474,6 +8479,59 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("hello 2026-10-13").as_deref(),
                 Some("2026-10-13T04:00:00.000Z")
+            );
+        });
+    }
+
+    #[test]
+    fn a_nul_ends_the_date_string() {
+        with_tz("America/New_York", || {
+            // Node 22. The scanner stops at NUL, so the rest of the text is
+            // never a clock or a month. A leading NUL leaves nothing to parse.
+            // Year 202 is local mean time, about UTC−4:56:02.
+            assert_eq!(super::canonical_iso("\u{0}2026-10-13"), None);
+            assert_eq!(
+                super::canonical_iso("2026-10-13\u{0}").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13\u{0}16:00").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 \u{0}").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026\u{0} 10-13").as_deref(),
+                Some("2026-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("202\u{0}6-10-13").as_deref(),
+                Some("0202-01-01T04:56:02.000Z")
+            );
+            assert_eq!(super::canonical_iso("Oct\u{0} 13 2026"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16\u{0}:00"), None);
+            assert_eq!(super::canonical_iso("hello\u{0} 2026-10-13"), None);
+            assert_eq!(
+                super::canonical_iso("2026-10-13T16:00\u{0}").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00\u{0}").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13\u{0} 2026").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026/10\u{0}/13").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("4\u{0}").as_deref(),
+                Some("2001-04-01T05:00:00.000Z")
             );
         });
     }

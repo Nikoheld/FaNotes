@@ -1852,6 +1852,11 @@ fn skip_clock_digits(bytes: &[u8], start: usize) -> usize {
 }
 
 fn unix_millis_from_iso(value: &str) -> Option<u64> {
+    if let Some(end) = value.find('\0') {
+        // A NUL ends the date string. `2026-10-13\016:00` is the UTC date,
+        // and `\02026-10-13` is empty.
+        return unix_millis_from_iso(&value[..end]);
+    }
     if let Some(next) = tighten_slash_spaces(value) {
         // `2026/ 10/13` is the slash date. A space after a clock stays, so
         // `16:00 / 10/13/2026` does not become `16:00/10/13/2026`.
@@ -8896,6 +8901,44 @@ mod local_zone_tests {
             unix_millis_from_iso("hello 2026-10-13"),
             Some(1_791_864_000_000)
         );
+    }
+
+    #[test]
+    fn a_nul_ends_the_date_string() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Node 22. The scanner stops at NUL, so the rest of the text is never
+        // a clock or a month. A leading NUL leaves nothing to parse.
+        assert_eq!(unix_millis_from_iso("\u{0}2026-10-13"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13\u{0}"), Some(1_791_849_600_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13\u{0}16:00"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 \u{0}"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026\u{0} 10-13"), Some(1_767_225_600_000));
+        assert_eq!(unix_millis_from_iso("202\u{0}6-10-13"), None);
+        assert_eq!(unix_millis_from_iso("Oct\u{0} 13 2026"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16\u{0}:00"), None);
+        assert_eq!(unix_millis_from_iso("hello\u{0} 2026-10-13"), None);
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13T16:00\u{0}"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00\u{0}"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("Oct 13\u{0} 2026"), Some(1_002_945_600_000));
+        assert_eq!(unix_millis_from_iso("2026/10\u{0}/13"), Some(1_790_827_200_000));
+        assert_eq!(unix_millis_from_iso("4\u{0}"), Some(986_101_200_000));
     }
 
     #[test]
