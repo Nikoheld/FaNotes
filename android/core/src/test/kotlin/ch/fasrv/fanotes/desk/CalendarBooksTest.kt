@@ -94,6 +94,11 @@ class CalendarBooksTest {
     }
 
     @Test
+    fun timedResizeHandleIsTheDesktopEdge() {
+        assertEquals(6, CAL_RESIZE_DP)
+    }
+
+    @Test
     fun monthRowsShareTheLeftoverHeight() {
         assertEquals(88, monthRowHeightDp(0, minDp = 88))
         assertEquals(100, monthRowHeightDp(600, minDp = 88))

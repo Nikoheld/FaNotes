@@ -507,6 +507,12 @@ const val CAL_EVENT_RADIUS_DP = 6
 const val CAL_EVENT_PAD_X_DP = 6
 const val CAL_EVENT_PAD_Y_DP = 3
 const val CAL_EVENT_INSET_DP = 2
+/**
+ * Desktop `.cal-resize` is a 6px strip on the bottom of a timed event.
+ * The rule sets no background, and the Notion chrome block does not restyle it,
+ * so the card stays visually the same and only the bottom edge resizes.
+ */
+const val CAL_RESIZE_DP = 6
 const val CAL_GUTTER_DP = 56
 const val CAL_NOW_DOT_DP = 8
 const val CAL_HEAD_NUM_SP = 16
