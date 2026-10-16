@@ -193,6 +193,40 @@ class NoteProfilesTest {
     }
 
     @Test
+    fun theWritingPreviewSheetFollowsTheDesktopPage() {
+        assertEquals(FirstRunWritingPad(31, 34, 0, 34), firstRunWritingFramePad(1200, 800))
+        assertEquals(FirstRunWritingPad(31, 28, 0, 28), firstRunWritingFramePad(1200, 680))
+        assertEquals(FirstRunWritingPad(31, 24, 0, 24), firstRunWritingFramePad(900, 800))
+        assertEquals(FirstRunWritingPad(31, 28, 0, 28), firstRunWritingFramePad(900, 680))
+        assertEquals(FirstRunWritingPad(31, 24, 0, 24), firstRunWritingFramePad(760, 680))
+        assertEquals(FirstRunWritingPad(36, 44, 36, 44), firstRunWritingSheetPad(1200, 800))
+        assertEquals(FirstRunWritingPad(27, 44, 27, 44), firstRunWritingSheetPad(1200, 680))
+        assertEquals(FirstRunWritingPad(36, 34, 36, 34), firstRunWritingSheetPad(900, 800))
+        assertEquals(FirstRunWritingPad(27, 34, 27, 34), firstRunWritingSheetPad(900, 680))
+        assertEquals(FirstRunWritingPad(36, 34, 36, 34), firstRunWritingSheetPad(760, 680))
+        assertEquals(407, firstRunWritingSheetMinDp(1200, 800))
+        assertEquals(354, firstRunWritingSheetMinDp(900, 680))
+        assertEquals(407, firstRunWritingSheetMinDp(760, 400))
+        assertEquals(150, firstRunWritingInkHeightDp(1200, 800))
+        assertEquals(127, firstRunWritingInkHeightDp(761, 680))
+        assertEquals(150, firstRunWritingInkHeightDp(760, 680))
+        assertEquals("12. AUGUST · MATHEMATIK", firstRunWritingDateLabel())
+        assertEquals(0xFFFBFAF7.toInt(), FIRST_RUN_WRITING_SHEET_FILL)
+        assertEquals(0xFF28292D.toInt(), FIRST_RUN_WRITING_SHEET_INK)
+        assertEquals(0xFF55565B.toInt(), FIRST_RUN_WRITING_TYPED_INK)
+        assertEquals(19, FIRST_RUN_WRITING_FRAME_RADIUS_DP)
+        assertEquals(11, FIRST_RUN_WRITING_SHEET_RADIUS_DP)
+        assertEquals(420, FIRST_RUN_WRITING_INK_VIEW_WIDTH)
+        assertEquals(3.3f, FIRST_RUN_WRITING_INK_WIDTH_DP)
+        val accent = 0xFF226688.toInt()
+        assertEquals(mixArgb(accent, 0xFF24252A.toInt(), 0.78f), firstRunWritingInkStroke(accent))
+        assertEquals(mixArgb(accent, 0xFFDDDDDD.toInt(), 0.24f), firstRunWritingTranscriptBorder(accent))
+        assertEquals(mixArgb(accent, 0xFFFFFFFF.toInt(), 0.05f), firstRunWritingTranscriptFill(accent))
+        assertEquals(mixArgb(accent, 0xFF333333.toInt(), 0.75f), firstRunWritingSparkle(accent))
+        assertEquals(mixArgb(accent, 0xFF222222.toInt(), 0.82f), firstRunWritingSelectionLabel(accent))
+    }
+
+    @Test
     fun theFirstRunGridFollowsTheDesktopBreakpoints() {
         assertEquals(0.78f to 1.22f, firstRunColumnWeights(0, 980))
         assertEquals(0.78f to 1.22f, firstRunColumnWeights(1, 800))

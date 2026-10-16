@@ -2,6 +2,7 @@ package ch.fasrv.fanotes.desk
 
 import kotlin.math.abs
 import kotlin.math.ceil
+import java.util.Locale
 import kotlin.math.roundToInt
 
 /** Starter folders and note templates from the desktop first-run profile. */
@@ -403,7 +404,176 @@ const val FIRST_RUN_WRITING_TYPED = "Der Flächeninhalt lässt sich mit dem best
 const val FIRST_RUN_WRITING_RECOGNIZED = "Im Hintergrund erkannt"
 const val FIRST_RUN_WRITING_FORMULA = "∫₀¹ (x + 2) dx = 2,5"
 const val FIRST_RUN_WRITING_CONVERT = "Optional umwandeln"
+/** `.first-run-writing-preview` radius, toolbar, and `0 32px 90px rgba(0,0,0,.2)` shadow. */
+const val FIRST_RUN_WRITING_FRAME_RADIUS_DP = 19
+const val FIRST_RUN_WRITING_FRAME_PAD_TOP_DP = 31
+const val FIRST_RUN_WRITING_FRAME_PAD_WIDE_DP = 34
+const val FIRST_RUN_WRITING_FRAME_PAD_MEDIUM_DP = 24
+const val FIRST_RUN_WRITING_FRAME_PAD_SHORT_DP = 28
+const val FIRST_RUN_WRITING_FRAME_SHADOW_Y_DP = 32
+const val FIRST_RUN_WRITING_FRAME_SHADOW_ALPHA = 0.2f
+const val FIRST_RUN_WRITING_FRAME_PANEL_ALPHA = 0.91f
+const val FIRST_RUN_WRITING_FRAME_ELEVATED_ALPHA = 0.80f
+/** `.first-run-paper-toolbar` is 31px, gap 7px, padding `0 12px`. The marks are 13px with a 4px radius; the live one holds a 5px accent dot. */
+const val FIRST_RUN_WRITING_TOOLBAR_DP = 31
+const val FIRST_RUN_WRITING_TOOLBAR_GAP_DP = 7
+const val FIRST_RUN_WRITING_TOOLBAR_PAD_DP = 12
+const val FIRST_RUN_WRITING_TOOLBAR_MARK_DP = 13
+const val FIRST_RUN_WRITING_TOOLBAR_MARK_RADIUS_DP = 4
+const val FIRST_RUN_WRITING_TOOLBAR_DOT_DP = 5
+const val FIRST_RUN_WRITING_TOOLBAR_DOT_ALPHA = 0.10f
+const val FIRST_RUN_WRITING_FILE_SP = 7
+/**
+ * `.first-run-paper-sheet` is `#fbfaf7` with `#28292d` type, top radius 11px, and `0 10px 35px rgba(0,0,0,.15)`.
+ * Padding is 36px 44px, inline 34px from 980px, and block 27px when the window is short and wider than 760px.
+ * Min height is 407px, or 354px on that short wide window.
+ */
+const val FIRST_RUN_WRITING_SHEET_RADIUS_DP = 11
+const val FIRST_RUN_WRITING_SHEET_FILL = 0xFFFBFAF7.toInt()
+const val FIRST_RUN_WRITING_SHEET_INK = 0xFF28292D.toInt()
+const val FIRST_RUN_WRITING_SHEET_PAD_BLOCK_DP = 36
+const val FIRST_RUN_WRITING_SHEET_PAD_BLOCK_SHORT_DP = 27
+const val FIRST_RUN_WRITING_SHEET_PAD_INLINE_DP = 44
+const val FIRST_RUN_WRITING_SHEET_PAD_INLINE_NARROW_DP = 34
+const val FIRST_RUN_WRITING_SHEET_MIN_DP = 407
+const val FIRST_RUN_WRITING_SHEET_MIN_SHORT_DP = 354
+const val FIRST_RUN_WRITING_SHEET_SHADOW_Y_DP = 10
+const val FIRST_RUN_WRITING_SHEET_SHADOW_ALPHA = 0.15f
+/** `.first-run-paper-sheet > small` is 6.5px, weight 600, `#929195`, tracking .08em, uppercased. */
+const val FIRST_RUN_WRITING_DATE_SP = 6.5f
+const val FIRST_RUN_WRITING_DATE_WEIGHT = 600
+const val FIRST_RUN_WRITING_DATE_TRACKING_EM = 0.08f
+const val FIRST_RUN_WRITING_DATE_INK = 0xFF929195.toInt()
+/** `.first-run-paper-sheet h2` is `650 23px/1.1`, tracking -.035em, margin `10px 0 14px`. */
+const val FIRST_RUN_WRITING_TITLE_SP = 23
+const val FIRST_RUN_WRITING_TITLE_WEIGHT = 650
+const val FIRST_RUN_WRITING_TITLE_LINE = 1.1f
+const val FIRST_RUN_WRITING_TITLE_TRACKING_EM = -0.035f
+const val FIRST_RUN_WRITING_TITLE_MARGIN_TOP_DP = 10
+const val FIRST_RUN_WRITING_TITLE_MARGIN_BOTTOM_DP = 14
+/** `.first-run-paper-type` is `8.5px/1.5` in `#55565b`. */
+const val FIRST_RUN_WRITING_TYPED_SP = 8.5f
+const val FIRST_RUN_WRITING_TYPED_LINE = 1.5f
+const val FIRST_RUN_WRITING_TYPED_INK = 0xFF55565B.toInt()
+/** `.first-run-paper-ink` is 150px, or 127px when short and wide. ViewBox is `0 0 420 150`. Stroke is 3.3 of accent mixed 78% into `#24252a`. */
+const val FIRST_RUN_WRITING_INK_VIEW_WIDTH = 420
+const val FIRST_RUN_WRITING_INK_VIEW_HEIGHT = 150
+const val FIRST_RUN_WRITING_INK_HEIGHT_DP = 150
+const val FIRST_RUN_WRITING_INK_HEIGHT_SHORT_DP = 127
+const val FIRST_RUN_WRITING_INK_MARGIN_TOP_DP = 7
+const val FIRST_RUN_WRITING_INK_WIDTH_DP = 3.3f
+const val FIRST_RUN_WRITING_INK_MIX = 0.78f
+const val FIRST_RUN_WRITING_INK_INTO = 0xFF24252A.toInt()
+/** `.first-run-paper-transcript` is at least 43px: columns 23 / 1fr / 18, gap 7, padding 7px 9px, radius 8. */
+const val FIRST_RUN_WRITING_TRANSCRIPT_MIN_DP = 43
+const val FIRST_RUN_WRITING_TRANSCRIPT_LEAD_DP = 23
+const val FIRST_RUN_WRITING_TRANSCRIPT_TRAIL_DP = 18
+const val FIRST_RUN_WRITING_TRANSCRIPT_GAP_DP = 7
+const val FIRST_RUN_WRITING_TRANSCRIPT_PAD_BLOCK_DP = 7
+const val FIRST_RUN_WRITING_TRANSCRIPT_PAD_INLINE_DP = 9
+const val FIRST_RUN_WRITING_TRANSCRIPT_RADIUS_DP = 8
+const val FIRST_RUN_WRITING_TRANSCRIPT_ICON_DP = 12
+const val FIRST_RUN_WRITING_TRANSCRIPT_CHECK_DP = 13
+const val FIRST_RUN_WRITING_TRANSCRIPT_SP = 6.5f
+const val FIRST_RUN_WRITING_TRANSCRIPT_LINE = 1.3f
+const val FIRST_RUN_WRITING_TRANSCRIPT_WEIGHT = 600
+const val FIRST_RUN_WRITING_TRANSCRIPT_DETAIL_WEIGHT = 500
+const val FIRST_RUN_WRITING_TRANSCRIPT_DETAIL_GAP_DP = 2
+const val FIRST_RUN_WRITING_TRANSCRIPT_DETAIL_INK = 0xFF87878A.toInt()
+const val FIRST_RUN_WRITING_TRANSCRIPT_CHECK_INK = 0xFF4F9970.toInt()
+const val FIRST_RUN_WRITING_TRANSCRIPT_BORDER_MIX = 0.24f
+const val FIRST_RUN_WRITING_TRANSCRIPT_BORDER_INTO = 0xFFDDDDDD.toInt()
+const val FIRST_RUN_WRITING_TRANSCRIPT_FILL_MIX = 0.05f
+const val FIRST_RUN_WRITING_TRANSCRIPT_SPARK_MIX = 0.75f
+const val FIRST_RUN_WRITING_TRANSCRIPT_SPARK_INTO = 0xFF333333.toInt()
+const val FIRST_RUN_WRITING_TRANSCRIPT_SHADOW_Y_DP = 7
+const val FIRST_RUN_WRITING_TRANSCRIPT_SHADOW_ALPHA = 0.06f
+/** `.first-run-paper-selection` sits at left 37, right 31, top 119, height 145, radius 8. The label is 6px, 21px above the top right. */
+const val FIRST_RUN_WRITING_SELECTION_START_DP = 37
+const val FIRST_RUN_WRITING_SELECTION_END_DP = 31
+const val FIRST_RUN_WRITING_SELECTION_TOP_DP = 119
+const val FIRST_RUN_WRITING_SELECTION_HEIGHT_DP = 145
+const val FIRST_RUN_WRITING_SELECTION_RADIUS_DP = 8
+const val FIRST_RUN_WRITING_SELECTION_ALPHA = 0.60f
+const val FIRST_RUN_WRITING_SELECTION_HANDLE_DP = 4
+const val FIRST_RUN_WRITING_SELECTION_HANDLE_OUTSET_DP = 3
+const val FIRST_RUN_WRITING_SELECTION_LABEL_RISE_DP = 21
+const val FIRST_RUN_WRITING_SELECTION_LABEL_SP = 6
+const val FIRST_RUN_WRITING_SELECTION_LABEL_WEIGHT = 600
+const val FIRST_RUN_WRITING_SELECTION_LABEL_PAD_BLOCK_DP = 4
+const val FIRST_RUN_WRITING_SELECTION_LABEL_PAD_INLINE_DP = 6
+const val FIRST_RUN_WRITING_SELECTION_LABEL_RADIUS_DP = 5
+const val FIRST_RUN_WRITING_SELECTION_LABEL_MIX = 0.82f
+const val FIRST_RUN_WRITING_SELECTION_LABEL_INTO = 0xFF222222.toInt()
 val FIRST_RUN_PREVIEW_SUBJECTS = listOf("Mathematik", "Deutsch", "Französisch", "Physik", "Wirtschaft")
+
+/** Top, end, bottom, and start padding. */
+data class FirstRunWritingPad(val top: Int, val end: Int, val bottom: Int, val start: Int)
+
+/** True for `@media (max-height: 680px) and (min-width: 761px)`. */
+fun firstRunWritingShort(screenWidthDp: Int, screenHeightDp: Int): Boolean =
+    screenHeightDp <= FIRST_RUN_PREVIEW_SHORT_HEIGHT_DP && screenWidthDp > FIRST_RUN_PREVIEW_SPLIT_DP
+
+/**
+ * Padding of `.first-run-writing-preview`.
+ * Base is `31px 34px 0`. At `max-width: 980px` the inline padding becomes 24px.
+ * A short window wider than 760px then sets inline padding to 28px, including wide windows.
+ */
+fun firstRunWritingFramePad(screenWidthDp: Int, screenHeightDp: Int): FirstRunWritingPad {
+    val inline = when {
+        firstRunWritingShort(screenWidthDp, screenHeightDp) -> FIRST_RUN_WRITING_FRAME_PAD_SHORT_DP
+        screenWidthDp <= FIRST_RUN_MEDIUM_DP -> FIRST_RUN_WRITING_FRAME_PAD_MEDIUM_DP
+        else -> FIRST_RUN_WRITING_FRAME_PAD_WIDE_DP
+    }
+    return FirstRunWritingPad(
+        top = FIRST_RUN_WRITING_FRAME_PAD_TOP_DP,
+        end = inline,
+        bottom = 0,
+        start = inline,
+    )
+}
+
+/**
+ * Padding of `.first-run-paper-sheet`.
+ * Base is 36px 44px. From 980px down, inline padding is 34px.
+ * A short window wider than 760px sets the block padding to 27px and leaves the inline padding.
+ */
+fun firstRunWritingSheetPad(screenWidthDp: Int, screenHeightDp: Int): FirstRunWritingPad {
+    val inline = if (screenWidthDp <= FIRST_RUN_MEDIUM_DP) FIRST_RUN_WRITING_SHEET_PAD_INLINE_NARROW_DP else FIRST_RUN_WRITING_SHEET_PAD_INLINE_DP
+    val block = if (firstRunWritingShort(screenWidthDp, screenHeightDp)) FIRST_RUN_WRITING_SHEET_PAD_BLOCK_SHORT_DP else FIRST_RUN_WRITING_SHEET_PAD_BLOCK_DP
+    return FirstRunWritingPad(top = block, end = inline, bottom = block, start = inline)
+}
+
+/** Min height of `.first-run-paper-sheet`: 407px, or 354px when short and wider than 760px. */
+fun firstRunWritingSheetMinDp(screenWidthDp: Int, screenHeightDp: Int): Int =
+    if (firstRunWritingShort(screenWidthDp, screenHeightDp)) FIRST_RUN_WRITING_SHEET_MIN_SHORT_DP else FIRST_RUN_WRITING_SHEET_MIN_DP
+
+/** Height of `.first-run-paper-ink`: 150px, or 127px when short and wider than 760px. */
+fun firstRunWritingInkHeightDp(screenWidthDp: Int, screenHeightDp: Int): Int =
+    if (firstRunWritingShort(screenWidthDp, screenHeightDp)) FIRST_RUN_WRITING_INK_HEIGHT_SHORT_DP else FIRST_RUN_WRITING_INK_HEIGHT_DP
+
+/** The date line is uppercased by `text-transform: uppercase`. */
+fun firstRunWritingDateLabel(): String = FIRST_RUN_WRITING_DATE.uppercase(Locale.GERMAN)
+
+/** Stroke of `.first-run-paper-ink path`: accent mixed 78% into `#24252a`. */
+fun firstRunWritingInkStroke(accentArgb: Int): Int =
+    mixArgb(accentArgb, FIRST_RUN_WRITING_INK_INTO, FIRST_RUN_WRITING_INK_MIX)
+
+/** Transcript border: accent mixed 24% into `#ddd`. */
+fun firstRunWritingTranscriptBorder(accentArgb: Int): Int =
+    mixArgb(accentArgb, FIRST_RUN_WRITING_TRANSCRIPT_BORDER_INTO, FIRST_RUN_WRITING_TRANSCRIPT_BORDER_MIX)
+
+/** Transcript fill: accent mixed 5% into white. */
+fun firstRunWritingTranscriptFill(accentArgb: Int): Int =
+    mixArgb(accentArgb, 0xFFFFFFFF.toInt(), FIRST_RUN_WRITING_TRANSCRIPT_FILL_MIX)
+
+/** Sparkle icon: accent mixed 75% into `#333`. */
+fun firstRunWritingSparkle(accentArgb: Int): Int =
+    mixArgb(accentArgb, FIRST_RUN_WRITING_TRANSCRIPT_SPARK_INTO, FIRST_RUN_WRITING_TRANSCRIPT_SPARK_MIX)
+
+/** Selection label: accent mixed 82% into `#222`. */
+fun firstRunWritingSelectionLabel(accentArgb: Int): Int =
+    mixArgb(accentArgb, FIRST_RUN_WRITING_SELECTION_LABEL_INTO, FIRST_RUN_WRITING_SELECTION_LABEL_MIX)
 
 fun firstRunPreviewColumns(widthDp: Int): Int = if (widthDp <= FIRST_RUN_PREVIEW_SPLIT_DP) 1 else 2
 
