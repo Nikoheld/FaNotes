@@ -1228,7 +1228,7 @@ impl Host {
         }
         let query = vault::truncate_utf16(query, 500);
         let root = self.require_vault()?;
-        let needle = vault::locale_lower_de(&query);
+        let needle = vault::search_text(&query);
         let mut files = Vec::new();
         collect_search_files(root, root, &mut files, 0)?;
         let present: std::collections::HashSet<String> =
@@ -1297,12 +1297,12 @@ impl Host {
                 }
             }
             remember_drawing_owner(&mut owners, &relative, &content, ink.as_ref());
-            let haystack = vault::locale_lower_de(&format!("{relative}\n{content}\n{transcript}"));
+            let haystack = vault::search_text(&format!("{relative}\n{content}\n{transcript}"));
             if !haystack.contains(&needle) {
                 continue;
             }
             let matches = count_matches(&haystack, &needle);
-            let content_index = vault::locale_lower_de(&content).find(&needle);
+            let content_index = vault::search_text(&content).find(&needle);
             let excerpt = if let Some(index) = content_index {
                 let (start, _) = original_match_span(&content, &needle, index);
                 excerpt(&content, start, vault::utf16_len(&query))
@@ -3873,7 +3873,7 @@ fn search_drawings(
                 .unwrap_or(""),
         );
         let searchable = format!("{title}\n{transcript}");
-        let haystack = vault::locale_lower_de(&searchable);
+        let haystack = vault::search_text(&searchable);
         let Some(first) = haystack.find(needle) else {
             continue;
         };
@@ -4142,7 +4142,7 @@ fn byte_range_for_utf16(text: &str, start_units: usize, end_units: usize) -> (us
 }
 
 fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
-    let needle = vault::locale_lower_de(vault::js_trim(query));
+    let needle = vault::search_text(vault::js_trim(query));
     if vault::utf16_len(&needle) < 2 || vault::js_trim(transcript).is_empty() {
         return None;
     }
@@ -4163,7 +4163,7 @@ fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
         .collect();
     let index = parsed
         .iter()
-        .position(|(_, text)| vault::locale_lower_de(text).contains(&needle))?;
+        .position(|(_, text)| vault::search_text(text).contains(&needle))?;
     parsed[index].0.or_else(|| {
         if parsed.len() == 1 {
             Some(0.15)

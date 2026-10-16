@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { createServer } from 'vite'
+
+const require = createRequire(import.meta.url)
 
 // Workspace navigation: visited-note history with back/forward, the split
 // layout, tab ordering/pinning, the remembered workspace per vault and the
@@ -17,6 +20,8 @@ const server = await createServer({
 
 try {
   const nav = await server.ssrLoadModule('/src/lib/workspaceNav.ts')
+  const german = await server.ssrLoadModule('/src/lib/germanSearch.ts')
+  const ink = await server.ssrLoadModule('/src/lib/searchInkAnchor.ts')
   const preview = await server.ssrLoadModule('/src/components/InkPreviewLayer.tsx')
 
   // ── History ──────────────────────────────────────────────────────────────
@@ -151,6 +156,15 @@ try {
   assert.equal(nav.fuzzyScore('xyz', 'Sets'), 0)
   assert.equal(nav.fuzzyScore('', 'Anything'), 1)
   assert.ok(nav.fuzzyScore('ubung', 'Übung') > 0, 'umlauts match their base letters')
+  assert.ok(nav.fuzzyScore('strasse', 'Straße') > 0, 'ß and ss are the same letters')
+  assert.equal(nav.rankSwitcherNotes(['Deutsch/Straße.md'], 'strasse')[0].path, 'Deutsch/Straße.md')
+  assert.equal(german.germanIndexOf('die straße ist lang', 'strasse'), 4)
+  assert.equal(german.germanIndexOf('die strasse ist lang', 'straße'), 4)
+  assert.equal(german.germanCount('straße und strasse', 'strasse'), 2)
+  assert.equal(ink.inkAnchorForQuery('0.4000\tDie Straße', 'strasse')?.y, 0.4)
+  const desktop = require('../electron/german-search.cjs')
+  assert.equal(desktop.germanIndexOf('die straße ist lang', 'strasse'), 4)
+  assert.equal(desktop.germanCount('straße und strasse', 'strasse'), 2)
   const paths = ['Math/Sets.md', 'Bio/Cells.md', 'Inbox/Untitled Note 2.md', 'Welcome.md', 'Inbox/Untitled Note.md']
   const recentFirst = nav.rankSwitcherNotes(paths, '', ['Bio/Cells.md', 'Welcome.md']).map((note) => note.path)
   assert.deepEqual(recentFirst.slice(0, 2), ['Bio/Cells.md', 'Welcome.md'])

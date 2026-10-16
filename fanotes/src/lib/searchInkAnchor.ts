@@ -21,14 +21,16 @@ export const parseTranscriptLine = (line: string): { y: number | null; text: str
   return { y: Math.min(1, Math.max(0, y)), text: match[2].trim() }
 }
 
+const foldSharpS = (value: string) => value.toLocaleLowerCase('de-DE').replaceAll('ß', 'ss')
+
 /** The page position of the first transcript line that contains `query`. */
 export const inkAnchorForQuery = (transcript: string, query: string): InkSearchAnchor | null => {
-  const needle = query.trim().toLocaleLowerCase('de-DE')
+  const needle = foldSharpS(query.trim())
   if (needle.length < 2 || !transcript.trim()) return null
   const lines = transcript.split('\n').map((line) => line.trim()).filter(Boolean)
   if (!lines.length) return null
   const parsed = lines.map(parseTranscriptLine)
-  const index = parsed.findIndex((line) => line.text.toLocaleLowerCase('de-DE').includes(needle))
+  const index = parsed.findIndex((line) => foldSharpS(line.text).includes(needle))
   if (index < 0) return null
   const positioned = parsed[index].y
   if (positioned !== null) return { y: positioned }

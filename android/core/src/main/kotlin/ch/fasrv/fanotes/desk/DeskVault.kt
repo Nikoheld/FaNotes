@@ -341,8 +341,8 @@ fun searchVault(files: List<Pair<String, String>>, query: String): List<SearchHi
         val content = text.replace("\r\n", "\n")
         val contentLower = content.lowercase(Locale.GERMAN)
         val pathLower = path.lowercase(Locale.GERMAN)
-        val index = if (markdown) contentLower.indexOf(needle) else -1
-        val pathMatch = pathLower.contains(needle)
+        val index = if (markdown) findSharpS(contentLower, needle)?.first ?: -1 else -1
+        val pathMatch = findSharpS(pathLower, needle) != null
         if (index < 0 && !pathMatch) continue
         val excerpt = when {
             pdf -> "PDF · $path"
@@ -352,7 +352,7 @@ fun searchVault(files: List<Pair<String, String>>, query: String): List<SearchHi
             else -> "Dateiname · $path"
         }
         val haystack = "$path\n$content".lowercase(Locale.GERMAN)
-        val count = haystack.split(needle).size - 1
+        val count = countSharpS(haystack, needle)
         val line = if (index < 0) 1 else content.take(index).count { it == '\n' } + 1
         val hit = SearchHit(
             path,

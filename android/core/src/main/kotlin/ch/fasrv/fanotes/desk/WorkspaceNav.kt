@@ -479,7 +479,7 @@ private fun compareNatural(left: String, right: String): Int {
 private fun normalizeForMatch(text: String): String {
     val lower = text.lowercase(Locale.GERMAN)
     val decomposed = Normalizer.normalize(lower, Normalizer.Form.NFD)
-    return decomposed.replace(Regex("\\p{M}+"), "")
+    return decomposed.replace(Regex("\\p{M}+"), "").replace("ß", "ss")
 }
 
 private fun wordStart(haystack: String, at: Int) =

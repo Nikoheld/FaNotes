@@ -3472,6 +3472,7 @@ function registerIpcHandlers() {
     const root = await assertCurrentVaultRoot()
     const markdownFiles = []
     await collectMarkdownFiles(root, root, markdownFiles)
+    const { germanCount, germanIndexOf } = require('./german-search.cjs')
     const needle = query.toLocaleLowerCase('de-DE')
     const hits = []
     const drawingOwners = new Map()
@@ -3519,18 +3520,11 @@ function registerIpcHandlers() {
       }
       rememberDrawingOwner(drawingOwners, relativePath, content, ownerInk)
       const contentHaystack = content.toLocaleLowerCase('de-DE')
-      const firstContentIndex = contentHaystack.indexOf(needle)
+      const firstContentIndex = germanIndexOf(contentHaystack, needle)
       const haystack = `${relativePath}\n${content}\n${inkTranscript}`.toLocaleLowerCase('de-DE')
-      const firstIndex = haystack.indexOf(needle)
+      const firstIndex = germanIndexOf(haystack, needle)
       if (firstIndex < 0) continue
-      let matches = 0
-      let cursor = 0
-      while (cursor < haystack.length) {
-        const index = haystack.indexOf(needle, cursor)
-        if (index < 0) break
-        matches += 1
-        cursor = index + Math.max(needle.length, 1)
-      }
+      const matches = germanCount(haystack, needle)
       const inkAnchor = inkTranscript ? inkAnchorForQuery(inkTranscript, query) : null
       hits.push({
         relativePath,
@@ -3570,16 +3564,9 @@ function registerIpcHandlers() {
           : ''
         const searchable = `${metadata.title}\n${transcript}`
         const haystack = searchable.toLocaleLowerCase('de-DE')
-        const firstIndex = haystack.indexOf(needle)
+        const firstIndex = germanIndexOf(haystack, needle)
         if (firstIndex < 0) continue
-        let matches = 0
-        let cursor = 0
-        while (cursor < haystack.length) {
-          const index = haystack.indexOf(needle, cursor)
-          if (index < 0) break
-          matches += 1
-          cursor = index + Math.max(needle.length, 1)
-        }
+        const matches = germanCount(haystack, needle)
         const notePath = drawingOwners.get(id)
         const inkAnchor = inkAnchorForQuery(transcript, query)
         hits.push({

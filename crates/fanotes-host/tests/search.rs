@@ -357,6 +357,21 @@ fn search_keeps_a_case_pair_the_desktop_does_not_fold() {
 }
 
 #[test]
+fn search_finds_sharp_s_written_as_ss() {
+    let mut host = host();
+    touch(&host, "Bio/Weg.md");
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Bio/Weg.md"), json!("Die Straße ist lang.\n")],
+    )
+    .unwrap();
+    let hits = host.dispatch("fanotes:search", &[json!("strasse")]).unwrap();
+    assert_eq!(hits[0]["relativePath"], "Bio/Weg.md");
+    let excerpt = hits[0]["excerpt"].as_str().unwrap();
+    assert!(excerpt.contains("Straße"), "{excerpt}");
+}
+
+#[test]
 fn search_excerpt_follows_a_case_fold_that_grows() {
     let mut host = host();
     touch(&host, "Bio/Istanbul.md");

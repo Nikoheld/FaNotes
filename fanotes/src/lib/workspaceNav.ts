@@ -331,6 +331,7 @@ const normalizeForMatch = (text: string) => text
   .toLocaleLowerCase('de')
   .normalize('NFD')
   .replace(/[\u0300-\u036f]/g, '')
+  .replaceAll('ß', 'ss')
 
 /**
  * Subsequence match with a bias for word starts and tight runs. 0 = no match.

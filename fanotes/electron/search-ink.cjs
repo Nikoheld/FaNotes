@@ -10,13 +10,15 @@ const parseTranscriptLine = (line) => {
   return { y: Math.min(1, Math.max(0, y)), text: match[2].trim() }
 }
 
+const foldSharpS = (value) => String(value).toLocaleLowerCase('de-DE').replaceAll('ß', 'ss')
+
 const inkAnchorForQuery = (transcript, query) => {
-  const needle = String(query || '').trim().toLocaleLowerCase('de-DE')
+  const needle = foldSharpS(String(query || '').trim())
   if (needle.length < 2 || !String(transcript || '').trim()) return null
   const lines = String(transcript).split('\n').map((line) => line.trim()).filter(Boolean)
   if (!lines.length) return null
   const parsed = lines.map(parseTranscriptLine)
-  const index = parsed.findIndex((line) => line.text.toLocaleLowerCase('de-DE').includes(needle))
+  const index = parsed.findIndex((line) => foldSharpS(line.text).includes(needle))
   if (index < 0) return null
   if (parsed[index].y !== null) return { y: parsed[index].y }
   if (parsed.length === 1) return { y: 0.15 }

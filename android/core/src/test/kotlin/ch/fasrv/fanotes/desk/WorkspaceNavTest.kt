@@ -246,6 +246,8 @@ class WorkspaceNavTest {
         assertEquals(0, fuzzyScore("xyz", "Sets"))
         assertEquals(1, fuzzyScore("", "Anything"))
         assertTrue(fuzzyScore("ubung", "Übung") > 0)
+        assertTrue(fuzzyScore("strasse", "Straße") > 0)
+        assertEquals("Deutsch/Straße.md", rankSwitcherNotes(listOf("Deutsch/Straße.md"), "strasse").first().path)
         val paths = listOf("Math/Sets.md", "Bio/Cells.md", "Inbox/Untitled Note 2.md", "Welcome.md", "Inbox/Untitled Note.md")
         val recentFirst = rankSwitcherNotes(paths, "", listOf("Bio/Cells.md", "Welcome.md")).map { it.path }
         assertEquals(listOf("Bio/Cells.md", "Welcome.md"), recentFirst.take(2))

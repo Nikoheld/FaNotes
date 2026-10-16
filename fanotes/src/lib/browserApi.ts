@@ -3,6 +3,7 @@ import { DEFAULT_SETTINGS } from '../defaults'
 import { getUiLanguage } from '../i18n'
 import type { AppSettings, BootstrapData, DrawingLibraryDocument, FaNotesApi, PaperStyle, ServerBackupState, UpdateState, VaultEntry, WorksheetDocument } from '../types'
 import { companionNotePath, emptyFamdPayload, parseFamd, serializeFamd } from './famd'
+import { germanCount, germanIndexOf } from './germanSearch'
 import { inkAnchorForQuery } from './searchInkAnchor'
 import { parseNoteBackups, type NoteBackupSnapshot } from './noteBackup'
 import { parseNoteLinks, type NoteLinkRecord } from './noteLink'
@@ -1012,22 +1013,22 @@ export function createBrowserApi(): FaNotesApi {
       if (!needle) return []
       const noteHits = [...files.values()].flatMap((record) => {
         const contentLower = record.content.toLocaleLowerCase('de')
-        const index = contentLower.indexOf(needle)
+        const index = germanIndexOf(contentLower, needle)
         const lower = `${record.path}\n${record.content}`.toLocaleLowerCase('de')
-        const pathMatch = record.path.toLocaleLowerCase('de').includes(needle)
+        const pathMatch = germanIndexOf(record.path.toLocaleLowerCase('de'), needle) >= 0
         if (index < 0 && !pathMatch) return []
         const excerpt = index >= 0
           ? record.content.slice(Math.max(0, index - 60), Math.min(record.content.length, index + needle.length + 120)).replace(/[#*_`]/gu, '')
           : `Dateiname · ${record.path}`
         const inkAnchor = inkAnchorForQuery(record.content, query)
-        return [{ relativePath: record.path, title: stem(fileName(record.path)), excerpt, matches: lower.split(needle).length - 1, kind: 'note' as const, ...(inkAnchor ? { inkAnchor } : {}) }]
+        return [{ relativePath: record.path, title: stem(fileName(record.path)), excerpt, matches: germanCount(lower, needle), kind: 'note' as const, ...(inkAnchor ? { inkAnchor } : {}) }]
       })
       const drawingHits = [...drawings.values()].flatMap((drawing) => {
         try {
           const parsed = JSON.parse(drawing.drawingJson) as { searchTranscript?: unknown }
           const transcript = typeof parsed.searchTranscript === 'string' ? parsed.searchTranscript : ''
           const haystack = `${drawing.title}\n${transcript}`
-          if (!haystack.toLocaleLowerCase('de').includes(needle)) return []
+          if (germanIndexOf(haystack.toLocaleLowerCase('de'), needle) < 0) return []
           const inkAnchor = inkAnchorForQuery(transcript, query)
           return [{ relativePath: drawing.dataRelativePath, title: drawing.title, excerpt: haystack.slice(0, 180), matches: 1, kind: 'drawing' as const, drawingId: drawing.id, ...(inkAnchor ? { inkAnchor } : {}) }]
         } catch { return [] }
@@ -1035,8 +1036,8 @@ export function createBrowserApi(): FaNotesApi {
       const pdfHits = [...assets.keys()].flatMap((path) => {
         if (path.startsWith('.') || !/\.pdf$/iu.test(path)) return []
         const haystack = path.toLocaleLowerCase('de')
-        if (!haystack.includes(needle)) return []
-        return [{ relativePath: path, title: stem(fileName(path)), excerpt: `PDF · ${path}`, matches: haystack.split(needle).length - 1, kind: 'note' as const }]
+        if (germanIndexOf(haystack, needle) < 0) return []
+        return [{ relativePath: path, title: stem(fileName(path)), excerpt: `PDF · ${path}`, matches: germanCount(haystack, needle), kind: 'note' as const }]
       })
       return [...noteHits, ...pdfHits, ...drawingHits].slice(0, 250)
     },
