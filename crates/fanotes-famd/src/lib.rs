@@ -1708,8 +1708,9 @@ fn legacy_numeric_iso(trimmed: &str) -> Option<String> {
             (year, month, day, suffix)
         }
     };
+    let year_text = legacy_iso_year(year);
     canonical_iso(&format!(
-        "{year:04}-{month:02}-{day:02}T{clock}{suffix}"
+        "{year_text}-{month:02}-{day:02}T{clock}{suffix}"
     ))
 }
 
@@ -2033,6 +2034,16 @@ fn legacy_year_number(year: i32) -> Option<i32> {
     None
 }
 
+/// `YYYY` for years 0 through 9999. `10000` is `+010000`, the form
+/// `Date.parse` reads as an expanded year.
+fn legacy_iso_year(year: i32) -> String {
+    if (0..10_000).contains(&year) {
+        format!("{year:04}")
+    } else {
+        format!("{year:+07}")
+    }
+}
+
 /// `Oct 13, 2026`, `13 Oct 2026`, and `2026 Oct 13`. `13-Oct` is 13 October
 /// 2001 and `Oct 2026` is 1 October 2026. A date alone is local midnight, so
 /// the result has no `Z`.
@@ -2051,7 +2062,10 @@ fn rewrite_month_name(trimmed: &str) -> Option<String> {
             (year, month, day, suffix)
         }
     };
-    Some(format!("{year:04}-{month:02}-{day:02}T{clock}{suffix}"))
+    let year_text = legacy_iso_year(year);
+    Some(format!(
+        "{year_text}-{month:02}-{day:02}T{clock}{suffix}"
+    ))
 }
 
 /// A slash date's tail is a clock, a zone, or both. `GMT+5: 1` keeps the
@@ -2251,7 +2265,8 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
             (year, month, day, suffix)
         }
     };
-    Some(format!("{year:04}-{month:02}-{day:02}T{clock}{suffix}"))
+    let year_text = legacy_iso_year(year);
+    Some(format!("{year_text}-{month:02}-{day:02}T{clock}{suffix}"))
 }
 
 /// `10/13/2026EST` is the slash date plus `EST`. The zone starts at the first
@@ -3034,7 +3049,8 @@ fn shift_hyphen_date(date: &str, delta: i32) -> Option<String> {
         return None;
     }
     let (year, month, day) = shift_ymd(year, month, day, delta)?;
-    Some(format!("{year:04}-{month:02}-{day:02}"))
+    let year_text = legacy_iso_year(year);
+    Some(format!("{year_text}-{month:02}-{day:02}"))
 }
 
 /// Leading zeros count in the length and not in the value. Nine significant
@@ -9117,6 +9133,28 @@ mod tests {
             assert_eq!(
                 super::canonical_iso(" -000001-01-01").as_deref(),
                 Some("2001-01-01T05:00:00.000Z")
+            );
+        });
+    }
+
+    #[test]
+    fn a_month_name_year_10000_is_local_midnight() {
+        with_tz("America/New_York", || {
+            assert_eq!(
+                super::canonical_iso("Oct 13 10000").as_deref(),
+                Some("+010000-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("13 Oct 10000").as_deref(),
+                Some("+010000-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("13Oct10000").as_deref(),
+                Some("+010000-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 10000 16:00").as_deref(),
+                Some("+010000-10-13T20:00:00.000Z")
             );
         });
     }

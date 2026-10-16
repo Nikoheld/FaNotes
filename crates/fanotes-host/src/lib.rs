@@ -3071,8 +3071,9 @@ fn legacy_numeric_millis(trimmed: &str) -> Option<u64> {
             (year, month, day, suffix)
         }
     };
+    let year_text = legacy_iso_year(year);
     unix_millis_from_iso(&format!(
-        "{year:04}-{month:02}-{day:02}T{clock}{suffix}"
+        "{year_text}-{month:02}-{day:02}T{clock}{suffix}"
     ))
 }
 
@@ -3399,8 +3400,9 @@ fn rewrite_month_name(trimmed: &str) -> Option<String> {
             (year, month, day, suffix)
         }
     };
+    let year_text = legacy_iso_year(year);
     Some(format!(
-        "{year:04}-{month:02}-{day:02}T{clock}{suffix}"
+        "{year_text}-{month:02}-{day:02}T{clock}{suffix}"
     ))
 }
 
@@ -4076,7 +4078,8 @@ fn shift_hyphen_date(date: &str, delta: i32) -> Option<String> {
         return None;
     }
     let (year, month, day) = shift_ymd(year, month, day, delta)?;
-    Some(format!("{year:04}-{month:02}-{day:02}"))
+    let year_text = legacy_iso_year(year);
+    Some(format!("{year_text}-{month:02}-{day:02}"))
 }
 
 /// Leading zeros count in the length and not in the value. Nine significant
@@ -4473,7 +4476,8 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
             (year, month, day, suffix)
         }
     };
-    Some(format!("{year:04}-{month:02}-{day:02}T{clock}{suffix}"))
+    let year_text = legacy_iso_year(year);
+    Some(format!("{year_text}-{month:02}-{day:02}T{clock}{suffix}"))
 }
 
 /// `10/13/2026EST` is the slash date plus `EST`. The zone starts at the first
@@ -4508,6 +4512,16 @@ fn legacy_year(year: i32) -> Option<i32> {
         return Some(1900 + year);
     }
     None
+}
+
+/// `YYYY` for years 0 through 9999. `10000` is `+010000`, the form
+/// `Date.parse` reads as an expanded year.
+fn legacy_iso_year(year: i32) -> String {
+    if (0..10_000).contains(&year) {
+        format!("{year:04}")
+    } else {
+        format!("{year:+07}")
+    }
 }
 
 fn pad_legacy_clock(time: &str) -> Option<String> {
@@ -11189,6 +11203,37 @@ mod local_zone_tests {
         assert_eq!(
             unix_millis_from_iso(" -000001-10-13"),
             Some(1_357_794_000_000)
+        );
+    }
+
+    #[test]
+    fn a_month_name_year_10000_is_local_midnight() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // October 10000 is EDT. The instant fits in `u64`.
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 10000"),
+            Some(253_427_025_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13, 10000"),
+            Some(253_427_025_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13 Oct 10000"),
+            Some(253_427_025_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13Oct10000"),
+            Some(253_427_025_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 10000 16:00"),
+            Some(253_427_083_200_000)
         );
     }
 }
