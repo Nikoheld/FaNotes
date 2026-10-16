@@ -634,6 +634,24 @@ class NotePageView(context: Context) : FrameLayout(context) {
     }
     private val lineNumbers = TextView(context)
     private val foldMarks = TextView(context)
+    private val boxField = object : EditText(context) {
+        override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+            if (keyCode == KeyEvent.KEYCODE_ESCAPE && !event.isCtrlPressed && !event.isAltPressed &&
+                !event.isMetaPressed && !event.isShiftPressed
+            ) {
+                if (event.action == KeyEvent.ACTION_UP) onWorksheetBoxClosed()
+                return true
+            }
+            return super.onKeyPreIme(keyCode, event)
+        }
+    }
+    private val boxRemove = TextView(context)
+    private var requestedBoxId: String? = null
+    private var openBoxId: String? = null
+    private var acceptedBoxText = ""
+    private var writingBox = false
+    private var suppressBoxClose = false
+    private var boxRemovePressed = false
     private val toolbar = HorizontalScrollView(context)
     private val toolbarRule = View(context)
     private val tools = LinearLayout(context)
@@ -687,6 +705,9 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onClear: () -> Unit = {}
     var onFinger: (Boolean) -> Unit = {}
     var onMath: () -> Unit = {}
+    var onWorksheetBoxText: (String, String) -> Unit = { _, _ -> }
+    var onWorksheetBoxRemove: (String) -> Unit = {}
+    var onWorksheetBoxClosed: () -> Unit = {}
     var onUnfoldHeading: (Int) -> Unit = {}
     var onToggleHeading: (Int) -> Unit = {}
     var onEditorFold: (String, Int) -> Unit = { _, _ -> }
@@ -822,6 +843,82 @@ class NotePageView(context: Context) : FrameLayout(context) {
         addView(lineNumbers, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         addView(foldMarks, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         addView(editor, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
+        boxField.setTextColor(0xFF20222B.toInt())
+        boxField.setHintTextColor(0xFF747887.toInt())
+        boxField.hint = ch.fasrv.fanotes.desk.BOX_EDITOR_PLACEHOLDER
+        boxField.gravity = Gravity.TOP or Gravity.START
+        boxField.setLineSpacing(0f, 1.35f)
+        boxField.minHeight = 0
+        boxField.minimumHeight = 0
+        boxField.isFocusableInTouchMode = true
+        boxField.imeOptions = EditorInfo.IME_ACTION_DONE
+        boxField.setRawInputType(
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES,
+        )
+        boxField.setImeActionLabel(ch.fasrv.fanotes.desk.BOX_EDITOR_SAVE, EditorInfo.IME_ACTION_DONE)
+        boxField.visibility = GONE
+        boxField.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId != EditorInfo.IME_ACTION_DONE || requestedBoxId == null) return@setOnEditorActionListener false
+            onWorksheetBoxClosed()
+            true
+        }
+        boxField.setOnFocusChangeListener { _, focused ->
+            applyBoxFieldChrome(focused)
+            if (focused || suppressBoxClose || requestedBoxId == null) return@setOnFocusChangeListener
+            boxField.post {
+                if (suppressBoxClose || requestedBoxId == null || boxRemovePressed) return@post
+                onWorksheetBoxClosed()
+            }
+        }
+        boxField.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: android.text.Editable?) {
+                if (writingBox) return
+                val id = openBoxId ?: return
+                val next = s?.toString().orEmpty()
+                if (next == acceptedBoxText) return
+                if (ch.fasrv.fanotes.desk.worksheetBoxTextError(next) != null) {
+                    onWorksheetBoxText(id, next)
+                    writingBox = true
+                    boxField.setText(acceptedBoxText)
+                    boxField.setSelection((boxField.text?.length ?: 0).coerceAtMost(acceptedBoxText.length))
+                    writingBox = false
+                    return
+                }
+                acceptedBoxText = next
+                onWorksheetBoxText(id, next)
+                placeWorksheetField()
+            }
+        })
+        applyBoxFieldChrome(false)
+        boxRemove.text = "×"
+        boxRemove.contentDescription = ch.fasrv.fanotes.desk.BOX_EDITOR_REMOVE
+        boxRemove.gravity = Gravity.CENTER
+        boxRemove.textSize = 12f
+        boxRemove.setTextColor(0xFFA33F56.toInt())
+        boxRemove.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(android.graphics.Color.WHITE)
+            setStroke(dp(1).coerceAtLeast(1), 0x2E58222F)
+        }
+        boxRemove.visibility = GONE
+        boxRemove.isFocusable = false
+        boxRemove.isFocusableInTouchMode = false
+        boxRemove.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> boxRemovePressed = true
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> boxRemovePressed = false
+            }
+            false
+        }
+        boxRemove.setOnClickListener {
+            val id = requestedBoxId ?: return@setOnClickListener
+            boxRemovePressed = false
+            onWorksheetBoxRemove(id)
+        }
+        addView(boxField, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
+        addView(boxRemove, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         editor.setOnScrollChangeListener { _, _, scrollY, _, _ ->
             lineNumbers.scrollTo(0, scrollY)
             foldMarks.scrollTo(0, scrollY)
@@ -848,7 +945,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
         handle.elevation = 12f
         addView(handle, LayoutParams(dp(112), dp(28), Gravity.TOP or Gravity.END))
         ink.onPaperImages = { paintLivePreview() }
-        ink.onCamera = { _, _, _ -> placeEditor() }
+        ink.onCamera = { _, _, _ ->
+            placeEditor()
+            placeWorksheetField()
+        }
         ink.onPenActive = { active ->
             penDown = active
             applyChromeVisibility()
@@ -1696,7 +1796,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
                     event.isMetaPressed,
                     event.isAltPressed,
                     event.isShiftPressed,
-                    editor.hasFocus(),
+                    editor.hasFocus() || boxField.hasFocus(),
                 )
                 when (sheet) {
                     "zoom-in" -> ink.zoomByStep(1)
@@ -1709,7 +1809,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 if (sheet != null) return true
             }
         }
-        if (pdfNote && !editor.hasFocus() && event.action == KeyEvent.ACTION_DOWN) {
+        if (pdfNote && !editor.hasFocus() && !boxField.hasFocus() && event.action == KeyEvent.ACTION_DOWN) {
             val name = when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_DOWN -> "down"
                 KeyEvent.KEYCODE_PAGE_DOWN -> "page-down"
@@ -1775,6 +1875,99 @@ class NotePageView(context: Context) : FrameLayout(context) {
         return true
     }
 
+    /**
+     * Shows or moves the on-sheet worksheet field. There is no dialog fallback:
+     * if the worksheet frame is not laid out yet, this waits for the next camera or layout pass.
+     */
+    fun syncWorksheetField(id: String?) {
+        requestedBoxId = id
+        placeWorksheetField()
+    }
+
+    private fun placeWorksheetField() {
+        val id = requestedBoxId
+        if (id == null) {
+            dismissWorksheetField()
+            return
+        }
+        if (ink.worksheetBoxes.none { it.box.id == id }) {
+            if (openBoxId == id) {
+                openBoxId = null
+                post { onWorksheetBoxClosed() }
+            }
+            return
+        }
+        val live = if (openBoxId == id) boxField.text?.toString() else null
+        val rect = ink.worksheetFieldScreenRect(id, live) ?: return
+        if (openBoxId != id) {
+            val text = ink.worksheetBoxes.firstOrNull { it.box.id == id }?.box?.text.orEmpty()
+            openBoxId = id
+            writingBox = true
+            boxField.setText(text)
+            boxField.setSelection(boxField.text?.length ?: 0)
+            writingBox = false
+            acceptedBoxText = text
+            boxField.visibility = VISIBLE
+            boxRemove.visibility = VISIBLE
+            boxField.requestFocusFromTouch()
+        }
+        ink.activeWorksheetBoxId = id
+        val anchored = ink.worksheetBoxes.firstOrNull { it.box.id == id }
+        val scale = ink.cameraScale().coerceAtLeast(0.2f)
+        val font = ((anchored?.box?.fontSize ?: 16.0) * scale).toFloat().coerceAtLeast(12f)
+        boxField.setTextSize(TypedValue.COMPLEX_UNIT_PX, font)
+        val left = rect.left.toInt()
+        val top = rect.top.toInt()
+        val right = (rect.left + rect.width).toInt().coerceAtLeast(left + 1)
+        val bottom = (rect.top + rect.height).toInt().coerceAtLeast(top + 1)
+        pinToSheet(boxField, left, top, right, bottom)
+        val size = dp(ch.fasrv.fanotes.desk.BOX_FIELD_REMOVE_DP).coerceAtLeast(1)
+        val outset = dp(ch.fasrv.fanotes.desk.BOX_FIELD_REMOVE_OUTSET_DP)
+        val removeRight = right + outset
+        val removeTop = top - outset
+        pinToSheet(boxRemove, removeRight - size, removeTop, removeRight, removeTop + size)
+    }
+
+    private fun pinToSheet(view: View, left: Int, top: Int, right: Int, bottom: Int) {
+        view.layout(left, top, right, bottom)
+        val rotation = ink.sheetRotation()
+        if (rotation == 0f) {
+            view.rotation = 0f
+            return
+        }
+        view.pivotX = ink.width / 2f - left
+        view.pivotY = ink.height / 2f - top
+        view.rotation = rotation
+    }
+
+    private fun applyBoxFieldChrome(focused: Boolean) {
+        val alpha = if (focused) ch.fasrv.fanotes.desk.BOX_FIELD_FOCUS_BG_ALPHA else ch.fasrv.fanotes.desk.BOX_FIELD_BG_ALPHA
+        boxField.background = GradientDrawable().apply {
+            cornerRadius = dp(ch.fasrv.fanotes.desk.BOX_EDITOR_RADIUS_DP).toFloat()
+            setColor(android.graphics.Color.argb((alpha * 255f + 0.5f).toInt(), 255, 255, 255))
+            val stroke = if (focused) ink.accentColor else 0x2E2E3848
+            setStroke(dp(1).coerceAtLeast(1), stroke)
+        }
+        val padX = dp(ch.fasrv.fanotes.desk.BOX_EDITOR_PAD_X_DP)
+        val padY = dp(ch.fasrv.fanotes.desk.BOX_EDITOR_PAD_Y_DP)
+        boxField.setPadding(padX, padY, padX, padY)
+    }
+
+    private fun dismissWorksheetField() {
+        val open = openBoxId != null || boxField.visibility == VISIBLE
+        requestedBoxId = null
+        if (!open && ink.activeWorksheetBoxId == null) return
+        suppressBoxClose = true
+        boxField.visibility = GONE
+        boxRemove.visibility = GONE
+        openBoxId = null
+        if (boxField.hasFocus()) boxField.clearFocus()
+        val imm = context.getSystemService(InputMethodManager::class.java)
+        imm?.hideSoftInputFromWindow(boxField.windowToken, 0)
+        if (ink.activeWorksheetBoxId != null) ink.activeWorksheetBoxId = null
+        suppressBoxClose = false
+    }
+
     private fun placeEditor() {
         if (editor.visibility != VISIBLE) {
             lineNumbers.visibility = GONE
@@ -1835,6 +2028,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
         placeEditor()
+        placeWorksheetField()
     }
 
     private fun rounded(color: Int, radius: Int, stroke: Int = 0, strokeWidth: Int = 0) = GradientDrawable().apply {

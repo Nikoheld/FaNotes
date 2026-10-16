@@ -209,6 +209,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private var editRevision = 0
     private var dirty = false
     private val saveMutex = Mutex()
+    private val worksheetBoxMutex = Mutex()
+    @Volatile private var worksheetBoxGeneration = 0
 
     init {
         val pen = ch.fasrv.fanotes.desk.penSettings(graph.readDesk())
@@ -2039,32 +2041,41 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             message.value = invalid
             return
         }
+        val generation = ++worksheetBoxGeneration
+        val known = worksheetBoxes.value.any { it.box.id == id }
+        worksheetBoxes.value = worksheetBoxes.value.map { anchored ->
+            if (anchored.box.id == id) anchored.copy(box = anchored.box.copy(text = text)) else anchored
+        }
         val worksheet = worksheetBoxes.value.firstOrNull { it.box.id == id }?.worksheetId
             ?: open.value?.worksheets?.firstOrNull() ?: return
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                val raw = graph.vault.read(".fanotes/worksheets/$worksheet.json")?.decodeToString() ?: return@withContext
-                val root = parseJson(raw) as? ch.fasrv.fanotes.json.JsonValue.Obj ?: return@withContext
-                val boxes = root.array("textBoxes") ?: ch.fasrv.fanotes.json.JsonValue.Arr()
-                val existing = boxes.items.indexOfFirst { (it as? ch.fasrv.fanotes.json.JsonValue.Obj)?.string("id") == id }
-                if (existing >= 0) {
-                    (boxes.items[existing] as ch.fasrv.fanotes.json.JsonValue.Obj).put("text", ch.fasrv.fanotes.json.jsonString(text))
-                } else {
-                    boxes.items += ch.fasrv.fanotes.json.jsonObject(
-                        "id" to ch.fasrv.fanotes.json.jsonString(id),
-                        "page" to ch.fasrv.fanotes.json.jsonNumber(1.0),
-                        "x" to ch.fasrv.fanotes.json.jsonNumber(0.12),
-                        "y" to ch.fasrv.fanotes.json.jsonNumber(0.12),
-                        "width" to ch.fasrv.fanotes.json.jsonNumber(0.5),
-                        "text" to ch.fasrv.fanotes.json.jsonString(text),
-                        "fontSize" to ch.fasrv.fanotes.json.jsonNumber(18.0),
-                    )
+            worksheetBoxMutex.withLock {
+                if (generation != worksheetBoxGeneration) return@withLock
+                val latest = worksheetBoxes.value.firstOrNull { it.box.id == id }?.box?.text ?: text
+                withContext(Dispatchers.IO) {
+                    val raw = graph.vault.read(".fanotes/worksheets/$worksheet.json")?.decodeToString() ?: return@withContext
+                    val root = parseJson(raw) as? ch.fasrv.fanotes.json.JsonValue.Obj ?: return@withContext
+                    val boxes = root.array("textBoxes") ?: ch.fasrv.fanotes.json.JsonValue.Arr()
+                    val existing = boxes.items.indexOfFirst { (it as? ch.fasrv.fanotes.json.JsonValue.Obj)?.string("id") == id }
+                    if (existing >= 0) {
+                        (boxes.items[existing] as ch.fasrv.fanotes.json.JsonValue.Obj).put("text", ch.fasrv.fanotes.json.jsonString(latest))
+                    } else {
+                        boxes.items += ch.fasrv.fanotes.json.jsonObject(
+                            "id" to ch.fasrv.fanotes.json.jsonString(id),
+                            "page" to ch.fasrv.fanotes.json.jsonNumber(1.0),
+                            "x" to ch.fasrv.fanotes.json.jsonNumber(0.12),
+                            "y" to ch.fasrv.fanotes.json.jsonNumber(0.12),
+                            "width" to ch.fasrv.fanotes.json.jsonNumber(0.5),
+                            "text" to ch.fasrv.fanotes.json.jsonString(latest),
+                            "fontSize" to ch.fasrv.fanotes.json.jsonNumber(18.0),
+                        )
+                    }
+                    root.put("textBoxes", boxes)
+                    root.put("updatedAt", ch.fasrv.fanotes.json.jsonString(isoNow()))
+                    graph.vault.write(".fanotes/worksheets/$worksheet.json", root.stringify().encodeToByteArray())
                 }
-                root.put("textBoxes", boxes)
-                root.put("updatedAt", ch.fasrv.fanotes.json.jsonString(isoNow()))
-                graph.vault.write(".fanotes/worksheets/$worksheet.json", root.stringify().encodeToByteArray())
             }
-            refreshOverlays()
+            if (!known) refreshOverlays()
             graph.engine.notifyLocalChange()
         }
     }

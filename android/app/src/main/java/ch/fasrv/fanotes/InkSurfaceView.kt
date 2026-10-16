@@ -164,6 +164,18 @@ class InkSurfaceView @JvmOverloads constructor(
     fun publishLinkChrome() = onLinkChrome(placingLink, selectedLinkId != null)
     var linkMarks: List<ch.fasrv.fanotes.desk.NoteLinkMark> = emptyList()
     var worksheetBoxes: List<ch.fasrv.fanotes.desk.AnchoredBox> = emptyList()
+        set(value) {
+            if (field === value) return
+            field = value
+            invalidate()
+        }
+    /** Box currently covered by the on-sheet text field. It stays out of the canvas draw. */
+    var activeWorksheetBoxId: String? = null
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
     var worksheetHighlights: List<ch.fasrv.fanotes.desk.AnchoredHighlight> = emptyList()
     private var reportedPdfPage = 0
     private var reportedSheet = false
@@ -442,6 +454,43 @@ class InkSurfaceView @JvmOverloads constructor(
     fun cameraLeft(): Float = pageLeft
     fun cameraTop(): Float = pageTop
     fun cameraScale(): Float = pixelsPerPageUnit()
+    fun sheetRotation(): Float = rotation
+
+    /**
+     * Screen rect of the inline text field for [id], in the same zoom and scroll as the canvas.
+     * [liveText] sizes the card while the field is being typed. Null when the sheet frame is not ready.
+     */
+    fun worksheetFieldScreenRect(id: String, liveText: String? = null): ch.fasrv.fanotes.desk.WorksheetFieldRect? {
+        if (width <= 0 || height <= 0) return null
+        val anchored = worksheetBoxes.firstOrNull { it.box.id == id } ?: return null
+        val scale = pixelsPerPageUnit()
+        val placements = currentPlacements(scale)
+        if (placements.isEmpty()) return null
+        val place = placements.firstOrNull { it.id == anchored.worksheetId && it.page == anchored.box.page.coerceAtLeast(1) } ?: return null
+        worksheetPlacements = placements
+        val sheet = ch.fasrv.fanotes.desk.boxOnFrame(anchored.box, place, sessionWidth(), sessionHeight())
+        val (sx, sy) = normToScreen(sheet.first, sheet.second)
+        val boxWidth = (anchored.box.width * place.width * scale).toFloat().coerceAtLeast(48f * scale)
+        val fontSize = (anchored.box.fontSize * scale).toFloat().coerceAtLeast(12f)
+        val canvasHeight = ch.fasrv.fanotes.desk.worksheetCardHeightPx(liveText ?: anchored.box.text, boxWidth, fontSize, scale)
+        val cover = placements.maxOfOrNull { it.top + it.height + 36.0 } ?: 0.0
+        val pageWidth = (sessionWidth() * scale).toFloat()
+        val pageHeight = (max(sessionHeight(), cover) * scale).toFloat()
+        val density = resources.displayMetrics.density
+        return ch.fasrv.fanotes.desk.worksheetFieldFrame(
+            anchorX = sx,
+            anchorY = sy,
+            widthPx = boxWidth,
+            canvasHeightPx = canvasHeight,
+            lipPx = BOX_LIP * scale,
+            pageLeft = pageLeft,
+            pageTop = pageTop,
+            pageRight = pageLeft + pageWidth,
+            pageBottom = pageTop + pageHeight,
+            desktopMinPx = ch.fasrv.fanotes.desk.BOX_FIELD_MIN_DP * density,
+            editorMinPx = ch.fasrv.fanotes.desk.BOX_EDITOR_MIN_DP * density,
+        )
+    }
 
     fun revealY(y: Double) {
         val scale = pixelsPerPageUnit()
@@ -1311,6 +1360,7 @@ class InkSurfaceView @JvmOverloads constructor(
         }
         drawHighlights(canvas)
         worksheetBoxes.forEach { anchored ->
+            if (anchored.box.id == activeWorksheetBoxId) return@forEach
             val place = worksheetPlacements.firstOrNull { it.id == anchored.worksheetId && it.page == anchored.box.page.coerceAtLeast(1) } ?: return@forEach
             val sheet = ch.fasrv.fanotes.desk.boxOnFrame(anchored.box, place, sessionWidth(), sessionHeight())
             val (sx, sy) = normToScreen(sheet.first, sheet.second)
@@ -1320,11 +1370,12 @@ class InkSurfaceView @JvmOverloads constructor(
             val lines = ch.fasrv.fanotes.desk.wrapBoxLines(anchored.box.text.ifEmpty { "Text" }, chars)
             val lineHeight = fontSize * 1.35f
             val boxHeight = ch.fasrv.fanotes.desk.worksheetCardHeightPx(anchored.box.text, boxWidth, fontSize, scale)
-            val top = sy - boxHeight + 8f * scale
+            val lip = BOX_LIP * scale
+            val top = sy - boxHeight + lip
             cardFill.color = Color.argb(184, 255, 255, 255)
-            canvas.drawRect(sx, top, sx + boxWidth, sy + 8f * scale, cardFill)
+            canvas.drawRect(sx, top, sx + boxWidth, sy + lip, cardFill)
             cardEdge.strokeWidth = max(1f, scale * 0.6f)
-            canvas.drawRect(sx, top, sx + boxWidth, sy + 8f * scale, cardEdge)
+            canvas.drawRect(sx, top, sx + boxWidth, sy + lip, cardEdge)
             cardFill.color = Color.WHITE
             textPaint.color = if (anchored.box.text.isEmpty()) Color.parseColor("#747887") else Color.parseColor("#202333")
             textPaint.textSize = fontSize
@@ -2531,6 +2582,7 @@ class InkSurfaceView @JvmOverloads constructor(
     private fun pxPerMm() = pixelsPerPageUnit() * (SOURCE_A4_PX / A4_WIDTH_MM).toFloat()
 
     private companion object {
+        const val BOX_LIP = 8f
         const val TILE_PAGE = 192
         const val MAX_TILES = 36
         const val MIN_CACHE_SCALE = 0.5f
