@@ -53,7 +53,7 @@ class SettingsModalTest {
         assertFalse(wide.rowsStack)
         assertFalse(settingsContentStacks(761))
         assertFalse(settingsContentStacks(800))
-        assertFalse(wide.headingIconVisible)
+        assertTrue(wide.headingIconVisible)
         assertEquals(25, wide.headerPadXDp)
         assertEquals(19, wide.scrollPadTopDp)
         assertEquals(25, wide.scrollPadXDp)
@@ -61,5 +61,18 @@ class SettingsModalTest {
         assertEquals(22, wide.rowGapDp)
         assertEquals(settingsNavCollapses(760), settingsContentStacks(760))
         assertEquals(settingsNavCollapses(761), settingsContentStacks(761))
+    }
+
+    @Test
+    fun theSettingsHeadingIconShowsAbove760() {
+        assertEquals(38, SETTINGS_HEADING_ICON_DP)
+        assertEquals(11, SETTINGS_HEADING_ICON_RADIUS_DP)
+        assertEquals(17, SETTINGS_HEADING_ICON_GLYPH_DP)
+        assertEquals(11, SETTINGS_HEADING_GAP_DP)
+        assertTrue(settingsContentLayout(761).headingIconVisible)
+        assertTrue(settingsContentLayout(800).headingIconVisible)
+        assertFalse(settingsContentLayout(760).headingIconVisible)
+        assertFalse(settingsContentLayout(400).headingIconVisible)
+        assertFalse(settingsContentLayout(0).headingIconVisible)
     }
 }
