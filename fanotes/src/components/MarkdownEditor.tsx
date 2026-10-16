@@ -72,6 +72,7 @@ import {
 } from '../lib/paperCaretScroll'
 import { buildTextMotionDiagnosticEvent, recordTextMotionDiagnostic } from '../lib/bugReport'
 import { revealDocumentLine } from '../lib/noteOutline'
+import { fenceIsOpen, isFenceLine, toggleTaskLine } from '../lib/noteEveryday'
 import { clientYFromTextAnchor, registerPaperTextAnchorProvider, textAnchorFromView } from '../lib/paperTextAnchor'
 import { minimalReplacement } from '../lib/textReplacement'
 import { primeSpellingCorrections, rerunSpellingCheck, spellingCorrections } from '../lib/spellingCorrections'
@@ -191,6 +192,8 @@ export type MarkdownEditorHandle = {
   insertText: (text: string, where: 'cursor' | 'start' | 'end' | 'line-end') => boolean
   replaceSelection: (text: string) => boolean
   setText: (text: string) => boolean
+  /** Turn the selected lines into tasks, or tick the tasks that are already there. */
+  toggleTasks: () => boolean
 }
 
 function commitEditorChange(
@@ -251,6 +254,37 @@ function transformSelectedLines(
   const original = view.state.sliceDoc(startLine.from, endLine.to)
   const next = original.split('\n').map(transform).join('\n')
   return commitEditorChange(view, startLine.from, endLine.to, next, startLine.from, startLine.from + next.length)
+}
+
+function toggleTasksInView(view: EditorView) {
+  if (view.state.readOnly) return false
+  const { from, to } = view.state.selection.main
+  const start = view.state.doc.lineAt(from)
+  const endPos = to > from && to === view.state.doc.lineAt(to).from ? to - 1 : to
+  const end = view.state.doc.lineAt(Math.max(from, endPos))
+  const before: string[] = []
+  for (let number = 1; number < start.number; number += 1) before.push(view.state.doc.line(number).text)
+  let fence = fenceIsOpen(before)
+  const changes: { from: number; to: number; insert: string }[] = []
+  let cursor = end.to
+  let delta = 0
+  for (let number = start.number; number <= end.number; number += 1) {
+    const line = view.state.doc.line(number)
+    let next = line.text
+    if (isFenceLine(line.text)) fence = !fence
+    else if (!fence) next = toggleTaskLine(line.text)
+    if (next !== line.text) changes.push({ from: line.from, to: line.to, insert: next })
+    if (number === end.number) cursor = line.from + delta + next.length
+    delta += next.length - line.text.length
+  }
+  if (!changes.length) return true
+  view.dispatch({
+    changes,
+    selection: EditorSelection.cursor(cursor),
+    scrollIntoView: true,
+  })
+  view.focus()
+  return true
 }
 
 function stripBlockPrefix(line: string) {
@@ -1310,6 +1344,11 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       const length = view.state.doc.length
       return commitEditorChange(view, 0, length, text, Math.min(text.length, view.state.selection.main.head))
     },
+    toggleTasks: () => {
+      const view = viewRef.current
+      if (!view || readOnly) return false
+      return toggleTasksInView(view)
+    },
   }), [readOnly])
 
   useEffect(() => {
@@ -1368,6 +1407,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
           { key: 'Mod-b', preventDefault: true, run: (view) => applyMarkdownFormat(view, 'bold') },
           { key: 'Mod-i', preventDefault: true, run: (view) => applyMarkdownFormat(view, 'italic') },
           { key: 'Mod-k', preventDefault: true, run: (view) => applyMarkdownFormat(view, 'link') },
+          { key: 'Mod-Enter', preventDefault: true, run: (view) => toggleTasksInView(view) },
           indentWithTab,
           ...closeBracketsKeymap,
           ...defaultKeymap,

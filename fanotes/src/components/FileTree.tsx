@@ -14,11 +14,14 @@ import {
   Check,
   ChevronRight,
   Columns2,
+  Copy,
+  CopyPlus,
   File,
   FileText,
   Folder,
   FolderOpen,
   FolderPlus,
+  Link2,
   MoreHorizontal,
   Palette,
   Pencil,
@@ -53,6 +56,11 @@ export type FileTreeProps = {
   onRename: (relativePath: string, nextName: string) => MaybePromise
   onMove: (relativePath: string, destFolder: string) => MaybePromise
   onTrash: (relativePath: string) => MaybePromise
+  onDuplicate?: (relativePath: string) => MaybePromise
+  onCopyWikiLink?: (relativePath: string) => MaybePromise
+  onCopyPath?: (relativePath: string) => MaybePromise
+  /** Bumps when the sidebar asks every folder to close. */
+  collapseToken?: number
   confirmTrash?: (message: string) => Promise<boolean>
   className?: string
   rootLabel?: string
@@ -189,6 +197,10 @@ export const FileTree = memo(function FileTree({
   onRename,
   onMove,
   onTrash,
+  onDuplicate,
+  onCopyWikiLink,
+  onCopyPath,
+  collapseToken = 0,
   confirmTrash,
   className = '',
   rootLabel = 'Dateien',
@@ -217,6 +229,12 @@ export const FileTree = memo(function FileTree({
     setExpanded(readExpandedFolders(expansionStorageKey))
   }, [expansionStorageKey])
   useEffect(() => { writeExpandedFolders(expansionStorageKey, expanded) }, [expanded, expansionStorageKey])
+  const seenCollapseToken = useRef(collapseToken)
+  useEffect(() => {
+    if (collapseToken === seenCollapseToken.current) return
+    seenCollapseToken.current = collapseToken
+    setExpanded(new Set())
+  }, [collapseToken])
 
   useEffect(() => {
     if (!activePath) return
@@ -752,7 +770,7 @@ export const FileTree = memo(function FileTree({
             left: Math.min(Math.max(8, contextMenu.x), window.innerWidth - 232),
             top: Math.min(
               Math.max(8, contextMenu.y),
-              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 510 : 172),
+              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 560 : isPdfEntry(contextMenu.entry) ? 280 : 390),
             ),
           }}
         >
@@ -887,7 +905,69 @@ export const FileTree = memo(function FileTree({
               <span className="file-tree__menu-separator" role="separator" />
             </>
           )}
+          {contextMenu.entry.kind === 'file' && (onCopyWikiLink || onCopyPath || onDuplicate) && (
+            <>
+              <span className="file-tree__menu-label">Kopieren</span>
+              {onCopyWikiLink && (
+                <button
+                  onClick={() => {
+                    const path = contextMenu.entry.relativePath
+                    setContextMenu(null)
+                    void Promise.resolve(onCopyWikiLink(path))
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Link2 aria-hidden="true" size={15} />
+                  Wiki-Link kopieren
+                </button>
+              )}
+              {onCopyPath && (
+                <button
+                  onClick={() => {
+                    const path = contextMenu.entry.relativePath
+                    setContextMenu(null)
+                    void Promise.resolve(onCopyPath(path))
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Copy aria-hidden="true" size={15} />
+                  Pfad kopieren
+                </button>
+              )}
+              {onDuplicate && !isPdfEntry(contextMenu.entry) && (
+                <button
+                  onClick={() => {
+                    const path = contextMenu.entry.relativePath
+                    setContextMenu(null)
+                    void Promise.resolve(onDuplicate(path))
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <CopyPlus aria-hidden="true" size={15} />
+                  Duplizieren
+                </button>
+              )}
+              <span className="file-tree__menu-separator" role="separator" />
+            </>
+          )}
           <span className="file-tree__menu-label">Verwalten</span>
+          {contextMenu.entry.kind === 'folder' && onCopyPath && (
+            <button
+              onClick={() => {
+                const path = contextMenu.entry.relativePath
+                setContextMenu(null)
+                void Promise.resolve(onCopyPath(path))
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <Copy aria-hidden="true" size={15} />
+              Pfad kopieren
+            </button>
+          )}
           <button
             onClick={() => beginRename(contextMenu.entry)}
             role="menuitem"

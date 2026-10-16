@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.10.8
+
+- **Alltag mit der Notiz.** Eine Notiz lässt sich duplizieren (Alt+Umschalt+D): Text, Handschrift und Papier liegen in der Kopie, Arbeitsblätter bleiben beim Original. Wiki-Link und Pfad kopierst du aus dem Dateimenü, dem Tab oder der Befehlspalette. Strg+Umschalt+. setzt das Datum aus den Einstellungen an die Schreibmarke, die Palette setzt die Uhrzeit. Strg+Enter schaltet die Aufgabe der Zeile um oder macht aus der Zeile eine Aufgabe. Alle Ordner klappen in der Dateileiste und über die Palette zu.
+
 ## 2026.10.7
 
 - **Android-Tablet.** Der Text liegt auf dem Papier, die Leiste klappt beim Schreiben ein, und der Radierer folgt der Spitze.
