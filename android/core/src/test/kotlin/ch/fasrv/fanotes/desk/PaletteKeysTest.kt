@@ -35,10 +35,40 @@ class PaletteKeysTest {
         assertEquals(130, paletteTopDp(1000))
         assertEquals(104, paletteTopDp(800))
         assertEquals(0, paletteTopDp(0))
+        assertEquals(0x590F0F0F, PALETTE_SCRIM)
+    }
+
+    @Test
+    fun thePaletteShadowIsOffsetDownward() {
+        assertEquals(0, PALETTE_SHADOW_X_DP)
         assertEquals(16, PALETTE_SHADOW_Y_DP)
         assertEquals(70, PALETTE_SHADOW_BLUR_DP)
         assertEquals(0.16f, PALETTE_SHADOW_ALPHA)
-        assertEquals(0x590F0F0F, PALETTE_SCRIM)
+        val shadow = palettePanelShadow()
+        assertEquals(0, shadow.xDp)
+        assertEquals(16, shadow.yDp)
+        assertEquals(70, shadow.blurDp)
+        assertEquals(0.16f, shadow.alpha)
+        assertTrue(shadow.yDp != 0)
+        val reach = paletteShadowReach(shadow)
+        assertEquals(70, reach.leftDp)
+        assertEquals(54, reach.topDp)
+        assertEquals(70, reach.rightDp)
+        assertEquals(86, reach.bottomDp)
+        assertEquals(reach.leftDp, reach.rightDp)
+        assertTrue(reach.bottomDp > reach.topDp)
+        val frame = checkNotNull(paletteShadowFrame(400f, 300f, 2f))
+        assertEquals(140f, frame.blurPx)
+        assertEquals(0f, frame.shapeLeftPx - frame.padPx)
+        assertEquals(32f, frame.shapeTopPx - frame.padPx)
+        assertTrue(frame.shapeTopPx - frame.padPx != 0f)
+        assertEquals(0x29000000, frame.color)
+        assertEquals(0x29000000, paletteShadowColor(0.16f))
+        assertTrue(frame.shapeBottomPx + frame.blurPx < frame.bitmapHeightPx)
+        assertTrue(paletteShadowFavorsDown(frame, 300f))
+        val flat = frame.copy(shapeTopPx = frame.padPx, shapeBottomPx = frame.padPx + 300f)
+        assertTrue(!paletteShadowFavorsDown(flat, 300f))
+        assertTrue(paletteShadowFrame(0f, 300f, 2f) == null)
     }
 
     @Test
