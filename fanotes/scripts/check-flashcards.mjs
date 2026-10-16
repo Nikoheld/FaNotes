@@ -48,6 +48,7 @@ try {
 
   const view = readFileSync(join(root, 'src/components/FlashcardReview.tsx'), 'utf8')
   assert.match(view, /reviewQueue\(due, later\)/)
+  assert.match(readFileSync(join(root, 'src/App.tsx'), 'utf8'), /editorRef\.current\?\.flushChanges\(\); setCardsOpen\(true\)/, 'opening flashcards books the latest keystrokes before a grade can rewrite the note')
   assert.match(view, /value === 'again'/)
   assert.match(view, /GRADE_KEYS/)
   assert.match(view, /addEventListener\('keydown', onKey, true\)/)
