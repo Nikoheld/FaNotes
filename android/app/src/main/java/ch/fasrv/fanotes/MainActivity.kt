@@ -1115,26 +1115,18 @@ fun FaNotesScreen(
             ch.fasrv.fanotes.desk.movableFolderTargets(collectFolders(tree), path)
         }
         val atRoot = !path.contains('/')
-        AlertDialog(
-            onDismissRequest = { moving = null },
-            title = { Text("Verschieben") },
-            text = {
-                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-                    Text(path.substringAfterLast('/'), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                    if (!atRoot) {
-                        TextButton(onClick = { model.moveEntry(path, ""); moving = null }) { Text("Vault-Wurzel") }
-                    }
-                    folders.forEach { folder ->
-                        TextButton(onClick = { model.moveEntry(path, folder); moving = null }) { Text(folder) }
-                    }
-                    if (atRoot && folders.isEmpty()) {
-                        Text("Es gibt noch keinen anderen Ordner.", fontSize = 13.sp)
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = { moving = null }) { Text("Abbrechen") } },
-        )
+        PromptCard(ch.fasrv.fanotes.desk.PROMPT_MOVE, onDismiss = { moving = null }, confirmLabel = null, onConfirm = {}) {
+            Text(path.substringAfterLast('/'), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            if (!atRoot) {
+                PromptChoice(ch.fasrv.fanotes.desk.PROMPT_ROOT) { model.moveEntry(path, ""); moving = null }
+            }
+            folders.forEach { folder ->
+                PromptChoice(folder) { model.moveEntry(path, folder); moving = null }
+            }
+            if (atRoot && folders.isEmpty()) {
+                Text(ch.fasrv.fanotes.desk.PROMPT_NO_FOLDER, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            }
+        }
     }
 }
 
@@ -3202,20 +3194,9 @@ private fun SheetImportChoice(
 @Composable
 private fun GotoLineDialog(onDone: (String?) -> Unit) {
     var value by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = { onDone(null) },
-        title = { Text("Gehe zu Zeile") },
-        text = {
-            OutlinedTextField(
-                value,
-                { value = it },
-                placeholder = { Text("12, +3, 50%, 8:4") },
-                singleLine = true,
-            )
-        },
-        confirmButton = { Button(onClick = { onDone(value) }) { Text("Gehe") } },
-        dismissButton = { TextButton(onClick = { onDone(null) }) { Text("Abbrechen") } },
-    )
+    PromptCard("Gehe zu Zeile", onDismiss = { onDone(null) }, confirmLabel = ch.fasrv.fanotes.desk.PROMPT_GO, confirmEnabled = value.isNotBlank(), onConfirm = { onDone(value) }) {
+        PromptField(value, { value = it }, ch.fasrv.fanotes.desk.GOTO_PLACEHOLDER, onDone = { if (value.isNotBlank()) onDone(value) })
+    }
 }
 
 @Composable
@@ -3227,12 +3208,101 @@ private fun NameDialog(
     onDone: (String?) -> Unit,
 ) {
     var name by remember(initial) { mutableStateOf(initial) }
-    AlertDialog(
-        onDismissRequest = { onDone(null) },
-        title = { Text(title) },
-        text = { OutlinedTextField(name, { name = it }, placeholder = { Text(placeholder) }, singleLine = true) },
-        confirmButton = { Button(onClick = { onDone(name) }, enabled = name.isNotBlank()) { Text(confirm) } },
-        dismissButton = { TextButton(onClick = { onDone(null) }) { Text("Abbrechen") } },
+    PromptCard(title, onDismiss = { onDone(null) }, confirmLabel = confirm, confirmEnabled = name.isNotBlank(), onConfirm = { onDone(name) }) {
+        PromptField(name, { name = it }, placeholder, onDone = { if (name.isNotBlank()) onDone(name) })
+    }
+}
+
+@Composable
+private fun PromptCard(
+    title: String,
+    onDismiss: () -> Unit,
+    confirmLabel: String?,
+    onConfirm: () -> Unit,
+    confirmEnabled: Boolean = true,
+    content: @Composable () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        val scrim = remember { MutableInteractionSource() }
+        val card = remember { MutableInteractionSource() }
+        val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.PROMPT_RADIUS_DP.dp)
+        val screen = LocalConfiguration.current
+        val shadow = ch.fasrv.fanotes.desk.calEditorShadow(MaterialTheme.colorScheme.background.luminance() < 0.5f)
+        val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+        Box(
+            Modifier.fillMaxSize().background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM)).clickable(interactionSource = scrim, indication = null, onClick = onDismiss),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                Modifier
+                    .padding(ch.fasrv.fanotes.desk.PROMPT_INSET_DP.dp)
+                    .width(ch.fasrv.fanotes.desk.promptWidthDp(screen.screenWidthDp).dp)
+                    .clickable(interactionSource = card, indication = null, onClick = {})
+                    .shadow(shadow.yDp.dp, shape, ambientColor = Color.Black.copy(alpha = shadow.alpha), spotColor = Color.Black.copy(alpha = shadow.alpha))
+                    .clip(shape)
+                    .border(1.dp, rule, shape)
+                    .background(LocalStatusInk.current.panelStrong)
+                    .padding(ch.fasrv.fanotes.desk.PROMPT_PAD_DP.dp),
+                verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.PROMPT_GAP_DP.dp),
+            ) {
+                Text(title, fontSize = ch.fasrv.fanotes.desk.PROMPT_TITLE_SP.sp, fontWeight = FontWeight(650), letterSpacing = (-0.02).em)
+                content()
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                    PromptButton(ch.fasrv.fanotes.desk.PROMPT_CANCEL, primary = false, onClick = onDismiss)
+                    if (confirmLabel != null) PromptButton(confirmLabel, primary = true, enabled = confirmEnabled, onClick = onConfirm)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PromptField(value: String, onChange: (String) -> Unit, placeholder: String, onDone: () -> Unit) {
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.PROMPT_FIELD_RADIUS_DP.dp)
+    val strong = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
+    BasicTextField(
+        value = value,
+        onValueChange = onChange,
+        singleLine = true,
+        textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp),
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { onDone() }),
+        modifier = Modifier.fillMaxWidth(),
+        decorationBox = { inner ->
+            Box(
+                Modifier.fillMaxWidth().border(1.dp, strong, shape).clip(shape).background(MaterialTheme.colorScheme.background).padding(horizontal = ch.fasrv.fanotes.desk.PROMPT_FIELD_PAD_X_DP.dp, vertical = ch.fasrv.fanotes.desk.PROMPT_FIELD_PAD_Y_DP.dp),
+            ) {
+                if (value.isEmpty()) Text(placeholder, fontSize = 16.sp, color = LocalStatusInk.current.muted)
+                inner()
+            }
+        },
     )
+}
+
+@Composable
+private fun PromptChoice(label: String, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.PROMPT_ROW_RADIUS_DP.dp)
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    Box(
+        Modifier.fillMaxWidth().heightIn(min = ch.fasrv.fanotes.desk.PROMPT_ROW_DP.dp).clip(shape).border(1.dp, rule, shape).clickable(onClick = onClick).padding(horizontal = 10.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+@Composable
+private fun PromptButton(label: String, primary: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.PROMPT_BUTTON_RADIUS_DP.dp)
+    val fill = if (primary) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.panelStrong
+    val ink = if (primary) MaterialTheme.colorScheme.background else LocalStatusInk.current.soft
+    val border = if (primary) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
+    Box(
+        Modifier.height(ch.fasrv.fanotes.desk.PROMPT_BUTTON_DP.dp).alpha(if (enabled) 1f else 0.45f).clip(shape).background(fill).border(1.dp, border, shape).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = ink)
+    }
 }
 

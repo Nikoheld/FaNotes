@@ -1,6 +1,7 @@
 package ch.fasrv.fanotes.desk
 
 import kotlin.math.floor
+import kotlin.math.min
 
 /** Where CodeMirror's go-to-line dialog puts the cursor. Lines are 1-based. */
 data class GotoLineCursor(val line: Int, val column: Int, val offset: Int)
@@ -60,3 +61,26 @@ private fun jsRound(value: Double): Int {
 }
 
 private val GOTO_LINE = Regex("""^([+-])?(\d+)?(:\d+)?(%)?$""")
+
+/** Small prompts after the later dialog pass: 12px card, min(440px, viewport − 32px). */
+const val PROMPT_MAX_DP = 440
+const val PROMPT_INSET_DP = 16
+const val PROMPT_RADIUS_DP = 12
+const val PROMPT_PAD_DP = 16
+const val PROMPT_GAP_DP = 10
+const val PROMPT_TITLE_SP = 16
+const val PROMPT_FIELD_RADIUS_DP = 8
+const val PROMPT_FIELD_PAD_X_DP = 8
+const val PROMPT_FIELD_PAD_Y_DP = 6
+const val PROMPT_BUTTON_DP = 31
+const val PROMPT_BUTTON_RADIUS_DP = 6
+const val PROMPT_ROW_DP = 34
+const val PROMPT_ROW_RADIUS_DP = 8
+const val GOTO_PLACEHOLDER = "12, +3, 50%, 8:4"
+const val PROMPT_CANCEL = "Abbrechen"
+const val PROMPT_GO = "Gehe"
+const val PROMPT_MOVE = "Verschieben"
+const val PROMPT_ROOT = "Vault-Wurzel"
+const val PROMPT_NO_FOLDER = "Es gibt noch keinen anderen Ordner."
+
+fun promptWidthDp(windowWidthDp: Int): Int = min(PROMPT_MAX_DP, (windowWidthDp - PROMPT_INSET_DP * 2).coerceAtLeast(0))
