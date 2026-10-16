@@ -3,9 +3,6 @@
 ## 2026.10.8
 
 - **Aufgabe umschalten.** Strg+Enter macht aus der aktuellen Zeile eine Aufgabe oder hakt sie ab. Überschriften, Zitate, Tabellen, Linien und Code bleiben. Alt+Umschalt+D dupliziert die Notiz. Kopieren fällt auf eine Textauswahl zurück, wenn der Browser die Zwischenablage sperrt.
-
-## 2026.10.7
-
 - **Android-Tablet.** Löschen verschiebt in den Papierkorb auf dem Gerät, mit Rückgängig, Wiederherstellen und endgültigem Leeren. Eine Notiz lässt sich wie am Desktop duplizieren, der Wiki-Link kopieren, und `Strg+Umschalt+D` setzt das Datum an der Schreibmarke. Alle Ordner klappen mit einem Klick, die leere Seite zeigt die letzten Notizen, und im Stiftmodus bleibt der Bildschirm drei Minuten an.
 - **Alltag.** Eine Notiz lässt sich duplizieren: Text, Handschrift, Verlinkungen und Arbeitsblätter kommen in eine neue Datei, die Antworten des Originals bleiben dort. Wiki-Link und Pfad kopierst du aus dem Dateimenü, `Strg+Umschalt+D` setzt das Datum an der Schreibmarke ein, alle Ordner klappen mit einem Klick zu, und die leere Seite zeigt die zuletzt geöffneten Notizen.
 - **Kalenderdatei.** Eine ICS-Datei mit Weltzeit oder einer Dauer landet auf der örtlichen Uhrzeit. Dieselbe Datei noch einmal importieren aktualisiert den Termin und nimmt abgesagte Einträge heraus, statt ihn zu verdoppeln.
@@ -15,6 +12,9 @@
 - **Ausgefallene Termine.** Eine wiederkehrende Kalenderdatei behält die ausgelassenen Tage. Ein erneuter Import ergänzt sie, ohne einen lokal übersprungenen Tag zurückzuholen.
 - **Suche.** Ein Treffer, der nur in der Handschrift steht, zeigt diese Wörter. Der Hinweis „Dateiname“ bleibt dem Treffer im Dateinamen vorbehalten. Die Seitenzahl vor der Zeile bleibt unsichtbar.
 - **Rückverweise.** `[[Mathe/Algebra]]` und `[[Algebra.md]]` zeigen auf diese Notiz. Ein Pfad in einen anderen Ordner mit demselben Titel zählt nicht mit.
+
+## 2026.10.7
+
 - **Android-Tablet.** Der Text liegt auf dem Papier, die Leiste klappt beim Schreiben ein, und der Radierer folgt der Spitze.
 - **Sync.** Der Abgleich zeigt den Fortschritt, und ein zweiter Start geht nicht verloren.
 - **Version.** Die Version lässt sich in GitHub Actions unter Update version setzen. Der Android-Release installiert das SDK, ohne am Lizenzdialog abzubrechen.
