@@ -160,6 +160,16 @@ class CalendarExchangeTest {
         val done = withSoon.copy(events = listOf(event.copy(title = "✓ Seite 4")))
         assertTrue(dueReminders(done, now, 15).isEmpty())
         assertTrue(dueReminders(withSoon, now, 3).isEmpty())
+        val allDay = CalendarEvent(
+            id = "day",
+            calendarId = "personal",
+            title = "Abgabe",
+            start = "2026-10-15",
+            end = "2026-10-15",
+            allDay = true,
+        )
+        val beforeMidnight = ZonedDateTime.of(2026, 10, 14, 23, 50, 0, 0, zone)
+        assertTrue(dueReminders(emptyCalendar().copy(events = listOf(allDay)), beforeMidnight, 15).isEmpty())
         val rent = CalendarEvent(
             id = "rent",
             calendarId = "personal",

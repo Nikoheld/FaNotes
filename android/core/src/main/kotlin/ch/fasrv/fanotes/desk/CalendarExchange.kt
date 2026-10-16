@@ -171,6 +171,7 @@ fun dueReminders(document: CalendarDocument, now: ZonedDateTime, leadMinutes: In
     val hidden = document.calendars.filter { !it.visible }.map { it.id }.toSet()
     return expandOccurrences(document, from, to)
         .filter { it.event.calendarId !in hidden }
+        .filter { !it.event.allDay }
         .filter { !it.event.title.startsWith("✓ ") }
         .filter { !it.start.isBefore(from) && !it.start.isAfter(to) }
         .map { occurrence ->

@@ -318,6 +318,24 @@ assert.match(calendarView, /formatReminder\(reminders\[0\], getUiLanguage\(\)\)/
 assert.match(calendarView, /\{copy\.close\}/)
 assert.doesNotMatch(calendarView, /beginnt/)
 
+const reminderNow = new Date(2026, 9, 16, 23, 50, 0)
+const allDayTomorrow = createEvent({
+  calendarId: personal,
+  title: 'Abgabe',
+  start: new Date(2026, 9, 17),
+  end: new Date(2026, 9, 18),
+  allDay: true,
+})
+const call = createEvent({
+  calendarId: personal,
+  title: 'Anruf',
+  start: new Date(2026, 9, 16, 23, 55, 0),
+  end: new Date(2026, 9, 17, 0, 25, 0),
+})
+const due = reminders.dueReminders({ ...doc, events: [allDayTomorrow, call] }, reminderNow, 15)
+assert.equal(due.some((item) => item.title === 'Abgabe'), false)
+assert.equal(due.some((item) => item.title === 'Anruf' && item.minutesUntil === 5), true)
+
 await server.close()
 console.log(JSON.stringify({
   events: roundTrip.events.length,
