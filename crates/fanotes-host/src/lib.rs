@@ -3294,22 +3294,18 @@ fn expand_glued_month(token: &str) -> Vec<&str> {
             }
             // `13Oct2026GMT+24:00` keeps the offset on the zone word. A bare
             // `GMT+24` still splits, so the 24 can be a day before a date.
+            // `GMT+5:`, `GMT+:30`, and `GMT+5::30` are not plain `H:MM`, but
+            // every colon still belongs to that offset.
             if exact_zone_keyword(letters)
                 && index < bytes.len()
                 && matches!(bytes[index], b'+' | b'-')
             {
                 let mut cursor = index + 1;
-                if cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
-                    while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
-                        cursor += 1;
-                    }
-                    if cursor < bytes.len() && bytes[cursor] == b':' {
-                        cursor += 1;
-                        while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
-                            cursor += 1;
-                        }
-                        index = cursor;
-                    }
+                while cursor < bytes.len() && is_glued_offset_mark(bytes[cursor]) {
+                    cursor += 1;
+                }
+                if bytes[index + 1..cursor].contains(&b':') {
+                    index = cursor;
                 }
             }
             runs.push(&token[start..index]);
@@ -3359,6 +3355,11 @@ fn expand_glued_month(token: &str) -> Vec<&str> {
 
 /// `GMT`, `UT`, `Z`, and the US zone abbreviations. A longer word is not a
 /// zone: `ESTX` stays one token. Months may be longer; these may not.
+/// Digits, colons, dots, and slashes inside `GMT+5::30`. A letter ends the offset.
+fn is_glued_offset_mark(byte: u8) -> bool {
+    byte.is_ascii_digit() || matches!(byte, b':' | b'.' | b'/')
+}
+
 fn exact_zone_keyword(token: &str) -> bool {
     matches!(
         token.to_ascii_lowercase().as_str(),
@@ -11399,5 +11400,62 @@ mod local_zone_tests {
         );
         assert_eq!(unix_millis_from_iso("Oct 13 2026:16:00"), None);
         assert_eq!(unix_millis_from_iso("10/13/2026:16:00"), None);
+    }
+
+    #[test]
+    fn a_glued_irregular_gmt_offset_matches_the_spaced_form() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `GMT+5:` is five hours. `GMT+:30` is 30 minutes. `GMT+5::30` is
+        // five hours and 30 minutes. The spaced forms already matched.
+        assert_eq!(
+            unix_millis_from_iso("13Oct2026GMT+5: 16:00"),
+            Some(1_791_889_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13Oct2026GMT+:30 16:00"),
+            Some(1_791_905_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13Oct2026GMT+5::30 16:00"),
+            Some(1_791_887_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13Oct2026GMT-5: 16:00"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13Oct2026GMT-:30 16:00"),
+            Some(1_791_909_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13Oct2026GMT-5::30 16:00"),
+            Some(1_791_927_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13Oct2026GMT+5:"),
+            Some(1_791_831_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13Oct2026GMT-5:"),
+            Some(1_791_867_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13Oct2026GMT+:30"),
+            Some(1_791_847_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13Oct2026GMT+5::30"),
+            Some(1_791_829_800_000)
+        );
+        assert_eq!(unix_millis_from_iso("10/13/2026"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("13Oct2026GMT+5:30 16:00"),
+            Some(1_791_887_400_000)
+        );
     }
 }
