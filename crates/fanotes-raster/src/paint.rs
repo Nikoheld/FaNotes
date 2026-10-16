@@ -456,11 +456,20 @@ struct Strokes<'s> {
     width: f64,
     height: f64,
     smoothing: f64,
-    blend: f64,
     scale: f64,
     opacity: f64,
     first_segment: usize,
     last_segment: usize,
+}
+
+/// How far an interior segment slides its end toward the next midpoint.
+/// Matches `inkInteriorPull` in `inkStrokePaint.ts`.
+fn interior_pull(smoothing: f64, leg_px: f64, nib_px: f64) -> f64 {
+    let wanted = clamp(smoothing, 0.0, 1.0) * 0.85;
+    if leg_px <= 0.01 || nib_px <= 0.0 {
+        return wanted;
+    }
+    wanted.min((nib_px * 0.35) / leg_px)
 }
 
 impl Strokes<'_> {
@@ -476,7 +485,36 @@ impl Strokes<'_> {
         self.stroke.points[index].pressure
     }
 
-    /// Curve of segment `index` (points index-1 → index), as the TypeScript `segment` paints it.
+    fn nib_between(&self, left: usize, right: usize) -> f64 {
+        ink_stroke_bitmap_width(
+            self.stroke,
+            (self.pressure(left) + self.pressure(right)) / 2.0,
+            self.scale,
+        )
+    }
+
+    /// Where the segment that arrives at `sample` ends. Matches `segmentEnd`.
+    fn segment_end(&self, sample: usize, point_count: usize) -> (f64, f64) {
+        let sx = self.px(sample);
+        let sy = self.py(sample);
+        if self.smoothing <= 0.0 || sample + 1 >= point_count {
+            return (sx, sy);
+        }
+        let nx = self.px(sample + 1);
+        let ny = self.py(sample + 1);
+        let before = if sample > 0 { sample - 1 } else { sample };
+        let pull = interior_pull(
+            self.smoothing,
+            (nx - sx).hypot(ny - sy),
+            self.nib_between(before, sample)
+                .min(self.nib_between(sample, sample + 1)),
+        );
+        (sx + (nx - sx) * pull * 0.5, sy + (ny - sy) * pull * 0.5)
+    }
+
+    /// Curve of segment `index` (points index-1 → index), as the TypeScript painter.
+    /// The open tip is the chord. Extrapolating the previous heading hooked
+    /// the ink in that direction until the next sample arrived.
     fn segment_curve(
         &self,
         ctx: &mut Ctx,
@@ -486,29 +524,24 @@ impl Strokes<'_> {
         connected: bool,
         point_count: usize,
     ) {
-        let previous_x = self.px(index - 1);
-        let previous_y = self.py(index - 1);
         let point_x = self.px(index);
         let point_y = self.py(index);
+        let (start_x, start_y) = if index <= 1 {
+            (self.px(0), self.py(0))
+        } else {
+            self.segment_end(index - 1, point_count)
+        };
         if !connected {
-            ctx.move_to(previous_x + ox, previous_y + oy);
+            ctx.move_to(start_x + ox, start_y + oy);
         }
         if self.smoothing > 0.0 && index + 1 < point_count {
-            let next = &self.stroke.points[index + 1];
-            let mid_x = point_x * (1.0 - self.blend * 0.35)
-                + ((point_x + next.x * self.width) / 2.0) * self.blend * 0.35;
-            let mid_y = point_y * (1.0 - self.blend * 0.35)
-                + ((point_y + next.y * self.height) / 2.0) * self.blend * 0.35;
-            ctx.quad_to(point_x + ox, point_y + oy, mid_x + ox, mid_y + oy);
-        } else if self.smoothing > 0.0 && index >= 2 {
-            let previous = &self.stroke.points[index - 1];
-            let before = &self.stroke.points[index - 2];
-            let control_x = previous_x + (previous.x - before.x) * self.width * self.blend * 0.4;
-            let control_y = previous_y + (previous.y - before.y) * self.height * self.blend * 0.4;
-            ctx.quad_to(control_x + ox, control_y + oy, point_x + ox, point_y + oy);
-        } else {
-            ctx.line_to(point_x + ox, point_y + oy);
+            let (end_x, end_y) = self.segment_end(index, point_count);
+            if (end_x - point_x).hypot(end_y - point_y) > 0.15 {
+                ctx.quad_to(point_x + ox, point_y + oy, end_x + ox, end_y + oy);
+                return;
+            }
         }
+        ctx.line_to(point_x + ox, point_y + oy);
     }
 
     fn segment_width(&self, index: usize, width_factor: f64) -> f64 {
@@ -777,7 +810,6 @@ pub fn draw_ink_stroke(
         width,
         height,
         smoothing,
-        blend: clamp(smoothing, 0.0, 0.92),
         scale,
         opacity,
         first_segment: start_segment.max(1),
@@ -851,14 +883,6 @@ pub fn draw_ink_stroke(
         };
         for index in strokes.first_segment.saturating_sub(2)..=last.min(last_segment) {
             include(strokes.px(index), strokes.py(index));
-        }
-        if last_segment >= last && last >= 2 {
-            let previous = &stroke.points[last - 1];
-            let before = &stroke.points[last - 2];
-            include(
-                (previous.x + (previous.x - before.x) * 0.4) * width,
-                (previous.y + (previous.y - before.y) * 0.4) * height,
-            );
         }
         let (ex, ey) = (-origin.0, -origin.1);
         let dx0 = 0.0_f64.max((x0 - margin + ex).floor());

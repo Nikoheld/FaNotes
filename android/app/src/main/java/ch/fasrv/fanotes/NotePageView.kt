@@ -742,6 +742,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onClear: () -> Unit = {}
     var onFinger: (Boolean) -> Unit = {}
     var onMath: () -> Unit = {}
+    var onTextHand: () -> Unit = {}
     var onWorksheetBoxText: (String, String) -> Unit = { _, _ -> }
     var onWorksheetBoxRemove: (String) -> Unit = {}
     var onWorksheetBoxClosed: () -> Unit = {}
@@ -1634,6 +1635,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             ink.drawCompassCircle()
         })
         tools.addView(chip("Mathe") { onMath() })
+        tools.addView(chip("Text → Handschrift") { onTextHand() })
         val textChip = chip(if (ink.placingText) "Auf Seite platzieren" else "Textfeld") {}
         val mark = chip(if (ink.placingHighlight) "Markieren ●" else "Markieren") {}
         ink.onWorksheetTool = { text, highlight ->

@@ -198,6 +198,11 @@ class MainActivity : ComponentActivity() {
         val bytes = model.readUri(uri) ?: return@registerForActivityResult
         model.importWorksheetFile(name, bytes, mime, sheetIntoCurrent)
     }
+    private val importGlyph = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@registerForActivityResult
+        model.importGlyphBytes(bytes)
+    }
     private val importIcs = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@registerForActivityResult
         val text = contentResolver.openInputStream(uri)?.use { it.readBytes() }?.toString(Charsets.UTF_8) ?: return@registerForActivityResult
@@ -229,6 +234,11 @@ class MainActivity : ComponentActivity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 21)
         }
         setContent {
+            LaunchedEffect(model) {
+                model.glyphImports.collect {
+                    importGlyph.launch(arrayOf("*/*"))
+                }
+            }
             val rawDesk by model.deskSettings.collectAsStateWithLifecycle()
             val css by model.customCss.collectAsStateWithLifecycle()
             var sheetDialog by remember { mutableStateOf(false) }
@@ -392,7 +402,7 @@ fun FaNotesTheme(
         onSurface = chrome.text?.let { Color(android.graphics.Color.parseColor(it)) } ?: baseScheme.onSurface,
         error = danger,
     )
-    CompositionLocalProvider(LocalStatusInk provides statusInk) {
+    CompositionLocalProvider(LocalStatusInk provides statusInk, LocalDeskThemeId provides palette.id) {
         MaterialTheme(colorScheme = scheme, typography = chromeTypography(family), content = content)
     }
 }
@@ -490,6 +500,8 @@ fun FaNotesScreen(
     var moving by remember { mutableStateOf<String?>(null) }
     var syncPending by remember { mutableStateOf(false) }
     var mathOpen by remember { mutableStateOf(false) }
+    val textHandOpen by model.textHandOpen.collectAsStateWithLifecycle()
+    val glyphSamples by model.glyphSamples.collectAsStateWithLifecycle()
     var mathInput by remember { mutableStateOf("") }
     var mathOutput by remember { mutableStateOf("") }
     var mathOk by remember { mutableStateOf(false) }
@@ -532,6 +544,7 @@ fun FaNotesScreen(
             "save" -> model.saveFromShortcut()
             "vault-search" -> model.showDestination("search")
             "ai" -> model.showDestination("ai")
+            "text-hand" -> model.openTextHand()
             "worksheet" -> onImportSheet()
             "new-note" -> {
                 createParent = model.defaultCreateFolder()
@@ -560,6 +573,7 @@ fun FaNotesScreen(
                             history = historyOpen,
                             gotoLine = gotoLine != null,
                             math = mathOpen,
+                            handwriting = textHandOpen,
                             textBox = editingBox != null,
                             firstRun = firstRun,
                             sync = syncOpen,
@@ -587,6 +601,7 @@ fun FaNotesScreen(
                         "history" -> model.closeHistory()
                         "goto-line" -> model.closeGotoLine()
                         "math" -> mathOpen = false
+                        "handwriting" -> model.closeTextHand()
                         "text-box" -> editingBox = null
                         "first-run" -> {
                             firstRun = false
@@ -1049,6 +1064,7 @@ fun FaNotesScreen(
                     "close-others" -> model.closeTabs("others")
                     "close-right" -> model.closeTabs("right")
                     "cycle-tab" -> model.cycleTabs(1)
+                    "text-hand" -> model.openTextHand()
                     else -> if (id.startsWith("template-")) model.createFromTemplate(id.removePrefix("template-")) else model.showDestination(id)
                 }
             }
@@ -1071,6 +1087,21 @@ fun FaNotesScreen(
             glass = glass,
             radiusDp = chrome.radiusDp,
             themeId = ch.fasrv.fanotes.desk.themePalette(desk["theme"], androidx.compose.foundation.isSystemInDarkTheme()).id,
+        )
+    }
+    if (textHandOpen) {
+        TextToHandwritingDialog(
+            personal = glyphSamples,
+            pageWidth = model.session.document.sourceWidth,
+            pageHeight = model.session.document.sourceHeight,
+            startY = ch.fasrv.fanotes.ink.suggestedHandwritingStartY(model.session.document),
+            color = style.color,
+            baseWidth = style.baseWidth,
+            pressure = style.pressureEnabled,
+            onDismiss = { model.closeTextHand() },
+            onImport = { model.requestGlyphImport() },
+            onClear = { model.clearGlyphSamples() },
+            onInsert = { model.insertHandwriting(it) },
         )
     }
     if (mathOpen) {
@@ -2882,6 +2913,7 @@ private fun PageSurface(
             page.ink.onToggleSection = { model.toggleInkSection(it) }
             page.ink.onEditBox = onEditBox
             page.onMath = onMath
+            page.onTextHand = { model.openTextHand() }
             page.pdfNote = model.open.value?.kind == NoteKind.PDF
             page.onPdfKey = { action ->
                 when (action) {

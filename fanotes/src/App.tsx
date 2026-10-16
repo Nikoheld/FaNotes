@@ -208,14 +208,14 @@ import {
   type RemoteSupportCommand,
   type RemoteSupportSession,
 } from './lib/remoteSupport'
-import { HOMEWORK_NOTE_PATH, mergeHomeworkFromRemote, parseHomeworkMarkdown, rememberPublishedHomeworkIds, serializeHomeworkMarkdown, type HomeworkDocument } from './lib/homeworkStore'
+import { HOMEWORK_NOTE_PATH, loadHomeworkMarkdown, mergeHomeworkFromRemote, rememberPublishedHomeworkIds, serializeHomeworkMarkdown, type HomeworkDocument } from './lib/homeworkStore'
 import { scrollTopForNormalizedY } from './lib/searchInkAnchor'
 import { headingLineForSection } from './lib/inkSectionMarkdown'
 import { syncPrefixesFromSetting, toggleSyncPrefix, RECOGNITION_MODEL_SYNC_PATH } from './lib/sync/folderSync'
 import { parseRecognitionBundle, serializeRecognitionBundle, emptyRecognitionBundle } from './lib/sync/recognitionModelBundle'
 import { polishRecognizedText } from './lib/recognitionPolish'
 import { sanitizeAddonStrokes, inkDocumentWithStrokes } from './lib/addonInk'
-import { sanitizeCalendarDocument, serializeCalendarMarkdown, parseCalendarMarkdown, CALENDAR_NOTE_PATH } from './lib/calendarModel'
+import { sanitizeCalendarDocument, serializeCalendarMarkdown, emptyCalendarDocument, isMissingNoteError, loadCalendarMarkdown, CALENDAR_NOTE_PATH } from './lib/calendarModel'
 import { templatesToSeed, templatePath, NOTE_TEMPLATES, type NoteProfileId } from './lib/noteTemplates'
 import { backlinksFor } from './lib/backlinks'
 import { readPdfMarks, writePdfMarks, addPdfMark } from './lib/pdfTextMarks'
@@ -671,6 +671,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [glyphenWerkSampleCount, setGlyphenWerkSampleCount] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchHits, setSearchHits] = useState<SearchHit[]>([])
+  const [searchFailed, setSearchFailed] = useState(false)
   const [inkReveal, setInkReveal] = useState<{ path: string; y: number; token: number } | null>(null)
   const [studyOpen, setStudyOpen] = useState(false)
   const [cardsOpen, setCardsOpen] = useState(false)
@@ -744,6 +745,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const subjectBooksLoadedRef = useRef(false)
   const bookPlacementRef = useRef<SubjectBookPlacement>('rechts')
   const editorRef = useRef<MarkdownEditorHandle>(null)
+  /** The second pane keeps its own 90 ms keystroke buffer. Save and quit must flush it too. */
+  const splitEditorRef = useRef<MarkdownEditorHandle>(null)
   const drawingBoardRef = useRef<DrawingBoardHandle>(null)
   const worksheetLayerRefs = useRef(new Map<string, WorksheetLayerHandle>())
   const worksheetLayerRefCallbacks = useRef(new Map<string, (handle: WorksheetLayerHandle | null) => void>())
@@ -1485,6 +1488,9 @@ export default function App({ startupBootstrap }: AppProps) {
     if (activePathRef.current && activePathRef.current !== path) {
       // Book the last keystrokes under the note that is leaving before its editor unmounts.
       editorRef.current?.flushChanges()
+      // Activating the split note swaps the panes. Its buffer has to land first,
+      // or the new main editor opens the copy from before those keystrokes.
+      if (splitPathRef.current === path) splitEditorRef.current?.flushChanges()
       if (!await flushDocumentLayers()) return false
     }
     const session = vaultSessionGenerationRef.current
@@ -1882,6 +1888,7 @@ export default function App({ startupBootstrap }: AppProps) {
 
   const flushPendingWrites = useCallback(async (): Promise<boolean> => {
     editorRef.current?.flushChanges()
+    splitEditorRef.current?.flushChanges()
     saveTimers.current.forEach((timer) => window.clearTimeout(timer))
     saveTimers.current.clear()
 
@@ -1917,6 +1924,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const flushPendingEntry = useCallback(async (entryPath: string): Promise<boolean> => {
     const belongsToEntry = (candidate: string) => candidate === entryPath || candidate.startsWith(`${entryPath}/`)
     if (activePathRef.current && belongsToEntry(activePathRef.current)) editorRef.current?.flushChanges()
+    if (splitPathRef.current && belongsToEntry(splitPathRef.current)) splitEditorRef.current?.flushChanges()
     ;[...saveTimers.current.entries()].forEach(([path, timer]) => {
       if (!belongsToEntry(path)) return
       window.clearTimeout(timer)
@@ -2014,6 +2022,7 @@ export default function App({ startupBootstrap }: AppProps) {
       statsNeedWrite = pageStatsNeedPersist(idle, PAGE_STATS_MIN_DWELL_DELTA_MS)
     }
     if (activePathRef.current === path) editorRef.current?.flushChanges()
+    if (splitPathRef.current === path) splitEditorRef.current?.flushChanges()
     if (activePathRef.current === path && !await flushDocumentLayers()) return
     const currentTabs = tabsRef.current
     const closing = currentTabs.find((tab) => tab.path === path)
@@ -2678,6 +2687,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const renameEntry = useCallback(async (path: string, nextName: string) => {
     const session = vaultSessionGenerationRef.current
     const active = activePathRef.current
+    const split = splitPathRef.current
+    if (split && (split === path || split.startsWith(`${path}/`))) splitEditorRef.current?.flushChanges()
     if (active && (active === path || active.startsWith(`${path}/`))) {
       editorRef.current?.flushChanges()
       if (!await flushDocumentLayers()) {
@@ -2722,6 +2733,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const moveEntry = useCallback(async (path: string, destFolder = '') => {
     const session = vaultSessionGenerationRef.current
     const active = activePathRef.current
+    const split = splitPathRef.current
+    if (split && (split === path || split.startsWith(`${path}/`))) splitEditorRef.current?.flushChanges()
     if (active && (active === path || active.startsWith(`${path}/`))) {
       editorRef.current?.flushChanges()
       if (!await flushDocumentLayers()) {
@@ -2857,8 +2870,11 @@ export default function App({ startupBootstrap }: AppProps) {
     let nextDocument = document
     if (!nextDocument) {
       try {
-        nextDocument = parseHomeworkMarkdown(await window.fanotes.readFile(HOMEWORK_NOTE_PATH))
-      } catch {
+        const loaded = loadHomeworkMarkdown(await window.fanotes.readFile(HOMEWORK_NOTE_PATH))
+        if (!loaded.ok) return
+        nextDocument = loaded.document
+      } catch (error) {
+        if (!isMissingNoteError(error)) return
         nextDocument = { version: 1, tasks: [] }
       }
     }
@@ -3104,6 +3120,7 @@ export default function App({ startupBootstrap }: AppProps) {
       workspaceRestoredRef.current = false
       setSearchQuery('')
       setSearchHits([])
+      setSearchFailed(false)
       const nextTree = await refreshTree()
       const remembered = chooseRestoredNote(selectedSettings.lastOpenNotePath, collectNotePaths(nextTree), firstNote(nextTree))
       if (remembered) await openNote(remembered)
@@ -3173,15 +3190,21 @@ export default function App({ startupBootstrap }: AppProps) {
     const query = searchQuery.trim()
     const session = vaultSessionGenerationRef.current
     const requestId = ++searchRequestRef.current
-    if (query.length < 2) { setSearchHits([]); setSearchLoading(false); return }
+    if (query.length < 2) { setSearchHits([]); setSearchFailed(false); setSearchLoading(false); return }
     setSearchLoading(true)
     const timer = window.setTimeout(() => {
       void window.fanotes.search(query)
         .then((hits) => {
-          if (session === vaultSessionGenerationRef.current && requestId === searchRequestRef.current) setSearchHits(hits)
+          if (session === vaultSessionGenerationRef.current && requestId === searchRequestRef.current) {
+            setSearchHits(hits)
+            setSearchFailed(false)
+          }
         })
         .catch(() => {
-          if (session === vaultSessionGenerationRef.current && requestId === searchRequestRef.current) setSearchHits([])
+          if (session === vaultSessionGenerationRef.current && requestId === searchRequestRef.current) {
+            setSearchHits([])
+            setSearchFailed(true)
+          }
         })
         .finally(() => {
           if (session === vaultSessionGenerationRef.current && requestId === searchRequestRef.current) setSearchLoading(false)
@@ -3271,6 +3294,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!isWeb) return
     const guard = (event: BeforeUnloadEvent) => {
       editorRef.current?.flushChanges()
+      splitEditorRef.current?.flushChanges()
       const unsaved = pendingWrites.current.size > 0 || drawingDirtyRef.current || worksheetDirtyIdsRef.current.size > 0
       if (!unsaved) return
       void flushDocumentLayers().then(() => flushPendingWrites()).catch(() => undefined)
@@ -3765,6 +3789,7 @@ export default function App({ startupBootstrap }: AppProps) {
   /** Ctrl+\ — open the second pane with the most recent other note, or close it. */
   const toggleSplit = useCallback(() => {
     if (splitPathRef.current) {
+      splitEditorRef.current?.flushChanges()
       setSplitPath(null)
       return
     }
@@ -4079,9 +4104,12 @@ export default function App({ startupBootstrap }: AppProps) {
     },
     readCalendar: async () => {
       try {
-        return parseCalendarMarkdown(await window.fanotes.readFile(CALENDAR_NOTE_PATH))
-      } catch {
-        return parseCalendarMarkdown('')
+        const loaded = loadCalendarMarkdown(await window.fanotes.readFile(CALENDAR_NOTE_PATH))
+        if (!loaded.ok) throw new Error('Kalender.md konnte nicht gelesen werden.')
+        return loaded.document
+      } catch (error) {
+        if (isMissingNoteError(error)) return emptyCalendarDocument()
+        throw error
       }
     },
     writeCalendar: async (document) => {
@@ -4091,9 +4119,12 @@ export default function App({ startupBootstrap }: AppProps) {
     },
     readHomework: async () => {
       try {
-        return parseHomeworkMarkdown(await window.fanotes.readFile(HOMEWORK_NOTE_PATH))
-      } catch {
-        return parseHomeworkMarkdown('')
+        const loaded = loadHomeworkMarkdown(await window.fanotes.readFile(HOMEWORK_NOTE_PATH))
+        if (!loaded.ok) throw new Error('Hausaufgaben.md konnte nicht gelesen werden.')
+        return loaded.document
+      } catch (error) {
+        if (isMissingNoteError(error)) return { version: 1 as const, tasks: [] }
+        throw error
       }
     },
     writeHomework: async (document) => {
@@ -4519,7 +4550,7 @@ export default function App({ startupBootstrap }: AppProps) {
             <div className="sidebar-search" role="search" title="Notizen und Handschrift durchsuchen">
               <Search aria-hidden="true" size={14} />
               <input value={searchQuery} placeholder="Suchen …" aria-label="Notizen suchen" onChange={(event) => { setSearchQuery(event.target.value); setSearchOpen(true) }} onFocus={() => setSearchOpen(true)} />
-              {searchQuery ? <button className="search-clear" type="button" aria-label="Suche leeren" title="Suche leeren" onMouseDown={(event) => event.preventDefault()} onClick={() => { setSearchQuery(''); setSearchHits([]) }}><X size={13} /></button> : null}
+              {searchQuery ? <button className="search-clear" type="button" aria-label="Suche leeren" title="Suche leeren" onMouseDown={(event) => event.preventDefault()} onClick={() => { setSearchQuery(''); setSearchHits([]); setSearchFailed(false) }}><X size={13} /></button> : null}
             </div>
             {knownTags.length > 0 && (
               <div className="tag-filter" aria-label="Nach Schlagwort filtern">
@@ -5009,8 +5040,8 @@ export default function App({ startupBootstrap }: AppProps) {
                   {splitTab.content !== splitTab.savedContent && <i className="dirty-dot" title="Noch nicht gespeichert" />}
                   <button type="button" title="Notizen tauschen (Strg+Umschalt+\)" aria-label="Notizen tauschen" onClick={() => void swapSplitPanes()}><ArrowLeftRight size={14} /></button>
                   <button type="button" title={splitLayout.orientation === 'columns' ? 'Untereinander anordnen' : 'Nebeneinander anordnen'} aria-label={splitLayout.orientation === 'columns' ? 'Untereinander anordnen' : 'Nebeneinander anordnen'} onClick={toggleSplitOrientation}>{splitLayout.orientation === 'columns' ? <Rows2 size={14} /> : <Columns2 size={14} />}</button>
-                  <button type="button" title="Als einzige Notiz öffnen" aria-label="Als einzige Notiz öffnen" onClick={() => { const target = splitTab.path; setSplitPath(null); void openNote(target) }}><Maximize2 size={14} /></button>
-                  <button type="button" aria-label="Teilung schließen" title="Teilung schließen (Strg+\)" onClick={() => setSplitPath(null)}><X size={14} /></button>
+                  <button type="button" title="Als einzige Notiz öffnen" aria-label="Als einzige Notiz öffnen" onClick={() => { const target = splitTab.path; splitEditorRef.current?.flushChanges(); setSplitPath(null); void openNote(target) }}><Maximize2 size={14} /></button>
+                  <button type="button" aria-label="Teilung schließen" title="Teilung schließen (Strg+\)" onClick={() => { splitEditorRef.current?.flushChanges(); setSplitPath(null) }}><X size={14} /></button>
                 </header>
                 <PaperView
                   className={`unified-note-view paper-${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'blank' : normalizePaperStyle(notePaperByPath[splitTab.path] ?? settings.paperStyle)} ${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'is-pdf-note' : ''}`}
@@ -5031,6 +5062,7 @@ export default function App({ startupBootstrap }: AppProps) {
                     <div className="editor-pane">
                       <SafeBoundary name="Zweite Notiz" fallbackTitle="Die zweite Notiz ist abgestürzt">
                         <MarkdownEditor
+                          ref={splitEditorRef}
                           key={`split-${splitTab.path}`}
                           content={splitTab.content}
                           onChange={(content) => updateContentFor(splitTab.path, content)}
@@ -5068,7 +5100,7 @@ export default function App({ startupBootstrap }: AppProps) {
 
         {inspectorVisible && settings.showOutline && !overviewOpen && !studyOpen && !homeworkOpen && !calendarOpen && !glyphenWerkOpen && !isPdfActive && <Suspense fallback={null}><RightInspector content={activeTab?.content ?? ''} path={activeTab?.path} notes={tabs.map((tab) => ({ path: tab.path, content: tab.content }))} history={historySnapshots} onShowHistory={() => { void openHistory() }} onRestoreHistory={(id) => { void restoreHistory(id) }} onJumpToLine={(line) => { editorRef.current?.revealLine(line) }} onOpenNote={(path) => { void openNote(path) }} /></Suspense>}
         {addonState.dockOpen && addonState.panels.length > 0 && !glyphenWerkOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Dock" fallbackTitle="Das Add-on-Dock ist abgestürzt"><AddonPanelDock panels={addonState.panels} activeKey={addonState.activePanel} runtime={addonRuntime} onClose={() => addonRuntime.setDockOpen(false)} /></SafeBoundary></Suspense>}
-        {searchOpen && <Suspense fallback={null}><SearchPanel query={searchQuery} hits={searchHits} loading={searchLoading} onQueryChange={setSearchQuery} onOpen={(hit) => { void openSearchHit(hit) }} onClose={() => setSearchOpen(false)} /></Suspense>}
+        {searchOpen && <Suspense fallback={null}><SearchPanel query={searchQuery} hits={searchHits} loading={searchLoading} failed={searchFailed} onQueryChange={setSearchQuery} onOpen={(hit) => { void openSearchHit(hit) }} onClose={() => setSearchOpen(false)} /></Suspense>}
       </div>
 
       <footer className="statusbar">
