@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS } from '../defaults'
 import { getUiLanguage } from '../i18n'
 import type { AppSettings, BootstrapData, DrawingLibraryDocument, FaNotesApi, PaperStyle, ServerBackupState, UpdateState, VaultEntry, WorksheetDocument } from '../types'
 import { companionNotePath, emptyFamdPayload, parseFamd, serializeFamd } from './famd'
-import { inkAnchorForQuery, noteSearchExcerpt } from './searchInkAnchor'
+import { inkAnchorForQuery, noteSearchExcerpt, readableTranscript } from './searchInkAnchor'
 import { parseNoteBackups, type NoteBackupSnapshot } from './noteBackup'
 import { parseNoteLinks, type NoteLinkRecord } from './noteLink'
 import { parseSubjectBooks, type SubjectBookRecord } from './subjectBook'
@@ -1047,8 +1047,11 @@ export function createBrowserApi(): FaNotesApi {
           const transcript = typeof parsed.searchTranscript === 'string' ? parsed.searchTranscript : ''
           const haystack = `${drawing.title}\n${transcript}`
           if (!haystack.toLocaleLowerCase('de').includes(needle)) return []
+          const readable = `${drawing.title}\n${readableTranscript(transcript)}`
+          const source = readable.toLocaleLowerCase('de').includes(needle) ? readable : haystack
+          const at = source.toLocaleLowerCase('de').indexOf(needle)
           const inkAnchor = inkAnchorForQuery(transcript, query)
-          return [{ relativePath: drawing.dataRelativePath, title: drawing.title, excerpt: haystack.slice(0, 180), matches: 1, kind: 'drawing' as const, drawingId: drawing.id, ...(inkAnchor ? { inkAnchor } : {}) }]
+          return [{ relativePath: drawing.dataRelativePath, title: drawing.title, excerpt: source.slice(Math.max(0, at - 40), at + needle.length + 80), matches: 1, kind: 'drawing' as const, drawingId: drawing.id, ...(inkAnchor ? { inkAnchor } : {}) }]
         } catch { return [] }
       })
       const pdfHits = [...assets.keys()].flatMap((path) => {
