@@ -1007,6 +1007,20 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     // U+2028 and U+2029 are JavaScript trim characters, and `Date.parse` rejects
     // them. Only the date-parse spaces are padding.
     let trimmed = value.trim_matches(is_date_parse_space);
+    // `-000001/01/01` keeps year -1. A slash is not an ES5 hyphen, so midnight
+    // is local. `32` is not a day, and that date is empty instead of 2032.
+    // A leading or trailing space stays on the legacy path.
+    if value == trimmed {
+        match negative_expanded_tail(trimmed) {
+            ExpandedTail::Skip | ExpandedTail::Strict => {}
+            ExpandedTail::Reject => return None,
+            ExpandedTail::Local(year, month, day) => {
+                let (year, month, day, hour, minute, second) =
+                    local_civil_to_utc(year, month, day, 0, 0, 0)?;
+                return format_civil_iso(year, month, day, hour, minute, second, 0);
+            }
+        }
+    }
     // `-000000-10-13` drops the invalid negative zero once. The remainder is
     // legacy, so `-10-13` is 13 October 2001 and a second `-000000` is year 0.
     // `-000001-10-13 EST` stays in year -1. A leading space stays legacy.
@@ -1445,6 +1459,99 @@ fn strip_negative_zero_year(trimmed: &str) -> Option<&str> {
         return None;
     }
     Some(rest.trim_start_matches(is_date_parse_space))
+}
+
+enum ExpandedTail {
+    Skip,
+    Strict,
+    Reject,
+    Local(i32, i32, i32),
+}
+
+/// A negative six-digit year followed by `/` or `-`.
+///
+/// `-000001-01-01` is a finished ES5 date, so this returns `Strict` and the
+/// UTC path keeps it. `-000001/01/01` and `-000001-1-1` are local mean time.
+/// `-000001-01-32` and `-000001/13/1` are empty. `-000000` is not this year.
+fn negative_expanded_tail(value: &str) -> ExpandedTail {
+    let bytes = value.as_bytes();
+    if bytes.first() != Some(&b'-') || bytes.len() < 8 || !bytes[1..7].iter().all(u8::is_ascii_digit)
+    {
+        return ExpandedTail::Skip;
+    }
+    let Ok(year) = value[..7].parse::<i32>() else {
+        return ExpandedTail::Skip;
+    };
+    if year >= 0 {
+        return ExpandedTail::Skip;
+    }
+    let rest = &value[7..];
+    if rest.bytes().any(|byte| !matches!(byte, b'0'..=b'9' | b'/' | b'-')) {
+        return ExpandedTail::Skip;
+    }
+    let rest_bytes = rest.as_bytes();
+    if !matches!(rest_bytes.first(), Some(b'/' | b'-')) {
+        return ExpandedTail::Skip;
+    }
+    let mut fields = Vec::new();
+    let mut all_hyphen = true;
+    let mut all_two = true;
+    let mut trailing = false;
+    let mut index = 0;
+    while index < rest_bytes.len() {
+        if rest_bytes[index] == b'/' {
+            all_hyphen = false;
+        }
+        index += 1;
+        let start = index;
+        while index < rest_bytes.len() && rest_bytes[index].is_ascii_digit() {
+            index += 1;
+        }
+        if start == index {
+            if index == rest_bytes.len() && fields.len() < 2 {
+                trailing = true;
+                break;
+            }
+            return ExpandedTail::Reject;
+        }
+        let field = &rest[start..index];
+        if field.len() != 2 {
+            all_two = false;
+        }
+        fields.push(field);
+        if fields.len() > 2 {
+            return ExpandedTail::Reject;
+        }
+    }
+    if trailing && fields.len() >= 2 {
+        return ExpandedTail::Reject;
+    }
+    let (month, day) = if fields.is_empty() {
+        (1, 1)
+    } else {
+        let Ok(month) = fields[0].parse::<i32>() else {
+            return ExpandedTail::Reject;
+        };
+        let day = if fields.len() == 2 {
+            let Ok(day) = fields[1].parse::<i32>() else {
+                return ExpandedTail::Reject;
+            };
+            day
+        } else {
+            1
+        };
+        if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+            return ExpandedTail::Reject;
+        }
+        (month, day)
+    };
+    if all_hyphen && all_two && !trailing {
+        return ExpandedTail::Strict;
+    }
+    match normalize_ymd(year, month, day) {
+        Some((year, month, day)) => ExpandedTail::Local(year, month, day),
+        None => ExpandedTail::Reject,
+    }
 }
 
 fn negative_expanded_ymd(date: &str) -> Option<(i32, i32, i32)> {
@@ -13327,6 +13434,59 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("10/13/2026").as_deref(),
                 Some("2026-10-13T04:00:00.000Z")
+            );
+        });
+    }
+
+    #[test]
+    fn a_negative_expanded_year_keeps_slash_fields() {
+        with_tz("America/New_York", || {
+            // Slashes are not ES5 hyphens, so year -1 stays on local mean time.
+            // A day past 31 is empty. Two-digit hyphens stay UTC.
+            assert_eq!(
+                super::canonical_iso("-000001/01/01").as_deref(),
+                Some("-000001-01-01T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001/10/13").as_deref(),
+                Some("-000001-10-13T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001/02/31").as_deref(),
+                Some("-000001-03-03T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-2-31").as_deref(),
+                Some("-000001-03-03T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001/10").as_deref(),
+                Some("-000001-10-01T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-").as_deref(),
+                Some("-000001-01-01T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-271821/10/01").as_deref(),
+                Some("-271821-10-01T04:56:02.000Z")
+            );
+            assert_eq!(super::canonical_iso("-000001/01/32"), None);
+            assert_eq!(super::canonical_iso("-000001-01-32"), None);
+            assert_eq!(super::canonical_iso("-000001/13/1"), None);
+            assert_eq!(super::canonical_iso("-000001-01-00"), None);
+            assert_eq!(super::canonical_iso("-000001-10-13-"), None);
+            assert_eq!(
+                super::canonical_iso("-000001-01-01").as_deref(),
+                Some("-000001-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-02-31").as_deref(),
+                Some("-000001-03-03T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(" -000001/01/01").as_deref(),
+                Some("2001-01-01T05:00:00.000Z")
             );
         });
     }
