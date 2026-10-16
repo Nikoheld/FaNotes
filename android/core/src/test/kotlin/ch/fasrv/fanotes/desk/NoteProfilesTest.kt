@@ -94,6 +94,36 @@ class NoteProfilesTest {
     }
 
     @Test
+    fun theWelcomePreviewSubjectColumnStaysAMiniature() {
+        assertEquals(7.5f, FIRST_RUN_PREVIEW_HEADING_SP)
+        assertEquals(7, FIRST_RUN_PREVIEW_SUBJECT_SP)
+        assertEquals(7, FIRST_RUN_PREVIEW_SUBJECT_PAD_DP)
+        assertEquals(7, FIRST_RUN_PREVIEW_SUBJECT_GAP_DP)
+        assertEquals(6, FIRST_RUN_PREVIEW_SUBJECT_RADIUS_DP)
+        assertEquals(6, FIRST_RUN_PREVIEW_MARK_DP)
+        assertEquals(2, FIRST_RUN_PREVIEW_MARK_RADIUS_DP)
+        val accent = 0xFF226688.toInt()
+        assertEquals(
+            listOf(
+                "Mathematik" to accent,
+                "Deutsch" to 0xFFC76868.toInt(),
+                "Französisch" to 0xFF3D8BE0.toInt(),
+                "Physik" to 0xFF5E9ABD.toInt(),
+                "Wirtschaft" to 0xFFCF9A48.toInt(),
+            ),
+            FIRST_RUN_PREVIEW_SUBJECTS.zip(firstRunPreviewMarkColors(accent)),
+        )
+        assertEquals(360, FIRST_RUN_PREVIEW_BODY_MIN_DP)
+        assertEquals(325, FIRST_RUN_PREVIEW_BODY_MIN_SHORT_DP)
+        assertEquals(325, firstRunPreviewBodyMinDp(761, 680))
+        assertEquals(325, firstRunPreviewBodyMinDp(981, 400))
+        assertEquals(360, firstRunPreviewBodyMinDp(400, 900))
+        assertEquals(360, firstRunPreviewBodyMinDp(760, 900))
+        assertEquals(360, firstRunPreviewBodyMinDp(760, 680))
+        assertEquals(360, firstRunPreviewBodyMinDp(1200, 681))
+    }
+
+    @Test
     fun theFirstRunGridFollowsTheDesktopBreakpoints() {
         assertEquals(0.78f to 1.22f, firstRunColumnWeights(0, 980))
         assertEquals(0.78f to 1.22f, firstRunColumnWeights(1, 800))
