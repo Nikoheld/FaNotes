@@ -4787,7 +4787,10 @@ fun FirstRunDialog(
 
 @Composable
 private fun FirstRunBrand(step: Int, onStep: (Int) -> Unit) {
-    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(dark))
+    val userAccent = MaterialTheme.colorScheme.primary
+    val borderStrong = Color(ch.fasrv.fanotes.desk.firstRunPreviewFloatBorder(dark))
     val ink = LocalStatusInk.current
     Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
         Box(
@@ -4803,16 +4806,23 @@ private fun FirstRunBrand(step: Int, onStep: (Int) -> Unit) {
         Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
             ch.fasrv.fanotes.desk.FIRST_RUN_STEPS.forEachIndexed { index, label ->
                 if (index > 0) {
+                    val connector = if (ch.fasrv.fanotes.desk.firstRunStepConnectorLit(index, step)) {
+                        Color(ch.fasrv.fanotes.desk.firstRunStepAccentWash(userAccent.toArgb(), ch.fasrv.fanotes.desk.FIRST_RUN_STEP_COMPLETE_LINE))
+                    } else {
+                        borderStrong
+                    }
                     Box(
-                        Modifier.padding(end = 2.dp).width(22.dp).height(1.dp).background(
-                            if (index <= step) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f) else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA),
-                        ),
+                        Modifier
+                            .padding(end = ch.fasrv.fanotes.desk.FIRST_RUN_STEP_CONNECTOR_GAP_DP.dp)
+                            .width(ch.fasrv.fanotes.desk.FIRST_RUN_STEP_CONNECTOR_DP.dp)
+                            .height(1.dp)
+                            .background(connector),
                     )
                 }
                 val active = index == step
                 val complete = index < step
-                val circle = if (active) MaterialTheme.colorScheme.primary else if (complete) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surface
-                val ring = if (active) MaterialTheme.colorScheme.primary else if (complete) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f) else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
+                val circle = if (active) userAccent else if (complete) Color(ch.fasrv.fanotes.desk.firstRunStepAccentWash(userAccent.toArgb(), ch.fasrv.fanotes.desk.FIRST_RUN_STEP_COMPLETE_FILL)) else MaterialTheme.colorScheme.surface
+                val ring = if (active) userAccent else if (complete) Color(ch.fasrv.fanotes.desk.firstRunStepAccentWash(userAccent.toArgb(), ch.fasrv.fanotes.desk.FIRST_RUN_STEP_COMPLETE_LINE)) else borderStrong
                 val number = if (active) MaterialTheme.colorScheme.onPrimary else if (complete) accent else ink.muted
                 Row(
                     Modifier.padding(end = 10.dp).clickable { onStep(index) },
@@ -4820,7 +4830,20 @@ private fun FirstRunBrand(step: Int, onStep: (Int) -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
                     Box(
-                        Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_STEP_DP.dp).clip(CircleShape).border(1.dp, ring, CircleShape).background(circle),
+                        Modifier
+                            .size(ch.fasrv.fanotes.desk.FIRST_RUN_STEP_DP.dp)
+                            .drawBehind {
+                                if (!active) return@drawBehind
+                                val spread = ch.fasrv.fanotes.desk.FIRST_RUN_STEP_HALO_DP.dp.toPx()
+                                drawCircle(
+                                    color = Color(ch.fasrv.fanotes.desk.firstRunStepHalo(userAccent.toArgb())),
+                                    radius = size.minDimension / 2f + spread / 2f,
+                                    style = Stroke(width = spread),
+                                )
+                            }
+                            .clip(CircleShape)
+                            .border(1.dp, ring, CircleShape)
+                            .background(circle),
                         contentAlignment = Alignment.Center,
                     ) {
                         if (complete) Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(12.dp), tint = number)
