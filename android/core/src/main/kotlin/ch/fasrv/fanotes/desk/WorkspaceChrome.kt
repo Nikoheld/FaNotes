@@ -233,6 +233,19 @@ fun chromeRowHeightDp(compact: Boolean, overrideDp: Int? = null) = overrideDp ?:
  */
 const val TREE_ROW_RADIUS_DP = 4
 const val TREE_LABEL_SP = 14
+const val TREE_RENAME_DP = 24
+const val TREE_RENAME_RADIUS_DP = 5
+const val TREE_RENAME_PAD_DP = 6
+const val TREE_RENAME_SP = 12
+const val TREE_RENAME_RING = 0.1f
+const val TREE_RENAME_ACTION_DP = 23
+
+/** Blank or unchanged names leave the row as it is. Anything else is the new name. */
+fun treeRenameCommit(current: String, next: String): String? {
+    val trimmed = next.trim()
+    if (trimmed.isEmpty() || trimmed == current) return null
+    return trimmed
+}
 const val TREE_DEPTH_DP = 13
 const val TREE_MARK_WIDTH_DP = 2
 const val TREE_MARK_HEIGHT_DP = 17
