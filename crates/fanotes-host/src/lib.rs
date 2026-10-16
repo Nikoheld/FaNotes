@@ -3012,12 +3012,17 @@ fn push_separator(out: &mut String) {
     }
 }
 
+/// `16:00:00.5` is a fraction: the dot follows a clock field. `Oct.13` is a
+/// month and a symbol, so those digits are not milliseconds.
 fn fraction_digits_before(chars: &[char], index: usize) -> bool {
     let mut digit = index;
     while digit > 0 && chars[digit - 1].is_ascii_digit() {
         digit -= 1;
     }
-    digit > 0 && digit < index && chars[digit - 1] == '.'
+    if digit < 2 || digit == index || chars[digit - 1] != '.' {
+        return false;
+    }
+    chars[digit - 2].is_ascii_digit() || chars[digit - 2] == ':'
 }
 
 fn separate_slash_after_fraction(value: &str) -> Option<String> {
@@ -3425,6 +3430,8 @@ fn is_v8_word_char(character: char) -> bool {
 /// `13:Oct` is hour 13 and October. The colon stays on the clock, and the
 /// month is the next word. `2026` cannot be a day, so the day is 1.
 /// `13Oct:2026` has no colon before the month, so it stays one token.
+/// A `-` after the month is skipped. `.` and `/` are symbols, so
+/// `13:Oct-2026` and `13:Oct.2026` keep `2026` as a date field.
 fn split_time_colon_month(token: &str) -> Option<Vec<&str>> {
     let bytes = token.as_bytes();
     if bytes.first().is_none_or(|byte| !byte.is_ascii_digit()) || !token.contains(':') {
@@ -3449,10 +3456,24 @@ fn split_time_colon_month(token: &str) -> Option<Vec<&str>> {
         return None;
     }
     let mut parts = vec![&token[..month_at], &token[month_at..index]];
+    index = skip_separator_after_month(token, index);
     if index < token.len() {
         parts.extend(expand_glued_month(&token[index..]));
     }
     Some(parts)
+}
+
+/// V8 skips one `-` after a month name. `.` and `/` are their own symbols
+/// and are ignored. A second `-`, as in `13:Oct--2026`, stays a sign.
+fn skip_separator_after_month(token: &str, mut index: usize) -> usize {
+    let bytes = token.as_bytes();
+    if bytes.get(index) == Some(&b'-') {
+        index += 1;
+    }
+    while index < bytes.len() && matches!(bytes[index], b'.' | b'/') {
+        index += 1;
+    }
+    index
 }
 
 /// `13Oct2026` and `Oct2026` are separate fields. `GMT5` is the zone `GMT`
@@ -12099,9 +12120,12 @@ mod local_zone_tests {
         unsafe { tzset() };
         // Node 22 `Date.parse`. `13:` is an hour and `Oct` is the month.
         // `2026` cannot be a day, so it is the year and the day is 1.
-        // October 2026 is EDT, so 13:00 local is 17:00 UTC. `30` fills the
-        // open minute. `13` fits that minute, so `13:Oct:13` has no date.
-        // October 1950 is before 1970, so that instant does not fit in `u64`.
+        // A `-` after the month is skipped. `.` and `/` are symbols, so
+        // the following number is still a date field. October 2026 is EDT,
+        // so 13:00 local is 17:00 UTC. `30` fills the open minute. `13` fits
+        // that minute, so `13:Oct-13` has no date. `13:Oct.13.2026` is
+        // empty: that dot is not a clock fraction. October 1950 is before
+        // 1970, so that instant does not fit in `u64`.
         let cases = [
             ("13:Oct:2026", Some(1_790_874_000_000)),
             ("13:Oct 2026", Some(1_790_874_000_000)),
@@ -12111,6 +12135,16 @@ mod local_zone_tests {
             ("16:Oct:13", None),
             ("13:Oct:13", None),
             ("13:Oct:1950", None),
+            ("13:Oct-2026", Some(1_790_874_000_000)),
+            ("13:Oct.2026", Some(1_790_874_000_000)),
+            ("13:Oct/2026", Some(1_790_874_000_000)),
+            ("4:May-2026", Some(1_777_622_400_000)),
+            ("13:October-2026", Some(1_790_874_000_000)),
+            ("13:Oct-2026 30", Some(1_790_875_800_000)),
+            ("13:Oct-13", None),
+            ("16:Oct-13", None),
+            ("13:Oct.13.2026", None),
+            ("13:Oct-1950", None),
         ];
         for (input, expected) in cases {
             assert_eq!(unix_millis_from_iso(input), expected, "{input}");
