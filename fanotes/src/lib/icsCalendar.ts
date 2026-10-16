@@ -136,6 +136,30 @@ const field = (lines: string[], name: string) => {
 
 const eventUid = (lines: string[]) => field(lines, 'UID').replace(/[^\w.-]/gu, '').slice(0, 80)
 
+/** Skipped recurrence days. Several EXDATE lines and comma-separated values count. */
+const exceptionDatesFrom = (lines: string[]): string[] => {
+  const dates: string[] = []
+  for (const line of lines) {
+    if (!line.startsWith('EXDATE')) continue
+    const colon = line.indexOf(':')
+    if (colon < 0) continue
+    const dateOnly = /VALUE=DATE/iu.test(line.slice(0, colon))
+    for (const part of line.slice(colon + 1).split(',')) {
+      const raw = part.trim()
+      if (!raw) continue
+      if (dateOnly || /^\d{8}$/u.test(raw)) {
+        const day = /^(\d{4})(\d{2})(\d{2})$/u.exec(raw)
+        if (!day || !realCivilTime(Number(day[1]), Number(day[2]) - 1, Number(day[3]), 0, 0, 0)) continue
+        dates.push(`${day[1]}-${day[2]}-${day[3]}`)
+        continue
+      }
+      const parsed = parseIcsDate(raw)
+      if (parsed) dates.push(dateKey(parsed.date))
+    }
+  }
+  return [...new Set(dates)].slice(0, 400)
+}
+
 const parseIcs = (ics: string, calendarId: string): { events: CalendarEvent[], cancelledIds: string[] } => {
   const events: CalendarEvent[] = []
   const cancelledIds: string[] = []
@@ -170,6 +194,7 @@ const parseIcs = (ics: string, calendarId: string): { events: CalendarEvent[], c
       id: uid || built.id,
       recurrence,
       recurrenceUntil: recurrence === 'none' ? null : until,
+      exceptionDates: recurrence === 'none' ? [] : exceptionDatesFrom(lines),
     })
   }
   return { events: events.slice(0, 2_000), cancelledIds }
@@ -216,7 +241,7 @@ export const applyIcsImport = (document: CalendarDocument, ics: string, calendar
       ...next,
       calendarId: event.calendarId,
       notePath: event.notePath || next.notePath,
-      exceptionDates: event.exceptionDates,
+      exceptionDates: [...new Set([...event.exceptionDates, ...next.exceptionDates])].slice(0, 400),
     })
   }
   const addedEvents = [...incoming.values()]
@@ -256,6 +281,9 @@ export const exportIcs = (document: CalendarDocument, calendarId?: string) => {
       event.location ? `LOCATION:${icsEscape(event.location)}` : '',
       event.notes ? `DESCRIPTION:${icsEscape(event.notes)}` : '',
       ruleFor(event).trimEnd(),
+      event.recurrence !== 'none' && event.exceptionDates.length
+        ? `EXDATE;VALUE=DATE:${event.exceptionDates.map((day) => day.replace(/-/gu, '')).join(',')}`
+        : '',
       'END:VEVENT',
     ].filter(Boolean).join('\n')
   }).filter(Boolean)
