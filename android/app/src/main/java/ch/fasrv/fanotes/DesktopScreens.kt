@@ -3,7 +3,6 @@ package ch.fasrv.fanotes
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.drawBehind
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
