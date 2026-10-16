@@ -103,6 +103,20 @@ import {
 } from './lib/pageStats'
 import { chooseRestoredNote, collectNotePaths } from './lib/lastOpenNote'
 import {
+  clonedWorksheetDocument,
+  drawingTitleFromJson,
+  duplicatePreferredStem,
+  formatNoteStamp,
+  recentNotePaths,
+  retargetWorksheetMarkers,
+  stampToInsert,
+  wikiLinkForNote,
+  withInkMarker,
+  withoutInkMarker,
+  withoutWorksheetMarker,
+  worksheetIdsIn,
+} from './lib/noteQoL'
+import {
   breadcrumbsFor,
   canGoBack,
   canGoForward,
@@ -138,6 +152,7 @@ import {
   activateNoteLink,
   linkedNoteParent,
   linkedNotePreferredName,
+  newNoteLinkId,
   NOTE_LINK_STYLES,
   placeNewNoteLink,
   removeNoteLink,
@@ -376,10 +391,12 @@ type TabContextMenuProps = {
   onCloseOthers: () => void
   onCloseRight: () => void
   onCopyPath: () => void
+  onCopyWikiLink: () => void
+  onDuplicate: () => void
   onReveal: () => void
 }
 
-function TabContextMenu({ menu, title, pinned, inSplit, isWeb, canCloseOthers, canCloseRight, onClose, onOpenInSplit, onTogglePin, onCloseTab, onCloseOthers, onCloseRight, onCopyPath, onReveal }: TabContextMenuProps) {
+function TabContextMenu({ menu, title, pinned, inSplit, isWeb, canCloseOthers, canCloseRight, onClose, onOpenInSplit, onTogglePin, onCloseTab, onCloseOthers, onCloseRight, onCopyPath, onCopyWikiLink, onDuplicate, onReveal }: TabContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
@@ -399,12 +416,14 @@ function TabContextMenu({ menu, title, pinned, inSplit, isWeb, canCloseOthers, c
       role="menu"
       aria-label={`Aktionen für ${title}`}
       onPointerDown={(event) => event.stopPropagation()}
-      style={{ left: Math.min(Math.max(8, menu.x), window.innerWidth - 240), top: Math.min(Math.max(8, menu.y), window.innerHeight - 320) }}
+      style={{ left: Math.min(Math.max(8, menu.x), window.innerWidth - 240), top: Math.min(Math.max(8, menu.y), window.innerHeight - 420) }}
     >
       <div className="file-tree__menu-head"><span>{isPdfNotePath(menu.path) ? <File size={16} /> : <FileText size={16} />}</span><div><small>Tab</small><strong>{title}</strong></div></div>
       <button type="button" role="menuitem" disabled={inSplit} onClick={run(onOpenInSplit)}><Columns2 aria-hidden="true" size={15} /> Rechts öffnen</button>
       <button type="button" role="menuitem" onClick={run(onTogglePin)}>{pinned ? <PinOff aria-hidden="true" size={15} /> : <Pin aria-hidden="true" size={15} />} {pinned ? 'Lösen' : 'Anheften'}</button>
       <span className="file-tree__menu-separator" role="separator" />
+      <button type="button" role="menuitem" onClick={run(onDuplicate)}><Files aria-hidden="true" size={15} /> Notiz duplizieren</button>
+      <button type="button" role="menuitem" onClick={run(onCopyWikiLink)}><Link2 aria-hidden="true" size={15} /> Wiki-Link kopieren</button>
       <button type="button" role="menuitem" onClick={run(onCopyPath)}><Copy aria-hidden="true" size={15} /> Pfad kopieren</button>
       <button type="button" role="menuitem" onClick={run(onReveal)}>{isWeb ? <Download aria-hidden="true" size={15} /> : <FolderOpen aria-hidden="true" size={15} />} {isWeb ? 'Herunterladen' : 'Im Dateimanager zeigen'}</button>
       <span className="file-tree__menu-separator" role="separator" />
@@ -586,11 +605,7 @@ const filePaths = (entries: VaultEntry[]): Set<string> => {
   return paths
 }
 
-const formatDate = (pattern: string, date = new Date()) => pattern
-  .replaceAll('YYYY', String(date.getFullYear()))
-  .replaceAll('YY', String(date.getFullYear()).slice(-2))
-  .replaceAll('MM', String(date.getMonth() + 1).padStart(2, '0'))
-  .replaceAll('DD', String(date.getDate()).padStart(2, '0'))
+const formatDate = (pattern: string, date = new Date()) => formatNoteStamp(pattern, date)
 
 const hexRgb = (hex: string) => {
   const value = hex.replace('#', '')
@@ -2303,6 +2318,152 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [openNote, refreshTree, settings.defaultFolder, toast, tree])
 
+  const copyWikiLink = useCallback((path: string) => {
+    const link = wikiLinkForNote(path)
+    void navigator.clipboard?.writeText(link)
+      .then(() => toast('Wiki-Link kopiert.', 'success'))
+      .catch(() => toast('Der Wiki-Link konnte nicht kopiert werden.', 'error'))
+  }, [toast])
+
+  const insertStamp = useCallback((withTime: boolean) => {
+    const path = activePathRef.current
+    const tab = path ? tabsRef.current.find((item) => item.path === path) : null
+    if (!path || !tab || tab.kind === 'pdf' || isPdfNotePath(path)) {
+      toast('Öffne eine Markdown-Notiz, um das Datum einzufügen.', 'info')
+      return
+    }
+    if (drawingOpenRef.current) {
+      toast('Wechsle zur Tastatur, um das Datum in den Text zu setzen.', 'info')
+      return
+    }
+    const stamp = formatNoteStamp(settingsRef.current.dateFormat || 'YYYY-MM-DD', new Date(), withTime)
+    const text = editorRef.current?.getText()
+    const selection = editorRef.current?.getSelection()
+    const before = text && selection ? text.slice(0, selection.from) : ''
+    const inserted = editorRef.current?.insertText(stampToInsert(before, stamp), 'cursor') ?? false
+    if (!inserted) toast('Das Datum konnte nicht eingefügt werden.', 'error')
+  }, [toast])
+
+  /**
+   * A second note with the same text. Handwriting gets its own drawing, and
+   * each worksheet is copied so answers on the original stay put.
+   */
+  const duplicateNote = useCallback(async (path: string) => {
+    if (!path || isPdfNotePath(path)) {
+      toast('Eine PDF-Notiz bleibt die Datei selbst.', 'info')
+      return
+    }
+    if (activePathRef.current === path) {
+      editorRef.current?.flushChanges()
+      if (!await flushDocumentLayers()) return
+    }
+    const openTab = tabsRef.current.find((item) => item.path === path)
+    const pending = pendingWrites.current.get(path)
+    const dirty = pending ?? (openTab && openTab.content !== openTab.savedContent ? openTab.content : null)
+    if (dirty !== null && !await saveContent(path, dirty)) return
+
+    const session = vaultSessionGenerationRef.current
+    let createdPath: string | null = null
+    const clonedWorksheetIds: string[] = []
+    try {
+      const sourceTab = tabsRef.current.find((item) => item.path === path)
+      const sourceMarkdown = stripFamdPayload(sourceTab?.content ?? await window.fanotes.readFile(path))
+      const ink = await readNoteInk(path, sourceMarkdown)
+      const links = window.fanotes.readNoteLinks ? await window.fanotes.readNoteLinks(path) : []
+      const paper = window.fanotes.readNotePaperStyle ? await window.fanotes.readNotePaperStyle(path) : null
+      const parent = parentPath(path)
+      const stem = duplicatePreferredStem(fileName(path), translateUiText('Kopie'))
+      vaultStructureRevisionRef.current += 1
+      let created: CreateResult
+      try {
+        created = await window.fanotes.createNote(parent || undefined, stem)
+      } catch {
+        created = await window.fanotes.createNote(undefined, stem)
+      }
+      if (session !== vaultSessionGenerationRef.current) return
+      createdPath = created.relativePath
+
+      let markdown = withoutInkMarker(sourceMarkdown)
+      let worksheetSkipped = false
+      const idMap = new Map<string, string>()
+      const importFromData = window.fanotes.importWorksheetFromData
+      for (const worksheetId of worksheetIdsIn(sourceMarkdown)) {
+        if (!importFromData) {
+          markdown = withoutWorksheetMarker(markdown, worksheetId)
+          worksheetSkipped = true
+          continue
+        }
+        try {
+          const original = await window.fanotes.readWorksheet(worksheetId)
+          const extension = original.sourceRelativePath.split('.').pop()?.toLocaleLowerCase('en-US') || 'png'
+          const bytes = await window.fanotes.readAssetBytes(original.sourceRelativePath)
+          const createdWorksheet = await importFromData({
+            name: `Kopie.${extension === 'jpeg' ? 'jpg' : extension}`,
+            mimeType: original.mimeType,
+            bytes,
+          })
+          const saved = await window.fanotes.saveWorksheet(clonedWorksheetDocument(createdWorksheet, original))
+          clonedWorksheetIds.push(saved.id)
+          idMap.set(worksheetId, saved.id)
+        } catch {
+          markdown = withoutWorksheetMarker(markdown, worksheetId)
+          worksheetSkipped = true
+        }
+      }
+      markdown = retargetWorksheetMarkers(markdown, idMap)
+
+      let inkCopied = false
+      if (ink?.drawingJson) {
+        try {
+          const asset = await window.fanotes.saveDrawing({
+            title: drawingTitleFromJson(ink.drawingJson, ink.title || stem),
+            drawingJson: ink.drawingJson,
+            noteRelativePath: created.relativePath,
+          })
+          markdown = withInkMarker(markdown, asset.id)
+          inkCopied = true
+        } catch {
+          inkCopied = false
+        }
+      }
+      await window.fanotes.writeFile(created.relativePath, markdown)
+      if (links.length && window.fanotes.writeNoteLinks) {
+        await window.fanotes.writeNoteLinks(created.relativePath, links.map((link) => ({
+          ...link,
+          id: newNoteLinkId(),
+          sourcePath: created.relativePath,
+        }))).catch(() => undefined)
+      }
+      if (paper && window.fanotes.setNotePaperStyle) {
+        await window.fanotes.setNotePaperStyle(created.relativePath, paper).catch(() => undefined)
+      }
+      if (session !== vaultSessionGenerationRef.current) return
+      vaultStructureRevisionRef.current += 1
+      try {
+        await refreshTree()
+      } catch (error) {
+        console.warn('FaNotes-Dateibaum konnte nach dem Duplizieren nicht aktualisiert werden:', error)
+      }
+      if (session !== vaultSessionGenerationRef.current) return
+      createdPath = null
+      const opened = await openNote(created.relativePath)
+      if (!opened) {
+        toast('Die Notiz wurde dupliziert, konnte aber nicht geöffnet werden.', 'info')
+        return
+      }
+      if (worksheetSkipped || (ink?.drawingJson && !inkCopied)) toast('Notiz dupliziert. Handschrift oder ein Arbeitsblatt ließ sich nicht mitkopieren.', 'info')
+      else toast('Notiz dupliziert.', 'success')
+    } catch (error) {
+      for (const worksheetId of clonedWorksheetIds) {
+        await window.fanotes.deleteWorksheet(worksheetId).catch(() => undefined)
+      }
+      if (createdPath) await window.fanotes.trashEntry(createdPath).catch(() => undefined)
+      if (session === vaultSessionGenerationRef.current) {
+        toast(error instanceof Error ? error.message : 'Notiz konnte nicht dupliziert werden.', 'error')
+      }
+    }
+  }, [flushDocumentLayers, openNote, refreshTree, saveContent, toast])
+
   const persistNoteLinks = useCallback(async (path: string, links: readonly NoteLinkRecord[]) => {
     const next = [...links]
     noteLinksRef.current = next
@@ -3978,6 +4139,10 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'homework', label: 'Hausaufgaben & Termine', detail: 'To-dos, Hausaufgaben und Termine mit Fälligkeit', group: 'Navigation', keywords: 'todo hausaufgaben schule termin fällig aufgabe checklist', icon: <ClipboardList size={15} />, run: openHomework },
     { id: 'calendar', label: 'Kalender', detail: 'Tag, 3 Tage, Woche, Monat und Agenda', group: 'Navigation', keywords: 'kalender termin woche monat agenda notion calendar event', icon: <CalendarDays size={15} />, run: openCalendar },
     { id: 'daily', label: 'Heutige Tagesnotiz', detail: settings.dailyNotesFolder, group: 'Dateien', icon: <CalendarDays size={15} />, run: () => void createDailyNote() },
+    { id: 'duplicate-note', label: 'Notiz duplizieren', detail: 'Text, Handschrift und Verlinkungen als neue Notiz', group: 'Dateien', keywords: 'duplizieren kopie copy duplicate klonen', icon: <Files size={15} />, run: () => { if (activePath) void duplicateNote(activePath) } },
+    { id: 'copy-wiki-link', label: 'Wiki-Link kopieren', detail: '[[Titel]] in die Zwischenablage', group: 'Dateien', keywords: 'wiki link kopieren verweis', icon: <Link2 size={15} />, run: () => { if (activePath) copyWikiLink(activePath) } },
+    { id: 'insert-date', label: 'Datum einfügen', detail: 'Setzt das Datumsformat an der Schreibmarke ein', shortcut: 'Ctrl ⇧ D', group: 'Werkzeuge', keywords: 'datum date stempel', icon: <CalendarDays size={15} />, run: () => insertStamp(false) },
+    { id: 'insert-date-time', label: 'Datum und Uhrzeit einfügen', detail: 'Datum plus Stunde und Minute', group: 'Werkzeuge', keywords: 'datum uhrzeit date time stempel', icon: <CalendarDays size={15} />, run: () => insertStamp(true) },
     { id: 'export-pdf', label: 'Notiz als PDF exportieren', detail: 'Text, Handschrift und Arbeitsblatt drucken oder speichern', group: 'Dateien', keywords: 'pdf export drucken print', icon: <FileDown size={15} />, run: () => void exportCurrentPdf() },
     { id: 'history', label: 'Versionsverlauf', detail: 'Frühere Stände dieser Notiz ansehen und wiederherstellen', group: 'Dateien', keywords: 'history version wiederherstellen', icon: <History size={15} />, run: () => void openHistory() },
     { id: 'quick-open', label: 'Notiz öffnen …', detail: 'Schnell zu einer Notiz springen', shortcut: 'Ctrl O', group: 'Navigation', keywords: 'quick open switcher wechseln springen', icon: <Files size={15} />, run: () => { setPaletteMode('notes'); setPaletteOpen(true) } },
@@ -4000,7 +4165,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'reveal', label: isWeb ? 'Notiz herunterladen' : 'Im Dateimanager zeigen', detail: isWeb ? 'Aktuelle Notiz exportieren' : 'Speicherort der geöffneten Notiz öffnen', group: 'Dateien', keywords: 'ordner explorer finder dateimanager download export', icon: isWeb ? <Download size={15} /> : <FolderOpen size={15} />, run: () => { if (activePath) void window.fanotes.revealInFolder(activePath) } },
     { id: 'bug-report', label: 'Fehler melden', detail: 'Kurz beschreiben; die letzten fünf Minuten werden angehängt', group: 'FaNotes', keywords: 'bug report fehler logs support', icon: <Bug size={15} />, run: () => setBugReportOpen(true) },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
-  ], [addonPaletteActions, activePath, activeTab, syncApi, syncState, attachBookToSubject, bookOpen, createDailyNote, createFolder, createNote, currentBook, drawingOpen, exportCurrentPdf, focusMode, importOneNote, importPdfNote, isWeb, navigateHistory, openCalendar, openGlyphenWerk, openHistory, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleSplitOrientation])
+  ], [addonPaletteActions, activePath, activeTab, syncApi, syncState, attachBookToSubject, bookOpen, copyWikiLink, createDailyNote, createFolder, createNote, currentBook, drawingOpen, duplicateNote, exportCurrentPdf, focusMode, importOneNote, importPdfNote, insertStamp, isWeb, navigateHistory, openCalendar, openGlyphenWerk, openHistory, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleSplitOrientation])
 
   // ---- Add-ons -------------------------------------------------------------
   // Everything add-ons may touch flows through this bridge. The deps object is
@@ -4237,6 +4402,12 @@ export default function App({ startupBootstrap }: AppProps) {
     return { paths, recent }
   }, [noteHistory.entries, tree])
 
+  const recentClosedNotes = useMemo(() => {
+    const existing = new Set(collectNotePaths(tree))
+    return recentNotePaths(noteHistory.entries, (path) => existing.has(path), 5, activePath)
+      .map((path) => ({ path, title: noteTitleFromPath(path) }))
+  }, [activePath, noteHistory.entries, tree])
+
   const rankNotesForPalette = useCallback((query: string, limit: number) => (
     rankSwitcherNotes(switcherNotes.paths, query, switcherNotes.recent, limit)
   ), [switcherNotes])
@@ -4353,7 +4524,14 @@ export default function App({ startupBootstrap }: AppProps) {
       if (mod && !event.shiftKey && event.key.toLowerCase() === 'n') { event.preventDefault(); void createNote() }
       if (mod && event.key === ',') { event.preventDefault(); openSettings() }
       if (mod && event.shiftKey && event.key.toLowerCase() === 'e') { event.preventDefault(); toggleFocusMode() }
-      if (mod && event.key.toLowerCase() === 'd') { event.preventDefault(); toggleDrawing() }
+      if (mod && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'd') {
+        const target = event.target as HTMLElement | null
+        if (target?.closest('textarea, input, [contenteditable="true"]') && !target.closest('.cm-editor, .markdown-editor')) return
+        event.preventDefault()
+        insertStamp(false)
+        return
+      }
+      if (mod && !event.shiftKey && event.key.toLowerCase() === 'd') { event.preventDefault(); toggleDrawing() }
       if (mod && event.key.toLowerCase() === 'q') { event.preventDefault(); window.fanotes.requestClose() }
       if ((event.key === 'Delete' || event.key === 'Backspace') && selectedNoteLinkId) {
         const target = event.target as HTMLElement | null
@@ -4390,7 +4568,7 @@ export default function App({ startupBootstrap }: AppProps) {
       window.removeEventListener('keydown', handler)
       window.removeEventListener('mouseup', mouseNav)
     }
-  }, [calendarOpen, closeDrawing, closeTab, createNote, cycleTabs, focusMode, glyphenWerkOpen, homeworkOpen, lmStudioOpen, navigateHistory, noteLinkPlacing, openGlyphenWerk, openLmStudio, openSettings, openTabByDigit, openWorksheetImport, overviewOpen, paletteOpen, removeSelectedNoteLink, reopenClosedTab, saveCurrentWork, searchOpen, selectedNoteLinkId, settingsOpen, swapSplitPanes, toast, toggleDrawing, toggleFocusMode, toggleSplit, worksheetImportOpen])
+  }, [calendarOpen, closeDrawing, closeTab, createNote, cycleTabs, focusMode, glyphenWerkOpen, homeworkOpen, insertStamp, lmStudioOpen, navigateHistory, noteLinkPlacing, openGlyphenWerk, openLmStudio, openSettings, openTabByDigit, openWorksheetImport, overviewOpen, paletteOpen, removeSelectedNoteLink, reopenClosedTab, saveCurrentWork, searchOpen, selectedNoteLinkId, settingsOpen, swapSplitPanes, toast, toggleDrawing, toggleFocusMode, toggleSplit, worksheetImportOpen])
 
   useEffect(() => {
     const placeImage = (data: DataTransfer | null, event: Event, failure: string) => {
@@ -4578,6 +4756,9 @@ export default function App({ startupBootstrap }: AppProps) {
                 onRename={renameEntry}
                 onMove={moveEntry}
                 onTrash={trashEntry}
+                onDuplicate={(path) => void duplicateNote(path)}
+                onCopyWikiLink={copyWikiLink}
+                onCopyPath={(path) => { void navigator.clipboard?.writeText(path).then(() => toast('Pfad kopiert.', 'success')).catch(() => undefined) }}
                 confirmTrash={(message) => requestConfirm(message, { title: 'In den Papierkorb', confirmLabel: 'Verschieben' })}
               />
             </div>
@@ -4672,6 +4853,8 @@ export default function App({ startupBootstrap }: AppProps) {
                 onCloseOthers={() => void closeTabsOf(menuTab.path, 'others')}
                 onCloseRight={() => void closeTabsOf(menuTab.path, 'right')}
                 onCopyPath={() => { void navigator.clipboard?.writeText(menuTab.path).then(() => toast('Pfad kopiert.', 'success')).catch(() => undefined) }}
+                onCopyWikiLink={() => copyWikiLink(menuTab.path)}
+                onDuplicate={() => void duplicateNote(menuTab.path)}
                 onReveal={() => void window.fanotes.revealInFolder(menuTab.path)}
               />
             )
@@ -4829,6 +5012,9 @@ export default function App({ startupBootstrap }: AppProps) {
                   <button type="button" role="menuitemcheckbox" aria-checked={inspectorVisible} onClick={() => { setEditorMenuOpen(false); setInspectorVisible((value) => !value) }}><span>{inspectorVisible ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}</span><span><strong>{inspectorVisible ? 'Gliederung ausblenden' : 'Gliederung anzeigen'}</strong><small>Überschriften und Dokumentinfo</small></span><i className={inspectorVisible ? 'is-on' : ''} /></button>
                   <span className="editor-menu-separator" role="separator" />
                   <span className="editor-menu-label">Datei</span>
+                  <button type="button" role="menuitem" disabled={!activeTab} onClick={() => { setEditorMenuOpen(false); if (activePath) void duplicateNote(activePath) }}><span><Files size={15} /></span><span><strong>Notiz duplizieren</strong><small>Text, Handschrift und Verlinkungen als neue Notiz</small></span></button>
+                  <button type="button" role="menuitem" disabled={!activePath} onClick={() => { setEditorMenuOpen(false); if (activePath) copyWikiLink(activePath) }}><span><Link2 size={15} /></span><span><strong>Wiki-Link kopieren</strong><small>[[Titel]] in die Zwischenablage</small></span></button>
+                  <button type="button" role="menuitem" disabled={!activeTab || isPdfActive} onClick={() => { setEditorMenuOpen(false); insertStamp(false) }}><span><CalendarDays size={15} /></span><span><strong>Datum einfügen</strong><small>Setzt das Datumsformat an der Schreibmarke ein</small></span><kbd>⌃⇧D</kbd></button>
                   <button type="button" role="menuitem" disabled={!activeTab} onClick={() => { setEditorMenuOpen(false); void exportCurrentPdf() }}><span><FileDown size={15} /></span><span><strong>Als PDF exportieren</strong><small>Text, Handschrift und Arbeitsblatt</small></span></button>
                   <button type="button" role="menuitem" disabled={!activePath} onClick={() => { setEditorMenuOpen(false); void openHistory() }}><span><History size={15} /></span><span><strong>Versionsverlauf</strong><small>Frühere Stände wiederherstellen</small></span></button>
                   <button type="button" role="menuitem" onClick={() => { setEditorMenuOpen(false); toggleSplit() }}><span><Columns2 size={15} /></span><span><strong>{splitPath ? 'Teilung schließen' : 'Geteilte Ansicht'}</strong><small>Zwei Notizen nebeneinander oder untereinander</small></span></button>
@@ -5086,7 +5272,29 @@ export default function App({ startupBootstrap }: AppProps) {
               </div>
               </>
             ) : (
-              <div className="editor-placeholder"><div className="placeholder-glyph"><BookOpen size={28} /></div><span className="eyebrow">Bereit für deine nächste Idee</span><h2>Dein Wissen, in deiner Hand</h2><p>Schreibe mit Tastatur und Stift auf derselben Seite, importiere ein PDF als eigene Notiz oder starte mit einem Arbeitsblatt.</p><div className="placeholder-actions"><button className="primary-button" type="button" onClick={() => void createNote()}><FilePlus2 size={14} /> Neue Notiz</button><button className="secondary-button" type="button" onClick={() => void importPdfNote()}><FileText size={14} /> PDF</button><button className="secondary-button" type="button" onClick={openWorksheetImport}><FileUp size={14} /> Arbeitsblatt</button></div><button className="placeholder-command" type="button" onClick={() => setPaletteOpen(true)}><Command size={13} /> Alle Aktionen mit <kbd>Strg P</kbd></button></div>
+              <div className={`editor-placeholder ${recentClosedNotes.length ? 'has-recent' : ''}`}>
+                <div className="placeholder-glyph"><BookOpen size={28} /></div>
+                <span className="eyebrow">Bereit für deine nächste Idee</span>
+                <h2>Dein Wissen, in deiner Hand</h2>
+                <p>Schreibe mit Tastatur und Stift auf derselben Seite, importiere ein PDF als eigene Notiz oder starte mit einem Arbeitsblatt.</p>
+                <div className="placeholder-actions">
+                  <button className="primary-button" type="button" onClick={() => void createNote()}><FilePlus2 size={14} /> Neue Notiz</button>
+                  <button className="secondary-button" type="button" onClick={() => void importPdfNote()}><FileText size={14} /> PDF</button>
+                  <button className="secondary-button" type="button" onClick={openWorksheetImport}><FileUp size={14} /> Arbeitsblatt</button>
+                </div>
+                {recentClosedNotes.length > 0 && (
+                  <div className="placeholder-recent">
+                    <h3>Zuletzt geöffnete Notizen</h3>
+                    {recentClosedNotes.map((note) => (
+                      <button key={note.path} type="button" onClick={() => void openNote(note.path)}>
+                        <FileText aria-hidden="true" size={14} />
+                        <span>{note.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <button className="placeholder-command" type="button" onClick={() => setPaletteOpen(true)}><Command size={13} /> Alle Aktionen mit <kbd>Strg P</kbd></button>
+              </div>
               )}
             </Suspense>
             </div>
