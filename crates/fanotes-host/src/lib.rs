@@ -6445,10 +6445,12 @@ fn finished_date_has_an_extra_hyphen(trimmed: &str) -> bool {
     if bytes.len() < date_at + 6 {
         return false;
     }
+    // `Oct<U+2028>13<U+2028>2026` is not a four-digit year. The fourth byte
+    // sits inside the line separator, so a byte slice would panic.
     let year_ok = if expanded {
-        datetime_year_ok(&head[..7])
+        head.is_char_boundary(7) && datetime_year_ok(&head[..7])
     } else {
-        datetime_year_ok(&head[..4])
+        head.is_char_boundary(4) && datetime_year_ok(&head[..4])
     };
     year_ok
         && bytes[date_at] == b'-'
@@ -14848,6 +14850,30 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso(" +002026-10-13T16:00:00Z GMT+5"), None);
         assert_eq!(unix_millis_from_iso(" 2026-10-13T16:00:00Z"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13T16:00:00Z "), None);
+    }
+
+    #[test]
+    fn a_line_separator_inside_a_month_is_not_a_year() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // U+2028 and U+2029 are word characters. Two of them around the
+        // day are a garbage word after a number, so the date is empty.
+        // One of them stays inside the month word.
+        assert_eq!(unix_millis_from_iso("Oct\u{2028}13\u{2028}2026"), None);
+        assert_eq!(unix_millis_from_iso("Oct\u{2029}13\u{2029}2026"), None);
+        assert_eq!(unix_millis_from_iso("\u{2028}October13 2026"), None);
+        assert_eq!(
+            unix_millis_from_iso("Oct\u{2028}13 2026"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct\u{2029}13 2026"),
+            Some(1_791_864_000_000)
+        );
     }
 
 }

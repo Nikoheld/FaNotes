@@ -4873,6 +4873,13 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
     val asidePad = ch.fasrv.fanotes.desk.firstRunPreviewAsidePad(screenWidth)
     val bodyMin = ch.fasrv.fanotes.desk.firstRunPreviewBodyMinDp(screenWidth, screenHeight).dp
     val marks = ch.fasrv.fanotes.desk.firstRunPreviewMarkColors(accent.toArgb())
+    val paperMin = ch.fasrv.fanotes.desk.firstRunPreviewPaperMinDp(screenWidth, screenHeight).dp
+    val paperShape = RoundedCornerShape(
+        topStart = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_RADIUS_TOP_DP.dp,
+        topEnd = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_RADIUS_TOP_DP.dp,
+        bottomEnd = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_RADIUS_BOTTOM_DP.dp,
+        bottomStart = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_RADIUS_BOTTOM_DP.dp,
+    )
     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_RADIUS_DP.dp)
     val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
     Column(modifier.semantics { contentDescription = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_LABEL }) {
@@ -4893,6 +4900,7 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
                 }
                 Text(ch.fasrv.fanotes.desk.FIRST_RUN_BRAND, modifier = Modifier.weight(1f), textAlign = TextAlign.End, fontSize = 11.sp, color = ink.muted)
             }
+            // The body does not clip, so the sheet shadow can paint. The window clip above still cuts blur that leaves the window.
             Row(Modifier.fillMaxWidth().heightIn(min = bodyMin)) {
                 Column(
                     Modifier.width(aside).fillMaxHeight().padding(
@@ -4928,29 +4936,119 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
                         }
                     }
                 }
-                Column(Modifier.weight(1f).padding(16.dp)) {
-                    Text(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_KICKER, fontSize = 12.sp, color = ink.muted, letterSpacing = 0.06.em)
-                    Text(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
-                    Text(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_TYPED, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-                    Box(Modifier.padding(top = 10.dp).fillMaxWidth().height(1.dp).background(rule))
-                    Canvas(Modifier.fillMaxWidth().height(48.dp).padding(top = 8.dp).semantics { contentDescription = "Handschriftliche Formel" }) {
-                        val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .padding(
+                            start = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_MARGIN_INLINE_DP.dp,
+                            top = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_MARGIN_TOP_DP.dp,
+                            end = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_MARGIN_INLINE_DP.dp,
+                            bottom = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_MARGIN_BOTTOM_DP.dp,
+                        )
+                        .heightIn(min = paperMin)
+                        .welcomePreviewPaperShade()
+                        .clip(paperShape)
+                        .background(Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_FILL))
+                        .padding(
+                            horizontal = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_PAD_INLINE_DP.dp,
+                            vertical = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_PAD_BLOCK_DP.dp,
+                        ),
+                ) {
+                    Text(
+                        ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_KICKER,
+                        fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_KICKER_SP.sp,
+                        fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_KICKER_WEIGHT),
+                        letterSpacing = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_KICKER_TRACKING_EM.em,
+                        color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_KICKER_INK),
+                    )
+                    Text(
+                        ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING,
+                        fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_TITLE_SP.sp,
+                        fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_TITLE_WEIGHT),
+                        letterSpacing = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_TITLE_TRACKING_EM.em,
+                        lineHeight = (ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_TITLE_SP * ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_TITLE_LINE).sp,
+                        color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_INK),
+                        modifier = Modifier.padding(
+                            top = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_TITLE_MARGIN_TOP_DP.dp,
+                            bottom = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_TITLE_MARGIN_BOTTOM_DP.dp,
+                        ),
+                    )
+                    Text(
+                        ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_TYPED,
+                        fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_TYPED_SP.sp,
+                        lineHeight = (ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_TYPED_SP * ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_TYPED_LINE).sp,
+                        color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_TYPED_INK),
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip,
+                    )
+                    val searchShape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_RADIUS_DP.dp)
+                    Box(
+                        Modifier
+                            .padding(
+                                top = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_RULE_MARGIN_TOP_DP.dp,
+                                bottom = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_RULE_MARGIN_BOTTOM_DP.dp,
+                            )
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_RULE_ARGB)),
+                    )
+                    Canvas(Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_HEIGHT_DP.dp).semantics { contentDescription = "Handschriftliche Formel" }) {
+                        val stroke = androidx.compose.ui.graphics.drawscope.Stroke(
+                            width = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_WIDTH_DP.dp.toPx(),
+                            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                            join = androidx.compose.ui.graphics.StrokeJoin.Round,
+                        )
+                        val sx = size.width / ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_VIEW_WIDTH
+                        val sy = size.height / ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_HEIGHT_DP
+                        fun mx(x: Float) = x * sx
+                        fun my(y: Float) = y * sy
                         val path = androidx.compose.ui.graphics.Path().apply {
-                            moveTo(8f, size.height * 0.62f)
-                            quadraticTo(size.width * 0.18f, size.height * 0.2f, size.width * 0.32f, size.height * 0.55f)
-                            quadraticTo(size.width * 0.48f, size.height * 0.9f, size.width * 0.66f, size.height * 0.4f)
-                            quadraticTo(size.width * 0.82f, size.height * 0.15f, size.width - 8f, size.height * 0.5f)
+                            moveTo(mx(15f), my(58f))
+                            cubicTo(mx(29f), my(50f), mx(33f), my(32f), mx(39f), my(26f))
+                            cubicTo(mx(47f), my(18f), mx(41f), my(67f), mx(51f), my(70f))
+                            cubicTo(mx(62f), my(72f), mx(69f), my(50f), mx(76f), my(40f))
+                            moveTo(mx(61f), my(55f))
+                            cubicTo(mx(75f), my(58f), mx(90f), my(55f), mx(103f), my(49f))
+                            moveTo(mx(119f), my(62f))
+                            cubicTo(mx(130f), my(49f), mx(134f), my(31f), mx(140f), my(27f))
+                            cubicTo(mx(148f), my(22f), mx(143f), my(64f), mx(153f), my(66f))
+                            cubicTo(mx(166f), my(68f), mx(173f), my(43f), mx(182f), my(40f))
+                            cubicTo(mx(192f), my(37f), mx(191f), my(63f), mx(202f), my(62f))
+                            moveTo(mx(220f), my(48f))
+                            lineTo(mx(247f), my(48f))
+                            moveTo(mx(234f), my(35f))
+                            lineTo(mx(234f), my(63f))
+                            moveTo(mx(267f), my(28f))
+                            cubicTo(mx(290f), my(20f), mx(308f), my(30f), mx(308f), my(48f))
+                            cubicTo(mx(308f), my(66f), mx(286f), my(72f), mx(268f), my(62f))
                         }
-                        drawPath(path, accent, style = stroke)
+                        drawPath(path, Color(ch.fasrv.fanotes.desk.firstRunPreviewInkStroke(accent.toArgb())), style = stroke)
                     }
                     Row(
-                        Modifier.padding(top = 8.dp).clip(RoundedCornerShape(8.dp)).border(1.dp, rule, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 6.dp),
+                        Modifier
+                            .height(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_HEIGHT_DP.dp)
+                            .shadow(
+                                elevation = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_SHADOW_Y_DP.dp,
+                                shape = searchShape,
+                                ambientColor = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_SHADOW_ALPHA),
+                                spotColor = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_SHADOW_ALPHA),
+                            )
+                            .clip(searchShape)
+                            .border(1.dp, Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_BORDER_ARGB), searchShape)
+                            .background(Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_FILL_ARGB))
+                            .padding(horizontal = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_PAD_DP.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_GAP_DP.dp),
                     ) {
-                        Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(11.dp), tint = ink.muted)
-                        Text(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_QUERY, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                        Text(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HITS, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = accent)
+                        Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_ICON_DP.dp), tint = Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_ARGB))
+                        Text(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_QUERY, fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_SP.sp, color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_ARGB))
+                        Text(
+                            ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HITS,
+                            fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HITS_SP.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(ch.fasrv.fanotes.desk.firstRunPreviewSearchHits(accent.toArgb())),
+                        )
                     }
                 }
             }

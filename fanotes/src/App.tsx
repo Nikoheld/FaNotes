@@ -744,6 +744,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const subjectBooksLoadedRef = useRef(false)
   const bookPlacementRef = useRef<SubjectBookPlacement>('rechts')
   const editorRef = useRef<MarkdownEditorHandle>(null)
+  /** The second pane keeps its own 90 ms keystroke buffer. Save and quit must flush it too. */
+  const splitEditorRef = useRef<MarkdownEditorHandle>(null)
   const drawingBoardRef = useRef<DrawingBoardHandle>(null)
   const worksheetLayerRefs = useRef(new Map<string, WorksheetLayerHandle>())
   const worksheetLayerRefCallbacks = useRef(new Map<string, (handle: WorksheetLayerHandle | null) => void>())
@@ -1485,6 +1487,9 @@ export default function App({ startupBootstrap }: AppProps) {
     if (activePathRef.current && activePathRef.current !== path) {
       // Book the last keystrokes under the note that is leaving before its editor unmounts.
       editorRef.current?.flushChanges()
+      // Activating the split note swaps the panes. Its buffer has to land first,
+      // or the new main editor opens the copy from before those keystrokes.
+      if (splitPathRef.current === path) splitEditorRef.current?.flushChanges()
       if (!await flushDocumentLayers()) return false
     }
     const session = vaultSessionGenerationRef.current
@@ -1882,6 +1887,7 @@ export default function App({ startupBootstrap }: AppProps) {
 
   const flushPendingWrites = useCallback(async (): Promise<boolean> => {
     editorRef.current?.flushChanges()
+    splitEditorRef.current?.flushChanges()
     saveTimers.current.forEach((timer) => window.clearTimeout(timer))
     saveTimers.current.clear()
 
@@ -1917,6 +1923,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const flushPendingEntry = useCallback(async (entryPath: string): Promise<boolean> => {
     const belongsToEntry = (candidate: string) => candidate === entryPath || candidate.startsWith(`${entryPath}/`)
     if (activePathRef.current && belongsToEntry(activePathRef.current)) editorRef.current?.flushChanges()
+    if (splitPathRef.current && belongsToEntry(splitPathRef.current)) splitEditorRef.current?.flushChanges()
     ;[...saveTimers.current.entries()].forEach(([path, timer]) => {
       if (!belongsToEntry(path)) return
       window.clearTimeout(timer)
@@ -2014,6 +2021,7 @@ export default function App({ startupBootstrap }: AppProps) {
       statsNeedWrite = pageStatsNeedPersist(idle, PAGE_STATS_MIN_DWELL_DELTA_MS)
     }
     if (activePathRef.current === path) editorRef.current?.flushChanges()
+    if (splitPathRef.current === path) splitEditorRef.current?.flushChanges()
     if (activePathRef.current === path && !await flushDocumentLayers()) return
     const currentTabs = tabsRef.current
     const closing = currentTabs.find((tab) => tab.path === path)
@@ -2678,6 +2686,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const renameEntry = useCallback(async (path: string, nextName: string) => {
     const session = vaultSessionGenerationRef.current
     const active = activePathRef.current
+    const split = splitPathRef.current
+    if (split && (split === path || split.startsWith(`${path}/`))) splitEditorRef.current?.flushChanges()
     if (active && (active === path || active.startsWith(`${path}/`))) {
       editorRef.current?.flushChanges()
       if (!await flushDocumentLayers()) {
@@ -2722,6 +2732,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const moveEntry = useCallback(async (path: string, destFolder = '') => {
     const session = vaultSessionGenerationRef.current
     const active = activePathRef.current
+    const split = splitPathRef.current
+    if (split && (split === path || split.startsWith(`${path}/`))) splitEditorRef.current?.flushChanges()
     if (active && (active === path || active.startsWith(`${path}/`))) {
       editorRef.current?.flushChanges()
       if (!await flushDocumentLayers()) {
@@ -3271,6 +3283,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!isWeb) return
     const guard = (event: BeforeUnloadEvent) => {
       editorRef.current?.flushChanges()
+      splitEditorRef.current?.flushChanges()
       const unsaved = pendingWrites.current.size > 0 || drawingDirtyRef.current || worksheetDirtyIdsRef.current.size > 0
       if (!unsaved) return
       void flushDocumentLayers().then(() => flushPendingWrites()).catch(() => undefined)
@@ -3765,6 +3778,7 @@ export default function App({ startupBootstrap }: AppProps) {
   /** Ctrl+\ — open the second pane with the most recent other note, or close it. */
   const toggleSplit = useCallback(() => {
     if (splitPathRef.current) {
+      splitEditorRef.current?.flushChanges()
       setSplitPath(null)
       return
     }
@@ -5009,8 +5023,8 @@ export default function App({ startupBootstrap }: AppProps) {
                   {splitTab.content !== splitTab.savedContent && <i className="dirty-dot" title="Noch nicht gespeichert" />}
                   <button type="button" title="Notizen tauschen (Strg+Umschalt+\)" aria-label="Notizen tauschen" onClick={() => void swapSplitPanes()}><ArrowLeftRight size={14} /></button>
                   <button type="button" title={splitLayout.orientation === 'columns' ? 'Untereinander anordnen' : 'Nebeneinander anordnen'} aria-label={splitLayout.orientation === 'columns' ? 'Untereinander anordnen' : 'Nebeneinander anordnen'} onClick={toggleSplitOrientation}>{splitLayout.orientation === 'columns' ? <Rows2 size={14} /> : <Columns2 size={14} />}</button>
-                  <button type="button" title="Als einzige Notiz öffnen" aria-label="Als einzige Notiz öffnen" onClick={() => { const target = splitTab.path; setSplitPath(null); void openNote(target) }}><Maximize2 size={14} /></button>
-                  <button type="button" aria-label="Teilung schließen" title="Teilung schließen (Strg+\)" onClick={() => setSplitPath(null)}><X size={14} /></button>
+                  <button type="button" title="Als einzige Notiz öffnen" aria-label="Als einzige Notiz öffnen" onClick={() => { const target = splitTab.path; splitEditorRef.current?.flushChanges(); setSplitPath(null); void openNote(target) }}><Maximize2 size={14} /></button>
+                  <button type="button" aria-label="Teilung schließen" title="Teilung schließen (Strg+\)" onClick={() => { splitEditorRef.current?.flushChanges(); setSplitPath(null) }}><X size={14} /></button>
                 </header>
                 <PaperView
                   className={`unified-note-view paper-${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'blank' : normalizePaperStyle(notePaperByPath[splitTab.path] ?? settings.paperStyle)} ${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'is-pdf-note' : ''}`}
@@ -5031,6 +5045,7 @@ export default function App({ startupBootstrap }: AppProps) {
                     <div className="editor-pane">
                       <SafeBoundary name="Zweite Notiz" fallbackTitle="Die zweite Notiz ist abgestürzt">
                         <MarkdownEditor
+                          ref={splitEditorRef}
                           key={`split-${splitTab.path}`}
                           content={splitTab.content}
                           onChange={(content) => updateContentFor(splitTab.path, content)}
