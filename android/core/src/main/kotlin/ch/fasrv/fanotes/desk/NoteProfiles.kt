@@ -272,6 +272,20 @@ const val FIRST_RUN_INBOX = "Eingang ist immer dabei"
 const val FIRST_RUN_INBOX_DETAIL = "Der schnelle Sammelplatz für neue Notizen und Ideen."
 const val FIRST_RUN_PREPARED = "Sauber vorbereitet"
 const val FIRST_RUN_PREPARED_DETAIL = "jeder Ordner erhält eine eigene Farbe und erscheint direkt in der Seitenleiste."
+const val FIRST_RUN_PREVIEW_RADIUS_DP = 12
+const val FIRST_RUN_PREVIEW_HEADER_DP = 32
+const val FIRST_RUN_PREVIEW_SPLIT_DP = 760
+const val FIRST_RUN_PREVIEW_KICKER = "MATHEMATIK · ANALYSIS"
+const val FIRST_RUN_PREVIEW_HEADING = "Ableitungen"
+const val FIRST_RUN_PREVIEW_TYPED = "Die Änderungsrate beschreibt die Steigung."
+const val FIRST_RUN_PREVIEW_QUERY = "„Änderungsrate“"
+const val FIRST_RUN_PREVIEW_HITS = "1 Treffer"
+const val FIRST_RUN_PREVIEW_INK = "Handschrift"
+const val FIRST_RUN_PREVIEW_FOUND = "Sofort gefunden"
+const val FIRST_RUN_PREVIEW_LABEL = "Vorschau von FaNotes"
+val FIRST_RUN_PREVIEW_SUBJECTS = listOf("Mathematik", "Deutsch", "Französisch", "Physik", "Wirtschaft")
+
+fun firstRunPreviewColumns(widthDp: Int): Int = if (widthDp <= FIRST_RUN_PREVIEW_SPLIT_DP) 1 else 2
 
 val FIRST_RUN_BENEFITS = listOf("Lokal & privat", "Stift & Tastatur", "Markdown inklusive")
 

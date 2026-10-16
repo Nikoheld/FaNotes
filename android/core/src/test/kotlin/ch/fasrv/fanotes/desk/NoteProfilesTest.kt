@@ -53,4 +53,18 @@ class NoteProfilesTest {
         assertEquals(3, firstRunStep(start, 9).step)
         assertEquals("school", firstRunChooseProfile(start, "nope").profile)
     }
+
+    @Test
+    fun theWelcomePreviewUsesTheDesktopWindow() {
+        assertEquals(1, firstRunPreviewColumns(760))
+        assertEquals(2, firstRunPreviewColumns(761))
+        assertEquals(12, FIRST_RUN_PREVIEW_RADIUS_DP)
+        assertEquals(32, FIRST_RUN_PREVIEW_HEADER_DP)
+        assertEquals(listOf("Mathematik", "Deutsch", "Französisch", "Physik", "Wirtschaft"), FIRST_RUN_PREVIEW_SUBJECTS)
+        assertEquals("Ableitungen", FIRST_RUN_PREVIEW_HEADING)
+        assertEquals("Die Änderungsrate beschreibt die Steigung.", FIRST_RUN_PREVIEW_TYPED)
+        assertEquals("1 Treffer", FIRST_RUN_PREVIEW_HITS)
+        assertEquals("Handschrift", FIRST_RUN_PREVIEW_INK)
+        assertEquals("Vorschau von FaNotes", FIRST_RUN_PREVIEW_LABEL)
+    }
 }
