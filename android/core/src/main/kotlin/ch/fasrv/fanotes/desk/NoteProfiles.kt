@@ -303,6 +303,9 @@ const val FIRST_RUN_PREVIEW_RADIUS_DP = 12
 const val FIRST_RUN_PREVIEW_HEADER_DP = 32
 const val FIRST_RUN_PREVIEW_ASIDE_DP = 118
 const val FIRST_RUN_PREVIEW_ASIDE_NARROW_DP = 102
+const val FIRST_RUN_PREVIEW_ASIDE_PAD_BLOCK_DP = 17
+const val FIRST_RUN_PREVIEW_ASIDE_PAD_INLINE_DP = 10
+const val FIRST_RUN_PREVIEW_ASIDE_PAD_INLINE_NARROW_DP = 7
 const val FIRST_RUN_PREVIEW_SPLIT_DP = 760
 const val FIRST_RUN_MEDIUM_DP = 980
 const val FIRST_RUN_PREVIEW_KICKER = "MATHEMATIK · ANALYSIS"
@@ -332,6 +335,25 @@ fun firstRunPreviewColumns(widthDp: Int): Int = if (widthDp <= FIRST_RUN_PREVIEW
  */
 fun firstRunPreviewAsideDp(screenWidthDp: Int): Int =
     if (screenWidthDp > FIRST_RUN_MEDIUM_DP) FIRST_RUN_PREVIEW_ASIDE_DP else FIRST_RUN_PREVIEW_ASIDE_NARROW_DP
+
+/** Top, end, bottom, and start padding of the welcome-preview subject column. */
+data class FirstRunPreviewAsidePad(val top: Int, val end: Int, val bottom: Int, val start: Int)
+
+/**
+ * Padding of `.first-run-preview-body > aside`.
+ * Desktop is `padding: 17px 10px`. At `max-width: 980px`, `padding-inline: 7px` replaces the horizontal padding and leaves the 17px block padding.
+ * The 760px query does not set aside padding, so 7px inline and 17px block remain.
+ * [screenWidthDp] is the viewport, the same width as [firstRunPreviewAsideDp].
+ */
+fun firstRunPreviewAsidePad(screenWidthDp: Int): FirstRunPreviewAsidePad {
+    val inline = if (screenWidthDp > FIRST_RUN_MEDIUM_DP) FIRST_RUN_PREVIEW_ASIDE_PAD_INLINE_DP else FIRST_RUN_PREVIEW_ASIDE_PAD_INLINE_NARROW_DP
+    return FirstRunPreviewAsidePad(
+        top = FIRST_RUN_PREVIEW_ASIDE_PAD_BLOCK_DP,
+        end = inline,
+        bottom = FIRST_RUN_PREVIEW_ASIDE_PAD_BLOCK_DP,
+        start = inline,
+    )
+}
 
 /** Copy and panel weights from the desktop first-run grids above 980dp. */
 fun firstRunColumnWeights(step: Int): Pair<Float, Float> = firstRunColumnWeights(step, FIRST_RUN_MAX_DP)
