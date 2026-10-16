@@ -4938,9 +4938,30 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
                         end = asidePad.end.dp,
                         bottom = asidePad.bottom.dp,
                     ),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_GAP_DP.dp),
                 ) {
-                    Text("Meine Fächer", fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_SP.sp, fontWeight = FontWeight.SemiBold)
+                    Row(
+                        Modifier.padding(
+                            start = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_MARGIN_INLINE_DP.dp,
+                            end = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_MARGIN_INLINE_DP.dp,
+                            bottom = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_MARGIN_BOTTOM_DP.dp,
+                        ),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_ICON_GAP_DP.dp),
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.MenuBook,
+                            contentDescription = null,
+                            modifier = Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_ICON_DP.dp),
+                            tint = ink.soft,
+                        )
+                        Text(
+                            ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SUBJECTS_HEADING,
+                            fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_SP.sp,
+                            fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_WEIGHT),
+                            color = ink.soft,
+                        )
+                    }
                     ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SUBJECTS.forEachIndexed { index, subject ->
                         Row(
                             Modifier
@@ -5023,15 +5044,19 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
                             .background(Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_RULE_ARGB)),
                     )
                     Canvas(Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_HEIGHT_DP.dp).semantics { contentDescription = "Handschriftliche Formel" }) {
+                        val meet = ch.fasrv.fanotes.desk.previewInkMeet(
+                            size.width,
+                            size.height,
+                            ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_VIEW_WIDTH.toFloat(),
+                            ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_VIEW_HEIGHT.toFloat(),
+                        ) ?: return@Canvas
                         val stroke = androidx.compose.ui.graphics.drawscope.Stroke(
-                            width = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_WIDTH_DP.dp.toPx(),
+                            width = ch.fasrv.fanotes.desk.previewInkStrokePx(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_WIDTH_DP, meet.scale),
                             cap = androidx.compose.ui.graphics.StrokeCap.Round,
                             join = androidx.compose.ui.graphics.StrokeJoin.Round,
                         )
-                        val sx = size.width / ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_VIEW_WIDTH
-                        val sy = size.height / ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_HEIGHT_DP
-                        fun mx(x: Float) = x * sx
-                        fun my(y: Float) = y * sy
+                        fun mx(x: Float) = meet.offsetX + x * meet.scale
+                        fun my(y: Float) = meet.offsetY + y * meet.scale
                         val path = androidx.compose.ui.graphics.Path().apply {
                             moveTo(mx(15f), my(58f))
                             cubicTo(mx(29f), my(50f), mx(33f), my(32f), mx(39f), my(26f))
@@ -5056,6 +5081,7 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
                     }
                     Row(
                         Modifier
+                            .fillMaxWidth()
                             .height(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_HEIGHT_DP.dp)
                             .shadow(
                                 elevation = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_SHADOW_Y_DP.dp,
@@ -5299,15 +5325,19 @@ private fun WritingPreview(modifier: Modifier, accent: Color) {
                         .height(inkHeight)
                         .semantics { contentDescription = "Handschriftliche Integralrechnung" },
                 ) {
+                    val meet = ch.fasrv.fanotes.desk.previewInkMeet(
+                        size.width,
+                        size.height,
+                        ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_INK_VIEW_WIDTH.toFloat(),
+                        ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_INK_VIEW_HEIGHT.toFloat(),
+                    ) ?: return@Canvas
                     val stroke = androidx.compose.ui.graphics.drawscope.Stroke(
-                        width = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_INK_WIDTH_DP.dp.toPx(),
+                        width = ch.fasrv.fanotes.desk.previewInkStrokePx(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_INK_WIDTH_DP, meet.scale),
                         cap = androidx.compose.ui.graphics.StrokeCap.Round,
                         join = androidx.compose.ui.graphics.StrokeJoin.Round,
                     )
-                    val sx = size.width / ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_INK_VIEW_WIDTH
-                    val sy = size.height / ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_INK_VIEW_HEIGHT
-                    fun mx(x: Float) = x * sx
-                    fun my(y: Float) = y * sy
+                    fun mx(x: Float) = meet.offsetX + x * meet.scale
+                    fun my(y: Float) = meet.offsetY + y * meet.scale
                     val integral = androidx.compose.ui.graphics.Path().apply {
                         moveTo(mx(36f), my(96f))
                         cubicTo(mx(51f), my(77f), mx(46f), my(38f), mx(65f), my(28f))
