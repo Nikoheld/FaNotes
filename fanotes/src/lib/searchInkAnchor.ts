@@ -36,6 +36,11 @@ export const inkAnchorForQuery = (transcript: string, query: string): InkSearchA
   return { y: index / (parsed.length - 1) }
 }
 
+const TRANSCRIPT_POSITION = /^[ \t]*\d+(?:\.\d+)?\t/gmu
+
+/** Drop the page-position prefix so a search hit shows the written words. */
+export const readableTranscript = (transcript: string) => transcript.replace(TRANSCRIPT_POSITION, '')
+
 /**
  * A hit in the note text shows that text. A hit only in the handwriting
  * transcript shows those words. The filename line is for a path match.
@@ -57,6 +62,9 @@ export const noteSearchExcerpt = ({
 }): string => {
   const contentIndex = content.toLocaleLowerCase('de-DE').indexOf(needle)
   if (contentIndex >= 0) return excerpt(content, contentIndex, queryLength)
+  const readable = readableTranscript(transcript)
+  const readableIndex = readable.toLocaleLowerCase('de-DE').indexOf(needle)
+  if (readableIndex >= 0) return excerpt(readable, readableIndex, queryLength)
   const transcriptIndex = transcript.toLocaleLowerCase('de-DE').indexOf(needle)
   if (transcriptIndex >= 0) return excerpt(transcript, transcriptIndex, queryLength)
   return `Dateiname · ${relativePath}`

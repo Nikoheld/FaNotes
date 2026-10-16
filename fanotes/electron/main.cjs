@@ -3464,7 +3464,7 @@ function registerIpcHandlers() {
   })
 
   handle(IPC.search, async (_event, rawQuery) => {
-    const { inkAnchorForQuery, noteSearchExcerpt } = require('./search-ink.cjs')
+    const { inkAnchorForQuery, noteSearchExcerpt, readableTranscript } = require('./search-ink.cjs')
     await ensureBootstrap()
     if (typeof rawQuery !== 'string') throw new Error('Ungültige Suchanfrage.')
     const query = rawQuery.trim().slice(0, 500)
@@ -3572,9 +3572,12 @@ function registerIpcHandlers() {
           ? document.searchTranscript.slice(0, 500_000)
           : ''
         const searchable = `${metadata.title}\n${transcript}`
+        const readable = `${metadata.title}\n${readableTranscript(transcript)}`
         const haystack = searchable.toLocaleLowerCase('de-DE')
         const firstIndex = haystack.indexOf(needle)
         if (firstIndex < 0) continue
+        const excerptSource = readable.toLocaleLowerCase('de-DE').includes(needle) ? readable : searchable
+        const excerptIndex = excerptSource.toLocaleLowerCase('de-DE').indexOf(needle)
         let matches = 0
         let cursor = 0
         while (cursor < haystack.length) {
@@ -3588,7 +3591,7 @@ function registerIpcHandlers() {
         hits.push({
           relativePath: metadata.dataRelativePath,
           title: metadata.title,
-          excerpt: createExcerpt(searchable, firstIndex, query.length),
+          excerpt: createExcerpt(excerptSource, excerptIndex, query.length),
           matches,
           kind: 'drawing',
           drawingId: id,

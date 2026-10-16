@@ -1303,10 +1303,15 @@ impl Host {
             }
             let matches = count_matches(&haystack, &needle);
             let content_index = vault::locale_lower_de(&content).find(&needle);
+            let readable = readable_transcript(&transcript);
+            let readable_index = vault::locale_lower_de(&readable).find(&needle);
             let transcript_index = vault::locale_lower_de(&transcript).find(&needle);
             let excerpt = if let Some(index) = content_index {
                 let (start, _) = original_match_span(&content, &needle, index);
                 excerpt(&content, start, vault::utf16_len(&query))
+            } else if let Some(index) = readable_index {
+                let (start, _) = original_match_span(&readable, &needle, index);
+                excerpt(&readable, start, vault::utf16_len(&query))
             } else if let Some(index) = transcript_index {
                 let (start, _) = original_match_span(&transcript, &needle, index);
                 excerpt(&transcript, start, vault::utf16_len(&query))
@@ -3877,15 +3882,27 @@ fn search_drawings(
                 .unwrap_or(""),
         );
         let searchable = format!("{title}\n{transcript}");
+        let readable = format!("{title}\n{}", readable_transcript(&transcript));
         let haystack = vault::locale_lower_de(&searchable);
         let Some(first) = haystack.find(needle) else {
             continue;
         };
-        let (start, _) = original_match_span(&searchable, needle, first);
+        let excerpt_source = if vault::locale_lower_de(&readable).contains(needle) {
+            readable
+        } else {
+            searchable
+        };
+        let (start, _) = original_match_span(
+            &excerpt_source,
+            needle,
+            vault::locale_lower_de(&excerpt_source)
+                .find(needle)
+                .unwrap_or(first),
+        );
         let mut hit = json!({
             "relativePath": format!(".fanotes/assets/{id}.json"),
             "title": title,
-            "excerpt": excerpt(&searchable, start, vault::utf16_len(query)),
+            "excerpt": excerpt(&excerpt_source, start, vault::utf16_len(query)),
             "matches": count_matches(&haystack, needle),
             "kind": "drawing",
             "drawingId": id,
@@ -3973,6 +3990,24 @@ fn collect_search_files(
         });
     }
     Ok(())
+}
+
+/// Drop `0.4200\t` so a handwriting hit shows the written words.
+fn readable_transcript(transcript: &str) -> String {
+    let mut out = String::with_capacity(transcript.len());
+    for line in transcript.split_inclusive('\n') {
+        let (body, newline) = match line.split_once('\n') {
+            Some((body, _)) => (body.trim_end_matches('\r'), "\n"),
+            None => (line, ""),
+        };
+        let shown = match body.split_once('\t') {
+            Some((head, rest)) if head.trim().parse::<f64>().is_ok() => rest,
+            _ => body,
+        };
+        out.push_str(shown);
+        out.push_str(newline);
+    }
+    out
 }
 
 fn bounded_transcript(value: &str) -> String {

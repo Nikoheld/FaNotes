@@ -81,6 +81,10 @@ fn search_returns_title_excerpt_and_handwriting_anchor() {
         .as_str()
         .unwrap()
         .starts_with("Dateiname"));
+    assert!(!ink_hits[0]["excerpt"]
+        .as_str()
+        .unwrap()
+        .contains("0.42"));
 
     std::fs::write(
         host.vault.as_ref().unwrap().join("Bio/Blatt.famd"),

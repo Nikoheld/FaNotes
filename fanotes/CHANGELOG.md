@@ -9,7 +9,7 @@
 - **Terminerinnerung.** Der Hinweis im Kalender folgt der Sprache der Oberfläche und nennt weitere Termine, die gleich beginnen.
 - **Karteikarten.** Nochmal legt die Karte hinter die anderen fälligen Karten, statt sie sofort wieder zu zeigen. Leertaste zeigt die Antwort, 1 bis 4 bewertet, und die Karte folgt der Sprache der Oberfläche. Ein Tag Abstand bleibt der nächste Kalendertag, auch wenn die Uhr in dieser Nacht umgestellt wird.
 - **Ausgefallene Termine.** Eine wiederkehrende Kalenderdatei behält die ausgelassenen Tage. Ein erneuter Import ergänzt sie, ohne einen lokal übersprungenen Tag zurückzuholen.
-- **Suche.** Ein Treffer, der nur in der Handschrift steht, zeigt diese Wörter. Der Hinweis „Dateiname“ bleibt dem Treffer im Dateinamen vorbehalten.
+- **Suche.** Ein Treffer, der nur in der Handschrift steht, zeigt diese Wörter. Der Hinweis „Dateiname“ bleibt dem Treffer im Dateinamen vorbehalten. Die Seitenzahl vor der Zeile bleibt unsichtbar.
 - **Rückverweise.** `[[Mathe/Algebra]]` und `[[Algebra.md]]` zeigen auf diese Notiz. Ein Pfad in einen anderen Ordner mit demselben Titel zählt nicht mit.
 - **Android-Tablet.** Der Text liegt auf dem Papier, die Leiste klappt beim Schreiben ein, und der Radierer folgt der Spitze.
 - **Sync.** Der Abgleich zeigt den Fortschritt, und ein zweiter Start geht nicht verloren.

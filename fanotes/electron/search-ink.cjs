@@ -23,12 +23,19 @@ const inkAnchorForQuery = (transcript, query) => {
   return { y: index / (parsed.length - 1) }
 }
 
+const TRANSCRIPT_POSITION = /^[ \t]*\d+(?:\.\d+)?\t/gmu
+
+const readableTranscript = (transcript) => String(transcript || '').replace(TRANSCRIPT_POSITION, '')
+
 const noteSearchExcerpt = ({ relativePath, content, transcript, needle, queryLength, excerpt }) => {
   const contentIndex = String(content || '').toLocaleLowerCase('de-DE').indexOf(needle)
   if (contentIndex >= 0) return excerpt(content, contentIndex, queryLength)
+  const readable = readableTranscript(transcript)
+  const readableIndex = readable.toLocaleLowerCase('de-DE').indexOf(needle)
+  if (readableIndex >= 0) return excerpt(readable, readableIndex, queryLength)
   const transcriptIndex = String(transcript || '').toLocaleLowerCase('de-DE').indexOf(needle)
   if (transcriptIndex >= 0) return excerpt(transcript, transcriptIndex, queryLength)
   return `Dateiname · ${relativePath}`
 }
 
-module.exports = { inkAnchorForQuery, noteSearchExcerpt }
+module.exports = { inkAnchorForQuery, noteSearchExcerpt, readableTranscript }
