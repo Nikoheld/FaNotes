@@ -653,6 +653,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private var userOpen = true
     private var penDown = false
     private var dark = true
+    private var themeId = ""
+    private var systemDark = true
 
     var onTool: (InkTool) -> Unit = {}
     var onSync: () -> Unit = {}
@@ -1118,12 +1120,16 @@ class NotePageView(context: Context) : FrameLayout(context) {
         canUndo: Boolean,
         canRedo: Boolean,
         darkChrome: Boolean,
+        theme: String = "",
+        systemDark: Boolean = darkChrome,
         folded: Set<Int> = emptySet(),
         metrics: ch.fasrv.fanotes.desk.EditorMetrics = ch.fasrv.fanotes.desk.editorMetrics(emptyMap()),
     ) {
         ink.onPdfPage = onPdfPage
-        if (dark != darkChrome) {
+        if (dark != darkChrome || themeId != theme || this.systemDark != systemDark) {
             dark = darkChrome
+            themeId = theme
+            this.systemDark = systemDark
             applyChromeColors()
         }
         ink.inkTool = tool
@@ -1172,7 +1178,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
         if (textMode != text) setTextMode(text)
         syncPill.text = if (syncBusy && !syncLabel.contains('/')) "Startet…" else syncLabel
-        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|${ink.placingSymbol}|${ink.placingSection}|${ink.symbolSize}|${ink.symbolRotation}|${ink.symbolOpacity}|${ink.symbolCategory}|$paper|$fingerDraws|$text|$canUndo|$canRedo|$dark|$followPen"
+        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|${ink.placingSymbol}|${ink.placingSection}|${ink.symbolSize}|${ink.symbolRotation}|${ink.symbolOpacity}|${ink.symbolCategory}|$paper|$fingerDraws|$text|$canUndo|$canRedo|$dark|$themeId|$systemDark|$followPen"
         if (signature != toolSignature) {
             toolSignature = signature
             rebuildTools(tool, style, paper, fingerDraws, canUndo, canRedo)
@@ -1501,7 +1507,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private fun segment(tool: InkTool): LinearLayout {
         val row = LinearLayout(context)
         row.orientation = LinearLayout.HORIZONTAL
-        row.background = rounded(ch.fasrv.fanotes.desk.modeSwitchTrackColor(dark), dp(ch.fasrv.fanotes.desk.MODE_SWITCH_RADIUS_DP))
+        row.background = rounded(ch.fasrv.fanotes.desk.modeSwitchTrackColor(themeId, systemDark), dp(ch.fasrv.fanotes.desk.MODE_SWITCH_RADIUS_DP))
         row.addView(seg("Stift", tool == InkTool.PEN) { onTool(InkTool.PEN) })
         row.addView(seg("Radierer", tool == InkTool.ERASER) { onTool(InkTool.ERASER) })
         row.addView(seg("Auswahl", tool == InkTool.SELECT) { onTool(InkTool.SELECT) })
@@ -1515,15 +1521,18 @@ class NotePageView(context: Context) : FrameLayout(context) {
         view.gravity = Gravity.CENTER
         view.setPadding(dp(10), 0, dp(10), 0)
         view.minHeight = dp(ch.fasrv.fanotes.desk.MODE_BUTTON_DP)
-        view.setTextColor(ch.fasrv.fanotes.desk.modeSwitchInk(dark, selected))
+        view.setTextColor(ch.fasrv.fanotes.desk.modeSwitchInk(themeId, systemDark, selected))
         view.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, 650, false)
         if (selected) {
             view.background = rounded(
-                ch.fasrv.fanotes.desk.modeSwitchActiveColor(dark),
+                ch.fasrv.fanotes.desk.modeSwitchActiveColor(themeId, systemDark),
                 dp(ch.fasrv.fanotes.desk.MODE_BUTTON_RADIUS_DP),
-                ch.fasrv.fanotes.desk.modeSwitchRing(ink.accentColor),
-                dp(1),
             )
+            view.elevation = dp(ch.fasrv.fanotes.desk.MODE_ACTIVE_SHADOW_BLUR_DP).toFloat()
+            view.outlineAmbientShadowColor = ch.fasrv.fanotes.desk.modeSwitchShadowColor()
+            view.outlineSpotShadowColor = ch.fasrv.fanotes.desk.modeSwitchShadowColor()
+        } else {
+            view.elevation = 0f
         }
         view.setOnClickListener { click() }
         return view
@@ -1549,7 +1558,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         view.background = rounded(android.graphics.Color.TRANSPARENT, dp(ch.fasrv.fanotes.desk.FORMAT_BUTTON_RADIUS_DP))
         view.isEnabled = enabled
         view.alpha = if (enabled) 1f else ch.fasrv.fanotes.desk.FORMAT_DISABLED_ALPHA
-        view.setTextColor(ch.fasrv.fanotes.desk.formatChipInk(dark))
+        view.setTextColor(ch.fasrv.fanotes.desk.formatChipInk(themeId, systemDark))
         view.setOnClickListener { if (enabled) click() }
         val params = LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, dp(ch.fasrv.fanotes.desk.FORMAT_BUTTON_DP))
         params.marginStart = dp(ch.fasrv.fanotes.desk.FORMAT_BUTTON_GAP_DP)
@@ -1592,7 +1601,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     }
 
     private fun applyChromeColors() {
-        val bg = ch.fasrv.fanotes.desk.editorToolbarColor(dark)
+        val bg = ch.fasrv.fanotes.desk.editorToolbarColor(themeId, systemDark)
         toolbarRule.setBackgroundColor(ch.fasrv.fanotes.desk.editorToolbarRule(dark))
         val fg = if (dark) 0xFFEDEDEC.toInt() else 0xFF252630.toInt()
         toolbar.setBackgroundColor(bg)
