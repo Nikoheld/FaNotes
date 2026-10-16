@@ -56,6 +56,9 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private val editor = object : EditText(context) {
         private var detailsDownX = 0f
         private var detailsDownY = 0f
+        private var touchX = 0f
+        private var touchY = 0f
+        val spelling = SpellingController(this)
         private val linkPointer = PreviewLinkPointer()
 
         fun bindLinkPointer() {
@@ -141,17 +144,29 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 )
             }
             super.onDraw(canvas)
+            spelling.draw(canvas)
         }
 
         override fun onSelectionChanged(selStart: Int, selEnd: Int) {
             super.onSelectionChanged(selStart, selEnd)
             trackSelection(selStart, selEnd)
+            spelling.schedule(220)
             invalidate()
             if (previewReady && !paintingPreview) paintLivePreview()
             tags?.onCaretMoved()
         }
 
+        override fun performLongClick(): Boolean {
+            if (spelling.showAt(getOffsetForPosition(touchX, touchY))) return true
+            return super.performLongClick()
+        }
+
         override fun onTouchEvent(event: MotionEvent): Boolean {
+            touchX = event.x
+            touchY = event.y
+            if (event.actionMasked == MotionEvent.ACTION_DOWN && event.buttonState and MotionEvent.BUTTON_SECONDARY != 0) {
+                if (spelling.showAt(getOffsetForPosition(event.x, event.y))) return true
+            }
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     detailsDownX = event.x
@@ -195,6 +210,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
 
         override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+            if (event.action == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_PERIOD &&
+                (event.isCtrlPressed || event.isMetaPressed) && !event.isAltPressed
+            ) {
+                if (spelling.showAtCursor()) return true
+            }
             if (keyCode == KeyEvent.KEYCODE_ESCAPE && !event.isCtrlPressed && !event.isAltPressed &&
                 !event.isMetaPressed && !event.isShiftPressed
             ) {
@@ -722,6 +742,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onClear: () -> Unit = {}
     var onFinger: (Boolean) -> Unit = {}
     var onMath: () -> Unit = {}
+    var onTextHand: () -> Unit = {}
     var onWorksheetBoxText: (String, String) -> Unit = { _, _ -> }
     var onWorksheetBoxRemove: (String) -> Unit = {}
     var onWorksheetBoxClosed: () -> Unit = {}
@@ -803,6 +824,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             }
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(s: android.text.Editable?) {
+                editor.spelling.schedule(360)
                 if (lineNumbers.visibility == VISIBLE || foldMarks.visibility == VISIBLE) placeEditor()
                 if (writing) {
                     closedBrackets.clear()
@@ -1330,6 +1352,20 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private var widthBar: SeekBar? = null
     private var widthFromUser = false
 
+    fun configureSpelling(
+        enabled: Boolean,
+        wave: Int,
+        ink: Int,
+        paper: Int,
+        epoch: Int,
+        accepted: () -> Set<String>,
+        onLanguage: (String) -> Unit,
+        onLearn: (String) -> Unit,
+        onIgnore: (String) -> Unit,
+    ) {
+        editor.spelling.configure(enabled, wave, ink, paper, epoch, accepted, onLanguage, onLearn, onIgnore)
+    }
+
     fun attachSession(session: ch.fasrv.fanotes.ink.InkSession) {
         ink.session = session
     }
@@ -1599,6 +1635,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             ink.drawCompassCircle()
         })
         tools.addView(chip("Mathe") { onMath() })
+        tools.addView(chip("Text → Handschrift") { onTextHand() })
         val textChip = chip(if (ink.placingText) "Auf Seite platzieren" else "Textfeld") {}
         val mark = chip(if (ink.placingHighlight) "Markieren ●" else "Markieren") {}
         ink.onWorksheetTool = { text, highlight ->

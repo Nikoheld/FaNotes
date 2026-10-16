@@ -15,6 +15,23 @@ import kotlin.math.min
 
 private val WALL = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")
 
+/** A short month clamps that one instance. The next month uses the original day again. */
+fun calendarMonthShift(origin: LocalDate, months: Long): LocalDate {
+    val shifted = origin.withDayOfMonth(1).plusMonths(months)
+    return shifted.withDayOfMonth(min(origin.dayOfMonth, shifted.lengthOfMonth()))
+}
+
+/** The nth repeat, counted from the original start rather than the previous clamped day. */
+fun calendarInstanceStart(origin: LocalDateTime, step: Int, recurrence: String): LocalDateTime {
+    val date = when (recurrence) {
+        "weekly" -> origin.toLocalDate().plusDays(7L * step)
+        "monthly" -> calendarMonthShift(origin.toLocalDate(), step.toLong())
+        "yearly" -> calendarMonthShift(origin.toLocalDate(), 12L * step)
+        else -> origin.toLocalDate().plusDays(step.toLong())
+    }
+    return date.atTime(origin.toLocalTime())
+}
+
 fun deleteCalendarEvent(document: CalendarDocument, eventId: String): CalendarDocument =
     document.copy(events = document.events.filter { it.id != eventId })
 
@@ -43,13 +60,23 @@ fun shiftCalendarEvent(document: CalendarDocument, eventId: String, days: Long):
 
 /**
  * Drop one day of an event. A single event is deleted. A later repeat is
- * recorded as an exception. The first day of a series moves to the next repeat.
+ * recorded as an exception. The first day of a daily or weekly series moves
+ * to the next repeat. A monthly or yearly series keeps its original day and
+ * records that first day as an exception, so a short month does not stick.
  */
 fun skipCalendarOccurrence(document: CalendarDocument, eventId: String, day: LocalDate): CalendarDocument {
     val event = document.events.find { it.id == eventId } ?: return document
     val key = day.toString()
     if (event.recurrence == "none" || event.recurrence.isBlank()) return deleteCalendarEvent(document, event.id)
     if (event.start.take(10) == key) {
+        if (event.recurrence == "monthly" || event.recurrence == "yearly") {
+            if (key in event.exceptionDates) return document
+            return document.copy(
+                events = document.events.map { item ->
+                    if (item.id != event.id) item else item.copy(exceptionDates = item.exceptionDates + key)
+                },
+            )
+        }
         return document.copy(
             events = document.events.map { item ->
                 if (item.id != event.id) item else item.copy(
@@ -389,6 +416,7 @@ private fun occurrenceSpans(document: CalendarDocument, rangeStart: LocalDateTim
         val until = event.recurrenceUntil?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
         val untilEnd = until?.plusDays(1)?.atStartOfDay()
         val skipped = event.exceptionDates.toSet()
+        var step = 0
         var cursor = bounds.first
         var guard = 0
         while (cursor.isBefore(rangeEnd) && guard < 500) {
@@ -399,12 +427,8 @@ private fun occurrenceSpans(document: CalendarDocument, rangeStart: LocalDateTim
                 spans += CalendarSpan("${event.id}@$dayKey", event, cursor, end, cursor, end)
             }
             if (event.recurrence == "none" || event.recurrence.isBlank()) break
-            val next = when (event.recurrence) {
-                "weekly" -> cursor.plusDays(7)
-                "monthly" -> cursor.plusMonths(1)
-                "yearly" -> cursor.plusYears(1)
-                else -> cursor.plusDays(1)
-            }
+            step += 1
+            val next = calendarInstanceStart(bounds.first, step, event.recurrence)
             if (!next.isAfter(cursor)) break
             cursor = next
             guard += 1

@@ -4701,6 +4701,70 @@ mod local_zone_tests {
     }
 
     #[test]
+    fn a_dot_after_minutes_fills_seconds() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `16:00.05` is 16:00:50. A fraction after the seconds stays
+        // milliseconds, and `.5` is 500 seconds, so that date is empty.
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00.05"),
+            Some(1_791_921_650_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00.005"),
+            Some(1_791_921_605_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00.059"),
+            Some(1_791_921_659_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00.00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 4:5.05"),
+            Some(1_791_878_750_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00:00.05"),
+            Some(1_791_921_600_050)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00.05Z"),
+            Some(1_791_907_250_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00.05 EST"),
+            Some(1_791_925_250_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00.05 +5"),
+            Some(1_791_889_250_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00.005 +5"),
+            Some(1_791_889_205_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:5.05 +5"),
+            Some(1_791_846_350_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00:00.05 +5"),
+            Some(1_791_889_200_050)
+        );
+        assert_eq!(unix_millis_from_iso("10/13/2026 16:00.5"), None);
+        assert_eq!(unix_millis_from_iso("10/13/2026 16:00.60"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00.5 +5"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00.60 +5"), None);
+    }
+
+    #[test]
     fn a_clock_before_a_slash_date_stays_on_that_day() {
         let _lock = TRASH_CLOCK
             .lock()
@@ -5693,11 +5757,47 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00:60"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 4:00:60 PM"), None);
         assert_eq!(unix_millis_from_iso("10/13/2026 16:00:60"), None);
+        // `10/13 16:00:70` has no year yet, so 70 is 1970. 59 stays a second.
+        assert_eq!(
+            unix_millis_from_iso("10/13 16:00:70"),
+            Some(24_696_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13 16:70"),
+            Some(24_696_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13 16:00:99"),
+            Some(939_844_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13 16:00:59"),
+            Some(1_003_003_259_000)
+        );
         assert_eq!(unix_millis_from_iso("2026/10/13 16:00:60"), None);
         assert_eq!(unix_millis_from_iso("Oct 13 2026 16:60:00"), None);
         assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00:60 61"), None);
         assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00:60 16 17"), None);
         assert_eq!(unix_millis_from_iso("Oct 13 16:00:2026 61 62"), None);
+        // `70` is 1970. `10` fills the open second and `-2026` is UTC−20:26.
+        // `99` is 1999, and `-3` replaces `-2`. A finished second stays a date.
+        assert_eq!(
+            unix_millis_from_iso("16:00:70 10-13-2026"),
+            Some(131_170_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:70 10-13-2026"),
+            Some(131_760_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:00:99 1-2-3"),
+            Some(915_217_201_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:00:30 1-2-3"),
+            Some(1_041_541_230_000)
+        );
+        assert_eq!(unix_millis_from_iso("24:00:60 10-13-2026"), None);
         assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00:60.500"), None);
         assert_eq!(unix_millis_from_iso("Oct 13 2026 16 16:00:60"), None);
         assert_eq!(unix_millis_from_iso("Oct 2026 16:00:60"), None);
@@ -5962,6 +6062,41 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("foo5 Oct 13 2026"), None);
         assert_eq!(unix_millis_from_iso("AM5 Oct 13 2026"), None);
         assert_eq!(unix_millis_from_iso("Oct 13 2026 4:00PM5"), None);
+        // Node 22. A month or zone between numbers is its own word, and the
+        // clock stays on the colon. A dot before the zone is only a separator.
+        // `16:00EST` and `2026Oct16:00.5` still finish the field and stay empty.
+        assert_eq!(unix_millis_from_iso("2026Oct16:00"), Some(1_790_884_800_000));
+        assert_eq!(unix_millis_from_iso("2026EST16:00"), Some(1_767_301_200_000));
+        assert_eq!(unix_millis_from_iso("2026GMT16:00"), Some(1_767_283_200_000));
+        assert_eq!(unix_millis_from_iso("2026Z16:00"), Some(1_767_283_200_000));
+        assert_eq!(unix_millis_from_iso("2026UTC16:00"), Some(1_767_283_200_000));
+        assert_eq!(unix_millis_from_iso("2026.EST"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("2026.Z"), Some(1_767_225_600_000));
+        assert_eq!(unix_millis_from_iso("10.EST"), Some(1_001_912_400_000));
+        assert_eq!(unix_millis_from_iso("10.Z"), Some(1_001_894_400_000));
+        assert_eq!(unix_millis_from_iso("10Oct16:00"), Some(1_002_744_000_000));
+        assert_eq!(unix_millis_from_iso("13Oct16:00"), Some(1_003_003_200_000));
+        assert_eq!(unix_millis_from_iso("10EST16:00"), Some(1_001_970_000_000));
+        assert_eq!(unix_millis_from_iso("Oct16:002026"), Some(1_790_884_800_000));
+        assert_eq!(unix_millis_from_iso("16:002026EST"), Some(1_767_301_200_000));
+        assert_eq!(unix_millis_from_iso("16:EST2026"), Some(1_767_301_200_000));
+        assert_eq!(unix_millis_from_iso("16:Z2026"), Some(1_767_283_200_000));
+        assert_eq!(unix_millis_from_iso("2026.EST16:00"), Some(1_767_301_200_000));
+        assert_eq!(unix_millis_from_iso("13.Oct16:00"), Some(1_003_003_200_000));
+        assert_eq!(unix_millis_from_iso("2026/EST"), Some(1_767_243_600_000));
+        assert_eq!(
+            unix_millis_from_iso("2026Oct16:00:00.5"),
+            Some(1_790_884_800_500)
+        );
+        assert_eq!(unix_millis_from_iso("2026Oct16::30"), Some(1_790_884_830_000));
+        assert_eq!(
+            unix_millis_from_iso("2026Oct16:00:00.5EST"),
+            Some(1_790_888_400_500)
+        );
+        assert_eq!(unix_millis_from_iso("2026Oct16:00.5"), None);
+        assert_eq!(unix_millis_from_iso("2026Oct16::30EST"), None);
+        assert_eq!(unix_millis_from_iso("2026Oct4:00PM"), None);
+        assert_eq!(unix_millis_from_iso("16:00EST"), None);
     }
 
     #[test]
@@ -9851,6 +9986,194 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso(" +002026-10-13T16:00:00Z GMT+5"), None);
         assert_eq!(unix_millis_from_iso(" 2026-10-13T16:00:00Z"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13T16:00:00Z "), None);
+    }
+
+    #[test]
+    fn a_line_separator_inside_a_month_is_not_a_year() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // U+2028 and U+2029 are word characters. Two of them around the
+        // day are a garbage word after a number, so the date is empty.
+        // One of them stays inside the month word.
+        assert_eq!(unix_millis_from_iso("Oct\u{2028}13\u{2028}2026"), None);
+        assert_eq!(unix_millis_from_iso("Oct\u{2029}13\u{2029}2026"), None);
+        assert_eq!(unix_millis_from_iso("\u{2028}October13 2026"), None);
+        assert_eq!(
+            unix_millis_from_iso("Oct\u{2028}13 2026"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct\u{2029}13 2026"),
+            Some(1_791_864_000_000)
+        );
+    }
+
+    #[test]
+    fn a_colon_takes_the_last_short_hyphen_field_as_the_hour() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `2026-1-2:16:00` is 02:16 on 1 January. The colon attaches to 2.
+        // A strict `2026-10-13:16:00` keeps 13 as the day.
+        assert_eq!(
+            unix_millis_from_iso("2026-1-2:16:00"),
+            Some(1_767_251_760_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026-1-2:"), Some(1_767_250_800_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-1-2:4:00 PM"),
+            Some(1_767_294_240_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-1-2:16:00.5"),
+            Some(1_767_251_760_500)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-7-2:16:00 EST"),
+            Some(1_782_890_160_000)
+        );
+        assert_eq!(unix_millis_from_iso("99-1-2:16:00"), Some(915_174_960_000));
+        assert_eq!(
+            unix_millis_from_iso("+002026-1-2:16:00"),
+            Some(1_767_251_760_000)
+        );
+        // Year -1 is before 1970, so the millisecond value does not fit.
+        assert_eq!(unix_millis_from_iso("-000001-1-2:16:00"), None);
+        assert_eq!(
+            unix_millis_from_iso("2026-1-2-3:16:00"),
+            Some(1_767_341_760_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-1-2"),
+            Some(1_767_330_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13:16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026-10-13-16:00"), None);
+        assert_eq!(unix_millis_from_iso("+002026-10-13-16:00"), None);
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 :5-04:00"),
+            Some(1_791_878_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00:00.5 EST"),
+            Some(1_791_925_200_500)
+        );
+    }
+
+    #[test]
+    fn a_fullwidth_digit_prefix_is_a_word() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Fullwidth digits are letters to `Date.parse`. `２０２６` is a
+        // garbage word, then `-` is skipped, and `10-13` is 13 October 2001.
+        assert_eq!(
+            unix_millis_from_iso("２０２６-10-13"),
+            Some(1_002_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("２０２６-10-13-"),
+            Some(1_002_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("２-10-13"),
+            Some(1_002_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("hello-10-13"),
+            Some(1_002_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Monday-1-"),
+            Some(978_325_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("２026-10-13"), None);
+        assert_eq!(unix_millis_from_iso("10-hello-13"), None);
+    }
+
+    #[test]
+    fn a_sign_after_a_slash_field_is_empty() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // A later sign is not the year. The first field may still be signed.
+        assert_eq!(unix_millis_from_iso("01/01/+002026"), None);
+        assert_eq!(unix_millis_from_iso("01/01/-000000"), None);
+        assert_eq!(unix_millis_from_iso("10/13/+2026"), None);
+        assert_eq!(unix_millis_from_iso("2026/+10/13"), None);
+        assert_eq!(unix_millis_from_iso("1/1/+002026"), None);
+        assert_eq!(unix_millis_from_iso("10/13/-5"), None);
+        assert_eq!(
+            unix_millis_from_iso("+002026/10/13"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("+2026/10/13"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("10/13/2026"), Some(1_791_864_000_000));
+    }
+
+    #[test]
+    fn a_negative_expanded_year_keeps_slash_fields() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Year -1 does not fit in `u64`. An impossible day is empty too.
+        assert_eq!(unix_millis_from_iso("-000001/01/01"), None);
+        assert_eq!(unix_millis_from_iso("-000001/10/13"), None);
+        assert_eq!(unix_millis_from_iso("-000001/02/31"), None);
+        assert_eq!(unix_millis_from_iso("-000001-2-31"), None);
+        assert_eq!(unix_millis_from_iso("-000001/01/32"), None);
+        assert_eq!(unix_millis_from_iso("-000001-01-32"), None);
+        assert_eq!(unix_millis_from_iso("-000001/13/1"), None);
+        assert_eq!(unix_millis_from_iso("-000001-01-00"), None);
+        assert_eq!(unix_millis_from_iso("-000001-10-13-"), None);
+        assert_eq!(unix_millis_from_iso("-271821/10/01"), None);
+        assert_eq!(unix_millis_from_iso("-000001-01-01"), None);
+    }
+
+    #[test]
+    fn a_trailing_dot_keeps_a_negative_expanded_year() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Year -1 is before 1970. The dot must not turn it into 2013.
+        assert_eq!(unix_millis_from_iso("-000001-10-13."), None);
+        assert_eq!(unix_millis_from_iso("-000001."), None);
+        assert_eq!(unix_millis_from_iso("-000001-10."), None);
+        assert_eq!(unix_millis_from_iso("-000001-1-13."), None);
+        assert_eq!(unix_millis_from_iso("-000001-13."), None);
+        assert_eq!(
+            unix_millis_from_iso("-000000-10-13."),
+            Some(1_002_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("+002026-10-13."),
+            Some(1_791_864_000_000)
+        );
     }
 
 }
