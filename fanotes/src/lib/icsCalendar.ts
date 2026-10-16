@@ -47,6 +47,17 @@ const realCivilTime = (year: number, monthIndex: number, day: number, hour: numb
     && date.getSeconds() === second
 }
 
+/** A `Z` or numeric offset is UTC, so a local daylight-saving gap does not reject it. */
+const realUtcTime = (year: number, monthIndex: number, day: number, hour: number, minute: number, second: number) => {
+  const date = new Date(Date.UTC(year, monthIndex, day, hour, minute, second))
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === monthIndex
+    && date.getUTCDate() === day
+    && date.getUTCHours() === hour
+    && date.getUTCMinutes() === minute
+    && date.getUTCSeconds() === second
+}
+
 /** Minutes east of UTC. `+0200` is 120. */
 const icsOffsetMinutes = (zone: string) => {
   const match = /^([+-])(\d{2})(\d{2})$/u.exec(zone)
@@ -76,9 +87,12 @@ const parseIcsDate = (raw: string): { date: Date; allDay: boolean } | null => {
   const hour = Number(timed[4])
   const minute = Number(timed[5])
   const second = Number(timed[6] ?? 0)
-  if (!realCivilTime(year, month, dayOfMonth, hour, minute, second)) return null
   const zone = timed[7] ?? ''
-  if (!zone) return { date: new Date(year, month, dayOfMonth, hour, minute, second), allDay: false }
+  if (!zone) {
+    if (!realCivilTime(year, month, dayOfMonth, hour, minute, second)) return null
+    return { date: new Date(year, month, dayOfMonth, hour, minute, second), allDay: false }
+  }
+  if (!realUtcTime(year, month, dayOfMonth, hour, minute, second)) return null
   const offset = /^z$/iu.test(zone) ? 0 : icsOffsetMinutes(zone)
   if (offset === null) return null
   const date = new Date(Date.UTC(year, month, dayOfMonth, hour, minute, second) - offset * 60_000)

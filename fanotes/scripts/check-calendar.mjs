@@ -249,6 +249,30 @@ assert.equal(ics.importIcs([
   'END:VCALENDAR',
 ].join('\n'), personal).length, 0)
 
+const dstUtc = new Date(Date.UTC(2026, 2, 8, 2, 30, 0))
+const dstZoned = ics.importIcs([
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'SUMMARY:Lücke',
+  'DTSTART:20260308T023000Z',
+  'DTEND:20260308T033000Z',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+assert.equal(dstZoned.length, 1, 'a Zulu time inside a local gap still imports')
+assert.equal(dstZoned[0].start, utcWall(dstUtc))
+assert.equal(dstZoned[0].end, utcWall(new Date(Date.UTC(2026, 2, 8, 3, 30, 0))))
+const dstOffset = ics.importIcs([
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'SUMMARY:Offset',
+  'DTSTART:20260308T023000+0000',
+  'DTEND:20260308T033000+0000',
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)
+assert.equal(dstOffset[0].start, utcWall(dstUtc))
+
 const existing = {
   ...doc,
   events: [{
