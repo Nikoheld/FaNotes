@@ -1848,6 +1848,18 @@ fn expand_glued_month(token: &str) -> Vec<&str> {
                 index += 1;
             }
             runs.push(&token[start..index]);
+        } else if bytes[index] == b'-'
+            && runs.last().is_some_and(|word| exact_zone_keyword(word))
+            && bytes.get(index + 1).is_some_and(u8::is_ascii_digit)
+        {
+            // `GMT+530` keeps the `+`. `GMT-530` must keep the `-` too.
+            // A skipped hyphen leaves `530`, which is a date number.
+            let start = index;
+            index += 1;
+            while index < bytes.len() && bytes[index].is_ascii_digit() {
+                index += 1;
+            }
+            runs.push(&token[start..index]);
         } else if matches!(bytes[index], b'-' | b'/' | b'.') {
             if index + 1 < bytes.len() && matches!(bytes[index + 1], b'-' | b'/' | b'.') {
                 return vec![token];
@@ -8948,5 +8960,73 @@ mod tests {
         assert_eq!(super::js_json_number(16.0).to_string(), "16");
         assert_eq!(super::js_json_number(-16.0).to_string(), "-16");
         assert_eq!(super::js_json_number(0.5).to_string(), "0.5");
+    }
+
+    #[test]
+    fn a_compact_gmt_offset_matches_date_parse() {
+        with_tz("America/New_York", || {
+            // Node 22 `Date.parse`, TZ=America/New_York. Three digits are HMM.
+            // Two digits are hours, even past 23. `HHMM` minutes past 59 carry
+            // into the next hour. A spilled colon minute makes the ISO form empty.
+            let cases = [
+                ("2026-10-13 16:00 GMT+530", Some("2026-10-13T10:30:00.000Z")),
+                ("2026-10-13 16:00 GMT+53", Some("2026-10-11T11:00:00.000Z")),
+                ("2026-10-13 16:00 GMT+24", Some("2026-10-12T16:00:00.000Z")),
+                ("2026-10-13 16:00 GMT+24:00", Some("2026-10-12T16:00:00.000Z")),
+                ("2026-10-13 16:00 GMT+2360", Some("2026-10-12T16:00:00.000Z")),
+                ("2026-10-13 16:00 GMT+2399", Some("2026-10-12T15:21:00.000Z")),
+                ("2026-10-13 16:00 GMT+130", Some("2026-10-13T14:30:00.000Z")),
+                ("2026-10-13 16:00 GMT+001", Some("2026-10-13T15:59:00.000Z")),
+                ("2026-10-13 16:00 GMT+5:", Some("2026-10-13T11:00:00.000Z")),
+                ("2026-10-13 16:00 GMT+5:3", Some("2026-10-13T10:57:00.000Z")),
+                ("2026-10-13 16:00 GMT+3:5", Some("2026-10-13T12:55:00.000Z")),
+                ("2026-10-13 16:00 GMT+0530", Some("2026-10-13T10:30:00.000Z")),
+                ("2026-10-13 16:00 GMT+2400", Some("2026-10-12T16:00:00.000Z")),
+                ("2026-10-13 16:00 GMT+9999", Some("2026-10-09T11:21:00.000Z")),
+                ("2026-10-13 16:00 GMT+90", Some("2026-10-09T22:00:00.000Z")),
+                ("2026-10-13 16:00 GMT-530", Some("2026-10-13T21:30:00.000Z")),
+                ("2026-10-13 16:00 GMT-53", Some("2026-10-15T21:00:00.000Z")),
+                ("2026-10-13 16:00 GMT-24", Some("2026-10-14T16:00:00.000Z")),
+                ("2026-10-13 16:00 GMT-2360", Some("2026-10-14T16:00:00.000Z")),
+                ("2026-10-13 16:00 GMT-5:", Some("2026-10-13T21:00:00.000Z")),
+                ("2026-10-13 16:00 UTC-530", Some("2026-10-13T21:30:00.000Z")),
+                ("2026-10-13 16:00 UT-530", Some("2026-10-13T21:30:00.000Z")),
+                ("2026-10-13 16:00 EST-530", Some("2026-10-13T21:30:00.000Z")),
+                ("2026-10-13 GMT-530", Some("2026-10-13T05:30:00.000Z")),
+                ("2026-10-13 GMT-53", Some("2026-10-15T05:00:00.000Z")),
+                ("Oct 13 2026 GMT-530", Some("2026-10-13T05:30:00.000Z")),
+                ("Oct 13 2026 16:00 GMT-530", Some("2026-10-13T21:30:00.000Z")),
+                ("Oct 13 2026 GMT-53", Some("2026-10-15T05:00:00.000Z")),
+                ("10/13/2026 16:00 GMT-530", Some("2026-10-13T21:30:00.000Z")),
+                ("10/13/2026 GMT-530", Some("2026-10-13T05:30:00.000Z")),
+                ("5 GMT-530", Some("2001-05-01T05:30:00.000Z")),
+                ("GMT-530 Oct 13 2026", Some("0530-10-13T04:56:02.000Z")),
+                ("GMT+530 Oct 13 2026", Some("0530-10-13T04:56:02.000Z")),
+                ("GMT-53 Oct 13 2026", Some("1953-10-13T05:00:00.000Z")),
+                ("2026-10-13 16:00 GMT+000", Some("2026-10-13T16:00:00.000Z")),
+                ("2026-10-13 16:00 GMT+100", Some("2026-10-13T15:00:00.000Z")),
+                ("2026-10-13 16:00 UTC+530", Some("2026-10-13T10:30:00.000Z")),
+                ("2026-10-13 16:00 UT+530", Some("2026-10-13T10:30:00.000Z")),
+                ("2026-10-13 16:00 gmt+530", Some("2026-10-13T10:30:00.000Z")),
+                ("2026-10-13 GMT+530", Some("2026-10-12T18:30:00.000Z")),
+                ("2026-10-13 GMT+53", Some("2026-10-10T19:00:00.000Z")),
+                ("Oct 13 2026 16:00 GMT+530", Some("2026-10-13T10:30:00.000Z")),
+                ("Oct 13 2026 16:00 GMT+53", Some("2026-10-11T11:00:00.000Z")),
+                ("10/13/2026 16:00 GMT+530", Some("2026-10-13T10:30:00.000Z")),
+                ("2026-10-13 4:00 PM GMT+530", Some("2026-10-13T10:30:00.000Z")),
+                ("2026-10-13 16:00 GMT+530 EST", Some("2026-10-13T21:00:00.000Z")),
+                ("2026-10-13 16:00 GMT+5:60", None),
+                ("2026-10-13 16:00 GMT+5:30.5", None),
+                ("2026-10-13 16:00 GMT+12345", None),
+                ("2026-10-13T16:00:00 GMT+530", None),
+            ];
+            for (input, expected) in cases {
+                assert_eq!(
+                    super::canonical_iso(input).as_deref(),
+                    expected,
+                    "{input}"
+                );
+            }
+        });
     }
 }

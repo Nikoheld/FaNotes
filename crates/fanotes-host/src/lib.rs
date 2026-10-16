@@ -3201,6 +3201,18 @@ fn expand_glued_month(token: &str) -> Vec<&str> {
                 index += 1;
             }
             runs.push(&token[start..index]);
+        } else if bytes[index] == b'-'
+            && runs.last().is_some_and(|word| exact_zone_keyword(word))
+            && bytes.get(index + 1).is_some_and(u8::is_ascii_digit)
+        {
+            // `GMT+530` keeps the `+`. `GMT-530` must keep the `-` too.
+            // A skipped hyphen leaves `530`, which is a date number.
+            let start = index;
+            index += 1;
+            while index < bytes.len() && bytes[index].is_ascii_digit() {
+                index += 1;
+            }
+            runs.push(&token[start..index]);
         } else if matches!(bytes[index], b'-' | b'/' | b'.') {
             if index + 1 < bytes.len() && matches!(bytes[index + 1], b'-' | b'/' | b'.') {
                 return vec![token];
@@ -10968,5 +10980,70 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13-1"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 -"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13-EST"), None);
+    }
+
+    #[test]
+    fn a_compact_gmt_offset_matches_date_parse() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Node 22 `Date.parse`. Three digits are HMM. A minus after `GMT`
+        // stays on the offset. A year before 1970 is outside `u64`.
+        let cases = [
+            ("2026-10-13 16:00 GMT+530", Some(1_791_887_400_000)),
+            ("2026-10-13 16:00 GMT+53", Some(1_791_716_400_000)),
+            ("2026-10-13 16:00 GMT+24", Some(1_791_820_800_000)),
+            ("2026-10-13 16:00 GMT+24:00", Some(1_791_820_800_000)),
+            ("2026-10-13 16:00 GMT+2360", Some(1_791_820_800_000)),
+            ("2026-10-13 16:00 GMT+2399", Some(1_791_818_460_000)),
+            ("2026-10-13 16:00 GMT+130", Some(1_791_901_800_000)),
+            ("2026-10-13 16:00 GMT+001", Some(1_791_907_140_000)),
+            ("2026-10-13 16:00 GMT+5:", Some(1_791_889_200_000)),
+            ("2026-10-13 16:00 GMT+5:3", Some(1_791_889_020_000)),
+            ("2026-10-13 16:00 GMT+3:5", Some(1_791_896_100_000)),
+            ("2026-10-13 16:00 GMT+0530", Some(1_791_887_400_000)),
+            ("2026-10-13 16:00 GMT+2400", Some(1_791_820_800_000)),
+            ("2026-10-13 16:00 GMT+9999", Some(1_791_544_860_000)),
+            ("2026-10-13 16:00 GMT+90", Some(1_791_583_200_000)),
+            ("2026-10-13 16:00 GMT-530", Some(1_791_927_000_000)),
+            ("2026-10-13 16:00 GMT-53", Some(1_792_098_000_000)),
+            ("2026-10-13 16:00 GMT-24", Some(1_791_993_600_000)),
+            ("2026-10-13 16:00 GMT-2360", Some(1_791_993_600_000)),
+            ("2026-10-13 16:00 GMT-5:", Some(1_791_925_200_000)),
+            ("2026-10-13 16:00 UTC+530", Some(1_791_887_400_000)),
+            ("2026-10-13 16:00 UT+530", Some(1_791_887_400_000)),
+            ("2026-10-13 16:00 UTC-530", Some(1_791_927_000_000)),
+            ("2026-10-13 16:00 UT-530", Some(1_791_927_000_000)),
+            ("2026-10-13 16:00 EST-530", Some(1_791_927_000_000)),
+            ("2026-10-13 16:00 gmt+530", Some(1_791_887_400_000)),
+            ("2026-10-13 GMT+530", Some(1_791_829_800_000)),
+            ("2026-10-13 GMT+53", Some(1_791_658_800_000)),
+            ("2026-10-13 GMT-530", Some(1_791_869_400_000)),
+            ("2026-10-13 GMT-53", Some(1_792_040_400_000)),
+            ("Oct 13 2026 16:00 GMT+530", Some(1_791_887_400_000)),
+            ("Oct 13 2026 16:00 GMT+53", Some(1_791_716_400_000)),
+            ("Oct 13 2026 GMT-530", Some(1_791_869_400_000)),
+            ("Oct 13 2026 16:00 GMT-530", Some(1_791_927_000_000)),
+            ("Oct 13 2026 GMT-53", Some(1_792_040_400_000)),
+            ("10/13/2026 16:00 GMT+530", Some(1_791_887_400_000)),
+            ("10/13/2026 16:00 GMT-530", Some(1_791_927_000_000)),
+            ("10/13/2026 GMT-530", Some(1_791_869_400_000)),
+            ("2026-10-13 4:00 PM GMT+530", Some(1_791_887_400_000)),
+            ("2026-10-13 16:00 GMT+530 EST", Some(1_791_925_200_000)),
+            ("5 GMT-530", Some(988_695_000_000)),
+            ("2026-10-13 16:00 GMT+5:60", None),
+            ("2026-10-13 16:00 GMT+5:30.5", None),
+            ("2026-10-13 16:00 GMT+12345", None),
+            ("2026-10-13T16:00:00 GMT+530", None),
+            ("GMT-530 Oct 13 2026", None),
+            ("GMT+530 Oct 13 2026", None),
+            ("GMT-53 Oct 13 2026", None),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(unix_millis_from_iso(input), expected, "{input}");
+        }
     }
 }
