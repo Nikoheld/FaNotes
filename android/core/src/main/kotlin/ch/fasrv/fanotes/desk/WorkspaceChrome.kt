@@ -230,6 +230,30 @@ const val MODE_SWITCH_DP = 28
 const val MODE_SWITCH_RADIUS_DP = 8
 const val MODE_BUTTON_DP = 24
 const val MODE_BUTTON_RADIUS_DP = 6
+const val MODE_ACTIVE_RING = 0.34f
+const val FORMAT_DISABLED_ALPHA = 0.48f
+
+/** Mode switch track is `--panel`. The active segment is `--panel-active`. */
+fun modeSwitchTrackColor(dark: Boolean): Int = if (dark) 0xFF202020.toInt() else 0xFFF7F6F3.toInt()
+
+fun modeSwitchActiveColor(dark: Boolean): Int = if (dark) 0xFF3A3A3A.toInt() else 0xFFE3E2DE.toInt()
+
+/** Inactive labels are muted. The active label is the body text. */
+fun modeSwitchInk(dark: Boolean, selected: Boolean): Int = when {
+    selected && dark -> 0xFFEDEDEC.toInt()
+    selected -> 0xFF37352F.toInt()
+    dark -> 0xFFB3B3AE.toInt()
+    else -> 0xFF5E5C57.toInt()
+}
+
+/** Format chips use `--text-soft`. */
+fun formatChipInk(dark: Boolean): Int = if (dark) 0xFFCFCFCA.toInt() else 0xFF4E4C47.toInt()
+
+/** Inset ring: 34% of the accent over transparency. */
+fun modeSwitchRing(accent: Int): Int {
+    val alpha = kotlin.math.round(255f * MODE_ACTIVE_RING).toInt().coerceIn(0, 255)
+    return (alpha shl 24) or (accent and 0x00FFFFFF)
+}
 
 /** Desktop sidebar range 210–430, default 286. */
 fun sidebarWidthDp(raw: String?) = (raw?.toIntOrNull() ?: 286).coerceIn(210, 430)
