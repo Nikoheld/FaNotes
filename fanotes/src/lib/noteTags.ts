@@ -1,3 +1,5 @@
+import { maskMarkdownCode } from './markdownCode'
+
 const TAG_MARKER = /<!--\s*fanotes-tags:\s*([^\n]*?)\s*-->/iu
 const HASHTAG = /(?:^|[\s([{'"])#([\p{L}\p{N}_-]{1,40})/gu
 
@@ -15,7 +17,7 @@ export const parseDeclaredTags = (content: string): string[] => {
 }
 
 export const parseHashtags = (content: string): string[] => {
-  const body = content.replace(TAG_MARKER, '')
+  const body = maskMarkdownCode(content).replace(TAG_MARKER, '')
   return uniqueTags([...body.matchAll(HASHTAG)].map((match) => match[1]))
 }
 

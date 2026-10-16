@@ -73,6 +73,9 @@ try {
   assert.deepEqual(nav.breadcrumbsFor('Welcome.md'), [{ label: 'Welcome', path: 'Welcome.md', isNote: true }])
 
   // ── Split layout ─────────────────────────────────────────────────────────
+  assert.equal(nav.editorPaneForCommand('split', true), 'split')
+  assert.equal(nav.editorPaneForCommand('split', false), 'main')
+  assert.equal(nav.editorPaneForCommand('main', true), 'main')
   assert.equal(nav.clampSplitRatio(0.05), nav.SPLIT_MIN_RATIO)
   assert.equal(nav.clampSplitRatio(0.95), nav.SPLIT_MAX_RATIO)
   assert.equal(nav.clampSplitRatio(Number.NaN), nav.DEFAULT_SPLIT_LAYOUT.ratio)
@@ -200,6 +203,8 @@ try {
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   assert.match(app, /editorRef\.current\?\.flushChanges\(\)[\s\S]{0,420}if \(!await flushDocumentLayers\(\)\) return false/, 'a note switch books pending keystrokes under the leaving note')
   assert.match(app, /ref=\{splitEditorRef\}/, 'the second pane exposes its editor so save can flush it')
+  assert.match(app, /commandEditor\(\)\?\.format/, 'the format toolbar follows the focused pane')
+  assert.match(app, /const editor = commandEditor\(\)/, 'a date stamp is inserted into the focused pane')
   assert.match(app, /editorRef\.current\?\.flushChanges\(\)\s*\n\s*splitEditorRef\.current\?\.flushChanges\(\)/, 'save and quit flush the split pane before they decide nothing is pending')
   assert.match(app, /if \(splitPathRef\.current === path\) splitEditorRef\.current\?\.flushChanges\(\)/, 'closing or activating the split note books its keystrokes first')
   assert.match(app, /drawingSessionKeyRef\.current !== noteDrawingSession\.key/, 'the ink dirty flag belongs to the mounted board')

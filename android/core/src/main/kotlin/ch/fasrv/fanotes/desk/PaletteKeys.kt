@@ -208,6 +208,7 @@ fun paletteCommands(
         PaletteCommand("book", if (bookOpen) "Buch ausblenden" else "Buch einblenden", "Werkzeuge", "PDF-Buch des Fachs neben der Notiz", keywords = "buch pdf fach"),
         PaletteCommand("worksheet", "Bild oder PDF als Arbeitsblatt", "Werkzeuge", "In die aktuelle oder eine neue Notiz importieren und ausfüllen", "Ctrl ⇧ I", "pdf bild import arbeitsblatt"),
         PaletteCommand("ai", "AI-Assistent", "Werkzeuge", "LM Studio, Ollama, OpenAI, Gemini, Anthropic oder OpenCode nutzen", "Ctrl ⇧ A", "ki ai rechtschreibung fakten"),
+        PaletteCommand("text-hand", "Text → Handschrift", "Werkzeuge", "Getippten Text mit trainierten Buchstaben auf die Seite setzen", keywords = "handschrift glyphenwerk schrift text"),
         PaletteCommand("cards", "Karteikarten", "Lernen", "Lernfragen dieser Notiz wiederholen", keywords = "flashcards karten spaced"),
         PaletteCommand("study", "Lernzeit", "Ansicht", "Zeit, Tippen und Handschrift je Fach, nur lokal", keywords = "statistik lernen heatmap"),
         PaletteCommand("split", if (splitOpen) "Geteilte Ansicht schließen" else "Geteilte Ansicht öffnen", "Ansicht", "Zwei Notizen nebeneinander oder untereinander", "Ctrl \\"),

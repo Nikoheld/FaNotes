@@ -160,6 +160,22 @@ data class GrainSegment(
     val width: Double,
 )
 
+/**
+ * How far an interior segment slides its end toward the next midpoint.
+ * Matches `inkInteriorPull` in `inkStrokePaint.ts`. The open tip is a line.
+ */
+fun interiorSegmentPull(smoothing: Double, legPx: Double, nibPx: Double): Double {
+    val wanted = smoothing.coerceIn(0.0, 1.0) * 0.85
+    if (legPx <= 0.01 || nibPx <= 0.0) return wanted
+    return min(wanted, (nibPx * 0.35) / legPx)
+}
+
+/** Full pen width in page pixels, the nib the centerline is allowed to leave. */
+private fun pageNib(baseWidth: Double, pressure: Double, pressureEnabled: Boolean, scale: Double): Double {
+    if (scale <= 0.0) return 0.0
+    return max(1.0, pressureWidth(baseWidth, pressure, pressureEnabled) * scale) / scale
+}
+
 /** Per-segment grain shift in page pixels. Seed matches `passOffset` in `inkStrokePaint.ts`. */
 fun pencilJitterOffset(textureSeed: Int, segmentIndex: Int, passIndex: Int, jitter: Double): Pair<Double, Double> {
     if (jitter == 0.0) return 0.0 to 0.0
@@ -181,35 +197,46 @@ fun pencilGrainSegments(
     scale: Double,
 ): List<GrainSegment> {
     if (points.size < 2 || scale <= 0.0) return emptyList()
-    val blend = smoothing.coerceIn(0.0, 0.92)
-    val factor = blend * 0.35
-    val tail = blend * 0.4
     val segments = ArrayList<GrainSegment>(points.size - 1)
+    var chainX = points[0].x * pageWidth
+    var chainY = points[0].y * pageHeight
     for (index in 1 until points.size) {
         val (offsetX, offsetY) = pencilJitterOffset(textureSeed, index, passIndex, jitter)
         val previous = points[index - 1]
         val point = points[index]
-        val previousX = previous.x * pageWidth
-        val previousY = previous.y * pageHeight
         val pointX = point.x * pageWidth
         val pointY = point.y * pageHeight
         val pressure = ((previous.pressure) + point.pressure) / 2.0
         val width = max(1.0, pressureWidth(baseWidth, pressure, pressureEnabled) * scale) * widthFactor / scale
-        val startX = previousX + offsetX
-        val startY = previousY + offsetY
+        val startX = chainX + offsetX
+        val startY = chainY + offsetY
+        var endX = pointX
+        var endY = pointY
+        var controlX: Double? = null
+        var controlY: Double? = null
         if (smoothing > 0.0 && index < points.lastIndex) {
             val next = points[index + 1]
-            val midX = pointX * (1.0 - factor) + ((pointX + next.x * pageWidth) / 2.0) * factor
-            val midY = pointY * (1.0 - factor) + ((pointY + next.y * pageHeight) / 2.0) * factor
-            segments += GrainSegment(startX, startY, pointX + offsetX, pointY + offsetY, midX + offsetX, midY + offsetY, width)
-        } else if (smoothing > 0.0 && index >= 2) {
-            val before = points[index - 2]
-            val controlX = previousX + (previous.x - before.x) * pageWidth * tail + offsetX
-            val controlY = previousY + (previous.y - before.y) * pageHeight * tail + offsetY
-            segments += GrainSegment(startX, startY, controlX, controlY, pointX + offsetX, pointY + offsetY, width)
-        } else {
-            segments += GrainSegment(startX, startY, null, null, pointX + offsetX, pointY + offsetY, width)
+            val nextX = next.x * pageWidth
+            val nextY = next.y * pageHeight
+            val leg = hypot(nextX - pointX, nextY - pointY)
+            val nib = min(
+                pageNib(baseWidth, pressure, pressureEnabled, scale),
+                pageNib(baseWidth, (point.pressure + next.pressure) / 2.0, pressureEnabled, scale),
+            )
+            val pull = interiorSegmentPull(smoothing, leg, nib)
+            endX = pointX + (nextX - pointX) * pull * 0.5
+            endY = pointY + (nextY - pointY) * pull * 0.5
+            if (hypot(endX - pointX, endY - pointY) > 0.15) {
+                controlX = pointX + offsetX
+                controlY = pointY + offsetY
+            } else {
+                endX = pointX
+                endY = pointY
+            }
         }
+        segments += GrainSegment(startX, startY, controlX, controlY, endX + offsetX, endY + offsetY, width)
+        chainX = endX
+        chainY = endY
     }
     return segments
 }
@@ -238,9 +265,6 @@ fun constantWidthStroke(
     scale: Double,
 ): ConstantStroke? {
     if (points.size < 2 || scale <= 0.0) return null
-    val blend = smoothing.coerceIn(0.0, 0.92)
-    val factor = blend * 0.35
-    val tail = blend * 0.4
     val width = segmentBitmapWidth(points[0], points[1], baseWidth, pressureEnabled, widthFactor, scale) / scale
     var end = points.size
     if (end - 1 > 1) {
@@ -261,17 +285,22 @@ fun constantWidthStroke(
         if (index == 1) commands += StrokeCommand.Move(previousX, previousY)
         if (smoothing > 0.0 && index < end - 1) {
             val next = points[index + 1]
-            val midX = pointX * (1.0 - factor) + ((pointX + next.x * pageWidth) / 2.0) * factor
-            val midY = pointY * (1.0 - factor) + ((pointY + next.y * pageHeight) / 2.0) * factor
-            commands += StrokeCommand.Quad(pointX, pointY, midX, midY)
-        } else if (smoothing > 0.0 && index >= 2) {
-            val before = points[index - 2]
-            val controlX = previousX + (previous.x - before.x) * pageWidth * tail
-            val controlY = previousY + (previous.y - before.y) * pageHeight * tail
-            commands += StrokeCommand.Quad(controlX, controlY, pointX, pointY)
-        } else {
-            commands += StrokeCommand.Line(pointX, pointY)
+            val nextX = next.x * pageWidth
+            val nextY = next.y * pageHeight
+            val leg = hypot(nextX - pointX, nextY - pointY)
+            val nib = min(
+                pageNib(baseWidth, (previous.pressure + point.pressure) / 2.0, pressureEnabled, scale),
+                pageNib(baseWidth, (point.pressure + next.pressure) / 2.0, pressureEnabled, scale),
+            )
+            val pull = interiorSegmentPull(smoothing, leg, nib)
+            if (pull > 1.0e-4) {
+                val midX = (pointX + nextX) / 2.0
+                val midY = (pointY + nextY) / 2.0
+                commands += StrokeCommand.Quad(pointX, pointY, pointX + (midX - pointX) * pull, pointY + (midY - pointY) * pull)
+                continue
+            }
         }
+        commands += StrokeCommand.Line(pointX, pointY)
     }
     return ConstantStroke(width, commands)
 }

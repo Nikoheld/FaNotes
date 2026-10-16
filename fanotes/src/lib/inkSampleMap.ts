@@ -248,17 +248,48 @@ export const appendAcceptedInkPoint = (
   return points
 }
 
-/** Predicted extras must use the same leap/0,0 rules as committed samples. */
+/** Farther than this (0–1 page space) a prediction is a flash, not a head start. */
+const PREVIEW_MAX_PAGE = 0.02
+/** Keep a prediction only when it continues the last real step, within ~40°. */
+const PREVIEW_MIN_COS = 0.766
+
+/**
+ * Predicted extras use the same leap rules as committed samples, then stay a
+ * short continuation of the last real step. A long or sideways prediction is
+ * what paints a line in the wrong direction for one frame.
+ */
 export const collectPreviewInkPoints = (
   committed: Array<{ x: number; y: number }>,
   predicted: Array<{ x: number; y: number } | null | undefined>,
 ) => {
   const extra: Array<{ x: number; y: number }> = []
-  let previous = committed.at(-1) ?? null
-  for (const next of predicted) {
-    if (!next || !Number.isFinite(next.x) || !Number.isFinite(next.y)) continue
-    if (isInkCorridorLeap(previous, next)) continue
+  const last = committed.at(-1)
+  if (!last) return extra
+  let previous: { x: number; y: number } = last
+  const prior = committed.length >= 2 ? committed[committed.length - 2] : null
+  let heading = prior ? { x: previous.x - prior.x, y: previous.y - prior.y } : null
+  let recent = heading ? Math.hypot(heading.x, heading.y) : 0
+  for (const candidate of predicted) {
+    if (!candidate || !Number.isFinite(candidate.x) || !Number.isFinite(candidate.y)) continue
+    if (isInkCorridorLeap(previous, candidate)) continue
+    const dx = candidate.x - previous.x
+    const dy = candidate.y - previous.y
+    const dist = Math.hypot(dx, dy)
+    if (!(dist > 1e-6)) continue
+    if (heading) {
+      const headingLength = Math.hypot(heading.x, heading.y)
+      if (headingLength > 1e-6 && (heading.x * dx + heading.y * dy) / (headingLength * dist) < PREVIEW_MIN_COS) {
+        continue
+      }
+    }
+    const limit = Math.min(PREVIEW_MAX_PAGE, Math.max(recent * 1.35, 0.004))
+    const scale = dist > limit ? limit / dist : 1
+    const next: { x: number; y: number } = scale === 1
+      ? { x: candidate.x, y: candidate.y }
+      : { x: previous.x + dx * scale, y: previous.y + dy * scale }
     extra.push(next)
+    heading = { x: next.x - previous.x, y: next.y - previous.y }
+    recent = Math.hypot(heading.x, heading.y)
     previous = next
   }
   return extra

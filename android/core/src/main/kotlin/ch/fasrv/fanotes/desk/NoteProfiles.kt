@@ -1,7 +1,9 @@
 package ch.fasrv.fanotes.desk
 
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /** Starter folders and note templates from the desktop first-run profile. */
@@ -249,6 +251,23 @@ fun firstRunFolderArgb(hex: String): Int {
     return (0xFF shl 24) or rgb
 }
 
+/**
+ * CSS `color-mix(in srgb, source share, into)`.
+ * Alpha is mixed in premultiplied form, the same way the browser mixes `--border`.
+ */
+fun cssColorMix(source: Int, into: Int, sourceShare: Float): Int {
+    val share = sourceShare.coerceIn(0f, 1f)
+    fun channel(color: Int, shift: Int): Int = (color ushr shift) and 0xFF
+    val p1 = share * (channel(source, 24) / 255f)
+    val p2 = (1f - share) * (channel(into, 24) / 255f)
+    val alpha = p1 + p2
+    if (alpha <= 0f) return 0
+    fun mixed(shift: Int): Int =
+        ((channel(source, shift) * p1 + channel(into, shift) * p2) / alpha).roundToInt().coerceIn(0, 255)
+    val a = (alpha * 255f).roundToInt().coerceIn(0, 255)
+    return (a shl 24) or (mixed(16) shl 16) or (mixed(8) shl 8) or mixed(0)
+}
+
 /** `color-mix` of [source] into [into] by [sourceShare]. */
 fun mixArgb(source: Int, into: Int, sourceShare: Float): Int {
     val share = sourceShare.coerceIn(0f, 1f)
@@ -301,16 +320,63 @@ const val FIRST_RUN_INBOX = "Eingang ist immer dabei"
 const val FIRST_RUN_INBOX_DETAIL = "Der schnelle Sammelplatz für neue Notizen und Ideen."
 const val FIRST_RUN_PREPARED = "Sauber vorbereitet"
 const val FIRST_RUN_PREPARED_DETAIL = "jeder Ordner erhält eine eigene Farbe und erscheint direkt in der Seitenleiste."
-const val FIRST_RUN_PREVIEW_RADIUS_DP = 12
+/** `.first-run-preview-window` border-radius is 18px. */
+const val FIRST_RUN_PREVIEW_RADIUS_DP = 18
 const val FIRST_RUN_PREVIEW_HEADER_DP = 32
+/** `.first-run-preview-window > header b` is 7px at weight 600. Dots are 6px, the row gap is 5px, and the side padding is 12px. */
+const val FIRST_RUN_PREVIEW_HEADER_TITLE_SP = 7
+const val FIRST_RUN_PREVIEW_HEADER_TITLE_WEIGHT = 600
+const val FIRST_RUN_PREVIEW_HEADER_DOT_DP = 6
+const val FIRST_RUN_PREVIEW_HEADER_GAP_DP = 5
+const val FIRST_RUN_PREVIEW_HEADER_PAD_DP = 12
+/** `.first-run-preview-body > aside` gap is 5px. The heading is a bold `strong` with a 12px book icon, gap 6px, and `margin: 0 4px 8px`. */
+const val FIRST_RUN_PREVIEW_ASIDE_GAP_DP = 5
+const val FIRST_RUN_PREVIEW_SUBJECTS_HEADING = "Meine Fächer"
+const val FIRST_RUN_PREVIEW_HEADING_WEIGHT = 700
+const val FIRST_RUN_PREVIEW_HEADING_MARGIN_INLINE_DP = 4
+const val FIRST_RUN_PREVIEW_HEADING_MARGIN_BOTTOM_DP = 8
+const val FIRST_RUN_PREVIEW_HEADING_ICON_DP = 12
+const val FIRST_RUN_PREVIEW_HEADING_ICON_GAP_DP = 6
+/** Header fill is `color-mix(in srgb, var(--panel) 92%, transparent)`. */
+const val FIRST_RUN_PREVIEW_HEADER_FILL_ALPHA = 0.92f
+/** Close dot is `color-mix(in srgb, var(--danger) 68%, var(--border))`. The middle dot is `#d8a643`. */
+const val FIRST_RUN_PREVIEW_HEADER_CLOSE_MIX = 0.68f
+const val FIRST_RUN_PREVIEW_HEADER_MIDDLE_DOT = 0xFFD8A643.toInt()
+/** `--border` is white at 9% on dark themes, `#37352f` at 9% on light, and `#37352f` at 10% on sepia. */
+const val FIRST_RUN_PREVIEW_BORDER_ALPHA = 0.09f
+const val FIRST_RUN_PREVIEW_BORDER_SEPIA_ALPHA = 0.10f
+const val FIRST_RUN_PREVIEW_BORDER_LIGHT_RGB = 0x37352F
+/**
+ * Window edge is `color-mix(in srgb, var(--border-strong) 90%, transparent)`.
+ * The shadow is `0 34px 95px rgba(0,0,0,.25)` plus a 1px ring at `rgba(255,255,255,.025)`.
+ */
+const val FIRST_RUN_PREVIEW_WINDOW_BORDER_MIX = 0.90f
+const val FIRST_RUN_PREVIEW_WINDOW_SHADOW_X_DP = 0
+const val FIRST_RUN_PREVIEW_WINDOW_SHADOW_Y_DP = 34
+const val FIRST_RUN_PREVIEW_WINDOW_SHADOW_BLUR_DP = 95
+const val FIRST_RUN_PREVIEW_WINDOW_SHADOW_ALPHA = 0.25f
+const val FIRST_RUN_PREVIEW_WINDOW_RING = 0x06FFFFFF
+/**
+ * `.first-run-preview-glow` is an ellipse inset 12% from the top and bottom and 8% from the sides.
+ * The fill is the accent at 22%, then the whole glow is at 70% opacity, blurred by 65px.
+ * The desktop pulse is not played.
+ */
+const val FIRST_RUN_PREVIEW_GLOW_INSET_BLOCK = 0.12f
+const val FIRST_RUN_PREVIEW_GLOW_INSET_INLINE = 0.08f
+const val FIRST_RUN_PREVIEW_GLOW_BLUR_DP = 65
+const val FIRST_RUN_PREVIEW_GLOW_COLOR_ALPHA = 0.22f
+const val FIRST_RUN_PREVIEW_GLOW_OPACITY = 0.7f
 const val FIRST_RUN_PREVIEW_ASIDE_DP = 118
 const val FIRST_RUN_PREVIEW_ASIDE_NARROW_DP = 102
 const val FIRST_RUN_PREVIEW_ASIDE_PAD_BLOCK_DP = 17
 const val FIRST_RUN_PREVIEW_ASIDE_PAD_INLINE_DP = 10
 const val FIRST_RUN_PREVIEW_ASIDE_PAD_INLINE_NARROW_DP = 7
+/** Right edge of the aside is a 1px `--border`. Fill is `color-mix(in srgb, var(--bg) 76%, var(--panel))`. */
+const val FIRST_RUN_PREVIEW_ASIDE_RULE_DP = 1
+const val FIRST_RUN_PREVIEW_ASIDE_FILL_MIX = 0.76f
 const val FIRST_RUN_PREVIEW_SPLIT_DP = 760
 const val FIRST_RUN_MEDIUM_DP = 980
-/** `.first-run-preview-body > aside strong` is 7.5px. */
+/** `.first-run-preview-body > aside strong` is 7.5px. The column fill is `--bg` mixed 76% into `--panel`. */
 const val FIRST_RUN_PREVIEW_HEADING_SP = 7.5f
 /** `.first-run-preview-body > aside > span` is 7px, with 7px padding, a 6px radius, and a 7px gap. */
 const val FIRST_RUN_PREVIEW_SUBJECT_SP = 7
@@ -328,7 +394,7 @@ const val FIRST_RUN_PREVIEW_KICKER = "MATHEMATIK · ANALYSIS"
 const val FIRST_RUN_PREVIEW_HEADING = "Ableitungen"
 const val FIRST_RUN_PREVIEW_TYPED = "Die Änderungsrate beschreibt die Steigung."
 /**
- * `.first-run-preview-paper` still wins. No later rule, including the 12px window radius, changes this sheet.
+ * `.first-run-preview-paper` still wins. No later rule, including the 18px window radius, changes this sheet.
  * Margin is 18px 19px 0. Padding is 25px 27px. Top corners are 11px and the bottom corners stay 0.
  */
 const val FIRST_RUN_PREVIEW_PAPER_MARGIN_TOP_DP = 18
@@ -362,11 +428,93 @@ const val FIRST_RUN_PREVIEW_PAPER_SHADOW_X_DP = 0
 const val FIRST_RUN_PREVIEW_PAPER_SHADOW_Y_DP = 10
 const val FIRST_RUN_PREVIEW_PAPER_SHADOW_BLUR_DP = 30
 const val FIRST_RUN_PREVIEW_PAPER_SHADOW_ALPHA = 0.14f
+/**
+ * `.first-run-preview-rule` still wins. No later rule changes this line.
+ * Height is 1px. Margin is 11px 0 4px. Color is `#e7e5df`.
+ * Shown at full width; the desktop scale-in animation is not played.
+ */
+const val FIRST_RUN_PREVIEW_RULE_HEIGHT_DP = 1
+const val FIRST_RUN_PREVIEW_RULE_MARGIN_TOP_DP = 11
+const val FIRST_RUN_PREVIEW_RULE_MARGIN_INLINE_DP = 0
+const val FIRST_RUN_PREVIEW_RULE_MARGIN_BOTTOM_DP = 4
+const val FIRST_RUN_PREVIEW_RULE_COLOR = 0xFFE7E5DF.toInt()
+/**
+ * `.first-run-preview-ink` is 100% wide and 98px tall. The SVG viewBox is 330×98.
+ * The draw animation is not played, so the stroke is the finished line.
+ */
+const val FIRST_RUN_PREVIEW_INK_HEIGHT_DP = 98
+const val FIRST_RUN_PREVIEW_INK_VIEW_WIDTH = 330f
+const val FIRST_RUN_PREVIEW_INK_VIEW_HEIGHT = 98
+/** `.first-run-preview-ink path` stroke is 3.4 user units, `color-mix` of the accent at 78% into `#222`. */
+const val FIRST_RUN_PREVIEW_INK_STROKE = 3.4f
+const val FIRST_RUN_PREVIEW_INK_MIX = 0.78f
+const val FIRST_RUN_PREVIEW_INK_INTO = 0xFF222222.toInt()
+/**
+ * Desktop formula from the welcome SVG. Coordinates are the 330×98 viewBox.
+ * Shown in full; `stroke-dashoffset` stays at the finished end of the draw.
+ */
+const val FIRST_RUN_PREVIEW_INK_PATH =
+    "M15 58 C29 50 33 32 39 26 C47 18 41 67 51 70 C62 72 69 50 76 40 M61 55 C75 58 90 55 103 49 M119 62 C130 49 134 31 140 27 C148 22 143 64 153 66 C166 68 173 43 182 40 C192 37 191 63 202 62 M220 48 L247 48 M234 35 L234 63 M267 28 C290 20 308 30 308 48 C308 66 286 72 268 62"
+/**
+ * `.first-run-preview-search` still wins. No later rule changes this chip.
+ * Height 27px, gap 6px, padding 0 8px, 1px border `#dfddd7`, radius 7px,
+ * text `#66676b`, fill `#ffffff`, shadow `0 5px 15px rgba(0,0,0,.06)`, font `7px/1`.
+ * Shown in place; the desktop fade-in is not played.
+ */
+const val FIRST_RUN_PREVIEW_SEARCH_HEIGHT_DP = 27
+const val FIRST_RUN_PREVIEW_SEARCH_GAP_DP = 6
+const val FIRST_RUN_PREVIEW_SEARCH_PAD_INLINE_DP = 8
+const val FIRST_RUN_PREVIEW_SEARCH_PAD_BLOCK_DP = 0
+const val FIRST_RUN_PREVIEW_SEARCH_BORDER_DP = 1
+const val FIRST_RUN_PREVIEW_SEARCH_RADIUS_DP = 7
+const val FIRST_RUN_PREVIEW_SEARCH_FONT_SP = 7
+const val FIRST_RUN_PREVIEW_SEARCH_LINE = 1f
+const val FIRST_RUN_PREVIEW_SEARCH_BORDER = 0xFFDFDDD7.toInt()
+const val FIRST_RUN_PREVIEW_SEARCH_INK = 0xFF66676B.toInt()
+const val FIRST_RUN_PREVIEW_SEARCH_FILL = 0xFFFFFFFF.toInt()
+const val FIRST_RUN_PREVIEW_SEARCH_SHADOW_X_DP = 0
+const val FIRST_RUN_PREVIEW_SEARCH_SHADOW_Y_DP = 5
+const val FIRST_RUN_PREVIEW_SEARCH_SHADOW_BLUR_DP = 15
+const val FIRST_RUN_PREVIEW_SEARCH_SHADOW_ALPHA = 0.06f
+/** `.first-run-preview-search b` is 6.5px. Its color is the accent mixed 78% into `#333`. */
+const val FIRST_RUN_PREVIEW_SEARCH_HITS_SP = 6.5f
+const val FIRST_RUN_PREVIEW_SEARCH_HIT_MIX = 0.78f
+const val FIRST_RUN_PREVIEW_SEARCH_HIT_INTO = 0xFF333333.toInt()
+/** Lucide `Search size={11}` inside the chip. CSS does not resize it. */
+const val FIRST_RUN_PREVIEW_SEARCH_ICON_DP = 11
 const val FIRST_RUN_PREVIEW_QUERY = "„Änderungsrate“"
 const val FIRST_RUN_PREVIEW_HITS = "1 Treffer"
 const val FIRST_RUN_PREVIEW_INK = "Handschrift"
 const val FIRST_RUN_PREVIEW_FOUND = "Sofort gefunden"
 const val FIRST_RUN_PREVIEW_LABEL = "Vorschau von FaNotes"
+/**
+ * `.first-run-preview-float` sits on `.first-run-app-preview`, not under the window.
+ * Padding is `8px 10px`, gap 6px, radius 9px, 8px type at weight 600, icon 15px.
+ * Tag one is `top: 24%` and `right: -25px`, or `right: -8px` at 760px and below.
+ * Tag two is `right: 28px` and `bottom: -16px`.
+ */
+const val FIRST_RUN_PREVIEW_FLOAT_PAD_BLOCK_DP = 8
+const val FIRST_RUN_PREVIEW_FLOAT_PAD_INLINE_DP = 10
+const val FIRST_RUN_PREVIEW_FLOAT_GAP_DP = 6
+const val FIRST_RUN_PREVIEW_FLOAT_RADIUS_DP = 9
+const val FIRST_RUN_PREVIEW_FLOAT_SP = 8
+const val FIRST_RUN_PREVIEW_FLOAT_WEIGHT = 600
+const val FIRST_RUN_PREVIEW_FLOAT_ICON_DP = 15
+const val FIRST_RUN_PREVIEW_FLOAT_ONE_TOP = 0.24f
+const val FIRST_RUN_PREVIEW_FLOAT_ONE_RIGHT_DP = -25
+const val FIRST_RUN_PREVIEW_FLOAT_ONE_RIGHT_NARROW_DP = -8
+const val FIRST_RUN_PREVIEW_FLOAT_TWO_RIGHT_DP = 28
+const val FIRST_RUN_PREVIEW_FLOAT_TWO_BOTTOM_DP = -16
+/** `color-mix(in srgb, var(--panel-strong) 93%, transparent)`. */
+const val FIRST_RUN_PREVIEW_FLOAT_FILL_ALPHA = 0.93f
+/** `--border-strong` is white at 16% on dark themes and `#37352f` at 16% on light themes. */
+const val FIRST_RUN_PREVIEW_FLOAT_BORDER_ALPHA = 0.16f
+const val FIRST_RUN_PREVIEW_FLOAT_BORDER_LIGHT_RGB = 0x37352F
+/** `box-shadow: 0 13px 35px rgba(0,0,0,.2)`. */
+const val FIRST_RUN_PREVIEW_FLOAT_SHADOW_X_DP = 0
+const val FIRST_RUN_PREVIEW_FLOAT_SHADOW_Y_DP = 13
+const val FIRST_RUN_PREVIEW_FLOAT_SHADOW_BLUR_DP = 35
+const val FIRST_RUN_PREVIEW_FLOAT_SHADOW_ALPHA = 0.2f
 const val FIRST_RUN_WRITING_PREVIEW_LABEL = "Vorschau einer Seite mit Text und Handschrift"
 const val FIRST_RUN_WRITING_FILE = "Analysis.md"
 const val FIRST_RUN_WRITING_DATE = "12. August · Mathematik"
@@ -375,7 +523,179 @@ const val FIRST_RUN_WRITING_TYPED = "Der Flächeninhalt lässt sich mit dem best
 const val FIRST_RUN_WRITING_RECOGNIZED = "Im Hintergrund erkannt"
 const val FIRST_RUN_WRITING_FORMULA = "∫₀¹ (x + 2) dx = 2,5"
 const val FIRST_RUN_WRITING_CONVERT = "Optional umwandeln"
+/**
+ * `.first-run-writing-preview` starts at 19px, then the shared chrome rule sets it to 12px.
+ * The toolbar and `0 32px 90px rgba(0,0,0,.2)` shadow are unchanged.
+ */
+const val FIRST_RUN_WRITING_FRAME_RADIUS_DP = 12
+const val FIRST_RUN_WRITING_FRAME_PAD_TOP_DP = 31
+const val FIRST_RUN_WRITING_FRAME_PAD_WIDE_DP = 34
+const val FIRST_RUN_WRITING_FRAME_PAD_MEDIUM_DP = 24
+const val FIRST_RUN_WRITING_FRAME_PAD_SHORT_DP = 28
+const val FIRST_RUN_WRITING_FRAME_SHADOW_Y_DP = 32
+const val FIRST_RUN_WRITING_FRAME_SHADOW_ALPHA = 0.2f
+const val FIRST_RUN_WRITING_FRAME_PANEL_ALPHA = 0.91f
+const val FIRST_RUN_WRITING_FRAME_ELEVATED_ALPHA = 0.80f
+/** `.first-run-paper-toolbar` is 31px, gap 7px, padding `0 12px`. The marks are 13px with a 4px radius; the live one holds a 5px accent dot. */
+const val FIRST_RUN_WRITING_TOOLBAR_DP = 31
+const val FIRST_RUN_WRITING_TOOLBAR_GAP_DP = 7
+const val FIRST_RUN_WRITING_TOOLBAR_PAD_DP = 12
+const val FIRST_RUN_WRITING_TOOLBAR_MARK_DP = 13
+const val FIRST_RUN_WRITING_TOOLBAR_MARK_RADIUS_DP = 4
+const val FIRST_RUN_WRITING_TOOLBAR_DOT_DP = 5
+const val FIRST_RUN_WRITING_TOOLBAR_DOT_ALPHA = 0.10f
+const val FIRST_RUN_WRITING_FILE_SP = 7
+/**
+ * `.first-run-paper-sheet` is `#fbfaf7` with `#28292d` type, top radius 11px, and `0 10px 35px rgba(0,0,0,.15)`.
+ * Padding is 36px 44px, inline 34px from 980px, and block 27px when the window is short and wider than 760px.
+ * Min height is 407px, or 354px on that short wide window.
+ */
+const val FIRST_RUN_WRITING_SHEET_RADIUS_DP = 11
+const val FIRST_RUN_WRITING_SHEET_FILL = 0xFFFBFAF7.toInt()
+const val FIRST_RUN_WRITING_SHEET_INK = 0xFF28292D.toInt()
+const val FIRST_RUN_WRITING_SHEET_PAD_BLOCK_DP = 36
+const val FIRST_RUN_WRITING_SHEET_PAD_BLOCK_SHORT_DP = 27
+const val FIRST_RUN_WRITING_SHEET_PAD_INLINE_DP = 44
+const val FIRST_RUN_WRITING_SHEET_PAD_INLINE_NARROW_DP = 34
+const val FIRST_RUN_WRITING_SHEET_MIN_DP = 407
+const val FIRST_RUN_WRITING_SHEET_MIN_SHORT_DP = 354
+const val FIRST_RUN_WRITING_SHEET_SHADOW_Y_DP = 10
+const val FIRST_RUN_WRITING_SHEET_SHADOW_ALPHA = 0.15f
+/** `.first-run-paper-sheet > small` is 6.5px, weight 600, `#929195`, tracking .08em, uppercased. */
+const val FIRST_RUN_WRITING_DATE_SP = 6.5f
+const val FIRST_RUN_WRITING_DATE_WEIGHT = 600
+const val FIRST_RUN_WRITING_DATE_TRACKING_EM = 0.08f
+const val FIRST_RUN_WRITING_DATE_INK = 0xFF929195.toInt()
+/** `.first-run-paper-sheet h2` is `650 23px/1.1`, tracking -.035em, margin `10px 0 14px`. */
+const val FIRST_RUN_WRITING_TITLE_SP = 23
+const val FIRST_RUN_WRITING_TITLE_WEIGHT = 650
+const val FIRST_RUN_WRITING_TITLE_LINE = 1.1f
+const val FIRST_RUN_WRITING_TITLE_TRACKING_EM = -0.035f
+const val FIRST_RUN_WRITING_TITLE_MARGIN_TOP_DP = 10
+const val FIRST_RUN_WRITING_TITLE_MARGIN_BOTTOM_DP = 14
+/** `.first-run-paper-type` is `8.5px/1.5` in `#55565b`. */
+const val FIRST_RUN_WRITING_TYPED_SP = 8.5f
+const val FIRST_RUN_WRITING_TYPED_LINE = 1.5f
+const val FIRST_RUN_WRITING_TYPED_INK = 0xFF55565B.toInt()
+/** `.first-run-paper-ink` is 150px, or 127px when short and wide. ViewBox is `0 0 420 150`. Stroke is 3.3 of accent mixed 78% into `#24252a`. */
+const val FIRST_RUN_WRITING_INK_VIEW_WIDTH = 420
+const val FIRST_RUN_WRITING_INK_VIEW_HEIGHT = 150
+const val FIRST_RUN_WRITING_INK_HEIGHT_DP = 150
+const val FIRST_RUN_WRITING_INK_HEIGHT_SHORT_DP = 127
+const val FIRST_RUN_WRITING_INK_MARGIN_TOP_DP = 7
+const val FIRST_RUN_WRITING_INK_WIDTH_DP = 3.3f
+const val FIRST_RUN_WRITING_INK_MIX = 0.78f
+const val FIRST_RUN_WRITING_INK_INTO = 0xFF24252A.toInt()
+/** `.first-run-paper-transcript` is at least 43px: columns 23 / 1fr / 18, gap 7, padding 7px 9px, radius 8. */
+const val FIRST_RUN_WRITING_TRANSCRIPT_MIN_DP = 43
+const val FIRST_RUN_WRITING_TRANSCRIPT_LEAD_DP = 23
+const val FIRST_RUN_WRITING_TRANSCRIPT_TRAIL_DP = 18
+const val FIRST_RUN_WRITING_TRANSCRIPT_GAP_DP = 7
+const val FIRST_RUN_WRITING_TRANSCRIPT_PAD_BLOCK_DP = 7
+const val FIRST_RUN_WRITING_TRANSCRIPT_PAD_INLINE_DP = 9
+const val FIRST_RUN_WRITING_TRANSCRIPT_RADIUS_DP = 8
+const val FIRST_RUN_WRITING_TRANSCRIPT_ICON_DP = 12
+const val FIRST_RUN_WRITING_TRANSCRIPT_CHECK_DP = 13
+const val FIRST_RUN_WRITING_TRANSCRIPT_SP = 6.5f
+const val FIRST_RUN_WRITING_TRANSCRIPT_LINE = 1.3f
+const val FIRST_RUN_WRITING_TRANSCRIPT_WEIGHT = 600
+const val FIRST_RUN_WRITING_TRANSCRIPT_DETAIL_WEIGHT = 500
+const val FIRST_RUN_WRITING_TRANSCRIPT_DETAIL_GAP_DP = 2
+const val FIRST_RUN_WRITING_TRANSCRIPT_DETAIL_INK = 0xFF87878A.toInt()
+const val FIRST_RUN_WRITING_TRANSCRIPT_CHECK_INK = 0xFF4F9970.toInt()
+const val FIRST_RUN_WRITING_TRANSCRIPT_BORDER_MIX = 0.24f
+const val FIRST_RUN_WRITING_TRANSCRIPT_BORDER_INTO = 0xFFDDDDDD.toInt()
+const val FIRST_RUN_WRITING_TRANSCRIPT_FILL_MIX = 0.05f
+const val FIRST_RUN_WRITING_TRANSCRIPT_SPARK_MIX = 0.75f
+const val FIRST_RUN_WRITING_TRANSCRIPT_SPARK_INTO = 0xFF333333.toInt()
+const val FIRST_RUN_WRITING_TRANSCRIPT_SHADOW_Y_DP = 7
+const val FIRST_RUN_WRITING_TRANSCRIPT_SHADOW_ALPHA = 0.06f
+/** `.first-run-paper-selection` sits at left 37, right 31, top 119, height 145, radius 8. The label is 6px, 21px above the top right. */
+const val FIRST_RUN_WRITING_SELECTION_START_DP = 37
+const val FIRST_RUN_WRITING_SELECTION_END_DP = 31
+const val FIRST_RUN_WRITING_SELECTION_TOP_DP = 119
+const val FIRST_RUN_WRITING_SELECTION_HEIGHT_DP = 145
+const val FIRST_RUN_WRITING_SELECTION_RADIUS_DP = 8
+const val FIRST_RUN_WRITING_SELECTION_ALPHA = 0.60f
+const val FIRST_RUN_WRITING_SELECTION_HANDLE_DP = 4
+const val FIRST_RUN_WRITING_SELECTION_HANDLE_OUTSET_DP = 3
+const val FIRST_RUN_WRITING_SELECTION_LABEL_RISE_DP = 21
+const val FIRST_RUN_WRITING_SELECTION_LABEL_SP = 6
+const val FIRST_RUN_WRITING_SELECTION_LABEL_WEIGHT = 600
+const val FIRST_RUN_WRITING_SELECTION_LABEL_PAD_BLOCK_DP = 4
+const val FIRST_RUN_WRITING_SELECTION_LABEL_PAD_INLINE_DP = 6
+const val FIRST_RUN_WRITING_SELECTION_LABEL_RADIUS_DP = 5
+const val FIRST_RUN_WRITING_SELECTION_LABEL_MIX = 0.82f
+const val FIRST_RUN_WRITING_SELECTION_LABEL_INTO = 0xFF222222.toInt()
 val FIRST_RUN_PREVIEW_SUBJECTS = listOf("Mathematik", "Deutsch", "Französisch", "Physik", "Wirtschaft")
+
+/** Top, end, bottom, and start padding. */
+data class FirstRunWritingPad(val top: Int, val end: Int, val bottom: Int, val start: Int)
+
+/** True for `@media (max-height: 680px) and (min-width: 761px)`. */
+fun firstRunWritingShort(screenWidthDp: Int, screenHeightDp: Int): Boolean =
+    screenHeightDp <= FIRST_RUN_PREVIEW_SHORT_HEIGHT_DP && screenWidthDp > FIRST_RUN_PREVIEW_SPLIT_DP
+
+/**
+ * Padding of `.first-run-writing-preview`.
+ * Base is `31px 34px 0`. At `max-width: 980px` the inline padding becomes 24px.
+ * A short window wider than 760px then sets inline padding to 28px, including wide windows.
+ */
+fun firstRunWritingFramePad(screenWidthDp: Int, screenHeightDp: Int): FirstRunWritingPad {
+    val inline = when {
+        firstRunWritingShort(screenWidthDp, screenHeightDp) -> FIRST_RUN_WRITING_FRAME_PAD_SHORT_DP
+        screenWidthDp <= FIRST_RUN_MEDIUM_DP -> FIRST_RUN_WRITING_FRAME_PAD_MEDIUM_DP
+        else -> FIRST_RUN_WRITING_FRAME_PAD_WIDE_DP
+    }
+    return FirstRunWritingPad(
+        top = FIRST_RUN_WRITING_FRAME_PAD_TOP_DP,
+        end = inline,
+        bottom = 0,
+        start = inline,
+    )
+}
+
+/**
+ * Padding of `.first-run-paper-sheet`.
+ * Base is 36px 44px. From 980px down, inline padding is 34px.
+ * A short window wider than 760px sets the block padding to 27px and leaves the inline padding.
+ */
+fun firstRunWritingSheetPad(screenWidthDp: Int, screenHeightDp: Int): FirstRunWritingPad {
+    val inline = if (screenWidthDp <= FIRST_RUN_MEDIUM_DP) FIRST_RUN_WRITING_SHEET_PAD_INLINE_NARROW_DP else FIRST_RUN_WRITING_SHEET_PAD_INLINE_DP
+    val block = if (firstRunWritingShort(screenWidthDp, screenHeightDp)) FIRST_RUN_WRITING_SHEET_PAD_BLOCK_SHORT_DP else FIRST_RUN_WRITING_SHEET_PAD_BLOCK_DP
+    return FirstRunWritingPad(top = block, end = inline, bottom = block, start = inline)
+}
+
+/** Min height of `.first-run-paper-sheet`: 407px, or 354px when short and wider than 760px. */
+fun firstRunWritingSheetMinDp(screenWidthDp: Int, screenHeightDp: Int): Int =
+    if (firstRunWritingShort(screenWidthDp, screenHeightDp)) FIRST_RUN_WRITING_SHEET_MIN_SHORT_DP else FIRST_RUN_WRITING_SHEET_MIN_DP
+
+/** Height of `.first-run-paper-ink`: 150px, or 127px when short and wider than 760px. */
+fun firstRunWritingInkHeightDp(screenWidthDp: Int, screenHeightDp: Int): Int =
+    if (firstRunWritingShort(screenWidthDp, screenHeightDp)) FIRST_RUN_WRITING_INK_HEIGHT_SHORT_DP else FIRST_RUN_WRITING_INK_HEIGHT_DP
+
+/** The date line is uppercased by `text-transform: uppercase`. */
+fun firstRunWritingDateLabel(): String = FIRST_RUN_WRITING_DATE.uppercase(Locale.GERMAN)
+
+/** Stroke of `.first-run-paper-ink path`: accent mixed 78% into `#24252a`. */
+fun firstRunWritingInkStroke(accentArgb: Int): Int =
+    mixArgb(accentArgb, FIRST_RUN_WRITING_INK_INTO, FIRST_RUN_WRITING_INK_MIX)
+
+/** Transcript border: accent mixed 24% into `#ddd`. */
+fun firstRunWritingTranscriptBorder(accentArgb: Int): Int =
+    mixArgb(accentArgb, FIRST_RUN_WRITING_TRANSCRIPT_BORDER_INTO, FIRST_RUN_WRITING_TRANSCRIPT_BORDER_MIX)
+
+/** Transcript fill: accent mixed 5% into white. */
+fun firstRunWritingTranscriptFill(accentArgb: Int): Int =
+    mixArgb(accentArgb, 0xFFFFFFFF.toInt(), FIRST_RUN_WRITING_TRANSCRIPT_FILL_MIX)
+
+/** Sparkle icon: accent mixed 75% into `#333`. */
+fun firstRunWritingSparkle(accentArgb: Int): Int =
+    mixArgb(accentArgb, FIRST_RUN_WRITING_TRANSCRIPT_SPARK_INTO, FIRST_RUN_WRITING_TRANSCRIPT_SPARK_MIX)
+
+/** Selection label: accent mixed 82% into `#222`. */
+fun firstRunWritingSelectionLabel(accentArgb: Int): Int =
+    mixArgb(accentArgb, FIRST_RUN_WRITING_SELECTION_LABEL_INTO, FIRST_RUN_WRITING_SELECTION_LABEL_MIX)
 
 fun firstRunPreviewColumns(widthDp: Int): Int = if (widthDp <= FIRST_RUN_PREVIEW_SPLIT_DP) 1 else 2
 
@@ -386,6 +706,10 @@ fun firstRunPreviewColumns(widthDp: Int): Int = if (widthDp <= FIRST_RUN_PREVIEW
  */
 fun firstRunPreviewAsideDp(screenWidthDp: Int): Int =
     if (screenWidthDp > FIRST_RUN_MEDIUM_DP) FIRST_RUN_PREVIEW_ASIDE_DP else FIRST_RUN_PREVIEW_ASIDE_NARROW_DP
+
+/** Subject-column fill: `--bg` mixed 76% into `--panel`. */
+fun firstRunPreviewAsideFill(backgroundArgb: Int, panelArgb: Int): Int =
+    cssColorMix(backgroundArgb, panelArgb, FIRST_RUN_PREVIEW_ASIDE_FILL_MIX)
 
 /** Top, end, bottom, and start padding of the welcome-preview subject column. */
 data class FirstRunPreviewAsidePad(val top: Int, val end: Int, val bottom: Int, val start: Int)
@@ -412,6 +736,27 @@ fun firstRunPreviewAsidePad(screenWidthDp: Int): FirstRunPreviewAsidePad {
  * Mathematik keeps `var(--accent)`, Deutsch is #c76868, Französisch #3d8be0, Physik #5e9abd, Wirtschaft #cf9a48.
  * [accentArgb] is the theme accent for Mathematik.
  */
+/**
+ * Default SVG placement, `xMidYMid meet`.
+ * The formula and the integral keep their shape. A wide sheet letterboxes them
+ * instead of stretching the strokes, and a 127px writing box does not squash the 150-unit viewBox.
+ */
+data class PreviewInkMeet(val scale: Float, val offsetX: Float, val offsetY: Float)
+
+fun previewInkMeet(widthPx: Float, heightPx: Float, viewWidth: Float, viewHeight: Float): PreviewInkMeet? {
+    if (widthPx <= 0f || heightPx <= 0f || viewWidth <= 0f || viewHeight <= 0f) return null
+    val scale = minOf(widthPx / viewWidth, heightPx / viewHeight)
+    if (!scale.isFinite() || scale <= 0f) return null
+    return PreviewInkMeet(
+        scale = scale,
+        offsetX = (widthPx - viewWidth * scale) / 2f,
+        offsetY = (heightPx - viewHeight * scale) / 2f,
+    )
+}
+
+/** A preview stroke is in viewBox units, so the meet scale is its pixel width. */
+fun previewInkStrokePx(strokeUnits: Float, scale: Float): Float = strokeUnits * scale
+
 fun firstRunPreviewMarkColors(accentArgb: Int): List<Int> = listOf(
     accentArgb,
     0xFFC76868.toInt(),
@@ -505,6 +850,282 @@ fun firstRunPreviewPaperShadowFrame(widthPx: Float, heightPx: Float, density: Fl
         topRadiusPx = FIRST_RUN_PREVIEW_PAPER_RADIUS_TOP_DP * density,
         blurPx = blurPx,
         color = firstRunPreviewPaperShadowColor(shadow.alpha),
+    )
+}
+
+/** One command of the welcome-preview handwriting path. */
+sealed class FirstRunPreviewInkOp {
+    data class Move(val x: Float, val y: Float) : FirstRunPreviewInkOp()
+    data class Line(val x: Float, val y: Float) : FirstRunPreviewInkOp()
+    data class Cubic(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val x: Float, val y: Float) : FirstRunPreviewInkOp()
+}
+
+/** Parses the desktop `M` / `L` / `C` path. A command may sit against its first number, as in `M15`. */
+fun firstRunPreviewInkOps(path: String = FIRST_RUN_PREVIEW_INK_PATH): List<FirstRunPreviewInkOp> {
+    val tokens = Regex("""[MLC]|-?\d+(?:\.\d+)?""").findAll(path).map { it.value }.toList()
+    val ops = ArrayList<FirstRunPreviewInkOp>()
+    var index = 0
+    fun number(): Float {
+        val value = tokens[index].toFloat()
+        index += 1
+        return value
+    }
+    while (index < tokens.size) {
+        val command = tokens[index]
+        index += 1
+        ops += when (command) {
+            "M" -> FirstRunPreviewInkOp.Move(number(), number())
+            "L" -> FirstRunPreviewInkOp.Line(number(), number())
+            "C" -> FirstRunPreviewInkOp.Cubic(number(), number(), number(), number(), number(), number())
+            else -> throw IllegalArgumentException("Bad welcome ink command $command")
+        }
+    }
+    return ops
+}
+
+val FIRST_RUN_PREVIEW_INK_OPS: List<FirstRunPreviewInkOp> = firstRunPreviewInkOps()
+
+/**
+ * `xMidYMid meet` of the 330×98 viewBox into the CSS box, plus the 3.4 user-unit stroke.
+ * [widthPx] and [heightPx] are the ink element's pixel size. A wide box letterboxes on the sides.
+ */
+data class FirstRunPreviewInkFit(
+    val scale: Float,
+    val offsetX: Float,
+    val offsetY: Float,
+    val strokePx: Float,
+)
+
+fun firstRunPreviewInkFit(widthPx: Float, heightPx: Float): FirstRunPreviewInkFit? {
+    if (widthPx < 1f || heightPx < 1f) return null
+    val viewWidth = FIRST_RUN_PREVIEW_INK_VIEW_WIDTH
+    val viewHeight = FIRST_RUN_PREVIEW_INK_HEIGHT_DP.toFloat()
+    if (viewWidth <= 0f || viewHeight <= 0f) return null
+    val scale = min(widthPx / viewWidth, heightPx / viewHeight)
+    if (scale <= 0f) return null
+    return FirstRunPreviewInkFit(
+        scale = scale,
+        offsetX = (widthPx - viewWidth * scale) / 2f,
+        offsetY = (heightPx - viewHeight * scale) / 2f,
+        strokePx = FIRST_RUN_PREVIEW_INK_STROKE * scale,
+    )
+}
+
+/** Finished stroke: `color-mix(in srgb, var(--accent) 78%, #222)`. */
+fun firstRunPreviewInkStroke(accentArgb: Int): Int =
+    mixArgb(accentArgb, FIRST_RUN_PREVIEW_INK_INTO, FIRST_RUN_PREVIEW_INK_MIX)
+
+/** Hit label: `color-mix(in srgb, var(--accent) 78%, #333)`. */
+fun firstRunPreviewSearchHit(accentArgb: Int): Int =
+    mixArgb(accentArgb, FIRST_RUN_PREVIEW_SEARCH_HIT_INTO, FIRST_RUN_PREVIEW_SEARCH_HIT_MIX)
+
+data class FirstRunPreviewSearchShadow(
+    val xDp: Int,
+    val yDp: Int,
+    val blurDp: Int,
+    val alpha: Float,
+)
+
+/** Desktop shadow for the welcome search chip. The same literal applies in every theme. */
+fun firstRunPreviewSearchShadow() = FirstRunPreviewSearchShadow(
+    FIRST_RUN_PREVIEW_SEARCH_SHADOW_X_DP,
+    FIRST_RUN_PREVIEW_SEARCH_SHADOW_Y_DP,
+    FIRST_RUN_PREVIEW_SEARCH_SHADOW_BLUR_DP,
+    FIRST_RUN_PREVIEW_SEARCH_SHADOW_ALPHA,
+)
+
+/** Black at 6%, packed ARGB. */
+fun firstRunPreviewSearchShadowColor(alpha: Float = FIRST_RUN_PREVIEW_SEARCH_SHADOW_ALPHA): Int {
+    val channel = (alpha.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
+    return channel shl 24
+}
+
+/**
+ * A floating tag anchored to `.first-run-app-preview`.
+ * [fromTop] uses [topFraction] of the preview height. Otherwise [bottomDp] is the CSS `bottom`.
+ * [rightDp] is the CSS `right`, negative when the tag hangs past the window.
+ */
+data class FirstRunPreviewFloatAnchor(
+    val fromTop: Boolean,
+    val topFraction: Float,
+    val rightDp: Int,
+    val bottomDp: Int,
+)
+
+/** Handschrift tag. The 760px query only changes its right edge. */
+fun firstRunPreviewFloatOne(screenWidthDp: Int) = FirstRunPreviewFloatAnchor(
+    fromTop = true,
+    topFraction = FIRST_RUN_PREVIEW_FLOAT_ONE_TOP,
+    rightDp = if (screenWidthDp <= FIRST_RUN_PREVIEW_SPLIT_DP) {
+        FIRST_RUN_PREVIEW_FLOAT_ONE_RIGHT_NARROW_DP
+    } else {
+        FIRST_RUN_PREVIEW_FLOAT_ONE_RIGHT_DP
+    },
+    bottomDp = 0,
+)
+
+/** Sofort gefunden tag. Its place does not change with the viewport. */
+fun firstRunPreviewFloatTwo() = FirstRunPreviewFloatAnchor(
+    fromTop = false,
+    topFraction = 0f,
+    rightDp = FIRST_RUN_PREVIEW_FLOAT_TWO_RIGHT_DP,
+    bottomDp = FIRST_RUN_PREVIEW_FLOAT_TWO_BOTTOM_DP,
+)
+
+/**
+ * Offset from the preview's top-end or bottom-end corner.
+ * Positive x moves right and positive y moves down, which is how Compose applies `offset`.
+ * [yFraction] is only used for the top tag and is a fraction of the preview height.
+ */
+data class FirstRunPreviewFloatOffset(val xDp: Int, val yFraction: Float, val yDp: Int)
+
+fun firstRunPreviewFloatOffset(anchor: FirstRunPreviewFloatAnchor): FirstRunPreviewFloatOffset = if (anchor.fromTop) {
+    FirstRunPreviewFloatOffset(xDp = -anchor.rightDp, yFraction = anchor.topFraction, yDp = 0)
+} else {
+    FirstRunPreviewFloatOffset(xDp = -anchor.rightDp, yFraction = 0f, yDp = -anchor.bottomDp)
+}
+
+/** Icon on `.first-run-preview-float svg` is `--accent-readable`. */
+fun firstRunPreviewFloatIcon(dark: Boolean): Int = noteTabAccentArgb(dark)
+
+/** Chip fill: panel-strong at 93% over a transparent backdrop. */
+fun firstRunPreviewFloatFill(panelStrongArgb: Int): Int {
+    val alpha = (FIRST_RUN_PREVIEW_FLOAT_FILL_ALPHA * 255f).roundToInt().coerceIn(0, 255)
+    return (alpha shl 24) or (panelStrongArgb and 0xFFFFFF)
+}
+
+/** `--border-strong` for the floating tags. */
+fun firstRunPreviewFloatBorder(dark: Boolean): Int {
+    val rgb = if (dark) 0xFFFFFF else FIRST_RUN_PREVIEW_FLOAT_BORDER_LIGHT_RGB
+    val alpha = (FIRST_RUN_PREVIEW_FLOAT_BORDER_ALPHA * 255f).roundToInt().coerceIn(0, 255)
+    return (alpha shl 24) or rgb
+}
+
+/** Header bar fill: `--panel` at 92% over a transparent backdrop. */
+fun firstRunPreviewHeaderFill(panelArgb: Int): Int {
+    val alpha = (FIRST_RUN_PREVIEW_HEADER_FILL_ALPHA * 255f).roundToInt().coerceIn(0, 255)
+    return (alpha shl 24) or (panelArgb and 0xFFFFFF)
+}
+
+/** `--border` for the welcome preview, including the sepia 10% rule. */
+fun firstRunPreviewBorder(themeId: String, systemDark: Boolean = false): Int {
+    val palette = themePalette(themeId, systemDark)
+    val alpha = if (palette.id == "sepia") FIRST_RUN_PREVIEW_BORDER_SEPIA_ALPHA else FIRST_RUN_PREVIEW_BORDER_ALPHA
+    val rgb = if (palette.dark) 0xFFFFFF else FIRST_RUN_PREVIEW_BORDER_LIGHT_RGB
+    val channel = (alpha * 255f).roundToInt().coerceIn(0, 255)
+    return (channel shl 24) or rgb
+}
+
+/** Close traffic light: danger mixed 68% into `--border`. */
+fun firstRunPreviewHeaderClose(dangerArgb: Int, borderArgb: Int): Int =
+    cssColorMix(dangerArgb, borderArgb, FIRST_RUN_PREVIEW_HEADER_CLOSE_MIX)
+
+/** Window border: `--border-strong` mixed 90% into transparent. */
+fun firstRunPreviewWindowBorder(themeId: String, systemDark: Boolean = false): Int {
+    val dark = themePalette(themeId, systemDark).dark
+    return cssColorMix(firstRunPreviewFloatBorder(dark), 0, FIRST_RUN_PREVIEW_WINDOW_BORDER_MIX)
+}
+
+/** Black at the welcome-window shadow alpha. */
+fun firstRunPreviewWindowShadowColor(alpha: Float = FIRST_RUN_PREVIEW_WINDOW_SHADOW_ALPHA): Int {
+    val channel = (alpha.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
+    return channel shl 24
+}
+
+/** Accent painted in the glow: 22% color times 70% opacity. */
+fun firstRunPreviewGlowColor(accentArgb: Int): Int {
+    val alpha = (FIRST_RUN_PREVIEW_GLOW_COLOR_ALPHA * FIRST_RUN_PREVIEW_GLOW_OPACITY * 255f).roundToInt().coerceIn(0, 255)
+    return (alpha shl 24) or (accentArgb and 0xFFFFFF)
+}
+
+/**
+ * Software-bitmap placement of the glow ellipse.
+ * [padPx] leaves room for the 65dp blur around the preview.
+ */
+data class FirstRunPreviewGlowFrame(
+    val bitmapWidthPx: Int,
+    val bitmapHeightPx: Int,
+    val padPx: Float,
+    val ovalLeftPx: Float,
+    val ovalTopPx: Float,
+    val ovalRightPx: Float,
+    val ovalBottomPx: Float,
+    val blurPx: Float,
+    val color: Int,
+)
+
+fun firstRunPreviewGlowFrame(widthPx: Float, heightPx: Float, density: Float, accentArgb: Int): FirstRunPreviewGlowFrame? {
+    if (widthPx < 1f || heightPx < 1f || density <= 0f) return null
+    val blurPx = FIRST_RUN_PREVIEW_GLOW_BLUR_DP * density
+    if (blurPx <= 0.5f) return null
+    val pad = blurPx * 2f + 2f
+    val left = widthPx * FIRST_RUN_PREVIEW_GLOW_INSET_INLINE
+    val top = heightPx * FIRST_RUN_PREVIEW_GLOW_INSET_BLOCK
+    val right = widthPx * (1f - FIRST_RUN_PREVIEW_GLOW_INSET_INLINE)
+    val bottom = heightPx * (1f - FIRST_RUN_PREVIEW_GLOW_INSET_BLOCK)
+    if (right - left < 1f || bottom - top < 1f) return null
+    val bitmapWidth = ceil(widthPx + pad * 2f).toInt()
+    val bitmapHeight = ceil(heightPx + pad * 2f).toInt()
+    if (bitmapWidth < 1 || bitmapHeight < 1) return null
+    return FirstRunPreviewGlowFrame(
+        bitmapWidthPx = bitmapWidth,
+        bitmapHeightPx = bitmapHeight,
+        padPx = pad,
+        ovalLeftPx = pad + left,
+        ovalTopPx = pad + top,
+        ovalRightPx = pad + right,
+        ovalBottomPx = pad + bottom,
+        blurPx = blurPx,
+        color = firstRunPreviewGlowColor(accentArgb),
+    )
+}
+
+/** Black at the floating-tag shadow alpha. */
+fun firstRunPreviewFloatShadowColor(alpha: Float = FIRST_RUN_PREVIEW_FLOAT_SHADOW_ALPHA): Int {
+    val channel = (alpha.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
+    return channel shl 24
+}
+
+/**
+ * Software-bitmap placement of the chip rectangle shifted by `0 5px`.
+ * Every corner uses the 7px chip radius. [padPx] leaves room for the 15px blur.
+ */
+data class FirstRunPreviewSearchShadowFrame(
+    val bitmapWidthPx: Int,
+    val bitmapHeightPx: Int,
+    val padPx: Float,
+    val shapeLeftPx: Float,
+    val shapeTopPx: Float,
+    val shapeRightPx: Float,
+    val shapeBottomPx: Float,
+    val radiusPx: Float,
+    val blurPx: Float,
+    val color: Int,
+)
+
+fun firstRunPreviewSearchShadowFrame(widthPx: Float, heightPx: Float, density: Float): FirstRunPreviewSearchShadowFrame? {
+    if (widthPx < 1f || heightPx < 1f || density <= 0f) return null
+    val shadow = firstRunPreviewSearchShadow()
+    if (shadow.blurDp <= 0) return null
+    val blurPx = shadow.blurDp * density
+    if (blurPx <= 0.5f) return null
+    val offsetX = shadow.xDp * density
+    val offsetY = shadow.yDp * density
+    val pad = blurPx * 2f + abs(offsetX) + abs(offsetY) + 2f
+    val bitmapWidth = ceil(widthPx + pad * 2f).toInt()
+    val bitmapHeight = ceil(heightPx + pad * 2f).toInt()
+    if (bitmapWidth < 1 || bitmapHeight < 1) return null
+    return FirstRunPreviewSearchShadowFrame(
+        bitmapWidthPx = bitmapWidth,
+        bitmapHeightPx = bitmapHeight,
+        padPx = pad,
+        shapeLeftPx = pad + offsetX,
+        shapeTopPx = pad + offsetY,
+        shapeRightPx = pad + offsetX + widthPx,
+        shapeBottomPx = pad + offsetY + heightPx,
+        radiusPx = FIRST_RUN_PREVIEW_SEARCH_RADIUS_DP * density,
+        blurPx = blurPx,
+        color = firstRunPreviewSearchShadowColor(shadow.alpha),
     )
 }
 

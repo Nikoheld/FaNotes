@@ -8,14 +8,90 @@ import java.util.Locale
  */
 
 private val WIKILINK = Regex("""\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?]]""")
+private val FENCE = Regex("""^ {0,3}(`{3,}|~{3,})(.*)$""")
 private val GERMAN = Locale.forLanguageTag("de-DE")
+
+/**
+ * Spaces stand in for fenced and inline code. The result has the same length,
+ * so a match index still points at the same place in the original note.
+ */
+fun maskMarkdownCode(markdown: String): String {
+    val chars = markdown.toCharArray()
+    var offset = 0
+    var fenceMarker = ""
+    var fenceLength = 0
+    for (rawLine in markdown.split('\n')) {
+        val line = rawLine.removeSuffix("\r")
+        val fence = FENCE.matchEntire(line)
+        var hide = false
+        if (fence != null) {
+            val token = fence.groupValues[1]
+            val marker = token.first().toString()
+            val rest = fence.groupValues[2]
+            if (fenceMarker.isEmpty()) {
+                if (marker != "`" || !rest.contains('`')) {
+                    fenceMarker = marker
+                    fenceLength = token.length
+                    hide = true
+                }
+            } else if (marker == fenceMarker && token.length >= fenceLength && rest.isBlank()) {
+                fenceMarker = ""
+                fenceLength = 0
+                hide = true
+            } else if (fenceMarker.isNotEmpty()) {
+                hide = true
+            }
+        } else if (fenceMarker.isNotEmpty()) {
+            hide = true
+        }
+        if (hide) {
+            for (slot in rawLine.indices) chars[offset + slot] = ' '
+        }
+        offset += rawLine.length + 1
+    }
+    return maskInlineCode(chars)
+}
+
+private fun maskInlineCode(chars: CharArray): String {
+    var index = 0
+    while (index < chars.size) {
+        if (chars[index] != '`') {
+            index += 1
+            continue
+        }
+        var length = 0
+        while (index + length < chars.size && chars[index + length] == '`') length += 1
+        var cursor = index + length
+        var closed = -1
+        while (cursor < chars.size) {
+            if (chars[cursor] != '`') {
+                cursor += 1
+                continue
+            }
+            var run = 0
+            while (cursor + run < chars.size && chars[cursor + run] == '`') run += 1
+            if (run == length) {
+                closed = cursor
+                break
+            }
+            cursor += run
+        }
+        if (closed < 0) {
+            index += length
+            continue
+        }
+        for (slot in index until closed + length) chars[slot] = ' '
+        index = closed + length
+    }
+    return String(chars)
+}
 
 data class Backlink(val path: String, val title: String, val excerpt: String)
 
-/** Titles a note points at with wiki links such as `[[Mechanik]]`. */
+/** Titles a note points at with wiki links such as `[[Mechanik]]`. Examples in code do not count. */
 fun wikilinkTargets(markdown: String): List<String> {
     val found = linkedSetOf<String>()
-    for (match in WIKILINK.findAll(markdown)) {
+    for (match in WIKILINK.findAll(maskMarkdownCode(markdown))) {
         val target = match.groupValues[1].trim()
         if (target.isNotEmpty()) found += target
     }
@@ -59,7 +135,7 @@ private fun titleFromPath(path: String): String {
 }
 
 private fun excerptAround(markdown: String, needle: String): String {
-    val index = markdown.lowercase(GERMAN).indexOf(needle.lowercase(GERMAN))
+    val index = maskMarkdownCode(markdown).lowercase(GERMAN).indexOf(needle.lowercase(GERMAN))
     if (index < 0) return ""
     val end = minOf(markdown.length, index + needle.length + 72)
     return markdown.substring(maxOf(0, index - 48), end).replace(Regex("\\s+"), " ").trim()

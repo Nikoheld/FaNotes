@@ -2,7 +2,13 @@
 
 ## 2026.10.7
 
-- **Schnellaktionen.** Eine Notiz lässt sich duplizieren: Text und Handschrift liegen in einer neuen Datei, das Arbeitsblatt bleibt beim Original. Datum und Uhrzeit setzen sich an die Schreibstelle, ein Wiki-Link kopiert `[[Name]]`, und Strg+Enter macht aus der Zeile eine Aufgabe oder setzt den Haken. Die Dateileiste zeigt die Notiz auf Wunsch.
+- **Alltag.** Eine Notiz lässt sich duplizieren: Text, Handschrift, Verlinkungen und Arbeitsblätter kommen in eine neue Datei, die Antworten des Originals bleiben dort. Wiki-Link und Pfad kopierst du aus dem Dateimenü, `Strg+Umschalt+D` setzt das Datum an der Schreibmarke ein, alle Ordner klappen mit einem Klick zu, und die leere Seite zeigt die zuletzt geöffneten Notizen.
+- **Aufgaben.** `Strg+Enter` macht aus der Zeile eine Aufgabe oder setzt den Haken. `Strg+Umschalt+C` kopiert den Wiki-Link, und die Dateileiste springt auf Wunsch zur Notiz.
+- **Kalenderdatei.** Eine ICS-Datei mit Weltzeit oder einer Dauer landet auf der örtlichen Uhrzeit. Dieselbe Datei noch einmal importieren aktualisiert den Termin und nimmt abgesagte Einträge heraus, statt ihn zu verdoppeln.
+- **Bild einfügen.** Ein Screenshot aus der Zwischenablage landet auf der offenen Notiz, auch während der Cursor im Text steht. Text bleibt Text.
+- **Terminerinnerung.** Der Hinweis im Kalender folgt der Sprache der Oberfläche und nennt weitere Termine, die gleich beginnen.
+- **Karteikarten.** Nochmal legt die Karte hinter die anderen fälligen Karten, statt sie sofort wieder zu zeigen. Leertaste zeigt die Antwort, 1 bis 4 bewertet, und die Karte folgt der Sprache der Oberfläche.
+- **Ausgefallene Termine.** Eine wiederkehrende Kalenderdatei behält die ausgelassenen Tage. Ein erneuter Import ergänzt sie, ohne einen lokal übersprungenen Tag zurückzuholen.
 - **Android-Tablet.** Der Text liegt auf dem Papier, die Leiste klappt beim Schreiben ein, und der Radierer folgt der Spitze.
 - **Sync.** Der Abgleich zeigt den Fortschritt, und ein zweiter Start geht nicht verloren.
 - **Version.** Die Version lässt sich in GitHub Actions unter Update version setzen. Der Android-Release installiert das SDK, ohne am Lizenzdialog abzubrechen.

@@ -11,11 +11,10 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Note tabs, dirty marker, close | `src/App.tsx` | `NoteTabButton` |
 | Duplicate note | `src/App.tsx` | `id: 'duplicate-note'` |
 | Insert date | `src/App.tsx` | `id: 'insert-date'` |
-| Insert time | `src/App.tsx` | `id: 'insert-time'` |
 | Copy wiki link | `src/App.tsx` | `id: 'copy-wiki-link'` |
 | Show the note in the file tree | `src/App.tsx` | `id: 'reveal-tree'` |
 | Toggle task | `src/App.tsx` | `id: 'toggle-task'` |
-| Duplicate name, wiki link, date stamp, task lines | `src/lib/noteActions.ts` | `export const duplicateNoteStem` |
+| Task line toggle | `src/lib/noteActions.ts` | `export const toggleTaskLine` |
 | New note / folder / daily note | `src/App.tsx` | `id: 'new-note'` |
 | File tree create / rename / trash / color | `src/components/FileTree.tsx` | `file-tree__menu-label">Erstellen` |
 | Tag filter and note tags | `src/App.tsx` | `aria-label="Nach Schlagwort filtern"` |
@@ -44,6 +43,15 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Spelling suggestion menu (right-click / Strg+.) with Ignore and Add to dictionary | `src/lib/spellingCorrections.ts` | `cm-spelling-menu__learn` |
 | Correction candidates, ranking and the autocorrect decision | `src/lib/spellingSuggest.ts` | `export const decideAutocorrect` |
 | Autokorrektur setting | `src/components/SettingsModal.tsx` | `title="Autokorrektur"` |
+| Lernzeit | `src/App.tsx` | `id: 'study'` |
+| Karteikarten | `src/App.tsx` | `id: 'flashcards'` |
+| Duplicate a note (text, ink, links, worksheets) | `src/App.tsx` | `id: 'duplicate-note'` |
+| Duplicate name, wiki link, date stamp, recent notes | `src/lib/noteQoL.ts` | `export const duplicatePreferredStem` |
+| Copy wiki link | `src/App.tsx` | `id: 'copy-wiki-link'` |
+| Insert date | `src/App.tsx` | `id: 'insert-date'` |
+| Insert date and time | `src/App.tsx` | `id: 'insert-date-time'` |
+| Collapse or expand every folder | `src/components/FileTree.tsx` | `Alle Ordner einklappen` |
+| Recent notes on the empty page | `src/App.tsx` | `placeholder-recent` |
 | Note backup snapshots | `src/lib/noteBackup.ts` | `export const createNoteBackup` |
 | Backup control policy | `src/lib/noteBackup.ts` | `export const noteBackupControlPolicy` |
 | Backup top chrome | `src/App.tsx` | `note-backup-control` |
