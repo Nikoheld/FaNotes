@@ -210,4 +210,23 @@ class CalendarEditTest {
         assertEquals(1 * 60 to 2 * 60 + 15, dragCreateMinutes(2 * 60, 1 * 60, moved = true))
         assertEquals(23 * 60 to 24 * 60, dragCreateMinutes(23 * 60, 24 * 60, moved = true))
     }
+
+    @Test
+    fun theEditorUsesTheDesktopCard() {
+        assertEquals(440, CAL_EDITOR_MAX_DP)
+        assertEquals(12, CAL_EDITOR_RADIUS_DP)
+        assertEquals(8, CAL_EDITOR_FIELD_RADIUS_DP)
+        assertEquals(8, CAL_EDITOR_ACTION_RADIUS_DP)
+        assertEquals(30, CAL_EDITOR_ACTION_DP)
+        assertEquals(0x48000000, CAL_EDITOR_SCRIM)
+        assertEquals(440, calEditorWidthDp(800))
+        assertEquals(368, calEditorWidthDp(400))
+        assertEquals(0, calEditorWidthDp(20))
+        assertEquals("Wöchentlich", calEditorRepeatLabel("weekly"))
+        assertEquals("Nie", calEditorRepeatLabel("missing"))
+        assertEquals(CalEditorShadow(12, 40, 0.08f), calEditorShadow(false))
+        assertEquals(CalEditorShadow(16, 48, 0.32f), calEditorShadow(true))
+        assertEquals("Schule/Mathe.md", CAL_EDITOR_NOTE_HINT)
+        assertEquals("Neuer Termin", CAL_EDITOR_TITLE)
+    }
 }
