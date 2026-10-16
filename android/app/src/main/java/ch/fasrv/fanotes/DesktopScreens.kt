@@ -63,6 +63,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -2254,7 +2255,13 @@ fun AiScreen(model: FaNotesViewModel) {
                     Text("Markdown", fontWeight = if (!pretty) FontWeight.SemiBold else FontWeight.Normal, color = if (!pretty) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                 }
             }
-            val base = ch.fasrv.fanotes.desk.editorMetrics(settings).previewFontPx
+            val metrics = ch.fasrv.fanotes.desk.editorMetrics(settings)
+            val base = metrics.previewFontPx
+            val leading = metrics.lineHeight.toFloat()
+            fun previewLeading(scale: Float, kind: String): TextUnit {
+                val em = ch.fasrv.fanotes.desk.previewLineHeightEm(kind, leading.toDouble())
+                return (base * scale * em).sp
+            }
             if (!pretty) {
                 Text(result, fontFamily = FontFamily.Monospace, fontSize = base.sp)
             } else {
@@ -2296,7 +2303,7 @@ fun AiScreen(model: FaNotesViewModel) {
                             rows += lines[index]
                             index += 1
                         }
-                        PreviewTable(rows, base, link, codeInk, codeFill, codeBorder, Modifier.previewAnchor(start), start == 0) { number ->
+                        PreviewTable(rows, base, link, codeInk, codeFill, codeBorder, Modifier.previewAnchor(start), start == 0, leading) { number ->
                             ch.fasrv.fanotes.desk.footnoteDefinitionIndex(lines, number)?.let(::jumpTo)
                         }
                         continue
@@ -2354,6 +2361,7 @@ fun AiScreen(model: FaNotesViewModel) {
                                         vertical = (base * quote.padYEm).dp,
                                     ),
                                     color = LocalStatusInk.current.soft,
+                                    lineHeight = previewLeading(line.scale, "quote"),
                                     onTextLayout = { previewLayouts[lineIndex] = it },
                                 )
                             }
@@ -2382,6 +2390,7 @@ fun AiScreen(model: FaNotesViewModel) {
                                         color = MaterialTheme.colorScheme.onSurface,
                                         softWrap = false,
                                         fontSize = (base * ch.fasrv.fanotes.desk.PREVIEW_CODE_SCALE).sp,
+                                        lineHeight = previewLeading(ch.fasrv.fanotes.desk.PREVIEW_CODE_SCALE, "code"),
                                         fontFamily = FontFamily.Monospace,
                                     )
                                 }
@@ -2422,6 +2431,7 @@ fun AiScreen(model: FaNotesViewModel) {
                                         previewAnnotated(line, base, link),
                                         softWrap = false,
                                         fontSize = (base * line.scale).sp,
+                                        lineHeight = previewLeading(line.scale, "math"),
                                         fontFamily = FontFamily.Monospace,
                                     )
                                 }
@@ -2431,11 +2441,15 @@ fun AiScreen(model: FaNotesViewModel) {
                             val bitmap = previewPictures[line.source]?.takeIf { !it.isRecycled }
                             val frame = ch.fasrv.fanotes.desk.previewImageChrome()
                             if (bitmap != null) {
+                                val imageShape = RoundedCornerShape(frame.radiusDp.dp)
                                 BoxWithConstraints(
                                     Modifier
                                         .previewAnchor(lineIndex)
                                         .fillMaxWidth()
-                                        .padding(vertical = (base * frame.marginEm).dp),
+                                        .padding(
+                                            top = (base * ch.fasrv.fanotes.desk.previewBlockTop(frame.marginEm, lineIndex == 0)).dp,
+                                            bottom = (base * frame.marginEm).dp,
+                                        ),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Image(
@@ -2443,11 +2457,18 @@ fun AiScreen(model: FaNotesViewModel) {
                                         contentDescription = line.text.ifBlank { "Bild" },
                                         modifier = Modifier
                                             .widthIn(max = maxWidth)
-                                            .clip(RoundedCornerShape(frame.radiusDp.dp))
+                                            .shadow(
+                                                elevation = frame.shadowBlurDp.dp,
+                                                shape = imageShape,
+                                                clip = false,
+                                                ambientColor = Color.Black.copy(alpha = frame.shadowAlpha),
+                                                spotColor = Color.Black.copy(alpha = frame.shadowAlpha),
+                                            )
+                                            .clip(imageShape)
                                             .border(
                                                 frame.borderDp.dp,
-                                                MaterialTheme.colorScheme.outline.copy(alpha = 0.55f),
-                                                RoundedCornerShape(frame.radiusDp.dp),
+                                                MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_ALPHA),
+                                                imageShape,
                                             )
                                             .background(Color.White),
                                         contentScale = ContentScale.Fit,
@@ -2466,6 +2487,7 @@ fun AiScreen(model: FaNotesViewModel) {
                                     line.kind,
                                     Modifier.previewFootnote(lineIndex),
                                     color = MaterialTheme.colorScheme.onSurface,
+                                    lineHeight = previewLeading(line.scale, line.kind),
                                     onTextLayout = { previewLayouts[lineIndex] = it },
                                 )
                             }
@@ -2501,7 +2523,7 @@ fun AiScreen(model: FaNotesViewModel) {
                                 fontWeight = if (line.heading) FontWeight.Bold else FontWeight.Normal,
                                 fontFamily = if (line.kind == "code" || line.kind == "math") FontFamily.Monospace else FontFamily.Default,
                                 letterSpacing = if (headingBox != null) headingBox.trackingEm.em else TextUnit.Unspecified,
-                                lineHeight = if (headingBox != null) (base * line.scale * headingBox.lineHeight).sp else TextUnit.Unspecified,
+                                lineHeight = previewLeading(line.scale, if (headingBox != null) "heading" else line.kind),
                                 onTextLayout = { previewLayouts[lineIndex] = it },
                             )
                         }
@@ -2522,6 +2544,7 @@ private fun PreviewTable(
     codeBorder: Color,
     modifier: Modifier = Modifier,
     first: Boolean = false,
+    leading: Float = 1.72f,
     onFootnote: (Int) -> Unit = {},
 ) {
     val chrome = ch.fasrv.fanotes.desk.previewTableChrome()
@@ -2583,6 +2606,7 @@ private fun PreviewTable(
                             },
                             textAlign = align,
                             fontWeight = if (row.heading) FontWeight.Bold else FontWeight.Normal,
+                            lineHeight = (base * scale * leading).sp,
                             onTextLayout = { cellLayouts[cellKey] = it },
                         )
                         if (cellIndex < cells.lastIndex) {

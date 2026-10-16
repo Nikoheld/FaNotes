@@ -103,10 +103,27 @@ const val PREVIEW_TABLE_HEAD = 0.9f
 /** `.markdown-preview code` is 0.88em of the surrounding text. */
 const val PREVIEW_CODE_SCALE = 0.88f
 
-/** A picture in the reading preview: 12px corners, a 1px border, and 1.4em of space. */
-data class PreviewImageChrome(val radiusDp: Float, val marginEm: Float, val borderDp: Float)
+/**
+ * A picture in the reading preview: 12px corners, a 1px border, 1.4em of
+ * space, and the desktop shadow `0 13px 32px` at 16% black.
+ */
+data class PreviewImageChrome(
+    val radiusDp: Float,
+    val marginEm: Float,
+    val borderDp: Float,
+    val shadowYDp: Float,
+    val shadowBlurDp: Float,
+    val shadowAlpha: Float,
+)
 
-fun previewImageChrome() = PreviewImageChrome(12f, 1.4f, 1f)
+fun previewImageChrome() = PreviewImageChrome(12f, 1.4f, 1f, 13f, 32f, 0.16f)
+
+/**
+ * Schön line height. Headings stay at 1.25. Everything else uses the
+ * configured `--line-height`, which defaults to 1.72.
+ */
+fun previewLineHeightEm(kind: String, configured: Double): Float =
+    if (kind == "heading") 1.25f else configured.toFloat()
 
 /** Code and display math keep their lines and scroll sideways, like `pre` and KaTeX. */
 fun previewBlockScrolls(kind: String): Boolean = kind == "code" || kind == "math"
