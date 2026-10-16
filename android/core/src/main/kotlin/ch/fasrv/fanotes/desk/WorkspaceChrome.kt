@@ -209,9 +209,10 @@ fun noteTabInk(selected: Boolean, inSplit: Boolean): String = when {
 fun noteTabShowsClose(selected: Boolean, pinned: Boolean, hovered: Boolean = false): Boolean =
     !pinned && (selected || hovered)
 
-fun ribbonItemActive(id: String, destination: String, penOpen: Boolean): Boolean = when (id) {
+fun ribbonItemActive(id: String, destination: String, penOpen: Boolean, aiOpen: Boolean = false): Boolean = when (id) {
     "pen" -> penOpen && destination == "notes"
-    "notes" -> destination == "notes" && !penOpen
+    "notes" -> destination == "notes" && !penOpen && !aiOpen
+    "ai" -> aiOpen || destination == id
     else -> destination == id
 }
 

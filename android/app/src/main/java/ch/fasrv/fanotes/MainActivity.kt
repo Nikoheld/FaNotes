@@ -467,6 +467,7 @@ fun FaNotesScreen(
     val paletteNotes by model.paletteNotes.collectAsStateWithLifecycle()
     val bugReportOpen by model.bugReportOpen.collectAsStateWithLifecycle()
     val historyOpen by model.historyOpen.collectAsStateWithLifecycle()
+    val aiOpen by model.aiOpen.collectAsStateWithLifecycle()
     val confirm by model.confirmRequest.collectAsStateWithLifecycle()
     val linkPlacing by model.linkPlacing.collectAsStateWithLifecycle()
     val placingSection by model.placingSection.collectAsStateWithLifecycle()
@@ -569,6 +570,7 @@ fun FaNotesScreen(
                             selectedLink = linkSelected,
                             worksheetImport = worksheetImport,
                             palette = palette,
+                            ai = aiOpen,
                             destination = destination,
                             selection = model.session.selection.isNotEmpty(),
                             sheet = model.sheetAdjusted.value && !showText,
@@ -602,7 +604,11 @@ fun FaNotesScreen(
                         "placing-section" -> model.setPlacingSection(false)
                         "worksheet" -> onDismissWorksheet()
                         "palette" -> model.paletteOpen.value = false
-                        "search", "settings", "ai", "calendar", "tasks", "overview" -> model.showDestination("notes")
+                        "search", "settings", "calendar", "tasks", "overview" -> model.showDestination("notes")
+                        "ai" -> {
+                            model.closeAi()
+                            if (destination == "ai") model.showDestination("notes")
+                        }
                         "selection" -> {
                             model.session.clearSelection()
                             model.message.value = ch.fasrv.fanotes.ink.SELECT_CLEARED_NOTICE
@@ -663,6 +669,7 @@ fun FaNotesScreen(
                 destination = destination,
                 focus = false,
                 penOpen = !showText,
+                aiOpen = aiOpen,
                 onDestination = { model.showDestination(it) },
                 onPalette = { model.showPalette(notes = false) },
                 onFocus = { model.updateDesk("focus", "on") },
@@ -719,6 +726,7 @@ fun FaNotesScreen(
                 destination,
                 true,
                 penOpen = !showText,
+                aiOpen = aiOpen,
                 onDestination = { model.showDestination(it) },
                 onPalette = { model.showPalette(notes = false) },
                 onFocus = { model.updateDesk("focus", "off") },
@@ -808,7 +816,6 @@ fun FaNotesScreen(
                             "books" -> BooksScreen(model) { model.openPath(it); model.showDestination("notes") }
                             "history" -> HistoryScreen(model)
                             "study" -> StudyScreen(model)
-                            "ai" -> AiScreen(model)
                             "settings" -> SettingsScreen(model, { requestSync() }, onOpenVault, { model.usePrivateVault() })
                         }
                     }
@@ -1046,6 +1053,7 @@ fun FaNotesScreen(
             }
         }
     }
+    if (aiOpen) AiScreen(model)
     if (bugReportOpen) BugReportDialog(model)
     if (historyOpen) HistoryDialog(model)
     confirm?.let { request ->

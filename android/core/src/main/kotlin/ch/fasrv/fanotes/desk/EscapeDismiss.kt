@@ -24,6 +24,7 @@ data class EscapeLayer(
     val selectedLink: Boolean = false,
     val worksheetImport: Boolean = false,
     val palette: Boolean = false,
+    val ai: Boolean = false,
     val destination: String = "notes",
     val selection: Boolean = false,
     val sheet: Boolean = false,
@@ -52,7 +53,9 @@ fun escapeDismisses(layer: EscapeLayer): String? {
     when (layer.destination) {
         "search" -> return "search"
         "settings" -> return "settings"
-        "ai" -> return "ai"
+    }
+    if (layer.ai || layer.destination == "ai") return "ai"
+    when (layer.destination) {
         "calendar" -> return "calendar"
         "tasks" -> return "tasks"
         "overview" -> return "overview"
