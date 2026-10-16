@@ -44,6 +44,17 @@ fun themePalette(raw: String?, systemDark: Boolean): ThemePalette {
     return THEME_PALETTES.first { it.id == id }
 }
 
+/** Preview chips in the Farbschema row. System is the dark/light split from the desktop list. */
+data class ThemeSwatch(val background: String, val surface: String, val split: Boolean)
+
+fun themeSwatch(id: String): ThemeSwatch = when (id) {
+    "system" -> ThemeSwatch("#191919", "#f7f6f3", split = true)
+    else -> {
+        val palette = themePalette(id, systemDark = false)
+        ThemeSwatch(palette.background, palette.surface, split = false)
+    }
+}
+
 fun themeChoiceSelected(stored: String?, choice: String): Boolean {
     val value = stored?.trim().orEmpty()
     return if (choice == "system") value.isEmpty() || value == "system" else value == choice

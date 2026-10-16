@@ -64,21 +64,24 @@ fun searchSettings(query: String, items: List<SettingsSearchItem> = SETTINGS_SEA
     }
 }
 
-/** One row in the desktop settings navigation. */
-data class SettingsNavItem(val id: String, val label: String, val detail: String, val group: String)
+/** One row in the desktop settings navigation. [count] is the desktop option count in the eyebrow. */
+data class SettingsNavItem(val id: String, val label: String, val detail: String, val group: String, val count: Int)
 
 val SETTINGS_NAV: List<SettingsNavItem> = listOf(
-    SettingsNavItem("appearance", "Darstellung", "Farben, Schriften und Dichte", "Aussehen & Schreiben"),
-    SettingsNavItem("editor", "Editor", "Markdown und Schreiben", "Aussehen & Schreiben"),
-    SettingsNavItem("drawing", "Stift & Erkennung", "Tablet, Papier und Handschrift", "Stift & Arbeitsbereich"),
-    SettingsNavItem("files", "Dateien & Vault", "Import, Ordner und Speichern", "Stift & Arbeitsbereich"),
-    SettingsNavItem("sync", "Sync", "Konto, Geräte und Verschlüsselung", "FaNotes & System"),
-    SettingsNavItem("addons", "Add-ons", "Store, Quelle und Updates", "FaNotes & System"),
-    SettingsNavItem("updates", "Updates", "Stable, Beta und Sicherheit", "FaNotes & System"),
-    SettingsNavItem("accessibility", "Bedienung", "Bewegung und Lesbarkeit", "FaNotes & System"),
-    SettingsNavItem("experimental", "Experimentell", "Unfertige Funktionen, standardmässig aus", "FaNotes & System"),
-    SettingsNavItem("advanced", "Erweitert", "Ressourcen, Datenschutz und App-Daten", "FaNotes & System"),
+    SettingsNavItem("appearance", "Darstellung", "Farben, Schriften und Dichte", "Aussehen & Schreiben", 12),
+    SettingsNavItem("editor", "Editor", "Markdown und Schreiben", "Aussehen & Schreiben", 8),
+    SettingsNavItem("drawing", "Stift & Erkennung", "Tablet, Papier und Handschrift", "Stift & Arbeitsbereich", 16),
+    SettingsNavItem("files", "Dateien & Vault", "Import, Ordner und Speichern", "Stift & Arbeitsbereich", 7),
+    SettingsNavItem("sync", "Sync", "Konto, Geräte und Verschlüsselung", "FaNotes & System", 6),
+    SettingsNavItem("addons", "Add-ons", "Store, Quelle und Updates", "FaNotes & System", 3),
+    SettingsNavItem("updates", "Updates", "Stable, Beta und Sicherheit", "FaNotes & System", 4),
+    SettingsNavItem("accessibility", "Bedienung", "Bewegung und Lesbarkeit", "FaNotes & System", 3),
+    SettingsNavItem("experimental", "Experimentell", "Unfertige Funktionen, standardmässig aus", "FaNotes & System", 5),
+    SettingsNavItem("advanced", "Erweitert", "Ressourcen, Datenschutz und App-Daten", "FaNotes & System", 10),
 )
+
+/** Eyebrow above the section title: „Anpassung · 12 Optionen“. */
+fun settingsEyebrow(count: Int) = "Anpassung · $count Optionen"
 
 /** Groups in desktop order, each with its rows. */
 fun settingsNavGroups(items: List<SettingsNavItem> = SETTINGS_NAV): List<Pair<String, List<SettingsNavItem>>> {
@@ -102,3 +105,31 @@ const val SETTINGS_HEADER_PAD_BOTTOM_DP = 15
 const val SETTINGS_FOOTER_DP = 47
 const val SETTINGS_DONE = "Fertig"
 const val SETTINGS_SAVED = "Änderungen werden automatisch lokal gespeichert."
+const val SETTINGS_EYEBROW_TRACKING = 0.12f
+const val SETTINGS_SCROLL_PAD_TOP_DP = 19
+const val SETTINGS_SCROLL_PAD_X_DP = 25
+const val SETTINGS_SCROLL_PAD_BOTTOM_DP = 34
+
+/** Setting card after the later chrome pass: 12px corners and a 70% strong panel. */
+const val SETTING_CARD_RADIUS_DP = 12
+const val SETTING_CARD_MARGIN_DP = 14
+const val SETTING_CARD_FILL_ALPHA = 0.70f
+const val SETTING_TITLE_DP = 39
+const val SETTING_TITLE_PAD_DP = 15
+const val SETTING_TITLE_GAP_DP = 7
+const val SETTING_TITLE_ICON_DP = 16
+const val SETTING_TITLE_WEIGHT = 700
+const val SETTING_TITLE_TRACKING = 0.06f
+const val SETTING_ROW_MIN_DP = 58
+const val SETTING_ROW_PAD_Y_DP = 10
+const val SETTING_ROW_PAD_X_DP = 15
+const val SETTING_ROW_GAP_DP = 22
+const val SETTING_COPY_WEIGHT = 580
+const val THEME_CHOICE_MIN_DP = 47
+const val THEME_CHOICE_RADIUS_DP = 9
+const val THEME_CHOICE_GAP_DP = 6
+const val THEME_PREVIEW_W_DP = 43
+const val THEME_PREVIEW_H_DP = 31
+const val THEME_PREVIEW_RADIUS_DP = 7
+const val SWATCH_DP = 23
+const val SWATCH_GAP_DP = 6
