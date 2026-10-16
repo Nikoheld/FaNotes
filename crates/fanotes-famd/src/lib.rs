@@ -1981,15 +1981,22 @@ fn omit_parentheticals(value: &str) -> String {
     out
 }
 
+/// A `Date.parse` word continues through every non-space character at or
+/// above `A`. `_`, `~`, and `é` stay inside `Oct_13`.
+fn is_v8_word_char(character: char) -> bool {
+    (character as u32) >= u32::from(b'A') && !is_date_parse_space(character)
+}
+
 /// `13Oct2026` and `Oct2026` are separate fields. `GMT5` is the zone `GMT`
 /// and the number 5. `PM5` is the meridiem and the number 5. A non-keyword
 /// glued to a digit, as in `foo13` or `Oct13th`, stays one token so the date
-/// scan rejects it.
+/// scan rejects it. `Oct_13` is October 13: the underscore continues the
+/// month word and the digits are the next field.
 fn expand_glued_month(token: &str) -> Vec<&str> {
     // `GMT+5` is one zone. Splitting it would turn the 5 into a date number.
     if month_zone_suffix(token).is_some()
         || !token.bytes().any(|byte| byte.is_ascii_digit())
-        || !token.bytes().any(|byte| byte.is_ascii_alphabetic())
+        || !token.chars().any(is_v8_word_char)
     {
         return vec![token];
     }
@@ -1997,10 +2004,16 @@ fn expand_glued_month(token: &str) -> Vec<&str> {
     let mut runs = Vec::new();
     let mut index = 0;
     while index < bytes.len() {
-        if bytes[index].is_ascii_alphabetic() {
+        if token[index..].chars().next().is_some_and(is_v8_word_char) {
             let start = index;
-            while index < bytes.len() && bytes[index].is_ascii_alphabetic() {
-                index += 1;
+            while index < bytes.len() {
+                let Some(character) = token[index..].chars().next() else {
+                    break;
+                };
+                if !is_v8_word_char(character) {
+                    break;
+                }
+                index += character.len_utf8();
             }
             let letters = &token[start..index];
             if english_month(letters).is_none()
@@ -2098,12 +2111,12 @@ fn digits_follow_zone(zone: &str, next: &str) -> bool {
     unsigned_number(next).is_some() && zone.as_bytes().as_ptr_range().end == next.as_ptr()
 }
 
+/// `foo13` and `~6` glue a non-keyword to a digit. `Oct_13` was already split.
 fn glued_non_month(word: &str) -> bool {
     if word.contains(':') || month_zone_suffix(word).is_some() {
         return false;
     }
-    word.bytes().any(|byte| byte.is_ascii_digit())
-        && word.bytes().any(|byte| byte.is_ascii_alphabetic())
+    word.bytes().any(|byte| byte.is_ascii_digit()) && word.chars().any(is_v8_word_char)
 }
 
 /// `13-Oct-26`, `13/Oct/26`, and `13.Oct.26` are three date fields. A leading
@@ -9807,6 +9820,70 @@ mod tests {
                     "1970-01-01 24:00:00.0000000001",
                     Some("1970-01-02T05:00:00.000Z"),
                 ),
+            ];
+            for (input, expected) in cases {
+                assert_eq!(super::canonical_iso(input).as_deref(), expected, "{input}");
+            }
+        });
+    }
+
+    #[test]
+    fn a_month_word_continues_through_characters_at_or_above_a() {
+        with_tz("America/New_York", || {
+            // Node 22 `Date.parse`. A word is every non-space character at or
+            // above `A`, so `Oct_13` is October 13 and `Oct_32` is October of
+            // year 32. A non-month word glued to a digit is empty.
+            let cases = [
+                ("Oct_13", Some("2001-10-13T04:00:00.000Z")),
+                ("Oct_13 2026", Some("2026-10-13T04:00:00.000Z")),
+                ("Oct~13", Some("2001-10-13T04:00:00.000Z")),
+                ("13Oct_2026", Some("2026-10-13T04:00:00.000Z")),
+                ("Oct_32", Some("2032-10-01T04:00:00.000Z")),
+                ("Jan_32", Some("2032-01-01T05:00:00.000Z")),
+                ("Octé13 2026", Some("2026-10-13T04:00:00.000Z")),
+                ("Oct\u{7f}13 2026", Some("2026-10-13T04:00:00.000Z")),
+                ("Oct😀13 2026", Some("2026-10-13T04:00:00.000Z")),
+                ("november_the_13 2026", Some("2026-11-13T05:00:00.000Z")),
+                ("May~~~6 2026", Some("2026-05-06T04:00:00.000Z")),
+                ("May~ 6 2026", Some("2026-05-06T04:00:00.000Z")),
+                ("Oct_13 2026 16:00", Some("2026-10-13T20:00:00.000Z")),
+                ("Oct_13 2026 4:00 PM", Some("2026-10-13T20:00:00.000Z")),
+                ("Oct_13 2026 GMT", Some("2026-10-13T00:00:00.000Z")),
+                ("Oct_13 2026 EST", Some("2026-10-13T05:00:00.000Z")),
+                ("DEC_31 99", Some("1999-12-31T05:00:00.000Z")),
+                ("Dec_31 99 23:00", Some("2000-01-01T04:00:00.000Z")),
+                ("13oct_2026GMT+5", Some("2026-10-12T19:00:00.000Z")),
+                ("13Oct_2026GMT", Some("2026-10-13T00:00:00.000Z")),
+                ("Sep~10 2026", Some("2026-09-10T04:00:00.000Z")),
+                ("January_the_1", Some("2001-01-01T05:00:00.000Z")),
+                ("preamble_ Oct_13 26 4::5", Some("2026-10-13T08:00:05.000Z")),
+                ("Oct_13/2026", Some("2026-10-13T04:00:00.000Z")),
+                ("Oct_13,2026", Some("2026-10-13T04:00:00.000Z")),
+                (
+                    "Saturday, Oct_13, 2026 4:5 PM",
+                    Some("2026-10-13T20:05:00.000Z"),
+                ),
+                ("Feb_29 2024", Some("2024-02-29T05:00:00.000Z")),
+                ("marketplace_13 2026", Some("2026-03-13T04:00:00.000Z")),
+                (
+                    "hello_world Oct 13 2026 4:5 PM EST",
+                    Some("2026-10-13T21:05:00.000Z"),
+                ),
+                ("note: Oct_13 2026", Some("2026-10-13T04:00:00.000Z")),
+                ("Oct_foo13 2026", Some("2026-10-13T04:00:00.000Z")),
+                ("October_13 2026", Some("2026-10-13T04:00:00.000Z")),
+                ("oct123", Some("0123-10-01T04:56:02.000Z")),
+                ("foo[bar13 Oct 2026", None),
+                ("on_Oct_13 2026", None),
+                ("May ~6 2026", None),
+                ("Oct _13 2026", None),
+                ("12~31 2026", None),
+                ("Oct_13_2026", None),
+                ("Oct13_2026", None),
+                ("Oct_13th", None),
+                ("4:00_PM Oct 13 2026", None),
+                ("oct123def", None),
+                ("A1", None),
             ];
             for (input, expected) in cases {
                 assert_eq!(super::canonical_iso(input).as_deref(), expected, "{input}");

@@ -3338,15 +3338,22 @@ fn omit_parentheticals(value: &str) -> String {
     out
 }
 
+/// A `Date.parse` word continues through every non-space character at or
+/// above `A`. `_`, `~`, and `é` stay inside `Oct_13`.
+fn is_v8_word_char(character: char) -> bool {
+    (character as u32) >= u32::from(b'A') && !is_date_parse_space(character)
+}
+
 /// `13Oct2026` and `Oct2026` are separate fields. `GMT5` is the zone `GMT`
 /// and the number 5. `PM5` is the meridiem and the number 5. A non-keyword
 /// glued to a digit, as in `foo13` or `Oct13th`, stays one token so the date
-/// scan rejects it.
+/// scan rejects it. `Oct_13` is October 13: the underscore continues the
+/// month word and the digits are the next field.
 fn expand_glued_month(token: &str) -> Vec<&str> {
     // `GMT+5` is one zone. Splitting it would turn the 5 into a date number.
     if named_zone_offset(token).is_some()
         || !token.bytes().any(|byte| byte.is_ascii_digit())
-        || !token.bytes().any(|byte| byte.is_ascii_alphabetic())
+        || !token.chars().any(is_v8_word_char)
     {
         return vec![token];
     }
@@ -3354,10 +3361,16 @@ fn expand_glued_month(token: &str) -> Vec<&str> {
     let mut runs = Vec::new();
     let mut index = 0;
     while index < bytes.len() {
-        if bytes[index].is_ascii_alphabetic() {
+        if token[index..].chars().next().is_some_and(is_v8_word_char) {
             let start = index;
-            while index < bytes.len() && bytes[index].is_ascii_alphabetic() {
-                index += 1;
+            while index < bytes.len() {
+                let Some(character) = token[index..].chars().next() else {
+                    break;
+                };
+                if !is_v8_word_char(character) {
+                    break;
+                }
+                index += character.len_utf8();
             }
             let letters = &token[start..index];
             if english_month(letters).is_none()
@@ -3455,12 +3468,12 @@ fn digits_follow_zone(zone: &str, next: &str) -> bool {
         && zone.as_bytes().as_ptr_range().end == next.as_ptr()
 }
 
+/// `foo13` and `~6` glue a non-keyword to a digit. `Oct_13` was already split.
 fn glued_non_month(word: &str) -> bool {
     if word.contains(':') || named_zone_offset(word).is_some() {
         return false;
     }
-    word.bytes().any(|byte| byte.is_ascii_digit())
-        && word.bytes().any(|byte| byte.is_ascii_alphabetic())
+    word.bytes().any(|byte| byte.is_ascii_digit()) && word.chars().any(is_v8_word_char)
 }
 
 /// `13-Oct-26`, `13/Oct/26`, and `13.Oct.26` are three date fields. A leading
@@ -11798,6 +11811,72 @@ mod local_zone_tests {
             ("1970-01-01T24:00:00.0000000001Z", None),
             ("1970-01-01 24:00:00.0001234567", None),
             ("1969-12-31T23:59:59.0001234567Z", None),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(unix_millis_from_iso(input), expected, "{input}");
+        }
+    }
+
+    #[test]
+    fn a_month_word_continues_through_characters_at_or_above_a() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Node 22 `Date.parse`. A word is every non-space character at or
+        // above `A`, so `Oct_13` is October 13 and `Oct_32` is October of
+        // year 32. A non-month word glued to a digit is empty. `oct123` is
+        // year 123, before 1970.
+        let cases = [
+            ("Oct_13", Some(1_002_945_600_000)),
+            ("Oct_13 2026", Some(1_791_864_000_000)),
+            ("Oct~13", Some(1_002_945_600_000)),
+            ("13Oct_2026", Some(1_791_864_000_000)),
+            ("Oct_32", Some(1_980_216_000_000)),
+            ("Jan_32", Some(1_956_546_000_000)),
+            ("Octé13 2026", Some(1_791_864_000_000)),
+            ("Oct\u{7f}13 2026", Some(1_791_864_000_000)),
+            ("Oct😀13 2026", Some(1_791_864_000_000)),
+            ("november_the_13 2026", Some(1_794_546_000_000)),
+            ("May~~~6 2026", Some(1_778_040_000_000)),
+            ("May~ 6 2026", Some(1_778_040_000_000)),
+            ("Oct_13 2026 16:00", Some(1_791_921_600_000)),
+            ("Oct_13 2026 4:00 PM", Some(1_791_921_600_000)),
+            ("Oct_13 2026 GMT", Some(1_791_849_600_000)),
+            ("Oct_13 2026 EST", Some(1_791_867_600_000)),
+            ("DEC_31 99", Some(946_616_400_000)),
+            ("Dec_31 99 23:00", Some(946_699_200_000)),
+            ("13oct_2026GMT+5", Some(1_791_831_600_000)),
+            ("13Oct_2026GMT", Some(1_791_849_600_000)),
+            ("Sep~10 2026", Some(1_789_012_800_000)),
+            ("January_the_1", Some(978_325_200_000)),
+            ("preamble_ Oct_13 26 4::5", Some(1_791_878_405_000)),
+            ("Oct_13/2026", Some(1_791_864_000_000)),
+            ("Oct_13,2026", Some(1_791_864_000_000)),
+            ("Saturday, Oct_13, 2026 4:5 PM", Some(1_791_921_900_000)),
+            ("Feb_29 2024", Some(1_709_182_800_000)),
+            ("marketplace_13 2026", Some(1_773_374_400_000)),
+            (
+                "hello_world Oct 13 2026 4:5 PM EST",
+                Some(1_791_925_500_000),
+            ),
+            ("note: Oct_13 2026", Some(1_791_864_000_000)),
+            ("Oct_foo13 2026", Some(1_791_864_000_000)),
+            ("October_13 2026", Some(1_791_864_000_000)),
+            ("oct123", None),
+            ("foo[bar13 Oct 2026", None),
+            ("on_Oct_13 2026", None),
+            ("May ~6 2026", None),
+            ("Oct _13 2026", None),
+            ("12~31 2026", None),
+            ("Oct_13_2026", None),
+            ("Oct13_2026", None),
+            ("Oct_13th", None),
+            ("4:00_PM Oct 13 2026", None),
+            ("oct123def", None),
+            ("A1", None),
         ];
         for (input, expected) in cases {
             assert_eq!(unix_millis_from_iso(input), expected, "{input}");
