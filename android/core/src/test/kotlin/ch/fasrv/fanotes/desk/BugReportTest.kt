@@ -43,6 +43,30 @@ class BugReportTest {
     }
 
     @Test
+    fun theDialogUsesTheDesktopCard() {
+        assertEquals(520, BUG_REPORT_MAX_DP)
+        assertEquals(0.94f, BUG_REPORT_WIDTH_FRACTION)
+        assertEquals(12, BUG_REPORT_RADIUS_DP)
+        assertEquals(24, BUG_REPORT_SHADOW_Y_DP)
+        assertEquals(80, BUG_REPORT_SHADOW_BLUR_DP)
+        assertEquals(0.16f, BUG_REPORT_SHADOW_ALPHA)
+        assertEquals(140, BUG_REPORT_FIELD_MIN_DP)
+        assertEquals(10, BUG_REPORT_FIELD_RADIUS_DP)
+        assertEquals(2000, BUG_REPORT_MAX_CHARS)
+        assertEquals(0.45f, BUG_REPORT_DISABLED_ALPHA)
+        assertEquals(520, bugReportCardWidthDp(800))
+        assertEquals(376, bugReportCardWidthDp(400))
+        assertEquals(640, bugReportMaxHeightDp(1000))
+        assertEquals(360, bugReportMaxHeightDp(400))
+        assertEquals("Wird gesendet …", bugReportSendLabel(true))
+        assertEquals("Bericht senden", bugReportSendLabel(false))
+        assertEquals(false, bugReportCanSend("  ", false))
+        assertEquals(false, bugReportCanSend("Stift springt", true))
+        assertEquals(true, bugReportCanSend("Stift springt", false))
+        assertEquals("Kurz beschreiben, z. B. Stift springt nach oben beim Schreiben.", BUG_REPORT_PLACEHOLDER)
+    }
+
+    @Test
     fun fiveMinutesOfPenSamplesStayUnderTheBodyCap() {
         val now = 20_000_000L
         val log = BugReportLog()

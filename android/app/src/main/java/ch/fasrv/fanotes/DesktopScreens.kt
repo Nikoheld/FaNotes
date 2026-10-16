@@ -51,6 +51,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Code
@@ -79,6 +81,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -150,6 +153,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -2096,29 +2100,218 @@ private fun CalendarEventEditor(
 @Composable
 fun BugReportDialog(model: FaNotesViewModel) {
     val status by model.bugReportMessage.collectAsStateWithLifecycle()
+    val busy by model.bugReportBusy.collectAsStateWithLifecycle()
     var description by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = { model.closeBugReport() },
-        title = { Text("Fehler melden") },
-        text = {
-            Column {
-                Text("Die letzten fünf Minuten (Stift, Notiz, Werkzeug) werden automatisch angehängt und nur an fanotes.fasrv.ch geschickt.", fontSize = 13.sp)
-                OutlinedTextField(
-                    description,
-                    { description = it.take(2000) },
-                    label = { Text("Was ist passiert?") },
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                )
-                if (!status.isNullOrBlank() && status != "Bericht gesendet.") {
-                    Text(status.orEmpty(), color = MaterialTheme.colorScheme.error, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+    val dismiss = { model.closeBugReport() }
+    Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        val scrim = remember { MutableInteractionSource() }
+        val card = remember { MutableInteractionSource() }
+        val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.BUG_REPORT_RADIUS_DP.dp)
+        val fieldShape = RoundedCornerShape(ch.fasrv.fanotes.desk.BUG_REPORT_FIELD_RADIUS_DP.dp)
+        val buttonShape = RoundedCornerShape(ch.fasrv.fanotes.desk.BUG_REPORT_BUTTON_RADIUS_DP.dp)
+        val strong = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
+        val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+        val ink = LocalStatusInk.current
+        val screen = androidx.compose.ui.platform.LocalConfiguration.current
+        val canSend = ch.fasrv.fanotes.desk.bugReportCanSend(description, busy)
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM))
+                .clickable(interactionSource = scrim, indication = null, onClick = dismiss),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth(ch.fasrv.fanotes.desk.BUG_REPORT_WIDTH_FRACTION)
+                    .widthIn(max = ch.fasrv.fanotes.desk.BUG_REPORT_MAX_DP.dp)
+                    .heightIn(max = ch.fasrv.fanotes.desk.bugReportMaxHeightDp(screen.screenHeightDp).dp)
+                    .clickable(interactionSource = card, indication = null, onClick = {})
+                    .shadow(
+                        elevation = ch.fasrv.fanotes.desk.BUG_REPORT_SHADOW_Y_DP.dp,
+                        shape = shape,
+                        ambientColor = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.BUG_REPORT_SHADOW_ALPHA),
+                        spotColor = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.BUG_REPORT_SHADOW_ALPHA),
+                    )
+                    .clip(shape)
+                    .border(1.dp, strong, shape)
+                    .background(MaterialTheme.colorScheme.background),
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            start = ch.fasrv.fanotes.desk.BUG_REPORT_HEADER_PAD_X_DP.dp,
+                            end = ch.fasrv.fanotes.desk.BUG_REPORT_HEADER_PAD_X_DP.dp,
+                            top = ch.fasrv.fanotes.desk.BUG_REPORT_HEADER_PAD_TOP_DP.dp,
+                            bottom = ch.fasrv.fanotes.desk.BUG_REPORT_HEADER_PAD_BOTTOM_DP.dp,
+                        ),
+                    horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.BUG_REPORT_HEADER_GAP_DP.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Row(
+                        Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.BUG_REPORT_HEADING_GAP_DP.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Icon(
+                            Icons.Filled.BugReport,
+                            contentDescription = null,
+                            modifier = Modifier.padding(top = ch.fasrv.fanotes.desk.BUG_REPORT_ICON_NUDGE_DP.dp).size(ch.fasrv.fanotes.desk.BUG_REPORT_ICON_DP.dp),
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Column {
+                            Text(
+                                ch.fasrv.fanotes.desk.BUG_REPORT_TITLE,
+                                fontSize = ch.fasrv.fanotes.desk.BUG_REPORT_TITLE_SP.sp,
+                                fontWeight = FontWeight(650),
+                                letterSpacing = (-0.02).em,
+                            )
+                            Text(
+                                ch.fasrv.fanotes.desk.BUG_REPORT_DETAIL,
+                                fontSize = ch.fasrv.fanotes.desk.BUG_REPORT_DETAIL_SP.sp,
+                                fontWeight = FontWeight.Medium,
+                                lineHeight = 17.sp,
+                                color = ink.muted,
+                                modifier = Modifier.padding(top = ch.fasrv.fanotes.desk.BUG_REPORT_DETAIL_GAP_DP.dp),
+                            )
+                        }
+                    }
+                    Box(
+                        Modifier
+                            .size(ch.fasrv.fanotes.desk.BUG_REPORT_CLOSE_DP.dp)
+                            .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.BUG_REPORT_CLOSE_RADIUS_DP.dp))
+                            .clickable(onClick = dismiss),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "Schließen",
+                            modifier = Modifier.size(ch.fasrv.fanotes.desk.BUG_REPORT_CLOSE_ICON_DP.dp),
+                            tint = ink.muted,
+                        )
+                    }
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
+                Column(
+                    Modifier
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState())
+                        .padding(
+                            start = ch.fasrv.fanotes.desk.BUG_REPORT_BODY_PAD_X_DP.dp,
+                            end = ch.fasrv.fanotes.desk.BUG_REPORT_BODY_PAD_X_DP.dp,
+                            top = ch.fasrv.fanotes.desk.BUG_REPORT_BODY_PAD_TOP_DP.dp,
+                            bottom = ch.fasrv.fanotes.desk.BUG_REPORT_BODY_PAD_BOTTOM_DP.dp,
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.BUG_REPORT_BODY_GAP_DP.dp),
+                ) {
+                    Text(
+                        ch.fasrv.fanotes.desk.BUG_REPORT_LABEL,
+                        fontSize = ch.fasrv.fanotes.desk.BUG_REPORT_LABEL_SP.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    BasicTextField(
+                        value = description,
+                        onValueChange = { description = it.take(ch.fasrv.fanotes.desk.BUG_REPORT_MAX_CHARS) },
+                        textStyle = TextStyle(
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = ch.fasrv.fanotes.desk.BUG_REPORT_FIELD_SP.sp,
+                            fontWeight = FontWeight.Medium,
+                            lineHeight = 19.sp,
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = ch.fasrv.fanotes.desk.BUG_REPORT_FIELD_MIN_DP.dp)
+                            .border(1.dp, strong, fieldShape)
+                            .clip(fieldShape)
+                            .background(MaterialTheme.colorScheme.background)
+                            .padding(
+                                horizontal = ch.fasrv.fanotes.desk.BUG_REPORT_FIELD_PAD_X_DP.dp,
+                                vertical = ch.fasrv.fanotes.desk.BUG_REPORT_FIELD_PAD_Y_DP.dp,
+                            ),
+                        decorationBox = { inner ->
+                            Box {
+                                if (description.isEmpty()) {
+                                    Text(
+                                        ch.fasrv.fanotes.desk.BUG_REPORT_PLACEHOLDER,
+                                        color = ink.muted,
+                                        fontSize = ch.fasrv.fanotes.desk.BUG_REPORT_FIELD_SP.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        lineHeight = 19.sp,
+                                    )
+                                }
+                                inner()
+                            }
+                        },
+                    )
+                    val reported = status
+                    if (!reported.isNullOrBlank() && reported != "Bericht gesendet.") {
+                        Text(reported, color = MaterialTheme.colorScheme.error, fontSize = 12.sp, lineHeight = 17.sp)
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.BUG_REPORT_ACTION_GAP_DP.dp, Alignment.End),
+                    ) {
+                        Box(
+                            Modifier
+                                .height(ch.fasrv.fanotes.desk.BUG_REPORT_BUTTON_DP.dp)
+                                .alpha(if (busy) ch.fasrv.fanotes.desk.BUG_REPORT_DISABLED_ALPHA else 1f)
+                                .clip(buttonShape)
+                                .background(ink.panelStrong)
+                                .border(1.dp, strong, buttonShape)
+                                .clickable(enabled = !busy, onClick = dismiss)
+                                .padding(horizontal = ch.fasrv.fanotes.desk.BUG_REPORT_BUTTON_PAD_DP.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                ch.fasrv.fanotes.desk.BUG_REPORT_CANCEL,
+                                fontSize = ch.fasrv.fanotes.desk.BUG_REPORT_BUTTON_SP.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = ink.soft,
+                            )
+                        }
+                        Box(
+                            Modifier
+                                .height(ch.fasrv.fanotes.desk.BUG_REPORT_BUTTON_DP.dp)
+                                .alpha(if (canSend) 1f else ch.fasrv.fanotes.desk.BUG_REPORT_DISABLED_ALPHA)
+                                .clip(buttonShape)
+                                .background(MaterialTheme.colorScheme.onSurface)
+                                .clickable(enabled = canSend, onClick = { model.sendBugReport(description) })
+                                .padding(horizontal = ch.fasrv.fanotes.desk.BUG_REPORT_BUTTON_PAD_DP.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.BUG_REPORT_BUTTON_GAP_DP.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (busy) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(ch.fasrv.fanotes.desk.BUG_REPORT_BUTTON_ICON_DP.dp),
+                                        strokeWidth = 1.5.dp,
+                                        color = MaterialTheme.colorScheme.background,
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.Send,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(ch.fasrv.fanotes.desk.BUG_REPORT_BUTTON_ICON_DP.dp),
+                                        tint = MaterialTheme.colorScheme.background,
+                                    )
+                                }
+                                Text(
+                                    ch.fasrv.fanotes.desk.bugReportSendLabel(busy),
+                                    fontSize = ch.fasrv.fanotes.desk.BUG_REPORT_BUTTON_SP.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.background,
+                                )
+                            }
+                        }
+                    }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { model.sendBugReport(description) }, enabled = description.isNotBlank()) { Text("Bericht senden") }
-        },
-        dismissButton = { TextButton(onClick = { model.closeBugReport() }) { Text("Abbrechen") } },
-    )
+        }
+    }
 }
 
 @Composable

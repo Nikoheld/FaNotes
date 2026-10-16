@@ -187,6 +187,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private val bugLog = ch.fasrv.fanotes.desk.BugReportLog()
     val bugReportOpen = MutableStateFlow(false)
     val bugReportMessage = MutableStateFlow<String?>(null)
+    val bugReportBusy = MutableStateFlow(false)
     private var paperViews: Map<String, ch.fasrv.fanotes.desk.PaperViewMemoryEntry> =
         ch.fasrv.fanotes.desk.parsePaperViewMemory(graph.readPaperViews())
     val showList = MutableStateFlow(true)
@@ -1847,6 +1848,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun sendBugReport(description: String) {
+        if (bugReportBusy.value) return
         val now = System.currentTimeMillis()
         val request = ch.fasrv.fanotes.desk.buildBugReportRequest(
             description = description,
@@ -1859,23 +1861,29 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             bugReportMessage.value = "Bitte beschreibe den Fehler kurz. Die letzten fünf Minuten müssen am Bericht hängen."
             return
         }
+        bugReportBusy.value = true
+        bugReportMessage.value = null
         viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val call = okhttp3.Request.Builder()
-                        .url(request.url)
-                        .header("Accept", "application/json")
-                        .header("Content-Type", "application/json")
-                        .post(request.json.toByteArray().toRequestBody("application/json".toMediaType()))
-                        .build()
-                    okhttp3.OkHttpClient().newCall(call).execute().use { response ->
-                        when {
-                            response.isSuccessful -> "Bericht gesendet."
-                            response.code == 400 -> "Bitte beschreibe den Fehler kurz. Die letzten fünf Minuten müssen am Bericht hängen."
-                            else -> "Der Bericht konnte nicht gesendet werden. Prüfe die Verbindung zu fanotes.fasrv.ch."
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        val call = okhttp3.Request.Builder()
+                            .url(request.url)
+                            .header("Accept", "application/json")
+                            .header("Content-Type", "application/json")
+                            .post(request.json.toByteArray().toRequestBody("application/json".toMediaType()))
+                            .build()
+                        okhttp3.OkHttpClient().newCall(call).execute().use { response ->
+                            when {
+                                response.isSuccessful -> "Bericht gesendet."
+                                response.code == 400 -> "Bitte beschreibe den Fehler kurz. Die letzten fünf Minuten müssen am Bericht hängen."
+                                else -> "Der Bericht konnte nicht gesendet werden. Prüfe die Verbindung zu fanotes.fasrv.ch."
+                            }
                         }
-                    }
-                }.getOrElse { "Der Bericht konnte nicht gesendet werden. Prüfe die Verbindung zu fanotes.fasrv.ch." }
+                    }.getOrElse { "Der Bericht konnte nicht gesendet werden. Prüfe die Verbindung zu fanotes.fasrv.ch." }
+                }
+            } finally {
+                bugReportBusy.value = false
             }
             bugReportMessage.value = result
             message.value = result
