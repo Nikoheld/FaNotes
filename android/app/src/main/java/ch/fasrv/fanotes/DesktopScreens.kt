@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -5470,7 +5471,7 @@ fun AiScreen(model: FaNotesViewModel) {
     Column(
         Modifier
             .width(panel.widthDp.dp)
-            .height(panel.heightDp.dp)
+            .requiredHeight(panel.heightDp.dp)
             .clickable(interactionSource = card, indication = null, onClick = {})
             .clip(panelShape)
             .then(
