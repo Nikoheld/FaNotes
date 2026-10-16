@@ -512,6 +512,10 @@ fun FaNotesScreen(
         if (sync.status == SyncStatus.SYNCING) syncPending = false
     }
 
+    LaunchedEffect(Unit) {
+        if (desk["update-check"] != "off") model.checkUpdate()
+    }
+
     LaunchedEffect(signedIn) {
         if (!signedIn) return@LaunchedEffect
         try {

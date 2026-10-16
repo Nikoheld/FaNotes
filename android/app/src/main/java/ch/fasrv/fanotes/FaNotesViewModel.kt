@@ -1863,7 +1863,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 y = ch.fasrv.fanotes.desk.compactCoord(y),
                 pointerType = "pen",
                 tool = tool.value.name.lowercase(),
-                version = "2026.10.7",
+                version = installedVersion,
                 platform = "android",
             ),
             now,
@@ -1889,7 +1889,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val request = ch.fasrv.fanotes.desk.buildBugReportRequest(
             description = description,
             events = bugLog.snapshot(now),
-            version = "2026.10.7",
+            version = installedVersion,
             platform = "android",
             now = now,
         )
@@ -1935,7 +1935,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 kind = kind,
                 noteId = noteId,
                 tool = tool,
-                version = "2026.10.7",
+                version = installedVersion,
                 platform = "android",
             ),
             now,
@@ -2403,7 +2403,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val linkSelected = MutableStateFlow(false)
     val clearLinkRequest = MutableStateFlow(0)
     val placeLinkRequest = MutableStateFlow(0)
-    val updateLabel = MutableStateFlow("2026.10.7")
+    val installedVersion: String = installedAppVersion(getApplication())
+    val updateLabel = MutableStateFlow("")
+    val updateOffer = MutableStateFlow<ch.fasrv.fanotes.desk.AndroidUpdate?>(null)
+    val updateBusy = MutableStateFlow(false)
 
     fun reportLinkChrome(placing: Boolean, selected: Boolean) {
         if (linkPlacing.value != placing) linkPlacing.value = placing
@@ -3915,16 +3918,66 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun clearUpdateOffer() {
+        updateOffer.value = null
+        updateLabel.value = ""
+    }
+
     fun checkUpdate() {
+        if (updateBusy.value) return
+        updateBusy.value = true
+        updateLabel.value = "Suche nach einem Release…"
+        val channel = ch.fasrv.fanotes.desk.updateChannelId(deskSettings.value["update-channel"])
+        val installed = installedVersion
         viewModelScope.launch {
-            updateLabel.value = withContext(Dispatchers.IO) {
+            val outcome = withContext(Dispatchers.IO) {
                 runCatching {
-                    val request = okhttp3.Request.Builder().url("https://api.github.com/repos/Nikoheld/FaNotes/releases/latest").header("Accept", "application/vnd.github+json").build()
+                    val request = okhttp3.Request.Builder()
+                        .url("https://api.github.com/repos/Nikoheld/FaNotes/releases?per_page=30")
+                        .header("Accept", "application/vnd.github+json")
+                        .header("User-Agent", "FaNotes-Android")
+                        .build()
                     okhttp3.OkHttpClient().newCall(request).execute().use { response ->
-                        val tag = Regex(""""tag_name"\s*:\s*"([^"]+)"""").find(response.body?.string().orEmpty())?.groupValues?.get(1)
-                        if (tag.isNullOrBlank()) "2026.10.7" else if (tag == "v2026.10.7") "2026.10.7 ist aktuell" else "Neu: $tag"
+                        if (!response.isSuccessful) error("Release-Liste ${response.code}")
+                        val body = response.body?.string().orEmpty()
+                        ch.fasrv.fanotes.desk.chooseAndroidUpdate(
+                            installed,
+                            channel,
+                            ch.fasrv.fanotes.desk.androidReleasesFromGithub(body),
+                        )
                     }
-                }.getOrDefault("2026.10.7")
+                }
+            }
+            updateBusy.value = false
+            outcome.onSuccess { offer ->
+                updateOffer.value = offer
+                updateLabel.value = if (offer == null) {
+                    if (installed.isBlank()) "Kein neueres Release." else "$installed ist aktuell"
+                } else {
+                    "Neu: ${offer.version}"
+                }
+            }.onFailure {
+                updateOffer.value = null
+                updateLabel.value = "Die Prüfung ist fehlgeschlagen."
+            }
+        }
+    }
+
+    fun downloadAndroidUpdate(onReady: (java.io.File) -> Unit) {
+        val offer = updateOffer.value ?: return
+        if (updateBusy.value) return
+        updateBusy.value = true
+        updateLabel.value = "APK wird geladen…"
+        viewModelScope.launch {
+            val file = withContext(Dispatchers.IO) {
+                runCatching { downloadAndroidApk(getApplication(), offer) }.getOrNull()
+            }
+            updateBusy.value = false
+            if (file == null) {
+                updateLabel.value = "Die APK konnte nicht geladen werden."
+            } else {
+                updateLabel.value = "APK bereit: ${offer.version}"
+                onReady(file)
             }
         }
     }

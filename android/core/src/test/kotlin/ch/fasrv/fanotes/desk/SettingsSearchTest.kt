@@ -15,6 +15,7 @@ class SettingsSearchTest {
         assertEquals("editor", searchSettings("Rechtschreibung").single().section)
         assertEquals("settings-editor", searchSettings("Rechtschreibung").single().target)
         assertEquals("editor", searchSettings("Autokorrektur").single().section)
+        assertEquals("updates", searchSettings("Nightly").single().section)
         assertEquals("settings-zoom", searchSettings("zoom limit").single { it.label == "Zoom-Limit" }.target)
         assertEquals("settings-typography", searchSettings("Größe").single { it.label == "Schriften & Textgrößen" }.target)
         assertEquals("settings-note-backup", searchSettings("Backup").single().target)

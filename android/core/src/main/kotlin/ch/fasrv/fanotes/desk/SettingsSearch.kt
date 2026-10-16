@@ -43,6 +43,7 @@ val SETTINGS_SEARCH_ITEMS: List<SettingsSearchItem> = listOf(
     SettingsSearchItem("Automatisches Speichern", "Dateien & Vault", "files", "settings-save", "autosave verzögerung dateiverhalten speichern"),
     SettingsSearchItem("Standardordner & Tagesnotizen", "Dateien & Vault", "files", "settings-daily", "daily notes datum format folder tagesnotiz standardordner"),
     SettingsSearchItem("Automatische Updates", "Updates", "updates", "settings-updates", "download installieren starten prüfen version release"),
+    SettingsSearchItem("Update-Kanal", "Updates", "updates", "settings-updates", "stable beta nightly kanal vorab version apk"),
     SettingsSearchItem("Bewegung reduzieren", "Bedienung", "accessibility", "settings-comfort", "animation transition barrierefrei fokus bewegung"),
     SettingsSearchItem("Seitenleisten-Breite", "Bedienung", "accessibility", "settings-comfort", "sidebar informationsleiste panel breite layout"),
     SettingsSearchItem("Eigenes CSS", "Erweitert", "advanced", "settings-css", "custom style design code variablen css"),
