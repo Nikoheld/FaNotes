@@ -1976,21 +1976,24 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
             return None;
         }
         if let Some(normalized) = fold_ampm(trimmed) {
-            return unix_millis_from_iso(&normalized);
+            // A leading space still chooses the legacy year. `4:00 PM` must
+            // not drop it.
+            return unix_millis_from_iso(&keep_leading_space(value, normalized));
         }
     }
     if let Some(normalized) = fold_trailing_zone(trimmed) {
         // `16:00 EST` is a fixed offset. `(EST)` is a comment, so the clock
         // stays local. A leading space on `-000001-10-13 16:00 GMT+5` is the
         // legacy 2013 date. Folding the zone would drop that space and make
-        // the year -1.
+        // the year -1. `-000000` with that space is year 0, so the space has
+        // to survive the fold.
         let legacy_negative_year = value.starts_with(is_date_parse_space)
             && trimmed
                 .split(is_date_parse_space)
                 .next()
                 .is_some_and(negative_expanded_date);
         if !legacy_negative_year {
-            return unix_millis_from_iso(&normalized);
+            return unix_millis_from_iso(&keep_leading_space(value, normalized));
         }
     }
     if has_english_month(trimmed) {
@@ -2004,8 +2007,17 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         return unix_millis_from_iso(&normalized);
     }
     if let Some(normalized) = fold_spaced_numeric_offset(trimmed) {
-        // `2026-10-13 16:00 +5` is 16:00 at a fixed offset.
-        return unix_millis_from_iso(&normalized);
+        // `2026-10-13 16:00 +5` is 16:00 at a fixed offset. A leading space
+        // on a negative expanded year keeps the legacy 2013 reading, so the
+        // offset stays a separate word.
+        let legacy_negative_year = value.starts_with(is_date_parse_space)
+            && trimmed
+                .split(is_date_parse_space)
+                .next()
+                .is_some_and(negative_expanded_date);
+        if !legacy_negative_year {
+            return unix_millis_from_iso(&normalized);
+        }
     }
     if finished_date_has_an_extra_hyphen(trimmed) {
         // `2026-10-13-` and `2026-10-13-EST` already finished the strict date.
@@ -2651,6 +2663,14 @@ fn strip_negative_zero_year(trimmed: &str) -> Option<&str> {
         return None;
     }
     Some(rest.trim_start_matches(is_date_parse_space))
+}
+
+fn keep_leading_space(value: &str, normalized: String) -> String {
+    if value.starts_with(is_date_parse_space) {
+        format!(" {normalized}")
+    } else {
+        normalized
+    }
 }
 
 fn negative_expanded_clock(value: &str) -> bool {
@@ -4672,7 +4692,18 @@ fn strip_glued_offset(clock: &str) -> &str {
 fn shift_hyphen_date(date: &str, delta: i32) -> Option<String> {
     // A leftover clock makes three hyphen fields legacy. `1-10-13` is 10
     // January 2013, because 1 can be a day. `0000-01-01` is 1 January 2000,
-    // because 0 cannot. `10000-10-13` stays year 10000.
+    // because 0 cannot. `10000-10-13` stays year 10000. `-000001-10-13` stays
+    // year -1; the sign is part of the year, not a field break.
+    if let Some((year, month, day)) = expanded_hyphen_ymd(date) {
+        // `-000000` is an invalid expanded year, so a legacy clock uses the
+        // 0–99 window. Year -1 is outside that window and stays negative.
+        let year = if (0..=99).contains(&year) {
+            legacy_year(year)?
+        } else {
+            year
+        };
+        return shifted_hyphen_iso((year, month, day), delta);
+    }
     let mut parts = date.split('-');
     let first: i32 = parts.next()?.parse().ok()?;
     let second: i32 = parts.next()?.parse().ok()?;
@@ -4687,6 +4718,28 @@ fn shift_hyphen_date(date: &str, delta: i32) -> Option<String> {
     } else {
         (first, second, third)
     };
+    shifted_hyphen_iso((year, month, day), delta)
+}
+
+fn expanded_hyphen_ymd(date: &str) -> Option<(i32, i32, i32)> {
+    if !date.starts_with(['+', '-']) || date.len() < 7 {
+        return None;
+    }
+    if !date.as_bytes()[1..7].iter().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let year: i32 = date[..7].parse().ok()?;
+    let rest = date[7..].strip_prefix('-')?;
+    let (month, day) = rest.split_once('-')?;
+    if day.contains('-') || month.len() != 2 || day.len() != 2 {
+        return None;
+    }
+    let month: i32 = month.parse().ok()?;
+    let day: i32 = day.parse().ok()?;
+    Some((year, month, day))
+}
+
+fn shifted_hyphen_iso((year, month, day): (i32, i32, i32), delta: i32) -> Option<String> {
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
@@ -12819,6 +12872,15 @@ mod local_zone_tests {
         assert_eq!(
             unix_millis_from_iso(" -000001-10-13 16:00 +5"),
             Some(1_357_815_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("-000001-10-13 16:00 +5"), None);
+        assert_eq!(
+            unix_millis_from_iso(" -000000-10-13 16:00 +5"),
+            Some(971_434_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso(" -000001-10-13 4:00 PM"),
+            Some(1_357_851_600_000)
         );
     }
 

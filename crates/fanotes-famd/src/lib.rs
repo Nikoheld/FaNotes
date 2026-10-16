@@ -1071,7 +1071,9 @@ pub fn canonical_iso(value: &str) -> Option<String> {
             return None;
         }
         if let Some(normalized) = fold_ampm(trimmed) {
-            return canonical_iso(&normalized);
+            // A leading space still chooses the legacy year. `4:00 PM` must
+            // not drop it.
+            return canonical_iso(&keep_leading_space(value, normalized));
         }
     }
     if has_english_month(trimmed) {
@@ -1084,8 +1086,17 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         return canonical_iso(&normalized);
     }
     if let Some(normalized) = fold_spaced_numeric_offset(trimmed) {
-        // `2026-10-13 16:00 +5` is 16:00 at a fixed offset.
-        return canonical_iso(&normalized);
+        // `2026-10-13 16:00 +5` is 16:00 at a fixed offset. A leading space
+        // on a negative expanded year keeps the legacy 2013 reading, so the
+        // offset stays a separate word.
+        let legacy_negative_year = value.starts_with(is_date_parse_space)
+            && trimmed
+                .split(is_date_parse_space)
+                .next()
+                .is_some_and(|date| negative_expanded_ymd(date).is_some());
+        if !legacy_negative_year {
+            return canonical_iso(&normalized);
+        }
     }
     if !has_iso_t(trimmed) {
         if let Some(normalized) = fold_trailing_zone(trimmed) {
@@ -1098,7 +1109,7 @@ pub fn canonical_iso(value: &str) -> Option<String> {
                     .next()
                     .is_some_and(|date| negative_expanded_ymd(date).is_some());
             if !legacy_negative_year {
-                return canonical_iso(&normalized);
+                return canonical_iso(&keep_leading_space(value, normalized));
             }
         }
     }
@@ -1120,6 +1131,15 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         // `2026-10-13` is UTC. `2026-10-13Z` is the same instant with a zone
         // glued on, so a failed date-only parse continues as a legacy number.
         // U+2028 and U+2029 are not date separators, so they stay empty.
+        // `-000001-10-13 ` already read year -1. The trailing space makes
+        // midnight local. A leading space is still the legacy 2013 date.
+        if surrounded && !value.starts_with(is_date_parse_space) {
+            if let Some((year, month, day)) = negative_expanded_ymd(trimmed) {
+                let (year, month, day, hour, minute, second) =
+                    local_civil_to_utc(year, month, day, 0, 0, 0)?;
+                return format_civil_iso(year, month, day, hour, minute, second, 0);
+            }
+        }
         if let Some(iso) = date_only_iso(trimmed, surrounded) {
             return Some(iso);
         }
@@ -1132,8 +1152,9 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         return None;
     }
     // A leading space keeps `-000001-10-13 16:00` on the legacy path, which
-    // reads 10 January 2013. Without that space the same text is year -1.
-    if surrounded {
+    // reads 10 January 2013. A trailing space does not: the year was already
+    // read, and the date stays in year -1.
+    if value.starts_with(is_date_parse_space) {
         if let Some((year, _, _, _)) = split_calendar(trimmed) {
             if year < 0
                 && trimmed.as_bytes().first() == Some(&b'-')
@@ -1380,6 +1401,14 @@ fn has_ampm_word(value: &str) -> bool {
 }
 
 /// `-000000-10-13` drops the invalid negative zero. The rest is the date.
+fn keep_leading_space(value: &str, normalized: String) -> String {
+    if value.starts_with(is_date_parse_space) {
+        format!(" {normalized}")
+    } else {
+        normalized
+    }
+}
+
 fn strip_negative_zero_year(trimmed: &str) -> Option<&str> {
     let rest = trimmed.strip_prefix("-000000")?;
     if rest.starts_with(|character: char| character.is_ascii_digit()) {
@@ -3809,7 +3838,18 @@ fn strip_glued_offset(clock: &str) -> &str {
 fn shift_hyphen_date(date: &str, delta: i32) -> Option<String> {
     // A leftover clock makes three hyphen fields legacy. `1-10-13` is 10
     // January 2013, because 1 can be a day. `0000-01-01` is 1 January 2000,
-    // because 0 cannot. `10000-10-13` stays year 10000.
+    // because 0 cannot. `10000-10-13` stays year 10000. `-000001-10-13` stays
+    // year -1; the sign is part of the year, not a field break.
+    if let Some((year, month, day)) = expanded_hyphen_ymd(date) {
+        // `-000000` is an invalid expanded year, so a legacy clock uses the
+        // 0–99 window. Year -1 is outside that window and stays negative.
+        let year = if (0..=99).contains(&year) {
+            legacy_year_number(year)?
+        } else {
+            year
+        };
+        return shifted_hyphen_iso((year, month, day), delta);
+    }
     let mut parts = date.split('-');
     let first: i32 = parts.next()?.parse().ok()?;
     let second: i32 = parts.next()?.parse().ok()?;
@@ -3824,6 +3864,28 @@ fn shift_hyphen_date(date: &str, delta: i32) -> Option<String> {
     } else {
         (first, second, third)
     };
+    shifted_hyphen_iso((year, month, day), delta)
+}
+
+fn expanded_hyphen_ymd(date: &str) -> Option<(i32, i32, i32)> {
+    if !date.starts_with(['+', '-']) || date.len() < 7 {
+        return None;
+    }
+    if !date.as_bytes()[1..7].iter().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let year: i32 = date[..7].parse().ok()?;
+    let rest = date[7..].strip_prefix('-')?;
+    let (month, day) = rest.split_once('-')?;
+    if day.contains('-') || month.len() != 2 || day.len() != 2 {
+        return None;
+    }
+    let month: i32 = month.parse().ok()?;
+    let day: i32 = day.parse().ok()?;
+    Some((year, month, day))
+}
+
+fn shifted_hyphen_iso((year, month, day): (i32, i32, i32), delta: i32) -> Option<String> {
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
@@ -4497,6 +4559,15 @@ fn iso_hyphen_date(value: &str) -> Option<String> {
             }
             (month, day)
         }
+    };
+    // A short field means the ES5 date did not finish. `0000-1-1` is year
+    // 2000. `0001-10-5` is 10 January 2005, because 1 can be a day.
+    let (year, month, day) = if legacy_local && (1..=31).contains(&year) {
+        (legacy_year_number(day)?, year, month)
+    } else if legacy_local && (0..=99).contains(&year) {
+        (legacy_year_number(year)?, month, day)
+    } else {
+        (year, month, day)
     };
     let (year, month, day) = normalize_ymd(year, month, day)?;
     if legacy_local {
@@ -10422,6 +10493,28 @@ mod tests {
             assert_eq!(
                 super::canonical_iso(" -000001-10-13 16:00 +5").as_deref(),
                 Some("2013-01-10T11:00:00.000Z")
+            );
+            // A trailing space does not reread year -1 as 2013. A short
+            // field on year 0 uses the legacy window.
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 ").as_deref(),
+                Some("-000001-10-13T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 16:00 +5").as_deref(),
+                Some("-000001-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0000-1-1").as_deref(),
+                Some("2000-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0001-10-5").as_deref(),
+                Some("2005-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(" -000000-10-13 16:00 +5").as_deref(),
+                Some("2000-10-13T11:00:00.000Z")
             );
             // `+275760-09-13` is the last UTC midnight. Local time that day,
             // and one millisecond past that midnight, are empty.
