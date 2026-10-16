@@ -1297,10 +1297,13 @@ fun HomeworkScreen(model: FaNotesViewModel) {
                 notes = notes,
                 onNotes = { notes = it.take(ch.fasrv.fanotes.desk.HOMEWORK_NOTES_LIMIT) },
                 onSubmit = {
-                    if (title.isNotBlank()) {
-                        model.addHomework(title, subject, due, kind, dueTime, notes, priority)
+                    val date = ch.fasrv.fanotes.desk.homeworkDueValue(due)
+                    val clock = ch.fasrv.fanotes.desk.homeworkTimeValue(dueTime)
+                    if (title.isNotBlank() && date != null && clock != null) {
+                        model.addHomework(title, subject, date, kind, clock, notes, priority)
                         title = ""
                         notes = ""
+                        due = date
                         dueTime = ""
                         priority = ch.fasrv.fanotes.desk.HOMEWORK_DEFAULT_PRIORITY
                     }
