@@ -198,7 +198,10 @@ try {
 
   // ── App wiring ───────────────────────────────────────────────────────────
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
-  assert.match(app, /editorRef\.current\?\.flushChanges\(\)\s*\n\s*if \(!await flushDocumentLayers\(\)\) return false/, 'a note switch books pending keystrokes under the leaving note')
+  assert.match(app, /editorRef\.current\?\.flushChanges\(\)[\s\S]{0,420}if \(!await flushDocumentLayers\(\)\) return false/, 'a note switch books pending keystrokes under the leaving note')
+  assert.match(app, /ref=\{splitEditorRef\}/, 'the second pane exposes its editor so save can flush it')
+  assert.match(app, /editorRef\.current\?\.flushChanges\(\)\s*\n\s*splitEditorRef\.current\?\.flushChanges\(\)/, 'save and quit flush the split pane before they decide nothing is pending')
+  assert.match(app, /if \(splitPathRef\.current === path\) splitEditorRef\.current\?\.flushChanges\(\)/, 'closing or activating the split note books its keystrokes first')
   assert.match(app, /drawingSessionKeyRef\.current !== noteDrawingSession\.key/, 'the ink dirty flag belongs to the mounted board')
   assert.match(app, /InkPreviewLayer load=\{loadSplitInk\}/, 'the second pane paints the saved ink')
   // Each pane drives its own camera: zooming one sheet must not move the other.
