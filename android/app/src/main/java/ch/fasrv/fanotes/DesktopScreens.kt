@@ -67,6 +67,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Settings
@@ -2591,23 +2592,82 @@ fun StudyScreen(model: FaNotesViewModel) {
 @Composable
 fun ConflictList(model: FaNotesViewModel) {
     val sync by model.sync.collectAsStateWithLifecycle()
-    if (sync.conflicts.isEmpty()) {
-        Text("Keine offenen Konflikte.", fontSize = 13.sp)
-        return
-    }
-    sync.conflicts.forEach { conflict ->
-        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-            Text(conflict.path, fontSize = 14.sp)
-            Text(conflict.copyPath, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-            Row {
-                TextButton(onClick = { model.resolveConflict(conflict, "remote") }) { Text("Server") }
-                TextButton(onClick = { model.resolveConflict(conflict, "local") }) { Text("Tablet") }
-                if (ch.fasrv.fanotes.desk.isMarkdownConflictPath(conflict.path)) {
-                    TextButton(onClick = { model.resolveConflict(conflict, "both") }) { Text("Beide") }
+    if (sync.conflicts.isEmpty()) return
+    SettingCard("Konfliktkopien", Icons.Filled.Warning, action = {
+        SyncCardAction("Liste leeren") { model.clearSyncConflicts() }
+    }) {
+        sync.conflicts.asReversed().forEachIndexed { index, conflict ->
+            SettingRow(conflict.path, "Lokale Fassung gesichert als „${conflict.copyPath}“", divider = index != sync.conflicts.lastIndex) {
+                Row {
+                    TextButton(onClick = { model.resolveConflict(conflict, "remote") }) { Text("Server") }
+                    TextButton(onClick = { model.resolveConflict(conflict, "local") }) { Text("Tablet") }
+                    if (ch.fasrv.fanotes.desk.isMarkdownConflictPath(conflict.path)) {
+                        TextButton(onClick = { model.resolveConflict(conflict, "both") }) { Text("Beide") }
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun SyncLogCard(log: List<ch.fasrv.fanotes.sync.SyncLogEntry>) {
+    if (log.isEmpty()) return
+    var open by remember { mutableStateOf(false) }
+    SettingCard("Protokoll", Icons.Filled.Sync, action = {
+        SyncCardAction(ch.fasrv.fanotes.sync.syncLogToggleLabel(log.size, open)) { open = !open }
+    }) {
+        if (open) {
+            Column(
+                Modifier
+                    .heightIn(max = ch.fasrv.fanotes.sync.SYNC_LOG_MAX_DP.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 15.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                ch.fasrv.fanotes.sync.visibleSyncLog(log).forEach { entry ->
+                    val tone = when (ch.fasrv.fanotes.sync.syncLogTone(entry.level)) {
+                        "danger" -> MaterialTheme.colorScheme.error
+                        "warning" -> MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                        else -> LocalStatusInk.current.soft
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            ch.fasrv.fanotes.sync.syncDeviceSeenLabel(entry.at),
+                            modifier = Modifier.width(ch.fasrv.fanotes.sync.SYNC_LOG_TIME_DP.dp),
+                            fontSize = 12.sp,
+                            color = LocalStatusInk.current.muted,
+                            maxLines = 1,
+                        )
+                        Text(entry.text, fontSize = 12.sp, color = tone, lineHeight = 17.sp, modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SyncCardAction(label: String, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val pressed by interaction.collectIsPressedAsState()
+    val hot = hovered || pressed
+    Text(
+        label,
+        fontSize = 12.sp,
+        fontWeight = FontWeight(600),
+        color = if (hot) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
+        modifier = Modifier
+            .heightIn(min = 24.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA), RoundedCornerShape(6.dp))
+            .background(if (hot) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+            .hoverable(interaction)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .padding(horizontal = 9.dp)
+            .wrapContentHeight(Alignment.CenterVertically),
+    )
 }
 
 @Composable
@@ -3421,6 +3481,7 @@ private fun SettingCard(
     title: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     modifier: Modifier = Modifier,
+    action: (@Composable () -> Unit)? = null,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.SETTING_CARD_RADIUS_DP.dp)
@@ -3449,6 +3510,10 @@ private fun SettingCard(
                 letterSpacing = ch.fasrv.fanotes.desk.SETTING_TITLE_TRACKING.em,
                 color = LocalStatusInk.current.soft,
             )
+            if (action != null) {
+                Spacer(Modifier.weight(1f))
+                action()
+            }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
         content()
@@ -4108,6 +4173,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     }
                     Text("Ein Konflikt behält die Serverfassung auf dem ursprünglichen Pfad. Die Tablet-Fassung liegt daneben.", fontSize = 12.sp, color = LocalStatusInk.current.muted)
                     ConflictList(model)
+                    SyncLogCard(sync.log)
                 }
                 "addons" -> SettingCard("Add-ons", Icons.Filled.Extension) {
                     SettingRow("Erweiterungen", "Add-ons des Desktops bleiben Dateien im Vault. Andere Erweiterungen werden nicht ausgeführt.", divider = false) {}

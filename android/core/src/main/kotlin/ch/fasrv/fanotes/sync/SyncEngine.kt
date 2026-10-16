@@ -29,6 +29,21 @@ enum class SyncStatus { UNAVAILABLE, SIGNED_OUT, IDLE, SYNCING, OFFLINE, ERROR, 
 data class SyncProgress(val phase: String, val done: Int, val total: Int)
 data class SyncConflict(val path: String, val copyPath: String, val at: String)
 data class SyncLogEntry(val at: String, val level: String, val text: String)
+
+/** The protocol card shows the newest 40 lines, newest first. */
+const val SYNC_LOG_VISIBLE = 40
+const val SYNC_LOG_MAX_DP = 240
+const val SYNC_LOG_TIME_DP = 110
+
+fun visibleSyncLog(log: List<SyncLogEntry>): List<SyncLogEntry> = log.asReversed().take(SYNC_LOG_VISIBLE)
+
+fun syncLogToggleLabel(count: Int, open: Boolean) = if (open) "Einklappen" else "$count Einträge"
+
+fun syncLogTone(level: String) = when (level) {
+    "error" -> "danger"
+    "warn", "warning" -> "warning"
+    else -> "soft"
+}
 data class SyncAccount(val email: String, val accountId: String, val deviceId: String)
 data class SyncScanEntry(val path: String, val size: Long, val mtimeMs: Long)
 
