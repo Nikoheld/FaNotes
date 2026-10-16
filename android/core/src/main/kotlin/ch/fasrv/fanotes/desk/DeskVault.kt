@@ -489,6 +489,7 @@ const val CAL_MINI_CELL_DP = 28
 const val CAL_MINI_DOT_DP = 4
 const val CAL_ICON_DP = 28
 const val CAL_MONTH_DAY_DP = 24
+const val CAL_MONTH_ROWS = 6
 const val CAL_MONTH_CELL_MIN_DP = 88
 const val CAL_CHIP_RADIUS_DP = 6
 const val CAL_MONTH_LIMIT = 3
@@ -513,6 +514,17 @@ const val CAL_HEAD_NUM_SP = 16
 fun calendarShowsSide(widthDp: Int): Boolean = widthDp > CAL_SIDE_BREAK_DP
 
 fun calendarMoreLabel(hidden: Int): String = "+$hidden $CAL_MORE"
+
+/**
+ * Equal week-row height for `repeat(rows, minmax(minDp, 1fr))`.
+ * A short calendar keeps every row at [minDp] (the month region can scroll).
+ * Extra space is shared, so each row is [availableDp] / [rows].
+ */
+fun monthRowHeightDp(availableDp: Int, rows: Int = CAL_MONTH_ROWS, minDp: Int = CAL_MONTH_CELL_MIN_DP): Int {
+    val count = rows.coerceAtLeast(1)
+    val share = availableDp.coerceAtLeast(0) / count
+    return maxOf(minDp, share)
+}
 
 /** How far the desktop calendar moves: a week for Woche and Agenda, a month for Monat. */
 fun calendarShift(view: String, anchor: java.time.LocalDate, step: Int): java.time.LocalDate = when (view) {
