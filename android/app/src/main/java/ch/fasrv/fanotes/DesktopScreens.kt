@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -4022,12 +4023,12 @@ private fun HistoryDiff(diff: String) {
 @Composable
 private fun InspectorHeading(title: String) {
     Text(
-        title.uppercase(),
+        title.uppercase(java.util.Locale.GERMAN),
         fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
-        letterSpacing = 0.7.sp,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-        modifier = Modifier.padding(top = 14.dp, bottom = 6.dp),
+        fontWeight = FontWeight.Bold,
+        letterSpacing = ch.fasrv.fanotes.desk.INSPECTOR_HEADING_TRACKING.em,
+        color = LocalStatusInk.current.muted,
+        modifier = Modifier.padding(start = 5.dp, top = 10.dp, end = 5.dp, bottom = 8.dp),
     )
 }
 
@@ -4041,16 +4042,31 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
     if (settings["outline"] == "off") return
     LaunchedEffect(path) { model.refreshNoteHistory() }
     Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().height(36.dp).padding(horizontal = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "Gliederung",
-                fontSize = 12.sp,
-                modifier = Modifier
-                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f), androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
-                    .padding(horizontal = 7.dp, vertical = 4.dp),
+        Column(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(ch.fasrv.fanotes.desk.INSPECTOR_HEADER_DP.dp)
+                    .padding(horizontal = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Gliederung",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .height(ch.fasrv.fanotes.desk.INSPECTOR_TAB_DP.dp)
+                        .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.INSPECTOR_TAB_RADIUS_DP.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 7.dp)
+                        .wrapContentHeight(Alignment.CenterVertically),
+                )
+            }
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)),
             )
         }
         Column(Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp).verticalScroll(rememberScrollState())) {
@@ -4063,11 +4079,18 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                 Text("Überschriften erscheinen hier automatisch.", fontSize = 12.sp, color = muted)
             }
             headings.forEach { heading ->
-                val inset = (10 + (heading.level - 1).coerceAtLeast(0) * 12).dp
                 Text(
                     "› ${heading.title}",
-                    modifier = Modifier.padding(start = inset, top = 4.dp).clickable { model.jumpToOutline(heading.line) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = ch.fasrv.fanotes.desk.INSPECTOR_OUTLINE_DP.dp)
+                        .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.INSPECTOR_OUTLINE_RADIUS_DP.dp))
+                        .clickable { model.jumpToOutline(heading.line) }
+                        .padding(start = ch.fasrv.fanotes.desk.outlineIndentDp(heading.level).dp, end = 7.dp)
+                        .wrapContentHeight(Alignment.CenterVertically),
                     fontSize = 12.sp,
+                    color = LocalStatusInk.current.soft,
+                    maxLines = 1,
                 )
             }
             InspectorHeading("Dokument")
@@ -4080,11 +4103,22 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                     Column(
                         Modifier
                             .weight(1f)
-                            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.INSPECTOR_STAT_RADIUS_DP.dp))
+                            .background(LocalStatusInk.current.panelStrong.copy(alpha = 0.72f))
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA),
+                                RoundedCornerShape(ch.fasrv.fanotes.desk.INSPECTOR_STAT_RADIUS_DP.dp),
+                            )
                             .padding(horizontal = 6.dp, vertical = 7.dp),
                     ) {
-                        Text(label, fontSize = 12.sp, color = muted)
-                        Text(value, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+                        Text(label, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                        Text(
+                            value,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight(ch.fasrv.fanotes.desk.INSPECTOR_VALUE_WEIGHT),
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
                     }
                 }
             }
@@ -4118,7 +4152,7 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier
-                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), androidx.compose.foundation.shape.RoundedCornerShape(99.dp))
+                                .background(LocalStatusInk.current.panelActive, androidx.compose.foundation.shape.RoundedCornerShape(99.dp))
                                 .padding(horizontal = 7.dp, vertical = 4.dp),
                         )
                     }
@@ -4132,12 +4166,13 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                 Modifier
                     .fillMaxWidth()
                     .padding(top = 14.dp)
-                    .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.18f), androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f), androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), RoundedCornerShape(10.dp))
                     .padding(10.dp),
             ) {
-                Text("Local first", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                Text("Deine Inhalte bleiben als lesbare Dateien in deinem Vault.", fontSize = 12.sp, color = muted, modifier = Modifier.padding(top = 3.dp))
+                Text("Local first", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = LocalStatusInk.current.soft)
+                Text("Deine Inhalte bleiben als lesbare Dateien in deinem Vault.", fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 3.dp))
             }
         }
     }
