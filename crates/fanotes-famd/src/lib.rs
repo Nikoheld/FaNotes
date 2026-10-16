@@ -961,6 +961,11 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         // `16:00:00.5.1` keeps the fraction. The second dot starts a new field.
         return canonical_iso(&next);
     }
+    if let Some(next) = separate_colon_after_word(value) {
+        // `note: 10/13/2026` is the slash date. The colon is a separator, and
+        // `note` is a garbage word. `note10/13/2026` has no separator.
+        return canonical_iso(&next);
+    }
     if let Some(next) = separate_finished_date_clock(value) {
         // `2026-10-13/16:00` and `2026-10-13:16:00` are 16:00 local.
         // `Oct 13 2026/16:00` uses the slash the same way. `10/13/2026` has
@@ -1687,12 +1692,21 @@ fn separate_colon_after_hyphen_date(value: &str) -> Option<String> {
             index += 1;
             continue;
         }
-        let prefix = value[..index].trim_start_matches(is_date_parse_space);
+        let raw_prefix = &value[..index];
+        let prefix = raw_prefix.trim_start_matches(is_date_parse_space);
         if prefix_is_strict_hyphen_date(prefix)
             && suffix_is_legacy_clock(value[index + 1..].trim_start_matches(is_date_parse_space))
         {
+            // `2026-10-13:16:00` starts at the first character, so ES5 keeps
+            // 13 October and reads 16:00. A leading space is legacy: 13 is the
+            // hour. An expanded year keeps the ES5 split.
+            let leading_space = raw_prefix.len() != prefix.len();
+            let four_digit_year = prefix.as_bytes().first().is_some_and(u8::is_ascii_digit);
+            if leading_space && four_digit_year {
+                return legacy_hyphen_colon_time(prefix, &value[index + 1..]);
+            }
             let mut next = String::with_capacity(value.len() + 1);
-            next.push_str(&value[..index]);
+            next.push_str(raw_prefix);
             next.push(' ');
             next.push_str(&value[index + 1..]);
             return Some(next);
@@ -1700,6 +1714,69 @@ fn separate_colon_after_hyphen_date(value: &str) -> Option<String> {
         index += 1;
     }
     None
+}
+
+/// `note:10/13/2026` and `hello:Oct 13 2026`. A colon after a word is only a
+/// separator. `16:00` and `16::30` follow a digit, so those colons stay.
+/// `note10/13/2026` has no colon, and a word glued to a number stays empty.
+fn separate_colon_after_word(value: &str) -> Option<String> {
+    let chars: Vec<char> = value.chars().collect();
+    let mut out = String::with_capacity(value.len());
+    let mut changed = false;
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] != ':' || !colon_follows_word(&chars, index) {
+            out.push(chars[index]);
+            index += 1;
+            continue;
+        }
+        push_separator(&mut out);
+        changed = true;
+        index += 1;
+        while index < chars.len() && chars[index] == ':' {
+            index += 1;
+        }
+    }
+    if changed { Some(out) } else { None }
+}
+
+/// The nearest character that is not a space or a colon is a word character.
+fn colon_follows_word(chars: &[char], index: usize) -> bool {
+    let mut cursor = index;
+    while cursor > 0 {
+        cursor -= 1;
+        if chars[cursor] == ':' || is_date_parse_space(chars[cursor]) {
+            continue;
+        }
+        return is_v8_word_char(chars[cursor]);
+    }
+    false
+}
+
+/// ` 2026-10-13:16:00` is 13:16 on 1 October. The last hyphen field is the
+/// hour because the colon is attached to it. ` 2026:16:00` has no date left.
+fn legacy_hyphen_colon_time(prefix: &str, suffix: &str) -> Option<String> {
+    let mut fields: Vec<&str> = prefix.split('-').collect();
+    let hour = fields.pop()?;
+    if fields.is_empty() || hour.is_empty() {
+        return None;
+    }
+    let dates = fields
+        .iter()
+        .map(|field| field.parse::<i32>().ok())
+        .collect::<Option<Vec<_>>>()?;
+    let (month, day, year) = numeric_month_day_year(&dates)?;
+    if !(1..=31).contains(&day) {
+        return None;
+    }
+    let clock = format!(
+        "{hour}:{}",
+        suffix.trim_start_matches(is_date_parse_space)
+    );
+    Some(format!(
+        "{}-{month:02}-{day:02} {clock}",
+        legacy_iso_year(year)
+    ))
 }
 
 fn separate_slash_before_clock(value: &str) -> Option<String> {
@@ -1872,8 +1949,9 @@ fn strip_leading_signs(trimmed: &str) -> Option<&str> {
     Some(rest)
 }
 
-/// `hello 2026-10-13` drops `hello`. The space in front of the date stays, so
-/// a date-only value is local.
+/// `hello 2026-10-13` drops `hello`. A word continues through every non-space
+/// character at or above `A`, so `hello_world 10/13/2026` drops that word too.
+/// `Oct_13` stays, because it names a month. The space keeps a date local.
 fn strip_leading_word(trimmed: &str) -> Option<String> {
     let end = trimmed
         .char_indices()
@@ -1881,7 +1959,7 @@ fn strip_leading_word(trimmed: &str) -> Option<String> {
         .0;
     let word = &trimmed[..end];
     if word.is_empty()
-        || !word.chars().all(|character| character.is_ascii_alphabetic())
+        || !word.chars().all(is_v8_word_char)
         || english_month(word).is_some()
     {
         return None;
@@ -9884,6 +9962,92 @@ mod tests {
                 ("4:00_PM Oct 13 2026", None),
                 ("oct123def", None),
                 ("A1", None),
+            ];
+            for (input, expected) in cases {
+                assert_eq!(super::canonical_iso(input).as_deref(), expected, "{input}");
+            }
+        });
+    }
+
+    #[test]
+    fn a_colon_after_a_word_is_a_separator() {
+        with_tz("America/New_York", || {
+            // Node 22 `Date.parse`. `note` is a garbage word and `:` is only
+            // a separator, so `note: 10/13/2026` is 13 October local midnight.
+            // `note10/13/2026` glues the word to the number and stays empty.
+            // A leading space before `2026-10-13:16:00` makes 13 the hour.
+            let cases = [
+                ("note: 10/13/2026", Some("2026-10-13T04:00:00.000Z")),
+                ("note:10/13/2026", Some("2026-10-13T04:00:00.000Z")),
+                ("note : 10/13/2026", Some("2026-10-13T04:00:00.000Z")),
+                ("note:  10/13/2026", Some("2026-10-13T04:00:00.000Z")),
+                ("NOTE: 10/13/2026", Some("2026-10-13T04:00:00.000Z")),
+                ("hello: Oct 13 2026", Some("2026-10-13T04:00:00.000Z")),
+                ("hello:Oct 13 2026", Some("2026-10-13T04:00:00.000Z")),
+                ("hello : Oct 13 2026", Some("2026-10-13T04:00:00.000Z")),
+                ("see: 2026-10-13", Some("2026-10-13T04:00:00.000Z")),
+                ("see:2026-10-13", Some("2026-10-13T04:00:00.000Z")),
+                ("see : 2026-10-13", Some("2026-10-13T04:00:00.000Z")),
+                ("note: 16:00 Oct 13 2026", Some("2026-10-13T20:00:00.000Z")),
+                ("note:16:00 Oct 13 2026", Some("2026-10-13T20:00:00.000Z")),
+                ("note : 16:00 Oct 13 2026", Some("2026-10-13T20:00:00.000Z")),
+                ("note: 4:00 PM Oct 13 2026", Some("2026-10-13T20:00:00.000Z")),
+                ("note:4:5 Oct 13 2026", Some("2026-10-13T08:05:00.000Z")),
+                ("note: 10/13/1950", Some("1950-10-13T05:00:00.000Z")),
+                ("note:10/13/1950", Some("1950-10-13T05:00:00.000Z")),
+                ("note : 10/13/1950", Some("1950-10-13T05:00:00.000Z")),
+                ("hello: Oct 13 1950", Some("1950-10-13T05:00:00.000Z")),
+                ("see: 1950-10-13", Some("1950-10-13T05:00:00.000Z")),
+                ("see:1950-10-13", Some("1950-10-13T05:00:00.000Z")),
+                ("note: 16:00 Oct 13 1950", Some("1950-10-13T21:00:00.000Z")),
+                ("note: 2026-10-13", Some("2026-10-13T04:00:00.000Z")),
+                ("note:2026-10-13", Some("2026-10-13T04:00:00.000Z")),
+                ("note: 2026-10-13 16:00", Some("2026-10-13T20:00:00.000Z")),
+                ("note:2026-10-13 16:00", Some("2026-10-13T20:00:00.000Z")),
+                ("see: 2026-10", Some("2026-10-01T04:00:00.000Z")),
+                ("see:2026", Some("2026-01-01T05:00:00.000Z")),
+                ("see: 10 13 2026", Some("2026-10-13T04:00:00.000Z")),
+                ("see:10 13 2026", Some("2026-10-13T04:00:00.000Z")),
+                ("note:10/13/2026 16:00", Some("2026-10-13T20:00:00.000Z")),
+                ("note:10/13/2026 :16:00", Some("2026-10-13T20:00:00.000Z")),
+                ("note: 10/13/2026 GMT", Some("2026-10-13T00:00:00.000Z")),
+                ("note:10/13/2026EST", Some("2026-10-13T05:00:00.000Z")),
+                ("note: 10/13/2026 EST", Some("2026-10-13T05:00:00.000Z")),
+                ("GMT:10/13/2026", Some("2026-10-13T04:00:00.000Z")),
+                ("EST: 10/13/2026", Some("2026-10-13T04:00:00.000Z")),
+                ("AM: 4:00 Oct 13 2026", Some("2026-10-13T08:00:00.000Z")),
+                ("hello_world:10/13/2026", Some("2026-10-13T04:00:00.000Z")),
+                ("hello_world: 10/13/2026", Some("2026-10-13T04:00:00.000Z")),
+                ("foo:bar 10/13/2026", Some("2026-10-13T04:00:00.000Z")),
+                ("note::10/13/2026", Some("2026-10-13T04:00:00.000Z")),
+                ("note: :10/13/2026", Some("2026-10-13T04:00:00.000Z")),
+                ("Oct:13 2026", Some("2026-10-13T04:00:00.000Z")),
+                ("May:6 2026", Some("2026-05-06T04:00:00.000Z")),
+                ("marketplace:13 2026", Some("2026-03-13T04:00:00.000Z")),
+                ("note:Oct_13 2026", Some("2026-10-13T04:00:00.000Z")),
+                ("note:Oct_13", Some("2001-10-13T04:00:00.000Z")),
+                ("Oct:13:2026", Some("2026-10-01T17:00:00.000Z")),
+                ("hello:Oct:13:2026", Some("2026-10-01T17:00:00.000Z")),
+                ("note:2026-10-13:16:00", Some("2026-10-01T17:16:00.000Z")),
+                ("note 2026-10-13:16:00", Some("2026-10-01T17:16:00.000Z")),
+                (" 2026-10-13:16:00", Some("2026-10-01T17:16:00.000Z")),
+                (" 2026-10-13: 16:00", Some("2026-10-01T17:16:00.000Z")),
+                (" 2026-10-13:4:5", Some("2026-10-01T17:04:05.000Z")),
+                (" 2026-10-13:16:00 EST", Some("2026-10-01T18:16:00.000Z")),
+                (" 2026-10-13:16:00Z", Some("2026-10-01T13:16:00.000Z")),
+                (" 2026-10:16:00", Some("2026-01-01T15:16:00.000Z")),
+                ("#2026-10-13:16:00", Some("2026-10-01T17:16:00.000Z")),
+                ("10/13/2026", Some("2026-10-13T04:00:00.000Z")),
+                ("Oct_13", Some("2001-10-13T04:00:00.000Z")),
+                ("2026-10-13:16:00", Some("2026-10-13T20:00:00.000Z")),
+                ("note10/13/2026", None),
+                ("note:16:00", None),
+                ("note:10/13/2026:16:00", None),
+                (" 2026:16:00", None),
+                ("Oct 13 2026:16:00", None),
+                ("10/13/2026:16:00", None),
+                ("on_Oct_13 2026", None),
+                ("x:2026-10-13T16:00:00Z", None),
             ];
             for (input, expected) in cases {
                 assert_eq!(super::canonical_iso(input).as_deref(), expected, "{input}");
