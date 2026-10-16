@@ -4037,7 +4037,8 @@ fn fold_spaced_numeric_offset(trimmed: &str) -> Option<String> {
         return None;
     }
     let parsed = parse_legacy_offset(words[2])?;
-    if !parsed.spilled.is_empty() {
+    // `+5:30:00` has a third field. `+5:30` and `+5::30` do not.
+    if !parsed.spilled.is_empty() || !parsed.time_fields.is_empty() {
         return None;
     }
     // `16:00+5 -30` keeps `-30`. The sign glued to the clock was replaced.
@@ -11104,5 +11105,30 @@ mod local_zone_tests {
             unix_millis_from_iso("Oct 13 2026 16::30"),
             Some(1_791_921_630_000)
         );
+    }
+
+    #[test]
+    fn a_third_offset_field_on_a_hyphen_date_is_empty() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `+5:30` is five hours and 30 minutes. A third field is not an offset.
+        // A real ISO zone still is.
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00 +5:30:00"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00 +05:30:00"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00 -5:30:00"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00 +5:3:0"), None);
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00 +5:30"),
+            Some(1_791_887_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13T16:00:00+05:30"),
+            Some(1_791_887_400_000)
+        );
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00 +5:30:00"), None);
     }
 }

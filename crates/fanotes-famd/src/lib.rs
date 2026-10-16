@@ -3002,7 +3002,8 @@ fn fold_spaced_numeric_offset(trimmed: &str) -> Option<String> {
         return None;
     }
     let parsed = parse_legacy_offset(words[2])?;
-    if !parsed.spilled.is_empty() {
+    // `+5:30:00` has a third field. `+5:30` and `+5::30` do not.
+    if !parsed.spilled.is_empty() || !parsed.time_fields.is_empty() {
         return None;
     }
     // `16:00+5 -30` keeps `-30`. The sign glued to the clock was replaced.
@@ -9070,6 +9071,25 @@ mod tests {
             );
             assert_eq!(super::canonical_iso("Oct 13 2026 16:00:::30"), None);
             assert_eq!(super::canonical_iso("2026-10-13T16:::30"), None);
+        });
+    }
+
+    #[test]
+    fn a_third_offset_field_on_a_hyphen_date_is_empty() {
+        with_tz("America/New_York", || {
+            assert_eq!(super::canonical_iso("2026-10-13 16:00 +5:30:00"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00 +05:30:00"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00 -5:30:00"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00 +5:3:0"), None);
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 +5:30").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13T16:00:00+05:30").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("Oct 13 2026 16:00 +5:30:00"), None);
         });
     }
 }
