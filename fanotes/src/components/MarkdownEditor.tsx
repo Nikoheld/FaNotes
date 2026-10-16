@@ -1,4 +1,5 @@
 import { forwardRef, lazy, Suspense, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { taskToggleChanges } from '../lib/noteActions'
 import { createRoot, type Root as ReactRoot } from 'react-dom/client'
 import '@fontsource/jetbrains-mono/latin-400.css'
 import '@fontsource/jetbrains-mono/latin-600.css'
@@ -191,6 +192,37 @@ export type MarkdownEditorHandle = {
   insertText: (text: string, where: 'cursor' | 'start' | 'end' | 'line-end') => boolean
   replaceSelection: (text: string) => boolean
   setText: (text: string) => boolean
+  /** Tick the task on the selected lines, or start a task under a heading. */
+  toggleTask: () => boolean
+}
+
+const applyTaskToggle = (view: EditorView) => {
+  if (view.state.readOnly) return false
+  const selection = view.state.selection.main
+  const start = view.state.doc.lineAt(selection.from)
+  const endPos = selection.to > selection.from && selection.to === view.state.doc.lineAt(selection.to).from
+    ? selection.to - 1
+    : selection.to
+  const end = view.state.doc.lineAt(Math.max(start.from, endPos))
+  const lines: string[] = []
+  for (let number = 1; number <= end.number; number += 1) lines.push(view.state.doc.line(number).text)
+  const planned = taskToggleChanges(lines, start.number, end.number)
+  if (!planned.length) return false
+  const changes = planned.map((change) => {
+    const line = view.state.doc.line(change.line)
+    if (change.insert.startsWith('\n')) return { from: line.to, to: line.to, insert: change.insert }
+    return { from: line.from, to: line.to, insert: change.insert }
+  })
+  const added = planned.find((change) => change.insert.startsWith('\n'))
+  view.dispatch({
+    changes,
+    ...(added
+      ? { selection: EditorSelection.cursor(view.state.doc.line(added.line).to + added.insert.length) }
+      : {}),
+    scrollIntoView: true,
+  })
+  view.focus()
+  return true
 }
 
 function commitEditorChange(
@@ -1310,6 +1342,11 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       const length = view.state.doc.length
       return commitEditorChange(view, 0, length, text, Math.min(text.length, view.state.selection.main.head))
     },
+    toggleTask: () => {
+      const view = viewRef.current
+      if (!view || readOnly) return false
+      return applyTaskToggle(view)
+    },
   }), [readOnly])
 
   useEffect(() => {
@@ -1365,6 +1402,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         EditorView.lineWrapping,
         saveKeymap,
         keymap.of([
+          { key: 'Mod-Enter', preventDefault: true, run: (view) => applyTaskToggle(view) },
           { key: 'Mod-b', preventDefault: true, run: (view) => applyMarkdownFormat(view, 'bold') },
           { key: 'Mod-i', preventDefault: true, run: (view) => applyMarkdownFormat(view, 'italic') },
           { key: 'Mod-k', preventDefault: true, run: (view) => applyMarkdownFormat(view, 'link') },

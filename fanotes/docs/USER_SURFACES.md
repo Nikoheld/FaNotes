@@ -9,6 +9,13 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Surface | Source | Needle |
 | --- | --- | --- |
 | Note tabs, dirty marker, close | `src/App.tsx` | `NoteTabButton` |
+| Duplicate note | `src/App.tsx` | `id: 'duplicate-note'` |
+| Insert date | `src/App.tsx` | `id: 'insert-date'` |
+| Insert time | `src/App.tsx` | `id: 'insert-time'` |
+| Copy wiki link | `src/App.tsx` | `id: 'copy-wiki-link'` |
+| Show the note in the file tree | `src/App.tsx` | `id: 'reveal-tree'` |
+| Toggle task | `src/App.tsx` | `id: 'toggle-task'` |
+| Duplicate name, wiki link, date stamp, task lines | `src/lib/noteActions.ts` | `export const duplicateNoteStem` |
 | New note / folder / daily note | `src/App.tsx` | `id: 'new-note'` |
 | File tree create / rename / trash / color | `src/components/FileTree.tsx` | `file-tree__menu-label">Erstellen` |
 | Tag filter and note tags | `src/App.tsx` | `aria-label="Nach Schlagwort filtern"` |
@@ -163,6 +170,8 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Calendar | `src/components/CalendarView.tsx` | `export function CalendarView` |
 | Calendar model | `src/lib/calendarModel.ts` | `export const CALENDAR_NOTE_PATH` |
 | Calendar command | `src/App.tsx` | `id: 'calendar'` |
+| Study time | `src/App.tsx` | `id: 'study'` |
+| Flashcards | `src/App.tsx` | `id: 'flashcards'` |
 
 ## Homework
 

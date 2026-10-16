@@ -129,6 +129,9 @@ PDFs werden ausschließlich lokal gerendert. Originaldatei, Textfelder und Stift
 | GlyphenWerk Training & Test | `Strg+Umschalt+G` |
 | Bild oder PDF als Arbeitsblatt | `Strg+Umschalt+I` |
 | Tastatur/Stift wechseln | `Strg+D` |
+| Datum einfügen | `Strg+Umschalt+D` |
+| Wiki-Link kopieren | `Strg+Umschalt+C` |
+| Aufgabe umschalten | `Strg+Enter` |
 | Fokusmodus | `Strg+Umschalt+E` |
 | Fett / kursiv / Link | `Strg+B` / `Strg+I` / `Strg+K` |
 | Einstellungen | `Strg+,` |
@@ -339,6 +342,9 @@ PDFs are rendered only locally. The original file, text fields, and pen strokes 
 | GlyphenWerk training and test | `Ctrl+Shift+G` |
 | Image or PDF as a worksheet | `Ctrl+Shift+I` |
 | Switch keyboard/pen | `Ctrl+D` |
+| Insert date | `Ctrl+Shift+D` |
+| Copy wiki link | `Ctrl+Shift+C` |
+| Toggle task | `Ctrl+Enter` |
 | Focus mode | `Ctrl+Shift+E` |
 | Bold / italic / link | `Ctrl+B` / `Ctrl+I` / `Ctrl+K` |
 | Settings | `Ctrl+,` |

@@ -14,11 +14,13 @@ import {
   Check,
   ChevronRight,
   Columns2,
+  CopyPlus,
   File,
   FileText,
   Folder,
   FolderOpen,
   FolderPlus,
+  Link2,
   MoreHorizontal,
   Palette,
   Pencil,
@@ -53,6 +55,8 @@ export type FileTreeProps = {
   onRename: (relativePath: string, nextName: string) => MaybePromise
   onMove: (relativePath: string, destFolder: string) => MaybePromise
   onTrash: (relativePath: string) => MaybePromise
+  onDuplicate?: (relativePath: string) => MaybePromise
+  onCopyWikiLink?: (relativePath: string) => MaybePromise
   confirmTrash?: (message: string) => Promise<boolean>
   className?: string
   rootLabel?: string
@@ -189,6 +193,8 @@ export const FileTree = memo(function FileTree({
   onRename,
   onMove,
   onTrash,
+  onDuplicate,
+  onCopyWikiLink,
   confirmTrash,
   className = '',
   rootLabel = 'Dateien',
@@ -246,6 +252,15 @@ export const FileTree = memo(function FileTree({
       return next
     })
   }, [revealPath])
+
+  useEffect(() => {
+    if (!revealPath) return
+    const frame = window.requestAnimationFrame(() => {
+      const row = treeRef.current?.querySelector<HTMLElement>(`[data-path="${CSS.escape(revealPath)}"]`)
+      row?.scrollIntoView({ block: 'nearest' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [revealPath, expanded])
 
   useEffect(() => {
     if (!contextMenu) return
@@ -752,7 +767,7 @@ export const FileTree = memo(function FileTree({
             left: Math.min(Math.max(8, contextMenu.x), window.innerWidth - 232),
             top: Math.min(
               Math.max(8, contextMenu.y),
-              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 510 : 172),
+              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 510 : 280),
             ),
           }}
         >
@@ -888,6 +903,34 @@ export const FileTree = memo(function FileTree({
             </>
           )}
           <span className="file-tree__menu-label">Verwalten</span>
+          {contextMenu.entry.kind === 'file' && onDuplicate && /\.(md|markdown)$/iu.test(contextMenu.entry.name) && (
+            <button
+              onClick={() => {
+                const path = contextMenu.entry.relativePath
+                setContextMenu(null)
+                void Promise.resolve(onDuplicate(path))
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <CopyPlus aria-hidden="true" size={15} />
+              Duplizieren
+            </button>
+          )}
+          {contextMenu.entry.kind === 'file' && onCopyWikiLink && (
+            <button
+              onClick={() => {
+                const path = contextMenu.entry.relativePath
+                setContextMenu(null)
+                void Promise.resolve(onCopyWikiLink(path))
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <Link2 aria-hidden="true" size={15} />
+              Wiki-Link kopieren
+            </button>
+          )}
           <button
             onClick={() => beginRename(contextMenu.entry)}
             role="menuitem"

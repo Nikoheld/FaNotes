@@ -2,6 +2,7 @@
 
 ## 2026.10.7
 
+- **Schnellaktionen.** Eine Notiz lässt sich duplizieren: Text und Handschrift liegen in einer neuen Datei, das Arbeitsblatt bleibt beim Original. Datum und Uhrzeit setzen sich an die Schreibstelle, ein Wiki-Link kopiert `[[Name]]`, und Strg+Enter macht aus der Zeile eine Aufgabe oder setzt den Haken. Die Dateileiste zeigt die Notiz auf Wunsch.
 - **Android-Tablet.** Der Text liegt auf dem Papier, die Leiste klappt beim Schreiben ein, und der Radierer folgt der Spitze.
 - **Sync.** Der Abgleich zeigt den Fortschritt, und ein zweiter Start geht nicht verloren.
 - **Version.** Die Version lässt sich in GitHub Actions unter Update version setzen. Der Android-Release installiert das SDK, ohne am Lizenzdialog abzubrechen.

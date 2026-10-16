@@ -188,6 +188,7 @@
     "check:ink-history-remap": "node scripts/check-ink-history-remap.mjs",
     "check:ink-sections": "node scripts/check-ink-sections.mjs",
     "check:workspace-nav": "node scripts/check-workspace-nav.mjs",
+    "check:note-actions": "node scripts/check-note-actions.mjs",
     "check:addons": "node scripts/check-addons.mjs",
     "check:sync": "node scripts/check-sync.mjs",
     "check:spelling-suggest": "node scripts/check-spelling-suggest.mjs",
