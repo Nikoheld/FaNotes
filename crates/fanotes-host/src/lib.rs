@@ -1303,9 +1303,13 @@ impl Host {
             }
             let matches = count_matches(&haystack, &needle);
             let content_index = vault::locale_lower_de(&content).find(&needle);
+            let transcript_index = vault::locale_lower_de(&transcript).find(&needle);
             let excerpt = if let Some(index) = content_index {
                 let (start, _) = original_match_span(&content, &needle, index);
                 excerpt(&content, start, vault::utf16_len(&query))
+            } else if let Some(index) = transcript_index {
+                let (start, _) = original_match_span(&transcript, &needle, index);
+                excerpt(&transcript, start, vault::utf16_len(&query))
             } else {
                 format!("Dateiname · {relative}")
             };

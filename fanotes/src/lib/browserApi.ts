@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS } from '../defaults'
 import { getUiLanguage } from '../i18n'
 import type { AppSettings, BootstrapData, DrawingLibraryDocument, FaNotesApi, PaperStyle, ServerBackupState, UpdateState, VaultEntry, WorksheetDocument } from '../types'
 import { companionNotePath, emptyFamdPayload, parseFamd, serializeFamd } from './famd'
-import { inkAnchorForQuery } from './searchInkAnchor'
+import { inkAnchorForQuery, noteSearchExcerpt } from './searchInkAnchor'
 import { parseNoteBackups, type NoteBackupSnapshot } from './noteBackup'
 import { parseNoteLinks, type NoteLinkRecord } from './noteLink'
 import { parseSubjectBooks, type SubjectBookRecord } from './subjectBook'
@@ -1011,15 +1011,34 @@ export function createBrowserApi(): FaNotesApi {
       const needle = query.trim().toLocaleLowerCase('de')
       if (!needle) return []
       const noteHits = [...files.values()].flatMap((record) => {
-        const contentLower = record.content.toLocaleLowerCase('de')
-        const index = contentLower.indexOf(needle)
-        const lower = `${record.path}\n${record.content}`.toLocaleLowerCase('de')
+        if (/\.famd$/iu.test(record.path)) {
+          const sibling = companionNotePath(record.path, '.md')
+          const pdf = record.path.replace(/\.famd$/iu, '.pdf')
+          if (files.has(sibling) || files.has(pdf)) return []
+        }
+        const parsed = parseFamd(record.content)
+        const content = /\.famd$/iu.test(record.path) ? parsed.markdown : record.content
+        const ownTranscript = parsed.payload?.ink && typeof parsed.payload.ink.searchTranscript === 'string'
+          ? parsed.payload.ink.searchTranscript
+          : ''
+        const companion = /\.famd$/iu.test(record.path) ? null : files.get(companionNotePath(record.path, '.famd'))
+        const companionInk = companion ? parseFamd(companion.content).payload?.ink : null
+        const companionTranscript = companionInk && typeof companionInk.searchTranscript === 'string' ? companionInk.searchTranscript : ''
+        const transcript = (ownTranscript || companionTranscript).slice(0, 500_000)
         const pathMatch = record.path.toLocaleLowerCase('de').includes(needle)
-        if (index < 0 && !pathMatch) return []
-        const excerpt = index >= 0
-          ? record.content.slice(Math.max(0, index - 60), Math.min(record.content.length, index + needle.length + 120)).replace(/[#*_`]/gu, '')
-          : `Dateiname · ${record.path}`
-        const inkAnchor = inkAnchorForQuery(record.content, query)
+        const contentMatch = content.toLocaleLowerCase('de').includes(needle)
+        const transcriptMatch = transcript.toLocaleLowerCase('de').includes(needle)
+        if (!contentMatch && !pathMatch && !transcriptMatch) return []
+        const excerpt = noteSearchExcerpt({
+          relativePath: record.path,
+          content,
+          transcript,
+          needle,
+          queryLength: needle.length,
+          excerpt: (text, index, length) => text.slice(Math.max(0, index - 60), Math.min(text.length, index + length + 120)).replace(/[#*_`]/gu, ''),
+        })
+        const lower = `${record.path}\n${content}\n${transcript}`.toLocaleLowerCase('de')
+        const inkAnchor = inkAnchorForQuery(transcript || content, query)
         return [{ relativePath: record.path, title: stem(fileName(record.path)), excerpt, matches: lower.split(needle).length - 1, kind: 'note' as const, ...(inkAnchor ? { inkAnchor } : {}) }]
       })
       const drawingHits = [...drawings.values()].flatMap((drawing) => {

@@ -73,6 +73,14 @@ fn search_returns_title_excerpt_and_handwriting_anchor() {
         .unwrap();
     assert_eq!(ink_hits[0]["relativePath"], "Bio/Blatt.md");
     assert_eq!(ink_hits[0]["inkAnchor"]["y"], 0.42);
+    assert!(ink_hits[0]["excerpt"]
+        .as_str()
+        .unwrap()
+        .contains("Chlorophyll"));
+    assert!(!ink_hits[0]["excerpt"]
+        .as_str()
+        .unwrap()
+        .starts_with("Dateiname"));
 
     std::fs::write(
         host.vault.as_ref().unwrap().join("Bio/Blatt.famd"),
