@@ -95,6 +95,12 @@ const val SETTINGS_NAV_RADIUS_DP = 9
 const val SETTINGS_NAV_LABEL_WEIGHT = 650
 const val SETTINGS_NAV_GROUP_WEIGHT = 750
 const val SETTINGS_NAV_GROUP_TRACKING = 0.08f
+/** `.settings-nav nav { gap: 9px }` stays after group headings hide. */
+const val SETTINGS_NAV_GROUP_GAP_DP = 9
+/** `.settings-nav-group { gap: 2px }`. */
+const val SETTINGS_NAV_ITEM_GAP_DP = 2
+/** Section icon on a nav button. Search hits stay at 15. */
+const val SETTINGS_NAV_ICON_DP = 16
 
 /** Settings content header and footer from `.settings-content`. */
 const val SETTINGS_TITLE_SP = 21
@@ -129,6 +135,8 @@ const val SETTINGS_NAV_PAD_TOP_DP = 18
 const val SETTINGS_NAV_PAD_X_DP = 13
 const val SETTINGS_NAV_PAD_BOTTOM_DP = 12
 const val SETTINGS_RESULT_GAP_DP = 3
+/** Search-hit icon. Section rows use [SETTINGS_NAV_ICON_DP]. */
+const val SETTINGS_RESULT_ICON_DP = 15
 const val SETTINGS_EYEBROW_TRACKING = 0.12f
 
 fun settingsSearchCount(count: Int) = if (count == 0) "Keine Treffer" else "$count Treffer"

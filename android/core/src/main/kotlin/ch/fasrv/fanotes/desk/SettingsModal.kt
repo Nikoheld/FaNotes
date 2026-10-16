@@ -15,6 +15,21 @@ const val SETTINGS_MODAL_HEIGHT_PERCENT = 92
 const val SETTINGS_MODAL_RADIUS_DP = 12
 const val SETTINGS_MODAL_FULL_DP = 760
 
+/** `.settings-modal { grid-template-columns: 76px minmax(0, 1fr) }` at max-width 760px. */
+const val SETTINGS_NAV_NARROW_DP = 76
+/** `.settings-nav { padding-inline: 8px }` at that breakpoint. */
+const val SETTINGS_NAV_NARROW_PAD_X_DP = 8
+/** `.settings-nav nav button { padding: 5px }` at that breakpoint. */
+const val SETTINGS_NAV_NARROW_BUTTON_PAD_DP = 5
+
+/**
+ * True when the viewport is 760dp or below, where [settingsModalSize] returns radius 0.
+ * At 761 the centered card keeps labels. Pass the same width as [settingsModalSize].
+ * Brand text, group headings, row labels, and the search field hide; each row keeps its icon.
+ * The later active-row rule clears the media query's bottom accent, so the wash stays.
+ */
+fun settingsNavCollapses(widthDp: Int): Boolean = widthDp <= SETTINGS_MODAL_FULL_DP
+
 data class SettingsModalSize(
     val widthDp: Int,
     val heightDp: Int,
