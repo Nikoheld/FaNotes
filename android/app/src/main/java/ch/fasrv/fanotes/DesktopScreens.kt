@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Science
@@ -2634,6 +2635,177 @@ fun BookPane(model: FaNotesViewModel, modifier: Modifier = Modifier, onOpen: (St
             TextButton(onClick = { model.turnBook(-1) }) { Text("‹") }
             TextButton(onClick = { model.turnBook(1) }) { Text("›") }
             TextButton(onClick = { onOpen(page.bookPath) }) { Text("Öffnen") }
+        }
+    }
+}
+
+@Composable
+fun HistoryDialog(model: FaNotesViewModel) {
+    val history by model.noteHistory.collectAsStateWithLifecycle()
+    val busy by model.historyBusy.collectAsStateWithLifecycle()
+    val dismiss = { model.closeHistory() }
+    Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        val scrim = remember { MutableInteractionSource() }
+        val card = remember { MutableInteractionSource() }
+        val shape = RoundedCornerShape(ch.fasrv.fanotes.vault.HISTORY_DIALOG_RADIUS_DP.dp)
+        val rowShape = RoundedCornerShape(ch.fasrv.fanotes.vault.HISTORY_DIALOG_ROW_RADIUS_DP.dp)
+        val buttonShape = RoundedCornerShape(ch.fasrv.fanotes.desk.BUG_REPORT_BUTTON_RADIUS_DP.dp)
+        val strong = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
+        val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+        val ink = LocalStatusInk.current
+        val screen = androidx.compose.ui.platform.LocalConfiguration.current
+        val shadow = ch.fasrv.fanotes.vault.historyDialogShadow(MaterialTheme.colorScheme.background.luminance() < 0.5f)
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM))
+                .clickable(interactionSource = scrim, indication = null, onClick = dismiss),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth(ch.fasrv.fanotes.vault.HISTORY_DIALOG_WIDTH_FRACTION)
+                    .widthIn(max = ch.fasrv.fanotes.vault.HISTORY_DIALOG_MAX_DP.dp)
+                    .heightIn(max = ch.fasrv.fanotes.vault.historyDialogMaxHeightDp(screen.screenHeightDp).dp)
+                    .clickable(interactionSource = card, indication = null, onClick = {})
+                    .shadow(
+                        elevation = shadow.yDp.dp,
+                        shape = shape,
+                        ambientColor = Color.Black.copy(alpha = shadow.alpha),
+                        spotColor = Color.Black.copy(alpha = shadow.alpha),
+                    )
+                    .clip(shape)
+                    .border(1.dp, strong, shape)
+                    .background(MaterialTheme.colorScheme.surface)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            start = ch.fasrv.fanotes.vault.HISTORY_DIALOG_HEADER_PAD_X_DP.dp,
+                            end = ch.fasrv.fanotes.vault.HISTORY_DIALOG_HEADER_PAD_X_DP.dp,
+                            top = ch.fasrv.fanotes.vault.HISTORY_DIALOG_HEADER_PAD_TOP_DP.dp,
+                            bottom = ch.fasrv.fanotes.vault.HISTORY_DIALOG_HEADER_PAD_BOTTOM_DP.dp,
+                        ),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.vault.HISTORY_DIALOG_HEADER_GAP_DP.dp),
+                        verticalAlignment = Alignment.Top,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(
+                            Icons.Filled.History,
+                            contentDescription = null,
+                            modifier = Modifier.size(ch.fasrv.fanotes.vault.HISTORY_DIALOG_ICON_DP.dp),
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Column {
+                            Text(
+                                ch.fasrv.fanotes.vault.HISTORY_EYEBROW,
+                                fontSize = ch.fasrv.fanotes.vault.HISTORY_DIALOG_META_SP.sp,
+                                color = ink.muted,
+                            )
+                            Text(
+                                ch.fasrv.fanotes.vault.HISTORY_TITLE,
+                                fontSize = ch.fasrv.fanotes.vault.HISTORY_DIALOG_TITLE_SP.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                    Box(
+                        Modifier
+                            .size(ch.fasrv.fanotes.desk.BUG_REPORT_CLOSE_DP.dp)
+                            .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.BUG_REPORT_CLOSE_RADIUS_DP.dp))
+                            .clickable(onClick = dismiss),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "Schließen",
+                            modifier = Modifier.size(ch.fasrv.fanotes.vault.HISTORY_DIALOG_CLOSE_ICON_DP.dp),
+                            tint = ink.muted,
+                        )
+                    }
+                }
+                if (busy) {
+                    Text(
+                        ch.fasrv.fanotes.vault.HISTORY_LOADING,
+                        fontSize = ch.fasrv.fanotes.vault.HISTORY_DIALOG_META_SP.sp,
+                        color = ink.muted,
+                        modifier = Modifier.padding(
+                            start = ch.fasrv.fanotes.vault.HISTORY_DIALOG_LIST_PAD_DP.dp,
+                            end = ch.fasrv.fanotes.vault.HISTORY_DIALOG_LIST_PAD_DP.dp,
+                            top = ch.fasrv.fanotes.vault.HISTORY_DIALOG_EMPTY_PAD_TOP_DP.dp,
+                            bottom = ch.fasrv.fanotes.vault.HISTORY_DIALOG_EMPTY_PAD_BOTTOM_DP.dp,
+                        ),
+                    )
+                } else if (history.isEmpty()) {
+                    Text(
+                        ch.fasrv.fanotes.vault.HISTORY_EMPTY,
+                        fontSize = ch.fasrv.fanotes.vault.HISTORY_DIALOG_META_SP.sp,
+                        color = ink.muted,
+                        modifier = Modifier.padding(
+                            start = ch.fasrv.fanotes.vault.HISTORY_DIALOG_LIST_PAD_DP.dp,
+                            end = ch.fasrv.fanotes.vault.HISTORY_DIALOG_LIST_PAD_DP.dp,
+                            top = ch.fasrv.fanotes.vault.HISTORY_DIALOG_EMPTY_PAD_TOP_DP.dp,
+                            bottom = ch.fasrv.fanotes.vault.HISTORY_DIALOG_EMPTY_PAD_BOTTOM_DP.dp,
+                        ),
+                    )
+                }
+                Column(
+                    Modifier.padding(
+                        start = ch.fasrv.fanotes.vault.HISTORY_DIALOG_LIST_PAD_DP.dp,
+                        end = ch.fasrv.fanotes.vault.HISTORY_DIALOG_LIST_PAD_DP.dp,
+                        bottom = ch.fasrv.fanotes.vault.HISTORY_DIALOG_LIST_PAD_DP.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.vault.HISTORY_DIALOG_LIST_GAP_DP.dp),
+                ) {
+                    history.forEach { snapshot ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(rowShape)
+                                .border(1.dp, rule, rowShape)
+                                .padding(ch.fasrv.fanotes.vault.HISTORY_DIALOG_ROW_PAD_DP.dp),
+                            horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.vault.HISTORY_DIALOG_ROW_GAP_DP.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    ch.fasrv.fanotes.vault.historyStampLabel(snapshot.createdAt),
+                                    fontSize = ch.fasrv.fanotes.vault.HISTORY_DIALOG_META_SP.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Text(
+                                    ch.fasrv.fanotes.vault.historySizeLabel(snapshot.bytes),
+                                    fontSize = ch.fasrv.fanotes.vault.HISTORY_DIALOG_META_SP.sp,
+                                    color = ink.muted,
+                                )
+                            }
+                            Box(
+                                Modifier
+                                    .height(ch.fasrv.fanotes.desk.BUG_REPORT_BUTTON_DP.dp)
+                                    .clip(buttonShape)
+                                    .background(ink.panelStrong)
+                                    .border(1.dp, strong, buttonShape)
+                                    .clickable { model.restoreHistory(snapshot.id) }
+                                    .padding(horizontal = ch.fasrv.fanotes.desk.BUG_REPORT_BUTTON_PAD_DP.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    ch.fasrv.fanotes.vault.HISTORY_RESTORE,
+                                    fontSize = ch.fasrv.fanotes.desk.BUG_REPORT_BUTTON_SP.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = ink.soft,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -5380,7 +5552,7 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
             if (path != null) Text(path, fontSize = 12.sp, color = muted, maxLines = 1, modifier = Modifier.padding(top = 6.dp))
             NoteRelations(model, onOpen)
             InspectorHeading("Versionen")
-            TextButton(onClick = { model.refreshNoteHistory() }) { Text("Verlauf laden") }
+            TextButton(onClick = { model.openHistory() }) { Text("Verlauf laden") }
             history.forEach { snapshot ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(
