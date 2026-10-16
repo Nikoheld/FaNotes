@@ -1984,7 +1984,9 @@ fn rewrite_ignored_symbols(value: &str) -> SymbolRewrite {
     let mut changed = false;
     for (index, character) in chars.iter().copied().enumerate() {
         if character == ')' {
-            if previous_significant(&chars, index).is_some_and(|item| item.is_ascii_digit()) {
+            // `4:00 PM)` and `16:00Z)` already read a number. The `)` does
+            // not have to touch that digit. `Oct) 13` has no digit yet.
+            if chars[..index].iter().any(|item| item.is_ascii_digit()) {
                 return SymbolRewrite::Illegal;
             }
             changed = true;
@@ -2006,17 +2008,6 @@ fn rewrite_ignored_symbols(value: &str) -> SymbolRewrite {
     } else {
         SymbolRewrite::Same
     }
-}
-
-fn previous_significant(chars: &[char], index: usize) -> Option<char> {
-    let mut cursor = index;
-    while cursor > 0 {
-        cursor -= 1;
-        if !is_date_parse_space(chars[cursor]) {
-            return Some(chars[cursor]);
-        }
-    }
-    None
 }
 
 fn push_separator(out: &mut String) {
@@ -7141,6 +7132,33 @@ mod tests {
                 Some("2026-10-13T04:00:00.000Z")
             );
             assert_eq!(super::canonical_iso("Oct 13) 2026"), None);
+            assert_eq!(super::canonical_iso("4:00 PM)"), None);
+            assert_eq!(super::canonical_iso("16:00Z)"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 4:00 PM)"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 4:00 PM) EST"), None);
+            assert_eq!(super::canonical_iso("2026 EST)"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00 EST)"), None);
+            assert_eq!(super::canonical_iso("4:00 PM )"), None);
+            assert_eq!(
+                super::canonical_iso("Oct) 13 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("EST) 2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("hello) 2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Monday) Oct 13 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(")16:00 2026-10-13").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
             assert_eq!(super::canonical_iso("Oct 13 2026 ) 16:00"), None);
             assert_eq!(super::canonical_iso("Oct 13 2026 )"), None);
             assert_eq!(super::canonical_iso("13 (Oct) 2026"), None);

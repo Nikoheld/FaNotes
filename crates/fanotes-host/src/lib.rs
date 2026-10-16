@@ -3263,7 +3263,9 @@ fn rewrite_ignored_symbols(value: &str) -> SymbolRewrite {
     let mut changed = false;
     for (index, character) in chars.iter().copied().enumerate() {
         if character == ')' {
-            if previous_significant(&chars, index).is_some_and(|item| item.is_ascii_digit()) {
+            // `4:00 PM)` and `16:00Z)` already read a number. The `)` does
+            // not have to touch that digit. `Oct) 13` has no digit yet.
+            if chars[..index].iter().any(|item| item.is_ascii_digit()) {
                 return SymbolRewrite::Illegal;
             }
             changed = true;
@@ -3285,17 +3287,6 @@ fn rewrite_ignored_symbols(value: &str) -> SymbolRewrite {
     } else {
         SymbolRewrite::Same
     }
-}
-
-fn previous_significant(chars: &[char], index: usize) -> Option<char> {
-    let mut cursor = index;
-    while cursor > 0 {
-        cursor -= 1;
-        if !is_date_parse_space(chars[cursor]) {
-            return Some(chars[cursor]);
-        }
-    }
-    None
 }
 
 fn push_separator(out: &mut String) {
@@ -10839,6 +10830,33 @@ mod local_zone_tests {
             Some(1_791_864_000_000)
         );
         assert_eq!(unix_millis_from_iso("Oct 13) 2026"), None);
+        assert_eq!(unix_millis_from_iso("4:00 PM)"), None);
+        assert_eq!(unix_millis_from_iso("16:00Z)"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 4:00 PM)"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 4:00 PM) EST"), None);
+        assert_eq!(unix_millis_from_iso("2026 EST)"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00 EST)"), None);
+        assert_eq!(unix_millis_from_iso("4:00 PM )"), None);
+        assert_eq!(
+            unix_millis_from_iso("Oct) 13 2026"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("EST) 2026-10-13"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("hello) 2026-10-13"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Monday) Oct 13 2026"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso(")16:00 2026-10-13"),
+            Some(1_791_921_600_000)
+        );
         assert_eq!(unix_millis_from_iso("Oct 13 2026 ) 16:00"), None);
         assert_eq!(unix_millis_from_iso("Oct 13 2026 )"), None);
         assert_eq!(unix_millis_from_iso("13 (Oct) 2026"), None);
