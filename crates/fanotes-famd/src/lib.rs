@@ -1156,16 +1156,12 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     }
     let time_text = source.get(time_at..)?;
     let Some((mut hour, minute, second, millis, rest)) = parse_clock(time_text) else {
-        // A `T` clock that is not `HH:MM` is empty. A space before the clock
-        // is legacy: `16:` is 16:00, `4:5` is 4:05, and `16:.5` is 16:05.
-        // `2026-10-13 16:00:60` is a broken clock. `2026 10 13 16:00` is a
-        // legacy date whose tail is not one clock. A negative expanded year
+        // A `T` clock that is not a finished ES5 time is empty. `T16:00 EST`
+        // does not fall through to the legacy parser. A space before the
+        // clock is legacy: `16:` is 16:00, `4:5` is 4:05, and `16:.5` is 16:05.
+        // `2026-10-13 16:00:60` is a broken clock. A negative expanded year
         // keeps that short clock; the legacy reread would turn it into 2013.
-        if has_iso_t(source)
-            && time_text.contains(':')
-            && !time_text.contains(is_date_parse_space)
-            && time_text.starts_with(|character: char| character.is_ascii_digit())
-        {
+        if has_iso_t(source) {
             return None;
         }
         if let Some(iso) = negative_expanded_legacy_clock(source, year, month, day, time_text) {
@@ -1193,9 +1189,13 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     } else if rest.is_empty() {
         local_civil_to_utc(year, month, day, hour, minute, second)?
     } else if rest.contains(is_date_parse_space) {
-        // `2026-10-13 16:00 +5: 1` is a legacy offset, not an ISO zone.
+        // `2026-10-13T16:00:00Z GMT+5` already read `T`, so the extra zone is
+        // empty. `2026-10-13 16:00 +5: 1` is a legacy offset, not an ISO zone.
         // `EST+5:30` on a negative expanded year replaces the name and keeps
         // that year. The legacy reread would turn it into 2013.
+        if has_iso_t(source) {
+            return None;
+        }
         if let Some(iso) = negative_expanded_legacy_clock(source, year, month, day, time_text) {
             return Some(iso);
         }
@@ -10374,6 +10374,17 @@ mod tests {
             assert_eq!(super::canonical_iso("275760-09-13 16:00"), None);
             assert_eq!(super::canonical_iso("275760-09-13 16:00 GMT-5"), None);
             assert_eq!(super::canonical_iso("+275760-09-14"), None);
+            // Once `T` is read, leftover text is empty. It is not a legacy date.
+            assert_eq!(
+                super::canonical_iso("2026-10-13T16:00:00Z").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13T16:00 EST"), None);
+            assert_eq!(super::canonical_iso("2026-10-13T16:00:00Z GMT+5"), None);
+            assert_eq!(super::canonical_iso("+002026-10-13T16:00:00Z GMT+5"), None);
+            assert_eq!(super::canonical_iso(" +002026-10-13T16:00:00Z GMT+5"), None);
+            assert_eq!(super::canonical_iso(" 2026-10-13T16:00:00Z"), None);
+            assert_eq!(super::canonical_iso("2026-10-13T16:00:00Z "), None);
         });
     }
 

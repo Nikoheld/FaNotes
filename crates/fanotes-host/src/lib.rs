@@ -1908,6 +1908,11 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         return unix_millis_from_iso(&next);
     }
     let trimmed = value.trim_matches(is_date_parse_space);
+    // A space around `2026-10-13T16:00` is empty. The `T` was already read, so
+    // the legacy parser cannot start over.
+    if has_iso_t(trimmed) && trimmed.len() != value.len() {
+        return None;
+    }
     // `-000000-10-13` is not year 0. The six zeros are dropped once and the
     // remainder is legacy, so `-10-13` is 13 October 2001. A second
     // `-000000` is year 0. A leading space never enters this path.
@@ -12797,6 +12802,28 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("275760-09-13 16:00"), None);
         assert_eq!(unix_millis_from_iso("275760-09-13 16:00 GMT-5"), None);
         assert_eq!(unix_millis_from_iso("+275760-09-14"), None);
+    }
+
+    #[test]
+    fn a_t_form_with_trailing_text_is_empty() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Once `T` is read, leftover text is empty. A leading space does not
+        // send that form back through the legacy parser.
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13T16:00:00Z"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026-10-13T16:00 EST"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13T16:00:00Z GMT+5"), None);
+        assert_eq!(unix_millis_from_iso("+002026-10-13T16:00:00Z GMT+5"), None);
+        assert_eq!(unix_millis_from_iso(" +002026-10-13T16:00:00Z GMT+5"), None);
+        assert_eq!(unix_millis_from_iso(" 2026-10-13T16:00:00Z"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13T16:00:00Z "), None);
     }
 
 }
