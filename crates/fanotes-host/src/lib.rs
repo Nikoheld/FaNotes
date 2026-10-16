@@ -7588,6 +7588,36 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13 16: +5.30EST"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 16::30 +5.10"), None);
         assert_eq!(unix_millis_from_iso("16: +5.30"), None);
+        assert_eq!(unix_millis_from_iso("+5.30EST"), Some(991_198_800_000));
+        assert_eq!(unix_millis_from_iso("5.30EST"), Some(991_198_800_000));
+        assert_eq!(unix_millis_from_iso("5.30 EST"), Some(991_198_800_000));
+        assert_eq!(unix_millis_from_iso("+5.30"), Some(991_195_200_000));
+        assert_eq!(unix_millis_from_iso("GMT+5.30EST"), Some(991_198_800_000));
+        assert_eq!(unix_millis_from_iso("+5/30EST"), Some(991_198_800_000));
+        let samples = [
+            ("2026/+5", None),
+            ("2026 / +5", None),
+            ("10/+5", None),
+            ("10 / +5", None),
+            ("16:00 / +5", None),
+            ("16:00/+5", None),
+            ("16:00 / +5 Oct 13 2026", Some(1_791_889_200_000)),
+            ("Oct +5:30 2026", Some(1_790_847_000_000)),
+            ("Oct +5:30 13", Some(1_002_965_400_000)),
+            ("Oct+5:3013", Some(32_937_526_800_000)),
+            ("16: / 2026", Some(1_767_301_200_000)),
+            ("Oct 16: / 2026", Some(1_790_884_800_000)),
+            ("2026 / +5:30", None),
+            ("16:00 / +5:30 Oct 13 2026", Some(1_791_887_400_000)),
+        ];
+        let mut bad = Vec::new();
+        for (text, expected) in samples {
+            let rust = unix_millis_from_iso(text);
+            if rust != expected {
+                bad.push(format!("{text:?} rust={rust:?} expected={expected:?}"));
+            }
+        }
+        assert!(bad.is_empty(), "{}", bad.join("\n"));
         assert_eq!(
             unix_millis_from_iso("16: GMT+5: 2026/10/13"),
             Some(1_767_265_380_000)

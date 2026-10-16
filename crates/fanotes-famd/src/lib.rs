@@ -3918,6 +3918,37 @@ mod tests {
             assert_eq!(super::canonical_iso("2026-10-13 16::30 +5.10"), None);
             assert_eq!(super::canonical_iso("16: +5.30"), None);
             assert_eq!(
+                super::canonical_iso("+5.30EST").as_deref(),
+                Some("2001-05-30T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+5.30").as_deref(),
+                Some("2001-05-30T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026/+5"), None);
+            assert_eq!(super::canonical_iso("2026 / +5"), None);
+            assert_eq!(super::canonical_iso("16:00 / +5"), None);
+            assert_eq!(
+                super::canonical_iso("16:00 / +5 Oct 13 2026").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct +5:30 2026").as_deref(),
+                Some("2026-10-01T09:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct +5:30 13").as_deref(),
+                Some("2001-10-13T09:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct+5:3013").as_deref(),
+                Some("3013-10-01T09:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("16: / 2026").as_deref(),
+                Some("2026-01-01T21:00:00.000Z")
+            );
+            assert_eq!(
                 super::canonical_iso("16: GMT+5: 2026/10/13").as_deref(),
                 Some("2026-01-01T11:03:00.000Z")
             );
