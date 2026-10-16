@@ -1203,6 +1203,19 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         return legacy_numeric_iso(trimmed);
     };
     let (mut year, mut month, mut day) = normalize_ymd(year, month, day)?;
+    if rest.contains(is_date_parse_space) {
+        // `2026-10-13T16:00:00Z GMT+5` already read `T`, so the extra zone is
+        // empty. `24:00 GMT-530` is still one clock. Rolling the day here and
+        // again inside that clock would skip an extra day. `EST+5:30` on a
+        // negative expanded year replaces the name and keeps that year.
+        if has_iso_t(source) {
+            return None;
+        }
+        if let Some(iso) = negative_expanded_legacy_clock(source, year, month, day, time_text) {
+            return Some(iso);
+        }
+        return legacy_numeric_iso(trimmed);
+    }
     if hour == 24 {
         // A `T` form rejects any later nonzero fraction digit. A space before
         // the clock uses the scaled milliseconds, so `.000000001` is still
@@ -1221,18 +1234,6 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         (year, month, day, hour, minute, second)
     } else if rest.is_empty() {
         local_civil_to_utc(year, month, day, hour, minute, second)?
-    } else if rest.contains(is_date_parse_space) {
-        // `2026-10-13T16:00:00Z GMT+5` already read `T`, so the extra zone is
-        // empty. `2026-10-13 16:00 +5: 1` is a legacy offset, not an ISO zone.
-        // `EST+5:30` on a negative expanded year replaces the name and keeps
-        // that year. The legacy reread would turn it into 2013.
-        if has_iso_t(source) {
-            return None;
-        }
-        if let Some(iso) = negative_expanded_legacy_clock(source, year, month, day, time_text) {
-            return Some(iso);
-        }
-        return legacy_numeric_iso(trimmed);
     } else if let Some(offset) = parse_offset(rest) {
         shift_seconds(year, month, day, hour, minute, second, -(offset as i64))?
     } else if !has_iso_t(source) {
@@ -10542,6 +10543,27 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("-000001-10-13 GMT-530").as_deref(),
                 Some("-000001-10-13T05:30:00.000Z")
+            );
+            // `24:00` is the next midnight, once. The zone is applied after that.
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 24:00 GMT-530").as_deref(),
+                Some("-000001-10-14T05:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 24:00 GMT+530").as_deref(),
+                Some("-000001-10-13T18:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 24:00 EST GMT+5").as_deref(),
+                Some("-000001-10-13T19:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 24:00 GMT+5 EST").as_deref(),
+                Some("-000001-10-14T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 24:00 PST+5").as_deref(),
+                Some("-000001-10-13T19:00:00.000Z")
             );
             assert_eq!(
                 super::canonical_iso("0000-1-1").as_deref(),
