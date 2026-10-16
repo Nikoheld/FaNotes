@@ -887,7 +887,6 @@ fun FaNotesScreen(
             }
         }
         if (destination == "search") {
-            val shadow = Color.Black.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_SHADOW_ALPHA)
             SearchScreen(
                 model,
                 { model.openPath(it); model.showDestination("notes") },
@@ -896,12 +895,7 @@ fun FaNotesScreen(
                     .align(Alignment.CenterStart)
                     .width((chrome.sidebarDp ?: ch.fasrv.fanotes.desk.searchPanelWidthDp(desk["sidebar-width"])).dp)
                     .fillMaxHeight()
-                    .shadow(
-                        ch.fasrv.fanotes.desk.SEARCH_SHADOW_X_DP.dp,
-                        clip = false,
-                        ambientColor = shadow,
-                        spotColor = shadow,
-                    ),
+                    .directionalSearchShade(),
             )
         }
             val toast = message
