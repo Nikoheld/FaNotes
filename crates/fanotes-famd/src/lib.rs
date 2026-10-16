@@ -2216,6 +2216,10 @@ fn slash_offset_words(words: &[&str]) -> Option<(Option<String>, Option<i64>, Ve
         parsed
     } else if let Some(parsed) = parse_legacy_offset(words[index]) {
         parsed
+    } else if clock.is_some() {
+        // `16:00 EST+5:30` uses +5:30. Without a clock, `EST+5:30` is empty.
+        let tail = named_zone_offset_tail(words[index])?;
+        parse_legacy_offset(tail)?
     } else {
         return None;
     };
@@ -2295,6 +2299,20 @@ fn finish_slash_offset(
                 {
                     minutes = zone.minutes;
                     continue;
+                }
+            }
+            // `16:00 GMT EST+5:30` keeps +5:30. The number replaces EST.
+            if clock.is_some() {
+                if let Some(tail) = named_zone_offset_tail(word) {
+                    if let Some(next) = parse_legacy_offset(tail) {
+                        if next.minute_sign == 0
+                            && next.spilled.is_empty()
+                            && next.time_fields.is_empty()
+                        {
+                            minutes = next.minutes;
+                            continue;
+                        }
+                    }
                 }
             }
             // `+5 +6` keeps the later offset.
@@ -2580,6 +2598,24 @@ fn compose_month_date(
         }
         if glued_non_month(word) {
             return None;
+        }
+        // `16:00 EST+5:30` is 16:00 at UTC+5:30. The number replaces the name.
+        // Before a clock, `EST+5:30` is empty. `EST` alone stays EST, and
+        // `GMT+5:30` is still the keyword offset.
+        if let Some(tail) = named_zone_offset_tail(word) {
+            if time.index == 0 {
+                return None;
+            }
+            let parsed = parse_legacy_offset(tail)?;
+            for number in parsed.spilled {
+                push_date_number(&mut dates, number)?;
+            }
+            offset = Some(parsed.minutes);
+            minute_sign = parsed.minute_sign;
+            for number in parsed.time_fields {
+                time.add(number)?;
+            }
+            continue;
         }
         if !numeric {
             if let Some(numbers) = slash_date_numbers(word) {
@@ -3253,6 +3289,27 @@ fn finish_month_time(time: &MonthTime, hour_offset: Option<i32>) -> Option<Strin
 fn ascii_prefix(word: &str, length: usize) -> Option<&str> {
     if word.len() >= length && word.is_char_boundary(length) {
         Some(&word[..length])
+    } else {
+        None
+    }
+}
+
+/// `EST+5:30` is the offset `+5:30`. `EST` has no tail. `GMT+5:30` does not
+/// use this form; the keyword already owns that signed tail.
+fn named_zone_offset_tail(word: &str) -> Option<&str> {
+    let bytes = word.as_bytes();
+    if bytes.len() < 5 || !bytes[..3].iter().all(u8::is_ascii_alphabetic) {
+        return None;
+    }
+    if !matches!(
+        word[..3].to_ascii_lowercase().as_str(),
+        "est" | "edt" | "cst" | "cdt" | "mst" | "mdt" | "pst" | "pdt"
+    ) {
+        return None;
+    }
+    let tail = &word[3..];
+    if tail.len() > 1 && matches!(tail.as_bytes()[0], b'+' | b'-') {
+        Some(tail)
     } else {
         None
     }
@@ -7698,6 +7755,143 @@ mod tests {
                 super::canonical_iso("2026-10-13 16:00:00 (EST)").as_deref(),
                 Some("2026-10-13T20:00:00.000Z")
             );
+        });
+    }
+
+    #[test]
+    fn a_numeric_offset_glued_to_a_named_zone_replaces_that_zone() {
+        with_tz("America/New_York", || {
+            // After a clock, `EST+5:30` is UTC+5:30. `EST` alone stays EST.
+            // The same number on `GMT` was already that offset.
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 EST+5:30").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 EDT+5:30").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 PST+5:30").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 EST+5:").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 EST+:30").as_deref(),
+                Some("2026-10-13T15:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 EST+5::30").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 EST+24:00").as_deref(),
+                Some("2026-10-12T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 EST-24:00").as_deref(),
+                Some("2026-10-14T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 EST-5:30").as_deref(),
+                Some("2026-10-13T21:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 EDT-5:30").as_deref(),
+                Some("2026-10-13T21:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 PST-5:30").as_deref(),
+                Some("2026-10-13T21:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 EST-5:").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 EST-:30").as_deref(),
+                Some("2026-10-13T16:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 EST-5::30").as_deref(),
+                Some("2026-10-13T21:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 GMT+5:30").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 GMT+5:").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 GMT+:30").as_deref(),
+                Some("2026-10-13T15:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 GMT+5::30").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 GMT+24:00").as_deref(),
+                Some("2026-10-12T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 GMT-24:00").as_deref(),
+                Some("2026-10-14T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 EST+5:30").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00 EST+5:30").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00 EST+5:").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00 EST+:30").as_deref(),
+                Some("2026-10-13T15:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00 EST+5::30").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00 EST-24:00").as_deref(),
+                Some("2026-10-14T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 16:00 EST+5:30").as_deref(),
+                Some("1950-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 16:00 EST-5:30").as_deref(),
+                Some("1950-10-13T21:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 16:00 EST").as_deref(),
+                Some("1950-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 16:00").as_deref(),
+                Some("1950-10-13T21:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("Oct 13 2026 EST+5:30"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 EST+5:30"), None);
+            assert_eq!(super::canonical_iso("10/13/2026 EST+5:30"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00 EST+5:30:00"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00 EST+5:60"), None);
         });
     }
 
