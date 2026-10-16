@@ -2357,21 +2357,70 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
         anchor = next
         if (view == "month") month = YearMonth.from(next)
     }
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState())
-            .pointerInput(view) {
-                detectDeskSwipe { direction ->
-                    ch.fasrv.fanotes.desk.calendarSwipeStep(direction)?.let(::shiftCalendar)
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val showSide = ch.fasrv.fanotes.desk.calendarShowsSide(maxWidth.value.toInt())
+        Row(Modifier.fillMaxSize()) {
+            if (showSide) {
+                Column(
+                    Modifier
+                        .width(ch.fasrv.fanotes.desk.CAL_SIDE_DP.dp)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState())
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Kalender", modifier = Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight(650), letterSpacing = (-0.01).em)
+                        Box(
+                            Modifier
+                                .size(ch.fasrv.fanotes.desk.CAL_ICON_DP.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA), RoundedCornerShape(8.dp))
+                                .clickable { model.showDestination("notes") },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = "Schließen", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
+                    CalendarMini(anchor, shown.events, onSelect = {
+                        anchor = it
+                        month = YearMonth.from(it)
+                    }) { step ->
+                        val next = ch.fasrv.fanotes.desk.calendarShift("month", anchor, step)
+                        anchor = next
+                        month = YearMonth.from(next)
+                    }
+                    CalendarLists(model, document, calendarName) { calendarName = it }
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA), RoundedCornerShape(8.dp))
+                            .clickable { onOpenNote(CALENDAR_NOTE_PATH) }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                    ) { Text("Als Notiz öffnen", fontSize = 12.sp) }
                 }
-            },
-    ) {
-        Text("Kalender", style = MaterialTheme.typography.titleLarge)
-        Text("Gespeichert in Kalender.md.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-        TextButton(onClick = { onOpenNote(CALENDAR_NOTE_PATH) }) { Text("Als Notiz öffnen") }
-        CalendarLists(model, document, calendarName) { calendarName = it }
+                Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
+            }
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+                    .pointerInput(view) {
+                        detectDeskSwipe { direction ->
+                            ch.fasrv.fanotes.desk.calendarSwipeStep(direction)?.let(::shiftCalendar)
+                        }
+                    },
+            ) {
+        if (!showSide) {
+            Text("Kalender", style = MaterialTheme.typography.titleLarge)
+            Text("Gespeichert in Kalender.md.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            TextButton(onClick = { onOpenNote(CALENDAR_NOTE_PATH) }) { Text("Als Notiz öffnen") }
+            CalendarLists(model, document, calendarName) { calendarName = it }
+        }
         OutlinedTextField(calendarQuery, { calendarQuery = it }, label = { Text("Im Kalender suchen") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         if (reminder != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2476,6 +2525,70 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
             }) { Text("Eintragen") }
             TextButton(onClick = onExportIcs) { Text("Exportieren") }
             TextButton(onClick = onImportIcs) { Text("Importieren") }
+        }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarMini(
+    anchor: LocalDate,
+    events: List<ch.fasrv.fanotes.desk.CalendarEvent>,
+    onSelect: (LocalDate) -> Unit,
+    onShift: (Int) -> Unit,
+) {
+    val days = ch.fasrv.fanotes.desk.calendarRange("month", anchor)
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    val label = anchor.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.GERMAN))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("‹", modifier = Modifier.clickable(onClickLabel = "Vorheriger Zeitraum") { onShift(-1) }.padding(4.dp))
+        Text(label, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 12.sp, fontWeight = FontWeight(650))
+        Text("›", modifier = Modifier.clickable(onClickLabel = "Nächster Zeitraum") { onShift(1) }.padding(4.dp))
+    }
+    Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So").forEach { day ->
+            Text(day.uppercase(java.util.Locale.GERMAN), modifier = Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 12.sp, fontWeight = FontWeight(700), letterSpacing = 0.04.em, color = LocalStatusInk.current.muted)
+        }
+    }
+    days.chunked(7).forEach { week ->
+        Row(Modifier.fillMaxWidth()) {
+            week.forEach { date ->
+                val outside = date.month != anchor.month
+                val selected = date == anchor
+                val today = date == LocalDate.now()
+                val busy = events.any { ch.fasrv.fanotes.desk.occurrencesOn(it, date) }
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(ch.fasrv.fanotes.desk.CAL_MINI_CELL_DP.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (selected) LocalStatusInk.current.panelActive else Color.Transparent)
+                        .clickable { onSelect(date) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        date.dayOfMonth.toString(),
+                        fontSize = 12.sp,
+                        color = when {
+                            today -> accent
+                            outside -> LocalStatusInk.current.muted
+                            else -> MaterialTheme.colorScheme.onSurface
+                        },
+                        modifier = Modifier.alpha(if (outside) 0.55f else 1f),
+                    )
+                    if (busy) {
+                        Box(
+                            Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 3.dp)
+                                .size(ch.fasrv.fanotes.desk.CAL_MINI_DOT_DP.dp)
+                                .clip(CircleShape)
+                                .background(accent),
+                        )
+                    }
+                }
+            }
         }
     }
 }
