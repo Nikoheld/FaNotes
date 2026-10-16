@@ -7918,9 +7918,25 @@ private fun SettingsPage(
                         SettingRow(
                             "Form-Erkennung",
                             "Wie bereitwillig Stillhalten eine Linie, einen Kreis oder ein Vieleck glättet. Niedrig nur bei sehr klaren Figuren; hoch früher und auch bei unsaubereren Strichen.",
-                            divider = false,
                         ) {
                             SettingSlider(pen.shapeSnap.toFloat(), 0f, 100f, 5f, " %") { model.updateDesk("shape-snap", it.toInt().toString()) }
+                        }
+                        val standardBusy by model.noteStandardBusy.collectAsStateWithLifecycle()
+                        val standardStatus by model.noteStandardStatus.collectAsStateWithLifecycle()
+                        SettingRow(
+                            "Alte Notizen auf den aktuellen Standard",
+                            "Bringt vorhandene Handschrift auf die aktuelle scharfe HiDPI-Anzeige. Markdown, Tinte, Arbeitsblätter und Seitenstatistik bleiben erhalten.",
+                            divider = false,
+                            modifier = Modifier.settingsAnchor("drawing", "settings-note-standard", anchorY),
+                        ) {
+                            Column(horizontalAlignment = Alignment.End) {
+                                TextButton(onClick = { model.convertOldNotes() }, enabled = !standardBusy) {
+                                    Text(if (standardBusy) "Aktualisiert …" else "Aktualisieren")
+                                }
+                                if (!standardStatus.isNullOrBlank()) {
+                                    Text(standardStatus.orEmpty(), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                                }
+                            }
                         }
                     }
                 }
