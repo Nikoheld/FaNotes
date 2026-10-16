@@ -55,7 +55,10 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Delete
@@ -123,10 +126,14 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -1202,6 +1209,7 @@ fun HomeworkScreen(model: FaNotesViewModel) {
     var due by remember { mutableStateOf(LocalDate.now().plusDays(1).toString()) }
     var planner by remember { mutableStateOf("list") }
     var filter by remember { mutableStateOf("open") }
+    var showDone by remember { mutableStateOf(false) }
     var cursor by remember { mutableStateOf(LocalDate.now()) }
     var dueTime by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
@@ -1362,38 +1370,264 @@ fun HomeworkScreen(model: FaNotesViewModel) {
         }
         val ordered = ch.fasrv.fanotes.desk.sortHomeworkTasks(shownTasks)
         if (ordered.isEmpty()) {
-            Text("Noch keine Einträge", modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.SemiBold)
-            Text("Lege deine erste Hausaufgabe oder den nächsten Termin oben an.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            HomeworkEmpty()
         }
-        listOf("overdue" to "Überfällig", "today" to "Heute", "upcoming" to "Demnächst", "undated" to "Ohne Termin", "done" to "Erledigt").forEach { (bucket, label) ->
+        listOf("overdue", "today", "upcoming", "undated").forEach { bucket ->
             val items = ordered.filter { ch.fasrv.fanotes.desk.classifyHomeworkTask(it) == bucket }
-            if (items.isEmpty()) return@forEach
-            Text("$label ${items.size}", modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.SemiBold)
-            items.forEach { task ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f).clickable { model.toggleHomework(task.id) }) {
-                        Text(task.title, fontWeight = if (task.priority == "high") FontWeight.Bold else FontWeight.Normal, textDecoration = if (task.done) TextDecoration.LineThrough else null)
-                        Text(
-                            listOf(
-                                if (task.done) "☑" else "☐",
-                                task.subject,
-                                task.dueDate ?: "Kein Termin",
-                                task.dueTime,
-                                if (task.kind == "appointment") "Termin" else "Aufgabe",
-                                if (task.priority == "high") "Wichtig" else null,
-                            ).filter { !it.isNullOrBlank() }.joinToString(" · "),
-                            fontSize = 12.sp,
-                            color = if (bucket == "overdue") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                        )
-                        if (task.notes.isNotBlank()) {
-                            Text(task.notes, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f))
-                        }
-                    }
-                    TextButton(onClick = { model.removeHomework(task.id) }) { Text("Löschen") }
-                }
+            if (items.isNotEmpty()) HomeworkBucket(bucket, items, model)
+        }
+        if (ch.fasrv.fanotes.desk.homeworkDoneBucketVisible(filter, showDone)) {
+            val finished = ordered.filter { ch.fasrv.fanotes.desk.classifyHomeworkTask(it) == "done" }
+            if (finished.isNotEmpty()) {
+                HomeworkBucket(
+                    "done",
+                    finished,
+                    model,
+                    toggle = ch.fasrv.fanotes.desk.homeworkDoneToggleLabel(filter, showDone),
+                    onToggle = { showDone = !showDone },
+                )
             }
         }
     }
+}
+
+@Composable
+private fun HomeworkEmpty() {
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp)
+            .heightIn(min = ch.fasrv.fanotes.desk.HOMEWORK_EMPTY_MIN_DP.dp)
+            .drawBehind {
+                val stroke = 1.dp.toPx()
+                val inset = stroke / 2f
+                drawRoundRect(
+                    color = rule,
+                    topLeft = Offset(inset, inset),
+                    size = Size(size.width - stroke, size.height - stroke),
+                    cornerRadius = CornerRadius(ch.fasrv.fanotes.desk.HOMEWORK_CARD_RADIUS_DP.dp.toPx()),
+                    style = Stroke(
+                        width = stroke,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx())),
+                    ),
+                )
+            }
+            .padding(28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+    ) {
+        Text(ch.fasrv.fanotes.desk.HOMEWORK_EMPTY_TITLE, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Text(
+            ch.fasrv.fanotes.desk.HOMEWORK_EMPTY_BODY,
+            modifier = Modifier.widthIn(max = 360.dp),
+            color = LocalStatusInk.current.muted,
+            fontSize = 12.sp,
+            lineHeight = 18.6.sp,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun HomeworkBucket(
+    bucket: String,
+    items: List<ch.fasrv.fanotes.desk.HomeworkTask>,
+    model: FaNotesViewModel,
+    toggle: String? = null,
+    onToggle: () -> Unit = {},
+) {
+    val ink = LocalStatusInk.current
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    Column(Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 16.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(bottom = ch.fasrv.fanotes.desk.HOMEWORK_BUCKET_GAP_DP.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_BUCKET_GAP_DP.dp),
+        ) {
+            Text(
+                ch.fasrv.fanotes.desk.homeworkBucketLabel(bucket).uppercase(java.util.Locale.GERMAN),
+                color = ink.soft,
+                fontSize = 12.sp,
+                fontWeight = FontWeight(750),
+                letterSpacing = 0.04.em,
+            )
+            Box(
+                Modifier
+                    .height(ch.fasrv.fanotes.desk.HOMEWORK_COUNT_DP.dp)
+                    .widthIn(min = ch.fasrv.fanotes.desk.HOMEWORK_COUNT_DP.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                    .padding(horizontal = 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(items.size.toString(), color = ink.muted, fontSize = 12.sp)
+            }
+            if (toggle != null) {
+                Spacer(Modifier.weight(1f))
+                Text(
+                    toggle,
+                    color = accent,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight(700),
+                    modifier = Modifier.clickable(onClick = onToggle),
+                )
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_CARDS_GAP_DP.dp)) {
+            items.forEach { task ->
+                HomeworkTaskCard(task, bucket, { model.toggleHomework(task.id) }, { model.removeHomework(task.id) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeworkTaskCard(
+    task: ch.fasrv.fanotes.desk.HomeworkTask,
+    bucket: String,
+    onToggle: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val ink = LocalStatusInk.current
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    val danger = MaterialTheme.colorScheme.error
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    val overdue = bucket == "overdue"
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.HOMEWORK_CARD_RADIUS_DP.dp)
+    val actionShape = RoundedCornerShape(ch.fasrv.fanotes.desk.HOMEWORK_CARD_ACTION_RADIUS_DP.dp)
+    val borderColor = if (overdue) homeworkMix(rule, danger, ch.fasrv.fanotes.desk.HOMEWORK_OVERDUE_BORDER) else rule
+    val fill = if (overdue) {
+        homeworkMix(ink.panelStrong, danger, ch.fasrv.fanotes.desk.HOMEWORK_OVERDUE_FILL)
+    } else {
+        ink.panelStrong.copy(alpha = ch.fasrv.fanotes.desk.HOMEWORK_CARD_FILL_ALPHA)
+    }
+    val inset = ch.fasrv.fanotes.desk.homeworkCardInset(task)
+    val deleteHover = remember { MutableInteractionSource() }
+    val deleteHovered by deleteHover.collectIsHoveredAsState()
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .alpha(if (task.done) ch.fasrv.fanotes.desk.HOMEWORK_CARD_DONE_ALPHA else 1f)
+            .clip(shape)
+            .border(1.dp, borderColor, shape)
+            .background(fill)
+            .drawBehind {
+                if (inset == "none") return@drawBehind
+                drawRect(
+                    color = if (inset == "accent") accent else ink.warning,
+                    size = Size(ch.fasrv.fanotes.desk.HOMEWORK_CARD_INSET_DP.dp.toPx(), size.height),
+                )
+            },
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(ch.fasrv.fanotes.desk.HOMEWORK_CARD_PAD_DP.dp),
+            horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_CARD_GAP_DP.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Box(
+                Modifier
+                    .size(ch.fasrv.fanotes.desk.HOMEWORK_CARD_ACTION_DP.dp)
+                    .clip(actionShape)
+                    .border(1.dp, rule, actionShape)
+                    .clickable(onClick = onToggle),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    if (task.done) Icons.Filled.CheckCircle else Icons.Outlined.Circle,
+                    contentDescription = if (task.done) ch.fasrv.fanotes.desk.HOMEWORK_MARK_OPEN else ch.fasrv.fanotes.desk.HOMEWORK_MARK_DONE,
+                    modifier = Modifier.size(18.dp),
+                    tint = accent,
+                )
+            }
+            Column(Modifier.weight(1f).padding(top = 4.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        task.title,
+                        modifier = Modifier.weight(1f),
+                        color = if (task.done) ink.muted else MaterialTheme.colorScheme.onSurface,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight(700),
+                        lineHeight = 16.9.sp,
+                        textDecoration = if (task.done) TextDecoration.LineThrough else null,
+                    )
+                    Text(
+                        ch.fasrv.fanotes.desk.homeworkKindLabel(task.kind).uppercase(java.util.Locale.GERMAN),
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f))
+                            .padding(horizontal = 7.dp, vertical = 2.dp),
+                        color = ink.muted,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight(800),
+                        letterSpacing = 0.05.em,
+                    )
+                }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (task.subject.isNotBlank()) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(12.dp), tint = ink.muted)
+                            Text(task.subject, color = ink.muted, fontSize = 12.sp)
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Icon(
+                            if (task.kind == "appointment") Icons.Filled.Alarm else Icons.Filled.CalendarMonth,
+                            contentDescription = null,
+                            modifier = Modifier.size(12.dp),
+                            tint = if (overdue) danger else ink.muted,
+                        )
+                        Text(
+                            ch.fasrv.fanotes.desk.homeworkDueLabel(task),
+                            color = if (overdue) danger else ink.muted,
+                            fontSize = 12.sp,
+                            fontWeight = if (overdue) FontWeight(700) else FontWeight.Normal,
+                        )
+                    }
+                    if (task.priority == "high") {
+                        Text(ch.fasrv.fanotes.desk.HOMEWORK_PRIORITY_HIGH, color = ink.warning, fontSize = 12.sp, fontWeight = FontWeight(800))
+                    }
+                }
+                if (task.notes.isNotBlank()) {
+                    Text(task.notes, modifier = Modifier.padding(top = 4.dp), color = ink.soft, fontSize = 12.sp, lineHeight = 18.sp)
+                }
+            }
+            Box(
+                Modifier
+                    .size(ch.fasrv.fanotes.desk.HOMEWORK_CARD_ACTION_DP.dp)
+                    .clip(actionShape)
+                    .border(1.dp, rule, actionShape)
+                    .hoverable(deleteHover)
+                    .background(if (deleteHovered) danger.copy(alpha = 0.10f) else Color.Transparent)
+                    .clickable(interactionSource = deleteHover, indication = null, onClick = onDelete),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = ch.fasrv.fanotes.desk.HOMEWORK_DELETE,
+                    modifier = Modifier.size(15.dp),
+                    tint = if (deleteHovered) danger else ink.muted,
+                )
+            }
+        }
+    }
+}
+
+private fun homeworkMix(base: Color, tint: Color, tintShare: Float): Color {
+    val keep = 1f - tintShare
+    return Color(
+        red = base.red * keep + tint.red * tintShare,
+        green = base.green * keep + tint.green * tintShare,
+        blue = base.blue * keep + tint.blue * tintShare,
+        alpha = base.alpha * keep + tint.alpha * tintShare,
+    )
 }
 
 @Composable
