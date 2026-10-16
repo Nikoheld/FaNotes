@@ -1852,10 +1852,6 @@ fn skip_clock_digits(bytes: &[u8], start: usize) -> usize {
 }
 
 fn unix_millis_from_iso(value: &str) -> Option<u64> {
-    if comma_after_final_clock(value) {
-        // `16:00,` and `16: Oct 13, 2026` finalize a field and then see a comma.
-        return None;
-    }
     if let Some(end) = value.find('\0') {
         // A NUL ends the date string. `2026-10-13\016:00` is the UTC date,
         // and `\02026-10-13` is empty.
@@ -1877,6 +1873,10 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         if omitted != value {
             return unix_millis_from_iso(&omitted);
         }
+    }
+    if comma_after_final_clock(value) {
+        // `16:00,` and `16: Oct 13!2026` finalize a field and then see junk.
+        return None;
     }
     if junk_glued_to_final_clock(value) {
         // `16:00,30` and `16:00!` finalized the clock. `16:00 ,30` has a
@@ -2202,11 +2202,20 @@ fn rewrite_periods(value: &str) -> String {
             .count();
         let after_digits = chars.get(next + digits).copied();
         if digits > 0 && after_digits == Some(':') {
-            if !out.is_empty() && !out.ends_with(' ') {
-                out.push(' ');
+            // `16:00:00.5:` keeps the fraction. `Oct.5:00` still drops the dot.
+            let clock_fraction = out.ends_with(|character: char| character.is_ascii_digit())
+                && out
+                    .chars()
+                    .rev()
+                    .take_while(|character| !is_date_parse_space(*character))
+                    .any(|character| character == ':');
+            if !clock_fraction {
+                if !out.is_empty() && !out.ends_with(' ') {
+                    out.push(' ');
+                }
+                index = next;
+                continue;
             }
-            index = next;
-            continue;
         }
         if digits > 0
             && !out.contains(':')
@@ -2430,24 +2439,133 @@ fn is_clock_separator_space(character: char) -> bool {
     is_date_parse_space(character) && character != ','
 }
 
-/// `16:00,` and `16: Oct 13, 2026` finalize a clock field and then see `,`.
-/// A comma after a date number, or after a fraction, stays a separator.
+/// `16:00,` and `16: Oct 13!2026` finalize a clock field and then see junk.
+/// A comma or mark after a date number, or after a fraction, stays a separator.
 fn comma_after_final_clock(value: &str) -> bool {
     let mut time_index = 0usize;
     for token in value.split(is_clock_separator_space).filter(|token| !token.is_empty()) {
-        let pieces: Vec<&str> = token.split(',').collect();
-        for (piece_index, piece) in pieces.iter().enumerate() {
-            let comma_after = piece_index + 1 < pieces.len();
-            if piece.is_empty() {
-                continue;
-            }
-            if comma_after && comma_rejects_piece(piece, time_index) {
-                return true;
-            }
-            note_clock_piece(piece, &mut time_index);
+        if token_has_bad_peek(token, &mut time_index) {
+            return true;
         }
     }
     false
+}
+
+fn token_has_bad_peek(token: &str, time_index: &mut usize) -> bool {
+    let bytes = token.as_bytes();
+    let mut index = 0;
+    let mut saw_word = false;
+    while index < bytes.len() {
+        if bytes[index].is_ascii_digit() {
+            if index > 0 && matches!(bytes[index - 1], b'+' | b'-') {
+                while index < bytes.len() && bytes[index].is_ascii_digit() {
+                    index += 1;
+                }
+                continue;
+            }
+            let start = index;
+            while index < bytes.len() && (bytes[index].is_ascii_digit() || bytes[index] == b':') {
+                index += 1;
+            }
+            let mut fraction = false;
+            if index < bytes.len() && bytes[index] == b'.' && token[start..index].contains(':') {
+                let dot = index;
+                index += 1;
+                if index < bytes.len() && bytes[index].is_ascii_digit() {
+                    fraction = true;
+                    while index < bytes.len() && bytes[index].is_ascii_digit() {
+                        index += 1;
+                    }
+                } else {
+                    index = dot;
+                }
+            }
+            let piece = &token[start..index];
+            if !saw_word
+                && index < bytes.len()
+                && bad_clock_peek(bytes[index])
+                && !fraction
+                && comma_rejects_piece(piece, *time_index)
+            {
+                return true;
+            }
+            if !saw_word {
+                note_clock_piece(piece, time_index);
+            }
+            continue;
+        }
+        if bytes[index].is_ascii_alphabetic() {
+            saw_word = true;
+            while index < bytes.len() && bytes[index].is_ascii_alphabetic() {
+                index += 1;
+            }
+            continue;
+        }
+        index += 1;
+    }
+    false
+}
+
+fn bad_clock_peek(byte: u8) -> bool {
+    !matches!(byte, b'+' | b'-' | b'Z' | b'z' | b'/')
+}
+
+/// `16:00:00.5:` and `16:00:00.5:EST` ignore the colon. The fraction already
+/// finished the clock, so a zone or a later number is still read.
+fn consume_mark_after_fraction(
+    bytes: &[u8],
+    mut index: usize,
+    dates: &mut Vec<i32>,
+    offset: &mut Option<i64>,
+) -> Option<bool> {
+    if index >= bytes.len() {
+        return Some(false);
+    }
+    let mut skipped = false;
+    while index < bytes.len()
+        && (bytes[index] == b':'
+            || is_ignored_legacy_symbol(char::from(bytes[index])))
+    {
+        skipped = true;
+        index += 1;
+    }
+    if !skipped {
+        return Some(false);
+    }
+    if index == bytes.len() {
+        return Some(true);
+    }
+    let rest = std::str::from_utf8(&bytes[index..]).ok()?;
+    if let Some(parsed) = legacy_zone_offset(rest) {
+        if parsed.spilled.is_empty() && parsed.time_fields.is_empty() && parsed.minute_sign == 0 {
+            *offset = Some(parsed.minutes);
+            return Some(true);
+        }
+    }
+    if bytes[index].is_ascii_digit() {
+        let (number, _, end) = read_clock_number(bytes, index)?;
+        push_date_number(dates, number)?;
+        return Some(end == bytes.len());
+    }
+    Some(false)
+}
+
+fn clock_piece_finalizes(piece: &str) -> bool {
+    if piece.contains('.') || piece.ends_with(':') || !piece.contains(':') {
+        return false;
+    }
+    if !piece.starts_with(|character: char| character.is_ascii_digit()) {
+        return false;
+    }
+    let fields: Vec<&str> = piece.split(':').filter(|part| !part.is_empty()).collect();
+    let Some(last) = fields.last().and_then(|part| part.parse::<i32>().ok()) else {
+        return false;
+    };
+    match fields.len() {
+        2 | 3 => (0..=59).contains(&last),
+        4 => (0..=999).contains(&last),
+        _ => false,
+    }
 }
 
 fn comma_rejects_piece(piece: &str, time_index: usize) -> bool {
@@ -2457,7 +2575,7 @@ fn comma_rejects_piece(piece: &str, time_index: usize) -> bool {
     if piece.ends_with(':') {
         return false;
     }
-    if piece.starts_with(|character: char| character.is_ascii_digit()) && piece.contains(':') {
+    if clock_piece_finalizes(piece) {
         return true;
     }
     !piece.starts_with(['+', '-'])
@@ -3877,6 +3995,10 @@ fn symbol_ends_a_clock(chars: &[char], index: usize) -> bool {
     if !saw_colon {
         return false;
     }
+    // `16:!` is still open. The mark is only a separator. `16:00!` is not.
+    if chars[index - 1] == ':' {
+        return false;
+    }
     // `16:00:00.5!` finished through the fraction. The mark is ignored.
     if fraction_digits_before(chars, index) {
         return false;
@@ -5114,6 +5236,9 @@ fn take_clock_word(
             // `16:00:00.5EST` is 16:00:00.500 EST. The fraction does not
             // require whitespace before the next token. `16:00EST` is empty.
             if consume_fraction_zone(bytes, index, offset)? {
+                break;
+            }
+            if consume_mark_after_fraction(bytes, index, dates, offset)? {
                 break;
             }
             if index != bytes.len() && !consume_glued_z(bytes, index, dates, offset)? {
@@ -12408,6 +12533,36 @@ mod local_zone_tests {
             unix_millis_from_iso("4:00 PM, Oct 13 2026"),
             Some(1_791_921_600_000)
         );
+        assert_eq!(unix_millis_from_iso("16: Oct 13!2026"), None);
+        assert_eq!(unix_millis_from_iso("16: Oct 13! 2026"), None);
+        assert_eq!(unix_millis_from_iso("16: Oct 13. 2026"), None);
+        assert_eq!(unix_millis_from_iso("16: Oct 13?2026"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13!2026"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:!"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:! EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00:00.5:"),
+            Some(1_791_921_600_500)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00:00.5: EST"),
+            Some(1_791_925_200_500)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00:00.5:2026"),
+            Some(1_791_921_600_500)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00:00.5:EST"),
+            Some(1_791_925_200_500)
+        );
+        assert_eq!(unix_millis_from_iso("16:!"), None);
         assert_eq!(
             unix_millis_from_iso("Oct 13 2026 16:00:00.5,1"),
             Some(1_791_921_600_500)
