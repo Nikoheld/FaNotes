@@ -94,6 +94,13 @@ class CalendarBooksTest {
     }
 
     @Test
+    fun monthRowsShareTheLeftoverHeight() {
+        assertEquals(88, monthRowHeightDp(0, minDp = 88))
+        assertEquals(100, monthRowHeightDp(600, minDp = 88))
+        assertEquals(88, monthRowHeightDp(400, minDp = 88))
+    }
+
+    @Test
     fun subjectBookFollowsTheFolderAndRemembersThePage() {
         val books = attachSubjectBook(emptyList(), "Schule/Mathe", "Buecher/Algebra.pdf", 4)
         val text = serializeSubjectBooks(books)
