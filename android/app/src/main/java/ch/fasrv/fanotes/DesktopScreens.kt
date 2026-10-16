@@ -2471,9 +2471,9 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
         val calRule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
         val calShape = RoundedCornerShape(8.dp)
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
+            Modifier.fillMaxWidth().padding(bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.CAL_TOOLBAR_GAP_DP.dp),
         ) {
             Box(
                 Modifier.height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp).clip(calShape).border(1.dp, calRule, calShape).background(MaterialTheme.colorScheme.surface).clickable {
@@ -2488,18 +2488,32 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                     contentAlignment = Alignment.Center,
                 ) { Text(mark) }
             }
-            Text(ch.fasrv.fanotes.desk.calendarHeading(view, anchor), fontSize = 15.sp, fontWeight = FontWeight(650), letterSpacing = (-0.01).em)
-            if (view == "week") {
-                val monday = ch.fasrv.fanotes.desk.calendarRange("week", anchor).first()
+            Row(
+                Modifier.weight(1f, fill = false),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Text(
-                    "${ch.fasrv.fanotes.desk.CAL_WEEK} ${ch.fasrv.fanotes.desk.calendarIsoWeek(monday)}",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight(550),
-                    color = LocalStatusInk.current.muted,
+                    ch.fasrv.fanotes.desk.calendarHeading(view, anchor),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight(650),
+                    letterSpacing = (-0.01).em,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
+                if (view == "week") {
+                    val monday = ch.fasrv.fanotes.desk.calendarRange("week", anchor).first()
+                    Text(
+                        "${ch.fasrv.fanotes.desk.CAL_WEEK} ${ch.fasrv.fanotes.desk.calendarIsoWeek(monday)}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight(550),
+                        color = LocalStatusInk.current.muted,
+                        maxLines = 1,
+                    )
+                }
             }
             Row(
-                Modifier.height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp).widthIn(min = 120.dp).clip(calShape).border(1.dp, calRule, calShape).padding(horizontal = 8.dp),
+                Modifier.weight(1f).height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp).widthIn(min = ch.fasrv.fanotes.desk.CAL_SEARCH_MIN_DP.dp).clip(calShape).border(1.dp, calRule, calShape).padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -2510,7 +2524,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                     singleLine = true,
                     textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    modifier = Modifier.widthIn(min = 80.dp),
+                    modifier = Modifier.weight(1f),
                     decorationBox = { inner ->
                         Box(contentAlignment = Alignment.CenterStart) {
                             if (calendarQuery.isEmpty()) Text(ch.fasrv.fanotes.desk.CAL_SEARCH, color = LocalStatusInk.current.muted, fontSize = 12.sp)
