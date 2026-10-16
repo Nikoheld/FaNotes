@@ -382,9 +382,9 @@ internal class DetailsSummarySpan(
                         drawRichText(canvas, paint, line, textX + previousSize * 0.7f, cursor, lineInlines, paint.typeface)
                     }
                     "bullet" -> {
-                        val indent = ch.fasrv.fanotes.desk.detailsListIndent(line)
+                        val indent = ch.fasrv.fanotes.desk.previewReadingListPrefix(line)
                         val mark = "• "
-                        val indentWidth = if (indent.isEmpty()) 0f else paint.measureText(indent)
+                        val indentWidth = listIndentPx(indent, paint.textSize)
                         paint.color = accent
                         canvas.drawText(mark, textX + indentWidth, cursor, paint)
                         paint.color = PAPER_MATH_INK
@@ -400,9 +400,9 @@ internal class DetailsSummarySpan(
                         )
                     }
                     "number" -> {
-                        val indent = ch.fasrv.fanotes.desk.detailsListIndent(line)
+                        val indent = ch.fasrv.fanotes.desk.previewReadingListPrefix(line)
                         val marker = ch.fasrv.fanotes.desk.detailsNumberMarker(line)
-                        val indentWidth = if (indent.isEmpty()) 0f else paint.measureText(indent)
+                        val indentWidth = listIndentPx(indent, paint.textSize)
                         paint.color = accent
                         if (marker.isNotEmpty()) canvas.drawText(marker, textX + indentWidth, cursor, paint)
                         paint.color = PAPER_MATH_INK
@@ -420,10 +420,10 @@ internal class DetailsSummarySpan(
                         )
                     }
                     "task" -> {
-                        val indent = ch.fasrv.fanotes.desk.detailsListIndent(line)
+                        val indent = ch.fasrv.fanotes.desk.previewReadingListPrefix(line)
                         val marker = ch.fasrv.fanotes.desk.detailsTaskMarker(line)
                         val checked = ch.fasrv.fanotes.desk.detailsTaskChecked(line) == true
-                        val indentWidth = if (indent.isEmpty()) 0f else paint.measureText(indent)
+                        val indentWidth = listIndentPx(indent, paint.textSize)
                         val task = paperTaskBox(previousSize)
                         val mid = cursor + (lineMetrics.ascent + lineMetrics.descent) / 2f
                         val taskRect = RectF(
@@ -546,6 +546,13 @@ internal class DetailsSummarySpan(
         val metrics = paint.fontMetrics
         linkHits += RectF(left, baseline + metrics.ascent, left + width, baseline + metrics.descent) to target
     }
+
+    /** Each nested list level adds 1.5em, plus the 0.2em on the item. */
+    private fun listIndentPx(prefix: String, textSizePx: Float): Float =
+        ch.fasrv.fanotes.desk.previewListIndentPx(
+            ch.fasrv.fanotes.desk.previewListLevelOfPrefix(prefix),
+            textSizePx,
+        )
 
     private fun shiftInlines(marks: List<DetailsInline>, by: Int): List<DetailsInline> {
         if (by == 0) return marks

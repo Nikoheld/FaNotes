@@ -372,12 +372,13 @@ class LivePreviewTest {
         assertEquals(true, detailsTaskChecked(task.single().text))
         assertEquals("Fertig", task.single().text.substring(task.single().inlines.single().start, task.single().inlines.single().end))
         val nested = detailsReadingLines("- a\n    - **nest**\n    1. **zwei**\n    - [ ] **drei**")
-        assertEquals(listOf("• a", "    • nest"), nested.filter { it.kind == "bullet" }.map { it.text })
-        assertEquals(4, nested.first { it.kind == "number" }.let { detailsListIndent(it.text).length })
+        val pad = previewListExtraPad(2)
+        assertEquals(listOf("• a", "$pad• nest"), nested.filter { it.kind == "bullet" }.map { it.text })
+        assertEquals(pad, previewReadingListPrefix(nested.first { it.kind == "number" }.text))
         assertEquals("1. ", detailsNumberMarker(nested.first { it.kind == "number" }.text))
         val nestedTask = nested.first { it.kind == "task" }
         assertEquals(false, detailsTaskChecked(nestedTask.text))
-        assertEquals(4, detailsListIndent(nestedTask.text).length)
+        assertEquals(pad, previewReadingListPrefix(nestedTask.text))
         assertEquals("drei", nestedTask.text.substring(nestedTask.inlines.single().start, nestedTask.inlines.single().end))
     }
 }
