@@ -1,7 +1,9 @@
 package ch.fasrv.fanotes.desk
 
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -60,6 +62,80 @@ class CalendarExchangeTest {
         assertFalse(folded[0].allDay)
         assertEquals("kalender.ics", icsFileName("!!!"))
         assertEquals("Mein-Kalender.ics", icsFileName("Mein Kalender"))
+
+        val zone = ZoneId.of("Europe/Zurich")
+        val timed = importIcs(
+            listOf(
+                "BEGIN:VCALENDAR",
+                "BEGIN:VEVENT",
+                "UID:lesson",
+                "SUMMARY:Hello\\, Welt",
+                "DESCRIPTION:Zeile\\\\n2",
+                "DTSTART:20261014T153000",
+                "DURATION:PT45M",
+                "END:VEVENT",
+                "BEGIN:VEVENT",
+                "UID:gone",
+                "STATUS:CANCELLED",
+                "SUMMARY:Entfällt",
+                "DTSTART:20261014T180000",
+                "END:VEVENT",
+                "END:VCALENDAR",
+            ).joinToString("\n"),
+            "personal",
+            zone,
+        )
+        assertEquals(1, timed.size)
+        assertEquals("Hello, Welt", timed[0].title)
+        assertEquals("Zeile\\n2", timed[0].notes)
+        assertEquals("2026-10-14T15:30", timed[0].start)
+        assertEquals("2026-10-14T16:15", timed[0].end)
+
+        val utc = importIcs(
+            "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:utc-call\nSUMMARY:Anruf\nDTSTART:20261016T070000Z\nDURATION:PT90M\nEND:VEVENT\nEND:VCALENDAR\n",
+            "personal",
+            zone,
+        )
+        val utcStart = ZonedDateTime.of(2026, 10, 16, 7, 0, 0, 0, ZoneOffset.UTC).withZoneSameInstant(zone)
+        val wall = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")
+        assertEquals(utcStart.format(wall), utc[0].start)
+        assertEquals(utcStart.plusMinutes(90).format(wall), utc[0].end)
+        assertEquals("2026-10-16T09:00", utc[0].start)
+
+        val existing = emptyCalendar().copy(
+            events = listOf(
+                CalendarEvent(
+                    id = "lesson",
+                    calendarId = "school",
+                    title = "Alt",
+                    start = "2026-10-14T15:30",
+                    end = "2026-10-14T16:15",
+                    allDay = false,
+                    notePath = "Schule/Mathe.md",
+                    exceptionDates = listOf("2026-10-21"),
+                ),
+            ),
+        )
+        val merged = applyIcsImport(
+            existing,
+            "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:lesson\nSUMMARY:Neu\nDTSTART:20261014T153000\nDURATION:PT45M\nEND:VEVENT\nEND:VCALENDAR\n",
+            "personal",
+            zone,
+        )
+        assertEquals(1, merged.updated)
+        assertEquals(0, merged.added)
+        assertEquals("Neu", merged.document.events[0].title)
+        assertEquals("school", merged.document.events[0].calendarId)
+        assertEquals("Schule/Mathe.md", merged.document.events[0].notePath)
+        assertEquals(listOf("2026-10-21"), merged.document.events[0].exceptionDates)
+        val removed = applyIcsImport(
+            merged.document,
+            "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:lesson\nSTATUS:CANCELLED\nSUMMARY:Neu\nDTSTART:20261014T153000\nEND:VEVENT\nEND:VCALENDAR\n",
+            "personal",
+            zone,
+        )
+        assertEquals(1, removed.removed)
+        assertTrue(removed.document.events.isEmpty())
     }
 
     @Test

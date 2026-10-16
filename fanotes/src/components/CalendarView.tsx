@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { bindHandGestures } from '../../../src/lib/handGestures'
 import { getUiLanguage } from '../i18n'
 import { dueReminders } from '../lib/calendarReminders'
-import { exportIcs, importIcs } from '../lib/icsCalendar'
+import { applyIcsImport, exportIcs } from '../lib/icsCalendar'
 import {
   CALENDAR_NOTE_PATH,
   CALENDAR_NOTE_TITLE,
@@ -107,6 +107,8 @@ const COPY = {
     saving: 'Speichert …',
     saved: 'Gespeichert',
     openFile: 'Als Notiz öffnen',
+    importEmpty: 'Keine Termine in dieser Kalenderdatei.',
+    importFailed: 'Die Kalenderdatei konnte nicht gelesen werden.',
     repeats: { none: 'Nie', daily: 'Täglich', weekly: 'Wöchentlich', monthly: 'Monatlich', yearly: 'Jährlich' } as Record<RecurrenceFreq, string>,
     weekdays: ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'],
   },
@@ -150,6 +152,8 @@ const COPY = {
     saving: 'Saving …',
     saved: 'Saved',
     openFile: 'Open as note',
+    importEmpty: 'No events in that calendar file.',
+    importFailed: 'That calendar file could not be read.',
     repeats: { none: 'Never', daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' } as Record<RecurrenceFreq, string>,
     weekdays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
   },
@@ -580,12 +584,16 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
             const file = event.target.files?.[0]
             event.target.value = ''
             if (!file) return
+            const calendarId = document.calendars[0]?.id
+            if (!calendarId) return
             void file.text().then((text) => {
-              const calendarId = document.calendars[0]?.id
-              if (!calendarId) return
-              const imported = importIcs(text, calendarId)
-              void persist({ ...document, events: [...document.events, ...imported].slice(0, 2000) })
-            })
+              const result = applyIcsImport(document, text, calendarId)
+              if (result.added === 0 && result.updated === 0 && result.removed === 0) {
+                setError(copy.importEmpty)
+                return
+              }
+              void persist(result.document)
+            }).catch(() => setError(copy.importFailed))
           }} /></label>
         </header>
         {reminders[0] && <p className="cal-error" role="status">{reminders[0].title} beginnt {reminders[0].minutesUntil === 0 ? 'jetzt' : `in ${reminders[0].minutesUntil} min`}. <button type="button" onClick={() => setDismissedReminders((current) => [...current, reminders[0].key])}>Schließen</button></p>}
