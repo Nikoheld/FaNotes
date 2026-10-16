@@ -323,6 +323,25 @@ class NoteProfilesTest {
     }
 
     @Test
+    fun theWelcomePreviewGlowSitsBehindTheWindow() {
+        assertEquals(0.12f, FIRST_RUN_PREVIEW_GLOW_INSET_BLOCK)
+        assertEquals(0.08f, FIRST_RUN_PREVIEW_GLOW_INSET_INLINE)
+        assertEquals(65, FIRST_RUN_PREVIEW_GLOW_BLUR_DP)
+        assertEquals(0.22f, FIRST_RUN_PREVIEW_GLOW_COLOR_ALPHA)
+        assertEquals(0.7f, FIRST_RUN_PREVIEW_GLOW_OPACITY)
+        assertEquals(0x272A6F97, firstRunPreviewGlowColor(0xFF2A6F97.toInt()))
+        val frame = checkNotNull(firstRunPreviewGlowFrame(100f, 200f, 2f, 0xFF2A6F97.toInt()))
+        assertEquals(130f, frame.blurPx)
+        assertEquals(262f, frame.padPx)
+        assertEquals(270f, frame.ovalLeftPx)
+        assertEquals(286f, frame.ovalTopPx)
+        assertEquals(354f, frame.ovalRightPx)
+        assertEquals(438f, frame.ovalBottomPx)
+        assertEquals(0x272A6F97, frame.color)
+        assertEquals(null, firstRunPreviewGlowFrame(0f, 200f, 2f, 0xFF2A6F97.toInt()))
+    }
+
+    @Test
     fun folderButtonsUseTheirOwnColor() {
         assertEquals(0xFF2A6F97.toInt(), firstRunFolderArgb("#2a6f97"))
         assertEquals(0xFF2A6F97.toInt(), firstRunFolderArgb(profileFolders("school").first { it.name == "Mathematik" }.color))
