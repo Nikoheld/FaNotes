@@ -1,5 +1,7 @@
 package ch.fasrv.fanotes.desk
 
+import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 /** Starter folders and note templates from the desktop first-run profile. */
@@ -325,6 +327,41 @@ const val FIRST_RUN_PREVIEW_SHORT_HEIGHT_DP = 680
 const val FIRST_RUN_PREVIEW_KICKER = "MATHEMATIK · ANALYSIS"
 const val FIRST_RUN_PREVIEW_HEADING = "Ableitungen"
 const val FIRST_RUN_PREVIEW_TYPED = "Die Änderungsrate beschreibt die Steigung."
+/**
+ * `.first-run-preview-paper` still wins. No later rule, including the 12px window radius, changes this sheet.
+ * Margin is 18px 19px 0. Padding is 25px 27px. Top corners are 11px and the bottom corners stay 0.
+ */
+const val FIRST_RUN_PREVIEW_PAPER_MARGIN_TOP_DP = 18
+const val FIRST_RUN_PREVIEW_PAPER_MARGIN_INLINE_DP = 19
+const val FIRST_RUN_PREVIEW_PAPER_MARGIN_BOTTOM_DP = 0
+const val FIRST_RUN_PREVIEW_PAPER_PAD_BLOCK_DP = 25
+const val FIRST_RUN_PREVIEW_PAPER_PAD_INLINE_DP = 27
+const val FIRST_RUN_PREVIEW_PAPER_RADIUS_TOP_DP = 11
+const val FIRST_RUN_PREVIEW_PAPER_RADIUS_BOTTOM_DP = 0
+/** Sheet text `#26272c` on `#fbfaf7`. */
+const val FIRST_RUN_PREVIEW_PAPER_INK = 0xFF26272C.toInt()
+const val FIRST_RUN_PREVIEW_PAPER_FILL = 0xFFFBFBF7.toInt()
+/** `.first-run-preview-paper > small` is 6px, weight 700, tracking .12em, `#8d8d90`. */
+const val FIRST_RUN_PREVIEW_KICKER_SP = 6
+const val FIRST_RUN_PREVIEW_KICKER_WEIGHT = 700
+const val FIRST_RUN_PREVIEW_KICKER_TRACKING_EM = 0.12f
+const val FIRST_RUN_PREVIEW_KICKER_INK = 0xFF8D8D90.toInt()
+/** `.first-run-preview-paper > h2` is `650 20px/1.1`, tracking -.035em, margin `9px 0 17px`. */
+const val FIRST_RUN_PREVIEW_PAPER_TITLE_SP = 20
+const val FIRST_RUN_PREVIEW_PAPER_TITLE_WEIGHT = 650
+const val FIRST_RUN_PREVIEW_PAPER_TITLE_LINE = 1.1f
+const val FIRST_RUN_PREVIEW_PAPER_TITLE_TRACKING_EM = -0.035f
+const val FIRST_RUN_PREVIEW_PAPER_TITLE_MARGIN_TOP_DP = 9
+const val FIRST_RUN_PREVIEW_PAPER_TITLE_MARGIN_BOTTOM_DP = 17
+/** `.first-run-preview-typed` is `8.5px/1.5` in `#54555a`. Shown in full; the desktop type-on animation is not played. */
+const val FIRST_RUN_PREVIEW_TYPED_SP = 8.5f
+const val FIRST_RUN_PREVIEW_TYPED_LINE = 1.5f
+const val FIRST_RUN_PREVIEW_TYPED_INK = 0xFF54555A.toInt()
+/** `box-shadow: 0 10px 30px rgba(0,0,0,.14)`. */
+const val FIRST_RUN_PREVIEW_PAPER_SHADOW_X_DP = 0
+const val FIRST_RUN_PREVIEW_PAPER_SHADOW_Y_DP = 10
+const val FIRST_RUN_PREVIEW_PAPER_SHADOW_BLUR_DP = 30
+const val FIRST_RUN_PREVIEW_PAPER_SHADOW_ALPHA = 0.14f
 const val FIRST_RUN_PREVIEW_QUERY = "„Änderungsrate“"
 const val FIRST_RUN_PREVIEW_HITS = "1 Treffer"
 const val FIRST_RUN_PREVIEW_INK = "Handschrift"
@@ -395,6 +432,81 @@ fun firstRunPreviewBodyMinDp(screenWidthDp: Int, screenHeightDp: Int): Int =
     } else {
         FIRST_RUN_PREVIEW_BODY_MIN_DP
     }
+
+/**
+ * Border-box min height of the stretched `.first-run-preview-paper`.
+ * The body min-height is the grid area. Margin sits inside that area, and the bottom margin is 0,
+ * so the sheet meets the floor of the preview window.
+ */
+fun firstRunPreviewPaperMinDp(screenWidthDp: Int, screenHeightDp: Int): Int {
+    val body = firstRunPreviewBodyMinDp(screenWidthDp, screenHeightDp)
+    return (body - FIRST_RUN_PREVIEW_PAPER_MARGIN_TOP_DP - FIRST_RUN_PREVIEW_PAPER_MARGIN_BOTTOM_DP).coerceAtLeast(0)
+}
+
+data class FirstRunPreviewPaperShadow(
+    val xDp: Int,
+    val yDp: Int,
+    val blurDp: Int,
+    val alpha: Float,
+)
+
+/** Desktop shadow for the welcome sheet. The same literal applies in every theme. */
+fun firstRunPreviewPaperShadow() = FirstRunPreviewPaperShadow(
+    FIRST_RUN_PREVIEW_PAPER_SHADOW_X_DP,
+    FIRST_RUN_PREVIEW_PAPER_SHADOW_Y_DP,
+    FIRST_RUN_PREVIEW_PAPER_SHADOW_BLUR_DP,
+    FIRST_RUN_PREVIEW_PAPER_SHADOW_ALPHA,
+)
+
+/** Black at 14%, packed ARGB. */
+fun firstRunPreviewPaperShadowColor(alpha: Float = FIRST_RUN_PREVIEW_PAPER_SHADOW_ALPHA): Int {
+    val channel = (alpha.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
+    return channel shl 24
+}
+
+/**
+ * Software-bitmap placement of the sheet rectangle shifted by the desktop offset.
+ * [padPx] is the bitmap inset of the unshifted sheet origin, large enough for the blur.
+ * Top corners follow the 11px sheet radius. The bottom corners stay square.
+ */
+data class FirstRunPreviewPaperShadowFrame(
+    val bitmapWidthPx: Int,
+    val bitmapHeightPx: Int,
+    val padPx: Float,
+    val shapeLeftPx: Float,
+    val shapeTopPx: Float,
+    val shapeRightPx: Float,
+    val shapeBottomPx: Float,
+    val topRadiusPx: Float,
+    val blurPx: Float,
+    val color: Int,
+)
+
+fun firstRunPreviewPaperShadowFrame(widthPx: Float, heightPx: Float, density: Float): FirstRunPreviewPaperShadowFrame? {
+    if (widthPx < 1f || heightPx < 1f || density <= 0f) return null
+    val shadow = firstRunPreviewPaperShadow()
+    if (shadow.blurDp <= 0) return null
+    val blurPx = shadow.blurDp * density
+    if (blurPx <= 0.5f) return null
+    val offsetX = shadow.xDp * density
+    val offsetY = shadow.yDp * density
+    val pad = blurPx * 2f + abs(offsetX) + abs(offsetY) + 2f
+    val bitmapWidth = ceil(widthPx + pad * 2f).toInt()
+    val bitmapHeight = ceil(heightPx + pad * 2f).toInt()
+    if (bitmapWidth < 1 || bitmapHeight < 1) return null
+    return FirstRunPreviewPaperShadowFrame(
+        bitmapWidthPx = bitmapWidth,
+        bitmapHeightPx = bitmapHeight,
+        padPx = pad,
+        shapeLeftPx = pad + offsetX,
+        shapeTopPx = pad + offsetY,
+        shapeRightPx = pad + offsetX + widthPx,
+        shapeBottomPx = pad + offsetY + heightPx,
+        topRadiusPx = FIRST_RUN_PREVIEW_PAPER_RADIUS_TOP_DP * density,
+        blurPx = blurPx,
+        color = firstRunPreviewPaperShadowColor(shadow.alpha),
+    )
+}
 
 /** Copy and panel weights from the desktop first-run grids above 980dp. */
 fun firstRunColumnWeights(step: Int): Pair<Float, Float> = firstRunColumnWeights(step, FIRST_RUN_MAX_DP)
