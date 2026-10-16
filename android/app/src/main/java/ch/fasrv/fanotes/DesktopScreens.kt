@@ -142,6 +142,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
@@ -6806,6 +6807,33 @@ private fun settingsSectionIcon(section: String) = when (section) {
 }
 
 @Composable
+private fun SettingsNavIconButton(
+    icon: ImageVector,
+    label: String,
+    active: Boolean,
+    iconDp: Int = ch.fasrv.fanotes.desk.SETTINGS_NAV_ICON_DP,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = ch.fasrv.fanotes.desk.SETTINGS_NAV_ROW_DP.dp)
+            .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SETTINGS_NAV_RADIUS_DP.dp))
+            .background(if (active) LocalStatusInk.current.panelActive else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(ch.fasrv.fanotes.desk.SETTINGS_NAV_NARROW_BUTTON_PAD_DP.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            contentDescription = label,
+            modifier = Modifier.size(iconDp.dp),
+            tint = if (active) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
+        )
+    }
+}
+
+@Composable
 private fun SyncAccountCallout(modifier: Modifier = Modifier) {
     val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
     val shape = RoundedCornerShape(ch.fasrv.fanotes.sync.SYNC_CALLOUT_RADIUS_DP.dp)
@@ -6947,7 +6975,8 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
         val scrim = remember { MutableInteractionSource() }
         val card = remember { MutableInteractionSource() }
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val panel = ch.fasrv.fanotes.desk.settingsModalSize(maxWidth.value.roundToInt(), maxHeight.value.roundToInt())
+            val viewportWidth = maxWidth.value.roundToInt()
+            val panel = ch.fasrv.fanotes.desk.settingsModalSize(viewportWidth, maxHeight.value.roundToInt())
             val shape = RoundedCornerShape(panel.radiusDp.dp)
             Box(
                 Modifier
@@ -6973,7 +7002,7 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                         )
                         .background(MaterialTheme.colorScheme.background),
                 ) {
-                    SettingsPage(model, onSync, onOpenVault, onPrivate, dismiss)
+                    SettingsPage(model, onSync, onOpenVault, onPrivate, dismiss, ch.fasrv.fanotes.desk.settingsNavCollapses(viewportWidth))
                 }
             }
         }
@@ -6987,6 +7016,7 @@ private fun SettingsPage(
     onOpenVault: () -> Unit,
     onPrivate: () -> Unit,
     onClose: () -> Unit,
+    navCollapsed: Boolean,
 ) {
     val settings by model.deskSettings.collectAsStateWithLifecycle()
     val sync by model.sync.collectAsStateWithLifecycle()
@@ -7010,14 +7040,14 @@ private fun SettingsPage(
         else paneScroll.animateScrollTo(y)
         scrollTarget = null
     }
+    val navPadX = if (navCollapsed) ch.fasrv.fanotes.desk.SETTINGS_NAV_NARROW_PAD_X_DP else ch.fasrv.fanotes.desk.SETTINGS_NAV_PAD_X_DP
     Row(Modifier.fillMaxSize()) {
         Column(
-            Modifier
-                .weight(0.38f)
+            (if (navCollapsed) Modifier.width(ch.fasrv.fanotes.desk.SETTINGS_NAV_NARROW_DP.dp) else Modifier.weight(0.38f))
                 .verticalScroll(rememberScrollState())
                 .padding(
-                    start = ch.fasrv.fanotes.desk.SETTINGS_NAV_PAD_X_DP.dp,
-                    end = ch.fasrv.fanotes.desk.SETTINGS_NAV_PAD_X_DP.dp,
+                    start = navPadX.dp,
+                    end = navPadX.dp,
                     top = ch.fasrv.fanotes.desk.SETTINGS_NAV_PAD_TOP_DP.dp,
                     bottom = ch.fasrv.fanotes.desk.SETTINGS_NAV_PAD_BOTTOM_DP.dp,
                 ),
@@ -7025,7 +7055,7 @@ private fun SettingsPage(
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTINGS_BRAND_GAP_DP.dp),
+                horizontalArrangement = if (navCollapsed) Arrangement.Center else Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTINGS_BRAND_GAP_DP.dp),
             ) {
                 Box(
                     Modifier
@@ -7034,60 +7064,91 @@ private fun SettingsPage(
                         .background(MaterialTheme.colorScheme.onSurface),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(17.dp), tint = MaterialTheme.colorScheme.background)
+                    Icon(
+                        Icons.Filled.Settings,
+                        contentDescription = if (navCollapsed) ch.fasrv.fanotes.desk.SETTINGS_BRAND else null,
+                        modifier = Modifier.size(17.dp),
+                        tint = MaterialTheme.colorScheme.background,
+                    )
                 }
-                Column(Modifier.weight(1f)) {
-                    Text(ch.fasrv.fanotes.desk.SETTINGS_BRAND, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    Text(ch.fasrv.fanotes.desk.SETTINGS_BRAND_DETAIL, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 2.dp))
+                if (!navCollapsed) {
+                    Column(Modifier.weight(1f)) {
+                        Text(ch.fasrv.fanotes.desk.SETTINGS_BRAND, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(ch.fasrv.fanotes.desk.SETTINGS_BRAND_DETAIL, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 2.dp))
+                    }
                 }
             }
-            SettingsSearchField(settingsQuery, { settingsQuery = it })
+            if (!navCollapsed) SettingsSearchField(settingsQuery, { settingsQuery = it })
             if (settingsQuery.isNotBlank()) {
-                Column(verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTINGS_RESULT_GAP_DP.dp)) {
-                    Text(
-                        ch.fasrv.fanotes.desk.settingsSearchCount(settingsResults.size).uppercase(java.util.Locale.GERMAN),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTINGS_NAV_GROUP_WEIGHT),
-                        letterSpacing = ch.fasrv.fanotes.desk.SETTINGS_NAV_GROUP_TRACKING.em,
-                        color = LocalStatusInk.current.muted,
-                        modifier = Modifier.padding(start = 8.dp, top = 2.dp, end = 8.dp, bottom = 4.dp),
-                    )
-                    settingsResults.forEach { item ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = ch.fasrv.fanotes.desk.SETTINGS_NAV_ROW_DP.dp)
-                                .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SETTINGS_NAV_RADIUS_DP.dp))
-                                .clickable {
-                                    section = item.section
-                                    scrollTarget = item.target
-                                    settingsQuery = ""
-                                }
-                                .padding(horizontal = 8.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(9.dp),
-                        ) {
-                            Icon(settingsSectionIcon(item.section), contentDescription = null, modifier = Modifier.size(15.dp), tint = LocalStatusInk.current.muted)
-                            Column(Modifier.weight(1f)) {
-                                Text(item.label, fontSize = 12.sp, fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTINGS_NAV_LABEL_WEIGHT))
-                                Text(item.detail, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                if (navCollapsed) {
+                    Column(verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTINGS_RESULT_GAP_DP.dp)) {
+                        settingsResults.forEach { item ->
+                            SettingsNavIconButton(settingsSectionIcon(item.section), item.label, false, iconDp = ch.fasrv.fanotes.desk.SETTINGS_RESULT_ICON_DP) {
+                                section = item.section
+                                scrollTarget = item.target
+                                settingsQuery = ""
                             }
-                            Icon(
-                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                                tint = LocalStatusInk.current.muted.copy(alpha = 0.45f),
+                        }
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTINGS_RESULT_GAP_DP.dp)) {
+                        Text(
+                            ch.fasrv.fanotes.desk.settingsSearchCount(settingsResults.size).uppercase(java.util.Locale.GERMAN),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTINGS_NAV_GROUP_WEIGHT),
+                            letterSpacing = ch.fasrv.fanotes.desk.SETTINGS_NAV_GROUP_TRACKING.em,
+                            color = LocalStatusInk.current.muted,
+                            modifier = Modifier.padding(start = 8.dp, top = 2.dp, end = 8.dp, bottom = 4.dp),
+                        )
+                        settingsResults.forEach { item ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = ch.fasrv.fanotes.desk.SETTINGS_NAV_ROW_DP.dp)
+                                    .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SETTINGS_NAV_RADIUS_DP.dp))
+                                    .clickable {
+                                        section = item.section
+                                        scrollTarget = item.target
+                                        settingsQuery = ""
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                            ) {
+                                Icon(settingsSectionIcon(item.section), contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.SETTINGS_RESULT_ICON_DP.dp), tint = LocalStatusInk.current.muted)
+                                Column(Modifier.weight(1f)) {
+                                    Text(item.label, fontSize = 12.sp, fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTINGS_NAV_LABEL_WEIGHT))
+                                    Text(item.detail, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                                }
+                                Icon(
+                                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                    tint = LocalStatusInk.current.muted.copy(alpha = 0.45f),
+                                )
+                            }
+                        }
+                        if (settingsResults.isEmpty()) {
+                            Text(
+                                ch.fasrv.fanotes.desk.SETTINGS_SEARCH_HINT,
+                                fontSize = 12.sp,
+                                lineHeight = 18.sp,
+                                color = LocalStatusInk.current.muted,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
                             )
                         }
                     }
-                    if (settingsResults.isEmpty()) {
-                        Text(
-                            ch.fasrv.fanotes.desk.SETTINGS_SEARCH_HINT,
-                            fontSize = 12.sp,
-                            lineHeight = 18.sp,
-                            color = LocalStatusInk.current.muted,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                        )
+                }
+            } else if (navCollapsed) {
+                Column(verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTINGS_NAV_GROUP_GAP_DP.dp)) {
+                    ch.fasrv.fanotes.desk.settingsNavGroups().forEach { (_, items) ->
+                        Column(verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTINGS_NAV_ITEM_GAP_DP.dp)) {
+                            items.forEach { item ->
+                                SettingsNavIconButton(settingsSectionIcon(item.id), item.label, section == item.id) {
+                                    section = item.id
+                                }
+                            }
+                        }
                     }
                 }
             } else {
