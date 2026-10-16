@@ -350,6 +350,7 @@ fun FaNotesTheme(
         warning = Color(android.graphics.Color.parseColor(chrome.warning ?: palette.warning)),
         soft = Color(android.graphics.Color.parseColor(chrome.soft ?: palette.soft)),
         panelActive = Color(android.graphics.Color.parseColor(palette.panelActive)),
+        panelStrong = Color(android.graphics.Color.parseColor(palette.panelStrong)),
     )
     val accent = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccent(accentHex)))
     val onAccent = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.accentInk(accentHex)))
@@ -708,7 +709,8 @@ fun FaNotesScreen(
             outlineEnabled = desk["outline"] != "off",
             notes = ch.fasrv.fanotes.desk.workspaceKeepsNoteChrome(destination),
         )
-        Row(Modifier.weight(1f).fillMaxWidth()) {
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Row(Modifier.fillMaxSize()) {
             if (panels.sidebar) {
                 VaultPane(
                     modifier = Modifier.width((chrome.sidebarDp ?: ch.fasrv.fanotes.desk.sidebarWidthDp(desk["sidebar-width"])).dp).fillMaxHeight(),
@@ -840,6 +842,20 @@ fun FaNotesScreen(
                 }
             }
         }
+            val toast = message
+            if (!toast.isNullOrBlank()) {
+                FaNotesToast(
+                    toast,
+                onDismiss = { model.message.value = null },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(
+                        end = ch.fasrv.fanotes.desk.TOAST_INSET_END_DP.dp,
+                        bottom = ch.fasrv.fanotes.desk.TOAST_INSET_BOTTOM_DP.dp,
+                    ),
+            )
+        }
+        }
         val sheetCount = backdrop.filter { it.worksheetId.isNotEmpty() }.distinctBy { it.worksheetId }.size
         DeskStatusBar(
             model.wordCountNow(),
@@ -855,7 +871,7 @@ fun FaNotesScreen(
             },
             sidebarOpen = if (wide) sidebarOpen else showList,
             onToggleSidebar = { model.setSidebarOpen(!(if (wide) sidebarOpen else showList)) },
-            notice = message,
+            notice = null,
             onDismissNotice = { model.message.value = null },
             mode = ch.fasrv.fanotes.desk.statusModeLabel(
                 destination,

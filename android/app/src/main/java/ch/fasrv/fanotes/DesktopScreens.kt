@@ -164,10 +164,11 @@ internal data class StatusInk(
     val warning: Color,
     val soft: Color,
     val panelActive: Color,
+    val panelStrong: Color,
 )
 
 internal val LocalStatusInk = staticCompositionLocalOf {
-    StatusInk(Color(0xFF5E5C57), Color(0xFF1F7A48), Color(0xFF8A5A12), Color(0xFF4E4C47), Color(0xFFE3E2DE))
+    StatusInk(Color(0xFF5E5C57), Color(0xFF1F7A48), Color(0xFF8A5A12), Color(0xFF4E4C47), Color(0xFFE3E2DE), Color(0xFFFFFFFF))
 }
 
 @Composable
@@ -256,6 +257,46 @@ private fun RibbonButton(
             maxLines = 1,
             color = if (active) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
         )
+    }
+}
+
+@Composable
+fun FaNotesToast(message: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.TOAST_RADIUS_DP.dp)
+    Row(
+        modifier
+            .widthIn(max = ch.fasrv.fanotes.desk.TOAST_MAX_DP.dp)
+            .fillMaxWidth(0.8f)
+            .heightIn(min = ch.fasrv.fanotes.desk.TOAST_MIN_DP.dp)
+            .shadow(12.dp, shape)
+            .clip(shape)
+            .background(LocalStatusInk.current.panelStrong)
+            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), shape)
+            .padding(
+                start = ch.fasrv.fanotes.desk.TOAST_PAD_START_DP.dp,
+                top = ch.fasrv.fanotes.desk.TOAST_PAD_DP.dp,
+                end = ch.fasrv.fanotes.desk.TOAST_PAD_DP.dp,
+                bottom = ch.fasrv.fanotes.desk.TOAST_PAD_DP.dp,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.TOAST_GAP_DP.dp),
+    ) {
+        Text(
+            message,
+            modifier = Modifier.weight(1f),
+            fontSize = ch.fasrv.fanotes.desk.TOAST_FONT_SP.sp,
+            lineHeight = 18.sp,
+            color = LocalStatusInk.current.soft,
+        )
+        Box(
+            Modifier
+                .size(ch.fasrv.fanotes.desk.TOAST_CLOSE_DP.dp)
+                .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.TOAST_CLOSE_RADIUS_DP.dp))
+                .clickable(onClickLabel = "Schließen", onClick = onDismiss),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Close, contentDescription = "Schließen", modifier = Modifier.size(14.dp), tint = LocalStatusInk.current.muted)
+        }
     }
 }
 
