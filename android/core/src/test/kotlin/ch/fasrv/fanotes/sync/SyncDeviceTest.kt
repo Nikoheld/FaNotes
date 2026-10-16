@@ -37,5 +37,14 @@ class SyncDeviceTest {
         assertEquals("Die beiden neuen Passwörter stimmen nicht überein.", syncPasswordChangeError("abcdefghij", "abcdefghjk"))
         assertEquals("Das Passwort braucht mindestens 10 Zeichen.", syncPasswordChangeError("short", "short"))
         assertEquals(null, syncPasswordChangeError("brand new secret", "brand new secret"))
+        val rows = conflictDiffRows("A", "A\nB")
+        assertEquals(listOf("same" to "A", "added" to "B"), rows.map { it.kind to it.text })
+        assertEquals("+", conflictDiffMark("added"))
+        assertEquals("-", conflictDiffMark("removed"))
+        assertEquals(" ", conflictDiffMark("same"))
+        assertEquals("Serverfassung behalten", conflictChoiceLabel("remote"))
+        assertEquals("Lokale Fassung behalten", conflictChoiceLabel("local"))
+        assertEquals("Zusammenführen", conflictChoiceLabel("both"))
+        assertEquals(80, CONFLICT_DIFF_LIMIT)
     }
 }

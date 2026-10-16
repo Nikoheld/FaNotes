@@ -3322,6 +3322,27 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    data class ConflictReview(val path: String, val copyPath: String, val remote: String, val local: String)
+
+    val conflictReview = MutableStateFlow<ConflictReview?>(null)
+
+    fun openConflictReview(conflict: SyncConflict) {
+        viewModelScope.launch {
+            conflictReview.value = withContext(Dispatchers.IO) {
+                ConflictReview(
+                    conflict.path,
+                    conflict.copyPath,
+                    graph.vault.read(conflict.path)?.decodeToString().orEmpty(),
+                    graph.vault.read(conflict.copyPath)?.decodeToString().orEmpty(),
+                )
+            }
+        }
+    }
+
+    fun closeConflictReview() {
+        conflictReview.value = null
+    }
+
     fun resolveConflict(conflict: SyncConflict, choice: String) {
         viewModelScope.launch {
             val messageText = withContext(Dispatchers.IO) {
@@ -3345,6 +3366,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 }.getOrElse { "Der Konflikt konnte nicht gelöst werden." }
             }
             if (messageText == "Konflikt gelöst.") {
+                if (conflictReview.value?.copyPath == conflict.copyPath) conflictReview.value = null
                 graph.engine.dismissConflict(conflict.copyPath)
                 graph.engine.notifyLocalChange()
                 refreshTree()
