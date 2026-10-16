@@ -92,6 +92,33 @@ class SettingsModalTest {
     }
 
     @Test
+    fun theRangeValueUsesTheEditorFaceNotTheUiFace() {
+        assertTrue(RANGE_SETTING_VALUE_USES_EDITOR_FONT)
+        assertEquals("editor", RANGE_SETTING_VALUE_FONT)
+        assertNotEquals("ui", RANGE_SETTING_VALUE_FONT)
+        assertEquals("soft", RANGE_SETTING_VALUE_INK)
+        assertEquals("soft", rangeSettingValueInkRole())
+        assertNotEquals("muted", RANGE_SETTING_VALUE_INK)
+        assertNotEquals("muted", rangeSettingValueInkRole())
+        THEME_PALETTES.forEach { palette ->
+            assertNotEquals(palette.muted, palette.soft)
+        }
+        assertEquals("jetbrains", rangeSettingValueFontId(null))
+        assertEquals("jetbrains", rangeSettingValueFontId(""))
+        assertNotEquals(uiFontId(null), rangeSettingValueFontId(null))
+        val editor = EDITOR_FONTS.first { it.id == rangeSettingValueFontId(null) }
+        val ui = UI_FONTS.first { it.id == uiFontId(null) }
+        assertEquals("'JetBrains Mono', ui-monospace, monospace", editor.stack)
+        assertNotEquals(ui.stack, editor.stack)
+        assertEquals("fira", rangeSettingValueFontId("'Fira Code', ui-monospace, monospace"))
+        assertEquals("plex", rangeSettingValueFontId("IBM Plex Mono"))
+        assertEquals("system", rangeSettingValueFontId("ui-monospace, SFMono-Regular, monospace"))
+        assertEquals("jetbrains", rangeSettingValueFontId(ui.stack))
+        assertNotEquals("inter", rangeSettingValueFontId(ui.stack))
+        assertNotEquals("dm", rangeSettingValueFontId("'DM Sans', ui-sans-serif, system-ui"))
+    }
+
+    @Test
     fun theSettingsHeadingIconShowsAbove760() {
         assertEquals(38, SETTINGS_HEADING_ICON_DP)
         assertEquals(11, SETTINGS_HEADING_ICON_RADIUS_DP)
