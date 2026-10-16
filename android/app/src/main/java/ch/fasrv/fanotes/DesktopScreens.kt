@@ -4488,17 +4488,41 @@ private fun AiChoiceCard(title: String, detail: String, badge: String, selected:
 }
 
 @Composable
-private fun AiPanelButton(label: String, primary: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+private fun AiPanelButton(label: String, primary: Boolean, enabled: Boolean = true, minWidth: Int = 0, onClick: () -> Unit) {
     val shape = RoundedCornerShape(6.dp)
     val fill = if (primary) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.panelStrong
     val ink = if (primary) MaterialTheme.colorScheme.background else LocalStatusInk.current.soft
     val border = if (primary) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
     Box(
-        Modifier.height(34.dp).alpha(if (enabled) 1f else 0.45f).clip(shape).background(fill).border(1.dp, border, shape).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 12.dp),
+        Modifier
+            .height(34.dp)
+            .widthIn(min = minWidth.dp)
+            .alpha(if (enabled) 1f else 0.45f)
+            .clip(shape)
+            .background(fill)
+            .border(1.dp, border, shape)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = ink)
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = ink, maxLines = 1)
     }
+}
+
+@Composable
+private fun AiSegment(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        fontSize = 12.sp,
+        color = if (selected) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
+        modifier = Modifier
+            .height(27.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp)
+            .wrapContentHeight(Alignment.CenterVertically),
+    )
 }
 
 @Composable
@@ -4511,7 +4535,13 @@ private fun AiField(
     minLines: Int = 1,
 ) {
     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.AI_FIELD_RADIUS_DP.dp)
-    Column(Modifier.fillMaxWidth().padding(top = 9.dp)) {
+    var focused by remember { mutableStateOf(false) }
+    val border = if (focused) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
+    }
+    Column(Modifier.fillMaxWidth().padding(top = 9.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Text(label, fontSize = 12.sp, fontWeight = FontWeight(650), color = LocalStatusInk.current.soft)
         BasicTextField(
             value = value,
@@ -4519,23 +4549,26 @@ private fun AiField(
             singleLine = minLines == 1,
             minLines = minLines,
             visualTransformation = if (password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
-            textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp),
+            textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, lineHeight = 17.4.sp),
             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 5.dp)
-                .heightIn(min = if (minLines > 1) ch.fasrv.fanotes.desk.AI_FIELD_AREA_DP.dp else ch.fasrv.fanotes.desk.AI_FIELD_HEIGHT_DP.dp)
+                .then(
+                    if (minLines > 1) Modifier.heightIn(min = ch.fasrv.fanotes.desk.AI_FIELD_AREA_DP.dp)
+                    else Modifier.height(ch.fasrv.fanotes.desk.AI_FIELD_HEIGHT_DP.dp),
+                )
                 .clip(shape)
-                .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), shape)
+                .border(1.dp, border, shape)
                 .background(MaterialTheme.colorScheme.background)
+                .onFocusChanged { focused = it.isFocused }
                 .padding(horizontal = 9.dp, vertical = if (minLines > 1) 8.dp else 0.dp),
             decorationBox = { inner ->
                 Box(
-                    Modifier.fillMaxWidth().heightIn(min = ch.fasrv.fanotes.desk.AI_FIELD_HEIGHT_DP.dp),
-                    contentAlignment = Alignment.CenterStart,
+                    Modifier.fillMaxWidth().then(if (minLines == 1) Modifier.fillMaxHeight() else Modifier),
+                    contentAlignment = if (minLines == 1) Alignment.CenterStart else Alignment.TopStart,
                 ) {
                     if (value.isEmpty() && hint.isNotEmpty()) {
-                        Text(hint, color = LocalStatusInk.current.muted, fontSize = 12.sp, maxLines = 1)
+                        Text(hint, color = LocalStatusInk.current.muted, fontSize = 12.sp, maxLines = if (minLines == 1) 1 else 4)
                     }
                     inner()
                 }
@@ -4570,12 +4603,26 @@ fun AiScreen(model: FaNotesViewModel) {
     val calmMotion = ch.fasrv.fanotes.desk.reduceMotion(settings["reduce-motion"])
     val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
     val canRun = !busy && note != null && setting("model").isNotBlank() && actions.isNotEmpty()
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val screenDp = maxWidth.value.toInt()
+        val panelRadius = ch.fasrv.fanotes.desk.aiPanelRadiusDp(screenDp)
+        val panelShape = RoundedCornerShape(panelRadius.dp)
+        val panelRule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    Column(
+        Modifier
+            .fillMaxSize()
+            .clip(panelShape)
+            .then(
+                if (panelRadius == 0) Modifier
+                else Modifier.border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), panelShape),
+            )
+            .background(MaterialTheme.colorScheme.surface),
+    ) {
+        Column(Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.AI_HEADER_DP.dp).background(MaterialTheme.colorScheme.background)) {
         Row(
             Modifier
+                .weight(1f)
                 .fillMaxWidth()
-                .heightIn(min = ch.fasrv.fanotes.desk.AI_HEADER_DP.dp)
-                .background(MaterialTheme.colorScheme.background)
                 .padding(horizontal = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -4584,11 +4631,11 @@ fun AiScreen(model: FaNotesViewModel) {
                 Modifier.size(ch.fasrv.fanotes.desk.AI_MARK_DP.dp).clip(RoundedCornerShape(ch.fasrv.fanotes.desk.AI_MARK_RADIUS_DP.dp)).background(MaterialTheme.colorScheme.onSurface),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.background)
+                Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.AI_MARK_ICON_DP.dp), tint = MaterialTheme.colorScheme.background)
             }
             Column(Modifier.weight(1f)) {
-                Text(ch.fasrv.fanotes.desk.AI_PANEL_EYEBROW.uppercase(java.util.Locale.GERMAN), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.08.em, color = accent)
-                Text(ch.fasrv.fanotes.desk.AI_PANEL_TITLE, fontSize = 18.sp, letterSpacing = (-0.035).em)
+                Text(ch.fasrv.fanotes.desk.AI_PANEL_EYEBROW.uppercase(java.util.Locale.GERMAN), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.12.em, color = accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(ch.fasrv.fanotes.desk.AI_PANEL_TITLE, fontSize = 18.sp, letterSpacing = (-0.035).em, maxLines = 1)
                 Text(ch.fasrv.fanotes.desk.AI_PANEL_DETAIL, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
             }
             Box(
@@ -4598,7 +4645,8 @@ fun AiScreen(model: FaNotesViewModel) {
                 Icon(Icons.Filled.Close, contentDescription = ch.fasrv.fanotes.desk.AI_CLOSE, modifier = Modifier.size(18.dp), tint = LocalStatusInk.current.muted)
             }
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(panelRule))
+        }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             val panelWidth = maxWidth.value.toInt()
             val configPane: @Composable () -> Unit = {
@@ -4704,15 +4752,6 @@ fun AiScreen(model: FaNotesViewModel) {
             }
             val previewPane: @Composable () -> Unit = {
         Column(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 12.dp)) {
-        Text(ch.fasrv.fanotes.desk.AI_PREVIEW_EYEBROW.uppercase(java.util.Locale.GERMAN), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.08.em, color = accent)
-        Text(
-            if (preview != null) "${definition.title} · Ergebnis" else note?.path ?: "Keine Notiz geöffnet",
-            fontSize = 12.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(bottom = 12.dp),
-        )
-        if (status.isNotBlank()) Text(status, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(bottom = 8.dp))
         val result = preview
         if (result == null) {
             Text("Deine Notiz bleibt unverändert", fontWeight = FontWeight.SemiBold)
@@ -5073,25 +5112,68 @@ fun AiScreen(model: FaNotesViewModel) {
                 }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 12.dp)) {
-            if (preview != null) {
-                AiPanelButton(ch.fasrv.fanotes.desk.AI_RESET, primary = false) { model.aiPreview.value = null }
-                AiPanelButton(ch.fasrv.fanotes.desk.AI_APPLY, primary = true) { model.applyAiPreview() }
-            } else {
-                AiPanelButton(ch.fasrv.fanotes.desk.AI_RUN, primary = true, enabled = canRun) {
-                    model.runAi(provider, setting("url"), setting("model"), setting("key"), setting("user"), actions.toList(), instruction)
-                }
-            }
-        }
         }
             }
             val previewScroll = Modifier
                 .onGloballyPositioned { previewColumnTop = it.positionInRoot().y.roundToInt() }
                 .verticalScroll(pageScroll)
+            val previewHeading = if (preview != null) "${definition.title} · Ergebnis" else note?.title?.ifBlank { null } ?: note?.path ?: "Keine Notiz geöffnet"
+            val previewToolbar: @Composable () -> Unit = {
+                Row(
+                    Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.AI_PREVIEW_TOOLBAR_DP.dp).padding(horizontal = 15.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(ch.fasrv.fanotes.desk.AI_PREVIEW_EYEBROW.uppercase(java.util.Locale.GERMAN), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.12.em, color = accent, maxLines = 1)
+                        Text(previewHeading, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    if (preview != null) {
+                        Row(
+                            Modifier.padding(start = 12.dp).clip(RoundedCornerShape(8.dp)).border(1.dp, panelRule, RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surface).padding(2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            AiSegment("Schön", pretty) { pretty = true }
+                            AiSegment("Markdown", !pretty) { pretty = false }
+                        }
+                    }
+                }
+            }
+            val previewFooter: @Composable () -> Unit = {
+                Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
+                    if (status.isNotBlank()) {
+                        Text(status, fontSize = 12.sp, color = LocalStatusInk.current.soft, modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 9.dp))
+                    }
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(panelRule))
+                    Row(
+                        Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.AI_FOOTER_DP.dp).padding(horizontal = 13.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    ) {
+                        if (preview != null) {
+                            AiPanelButton(ch.fasrv.fanotes.desk.AI_RESET, primary = false) { model.aiPreview.value = null }
+                            AiPanelButton(ch.fasrv.fanotes.desk.AI_APPLY, primary = true) { model.applyAiPreview() }
+                        } else {
+                            AiPanelButton(
+                                ch.fasrv.fanotes.desk.AI_RUN,
+                                primary = true,
+                                enabled = canRun,
+                                minWidth = ch.fasrv.fanotes.desk.AI_RUN_MIN_DP,
+                            ) {
+                                model.runAi(provider, setting("url"), setting("model"), setting("key"), setting("user"), actions.toList(), instruction)
+                            }
+                        }
+                    }
+                }
+            }
             if (ch.fasrv.fanotes.desk.aiPanelStacks(panelWidth)) {
-                Column(Modifier.fillMaxSize().then(previewScroll)) {
-                    Column(Modifier.padding(15.dp)) { configPane() }
-                    previewPane()
+                Column(Modifier.fillMaxSize()) {
+                    Column(Modifier.weight(1f).fillMaxWidth().then(previewScroll)) {
+                        Column(Modifier.padding(15.dp)) { configPane() }
+                        previewToolbar()
+                        previewPane()
+                    }
+                    previewFooter()
                 }
             } else {
                 Row(Modifier.fillMaxSize()) {
@@ -5103,13 +5185,17 @@ fun AiScreen(model: FaNotesViewModel) {
                             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.84f))
                             .padding(15.dp),
                     ) { configPane() }
-                    Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
-                    Column(
-                        Modifier.weight(1f).fillMaxHeight().background(MaterialTheme.colorScheme.background).then(previewScroll),
-                    ) { previewPane() }
+                    Box(Modifier.width(1.dp).fillMaxHeight().background(panelRule))
+                    Column(Modifier.weight(1f).fillMaxHeight().background(MaterialTheme.colorScheme.background)) {
+                        previewToolbar()
+                        Box(Modifier.fillMaxWidth().height(1.dp).background(panelRule))
+                        Column(Modifier.weight(1f).fillMaxWidth().then(previewScroll)) { previewPane() }
+                        previewFooter()
+                    }
                 }
             }
         }
+    }
     }
 }
 
