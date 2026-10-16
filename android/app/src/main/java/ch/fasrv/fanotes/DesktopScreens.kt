@@ -141,8 +141,12 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
@@ -2358,7 +2362,55 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
         anchor = next
         if (view == "month") month = YearMonth.from(next)
     }
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    fun openNewEvent() {
+        val now = java.time.LocalTime.now()
+        val snapped = ch.fasrv.fanotes.desk.snapCalendarClock(now.hour, now.minute)
+        val start = LocalDate.now().plusDays(snapped.dayOffset.toLong()).atTime(snapped.hour, snapped.minute)
+        editor = draftForCreate(document, start.toLocalDate(), start, start.plusHours(1), false)
+    }
+    val calendarFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { calendarFocus.requestFocus() } }
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .focusRequester(calendarFocus)
+            .focusable()
+            .onKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                val name = when (event.key) {
+                    Key.T -> "t"
+                    Key.N -> "n"
+                    Key.DirectionLeft -> "left"
+                    Key.DirectionRight -> "right"
+                    Key.One, Key.NumPad1 -> "1"
+                    Key.Two, Key.NumPad2 -> "2"
+                    Key.Three, Key.NumPad3 -> "3"
+                    Key.Four, Key.NumPad4 -> "4"
+                    Key.Five, Key.NumPad5 -> "5"
+                    else -> return@onKeyEvent false
+                }
+                val action = ch.fasrv.fanotes.desk.calendarKeyAction(
+                    name,
+                    event.isCtrlPressed,
+                    event.isAltPressed,
+                    event.isMetaPressed,
+                ) ?: return@onKeyEvent false
+                when (action) {
+                    "today" -> {
+                        anchor = LocalDate.now()
+                        month = YearMonth.now()
+                    }
+                    "new" -> openNewEvent()
+                    "previous" -> shiftCalendar(-1)
+                    "next" -> shiftCalendar(1)
+                    "day", "three", "week", "month", "agenda" -> {
+                        view = action
+                        if (action == "month") month = YearMonth.from(anchor)
+                    }
+                }
+                true
+            },
+    ) {
         val showSide = ch.fasrv.fanotes.desk.calendarShowsSide(maxWidth.value.toInt())
         Row(Modifier.fillMaxSize()) {
             if (showSide) {
@@ -2443,6 +2495,15 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 ) { Text(mark) }
             }
             Text(ch.fasrv.fanotes.desk.calendarHeading(view, anchor), fontSize = 15.sp, fontWeight = FontWeight(650), letterSpacing = (-0.01).em)
+            if (view == "week") {
+                val monday = ch.fasrv.fanotes.desk.calendarRange("week", anchor).first()
+                Text(
+                    "${ch.fasrv.fanotes.desk.CAL_WEEK} ${ch.fasrv.fanotes.desk.calendarIsoWeek(monday)}",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight(550),
+                    color = LocalStatusInk.current.muted,
+                )
+            }
             Row(
                 Modifier.height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp).widthIn(min = 120.dp).clip(calShape).border(1.dp, calRule, calShape).padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -2485,12 +2546,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                     .height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp)
                     .clip(calShape)
                     .background(MaterialTheme.colorScheme.primary)
-                    .clickable {
-                        val now = java.time.LocalTime.now()
-                        val snapped = ch.fasrv.fanotes.desk.snapCalendarClock(now.hour, now.minute)
-                        val start = LocalDate.now().plusDays(snapped.dayOffset.toLong()).atTime(snapped.hour, snapped.minute)
-                        editor = draftForCreate(document, start.toLocalDate(), start, start.plusHours(1), false)
-                    }
+                    .clickable { openNewEvent() }
                     .padding(horizontal = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -4329,28 +4385,17 @@ fun FirstRunDialog(
                         FirstRunProfiles(draft.profile) { onDraft(ch.fasrv.fanotes.desk.firstRunChooseProfile(draft, it)) }
                     }
                     2 -> {
-                        Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TITLE, fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.055).em, lineHeight = 36.sp, modifier = Modifier.padding(top = 18.dp))
-                        Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_BODY, fontSize = 13.sp, lineHeight = 22.sp, color = ink.muted, modifier = Modifier.padding(top = 15.dp).widthIn(max = 490.dp))
-                        Column(Modifier.padding(top = 21.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            val icons = listOf(Icons.Filled.Keyboard, Icons.Filled.Edit, Icons.Filled.Search)
-                            ch.fasrv.fanotes.desk.FIRST_RUN_WRITING.forEachIndexed { index, (title, detail) ->
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-                                    Box(
-                                        Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Icon(icons[index], contentDescription = null, modifier = Modifier.size(17.dp), tint = accent)
-                                    }
-                                    Column {
-                                        Text(title, fontSize = 12.sp, color = ink.soft)
-                                        Text(detail, fontSize = 12.sp, color = ink.muted, lineHeight = 17.sp, modifier = Modifier.padding(top = 3.dp))
-                                    }
+                        BoxWithConstraints(Modifier.fillMaxWidth()) {
+                            val wide = ch.fasrv.fanotes.desk.firstRunPreviewColumns(maxWidth.value.toInt()) == 2
+                            if (wide) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(0.78f)) { FirstRunWritingCopy(accent) { go(it) } }
+                                    WritingPreview(Modifier.weight(1.22f), accent)
                                 }
+                            } else {
+                                FirstRunWritingCopy(accent) { go(it) }
+                                WritingPreview(Modifier.fillMaxWidth().padding(top = 24.dp), accent)
                             }
-                        }
-                        Row(Modifier.fillMaxWidth().padding(top = 21.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            FirstRunQuiet(ch.fasrv.fanotes.desk.FIRST_RUN_BACK, leading = true) { go(1) }
-                            FirstRunContinue(ch.fasrv.fanotes.desk.FIRST_RUN_CHOOSE_FOLDERS) { go(3) }
                         }
                     }
                     else -> {
@@ -4586,6 +4631,94 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
                     modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, rule, RoundedCornerShape(999.dp)).background(ink.panelStrong).padding(horizontal = 10.dp, vertical = 6.dp),
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun FirstRunWritingCopy(accent: Color, onStep: (Int) -> Unit) {
+    val ink = LocalStatusInk.current
+    Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TITLE, fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.055).em, lineHeight = 36.sp, modifier = Modifier.padding(top = 18.dp))
+    Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_BODY, fontSize = 13.sp, lineHeight = 22.sp, color = ink.muted, modifier = Modifier.padding(top = 15.dp).widthIn(max = 490.dp))
+    Column(Modifier.padding(top = 21.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        val icons = listOf(Icons.Filled.Keyboard, Icons.Filled.Edit, Icons.Filled.Search)
+        ch.fasrv.fanotes.desk.FIRST_RUN_WRITING.forEachIndexed { index, (title, detail) ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
+                Box(
+                    Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(icons[index], contentDescription = null, modifier = Modifier.size(17.dp), tint = accent)
+                }
+                Column {
+                    Text(title, fontSize = 12.sp, color = ink.soft)
+                    Text(detail, fontSize = 12.sp, color = ink.muted, lineHeight = 17.sp, modifier = Modifier.padding(top = 3.dp))
+                }
+            }
+        }
+    }
+    Row(Modifier.fillMaxWidth().padding(top = 21.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        FirstRunQuiet(ch.fasrv.fanotes.desk.FIRST_RUN_BACK, leading = true) { onStep(1) }
+        FirstRunContinue(ch.fasrv.fanotes.desk.FIRST_RUN_CHOOSE_FOLDERS) { onStep(3) }
+    }
+}
+
+@Composable
+private fun WritingPreview(modifier: Modifier, accent: Color) {
+    val ink = LocalStatusInk.current
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_RADIUS_DP.dp)
+    val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
+    Column(
+        modifier
+            .clip(shape)
+            .border(1.dp, rule, shape)
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(start = 24.dp, end = 24.dp, top = 18.dp, bottom = 16.dp)
+            .semantics { contentDescription = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_PREVIEW_LABEL },
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(accent))
+            Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FILE, fontSize = 12.sp, color = ink.muted)
+        }
+        Column(
+            Modifier
+                .padding(top = 12.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(ink.panelStrong)
+                .padding(16.dp),
+        ) {
+            Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_DATE, fontSize = 12.sp, color = ink.muted)
+            Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_HEADING, fontSize = 20.sp, fontWeight = FontWeight(650), modifier = Modifier.padding(top = 6.dp))
+            Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TYPED, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+            Canvas(Modifier.fillMaxWidth().height(56.dp).padding(top = 8.dp).semantics { contentDescription = "Handschriftliche Integralrechnung" }) {
+                val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                val path = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(12f, size.height * 0.7f)
+                    quadraticTo(size.width * 0.12f, size.height * 0.15f, size.width * 0.22f, size.height * 0.45f)
+                    quadraticTo(size.width * 0.34f, size.height * 0.85f, size.width * 0.48f, size.height * 0.35f)
+                    quadraticTo(size.width * 0.7f, size.height * 0.1f, size.width - 12f, size.height * 0.55f)
+                }
+                drawPath(path, accent, style = stroke)
+            }
+            Row(
+                Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)).padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(12.dp), tint = accent)
+                Column(Modifier.weight(1f)) {
+                    Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_RECOGNIZED, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FORMULA, fontSize = 12.sp, color = ink.muted)
+                }
+                Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(13.dp), tint = accent)
+            }
+            Text(
+                ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_CONVERT,
+                fontSize = 12.sp,
+                color = ink.muted,
+                modifier = Modifier.padding(top = 8.dp).clip(RoundedCornerShape(6.dp)).border(1.dp, rule, RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 4.dp),
+            )
         }
     }
 }

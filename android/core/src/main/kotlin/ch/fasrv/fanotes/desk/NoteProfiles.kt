@@ -283,6 +283,14 @@ const val FIRST_RUN_PREVIEW_HITS = "1 Treffer"
 const val FIRST_RUN_PREVIEW_INK = "Handschrift"
 const val FIRST_RUN_PREVIEW_FOUND = "Sofort gefunden"
 const val FIRST_RUN_PREVIEW_LABEL = "Vorschau von FaNotes"
+const val FIRST_RUN_WRITING_PREVIEW_LABEL = "Vorschau einer Seite mit Text und Handschrift"
+const val FIRST_RUN_WRITING_FILE = "Analysis.md"
+const val FIRST_RUN_WRITING_DATE = "12. August · Mathematik"
+const val FIRST_RUN_WRITING_HEADING = "Integralrechnung"
+const val FIRST_RUN_WRITING_TYPED = "Der Flächeninhalt lässt sich mit dem bestimmten Integral berechnen."
+const val FIRST_RUN_WRITING_RECOGNIZED = "Im Hintergrund erkannt"
+const val FIRST_RUN_WRITING_FORMULA = "∫₀¹ (x + 2) dx = 2,5"
+const val FIRST_RUN_WRITING_CONVERT = "Optional umwandeln"
 val FIRST_RUN_PREVIEW_SUBJECTS = listOf("Mathematik", "Deutsch", "Französisch", "Physik", "Wirtschaft")
 
 fun firstRunPreviewColumns(widthDp: Int): Int = if (widthDp <= FIRST_RUN_PREVIEW_SPLIT_DP) 1 else 2
