@@ -50,6 +50,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
@@ -59,6 +60,8 @@ import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FileCopy
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
@@ -109,9 +112,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalConfiguration
@@ -127,6 +133,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -2840,33 +2848,224 @@ private fun WorksheetImportDialog(
     onNew: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Arbeitsblatt importieren") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Bild oder PDF", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        val scrim = remember { MutableInteractionSource() }
+        val card = remember { MutableInteractionSource() }
+        val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.SHEET_IMPORT_RADIUS_DP.dp)
+        val strong = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
+        val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+        val ink = LocalStatusInk.current
+        val screen = LocalConfiguration.current
+        val shadow = ch.fasrv.fanotes.desk.sheetImportShadow(MaterialTheme.colorScheme.background.luminance() < 0.5f)
+        val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+        val stacked = ch.fasrv.fanotes.desk.sheetImportColumns(screen.screenWidthDp) == 1
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM))
+                .clickable(interactionSource = scrim, indication = null, onClick = onDismiss),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth(ch.fasrv.fanotes.desk.SHEET_IMPORT_WIDTH_FRACTION)
+                    .widthIn(max = ch.fasrv.fanotes.desk.SHEET_IMPORT_MAX_DP.dp)
+                    .clickable(interactionSource = card, indication = null, onClick = {})
+                    .shadow(
+                        elevation = shadow.yDp.dp,
+                        shape = shape,
+                        ambientColor = Color.Black.copy(alpha = shadow.alpha),
+                        spotColor = Color.Black.copy(alpha = shadow.alpha),
+                    )
+                    .clip(shape)
+                    .border(1.dp, strong, shape)
+                    .background(MaterialTheme.colorScheme.surface),
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(ch.fasrv.fanotes.desk.SHEET_IMPORT_HEADER_DP.dp)
+                        .background(MaterialTheme.colorScheme.background)
+                        .padding(horizontal = ch.fasrv.fanotes.desk.SHEET_IMPORT_HEADER_PAD_DP.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SHEET_IMPORT_HEADER_GAP_DP.dp),
+                ) {
+                    Box(
+                        Modifier
+                            .size(ch.fasrv.fanotes.desk.SHEET_IMPORT_MARK_DP.dp)
+                            .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SHEET_IMPORT_MARK_RADIUS_DP.dp))
+                            .background(MaterialTheme.colorScheme.onSurface),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.FileUpload,
+                            contentDescription = null,
+                            modifier = Modifier.size(ch.fasrv.fanotes.desk.SHEET_IMPORT_MARK_ICON_DP.dp),
+                            tint = MaterialTheme.colorScheme.background,
+                        )
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            ch.fasrv.fanotes.desk.SHEET_IMPORT_EYEBROW.uppercase(java.util.Locale.GERMAN),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.09.em,
+                            color = accent,
+                        )
+                        Text(
+                            ch.fasrv.fanotes.desk.SHEET_IMPORT_TITLE,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
+                    Box(
+                        Modifier
+                            .size(ch.fasrv.fanotes.desk.SHEET_IMPORT_CLOSE_DP.dp)
+                            .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SHEET_IMPORT_CLOSE_RADIUS_DP.dp))
+                            .clickable(onClick = onDismiss),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "Schließen",
+                            modifier = Modifier.size(ch.fasrv.fanotes.desk.SHEET_IMPORT_CLOSE_ICON_DP.dp),
+                            tint = ink.muted,
+                        )
+                    }
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
                 Text(
-                    "Das Arbeitsblatt bleibt Teil deines Vaults. Anschließend kannst du direkt darauf Textfelder platzieren oder mit dem Grafiktablett schreiben.",
-                    fontSize = 13.sp,
+                    ch.fasrv.fanotes.desk.SHEET_IMPORT_BODY,
+                    fontSize = 12.sp,
+                    lineHeight = 19.sp,
+                    color = ink.muted,
+                    modifier = Modifier.padding(
+                        start = ch.fasrv.fanotes.desk.SHEET_IMPORT_BODY_PAD_X_DP.dp,
+                        end = ch.fasrv.fanotes.desk.SHEET_IMPORT_BODY_PAD_X_DP.dp,
+                        top = ch.fasrv.fanotes.desk.SHEET_IMPORT_BODY_PAD_TOP_DP.dp,
+                        bottom = ch.fasrv.fanotes.desk.SHEET_IMPORT_BODY_PAD_BOTTOM_DP.dp,
+                    ),
                 )
-                TextButton(onClick = onCurrent, enabled = noteTitle != null, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.fillMaxWidth()) {
-                        Text("In aktuelle Notiz", fontWeight = FontWeight.SemiBold)
-                        Text(noteTitle ?: "Keine Notiz geöffnet", fontSize = 12.sp)
+                Column(
+                    Modifier.padding(
+                        start = ch.fasrv.fanotes.desk.SHEET_IMPORT_BODY_PAD_X_DP.dp,
+                        end = ch.fasrv.fanotes.desk.SHEET_IMPORT_BODY_PAD_X_DP.dp,
+                        top = 4.dp,
+                        bottom = 20.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SHEET_IMPORT_OPTION_GAP_DP.dp),
+                ) {
+                    if (stacked) {
+                        SheetImportChoice(Icons.Filled.FileCopy, ch.fasrv.fanotes.desk.SHEET_IMPORT_CURRENT, noteTitle ?: ch.fasrv.fanotes.desk.SHEET_IMPORT_NONE, noteTitle != null, onCurrent)
+                        SheetImportChoice(Icons.AutoMirrored.Filled.NoteAdd, ch.fasrv.fanotes.desk.SHEET_IMPORT_NEW, ch.fasrv.fanotes.desk.SHEET_IMPORT_NEW_DETAIL, true, onNew)
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SHEET_IMPORT_OPTION_GAP_DP.dp)) {
+                            SheetImportChoice(Icons.Filled.FileCopy, ch.fasrv.fanotes.desk.SHEET_IMPORT_CURRENT, noteTitle ?: ch.fasrv.fanotes.desk.SHEET_IMPORT_NONE, noteTitle != null, onCurrent, Modifier.weight(1f))
+                            SheetImportChoice(Icons.AutoMirrored.Filled.NoteAdd, ch.fasrv.fanotes.desk.SHEET_IMPORT_NEW, ch.fasrv.fanotes.desk.SHEET_IMPORT_NEW_DETAIL, true, onNew, Modifier.weight(1f))
+                        }
+                    }
+                    SheetImportChoice(
+                        Icons.AutoMirrored.Filled.MenuBook,
+                        ch.fasrv.fanotes.desk.SHEET_IMPORT_ONENOTE,
+                        ch.fasrv.fanotes.desk.SHEET_IMPORT_ONENOTE_DETAIL,
+                        enabled = false,
+                        onClick = {},
+                        wide = true,
+                    )
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = ch.fasrv.fanotes.desk.SHEET_IMPORT_FOOTER_DP.dp)
+                        .padding(horizontal = ch.fasrv.fanotes.desk.SHEET_IMPORT_FOOTER_PAD_X_DP.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        ch.fasrv.fanotes.desk.SHEET_IMPORT_FORMATS,
+                        fontSize = 12.sp,
+                        color = ink.muted,
+                        modifier = Modifier.weight(1f),
+                    )
+                    val buttonShape = RoundedCornerShape(ch.fasrv.fanotes.desk.SHEET_IMPORT_BUTTON_RADIUS_DP.dp)
+                    Box(
+                        Modifier
+                            .height(ch.fasrv.fanotes.desk.SHEET_IMPORT_BUTTON_DP.dp)
+                            .clip(buttonShape)
+                            .background(ink.panelStrong)
+                            .border(1.dp, strong, buttonShape)
+                            .clickable(onClick = onDismiss)
+                            .padding(horizontal = ch.fasrv.fanotes.desk.SHEET_IMPORT_BUTTON_PAD_DP.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            ch.fasrv.fanotes.desk.SHEET_IMPORT_CANCEL,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = ink.soft,
+                        )
                     }
                 }
-                TextButton(onClick = onNew, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.fillMaxWidth()) {
-                        Text("Als neue Notiz", fontWeight = FontWeight.SemiBold)
-                        Text("Dateiname wird zum Notiztitel", fontSize = 12.sp)
-                    }
-                }
-                Text("PDF · Bilder", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
-    )
+        }
+    }
+}
+
+@Composable
+private fun SheetImportChoice(
+    icon: ImageVector,
+    title: String,
+    detail: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    wide: Boolean = false,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val hot = enabled && hovered
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.SHEET_IMPORT_OPTION_RADIUS_DP.dp)
+    val border = if (hot) MaterialTheme.colorScheme.primary.copy(alpha = ch.fasrv.fanotes.desk.SHEET_IMPORT_HOVER_BORDER) else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
+    val fill = if (hot) LocalStatusInk.current.panelActive else MaterialTheme.colorScheme.surface
+    val frame = modifier
+        .fillMaxWidth()
+        .heightIn(min = (if (wide) ch.fasrv.fanotes.desk.SHEET_IMPORT_ONENOTE_MIN_DP else ch.fasrv.fanotes.desk.SHEET_IMPORT_OPTION_MIN_DP).dp)
+        .alpha(if (enabled) 1f else ch.fasrv.fanotes.desk.SHEET_IMPORT_DISABLED_ALPHA)
+        .clip(shape)
+        .border(1.dp, border, shape)
+        .background(fill)
+        .hoverable(interaction)
+        .clickable(interactionSource = interaction, indication = null, enabled = enabled, onClick = onClick)
+        .padding(ch.fasrv.fanotes.desk.SHEET_IMPORT_OPTION_PAD_DP.dp)
+    val glyph = @Composable {
+        Box(
+            Modifier
+                .size(ch.fasrv.fanotes.desk.SHEET_IMPORT_OPTION_ICON_DP.dp)
+                .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SHEET_IMPORT_OPTION_ICON_RADIUS_DP.dp))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = ch.fasrv.fanotes.desk.SHEET_IMPORT_GLYPH_ALPHA)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.SHEET_IMPORT_OPTION_ICON_SIZE_DP.dp), tint = accent)
+        }
+    }
+    val copy = @Composable {
+        Text(title, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+        Text(detail, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+    }
+    if (wide) {
+        Row(frame, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SHEET_IMPORT_ONENOTE_GAP_DP.dp)) {
+            glyph()
+            Column(Modifier.weight(1f)) { copy() }
+        }
+    } else {
+        Column(frame) {
+            Box(Modifier.padding(bottom = 11.dp)) { glyph() }
+            copy()
+        }
+    }
 }
 
 @Composable

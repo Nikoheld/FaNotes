@@ -96,4 +96,23 @@ class WorksheetLayoutTest {
         assertEquals(WORKSHEET_HIGHLIGHT_HINT, worksheetPlaceHint(false, true))
         assertEquals(WORKSHEET_HIGHLIGHT_HINT, worksheetPlaceHint(true, true))
     }
+
+    @Test
+    fun theImportDialogUsesTheDesktopCard() {
+        assertEquals(620, SHEET_IMPORT_MAX_DP)
+        assertEquals(0.92f, SHEET_IMPORT_WIDTH_FRACTION)
+        assertEquals(12, SHEET_IMPORT_RADIUS_DP)
+        assertEquals(12, SHEET_IMPORT_OPTION_RADIUS_DP)
+        assertEquals(620, sheetImportWidthDp(900))
+        assertEquals(368, sheetImportWidthDp(400))
+        assertEquals(2, sheetImportColumns(561))
+        assertEquals(1, sheetImportColumns(560))
+        assertEquals(1, sheetImportColumns(400))
+        assertEquals(SheetImportShadow(12, 40, 0.08f), sheetImportShadow(false))
+        assertEquals(SheetImportShadow(16, 48, 0.32f), sheetImportShadow(true))
+        assertEquals("Bild oder PDF", SHEET_IMPORT_EYEBROW)
+        assertEquals("In der Linux- oder Windows-App", SHEET_IMPORT_ONENOTE_DETAIL)
+        assertEquals("PDF · Bilder · ONE · ONETOC2 · ONEPKG · ZIP", SHEET_IMPORT_FORMATS)
+        assertEquals(0.45f, SHEET_IMPORT_DISABLED_ALPHA)
+    }
 }
