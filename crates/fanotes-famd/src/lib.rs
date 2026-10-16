@@ -2065,12 +2065,49 @@ fn is_v8_word_char(character: char) -> bool {
     (character as u32) >= u32::from(b'A') && !is_date_parse_space(character)
 }
 
+/// `13:Oct` is hour 13 and October. The colon stays on the clock, and the
+/// month is the next word. `2026` cannot be a day, so the day is 1.
+/// `13Oct:2026` has no colon before the month, so it stays one token.
+fn split_time_colon_month(token: &str) -> Option<Vec<&str>> {
+    let bytes = token.as_bytes();
+    if bytes.first().is_none_or(|byte| !byte.is_ascii_digit()) || !token.contains(':') {
+        return None;
+    }
+    let mut index = 0;
+    while index < bytes.len() && (bytes[index].is_ascii_digit() || bytes[index] == b':') {
+        index += 1;
+    }
+    if index == 0 || index == bytes.len() || bytes[index - 1] != b':' {
+        return None;
+    }
+    let month_at = index;
+    while index < bytes.len() {
+        let character = token[index..].chars().next()?;
+        if !is_v8_word_char(character) {
+            break;
+        }
+        index += character.len_utf8();
+    }
+    if month_at == index || english_month(&token[month_at..index]).is_none() {
+        return None;
+    }
+    let mut parts = vec![&token[..month_at], &token[month_at..index]];
+    if index < token.len() {
+        parts.extend(expand_glued_month(&token[index..]));
+    }
+    Some(parts)
+}
+
 /// `13Oct2026` and `Oct2026` are separate fields. `GMT5` is the zone `GMT`
 /// and the number 5. `PM5` is the meridiem and the number 5. A non-keyword
 /// glued to a digit, as in `foo13` or `Oct13th`, stays one token so the date
 /// scan rejects it. `Oct_13` is October 13: the underscore continues the
-/// month word and the digits are the next field.
+/// month word and the digits are the next field. `13:Oct` is hour 13 and
+/// October: a month after a time colon is its own word.
 fn expand_glued_month(token: &str) -> Vec<&str> {
+    if let Some(parts) = split_time_colon_month(token) {
+        return parts;
+    }
     // `GMT+5` is one zone. Splitting it would turn the 5 into a date number.
     if month_zone_suffix(token).is_some()
         || !token.bytes().any(|byte| byte.is_ascii_digit())
@@ -10048,6 +10085,30 @@ mod tests {
                 ("10/13/2026:16:00", None),
                 ("on_Oct_13 2026", None),
                 ("x:2026-10-13T16:00:00Z", None),
+            ];
+            for (input, expected) in cases {
+                assert_eq!(super::canonical_iso(input).as_deref(), expected, "{input}");
+            }
+        });
+    }
+
+    #[test]
+    fn a_month_after_a_time_colon_defaults_the_day() {
+        with_tz("America/New_York", || {
+            // Node 22 `Date.parse`. `13:` is an hour and `Oct` is the month.
+            // `2026` cannot be a day, so it is the year and the day is 1.
+            // October 2026 is EDT, so 13:00 local is 17:00 UTC. `30` fills the
+            // open minute. `13` fits that minute, so `13:Oct:13` has no date.
+            // October 1950 is EST, so 13:00 local is 18:00 UTC.
+            let cases = [
+                ("13:Oct:2026", Some("2026-10-01T17:00:00.000Z")),
+                ("13:Oct 2026", Some("2026-10-01T17:00:00.000Z")),
+                ("4:May:2026", Some("2026-05-01T08:00:00.000Z")),
+                ("13:October:2026", Some("2026-10-01T17:00:00.000Z")),
+                ("13:Oct:2026 30", Some("2026-10-01T17:30:00.000Z")),
+                ("13:Oct:1950", Some("1950-10-01T18:00:00.000Z")),
+                ("16:Oct:13", None),
+                ("13:Oct:13", None),
             ];
             for (input, expected) in cases {
                 assert_eq!(super::canonical_iso(input).as_deref(), expected, "{input}");
