@@ -2492,6 +2492,68 @@ fun AiScreen(model: FaNotesViewModel) {
                                 )
                             }
                         }
+                        "task" -> {
+                            val taskLine = ch.fasrv.fanotes.desk.previewTaskLine(line.text, line.inlines)
+                            val taskChrome = ch.fasrv.fanotes.desk.previewTaskChrome()
+                            if (taskLine == null) {
+                                PreviewRich(
+                                    line.text,
+                                    line.inlines,
+                                    base,
+                                    line.scale,
+                                    link,
+                                    codeInk,
+                                    codeFill,
+                                    codeBorder,
+                                    line.kind,
+                                    Modifier.previewFootnote(lineIndex),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    lineHeight = previewLeading(line.scale, "task"),
+                                    onTextLayout = { previewLayouts[lineIndex] = it },
+                                )
+                            } else {
+                                Row(
+                                    Modifier.padding(
+                                        start = (base * ch.fasrv.fanotes.desk.previewFlowStart("task")).dp,
+                                        top = (base * ch.fasrv.fanotes.desk.previewFlowTop("task", lineIndex == 0)).dp,
+                                        bottom = (base * ch.fasrv.fanotes.desk.previewFlowBottom("task")).dp,
+                                    ),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    if (taskLine.indent.isNotEmpty()) {
+                                        Text(taskLine.indent, fontSize = base.sp, color = MaterialTheme.colorScheme.onSurface)
+                                    }
+                                    Box(
+                                        Modifier
+                                            .size(taskChrome.boxDp.dp)
+                                            .clip(RoundedCornerShape(3.dp))
+                                            .background(if (taskLine.checked) link else Color.Transparent)
+                                            .border(1.5.dp, link, RoundedCornerShape(3.dp)),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        if (taskLine.checked) {
+                                            Text("✓", color = MaterialTheme.colorScheme.onPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                    Spacer(Modifier.width((base * taskChrome.gapEm).dp))
+                                    PreviewRich(
+                                        taskLine.text,
+                                        taskLine.inlines,
+                                        base,
+                                        line.scale,
+                                        link,
+                                        codeInk,
+                                        codeFill,
+                                        codeBorder,
+                                        "paragraph",
+                                        Modifier.previewFootnote(lineIndex).weight(1f, fill = false),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        lineHeight = previewLeading(line.scale, "task"),
+                                        onTextLayout = { previewLayouts[lineIndex] = it },
+                                    )
+                                }
+                            }
+                        }
                         else -> if (line.text.isNotEmpty()) {
                             val headingBox = if (line.kind == "heading") {
                                 ch.fasrv.fanotes.desk.previewHeadingBox(line.scale, lineIndex == 0)

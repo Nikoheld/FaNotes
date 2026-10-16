@@ -204,6 +204,41 @@ fun previewFlowStart(kind: String): Float {
     return if (kind == "bullet" || kind == "number" || kind == "task") flow.listIndentEm + flow.listPadEm else 0f
 }
 
+/**
+ * Schön task control. The preview stylesheet only sets the accent and a
+ * 0.45em gap; the box stays the browser checkbox size.
+ */
+data class PreviewTaskChrome(val boxDp: Float, val gapEm: Float)
+
+fun previewTaskChrome() = PreviewTaskChrome(13f, 0.45f)
+
+data class PreviewTaskLine(
+    val checked: Boolean,
+    val indent: String,
+    val text: String,
+    val inlines: List<DetailsInline>,
+)
+
+/** Splits a Schön task into its indent, checkbox, and label. */
+fun previewTaskLine(text: String, inlines: List<DetailsInline>): PreviewTaskLine? {
+    val indent = text.takeWhile { it == ' ' || it == '\t' }
+    val rest = text.drop(indent.length)
+    val checked = when {
+        rest.startsWith("☑ ") -> true
+        rest.startsWith("☐ ") -> false
+        else -> return null
+    }
+    val cut = indent.length + 2
+    val body = text.substring(cut)
+    val moved = inlines.mapNotNull { mark ->
+        if (mark.end <= cut) return@mapNotNull null
+        val start = (mark.start - cut).coerceAtLeast(0)
+        val end = (mark.end - cut).coerceAtMost(body.length)
+        if (end <= start) null else mark.copy(start = start, end = end)
+    }
+    return PreviewTaskLine(checked, indent, body, moved)
+}
+
 /** Table card from `.markdown-preview table` and the cell padding. */
 data class PreviewTableChrome(val marginEm: Float, val radiusDp: Float, val padYEm: Float, val padXEm: Float)
 
