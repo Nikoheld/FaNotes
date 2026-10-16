@@ -2372,9 +2372,9 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         clearLinkRequest.value += 1
     }
 
-    /** The desktop dialog covers the note. A full screen steps aside so the editor stays underneath. */
+    /** The AI dialog covers the current screen and leaves that screen in place. */
     fun openAi() {
-        if (!ch.fasrv.fanotes.desk.workspaceKeepsNoteChrome(destination.value)) destination.value = "notes"
+        destination.value = ch.fasrv.fanotes.desk.destinationUnderOverlay(destination.value)
         paletteOpen.value = false
         aiOpen.value = true
     }
@@ -2383,9 +2383,9 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         aiOpen.value = false
     }
 
-    /** The desktop `.settings-modal` covers the note. A full screen steps aside so the editor stays underneath. */
+    /** The settings dialog covers the current screen and leaves that screen in place. */
     fun openSettings() {
-        if (!ch.fasrv.fanotes.desk.workspaceKeepsNoteChrome(destination.value)) destination.value = "notes"
+        destination.value = ch.fasrv.fanotes.desk.destinationUnderOverlay(destination.value)
         settingsOpen.value = true
     }
 
