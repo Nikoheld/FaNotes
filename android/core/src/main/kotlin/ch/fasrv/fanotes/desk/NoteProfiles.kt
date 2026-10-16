@@ -340,7 +340,7 @@ const val FIRST_RUN_PREVIEW_PAPER_RADIUS_TOP_DP = 11
 const val FIRST_RUN_PREVIEW_PAPER_RADIUS_BOTTOM_DP = 0
 /** Sheet text `#26272c` on `#fbfaf7`. */
 const val FIRST_RUN_PREVIEW_PAPER_INK = 0xFF26272C.toInt()
-const val FIRST_RUN_PREVIEW_PAPER_FILL = 0xFFFBFBF7.toInt()
+const val FIRST_RUN_PREVIEW_PAPER_FILL = 0xFFFBFAF7.toInt()
 /** `.first-run-preview-paper > small` is 6px, weight 700, tracking .12em, `#8d8d90`. */
 const val FIRST_RUN_PREVIEW_KICKER_SP = 6
 const val FIRST_RUN_PREVIEW_KICKER_WEIGHT = 700

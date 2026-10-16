@@ -129,7 +129,7 @@ class NoteProfilesTest {
         assertEquals(20, FIRST_RUN_PREVIEW_PAPER_TITLE_SP)
         assertEquals(8.5f, FIRST_RUN_PREVIEW_TYPED_SP)
         assertEquals(11, FIRST_RUN_PREVIEW_PAPER_RADIUS_TOP_DP)
-        assertEquals(0xFFFBFBF7.toInt(), FIRST_RUN_PREVIEW_PAPER_FILL)
+        assertEquals(0xFFFBFAF7.toInt(), FIRST_RUN_PREVIEW_PAPER_FILL)
         assertEquals(0xFF26272C.toInt(), FIRST_RUN_PREVIEW_PAPER_INK)
         assertEquals(0xFF8D8D90.toInt(), FIRST_RUN_PREVIEW_KICKER_INK)
         assertEquals(0xFF54555A.toInt(), FIRST_RUN_PREVIEW_TYPED_INK)
