@@ -13,7 +13,6 @@ import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
-import ch.fasrv.fanotes.desk.CONFIRM_SHADOW_BLUR_DP
 import ch.fasrv.fanotes.desk.ConfirmShadowFrame
 import ch.fasrv.fanotes.desk.confirmShadowFrame
 import kotlin.math.roundToInt
@@ -24,16 +23,16 @@ import kotlin.math.roundToInt
  * on a software bitmap, then drawn behind the dialog. A hardware canvas would
  * ignore [BlurMaskFilter], which is why the worksheet field uses the same split.
  */
-fun Modifier.directionalConfirmShade(): Modifier = this.then(ConfirmShadeElement)
+fun Modifier.directionalConfirmShade(themeId: String): Modifier = this.then(ConfirmShadeElement(themeId))
 
-private object ConfirmShadeElement : ModifierNodeElement<ConfirmShadeNode>() {
-    override fun create(): ConfirmShadeNode = ConfirmShadeNode()
-    override fun update(node: ConfirmShadeNode) = Unit
-    override fun equals(other: Any?): Boolean = other === this
-    override fun hashCode(): Int = "directionalConfirmShade".hashCode()
+private data class ConfirmShadeElement(val themeId: String) : ModifierNodeElement<ConfirmShadeNode>() {
+    override fun create(): ConfirmShadeNode = ConfirmShadeNode(themeId)
+    override fun update(node: ConfirmShadeNode) {
+        node.themeId = themeId
+    }
 }
 
-private class ConfirmShadeNode : Modifier.Node(), DrawModifierNode {
+private class ConfirmShadeNode(var themeId: String) : Modifier.Node(), DrawModifierNode {
     private val raster = ConfirmShadeRaster()
 
     override fun onDetach() {
@@ -42,8 +41,8 @@ private class ConfirmShadeNode : Modifier.Node(), DrawModifierNode {
     }
 
     override fun ContentDrawScope.draw() {
-        val frame = confirmShadowFrame(size.width, size.height, density)
-        val image = frame?.let { raster.imageFor(it) }
+        val frame = confirmShadowFrame(size.width, size.height, density, themeId)
+        val image = frame?.let { raster.imageFor(it, themeId) }
         if (frame != null && image != null) {
             if (raster.stretched) {
                 val column = image.width / 2
@@ -72,9 +71,9 @@ private class ConfirmShadeRaster {
     var stretched: Boolean = false
         private set
 
-    fun imageFor(frame: ConfirmShadowFrame): ImageBitmap? {
+    fun imageFor(frame: ConfirmShadowFrame, themeId: String): ImageBitmap? {
         val direct = frame.bitmapWidthPx <= SHADE_BITMAP_LIMIT && frame.bitmapHeightPx <= SHADE_BITMAP_LIMIT
-        val source = if (direct) frame else sampleFrame(frame) ?: return null
+        val source = if (direct) frame else sampleFrame(frame, themeId) ?: return null
         return obtain(source, stretch = !direct)
     }
 
@@ -103,12 +102,13 @@ private class ConfirmShadeRaster {
         return wrapped
     }
 
-    private fun sampleFrame(frame: ConfirmShadowFrame): ConfirmShadowFrame? {
-        if (CONFIRM_SHADOW_BLUR_DP == 0) return null
+    private fun sampleFrame(frame: ConfirmShadowFrame, themeId: String): ConfirmShadowFrame? {
+        val shadow = ch.fasrv.fanotes.desk.confirmDialogShadow(themeId)
+        if (shadow.blurDp == 0) return null
         val heightPx = frame.shapeBottomPx - frame.shapeTopPx
-        val density = frame.blurPx / CONFIRM_SHADOW_BLUR_DP
+        val density = frame.blurPx / shadow.blurDp
         val sampleWidth = (frame.blurPx * 8f).coerceIn(64f, 720f)
-        val sample = confirmShadowFrame(sampleWidth, heightPx, density) ?: return null
+        val sample = confirmShadowFrame(sampleWidth, heightPx, density, themeId) ?: return null
         if (sample.bitmapWidthPx > SHADE_BITMAP_LIMIT || sample.bitmapHeightPx > SHADE_BITMAP_LIMIT) return null
         return sample
     }

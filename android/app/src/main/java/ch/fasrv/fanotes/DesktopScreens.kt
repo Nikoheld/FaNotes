@@ -4030,7 +4030,7 @@ fun BugReportDialog(model: FaNotesViewModel) {
 }
 
 @Composable
-fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismiss: () -> Unit, glass: Boolean = false, radiusDp: Int? = null) {
+fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismiss: () -> Unit, glass: Boolean = false, radiusDp: Int? = null, themeId: String = "light") {
     val cancel = remember { FocusRequester() }
     val confirm = remember { FocusRequester() }
     var focused by remember(request.message) { mutableStateOf(0) }
@@ -4049,7 +4049,7 @@ fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismi
         Surface(
             Modifier
                 .widthIn(max = ch.fasrv.fanotes.desk.CONFIRM_MAX_DP.dp)
-                .directionalConfirmShade()
+                .directionalConfirmShade(themeId)
                 .clickable(interactionSource = card, indication = null, onClick = {})
                 .onPreviewKeyEvent { event ->
             if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false

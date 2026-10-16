@@ -61,15 +61,32 @@ data class ConfirmDialogShadow(
     val yDp: Int,
     val blurDp: Int,
     val alpha: Float,
+    val red: Int,
+    val green: Int,
+    val blue: Int,
 )
 
-/** Desktop shadow for the confirm dialog on the factory light shell. */
-fun confirmDialogShadow() = ConfirmDialogShadow(
-    CONFIRM_SHADOW_X_DP,
-    CONFIRM_SHADOW_Y_DP,
-    CONFIRM_SHADOW_BLUR_DP,
-    CONFIRM_SHADOW_ALPHA,
-)
+/**
+ * `--shadow` for the active shell.
+ * Light is `0 12px 40px rgba(15, 15, 15, .08)`.
+ * Sepia uses the same offset with `rgba(55, 48, 36, .08)`.
+ * Midnight, forest, and aurora use `0 16px 48px rgba(0, 0, 0, .32)`.
+ * The dark root theme uses `0 16px 48px rgba(0, 0, 0, .28)`.
+ */
+fun confirmDialogShadow(themeId: String = "light"): ConfirmDialogShadow = when (themeId) {
+    "sepia" -> ConfirmDialogShadow(0, 12, 40, 0.08f, 55, 48, 36)
+    "midnight", "forest", "aurora" -> ConfirmDialogShadow(0, 16, 48, 0.32f, 0, 0, 0)
+    "dark" -> ConfirmDialogShadow(0, 16, 48, 0.28f, 0, 0, 0)
+    else -> ConfirmDialogShadow(
+        CONFIRM_SHADOW_X_DP,
+        CONFIRM_SHADOW_Y_DP,
+        CONFIRM_SHADOW_BLUR_DP,
+        CONFIRM_SHADOW_ALPHA,
+        15,
+        15,
+        15,
+    )
+}
 
 /**
  * Nominal reach past each dialog edge. CSS blur spreads `blur` around the shifted silhouette,
@@ -92,10 +109,10 @@ fun confirmShadowReach(shadow: ConfirmDialogShadow = confirmDialogShadow()): Con
     )
 }
 
-/** `rgba(15, 15, 15, alpha)` packed ARGB. */
-fun confirmShadowColor(alpha: Float = CONFIRM_SHADOW_ALPHA): Int {
+/** Packed ARGB for a theme `--shadow` color at its alpha. */
+fun confirmShadowColor(alpha: Float = CONFIRM_SHADOW_ALPHA, red: Int = 15, green: Int = 15, blue: Int = 15): Int {
     val channel = (alpha.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
-    return (channel shl 24) or (15 shl 16) or (15 shl 8) or 15
+    return (channel shl 24) or ((red and 0xFF) shl 16) or ((green and 0xFF) shl 8) or (blue and 0xFF)
 }
 
 /**
@@ -114,9 +131,9 @@ data class ConfirmShadowFrame(
     val color: Int,
 )
 
-fun confirmShadowFrame(widthPx: Float, heightPx: Float, density: Float): ConfirmShadowFrame? {
+fun confirmShadowFrame(widthPx: Float, heightPx: Float, density: Float, themeId: String = "light"): ConfirmShadowFrame? {
     if (widthPx < 1f || heightPx < 1f || density <= 0f) return null
-    val shadow = confirmDialogShadow()
+    val shadow = confirmDialogShadow(themeId)
     if (shadow.blurDp <= 0) return null
     val blurPx = shadow.blurDp * density
     if (blurPx <= 0.5f) return null
@@ -135,7 +152,7 @@ fun confirmShadowFrame(widthPx: Float, heightPx: Float, density: Float): Confirm
         shapeRightPx = pad + offsetX + widthPx,
         shapeBottomPx = pad + offsetY + heightPx,
         blurPx = blurPx,
-        color = confirmShadowColor(shadow.alpha),
+        color = confirmShadowColor(shadow.alpha, shadow.red, shadow.green, shadow.blue),
     )
 }
 
