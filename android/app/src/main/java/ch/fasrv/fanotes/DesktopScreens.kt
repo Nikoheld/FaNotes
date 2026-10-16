@@ -4374,7 +4374,7 @@ fun BookPane(model: FaNotesViewModel, modifier: Modifier = Modifier, onOpen: (St
 }
 
 @Composable
-fun HistoryDialog(model: FaNotesViewModel) {
+fun HistoryDialog(model: FaNotesViewModel, themeId: String) {
     val history by model.noteHistory.collectAsStateWithLifecycle()
     val busy by model.historyBusy.collectAsStateWithLifecycle()
     val dismiss = { model.closeHistory() }
@@ -4388,7 +4388,6 @@ fun HistoryDialog(model: FaNotesViewModel) {
         val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
         val ink = LocalStatusInk.current
         val screen = androidx.compose.ui.platform.LocalConfiguration.current
-        val shadow = ch.fasrv.fanotes.vault.historyDialogShadow(MaterialTheme.colorScheme.background.luminance() < 0.5f)
         Box(
             Modifier
                 .fillMaxSize()
@@ -4401,13 +4400,8 @@ fun HistoryDialog(model: FaNotesViewModel) {
                     .fillMaxWidth(ch.fasrv.fanotes.vault.HISTORY_DIALOG_WIDTH_FRACTION)
                     .widthIn(max = ch.fasrv.fanotes.vault.HISTORY_DIALOG_MAX_DP.dp)
                     .heightIn(max = ch.fasrv.fanotes.vault.historyDialogMaxHeightDp(screen.screenHeightDp).dp)
+                    .directionalHistoryShade(themeId)
                     .clickable(interactionSource = card, indication = null, onClick = {})
-                    .shadow(
-                        elevation = shadow.yDp.dp,
-                        shape = shape,
-                        ambientColor = Color.Black.copy(alpha = shadow.alpha),
-                        spotColor = Color.Black.copy(alpha = shadow.alpha),
-                    )
                     .clip(shape)
                     .border(1.dp, strong, shape)
                     .background(MaterialTheme.colorScheme.surface)
