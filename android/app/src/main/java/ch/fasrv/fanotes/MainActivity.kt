@@ -68,6 +68,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileCopy
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.ViewColumn
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
@@ -1747,57 +1748,16 @@ private fun NoteRow(
             },
         )
         if (folder) {
-            var colorMenu by remember(node.path) { mutableStateOf(false) }
-            Box {
-                Icon(
-                    Icons.Filled.Folder,
-                    contentDescription = "Ordnerfarbe",
-                    tint = Color(
-                        android.graphics.Color.parseColor(
-                            ch.fasrv.fanotes.desk.folderIconInk(folderColor, accentHex, textHex),
-                        ),
+            Icon(
+                Icons.Filled.Folder,
+                contentDescription = null,
+                tint = Color(
+                    android.graphics.Color.parseColor(
+                        ch.fasrv.fanotes.desk.folderIconInk(folderColor, accentHex, textHex),
                     ),
-                    modifier = Modifier
-                        .size(ch.fasrv.fanotes.desk.TREE_ICON_DP.dp)
-                        .clickable(onClickLabel = "Ordnerfarbe wählen") { colorMenu = true },
-                )
-                DropdownMenu(expanded = colorMenu, onDismissRequest = { colorMenu = false }) {
-                    Text(
-                        ch.fasrv.fanotes.desk.FOLDER_COLOR_MENU,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                    )
-                    FlowRow(
-                        Modifier.width(196.dp).padding(horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        ch.fasrv.fanotes.desk.FOLDER_COLOR_CHOICES.forEach { color ->
-                            val selectedColor = folderColor == color
-                            Box(
-                                Modifier
-                                    .size(22.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(android.graphics.Color.parseColor(color)))
-                                    .clickable(onClickLabel = "Ordnerfarbe $color") {
-                                        onFolderColor(node.path, color)
-                                        colorMenu = false
-                                    },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                if (selectedColor) {
-                                    Text("✓", fontSize = 12.sp, color = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.accentInk(color))))
-                                }
-                            }
-                        }
-                    }
-                    TextButton(onClick = {
-                        onFolderColor(node.path, null)
-                        colorMenu = false
-                    }) { Text(ch.fasrv.fanotes.desk.FOLDER_COLOR_CLEAR) }
-                }
-            }
+                ),
+                modifier = Modifier.size(ch.fasrv.fanotes.desk.TREE_ICON_DP.dp),
+            )
         } else {
             Icon(
                 when (node.kind) {
@@ -2008,6 +1968,83 @@ private fun NoteRow(
                             if (node.path in bookFolders) TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_DETACH, danger = true) { menu = false; onDetachBook(node.path) }
                             TreeMenuItem(localFolderAction(local)) { menu = false; onToggleLocal(node.path) }
                             TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_SUBFOLDER) { menu = false; onCreateFolderIn(node.path) }
+                            Box(
+                                Modifier
+                                    .padding(horizontal = 6.dp, vertical = 5.dp)
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)),
+                            )
+                            Row(
+                                Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Icon(Icons.Filled.Palette, contentDescription = null, modifier = Modifier.size(14.dp), tint = LocalStatusInk.current.muted)
+                                Text(
+                                    ch.fasrv.fanotes.desk.FOLDER_COLOR_MENU.uppercase(java.util.Locale.GERMAN),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight(700),
+                                    letterSpacing = 0.05.em,
+                                    color = LocalStatusInk.current.muted,
+                                )
+                            }
+                            val swatchRows = (ch.fasrv.fanotes.desk.FOLDER_COLOR_CHOICES.map { it as String? } + listOf(null))
+                                .chunked(ch.fasrv.fanotes.desk.FOLDER_SWATCH_COLUMNS)
+                            swatchRows.forEach { row ->
+                                Row(
+                                    Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FOLDER_SWATCH_GAP_DP.dp),
+                                ) {
+                                    row.forEach { color ->
+                                        if (color == null) {
+                                            Box(
+                                                Modifier
+                                                    .size(ch.fasrv.fanotes.desk.FOLDER_SWATCH_DP.dp)
+                                                    .clip(CircleShape)
+                                                    .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), CircleShape)
+                                                    .background(MaterialTheme.colorScheme.surface)
+                                                    .clickable(onClickLabel = ch.fasrv.fanotes.desk.FOLDER_COLOR_CLEAR) {
+                                                        onFolderColor(node.path, null)
+                                                        menu = false
+                                                    },
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                Icon(Icons.Filled.Close, contentDescription = ch.fasrv.fanotes.desk.FOLDER_COLOR_REMOVE, modifier = Modifier.size(12.dp), tint = LocalStatusInk.current.muted)
+                                            }
+                                        } else {
+                                            val selectedColor = folderColor == color
+                                            Box(
+                                                Modifier
+                                                    .size(ch.fasrv.fanotes.desk.FOLDER_SWATCH_DP.dp)
+                                                    .clip(CircleShape)
+                                                    .border(
+                                                        2.dp,
+                                                        if (selectedColor) MaterialTheme.colorScheme.onSurface else Color(android.graphics.Color.parseColor(color)).copy(alpha = 0.28f),
+                                                        CircleShape,
+                                                    )
+                                                    .background(Color(android.graphics.Color.parseColor(color)))
+                                                    .clickable(onClickLabel = "Ordnerfarbe $color") {
+                                                        onFolderColor(node.path, color)
+                                                        menu = false
+                                                    },
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                if (selectedColor) {
+                                                    Text("✓", fontSize = 12.sp, color = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.accentInk(color))))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Box(
+                                Modifier
+                                    .padding(horizontal = 6.dp, vertical = 5.dp)
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)),
+                            )
                         } else {
                             TreeMenuLabel(ch.fasrv.fanotes.desk.TREE_MENU_OPEN)
                             TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_SPLIT) { menu = false; onOpenSplit(node.path) }

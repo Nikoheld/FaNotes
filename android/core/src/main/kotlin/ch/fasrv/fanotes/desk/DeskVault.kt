@@ -581,6 +581,11 @@ const val FOLDER_COLORS_PATH = ".fanotes/folder-colors.json"
 /** Swatches from the desktop file tree. */
 const val FOLDER_COLOR_MENU = "Darstellung"
 const val FOLDER_COLOR_CLEAR = "Standardfarbe"
+const val FOLDER_COLOR_PICK = "Ordnerfarbe wählen"
+const val FOLDER_COLOR_REMOVE = "Ordnerfarbe entfernen"
+const val FOLDER_SWATCH_DP = 23
+const val FOLDER_SWATCH_GAP_DP = 5
+const val FOLDER_SWATCH_COLUMNS = 6
 
 /** Folder titles mix 54% of the folder color into the text and use weight 620. */
 const val FOLDER_NAME_WEIGHT = 620
