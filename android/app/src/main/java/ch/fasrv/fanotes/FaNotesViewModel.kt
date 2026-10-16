@@ -387,6 +387,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 session.replace(note.document)
                 open.value = noteOpened(note)
                 markdown.value = note.markdown
+                spellingLanguage.value = "unknown"
                 foldedHeadings.value = foldsForSections(note.markdown, note.document)
                 jumpToHeading(note.markdown, headingAnchor)
                 rememberTags(path, note.markdown)
@@ -2305,6 +2306,26 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val historyComparison = MutableStateFlow<Pair<String, String>?>(null)
     val study = MutableStateFlow<StudyPicture?>(null)
     val deskSettings = MutableStateFlow(graph.readDesk())
+    val spellingLanguage = MutableStateFlow("unknown")
+    val spellingEpoch = MutableStateFlow(0)
+    private val spellingSession = ch.fasrv.fanotes.desk.SpellingSession()
+
+    fun reportSpellingLanguage(code: String) {
+        if (spellingLanguage.value != code) spellingLanguage.value = code
+    }
+
+    fun spellingAcceptedWords(): Set<String> =
+        ch.fasrv.fanotes.desk.personalSpellWords(deskSettings.value["spell-personal"]) + spellingSession.snapshot()
+
+    fun learnSpellingWord(word: String) {
+        val next = ch.fasrv.fanotes.desk.addPersonalSpellWord(deskSettings.value["spell-personal"], word) ?: return
+        updateDesk("spell-personal", next)
+        spellingEpoch.value += 1
+    }
+
+    fun ignoreSpellingWord(word: String) {
+        if (spellingSession.ignore(word)) spellingEpoch.value += 1
+    }
     val customCss = MutableStateFlow(graph.readCustomCss())
     val splitPath = MutableStateFlow<String?>(null)
     val unsaved = MutableStateFlow(false)
