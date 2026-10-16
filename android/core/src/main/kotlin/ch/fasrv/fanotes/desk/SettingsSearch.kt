@@ -32,6 +32,7 @@ val SETTINGS_SEARCH_ITEMS: List<SettingsSearchItem> = listOf(
     SettingsSearchItem("Zoom-Limit", "Editor", "editor", "settings-zoom", "zoom limit maximum hinein 50 325 600 prozent"),
     SettingsSearchItem("Zeilennummern, Wortzahl & Gliederung", "Editor", "editor", "settings-editor", "statusleiste outline struktur markdown zeilennummern wortzahl"),
     SettingsSearchItem("Rechtschreibprüfung", "Editor", "editor", "settings-editor", "rechtschreibung sprache deutsch englisch rot unterstreichen fehler spellcheck vorschläge wörterbuch"),
+    SettingsSearchItem("Autokorrektur", "Editor", "editor", "settings-editor", "autocorrect tippfehler ersetzen rückschritt leerzeichen satzzeichen"),
     SettingsSearchItem("Papier & Stift", "Stift & Erkennung", "drawing", "settings-tablet", "tablet karos linien punkte gepunktet häuschen kästchen millimeter farbe breite druck glättung hintergrund handschrift stift"),
     SettingsSearchItem("Stifte- und Tablett-Tasten", "Stift & Erkennung", "drawing", "settings-tablet-buttons", "wacom tablett taste barrel radierer expresskey stift knopf mapping"),
     SettingsSearchItem("Durchkritzel-Empfindlichkeit", "Stift & Erkennung", "drawing", "settings-tablet", "löschen radierer scribble sensitivity"),
