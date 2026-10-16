@@ -1144,6 +1144,13 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     let Some((year, month, day, time_at)) = split_calendar(source) else {
         return legacy_numeric_iso(trimmed);
     };
+    // A finished `0000-01-01` is year 0. `0000-01-01 16:00` did not finish the
+    // ES5 date, so the legacy window makes that year 2000. `0100` stays 100.
+    let year = if !has_iso_t(source) && (0..=99).contains(&year) {
+        legacy_year_number(year)?
+    } else {
+        year
+    };
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
@@ -3790,19 +3797,38 @@ fn strip_glued_offset(clock: &str) -> &str {
 }
 
 fn shift_hyphen_date(date: &str, delta: i32) -> Option<String> {
-    if delta == 0 {
+    // `0000-01-01 16:00 +5` is a legacy date. Year 0 becomes 2000 before the
+    // offset is applied. A year of 100 or more stays put.
+    let short_year = date
+        .split('-')
+        .next()
+        .is_some_and(|year| year_in_legacy_window(year));
+    if delta == 0 && !short_year {
         return Some(date.to_string());
     }
     let mut parts = date.split('-');
-    let year: i32 = parts.next()?.parse().ok()?;
+    let mut year: i32 = parts.next()?.parse().ok()?;
+    if short_year {
+        year = legacy_year_number(year)?;
+    }
     let month: i32 = parts.next()?.parse().ok()?;
     let day: i32 = parts.next()?.parse().ok()?;
     if parts.next().is_some() {
         return None;
     }
-    let (year, month, day) = shift_ymd(year, month, day, delta)?;
+    let (year, month, day) = if delta == 0 {
+        (year, month, day)
+    } else {
+        shift_ymd(year, month, day, delta)?
+    };
     let year_text = legacy_iso_year(year);
     Some(format!("{year_text}-{month:02}-{day:02}"))
+}
+
+fn year_in_legacy_window(year: &str) -> bool {
+    (1..=4).contains(&year.len())
+        && year.bytes().all(|byte| byte.is_ascii_digit())
+        && year.parse::<i32>().ok().is_some_and(|year| (0..=99).contains(&year))
 }
 
 /// Leading zeros count in the length and not in the value. Nine significant
@@ -10266,6 +10292,61 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("-000001-10-13 16:00 EST").as_deref(),
                 Some("-000001-10-13T21:00:00.000Z")
+            );
+            // `0000-01-01` alone is year 0. A legacy clock uses the 0–99
+            // window, so that day is 1 January 2000. Year 100 stays 100.
+            assert_eq!(
+                super::canonical_iso("0000-01-01").as_deref(),
+                Some("0000-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0000-01-01T16:00").as_deref(),
+                Some("0000-01-01T20:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0000-01-01 16:00").as_deref(),
+                Some("2000-01-01T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0000-01-01 16:00 +5").as_deref(),
+                Some("2000-01-01T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0000-01-01 16:00 GMT+5").as_deref(),
+                Some("2000-01-01T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0000-01-01 EST").as_deref(),
+                Some("2000-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0000-01-01 GMT+5").as_deref(),
+                Some("1999-12-31T19:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("0000-01-01 +5"), None);
+            assert_eq!(
+                super::canonical_iso("0000-10-13 16:00").as_deref(),
+                Some("2000-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0000 16:00").as_deref(),
+                Some("2000-01-01T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0049-06-15 16:00").as_deref(),
+                Some("2049-06-15T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0050-06-15 16:00").as_deref(),
+                Some("1950-06-15T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0099-12-31 16:00").as_deref(),
+                Some("1999-12-31T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0100-01-01 16:00").as_deref(),
+                Some("0100-01-01T20:56:02.000Z")
             );
         });
     }
