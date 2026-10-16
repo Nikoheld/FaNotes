@@ -322,6 +322,58 @@ const val FIRST_RUN_PREVIEW_MARK_RADIUS_DP = 2
 const val FIRST_RUN_PREVIEW_BODY_MIN_DP = 360
 const val FIRST_RUN_PREVIEW_BODY_MIN_SHORT_DP = 325
 const val FIRST_RUN_PREVIEW_SHORT_HEIGHT_DP = 680
+/**
+ * `.first-run-preview-paper` is the cream sheet in the second column.
+ * Margin is 18px 19px 0, padding is 25px 27px, and only the top corners are 11px.
+ * Fill is #fbfaf7. Body ink is #26272c. Shadow is `0 10px 30px rgba(0,0,0,.14)`.
+ */
+const val FIRST_RUN_PREVIEW_PAPER_MARGIN_TOP_DP = 18
+const val FIRST_RUN_PREVIEW_PAPER_MARGIN_INLINE_DP = 19
+const val FIRST_RUN_PREVIEW_PAPER_PAD_BLOCK_DP = 25
+const val FIRST_RUN_PREVIEW_PAPER_PAD_INLINE_DP = 27
+const val FIRST_RUN_PREVIEW_PAPER_RADIUS_DP = 11
+const val FIRST_RUN_PREVIEW_PAPER_ARGB = 0xFFFBFAF7.toInt()
+const val FIRST_RUN_PREVIEW_PAPER_INK_ARGB = 0xFF26272C.toInt()
+const val FIRST_RUN_PREVIEW_PAPER_SHADOW_Y_DP = 10
+const val FIRST_RUN_PREVIEW_PAPER_SHADOW_ALPHA = 0.14f
+/** `.first-run-preview-paper > small` is 6px, weight 700, #8d8d90, tracking 0.12em. */
+const val FIRST_RUN_PREVIEW_KICKER_SP = 6
+const val FIRST_RUN_PREVIEW_KICKER_ARGB = 0xFF8D8D90.toInt()
+const val FIRST_RUN_PREVIEW_KICKER_TRACKING = 0.12f
+/** `.first-run-preview-paper > h2` is 20px / 1.1, weight 650, tracking -0.035em, margin 9px 0 17px. */
+const val FIRST_RUN_PREVIEW_TITLE_SP = 20
+const val FIRST_RUN_PREVIEW_TITLE_LINE_SP = 22
+const val FIRST_RUN_PREVIEW_TITLE_TRACKING = -0.035f
+const val FIRST_RUN_PREVIEW_TITLE_MARGIN_TOP_DP = 9
+const val FIRST_RUN_PREVIEW_TITLE_MARGIN_BOTTOM_DP = 17
+/** `.first-run-preview-typed` is 8.5px / 1.5 and #54555a. */
+const val FIRST_RUN_PREVIEW_TYPED_SP = 8.5f
+const val FIRST_RUN_PREVIEW_TYPED_LINE_SP = 12.75f
+const val FIRST_RUN_PREVIEW_TYPED_ARGB = 0xFF54555A.toInt()
+/** `.first-run-preview-rule` is 1px #e7e5df with margin 11px 0 4px. */
+const val FIRST_RUN_PREVIEW_RULE_ARGB = 0xFFE7E5DF.toInt()
+const val FIRST_RUN_PREVIEW_RULE_MARGIN_TOP_DP = 11
+const val FIRST_RUN_PREVIEW_RULE_MARGIN_BOTTOM_DP = 4
+/** `.first-run-preview-ink` is 98px tall. The stroke is 3.4 user units of `color-mix(in srgb, var(--accent) 78%, #222)`. */
+const val FIRST_RUN_PREVIEW_INK_HEIGHT_DP = 98
+const val FIRST_RUN_PREVIEW_INK_WIDTH_DP = 3.4f
+const val FIRST_RUN_PREVIEW_INK_MIX = 0.78f
+const val FIRST_RUN_PREVIEW_INK_INTO_ARGB = 0xFF222222.toInt()
+/** `.first-run-preview-search` is 27px tall, 7px type, 7px radius, gap 6px, padding 0 8px, #66676b on white, border #dfddd7. */
+const val FIRST_RUN_PREVIEW_SEARCH_HEIGHT_DP = 27
+const val FIRST_RUN_PREVIEW_SEARCH_SP = 7
+const val FIRST_RUN_PREVIEW_SEARCH_RADIUS_DP = 7
+const val FIRST_RUN_PREVIEW_SEARCH_GAP_DP = 6
+const val FIRST_RUN_PREVIEW_SEARCH_PAD_DP = 8
+const val FIRST_RUN_PREVIEW_SEARCH_ICON_DP = 11
+const val FIRST_RUN_PREVIEW_SEARCH_ARGB = 0xFF66676B.toInt()
+const val FIRST_RUN_PREVIEW_SEARCH_BORDER_ARGB = 0xFFDFDDD7.toInt()
+const val FIRST_RUN_PREVIEW_SEARCH_FILL_ARGB = 0xFFFFFFFF.toInt()
+const val FIRST_RUN_PREVIEW_SEARCH_SHADOW_Y_DP = 5
+const val FIRST_RUN_PREVIEW_SEARCH_SHADOW_ALPHA = 0.06f
+/** `.first-run-preview-search b` is 6.5px and `color-mix(in srgb, var(--accent) 78%, #333)`. */
+const val FIRST_RUN_PREVIEW_HITS_SP = 6.5f
+const val FIRST_RUN_PREVIEW_HITS_INTO_ARGB = 0xFF333333.toInt()
 const val FIRST_RUN_PREVIEW_KICKER = "MATHEMATIK · ANALYSIS"
 const val FIRST_RUN_PREVIEW_HEADING = "Ableitungen"
 const val FIRST_RUN_PREVIEW_TYPED = "Die Änderungsrate beschreibt die Steigung."
@@ -375,6 +427,14 @@ fun firstRunPreviewAsidePad(screenWidthDp: Int): FirstRunPreviewAsidePad {
  * Mathematik keeps `var(--accent)`, Deutsch is #c76868, Französisch #3d8be0, Physik #5e9abd, Wirtschaft #cf9a48.
  * [accentArgb] is the theme accent for Mathematik.
  */
+/** Stroke of `.first-run-preview-ink path`: accent mixed 78% into #222. */
+fun firstRunPreviewInkStroke(accentArgb: Int): Int =
+    mixArgb(accentArgb, FIRST_RUN_PREVIEW_INK_INTO_ARGB, FIRST_RUN_PREVIEW_INK_MIX)
+
+/** Hit count on `.first-run-preview-search b`: accent mixed 78% into #333. */
+fun firstRunPreviewSearchHits(accentArgb: Int): Int =
+    mixArgb(accentArgb, FIRST_RUN_PREVIEW_HITS_INTO_ARGB, FIRST_RUN_PREVIEW_INK_MIX)
+
 fun firstRunPreviewMarkColors(accentArgb: Int): List<Int> = listOf(
     accentArgb,
     0xFFC76868.toInt(),
