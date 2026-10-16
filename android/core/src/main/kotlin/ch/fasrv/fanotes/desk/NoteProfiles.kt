@@ -337,6 +337,16 @@ const val FIRST_RUN_PREVIEW_HEADER_MIDDLE_DOT = 0xFFD8A643.toInt()
 const val FIRST_RUN_PREVIEW_BORDER_ALPHA = 0.09f
 const val FIRST_RUN_PREVIEW_BORDER_SEPIA_ALPHA = 0.10f
 const val FIRST_RUN_PREVIEW_BORDER_LIGHT_RGB = 0x37352F
+/**
+ * Window edge is `color-mix(in srgb, var(--border-strong) 90%, transparent)`.
+ * The shadow is `0 34px 95px rgba(0,0,0,.25)` plus a 1px ring at `rgba(255,255,255,.025)`.
+ */
+const val FIRST_RUN_PREVIEW_WINDOW_BORDER_MIX = 0.90f
+const val FIRST_RUN_PREVIEW_WINDOW_SHADOW_X_DP = 0
+const val FIRST_RUN_PREVIEW_WINDOW_SHADOW_Y_DP = 34
+const val FIRST_RUN_PREVIEW_WINDOW_SHADOW_BLUR_DP = 95
+const val FIRST_RUN_PREVIEW_WINDOW_SHADOW_ALPHA = 0.25f
+const val FIRST_RUN_PREVIEW_WINDOW_RING = 0x06FFFFFF
 const val FIRST_RUN_PREVIEW_ASIDE_DP = 118
 const val FIRST_RUN_PREVIEW_ASIDE_NARROW_DP = 102
 const val FIRST_RUN_PREVIEW_ASIDE_PAD_BLOCK_DP = 17
@@ -854,6 +864,18 @@ fun firstRunPreviewBorder(themeId: String, systemDark: Boolean = false): Int {
 /** Close traffic light: danger mixed 68% into `--border`. */
 fun firstRunPreviewHeaderClose(dangerArgb: Int, borderArgb: Int): Int =
     cssColorMix(dangerArgb, borderArgb, FIRST_RUN_PREVIEW_HEADER_CLOSE_MIX)
+
+/** Window border: `--border-strong` mixed 90% into transparent. */
+fun firstRunPreviewWindowBorder(themeId: String, systemDark: Boolean = false): Int {
+    val dark = themePalette(themeId, systemDark).dark
+    return cssColorMix(firstRunPreviewFloatBorder(dark), 0, FIRST_RUN_PREVIEW_WINDOW_BORDER_MIX)
+}
+
+/** Black at the welcome-window shadow alpha. */
+fun firstRunPreviewWindowShadowColor(alpha: Float = FIRST_RUN_PREVIEW_WINDOW_SHADOW_ALPHA): Int {
+    val channel = (alpha.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
+    return channel shl 24
+}
 
 /** Black at the floating-tag shadow alpha. */
 fun firstRunPreviewFloatShadowColor(alpha: Float = FIRST_RUN_PREVIEW_FLOAT_SHADOW_ALPHA): Int {
