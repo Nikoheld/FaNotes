@@ -1268,21 +1268,21 @@ fn negative_expanded_legacy_clock(
         .split(is_date_parse_space)
         .filter(|word| !word.is_empty())
         .collect();
-    let (clock, offset_minutes) = match words.as_slice() {
-        [clock] => (legacy_clock_text(clock)?, None),
-        [clock, zone] => {
-            let tail = named_zone_offset_tail(zone)?;
-            let parsed = parse_legacy_offset(tail)?;
-            if !parsed.spilled.is_empty() || !parsed.time_fields.is_empty() {
-                return None;
-            }
-            let clock = legacy_clock_text(clock)?;
-            if clock.contains(['+', '-', 'Z', 'z']) {
-                return None;
-            }
-            (clock, Some(parsed.minutes))
+    let (clock, offset_minutes) = if words.len() >= 2 {
+        // `16:00 GMT-530` is an offset. `16:00 GMT+5 EST` keeps the later zone.
+        let clock = legacy_clock_text(words[0])?;
+        if clock.contains(['+', '-', 'Z', 'z']) {
+            return None;
         }
-        _ => return None,
+        let mut minutes = None;
+        for zone in &words[1..] {
+            minutes = Some(zone_offset_minutes(zone)?);
+        }
+        (clock, minutes)
+    } else if let Some(clock) = words.first() {
+        (legacy_clock_text(clock)?, None)
+    } else {
+        return None;
     };
     let (delta, suffix) = match offset_minutes {
         Some(minutes) => fold_offset_days(minutes)?,
@@ -1474,19 +1474,24 @@ fn negative_expanded_bare_offset(trimmed: &str) -> bool {
 
 fn negative_expanded_zone_iso(trimmed: &str) -> Option<String> {
     let (date, zone) = trimmed.split_once(is_date_parse_space)?;
-    let zone = zone.trim_start_matches(is_date_parse_space);
-    if zone.is_empty()
-        || zone.split(is_date_parse_space).filter(|word| !word.is_empty()).count() != 1
-        || zone.starts_with(|character: char| character.is_ascii_digit())
+    let words: Vec<&str> = zone
+        .split(is_date_parse_space)
+        .filter(|word| !word.is_empty())
+        .collect();
+    if words.is_empty()
+        || words
+            .iter()
+            .any(|word| word.starts_with(|character: char| character.is_ascii_digit()))
     {
         return None;
     }
     let (year, month, day) = negative_expanded_ymd(date)?;
-    let parsed = legacy_zone_offset(zone)?;
-    if !parsed.spilled.is_empty() || !parsed.time_fields.is_empty() || parsed.minute_sign != 0 {
-        return None;
+    // `EST GMT+5` keeps the later zone. Every word has to be a zone.
+    let mut minutes = None;
+    for word in words {
+        minutes = Some(zone_offset_minutes(word)?);
     }
-    let (delta, suffix) = fold_offset_days(parsed.minutes)?;
+    let (delta, suffix) = fold_offset_days(minutes?)?;
     let (year, month, day) = shift_ymd(year, month, day, delta)?;
     canonical_iso(&format!(
         "{}-{:02}-{:02}T00:00:00{suffix}",
@@ -1494,6 +1499,19 @@ fn negative_expanded_zone_iso(trimmed: &str) -> Option<String> {
         month,
         day
     ))
+}
+
+/// `EST`, `GMT-530`, `EST+5:30`, and `+5`. A spilled field is not an offset.
+fn zone_offset_minutes(word: &str) -> Option<i64> {
+    let parsed = if let Some(tail) = named_zone_offset_tail(word) {
+        parse_legacy_offset(tail)?
+    } else {
+        legacy_zone_offset(word).or_else(|| parse_legacy_offset(word))?
+    };
+    if !parsed.spilled.is_empty() || !parsed.time_fields.is_empty() || parsed.minute_sign != 0 {
+        return None;
+    }
+    Some(parsed.minutes)
 }
 
 fn positive_expanded_bare_offset(trimmed: &str) -> bool {
@@ -10503,6 +10521,27 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("-000001-10-13 16:00 +5").as_deref(),
                 Some("-000001-10-13T11:00:00.000Z")
+            );
+            // `GMT-530` is UTC−5:30. A later zone replaces the earlier one.
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 16:00 GMT-530").as_deref(),
+                Some("-000001-10-13T21:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 16:00 GMT+530").as_deref(),
+                Some("-000001-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 16:00 GMT+5 EST").as_deref(),
+                Some("-000001-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 EST GMT+5").as_deref(),
+                Some("-000001-10-12T19:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 GMT-530").as_deref(),
+                Some("-000001-10-13T05:30:00.000Z")
             );
             assert_eq!(
                 super::canonical_iso("0000-1-1").as_deref(),
