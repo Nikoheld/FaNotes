@@ -3158,6 +3158,9 @@ fn expand_hyphen_numbers(token: &str) -> Vec<&str> {
     if let Some(parts) = split_hyphen_zone(token) {
         return parts;
     }
+    if let Some(parts) = split_number_before_clock(token) {
+        return parts;
+    }
     if token.contains(':') || !token.contains('-') {
         return vec![token];
     }
@@ -3183,6 +3186,28 @@ fn expand_hyphen_numbers(token: &str) -> Vec<&str> {
         return vec![token];
     }
     parts
+}
+
+/// `13-5:30` is the day 13 and then 5:30. The hyphen is skipped.
+fn split_number_before_clock(token: &str) -> Option<Vec<&str>> {
+    let bytes = token.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() && bytes[index].is_ascii_digit() {
+        index += 1;
+    }
+    if index == 0 || bytes.get(index) != Some(&b'-') {
+        return None;
+    }
+    let clock = &token[index + 1..];
+    let clock_bytes = clock.as_bytes();
+    let mut digit = 0;
+    while digit < clock_bytes.len() && clock_bytes[digit].is_ascii_digit() {
+        digit += 1;
+    }
+    if digit == 0 || clock_bytes.get(digit) != Some(&b':') {
+        return None;
+    }
+    Some(vec![&token[..index], clock])
 }
 
 /// `2026-10-13-EST` is the date and then `EST`. The hyphen is skipped.
@@ -3289,7 +3314,9 @@ fn fraction_digits_before(chars: &[char], index: usize) -> bool {
     if digit < 2 || digit == index || chars[digit - 1] != '.' {
         return false;
     }
-    chars[digit - 2].is_ascii_digit() || chars[digit - 2] == ':'
+    // `16:00:00.5.1` is a real fraction: digits, dot, digits, then another dot.
+    // `16:.5.5` is not. The first dot only opens the field.
+    chars[digit - 2].is_ascii_digit()
 }
 
 fn separate_slash_after_fraction(value: &str) -> Option<String> {
@@ -4731,6 +4758,10 @@ fn take_clock_word(
         }
         if time.expecting(number) {
             time.add_final(number)?;
+            // `16:.5` is 16:05. `16:.5.5` finalized the minute and then saw `.`.
+            if index < bytes.len() && bytes[index] == b'.' {
+                return None;
+            }
             if index != bytes.len() && !consume_glued_z(bytes, index, dates, offset)? {
                 return None;
             }
@@ -9308,6 +9339,33 @@ mod local_zone_tests {
             unix_millis_from_iso("13:Oct-2026"),
             Some(1_790_874_000_000)
         );
+        assert_eq!(
+            unix_millis_from_iso("13:Oct.2026"),
+            Some(1_790_874_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13:Oct/2026"),
+            Some(1_790_874_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("13:Oct:2026:5"), None);
+        assert_eq!(unix_millis_from_iso("16:.5.5"), None);
+        assert_eq!(unix_millis_from_iso("16:00:.5.5"), None);
+        assert_eq!(
+            unix_millis_from_iso("Oct 13-5:30"),
+            Some(1_002_965_400_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00:.500"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00.5 GMT"), None);
+        assert_eq!(unix_millis_from_iso("16:00.5.1"), None);
+        assert_eq!(
+            unix_millis_from_iso("16:00:00.500!1"),
+            Some(978_382_800_500)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:00:00.500! 2026"),
+            Some(1_767_301_200_500)
+        );
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00:00.500!1"), None);
         assert_eq!(
             unix_millis_from_iso("16:00Z2026-10-13"),
             Some(1_791_907_200_000)
