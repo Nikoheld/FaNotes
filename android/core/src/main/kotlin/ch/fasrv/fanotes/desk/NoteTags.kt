@@ -26,7 +26,7 @@ fun parseDeclaredTags(content: String): List<String> {
 }
 
 fun parseHashtags(content: String): List<String> {
-    val body = TAG_MARKER.replaceFirst(content, "")
+    val body = TAG_MARKER.replaceFirst(maskMarkdownCode(content), "")
     return uniqueTags(HASHTAG.findAll(body).map { it.groupValues[1] }.toList())
 }
 
