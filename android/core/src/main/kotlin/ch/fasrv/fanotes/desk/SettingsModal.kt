@@ -151,6 +151,54 @@ fun settingsContentLayout(widthDp: Int): SettingsContentLayout {
     }
 }
 
+/**
+ * `.setting-callout { align-items: center }` above 760.
+ * `flex-wrap` is unset, so it stays `nowrap`.
+ * Direct actions are `flex: none` with `gap: 7px` and no leading inset.
+ */
+const val SETTING_CALLOUT_ALIGN_WIDE = "center"
+const val SETTING_CALLOUT_ACTIONS_GAP_DP = 7
+
+/**
+ * Last callout rules, inside `@media (max-width: 760px)`. Nothing after that block
+ * sets callout alignment, wrap, or action padding:
+ * `.setting-callout { align-items: flex-start; flex-wrap: wrap; }`
+ * `.setting-callout > .setting-callout-actions { width: 100%; padding-left: 46px; }`
+ * The copy stays `flex: 1; min-width: 0`, so wrap drops only a full-width actions row.
+ */
+const val SETTING_CALLOUT_ALIGN_NARROW = "flex-start"
+const val SETTING_CALLOUT_ACTIONS_PAD_START_DP = 46
+
+data class SettingCalloutLayout(
+    val alignItems: String,
+    val wraps: Boolean,
+    val actionsFillWidth: Boolean,
+    val actionsPadStartDp: Int,
+    val actionsGapDp: Int,
+)
+
+/** Narrow values apply only while [settingsContentStacks] is true. */
+fun settingCalloutLayout(widthDp: Int): SettingCalloutLayout {
+    val stacks = settingsContentStacks(widthDp)
+    return if (stacks) {
+        SettingCalloutLayout(
+            alignItems = SETTING_CALLOUT_ALIGN_NARROW,
+            wraps = true,
+            actionsFillWidth = true,
+            actionsPadStartDp = SETTING_CALLOUT_ACTIONS_PAD_START_DP,
+            actionsGapDp = SETTING_CALLOUT_ACTIONS_GAP_DP,
+        )
+    } else {
+        SettingCalloutLayout(
+            alignItems = SETTING_CALLOUT_ALIGN_WIDE,
+            wraps = false,
+            actionsFillWidth = false,
+            actionsPadStartDp = 0,
+            actionsGapDp = SETTING_CALLOUT_ACTIONS_GAP_DP,
+        )
+    }
+}
+
 data class SettingsModalSize(
     val widthDp: Int,
     val heightDp: Int,
