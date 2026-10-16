@@ -278,7 +278,7 @@ private val DETAILS_NUMBER_MARKER = Regex("""^\d+\.\s+""")
 
 fun detailsListIndent(text: String): String = text.takeWhile { it == ' ' || it == '\t' }
 
-private fun detailsAfterIndent(text: String): String = text.drop(detailsListIndent(text).length)
+private fun detailsAfterIndent(text: String): String = text.drop(previewReadingListPrefix(text).length)
 
 /** Ordered-list prefix inside a details card. The desktop preview paints this marker in the accent. */
 fun detailsNumberMarker(text: String): String = DETAILS_NUMBER_MARKER.find(detailsAfterIndent(text))?.value.orEmpty()
@@ -411,7 +411,44 @@ private fun readingLines(body: String, scaleOf: (PaperKind) -> Float): List<Deta
             }
         }
     }
-    return lines + footnoteSection(prepared.notes)
+    return applyPreviewListPads(lines + footnoteSection(prepared.notes))
+}
+
+/**
+ * Replaces source spaces on list items with one 1.5em pad per nested level.
+ * The preview chrome already insets the first level, so level 1 keeps no pad.
+ */
+private fun applyPreviewListPads(lines: List<DetailsReadingLine>): List<DetailsReadingLine> {
+    val chosen = lines.indices.filter {
+        val kind = lines[it].kind
+        kind == "bullet" || kind == "number" || kind == "task"
+    }
+    if (chosen.isEmpty()) return lines
+    val indents = chosen.map { lines[it].text.takeWhile { ch -> ch == ' ' || ch == '\t' } }
+    val levels = previewListLevels(indents)
+    val replaced = HashMap<Int, DetailsReadingLine>(chosen.size)
+    chosen.forEachIndexed { position, index ->
+        val indent = indents[position]
+        val pad = previewListExtraPad(levels[position])
+        if (indent == pad) return@forEachIndexed
+        val line = lines[index]
+        if (indent.isNotEmpty() && !line.text.startsWith(indent)) return@forEachIndexed
+        val text = pad + line.text.drop(indent.length)
+        val delta = pad.length - indent.length
+        val marks = if (delta == 0) {
+            line.inlines
+        } else {
+            line.inlines.mapNotNull { mark ->
+                if (mark.end <= indent.length) return@mapNotNull null
+                val start = (mark.start + delta).coerceAtLeast(pad.length)
+                val end = mark.end + delta
+                if (end <= start) null else mark.copy(start = start, end = end)
+            }
+        }
+        replaced[index] = line.copy(text = text, inlines = marks)
+    }
+    if (replaced.isEmpty()) return lines
+    return lines.mapIndexed { index, line -> replaced[index] ?: line }
 }
 
 private fun footnoteSection(notes: List<String>): List<DetailsReadingLine> {
