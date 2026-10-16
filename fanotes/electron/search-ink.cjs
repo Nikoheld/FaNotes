@@ -23,4 +23,12 @@ const inkAnchorForQuery = (transcript, query) => {
   return { y: index / (parsed.length - 1) }
 }
 
-module.exports = { inkAnchorForQuery }
+const noteSearchExcerpt = ({ relativePath, content, transcript, needle, queryLength, excerpt }) => {
+  const contentIndex = String(content || '').toLocaleLowerCase('de-DE').indexOf(needle)
+  if (contentIndex >= 0) return excerpt(content, contentIndex, queryLength)
+  const transcriptIndex = String(transcript || '').toLocaleLowerCase('de-DE').indexOf(needle)
+  if (transcriptIndex >= 0) return excerpt(transcript, transcriptIndex, queryLength)
+  return `Dateiname · ${relativePath}`
+}
+
+module.exports = { inkAnchorForQuery, noteSearchExcerpt }
