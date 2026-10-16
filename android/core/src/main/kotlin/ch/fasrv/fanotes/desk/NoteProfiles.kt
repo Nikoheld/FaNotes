@@ -328,6 +328,14 @@ const val FIRST_RUN_PREVIEW_HEADER_TITLE_WEIGHT = 600
 const val FIRST_RUN_PREVIEW_HEADER_DOT_DP = 6
 const val FIRST_RUN_PREVIEW_HEADER_GAP_DP = 5
 const val FIRST_RUN_PREVIEW_HEADER_PAD_DP = 12
+/** `.first-run-preview-body > aside` gap is 5px. The heading is a bold `strong` with a 12px book icon, gap 6px, and `margin: 0 4px 8px`. */
+const val FIRST_RUN_PREVIEW_ASIDE_GAP_DP = 5
+const val FIRST_RUN_PREVIEW_SUBJECTS_HEADING = "Meine Fächer"
+const val FIRST_RUN_PREVIEW_HEADING_WEIGHT = 700
+const val FIRST_RUN_PREVIEW_HEADING_MARGIN_INLINE_DP = 4
+const val FIRST_RUN_PREVIEW_HEADING_MARGIN_BOTTOM_DP = 8
+const val FIRST_RUN_PREVIEW_HEADING_ICON_DP = 12
+const val FIRST_RUN_PREVIEW_HEADING_ICON_GAP_DP = 6
 /** Header fill is `color-mix(in srgb, var(--panel) 92%, transparent)`. */
 const val FIRST_RUN_PREVIEW_HEADER_FILL_ALPHA = 0.92f
 /** Close dot is `color-mix(in srgb, var(--danger) 68%, var(--border))`. The middle dot is `#d8a643`. */
@@ -425,6 +433,7 @@ const val FIRST_RUN_PREVIEW_RULE_MARGIN_BOTTOM_DP = 4
  * The stroke is 3.4 user units of `color-mix(in srgb, var(--accent) 78%, #222)`.
  */
 const val FIRST_RUN_PREVIEW_INK_VIEW_WIDTH = 330
+const val FIRST_RUN_PREVIEW_INK_VIEW_HEIGHT = 98
 const val FIRST_RUN_PREVIEW_INK_HEIGHT_DP = 98
 const val FIRST_RUN_PREVIEW_INK_WIDTH_DP = 3.4f
 const val FIRST_RUN_PREVIEW_INK_MIX = 0.78f
@@ -485,8 +494,11 @@ const val FIRST_RUN_WRITING_TYPED = "Der Flächeninhalt lässt sich mit dem best
 const val FIRST_RUN_WRITING_RECOGNIZED = "Im Hintergrund erkannt"
 const val FIRST_RUN_WRITING_FORMULA = "∫₀¹ (x + 2) dx = 2,5"
 const val FIRST_RUN_WRITING_CONVERT = "Optional umwandeln"
-/** `.first-run-writing-preview` radius, toolbar, and `0 32px 90px rgba(0,0,0,.2)` shadow. */
-const val FIRST_RUN_WRITING_FRAME_RADIUS_DP = 19
+/**
+ * `.first-run-writing-preview` starts at 19px, then the shared chrome rule sets it to 12px.
+ * The toolbar and `0 32px 90px rgba(0,0,0,.2)` shadow are unchanged.
+ */
+const val FIRST_RUN_WRITING_FRAME_RADIUS_DP = 12
 const val FIRST_RUN_WRITING_FRAME_PAD_TOP_DP = 31
 const val FIRST_RUN_WRITING_FRAME_PAD_WIDE_DP = 34
 const val FIRST_RUN_WRITING_FRAME_PAD_MEDIUM_DP = 24
@@ -694,6 +706,27 @@ fun firstRunPreviewAsidePad(screenWidthDp: Int): FirstRunPreviewAsidePad {
 /** Stroke of `.first-run-preview-ink path`: accent mixed 78% into #222. */
 fun firstRunPreviewInkStroke(accentArgb: Int): Int =
     mixArgb(accentArgb, FIRST_RUN_PREVIEW_INK_INTO_ARGB, FIRST_RUN_PREVIEW_INK_MIX)
+
+/**
+ * Default SVG placement, `xMidYMid meet`.
+ * The formula and the integral keep their shape. A wide sheet letterboxes them
+ * instead of stretching the strokes, and a 127px writing box does not squash the 150-unit viewBox.
+ */
+data class PreviewInkMeet(val scale: Float, val offsetX: Float, val offsetY: Float)
+
+fun previewInkMeet(widthPx: Float, heightPx: Float, viewWidth: Float, viewHeight: Float): PreviewInkMeet? {
+    if (widthPx <= 0f || heightPx <= 0f || viewWidth <= 0f || viewHeight <= 0f) return null
+    val scale = minOf(widthPx / viewWidth, heightPx / viewHeight)
+    if (!scale.isFinite() || scale <= 0f) return null
+    return PreviewInkMeet(
+        scale = scale,
+        offsetX = (widthPx - viewWidth * scale) / 2f,
+        offsetY = (heightPx - viewHeight * scale) / 2f,
+    )
+}
+
+/** A preview stroke is in viewBox units, so the meet scale is its pixel width. */
+fun previewInkStrokePx(strokeUnits: Float, scale: Float): Float = strokeUnits * scale
 
 /** Hit count on `.first-run-preview-search b`: accent mixed 78% into #333. */
 fun firstRunPreviewSearchHits(accentArgb: Int): Int =

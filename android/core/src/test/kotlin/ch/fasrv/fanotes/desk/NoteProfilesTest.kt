@@ -5,6 +5,7 @@ import ch.fasrv.fanotes.text.paperLines
 import ch.fasrv.fanotes.text.tableRows
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class NoteProfilesTest {
@@ -190,6 +191,21 @@ class NoteProfilesTest {
         val accent = 0xFF226688.toInt()
         assertEquals(mixArgb(accent, 0xFF222222.toInt(), 0.78f), firstRunPreviewInkStroke(accent))
         assertEquals(mixArgb(accent, 0xFF333333.toInt(), 0.78f), firstRunPreviewSearchHits(accent))
+        assertEquals(98, FIRST_RUN_PREVIEW_INK_VIEW_HEIGHT)
+        assertEquals(5, FIRST_RUN_PREVIEW_ASIDE_GAP_DP)
+        assertEquals("Meine Fächer", FIRST_RUN_PREVIEW_SUBJECTS_HEADING)
+        assertEquals(700, FIRST_RUN_PREVIEW_HEADING_WEIGHT)
+        assertEquals(12, FIRST_RUN_PREVIEW_HEADING_ICON_DP)
+        assertEquals(8, FIRST_RUN_PREVIEW_HEADING_MARGIN_BOTTOM_DP)
+        assertEquals(PreviewInkMeet(1f, 0f, 0f), previewInkMeet(330f, 98f, 330f, 98f))
+        assertEquals(PreviewInkMeet(1f, 165f, 0f), previewInkMeet(660f, 98f, 330f, 98f))
+        assertEquals(PreviewInkMeet(0.5f, 0f, 24.5f), previewInkMeet(165f, 98f, 330f, 98f))
+        val short = checkNotNull(previewInkMeet(420f, 127f, 420f, 150f))
+        assertEquals(127f / 150f, short.scale)
+        assertEquals(32.2f, short.offsetX, 0.001f)
+        assertEquals(0f, short.offsetY, 0.001f)
+        assertEquals(6.8f, previewInkStrokePx(3.4f, 2f))
+        assertNull(previewInkMeet(0f, 98f, 330f, 98f))
     }
 
     @Test
@@ -214,7 +230,7 @@ class NoteProfilesTest {
         assertEquals(0xFFFBFAF7.toInt(), FIRST_RUN_WRITING_SHEET_FILL)
         assertEquals(0xFF28292D.toInt(), FIRST_RUN_WRITING_SHEET_INK)
         assertEquals(0xFF55565B.toInt(), FIRST_RUN_WRITING_TYPED_INK)
-        assertEquals(19, FIRST_RUN_WRITING_FRAME_RADIUS_DP)
+        assertEquals(12, FIRST_RUN_WRITING_FRAME_RADIUS_DP)
         assertEquals(11, FIRST_RUN_WRITING_SHEET_RADIUS_DP)
         assertEquals(420, FIRST_RUN_WRITING_INK_VIEW_WIDTH)
         assertEquals(3.3f, FIRST_RUN_WRITING_INK_WIDTH_DP)
