@@ -31,5 +31,10 @@ class GotoLineTest {
         assertEquals(30, gotoLineCursor(lines, "+10%", 20)?.line)
         assertEquals(10, gotoLineCursor(lines, "-10%", 20)?.line)
         assertEquals(2, gotoLineCursor("a\nb\nc", "50%", 1)?.line)
+        assertEquals(440, promptWidthDp(800))
+        assertEquals(368, promptWidthDp(400))
+        assertEquals(12, PROMPT_RADIUS_DP)
+        assertEquals("12, +3, 50%, 8:4", GOTO_PLACEHOLDER)
+        assertEquals("Vault-Wurzel", PROMPT_ROOT)
     }
 }
