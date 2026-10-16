@@ -32,22 +32,38 @@ data class HomeworkTask(
 
 data class HomeworkDocument(val tasks: List<HomeworkTask>, val publishedIds: List<String> = emptyList())
 
-fun parseHomeworkMarkdown(markdown: String): HomeworkDocument {
+/** A note with no marker is new. A marker that does not parse must stay on disk. */
+sealed class NoteMarkdownLoad<out T> {
+    data class Ready<T>(val document: T) : NoteMarkdownLoad<T>()
+    data object Unreadable : NoteMarkdownLoad<Nothing>()
+}
+
+fun loadHomeworkMarkdown(markdown: String): NoteMarkdownLoad<HomeworkDocument> {
     val start = markdown.indexOf(HOMEWORK_START)
-    val end = if (start >= 0) markdown.indexOf(MARKER_END, start + HOMEWORK_START.length) else -1
-    if (start < 0 || end < 0) return HomeworkDocument(emptyList())
+    if (start < 0) return NoteMarkdownLoad.Ready(HomeworkDocument(emptyList()))
+    val end = markdown.indexOf(MARKER_END, start + HOMEWORK_START.length)
+    if (end < 0) return NoteMarkdownLoad.Unreadable
     return try {
         val parsed = parseJson(markdown.substring(start + HOMEWORK_START.length, end).trim()) as? JsonValue.Obj
-            ?: return HomeworkDocument(emptyList())
+            ?: return NoteMarkdownLoad.Unreadable
         val tasks = parsed.array("tasks")?.items.orEmpty().mapNotNull { item ->
             (item as? JsonValue.Obj)?.let(::homeworkTaskFromJson)
         }
         val published = parsed.array("publishedIds")?.items.orEmpty().mapNotNull { (it as? JsonValue.Str)?.value }
-        HomeworkDocument(tasks, published)
+        NoteMarkdownLoad.Ready(HomeworkDocument(tasks, published))
     } catch (_: Exception) {
-        HomeworkDocument(emptyList())
+        NoteMarkdownLoad.Unreadable
     }
 }
+
+fun parseHomeworkMarkdown(markdown: String): HomeworkDocument = when (val loaded = loadHomeworkMarkdown(markdown)) {
+    is NoteMarkdownLoad.Ready -> loaded.document
+    NoteMarkdownLoad.Unreadable -> HomeworkDocument(emptyList())
+}
+
+/** A missing file can be created. A present file that does not parse is left alone. */
+fun managedNoteAllowsReplace(existing: String?, load: (String) -> NoteMarkdownLoad<*>): Boolean =
+    existing == null || load(existing) is NoteMarkdownLoad.Ready
 
 /** One task from the homework note or the publish API. Blank titles are dropped. */
 fun homeworkTaskFromJson(obj: JsonValue.Obj): HomeworkTask? {
@@ -136,13 +152,14 @@ fun emptyCalendar(): CalendarDocument = CalendarDocument(
     emptyList(),
 )
 
-fun parseCalendarMarkdown(markdown: String): CalendarDocument {
+fun loadCalendarMarkdown(markdown: String): NoteMarkdownLoad<CalendarDocument> {
     val start = markdown.indexOf(CALENDAR_START)
-    val end = if (start >= 0) markdown.indexOf(MARKER_END, start + CALENDAR_START.length) else -1
-    if (start < 0 || end < 0) return emptyCalendar()
+    if (start < 0) return NoteMarkdownLoad.Ready(emptyCalendar())
+    val end = markdown.indexOf(MARKER_END, start + CALENDAR_START.length)
+    if (end < 0) return NoteMarkdownLoad.Unreadable
     return try {
         val parsed = parseJson(markdown.substring(start + CALENDAR_START.length, end).trim()) as? JsonValue.Obj
-            ?: return emptyCalendar()
+            ?: return NoteMarkdownLoad.Unreadable
         val calendars = parsed.array("calendars")?.items.orEmpty().mapNotNull { item ->
             val obj = item as? JsonValue.Obj ?: return@mapNotNull null
             val name = obj.string("name")?.trim().orEmpty()
@@ -172,10 +189,15 @@ fun parseCalendarMarkdown(markdown: String): CalendarDocument {
                 exceptionDates = obj.array("exceptionDates")?.items.orEmpty().mapNotNull { (it as? JsonValue.Str)?.value },
             )
         }
-        CalendarDocument(calendars, events)
+        NoteMarkdownLoad.Ready(CalendarDocument(calendars, events))
     } catch (_: Exception) {
-        emptyCalendar()
+        NoteMarkdownLoad.Unreadable
     }
+}
+
+fun parseCalendarMarkdown(markdown: String): CalendarDocument = when (val loaded = loadCalendarMarkdown(markdown)) {
+    is NoteMarkdownLoad.Ready -> loaded.document
+    NoteMarkdownLoad.Unreadable -> emptyCalendar()
 }
 
 fun serializeCalendarMarkdown(document: CalendarDocument): String {
