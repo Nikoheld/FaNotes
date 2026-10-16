@@ -12,6 +12,7 @@ Native tablet client (Kotlin, Jetpack Compose) for the FaNotes vault. The writin
 - Local spellcheck, on by default. German and English typos get the same red wavy underline as the desktop. Code, math, and the word under the cursor stay clear. A long-press or Ctrl+. offers corrections, Ignore, and Add to dictionary. Autocorrect replaces one clear typo when the word is finished; Backspace immediately afterwards restores what was typed. The dictionaries never leave the tablet.
 - Text → Handschrift in the pen bar and the command palette. A GlyphenWerk training ZIP supplies the personal strokes; letters without a sample use the built-in school script. The sheet grows when the text needs more paper, and the inserted words stay in the handwriting search transcript.
 - Account login and bidirectional sync with `https://fanotes.fasrv.ch`. Offline writes sync when the network returns. Conflicts keep both copies under the desktop name `Konflikt`.
+- Updates follow the desktop channels. Stable, Beta, and Nightly use the same version order. A newer release can be downloaded from GitHub and handed to the Android installer.
 
 Handwriting recognition is a `HandwritingRecognizer` seam. The stroke JSON already matches the desktop, so a later NDK build of GlyphenWerk can plug in without a format change. Math editing and collapsible sections are preserved in the file and not edited here yet.
 
