@@ -3163,8 +3163,38 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                 }
             }
         }
-        Column(Modifier.weight(0.62f).verticalScroll(paneScroll).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(sections.first { it.id == section }.label, style = MaterialTheme.typography.titleLarge)
+        Column(Modifier.weight(0.62f)) {
+            val current = sections.first { it.id == section }
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = ch.fasrv.fanotes.desk.SETTINGS_HEADER_PAD_X_DP.dp,
+                        end = ch.fasrv.fanotes.desk.SETTINGS_HEADER_PAD_X_DP.dp,
+                        top = ch.fasrv.fanotes.desk.SETTINGS_HEADER_PAD_TOP_DP.dp,
+                        bottom = ch.fasrv.fanotes.desk.SETTINGS_HEADER_PAD_BOTTOM_DP.dp,
+                    ),
+            ) {
+                Text(
+                    current.label,
+                    fontSize = ch.fasrv.fanotes.desk.SETTINGS_TITLE_SP.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = ch.fasrv.fanotes.desk.SETTINGS_TITLE_TRACKING.em,
+                )
+                Text(
+                    current.detail,
+                    fontSize = 12.sp,
+                    color = LocalStatusInk.current.muted,
+                    modifier = Modifier.padding(top = 3.dp),
+                )
+            }
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)),
+            )
+            Column(Modifier.weight(1f).verticalScroll(paneScroll).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when (section) {
                 "appearance" -> {
                     Box(Modifier.settingsAnchor("appearance", "settings-surface", anchorY))
@@ -3458,6 +3488,38 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
             }
             TextButton(onClick = { model.openBugReport() }) { Text("Fehler melden") }
             Text("Die letzten fünf Minuten (Stift, Notiz, Werkzeug) werden an fanotes.fasrv.ch geschickt.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            }
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)),
+            )
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(ch.fasrv.fanotes.desk.SETTINGS_FOOTER_DP.dp)
+                    .padding(start = 25.dp, end = 19.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    ch.fasrv.fanotes.desk.SETTINGS_SAVED,
+                    fontSize = 12.sp,
+                    color = LocalStatusInk.current.success,
+                    modifier = Modifier.weight(1f),
+                )
+                Box(
+                    Modifier
+                        .height(31.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.onSurface)
+                        .clickable { model.showDestination("notes") }
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(ch.fasrv.fanotes.desk.SETTINGS_DONE, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.background)
+                }
+            }
         }
     }
 }

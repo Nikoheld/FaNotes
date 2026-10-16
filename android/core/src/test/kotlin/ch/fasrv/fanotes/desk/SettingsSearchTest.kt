@@ -32,5 +32,10 @@ class SettingsSearchTest {
         assertEquals(650, SETTINGS_NAV_LABEL_WEIGHT)
         assertEquals(750, SETTINGS_NAV_GROUP_WEIGHT)
         assertEquals(0.08f, SETTINGS_NAV_GROUP_TRACKING)
+        assertEquals(21, SETTINGS_TITLE_SP)
+        assertEquals(-0.03f, SETTINGS_TITLE_TRACKING)
+        assertEquals(47, SETTINGS_FOOTER_DP)
+        assertEquals("Fertig", SETTINGS_DONE)
+        assertEquals("Änderungen werden automatisch lokal gespeichert.", SETTINGS_SAVED)
     }
 }
