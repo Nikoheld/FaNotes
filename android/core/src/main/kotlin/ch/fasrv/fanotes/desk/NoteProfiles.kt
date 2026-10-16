@@ -340,6 +340,7 @@ fun firstRunColumnWeights(step: Int, widthDp: Int): Pair<Float, Float> = when {
  * Column gap in dp.
  * At 760 and below every step uses 30. From 761 to 980 the gap is 28, or 35 on the folder step.
  * Above 980 it follows the desktop clamp: round(7% of [widthDp]), held to 45–100 on steps 0–2 and 45–105 on the folder step.
+ * [widthDp] is the viewport (CSS 7vw and the 760/980 media queries), not the capped content column.
  */
 fun firstRunColumnGap(step: Int, widthDp: Int): Int = when {
     widthDp <= FIRST_RUN_PREVIEW_SPLIT_DP -> 30
