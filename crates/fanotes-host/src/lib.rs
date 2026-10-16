@@ -3836,7 +3836,7 @@ fn apply_dotted_clock_number(
     dates: &mut Vec<i32>,
 ) -> Option<bool> {
     if word.is_empty()
-        || !word.contains('.')
+        || !(word.contains('.') || word.contains('/'))
         || !word
             .bytes()
             .all(|byte| byte.is_ascii_digit() || matches!(byte, b'.' | b'/'))
@@ -3930,6 +3930,18 @@ fn compose_month_date(
                 time.add(number)?;
             }
             continue;
+        }
+        // `13:Oct-2026/5` keeps 2026 as the year. The slash is a separator
+        // and 5 fills the open minute. A finished clock still reads
+        // `10/13/2026` as a slash date.
+        if (1..=3).contains(&time.index) {
+            if let Some(done) = apply_dotted_clock_number(word, &mut time, &mut dates) {
+                if !done {
+                    return None;
+                }
+                number_seen = true;
+                continue;
+            }
         }
         if !numeric {
             if let Some(numbers) = slash_date_numbers(word) {
@@ -12267,6 +12279,19 @@ mod local_zone_tests {
             ("13:Oct-2026.5.", None),
             ("13:Oct-2026.5/1", None),
             ("13:Oct-1950.5", None),
+            // A slash after the year is the same separator as a dot while
+            // the minute is open. `2026/5` with no clock is still 1 May.
+            ("13:Oct-2026/5", Some(1_790_874_300_000)),
+            ("13:Oct-2026/05", Some(1_790_874_300_000)),
+            ("13:Oct:2026/5", Some(1_790_874_300_000)),
+            ("13:Oct 2026/5", Some(1_790_874_300_000)),
+            ("4:May-2026/5", Some(1_777_622_700_000)),
+            ("13:00:Oct-2026/5", Some(1_790_874_005_000)),
+            ("13:Oct-2026/60", None),
+            ("13:Oct-2026/5/1", None),
+            ("13:Oct-1950/5", None),
+            ("Oct 13 2026/5", Some(1_791_864_000_000)),
+            ("2026/5", Some(1_777_608_000_000)),
         ];
         for (input, expected) in cases {
             assert_eq!(unix_millis_from_iso(input), expected, "{input}");
