@@ -165,6 +165,37 @@ export const emptyCalendarDocument = (): CalendarDocument => ({
   events: [],
 })
 
+export type CalendarMarkdownLoad =
+  | { ok: true, document: CalendarDocument }
+  | { ok: false }
+
+/** A missing note is safe to create. Any other read failure must not be saved back. */
+export const isMissingNoteError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+  return /nicht gefunden|ENOENT|no such file/iu.test(message)
+}
+
+/**
+ * No marker means a fresh calendar. A marker that does not close or does not
+ * parse is left untouched: treating it as empty would overwrite the file.
+ */
+export const loadCalendarMarkdown = (markdown: string): CalendarMarkdownLoad => {
+  if (typeof markdown !== 'string' || !markdown.includes(CALENDAR_MARKER_START)) {
+    return { ok: true, document: emptyCalendarDocument() }
+  }
+  const start = markdown.indexOf(CALENDAR_MARKER_START)
+  const end = markdown.indexOf(CALENDAR_MARKER_END, start + CALENDAR_MARKER_START.length)
+  if (end < 0) return { ok: false }
+  try {
+    return {
+      ok: true,
+      document: sanitizeCalendarDocument(JSON.parse(markdown.slice(start + CALENDAR_MARKER_START.length, end))),
+    }
+  } catch {
+    return { ok: false }
+  }
+}
+
 /**
  * A blank rename is not a deletion. Restore the last committed name so the
  * next save does not drop the calendar and every event that belongs to it.
@@ -259,15 +290,8 @@ export const sanitizeCalendarDocument = (raw: unknown): CalendarDocument => {
 }
 
 export const parseCalendarMarkdown = (markdown: string): CalendarDocument => {
-  if (typeof markdown !== 'string' || !markdown.includes(CALENDAR_MARKER_START)) return emptyCalendarDocument()
-  const start = markdown.indexOf(CALENDAR_MARKER_START)
-  const end = markdown.indexOf(CALENDAR_MARKER_END, start + CALENDAR_MARKER_START.length)
-  if (end < 0) return emptyCalendarDocument()
-  try {
-    return sanitizeCalendarDocument(JSON.parse(markdown.slice(start + CALENDAR_MARKER_START.length, end)))
-  } catch {
-    return emptyCalendarDocument()
-  }
+  const loaded = loadCalendarMarkdown(markdown)
+  return loaded.ok ? loaded.document : emptyCalendarDocument()
 }
 
 export const serializeCalendarMarkdown = (document: CalendarDocument): string => {

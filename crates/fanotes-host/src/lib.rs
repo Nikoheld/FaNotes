@@ -4200,12 +4200,75 @@ fn skip_separator_after_month(token: &str, mut index: usize) -> usize {
     index
 }
 
+/// `16:00EST` and `4:00PM` stay one token: only `Z` may touch a finished
+/// clock. `16:00:00.5EST` is a fraction, so the zone still splits.
+/// `+5.30EST` keeps the zone on the dotted number. `2026.EST` does not:
+/// the dot is only a separator.
+fn keyword_must_stay_glued(token: &str, start: usize, letters: &str) -> bool {
+    if english_month(letters).is_some() {
+        return false;
+    }
+    let before = &token[..start];
+    if clock_fraction_prefix(before) {
+        return false;
+    }
+    let bytes = before.as_bytes();
+    if bytes.last().is_some_and(u8::is_ascii_digit) {
+        let mut cursor = bytes.len();
+        while cursor > 0 && bytes[cursor - 1].is_ascii_digit() {
+            cursor -= 1;
+        }
+        if cursor > 0 && matches!(bytes[cursor - 1], b'.' | b'/') {
+            return true;
+        }
+    }
+    if letters.eq_ignore_ascii_case("z") {
+        return false;
+    }
+    let trimmed = before.trim_end_matches(['.', '/']);
+    let piece_at = trimmed
+        .char_indices()
+        .rev()
+        .find(|(_, character)| !character.is_ascii_digit() && *character != ':')
+        .map(|(index, character)| index + character.len_utf8())
+        .unwrap_or(0);
+    clock_piece_finalizes(&trimmed[piece_at..])
+}
+
+/// `16:00:00.5` is a fraction. `16:00.5` is a minute and then a dot.
+fn clock_fraction_prefix(before: &str) -> bool {
+    let bytes = before.as_bytes();
+    let mut end = bytes.len();
+    while end > 0 && bytes[end - 1].is_ascii_digit() {
+        end -= 1;
+    }
+    if end == 0 || end == bytes.len() || bytes[end - 1] != b'.' {
+        return false;
+    }
+    let clock = &before[..end - 1];
+    clock.bytes().filter(|byte| *byte == b':').count() >= 2
+        && clock.ends_with(|character: char| character.is_ascii_digit())
+}
+
+/// `16:00+5` and `16:00Z-10-13` are one clock word. A sign after that clock
+/// is the offset, so the token must not be split first.
+fn clock_sign_must_stay_whole(runs: &[&str]) -> bool {
+    let Some(last) = runs.last() else {
+        return false;
+    };
+    if last.contains(':') {
+        return true;
+    }
+    last.eq_ignore_ascii_case("z") && runs.iter().any(|run| run.contains(':'))
+}
+
 /// `13Oct2026` and `Oct2026` are separate fields. `GMT5` is the zone `GMT`
 /// and the number 5. `PM5` is the meridiem and the number 5. A non-keyword
 /// glued to a digit, as in `foo13` or `Oct13th`, stays one token so the date
 /// scan rejects it. `Oct_13` is October 13: the underscore continues the
 /// month word and the digits are the next field. `13:Oct` is hour 13 and
-/// October: a month after a time colon is its own word.
+/// October: a month after a time colon is its own word. `2026Oct16:00` is
+/// the year, October, and 16:00. The colon stays on the clock word.
 fn expand_glued_month(token: &str) -> Vec<&str> {
     if let Some(parts) = split_zone_before_clock(token) {
         return parts;
@@ -4221,7 +4284,7 @@ fn expand_glued_month(token: &str) -> Vec<&str> {
         return vec![token];
     }
     let bytes = token.as_bytes();
-    let mut runs = Vec::new();
+    let mut runs: Vec<&str> = Vec::new();
     let mut index = 0;
     while index < bytes.len() {
         if token[index..].chars().next().is_some_and(is_v8_word_char) {
@@ -4240,12 +4303,27 @@ fn expand_glued_month(token: &str) -> Vec<&str> {
                 && !exact_zone_keyword(letters)
                 && !is_ampm(letters)
             {
+                // `hello-10-13` drops `hello`. The hyphen separates it from
+                // the first number. `２026` has no separator, and `p.m.5`
+                // uses a dot, so those tokens stay whole.
+                let number_seen = runs
+                    .iter()
+                    .any(|run| run.bytes().any(|byte| byte.is_ascii_digit()));
+                if number_seen || bytes.get(index) != Some(&b'-') {
+                    return vec![token];
+                }
+                continue;
+            }
+            // `+5.30EST` and `16:00EST` stay one token. `2026.EST` splits:
+            // the dot is only a separator. `13.Oct` still splits.
+            if english_month(letters).is_none() && keyword_must_stay_glued(token, start, letters) {
                 return vec![token];
             }
-            // `+5.30EST` finalized a field and then saw a word. That is empty.
-            // `13.Oct` still splits, because a month may follow a dot.
-            if english_month(letters).is_none()
-                && token[..start].bytes().any(|byte| matches!(byte, b'.' | b'/'))
+            // `16:00Z+05:00` is one clock word. Splitting the offset off `Z`
+            // would hide the sign from the clock parser.
+            if exact_zone_keyword(letters)
+                && matches!(bytes.get(index), Some(b'+' | b'-'))
+                && token[..start].contains(':')
             {
                 return vec![token];
             }
@@ -4271,8 +4349,35 @@ fn expand_glued_month(token: &str) -> Vec<&str> {
             while index < bytes.len() && bytes[index].is_ascii_digit() {
                 index += 1;
             }
+            // `2026Oct16:00` keeps `16:00` together. `16:002026` is hour 16
+            // and the year 2026, still one clock word. `16:00+5` is an offset
+            // and stays whole. `16:00.5` finalized the minute.
+            if bytes.get(index) == Some(&b':') {
+                while index < bytes.len() && matches!(bytes[index], b':' | b'0'..=b'9') {
+                    index += 1;
+                }
+                let colons = token[start..index].bytes().filter(|byte| *byte == b':').count();
+                if bytes.get(index) == Some(&b'.')
+                    && colons >= 2
+                    && bytes.get(index + 1).is_some_and(u8::is_ascii_digit)
+                {
+                    index += 1;
+                    while index < bytes.len() && bytes[index].is_ascii_digit() {
+                        index += 1;
+                    }
+                }
+                if matches!(bytes.get(index), Some(b'+' | b'-'))
+                    || (bytes.get(index) == Some(&b'.')
+                        && clock_piece_finalizes(&token[start..index]))
+                {
+                    return vec![token];
+                }
+            }
             runs.push(&token[start..index]);
         } else if bytes[index] == b'+' {
+            if clock_sign_must_stay_whole(&runs) {
+                return vec![token];
+            }
             let start = index;
             index += 1;
             if index >= bytes.len() || !bytes[index].is_ascii_digit() {
@@ -4295,6 +4400,17 @@ fn expand_glued_month(token: &str) -> Vec<&str> {
             }
             runs.push(&token[start..index]);
         } else if matches!(bytes[index], b'-' | b'/' | b'.') {
+            if bytes[index] == b'-' && clock_sign_must_stay_whole(&runs) {
+                return vec![token];
+            }
+            // `4:00:00.5PM-05:00` glued the zone onto the meridiem. The sign
+            // belongs to that clock word.
+            if bytes[index] == b'-'
+                && runs.last().is_some_and(|word| is_ampm(word))
+                && runs.iter().any(|run| run.contains(':'))
+            {
+                return vec![token];
+            }
             if index + 1 < bytes.len() && matches!(bytes[index + 1], b'-' | b'/' | b'.') {
                 return vec![token];
             }
@@ -6165,6 +6281,12 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
     if fields.is_empty() || fields.len() > 3 {
         return None;
     }
+    // `01/01/+002026` already read a number. `+` is not an offset without a
+    // clock, and it is not the year. A sign on the first field, as in
+    // `+002026/10/13`, is still that year.
+    if fields.iter().skip(1).any(|part| part.starts_with(['+', '-'])) {
+        return None;
+    }
     let mut numbers = fields
         .iter()
         .map(|part| part.parse::<i32>().ok())
@@ -6282,17 +6404,30 @@ fn pad_legacy_clock(time: &str) -> Option<String> {
     if !(2..=3).contains(&numbers.len()) || numbers.iter().any(|number| *number > 99) {
         return legacy_clock_text(time);
     }
-    let mut padded = if numbers.len() == 3 {
-        format!("{:02}:{:02}:{:02}", numbers[0], numbers[1], numbers[2])
+    // `16:00.05` is 50 seconds. The dot scales into the open seconds field.
+    // `16:00:00.05` is 50 milliseconds, and `16:00.5` is 500 seconds, which is empty.
+    let padded = if numbers.len() == 2 {
+        if let Some(fraction) = fraction {
+            let digits = if fraction.len() > 9 {
+                &fraction[..9]
+            } else {
+                fraction
+            };
+            let value: i32 = digits.parse().ok()?;
+            let seconds = clock_milliseconds(value, digits.len());
+            format!("{:02}:{:02}:{:02}", numbers[0], numbers[1], seconds)
+        } else {
+            format!("{:02}:{:02}", numbers[0], numbers[1])
+        }
     } else {
-        format!("{:02}:{:02}", numbers[0], numbers[1])
+        let mut padded = format!("{:02}:{:02}:{:02}", numbers[0], numbers[1], numbers[2]);
+        if let Some(fraction) = fraction {
+            padded.push('.');
+            padded.push_str(fraction);
+        }
+        padded
     };
-    if let Some(fraction) = fraction {
-        padded.push('.');
-        padded.push_str(fraction);
-    }
-    padded.push_str(zone);
-    Some(padded)
+    Some(format!("{padded}{zone}"))
 }
 
 /// `16:` is 16:00:00. `16::30` is 16:00:30. `16:.5` skips the dot and is 16:05.
@@ -6338,8 +6473,8 @@ fn finished_date_has_an_extra_hyphen(trimmed: &str) -> bool {
     if bytes.len() < date_at + 6 {
         return false;
     }
-    // `Oct<U+2028>13<U+2028>2026` is not a four-digit year. The fourth byte
-    // sits inside the line separator, so a byte slice would panic.
+    // `Oct<U+2028>13` and `２０２６-10-13` are not four-digit years. The
+    // fourth byte sits inside a multibyte character, so a byte slice panics.
     let year_ok = if expanded {
         head.is_char_boundary(7) && datetime_year_ok(&head[..7])
     } else {
@@ -9558,6 +9693,70 @@ mod local_zone_tests {
     }
 
     #[test]
+    fn a_dot_after_minutes_fills_seconds() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `16:00.05` is 16:00:50. A fraction after the seconds stays
+        // milliseconds, and `.5` is 500 seconds, so that date is empty.
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00.05"),
+            Some(1_791_921_650_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00.005"),
+            Some(1_791_921_605_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00.059"),
+            Some(1_791_921_659_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00.00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 4:5.05"),
+            Some(1_791_878_750_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00:00.05"),
+            Some(1_791_921_600_050)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00.05Z"),
+            Some(1_791_907_250_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00.05 EST"),
+            Some(1_791_925_250_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00.05 +5"),
+            Some(1_791_889_250_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00.005 +5"),
+            Some(1_791_889_205_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:5.05 +5"),
+            Some(1_791_846_350_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00:00.05 +5"),
+            Some(1_791_889_200_050)
+        );
+        assert_eq!(unix_millis_from_iso("10/13/2026 16:00.5"), None);
+        assert_eq!(unix_millis_from_iso("10/13/2026 16:00.60"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00.5 +5"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00.60 +5"), None);
+    }
+
+    #[test]
     fn a_clock_before_a_slash_date_stays_on_that_day() {
         let _lock = TRASH_CLOCK
             .lock()
@@ -10819,6 +11018,41 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("foo5 Oct 13 2026"), None);
         assert_eq!(unix_millis_from_iso("AM5 Oct 13 2026"), None);
         assert_eq!(unix_millis_from_iso("Oct 13 2026 4:00PM5"), None);
+        // Node 22. A month or zone between numbers is its own word, and the
+        // clock stays on the colon. A dot before the zone is only a separator.
+        // `16:00EST` and `2026Oct16:00.5` still finish the field and stay empty.
+        assert_eq!(unix_millis_from_iso("2026Oct16:00"), Some(1_790_884_800_000));
+        assert_eq!(unix_millis_from_iso("2026EST16:00"), Some(1_767_301_200_000));
+        assert_eq!(unix_millis_from_iso("2026GMT16:00"), Some(1_767_283_200_000));
+        assert_eq!(unix_millis_from_iso("2026Z16:00"), Some(1_767_283_200_000));
+        assert_eq!(unix_millis_from_iso("2026UTC16:00"), Some(1_767_283_200_000));
+        assert_eq!(unix_millis_from_iso("2026.EST"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("2026.Z"), Some(1_767_225_600_000));
+        assert_eq!(unix_millis_from_iso("10.EST"), Some(1_001_912_400_000));
+        assert_eq!(unix_millis_from_iso("10.Z"), Some(1_001_894_400_000));
+        assert_eq!(unix_millis_from_iso("10Oct16:00"), Some(1_002_744_000_000));
+        assert_eq!(unix_millis_from_iso("13Oct16:00"), Some(1_003_003_200_000));
+        assert_eq!(unix_millis_from_iso("10EST16:00"), Some(1_001_970_000_000));
+        assert_eq!(unix_millis_from_iso("Oct16:002026"), Some(1_790_884_800_000));
+        assert_eq!(unix_millis_from_iso("16:002026EST"), Some(1_767_301_200_000));
+        assert_eq!(unix_millis_from_iso("16:EST2026"), Some(1_767_301_200_000));
+        assert_eq!(unix_millis_from_iso("16:Z2026"), Some(1_767_283_200_000));
+        assert_eq!(unix_millis_from_iso("2026.EST16:00"), Some(1_767_301_200_000));
+        assert_eq!(unix_millis_from_iso("13.Oct16:00"), Some(1_003_003_200_000));
+        assert_eq!(unix_millis_from_iso("2026/EST"), Some(1_767_243_600_000));
+        assert_eq!(
+            unix_millis_from_iso("2026Oct16:00:00.5"),
+            Some(1_790_884_800_500)
+        );
+        assert_eq!(unix_millis_from_iso("2026Oct16::30"), Some(1_790_884_830_000));
+        assert_eq!(
+            unix_millis_from_iso("2026Oct16:00:00.5EST"),
+            Some(1_790_888_400_500)
+        );
+        assert_eq!(unix_millis_from_iso("2026Oct16:00.5"), None);
+        assert_eq!(unix_millis_from_iso("2026Oct16::30EST"), None);
+        assert_eq!(unix_millis_from_iso("2026Oct4:00PM"), None);
+        assert_eq!(unix_millis_from_iso("16:00EST"), None);
     }
 
     #[test]
@@ -14732,6 +14966,66 @@ mod local_zone_tests {
             unix_millis_from_iso("Oct\u{2029}13 2026"),
             Some(1_791_864_000_000)
         );
+    }
+
+    #[test]
+    fn a_fullwidth_digit_prefix_is_a_word() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Fullwidth digits are letters to `Date.parse`. `２０２６` is a
+        // garbage word, then `-` is skipped, and `10-13` is 13 October 2001.
+        assert_eq!(
+            unix_millis_from_iso("２０２６-10-13"),
+            Some(1_002_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("２０２６-10-13-"),
+            Some(1_002_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("２-10-13"),
+            Some(1_002_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("hello-10-13"),
+            Some(1_002_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Monday-1-"),
+            Some(978_325_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("２026-10-13"), None);
+        assert_eq!(unix_millis_from_iso("10-hello-13"), None);
+    }
+
+    #[test]
+    fn a_sign_after_a_slash_field_is_empty() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // A later sign is not the year. The first field may still be signed.
+        assert_eq!(unix_millis_from_iso("01/01/+002026"), None);
+        assert_eq!(unix_millis_from_iso("01/01/-000000"), None);
+        assert_eq!(unix_millis_from_iso("10/13/+2026"), None);
+        assert_eq!(unix_millis_from_iso("2026/+10/13"), None);
+        assert_eq!(unix_millis_from_iso("1/1/+002026"), None);
+        assert_eq!(unix_millis_from_iso("10/13/-5"), None);
+        assert_eq!(
+            unix_millis_from_iso("+002026/10/13"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("+2026/10/13"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("10/13/2026"), Some(1_791_864_000_000));
     }
 
 }
