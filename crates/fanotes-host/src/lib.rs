@@ -1878,6 +1878,12 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         // `16:00:00.5.1` keeps the fraction. The second dot starts a new field.
         return unix_millis_from_iso(&next);
     }
+    if let Some(next) = separate_finished_date_clock(value) {
+        // `2026-10-13/16:00` and `2026-10-13:16:00` are 16:00 local.
+        // `Oct 13 2026/16:00` uses the slash the same way. `10/13/2026` has
+        // no clock, and a `T` form keeps its own separator.
+        return unix_millis_from_iso(&next);
+    }
     match rewrite_ignored_symbols(value) {
         SymbolRewrite::Illegal => return None,
         SymbolRewrite::Changed(next) => return unix_millis_from_iso(&next),
@@ -2948,6 +2954,120 @@ fn separate_slash_after_fraction(value: &str) -> Option<String> {
         }
     }
     if changed { Some(out) } else { None }
+}
+
+/// A slash or colon between a finished date and a clock is only a separator.
+///
+/// `2026-10-13/16:00`, `2026-10-13:16:00`, and `Oct 13 2026/16:00` are 16:00
+/// local. `10/13/2026` has no clock. `Oct 13 2026:16:00` is not a date: a
+/// colon after a month name does not separate the clock.
+fn separate_finished_date_clock(value: &str) -> Option<String> {
+    if let Some(next) = separate_colon_after_hyphen_date(value) {
+        return Some(next);
+    }
+    separate_slash_before_clock(value)
+}
+
+fn separate_colon_after_hyphen_date(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b':' {
+            index += 1;
+            continue;
+        }
+        let prefix = value[..index].trim_start_matches(is_date_parse_space);
+        if prefix_is_strict_hyphen_date(prefix)
+            && suffix_is_legacy_clock(value[index + 1..].trim_start_matches(is_date_parse_space))
+        {
+            let mut next = String::with_capacity(value.len() + 1);
+            next.push_str(&value[..index]);
+            next.push(' ');
+            next.push_str(&value[index + 1..]);
+            return Some(next);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn separate_slash_before_clock(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'/' {
+            index += 1;
+            continue;
+        }
+        if index > 0
+            && bytes[index - 1].is_ascii_digit()
+            && suffix_is_legacy_clock(value[index + 1..].trim_start_matches(is_date_parse_space))
+        {
+            let mut next = String::with_capacity(value.len() + 1);
+            next.push_str(&value[..index]);
+            next.push(' ');
+            next.push_str(&value[index + 1..]);
+            return Some(next);
+        }
+        index += 1;
+    }
+    None
+}
+
+/// `YYYY`, `YYYY-MM`, `YYYY-MM-DD`, or the same with `±YYYYYY`.
+fn prefix_is_strict_hyphen_date(prefix: &str) -> bool {
+    let bytes = prefix.as_bytes();
+    if bytes.is_empty() {
+        return false;
+    }
+    let mut index = if matches!(bytes[0], b'+' | b'-') {
+        if bytes.len() < 7 || !bytes[1..7].iter().all(u8::is_ascii_digit) {
+            return false;
+        }
+        7
+    } else if bytes.len() >= 4 && bytes[..4].iter().all(u8::is_ascii_digit) {
+        4
+    } else {
+        return false;
+    };
+    let mut fields = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'-' || fields == 2 {
+            return false;
+        }
+        if index + 3 > bytes.len()
+            || !bytes[index + 1].is_ascii_digit()
+            || !bytes[index + 2].is_ascii_digit()
+        {
+            return false;
+        }
+        index += 3;
+        fields += 1;
+    }
+    true
+}
+
+/// `16:00`, `4:5`, and `16:00 EST`. Another slash means this is not the clock.
+/// `2026GMT+24:00` is a year glued to an offset: the colon comes after letters.
+fn suffix_is_legacy_clock(suffix: &str) -> bool {
+    if suffix.is_empty() || suffix.contains('/') {
+        return false;
+    }
+    let first = suffix.split(is_date_parse_space).next().unwrap_or("");
+    let bytes = first.as_bytes();
+    if bytes.first().is_none_or(|byte| !byte.is_ascii_digit()) {
+        return false;
+    }
+    let mut saw_colon = false;
+    for byte in bytes {
+        if byte.is_ascii_alphabetic() {
+            return saw_colon;
+        }
+        if *byte == b':' {
+            saw_colon = true;
+        }
+    }
+    saw_colon
 }
 
 fn separate_dot_after_fraction(value: &str) -> Option<String> {
@@ -11235,5 +11355,49 @@ mod local_zone_tests {
             unix_millis_from_iso("Oct 13 10000 16:00"),
             Some(253_427_083_200_000)
         );
+    }
+
+    #[test]
+    fn a_slash_or_colon_between_a_date_and_a_clock_is_a_separator() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // 16:00 in October is EDT, so the UTC instant is 20:00. A slash date
+        // with no clock stays local midnight. `T` is not this separator.
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026/16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13/16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13:16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13/16:00:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13:16:00:00Z"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("10/13/2026"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026/10/13"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13T16:00:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13T16:00:00+05:30"),
+            Some(1_791_887_400_000)
+        );
+        assert_eq!(unix_millis_from_iso("Oct 13 2026:16:00"), None);
+        assert_eq!(unix_millis_from_iso("10/13/2026:16:00"), None);
     }
 }
