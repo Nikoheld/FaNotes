@@ -4966,14 +4966,14 @@ private fun WelcomePreview(modifier: Modifier) {
                             ),
                         )
                         .drawBehind {
-                            val stroke = 1.dp.toPx()
+                            val stroke = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_RULE_DP.dp.toPx()
                             val x = size.width - stroke / 2f
                             drawLine(headerBorder, Offset(x, 0f), Offset(x, size.height), strokeWidth = stroke)
                         }
                         .padding(
                             start = asidePad.start.dp,
                             top = asidePad.top.dp,
-                            end = asidePad.end.dp,
+                            end = asidePad.end.dp + ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_RULE_DP.dp,
                             bottom = asidePad.bottom.dp,
                         ),
                     verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_GAP_DP.dp),

@@ -370,11 +370,13 @@ const val FIRST_RUN_PREVIEW_ASIDE_NARROW_DP = 102
 const val FIRST_RUN_PREVIEW_ASIDE_PAD_BLOCK_DP = 17
 const val FIRST_RUN_PREVIEW_ASIDE_PAD_INLINE_DP = 10
 const val FIRST_RUN_PREVIEW_ASIDE_PAD_INLINE_NARROW_DP = 7
+/** Right edge of the aside is a 1px `--border`. Fill is `color-mix(in srgb, var(--bg) 76%, var(--panel))`. */
+const val FIRST_RUN_PREVIEW_ASIDE_RULE_DP = 1
+const val FIRST_RUN_PREVIEW_ASIDE_FILL_MIX = 0.76f
 const val FIRST_RUN_PREVIEW_SPLIT_DP = 760
 const val FIRST_RUN_MEDIUM_DP = 980
 /** `.first-run-preview-body > aside strong` is 7.5px. The column fill is `--bg` mixed 76% into `--panel`. */
 const val FIRST_RUN_PREVIEW_HEADING_SP = 7.5f
-const val FIRST_RUN_PREVIEW_ASIDE_FILL_MIX = 0.76f
 /** `.first-run-preview-body > aside > span` is 7px, with 7px padding, a 6px radius, and a 7px gap. */
 const val FIRST_RUN_PREVIEW_SUBJECT_SP = 7
 const val FIRST_RUN_PREVIEW_SUBJECT_PAD_DP = 7
