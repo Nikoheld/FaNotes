@@ -1208,9 +1208,7 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     } else {
         return None;
     };
-    Some(format_civil_iso(
-        year, month, day, hour, minute, second, millis,
-    ))
+    format_civil_iso(year, month, day, hour, minute, second, millis)
 }
 
 /// `16:` and `4:5` on `-000001-10-13` are local mean time in that year.
@@ -4372,10 +4370,10 @@ fn trailing_hyphen_iso(trimmed: &str) -> Option<String> {
         let delta = parsed.minutes.checked_mul(-60)?;
         let (year, month, day, hour, minute, second) =
             shift_seconds(year, month, day, 0, 0, 0, delta)?;
-        return Some(format_civil_iso(year, month, day, hour, minute, second, 0));
+        return format_civil_iso(year, month, day, hour, minute, second, 0);
     }
     let (year, month, day, hour, minute, second) = local_civil_to_utc(year, month, day, 0, 0, 0)?;
-    Some(format_civil_iso(year, month, day, hour, minute, second, 0))
+    format_civil_iso(year, month, day, hour, minute, second, 0)
 }
 
 fn unfinished_hyphen_ymd(body: &str) -> Option<(i32, i32, i32)> {
@@ -4498,9 +4496,9 @@ fn iso_hyphen_date(value: &str) -> Option<String> {
     if legacy_local {
         let (year, month, day, hour, minute, second) =
             local_civil_to_utc(year, month, day, 0, 0, 0)?;
-        return Some(format_civil_iso(year, month, day, hour, minute, second, 0));
+        return format_civil_iso(year, month, day, hour, minute, second, 0);
     }
-    Some(format_civil_iso(year, month, day, 0, 0, 0, 0))
+    format_civil_iso(year, month, day, 0, 0, 0, 0)
 }
 
 /// A hyphen date that is not `YYYY` or `±YYYYYY`.
@@ -4548,7 +4546,7 @@ fn legacy_hyphen_date(value: &str) -> Option<String> {
     let (year, month, day) = normalize_ymd(year, month, day)?;
     let (year, month, day, hour, minute, second) =
         local_civil_to_utc(year, month, day, 0, 0, 0)?;
-    Some(format_civil_iso(year, month, day, hour, minute, second, 0))
+    format_civil_iso(year, month, day, hour, minute, second, 0)
 }
 
 /// `YYYY-MM-DD` or `±YYYYYY-MM-DD`, then optional month and day text.
@@ -4595,13 +4593,22 @@ fn format_civil_iso(
     minute: i32,
     second: i32,
     millis: u32,
-) -> String {
+) -> Option<String> {
+    // TimeClip: ±8.64e15 ms is the last representable instant. One millisecond
+    // past `+275760-09-13T00:00:00.000Z` is empty.
+    let seconds = unix_from_utc(year, month, day, hour, minute, second)?;
+    let instant = seconds.checked_mul(1000)?.checked_add(i64::from(millis))?;
+    if instant.abs() > 8_640_000_000_000_000 {
+        return None;
+    }
     let year_text = if (0..10_000).contains(&year) {
         format!("{year:04}")
     } else {
         format!("{year:+07}")
     };
-    format!("{year_text}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
+    Some(format!(
+        "{year_text}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z"
+    ))
 }
 
 /// `YYYY`, `±YYYYYY`, then an optional two-digit month and day, then the clock.
@@ -10348,6 +10355,25 @@ mod tests {
                 super::canonical_iso("0100-01-01 16:00").as_deref(),
                 Some("0100-01-01T20:56:02.000Z")
             );
+            // `+275760-09-13` is the last UTC midnight. Local time that day,
+            // and one millisecond past that midnight, are empty.
+            assert_eq!(
+                super::canonical_iso("+275760-09-13").as_deref(),
+                Some("+275760-09-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+275760-09-13T00:00:00.000Z").as_deref(),
+                Some("+275760-09-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("275760-09-13 GMT").as_deref(),
+                Some("+275760-09-13T00:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("+275760-09-13T00:00:00.001Z"), None);
+            assert_eq!(super::canonical_iso("275760-09-13"), None);
+            assert_eq!(super::canonical_iso("275760-09-13 16:00"), None);
+            assert_eq!(super::canonical_iso("275760-09-13 16:00 GMT-5"), None);
+            assert_eq!(super::canonical_iso("+275760-09-14"), None);
         });
     }
 

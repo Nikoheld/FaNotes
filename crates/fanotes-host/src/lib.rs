@@ -2115,7 +2115,7 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         Some(offset) => offset,
         None => local_offset_east_ms(local)?,
     };
-    u64::try_from(local.checked_sub(offset_ms)?).ok()
+    time_clip_millis(local.checked_sub(offset_ms)?)
 }
 
 enum IsoDate<'a> {
@@ -5368,7 +5368,7 @@ fn trailing_hyphen_millis(trimmed: &str) -> Option<u64> {
         let days = days_from_civil(year, month as u32, day as u32)?;
         let naive = i64::try_from(days).ok()?.checked_mul(86_400_000)?;
         let offset_ms = parsed.minutes.checked_mul(60_000)?;
-        return u64::try_from(naive.checked_sub(offset_ms)?).ok();
+        return time_clip_millis(naive.checked_sub(offset_ms)?);
     }
     midnight_millis(year, month as u32, day as u32, true)
 }
@@ -5594,10 +5594,19 @@ fn midnight_millis(year: i32, month: u32, day: u32, local: bool) -> Option<u64> 
     let days = days_from_civil(year, month, day)?;
     let naive = i64::try_from(days.saturating_mul(86_400_000)).ok()?;
     if !local {
-        return u64::try_from(naive).ok();
+        return time_clip_millis(naive);
     }
     let offset = local_offset_east_ms(naive)?;
-    u64::try_from(naive.checked_sub(offset)?).ok()
+    time_clip_millis(naive.checked_sub(offset)?)
+}
+
+/// `Date.parse` TimeClip. `+275760-09-13T00:00:00.000Z` is the last instant.
+/// One millisecond later is empty. A negative instant does not fit in `u64`.
+fn time_clip_millis(millis: i64) -> Option<u64> {
+    if millis < 0 || millis > 8_640_000_000_000_000 {
+        return None;
+    }
+    Some(millis as u64)
 }
 
 fn days_from_civil(year: i32, month: u32, day: u32) -> Option<u64> {
@@ -12758,6 +12767,36 @@ mod local_zone_tests {
             Some(946_674_000_000)
         );
         assert_eq!(unix_millis_from_iso("0100-01-01 16:00"), None);
+    }
+
+    #[test]
+    fn a_time_past_the_javascript_limit_is_empty() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `+275760-09-13` is the last UTC midnight `Date.parse` accepts.
+        // Local 16:00 that day is later, so it is empty. `275760` without a
+        // sign is a legacy year, and local midnight is also past the limit.
+        assert_eq!(
+            unix_millis_from_iso("+275760-09-13"),
+            Some(8_640_000_000_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("+275760-09-13T00:00:00.000Z"),
+            Some(8_640_000_000_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("275760-09-13 GMT"),
+            Some(8_640_000_000_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("+275760-09-13T00:00:00.001Z"), None);
+        assert_eq!(unix_millis_from_iso("275760-09-13"), None);
+        assert_eq!(unix_millis_from_iso("275760-09-13 16:00"), None);
+        assert_eq!(unix_millis_from_iso("275760-09-13 16:00 GMT-5"), None);
+        assert_eq!(unix_millis_from_iso("+275760-09-14"), None);
     }
 
 }
