@@ -3,7 +3,6 @@ package ch.fasrv.fanotes
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.drawBehind
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -57,6 +56,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -4952,15 +4952,52 @@ private fun WelcomePreview(modifier: Modifier, accent: Color) {
             // The body does not clip, so the sheet shadow can paint. The window clip above still cuts blur that leaves the window.
             Row(Modifier.fillMaxWidth().heightIn(min = bodyMin)) {
                 Column(
-                    Modifier.width(aside).fillMaxHeight().padding(
-                        start = asidePad.start.dp,
-                        top = asidePad.top.dp,
-                        end = asidePad.end.dp,
-                        bottom = asidePad.bottom.dp,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    Modifier
+                        .width(aside)
+                        .fillMaxHeight()
+                        .background(
+                            Color(
+                                ch.fasrv.fanotes.desk.firstRunPreviewAsideFill(
+                                    MaterialTheme.colorScheme.background.toArgb(),
+                                    MaterialTheme.colorScheme.surface.toArgb(),
+                                ),
+                            ),
+                        )
+                        .drawBehind {
+                            val stroke = 1.dp.toPx()
+                            val x = size.width - stroke / 2f
+                            drawLine(headerBorder, Offset(x, 0f), Offset(x, size.height), strokeWidth = stroke)
+                        }
+                        .padding(
+                            start = asidePad.start.dp,
+                            top = asidePad.top.dp,
+                            end = asidePad.end.dp,
+                            bottom = asidePad.bottom.dp,
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_GAP_DP.dp),
                 ) {
-                    Text("Meine Fächer", fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_SP.sp, fontWeight = FontWeight.SemiBold)
+                    Row(
+                        Modifier.padding(
+                            start = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_MARGIN_INLINE_DP.dp,
+                            end = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_MARGIN_INLINE_DP.dp,
+                            bottom = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_MARGIN_BOTTOM_DP.dp,
+                        ),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_GAP_DP.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.AutoStories,
+                            contentDescription = null,
+                            modifier = Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_ICON_DP.dp),
+                            tint = ink.soft,
+                        )
+                        Text(
+                            ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_ASIDE_TITLE,
+                            fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_SP.sp,
+                            fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_WEIGHT),
+                            color = ink.soft,
+                        )
+                    }
                     ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SUBJECTS.forEachIndexed { index, subject ->
                         Row(
                             Modifier
