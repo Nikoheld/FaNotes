@@ -123,10 +123,19 @@ class AiAssistTest {
         assertEquals(AiPanelSize(746, 768, 12), aiPanelSize(761, 800))
         assertEquals(AiPanelSize(960, 960, 12), aiPanelSize(980, 1000))
         assertEquals(AiPanelSize(952, 850, 12), aiPanelSize(981, 1000))
-        assertEquals(AiPanelSize(1230, 376, 12), aiPanelSize(1600, 400))
+        assertEquals(AiPanelSize(1230, 620, 12), aiPanelSize(1600, 400))
         assertEquals(AiPanelSize(1230, 850, 12), aiPanelSize(1600, 1200))
         assertEquals(AiPanelSize(1193, 799, 12), aiPanelSize(1230, 850))
         assertEquals(1230, AI_PANEL_MAX_WIDTH_DP)
         assertEquals(850, AI_PANEL_MAX_HEIGHT_DP)
+    }
+
+    @Test
+    fun thePanelKeepsTheDesktopMinHeightAboveTheStack() {
+        assertEquals(AiPanelSize(760, 800, 0), aiPanelSize(760, 800))
+        assertEquals(AiPanelSize(784, 620, 12), aiPanelSize(800, 500))
+        assertEquals(AiPanelSize(1230, 620, 12), aiPanelSize(1600, 400))
+        assertEquals(AiPanelSize(1230, 850, 12), aiPanelSize(1600, 1200))
+        assertEquals(620, AI_PANEL_MIN_HEIGHT_DP)
     }
 }
