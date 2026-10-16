@@ -993,6 +993,23 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     // U+2028 and U+2029 are JavaScript trim characters, and `Date.parse` rejects
     // them. Only the date-parse spaces are padding.
     let trimmed = value.trim_matches(is_date_parse_space);
+    // `-000000-10-13` drops the invalid negative zero once. The remainder is
+    // legacy, so `-10-13` is 13 October 2001 and a second `-000000` is year 0.
+    // `-000001-10-13 EST` stays in year -1. A leading space stays legacy.
+    if !value.starts_with(is_date_parse_space) {
+        if let Some(rest) = strip_negative_zero_year(trimmed) {
+            if rest.is_empty() {
+                return None;
+            }
+            return canonical_iso(&format!(" {rest}"));
+        }
+        if negative_expanded_bare_offset(trimmed) {
+            return None;
+        }
+        if let Some(iso) = negative_expanded_zone_iso(trimmed) {
+            return Some(iso);
+        }
+    }
     // `+002026-10-13 16:00` is local 16:00. The plus and six digits are the
     // numeric year, then the usual hyphen rules. A date with no clock stays UTC.
     if positive_expanded_bare_offset(trimmed) {
@@ -1341,12 +1358,98 @@ fn meridiem_boundary(chars: &[char], index: usize) -> bool {
 
 fn has_ampm_word(value: &str) -> bool {
     value
-        .split(char::is_whitespace)
+        .split(is_date_parse_space)
         .any(|word| word.eq_ignore_ascii_case("am") || word.eq_ignore_ascii_case("pm"))
 }
 
-/// `+002026-10-13 16:00` becomes `2026-10-13 16:00`. `+000001-10-13 16:00`
-/// becomes `1-10-13 16:00`, which is 10 January 2013.
+/// `-000000-10-13` drops the invalid negative zero. The rest is the date.
+fn strip_negative_zero_year(trimmed: &str) -> Option<&str> {
+    let rest = trimmed.strip_prefix("-000000")?;
+    if rest.starts_with(|character: char| character.is_ascii_digit()) {
+        return None;
+    }
+    Some(rest.trim_start_matches(is_date_parse_space))
+}
+
+fn negative_expanded_ymd(date: &str) -> Option<(i32, i32, i32)> {
+    let bytes = date.as_bytes();
+    if bytes.first() != Some(&b'-') || bytes.len() < 7 {
+        return None;
+    }
+    if !bytes[1..7].iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    let year: i32 = date[..7].parse().ok()?;
+    if year >= 0 {
+        return None;
+    }
+    let rest = &date[7..];
+    if rest.is_empty() {
+        return Some((year, 1, 1));
+    }
+    let rest = rest.strip_prefix('-')?;
+    let (month, day) = if let Some((month, day)) = rest.split_once('-') {
+        if day.contains('-') {
+            return None;
+        }
+        (month, day)
+    } else {
+        (rest, "01")
+    };
+    let two = |text: &str| text.len() == 2 && text.bytes().all(|byte| byte.is_ascii_digit());
+    if !two(month) || !two(day) {
+        return None;
+    }
+    let month: i32 = month.parse().ok()?;
+    let day: i32 = day.parse().ok()?;
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    Some((year, month, day))
+}
+
+/// `+5` and `EST+5` after a negative expanded year are empty. A clock is not.
+fn negative_expanded_bare_offset(trimmed: &str) -> bool {
+    let Some((date, time)) = trimmed.split_once(is_date_parse_space) else {
+        return false;
+    };
+    let time = time.trim_start_matches(is_date_parse_space);
+    if time.is_empty() || negative_expanded_ymd(date).is_none() {
+        return false;
+    }
+    let Some(first) = time.split(is_date_parse_space).find(|word| !word.is_empty()) else {
+        return false;
+    };
+    if first.starts_with(|character: char| character.is_ascii_digit()) {
+        return false;
+    }
+    signed_offset_word(first)
+}
+
+fn negative_expanded_zone_iso(trimmed: &str) -> Option<String> {
+    let (date, zone) = trimmed.split_once(is_date_parse_space)?;
+    let zone = zone.trim_start_matches(is_date_parse_space);
+    if zone.is_empty()
+        || zone.split(is_date_parse_space).filter(|word| !word.is_empty()).count() != 1
+        || zone.starts_with(|character: char| character.is_ascii_digit())
+    {
+        return None;
+    }
+    let (year, month, day) = negative_expanded_ymd(date)?;
+    let parsed = legacy_zone_offset(zone)?;
+    if !parsed.spilled.is_empty() || !parsed.time_fields.is_empty() || parsed.minute_sign != 0 {
+        return None;
+    }
+    let (delta, suffix) = fold_offset_days(parsed.minutes)?;
+    let (year, month, day) = shift_ymd(year, month, day, delta)?;
+    canonical_iso(&format!(
+        "{}-{:02}-{:02}T00:00:00{suffix}",
+        legacy_iso_year(year),
+        month,
+        day
+    ))
+}
+
 fn positive_expanded_bare_offset(trimmed: &str) -> bool {
     let Some((date, time)) = trimmed.split_once(is_date_parse_space) else {
         return false;
@@ -1434,7 +1537,7 @@ fn iso_fraction_has_nonzero(time: &str) -> bool {
 /// `4:00 PM` becomes `16:00`. `12:00 AM` and `0:00 AM` become `00:00`.
 fn fold_ampm(trimmed: &str) -> Option<String> {
     let words: Vec<&str> = trimmed
-        .split(char::is_whitespace)
+        .split(is_date_parse_space)
         .filter(|word| !word.is_empty())
         .collect();
     let ampm_at = words.iter().position(|word| {
@@ -1555,7 +1658,7 @@ fn ampm_hour(hour: u32, pm: bool) -> Option<u32> {
 /// Attach `EST` or `GMT+5` to the clock, and drop one trailing `(comment)`.
 fn fold_trailing_zone(trimmed: &str) -> Option<String> {
     let words: Vec<&str> = trimmed
-        .split(char::is_whitespace)
+        .split(is_date_parse_space)
         .filter(|word| !word.is_empty())
         .collect();
     if words.len() < 2 {
@@ -1609,7 +1712,8 @@ fn trim_date_token(token: &str) -> &str {
 
 fn month_words(value: &str) -> Vec<&str> {
     value
-        .split(|c: char| c.is_whitespace() || c == ',')
+        .split(is_date_parse_space)
+        .flat_map(|piece| piece.split(','))
         .map(trim_date_token)
         .filter(|token| !token.is_empty())
         .flat_map(expand_joined_month)
@@ -2713,10 +2817,10 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
     }
     let mut offset_minutes = None;
     let mut zone_spill = Vec::new();
-    let (date, time) = if let Some(index) = trimmed.find(char::is_whitespace) {
-        let rest = trimmed[index..].trim_start();
+    let (date, time) = if let Some(index) = trimmed.find(is_date_parse_space) {
+        let rest = trimmed[index..].trim_start_matches(is_date_parse_space);
         let words: Vec<&str> = rest
-            .split(char::is_whitespace)
+            .split(is_date_parse_space)
             .filter(|word| !word.is_empty())
             .collect();
         if slash_clock_word(&trimmed[..index]) {
@@ -2837,7 +2941,7 @@ fn split_glued_slash_zone(token: &str) -> (&str, Option<&str>) {
 /// `16:00 EST` keeps the offset. `(EST)` is a comment, so the clock stays local.
 fn slash_time_and_zone(rest: &str) -> Option<String> {
     let words: Vec<&str> = rest
-        .split(char::is_whitespace)
+        .split(is_date_parse_space)
         .filter(|word| !word.is_empty())
         .collect();
     if words.is_empty() {
@@ -8950,6 +9054,23 @@ mod tests {
                 super::canonical_iso("\u{FEFF}2026-10-13").as_deref(),
                 Some("2026-10-13T04:00:00.000Z")
             );
+            // U+FEFF is a date-parse space between fields, not part of a word.
+            assert_eq!(
+                super::canonical_iso("Oct 13\u{FEFF}2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13\u{FEFF}16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026\u{FEFF}16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct\u{FEFF}13\u{FEFF}2026 16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
             assert_eq!(
                 super::canonical_iso("2026-10-13").as_deref(),
                 Some("2026-10-13T00:00:00.000Z")
@@ -10069,6 +10190,82 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("2026-10-13 16:00 EST+5:30").as_deref(),
                 Some("2026-10-13T10:30:00.000Z")
+            );
+            // `-000000` drops the invalid expanded year once. The rest is
+            // legacy, so 13 October 2001. A second `-000000` is year 0.
+            // `EST` and `GMT+5` on year -1 stay in that year. A leading
+            // space is still 2013. `+5` with no clock is empty.
+            assert_eq!(
+                super::canonical_iso("-000000-10-13").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000000-10-13 16:00").as_deref(),
+                Some("2001-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000000-10-13 4:5").as_deref(),
+                Some("2001-10-13T08:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000000-10-13 EST").as_deref(),
+                Some("2001-10-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000000-10-13 GMT+5").as_deref(),
+                Some("2001-10-12T19:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000000-10").as_deref(),
+                Some("2001-10-01T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("-000000 16:00"), None);
+            assert_eq!(super::canonical_iso("-000000"), None);
+            assert_eq!(
+                super::canonical_iso("-000000-000000").as_deref(),
+                Some("2000-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000000-000001-10-13").as_deref(),
+                Some("2013-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(" -000000-10-13").as_deref(),
+                Some("2000-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000000-10-13 ").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 EST").as_deref(),
+                Some("-000001-10-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 GMT+5").as_deref(),
+                Some("-000001-10-12T19:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 GMT").as_deref(),
+                Some("-000001-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 PST").as_deref(),
+                Some("-000001-10-13T08:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001 EST").as_deref(),
+                Some("-000001-01-01T05:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("-000001-10-13 +5"), None);
+            assert_eq!(super::canonical_iso("-000001-10-13 EST+5"), None);
+            assert_eq!(
+                super::canonical_iso(" -000001-10-13 EST").as_deref(),
+                Some("2013-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-10-13 16:00 EST").as_deref(),
+                Some("-000001-10-13T21:00:00.000Z")
             );
         });
     }

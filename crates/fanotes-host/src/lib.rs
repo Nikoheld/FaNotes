@@ -1908,6 +1908,23 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         return unix_millis_from_iso(&next);
     }
     let trimmed = value.trim_matches(is_date_parse_space);
+    // `-000000-10-13` is not year 0. The six zeros are dropped once and the
+    // remainder is legacy, so `-10-13` is 13 October 2001. A second
+    // `-000000` is year 0. A leading space never enters this path.
+    // `-000001-10-13 EST` is still year -1. A `u64` cannot store it.
+    if !value.starts_with(is_date_parse_space) {
+        if let Some(rest) = strip_negative_zero_year(trimmed) {
+            if rest.is_empty() {
+                return None;
+            }
+            return unix_millis_from_iso(&format!(" {rest}"));
+        }
+        if let Some(date) = trimmed.split(is_date_parse_space).next() {
+            if negative_expanded_date(date) {
+                return None;
+            }
+        }
+    }
     if positive_expanded_bare_offset(trimmed) {
         return None;
     }
@@ -2611,6 +2628,15 @@ fn expanded_year_tail(tail: &str) -> bool {
         [month, day] => two_digits(month) && two_digits(day),
         _ => false,
     }
+}
+
+/// `-000000-10-13` drops the invalid negative zero. The rest is the date.
+fn strip_negative_zero_year(trimmed: &str) -> Option<&str> {
+    let rest = trimmed.strip_prefix("-000000")?;
+    if rest.starts_with(|character: char| character.is_ascii_digit()) {
+        return None;
+    }
+    Some(rest.trim_start_matches(is_date_parse_space))
 }
 
 fn negative_expanded_clock(value: &str) -> bool {
@@ -12605,4 +12631,63 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("+002026-10-13 +5"), None);
         assert_eq!(unix_millis_from_iso("+002026-10-13 PST+5"), None);
     }
+
+    #[test]
+    fn a_negative_zero_year_is_legacy() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `-000000` is an invalid expanded year. The six zeros are dropped
+        // once and the rest is legacy, so `-10-13` is 13 October 2001.
+        // A leading space keeps year 0, which is 2000. Year -1 still does
+        // not fit in `u64`.
+        assert_eq!(unix_millis_from_iso("-000000-10-13"), Some(1_002_945_600_000));
+        assert_eq!(
+            unix_millis_from_iso("-000000-10-13 16:00"),
+            Some(1_003_003_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("-000000-10-13 4:5"),
+            Some(1_002_960_300_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("-000000-10-13 EST"),
+            Some(1_002_949_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("-000000-10-13 GMT+5"),
+            Some(1_002_913_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("-000000-10"), Some(1_001_908_800_000));
+        assert_eq!(unix_millis_from_iso("-000000 16:00"), None);
+        assert_eq!(unix_millis_from_iso("-000000"), None);
+        assert_eq!(
+            unix_millis_from_iso("-000000-000000"),
+            Some(946_702_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("-000000-000001-10-13"),
+            Some(1_357_794_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso(" -000000-10-13"),
+            Some(971_409_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("-000000-10-13 "),
+            Some(1_002_945_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("-000001-10-13 EST"), None);
+        assert_eq!(unix_millis_from_iso("-000001-10-13 GMT+5"), None);
+        assert_eq!(unix_millis_from_iso("-000001-10-13 +5"), None);
+        assert_eq!(unix_millis_from_iso("-000001-10-13 EST+5"), None);
+        assert_eq!(
+            unix_millis_from_iso(" -000001-10-13 EST"),
+            Some(1_357_794_000_000)
+        );
+    }
+
 }
