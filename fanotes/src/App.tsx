@@ -121,6 +121,7 @@ import {
   canGoBack,
   canGoForward,
   clampSplitRatio,
+  editorPaneForCommand,
   DEFAULT_SPLIT_LAYOUT,
   EMPTY_NOTE_HISTORY,
   forgetNoteHistory,
@@ -738,6 +739,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const [splitLayout, setSplitLayout] = useState<SplitLayout>(() => loadSplitLayout())
   const [splitDragging, setSplitDragging] = useState(false)
   const [focusedPane, setFocusedPane] = useState<'main' | 'split'>('main')
+  const focusedPaneRef = useRef(focusedPane)
+  focusedPaneRef.current = focusedPane
   const [tabMenu, setTabMenu] = useState<TabMenuState | null>(null)
   const [tabDrag, setTabDrag] = useState<{ path: string; over: string | null; side: 'before' | 'after' } | null>(null)
   const [paletteMode, setPaletteMode] = useState<'commands' | 'notes'>('commands')
@@ -763,6 +766,9 @@ export default function App({ startupBootstrap }: AppProps) {
   const editorRef = useRef<MarkdownEditorHandle>(null)
   /** The second pane keeps its own 90 ms keystroke buffer. Save and quit must flush it too. */
   const splitEditorRef = useRef<MarkdownEditorHandle>(null)
+  const commandPane = () => editorPaneForCommand(focusedPaneRef.current, Boolean(splitPathRef.current))
+  const commandEditor = () => commandPane() === 'split' ? splitEditorRef.current : editorRef.current
+  const commandNotePath = () => commandPane() === 'split' ? splitPathRef.current : activePathRef.current
   const drawingBoardRef = useRef<DrawingBoardHandle>(null)
   const worksheetLayerRefs = useRef(new Map<string, WorksheetLayerHandle>())
   const worksheetLayerRefCallbacks = useRef(new Map<string, (handle: WorksheetLayerHandle | null) => void>())
@@ -2326,21 +2332,22 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [toast])
 
   const insertStamp = useCallback((withTime: boolean) => {
-    const path = activePathRef.current
+    const path = commandNotePath()
     const tab = path ? tabsRef.current.find((item) => item.path === path) : null
     if (!path || !tab || tab.kind === 'pdf' || isPdfNotePath(path)) {
       toast('Öffne eine Markdown-Notiz, um das Datum einzufügen.', 'info')
       return
     }
-    if (drawingOpenRef.current) {
+    if (drawingOpenRef.current && focusedPaneRef.current === commandPane()) {
       toast('Wechsle zur Tastatur, um das Datum in den Text zu setzen.', 'info')
       return
     }
+    const editor = commandEditor()
     const stamp = formatNoteStamp(settingsRef.current.dateFormat || 'YYYY-MM-DD', new Date(), withTime)
-    const text = editorRef.current?.getText()
-    const selection = editorRef.current?.getSelection()
+    const text = editor?.getText()
+    const selection = editor?.getSelection()
     const before = text && selection ? text.slice(0, selection.from) : ''
-    const inserted = editorRef.current?.insertText(stampToInsert(before, stamp), 'cursor') ?? false
+    const inserted = editor?.insertText(stampToInsert(before, stamp), 'cursor') ?? false
     if (!inserted) toast('Das Datum konnte nicht eingefügt werden.', 'error')
   }, [toast])
 
@@ -2353,9 +2360,10 @@ export default function App({ startupBootstrap }: AppProps) {
       toast('Eine PDF-Notiz bleibt die Datei selbst.', 'info')
       return
     }
-    if (activePathRef.current === path) {
-      editorRef.current?.flushChanges()
-      if (!await flushDocumentLayers()) return
+    if (activePathRef.current === path || splitPathRef.current === path) {
+      if (activePathRef.current === path) editorRef.current?.flushChanges()
+      if (splitPathRef.current === path) splitEditorRef.current?.flushChanges()
+      if (activePathRef.current === path && !await flushDocumentLayers()) return
     }
     const openTab = tabsRef.current.find((item) => item.path === path)
     const pending = pendingWrites.current.get(path)
@@ -3393,12 +3401,17 @@ export default function App({ startupBootstrap }: AppProps) {
       toast('Öffne eine Notiz im Editor, um sie zu formatieren.', 'info')
       return
     }
-    if (activeEntryMutating) {
+    const path = commandNotePath()
+    if (!path || isPdfNotePath(path)) {
+      toast('Öffne eine Notiz im Editor, um sie zu formatieren.', 'info')
+      return
+    }
+    if ([...mutatingEntryPathsRef.current].some((entry) => path === entry || path.startsWith(`${entry}/`))) {
       toast('Diese Notiz ist während der Dateiaktion schreibgeschützt.', 'error')
       return
     }
-    if (!editorRef.current?.format(action)) toast('Die Formatierung konnte nicht angewandt werden.', 'error')
-  }, [activeEntryMutating, drawingOpen, homeworkOpen, overviewOpen, toast])
+    if (!commandEditor()?.format(action)) toast('Die Formatierung konnte nicht angewandt werden.', 'error')
+  }, [drawingOpen, homeworkOpen, overviewOpen, toast])
 
   const handleDrawingDirtyChange = useMemo(() => {
     const session = noteDrawingSession.key
