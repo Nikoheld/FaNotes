@@ -3004,9 +3004,13 @@ private fun DayColumns(
     val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
     val gutter = ch.fasrv.fanotes.desk.CAL_GUTTER_DP.dp
     // `.cal-scroll` is the flexible remainder under the weekday headers and the all-day row.
-    // One horizontal scroll keeps those rows aligned with the hour columns.
-    SubcomposeLayout(Modifier.fillMaxSize().horizontalScroll(rememberScrollState())) { constraints ->
+    // Day tracks are `56px repeat(n, minmax(0, 1fr))` and stay inside the pane.
+    SubcomposeLayout(Modifier.fillMaxSize()) { constraints ->
         val bodyHeight = if (constraints.hasBoundedHeight) constraints.maxHeight else 0
+        val panePx = if (constraints.hasBoundedWidth) constraints.maxWidth else 0
+        val paneDp = panePx.toDp().value.roundToInt().coerceAtLeast(0)
+        val column = ch.fasrv.fanotes.desk.calendarColumnDp(paneDp, days.size).dp
+        val trackMax = if (constraints.hasBoundedWidth) panePx else Constraints.Infinity
         val chrome = subcompose("chrome") {
             Column {
                 Row {
@@ -3015,7 +3019,7 @@ private fun DayColumns(
                         val today = date == LocalDate.now()
                         Column(
                             Modifier
-                                .width(148.dp)
+                                .width(column)
                                 .clickable {
                                     onPick(date)
                                     onDaily(date)
@@ -3043,7 +3047,7 @@ private fun DayColumns(
                         Text(ch.fasrv.fanotes.desk.CAL_ALL_DAY, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(end = 8.dp))
                     }
                     days.forEach { date ->
-                        Column(Modifier.width(148.dp).padding(end = 4.dp).heightIn(min = 34.dp)) {
+                        Column(Modifier.width(column).padding(end = 4.dp).heightIn(min = 34.dp)) {
                             allDaySpans(document, date).forEach { span ->
                                 val tint = document.calendars.find { it.id == span.event.calendarId }?.color ?: "#2a6f97"
                                 Text(
@@ -3072,7 +3076,7 @@ private fun DayColumns(
                     }
                 }
             }
-        }.first().measure(Constraints(maxWidth = Constraints.Infinity, maxHeight = Constraints.Infinity))
+        }.first().measure(Constraints(maxWidth = trackMax, maxHeight = Constraints.Infinity))
         val availablePx = (bodyHeight - chrome.height).coerceAtLeast(0)
         val availableDp = availablePx.toDp().value.roundToInt().coerceAtLeast(0)
         val viewportDp = ch.fasrv.fanotes.desk.hourViewportDp(availableDp, ch.fasrv.fanotes.desk.CAL_HOUR_DP)
@@ -3091,12 +3095,12 @@ private fun DayColumns(
                     }
                 }
                 days.forEach { date ->
-                    HourColumn(date, timedDayLayout(document, date), document, onEdit, onMove, onResize, onCreate)
+                    HourColumn(date, timedDayLayout(document, date), document, column, onEdit, onMove, onResize, onCreate)
                 }
             }
-        }.first().measure(Constraints(maxWidth = Constraints.Infinity, maxHeight = hourPx.coerceAtLeast(0)))
+        }.first().measure(Constraints(maxWidth = trackMax, maxHeight = hourPx.coerceAtLeast(0)))
         val contentWidth = maxOf(chrome.width, hours.width)
-        val layoutWidth = contentWidth.coerceAtLeast(constraints.minWidth)
+        val layoutWidth = contentWidth.coerceIn(constraints.minWidth, constraints.maxWidth)
         val layoutHeight = if (constraints.hasBoundedHeight) {
             bodyHeight.coerceAtLeast(constraints.minHeight)
         } else {
@@ -3114,13 +3118,14 @@ private fun HourColumn(
     day: LocalDate,
     slices: List<LaidOutSpan>,
     document: ch.fasrv.fanotes.desk.CalendarDocument,
+    columnWidth: Dp,
     onEdit: (CalendarEvent, LocalDate) -> Unit,
     onMove: (String, LocalDateTime) -> Unit,
     onResize: (String, LocalDateTime) -> Unit,
     onCreate: (LocalDate, LocalDateTime, LocalDateTime, Boolean) -> Unit,
 ) {
     var draftRange by remember(day) { mutableStateOf<Pair<Int, Int>?>(null) }
-    Box(Modifier.width(148.dp).height((24 * HOUR_DP).dp).padding(end = 4.dp)) {
+    Box(Modifier.width(columnWidth).height((24 * HOUR_DP).dp).padding(end = 4.dp)) {
         for (hour in 0..23) {
             Box(
                 Modifier.fillMaxWidth().height(1.dp).offset(y = (hour * HOUR_DP).dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)),

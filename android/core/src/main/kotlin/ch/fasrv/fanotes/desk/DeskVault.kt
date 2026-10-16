@@ -647,6 +647,17 @@ fun hourViewportDp(availableDp: Int, minDp: Int = CAL_HOUR_DP): Int {
     return availableDp.coerceAtLeast(floor)
 }
 
+/**
+ * Width of one day column on `.cal-dayheads`, `.cal-allday`, and `.cal-hours`.
+ * Desktop uses `56px repeat(n, minmax(0, 1fr))`, so day, three-day, and week
+ * columns share whatever the pane has left after the gutter. The share is
+ * never negative. Zero days returns 0 instead of dividing by zero.
+ */
+fun calendarColumnDp(paneDp: Int, days: Int, gutterDp: Int = CAL_GUTTER_DP): Int {
+    if (days <= 0) return 0
+    return (paneDp - gutterDp).coerceAtLeast(0) / days
+}
+
 /** Distance from midnight down the 48dp hour grid. */
 fun calendarNowOffsetDp(hour: Int, minute: Int, hourDp: Int = CAL_HOUR_DP): Float =
     ((hour.coerceIn(0, 23) * 60 + minute.coerceIn(0, 59)) / 60f) * hourDp

@@ -145,6 +145,14 @@ class CalendarBooksTest {
     }
 
     @Test
+    fun dayColumnsShareTheLeftoverWidth() {
+        assertEquals(100, calendarColumnDp(756, 7, gutterDp = 56))
+        assertEquals(500, calendarColumnDp(556, 1))
+        assertEquals(0, calendarColumnDp(40, 7))
+        assertEquals(0, calendarColumnDp(756, 0))
+    }
+
+    @Test
     fun subjectBookFollowsTheFolderAndRemembersThePage() {
         val books = attachSubjectBook(emptyList(), "Schule/Mathe", "Buecher/Algebra.pdf", 4)
         val text = serializeSubjectBooks(books)
