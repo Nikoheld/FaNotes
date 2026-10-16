@@ -49,6 +49,8 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Note backup snapshots | `src/lib/noteBackup.ts` | `export const createNoteBackup` |
 | Backup control policy | `src/lib/noteBackup.ts` | `export const noteBackupControlPolicy` |
 | Backup top chrome | `src/App.tsx` | `note-backup-control` |
+| Toggle the task on the current line | `src/App.tsx` | `id: 'toggle-task'` |
+| Task line toggle | `src/lib/noteEveryday.ts` | `export const toggleTaskLine` |
 | Notiz-Backup Experimentell | `src/components/SettingsModal.tsx` | `title="Notiz-Backup"` |
 | Send Data Experimentell | `src/components/SettingsModal.tsx` | `title="Send Data"` |
 | Send Data policy | `src/lib/sendData.ts` | `export const sendDataPolicy` |
@@ -172,6 +174,8 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Calendar | `src/components/CalendarView.tsx` | `export function CalendarView` |
 | Calendar model | `src/lib/calendarModel.ts` | `export const CALENDAR_NOTE_PATH` |
 | Calendar command | `src/App.tsx` | `id: 'calendar'` |
+| Study time | `src/components/StudyOverview.tsx` | `export function StudyOverview` |
+| Flashcards | `src/components/FlashcardReview.tsx` | `export function FlashcardReview` |
 
 ## Homework
 

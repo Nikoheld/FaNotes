@@ -88,6 +88,7 @@
     "check:efficiency": "node scripts/check-efficiency.mjs",
     "check:startup": "node scripts/check-startup-preflight.cjs",
     "check:surfaces": "node scripts/check-user-surfaces.cjs && node scripts/check-note-outline.mjs",
+    "check:everyday": "node scripts/check-note-everyday.mjs",
     "measure:startup:linux": "node scripts/measure-linux-startup.cjs",
     "measure:efficiency:linux": "node scripts/measure-linux-efficiency.cjs",
     "check:updater": "node scripts/check-updater.cjs",

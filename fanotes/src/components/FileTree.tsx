@@ -23,6 +23,7 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  Link2,
   MoreHorizontal,
   Palette,
   Pencil,
@@ -781,7 +782,7 @@ export const FileTree = memo(function FileTree({
             left: Math.min(Math.max(8, contextMenu.x), window.innerWidth - 232),
             top: Math.min(
               Math.max(8, contextMenu.y),
-              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 510 : 400),
+              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 560 : 420),
             ),
           }}
         >
@@ -919,7 +920,7 @@ export const FileTree = memo(function FileTree({
           {(onDuplicate || onCopyWikiLink || onCopyPath) && (
             <>
               <span className="file-tree__menu-label">Kopieren</span>
-              {contextMenu.entry.kind === 'file' && onDuplicate && (
+              {contextMenu.entry.kind === 'file' && onDuplicate && !isPdfEntry(contextMenu.entry) && (
                 <button
                   onClick={() => {
                     const path = contextMenu.entry.relativePath
@@ -938,12 +939,12 @@ export const FileTree = memo(function FileTree({
                   onClick={() => {
                     const path = contextMenu.entry.relativePath
                     setContextMenu(null)
-                    onCopyWikiLink(path)
+                    void Promise.resolve(onCopyWikiLink(path))
                   }}
                   role="menuitem"
                   type="button"
                 >
-                  <Copy aria-hidden="true" size={15} />
+                  <Link2 aria-hidden="true" size={15} />
                   Wiki-Link kopieren
                 </button>
               )}
@@ -952,7 +953,7 @@ export const FileTree = memo(function FileTree({
                   onClick={() => {
                     const path = contextMenu.entry.relativePath
                     setContextMenu(null)
-                    onCopyPath(path)
+                    void Promise.resolve(onCopyPath(path))
                   }}
                   role="menuitem"
                   type="button"

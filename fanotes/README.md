@@ -134,6 +134,8 @@ PDFs werden ausschließlich lokal gerendert. Originaldatei, Textfelder und Stift
 | Fett / kursiv / Link | `Strg+B` / `Strg+I` / `Strg+K` |
 | Einstellungen | `Strg+,` |
 | Zeichnung rückgängig/wiederholen | `Strg+Z` / `Strg+Y` |
+| Notiz duplizieren | `Alt+Umschalt+D` |
+| Aufgabe umschalten | `Strg+Enter` |
 
 ## Windows und Arch Linux installieren
 

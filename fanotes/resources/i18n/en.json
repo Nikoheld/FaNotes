@@ -3741,11 +3741,18 @@
   "Wiki-Link kopiert.": "Wiki link copied.",
   "Der Wiki-Link konnte nicht kopiert werden.": "The wiki link could not be copied.",
   "Öffne eine Markdown-Notiz, um das Datum einzufügen.": "Open a Markdown note to insert the date.",
+  "Öffne eine Markdown-Notiz, um die Aufgabe umzuschalten.": "Open a Markdown note to toggle the task.",
   "Wechsle zur Tastatur, um das Datum in den Text zu setzen.": "Switch to the keyboard to put the date into the text.",
+  "Wechsle zur Tastatur, um Text einzufügen.": "Switch to the keyboard to insert text.",
   "Das Datum konnte nicht eingefügt werden.": "The date could not be inserted.",
   "Eine PDF-Notiz bleibt die Datei selbst.": "A PDF note stays the file itself.",
   "Notiz dupliziert.": "Note duplicated.",
   "Notiz dupliziert. Handschrift oder ein Arbeitsblatt ließ sich nicht mitkopieren.": "Note duplicated. Handwriting or a worksheet could not be copied along.",
   "Die Notiz wurde dupliziert, konnte aber nicht geöffnet werden.": "The note was duplicated, but it could not be opened.",
-  "Notiz konnte nicht dupliziert werden.": "The note could not be duplicated."
+  "Notiz konnte nicht dupliziert werden.": "The note could not be duplicated.",
+  "Aufgabe umschalten": "Toggle task",
+  "Die Aufgabe der aktuellen Zeile umschalten": "Toggle the task on the current line",
+  "Erledigt oder offen": "Done or open",
+  "Umbenennen": "Rename",
+  "In Papierkorb": "Move to trash"
 }

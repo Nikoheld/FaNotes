@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.10.8
+
+- **Aufgabe umschalten.** Strg+Enter macht aus der aktuellen Zeile eine Aufgabe oder hakt sie ab. Überschriften, Zitate, Tabellen, Linien und Code bleiben. Alt+Umschalt+D dupliziert die Notiz. Kopieren fällt auf eine Textauswahl zurück, wenn der Browser die Zwischenablage sperrt.
+
 ## 2026.10.7
 
 - **Android-Tablet.** Löschen verschiebt in den Papierkorb auf dem Gerät, mit Rückgängig, Wiederherstellen und endgültigem Leeren. Eine Notiz lässt sich wie am Desktop duplizieren, der Wiki-Link kopieren, und `Strg+Umschalt+D` setzt das Datum an der Schreibmarke. Alle Ordner klappen mit einem Klick, die leere Seite zeigt die letzten Notizen, und im Stiftmodus bleibt der Bildschirm drei Minuten an.
