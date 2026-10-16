@@ -52,11 +52,13 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
@@ -66,6 +68,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileCopy
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.ViewColumn
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
@@ -1629,19 +1632,45 @@ private fun TreeMenuLabel(label: String) {
 }
 
 @Composable
+private fun treeMenuImage(id: String) = when (id) {
+    "plus" -> Icons.Filled.Add
+    "file" -> Icons.AutoMirrored.Filled.InsertDriveFile
+    "file-text" -> Icons.Filled.Description
+    "close" -> Icons.Filled.Close
+    "folder-plus" -> Icons.Filled.CreateNewFolder
+    "columns" -> Icons.Filled.ViewColumn
+    "pencil" -> Icons.Filled.Edit
+    "move" -> Icons.AutoMirrored.Filled.DriveFileMove
+    "trash" -> Icons.Filled.Delete
+    else -> Icons.Filled.Folder
+}
+
+@Composable
 private fun TreeMenuItem(label: String, danger: Boolean = false, onClick: () -> Unit) {
-    Text(
-        label,
-        fontSize = 12.sp,
-        color = if (danger) MaterialTheme.colorScheme.error else LocalStatusInk.current.soft,
-        modifier = Modifier
+    val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    val tint = if (danger) MaterialTheme.colorScheme.error else accent
+    Row(
+        Modifier
             .fillMaxWidth()
             .height(ch.fasrv.fanotes.desk.TREE_MENU_ROW_DP.dp)
             .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.TREE_MENU_ROW_RADIUS_DP.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp)
-            .wrapContentHeight(Alignment.CenterVertically),
-    )
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.TREE_MENU_ICON_GAP_DP.dp),
+    ) {
+        Icon(
+            treeMenuImage(ch.fasrv.fanotes.desk.treeMenuIcon(label)),
+            contentDescription = null,
+            modifier = Modifier.size(ch.fasrv.fanotes.desk.TREE_MENU_ICON_DP.dp),
+            tint = tint,
+        )
+        Text(
+            label,
+            fontSize = 12.sp,
+            color = if (danger) MaterialTheme.colorScheme.error else LocalStatusInk.current.soft,
+        )
+    }
 }
 
 @Composable
@@ -1973,16 +2002,39 @@ private fun NoteRow(
                     border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)),
                 ) {
                     Column(Modifier.padding(ch.fasrv.fanotes.desk.TREE_MENU_PAD_DP.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
-                            Text(
-                                ch.fasrv.fanotes.desk.treeMenuKind(folder, node.kind == NoteKind.PDF).uppercase(java.util.Locale.GERMAN),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.07.em,
-                                color = LocalStatusInk.current.muted,
-                            )
-                            Text(node.name, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.TREE_MENU_HEAD_GAP_DP.dp),
+                            modifier = Modifier.padding(start = 5.dp, end = 5.dp, top = 3.dp, bottom = 8.dp),
+                        ) {
+                            val headAccent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+                            val headTint = folderColor?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() } ?: headAccent
+                            Box(
+                                Modifier
+                                    .size(ch.fasrv.fanotes.desk.TREE_MENU_HEAD_DP.dp)
+                                    .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.TREE_MENU_HEAD_RADIUS_DP.dp))
+                                    .background(LocalStatusInk.current.panelActive),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    treeMenuImage(ch.fasrv.fanotes.desk.treeMenuHeadIcon(folder, node.kind == NoteKind.PDF)),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(ch.fasrv.fanotes.desk.TREE_MENU_HEAD_ICON_DP.dp),
+                                    tint = if (folder) headTint else headAccent,
+                                )
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    ch.fasrv.fanotes.desk.treeMenuKind(folder, node.kind == NoteKind.PDF).uppercase(java.util.Locale.GERMAN),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight(750),
+                                    letterSpacing = 0.07.em,
+                                    color = LocalStatusInk.current.muted,
+                                )
+                                Text(node.name, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface)
+                            }
                         }
+                        Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
                         if (folder) {
                             TreeMenuLabel(ch.fasrv.fanotes.desk.TREE_MENU_CREATE)
                             TreeMenuItem(ch.fasrv.fanotes.desk.TREE_MENU_NOTE) { menu = false; onCreateNoteIn(node.path) }

@@ -265,6 +265,33 @@ const val TREE_MENU_SPLIT = "Rechts öffnen"
 const val TREE_MENU_RENAME = "Umbenennen"
 const val TREE_MENU_MOVE = "Verschieben"
 const val TREE_MENU_DELETE = "Löschen"
+const val TREE_MENU_ICON_DP = 15
+const val TREE_MENU_ICON_GAP_DP = 9
+const val TREE_MENU_HEAD_DP = 29
+const val TREE_MENU_HEAD_RADIUS_DP = 8
+const val TREE_MENU_HEAD_ICON_DP = 16
+const val TREE_MENU_HEAD_GAP_DP = 8
+
+/** Row glyphs from the desktop context menu. Danger rows still use the trash glyph. */
+fun treeMenuIcon(label: String): String = when (label) {
+    TREE_MENU_NOTE -> "plus"
+    TREE_MENU_PDF -> "file"
+    TREE_MENU_BOOK -> "file-text"
+    TREE_MENU_DETACH -> "close"
+    TREE_MENU_SUBFOLDER -> "folder-plus"
+    TREE_MENU_SPLIT -> "columns"
+    TREE_MENU_RENAME -> "pencil"
+    TREE_MENU_MOVE -> "move"
+    TREE_MENU_DELETE -> "trash"
+    else -> "folder"
+}
+
+/** Header mark: an open folder, a PDF file, or a note. */
+fun treeMenuHeadIcon(folder: Boolean, pdf: Boolean): String = when {
+    folder -> "folder"
+    pdf -> "file"
+    else -> "file-text"
+}
 
 fun treeMenuKind(folder: Boolean, pdf: Boolean): String = when {
     folder -> "Ordner"

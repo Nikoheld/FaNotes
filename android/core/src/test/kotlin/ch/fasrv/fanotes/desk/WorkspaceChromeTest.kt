@@ -286,4 +286,25 @@ class WorkspaceChromeTest {
         assertEquals(12, TREE_MENU_RADIUS_DP)
         assertEquals(34, TREE_MENU_ROW_DP)
     }
+
+    @Test
+    fun theContextMenuUsesTheDesktopGlyphs() {
+        assertEquals(15, TREE_MENU_ICON_DP)
+        assertEquals(9, TREE_MENU_ICON_GAP_DP)
+        assertEquals(29, TREE_MENU_HEAD_DP)
+        assertEquals("plus", treeMenuIcon(TREE_MENU_NOTE))
+        assertEquals("file", treeMenuIcon(TREE_MENU_PDF))
+        assertEquals("file-text", treeMenuIcon(TREE_MENU_BOOK))
+        assertEquals("close", treeMenuIcon(TREE_MENU_DETACH))
+        assertEquals("folder-plus", treeMenuIcon(TREE_MENU_SUBFOLDER))
+        assertEquals("columns", treeMenuIcon(TREE_MENU_SPLIT))
+        assertEquals("pencil", treeMenuIcon(TREE_MENU_RENAME))
+        assertEquals("move", treeMenuIcon(TREE_MENU_MOVE))
+        assertEquals("trash", treeMenuIcon(TREE_MENU_DELETE))
+        assertEquals("folder", treeMenuIcon("Nur auf diesem Gerät"))
+        assertEquals("folder", treeMenuIcon("Wieder synchronisieren"))
+        assertEquals("folder", treeMenuHeadIcon(folder = true, pdf = false))
+        assertEquals("file", treeMenuHeadIcon(folder = false, pdf = true))
+        assertEquals("file-text", treeMenuHeadIcon(folder = false, pdf = false))
+    }
 }
