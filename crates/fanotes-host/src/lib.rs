@@ -2150,8 +2150,14 @@ fn rewrite_periods(value: &str) -> String {
             continue;
         }
         // `p.m.` is not `pm`. Only a period at the end of the text is padding.
+        // `13:Oct-2026.5.` keeps the last dot: it is a fraction with no digits.
         if chars.get(next).is_some() {
             out.extend(chars[index..next].iter().copied());
+        } else {
+            let token_start = out.rfind([' ', '\t', ',']).map(|at| at + 1).unwrap_or(0);
+            if out.contains(':') && out[token_start..].contains('.') {
+                out.push('.');
+            }
         }
         index = next;
     }
@@ -2876,11 +2882,22 @@ fn fold_trailing_zone(trimmed: &str) -> Option<String> {
     None
 }
 
+/// `2026.` loses a padding dot. `2026.5.` keeps the last dot so a fraction
+/// with no digits stays empty.
+fn trim_date_token(token: &str) -> &str {
+    let trimmed = token.trim_matches('.');
+    if token.ends_with('.') && trimmed.contains('.') {
+        token.trim_start_matches('.')
+    } else {
+        trimmed
+    }
+}
+
 fn legacy_words(value: &str) -> Vec<&str> {
     value
         .split(is_date_parse_space)
         .flat_map(|piece| piece.split(','))
-        .map(|token| token.trim_matches('.'))
+        .map(trim_date_token)
         .filter(|token| !token.is_empty())
         .flat_map(expand_joined_month)
         .flat_map(expand_glued_month)
@@ -3030,7 +3047,7 @@ fn separate_slash_after_fraction(value: &str) -> Option<String> {
     let mut changed = false;
     let mut out = String::with_capacity(value.len());
     for (index, character) in chars.iter().copied().enumerate() {
-        if character == '/' && fraction_digits_before(&chars, index) {
+        if character == '/' && clock_fraction_dot(&chars, index) {
             out.push(' ');
             changed = true;
         } else {
@@ -3226,6 +3243,23 @@ fn suffix_is_legacy_clock(suffix: &str) -> bool {
     saw_colon
 }
 
+/// The dot is a second dot after a real clock fraction, as in
+/// `16:00:00.5.1`. `2026.5.1` is not: its first dot does not follow a colon.
+fn clock_fraction_dot(chars: &[char], index: usize) -> bool {
+    if !fraction_digits_before(chars, index) {
+        return false;
+    }
+    let mut digit = index;
+    while digit > 0 && chars[digit - 1].is_ascii_digit() {
+        digit -= 1;
+    }
+    let mut cursor = digit.saturating_sub(1);
+    while cursor > 0 && chars[cursor - 1].is_ascii_digit() {
+        cursor -= 1;
+    }
+    cursor > 0 && chars[cursor - 1] == ':'
+}
+
 fn separate_dot_after_fraction(value: &str) -> Option<String> {
     let chars: Vec<char> = value.chars().collect();
     let mut changed = false;
@@ -3240,7 +3274,7 @@ fn separate_dot_after_fraction(value: &str) -> Option<String> {
         if character == ':' {
             token_has_colon = true;
         }
-        if character == '.' && token_has_colon && fraction_digits_before(&chars, index) {
+        if character == '.' && token_has_colon && clock_fraction_dot(&chars, index) {
             out.push(' ');
             changed = true;
             token_has_colon = false;
@@ -3793,6 +3827,71 @@ impl LegacyTime {
     }
 }
 
+/// `13:Oct-2026.5` is 13:05. The dot after the year is ignored, and `5`
+/// fills the open minute. `5.1` is a fraction of that field, so it lands in
+/// the next slot and is not a date. A slash after a finished field is empty.
+fn apply_dotted_clock_number(
+    word: &str,
+    time: &mut LegacyTime,
+    dates: &mut Vec<i32>,
+) -> Option<bool> {
+    if word.is_empty()
+        || !word.contains('.')
+        || !word
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'.' | b'/'))
+    {
+        return None;
+    }
+    let bytes = word.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if matches!(bytes[index], b'.' | b'/') {
+            index += 1;
+            continue;
+        }
+        if !bytes[index].is_ascii_digit() {
+            return Some(false);
+        }
+        let (number, _, next) = read_clock_number(bytes, index)?;
+        let expecting = time.expecting(number);
+        if expecting && next < bytes.len() && bytes[next] == b'.' {
+            let mut end = next + 1;
+            if end >= bytes.len() || !bytes[end].is_ascii_digit() {
+                return Some(false);
+            }
+            let fraction_at = end;
+            while end < bytes.len() && bytes[end].is_ascii_digit() {
+                end += 1;
+            }
+            if end < bytes.len() {
+                return Some(false);
+            }
+            let fraction = &word[fraction_at..end];
+            let digits = if fraction.len() > 9 {
+                &fraction[..9]
+            } else {
+                fraction
+            };
+            let value: i32 = digits.parse().ok()?;
+            time.add(number)?;
+            time.add_final(clock_milliseconds(value, digits.len()))?;
+            return Some(true);
+        }
+        if expecting {
+            time.add_final(number)?;
+            index = next;
+            if index < bytes.len() && bytes[index] == b'/' {
+                return Some(false);
+            }
+            continue;
+        }
+        push_date_number(dates, number)?;
+        index = next;
+    }
+    Some(true)
+}
+
 fn compose_month_date(
     words: &[&str],
     numeric: bool,
@@ -3961,6 +4060,13 @@ fn compose_month_date(
             }
             // A later `AM` or `PM` replaces the earlier one.
             hour_offset = Some(if word.eq_ignore_ascii_case("pm") { 12 } else { 0 });
+            continue;
+        }
+        if let Some(done) = apply_dotted_clock_number(word, &mut time, &mut dates) {
+            if !done {
+                return None;
+            }
+            number_seen = true;
             continue;
         }
         if let Some((number, signed)) = date_number_word(word) {
@@ -12145,6 +12251,22 @@ mod local_zone_tests {
             ("16:Oct-13", None),
             ("13:Oct.13.2026", None),
             ("13:Oct-1950", None),
+            // `.5` fills the open minute. `.5.1` is a fraction of that minute,
+            // which becomes an illegal second. A finished `13:00` keeps `.5.1`
+            // as 05.100 seconds.
+            ("13:Oct-2026.5", Some(1_790_874_300_000)),
+            ("13:Oct-2026.05", Some(1_790_874_300_000)),
+            ("13:Oct:2026.5", Some(1_790_874_300_000)),
+            ("13:Oct 2026.5", Some(1_790_874_300_000)),
+            ("4:May-2026.5", Some(1_777_622_700_000)),
+            ("4:May-2026.15", Some(1_777_623_300_000)),
+            ("13:00:Oct-2026.5", Some(1_790_874_005_000)),
+            ("13:00:Oct-2026.5.1", Some(1_790_874_005_100)),
+            ("13:Oct-2026.60", None),
+            ("13:Oct-2026.5.1", None),
+            ("13:Oct-2026.5.", None),
+            ("13:Oct-2026.5/1", None),
+            ("13:Oct-1950.5", None),
         ];
         for (input, expected) in cases {
             assert_eq!(unix_millis_from_iso(input), expected, "{input}");
