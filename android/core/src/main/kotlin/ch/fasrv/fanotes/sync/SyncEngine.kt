@@ -16,7 +16,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.Locale
 import java.util.concurrent.Executors
+import kotlin.math.roundToInt
 
 const val AUTO_INTERVAL_MS = 60_000L
 const val LOCAL_DEBOUNCE_MS = 2_500L
@@ -61,22 +63,41 @@ data class SyncPublicState(
     val info: SyncAccountInfo? = null,
 )
 
+/** Desktop `syncStatusLabel` for the account card and the status line. */
 fun syncStatusLabel(state: SyncPublicState): String = when (state.status) {
     SyncStatus.SYNCING -> state.progress?.let { progress ->
-        val verb = when (progress.phase) {
-            "pull" -> "Downloading"
-            "push" -> "Uploading"
-            else -> "Checking"
+        if (progress.total > 0) {
+            val verb = when (progress.phase) {
+                "pull" -> "Holt"
+                "push" -> "Lädt hoch"
+                else -> "Prüft"
+            }
+            "$verb ${progress.done}/${progress.total}"
+        } else {
+            "Synchronisiert …"
         }
-        if (progress.total > 0) "$verb ${progress.done}/${progress.total}" else "Syncing…"
-    } ?: "Syncing…"
-    SyncStatus.IDLE -> "Synced"
-    SyncStatus.OFFLINE -> "Offline"
-    SyncStatus.ERROR -> "Sync error"
-    SyncStatus.PAUSED -> "Sync paused"
-    SyncStatus.SIGNED_OUT -> "Signed out"
-    SyncStatus.UNAVAILABLE -> "Sync unavailable"
+    } ?: "Synchronisiert …"
+    SyncStatus.IDLE -> "Synchron"
+    SyncStatus.OFFLINE -> "Offline – wartet auf Verbindung"
+    SyncStatus.ERROR -> "Sync-Fehler"
+    SyncStatus.PAUSED -> "Sync pausiert"
+    SyncStatus.SIGNED_OUT -> "Nicht angemeldet"
+    SyncStatus.UNAVAILABLE -> "Sync nicht verfügbar"
 }
+
+/** Desktop `formatBytes`: two decimals for GB, one for MB, rounded KB. */
+fun syncByteLabel(bytes: Long): String = when {
+    bytes >= 1024L * 1024L * 1024L -> String.format(Locale.US, "%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0))
+    bytes >= 1024L * 1024L -> String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
+    bytes >= 1024L -> "${(bytes.toDouble() / 1024.0).roundToInt()} KB"
+    else -> "$bytes B"
+}
+
+fun syncUsagePercent(bytes: Long, quotaBytes: Long): Int =
+    if (quotaBytes <= 0L) 0 else minOf(100, (bytes.toDouble() / quotaBytes * 100.0).roundToInt())
+
+fun syncUsageLabel(files: Int, bytes: Long, quotaBytes: Long): String =
+    "$files Dateien · ${syncByteLabel(bytes)} von ${syncByteLabel(quotaBytes)}"
 
 interface SyncHost {
     suspend fun vaultId(): String

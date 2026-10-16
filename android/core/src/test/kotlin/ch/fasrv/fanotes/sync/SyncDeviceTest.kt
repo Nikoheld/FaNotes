@@ -46,5 +46,18 @@ class SyncDeviceTest {
         assertEquals("Lokale Fassung behalten", conflictChoiceLabel("local"))
         assertEquals("Zusammenführen", conflictChoiceLabel("both"))
         assertEquals(80, CONFLICT_DIFF_LIMIT)
+        assertEquals("Synchron", syncStatusLabel(SyncPublicState(status = SyncStatus.IDLE)))
+        assertEquals("Sync-Fehler", syncStatusLabel(SyncPublicState(status = SyncStatus.ERROR)))
+        assertEquals("Offline – wartet auf Verbindung", syncStatusLabel(SyncPublicState(status = SyncStatus.OFFLINE)))
+        assertEquals("Holt 1/2", syncStatusLabel(SyncPublicState(status = SyncStatus.SYNCING, progress = SyncProgress("pull", 1, 2))))
+        assertEquals("Synchronisiert …", syncStatusLabel(SyncPublicState(status = SyncStatus.SYNCING)))
+        assertEquals("0 B", syncByteLabel(0))
+        assertEquals("1 KB", syncByteLabel(1024))
+        assertEquals("1.5 MB", syncByteLabel(3L * 512L * 1024L))
+        assertEquals("1.00 GB", syncByteLabel(1024L * 1024L * 1024L))
+        assertEquals(50, syncUsagePercent(50, 100))
+        assertEquals(100, syncUsagePercent(250, 100))
+        assertEquals(0, syncUsagePercent(10, 0))
+        assertEquals("3 Dateien · 1 KB von 1.00 GB", syncUsageLabel(3, 1024, 1024L * 1024L * 1024L))
     }
 }
