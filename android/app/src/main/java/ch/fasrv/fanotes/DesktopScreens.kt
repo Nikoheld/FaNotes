@@ -4815,13 +4815,29 @@ private fun FirstRunBrand(step: Int, onStep: (Int) -> Unit) {
                 }
             }
         }
+        val localBorder = Color(ch.fasrv.fanotes.desk.firstRunLocalBorder(ink.success.toArgb(), ch.fasrv.fanotes.desk.firstRunPreviewBorder(LocalDeskThemeId.current)))
+        val localInk = Color(ch.fasrv.fanotes.desk.firstRunLocalInk(ink.success.toArgb(), MaterialTheme.colorScheme.onSurface.toArgb()))
+        val localShape = RoundedCornerShape(99.dp)
         Row(
-            Modifier.padding(start = 9.dp).clip(RoundedCornerShape(99.dp)).border(1.dp, ink.success.copy(alpha = 0.25f), RoundedCornerShape(99.dp)).background(ink.success.copy(alpha = 0.07f)).padding(horizontal = 9.dp, vertical = 6.dp),
+            Modifier
+                .padding(start = ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL_MARGIN_START_DP.dp)
+                .clip(localShape)
+                .border(1.dp, localBorder, localShape)
+                .background(Color(ch.fasrv.fanotes.desk.firstRunLocalFill(ink.success.toArgb())))
+                .padding(
+                    horizontal = ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL_PAD_INLINE_DP.dp,
+                    vertical = ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL_PAD_BLOCK_DP.dp,
+                ),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL_GAP_DP.dp),
         ) {
-            Icon(Icons.Filled.Shield, contentDescription = null, modifier = Modifier.size(15.dp), tint = ink.success)
-            Text(ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = ink.success)
+            Icon(Icons.Filled.Shield, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL_ICON_DP.dp), tint = localInk)
+            Text(
+                ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL,
+                fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL_SP.sp,
+                fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL_WEIGHT),
+                color = localInk,
+            )
         }
     }
 }
