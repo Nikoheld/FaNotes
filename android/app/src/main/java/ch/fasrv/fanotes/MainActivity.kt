@@ -468,6 +468,7 @@ fun FaNotesScreen(
     val bugReportOpen by model.bugReportOpen.collectAsStateWithLifecycle()
     val historyOpen by model.historyOpen.collectAsStateWithLifecycle()
     val aiOpen by model.aiOpen.collectAsStateWithLifecycle()
+    val settingsOpen by model.settingsOpen.collectAsStateWithLifecycle()
     val confirm by model.confirmRequest.collectAsStateWithLifecycle()
     val linkPlacing by model.linkPlacing.collectAsStateWithLifecycle()
     val placingSection by model.placingSection.collectAsStateWithLifecycle()
@@ -571,6 +572,7 @@ fun FaNotesScreen(
                             worksheetImport = worksheetImport,
                             palette = palette,
                             ai = aiOpen,
+                            settings = settingsOpen,
                             destination = destination,
                             selection = model.session.selection.isNotEmpty(),
                             sheet = model.sheetAdjusted.value && !showText,
@@ -604,7 +606,11 @@ fun FaNotesScreen(
                         "placing-section" -> model.setPlacingSection(false)
                         "worksheet" -> onDismissWorksheet()
                         "palette" -> model.paletteOpen.value = false
-                        "search", "settings", "calendar", "tasks", "overview" -> model.showDestination("notes")
+                        "search", "calendar", "tasks", "overview" -> model.showDestination("notes")
+                        "settings" -> {
+                            model.closeSettings()
+                            if (destination == "settings") model.showDestination("notes")
+                        }
                         "ai" -> {
                             model.closeAi()
                             if (destination == "ai") model.showDestination("notes")
@@ -816,7 +822,6 @@ fun FaNotesScreen(
                             "books" -> BooksScreen(model) { model.openPath(it); model.showDestination("notes") }
                             "history" -> HistoryScreen(model)
                             "study" -> StudyScreen(model)
-                            "settings" -> SettingsScreen(model, { requestSync() }, onOpenVault, { model.usePrivateVault() })
                         }
                     }
                 } else {
@@ -1048,6 +1053,7 @@ fun FaNotesScreen(
         }
     }
     if (aiOpen) AiScreen(model)
+    if (settingsOpen) SettingsScreen(model, { requestSync() }, onOpenVault, { model.usePrivateVault() })
     if (bugReportOpen) BugReportDialog(model)
     if (historyOpen) HistoryDialog(
         model,
