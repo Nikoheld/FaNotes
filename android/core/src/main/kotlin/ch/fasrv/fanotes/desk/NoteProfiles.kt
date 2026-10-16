@@ -236,3 +236,57 @@ private val FOLDER_BLURBS = mapOf(
 fun firstRunFolderMark(name: String): String = FOLDER_BLURBS[name]?.first ?: name.take(2)
 
 fun firstRunFolderBlurb(name: String): String = FOLDER_BLURBS[name]?.second ?: "Organisierter Startordner"
+
+/** First-run shell after the later chrome pass: inverted 8px mark, 12px profile cards. */
+const val FIRST_RUN_MAX_DP = 1180
+const val FIRST_RUN_GUTTER_DP = 36
+const val FIRST_RUN_LOGO_DP = 39
+const val FIRST_RUN_LOGO_RADIUS_DP = 8
+const val FIRST_RUN_LOGO_ICON_DP = 18
+const val FIRST_RUN_STEP_DP = 22
+const val FIRST_RUN_PROFILE_RADIUS_DP = 12
+const val FIRST_RUN_PROFILE_MIN_DP = 150
+const val FIRST_RUN_PICKER_RADIUS_DP = 12
+const val FIRST_RUN_SUBJECT_RADIUS_DP = 11
+const val FIRST_RUN_CONTINUE_DP = 39
+const val FIRST_RUN_CONTINUE_RADIUS_DP = 6
+const val FIRST_RUN_TITLE_SP = 36
+const val FIRST_RUN_BRAND = "FaNotes"
+const val FIRST_RUN_BRAND_DETAIL = "Dein persönlicher Denkraum"
+const val FIRST_RUN_LOCAL = "Bleibt lokal"
+const val FIRST_RUN_GO = "Los geht’s"
+const val FIRST_RUN_SKIP = "Einsatzprofil auswählen"
+const val FIRST_RUN_NEXT = "Weiter"
+const val FIRST_RUN_BACK = "Zurück"
+const val FIRST_RUN_CHOOSE_FOLDERS = "Ordner auswählen"
+const val FIRST_RUN_FINISH = "FaNotes einrichten"
+const val FIRST_RUN_TITLE_WELCOME = "Alles, was dir wichtig ist."
+const val FIRST_RUN_TITLE_EMPHASIS = "An einem ruhigen Ort."
+const val FIRST_RUN_BODY_WELCOME = "Schreibe mit Tastatur oder Stift, ordne deine Themen und finde jeden Gedanken wieder – in Schule, UNI, Privatleben oder Arbeit."
+const val FIRST_RUN_PROFILE_TITLE = "Wofür möchtest du FaNotes verwenden?"
+const val FIRST_RUN_PROFILE_BODY = "Deine Auswahl bestimmt nur die vorgeschlagenen Startordner. Alle Funktionen bleiben in jedem Profil verfügbar und später frei anpassbar."
+const val FIRST_RUN_WRITING_TITLE = "Eine Seite. Zwei Arten zu schreiben."
+const val FIRST_RUN_WRITING_BODY = "Tippe und schreibe frei auf derselben Seite. Handschrift bleibt Handschrift, bis du sie bewusst umwandelst."
+const val FIRST_RUN_FOLDER_TITLE = "Welche Ordner möchtest du verwenden?"
+const val FIRST_RUN_INBOX = "Eingang ist immer dabei"
+const val FIRST_RUN_INBOX_DETAIL = "Der schnelle Sammelplatz für neue Notizen und Ideen."
+const val FIRST_RUN_PREPARED = "Sauber vorbereitet"
+const val FIRST_RUN_PREPARED_DETAIL = "jeder Ordner erhält eine eigene Farbe und erscheint direkt in der Seitenleiste."
+
+val FIRST_RUN_BENEFITS = listOf("Lokal & privat", "Stift & Tastatur", "Markdown inklusive")
+
+val FIRST_RUN_WRITING = listOf(
+    "Einfach losschreiben" to "Markdown wird direkt schön dargestellt – ohne Ansichtswechsel.",
+    "Natürlich mit dem Stift" to "Ganze handschriftliche Seiten oder Ergänzungen zwischen Text.",
+    "Trotzdem alles finden" to "Unsichtbare Transkription macht auch unkonvertierte Handschrift durchsuchbar.",
+)
+
+fun firstRunEyebrow(step: Int): String = when (step.coerceIn(0, FIRST_RUN_STEPS.lastIndex)) {
+    0 -> "Willkommen bei FaNotes"
+    1 -> "Dein Startprofil"
+    2 -> "Deine natürliche Arbeitsweise"
+    else -> "Fast geschafft · 4 von 4"
+}
+
+fun firstRunFolderIntro(profileTitle: String): String =
+    "FaNotes schlägt passende Ordner für das Profil $profileTitle vor. Du kannst später jederzeit weitere Ordner ergänzen, umbenennen oder löschen."
