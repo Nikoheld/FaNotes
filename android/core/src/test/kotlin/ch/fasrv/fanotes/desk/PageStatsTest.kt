@@ -39,6 +39,25 @@ class PageStatsTest {
     }
 
     @Test
+    fun headingsFollowTheDesktopAtxRule() {
+        val measured = measureDocument(
+            """
+            # Titel
+            #kein
+            ####### Sieben
+              # Eingerückt
+            ## Zwei
+
+            ```
+            # Im Code
+            ```
+            """.trimIndent(),
+        )
+        assertEquals(2, measured.headings)
+        assertEquals(1, measured.codeBlocks)
+    }
+
+    @Test
     fun openingCountsTheLocalHourAndAFullWidthStrokeIs210Millimetres() {
         val opened = openPageStats(emptyPageStats(0), 0, ZoneOffset.UTC)
         assertEquals(1, opened.openCount)

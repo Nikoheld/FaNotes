@@ -251,7 +251,7 @@ fun measureDocument(markdown: String): DocumentStats {
             previous = line
             continue
         }
-        if (trimmed.startsWith("#")) {
+        if (ATX_HEADING.containsMatchIn(line)) {
             headings += 1
             inParagraph = false
             previous = line
@@ -545,6 +545,8 @@ private fun weekCounts(array: JsonValue.Arr?): List<Long> {
 
 private fun round1(value: Double) = round(value * 10.0) / 10.0
 
+/** `pageStats.ts` counts only an ATX heading at the start of the line. */
+private val ATX_HEADING = Regex("""^#{1,6}\s""")
 private val TABLE_SEPARATOR = Regex("""^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$""")
 private val TASK = Regex("""^\s*(?:[-*+]|\d+[.)])\s+\[( |x|X)]""")
 private val LIST_ITEM = Regex("""^\s*(?:[-*+]|\d+[.)])\s+""")
