@@ -50,6 +50,15 @@ class CalendarBooksTest {
         assertEquals(0.22f, CAL_CHIP_ALPHA)
         assertEquals("+2 weitere", calendarMoreLabel(2))
         assertEquals("+1 weitere", calendarMoreLabel(1))
+        val thursday = LocalDate.parse("2026-10-15")
+        assertEquals("Oktober 2026", calendarHeading("month", thursday))
+        assertEquals("Donnerstag, 15. Oktober", calendarHeading("day", thursday))
+        assertEquals("12. Okt. – 18. Okt.", calendarHeading("week", thursday))
+        assertEquals("Ganztägig", agendaWhenLabel(CalendarEvent("e", "personal", "Tag", "2026-10-14", "2026-10-14", allDay = true)))
+        assertEquals("09:00–10:00", agendaWhenLabel(CalendarEvent("e", "personal", "Stunde", "2026-10-14T09:00", "2026-10-14T10:00", allDay = false)))
+        assertEquals(30, CAL_TOOL_DP)
+        assertEquals("Termine suchen", CAL_SEARCH)
+        assertEquals("Tagesnotiz", CAL_DAILY)
     }
 
     @Test
