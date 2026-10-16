@@ -224,6 +224,8 @@ const val RIBBON_BUTTON_PAD_DP = 8
 
 /** Editor toolbar is 36px. Format buttons are 28px with 7px corners. The mode switch is 28px with 24px buttons. */
 const val EDITOR_TOOLBAR_DP = 36
+const val EDITOR_TOOLBAR_PAD_DP = 10
+const val FORMAT_BUTTON_GAP_DP = 2
 const val FORMAT_BUTTON_DP = 28
 const val FORMAT_BUTTON_RADIUS_DP = 7
 const val MODE_SWITCH_DP = 28
@@ -248,6 +250,15 @@ fun modeSwitchInk(dark: Boolean, selected: Boolean): Int = when {
 
 /** Format chips use `--text-soft`. */
 fun formatChipInk(dark: Boolean): Int = if (dark) 0xFFCFCFCA.toInt() else 0xFF4E4C47.toInt()
+
+/** Toolbar fill is `--bg`. The bottom rule is `--border` at 9%. */
+fun editorToolbarColor(dark: Boolean): Int = if (dark) 0xFF191919.toInt() else 0xFFFFFFFF.toInt()
+
+fun editorToolbarRule(dark: Boolean): Int {
+    val alpha = kotlin.math.round(255f * 0.09f).toInt().coerceIn(0, 255)
+    val rgb = if (dark) 0xFFFFFF else 0x37352F
+    return (alpha shl 24) or rgb
+}
 
 /** Inset ring: 34% of the accent over transparency. */
 fun modeSwitchRing(accent: Int): Int {
