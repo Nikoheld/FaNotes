@@ -319,7 +319,8 @@ const val FIRST_RUN_INBOX = "Eingang ist immer dabei"
 const val FIRST_RUN_INBOX_DETAIL = "Der schnelle Sammelplatz für neue Notizen und Ideen."
 const val FIRST_RUN_PREPARED = "Sauber vorbereitet"
 const val FIRST_RUN_PREPARED_DETAIL = "jeder Ordner erhält eine eigene Farbe und erscheint direkt in der Seitenleiste."
-const val FIRST_RUN_PREVIEW_RADIUS_DP = 12
+/** `.first-run-preview-window` border-radius is 18px. */
+const val FIRST_RUN_PREVIEW_RADIUS_DP = 18
 const val FIRST_RUN_PREVIEW_HEADER_DP = 32
 /** `.first-run-preview-window > header b` is 7px at weight 600. Dots are 6px, the row gap is 5px, and the side padding is 12px. */
 const val FIRST_RUN_PREVIEW_HEADER_TITLE_SP = 7
@@ -371,7 +372,7 @@ const val FIRST_RUN_PREVIEW_KICKER = "MATHEMATIK · ANALYSIS"
 const val FIRST_RUN_PREVIEW_HEADING = "Ableitungen"
 const val FIRST_RUN_PREVIEW_TYPED = "Die Änderungsrate beschreibt die Steigung."
 /**
- * `.first-run-preview-paper` still wins. No later rule, including the 12px window radius, changes this sheet.
+ * `.first-run-preview-paper` still wins. No later rule, including the 18px window radius, changes this sheet.
  * Margin is 18px 19px 0. Padding is 25px 27px. Top corners are 11px and the bottom corners stay 0.
  */
 const val FIRST_RUN_PREVIEW_PAPER_MARGIN_TOP_DP = 18

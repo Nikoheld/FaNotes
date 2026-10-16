@@ -58,7 +58,7 @@ class NoteProfilesTest {
     fun theWelcomePreviewUsesTheDesktopWindow() {
         assertEquals(1, firstRunPreviewColumns(760))
         assertEquals(2, firstRunPreviewColumns(761))
-        assertEquals(12, FIRST_RUN_PREVIEW_RADIUS_DP)
+        assertEquals(18, FIRST_RUN_PREVIEW_RADIUS_DP)
         assertEquals(32, FIRST_RUN_PREVIEW_HEADER_DP)
         assertEquals(listOf("Mathematik", "Deutsch", "Französisch", "Physik", "Wirtschaft"), FIRST_RUN_PREVIEW_SUBJECTS)
         assertEquals("Ableitungen", FIRST_RUN_PREVIEW_HEADING)
