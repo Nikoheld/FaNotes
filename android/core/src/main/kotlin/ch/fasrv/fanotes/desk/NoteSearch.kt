@@ -152,15 +152,20 @@ private fun searchLiteral(
     val hits = ArrayList<NoteSearchHit>()
     var cursor = 0
     while (cursor < haystack.length && hits.size < limit) {
-        val index = haystack.indexOf(folded, cursor)
-        if (index < 0) break
-        val matchEnd = (index + folded.length).coerceAtMost(source.length)
+        val found = if (options.caseSensitive) {
+            val index = haystack.indexOf(folded, cursor)
+            if (index < 0) null else index until (index + folded.length)
+        } else {
+            findSharpS(haystack, folded, cursor)
+        } ?: break
+        val index = found.first
+        val matchEnd = (found.last + 1).coerceAtMost(source.length)
         if (options.wholeWord && (!aligned || !isWholeWord(content, index, matchEnd))) {
             cursor = index + 1
             continue
         }
         hits += NoteSearchHit(index, matchEnd, excerptAt(source, index, matchEnd))
-        cursor = index + folded.length.coerceAtLeast(1)
+        cursor = (found.last + 1).coerceAtLeast(index + 1)
     }
     return hits
 }

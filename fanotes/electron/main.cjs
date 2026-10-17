@@ -3465,6 +3465,7 @@ function registerIpcHandlers() {
 
   handle(IPC.search, async (_event, rawQuery) => {
     const { inkAnchorForQuery, noteSearchExcerpt, readableTranscript } = require('./search-ink.cjs')
+    const { germanCount, germanIndexOf } = require('./german-search.cjs')
     await ensureBootstrap()
     if (typeof rawQuery !== 'string') throw new Error('Ungültige Suchanfrage.')
     const query = rawQuery.trim().slice(0, 500)
@@ -3518,17 +3519,10 @@ function registerIpcHandlers() {
         }
       }
       rememberDrawingOwner(drawingOwners, relativePath, content, ownerInk)
-      const haystack = `${relativePath}\n${content}\n${inkTranscript}`.toLocaleLowerCase('de-DE')
-      const firstIndex = haystack.indexOf(needle)
+      const haystack = `${relativePath}\n${content}\n${readableTranscript(inkTranscript)}`.toLocaleLowerCase('de-DE')
+      const firstIndex = germanIndexOf(haystack, needle)
       if (firstIndex < 0) continue
-      let matches = 0
-      let cursor = 0
-      while (cursor < haystack.length) {
-        const index = haystack.indexOf(needle, cursor)
-        if (index < 0) break
-        matches += 1
-        cursor = index + Math.max(needle.length, 1)
-      }
+      const matches = germanCount(haystack, needle)
       const inkAnchor = inkTranscript ? inkAnchorForQuery(inkTranscript, query) : null
       hits.push({
         relativePath,
@@ -3571,27 +3565,18 @@ function registerIpcHandlers() {
         const transcript = typeof document.searchTranscript === 'string'
           ? document.searchTranscript.slice(0, 500_000)
           : ''
-        const searchable = `${metadata.title}\n${transcript}`
-        const readable = `${metadata.title}\n${readableTranscript(transcript)}`
+        const searchable = `${metadata.title}\n${readableTranscript(transcript)}`
         const haystack = searchable.toLocaleLowerCase('de-DE')
-        const firstIndex = haystack.indexOf(needle)
+        const firstIndex = germanIndexOf(haystack, needle)
         if (firstIndex < 0) continue
-        const excerptSource = readable.toLocaleLowerCase('de-DE').includes(needle) ? readable : searchable
-        const excerptIndex = excerptSource.toLocaleLowerCase('de-DE').indexOf(needle)
-        let matches = 0
-        let cursor = 0
-        while (cursor < haystack.length) {
-          const index = haystack.indexOf(needle, cursor)
-          if (index < 0) break
-          matches += 1
-          cursor = index + Math.max(needle.length, 1)
-        }
+        const excerptIndex = germanIndexOf(haystack, needle)
+        const matches = germanCount(haystack, needle)
         const notePath = drawingOwners.get(id)
         const inkAnchor = inkAnchorForQuery(transcript, query)
         hits.push({
           relativePath: metadata.dataRelativePath,
           title: metadata.title,
-          excerpt: createExcerpt(excerptSource, excerptIndex, query.length),
+          excerpt: createExcerpt(searchable, excerptIndex, query.length),
           matches,
           kind: 'drawing',
           drawingId: id,

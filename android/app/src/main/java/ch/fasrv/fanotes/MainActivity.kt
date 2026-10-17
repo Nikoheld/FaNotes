@@ -1214,6 +1214,31 @@ fun FaNotesScreen(
             onDismiss = { firstRun = false; model.updateDesk("welcomed", "yes") },
         )
     }
+    val updateOffer by model.updateOffer.collectAsStateWithLifecycle()
+    val updateBusy by model.updateBusy.collectAsStateWithLifecycle()
+    val updateLabel by model.updateLabel.collectAsStateWithLifecycle()
+    val offered = updateOffer
+    if (offered != null) {
+        AlertDialog(
+            onDismissRequest = { model.clearUpdateOffer() },
+            title = { Text("FaNotes ${offered.version}") },
+            text = {
+                Text(
+                    updateLabel.ifBlank { "Eine neuere Version liegt auf GitHub bereit." },
+                    fontSize = 14.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !updateBusy,
+                    onClick = { model.downloadAndroidUpdate { file -> installAndroidApk(context, file) } },
+                ) { Text(if (updateBusy) "Lädt…" else "Installieren") }
+            },
+            dismissButton = {
+                TextButton(onClick = { model.clearUpdateOffer() }, enabled = !updateBusy) { Text("Später") }
+            },
+        )
+    }
     if (syncOpen && sync.account == null) {
         SyncDialog(model) { syncOpen = false }
     }

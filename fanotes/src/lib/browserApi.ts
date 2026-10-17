@@ -3,6 +3,7 @@ import { DEFAULT_SETTINGS } from '../defaults'
 import { getUiLanguage } from '../i18n'
 import type { AppSettings, BootstrapData, DrawingLibraryDocument, FaNotesApi, PaperStyle, ServerBackupState, UpdateState, VaultEntry, WorksheetDocument } from '../types'
 import { companionNotePath, emptyFamdPayload, parseFamd, serializeFamd } from './famd'
+import { germanCount, germanIndexOf } from './germanSearch'
 import { inkAnchorForQuery, noteSearchExcerpt, readableTranscript } from './searchInkAnchor'
 import { parseNoteBackups, type NoteBackupSnapshot } from './noteBackup'
 import { parseNoteLinks, type NoteLinkRecord } from './noteLink'
@@ -1025,9 +1026,10 @@ export function createBrowserApi(): FaNotesApi {
         const companionInk = companion ? parseFamd(companion.content).payload?.ink : null
         const companionTranscript = companionInk && typeof companionInk.searchTranscript === 'string' ? companionInk.searchTranscript : ''
         const transcript = (ownTranscript || companionTranscript).slice(0, 500_000)
-        const pathMatch = record.path.toLocaleLowerCase('de').includes(needle)
-        const contentMatch = content.toLocaleLowerCase('de').includes(needle)
-        const transcriptMatch = transcript.toLocaleLowerCase('de').includes(needle)
+        const words = readableTranscript(transcript)
+        const pathMatch = germanIndexOf(record.path.toLocaleLowerCase('de'), needle) >= 0
+        const contentMatch = germanIndexOf(content.toLocaleLowerCase('de'), needle) >= 0
+        const transcriptMatch = germanIndexOf(words.toLocaleLowerCase('de'), needle) >= 0
         if (!contentMatch && !pathMatch && !transcriptMatch) return []
         const excerpt = noteSearchExcerpt({
           relativePath: record.path,
@@ -1037,19 +1039,18 @@ export function createBrowserApi(): FaNotesApi {
           queryLength: needle.length,
           excerpt: (text, index, length) => text.slice(Math.max(0, index - 60), Math.min(text.length, index + length + 120)).replace(/[#*_`]/gu, ''),
         })
-        const lower = `${record.path}\n${content}\n${transcript}`.toLocaleLowerCase('de')
+        const lower = `${record.path}\n${content}\n${words}`.toLocaleLowerCase('de')
         const inkAnchor = inkAnchorForQuery(transcript || content, query)
-        return [{ relativePath: record.path, title: stem(fileName(record.path)), excerpt, matches: lower.split(needle).length - 1, kind: 'note' as const, ...(inkAnchor ? { inkAnchor } : {}) }]
+        return [{ relativePath: record.path, title: stem(fileName(record.path)), excerpt, matches: germanCount(lower, needle), kind: 'note' as const, ...(inkAnchor ? { inkAnchor } : {}) }]
       })
       const drawingHits = [...drawings.values()].flatMap((drawing) => {
         try {
           const parsed = JSON.parse(drawing.drawingJson) as { searchTranscript?: unknown }
           const transcript = typeof parsed.searchTranscript === 'string' ? parsed.searchTranscript : ''
-          const haystack = `${drawing.title}\n${transcript}`
-          if (!haystack.toLocaleLowerCase('de').includes(needle)) return []
-          const readable = `${drawing.title}\n${readableTranscript(transcript)}`
-          const source = readable.toLocaleLowerCase('de').includes(needle) ? readable : haystack
-          const at = source.toLocaleLowerCase('de').indexOf(needle)
+          const source = `${drawing.title}\n${readableTranscript(transcript)}`
+          const haystack = source.toLocaleLowerCase('de')
+          if (germanIndexOf(haystack, needle) < 0) return []
+          const at = germanIndexOf(haystack, needle)
           const inkAnchor = inkAnchorForQuery(transcript, query)
           return [{ relativePath: drawing.dataRelativePath, title: drawing.title, excerpt: source.slice(Math.max(0, at - 40), at + needle.length + 80), matches: 1, kind: 'drawing' as const, drawingId: drawing.id, ...(inkAnchor ? { inkAnchor } : {}) }]
         } catch { return [] }

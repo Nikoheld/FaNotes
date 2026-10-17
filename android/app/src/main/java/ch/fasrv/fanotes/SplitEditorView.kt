@@ -304,6 +304,8 @@ class SplitEditorView(context: Context) : EditText(context) {
 
     override fun onSelectionChanged(selStart: Int, selEnd: Int) {
         super.onSelectionChanged(selStart, selEnd)
+        // The constructor reports a selection before history and spelling exist.
+        if (!ready) return
         if (!applyingHistory) history.noteSelection(selStart, selEnd, text?.length ?: 0, System.currentTimeMillis())
         spelling.schedule(220)
         invalidate()

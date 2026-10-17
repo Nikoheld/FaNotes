@@ -8366,6 +8366,15 @@ mod tests {
                 super::canonical_iso("-271821/10/01").as_deref(),
                 Some("-271821-10-01T04:56:02.000Z")
             );
+            // `-271821-04-20` is the first UTC instant. January of that year is
+            // before it, and the minus sign must not become year +271821.
+            assert_eq!(super::canonical_iso("-271821-01-01"), None);
+            assert_eq!(super::canonical_iso("-271821-04-19"), None);
+            assert_eq!(
+                super::canonical_iso("-271821-04-20").as_deref(),
+                Some("-271821-04-20T00:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("+275760-09-14"), None);
             assert_eq!(super::canonical_iso("-000001/01/32"), None);
             assert_eq!(super::canonical_iso("-000001-01-32"), None);
             assert_eq!(super::canonical_iso("-000001/13/1"), None);

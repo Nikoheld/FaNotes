@@ -15,6 +15,7 @@ const server = await createServer({
 const qol = await server.ssrLoadModule('/src/lib/noteQoL.ts')
 const {
   clonedWorksheetDocument,
+  dailyNoteStem,
   drawingTitleFromJson,
   duplicatePreferredStem,
   folderPathsIn,
@@ -23,6 +24,7 @@ const {
   noteTitleFromPath,
   recentNotePaths,
   retargetWorksheetMarkers,
+  shiftDailyNote,
   stampToInsert,
   wikiLinkForNote,
   withInkMarker,
@@ -50,6 +52,13 @@ try {
   assert.equal(formatNoteStamp('YYYY-MM-DD', noon), '2026-10-16')
   assert.equal(formatNoteStamp('DD.MM.YYYY', noon, true), '16.10.2026 09:05')
   assert.equal(formatNoteStamp('', noon), '2026-10-16')
+  assert.equal(dailyNoteStem('Tagesnotizen/2026-10-16.md', 'Tagesnotizen', 'YYYY-MM-DD'), '2026-10-16')
+  assert.equal(dailyNoteStem('Andere/2026-10-16.md', 'Tagesnotizen', 'YYYY-MM-DD'), null)
+  const previous = shiftDailyNote('Tagesnotizen/2026-10-16.md', 'Tagesnotizen', 'YYYY-MM-DD', -1)
+  assert.equal(previous && formatNoteStamp('YYYY-MM-DD', previous), '2026-10-15')
+  const dotted = shiftDailyNote('Notizen/16.10.2026.md', 'Notizen', 'DD.MM.YYYY', 1)
+  assert.equal(dotted && formatNoteStamp('DD.MM.YYYY', dotted), '17.10.2026')
+  assert.equal(shiftDailyNote('Los.md', 'Tagesnotizen', 'YYYY-MM-DD', 1), null)
   assert.equal(stampToInsert('', '2026-10-16'), '2026-10-16')
   assert.equal(stampToInsert('Heute', '2026-10-16'), ' 2026-10-16')
   assert.equal(stampToInsert('Heute ', '2026-10-16'), '2026-10-16')
@@ -102,6 +111,8 @@ try {
     'duplicatePreferredStem',
     'wikiLinkForNote',
     'formatNoteStamp',
+    "id: 'daily-previous'",
+    "id: 'daily-next'",
   ]) {
     assert.equal(app.includes(needle), true, needle)
   }

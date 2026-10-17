@@ -47,8 +47,34 @@ try {
   assert.match(handwriting, /Chlorophyll/)
   assert.doesNotMatch(handwriting, /^Dateiname/)
   assert.doesNotMatch(handwriting, /0\.42/)
+  assert.doesNotMatch(handwriting, /0\.4200/)
   assert.match(noteSearchExcerpt({ ...cases[1], excerpt }), /Licht/)
   assert.equal(noteSearchExcerpt({ ...cases[2], excerpt }), 'Dateiname · Bio/Welt.md')
+  assert.equal(noteSearchExcerpt({
+    relativePath: 'Bio/Blatt.md',
+    content: 'Hallo',
+    transcript: '0.4200\tChlorophyll',
+    needle: '0.4200',
+    queryLength: 6,
+    excerpt,
+  }), 'Dateiname · Bio/Blatt.md')
+  const sharp = noteSearchExcerpt({
+    relativePath: 'Orte/Weg.md',
+    content: 'Die Straße ist nass.',
+    transcript: '',
+    needle: 'strasse',
+    queryLength: 7,
+    excerpt,
+  })
+  assert.match(sharp, /Straße/)
+  assert.equal(sharp, cjs({
+    relativePath: 'Orte/Weg.md',
+    content: 'Die Straße ist nass.',
+    transcript: '',
+    needle: 'strasse',
+    queryLength: 7,
+    excerpt,
+  }))
   console.log('search excerpt ok')
 } finally {
   await server.close()

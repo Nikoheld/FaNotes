@@ -3754,5 +3754,9 @@
   "Die Aufgabe der aktuellen Zeile umschalten": "Toggle the task on the current line",
   "Erledigt oder offen": "Done or open",
   "Umbenennen": "Rename",
-  "In Papierkorb": "Move to trash"
+  "In Papierkorb": "Move to trash",
+  "Vorherige Tagesnotiz": "Previous daily note",
+  "Nächste Tagesnotiz": "Next daily note",
+  "Benachbarte Tagesnotizen": "Neighbouring daily notes",
+  "Diese Notiz ist keine Tagesnotiz.": "This note is not a daily note."
 }

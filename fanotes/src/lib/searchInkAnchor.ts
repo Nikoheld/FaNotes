@@ -1,5 +1,7 @@
 /** Locate a vault-search hit inside an invisible handwriting transcript. */
 
+import { germanIndexOf } from './germanSearch'
+
 export type InkSearchAnchor = {
   /** 0 at the top of the page, 1 at the bottom. */
   y: number
@@ -28,7 +30,7 @@ export const inkAnchorForQuery = (transcript: string, query: string): InkSearchA
   const lines = transcript.split('\n').map((line) => line.trim()).filter(Boolean)
   if (!lines.length) return null
   const parsed = lines.map(parseTranscriptLine)
-  const index = parsed.findIndex((line) => line.text.toLocaleLowerCase('de-DE').includes(needle))
+  const index = parsed.findIndex((line) => germanIndexOf(line.text.toLocaleLowerCase('de-DE'), needle) >= 0)
   if (index < 0) return null
   const positioned = parsed[index].y
   if (positioned !== null) return { y: positioned }
@@ -60,13 +62,11 @@ export const noteSearchExcerpt = ({
   queryLength: number
   excerpt: (text: string, index: number, queryLength: number) => string
 }): string => {
-  const contentIndex = content.toLocaleLowerCase('de-DE').indexOf(needle)
+  const contentIndex = germanIndexOf(content.toLocaleLowerCase('de-DE'), needle)
   if (contentIndex >= 0) return excerpt(content, contentIndex, queryLength)
   const readable = readableTranscript(transcript)
-  const readableIndex = readable.toLocaleLowerCase('de-DE').indexOf(needle)
+  const readableIndex = germanIndexOf(readable.toLocaleLowerCase('de-DE'), needle)
   if (readableIndex >= 0) return excerpt(readable, readableIndex, queryLength)
-  const transcriptIndex = transcript.toLocaleLowerCase('de-DE').indexOf(needle)
-  if (transcriptIndex >= 0) return excerpt(transcript, transcriptIndex, queryLength)
   return `Dateiname · ${relativePath}`
 }
 

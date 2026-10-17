@@ -17,9 +17,27 @@ android {
         versionName = fanotesVersion.get()
     }
 
+    val keystorePath = providers.environmentVariable("FANOTES_ANDROID_KEYSTORE")
+    val keystorePassword = providers.environmentVariable("FANOTES_ANDROID_KEYSTORE_PASSWORD")
+    val keyPassword = providers.environmentVariable("FANOTES_ANDROID_KEY_PASSWORD").orElse(keystorePassword)
+
+    signingConfigs {
+        create("release") {
+            val path = keystorePath.orNull
+            val password = keystorePassword.orNull
+            if (!path.isNullOrBlank() && !password.isNullOrBlank()) {
+                storeFile = file(path)
+                storePassword = password
+                keyAlias = "fanotes"
+                this.keyPassword = keyPassword.get()
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 

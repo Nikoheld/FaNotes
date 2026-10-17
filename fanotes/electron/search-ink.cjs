@@ -1,5 +1,7 @@
 'use strict'
 
+const { germanIndexOf } = require('./german-search.cjs')
+
 const POSITIONED_LINE = /^(\d+(?:\.\d+)?)\t(.*)$/u
 
 const parseTranscriptLine = (line) => {
@@ -16,7 +18,7 @@ const inkAnchorForQuery = (transcript, query) => {
   const lines = String(transcript).split('\n').map((line) => line.trim()).filter(Boolean)
   if (!lines.length) return null
   const parsed = lines.map(parseTranscriptLine)
-  const index = parsed.findIndex((line) => line.text.toLocaleLowerCase('de-DE').includes(needle))
+  const index = parsed.findIndex((line) => germanIndexOf(line.text.toLocaleLowerCase('de-DE'), needle) >= 0)
   if (index < 0) return null
   if (parsed[index].y !== null) return { y: parsed[index].y }
   if (parsed.length === 1) return { y: 0.15 }
@@ -28,13 +30,11 @@ const TRANSCRIPT_POSITION = /^[ \t]*\d+(?:\.\d+)?\t/gmu
 const readableTranscript = (transcript) => String(transcript || '').replace(TRANSCRIPT_POSITION, '')
 
 const noteSearchExcerpt = ({ relativePath, content, transcript, needle, queryLength, excerpt }) => {
-  const contentIndex = String(content || '').toLocaleLowerCase('de-DE').indexOf(needle)
+  const contentIndex = germanIndexOf(String(content || '').toLocaleLowerCase('de-DE'), needle)
   if (contentIndex >= 0) return excerpt(content, contentIndex, queryLength)
   const readable = readableTranscript(transcript)
-  const readableIndex = readable.toLocaleLowerCase('de-DE').indexOf(needle)
+  const readableIndex = germanIndexOf(readable.toLocaleLowerCase('de-DE'), needle)
   if (readableIndex >= 0) return excerpt(readable, readableIndex, queryLength)
-  const transcriptIndex = String(transcript || '').toLocaleLowerCase('de-DE').indexOf(needle)
-  if (transcriptIndex >= 0) return excerpt(transcript, transcriptIndex, queryLength)
   return `Dateiname · ${relativePath}`
 }
 

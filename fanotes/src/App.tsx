@@ -107,9 +107,11 @@ import { chooseRestoredNote, collectNotePaths } from './lib/lastOpenNote'
 import {
   clonedWorksheetDocument,
   drawingTitleFromJson,
+  dailyNoteStem,
   duplicatePreferredStem,
   formatNoteStamp,
   recentNotePaths,
+  shiftDailyNote,
   retargetWorksheetMarkers,
   stampToInsert,
   wikiLinkForNote,
@@ -2830,6 +2832,18 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [openNote, refreshTree, settings.dailyNotesFolder, settings.dateFormat, toast, tree])
 
+  const openAdjacentDaily = useCallback(async (days: number) => {
+    const path = activePathRef.current
+    const folder = normalizePath(settingsRef.current.dailyNotesFolder || translateUiText('Tagesnotizen'))
+    const pattern = settingsRef.current.dateFormat || 'YYYY-MM-DD'
+    const when = path ? shiftDailyNote(path, folder, pattern, days) : null
+    if (!when) {
+      toast('Diese Notiz ist keine Tagesnotiz.', 'info')
+      return
+    }
+    await createDailyNote(when)
+  }, [createDailyNote, toast])
+
   const remapNotePaperPaths = useCallback((from: string, to: string | null) => {
     setNotePaperByPath((current) => {
       const next = { ...current }
@@ -4191,6 +4205,8 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'homework', label: 'Hausaufgaben & Termine', detail: 'To-dos, Hausaufgaben und Termine mit Fälligkeit', group: 'Navigation', keywords: 'todo hausaufgaben schule termin fällig aufgabe checklist', icon: <ClipboardList size={15} />, run: openHomework },
     { id: 'calendar', label: 'Kalender', detail: 'Tag, 3 Tage, Woche, Monat und Agenda', group: 'Navigation', keywords: 'kalender termin woche monat agenda notion calendar event', icon: <CalendarDays size={15} />, run: openCalendar },
     { id: 'daily', label: 'Heutige Tagesnotiz', detail: settings.dailyNotesFolder, group: 'Dateien', icon: <CalendarDays size={15} />, run: () => void createDailyNote() },
+    { id: 'daily-previous', label: 'Vorherige Tagesnotiz', detail: settings.dailyNotesFolder, group: 'Dateien', keywords: 'gestern tagesnotiz daily previous', icon: <ArrowLeft size={15} />, run: () => { void openAdjacentDaily(-1) } },
+    { id: 'daily-next', label: 'Nächste Tagesnotiz', detail: settings.dailyNotesFolder, group: 'Dateien', keywords: 'morgen tagesnotiz daily next', icon: <ArrowRight size={15} />, run: () => { void openAdjacentDaily(1) } },
     { id: 'duplicate-note', label: 'Notiz duplizieren', detail: 'Text, Handschrift und Verlinkungen als neue Notiz', shortcut: 'Alt ⇧ D', group: 'Dateien', keywords: 'duplizieren kopie copy duplicate klonen', icon: <Files size={15} />, run: () => { if (activePath) void duplicateNote(activePath) } },
     { id: 'copy-wiki-link', label: 'Wiki-Link kopieren', detail: '[[Titel]] in die Zwischenablage', group: 'Dateien', keywords: 'wiki link kopieren verweis', icon: <Link2 size={15} />, run: () => { if (activePath) copyWikiLink(activePath) } },
     { id: 'insert-date', label: 'Datum einfügen', detail: 'Setzt das Datumsformat an der Schreibmarke ein', shortcut: 'Ctrl ⇧ D', group: 'Werkzeuge', keywords: 'datum date stempel', icon: <CalendarDays size={15} />, run: () => insertStamp(false) },
@@ -4218,7 +4234,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'reveal', label: isWeb ? 'Notiz herunterladen' : 'Im Dateimanager zeigen', detail: isWeb ? 'Aktuelle Notiz exportieren' : 'Speicherort der geöffneten Notiz öffnen', group: 'Dateien', keywords: 'ordner explorer finder dateimanager download export', icon: isWeb ? <Download size={15} /> : <FolderOpen size={15} />, run: () => { if (activePath) void window.fanotes.revealInFolder(activePath) } },
     { id: 'bug-report', label: 'Fehler melden', detail: 'Kurz beschreiben; die letzten fünf Minuten werden angehängt', group: 'FaNotes', keywords: 'bug report fehler logs support', icon: <Bug size={15} />, run: () => setBugReportOpen(true) },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
-  ], [addonPaletteActions, activePath, activeTab, syncApi, syncState, attachBookToSubject, bookOpen, copyWikiLink, createDailyNote, createFolder, createNote, currentBook, drawingOpen, duplicateNote, exportCurrentPdf, focusMode, importOneNote, importPdfNote, insertStamp, isWeb, navigateHistory, openCalendar, openGlyphenWerk, openHistory, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleTask, toggleSplitOrientation])
+  ], [addonPaletteActions, activePath, activeTab, syncApi, syncState, attachBookToSubject, bookOpen, copyWikiLink, createDailyNote, createFolder, createNote, currentBook, drawingOpen, duplicateNote, exportCurrentPdf, focusMode, importOneNote, importPdfNote, insertStamp, isWeb, navigateHistory, openAdjacentDaily, openCalendar, openGlyphenWerk, openHistory, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleTask, toggleSplitOrientation])
 
   // ---- Add-ons -------------------------------------------------------------
   // Everything add-ons may touch flows through this bridge. The deps object is
@@ -5146,6 +5162,12 @@ export default function App({ startupBootstrap }: AppProps) {
                       <input value={tagDraft} onChange={(event) => setTagDraft(event.target.value)} placeholder="Tag hinzufügen" maxLength={40} aria-label="Neues Schlagwort" />
                     </form>
                   </div>
+                  {dailyNoteStem(activeTab.path, normalizePath(settings.dailyNotesFolder || translateUiText('Tagesnotizen')), settings.dateFormat || 'YYYY-MM-DD') && (
+                    <div className="daily-nav" role="group" aria-label="Benachbarte Tagesnotizen">
+                      <button type="button" title="Vorherige Tagesnotiz" aria-label="Vorherige Tagesnotiz" onClick={() => void openAdjacentDaily(-1)}><ArrowLeft size={13} /></button>
+                      <button type="button" title="Nächste Tagesnotiz" aria-label="Nächste Tagesnotiz" onClick={() => void openAdjacentDaily(1)}><ArrowRight size={13} /></button>
+                    </div>
+                  )}
                   {!isPdfActive && (
                   <PaperStylePicker
                     value={activePaper}

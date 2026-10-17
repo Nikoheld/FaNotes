@@ -12,7 +12,7 @@ fun inkAnchorForQuery(transcript: String, query: String): Double? {
     val lines = transcript.split('\n').map { it.trim() }.filter { it.isNotEmpty() }
     if (lines.isEmpty()) return null
     val parsed = lines.map(::parseTranscriptLine)
-    val index = parsed.indexOfFirst { it.second.lowercase(Locale.GERMAN).contains(needle) }
+    val index = parsed.indexOfFirst { containsSharpS(it.second.lowercase(Locale.GERMAN), needle) }
     if (index < 0) return null
     parsed[index].first?.let { return it }
     if (parsed.size == 1) return 0.15
@@ -24,7 +24,10 @@ fun searchTranscriptHits(files: List<Pair<String, String>>, query: String): List
     if (needle.length < 2) return emptyList()
     return files.mapNotNull { (path, transcript) ->
         val y = inkAnchorForQuery(transcript, needle) ?: return@mapNotNull null
-        val line = transcript.split('\n').map { parseTranscriptLine(it.trim()) }.firstOrNull { it.second.contains(needle, ignoreCase = true) }
+        val folded = needle.lowercase(Locale.GERMAN)
+        val line = transcript.split('\n').map { parseTranscriptLine(it.trim()) }.firstOrNull {
+            containsSharpS(it.second.lowercase(Locale.GERMAN), folded)
+        }
         SearchHit(
             path,
             0,

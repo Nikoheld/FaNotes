@@ -55,6 +55,79 @@ export const formatNoteStamp = (pattern: string, date: Date, withTime = false) =
   return `${datePart} ${hours}:${minutes}`
 }
 
+type DateToken = 'Y' | 'y' | 'M' | 'D'
+
+const datePatternCache = new Map<string, { expression: RegExp; order: DateToken[] } | null>()
+
+const yearFromTwoDigits = (yy: number, referenceYear: number) => {
+  const pivot = (referenceYear % 100) + 10
+  return yy <= pivot ? 2000 + yy : 1900 + yy
+}
+
+const compileDatePattern = (pattern: string) => {
+  const cached = datePatternCache.get(pattern)
+  if (cached !== undefined) return cached
+  const order: DateToken[] = []
+  let source = '^'
+  for (let index = 0; index < pattern.length;) {
+    if (pattern.startsWith('YYYY', index)) { source += '(\\d{4})'; order.push('Y'); index += 4; continue }
+    if (pattern.startsWith('YY', index)) { source += '(\\d{2})'; order.push('y'); index += 2; continue }
+    if (pattern.startsWith('MM', index)) { source += '(\\d{2})'; order.push('M'); index += 2; continue }
+    if (pattern.startsWith('DD', index)) { source += '(\\d{2})'; order.push('D'); index += 2; continue }
+    const char = pattern[index] ?? ''
+    source += /[.*+?^${}()|[\]\\]/u.test(char) ? `\\${char}` : char
+    index += 1
+  }
+  const compiled = order.includes('M') && order.includes('D') && (order.includes('Y') || order.includes('y'))
+    ? { expression: new RegExp(`${source}$`, 'u'), order }
+    : null
+  datePatternCache.set(pattern, compiled)
+  return compiled
+}
+
+/** Local noon, so a daylight-saving midnight cannot move the calendar day. */
+export const parseNoteDate = (title: string, pattern: string, referenceYear = new Date().getFullYear()): Date | null => {
+  const compiled = compileDatePattern(pattern || 'YYYY-MM-DD')
+  if (!compiled) return null
+  const match = compiled.expression.exec(title.trim())
+  if (!match) return null
+  let year = 0
+  let month = 0
+  let day = 0
+  compiled.order.forEach((token, index) => {
+    const value = Number(match[index + 1])
+    if (token === 'Y') year = value
+    else if (token === 'y') year = yearFromTwoDigits(value, referenceYear)
+    else if (token === 'M') month = value
+    else day = value
+  })
+  if (month < 1 || month > 12 || day < 1 || day > 31 || !Number.isInteger(year)) return null
+  const date = new Date(year, month - 1, day, 12, 0, 0, 0)
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null
+  return date
+}
+
+const vaultFolder = (folder: string) => folder.replace(/\\/gu, '/').replace(/^\/+|\/+$/gu, '')
+
+/** Stem of a daily note that lives in the daily-notes folder and matches the date format. */
+export const dailyNoteStem = (relativePath: string, folder: string, pattern: string) => {
+  const normalized = String(relativePath ?? '').replace(/\\/gu, '/').replace(/^\/+/u, '')
+  if (!/\.md$/iu.test(normalized)) return null
+  const parent = normalized.split('/').slice(0, -1).join('/')
+  if (parent !== vaultFolder(folder)) return null
+  const stem = normalized.slice(normalized.lastIndexOf('/') + 1).replace(/\.md$/iu, '')
+  return parseNoteDate(stem, pattern) ? stem : null
+}
+
+/** The calendar day `days` away from the open daily note, or null when this file is not one. */
+export const shiftDailyNote = (relativePath: string, folder: string, pattern: string, days: number): Date | null => {
+  const stem = dailyNoteStem(relativePath, folder, pattern)
+  if (!stem || !Number.isFinite(days)) return null
+  const parsed = parseNoteDate(stem, pattern)
+  if (!parsed) return null
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate() + Math.trunc(days), 12, 0, 0, 0)
+}
+
 /** A stamp typed against a word gets one separating space. A line start stays flush. */
 export const stampToInsert = (textBeforeCursor: string, stamp: string) => {
   if (!stamp) return ''

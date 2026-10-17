@@ -1228,7 +1228,7 @@ impl Host {
         }
         let query = vault::truncate_utf16(query, 500);
         let root = self.require_vault()?;
-        let needle = vault::locale_lower_de(&query);
+        let needle = vault::search_text(&query);
         let mut files = Vec::new();
         collect_search_files(root, root, &mut files, 0)?;
         let present: std::collections::HashSet<String> =
@@ -1297,24 +1297,20 @@ impl Host {
                 }
             }
             remember_drawing_owner(&mut owners, &relative, &content, ink.as_ref());
-            let haystack = vault::locale_lower_de(&format!("{relative}\n{content}\n{transcript}"));
+            let readable = readable_transcript(&transcript);
+            let haystack = vault::search_text(&format!("{relative}\n{content}\n{readable}"));
             if !haystack.contains(&needle) {
                 continue;
             }
             let matches = count_matches(&haystack, &needle);
-            let content_index = vault::locale_lower_de(&content).find(&needle);
-            let readable = readable_transcript(&transcript);
-            let readable_index = vault::locale_lower_de(&readable).find(&needle);
-            let transcript_index = vault::locale_lower_de(&transcript).find(&needle);
+            let content_index = vault::search_text(&content).find(&needle);
+            let readable_index = vault::search_text(&readable).find(&needle);
             let excerpt = if let Some(index) = content_index {
                 let (start, _) = original_match_span(&content, &needle, index);
                 excerpt(&content, start, vault::utf16_len(&query))
             } else if let Some(index) = readable_index {
                 let (start, _) = original_match_span(&readable, &needle, index);
                 excerpt(&readable, start, vault::utf16_len(&query))
-            } else if let Some(index) = transcript_index {
-                let (start, _) = original_match_span(&transcript, &needle, index);
-                excerpt(&transcript, start, vault::utf16_len(&query))
             } else {
                 format!("Dateiname · {relative}")
             };
@@ -3881,21 +3877,15 @@ fn search_drawings(
                 .and_then(Value::as_str)
                 .unwrap_or(""),
         );
-        let searchable = format!("{title}\n{transcript}");
-        let readable = format!("{title}\n{}", readable_transcript(&transcript));
-        let haystack = vault::locale_lower_de(&searchable);
+        let excerpt_source = format!("{title}\n{}", readable_transcript(&transcript));
+        let haystack = vault::search_text(&excerpt_source);
         let Some(first) = haystack.find(needle) else {
             continue;
-        };
-        let excerpt_source = if vault::locale_lower_de(&readable).contains(needle) {
-            readable
-        } else {
-            searchable
         };
         let (start, _) = original_match_span(
             &excerpt_source,
             needle,
-            vault::locale_lower_de(&excerpt_source)
+            vault::search_text(&excerpt_source)
                 .find(needle)
                 .unwrap_or(first),
         );
@@ -4061,14 +4051,14 @@ fn original_match_span(text: &str, needle: &str, folded_index: usize) -> (usize,
     if folded_end <= text.len()
         && text.is_char_boundary(folded_index)
         && text.is_char_boundary(folded_end)
-        && vault::locale_lower_de(&text[folded_index..folded_end]) == needle
+        && vault::search_text(&text[folded_index..folded_end]) == needle
     {
         return (folded_index, needle_len);
     }
     let mut produced = 0usize;
     let mut start = None;
     for (offset, ch) in text.char_indices() {
-        let folded_len = vault::locale_lower_de(ch.encode_utf8(&mut [0; 4])).len();
+        let folded_len = vault::search_text(ch.encode_utf8(&mut [0; 4])).len();
         let next = produced + folded_len;
         if start.is_none() && next > folded_index {
             start = Some(offset);
@@ -4181,7 +4171,7 @@ fn byte_range_for_utf16(text: &str, start_units: usize, end_units: usize) -> (us
 }
 
 fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
-    let needle = vault::locale_lower_de(vault::js_trim(query));
+    let needle = vault::search_text(vault::js_trim(query));
     if vault::utf16_len(&needle) < 2 || vault::js_trim(transcript).is_empty() {
         return None;
     }
@@ -4202,7 +4192,7 @@ fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
         .collect();
     let index = parsed
         .iter()
-        .position(|(_, text)| vault::locale_lower_de(text).contains(&needle))?;
+        .position(|(_, text)| vault::search_text(text).contains(&needle))?;
     parsed[index].0.or_else(|| {
         if parsed.len() == 1 {
             Some(0.15)

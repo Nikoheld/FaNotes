@@ -21,14 +21,14 @@ fun searchPdfPages(pages: List<String>, query: String, limit: Int = 400): List<P
         var cursor = 0
         var local = 0
         while (cursor < haystack.length && hits.size < limit) {
-            val index = haystack.indexOf(needle, cursor)
-            if (index < 0) break
+            val found = findSharpS(haystack, needle, cursor) ?: break
+            val index = found.first
             val start = (index - 28).coerceAtLeast(0)
             val end = (index + needleRaw.length + 42).coerceAtMost(source.length)
             val excerpt = source.substring(start, end.coerceAtLeast(start)).replace(Regex("\\s+"), " ").trim()
             hits += PdfSearchHit(pageIndex + 1, local, excerpt)
             local += 1
-            cursor = index + needleRaw.length.coerceAtLeast(1)
+            cursor = (found.last + 1).coerceAtLeast(index + 1)
         }
     }
     return hits

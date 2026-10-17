@@ -54,6 +54,9 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private var previewReady = false
     private var paintingPreview = false
     private val editor = object : EditText(context) {
+        // EditText.setText runs from the constructor and reports a selection
+        // before the fields below exist. Stay quiet until init finishes.
+        private var constructed = false
         private var detailsDownX = 0f
         private var detailsDownY = 0f
         private var touchX = 0f
@@ -68,6 +71,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
         private val history = ch.fasrv.fanotes.desk.EditorHistory()
         private var cursorBeforeEdit = 0
         private val activeLinePaint = Paint()
+
+        init {
+            constructed = true
+        }
 
         fun captureCursor() {
             cursorBeforeEdit = selectionEnd.coerceAtLeast(0)
@@ -154,6 +161,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
 
         override fun onSelectionChanged(selStart: Int, selEnd: Int) {
             super.onSelectionChanged(selStart, selEnd)
+            if (!constructed) return
             trackSelection(selStart, selEnd)
             spelling.schedule(220)
             invalidate()

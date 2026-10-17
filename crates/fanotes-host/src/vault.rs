@@ -317,6 +317,16 @@ pub(crate) fn locale_lower_de(value: &str) -> String {
     out
 }
 
+/// `ß` and `ss` are the same letters in a German lookup. Both are two UTF-8 bytes,
+/// so a match index in the folded text still points at the same place.
+pub(crate) fn fold_sharp_s(value: &str) -> String {
+    value.replace('ß', "ss")
+}
+
+pub(crate) fn search_text(value: &str) -> String {
+    fold_sharp_s(&locale_lower_de(value))
+}
+
 /// Case pairs in Unicode 16 that Node 22's `toLocaleLowerCase('de-DE')` does not fold.
 fn js_keeps_case(character: char) -> bool {
     matches!(

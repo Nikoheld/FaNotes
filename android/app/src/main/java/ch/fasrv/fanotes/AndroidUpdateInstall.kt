@@ -34,7 +34,20 @@ fun downloadAndroidApk(context: Context, offer: AndroidUpdate): File {
         val body = response.body ?: throw IllegalStateException("Die APK konnte nicht geladen werden.")
         file.outputStream().use { output -> body.byteStream().use { input -> input.copyTo(output) } }
     }
+    if (!apkLooksValid(file)) {
+        file.delete()
+        throw IllegalStateException("Die geladene Datei ist kein APK.")
+    }
     return file
+}
+
+/** A GitHub error page must not be handed to the package installer. */
+private fun apkLooksValid(file: File): Boolean {
+    if (file.length() < 1_000_000L) return false
+    return file.inputStream().use { input ->
+        val magic = ByteArray(2)
+        input.read(magic) == 2 && magic[0] == 'P'.code.toByte() && magic[1] == 'K'.code.toByte()
+    }
 }
 
 /** Opens the system installer, or the unknown-sources setting when Android blocks it. */
