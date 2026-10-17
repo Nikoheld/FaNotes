@@ -2057,10 +2057,33 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .confirm-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .confirm-dialog-actions button { min-height: 34px; padding: 0 14px; font-size: 12px; }
 .confirm-dialog-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.folder-path-dialog { width: min(560px, 100%); max-width: 560px; }
+.folder-path-dialog .confirm-dialog-header { position: relative; }
+.folder-path-dialog__close { margin-left: auto; }
+.folder-path-dialog__body { display: grid; gap: 10px; }
+.folder-path-dialog__body p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--text-soft); }
+.folder-path-dialog__note, .folder-path-dialog__empty, .folder-path-dialog__meta { font-size: 12px; }
+.folder-path-dialog__meta { overflow-wrap: anywhere; opacity: .75; }
+.folder-path-dialog__list { list-style: none; display: grid; gap: 6px; margin: 0; padding: 0; }
+.folder-path-dialog__list li { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr) auto; gap: 8px; align-items: center; min-height: 34px; padding: 4px 6px 4px 8px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--panel) 82%, var(--bg)); }
+.folder-path-dialog__role { font-size: 11px; color: var(--text-soft); }
+.folder-path-dialog__list code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.folder-path-dialog__row-actions, .folder-path-dialog__add { display: flex; gap: 6px; align-items: center; }
+.folder-path-dialog__row-actions button, .folder-path-dialog__add button { min-height: 30px; }
+.folder-path-dialog__row-actions button { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 8px; color: inherit; background: transparent; }
+.folder-path-dialog__add { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; }
+.folder-path-dialog__add input, .folder-path-dialog__add select { min-width: 0; min-height: 34px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 10px; color: inherit; background: var(--bg); }
+.folder-path-dialog__move { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; line-height: 1.4; }
+.folder-path-dialog__error { color: var(--danger); }
+.folder-path-dialog__conflicts ul { margin: 4px 0 0; padding-left: 18px; font-size: 12px; }
+.file-tree__location-mark { flex: none; opacity: .72; }
 @media (max-width: 520px) {
   .confirm-dialog-body { padding-left: 0; }
   .confirm-dialog-actions { flex-direction: column-reverse; }
   .confirm-dialog-actions button { width: 100%; }
+  .folder-path-dialog__list li { grid-template-columns: minmax(0, 1fr) auto; }
+  .folder-path-dialog__role { grid-column: 1 / -1; }
+  .folder-path-dialog__add { grid-template-columns: 1fr; }
 }
 .worksheet-import-dialog { width: min(620px, 92vw); overflow: hidden; border: 1px solid var(--border-strong); border-radius: 17px; color: var(--text); background: var(--panel); box-shadow: var(--shadow); animation: modal-in var(--motion-med) var(--ease-out) both; }
 .worksheet-import-dialog > header { height: 68px; display: flex; align-items: center; justify-content: space-between; padding: 0 17px; border-bottom: 1px solid var(--border); background: linear-gradient(110deg, rgba(var(--accent-rgb),.12), transparent 65%); }

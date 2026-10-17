@@ -21,6 +21,7 @@ import {
   Files,
   FileText,
   Folder,
+  FolderInput,
   FolderOpen,
   FolderPlus,
   Link2,
@@ -56,6 +57,7 @@ export type FileTreeProps = {
   localOnlyPaths?: string[]
   onToggleLocalOnly?: (relativePath: string) => void
   onSetFolderColor?: (relativePath: string, color: string | null) => MaybePromise
+  onEditFolderPath?: (relativePath: string) => MaybePromise
   onRename: (relativePath: string, nextName: string) => MaybePromise
   onMove: (relativePath: string, destFolder: string) => MaybePromise
   onTrash: (relativePath: string) => MaybePromise
@@ -195,6 +197,7 @@ export const FileTree = memo(function FileTree({
   localOnlyPaths = [],
   onToggleLocalOnly,
   onSetFolderColor,
+  onEditFolderPath,
   onRename,
   onMove,
   onTrash,
@@ -600,7 +603,7 @@ export const FileTree = memo(function FileTree({
                 onDragEnd={endDrag}
                 onKeyDown={(event) => handleRowKey(event, entry)}
                 title={isFolder
-                  ? `${entry.relativePath} · Ziehen, um in einen Ordner oder auf die oberste Ebene zu legen`
+                  ? `${entry.relativePath}${entry.locations?.length ? ` · Verknüpfter Ordner (${entry.locations.length})` : ''} · Ziehen, um in einen Ordner oder auf die oberste Ebene zu legen`
                   : `${entry.relativePath} · Umschalt+Klick öffnet rechts · Ziehen zum Verschieben`}
                 type="button"
               >
@@ -621,6 +624,9 @@ export const FileTree = memo(function FileTree({
                   )}
                 </span>
                 <span className="file-tree__name">{displayName(entry)}</span>
+                {isFolder && entry.locations && entry.locations.length > 0 && (
+                  <FolderInput className="file-tree__location-mark" aria-hidden="true" size={12} />
+                )}
               </button>
 
               <span className="file-tree__inline-actions">
@@ -782,7 +788,7 @@ export const FileTree = memo(function FileTree({
             left: Math.min(Math.max(8, contextMenu.x), window.innerWidth - 232),
             top: Math.min(
               Math.max(8, contextMenu.y),
-              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 560 : 420),
+              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 620 : 420),
             ),
           }}
         >
@@ -858,6 +864,20 @@ export const FileTree = memo(function FileTree({
                 Neuer Unterordner
               </button>
               <span className="file-tree__menu-separator" role="separator" />
+              {onEditFolderPath && (
+                <button
+                  onClick={() => {
+                    const path = contextMenu.entry.relativePath
+                    setContextMenu(null)
+                    void Promise.resolve(onEditFolderPath(path))
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <FolderInput aria-hidden="true" size={15} />
+                  Ordnerpfad …
+                </button>
+              )}
               {onSetFolderColor && (
                 <div className="folder-color-menu">
                   <span><Palette aria-hidden="true" size={14} /> Darstellung</span>

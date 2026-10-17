@@ -11,6 +11,8 @@ export type VaultEntry = {
   modifiedAt?: string
   size?: number
   color?: string
+  /** Absolute directories on the desktop, or other vault folders in the browser, whose files appear in this folder. */
+  locations?: string[]
   children?: VaultEntry[]
 }
 
@@ -526,6 +528,9 @@ export type FaNotesApi = {
   createNote: (parentPath?: string, preferredName?: string) => Promise<CreateResult>
   createFolder: (parentPath?: string, preferredName?: string) => Promise<CreateResult>
   setFolderColor: (relativePath: string, color: string | null) => Promise<{ color: string | null }>
+  getFolderLocations: (relativePath: string) => Promise<{ paths: string[] }>
+  pickFolderLocation: () => Promise<string | null>
+  setFolderLocations: (relativePath: string, paths: string[], moveContents?: boolean) => Promise<{ paths: string[]; moved: number; conflicts: string[] }>
   renameEntry: (relativePath: string, nextName: string) => Promise<string>
   moveEntry: (relativePath: string, destFolder?: string | null) => Promise<string>
   trashEntry: (relativePath: string) => Promise<void>

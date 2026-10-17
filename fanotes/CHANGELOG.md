@@ -2,6 +2,7 @@
 
 ## 2026.10.9
 
+- **Ordnerpfad.** Ein Ordner kann auf einen anderen Ordner zeigen, auch auf mehrere. Die Dateien erscheinen zusammen in diesem einen Ordner. Der erste Pfad ist der Hauptordner für neue Notizen. Beim Wechsel kann FaNotes die Dateien aus dem bisherigen Ordner in den neuen verschieben und lässt belegte Namen liegen. Auf dem Desktop liegen die Pfade außerhalb des Vaults und bleiben auf diesem Gerät. Im Browser sind es andere Ordner desselben Vaults.
 - **Android bleibt offen.** Die Notizseite fragt die Undo-Historie nicht mehr ab, bevor das Textfeld steht. Die App bleibt nach dem Öffnen offen.
 - **Android-Update.** Beim Öffnen prüft die App GitHub und bietet ein neueres APK zur Installation an. Das Paket ist mit einem festen Schlüssel signiert. 2026.10.6, 2026.10.7 und 2026.10.8 waren jeweils anders signiert; diese eine Version muss einmal neu installiert werden.
 - **Suche.** strasse findet auch Straße.

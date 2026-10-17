@@ -16,6 +16,20 @@ import { createBrowserAddonsApi } from './addons/browserAddonsApi'
 import { createBrowserSyncHost } from './sync/browserSyncHost'
 import { loadBrowserSpellingResources, loadBrowserSpellingWordCandidates } from './spellingResources'
 import { loadBrowserHandwritingRecognitionResources } from './handwritingRecognitionResources'
+import {
+  applyFolderLocations,
+  contentDirectory,
+  contentRoots,
+  forgetFolderLocations,
+  isPlaceholderDescendant,
+  logicalPathForStored,
+  planFolderContentMove,
+  resolveWebStoredPath,
+  retargetFolderLocations,
+  sanitizeFolderLocationMap,
+  validateWebFolderPaths,
+  type FolderLocationMap,
+} from './webFolderLocations'
 
 const DATABASE_NAME = 'fanotes-web-vault'
 const DATABASE_VERSION = 1
@@ -226,6 +240,7 @@ export function createBrowserApi(): FaNotesApi {
   const worksheets = new Map<string, WorksheetDocument>()
   const notePaper = new Map<string, PaperStyle>()
   let subjectBooks: SubjectBookRecord[] = []
+  let folderLocations: FolderLocationMap = {}
   const noteHistory = new Map<string, Array<{ id: string; createdAt: string; content: string; bytes: number }>>()
   let cachedTree: VaultEntry[] | null = null
   let updateState: UpdateState = {
@@ -337,6 +352,7 @@ export function createBrowserApi(): FaNotesApi {
       })
     }
     subjectBooks = parseSubjectBooks(meta.get('subjectBooks'))
+    folderLocations = sanitizeFolderLocationMap(meta.get('folderLocations'))
     fileRows.forEach((row) => files.set(row.path, row))
     folderRows.forEach((row) => folders.set(row.path, row))
     assetRows.forEach((row) => assets.set(row.path, row.value))
@@ -356,11 +372,17 @@ export function createBrowserApi(): FaNotesApi {
     linuxRuntime: null,
   })
 
+  const storedExists = (candidate: string) => files.has(candidate) || folders.has(candidate) || (assets.has(candidate) && !candidate.startsWith('.fanotes/'))
+  const resolveStored = (logical: string, allowMissing = false) => resolveWebStoredPath(folderLocations, logical, storedExists, allowMissing)
+  const persistFolderLocations = () => setMeta('folderLocations', folderLocations)
+  const logicalResult = (logical: string, storedResult: string) => [parentPath(logical), fileName(storedResult)].filter(Boolean).join('/')
+
   const buildTree = () => {
     if (cachedTree) return clone(cachedTree)
     const root: VaultEntry[] = []
     const directories = new Map<string, VaultEntry[]>([['', root]])
     ;[...folders.values()].sort((a, b) => a.path.localeCompare(b.path, getUiLanguage())).forEach((folder) => {
+      if (isPlaceholderDescendant(folder.path, folderLocations)) return
       const children: VaultEntry[] = []
       directories.set(folder.path, children)
       const entry: VaultEntry = { name: fileName(folder.path), relativePath: folder.path, kind: 'folder', color: folder.color, children }
@@ -382,15 +404,35 @@ export function createBrowserApi(): FaNotesApi {
     files.forEach((record) => {
       if (record.path === '.fanotes/recognition-model.json') return
       if (hiddenFamd.has(record.path)) return
+      if (isPlaceholderDescendant(record.path, folderLocations)) return
       const extension = fileName(record.path).split('.').pop()?.toLocaleLowerCase('en-US') || 'md'
       const entry: VaultEntry = { name: fileName(record.path), relativePath: record.path, kind: 'file', extension, modifiedAt: record.modifiedAt, size: textBytes(record.content) }
       ;(directories.get(parentPath(record.path)) ?? root).push(entry)
     })
     assets.forEach((blob, path) => {
       if (path.startsWith('.') || !/\.pdf$/iu.test(path)) return
+      if (isPlaceholderDescendant(path, folderLocations)) return
       const entry: VaultEntry = { name: fileName(path), relativePath: path, kind: 'file', extension: 'pdf', size: blob.size }
       ;(directories.get(parentPath(path)) ?? root).push(entry)
     })
+    const listStored = (parent: string): VaultEntry[] => {
+      const items: VaultEntry[] = []
+      folders.forEach((folder) => {
+        if (parentPath(folder.path) !== parent) return
+        items.push({ name: fileName(folder.path), relativePath: folder.path, kind: 'folder', color: folder.color, children: [] })
+      })
+      files.forEach((record) => {
+        if (record.path === '.fanotes/recognition-model.json' || hiddenFamd.has(record.path) || parentPath(record.path) !== parent) return
+        const extension = fileName(record.path).split('.').pop()?.toLocaleLowerCase('en-US') || 'md'
+        items.push({ name: fileName(record.path), relativePath: record.path, kind: 'file', extension, modifiedAt: record.modifiedAt, size: textBytes(record.content) })
+      })
+      assets.forEach((blob, path) => {
+        if (path.startsWith('.') || !/\.pdf$/iu.test(path) || parentPath(path) !== parent) return
+        items.push({ name: fileName(path), relativePath: path, kind: 'file', extension: 'pdf', size: blob.size })
+      })
+      return items
+    }
+    applyFolderLocations(root, folderLocations, listStored)
     const sort = (entries: VaultEntry[]) => entries.sort((a, b) => a.kind === b.kind ? a.name.localeCompare(b.name, getUiLanguage()) : a.kind === 'folder' ? -1 : 1).forEach((entry) => { if (entry.children) sort(entry.children) })
     sort(root)
     cachedTree = root
@@ -704,13 +746,13 @@ export function createBrowserApi(): FaNotesApi {
     getTree: async () => { await ready; return buildTree() },
     readFile: async (rawPath) => {
       await ready
-      const record = files.get(normalizePath(rawPath))
+      const record = files.get(resolveStored(normalizePath(rawPath), false))
       if (!record) throw new Error('Die Notiz wurde im Browser-Vault nicht gefunden.')
       return parseFamd(record.content).markdown
     },
     readAssetDataUrl: async (rawPath) => {
       await ready
-      const path = normalizePath(rawPath)
+      const path = resolveStored(normalizePath(rawPath), false)
       const blob = assets.get(path)
       if (!blob) throw new Error('Die lokale Bild- oder PDF-Datei wurde nicht gefunden.')
       const previous = assetUrls.get(path)
@@ -721,7 +763,7 @@ export function createBrowserApi(): FaNotesApi {
     },
     readAssetBytes: async (rawPath) => {
       await ready
-      const path = normalizePath(rawPath)
+      const path = resolveStored(normalizePath(rawPath), false)
       const blob = assets.get(path)
       if (!blob) throw new Error('Die lokale Bild- oder PDF-Datei wurde nicht gefunden.')
       return new Uint8Array(await blob.arrayBuffer())
@@ -742,16 +784,17 @@ export function createBrowserApi(): FaNotesApi {
     },
     writeFile: async (rawPath, content) => {
       await ready
-      const path = normalizePath(rawPath)
+      const logical = normalizePath(rawPath)
+      const path = resolveStored(logical, true)
       const previous = files.get(path)
       if (!previous && !/\.famd$/iu.test(path)) throw new Error('Die Notiz wurde im Browser-Vault nicht gefunden.')
       if (typeof content !== 'string' || textBytes(content) > MAX_NOTE_BYTES) throw new Error('Die Notiz ist zu groß.')
       if (previous && previous.content !== content) {
         const createdAt = new Date().toISOString()
         const entry = { id: `${createdAt}-${Math.random().toString(36).slice(2, 8)}`, createdAt, content: previous.content, bytes: textBytes(previous.content) }
-        const list = noteHistory.get(path) ?? []
+        const list = noteHistory.get(logical) ?? []
         list.push(entry)
-        noteHistory.set(path, list.slice(-30))
+        noteHistory.set(logical, list.slice(-30))
       }
       const record = { path, content, modifiedAt: new Date().toISOString() }
       await write('files', (store) => { store.put(record) })
@@ -781,32 +824,56 @@ export function createBrowserApi(): FaNotesApi {
     createNote: async (rawParent, rawPreferredName) => {
       await ready
       const parent = typeof rawParent === 'string' && rawParent.trim() ? normalizePath(rawParent) : ''
-      if (parent && !folders.has(parent)) throw new Error('Der Zielordner wurde nicht gefunden.')
+      if (parent && !folders.has(parent) && !folders.has(resolveStored(parent, false))) throw new Error('Der Zielordner wurde nicht gefunden.')
+      const physicalParent = contentDirectory(folderLocations, parent, (candidate) => folders.has(candidate))
+      if (physicalParent && !folders.has(physicalParent)) throw new Error('Der verknüpfte Ordner wurde nicht gefunden.')
       const preferredName = typeof rawPreferredName === 'string' && rawPreferredName.trim()
         ? rawPreferredName
         : english ? 'Untitled Note' : 'Unbenannte Notiz'
       const name = safeSegment(preferredName.replace(/\.md$/iu, ''), english ? 'Untitled Note' : 'Unbenannte Notiz')
-      const path = uniquePath([parent, `${name}.md`].filter(Boolean).join('/'), 'file')
+      const roots = contentRoots(folderLocations, parent)
+      const taken = (candidateName: string) => roots.some((root) => storedExists([root, candidateName].filter(Boolean).join('/')))
+      let chosen = `${name}.md`
+      if (taken(chosen)) {
+        let index = 2
+        while (taken(`${name} ${index}.md`)) index += 1
+        chosen = `${name} ${index}.md`
+      }
+      const path = [physicalParent, chosen].filter(Boolean).join('/')
+      const logicalPath = [parent, chosen].filter(Boolean).join('/')
       const record = { path, content: `# ${name}\n\n`, modifiedAt: new Date().toISOString() }
       await write('files', (store) => { store.put(record) })
       files.set(path, record)
       cachedTree = null
-      return { relativePath: path, entry: { name: fileName(path), relativePath: path, kind: 'file', extension: 'md', modifiedAt: record.modifiedAt, size: textBytes(record.content) } }
+      return { relativePath: logicalPath, entry: { name: chosen, relativePath: logicalPath, kind: 'file', extension: 'md', modifiedAt: record.modifiedAt, size: textBytes(record.content) } }
     },
     createFolder: async (rawParent = '', preferredName = english ? 'New Folder' : 'Neuer Ordner') => {
       await ready
       const parent = rawParent ? normalizePath(rawParent) : ''
-      if (parent && !folders.has(parent)) throw new Error('Der Zielordner wurde nicht gefunden.')
-      const path = uniquePath([parent, safeSegment(preferredName, english ? 'New Folder' : 'Neuer Ordner')].filter(Boolean).join('/'), 'folder')
+      if (parent && !folders.has(parent) && !folders.has(resolveStored(parent, false))) throw new Error('Der Zielordner wurde nicht gefunden.')
+      const physicalParent = contentDirectory(folderLocations, parent, (candidate) => folders.has(candidate))
+      if (physicalParent && !folders.has(physicalParent)) throw new Error('Der verknüpfte Ordner wurde nicht gefunden.')
+      const name = safeSegment(preferredName, english ? 'New Folder' : 'Neuer Ordner')
+      const roots = contentRoots(folderLocations, parent)
+      const taken = (candidateName: string) => roots.some((root) => storedExists([root, candidateName].filter(Boolean).join('/')))
+      let chosen = name
+      if (taken(chosen)) {
+        let index = 2
+        while (taken(`${name} ${index}`)) index += 1
+        chosen = `${name} ${index}`
+      }
+      const path = [physicalParent, chosen].filter(Boolean).join('/')
+      const logicalPath = [parent, chosen].filter(Boolean).join('/')
       const record = { path }
       await write('folders', (store) => { store.put(record) })
       folders.set(path, record)
       cachedTree = null
-      return { relativePath: path, entry: { name: fileName(path), relativePath: path, kind: 'folder', children: [] } }
+      return { relativePath: logicalPath, entry: { name: chosen, relativePath: logicalPath, kind: 'folder', children: [] } }
     },
     setFolderColor: async (rawPath, color) => {
       await ready
-      const path = normalizePath(rawPath)
+      const logical = normalizePath(rawPath)
+      const path = folders.has(logical) ? logical : resolveStored(logical, false)
       const current = folders.get(path)
       if (!current) throw new Error('Der Ordner wurde nicht gefunden.')
       if (color !== null && !/^#[a-f0-9]{6}$/iu.test(color)) throw new Error('Die Ordnerfarbe ist ungültig.')
@@ -816,14 +883,110 @@ export function createBrowserApi(): FaNotesApi {
       cachedTree = null
       return { color }
     },
+    getFolderLocations: async (rawPath) => {
+      await ready
+      const logical = normalizePath(rawPath)
+      const path = folders.has(logical) ? logical : resolveStored(logical, false)
+      if (!folders.has(path)) throw new Error('Der Ordner wurde nicht gefunden.')
+      return { paths: [...(folderLocations[logical] ?? [])] }
+    },
+    pickFolderLocation: async () => null,
+    setFolderLocations: async (rawPath, rawPaths, moveContents) => {
+      await ready
+      const logical = normalizePath(rawPath)
+      if (!folders.has(logical)) throw new Error('Der Ordner wurde nicht gefunden.')
+      const validated = validateWebFolderPaths(logical, rawPaths, folderLocations, (candidate) => folders.has(candidate), normalizePath)
+      const nextCount = Object.keys(folderLocations).filter((key) => key !== logical).length + (validated.length ? 1 : 0)
+      if (nextCount > 200) throw new Error('Zu viele Ordnerpfade.')
+      const previous = folderLocations[logical] ?? []
+      const oldPrimary = previous[0] ?? logical
+      const newPrimary = validated[0] ?? logical
+      let moved = 0
+      let conflicts: string[] = []
+      if (moveContents === true && oldPrimary !== newPrimary) {
+        const plan = planFolderContentMove(oldPrimary, newPrimary, [...files.keys(), ...assets.keys()], [...folders.keys()])
+        conflicts = plan.conflicts
+        const nextFiles = new Map(files)
+        const nextFolders = new Map(folders)
+        const nextAssets = new Map(assets)
+        for (const move of plan.folderMoves) {
+          const row = nextFolders.get(move.from)
+          if (!row) continue
+          nextFolders.delete(move.from)
+          nextFolders.set(move.to, { ...row, path: move.to })
+        }
+        for (const move of plan.fileMoves) {
+          if (nextAssets.has(move.from)) {
+            const blob = nextAssets.get(move.from)!
+            nextAssets.delete(move.from)
+            nextAssets.set(move.to, blob)
+            moved += 1
+            continue
+          }
+          const row = nextFiles.get(move.from)
+          if (!row) continue
+          nextFiles.delete(move.from)
+          nextFiles.set(move.to, { ...row, path: move.to })
+          moved += 1
+        }
+        await writeMany(['files', 'folders', 'assets'], (stores) => {
+          for (const move of [...plan.folderMoves, ...plan.fileMoves]) {
+            stores.get('files')!.delete(move.from)
+            stores.get('folders')!.delete(move.from)
+            stores.get('assets')!.delete(move.from)
+          }
+          nextFolders.forEach((row) => { if (plan.folderMoves.some((move) => move.to === row.path)) stores.get('folders')!.put(row) })
+          nextFiles.forEach((row) => { if (plan.fileMoves.some((move) => move.to === row.path)) stores.get('files')!.put(row) })
+          nextAssets.forEach((blob, path) => { if (plan.fileMoves.some((move) => move.to === path)) stores.get('assets')!.put({ path, value: blob }) })
+        })
+        files.clear(); nextFiles.forEach((row, key) => files.set(key, row))
+        folders.clear(); nextFolders.forEach((row, key) => folders.set(key, row))
+        plan.fileMoves.forEach((move) => {
+          const previousUrl = assetUrls.get(move.from)
+          if (previousUrl) {
+            URL.revokeObjectURL(previousUrl)
+            assetUrls.delete(move.from)
+          }
+        })
+        assets.clear(); nextAssets.forEach((blob, key) => assets.set(key, blob))
+        for (const move of [...plan.fileMoves, ...plan.folderMoves]) await remapNotePaper(move.from, move.to)
+      }
+      if (validated.length) folderLocations = { ...folderLocations, [logical]: validated }
+      else {
+        const next = { ...folderLocations }
+        delete next[logical]
+        folderLocations = next
+      }
+      await persistFolderLocations()
+      cachedTree = null
+      return { paths: validated, moved, conflicts }
+    },
     renameEntry: async (rawPath, nextName) => {
       await ready
-      const path = normalizePath(rawPath)
+      const logical = normalizePath(rawPath)
+      const path = resolveStored(logical, false)
+      const wasFolder = folders.has(path) && !files.has(path) && !(assets.has(path) && /\.pdf$/iu.test(path))
+      const present = async (next: string) => {
+        const shown = logicalResult(logical, next)
+        if (wasFolder) {
+          const updated = retargetFolderLocations(folderLocations, logical, shown)
+          if (updated !== folderLocations) {
+            folderLocations = updated
+            await persistFolderLocations()
+          }
+        }
+        if (shown !== next) await remapNotePaper(logical, shown)
+        return shown
+      }
+      const displayTaken = (candidate: string) => contentRoots(folderLocations, parentPath(logical)).some((root) => {
+        const other = [root, fileName(candidate)].filter(Boolean).join('/')
+        return other !== path && other !== candidate && storedExists(other)
+      })
       const parent = parentPath(path)
       if (assets.has(path) && /\.pdf$/iu.test(path)) {
         const name = `${safeSegment(nextName.replace(/\.pdf$/iu, ''), stem(fileName(path)))}.pdf`
         const next = [parent, name].filter(Boolean).join('/')
-        if (next !== path && (files.has(next) || folders.has(next) || assets.has(next))) throw new Error('An diesem Ort existiert bereits ein Eintrag mit diesem Namen.')
+        if (next !== path && (files.has(next) || folders.has(next) || assets.has(next) || displayTaken(next))) throw new Error('An diesem Ort existiert bereits ein Eintrag mit diesem Namen.')
         const blob = assets.get(path)!
         const oldCompanion = `${stem(path)}.famd`
         const nextCompanion = `${stem(next)}.famd`
@@ -849,21 +1012,21 @@ export function createBrowserApi(): FaNotesApi {
         }
         cachedTree = null
         await remapNotePaper(path, next)
-        return next
+        return present(next)
       }
       if (files.has(path)) {
         const name = `${safeSegment(nextName.replace(/\.md$/iu, ''), stem(fileName(path)))}.md`
         const next = [parent, name].filter(Boolean).join('/')
-        if (next !== path && (files.has(next) || folders.has(next))) throw new Error('An diesem Ort existiert bereits ein Eintrag mit diesem Namen.')
+        if (next !== path && (files.has(next) || folders.has(next) || displayTaken(next))) throw new Error('An diesem Ort existiert bereits ein Eintrag mit diesem Namen.')
         const record = { ...files.get(path)!, path: next, modifiedAt: new Date().toISOString() }
         await write('files', (store) => { store.delete(path); store.put(record) })
         files.delete(path); files.set(next, record); cachedTree = null
         await remapNotePaper(path, next)
-        return next
+        return present(next)
       }
       if (!folders.has(path)) throw new Error('Der Eintrag wurde nicht gefunden.')
       const next = [parent, safeSegment(nextName, fileName(path))].filter(Boolean).join('/')
-      if (next !== path && (files.has(next) || folders.has(next))) throw new Error('An diesem Ort existiert bereits ein Eintrag mit diesem Namen.')
+      if (next !== path && (files.has(next) || folders.has(next) || displayTaken(next))) throw new Error('An diesem Ort existiert bereits ein Eintrag mit diesem Namen.')
       const movedFolders = [...folders.values()].filter((row) => row.path === path || row.path.startsWith(`${path}/`)).map((row) => ({ ...row, path: `${next}${row.path.slice(path.length)}` }))
       const movedFiles = [...files.values()].filter((row) => row.path.startsWith(`${path}/`)).map((row) => ({ ...row, path: `${next}${row.path.slice(path.length)}` }))
       await writeMany(['folders', 'files'], (stores) => {
@@ -876,16 +1039,31 @@ export function createBrowserApi(): FaNotesApi {
       ;[...files.keys()].filter((candidate) => candidate.startsWith(`${path}/`)).forEach((candidate) => files.delete(candidate))
       movedFolders.forEach((row) => folders.set(row.path, row)); movedFiles.forEach((row) => files.set(row.path, row)); cachedTree = null
       await remapNotePaper(path, next)
-      return next
+      return present(next)
     },
     moveEntry: async (rawPath, rawDestFolder) => {
       await ready
-      const path = normalizePath(rawPath)
-      const dest = typeof rawDestFolder === 'string' && rawDestFolder.trim() ? normalizePath(rawDestFolder) : ''
+      const logical = normalizePath(rawPath)
+      const path = resolveStored(logical, false)
+      const logicalDest = typeof rawDestFolder === 'string' && rawDestFolder.trim() ? normalizePath(rawDestFolder) : ''
+      const movingFolder = folders.has(path) && !files.has(path) && !(assets.has(path) && /\.pdf$/iu.test(path))
+      const dest = movingFolder ? logicalDest : contentDirectory(folderLocations, logicalDest, (candidate) => folders.has(candidate))
       if (dest && !folders.has(dest)) throw new Error('Der Zielordner wurde nicht gefunden.')
       if (dest === path || dest.startsWith(`${path}/`)) throw new Error('Ein Ordner kann nicht in sich selbst verschoben werden.')
       const currentParent = parentPath(path)
-      if (currentParent === dest) return path
+      const shownDest = async (next: string) => {
+        const shown = [logicalDest, fileName(next)].filter(Boolean).join('/')
+        if (movingFolder) {
+          const updated = retargetFolderLocations(folderLocations, logical, shown)
+          if (updated !== folderLocations) {
+            folderLocations = updated
+            await persistFolderLocations()
+          }
+        }
+        if (shown !== next) await remapNotePaper(logical, shown)
+        return shown
+      }
+      if (currentParent === dest) return logicalResult(logical, path)
       const name = fileName(path)
       const extensionMatch = /\.[^.]+$/u.exec(name)
       const extension = extensionMatch ? extensionMatch[0] : ''
@@ -934,7 +1112,7 @@ export function createBrowserApi(): FaNotesApi {
         }
         cachedTree = null
         await remapNotePaper(path, next)
-        return next
+        return shownDest(next)
       }
       if (files.has(path)) {
         const record = { ...files.get(path)!, path: next, modifiedAt: new Date().toISOString() }
@@ -959,7 +1137,7 @@ export function createBrowserApi(): FaNotesApi {
         }
         cachedTree = null
         await remapNotePaper(path, next)
-        return next
+        return shownDest(next)
       }
       if (!folders.has(path)) throw new Error('Der Eintrag wurde nicht gefunden.')
       const movedFolders = [...folders.values()]
@@ -980,11 +1158,17 @@ export function createBrowserApi(): FaNotesApi {
       movedFiles.forEach((row) => files.set(row.path, row))
       cachedTree = null
       await remapNotePaper(path, next)
-      return next
+      return shownDest(next)
     },
     trashEntry: async (rawPath) => {
       await ready
-      const path = normalizePath(rawPath)
+      const logical = normalizePath(rawPath)
+      const path = resolveStored(logical, false)
+      const forgotten = forgetFolderLocations(folderLocations, logical)
+      if (forgotten !== folderLocations) {
+        folderLocations = forgotten
+        await persistFolderLocations()
+      }
       const deletedFiles = [...files.keys()].filter((candidate) => candidate === path || candidate.startsWith(`${path}/`))
       const deletedFolders = [...folders.keys()].filter((candidate) => candidate === path || candidate.startsWith(`${path}/`))
       const deletedAssets = [...assets.keys()].filter((candidate) => candidate === path || candidate.startsWith(`${path}/`))
@@ -1006,12 +1190,16 @@ export function createBrowserApi(): FaNotesApi {
       })
       cachedTree = null
       await remapNotePaper(path, null)
+      if (logical !== path) await remapNotePaper(logical, null)
     },
     search: async (query) => {
       await ready
       const needle = query.trim().toLocaleLowerCase('de')
       if (!needle) return []
       const noteHits = [...files.values()].flatMap((record) => {
+        const visiblePath = logicalPathForStored(folderLocations, record.path)
+        if (visiblePath !== record.path && resolveStored(visiblePath, false) !== record.path) return []
+        if (isPlaceholderDescendant(record.path, folderLocations) && visiblePath === record.path) return []
         if (/\.famd$/iu.test(record.path)) {
           const sibling = companionNotePath(record.path, '.md')
           const pdf = record.path.replace(/\.famd$/iu, '.pdf')
@@ -1027,12 +1215,12 @@ export function createBrowserApi(): FaNotesApi {
         const companionTranscript = companionInk && typeof companionInk.searchTranscript === 'string' ? companionInk.searchTranscript : ''
         const transcript = (ownTranscript || companionTranscript).slice(0, 500_000)
         const words = readableTranscript(transcript)
-        const pathMatch = germanIndexOf(record.path.toLocaleLowerCase('de'), needle) >= 0
+        const pathMatch = germanIndexOf(visiblePath.toLocaleLowerCase('de'), needle) >= 0 || germanIndexOf(record.path.toLocaleLowerCase('de'), needle) >= 0
         const contentMatch = germanIndexOf(content.toLocaleLowerCase('de'), needle) >= 0
         const transcriptMatch = germanIndexOf(words.toLocaleLowerCase('de'), needle) >= 0
         if (!contentMatch && !pathMatch && !transcriptMatch) return []
         const excerpt = noteSearchExcerpt({
-          relativePath: record.path,
+          relativePath: visiblePath,
           content,
           transcript,
           needle,
@@ -1041,7 +1229,7 @@ export function createBrowserApi(): FaNotesApi {
         })
         const lower = `${record.path}\n${content}\n${words}`.toLocaleLowerCase('de')
         const inkAnchor = inkAnchorForQuery(transcript || content, query)
-        return [{ relativePath: record.path, title: stem(fileName(record.path)), excerpt, matches: germanCount(lower, needle), kind: 'note' as const, ...(inkAnchor ? { inkAnchor } : {}) }]
+        return [{ relativePath: visiblePath, title: stem(fileName(record.path)), excerpt, matches: germanCount(lower, needle), kind: 'note' as const, ...(inkAnchor ? { inkAnchor } : {}) }]
       })
       const drawingHits = [...drawings.values()].flatMap((drawing) => {
         try {
@@ -1057,9 +1245,12 @@ export function createBrowserApi(): FaNotesApi {
       })
       const pdfHits = [...assets.keys()].flatMap((path) => {
         if (path.startsWith('.') || !/\.pdf$/iu.test(path)) return []
-        const haystack = path.toLocaleLowerCase('de')
+        const visiblePath = logicalPathForStored(folderLocations, path)
+        if (visiblePath !== path && resolveStored(visiblePath, false) !== path) return []
+        if (isPlaceholderDescendant(path, folderLocations) && visiblePath === path) return []
+        const haystack = `${visiblePath}\n${path}`.toLocaleLowerCase('de')
         if (!haystack.includes(needle)) return []
-        return [{ relativePath: path, title: stem(fileName(path)), excerpt: `PDF · ${path}`, matches: haystack.split(needle).length - 1, kind: 'note' as const }]
+        return [{ relativePath: visiblePath, title: stem(fileName(path)), excerpt: `PDF · ${visiblePath}`, matches: haystack.split(needle).length - 1, kind: 'note' as const }]
       })
       return [...noteHits, ...pdfHits, ...drawingHits].slice(0, 250)
     },
@@ -1223,9 +1414,20 @@ export function createBrowserApi(): FaNotesApi {
       if (!file.size || file.size > MAX_PDF_BYTES) throw new Error(`Das PDF ist leer oder größer als ${Math.round(MAX_PDF_BYTES / 1024 / 1024)} MB.`)
       if (!await validWorksheetSignature(file, 'pdf')) throw new Error('Die ausgewählte Datei ist kein gültiges PDF.')
       const parent = typeof rawParent === 'string' && rawParent.trim() ? normalizePath(rawParent) : ''
-      if (parent && !folders.has(parent)) throw new Error('Der Zielordner wurde nicht gefunden.')
+      if (parent && !folders.has(parent) && !folders.has(resolveStored(parent, false))) throw new Error('Der Zielordner wurde nicht gefunden.')
+      const physicalParent = contentDirectory(folderLocations, parent, (candidate) => folders.has(candidate))
+      if (physicalParent && !folders.has(physicalParent)) throw new Error('Der verknüpfte Ordner wurde nicht gefunden.')
       const title = safeSegment(stem(file.name), english ? 'PDF note' : 'PDF-Notiz')
-      const path = uniquePath([parent, `${title}.pdf`].filter(Boolean).join('/'), 'pdf')
+      const roots = contentRoots(folderLocations, parent)
+      const taken = (candidateName: string) => roots.some((root) => storedExists([root, candidateName].filter(Boolean).join('/')))
+      let chosen = `${title}.pdf`
+      if (taken(chosen)) {
+        let index = 2
+        while (taken(`${title} ${index}.pdf`)) index += 1
+        chosen = `${title} ${index}.pdf`
+      }
+      const path = [physicalParent, chosen].filter(Boolean).join('/')
+      const logicalPath = [parent, chosen].filter(Boolean).join('/')
       const source = file.slice(0, file.size, 'application/pdf')
       const famdPath = `${stem(path)}.famd`
       const famdRecord = { path: famdPath, content: '', modifiedAt: new Date().toISOString() }
@@ -1236,7 +1438,7 @@ export function createBrowserApi(): FaNotesApi {
       assets.set(path, source)
       files.set(famdPath, famdRecord)
       cachedTree = null
-      return { relativePath: path, entry: { name: fileName(path), relativePath: path, kind: 'file', extension: 'pdf', size: file.size } }
+      return { relativePath: logicalPath, entry: { name: chosen, relativePath: logicalPath, kind: 'file', extension: 'pdf', size: file.size } }
     },
     importWorksheet: async () => {
       const file = await pickWorksheet()
