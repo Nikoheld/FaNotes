@@ -1,5 +1,14 @@
 # Änderungsverlauf
 
+## 2026.10.9
+
+- **Android bleibt offen.** Die Notizseite fragt die Undo-Historie nicht mehr ab, bevor das Textfeld steht. Die App bleibt nach dem Öffnen offen.
+- **Android-Update.** Beim Öffnen prüft die App GitHub und bietet ein neueres APK zur Installation an. Das Paket ist mit einem festen Schlüssel signiert. 2026.10.6, 2026.10.7 und 2026.10.8 waren jeweils anders signiert; diese eine Version muss einmal neu installiert werden.
+- **Suche.** strasse findet auch Straße.
+- **Tagesnotizen.** In einer Tagesnotiz geht es einen Tag zurück oder voraus.
+- **Handschrift.** Ein Suchtreffer zeigt die Wörter, nicht die Seitenposition.
+- **Datum.** Ein erweitertes Jahr vor dem ersten gültigen Zeitpunkt bleibt leer.
+
 ## 2026.10.8
 
 - **Aufgabe umschalten.** Strg+Enter macht aus der aktuellen Zeile eine Aufgabe oder hakt sie ab. Überschriften, Zitate, Tabellen, Linien und Code bleiben. Alt+Umschalt+D dupliziert die Notiz. Kopieren fällt auf eine Textauswahl zurück, wenn der Browser die Zwischenablage sperrt.
