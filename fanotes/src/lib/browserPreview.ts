@@ -5,6 +5,18 @@ import type { AppSettings, DrawingLibraryDocument, FaNotesApi, UpdateState, Vaul
 import { loadBrowserSpellingResources, loadBrowserSpellingWordCandidates } from './spellingResources'
 import { loadBrowserHandwritingRecognitionResources } from './handwritingRecognitionResources'
 import { createBrowserAddonsApi } from './addons/browserAddonsApi'
+import {
+  applyFolderLocations,
+  contentDirectory,
+  contentRoots,
+  forgetFolderLocations,
+  isPlaceholderDescendant,
+  planFolderContentMove,
+  resolveWebStoredPath,
+  retargetFolderLocations,
+  validateWebFolderPaths,
+  type FolderLocationMap,
+} from './webFolderLocations'
 
 export const BROWSER_INITIAL_FILES: Record<string, string> = {
   'Willkommen.md': `# Willkommen bei FaNotes
@@ -186,6 +198,7 @@ export function createBrowserPreviewApi(): FaNotesApi {
   const files = new Map(Object.entries(browserInitialFiles()))
   const initialFolders = [english ? 'Inbox' : 'Eingang', ...starterSubjects.map(({ name }) => name)]
   const folders = new Set(initialFolders)
+  let folderLocations: FolderLocationMap = {}
   const folderColors = new Map<string, string>([[english ? 'Inbox' : 'Eingang', '#6b7280'], ...starterSubjects.map(({ name, color }) => [name, color] as [string, string])])
   const assets = new Map<string, string>()
   const drawings = new Map<string, DrawingLibraryDocument>()
@@ -210,11 +223,29 @@ export function createBrowserPreviewApi(): FaNotesApi {
     updateChannel: 'stable',
   }
 
+  const parentOf = (path: string) => path.split('/').slice(0, -1).join('/')
+  const nameOf = (path: string) => path.split('/').pop() ?? path
+  const storedExists = (candidate: string) => files.has(candidate) || folders.has(candidate)
+  const resolveStored = (logical: string, allowMissing = false) => resolveWebStoredPath(folderLocations, logical, storedExists, allowMissing)
+  const listStored = (parent: string): VaultEntry[] => {
+    const items: VaultEntry[] = []
+    folders.forEach((folder) => {
+      if (parentOf(folder) !== parent) return
+      items.push({ name: nameOf(folder), relativePath: folder, kind: 'folder', color: folderColors.get(folder), children: [] })
+    })
+    files.forEach((content, relativePath) => {
+      if (parentOf(relativePath) !== parent) return
+      items.push({ name: nameOf(relativePath), relativePath, kind: 'file', extension: 'md', size: content.length })
+    })
+    return items
+  }
+
   const tree = () => {
     const root: VaultEntry[] = []
     const directories = new Map<string, VaultEntry[]>()
     directories.set('', root)
     ;[...folders].sort().forEach((folder) => {
+      if (isPlaceholderDescendant(folder, folderLocations)) return
       const parts = folder.split('/')
       const name = parts.pop()!
       const parent = parts.join('/')
@@ -224,11 +255,13 @@ export function createBrowserPreviewApi(): FaNotesApi {
       bucket.push({ name, relativePath: folder, kind: 'folder', color: folderColors.get(folder), children })
     })
     files.forEach((content, relativePath) => {
+      if (isPlaceholderDescendant(relativePath, folderLocations)) return
       const parts = relativePath.split('/')
       const name = parts.pop()!
       const parent = parts.join('/')
       ;(directories.get(parent) ?? root).push({ name, relativePath, kind: 'file', extension: 'md', size: content.length })
     })
+    applyFolderLocations(root, folderLocations, listStored)
     const sort = (entries: VaultEntry[]) => entries.sort((a, b) => a.kind === b.kind ? a.name.localeCompare(b.name, getUiLanguage()) : a.kind === 'folder' ? -1 : 1).forEach((entry) => entry.children && sort(entry.children))
     sort(root)
     return root
@@ -244,7 +277,7 @@ export function createBrowserPreviewApi(): FaNotesApi {
     getFastTree: async () => tree(),
     getTree: async () => tree(),
     readFile: async (path) => {
-      const content = files.get(path)
+      const content = files.get(resolveStored(path, false))
       if (content === undefined) throw new Error('Datei nicht gefunden.')
       return content
     },
@@ -285,28 +318,101 @@ export function createBrowserPreviewApi(): FaNotesApi {
     loadSpellingResources: loadBrowserSpellingResources,
     loadSpellingWordCandidates: loadBrowserSpellingWordCandidates,
     loadHandwritingRecognitionResources: loadBrowserHandwritingRecognitionResources,
-    writeFile: async (path, content) => { files.set(path, content); return { modifiedAt: new Date().toISOString() } },
+    writeFile: async (path, content) => { files.set(resolveStored(path, true), content); return { modifiedAt: new Date().toISOString() } },
     createNote: async (parent = '', preferredName = english ? 'Untitled Note' : 'Unbenannte Notiz') => {
       const filename = preferredName.toLowerCase().endsWith('.md') ? preferredName : `${preferredName}.md`
-      const path = uniquePath([parent, filename].filter(Boolean).join('/'), (candidate) => files.has(candidate))
-      files.set(path, `# ${filename.replace(/\.md$/i, '')}\n\n`)
-      return { relativePath: path, entry: { name: path.split('/').pop()!, relativePath: path, kind: 'file', extension: 'md' } }
+      const physicalParent = contentDirectory(folderLocations, parent, (candidate) => folders.has(candidate))
+      const roots = contentRoots(folderLocations, parent)
+      const taken = (candidateName: string) => roots.some((root) => files.has([root, candidateName].filter(Boolean).join('/')) || folders.has([root, candidateName].filter(Boolean).join('/')))
+      const base = filename.replace(/\.md$/iu, '')
+      let chosen = filename
+      if (taken(chosen)) {
+        let index = 2
+        while (taken(`${base} ${index}.md`)) index += 1
+        chosen = `${base} ${index}.md`
+      }
+      const path = [physicalParent, chosen].filter(Boolean).join('/')
+      const logicalPath = [parent, chosen].filter(Boolean).join('/')
+      files.set(path, `# ${chosen.replace(/\.md$/i, '')}\n\n`)
+      return { relativePath: logicalPath, entry: { name: chosen, relativePath: logicalPath, kind: 'file', extension: 'md' } }
     },
     createFolder: async (parent = '', preferredName = english ? 'New Folder' : 'Neuer Ordner') => {
-      const path = uniquePath([parent, preferredName].filter(Boolean).join('/'), (candidate) => folders.has(candidate))
+      const physicalParent = contentDirectory(folderLocations, parent, (candidate) => folders.has(candidate))
+      const roots = contentRoots(folderLocations, parent)
+      const taken = (candidateName: string) => roots.some((root) => folders.has([root, candidateName].filter(Boolean).join('/')) || files.has([root, candidateName].filter(Boolean).join('/')))
+      let chosen = preferredName
+      if (taken(chosen)) {
+        let index = 2
+        while (taken(`${preferredName} ${index}`)) index += 1
+        chosen = `${preferredName} ${index}`
+      }
+      const path = [physicalParent, chosen].filter(Boolean).join('/')
+      const logicalPath = [parent, chosen].filter(Boolean).join('/')
       folders.add(path)
-      return { relativePath: path, entry: { name: path.split('/').pop()!, relativePath: path, kind: 'folder', children: [] } }
+      return { relativePath: logicalPath, entry: { name: chosen, relativePath: logicalPath, kind: 'folder', children: [] } }
     },
     setFolderColor: async (path, color) => {
-      if (!folders.has(path)) throw new Error('Ordner nicht gefunden.')
-      if (color) folderColors.set(path, color)
-      else folderColors.delete(path)
+      const stored = folders.has(path) ? path : resolveStored(path, false)
+      if (!folders.has(stored)) throw new Error('Ordner nicht gefunden.')
+      if (color) folderColors.set(stored, color)
+      else folderColors.delete(stored)
       return { color }
     },
+    getFolderLocations: async (path) => {
+      if (!folders.has(path) && !folders.has(resolveStored(path, false))) throw new Error('Ordner nicht gefunden.')
+      return { paths: [...(folderLocations[path] ?? [])] }
+    },
+    pickFolderLocation: async () => null,
+    setFolderLocations: async (path, rawPaths, moveContents) => {
+      if (!folders.has(path)) throw new Error('Ordner nicht gefunden.')
+      const validated = validateWebFolderPaths(path, rawPaths, folderLocations, (candidate) => folders.has(candidate), (value) => value.replace(/^\/+|\/+$/gu, ''))
+      const previous = folderLocations[path] ?? []
+      const oldPrimary = previous[0] ?? path
+      const newPrimary = validated[0] ?? path
+      let moved = 0
+      let conflicts: string[] = []
+      if (moveContents && oldPrimary !== newPrimary) {
+        const plan = planFolderContentMove(oldPrimary, newPrimary, [...files.keys()], [...folders])
+        conflicts = plan.conflicts
+        for (const move of plan.folderMoves) {
+          if (!folders.has(move.from)) continue
+          folders.delete(move.from)
+          folders.add(move.to)
+          const color = folderColors.get(move.from)
+          if (color) {
+            folderColors.delete(move.from)
+            folderColors.set(move.to, color)
+          }
+        }
+        for (const move of plan.fileMoves) {
+          const content = files.get(move.from)
+          if (content === undefined) continue
+          files.delete(move.from)
+          files.set(move.to, content)
+          moved += 1
+        }
+      }
+      if (validated.length) folderLocations = { ...folderLocations, [path]: validated }
+      else {
+        const next = { ...folderLocations }
+        delete next[path]
+        folderLocations = next
+      }
+      return { paths: validated, moved, conflicts }
+    },
     renameEntry: async (path, nextName) => {
+      const logical = path
+      path = resolveStored(path, false)
+      const wasFolder = folders.has(path) && !files.has(path)
       const parent = path.split('/').slice(0, -1).join('/')
       const next = [parent, nextName].filter(Boolean).join('/')
-      if (files.has(path)) { const content = files.get(path)!; files.delete(path); files.set(next.toLowerCase().endsWith('.md') ? next : `${next}.md`, content); return next.toLowerCase().endsWith('.md') ? next : `${next}.md` }
+      if (files.has(path)) {
+        const content = files.get(path)!
+        files.delete(path)
+        const storedNext = next.toLowerCase().endsWith('.md') ? next : `${next}.md`
+        files.set(storedNext, content)
+        return [parentOf(logical), nameOf(storedNext)].filter(Boolean).join('/')
+      }
       const movedFolders = [...folders].filter((candidate) => candidate === path || candidate.startsWith(`${path}/`))
       movedFolders.forEach((candidate) => {
         folders.delete(candidate)
@@ -322,14 +428,20 @@ export function createBrowserPreviewApi(): FaNotesApi {
         folderColors.delete(candidate)
         folderColors.set(candidate === path ? next : `${next}${candidate.slice(path.length)}`, color)
       })
-      return next
+      const shown = [parentOf(logical), nameOf(next)].filter(Boolean).join('/')
+      if (wasFolder) folderLocations = retargetFolderLocations(folderLocations, logical, shown)
+      return shown
     },
-    moveEntry: async (path, rawDestFolder) => {
-      const dest = typeof rawDestFolder === 'string' ? rawDestFolder.replace(/^\/+|\/+$/gu, '') : ''
+    moveEntry: async (rawPath, rawDestFolder) => {
+      const logical = rawPath
+      const path = resolveStored(rawPath, false)
+      const logicalDest = typeof rawDestFolder === 'string' ? rawDestFolder.replace(/^\/+|\/+$/gu, '') : ''
+      const movingFolder = folders.has(path) && !files.has(path)
+      const dest = movingFolder ? logicalDest : contentDirectory(folderLocations, logicalDest, (candidate) => folders.has(candidate))
       if (dest && !folders.has(dest)) throw new Error('Der Zielordner wurde nicht gefunden.')
       if (dest === path || dest.startsWith(`${path}/`)) throw new Error('Ein Ordner kann nicht in sich selbst verschoben werden.')
       const parent = path.split('/').slice(0, -1).join('/')
-      if (parent === dest) return path
+      if (parent === dest) return logical
       const name = path.split('/').pop() || path
       const nextPreferred = [dest, name].filter(Boolean).join('/')
       const exists = (candidate: string) => files.has(candidate) || folders.has(candidate)
@@ -345,7 +457,7 @@ export function createBrowserPreviewApi(): FaNotesApi {
         const content = files.get(path)!
         files.delete(path)
         files.set(next, content)
-        return next
+        return [logicalDest, nameOf(next)].filter(Boolean).join('/')
       }
       const movedFolders = [...folders].filter((candidate) => candidate === path || candidate.startsWith(`${path}/`))
       movedFolders.forEach((candidate) => {
@@ -362,9 +474,15 @@ export function createBrowserPreviewApi(): FaNotesApi {
         folderColors.delete(candidate)
         folderColors.set(candidate === path ? next : `${next}${candidate.slice(path.length)}`, color)
       })
-      return next
+      const shown = [logicalDest, nameOf(next)].filter(Boolean).join('/')
+      if (movingFolder) folderLocations = retargetFolderLocations(folderLocations, logical, shown)
+      return shown
     },
-    trashEntry: async (path) => {
+    trashEntry: async (rawPath) => {
+      const logical = rawPath
+      const path = resolveStored(rawPath, false)
+      const forgotten = forgetFolderLocations(folderLocations, logical)
+      if (forgotten !== folderLocations) folderLocations = forgotten
       ;[...files.keys()].forEach((candidate) => {
         if (candidate === path || candidate.startsWith(`${path}/`)) files.delete(candidate)
       })

@@ -22,6 +22,8 @@ pub fn native_label(language: &str, source: &'static str) -> &'static str {
     match source {
         "Notiz als PDF speichern" => "Save note as PDF",
         "FaNotes-Vault auswählen" => "Select FaNotes Vault",
+        "Ordnerpfad für FaNotes wählen" => "Choose a FaNotes folder path",
+        "Ordner verwenden" => "Use folder",
         "PDF-Buch zum Fach hinzufügen" => "Add a PDF book to the subject",
         "PDF-Dokumente" => "PDF documents",
         "Bild oder PDF als Arbeitsblatt importieren" => "Import image or PDF as a worksheet",
@@ -77,6 +79,10 @@ pub fn onenote_import_dialog(language: &str) -> (&'static str, Vec<DialogFilter>
 
 pub fn vault_picker_title(language: &str) -> &'static str {
     native_label(language, "FaNotes-Vault auswählen")
+}
+
+pub fn folder_location_picker_title(language: &str) -> &'static str {
+    native_label(language, "Ordnerpfad für FaNotes wählen")
 }
 
 pub fn pdf_export_dialog(language: &str) -> (&'static str, DialogFilter) {

@@ -63,6 +63,7 @@ import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState
 import type { PaletteAction } from './components/CommandPalette'
 import type { DrawingBoardHandle, DrawingSavePayload, InkActivity } from './components/DrawingBoard'
 import { ConfirmDialog } from './components/ConfirmDialog'
+import { FolderPathDialog } from './components/FolderPathDialog'
 import { FileTree } from './components/FileTree'
 import { FormattingToolbar } from './components/FormattingToolbar'
 import { NoteLinkLayer } from './components/NoteLinkLayer'
@@ -750,6 +751,12 @@ export default function App({ startupBootstrap }: AppProps) {
   const [tabDrag, setTabDrag] = useState<{ path: string; over: string | null; side: 'before' | 'after' } | null>(null)
   const [paletteMode, setPaletteMode] = useState<'commands' | 'notes'>('commands')
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [folderPathTarget, setFolderPathTarget] = useState<string | null>(null)
+  const [folderPathInitial, setFolderPathInitial] = useState<string[]>([])
+  const [folderPathError, setFolderPathError] = useState<string | null>(null)
+  const [folderPathBusy, setFolderPathBusy] = useState(false)
+  const [folderPathMoved, setFolderPathMoved] = useState<number | null>(null)
+  const [folderPathConflicts, setFolderPathConflicts] = useState<string[]>([])
   const [historySnapshots, setHistorySnapshots] = useState<NoteHistorySnapshot[]>([])
   const [historyBusy, setHistoryBusy] = useState(false)
   const tabsRef = useRef(tabs)
@@ -2800,6 +2807,46 @@ export default function App({ startupBootstrap }: AppProps) {
       if (session === vaultSessionGenerationRef.current) toast(error instanceof Error ? error.message : 'Ordner konnte nicht erstellt werden.', 'error')
     }
   }, [refreshTree, toast])
+
+  const openFolderPath = useCallback((path: string) => {
+    setFolderPathTarget(path)
+    setFolderPathInitial([])
+    setFolderPathError(null)
+    setFolderPathMoved(null)
+    setFolderPathConflicts([])
+    void window.fanotes.getFolderLocations(path).then((result) => {
+      setFolderPathInitial(result.paths)
+    }).catch((error: unknown) => {
+      setFolderPathError(error instanceof Error ? error.message : 'Ordnerpfad konnte nicht gelesen werden.')
+    })
+  }, [])
+
+  const saveFolderPath = useCallback(async (paths: string[], moveContents: boolean) => {
+    if (!folderPathTarget) return
+    const session = vaultSessionGenerationRef.current
+    setFolderPathBusy(true)
+    setFolderPathError(null)
+    try {
+      const result = await window.fanotes.setFolderLocations(folderPathTarget, paths, moveContents)
+      if (session !== vaultSessionGenerationRef.current) return
+      vaultStructureRevisionRef.current += 1
+      setFolderPathInitial(result.paths)
+      setFolderPathMoved(result.moved)
+      setFolderPathConflicts(result.conflicts)
+      await refreshTree()
+      if (session !== vaultSessionGenerationRef.current) return
+      if (result.conflicts.length === 0) {
+        setFolderPathTarget(null)
+        toast(result.moved > 0 ? (result.moved === 1 ? '1 Datei verschoben.' : `${result.moved} Dateien verschoben.`) : 'Ordnerpfad gespeichert.', 'success')
+      }
+    } catch (error) {
+      if (session === vaultSessionGenerationRef.current) {
+        setFolderPathError(error instanceof Error ? error.message : 'Ordnerpfad konnte nicht gespeichert werden.')
+      }
+    } finally {
+      if (session === vaultSessionGenerationRef.current) setFolderPathBusy(false)
+    }
+  }, [folderPathTarget, refreshTree, toast])
 
   const setFolderColor = useCallback(async (path: string, color: string | null) => {
     const session = vaultSessionGenerationRef.current
@@ -4852,6 +4899,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 onToggleLocalOnly={(folder) => applySettings({ ...settingsRef.current, syncExcludedFolders: toggleSyncPrefix(settingsRef.current.syncExcludedFolders, folder) })}
                 bookFolderPaths={subjectBooks.map((book) => book.subjectPath)}
                 onSetFolderColor={setFolderColor}
+                onEditFolderPath={openFolderPath}
                 onRename={renameEntry}
                 onMove={moveEntry}
                 onTrash={trashEntry}
@@ -5431,6 +5479,22 @@ export default function App({ startupBootstrap }: AppProps) {
         <div className="statusbar-right">{updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={11} /> Update bereit</button>}{updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={11} /> Update {Math.round(updateState.progress * 100)} %</span>}{settings.spellcheck && activeTab && !drawingOpen && detectedTextLanguage !== 'unknown' && <span className="detected-text-language" title="Automatisch erkannte Sprache für die lokale Rechtschreibprüfung"><b>Aa</b> {detectedTextLanguage === 'de' ? 'Deutsch' : detectedTextLanguage === 'en' ? 'English' : detectedTextLanguage === 'fr' ? 'Français' : 'DE / EN'}</span>}{settings.showWordCount && activeTab && <span>{activeWordCount} Wörter</span>}{addonState.statusItems.map((item) => item.clickable ? <button key={`${item.addonId}/${item.id}`} type="button" className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore onClick={() => addonRuntime.clickStatusItem(item.addonId, item.id)}>{item.text}</button> : <span key={`${item.addonId}/${item.id}`} className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore>{item.text}</span>)}{addonState.panels.length > 0 && !addonState.dockOpen && <button type="button" className="addon-status-item addon-status-item--dock" title="Add-on-Panels einblenden" onClick={() => addonRuntime.setDockOpen(true)}><Puzzle size={11} /> {addonState.panels.length}</button>}{syncApi && syncState.account && <button type="button" className={`sync-status-item is-${syncState.status}`} title={`Sync · ${syncState.account.email} · ${syncStatusLabel(syncState)}${syncState.error ? ` · ${syncState.error}` : ''}`} aria-live="polite" onClick={() => openSettings('sync')}>{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={11} /> : syncState.status === 'offline' ? <CloudOff size={11} /> : syncState.status === 'error' ? <CircleAlert size={11} /> : <Cloud size={11} />}{syncState.status === 'syncing' ? 'Sync …' : syncState.status === 'offline' ? 'Offline' : syncState.status === 'error' ? 'Sync-Fehler' : 'Synchron'}{syncState.conflicts.length > 0 && <em>{syncState.conflicts.length}</em>}</button>}<button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={11} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={11} /> : <CircleAlert size={11} />}{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</button><span title={isWeb ? 'Die Daten bleiben in diesem Browser' : 'Dein Vault bleibt auf deinem Gerät'}><ShieldCheck size={11} /> {isWeb ? 'Im Browser gespeichert' : 'Lokal & privat'}</span></div>
       </footer>
 
+      {folderPathTarget && (
+        <FolderPathDialog
+          folderName={folderPathTarget.split('/').pop() || folderPathTarget}
+          folderPath={folderPathTarget}
+          initialPaths={folderPathInitial}
+          folderChoices={[...folderPaths(tree)].filter((path) => path !== folderPathTarget && !path.startsWith(`${folderPathTarget}/`) && !folderPathTarget.startsWith(`${path}/`)).sort((left, right) => left.localeCompare(right, 'de'))}
+          usesVaultFolders={window.fanotes.platform === 'web' || window.fanotes.platform === 'browser-preview'}
+          busy={folderPathBusy}
+          error={folderPathError}
+          moved={folderPathMoved}
+          conflicts={folderPathConflicts}
+          onBrowse={() => window.fanotes.pickFolderLocation()}
+          onClose={() => { if (!folderPathBusy) setFolderPathTarget(null) }}
+          onSave={(paths, moveContents) => { void saveFolderPath(paths, moveContents) }}
+        />
+      )}
       {cardsOpen && activeTab && <Suspense fallback={null}><FlashcardReview markdown={activeTab.content} title={activeTab.title} onSave={(markdown) => updateContentFor(activeTab.path, markdown)} onClose={() => setCardsOpen(false)} /></Suspense>}
       {historyOpen && (
         <div className="modal-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) setHistoryOpen(false) }}>

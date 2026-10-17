@@ -20,6 +20,7 @@ const fsp = require('node:fs/promises')
 const os = require('node:os')
 const path = require('node:path')
 const { fileURLToPath, pathToFileURL } = require('node:url')
+const folderLocations = require('./folder-locations.cjs')
 const { coerceWorksheetBytes } = require('./worksheet-bytes.cjs')
 const { encodeWindowCapture } = require('./window-capture.cjs')
 const { publishNewFile } = require('./exclusive-publish.cjs')
@@ -167,6 +168,9 @@ const IPC = Object.freeze({
   createNote: 'fanotes:create-note',
   createFolder: 'fanotes:create-folder',
   setFolderColor: 'fanotes:set-folder-color',
+  getFolderLocations: 'fanotes:get-folder-locations',
+  pickFolderLocation: 'fanotes:pick-folder-location',
+  setFolderLocations: 'fanotes:set-folder-locations',
   renameEntry: 'fanotes:rename-entry',
   moveEntry: 'fanotes:move-entry',
   trashEntry: 'fanotes:trash-entry',
@@ -1541,6 +1545,24 @@ function isInsideRoot(root, candidate) {
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
 }
 
+let folderLocationStore = null
+
+function folderLocationStoreNow() {
+  if (!folderLocationStore) folderLocationStore = folderLocations.loadStore(app.getPath('userData'))
+  return folderLocationStore
+}
+
+function folderLocationMap(vault) {
+  return folderLocations.mapFor(folderLocationStoreNow(), vault)
+}
+
+function rememberFolderLocationMap(vault, map) {
+  const store = folderLocationStoreNow()
+  folderLocations.writeMap(store, vault, map)
+  folderLocations.saveStore(app.getPath('userData'), store)
+  folderLocationStore = store
+}
+
 async function assertCurrentVaultRoot() {
   if (!currentVaultPath) await ensureBootstrap()
   // ensureBootstrap() may just have completed the same realpath/lstat/access
@@ -1560,10 +1582,20 @@ async function assertCurrentVaultRoot() {
 
 async function resolveVaultPath(
   relativePath,
-  { allowRoot = false, allowMissing = false, allowInternal = false, expected = null } = {},
+  { allowRoot = false, allowMissing = false, allowInternal = false, expected = null, asContent = false } = {},
 ) {
   const root = await assertCurrentVaultRoot()
   const normalized = normalizeRelativePath(relativePath, { allowRoot, allowInternal })
+  const logical = normalized.split(path.sep).join('/')
+  const located = await folderLocations.resolveLocated({
+    vault: root,
+    logical,
+    map: folderLocationMap(root),
+    allowMissing,
+    expected,
+    asContent,
+  })
+  if (located) return { root, target: located.target, relativePath: logical, locationRoot: located.anchor }
   const segments = normalized ? normalized.split(path.sep) : []
   const target = path.resolve(root, ...segments)
   if (!isInsideRoot(root, target)) throw new Error('Der Pfad liegt außerhalb des Vaults.')
@@ -1912,12 +1944,16 @@ function numberedName(name, number) {
 }
 
 async function siblingNames(parentTarget, excluding = null) {
-  const entries = await fsp.readdir(parentTarget)
-  return new Set(
-    entries
-      .filter((entry) => entry !== excluding)
-      .map((entry) => entry.normalize('NFC').toLocaleLowerCase('de-DE')),
-  )
+  const directories = Array.isArray(parentTarget) ? parentTarget : [parentTarget]
+  if (directories.length === 1) {
+    const entries = await fsp.readdir(directories[0])
+    return new Set(
+      entries
+        .filter((entry) => entry !== excluding)
+        .map((entry) => entry.normalize('NFC').toLocaleLowerCase('de-DE')),
+    )
+  }
+  return folderLocations.occupiedNames(directories, excluding)
 }
 
 async function availableName(parentTarget, desiredName, excluding = null) {
@@ -1931,6 +1967,26 @@ async function availableName(parentTarget, desiredName, excluding = null) {
 
 function toRelativePosix(root, absolutePath) {
   return path.relative(root, absolutePath).split(path.sep).join('/')
+}
+
+function logicalIdentity(root, absolutePath) {
+  const located = folderLocations.identityPath(root, absolutePath, folderLocationMap(root))
+  return located === null || located === undefined ? toRelativePosix(root, absolutePath) : located
+}
+
+function physicalAllowed(root, absolutePath) {
+  return folderLocations.allowsPhysical(root, absolutePath, folderLocationMap(root))
+}
+
+async function relocatePath(source, destination) {
+  try {
+    await fsp.rename(source, destination)
+    return
+  } catch (error) {
+    if (error?.code !== 'EXDEV') throw error
+  }
+  await fsp.cp(source, destination, { recursive: true, errorOnExist: true })
+  await fsp.rm(source, { recursive: true, force: true })
 }
 
 function entryFromStat(root, absolutePath, info, children, color) {
@@ -1952,88 +2008,137 @@ function compareEntries(left, right) {
   return left.name.localeCompare(right.name, 'de', { numeric: true, sensitivity: 'base' })
 }
 
-async function readTreeDirectory(root, directory, depth = 0, folderColors = new Map()) {
+async function readTreeDirectory(root, directory, depth = 0, folderColors = new Map(), logicalDir = '') {
   if (depth > MAX_TREE_DEPTH) return []
-  const directoryEntries = await withTreeIoSlot(() => fsp.readdir(directory, { withFileTypes: true }))
-  const result = await Promise.all(directoryEntries.map(async (directoryEntry) => {
-    if (directoryEntry.name.startsWith('.') || directoryEntry.isSymbolicLink()) return null
-    const absolutePath = path.join(directory, directoryEntry.name)
-    let info
+  const locationMap = folderLocationMap(root)
+  const mapped = folderLocations.exactPaths(locationMap, logicalDir)
+  const scanDirectories = mapped || [directory]
+  const seen = new Set()
+  const result = []
+  for (const scan of scanDirectories) {
+    let directoryEntries
     try {
-      info = await withTreeIoSlot(() => fsp.lstat(absolutePath))
-    } catch {
-      return null
+      directoryEntries = await withTreeIoSlot(() => fsp.readdir(scan, { withFileTypes: true }))
+    } catch (error) {
+      if (!mapped) throw error
+      continue
     }
-    if (info.isSymbolicLink()) return null
-
-    if (info.isDirectory()) {
-      const realDirectory = await withTreeIoSlot(() => fsp.realpath(absolutePath)).catch(() => null)
-      if (!realDirectory || !isInsideRoot(root, realDirectory)) return null
-      const children = await readTreeDirectory(root, absolutePath, depth + 1, folderColors)
-      const relativePath = toRelativePosix(root, absolutePath)
-      return entryFromStat(root, absolutePath, info, children, folderColors.get(relativePath))
-    }
-
-    if (info.isFile() && TREE_EXTENSIONS.has(path.extname(directoryEntry.name).toLocaleLowerCase('en-US'))) {
-      return entryFromStat(root, absolutePath, info)
-    }
-    return null
-  }))
-
-  return omitFamdCompanions(result.filter(Boolean)).sort(compareEntries)
-}
-
-async function readFastTreeDirectory(root, directory, depth = 0, folderColors = new Map()) {
-  if (depth > MAX_TREE_DEPTH) return []
-  const directoryEntries = await withTreeIoSlot(() => fsp.readdir(directory, { withFileTypes: true }))
-  const result = await Promise.all(directoryEntries.map(async (directoryEntry) => {
-    if (directoryEntry.name.startsWith('.') || directoryEntry.isSymbolicLink()) return null
-    const absolutePath = path.join(directory, directoryEntry.name)
-
-    if (directoryEntry.isDirectory()) {
-      const realDirectory = await withTreeIoSlot(() => fsp.realpath(absolutePath)).catch(() => null)
-      if (!realDirectory || !isInsideRoot(root, realDirectory)) return null
-      const children = await readFastTreeDirectory(root, absolutePath, depth + 1, folderColors).catch(() => null)
-      if (!children) return null
-      const relativePath = toRelativePosix(root, absolutePath)
-      const color = folderColors.get(relativePath)
-      return {
-        name: directoryEntry.name,
-        relativePath,
-        kind: 'folder',
-        ...(color ? { color } : {}),
-        children,
+    const scanReal = mapped ? await withTreeIoSlot(() => fsp.realpath(scan)).catch(() => null) : root
+    if (mapped && !scanReal) continue
+    for (const directoryEntry of directoryEntries) {
+      if (directoryEntry.name.startsWith('.') || directoryEntry.isSymbolicLink() || seen.has(directoryEntry.name)) continue
+      const absolutePath = path.join(scan, directoryEntry.name)
+      let info
+      try {
+        info = await withTreeIoSlot(() => fsp.lstat(absolutePath))
+      } catch {
+        continue
       }
-    }
-
-    const extensionWithDot = path.extname(directoryEntry.name).toLocaleLowerCase('en-US')
-    if (directoryEntry.isFile() && TREE_EXTENSIONS.has(extensionWithDot)) {
-      return {
-        name: directoryEntry.name,
-        relativePath: toRelativePosix(root, absolutePath),
-        kind: 'file',
-        extension: extensionWithDot.slice(1),
-      }
-    }
-
-    // A few network filesystems return DT_UNKNOWN. Preserve compatibility by
-    // falling back to the full safe stat path only for those entries.
-    if (!directoryEntry.isFile() && !directoryEntry.isDirectory()) {
-      const info = await withTreeIoSlot(() => fsp.lstat(absolutePath)).catch(() => null)
-      if (!info || info.isSymbolicLink()) return null
+      if (info.isSymbolicLink()) continue
+      const logicalChild = logicalDir ? `${logicalDir}/${directoryEntry.name}` : directoryEntry.name
       if (info.isDirectory()) {
         const realDirectory = await withTreeIoSlot(() => fsp.realpath(absolutePath)).catch(() => null)
-        if (!realDirectory || !isInsideRoot(root, realDirectory)) return null
-        const children = await readFastTreeDirectory(root, absolutePath, depth + 1, folderColors).catch(() => null)
-        if (!children) return null
-        const relativePath = toRelativePosix(root, absolutePath)
-        return entryFromStat(root, absolutePath, info, children, folderColors.get(relativePath))
+        if (!realDirectory || !isInsideRoot(scanReal, realDirectory)) continue
+        const children = await readTreeDirectory(root, absolutePath, depth + 1, folderColors, logicalChild)
+        const entry = entryFromStat(root, absolutePath, info, children, folderColors.get(logicalChild))
+        entry.name = directoryEntry.name
+        entry.relativePath = logicalChild
+        const linked = folderLocations.exactPaths(locationMap, logicalChild)
+        if (linked) entry.locations = linked
+        seen.add(directoryEntry.name)
+        result.push(entry)
+        continue
       }
-      if (info.isFile() && TREE_EXTENSIONS.has(extensionWithDot)) return entryFromStat(root, absolutePath, info)
+      if (info.isFile() && TREE_EXTENSIONS.has(path.extname(directoryEntry.name).toLocaleLowerCase('en-US'))) {
+        const entry = entryFromStat(root, absolutePath, info)
+        entry.name = directoryEntry.name
+        entry.relativePath = logicalChild
+        seen.add(directoryEntry.name)
+        result.push(entry)
+      }
     }
-    return null
-  }))
-  return omitFamdCompanions(result.filter(Boolean)).sort(compareEntries)
+  }
+  return omitFamdCompanions(result).sort(compareEntries)
+}
+
+async function readFastTreeDirectory(root, directory, depth = 0, folderColors = new Map(), logicalDir = '') {
+  if (depth > MAX_TREE_DEPTH) return []
+  const locationMap = folderLocationMap(root)
+  const mapped = folderLocations.exactPaths(locationMap, logicalDir)
+  const scanDirectories = mapped || [directory]
+  const seen = new Set()
+  const result = []
+  for (const scan of scanDirectories) {
+    let directoryEntries
+    try {
+      directoryEntries = await withTreeIoSlot(() => fsp.readdir(scan, { withFileTypes: true }))
+    } catch (error) {
+      if (!mapped) throw error
+      continue
+    }
+    const scanReal = mapped ? await withTreeIoSlot(() => fsp.realpath(scan)).catch(() => null) : root
+    if (mapped && !scanReal) continue
+    for (const directoryEntry of directoryEntries) {
+      if (directoryEntry.name.startsWith('.') || directoryEntry.isSymbolicLink() || seen.has(directoryEntry.name)) continue
+      const absolutePath = path.join(scan, directoryEntry.name)
+      const logicalChild = logicalDir ? `${logicalDir}/${directoryEntry.name}` : directoryEntry.name
+      const extensionWithDot = path.extname(directoryEntry.name).toLocaleLowerCase('en-US')
+      if (directoryEntry.isDirectory()) {
+        const realDirectory = await withTreeIoSlot(() => fsp.realpath(absolutePath)).catch(() => null)
+        if (!realDirectory || !isInsideRoot(scanReal, realDirectory)) continue
+        const children = await readFastTreeDirectory(root, absolutePath, depth + 1, folderColors, logicalChild).catch(() => null)
+        if (!children) continue
+        const color = folderColors.get(logicalChild)
+        const linked = folderLocations.exactPaths(locationMap, logicalChild)
+        seen.add(directoryEntry.name)
+        result.push({
+          name: directoryEntry.name,
+          relativePath: logicalChild,
+          kind: 'folder',
+          ...(color ? { color } : {}),
+          ...(linked ? { locations: linked } : {}),
+          children,
+        })
+        continue
+      }
+      if (directoryEntry.isFile() && TREE_EXTENSIONS.has(extensionWithDot)) {
+        seen.add(directoryEntry.name)
+        result.push({
+          name: directoryEntry.name,
+          relativePath: logicalChild,
+          kind: 'file',
+          extension: extensionWithDot.slice(1),
+        })
+        continue
+      }
+      // A few network filesystems return DT_UNKNOWN. Preserve compatibility by
+      // falling back to the full safe stat path only for those entries.
+      if (!directoryEntry.isFile() && !directoryEntry.isDirectory()) {
+        const info = await withTreeIoSlot(() => fsp.lstat(absolutePath)).catch(() => null)
+        if (!info || info.isSymbolicLink()) continue
+        if (info.isDirectory()) {
+          const realDirectory = await withTreeIoSlot(() => fsp.realpath(absolutePath)).catch(() => null)
+          if (!realDirectory || !isInsideRoot(scanReal, realDirectory)) continue
+          const children = await readFastTreeDirectory(root, absolutePath, depth + 1, folderColors, logicalChild).catch(() => null)
+          if (!children) continue
+          const entry = entryFromStat(root, absolutePath, info, children, folderColors.get(logicalChild))
+          entry.name = directoryEntry.name
+          entry.relativePath = logicalChild
+          const linked = folderLocations.exactPaths(locationMap, logicalChild)
+          if (linked) entry.locations = linked
+          seen.add(directoryEntry.name)
+          result.push(entry)
+        } else if (info.isFile() && TREE_EXTENSIONS.has(extensionWithDot)) {
+          const entry = entryFromStat(root, absolutePath, info)
+          entry.name = directoryEntry.name
+          entry.relativePath = logicalChild
+          seen.add(directoryEntry.name)
+          result.push(entry)
+        }
+      }
+    }
+  }
+  return omitFamdCompanions(result).sort(compareEntries)
 }
 
 function treeCacheIdentity(root) {
@@ -2068,6 +2173,12 @@ function cleanCachedTreeEntries(candidate, parentPath = '', depth = 0, state = {
         throw new Error('Der Dateibaum-Cache enthält eine ungültige Farbe.')
       }
       if (entry.color) cleaned.color = entry.color.toLowerCase()
+      if (entry.locations !== undefined) {
+        if (!Array.isArray(entry.locations) || entry.locations.length > folderLocations.MAX_PATHS || entry.locations.some((item) => typeof item !== 'string' || !item || item.length > 4096)) {
+          throw new Error('Der Dateibaum-Cache enthält einen ungültigen Ordnerpfad.')
+        }
+        cleaned.locations = entry.locations
+      }
       cleaned.children = cleanCachedTreeEntries(entry.children ?? [], expectedPath, depth + 1, state)
     } else {
       const extension = path.extname(entry.name).slice(1).toLocaleLowerCase('en-US')
@@ -2129,25 +2240,43 @@ function writeTreeCache(root, entries) {
   return next
 }
 
-async function collectMarkdownFiles(root, directory, output, depth = 0) {
+async function collectMarkdownFiles(root, directory, output, depth = 0, logicalDir = '') {
   if (depth > MAX_TREE_DEPTH) return
-  const entries = await fsp.readdir(directory, { withFileTypes: true })
-  for (const entry of entries) {
-    if (entry.name.startsWith('.')) continue
-    const absolutePath = path.join(directory, entry.name)
-    const info = await fsp.lstat(absolutePath).catch(() => null)
-    if (!info || info.isSymbolicLink()) continue
-    if (info.isDirectory()) {
-      const realDirectory = await fsp.realpath(absolutePath).catch(() => null)
-      if (realDirectory && isInsideRoot(root, realDirectory)) {
-        await collectMarkdownFiles(root, absolutePath, output, depth + 1)
-      }
-    } else if (info.isFile()) {
-      const extension = path.extname(entry.name).toLocaleLowerCase('en-US')
-      if (MARKDOWN_EXTENSIONS.has(extension) && info.size <= MAX_TEXT_BYTES) {
-        output.push({ absolutePath, info, kind: 'markdown' })
-      } else if (isPdfNoteExtension(extension) && info.size <= (WORKSHEET_FORMATS.get('.pdf')?.maxBytes ?? 96 * 1024 * 1024)) {
-        output.push({ absolutePath, info, kind: 'pdf' })
+  const locationMap = folderLocationMap(root)
+  const mapped = folderLocations.exactPaths(locationMap, logicalDir)
+  const scanDirectories = mapped || [directory]
+  const seen = new Set()
+  for (const scan of scanDirectories) {
+    let entries
+    try {
+      entries = await fsp.readdir(scan, { withFileTypes: true })
+    } catch (error) {
+      if (!mapped) throw error
+      continue
+    }
+    const scanReal = mapped ? await fsp.realpath(scan).catch(() => null) : root
+    if (mapped && !scanReal) continue
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || seen.has(entry.name)) continue
+      const absolutePath = path.join(scan, entry.name)
+      const info = await fsp.lstat(absolutePath).catch(() => null)
+      if (!info || info.isSymbolicLink()) continue
+      const logicalChild = logicalDir ? `${logicalDir}/${entry.name}` : entry.name
+      if (info.isDirectory()) {
+        const realDirectory = await fsp.realpath(absolutePath).catch(() => null)
+        if (realDirectory && isInsideRoot(scanReal, realDirectory)) {
+          seen.add(entry.name)
+          await collectMarkdownFiles(root, absolutePath, output, depth + 1, logicalChild)
+        }
+      } else if (info.isFile()) {
+        const extension = path.extname(entry.name).toLocaleLowerCase('en-US')
+        if (MARKDOWN_EXTENSIONS.has(extension) && info.size <= MAX_TEXT_BYTES) {
+          seen.add(entry.name)
+          output.push({ absolutePath, relativePath: logicalChild, info, kind: 'markdown' })
+        } else if (isPdfNoteExtension(extension) && info.size <= (WORKSHEET_FORMATS.get('.pdf')?.maxBytes ?? 96 * 1024 * 1024)) {
+          seen.add(entry.name)
+          output.push({ absolutePath, relativePath: logicalChild, info, kind: 'pdf' })
+        }
       }
     }
   }
@@ -3093,7 +3222,7 @@ function registerIpcHandlers() {
           const realParent = await fsp.realpath(parent)
           assertVaultWriteContext(requestedVaultPath, requestedVaultGeneration)
           const root = await assertCurrentVaultRoot()
-          if (root !== requestedVaultPath || !isInsideRoot(root, realParent)) {
+          if (root !== requestedVaultPath || !folderLocations.allowsPhysical(root, realParent, folderLocationMap(root))) {
             throw new Error('Der Zielordner liegt außerhalb des ursprünglichen Vaults.')
           }
           const existing = await fsp.lstat(target).catch((error) => {
@@ -3144,16 +3273,19 @@ function registerIpcHandlers() {
     const preferredName = typeof rawPreferredName === 'string' && rawPreferredName.trim()
       ? rawPreferredName
       : localizeText('Unbenannte Notiz', currentUiLanguage())
-    const { root, target: parentTarget } = await resolveVaultPath(parentPath, {
+    const normalizedParent = parentPath ? normalizeRelativePath(parentPath, { allowRoot: true }).split(path.sep).join('/') : ''
+    const { root, target: parentTarget } = await resolveVaultPath(normalizedParent, {
       allowRoot: true,
       expected: 'directory',
+      asContent: true,
     })
     let desiredName = safeEntryName(preferredName, localizeText('Unbenannte Notiz', currentUiLanguage()))
     const requestedExtension = path.extname(desiredName).toLocaleLowerCase('en-US')
     if (!requestedExtension) desiredName += '.md'
     else if (!MARKDOWN_EXTENSIONS.has(requestedExtension)) throw new Error('Neue Notizen müssen Markdown-Dateien sein.')
 
-    let candidate = await availableName(parentTarget, desiredName)
+    const noteRoots = folderLocations.contentRoots(folderLocationMap(root), root, normalizedParent)
+    let candidate = await availableName(noteRoots.mapped ? noteRoots.roots : parentTarget, desiredName)
     for (let attempt = 0; attempt < 10000; attempt += 1) {
       const absolutePath = path.join(parentTarget, candidate)
       let fileHandle
@@ -3171,7 +3303,7 @@ function registerIpcHandlers() {
         await fileHandle.close()
         fileHandle = null
         const info = await fsp.lstat(absolutePath)
-        const entry = entryFromStat(root, absolutePath, info)
+        const entry = folderLocations.assignLogical(entryFromStat(root, absolutePath, info), normalizedParent, candidate)
         try {
           await writeFamdCompanion(entry.relativePath, `# ${title}\n\n`)
         } catch (error) {
@@ -3182,7 +3314,7 @@ function registerIpcHandlers() {
         if (fileHandle) await fileHandle.close().catch(() => {})
         if (created) await fsp.rm(absolutePath, { force: true }).catch(() => {})
         if (error?.code !== 'EEXIST') throw error
-        candidate = await availableName(parentTarget, desiredName)
+        candidate = await availableName(noteRoots.mapped ? noteRoots.roots : parentTarget, desiredName)
       }
     }
     throw new Error('Es konnte kein eindeutiger Notizname erzeugt werden.')
@@ -3190,22 +3322,27 @@ function registerIpcHandlers() {
 
   handle(IPC.createFolder, async (_event, parentPath = '', preferredName = localizeText('Neuer Ordner', currentUiLanguage())) => {
     await ensureBootstrap()
-    const { root, target: parentTarget } = await resolveVaultPath(parentPath, {
+    const normalizedParent = typeof parentPath === 'string' && parentPath
+      ? normalizeRelativePath(parentPath, { allowRoot: true }).split(path.sep).join('/')
+      : ''
+    const { root, target: parentTarget } = await resolveVaultPath(normalizedParent, {
       allowRoot: true,
       expected: 'directory',
+      asContent: true,
     })
     const desiredName = safeEntryName(preferredName, localizeText('Neuer Ordner', currentUiLanguage()))
-    let candidate = await availableName(parentTarget, desiredName)
+    const folderRoots = folderLocations.contentRoots(folderLocationMap(root), root, normalizedParent)
+    let candidate = await availableName(folderRoots.mapped ? folderRoots.roots : parentTarget, desiredName)
     for (let attempt = 0; attempt < 10000; attempt += 1) {
       const absolutePath = path.join(parentTarget, candidate)
       try {
         await fsp.mkdir(absolutePath, { mode: 0o700 })
         const info = await fsp.lstat(absolutePath)
-        const entry = entryFromStat(root, absolutePath, info, [])
+        const entry = folderLocations.assignLogical(entryFromStat(root, absolutePath, info, []), normalizedParent, candidate)
         return { relativePath: entry.relativePath, entry }
       } catch (error) {
         if (error?.code !== 'EEXIST') throw error
-        candidate = await availableName(parentTarget, desiredName)
+        candidate = await availableName(folderRoots.mapped ? folderRoots.roots : parentTarget, desiredName)
       }
     }
     throw new Error('Es konnte kein eindeutiger Ordnername erzeugt werden.')
@@ -3224,6 +3361,56 @@ function registerIpcHandlers() {
       else colors.set(normalizedRelativePath, color.toLowerCase())
     })
     return { color: color?.toLowerCase() ?? null }
+  })
+
+  handle(IPC.getFolderLocations, async (_event, relativePath) => {
+    await ensureBootstrap()
+    const logical = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    await resolveVaultPath(logical, { expected: 'directory' })
+    const paths = folderLocations.exactPaths(folderLocationMap(await assertCurrentVaultRoot()), logical) || []
+    return { paths }
+  })
+
+  handle(IPC.pickFolderLocation, async () => {
+    await ensureBootstrap()
+    const result = await dialog.showOpenDialog(mainWindow, localizedDialog({
+      title: 'Ordnerpfad für FaNotes wählen',
+      buttonLabel: 'Ordner verwenden',
+      properties: ['openDirectory', 'createDirectory'],
+    }))
+    if (result.canceled || result.filePaths.length !== 1) return null
+    return result.filePaths[0]
+  })
+
+  handle(IPC.setFolderLocations, async (_event, relativePath, rawPaths, moveContents) => {
+    await ensureBootstrap()
+    const logical = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    const { root, target } = await resolveVaultPath(logical, { expected: 'directory' })
+    const info = await fsp.lstat(target)
+    if (info.isSymbolicLink() || !info.isDirectory()) throw new Error('Der gewählte Pfad ist kein Ordner.')
+    if (!Array.isArray(rawPaths) || rawPaths.length > folderLocations.MAX_PATHS) {
+      throw new Error('Die Ordnerpfade sind ungültig.')
+    }
+    const map = { ...folderLocationMap(root) }
+    if (Object.keys(map).length > folderLocations.MAX_FOLDERS) throw new Error('Zu viele Ordnerpfade.')
+    const previous = Array.isArray(map[logical]) ? map[logical] : []
+    const validated = []
+    for (const candidate of rawPaths) {
+      validated.push(await folderLocations.validateLocation(root, candidate, validated, map, logical))
+    }
+    const oldPrimary = previous[0] || target
+    const newPrimary = validated[0] || target
+    let moved = 0
+    let conflicts = []
+    if (moveContents === true && path.resolve(oldPrimary) !== path.resolve(newPrimary)) {
+      const report = await folderLocations.moveContents(oldPrimary, newPrimary)
+      moved = report.moved
+      conflicts = report.conflicts
+    }
+    if (validated.length) map[logical] = validated
+    else delete map[logical]
+    rememberFolderLocationMap(root, map)
+    return { paths: validated, moved, conflicts }
   })
 
   handle(IPC.renameEntry, async (_event, relativePath, nextName) => {
@@ -3259,11 +3446,11 @@ function registerIpcHandlers() {
       if (desiredName === currentName) return relativePath
       const uniqueName = await availableName(parentTarget, desiredName, currentName)
       const destination = path.join(parentTarget, uniqueName)
-      if (!isInsideRoot(root, destination)) throw new Error('Das Umbenennungsziel liegt außerhalb des Vaults.')
-      await fsp.rename(target, destination)
+      if (!physicalAllowed(root, destination)) throw new Error('Das Umbenennungsziel liegt außerhalb des Vaults.')
+      await relocatePath(target, destination)
       mutationBarrier.invalidateQueuedWrites()
-      const oldRelativePath = toRelativePosix(root, target)
-      const nextRelativePath = toRelativePosix(root, destination)
+      const oldRelativePath = logicalIdentity(root, target)
+      const nextRelativePath = logicalIdentity(root, destination)
       if (info.isFile() && isNoteExtension(path.extname(oldRelativePath).toLocaleLowerCase('en-US'))) {
         const oldCompanionExt = path.extname(oldRelativePath).toLocaleLowerCase('en-US') === '.famd' ? '.md' : '.famd'
         const newCompanionExt = path.extname(nextRelativePath).toLocaleLowerCase('en-US') === '.famd' ? '.md' : '.famd'
@@ -3272,12 +3459,17 @@ function registerIpcHandlers() {
         try {
           const companion = await resolveVaultPath(oldCompanion, { expected: 'file' })
           const companionDest = path.join(path.dirname(destination), path.basename(nextCompanion))
-          if (isInsideRoot(root, companionDest)) await fsp.rename(companion.target, companionDest)
+          if (physicalAllowed(root, companionDest)) await relocatePath(companion.target, companionDest)
         } catch (error) {
           if (error?.code !== 'ENOENT') {
             console.warn('FaNotes: Notizbegleiter konnte nicht mit umbenannt werden:', error?.message ?? error)
           }
         }
+      }
+      if (info.isDirectory()) {
+        const map = folderLocationMap(root)
+        const renamed = folderLocations.retargetMap(map, oldRelativePath, nextRelativePath)
+        if (renamed !== map) rememberFolderLocationMap(root, renamed)
       }
       try {
         await mutateFolderColors(root, requestedVaultGeneration, (colors) => {
@@ -3319,19 +3511,20 @@ function registerIpcHandlers() {
         ? normalizeRelativePath(destFolder).split(path.sep).join('/')
         : ''
       const destResolved = destRelative
-        ? await resolveVaultPath(destRelative, { expected: 'directory' })
+        ? await resolveVaultPath(destRelative, { expected: 'directory', asContent: info.isFile() })
         : await resolveVaultPath('', { allowRoot: true, expected: 'directory' })
       if (destResolved.root !== root) throw new Error('Das Ziel liegt außerhalb des Vaults.')
 
       const destDir = destResolved.target
-      const oldRelativePath = toRelativePosix(root, target)
+      const oldRelativePath = logicalIdentity(root, target)
       if (info.isDirectory() && (destRelative === oldRelativePath || destRelative.startsWith(`${oldRelativePath}/`))) {
         throw new Error('Ein Ordner kann nicht in sich selbst verschoben werden.')
       }
       if (path.resolve(path.dirname(target)) === path.resolve(destDir)) return oldRelativePath
 
       const currentName = path.basename(target)
-      const occupied = await siblingNames(destDir)
+      const destContent = folderLocations.contentRoots(folderLocationMap(root), root, destRelative)
+      const occupied = await siblingNames(info.isFile() && destContent.mapped ? destContent.roots : destDir)
       const noteExtension = info.isFile() ? path.extname(currentName).toLocaleLowerCase('en-US') : ''
       const companionExtension = isNoteExtension(noteExtension)
         ? (noteExtension === '.famd' ? '.md' : '.famd')
@@ -3353,10 +3546,10 @@ function registerIpcHandlers() {
       }
 
       const destination = path.join(destDir, uniqueName)
-      if (!isInsideRoot(root, destination)) throw new Error('Das Verschiebeziel liegt außerhalb des Vaults.')
-      await fsp.rename(target, destination)
+      if (!physicalAllowed(root, destination)) throw new Error('Das Verschiebeziel liegt außerhalb des Vaults.')
+      await relocatePath(target, destination)
       mutationBarrier.invalidateQueuedWrites()
-      const nextRelativePath = toRelativePosix(root, destination)
+      const nextRelativePath = logicalIdentity(root, destination)
 
       if (info.isFile() && isNoteExtension(noteExtension)) {
         const oldCompanion = companionNotePath(oldRelativePath, companionExtension)
@@ -3364,12 +3557,17 @@ function registerIpcHandlers() {
         try {
           const companion = await resolveVaultPath(oldCompanion, { expected: 'file' })
           const companionDest = path.join(destDir, path.basename(nextCompanion))
-          if (isInsideRoot(root, companionDest)) await fsp.rename(companion.target, companionDest)
+          if (physicalAllowed(root, companionDest)) await relocatePath(companion.target, companionDest)
         } catch (error) {
           if (error?.code !== 'ENOENT') {
             console.warn('FaNotes: Notizbegleiter konnte nicht mit verschoben werden:', error?.message ?? error)
           }
         }
+      }
+      if (info.isDirectory()) {
+        const map = folderLocationMap(root)
+        const moved = folderLocations.retargetMap(map, oldRelativePath, nextRelativePath)
+        if (moved !== map) rememberFolderLocationMap(root, moved)
       }
 
       try {
@@ -3404,9 +3602,14 @@ function registerIpcHandlers() {
       if (root !== initial.root || target !== initial.target) {
         throw new Error('Der Vault wurde während des Löschens verändert.')
       }
-      const trashedRelativePath = toRelativePosix(root, target)
+      const trashedRelativePath = logicalIdentity(root, target)
       const trashedInfo = await fsp.lstat(target)
       await shell.trashItem(target)
+      if (trashedInfo.isDirectory()) {
+        const map = folderLocationMap(root)
+        const forgotten = folderLocations.forgetMap(map, trashedRelativePath)
+        if (forgotten !== map) rememberFolderLocationMap(root, forgotten)
+      }
       mutationBarrier.invalidateQueuedWrites()
       if (trashedInfo.isFile() && isNoteExtension(path.extname(trashedRelativePath).toLocaleLowerCase('en-US'))) {
         const companionExt = path.extname(trashedRelativePath).toLocaleLowerCase('en-US') === '.famd' ? '.md' : '.famd'
@@ -3478,13 +3681,13 @@ function registerIpcHandlers() {
     const drawingOwners = new Map()
 
     for (const file of markdownFiles) {
-      const relativePath = toRelativePosix(root, file.absolutePath)
+      const relativePath = file.relativePath || toRelativePosix(root, file.absolutePath)
       const extension = path.extname(relativePath).toLocaleLowerCase('en-US')
       if (extension === '.famd') {
         const siblingMd = companionNotePath(relativePath, '.md')
         const siblingPdf = `${noteStem(relativePath)}.pdf`
         if (markdownFiles.some((candidate) => {
-          const candidatePath = toRelativePosix(root, candidate.absolutePath)
+          const candidatePath = candidate.relativePath || toRelativePosix(root, candidate.absolutePath)
           return candidatePath === siblingMd || candidatePath === siblingPdf
         })) continue
       }
@@ -3842,7 +4045,7 @@ function registerIpcHandlers() {
     const source = await readRegularFileNoFollow(selectedPath, format.maxBytes)
     if (!source.length) throw new Error('Die ausgewählte PDF-Datei ist leer.')
     validateWorksheetBytes(source, '.pdf')
-    const { root, target: parentTarget } = await resolveVaultPath(subjectPath, { expected: 'directory' })
+    const { root, target: parentTarget } = await resolveVaultPath(subjectPath, { expected: 'directory', asContent: true })
     const title = safeEntryName(splitName(path.basename(selectedPath)).stem, localizeText('Buch', currentUiLanguage()))
     const desiredName = `${title}.pdf`
     const occupied = await siblingNames(parentTarget)
@@ -3857,7 +4060,7 @@ function registerIpcHandlers() {
       try {
         await queueFileWrite(absolutePath, async () => atomicWrite(absolutePath, source, { mode: 0o600, exclusive: true }))
         const info = await fsp.lstat(absolutePath)
-        const entry = entryFromStat(root, absolutePath, info)
+        const entry = folderLocations.assignLogical(entryFromStat(root, absolutePath, info), subjectPath, candidate)
         try {
           await writeFamdCompanion(entry.relativePath, '')
         } catch (error) {
@@ -4038,9 +4241,11 @@ function registerIpcHandlers() {
     validateWorksheetBytes(source, '.pdf')
 
     const parentPath = typeof rawParentPath === 'string' ? rawParentPath : ''
-    const { root, target: parentTarget } = await resolveVaultPath(parentPath, {
+    const normalizedParent = parentPath ? normalizeRelativePath(parentPath, { allowRoot: true }).split(path.sep).join('/') : ''
+    const { root, target: parentTarget } = await resolveVaultPath(normalizedParent, {
       allowRoot: true,
       expected: 'directory',
+      asContent: true,
     })
     const title = safeEntryName(splitName(path.basename(selectedPath)).stem, localizeText('PDF-Notiz', currentUiLanguage()))
     const desiredName = `${title}.pdf`
@@ -4058,7 +4263,7 @@ function registerIpcHandlers() {
         occupied.add(candidateKey)
         occupied.add(famdKey)
         const info = await fsp.lstat(absolutePath)
-        const entry = entryFromStat(root, absolutePath, info)
+        const entry = folderLocations.assignLogical(entryFromStat(root, absolutePath, info), normalizedParent, candidate)
         try {
           await writeFamdCompanion(entry.relativePath, '')
         } catch (error) {
@@ -4530,7 +4735,7 @@ function registerIpcHandlers() {
 
   handle(IPC.revealInFolder, async (_event, relativePath) => {
     await ensureBootstrap()
-    const { target } = await resolveVaultPath(relativePath, { allowRoot: true, allowInternal: true })
+    const { target } = await resolveVaultPath(relativePath, { allowRoot: true, allowInternal: true, asContent: true })
     shell.showItemInFolder(target)
   })
 

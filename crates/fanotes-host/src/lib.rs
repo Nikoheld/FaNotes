@@ -10,6 +10,7 @@ mod dialogs;
 mod drawings;
 mod imports;
 mod linux_runtime;
+mod locations;
 mod notes;
 mod ocr;
 mod onboarding;
@@ -54,6 +55,7 @@ const APP_VERSION: &str = "2026.10.2";
 #[derive(Debug)]
 pub struct Host {
     pub vault: Option<PathBuf>,
+    folder_locations: locations::FolderLocations,
     /// Absolute vault from `vault-path` or an imported profile.
     ///
     /// Desktop `readConfig` remembers this path before the folder is mounted.
@@ -89,6 +91,7 @@ impl Host {
         let _ = ensure_private_profile_dir(&app_data);
         let mut host = Self {
             vault: None,
+            folder_locations: locations::FolderLocations::default(),
             configured_vault: None,
             app_data,
             settings: default_settings(),
@@ -109,7 +112,8 @@ impl Host {
     pub fn set_vault(&mut self, path: PathBuf) -> Result<(), String> {
         let canonical = validated_vault_directory(&path)?;
         self.vault = Some(canonical.clone());
-        self.configured_vault = Some(canonical);
+        self.configured_vault = Some(canonical.clone());
+        self.folder_locations = locations::FolderLocations::load(&self.app_data, &canonical);
         self.refresh_onboarding();
         if let Some(root) = self.vault.clone() {
             onboarding::upgrade_welcome_notes(&root);
@@ -180,6 +184,11 @@ impl Host {
                 &arg_text(args, 0, "Ungültiger Vault-Pfad.")?,
                 args.get(1),
             ),
+            "fanotes:get-folder-locations" => {
+                self.get_folder_locations(&arg_text(args, 0, "Ungültiger Vault-Pfad.")?)
+            }
+            "fanotes:pick-folder-location" => self.pick_folder_location(),
+            "fanotes:set-folder-locations" => self.set_folder_locations(args),
             "fanotes:rename-entry" => self.rename_entry(
                 &arg_text(args, 0, "Ungültiger Vault-Pfad.")?,
                 &loose_string(args, 1),
@@ -367,7 +376,7 @@ impl Host {
     fn render_pdf_page(&self, args: &[Value]) -> Result<Value, String> {
         let (path, job) = fanotes_pdf::parse_vault_request(args.first().unwrap_or(&Value::Null))
             .map_err(|error| error.to_string())?;
-        let file = vault::resolve_existing_entry(self.require_vault()?, &path)?;
+        let file = self.folder_locations.resolve_existing(self.require_vault()?, &path)?;
         let bytes = read_regular_limited(&file, PDF_ASSET_MAX)?;
         let bitmap =
             fanotes_pdf::render_pdf_page(&bytes, &job).map_err(|error| error.to_string())?;
@@ -781,7 +790,7 @@ impl Host {
     fn tree(&self, stats: bool) -> Result<Value, String> {
         let root = self.require_vault()?;
         let colors = read_folder_colors(root)?;
-        let entries = read_tree(root, root, &colors, 0, stats)?;
+        let entries = read_tree(root, "", &self.folder_locations, &colors, 0, stats)?;
         write_tree_cache(&self.app_data, root, &entries);
         Ok(entries)
     }
@@ -862,7 +871,9 @@ impl Host {
             return Err("Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
         }
         let normalized = vault::normalize_relative_path(relative, false, false)?;
-        let path = vault::resolve_present_note_file(self.require_vault()?, &normalized)?;
+        let path = self
+            .folder_locations
+            .resolve_note(self.require_vault()?, &normalized, false)?;
         let limit = note_byte_limit(&normalized);
         let meta = fs::symlink_metadata(&path)
             .map_err(|error| vault::node_lstat_error(&path, &error))?;
@@ -898,7 +909,7 @@ impl Host {
             return Err("Bitte schließe zuerst die FaNotes-Ersteinrichtung ab.".to_owned());
         }
         let root = self.require_vault()?.to_path_buf();
-        let path = vault::resolve_note_file(&root, &normalized)?;
+        let path = self.folder_locations.resolve_note(&root, &normalized, true)?;
         if notes::records_history(&normalized) {
             if let Some(text) = notes::read_lossy_string(&path) {
                 let _ = notes::record_history(&root, &normalized, &text);
@@ -909,7 +920,13 @@ impl Host {
             .get("paperStyle")
             .and_then(Value::as_str)
             .map(str::to_owned);
-        let modified = notes::write_note_file(&root, &normalized, content, paper.as_deref())?;
+        let modified = notes::write_note_file_with(
+            &root,
+            &normalized,
+            content,
+            paper.as_deref(),
+            &self.folder_locations,
+        )?;
         Ok(json!({ "modifiedAt": modified }))
     }
 
@@ -926,8 +943,14 @@ impl Host {
             vault::normalize_relative_path(parent, true, false)?
         };
         // Desktop resolveVaultPath runs before safeEntryName.
+        let (parent_mapped, parent_roots) = self
+            .folder_locations
+            .content_roots(&root, &parent_relative);
         let parent_path = if parent_relative.is_empty() {
             root.clone()
+        } else if parent_mapped {
+            self.folder_locations
+                .resolve_directory(&root, &parent_relative, true)?
         } else {
             vault::reject_symlinks(&root, &parent_relative)?;
             let path = vault::resolve_existing_entry(&root, &parent_relative)?;
@@ -969,14 +992,19 @@ impl Host {
             .and_then(Value::as_str)
             .map(str::to_owned);
         for _attempt in 0..10_000 {
-            let candidate = available_entry_name(&parent_path, &desired, note)?;
+            let candidate = available_entry_name(
+                &parent_path,
+                &desired,
+                note,
+                if parent_mapped { parent_roots.as_slice() } else { &[] },
+            )?;
             let relative = if parent_relative.is_empty() {
                 candidate.clone()
             } else {
                 format!("{parent_relative}/{candidate}")
             };
             let path = parent_path.join(&candidate);
-            if !vault::is_inside_root(&root, &path) {
+            if !self.folder_locations.allows(&root, &path) {
                 return Err("Der Pfad liegt außerhalb des Vaults.".to_owned());
             }
             let (title, _) = split_entry_name(&candidate);
@@ -989,8 +1017,13 @@ impl Host {
             match created {
                 Ok(()) => {
                     if note {
-                        let _ =
-                            notes::attach_sidecar(&root, &relative, &markdown, paper.as_deref());
+                        let _ = notes::attach_sidecar_with(
+                            &root,
+                            &relative,
+                            &markdown,
+                            paper.as_deref(),
+                            &self.folder_locations,
+                        );
                     }
                     return Ok(created_entry(&relative, &path, note));
                 }
@@ -1036,6 +1069,97 @@ impl Host {
         )?;
         self.set_vault(stored)?;
         self.bootstrap()
+    }
+
+    fn get_folder_locations(&self, relative: &str) -> Result<Value, String> {
+        let root = self.require_vault()?.to_path_buf();
+        let normalized = vault::normalize_relative_path(relative, false, false)?;
+        let path = vault::resolve_existing_entry(&root, &normalized)?;
+        let meta = fs::symlink_metadata(&path).map_err(|_| "Der Ordner wurde nicht gefunden.".to_owned())?;
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return Err("Der gewählte Pfad ist kein Ordner.".to_owned());
+        }
+        let paths = self
+            .folder_locations
+            .paths(&normalized)
+            .unwrap_or(&[])
+            .iter()
+            .map(|path| Value::String(path.to_string_lossy().into_owned()))
+            .collect::<Vec<_>>();
+        Ok(json!({ "paths": paths }))
+    }
+
+    fn pick_folder_location(&self) -> Result<Value, String> {
+        self.require_vault()?;
+        if !self.file_dialogs {
+            return Ok(Value::Null);
+        }
+        let Some(path) = rfd::FileDialog::new()
+            .set_title(crate::dialogs::folder_location_picker_title(self.ui_language()))
+            .pick_folder()
+        else {
+            return Ok(Value::Null);
+        };
+        Ok(Value::String(path.to_string_lossy().into_owned()))
+    }
+
+    fn set_folder_locations(&mut self, args: &[Value]) -> Result<Value, String> {
+        let relative = arg_text(args, 0, "Ungültiger Vault-Pfad.")?;
+        let root = self.require_vault()?.to_path_buf();
+        let normalized = vault::normalize_relative_path(&relative, false, false)?;
+        let placeholder = vault::resolve_existing_entry(&root, &normalized)?;
+        let meta = fs::symlink_metadata(&placeholder)
+            .map_err(|_| "Der Ordner wurde nicht gefunden.".to_owned())?;
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return Err("Der gewählte Pfad ist kein Ordner.".to_owned());
+        }
+        let listed = args
+            .get(1)
+            .and_then(Value::as_array)
+            .ok_or_else(|| "Die Ordnerpfade sind ungültig.".to_owned())?;
+        if listed.len() > locations::MAX_PATHS {
+            return Err("Zu viele Ordnerpfade.".to_owned());
+        }
+        if !listed.is_empty()
+            && self.folder_locations.paths(&normalized).is_none()
+            && self.folder_locations.len() >= locations::MAX_FOLDERS
+        {
+            return Err("Zu viele Ordnerpfade.".to_owned());
+        }
+        let previous = self
+            .folder_locations
+            .paths(&normalized)
+            .map(|paths| paths.to_vec())
+            .unwrap_or_default();
+        let mut validated = Vec::new();
+        for candidate in listed {
+            let text = candidate
+                .as_str()
+                .ok_or_else(|| "Die Ordnerpfade sind ungültig.".to_owned())?;
+            validated.push(locations::validate_location(
+                &root,
+                text,
+                &validated,
+                &self.folder_locations,
+                &normalized,
+            )?);
+        }
+        let old_primary = previous.first().cloned().unwrap_or_else(|| placeholder.clone());
+        let new_primary = validated.first().cloned().unwrap_or_else(|| placeholder.clone());
+        let mut moved = 0_u64;
+        let mut conflicts = Vec::new();
+        if args.get(2).and_then(Value::as_bool) == Some(true) && old_primary != new_primary {
+            let report = locations::move_contents(&old_primary, &new_primary)?;
+            moved = report.0;
+            conflicts = report.1;
+        }
+        self.folder_locations.replace(&normalized, validated.clone());
+        self.folder_locations.save(&self.app_data, &root)?;
+        Ok(json!({
+            "paths": validated.iter().map(|path| path.to_string_lossy().into_owned()).collect::<Vec<_>>(),
+            "moved": moved,
+            "conflicts": conflicts,
+        }))
     }
 
     fn set_folder_color(
@@ -1087,7 +1211,7 @@ impl Host {
 
     fn rename_entry(&mut self, relative: &str, next_name: &str) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
-        let source = vault::resolve_existing_entry(&root, relative)?;
+        let source = self.folder_locations.resolve_existing(&root, relative)?;
         let normalized = vault::normalize_relative_path(relative, false, false)?;
         let meta = fs::symlink_metadata(&source)
             .map_err(|error| vault::node_lstat_error(&source, &error))?;
@@ -1124,14 +1248,21 @@ impl Host {
         // block `Ziel.md`; the companion rename replaces that file.
         let unique = unique_sibling_name(&parent, &desired, Some(current_name.as_str()), None)?;
         let destination = parent.join(&unique);
-        if !vault::is_inside_root(&root, &destination) {
+        if !self.folder_locations.allows(&root, &destination) {
             return Err("Der Pfad liegt außerhalb des Vaults.".to_owned());
         }
         fs::rename(&source, &destination)
             .map_err(|error| vault::node_rename_error(&source, &destination, &error))?;
-        let next = relative_from_root(&root, &destination);
+        let next = self
+            .folder_locations
+            .identity(&root, &destination)
+            .unwrap_or_else(|| relative_from_root(&root, &destination));
+        if was_dir {
+            self.folder_locations.retarget(&normalized, &next);
+            let _ = self.folder_locations.save(&self.app_data, &root);
+        }
         if !was_dir {
-            move_note_companion(&root, &normalized, &next);
+            move_note_companion(&root, &normalized, &next, &self.folder_locations);
         }
         // Desktop rename always rewrites folder colors. That read creates
         // `.fanotes` or renames a leftover `.lernwerk` folder into place.
@@ -1141,7 +1272,7 @@ impl Host {
 
     fn move_entry(&mut self, relative: &str, dest_folder: &str) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
-        let source = vault::resolve_existing_entry(&root, relative)?;
+        let source = self.folder_locations.resolve_existing(&root, relative)?;
         let normalized = vault::normalize_relative_path(relative, false, false)?;
         let meta = fs::symlink_metadata(&source)
             .map_err(|error| vault::node_lstat_error(&source, &error))?;
@@ -1158,8 +1289,18 @@ impl Host {
         };
         let folder = if dest_relative.is_empty() {
             root.clone()
-        } else {
+        } else if was_dir {
             let path = vault::resolve_existing_entry(&root, &dest_relative)?;
+            let folder_meta = fs::symlink_metadata(&path)
+                .map_err(|_| "Der Zielordner wurde nicht gefunden.".to_owned())?;
+            if folder_meta.file_type().is_symlink() || !folder_meta.is_dir() {
+                return Err("Der gewählte Pfad ist kein Ordner.".to_owned());
+            }
+            path
+        } else {
+            let path = self
+                .folder_locations
+                .resolve_directory(&root, &dest_relative, true)?;
             let folder_meta = fs::symlink_metadata(&path)
                 .map_err(|_| "Der Zielordner wurde nicht gefunden.".to_owned())?;
             if folder_meta.file_type().is_symlink() || !folder_meta.is_dir() {
@@ -1187,14 +1328,20 @@ impl Host {
             companion_extension(was_dir, current_name),
         )?;
         let destination = folder.join(&unique);
-        if !vault::is_inside_root(&root, &destination) {
+        if !self.folder_locations.allows(&root, &destination) {
             return Err("Das Verschiebeziel liegt außerhalb des Vaults.".to_owned());
         }
         fs::rename(&source, &destination)
             .map_err(|error| vault::node_rename_error(&source, &destination, &error))?;
-        let next = relative_from_root(&root, &destination);
+        let next = self
+            .folder_locations
+            .identity(&root, &destination)
+            .unwrap_or_else(|| relative_from_root(&root, &destination));
         if !was_dir {
-            move_note_companion(&root, &normalized, &next);
+            move_note_companion(&root, &normalized, &next, &self.folder_locations);
+        } else {
+            self.folder_locations.retarget(&normalized, &next);
+            let _ = self.folder_locations.save(&self.app_data, &root);
         }
         let _ = retarget_folder_colors(&root, &normalized, &next);
         Ok(Value::String(next))
@@ -1203,12 +1350,16 @@ impl Host {
     fn trash_entry(&mut self, relative: &str) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
         let normalized = vault::normalize_relative_path(relative, false, false)?;
-        let path = vault::resolve_existing_entry(&root, &normalized)?;
+        let path = self.folder_locations.resolve_existing(&root, &normalized)?;
         let is_dir = fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_dir());
         send_to_trash(self, &path)?;
+        if is_dir {
+            self.folder_locations.forget(&normalized);
+            let _ = self.folder_locations.save(&self.app_data, &root);
+        }
         if !is_dir {
             if let Some(companion) = note_companion_relative(&normalized) {
-                if let Ok(companion_path) = vault::resolve_existing_entry(&root, &companion) {
+                if let Ok(companion_path) = self.folder_locations.resolve_existing(&root, &companion) {
                     if fs::symlink_metadata(&companion_path)
                         .is_ok_and(|meta| meta.is_file() && !meta.file_type().is_symlink())
                     {
@@ -1230,7 +1381,7 @@ impl Host {
         let root = self.require_vault()?;
         let needle = vault::search_text(&query);
         let mut files = Vec::new();
-        collect_search_files(root, root, &mut files, 0)?;
+        collect_search_files(root, "", &self.folder_locations, &mut files, 0)?;
         let present: std::collections::HashSet<String> =
             files.iter().map(|file| file.relative.clone()).collect();
         let mut hits = Vec::new();
@@ -1271,7 +1422,7 @@ impl Host {
             let mut transcript = ink_transcript(ink.as_ref());
             if !lower.ends_with(".famd") {
                 let famd = fanotes_famd::companion_note_path(&relative, ".famd");
-                if let Ok(companion_path) = vault::resolve_existing_entry(root, &famd) {
+                if let Ok(companion_path) = self.folder_locations.resolve_existing(root, &famd) {
                     if let Some(companion) = read_search_companion(&companion_path) {
                         let parsed_companion = fanotes_famd::parse_famd(&companion);
                         if lower.ends_with(".pdf") && !parsed_companion.markdown.is_empty() {
@@ -2454,11 +2605,20 @@ fn unique_sibling_name(
     Err("Es konnte kein eindeutiger Name erzeugt werden.".to_owned())
 }
 
-fn available_entry_name(parent: &Path, desired: &str, note: bool) -> Result<String, String> {
+fn available_entry_name(
+    parent: &Path,
+    desired: &str,
+    note: bool,
+    extra_roots: &[PathBuf],
+) -> Result<String, String> {
     let mut occupied = std::collections::HashSet::new();
-    for entry in read_sibling_dir(parent)?.flatten() {
-        if let Some(name) = entry.file_name().to_str() {
-            occupied.insert(vault::entry_name_key(name));
+    for directory in std::iter::once(parent).chain(extra_roots.iter().map(PathBuf::as_path)) {
+        if let Ok(entries) = read_sibling_dir(directory) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    occupied.insert(vault::entry_name_key(name));
+                }
+            }
         }
     }
     for number in 1..=10_000 {
@@ -3524,7 +3684,8 @@ fn clean_cached_entries(
 
 fn read_tree(
     root: &Path,
-    directory: &Path,
+    logical: &str,
+    locations: &locations::FolderLocations,
     colors: &BTreeMap<String, String>,
     depth: usize,
     stats: bool,
@@ -3532,76 +3693,115 @@ fn read_tree(
     if depth > 80 {
         return Ok(json!([]));
     }
+    let (mapped, scan_roots) = locations.content_roots(root, logical);
+    let directories = if mapped {
+        scan_roots
+    } else if logical.is_empty() {
+        vec![root.to_path_buf()]
+    } else {
+        scan_roots
+    };
     let mut children = Vec::new();
-    // Desktop `readdir` throws `scandir`. The fast tree omits that folder.
-    let entries = read_sibling_dir(directory)?;
-    for entry in entries {
-        let Ok(entry) = entry else {
-            continue;
+    let mut seen = std::collections::HashSet::new();
+    for directory in directories {
+        // Desktop `readdir` throws `scandir`. The fast tree omits that folder.
+        let entries = match read_sibling_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if !mapped => return Err(error),
+            Err(_) => continue,
         };
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') {
-            continue;
-        }
-        let path = entry.path();
-        let relative = vault::relative_posix(root, &path);
-        let Ok(meta) = fs::symlink_metadata(&path) else {
-            continue;
+        let anchor = if mapped {
+            match fs::canonicalize(&directory) {
+                Ok(anchor) => anchor,
+                Err(_) => continue,
+            }
+        } else {
+            root.to_path_buf()
         };
-        if meta.file_type().is_symlink() {
-            continue;
-        }
-        if meta.is_dir() {
-            let Ok(real) = fs::canonicalize(&path) else {
+        for entry in entries {
+            let Ok(entry) = entry else {
                 continue;
             };
-            let Ok(root_real) = fs::canonicalize(root) else {
-                continue;
-            };
-            if !vault::is_inside_root(&root_real, &real) {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || seen.contains(&name) {
                 continue;
             }
-            let nested = if stats {
-                read_tree(root, &path, colors, depth + 1, stats)?
+            let path = entry.path();
+            let relative = if logical.is_empty() {
+                name.clone()
             } else {
-                match read_tree(root, &path, colors, depth + 1, stats) {
-                    Ok(nested) => nested,
-                    Err(_) => continue,
-                }
+                format!("{logical}/{name}")
             };
-            let mut folder = json!({
-                "name": name,
-                "relativePath": relative,
-                "kind": "folder",
-                "children": nested,
-            });
-            if stats {
-                if let Ok(modified) = meta.modified() {
-                    folder["modifiedAt"] = Value::String(notes::iso_from_system_time(modified));
-                }
-            }
-            if let Some(color) = colors.get(&relative) {
-                folder["color"] = Value::String(color.clone());
-            }
-            children.push(folder);
-        } else if meta.is_file() {
-            let extension = extension_label(&name);
-            if !tree_extension(&extension) {
+            let Ok(meta) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if meta.file_type().is_symlink() {
                 continue;
             }
-            let mut file = json!({
-                "name": name,
-                "relativePath": relative,
-                "kind": "file",
-                "extension": extension,
-            });
-            if stats {
-                file["size"] = json!(meta.len());
-                if let Ok(modified) = meta.modified() {
-                    file["modifiedAt"] = Value::String(notes::iso_from_system_time(modified));
+            if meta.is_dir() {
+                let Ok(real) = fs::canonicalize(&path) else {
+                    continue;
+                };
+                let inside = if mapped {
+                    vault::is_inside_root(&anchor, &real)
+                } else {
+                    fs::canonicalize(root)
+                        .ok()
+                        .is_some_and(|root_real| vault::is_inside_root(&root_real, &real))
+                };
+                if !inside {
+                    continue;
                 }
+                let nested = if stats {
+                    read_tree(root, &relative, locations, colors, depth + 1, stats)?
+                } else {
+                    match read_tree(root, &relative, locations, colors, depth + 1, stats) {
+                        Ok(nested) => nested,
+                        Err(_) => continue,
+                    }
+                };
+                let mut folder = json!({
+                    "name": name,
+                    "relativePath": relative,
+                    "kind": "folder",
+                    "children": nested,
+                });
+                if stats {
+                    if let Ok(modified) = meta.modified() {
+                        folder["modifiedAt"] = Value::String(notes::iso_from_system_time(modified));
+                    }
+                }
+                if let Some(color) = colors.get(&relative) {
+                    folder["color"] = Value::String(color.clone());
+                }
+                if let Some(paths) = locations.paths(&relative) {
+                    folder["locations"] = json!(paths
+                        .iter()
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .collect::<Vec<_>>());
+                }
+                seen.insert(name);
+                children.push(folder);
+            } else if meta.is_file() {
+                let extension = extension_label(&name);
+                if !tree_extension(&extension) {
+                    continue;
+                }
+                let mut file = json!({
+                    "name": name,
+                    "relativePath": relative,
+                    "kind": "file",
+                    "extension": extension,
+                });
+                if stats {
+                    file["size"] = json!(meta.len());
+                    if let Ok(modified) = meta.modified() {
+                        file["modifiedAt"] = Value::String(notes::iso_from_system_time(modified));
+                    }
+                }
+                seen.insert(name);
+                children.push(file);
             }
-            children.push(file);
         }
     }
     children = omit_famd_companions(children);
@@ -3735,14 +3935,19 @@ fn write_folder_colors(root: &Path, colors: &BTreeMap<String, String>) -> Result
     Ok(())
 }
 
-fn move_note_companion(root: &Path, old_relative: &str, new_relative: &str) {
+fn move_note_companion(
+    root: &Path,
+    old_relative: &str,
+    new_relative: &str,
+    locations: &locations::FolderLocations,
+) {
     let Some(old_companion) = note_companion_relative(old_relative) else {
         return;
     };
     let Some(new_companion) = note_companion_relative(new_relative) else {
         return;
     };
-    let Ok(source) = vault::resolve_existing_entry(root, &old_companion) else {
+    let Ok(source) = locations.resolve_existing(root, &old_companion) else {
         return;
     };
     if !fs::symlink_metadata(&source)
@@ -3750,7 +3955,7 @@ fn move_note_companion(root: &Path, old_relative: &str, new_relative: &str) {
     {
         return;
     }
-    let Ok(destination) = vault::resolve_note_file(root, &new_companion) else {
+    let Ok(destination) = locations.resolve_note(root, &new_companion, true) else {
         return;
     };
     if let Some(parent) = destination.parent() {
@@ -3926,58 +4131,82 @@ fn search_title(relative: &str) -> &str {
 
 fn collect_search_files(
     root: &Path,
-    directory: &Path,
+    logical: &str,
+    locations: &locations::FolderLocations,
     files: &mut Vec<SearchFile>,
     depth: usize,
 ) -> Result<(), String> {
     if depth > 80 {
         return Ok(());
     }
-    // A nested folder that cannot be listed fails the search, as on the desktop.
-    for entry in read_sibling_dir(directory)? {
-        let Ok(entry) = entry else {
-            continue;
+    let (mapped, scan_roots) = locations.content_roots(root, logical);
+    let directories = if logical.is_empty() && !mapped {
+        vec![root.to_path_buf()]
+    } else {
+        scan_roots
+    };
+    let mut seen = std::collections::HashSet::new();
+    for directory in directories {
+        // A nested folder that cannot be listed fails the search, as on the desktop.
+        let entries = match read_sibling_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if !mapped => return Err(error),
+            Err(_) => continue,
         };
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') {
-            continue;
-        }
-        let path = entry.path();
-        let Ok(meta) = fs::symlink_metadata(&path) else {
-            continue;
+        let anchor = if mapped {
+            match fs::canonicalize(&directory) {
+                Ok(anchor) => anchor,
+                Err(_) => continue,
+            }
+        } else {
+            fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf())
         };
-        if meta.file_type().is_symlink() {
-            continue;
-        }
-        if meta.is_dir() {
-            let Ok(real) = fs::canonicalize(&path) else {
+        for entry in entries {
+            let Ok(entry) = entry else {
                 continue;
             };
-            let Ok(root_real) = fs::canonicalize(root) else {
-                continue;
-            };
-            if !vault::is_inside_root(&root_real, &real) {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || seen.contains(&name) {
                 continue;
             }
-            collect_search_files(root, &path, files, depth + 1)?;
-            continue;
+            let path = entry.path();
+            let Ok(meta) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+            let relative = if logical.is_empty() {
+                name.clone()
+            } else {
+                format!("{logical}/{name}")
+            };
+            if meta.is_dir() {
+                let Ok(real) = fs::canonicalize(&path) else {
+                    continue;
+                };
+                if !vault::is_inside_root(&anchor, &real) {
+                    continue;
+                }
+                seen.insert(name);
+                collect_search_files(root, &relative, locations, files, depth + 1)?;
+                continue;
+            }
+            let extension = extension_label(&name);
+            if !matches!(extension.as_str(), "md" | "markdown" | "famd" | "pdf") {
+                continue;
+            }
+            let max = if extension == "pdf" {
+                PDF_ASSET_MAX
+            } else {
+                MAX_TEXT_BYTES
+            };
+            if meta.len() > max {
+                continue;
+            }
+            seen.insert(name);
+            files.push(SearchFile { relative, path });
         }
-        let extension = extension_label(&name);
-        if !matches!(extension.as_str(), "md" | "markdown" | "famd" | "pdf") {
-            continue;
-        }
-        let max = if extension == "pdf" {
-            PDF_ASSET_MAX
-        } else {
-            MAX_TEXT_BYTES
-        };
-        if meta.len() > max {
-            continue;
-        }
-        files.push(SearchFile {
-            relative: vault::relative_posix(root, &path),
-            path,
-        });
     }
     Ok(())
 }

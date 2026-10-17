@@ -96,6 +96,22 @@ pub fn write_note_file(
     content: &str,
     settings_paper: Option<&str>,
 ) -> Result<String, String> {
+    write_note_file_with(
+        root,
+        relative,
+        content,
+        settings_paper,
+        &crate::locations::FolderLocations::default(),
+    )
+}
+
+pub fn write_note_file_with(
+    root: &Path,
+    relative: &str,
+    content: &str,
+    settings_paper: Option<&str>,
+    locations: &crate::locations::FolderLocations,
+) -> Result<String, String> {
     let is_famd = crate::vault::posix_extname_en_us(relative) == ".famd";
     let body = strip_famd_payload(content);
     let markdown = if body.ends_with('\n') {
@@ -104,7 +120,7 @@ pub fn write_note_file(
         format!("{body}\n")
     };
     let written = if is_famd {
-        let path = vault::resolve_note_file(root, relative)?;
+        let path = locations.resolve_note(root, relative, true)?;
         // Desktop `realpath` of the parent runs before a new `.famd` is created.
         // A missing folder stays missing.
         require_parent_realpath(&path)?;
@@ -112,11 +128,11 @@ pub fn write_note_file(
     } else {
         // A missing markdown note is not created here; that is `create-note`.
         // `allowMissing` is false, so the first missing segment is `lstat`.
-        let path = vault::resolve_present_note_file(root, relative)?;
+        let path = locations.resolve_note(root, relative, false)?;
         atomic_write(&path, markdown.as_bytes(), 0o600)?;
         path
     };
-    attach_sidecar(root, relative, content, settings_paper)?;
+    attach_sidecar_with(root, relative, content, settings_paper, locations)?;
     Ok(file_mtime_iso(&written))
 }
 
@@ -161,8 +177,24 @@ pub fn attach_sidecar(
     content: &str,
     settings_paper: Option<&str>,
 ) -> Result<(), String> {
+    attach_sidecar_with(
+        root,
+        relative,
+        content,
+        settings_paper,
+        &crate::locations::FolderLocations::default(),
+    )
+}
+
+pub fn attach_sidecar_with(
+    root: &Path,
+    relative: &str,
+    content: &str,
+    settings_paper: Option<&str>,
+    locations: &crate::locations::FolderLocations,
+) -> Result<(), String> {
     let famd_relative = companion_note_path(relative, ".famd");
-    let famd_path = vault::resolve_note_file(root, &famd_relative)?;
+    let famd_path = locations.resolve_note(root, &famd_relative, true)?;
     let existing = match read_optional_text(&famd_path, optional_note_limit(&famd_path))? {
         Some(source) => parse_famd(&source),
         None => parse_famd(""),
@@ -222,7 +254,7 @@ pub fn attach_sidecar(
     )?;
     if relative.to_lowercase().ends_with(".famd") {
         let markdown_relative = companion_note_path(relative, ".md");
-        if let Ok(markdown_path) = vault::resolve_note_file(root, &markdown_relative) {
+        if let Ok(markdown_path) = locations.resolve_note(root, &markdown_relative, true) {
             if markdown_path.is_file() {
                 let text = if body.ends_with('\n') {
                     body
@@ -521,7 +553,7 @@ fn read_companion(host: &Host, relative: &str) -> Result<Option<FamdPayload>, St
     let root = vault_root(host)?;
     let note = note_path(relative)?;
     let famd_relative = companion_note_path(&note, ".famd");
-    let path = vault::resolve_note_file(root, &famd_relative)?;
+    let path = host.folder_locations.resolve_note(root, &famd_relative, true)?;
     match fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(vault::node_lstat_error(&path, &error)),
@@ -544,7 +576,9 @@ fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayloa
     let root = vault_root(host)?;
     let note = note_path(relative)?;
     let famd_relative = companion_note_path(&note, ".famd");
-    let famd_path = vault::resolve_note_file(root, &famd_relative)?;
+    let famd_path = host
+        .folder_locations
+        .resolve_note(root, &famd_relative, true)?;
     let source = read_optional_text(&famd_path, optional_note_limit(&famd_path))?.unwrap_or_default();
     let parsed = if source.is_empty() {
         parse_famd("")
@@ -554,7 +588,7 @@ fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayloa
     let markdown = if note.to_lowercase().ends_with(".pdf") {
         parsed.markdown.clone()
     } else {
-        let markdown_path = vault::resolve_note_file(root, &note)?;
+        let markdown_path = host.folder_locations.resolve_note(root, &note, true)?;
         match read_optional_text(&markdown_path, optional_note_limit(&markdown_path))? {
             Some(text) => text,
             None => parsed.markdown.clone(),
