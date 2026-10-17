@@ -536,6 +536,8 @@ const handlePassword = async (request, response, auth) => {
     account.sessions = { [auth.tokenHash]: account.sessions[auth.tokenHash] }
     for (const id of Object.keys(account.devices)) if (id !== auth.deviceId) delete account.devices[id]
     await saveAccount(account)
+    const { revokeAccountAccess } = await import('./mcp-grants.mjs')
+    await revokeAccountAccess(account.id)
   })
   sendEmpty(request, response, 204)
 }
@@ -551,6 +553,8 @@ const handleDeleteAccount = async (request, response, auth) => {
     await fs.rm(emailIndexPath(account.email), { force: true })
     await fs.rm(accountDirectory(account.id), { recursive: true, force: true })
     tables.delete(account.id)
+    const { revokeAccountAccess } = await import('./mcp-grants.mjs')
+    await revokeAccountAccess(account.id)
   })
   sendEmpty(request, response, 204)
 }
@@ -671,6 +675,38 @@ const handleDeleteFile = async (request, response, auth, fileId) => {
 }
 
 // ── Router ──────────────────────────────────────────────────────────────────
+
+export const authenticateSyncRequest = (request) => authenticate(request)
+
+export const loadSyncAccountByEmail = async (email) => {
+  try {
+    return await loadAccountByEmail(normalizeEmail(email))
+  } catch {
+    return null
+  }
+}
+
+/** True when `authKey` is the account's current authentication key. Never throws. */
+/** Re-read the account under its lock and run `task` only if `authKey` is still current. */
+export const withVerifiedSyncAuth = async (accountId, authKey, task) => withAccountLock(accountId, async () => {
+  const account = await loadAccountById(accountId)
+  if (!account || !await accountAcceptsAuthKey(account, authKey)) return { ok: false }
+  return { ok: true, value: await task(account) }
+})
+
+export const accountAcceptsAuthKey = async (account, authKey) => {
+  let key
+  try { key = parseAuthKey(authKey) } catch { return false }
+  if (!account?.auth?.hash || !account?.auth?.salt) return false
+  try {
+    const expected = Buffer.from(account.auth.hash, 'base64')
+    const actual = await scryptHash(key, Buffer.from(account.auth.salt, 'base64'))
+    if (expected.length !== actual.length) return false
+    return safeEqual(expected, actual)
+  } catch {
+    return false
+  }
+}
 
 export const handleSyncRequest = async (request, response, url) => {
   if (url.pathname !== API_PREFIX && !url.pathname.startsWith(`${API_PREFIX}/`)) return false

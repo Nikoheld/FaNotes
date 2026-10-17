@@ -231,6 +231,9 @@ End-to-end encrypted synchronisation of the whole vault (notes, `.famd` companio
 | Desktop host: raw vault access, safeStorage secrets | `electron/sync.cjs` | `function createSyncHost` |
 | Web host: IndexedDB stores mapped to vault paths | `src/lib/sync/browserSyncHost.ts` | `export const createBrowserSyncHost` |
 | Server: accounts, sessions, encrypted blob store, change feed | `../fanotes-site/sync-api.mjs` | `export const handleSyncRequest` |
+| Grok connector: name, server URL, device switch, revoke | `src/components/SyncSettingsSection.tsx` | `settings-grok-connector` |
+| Grok connector bridge | `src/lib/mcp/bridge.ts` | `export const startMcpBridge` |
+| MCP server: OAuth and read-only tools | `../fanotes-site/mcp-api.mjs` | `export const handleMcpRequest` |
 | Settings: automatic sync, device name | `src/types.ts` | `syncAutomatic: boolean` |
 
 ## Add-ons

@@ -76,6 +76,7 @@ import { sanitizeCustomCss } from './lib/customCss'
 import { addonIndexCache } from './lib/addons/indexCache'
 import { parseAddonSource } from './lib/addons/registry'
 import { addonRuntime } from './lib/addons/runtime'
+import { startMcpBridge } from './lib/mcp/bridge'
 import { syncEngine } from './lib/sync/engine'
 import { syncStatusLabel } from './lib/sync/status'
 import type { SettingsSection } from './components/SettingsModal'
@@ -2172,6 +2173,26 @@ export default function App({ startupBootstrap }: AppProps) {
       window.clearTimeout(timer)
       syncEngine.dispose()
     }
+  }, [syncApi])
+
+  useEffect(() => {
+    if (!syncApi) return undefined
+    const walk = (entries: VaultEntry[], into: { path: string; modifiedAt: string | null }[]) => {
+      for (const entry of entries) {
+        if (entry.kind === 'folder') walk(entry.children ?? [], into)
+        else into.push({ path: entry.relativePath, modifiedAt: entry.modifiedAt ?? null })
+      }
+      return into
+    }
+    return startMcpBridge({
+      session: () => syncEngine.getSession(),
+      readerKey: () => syncEngine.getMcpReaderKey(),
+      reader: {
+        list: async () => walk(await window.fanotes.getFastTree().catch(() => window.fanotes.getTree()), []),
+        read: (path) => window.fanotes.readFile(path),
+      },
+      onRejected: () => { void syncEngine.clearMcpReaderLocal() },
+    })
   }, [syncApi])
 
   useEffect(() => {

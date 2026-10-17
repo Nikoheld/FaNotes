@@ -146,3 +146,7 @@ FANOTES_SYNC_API=http://127.0.0.1:18790 npm run dev
 `npm run check:sync` starts the server module on a random port, loads the client modules
 through Vite SSR, and drives three fake devices through register, edit, sign-in, conflict,
 deletion, password change and revocation.
+
+The Grok connector (`docs/MCP.md`, `npm run check:mcp`) is a separate OAuth client of the
+same account. It does not receive the vault key. A device that has the connector turned on
+decrypts locally and answers tool calls; the server still stores only ciphertext.
