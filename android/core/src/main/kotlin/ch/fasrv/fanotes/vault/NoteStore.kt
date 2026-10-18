@@ -283,10 +283,20 @@ class NoteStore(private val io: VaultIo) {
         val folder = io.list(parent).any { it.directory && it.path.trim('/') == path.trim('/') }
         val next = renamedVaultPath(path, title, folder)
         if (next == path) return path
-        if (io.exists(next)) throw IllegalArgumentException("An diesem Ort existiert bereits ein Eintrag mit diesem Namen.")
+        if (io.exists(next) || (!folder && companionDestinationTaken(path, next))) {
+            throw IllegalArgumentException("An diesem Ort existiert bereits ein Eintrag mit diesem Namen.")
+        }
         io.move(path, next)
         if (!folder) moveCompanions(path, next)
         return next
+    }
+
+    /** A taken `.famd` or `.md` beside the new name would split one note across two files. */
+    private fun companionDestinationTaken(path: String, next: String): Boolean {
+        val extension = extensionOf(path).ifBlank { ".md" }
+        val companionExt = if (extension == FAMD_EXTENSION) ".md" else FAMD_EXTENSION
+        if (io.exists(companionPath(next, companionExt))) return true
+        return extension == ".pdf" && io.exists(companionPath(next, ".md"))
     }
 
     fun moveEntry(path: String, destFolder: String): String {

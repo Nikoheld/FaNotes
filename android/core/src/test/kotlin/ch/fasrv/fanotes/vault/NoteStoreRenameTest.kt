@@ -68,4 +68,30 @@ class NoteStoreRenameTest {
             root.toFile().deleteRecursively()
         }
     }
+
+    @Test
+    fun renamingRefusesWhenTheCompanionNameIsAlreadyTaken() {
+        val root = Files.createTempDirectory("fanotes-rename-companion")
+        try {
+            val vault = DirectoryVault(root)
+            val store = NoteStore(vault)
+            val a = store.createMarkdown("", "A")
+            val aNote = store.readNote(a)
+            store.save(aNote, aNote.document, "# A text\n")
+            val b = store.createMarkdown("", "B")
+            val bNote = store.readNote(b)
+            store.save(bNote, bNote.document, "# B text\n")
+            val bInk = vault.read(companionPath("B.md", ".famd"))!!.toList()
+            vault.delete("B.md")
+            val error = assertFailsWith<IllegalArgumentException> { store.rename("A.md", "B") }
+            assertEquals("An diesem Ort existiert bereits ein Eintrag mit diesem Namen.", error.message)
+            assertTrue(vault.exists("A.md"))
+            assertFalse(vault.exists("B.md"))
+            assertTrue(vault.read("A.md")!!.decodeToString().contains("A text"))
+            assertTrue(vault.exists(companionPath("A.md", ".famd")))
+            assertEquals(bInk, vault.read(companionPath("B.md", ".famd"))!!.toList())
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
 }
