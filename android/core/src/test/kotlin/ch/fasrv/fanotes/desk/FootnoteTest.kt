@@ -27,6 +27,21 @@ class FootnoteTest {
         assertTrue(fenced.body.contains("[^a]"))
         assertTrue(fenced.notes.isEmpty())
 
+        // A shorter line, or one with an info string, does not end the fence.
+        // remark-gfm leaves the definition in the code block.
+        val shorter = prepareFootnotes("````\ncode\n```\n[^a]: im Code\n````\n\nSiehe [^a]")
+        assertTrue(shorter.body.contains("[^a]: im Code"), shorter.body)
+        assertTrue(shorter.body.contains("Siehe [^a]"), shorter.body)
+        assertTrue(shorter.notes.isEmpty(), shorter.notes.toString())
+        val labeled = prepareFootnotes("```\ncode\n```js\n[^a]: gestohlen\n```\n\nSiehe [^a]")
+        assertTrue(labeled.body.contains("[^a]: gestohlen"), labeled.body)
+        assertTrue(labeled.body.contains("Siehe [^a]"), labeled.body)
+        assertTrue(labeled.notes.isEmpty(), labeled.notes.toString())
+        val tildeInInfo = prepareFootnotes("```foo~bar\n[^a]: drin\n```\n\nSiehe [^b]\n\n[^b]: draus")
+        assertTrue(tildeInInfo.body.contains("[^a]: drin"), tildeInInfo.body)
+        assertEquals(listOf("draus"), tildeInInfo.notes)
+        assertTrue(tildeInInfo.body.contains("\u00031\u0003"), tildeInInfo.body)
+
         val continued = prepareFootnotes("[^lang]: Erste Zeile\n\n    Zweite **Zeile**\n\nDanach [^lang]")
         assertEquals("Erste Zeile\n\nZweite **Zeile**", continued.notes.single())
         assertEquals("Danach \u00031\u0003", continued.body.trim())

@@ -15,19 +15,22 @@ const val FOOTNOTE_RETURN = "\u21A9"
 
 private val FOOTNOTE_DEF = Regex("""^ {0,3}\[\^([^\]\s]+)]:[ \t]?(.*)$""")
 private val FOOTNOTE_REF = Regex("""\[\^([^\]\s]+)](?!:)""")
-private val FENCE_LINE = Regex("""^ {0,3}(`{3,}|~{3,})[^`~]*$""")
+private val FENCE_LINE = Regex("""^ {0,3}(`{3,}|~{3,})(.*)$""")
+
+/** Opening marker and length. A close must repeat that marker at least this long, with no info string. */
+private class FenceState(val marker: Char, val length: Int)
 
 fun prepareFootnotes(markdown: String): FootnotePrep {
     val lines = markdown.replace("\r\n", "\n").split('\n')
     val drop = BooleanArray(lines.size)
     val definitions = LinkedHashMap<String, String>()
-    var fence: Char? = null
+    var fence: FenceState? = null
     var index = 0
     while (index < lines.size) {
         val line = lines[index]
-        val marker = fenceMarker(line)
-        if (marker != null && (fence == null || marker == fence)) {
-            fence = if (fence == null) marker else null
+        val stepped = stepFence(line, fence)
+        if (stepped != fence) {
+            fence = stepped
             index += 1
             continue
         }
@@ -73,9 +76,9 @@ fun prepareFootnotes(markdown: String): FootnotePrep {
     lines.forEachIndexed { lineIndex, line ->
         if (drop[lineIndex]) return@forEachIndexed
         if (replaced.isNotEmpty()) replaced.append('\n')
-        val marker = fenceMarker(line)
-        if (marker != null && (fence == null || marker == fence)) {
-            fence = if (fence == null) marker else null
+        val stepped = stepFence(line, fence)
+        if (stepped != fence) {
+            fence = stepped
             replaced.append(line)
             return@forEachIndexed
         }
@@ -130,7 +133,23 @@ private fun replaceReferences(
     return out.toString()
 }
 
-private fun fenceMarker(line: String): Char? = FENCE_LINE.find(line)?.groupValues?.get(1)?.firstOrNull()
+/**
+ * Same fence rule as the note outline. A shorter line, a different marker, or
+ * an info string leaves the fence open. A backtick fence whose info contains
+ * a backtick never opens, so a tilde in that info still starts a fence.
+ */
+private fun stepFence(line: String, fence: FenceState?): FenceState? {
+    val match = FENCE_LINE.matchEntire(line) ?: return fence
+    val token = match.groupValues[1]
+    val marker = token.first()
+    val rest = match.groupValues[2]
+    if (fence == null) {
+        if (marker == '`' && rest.contains('`')) return null
+        return FenceState(marker, token.length)
+    }
+    if (marker == fence.marker && token.length >= fence.length && rest.isBlank()) return null
+    return fence
+}
 
 private fun isContinuation(line: String): Boolean = line.startsWith("    ") || line.startsWith("\t")
 
