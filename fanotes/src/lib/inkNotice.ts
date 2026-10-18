@@ -6,14 +6,12 @@ export type InkNotice = {
 }
 
 export const SCRIBBLE_ERASE_NOTICE_TEXT = 'Durchkritzeln erkannt: Handschrift gelöscht. Mit Strg+Z kannst du sie sofort zurückholen.'
-export const FORM_DETECT_NOTICE_TEXT = 'Form erkannt — halte still, um sie zu glätten.'
 
 /** Transient ink hints must leave the screen on their own. Errors stay until dismissed. */
 export const INK_TRANSIENT_NOTICE_MS = 4_000
 
 const TRANSIENT_NOTICE_TEXT = new Set([
   SCRIBBLE_ERASE_NOTICE_TEXT,
-  FORM_DETECT_NOTICE_TEXT,
 ])
 
 export type InkNoticeState = {

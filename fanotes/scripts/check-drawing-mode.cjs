@@ -59,7 +59,6 @@ const safeguards = [
   ['shouldRejectNonPenInk', 'Nur-Stift-Modus ignoriert Finger und Maus'],
   ['const SHAPE_DWELL_MS = 700', 'Form-Snap nach kurzem Stillhalten'],
   ['const armShapeDwell', 'Form-Timer läuft auch ohne neue Stiftpunkte'],
-  ['strokeLooksLikeShape', 'Hinweis nur bei erkannter Figur'],
   ["event.pointerType === 'mouse'", 'kein setPointerCapture für Stift (Hyprland-Freeze)'],
   ['!inline && event.pointerType === \'mouse\'', 'kein Pointer-Capture auf dem Notizblatt'],
   ['const releaseInkPointerCaptures', 'Capture wird auf Fläche, Canvas und Board gelöst'],
@@ -135,9 +134,8 @@ const safeguards = [
   ['inkToolbarPortalHost', 'Abgehängte Leisten-Knoten werden nicht an createPortal gegeben'],
   ['portalInkToolbar', 'Die gelieferte Portal-Hilfe skippt getrennte Hosts statt zu werfen'],
   ['overlayAfterNoteSwitch', 'Notizwechsel hält eine bereite Stiftebene, nicht key 0'],
-  ['inkNoticeAutoClearDelayMs', 'Durchkritzeln- und Form-Hinweise verschwinden von selbst'],
+  ['inkNoticeAutoClearDelayMs', 'Durchkritzeln-Hinweis verschwindet von selbst'],
   ['SCRIBBLE_ERASE_NOTICE_TEXT', 'Durchkritzeln-Hinweis kommt aus dem gelieferten Text'],
-  ['FORM_DETECT_NOTICE_TEXT', 'Form-Hinweis kommt aus dem gelieferten Text'],
   ['Piktogramme', 'Piktogramme bleiben im Stiftmodus erreichbar'],
   ['is-docked-chrome', 'Stiftleiste dockt in das normale Menü, statt zu schweben'],
   ['is-viewport-chrome', 'Hinweise und Studio liegen außerhalb des Blatt-Zooms'],
@@ -249,6 +247,38 @@ const lockSafeguards = [
 
 for (const [needle, label] of safeguards) {
   if (!lockSource.includes(needle)) throw new Error(`Zeichenmodus-Prüfung fehlgeschlagen: ${label}.`)
+}
+const removedToolPopups = [
+  'FORM_DETECT_NOTICE_TEXT',
+  'Form erkannt — halte still',
+  'Form übernommen.',
+  'erkannt · Stift heben',
+  'Nadel ziehen zum Setzen',
+  'Geodreieck: Körper verschieben',
+  'Lineal: Körper verschieben',
+  'Rahmen um die Tinte ziehen',
+  'Bereich auf der Seite aufziehen',
+  'Auf das Blatt tippen, wo der Abschnitt beginnen soll',
+  'Mathematik-Löser aktiv',
+  'Mathematik-Korrigierer ausgeschaltet.',
+  'Ziehe auf der Seite einen Rahmen',
+  'Ziehe einen Rahmen um mindestens zwei',
+  'Ziehe einen Rahmen um die Handschrift',
+  'Im gewählten Bereich wurde keine Handschrift gefunden.',
+  'Auswahl aufgehoben.',
+  'Bereichsauswahl abgebrochen.',
+  'Abschnitt nicht eingefügt.',
+  'Hier ist bereits ein Abschnittstitel.',
+  'Abschnitt eingefügt',
+  'ausgewählt · tippe',
+  'eingefügt · tippe erneut',
+  'Doppeltippe direkt',
+  'Mathematik-Löser ausgeschaltet.',
+  'Rechenweg mit mehreren Zeilen auswählen',
+  'Rahmen um die Handschrift ziehen',
+]
+for (const text of removedToolPopups) {
+  if (source.includes(text)) throw new Error(`Zeichenmodus-Prüfung fehlgeschlagen: Hinweis „${text}“ darf nicht mehr aufgehen.`)
 }
 for (const [needle, label] of paperViewSafeguards) {
   if (!paperView.includes(needle)) throw new Error(`Zeichenmodus-Prüfung fehlgeschlagen: ${label}.`)

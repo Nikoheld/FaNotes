@@ -12,7 +12,6 @@ const server = await createServer({
 })
 
 const {
-  FORM_DETECT_NOTICE_TEXT,
   INK_TRANSIENT_NOTICE_MS,
   SCRIBBLE_ERASE_NOTICE_TEXT,
   applyInkNoticeOp,
@@ -28,10 +27,6 @@ try {
   assert.equal(
     SCRIBBLE_ERASE_NOTICE_TEXT,
     'Durchkritzeln erkannt: Handschrift gelöscht. Mit Strg+Z kannst du sie sofort zurückholen.',
-  )
-  assert.equal(
-    FORM_DETECT_NOTICE_TEXT,
-    'Form erkannt — halte still, um sie zu glätten.',
   )
   assert.ok(Number.isFinite(INK_TRANSIENT_NOTICE_MS) && INK_TRANSIENT_NOTICE_MS > 0 && INK_TRANSIENT_NOTICE_MS < 60_000)
 
@@ -63,7 +58,6 @@ try {
   }
 
   const scribble = drive(SCRIBBLE_ERASE_NOTICE_TEXT, 'success')
-  const form = drive(FORM_DETECT_NOTICE_TEXT, 'info')
 
   const sticky = applyInkNoticeOp(emptyInkNoticeState(), {
     type: 'show',
@@ -76,16 +70,46 @@ try {
   assert.match(board, /inkNoticeAutoClearDelayMs\(notice\)/)
   assert.match(board, /applyInkNoticeOp/)
   assert.match(board, /SCRIBBLE_ERASE_NOTICE_TEXT/)
-  assert.match(board, /FORM_DETECT_NOTICE_TEXT/)
   assert.match(board, /type: 'close'/)
   assert.match(board, /type: 'tick'/)
   assert.doesNotMatch(board, /text: 'Durchkritzeln erkannt: Handschrift gelöscht/)
-  assert.doesNotMatch(board, /text: 'Form erkannt — halte still/)
+  for (const text of [
+    'FORM_DETECT_NOTICE_TEXT',
+    'Form erkannt — halte still',
+    'Form übernommen.',
+    'erkannt · Stift heben',
+    'Nadel ziehen zum Setzen',
+    'Geodreieck: Körper verschieben',
+    'Lineal: Körper verschieben',
+    'Rahmen um die Tinte ziehen',
+    'Bereich auf der Seite aufziehen',
+    'Auf das Blatt tippen, wo der Abschnitt beginnen soll',
+    'Mathematik-Löser aktiv',
+    'Mathematik-Korrigierer ausgeschaltet.',
+    'Ziehe auf der Seite einen Rahmen',
+    'Ziehe einen Rahmen um mindestens zwei',
+    'Ziehe einen Rahmen um die Handschrift',
+    'Im gewählten Bereich wurde keine Handschrift gefunden.',
+    'Auswahl aufgehoben.',
+    'Bereichsauswahl abgebrochen.',
+    'Abschnitt nicht eingefügt.',
+    'Hier ist bereits ein Abschnittstitel.',
+    'Abschnitt eingefügt',
+    'ausgewählt · tippe',
+    'eingefügt · tippe erneut',
+    'Doppeltippe direkt',
+    'Mathematik-Löser ausgeschaltet.',
+    'Rechenweg mit mehreren Zeilen auswählen',
+    'Rahmen um die Handschrift ziehen',
+  ]) {
+    assert.equal(board.includes(text), false, `${text} must not pop up`)
+  }
 
   console.log(JSON.stringify({
     scribble: scribble.text,
-    form: form.text,
     delayMs: scribble.delay,
+    toolPopups: false,
+    shapePopups: false,
     autoClears: true,
     closeImmediate: true,
   }))

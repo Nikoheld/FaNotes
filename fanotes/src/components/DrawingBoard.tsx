@@ -61,7 +61,7 @@ import type {
   CorrectionLearningResult,
   RecognitionResources,
 } from '../lib/handwritingDb'
-import { SHAPE_SNAP_LABEL, inkStrokeAllowsShapeSnap, shapeSnapAllowsLiveSample, shapeSnapProfile, snapStrokeToShape, strokeLooksLikeShape } from '../lib/shapeSnap'
+import { inkStrokeAllowsShapeSnap, shapeSnapAllowsLiveSample, shapeSnapProfile, snapStrokeToShape } from '../lib/shapeSnap'
 import {
   VIEW_ROTATE_STEP,
   VIEW_ZOOM_MIN,
@@ -96,7 +96,6 @@ import { addPersonalWord } from '../lib/spellingSuggest'
 import { replaceTranscriptWord } from '../lib/marginTranscript'
 import { detectScribbleErase } from '../lib/scribbleErase'
 import {
-  FORM_DETECT_NOTICE_TEXT,
   SCRIBBLE_ERASE_NOTICE_TEXT,
   applyInkNoticeOp,
   inkNoticeAutoClearDelayMs,
@@ -1352,7 +1351,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const undoNowRef = useRef<() => void>(() => {})
   const redoNowRef = useRef<() => void>(() => {})
   const shapeDwellTimerRef = useRef<number | null>(null)
-  const shapeHintTimerRef = useRef<number | null>(null)
   const shapeLastMoveAtRef = useRef(0)
   const shapeSnappedRef = useRef(false)
   const mountedRef = useRef(true)
@@ -3344,10 +3342,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       window.clearTimeout(shapeDwellTimerRef.current)
       shapeDwellTimerRef.current = null
     }
-    if (shapeHintTimerRef.current !== null) {
-      window.clearTimeout(shapeHintTimerRef.current)
-      shapeHintTimerRef.current = null
-    }
   }, [])
 
   const readShapeSnapProfile = useCallback(() => shapeSnapProfile(settings.shapeSnapSensitivity ?? 50), [settings.shapeSnapSensitivity])
@@ -3371,10 +3365,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     shapeSnappedRef.current = true
     gestureChangedRef.current = true
     scheduleRedraw()
-    setNotice({
-      kind: 'success',
-      text: `${SHAPE_SNAP_LABEL[snapped.kind]} erkannt · Stift heben übernimmt die saubere Form.`,
-    })
     return true
   }, [readShapeSnapProfile, scheduleRedraw, settings.shapeSnapSensitivity, sourceHeight, sourceWidth])
 
@@ -3399,17 +3389,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (shapeDwellTimerRef.current === null) {
       shapeDwellTimerRef.current = window.setTimeout(onShapeDwellElapsed, profile.dwellMs)
     }
-    if (shapeHintTimerRef.current === null) {
-      shapeHintTimerRef.current = window.setTimeout(() => {
-        shapeHintTimerRef.current = null
-        if (shapeSnappedRef.current || !activeStrokeRef.current) return
-        if (performance.now() - shapeLastMoveAtRef.current < profile.hintMs) return
-        if (strokeLooksLikeShape(activeStrokeRef.current, sourceWidthRef.current, sourceHeightRef.current, settings.shapeSnapSensitivity ?? 50)) {
-          setNotice({ kind: 'info', text: FORM_DETECT_NOTICE_TEXT })
-        }
-      }, profile.hintMs)
-    }
-  }, [onShapeDwellElapsed, readShapeSnapProfile, settings.shapeSnapSensitivity])
+  }, [onShapeDwellElapsed, readShapeSnapProfile])
 
   const paintActiveStrokeNow = useCallback((predicted: PointerEvent[] = []) => {
     const canvas = canvasRef.current
@@ -3727,10 +3707,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       width: sourceWidth,
       height: sourceHeight,
     })
-    if (!selection) {
-      setNotice({ kind: 'info', text: 'Doppeltippe direkt auf den mathematischen Ausdruck, den du bearbeiten möchtest.' })
-      return
-    }
+    if (!selection) return
     const runId = ++mathSolverRunRef.current
     clearRecognitionScope()
     setConversionOpen(false)
@@ -3854,17 +3831,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const insertSectionAt = useCallback((y: number) => {
     const id = `section-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`
     const plan = planInsertSection(sectionsRef.current, y, sheetPx(), id)
-    if (!plan) {
-      setNotice({ kind: 'info', text: 'Hier ist bereits ein Abschnittstitel.' })
-      return false
-    }
+    if (!plan) return false
     // Tracked before the grow so the new edges are remapped like every other point.
     sectionsRef.current = [...sectionsRef.current, plan.section]
     const sheet = growSheetBy(plan.growPx)
     insertSection(plan, sectionsRef.current, sheet, forEachTrackedStroke)
     commitSections(sectionsRef.current)
     afterSectionChange()
-    setNotice({ kind: 'success', text: 'Abschnitt eingefügt · Titel in die Kopfzeile schreiben, Pfeil klappt den Inhalt ein.' })
     return true
   }, [afterSectionChange, commitSections, forEachTrackedStroke, growSheetBy, sheetPx])
 
@@ -3931,7 +3904,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   useEffect(() => {
     if (!sectionPlacing) return
-    setNotice({ kind: 'info', text: 'Auf das Blatt tippen, wo der Abschnitt beginnen soll · Esc bricht ab.' })
     const surface = surfaceRef.current
     if (!surface) return
     // The guide follows the pen without a React render per move.
@@ -4134,7 +4106,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (event.pointerType === 'pen' || event.pointerType === 'touch') {
         queueMicrotask(() => releaseStuckInputFocus(boardRef.current))
       }
-      setNotice({ kind: 'success', text: `${activeArtSymbol.label} eingefügt · tippe erneut für weitere.` })
       scheduleRedraw()
       return
     }
@@ -4296,9 +4267,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         setSelectionMode(selectionPurpose === 'edit')
         setSelectionRect(null)
         if (selectionPurpose === 'math-correction') setMathCorrectorEnabled(false)
-        setNotice({ kind: 'info', text: selectionPurpose === 'edit'
-          ? 'Ziehe einen Rahmen um die Handschrift, die du verschieben möchtest.'
-          : 'Bereichsauswahl abgebrochen. Ziehe einen Rahmen um die gewünschte Handschrift.' })
         return
       }
       const selectedStrokes = handwritingStrokes(strokesRef.current.filter((stroke) => strokeIntersectsSelection(stroke, selection)))
@@ -4306,7 +4274,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         setSelectionMode(selectionPurpose === 'edit')
         setSelectionRect(null)
         if (selectionPurpose === 'math-correction') setMathCorrectorEnabled(false)
-        setNotice({ kind: 'info', text: 'Im gewählten Bereich wurde keine Handschrift gefunden.' })
         return
       }
       if (selectionPurpose === 'math-correction') {
@@ -4324,7 +4291,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           setSelectionMode(true)
           setSelectionRect(null)
           selectedStrokeIndexesRef.current = []
-          setNotice({ kind: 'info', text: 'Im gewählten Bereich wurde keine Handschrift gefunden.' })
           return
         }
         if (taken.strokes !== strokesRef.current) {
@@ -4339,7 +4305,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         selectedStrokeIndexesRef.current = taken.indexes
         setSelectionMode(false)
         setSelectionRect(boundsOfInkIndexes(taken.strokes, taken.indexes) ?? selection)
-        setNotice({ kind: 'info', text: 'Ziehen zum Verschieben. Esc hebt die Auswahl auf.' })
         return
       }
       recognitionStrokesRef.current = selectedStrokes
@@ -4426,7 +4391,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     activeStrokeRef.current = null
     wipeLiveInk()
     activeRenderedPointCountRef.current = 0
-    const didShapeSnap = shapeSnappedRef.current
     shapeSnappedRef.current = false
     endInteraction()
     // If zoom changed during the stroke, upgrade the backing store once the
@@ -4458,8 +4422,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           kind: 'success',
           text: SCRIBBLE_ERASE_NOTICE_TEXT,
         })
-      } else if (didShapeSnap) {
-        setNotice({ kind: 'success', text: 'Form übernommen.' })
       }
     }
     if (gestureChangedRef.current) {
@@ -4707,22 +4669,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return
     }
     showDraftingTool(kind)
-    if (kind === 'compass') {
-      setNotice({
-        kind: 'info',
-        text: 'Nadel ziehen zum Setzen, gelber Punkt für den Radius, grüner Punkt drehen zum Zeichnen. Schloss sperrt das Maß, Kreis-Taste zeichnet sofort.',
-      })
-    } else if (kind === 'setSquare') {
-      setNotice({
-        kind: 'info',
-        text: 'Geodreieck: Körper verschieben, blauer Punkt dreht, Stift zeichnet an allen drei Kanten. Nahe am Lineal legt es sich von selbst an.',
-      })
-    } else {
-      setNotice({
-        kind: 'info',
-        text: 'Lineal: Körper verschieben, blauer Punkt dreht, linker Griff ändert die Länge, unterer Griff die Breite. Der Stift zeichnet an beiden Kanten entlang.',
-      })
-    }
   }, [draftingPoseOf, setDraftingPose, showDraftingTool])
 
   /** Brings a tool back into view with its rotation reset; size and radius stay. */
@@ -5779,7 +5725,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setSelectionMode(true)
     setSelectionPurpose('edit')
     setSelectionRect(null)
-    setNotice({ kind: 'info', text: 'Ziehe einen Rahmen um die Handschrift. Danach ziehst du sie an die neue Stelle.' })
   }, [closeMathCorrectionSession, closeMathSolverSelection, restoreUnmovedSelection])
 
   const copySelectedInk = useCallback(() => {
@@ -5851,7 +5796,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setTokens([])
     setCorrection('')
     setAutomaticResult(null)
-    setNotice({ kind: 'info', text: 'Ziehe auf der Seite einen Rahmen um die Handschrift, die du konvertieren möchtest. Esc bricht ab.' })
     requestAnimationFrame(() => boardRef.current?.focus({ preventScroll: true }))
   }, [closeMathCorrectionSession, closeMathSolverSelection, settings.experimentalHandwritingToText])
 
@@ -6420,12 +6364,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     } else {
       closeMathSolverSelection()
     }
-    setNotice({
-      kind: 'info',
-      text: enabled
-        ? 'Mathematik-Löser aktiv: Doppeltippe auf einen handschriftlichen Term oder eine Gleichung.'
-        : 'Mathematik-Löser ausgeschaltet.',
-    })
     bumpRevision()
     setDirty(true)
   }, [bumpRevision, clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, mathSolverEnabled, selectionPurpose, setDirty, settings.experimentalHandwritingToText])
@@ -6450,7 +6388,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setTokens([])
     setCorrection('')
     setAutomaticResult(null)
-    setNotice({ kind: 'info', text: 'Ziehe einen Rahmen um mindestens zwei untereinander geschriebene Rechenschritte. FaNotes markiert den ersten sicheren Fehler.' })
     requestAnimationFrame(() => boardRef.current?.focus({ preventScroll: true }))
   }, [bumpRevision, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, mathSolverEnabled, setDirty])
 
@@ -6466,7 +6403,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setMathCorrectorEnabled(false)
     closeMathCorrectionSession()
     if (selectionPurpose === 'math-correction') clearRecognitionScope()
-    setNotice({ kind: 'info', text: 'Mathematik-Korrigierer ausgeschaltet.' })
   }, [beginMathCorrectionSelection, clearRecognitionScope, closeMathCorrectionSession, mathCorrectorEnabled, selectionPurpose, settings.experimentalHandwritingToText])
 
   useEffect(() => {
@@ -6548,7 +6484,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const chooseArtSymbol = (symbol: ArtSymbolDefinition) => {
     setArtSymbolId(symbol.id)
     setTool('pen')
-    setNotice({ kind: 'info', text: `${symbol.label} ausgewählt · tippe auf die gewünschte Stelle der Seite.` })
     requestAnimationFrame(() => boardRef.current?.focus({ preventScroll: true }))
   }
 
@@ -6581,13 +6516,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         setSelectionMode(true)
         setSelectionPurpose('edit')
       }
-      setNotice({ kind: 'info', text: tool === 'select' ? 'Auswahl aufgehoben.' : 'Bereichsauswahl abgebrochen.' })
       return
     }
     if (event.key === 'Escape' && sectionPlacing) {
       event.preventDefault()
       setSectionPlacing(false)
-      setNotice({ kind: 'info', text: 'Abschnitt nicht eingefügt.' })
       return
     }
     if (event.key === 'Escape') {
@@ -7143,13 +7076,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                 )
               })}
               {sectionPlacing && <div ref={sectionGuideRef} className="lw-ink-section-guide" style={{ top: '-9999px', opacity: 0 }}><span>Neuer Abschnitt</span></div>}
-              {sectionPlacing && <div className="lw-selection-hint is-section"><ListCollapse size={18} /> Auf das Blatt tippen, wo der Abschnitt beginnen soll</div>}
             </div>}
             <div className="lw-page-overlay">
-            {selectionMode && !selectionRect && <div className={`lw-selection-hint ${selectionPurpose === 'math-correction' ? 'is-correction' : ''}`}>
-              {selectionPurpose === 'math-correction' ? <ListChecks size={18} /> : selectionPurpose === 'edit' ? <Move size={18} /> : <ScanSearch size={18} />}
-              {selectionPurpose === 'math-correction' ? 'Rechenweg mit mehreren Zeilen auswählen' : selectionPurpose === 'edit' ? 'Rahmen um die Handschrift ziehen' : 'Bereich auf der Seite aufziehen'}
-            </div>}
             {selectionRect && <div
               className={`lw-selection-rect ${selectionMode ? 'is-selecting' : 'is-selected'} ${selectionPurpose === 'edit' && !selectionMode ? 'is-editable' : ''}`}
               style={{
