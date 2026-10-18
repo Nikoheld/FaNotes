@@ -1,4 +1,4 @@
-import { forwardRef, lazy, Suspense, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { forwardRef, lazy, Suspense, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createRoot, type Root as ReactRoot } from 'react-dom/client'
 import '@fontsource/jetbrains-mono/latin-400.css'
 import '@fontsource/jetbrains-mono/latin-600.css'
@@ -1351,7 +1351,9 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     },
   }), [readOnly])
 
-  useEffect(() => {
+  // The note tab is visible in the same commit. CodeMirror's content node has
+  // to exist before that commit yields, or the first keystrokes miss the editor.
+  useLayoutEffect(() => {
     const host = hostRef.current
     if (!host) return
     const changeScheduler = createTrailingValueScheduler((readContent: () => string) => {

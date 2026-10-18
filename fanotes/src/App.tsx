@@ -59,7 +59,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
 import type { PaletteAction } from './components/CommandPalette'
 import type { DrawingBoardHandle, DrawingSavePayload, InkActivity } from './components/DrawingBoard'
 import { ConfirmDialog } from './components/ConfirmDialog'
@@ -257,14 +257,23 @@ const CommandPalette = lazy(() => import('./components/CommandPalette').then((mo
 const StudyOverview = lazy(() => import('./components/StudyOverview').then((module) => ({ default: module.StudyOverview })))
 const FlashcardReview = lazy(() => import('./components/FlashcardReview').then((module) => ({ default: module.FlashcardReview })))
 const AiPanel = lazy(() => import('./components/AiPanel').then((module) => ({ default: module.AiPanel })))
-type MarkdownEditorModule = { default: typeof import('./components/MarkdownEditor')['MarkdownEditor'] }
+type MarkdownEditorComponent = typeof import('./components/MarkdownEditor')['MarkdownEditor']
+type MarkdownEditorModule = { default: MarkdownEditorComponent }
+let resolvedMarkdownEditor: MarkdownEditorComponent | null = null
 let markdownEditorModulePromise: Promise<MarkdownEditorModule> | null = null
 const loadMarkdownEditor = () => {
   markdownEditorModulePromise ??= import('./components/MarkdownEditor')
-    .then((module) => ({ default: module.MarkdownEditor }))
+    .then((module) => {
+      resolvedMarkdownEditor = module.MarkdownEditor
+      return { default: module.MarkdownEditor }
+    })
   return markdownEditorModulePromise
 }
-const MarkdownEditor = lazy(loadMarkdownEditor)
+function MarkdownEditor(props: ComponentProps<MarkdownEditorComponent>) {
+  if (!resolvedMarkdownEditor) throw loadMarkdownEditor()
+  const Impl = resolvedMarkdownEditor
+  return <Impl {...props} />
+}
 const RightInspector = lazy(() => import('./components/RightInspector').then((module) => ({ default: module.RightInspector })))
 const AddonStoreModal = lazy(() => import('./components/addons/AddonStoreModal').then((module) => ({ default: module.AddonStoreModal })))
 const AddonPanelDock = lazy(() => import('./components/addons/AddonPanelDock').then((module) => ({ default: module.AddonPanelDock })))
@@ -1541,6 +1550,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (existing) {
       await preparePageStats(path)
       if (session !== vaultSessionGenerationRef.current) return false
+      if (!isPdfNotePath(path)) await loadMarkdownEditor()
       activatePageStats(path, existing.content)
       setActivePath(path)
       if (swapIntoSplit) setSplitPath(previousActive)
@@ -1563,6 +1573,7 @@ export default function App({ startupBootstrap }: AppProps) {
         session !== vaultSessionGenerationRef.current ||
         structureRevision !== vaultStructureRevisionRef.current
       ) return false
+      if (!isPdfNotePath(path)) await loadMarkdownEditor()
       setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
       setTabs((current) => current.some((item) => item.path === path) ? current : [...current, tab])
       activatePageStats(path, content)
