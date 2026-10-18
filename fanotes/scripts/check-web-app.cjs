@@ -190,22 +190,16 @@ void (async () => {
       if (message.method === 'Log.entryAdded' && message.params?.entry?.level === 'error') errors.push(message.params.entry.text)
     })
     await Promise.all([cdp.send('Runtime.enable'), cdp.send('Log.enable'), cdp.send('Page.enable'), cdp.send('Network.enable'), cdp.send('DOM.enable'), cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false })])
-    await waitFor(cdp, `document.querySelector('.first-run')?.dataset.step === 'welcome'`, 'Der Willkommen-Schritt')
+    await waitFor(cdp, `Boolean(document.querySelector('.first-run')) && document.querySelectorAll('.first-run-profiles > button').length === 4 && document.querySelectorAll('.first-run-subjects > button').length === 11 && Boolean(document.querySelector('.first-run-continue'))`, 'Die Einrichtung')
     const onboarding = await cdp.evaluate(`({
-      steps: document.querySelectorAll('.first-run-progress button').length,
-      preview: Boolean(document.querySelector('.first-run-app-preview .first-run-preview-ink')),
-      active: document.querySelector('.first-run-progress [aria-current="step"]')?.getAttribute('aria-label'),
+      purposes: document.querySelectorAll('.first-run-profiles > button').length,
+      folders: document.querySelectorAll('.first-run-subjects > button').length,
+      finish: document.querySelector('.first-run-continue')?.textContent || '',
     })`)
-    if (onboarding.steps !== 4 || !onboarding.preview || onboarding.active !== 'Schritt 1: Willkommen') throw new Error(`Das Onboarding ist unvollständig: ${JSON.stringify(onboarding)}`)
+    if (onboarding.purposes !== 4 || onboarding.folders !== 11 || !onboarding.finish.includes('FaNotes einrichten')) throw new Error(`Das Onboarding ist unvollständig: ${JSON.stringify(onboarding)}`)
     await wait(850)
     const onboardingScreenshot = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true })
     fs.writeFileSync(onboardingScreenshotPath, Buffer.from(onboardingScreenshot.data, 'base64'))
-    await cdp.evaluate(`document.querySelector('.first-run-continue').click()`)
-    await waitFor(cdp, `document.querySelector('.first-run')?.dataset.step === 'profile' && document.querySelectorAll('.first-run-profiles > button').length === 4`, 'Die Profilauswahl')
-    await cdp.evaluate(`document.querySelector('.first-run-continue').click()`)
-    await waitFor(cdp, `document.querySelector('.first-run')?.dataset.step === 'writing' && Boolean(document.querySelector('.first-run-writing-preview'))`, 'Der Schreib-Schritt')
-    await cdp.evaluate(`document.querySelector('.first-run-continue').click()`)
-    await waitFor(cdp, `document.querySelector('.first-run')?.dataset.step === 'folders' && document.querySelectorAll('.first-run-subjects > button').length === 11`, 'Die Ordnerauswahl')
     await cdp.evaluate(`document.querySelector('.first-run-continue').click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.app-shell') && document.querySelector('.markdown-editor .cm-content'))`, 'Der Web-Markdown-Editor')
     await waitFor(cdp, `navigator.serviceWorker.getRegistration('./').then((registration) => Boolean(registration?.active))`, 'Der Offline-Service-Worker')
@@ -344,7 +338,7 @@ void (async () => {
     fs.writeFileSync(screenshotPath, Buffer.from(screenshot.data, 'base64'))
     const relevantErrors = errors.filter((message) => message && !message.includes('ERR_INTERNET_DISCONNECTED'))
     if (relevantErrors.length) throw new Error(`Browserfehler: ${relevantErrors.join(' | ')}`)
-    console.log(`Web-Prüfung erfolgreich: 4-stufiges Profil-Onboarding, dauerhafte Welcome.md-Reparatur, zweisprachige Rechtschreibung, sechs AI-Anbieter mit flüchtigen Cloud-Schlüsseln, Markdown, Suche, Zeichnungen, Bildimport, IndexedDB-Persistenz, optionales Server-Backup, PWA-Cache und Offline-Neustart. Screenshots: ${onboardingScreenshotPath}, ${welcomeRepairScreenshotPath}, ${backupScreenshotPath}, ${screenshotPath}`)
+    console.log(`Web-Prüfung erfolgreich: Einrichtung mit Profil und Ordnern, dauerhafte Welcome.md-Reparatur, zweisprachige Rechtschreibung, sechs AI-Anbieter mit flüchtigen Cloud-Schlüsseln, Markdown, Suche, Zeichnungen, Bildimport, IndexedDB-Persistenz, optionales Server-Backup, PWA-Cache und Offline-Neustart. Screenshots: ${onboardingScreenshotPath}, ${welcomeRepairScreenshotPath}, ${backupScreenshotPath}, ${screenshotPath}`)
   } finally {
     socket?.close()
     chromium.kill('SIGTERM')
