@@ -58,9 +58,9 @@ import { PAPER_STYLES, drawPaperBackground } from '../lib/paperStyles'
 import { strokeDurationMs, strokeLengthMm, summarizeInkStrokes, type InkStrokeActivity, type InkSummary } from '../lib/pageStats'
 import { TextToHandwritingDialog } from './TextToHandwritingDialog'
 import type {
-  CorrectionLearningResult,
   RecognitionResources,
 } from '../lib/handwritingDb'
+import { decodeInkHistory, encodeInkHistory, type EncodedInkHistory } from '../lib/inkHistory'
 import { inkStrokeAllowsShapeSnap, shapeSnapAllowsLiveSample, shapeSnapProfile, snapStrokeToShape } from '../lib/shapeSnap'
 import {
   VIEW_ROTATE_STEP,
@@ -96,7 +96,6 @@ import { addPersonalWord } from '../lib/spellingSuggest'
 import { replaceTranscriptWord } from '../lib/marginTranscript'
 import { detectScribbleErase } from '../lib/scribbleErase'
 import {
-  SCRIBBLE_ERASE_NOTICE_TEXT,
   applyInkNoticeOp,
   inkNoticeAutoClearDelayMs,
 } from '../lib/inkNotice'
@@ -635,6 +634,8 @@ type DrawingDocument = {
   mathSolverHistory?: MathSolverHistoryEntry[]
   /** Collapsible handwriting sections; hidden body ink lives inside a collapsed one. */
   sections?: SerializedSection[]
+  /** Undo and redo steps, so Ctrl+Z and Ctrl+Y still work after the app was closed. */
+  inkHistory?: EncodedInkHistory<InkStroke>
 }
 
 export type DrawingSavePayload = {
@@ -1332,7 +1333,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const gestureToolRef = useRef<DrawingTool>('pen')
   const beforeGestureRef = useRef<InkStroke[]>([])
   const gestureChangedRef = useRef(false)
-  const scribbleHintShownRef = useRef(false)
   const undoRef = useRef<InkStroke[][]>([])
   const redoRef = useRef<InkStroke[][]>([])
   const drawFrameRef = useRef<number | null>(null)
@@ -2341,8 +2341,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       setMathSolverSelection(null)
       setMathCorrectionSession(null)
       setMathCorrectorEnabled(false)
-      undoRef.current = []
-      redoRef.current = []
+      const loadedHistory = decodeInkHistory(strokesRef.current, raw.inkHistory, (entry) => {
+        const parsed = safeInkStrokes([entry], initialColorRef.current)
+        return parsed.length === 1 ? parsed[0] : null
+      })
+      undoRef.current = loadedHistory.undo
+      redoRef.current = loadedHistory.redo
       clearRecognitionScope()
       bumpInkRevision({ updateTranscript: false })
       setDirty(false)
@@ -4416,13 +4420,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       })
       setDirty(true)
       updateHistoryState()
-      if (scribbleDeleted && !scribbleHintShownRef.current) {
-        scribbleHintShownRef.current = true
-        setNotice({
-          kind: 'success',
-          text: SCRIBBLE_ERASE_NOTICE_TEXT,
-        })
-      }
     }
     if (gestureChangedRef.current) {
       const roomGrown = activeStroke && gestureToolRef.current === 'pen' && !scribbleDeleted && strokesRef.current.includes(activeStroke)
@@ -5174,6 +5171,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
     }
     const now = new Date().toISOString()
+    const inkHistory = encodeInkHistory(strokesRef.current, undoRef.current, redoRef.current)
     const drawing: DrawingDocument = {
       schemaVersion: 1,
       title,
@@ -5195,6 +5193,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       mathSolverEnabled,
       mathSolverHistory: mathSolverHistoryRef.current,
       sections: sectionsRef.current.length ? serializeSections(sectionsRef.current) : undefined,
+      ...(inkHistory ? { inkHistory } : {}),
     }
     return {
       id: drawingIdRef.current,
@@ -5406,9 +5405,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       let recognized: RecognitionToken[]
       let value: string
       let automaticDetection: AutomaticRecognitionResult | null = null
-      let neuralTextUsed = false
-      let neuralTextFailure = ''
-      let enhancedMathFailure = ''
       let enhancedMathUsed = false
       if (requestedMode === 'auto') {
         const detected = recognitionEngine.recognizeAutomaticExpression(
@@ -5448,7 +5444,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
       // Optional Qwen3-VL (Intel NPU): recommended text engine. Run it before
       // the slower neural line model so the conversion uses the VLM first.
-      let qwenVisionFailure = ''
       let qwenVisionUsed = false
       const recognizeQwenVision = window.fanotes.recognizeQwenVision
       const qwenVisionReady = Boolean(
@@ -5508,10 +5503,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               }
             }
           }
-        } catch (error) {
-          qwenVisionFailure = error instanceof Error
-            ? error.message
-            : 'Qwen3-VL konnte nicht auf der NPU ausgeführt werden.'
+        } catch {
+          // Optional vision engine failed; the classic text result stays.
         }
       }
 
@@ -5556,7 +5549,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             recognized = personalized.tokens
             resolvedMode = 'text'
             value = fused.text
-            neuralTextUsed = fused.neuralCharacters > 0
             if (automaticDetection) {
               const neuralTextScore = 1.1 + fused.confidence / 45 + Math.min(1.4, letters * 0.08)
               automaticDetection = {
@@ -5574,8 +5566,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               }
             }
           }
-        } catch (error) {
-          neuralTextFailure = error instanceof Error ? error.message : 'Das neuronale Textmodell konnte nicht geladen werden.'
+        } catch {
+          // Optional line model failed; the classic text result stays.
         }
       }
 
@@ -5607,10 +5599,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               }
             }
           }
-        } catch (error) {
-          enhancedMathFailure = error instanceof Error
-            ? error.message
-            : 'Das erweiterte Formelmodell konnte nicht ausgeführt werden.'
+        } catch {
+          // Optional formula model failed; the classic math result stays.
         }
       }
 
@@ -5633,35 +5623,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       setWholeFormulaResult(enhancedMathUsed)
       setCorrection(value)
       setConversionOpen(true)
-      const contextChanges = recognized.filter((token) => token.context?.changed).length
-      if (resolvedMode === 'text' && neuralTextFailure && !neuralTextUsed && !qwenVisionUsed) {
-        setNotice({
-          kind: 'info',
-          text: `${neuralTextFailure} FaNotes verwendet vorübergehend die klassische Erkennung.`,
-        })
-      } else if (resolvedMode === 'math' && enhancedMathFailure) {
-        setNotice({
-          kind: 'info',
-          text: `${enhancedMathFailure} FaNotes verwendet für diese Eingabe die klassische lokale Mathematikerkennung.`,
-        })
-      } else if (resolvedMode === 'text' && qwenVisionFailure && !qwenVisionUsed) {
-        setNotice({
-          kind: 'info',
-          text: `${qwenVisionFailure} FaNotes bleibt bei der klassischen lokalen Texterkennung.`,
-        })
-      } else if (resolvedMode === 'text' && qwenVisionUsed) {
-        setNotice({
-          kind: 'success',
-          text: 'Qwen3-VL hat den Text gelesen — empfohlene Texterkennung auf der Intel-NPU. Du kannst das Ergebnis weiter korrigieren.',
-        })
-      } else if (resolvedMode === 'text' && contextChanges > 0 && !neuralTextUsed) {
-        setNotice({
-          kind: 'info',
-          text: `Der lokale Wortkontext hat ${contextChanges} unsichere${contextChanges === 1 ? 's Zeichen' : ' Zeichen'} plausibel aufgelöst. Du kannst das Ergebnis weiterhin korrigieren.`,
-        })
-      } else if (!value || value.includes('?')) {
-        setNotice({ kind: 'info', text: 'Einige Zeichen sind noch unsicher. Wähle Alternativen oder korrigiere das Ergebnis direkt.' })
-      }
     } catch (error) {
       if (runId === recognitionRunRef.current) {
         setNotice({ kind: 'error', text: error instanceof Error ? error.message : 'Handschrift konnte nicht analysiert werden.' })
@@ -6088,19 +6049,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         resourcesRef.current = refreshed
         if (mountedRef.current) {
           setResources(refreshed)
-          setNotice({
-            kind: 'success',
-            text: `Korrektur sofort gelernt: ${label.char}`,
-          })
           onTrainingChanged?.(refreshed.sampleCount)
         }
       }).catch(() => {
-        if (mountedRef.current) {
-          setNotice({
-            kind: 'info',
-            text: 'Die Auswahl wurde übernommen; das lokale Nachlernen wird beim Einfügen erneut versucht.',
-          })
-        }
+        // Learning can fail quietly. The chosen character is already in the result.
       })
     }
   }, [activeMode, mode, onSettingsChange, onTrainingChanged, tokens])
@@ -6116,11 +6068,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
 
       const loaded = resourcesRef.current
-      let learningResult: CorrectionLearningResult | null = null
-      let learningFailed = false
       if (loaded && tokens.length && !wholeFormulaResult) {
         try {
-          learningResult = await learnFromRecognitionCorrection(
+          const learningResult = await learnFromRecognitionCorrection(
             tokens,
             cleaned,
             activeMode,
@@ -6135,17 +6085,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           }
         } catch {
           // Das Einfügen darf nie an optionalem lokalem Nachlernen scheitern.
-          learningFailed = true
         }
       }
 
-      const learnedCount = (learningResult?.learnedSamples ?? 0) + (learningResult?.learnedLayouts ?? 0)
-      const learningMessage = learnedCount > 0
-        ? ` Lokales Modell mit ${learningResult!.learnedSamples} Zeichen${learningResult!.learnedLayouts ? ` und ${learningResult!.learnedLayouts} Layout-Beispielen` : ''} verbessert.`
-        : learningResult?.reason
-          ? ` ${learningResult.reason}`
-          : learningFailed ? ' Lokales Nachlernen war diesmal nicht möglich.' : ''
-      setNotice({ kind: 'success', text: `Konvertierung eingefügt.${learningMessage}` })
       searchTranscriptRef.current = cleaned
       transcriptUpdatedAtRef.current = new Date().toISOString()
       indexedStrokeCountRef.current = handwritingStrokes(strokesRef.current).length

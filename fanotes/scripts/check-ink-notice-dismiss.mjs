@@ -69,9 +69,9 @@ try {
 
   assert.match(board, /inkNoticeAutoClearDelayMs\(notice\)/)
   assert.match(board, /applyInkNoticeOp/)
-  assert.match(board, /SCRIBBLE_ERASE_NOTICE_TEXT/)
   assert.match(board, /type: 'close'/)
   assert.match(board, /type: 'tick'/)
+  assert.doesNotMatch(board, /SCRIBBLE_ERASE_NOTICE_TEXT/)
   assert.doesNotMatch(board, /text: 'Durchkritzeln erkannt: Handschrift gelöscht/)
   for (const text of [
     'FORM_DETECT_NOTICE_TEXT',
@@ -101,6 +101,17 @@ try {
     'Mathematik-Löser ausgeschaltet.',
     'Rechenweg mit mehreren Zeilen auswählen',
     'Rahmen um die Handschrift ziehen',
+    'SCRIBBLE_ERASE_NOTICE_TEXT',
+    'Durchkritzeln erkannt',
+    'Konvertierung eingefügt.',
+    'Einige Zeichen sind noch unsicher',
+    'Qwen3-VL hat den Text gelesen',
+    'FaNotes verwendet vorübergehend die klassische Erkennung',
+    'FaNotes verwendet für diese Eingabe die klassische lokale Mathematikerkennung',
+    'FaNotes bleibt bei der klassischen lokalen Texterkennung',
+    'Der lokale Wortkontext hat',
+    'Korrektur sofort gelernt',
+    'Die Auswahl wurde übernommen',
   ]) {
     assert.equal(board.includes(text), false, `${text} must not pop up`)
   }
