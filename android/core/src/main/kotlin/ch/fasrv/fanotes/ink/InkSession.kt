@@ -4,6 +4,8 @@ import ch.fasrv.fanotes.desk.formatTranscriptLine
 import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.deepCopy
 import ch.fasrv.fanotes.json.jsonString
+import ch.fasrv.fanotes.recognition.recognizeSchoolScript
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.max
@@ -211,7 +213,18 @@ class InkSession(document: InkDocument) {
         )
         pushUndo()
         document = document.copy(strokes = document.strokes + stroke, updatedAt = now)
+        appendRecognizedTranscript(document.strokes, recognizeSchoolScript(document.strokes))
         return stroke
+    }
+
+    /** Commits one handwriting gesture. Readable school-script words join the search transcript. */
+    fun commitHandwriting(strokes: List<InkStroke>, now: String): String {
+        if (strokes.isEmpty()) return ""
+        val recognized = recognizeSchoolScript(strokes)
+        pushUndo()
+        document = document.copy(strokes = document.strokes + strokes, updatedAt = now)
+        appendRecognizedTranscript(strokes, recognized)
+        return recognized
     }
 
     fun cancelStroke() {
@@ -371,6 +384,23 @@ class InkSession(document: InkDocument) {
         undo.addLast(document.strokes)
         if (undo.size > 100) undo.removeFirst()
         redo.clear()
+    }
+
+    /** Keeps an unreadable stroke, and does not repeat a line already stored. */
+    private fun appendRecognizedTranscript(strokes: List<InkStroke>, recognized: String) {
+        if (recognized.count { it.isLetterOrDigit() } < 2) return
+        val extras = document.extras.deepCopy() as JsonValue.Obj
+        val previous = extras.string("searchTranscript").orEmpty()
+        val folded = recognized.lowercase(Locale.GERMAN)
+        val bodies = previous.split('\n').map { line ->
+            line.substringAfter('\t', line).trim().lowercase(Locale.GERMAN)
+        }
+        if (bodies.any { it == folded }) return
+        val anchorY = strokes.flatMap { it.points }.minOfOrNull { it.y } ?: 0.0
+        val line = formatTranscriptLine(anchorY, recognized)
+        val transcript = listOf(previous.trim(), line).filter { it.isNotEmpty() }.joinToString("\n")
+        extras.put("searchTranscript", jsonString(transcript))
+        document = document.copy(extras = extras)
     }
 
     /** Older undo snapshots use the page size from when they were stored. */
