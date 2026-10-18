@@ -19,8 +19,8 @@ import ch.fasrv.fanotes.desk.selectionWashArgb
 import ch.fasrv.fanotes.desk.editorLineNumberLabels
 import ch.fasrv.fanotes.desk.findDetailsBlocks
 import ch.fasrv.fanotes.desk.bracketTyping
-import ch.fasrv.fanotes.desk.insertMarkdownBlankLine
 import ch.fasrv.fanotes.desk.insertMarkdownNewlineIndent
+import ch.fasrv.fanotes.desk.toggleTasksInNote
 import ch.fasrv.fanotes.desk.applyMarkdownFormat
 import ch.fasrv.fanotes.desk.markdownFormatShortcut
 import ch.fasrv.fanotes.desk.matchingBracketJump
@@ -513,13 +513,18 @@ class SplitEditorView(context: Context) : EditText(context) {
             }
             return true
         }
-        if (keyCode == KeyEvent.KEYCODE_ENTER && event.isCtrlPressed && !event.isShiftPressed &&
-            !event.isAltPressed && !event.isMetaPressed
-        ) {
-            if (event.action == KeyEvent.ACTION_DOWN) {
-                applyLineEdit(insertMarkdownBlankLine(text?.toString().orEmpty(), selectionStart, selectionEnd))
+        if (keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+            val command = ch.fasrv.fanotes.desk.deskShortcut(
+                event.isCtrlPressed,
+                event.isShiftPressed,
+                event.isAltPressed,
+                event.isMetaPressed,
+                "enter",
+            )
+            if (command == "toggle-task") {
+                if (event.action == KeyEvent.ACTION_DOWN) applyTaskToggle()
+                return true
             }
-            return true
         }
         if (keyCode == KeyEvent.KEYCODE_K && event.isCtrlPressed && event.isShiftPressed &&
             !event.isAltPressed && !event.isMetaPressed
@@ -712,6 +717,24 @@ class SplitEditorView(context: Context) : EditText(context) {
         )
         if (edit.text == text?.toString()) return
         applyLineEdit(edit)
+    }
+
+    private fun applyTaskToggle() {
+        val before = text?.toString().orEmpty()
+        val edit = toggleTasksInNote(before, selectionStart, selectionEnd)
+        if (edit.text == before) return
+        val cursor = selectionEnd.coerceAtLeast(0)
+        writing = true
+        setText(edit.text)
+        setSelection(
+            edit.selectionStart.coerceIn(0, edit.text.length),
+            edit.selectionEnd.coerceIn(0, edit.text.length),
+        )
+        writing = false
+        editBefore = edit.text
+        rememberChange(before, edit.text, cursor)
+        onVisibleEdit(before, edit.text)
+        paintPreview()
     }
 
     private fun applyLineEdit(edit: ch.fasrv.fanotes.desk.MarkdownEdit?) {

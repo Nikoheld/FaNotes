@@ -214,6 +214,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val message = MutableStateFlow<String?>(null)
     val undoTrash = MutableStateFlow<ch.fasrv.fanotes.vault.TrashItem?>(null)
     val stampRequest = MutableStateFlow<String?>(null)
+    val taskToggleRequest = MutableStateFlow(0)
+    private var consumedTaskToggle = 0
     val trashOpen = MutableStateFlow(false)
     val trashItems = MutableStateFlow<List<ch.fasrv.fanotes.vault.TrashItem>>(emptyList())
     val backdrop = MutableStateFlow<List<BackdropSlice>>(emptyList())
@@ -1444,6 +1446,18 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun consumeStamp() {
         stampRequest.value = null
+    }
+
+    /** One shot for Ctrl+Enter and the command list. Two requests before the editor runs still apply once. */
+    fun requestToggleTask() {
+        taskToggleRequest.value = taskToggleRequest.value + 1
+    }
+
+    fun takeTaskToggle(): Boolean {
+        val token = taskToggleRequest.value
+        if (token == consumedTaskToggle) return false
+        consumedTaskToggle = token
+        return true
     }
 
     fun recentNotePaths(limit: Int = 5): List<String> {

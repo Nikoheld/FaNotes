@@ -322,11 +322,18 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 if (event.action == KeyEvent.ACTION_DOWN) insertIndentedBreak()
                 return true
             }
-            if (keyCode == KeyEvent.KEYCODE_ENTER && event.isCtrlPressed && !event.isShiftPressed &&
-                !event.isAltPressed && !event.isMetaPressed
-            ) {
-                if (event.action == KeyEvent.ACTION_DOWN) insertBlankLine()
-                return true
+            if (keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                val command = ch.fasrv.fanotes.desk.deskShortcut(
+                    event.isCtrlPressed,
+                    event.isShiftPressed,
+                    event.isAltPressed,
+                    event.isMetaPressed,
+                    "enter",
+                )
+                if (command != null) {
+                    if (event.action == KeyEvent.ACTION_DOWN) onDeskShortcut(command)
+                    return true
+                }
             }
             if (!event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed &&
                 (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_PAGE_DOWN)
@@ -483,6 +490,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 KeyEvent.KEYCODE_N -> "n"
                 KeyEvent.KEYCODE_COMMA -> ","
                 KeyEvent.KEYCODE_E -> "e"
+                KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> "enter"
                 in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9 -> ('1' + (keyCode - KeyEvent.KEYCODE_1)).toString()
                 else -> null
             }
@@ -1184,6 +1192,32 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val scale = editor.textSize / 16f
         val y = layout.getLineTop(line) + (anchor.offset * scale).toInt()
         editor.scrollTo(0, y.coerceAtLeast(0))
+    }
+
+    /**
+     * Flips the caret line, and every selected line, with the desktop task rule.
+     * Fails while the pen is the editor.
+     */
+    fun toggleTasks(): Boolean {
+        if (!textMode) return false
+        val editable = editor.text ?: return false
+        val before = editable.toString()
+        val start = editor.selectionStart.coerceIn(0, before.length)
+        val end = editor.selectionEnd.coerceIn(0, before.length)
+        val edit = ch.fasrv.fanotes.desk.toggleTasksInNote(before, start, end)
+        if (edit.text == before) return true
+        val caret = editor.selectionEnd.coerceAtLeast(0)
+        writing = true
+        editor.setText(edit.text)
+        editor.setSelection(
+            edit.selectionStart.coerceIn(0, edit.text.length),
+            edit.selectionEnd.coerceIn(0, edit.text.length),
+        )
+        writing = false
+        editor.rememberChange(before, edit.text, caret)
+        paintLivePreview()
+        onVisibleMarkdown(before, edit.text)
+        return true
     }
 
     /** Inserts a date stamp at the caret. Fails while the pen is the editor. */

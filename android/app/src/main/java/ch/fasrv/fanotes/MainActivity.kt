@@ -536,6 +536,33 @@ fun FaNotesScreen(
         }
     }
 
+    fun copyWikiLink(path: String) {
+        val link = ch.fasrv.fanotes.vault.wikiLinkForNote(path)
+        val clipboard = context.getSystemService(ClipboardManager::class.java)
+        clipboard?.setPrimaryClip(ClipData.newPlainText("Wiki-Link", link))
+        model.message.value = ch.fasrv.fanotes.vault.WIKI_LINK_COPIED
+        if (model.message.value != "Wiki-Link kopiert.") model.message.value = "Wiki-Link kopiert."
+    }
+
+    fun copyOpenWikiLink() {
+        val path = open?.path ?: return
+        if (path.isEmpty()) return
+        copyWikiLink(path)
+    }
+
+    fun toggleOpenTask() {
+        val note = open
+        if (note == null || note.kind != NoteKind.MARKDOWN) {
+            model.message.value = "Öffne eine Markdown-Notiz, um die Aufgabe umzuschalten."
+            return
+        }
+        if (!showText) {
+            model.message.value = "Wechsle zur Tastatur, um Text einzufügen."
+            return
+        }
+        model.requestToggleTask()
+    }
+
     fun runDeskShortcut(id: String) {
         when (id) {
             "tab-next" -> model.cycleTabs(1)
@@ -562,6 +589,8 @@ fun FaNotesScreen(
             "pen" -> model.togglePen()
             "stamp", "insert-date" -> model.insertDateStamp(withTime = false)
             "insert-date-time" -> model.insertDateStamp(withTime = true)
+            "copy-wiki-link" -> copyOpenWikiLink()
+            "toggle-task" -> toggleOpenTask()
             else -> if (id.startsWith("tab-")) id.removePrefix("tab-").toIntOrNull()?.let(model::openTabByDigit)
         }
     }
@@ -690,6 +719,7 @@ fun FaNotesScreen(
                     Key.Comma -> ","
                     Key.E -> "e"
                     Key.D -> "d"
+                    Key.Enter, Key.NumPadEnter -> "enter"
                     Key.One -> "1"
                     Key.Two -> "2"
                     Key.Three -> "3"
@@ -840,12 +870,7 @@ fun FaNotesScreen(
                     expanded = model.expandedFolders.collectAsStateWithLifecycle().value,
                     onToggleFolder = { model.toggleFolder(it) },
                     onToggleFolders = { model.toggleAllFolders() },
-                    onCopyWiki = { path ->
-                        val link = ch.fasrv.fanotes.vault.wikiLinkForNote(path)
-                        val clipboard = context.getSystemService(ClipboardManager::class.java)
-                        clipboard?.setPrimaryClip(ClipData.newPlainText("Wiki-Link", link))
-                        model.message.value = ch.fasrv.fanotes.vault.WIKI_LINK_COPIED
-                    },
+                    onCopyWiki = { path -> copyWikiLink(path) },
                     onSetFolderExpanded = { path, open -> model.setFolderExpanded(path, open) },
                     onOpenSplit = { model.openInSplit(it) },
                     onCreateNoteIn = { model.createNoteIn(it) },
@@ -1114,6 +1139,8 @@ fun FaNotesScreen(
                     "trash" -> model.openTrash()
                     "stamp", "insert-date" -> model.insertDateStamp(withTime = false)
                     "insert-date-time" -> model.insertDateStamp(withTime = true)
+                    "copy-wiki-link" -> copyOpenWikiLink()
+                    "toggle-task" -> toggleOpenTask()
                     "pin-tab" -> model.togglePinTab()
                     "close-others" -> model.closeTabs("others")
                     "close-right" -> model.closeTabs("right")
@@ -2920,6 +2947,7 @@ private fun PageSurface(
     val highlights by model.worksheetHighlights.collectAsStateWithLifecycle()
     val outlineJump by model.outlineJump.collectAsStateWithLifecycle()
     val gotoLineInput by model.gotoLineInput.collectAsStateWithLifecycle()
+    val taskToggleRequest by model.taskToggleRequest.collectAsStateWithLifecycle()
     val foldedHeadings by model.foldedHeadings.collectAsStateWithLifecycle()
     val clearLink by model.clearLinkRequest.collectAsStateWithLifecycle()
     val placeLinkRequest by model.placeLinkRequest.collectAsStateWithLifecycle()
@@ -3136,6 +3164,9 @@ private fun PageSurface(
                 folded = foldedHeadings,
                 metrics = ch.fasrv.fanotes.desk.editorMetrics(model.effectiveDesk()),
             )
+            if (taskToggleRequest != 0 && model.takeTaskToggle()) {
+                if (!page.toggleTasks()) model.message.value = "Wechsle zur Tastatur, um Text einzufügen."
+            }
             val jump = outlineJump
             if (jump != null) {
                 page.revealLine(jump)

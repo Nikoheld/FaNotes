@@ -24,5 +24,6 @@ fun deskShortcut(ctrl: Boolean, shift: Boolean, alt: Boolean, meta: Boolean, key
     if (mod && shift && !alt && key == "e") return "focus"
     if (mod && !shift && !alt && key == "d") return "pen"
     if (mod && shift && !alt && key == "d") return "stamp"
+    if (mod && !shift && !alt && key == "enter") return "toggle-task"
     return null
 }
