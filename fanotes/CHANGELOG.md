@@ -1,5 +1,13 @@
 # Änderungsverlauf
 
+## 2026.10.11-beta.1
+
+- Add an Alpha action that publishes the next beta from main.
+- Make the square size of the paper background configurable.
+- Let the eraser start at 1 px and leave distant ink.
+- Keep handwriting undo after the app closes.
+- Remove tool-select and shape-recognition popups.
+
 ## 2026.10.10
 
 - **Startseite.** Die leere Seite ist eine Fläche aus Uhr, Datum, Notiz und Fächern.
