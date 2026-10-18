@@ -45,6 +45,7 @@ import {
   homeworkApiSecretReady,
 } from '../lib/homeworkApi'
 import { bestContrastText } from '../lib/colorContrast'
+import { clampPaperSquareMm, paperSquareSizeLabel } from '../lib/paperSquare'
 import type { RemoteSupportSession } from '../lib/remoteSupport'
 import {
   TABLET_BUTTON_ACTION_LABELS,
@@ -761,6 +762,20 @@ export function SettingsModal({
                       <option value="lines">Liniert</option>
                       <option value="millimeter">Millimeterpapier</option>
                     </select>
+                  </SettingRow>
+                  <SettingRow title="Kästchengrösse" description="Seitenlänge der Quadrate auf Häuschen- und Kariertpapier. Automatisch behält Häuschen bei 5 mm und Kariert bei 7,5 mm.">
+                    <div className="range-setting">
+                      <input
+                        type="range"
+                        min={0}
+                        max={20}
+                        step={0.5}
+                        aria-label="Kästchengrösse"
+                        value={clampPaperSquareMm(settings.paperSquareMm)}
+                        onChange={(event) => update('paperSquareMm', clampPaperSquareMm(Number(event.target.value)))}
+                      />
+                      <output>{paperSquareSizeLabel(settings.paperSquareMm)}</output>
+                    </div>
                   </SettingRow>
                   <SettingRow title="Stiftfarbe"><input className="color-input" type="color" value={settings.penColor} onChange={(event) => update('penColor', event.target.value)} /></SettingRow>
                   <SettingRow title="Stiftbreite"><Range value={settings.penWidth} min={1} max={18} step={0.5} suffix=" px" onChange={(value) => update('penWidth', value)} /></SettingRow>

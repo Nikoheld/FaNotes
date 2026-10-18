@@ -207,6 +207,7 @@ import { defaultSettingsForPlatform } from './defaults'
 import { PaperStylePicker } from './components/PaperStylePicker'
 import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
+import { clampPaperSquareMm, paperSheetPx, paperSquarePx, paperSquareSizeLabel } from './lib/paperSquare'
 import { clampViewZoom, createPaperViewStore, sharedPaperViewStore, writeSharedZoomMaxPercent, writeSharedZoomSpeed, type PaperViewStore } from './lib/paperView'
 import { diagnosticLog } from './lib/bugReport'
 import {
@@ -4853,6 +4854,9 @@ export default function App({ startupBootstrap }: AppProps) {
       '--line-height': String(settings.lineHeight),
       '--ui-font': settings.uiFont,
       '--editor-font': settings.editorFont,
+      ...(clampPaperSquareMm(settings.paperSquareMm) > 0
+        ? { '--paper-square-size': `${paperSquarePx(paperSheetPx(settings.contentWidth, settings.readableLineLength), clampPaperSquareMm(settings.paperSquareMm))}px` }
+        : {}),
     } as React.CSSProperties
   }, [settings, sidebarVisible, theme])
 
@@ -5354,11 +5358,28 @@ export default function App({ startupBootstrap }: AppProps) {
                     </div>
                   )}
                   {!isPdfActive && (
-                  <PaperStylePicker
-                    value={activePaper}
-                    disabled={activeEntryMutating}
-                    onChange={(style) => { if (activeTab) void applyNotePaper(activeTab.path, style) }}
-                  />
+                  <div className="note-paper-controls">
+                    {(activePaper === 'squares' || activePaper === 'grid') && (
+                      <label className="paper-square-size" title="Seitenlänge der Quadrate auf Häuschen- und Kariertpapier">
+                        <span>Kästchen</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={20}
+                          step={0.5}
+                          aria-label="Kästchengrösse"
+                          value={clampPaperSquareMm(settings.paperSquareMm)}
+                          onChange={(event) => applySettings({ ...settings, paperSquareMm: clampPaperSquareMm(Number(event.target.value)) })}
+                        />
+                        <output>{paperSquareSizeLabel(settings.paperSquareMm)}</output>
+                      </label>
+                    )}
+                    <PaperStylePicker
+                      value={activePaper}
+                      disabled={activeEntryMutating}
+                      onChange={(style) => { if (activeTab) void applyNotePaper(activeTab.path, style) }}
+                    />
+                  </div>
                   )}
                 </div>
               )}

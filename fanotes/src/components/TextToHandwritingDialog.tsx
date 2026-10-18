@@ -22,6 +22,7 @@ type TextToHandwritingDialogProps = {
   baseWidth: number
   pressureEnabled: boolean
   paperStyle: PaperStyle
+  squareMm?: number
   onClose: () => void
   onInsert: (strokes: SynthesizedInkStroke[], result: HandwritingSynthesisResult) => void
   onRequestTraining: () => void
@@ -38,8 +39,9 @@ const drawPreviewPaper = (
   width: number,
   height: number,
   paperStyle: PaperStyle,
+  squareMm = 0,
 ) => {
-  drawPaperBackground(context, width, height, paperStyle)
+  drawPaperBackground(context, width, height, paperStyle, squareMm)
 }
 
 const HandwritingPreview = ({
@@ -47,11 +49,13 @@ const HandwritingPreview = ({
   pageWidth,
   pageHeight,
   paperStyle,
+  squareMm = 0,
 }: {
   result: HandwritingSynthesisResult
   pageWidth: number
   pageHeight: number
   paperStyle: PaperStyle
+  squareMm?: number
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -62,7 +66,7 @@ const HandwritingPreview = ({
     canvas.width = pageWidth
     canvas.height = pageHeight
     context.clearRect(0, 0, pageWidth, pageHeight)
-    drawPreviewPaper(context, pageWidth, pageHeight, paperStyle)
+    drawPreviewPaper(context, pageWidth, pageHeight, paperStyle, squareMm)
     context.lineCap = 'round'
     context.lineJoin = 'round'
     for (const stroke of result.strokes) {
@@ -92,7 +96,7 @@ const HandwritingPreview = ({
         context.stroke()
       }
     }
-  }, [pageHeight, pageWidth, paperStyle, result])
+  }, [pageHeight, pageWidth, paperStyle, result, squareMm])
 
   return <canvas ref={canvasRef} className="lw-tth-preview-canvas" aria-label="Vorschau der erzeugten Handschrift" />
 }
@@ -107,6 +111,7 @@ export function TextToHandwritingDialog({
   baseWidth,
   pressureEnabled,
   paperStyle,
+  squareMm = 0,
   onClose,
   onInsert,
   onRequestTraining,
@@ -344,7 +349,7 @@ export function TextToHandwritingDialog({
             </button>
           </div>
           <div className="lw-tth-paper-wrap">
-            <HandwritingPreview result={result} pageWidth={previewWidth} pageHeight={previewHeight} paperStyle={paperStyle} />
+            <HandwritingPreview result={result} pageWidth={previewWidth} pageHeight={previewHeight} paperStyle={paperStyle} squareMm={squareMm} />
             {!text.trim() && <div className="lw-tth-preview-empty"><PenLine size={27} /><span>Deine Vorschau erscheint hier</span></div>}
           </div>
           {fitToPage && result.fontSizeUsed < fontSize && <p className="lw-tth-fit-note">Für den verfügbaren Platz automatisch auf {result.fontSizeUsed} px angepasst.</p>}

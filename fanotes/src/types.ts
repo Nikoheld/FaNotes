@@ -119,6 +119,8 @@ export type AppSettings = {
   dailyNotesFolder: string
   dateFormat: string
   paperStyle: PaperStyle
+  /** 0 keeps the built-in square size. Otherwise the side of Häuschen and Kariert, in millimetres. */
+  paperSquareMm: number
   penColor: string
   penWidth: number
   pressureEnabled: boolean

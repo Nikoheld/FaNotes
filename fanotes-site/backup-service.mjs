@@ -36,7 +36,7 @@ const SETTING_KEYS = new Set([
   'theme', 'workspaceBackground', 'accent', 'accentSecondary', 'uiFont', 'editorFont', 'editorFontSize',
   'previewFontSize', 'lineHeight', 'readableLineLength', 'contentWidth', 'showLineNumbers', 'spellcheck',
   'vimMode', 'autosaveDelay', 'sidebarWidth', 'rightPanelWidth', 'compactMode', 'glassEffects', 'reduceMotion',
-  'showWordCount', 'showOutline', 'defaultFolder', 'dailyNotesFolder', 'dateFormat', 'paperStyle', 'penColor',
+  'showWordCount', 'showOutline', 'defaultFolder', 'dailyNotesFolder', 'dateFormat', 'paperStyle', 'paperSquareMm', 'penColor',
   'penWidth', 'pressureEnabled', 'smoothing', 'scribbleEraseSensitivity', 'recognitionMode', 'lastRecognitionMode',
   'recognitionLanguage', 'autoOpenConversion', 'keepDrawingAfterInsert', 'autoCheckUpdates',
   'autoDownloadUpdates', 'installUpdatesOnQuit', 'updateChannel', 'lmStudioBaseUrl', 'lmStudioModel',

@@ -55,6 +55,7 @@ import type {
 import type { Stroke, StrokePoint } from '../../../src/types'
 import type { AppSettings, DrawingAsset, PaperStyle } from '../types'
 import { PAPER_STYLES, drawPaperBackground } from '../lib/paperStyles'
+import { clampPaperSquareMm, paperSquareSizeLabel } from '../lib/paperSquare'
 import { strokeDurationMs, strokeLengthMm, summarizeInkStrokes, type InkStrokeActivity, type InkSummary } from '../lib/pageStats'
 import { TextToHandwritingDialog } from './TextToHandwritingDialog'
 import type {
@@ -669,6 +670,7 @@ export type DrawingBoardProps = {
   settings: Pick<
     AppSettings,
     | 'paperStyle'
+    | 'paperSquareMm'
     | 'penColor'
     | 'penWidth'
     | 'pressureEnabled'
@@ -924,8 +926,9 @@ const drawPaper = (
   width: number,
   height: number,
   style: PaperStyle,
+  squareMm = 0,
 ) => {
-  drawPaperBackground(context, width, height, style)
+  drawPaperBackground(context, width, height, style, squareMm)
 }
 
 const drawInkStroke = (
@@ -1015,6 +1018,7 @@ const renderDocument = (
   inkWindow: InkWindow = FULL_INK_WINDOW,
   layoutWidth = 0,
   band: { y: number; height: number } | null = null,
+  squareMm = 0,
 ) => {
   const context = canvas.getContext('2d')
   if (!context) return
@@ -1026,7 +1030,7 @@ const renderDocument = (
   context.setTransform(1, 0, 0, 1, 0, 0)
   if (band) context.clearRect(0, band.y, width, band.height)
   else context.clearRect(0, 0, canvas.width, canvas.height)
-  if (includePaper && !band) drawPaper(context, width, height, paperStyle)
+  if (includePaper && !band) drawPaper(context, width, height, paperStyle, squareMm)
   context.save()
   context.beginPath()
   context.rect(0, clip.y, width, clip.height)
@@ -2112,6 +2116,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       pixelHeight,
       (pixelHeight / windowLayoutHeight).toFixed(5),
       paperStyle,
+      clampPaperSquareMm(settings.paperSquareMm),
       settings.smoothing,
       paintLayoutWidth || layoutWidth,
       inline,
@@ -2151,6 +2156,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         sourceWidth,
         inkWindow,
         paintLayoutWidth || layoutWidth,
+        null,
+        settings.paperSquareMm,
       )
       committedBitmapRef.current = { key: contentKey, topPx }
       committedCanvasDirtyRef.current = false
@@ -2175,7 +2182,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return
     }
     paintLiveInk(context, activeStroke, [])
-  }, [inline, paintLiveInk, paperStyle, redrawViewportRaster, settings.smoothing, sourceHeight, sourceWidth])
+  }, [inline, paintLiveInk, paperStyle, redrawViewportRaster, settings.paperSquareMm, settings.smoothing, sourceHeight, sourceWidth])
 
   const onInkActivityRef = useRef(onInkActivity)
   onInkActivityRef.current = onInkActivity
@@ -5150,7 +5157,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     )
     let imageData: string | undefined
     if (includeImage) {
-      const exportKey = [inkRevisionRef.current, paperStyle, settings.smoothing, page.width, page.height].join(':')
+      const exportKey = [inkRevisionRef.current, paperStyle, clampPaperSquareMm(settings.paperSquareMm), settings.smoothing, page.width, page.height].join(':')
       imageData = exportCacheRef.current?.key === exportKey ? exportCacheRef.current.imageData : undefined
       if (!imageData) {
       const exportCanvas = document.createElement('canvas')
@@ -5165,6 +5172,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         exportCanvas.height,
         true,
         page.width,
+        FULL_INK_WINDOW,
+        0,
+        null,
+        settings.paperSquareMm,
       )
       imageData = exportCanvas.toDataURL('image/png')
       exportCacheRef.current = { key: exportKey, imageData }
@@ -5202,7 +5213,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       drawingJson: JSON.stringify(drawing),
       inkSummary: summarizeInkStrokes(strokesRef.current, page.width, page.height),
     }
-  }, [activeMode, mathSolverEnabled, mode, paperStyle, settings.smoothing, title])
+  }, [activeMode, mathSolverEnabled, mode, paperStyle, settings.paperSquareMm, settings.smoothing, title])
 
   /** A record exists once the page was loaded from the note or written by this board. */
   const inkRecordExists = useCallback(() => (
@@ -6747,6 +6758,21 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           </select>
           <ChevronDown size={14} />
         </label>
+        {(paperStyle === 'squares' || paperStyle === 'grid') && (
+          <label className="lw-draw-range" title="Seitenlänge der Quadrate auf Häuschen- und Kariertpapier">
+            <span>Kästchen</span>
+            <input
+              type="range"
+              min={0}
+              max={20}
+              step={0.5}
+              aria-label="Kästchengrösse"
+              value={clampPaperSquareMm(settings.paperSquareMm)}
+              onChange={(event) => onSettingsChange?.({ paperSquareMm: clampPaperSquareMm(Number(event.target.value)) })}
+            />
+            <output>{paperSquareSizeLabel(settings.paperSquareMm)}</output>
+          </label>
+        )}
 
         <div className="lw-draw-toolgroup lw-view-controls" aria-label="Blattansicht">
           <button type="button" className="lw-draw-icon" aria-label="Herauszoomen" title="Herauszoomen (Strg+- · Strg+Mausrad)" onClick={() => zoomBy(-zoomStepFromSpeed(readSharedZoomSpeed()))} disabled={viewZoom <= VIEW_ZOOM_MIN}><ZoomOut size={17} /></button>
@@ -7531,6 +7557,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         baseWidth={penWidth}
         pressureEnabled={settings.pressureEnabled}
         paperStyle={paperStyle}
+        squareMm={settings.paperSquareMm}
         onClose={() => setTextToHandwritingOpen(false)}
         onInsert={insertSynthesizedHandwriting}
         onRequestTraining={requestTraining}

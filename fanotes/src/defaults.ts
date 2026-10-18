@@ -42,6 +42,7 @@ export const defaultSettingsForPlatform = (platform: string | undefined): AppSet
   dailyNotesFolder: 'Tagesnotizen',
   dateFormat: 'YYYY-MM-DD',
   paperStyle: 'dots',
+  paperSquareMm: 0,
   penColor: '#202333',
   penWidth: 3.5,
   pressureEnabled: true,

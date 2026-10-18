@@ -1,4 +1,5 @@
 import type { PaperStyle } from '../types'
+import { paperSquareStyleMm } from './paperSquare'
 
 export type PaperStyleOption = {
   id: PaperStyle
@@ -39,6 +40,7 @@ export const drawPaperBackground = (
   width: number,
   height: number,
   style: PaperStyle,
+  squareMm = 0,
 ) => {
   context.save()
   context.fillStyle = '#fbfcff'
@@ -63,7 +65,7 @@ export const drawPaperBackground = (
       }
     }
   } else if (style === 'squares') {
-    const step = stepForMm(width, 5)
+    const step = stepForMm(width, paperSquareStyleMm(style, squareMm) ?? 5)
     context.strokeStyle = 'rgba(92, 118, 168, .22)'
     context.beginPath()
     for (let x = 0; x <= width; x += step) {
@@ -76,7 +78,7 @@ export const drawPaperBackground = (
     }
     context.stroke()
   } else if (style === 'grid') {
-    const step = stepForMm(width, 7.5)
+    const step = stepForMm(width, paperSquareStyleMm(style, squareMm) ?? 7.5)
     context.strokeStyle = 'rgba(103, 116, 147, .145)'
     context.beginPath()
     for (let x = step; x < width; x += step) {
