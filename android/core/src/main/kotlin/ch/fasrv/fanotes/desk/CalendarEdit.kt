@@ -201,7 +201,7 @@ fun saveCalendarOccurrence(
             exceptionDates = emptyList(),
         ),
         skipped.calendars.map { it.id }.toSet(),
-    ) ?: return skipped
+    ) ?: return document
     return upsertCalendarEvent(skipped, detached)
 }
 

@@ -170,6 +170,29 @@ class CalendarEditTest {
         assertEquals("2026-10-12T09:30", fixed.events.first { it.id == "neu" }.end)
         assertSame(document, saveCalendarOccurrence(document, "e@2026-10-12", event.copy(title = "   ")))
         assertSame(document, saveCalendarOccurrence(document, null, event.copy(id = "x", calendarId = "missing", title = "Weg")))
+        val weekly = CalendarEvent(
+            "w",
+            "personal",
+            "Serie",
+            "2026-10-12T09:00",
+            "2026-10-12T10:00",
+            allDay = false,
+            recurrence = "weekly",
+        )
+        val series = emptyCalendar().copy(events = listOf(weekly))
+        val blankLater = saveCalendarOccurrence(
+            series,
+            "w@2026-10-19",
+            weekly.copy(title = "   ", start = "2026-10-19T09:00", end = "2026-10-19T10:00"),
+        )
+        assertSame(series, blankLater)
+        assertEquals(emptyList(), blankLater.events.single().exceptionDates)
+        val unknownLater = saveCalendarOccurrence(
+            series,
+            "w@2026-10-19",
+            weekly.copy(calendarId = "missing", title = "Weg", start = "2026-10-19T09:00", end = "2026-10-19T10:00"),
+        )
+        assertSame(series, unknownLater)
         val allDay = CalendarEvent("d", "personal", "Tag", "2026-10-14", "2026-10-12", allDay = true)
         val healed = saveCalendarOccurrence(emptyCalendar(), null, allDay)
         assertEquals("2026-10-14", healed.events.single().start)
