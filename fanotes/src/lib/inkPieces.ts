@@ -6,6 +6,7 @@
  * the pen really meets its ink, and the neighbouring letter stays.
  * A long straight mark, such as an underline, is not a letter — only the
  * span the pen actually covers is cut out.
+ * A leap to ink that is not part of the letter starts a new piece.
  */
 
 export type InkPiecePoint = { x: number; y: number }
@@ -92,6 +93,9 @@ export const boundsOfPixels = (pixels: readonly Pixel[], start: number, end: num
   }
 }
 
+/** Page-space leap the live pen already refuses to join into one stroke. */
+const PAGE_LEAP = 0.12
+
 const kindFor = (bounds: PieceBounds): PieceKind => {
   const flat = bounds.height <= 14
   const wideLine = bounds.width > Math.max(72, bounds.height * 3)
@@ -106,6 +110,42 @@ const rangeWidth = (pixels: readonly Pixel[], start: number, end: number) => (
 )
 
 /**
+ * Cuts where one segment jumps to a different cluster of ink.
+ * Both sides keep at least two points, so a plain stem stays one piece.
+ */
+const leapParts = (
+  pixels: readonly Pixel[],
+  sourceWidth: number,
+  sourceHeight: number,
+): Array<{ start: number; end: number }> => {
+  const count = pixels.length
+  if (count < 4 || sourceWidth < 1 || sourceHeight < 1) return []
+  const spans: number[] = []
+  for (let index = 1; index < count; index += 1) {
+    const dx = (pixels[index].x - pixels[index - 1].x) / sourceWidth
+    const dy = (pixels[index].y - pixels[index - 1].y) / sourceHeight
+    spans.push(Math.hypot(dx, dy))
+  }
+  const ordered = [...spans].sort((left, right) => left - right)
+  const median = ordered[Math.floor((ordered.length - 1) / 2)] ?? 0
+  const cuts: number[] = []
+  for (let index = 2; index <= count - 2; index += 1) {
+    const span = spans[index - 1]
+    const outlier = span > 0.09 && median > 0 && span > median * 4
+    if (span > PAGE_LEAP || outlier) cuts.push(index)
+  }
+  if (!cuts.length) return []
+  const parts: Array<{ start: number; end: number }> = []
+  let start = 0
+  for (const index of cuts) {
+    if (index - 1 >= start) parts.push({ start, end: index - 1 })
+    start = index
+  }
+  if (start <= count - 1) parts.push({ start, end: count - 1 })
+  return parts.length > 1 ? parts : []
+}
+
+/**
  * Splits one stroke into letter-sized ranges. A short glyph stays one range.
  * Necks are the thin connectors between letters, not the arches inside m or w.
  */
@@ -118,6 +158,19 @@ export const letterRanges = (
   if (!count || sourceWidth < 1 || sourceHeight < 1) return []
   const pixels = pixelsOf(points, sourceWidth, sourceHeight)
   if (count === 1) return [{ start: 0, end: 0, kind: kindFor(boundsOfPixels(pixels, 0, 0)) }]
+
+  const leaps = leapParts(pixels, sourceWidth, sourceHeight)
+  if (leaps.length) {
+    return leaps.flatMap((part) => letterRanges(
+      points.slice(part.start, part.end + 1),
+      sourceWidth,
+      sourceHeight,
+    ).map((range) => ({
+      start: range.start + part.start,
+      end: range.end + part.start,
+      kind: range.kind,
+    })))
+  }
 
   const box = boundsOfPixels(pixels, 0, count - 1)
   const height = Math.max(box.height, 1)
@@ -245,7 +298,9 @@ const attaches = (mark: PieceBounds, host: PieceBounds) => {
   if (centerX < host.minX - 8 || centerX > host.maxX + 8) return false
   if (mark.height > host.height * 0.55 && mark.width > host.width * 0.7) return false
   const gap = Math.max(0, Math.max(mark.minY, host.minY) - Math.min(mark.maxY, host.maxY))
-  return gap <= Math.max(18, host.height * 0.8)
+  // A dot or crossbar sits on the letter. A short stroke farther down the
+  // page is a different line, even when the stem is tall.
+  return gap <= Math.min(36, Math.max(18, host.height * 0.45))
 }
 
 /** Letter pieces for every stroke, with dots and crossbars grouped onto their letter. */

@@ -6736,7 +6736,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           </label>
         </> : tool === 'eraser' ? <label className="lw-draw-range">
           <span>Größe</span>
-          <input type="range" min="10" max="72" value={eraserSize} onChange={(event) => setEraserSize(Number(event.target.value))} />
+          <input type="range" min="1" max="72" value={eraserSize} onChange={(event) => setEraserSize(Number(event.target.value))} />
           <output>{eraserSize} px</output>
         </label> : null}
 

@@ -157,6 +157,43 @@ try {
   assert.equal(lineParts.some((stroke) => hasPointNear(stroke, 360, 420, 2)), true, 'the underline keeps its untouched end')
 
   assert.equal(wordParts.some((stroke) => hasPointNear(stroke, 120, 220, 8)), false, 'the stem of the touched letter goes with the letter')
+
+  const fineStem = polyline([[px(100), py(230)], [px(100), py(310)]], { id: 'fine' })
+  const fineNeighbor = polyline([[px(130), py(230)], [px(130), py(310)]], { id: 'fine-neighbor' })
+  const finePair = [fineStem, fineNeighbor]
+  const fineHit = applyToolErase(finePair, [{ x: px(100), y: py(270) }], 1, SOURCE_WIDTH, SOURCE_HEIGHT)
+  assert.equal(fineHit.some((stroke) => stroke.id === 'fine'), false, 'a 1 px eraser on the ink removes that stroke')
+  assert.equal(fineHit.includes(fineNeighbor), true, 'a 1 px eraser leaves the stroke a few pixels away')
+  const fineMiss = applyToolErase(finePair, [{ x: px(108), y: py(270) }], 1, SOURCE_WIDTH, SOURCE_HEIGHT)
+  assert.equal(fineMiss, finePair, 'a 1 px eraser that only passes near the ink deletes nothing')
+
+  const tallStem = polyline([[px(120), py(200)], [px(120), py(320)]], { id: 'tall' })
+  const stray = polyline([[px(108), py(400)], [px(132), py(400)]], { id: 'stray' })
+  const farLine = polyline([[px(420), py(180)], [px(620), py(180)]], { id: 'far' })
+  const separated = applyToolErase(
+    [tallStem, stray, farLine],
+    [{ x: px(120), y: py(300) }],
+    RADIUS,
+    SOURCE_WIDTH,
+    SOURCE_HEIGHT,
+  )
+  assert.equal(separated.some((stroke) => stroke.id === 'tall'), false, 'the touched stem is removed')
+  assert.equal(separated.includes(stray), true, 'a short line well below the letter stays')
+  assert.equal(separated.includes(farLine), true, 'a line elsewhere on the page stays')
+
+  const jumped = polyline([
+    [px(80), py(200)],
+    [px(80), py(260)],
+    [px(700), py(900)],
+    [px(780), py(900)],
+  ], { id: 'jumped' })
+  const quiet = polyline([[px(200), py(500)], [px(400), py(500)]], { id: 'quiet' })
+  const afterJump = applyToolErase([jumped, quiet], [{ x: px(80), y: py(230) }], RADIUS, SOURCE_WIDTH, SOURCE_HEIGHT)
+  assert.equal(afterJump.includes(quiet), true, 'a stroke that was not touched stays')
+  const jumpParts = afterJump.filter((stroke) => stroke.id === 'jumped')
+  assert.equal(jumpParts.some((stroke) => hasPointNear(stroke, 80, 230, 8)), false, 'the touched end of a jumped stroke is gone')
+  assert.equal(jumpParts.some((stroke) => hasPointNear(stroke, 740, 900, 50)), true, 'the far end of a jumped stroke stays')
+
   console.log(JSON.stringify({
     lineRemnants: remnants.length,
     wordParts: wordParts.map((stroke) => stroke.points.length),
