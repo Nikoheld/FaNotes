@@ -1,5 +1,22 @@
 # Änderungsverlauf
 
+## 2026.10.10
+
+- **Startseite.** Die leere Seite ist eine Fläche aus Uhr, Datum, Notiz und Fächern.
+- **Erster Start.** Die Ersteinrichtung ist eine Fläche statt vier Szenen.
+- **LaTeX.** Einfache Formeln kommen über Knöpfe in den Text.
+- **Fußnote.** Ein Codezaun in einer Fußnote bleibt offen, bis der passende Abschluss da ist.
+- **Neue Notiz.** Das Textfeld steht, bevor die ersten Tasten ankommen.
+- **Android.** Die Befehlsliste kann den Wiki-Link kopieren und die Aufgabe umschalten.
+- **Stempel.** Neben der Uhrzeit gibt es einen reinen Datumsstempel. Rückgängig bei Tinte bleibt auf denselben Papierpunkten.
+- **Schulschrift.** Festgeschriebene Schulschrift bleibt suchbar.
+- **Arbeitsblatt.** Ein Duplikat behält sein Bild, auch wenn die Kennung im Dateinamen oder in einer anderen Markierung steckt.
+- **Umbenennen.** Ist der Name der Begleitdatei schon vergeben, bleibt die Notiz beisammen.
+- **Kalender.** Ein wiederkehrender Termin bleibt stehen, wenn ein späteres Vorkommen nicht gespeichert werden kann.
+- **Papierkorb.** Ein Ordner mit einem Punkt im Namen behält beim Wiederherstellen seine Endung.
+- **Ordnerpfade.** Ein Ordner zeigt Dateien aus mehreren Pfaden. Neue Notizen landen im ersten Pfad.
+- **Grok-Connector.** Ein freigegebener Grok liest den synchronisierten Tresor nur lesend: Notizen, Prüfungen, Kalender, Hausaufgaben und Karteikarten.
+
 ## 2026.10.9
 
 - **Ordnerpfad.** Ein Ordner kann auf einen anderen Ordner zeigen, auch auf mehrere. Die Dateien erscheinen zusammen in diesem einen Ordner. Der erste Pfad ist der Hauptordner für neue Notizen. Beim Wechsel kann FaNotes die Dateien aus dem bisherigen Ordner in den neuen verschieben und lässt belegte Namen liegen. Auf dem Desktop liegen die Pfade außerhalb des Vaults und bleiben auf diesem Gerät. Im Browser sind es andere Ordner desselben Vaults.
