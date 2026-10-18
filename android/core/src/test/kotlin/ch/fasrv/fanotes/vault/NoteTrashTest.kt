@@ -79,6 +79,26 @@ class NoteTrashTest {
     }
 
     @Test
+    fun restoringADottedFolderKeepsTheClashSuffix() {
+        val (vault, store) = vault("fanotes-trash-dotted")
+        store.createFolder("", "2026.10")
+        val path = store.createMarkdown("2026.10", "Aufgabe")
+        val note = store.readNote(path)
+        store.save(note, note.document, "Original\n")
+        store.trashEntry("2026.10", "folder-dot", "2026-10-16T12:00:00.000Z")
+        store.createFolder("", "2026.10")
+        val fresh = store.createMarkdown("2026.10", "Aufgabe")
+        val freshNote = store.readNote(fresh)
+        store.save(freshNote, freshNote.document, "Neu\n")
+        val restored = store.restoreTrash("folder-dot")
+        assertEquals("2026.10 2", restored)
+        assertTrue(store.readNote("2026.10 2/Aufgabe.md").markdown.contains("Original"))
+        assertTrue(store.readNote("2026.10/Aufgabe.md").markdown.contains("Neu"))
+        assertTrue(vault.exists("2026.10 2/Aufgabe.famd"))
+        assertFalse(vault.exists(".fanotes/trash/folder-dot"))
+    }
+
+    @Test
     fun aCopyKeepsTheTextAndGetsItsOwnInkAndWorksheet() {
         val (vault, store) = vault("fanotes-copy")
         val png = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
@@ -137,6 +157,8 @@ class NoteTrashTest {
         assertEquals("Math/Algebra.md", restoredVaultPath("Math/Algebra.md", folder = false) { false })
         assertEquals(".fanotes/assets/ink.json", remapRestoredFile("Math/Algebra.md", "Math/Algebra 2.md", ".fanotes/assets/ink.json"))
         assertEquals("Math/Algebra 2.famd", remapRestoredFile("Math/Algebra.md", "Math/Algebra 2.md", "Math/Algebra.famd"))
+        assertEquals("2026.10 2/Aufgabe.md", remapRestoredFile("2026.10", "2026.10 2", "2026.10/Aufgabe.md"))
+        assertEquals("2026.10 2", restoredVaultPath("2026.10", folder = true) { it == "2026.10" })
         assertEquals("2026-10-16 16:19", noteDateStamp(LocalDate.parse("2026-10-16"), LocalTime.of(16, 19), "YYYY-MM-DD"))
         assertEquals("16.10.2026 16:19", noteDateStamp(LocalDate.parse("2026-10-16"), LocalTime.of(16, 19), "DD.MM.YYYY"))
         assertEquals("Heute\n\n2026-10-16 16:19\n", insertNoteStamp("Heute\n", "2026-10-16 16:19"))

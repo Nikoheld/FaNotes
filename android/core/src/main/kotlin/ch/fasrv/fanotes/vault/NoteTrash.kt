@@ -151,8 +151,10 @@ fun remapRestoredFile(originalRoot: String, restoredRoot: String, file: String):
 }
 
 private fun restoredStem(path: String): String {
-    val extension = extensionOf(path)
-    return if (extension.isEmpty()) path else path.removeSuffix(extension)
+    val name = path.substringAfterLast('/')
+    val extension = listOf(".markdown", ".famd", ".pdf", ".md").firstOrNull { name.endsWith(it, ignoreCase = true) }
+        ?: return path
+    return path.dropLast(extension.length)
 }
 
 fun readTrashIndex(io: VaultIo): List<TrashItem> {
