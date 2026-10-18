@@ -16,6 +16,7 @@ const CHROME_FILES = [
   'src/components/SettingsModal.tsx',
   'src/components/FileTree.tsx',
   'src/components/FirstRunOnboarding.tsx',
+  'src/components/StartDashboard.tsx',
   'src/components/CommandPalette.tsx',
   'src/components/SubjectBookPane.tsx',
   'src/components/BugReportModal.tsx',

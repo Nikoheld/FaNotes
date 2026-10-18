@@ -171,6 +171,8 @@ export type AppSettings = {
   experimentalSendData: boolean
   /** Last opened note path. Restored on launch when the file still exists. */
   lastOpenNotePath: string
+  /** Persisted start-dashboard cards. Empty means the default clock, date, note, and subject. */
+  dashboardLayout: string
   /** Public channel id (32 hex) used in the homework query URL. */
   homeworkApiChannelId: string
   /** Local-only homework API secret. Never sent to backups. */

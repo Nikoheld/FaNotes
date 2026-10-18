@@ -73,6 +73,7 @@ export const defaultSettingsForPlatform = (platform: string | undefined): AppSet
   experimentalNoteBackup: false,
   experimentalSendData: false,
   lastOpenNotePath: '',
+  dashboardLayout: '',
   homeworkApiChannelId: '',
   homeworkApiSecret: '',
   ocrModelKeepAliveSeconds: 120,
