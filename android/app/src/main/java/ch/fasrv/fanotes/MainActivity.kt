@@ -560,7 +560,8 @@ fun FaNotesScreen(
             "settings" -> model.showDestination("settings")
             "focus" -> model.toggleFocusMode()
             "pen" -> model.togglePen()
-            "stamp" -> model.insertDateStamp()
+            "stamp", "insert-date" -> model.insertDateStamp(withTime = false)
+            "insert-date-time" -> model.insertDateStamp(withTime = true)
             else -> if (id.startsWith("tab-")) id.removePrefix("tab-").toIntOrNull()?.let(model::openTabByDigit)
         }
     }
@@ -1067,6 +1068,8 @@ fun FaNotesScreen(
                     "book" -> model.toggleBookView()
                     "worksheet" -> onImportSheet()
                     "daily" -> model.openDaily()
+                    "daily-previous" -> model.openAdjacentDaily(-1)
+                    "daily-next" -> model.openAdjacentDaily(1)
                     "split" -> model.toggleSplit()
                     "split-orient" -> model.toggleSplitOrientation()
                     "split-swap" -> model.swapSplit()
@@ -1109,7 +1112,8 @@ fun FaNotesScreen(
                     "reopen-tab" -> model.reopenClosedTab()
                     "duplicate" -> model.duplicateNote()
                     "trash" -> model.openTrash()
-                    "stamp" -> model.insertDateStamp()
+                    "stamp", "insert-date" -> model.insertDateStamp(withTime = false)
+                    "insert-date-time" -> model.insertDateStamp(withTime = true)
                     "pin-tab" -> model.togglePinTab()
                     "close-others" -> model.closeTabs("others")
                     "close-right" -> model.closeTabs("right")

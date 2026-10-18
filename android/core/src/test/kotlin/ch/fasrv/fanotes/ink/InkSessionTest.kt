@@ -9,6 +9,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class InkSessionTest {
@@ -41,6 +42,99 @@ class InkSessionTest {
         assertEquals(1, session.document.strokes.size)
         assertTrue(session.redo())
         assertEquals(2, session.document.strokes.size)
+    }
+
+    @Test
+    fun undoAfterACancelledGrowKeepsTheEarlierStrokeOnTheSamePixels() {
+        val session = InkSession(newInkDocument("Page", "dots", isoNow(0)))
+        session.beginStroke()
+        session.addSample(point(0.2, 0.2))
+        session.endStroke(StrokeStyle(), isoNow(1))
+        session.beginStroke()
+        session.addSample(point(0.4, 0.4))
+        session.endStroke(StrokeStyle(), isoNow(2))
+        val earlier = session.document.strokes[0].points[0]
+        val pageX = earlier.x * session.document.sourceWidth
+        val pageY = earlier.y * session.document.sourceHeight
+        session.beginStroke()
+        session.addSample(StrokePoint(0.2, 0.99, 3.0, 0.5, 0.0, 0.0, "pen"))
+        assertTrue(session.document.sourceHeight > PAGE_START_HEIGHT)
+        session.cancelStroke()
+        assertTrue(session.document.sourceHeight > PAGE_START_HEIGHT)
+        val beforeUndo = session.document.strokes
+        assertTrue(session.undo())
+        assertTrue(session.document.sourceHeight > PAGE_START_HEIGHT)
+        val restored = session.document.strokes.single().points.single()
+        assertEquals(pageX, restored.x * session.document.sourceWidth, 0.01)
+        assertEquals(pageY, restored.y * session.document.sourceHeight, 0.01)
+        assertTrue(session.redo())
+        assertEquals(beforeUndo, session.document.strokes)
+        val redone = session.document.strokes[0].points[0]
+        assertEquals(pageX, redone.x * session.document.sourceWidth, 0.01)
+        assertEquals(pageY, redone.y * session.document.sourceHeight, 0.01)
+    }
+
+    @Test
+    fun undoAfterSynthesizedGrowthKeepsEarlierInkOnTheSamePixels() {
+        val session = InkSession(newInkDocument("Page", "dots", isoNow(0)))
+        session.beginStroke()
+        session.addSample(point(0.2, 0.3))
+        session.endStroke(StrokeStyle(), isoNow(1))
+        val pageX = session.document.strokes[0].points[0].x * session.document.sourceWidth
+        val pageY = session.document.strokes[0].points[0].y * session.document.sourceHeight
+        val added = InkStroke(
+            points = listOf(StrokePoint(0.4, 0.5, 1.0, 0.5, 0.0, 0.0, "pen")),
+            baseWidth = 3.0,
+            pressureEnabled = true,
+            color = "#202333",
+        )
+        val result = HandwritingSynthesisResult(
+            strokes = listOf(added),
+            normalizedText = "A",
+            missingCharacters = emptyList(),
+            overflow = false,
+            overflowCharacters = 0,
+            glyphCount = 1,
+            lineCount = 1,
+            connectionCount = 0,
+            usedSampleIds = emptyList(),
+            fontSizeUsed = 32.0,
+            bounds = null,
+            pageWidth = session.document.sourceWidth,
+            pageHeight = session.document.sourceHeight + 400.0,
+        )
+        assertTrue(session.insertSynthesized(result, isoNow(2)))
+        assertTrue(session.document.sourceHeight > PAGE_START_HEIGHT)
+        assertTrue(session.undo())
+        assertTrue(session.document.sourceHeight > PAGE_START_HEIGHT)
+        val restored = session.document.strokes.single().points.single()
+        assertEquals(pageX, restored.x * session.document.sourceWidth, 0.01)
+        assertEquals(pageY, restored.y * session.document.sourceHeight, 0.01)
+    }
+
+    @Test
+    fun undoAfterAConstructedShapeGrowsThePageKeepsEarlierInkOnTheSamePixels() {
+        val session = InkSession(newInkDocument("Page", "dots", isoNow(0)))
+        session.beginStroke()
+        session.addSample(point(0.25, 0.35))
+        session.endStroke(StrokeStyle(), isoNow(1))
+        val pageX = session.document.strokes[0].points[0].x * session.document.sourceWidth
+        val pageY = session.document.strokes[0].points[0].y * session.document.sourceHeight
+        val shape = session.commitShape(
+            listOf(
+                StrokePoint(0.4, 0.4, 1.0, 0.5, 0.0, 0.0, "pen"),
+                StrokePoint(0.4, 0.99, 2.0, 0.5, 0.0, 0.0, "pen"),
+            ),
+            StrokeStyle(),
+            isoNow(2),
+        )
+        assertNotNull(shape)
+        assertTrue(session.document.sourceHeight > PAGE_START_HEIGHT)
+        assertTrue(session.undo())
+        assertTrue(session.document.sourceHeight > PAGE_START_HEIGHT)
+        val restored = session.document.strokes.single().points.single()
+        assertEquals(pageX, restored.x * session.document.sourceWidth, 0.01)
+        assertEquals(pageY, restored.y * session.document.sourceHeight, 0.01)
     }
 
     @Test

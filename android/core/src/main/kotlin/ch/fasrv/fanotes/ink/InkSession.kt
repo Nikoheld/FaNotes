@@ -75,6 +75,7 @@ class InkSession(document: InkDocument) {
         val pageY = point.y * prevHeight
         val grown = growDocument(document, pageX, pageY)
         if (grown.document !== document) {
+            remapHistory(prevWidth, prevHeight, grown.document.sourceWidth, grown.document.sourceHeight, grown.padX, grown.padY)
             livePoints = livePoints.map { sample ->
                 sample.copy(
                     x = keepMarkOnPage(sample.x, prevWidth, grown.document.sourceWidth, grown.padX),
@@ -103,7 +104,11 @@ class InkSession(document: InkDocument) {
      */
     fun insertSynthesized(result: HandwritingSynthesisResult, now: String): Boolean {
         if (result.strokes.isEmpty()) return false
+        val prevWidth = document.sourceWidth
+        val prevHeight = document.sourceHeight
         val extended = extendPage(document, result.pageWidth, result.pageHeight)
+        remapHistory(prevWidth, prevHeight, extended.sourceWidth, extended.sourceHeight, 0.0, 0.0)
+        document = extended
         val scaleX = if (extended.sourceWidth > 0.0) result.pageWidth / extended.sourceWidth else 1.0
         val scaleY = if (extended.sourceHeight > 0.0) result.pageHeight / extended.sourceHeight else 1.0
         val placed = result.strokes.map { stroke ->
@@ -155,6 +160,8 @@ class InkSession(document: InkDocument) {
             opacity = style.opacity ?: brushOpacity(style.brush) ?: 1.0,
             colorEffect = style.colorEffect,
         )
+        remapHistory(width0, height0, doc.sourceWidth, doc.sourceHeight, doc.originX - originX0, doc.originY - originY0)
+        document = doc
         pushUndo()
         document = doc.copy(strokes = doc.strokes + stroke, updatedAt = now)
         return stroke
@@ -364,6 +371,25 @@ class InkSession(document: InkDocument) {
         undo.addLast(document.strokes)
         if (undo.size > 100) undo.removeFirst()
         redo.clear()
+    }
+
+    /** Older undo snapshots use the page size from when they were stored. */
+    private fun remapHistory(prevWidth: Double, prevHeight: Double, nextWidth: Double, nextHeight: Double, padX: Double, padY: Double) {
+        if (abs(nextWidth - prevWidth) < STAY_PUT_PAD_EPSILON && abs(nextHeight - prevHeight) < STAY_PUT_PAD_EPSILON && padX == 0.0 && padY == 0.0) return
+        fun remap(strokes: List<InkStroke>) = strokes.map { stroke ->
+            stroke.copy(points = stroke.points.map { point ->
+                point.copy(
+                    x = keepMarkOnPage(point.x, prevWidth, nextWidth, padX),
+                    y = keepMarkOnPage(point.y, prevHeight, nextHeight, padY),
+                )
+            })
+        }
+        val nextUndo = undo.map { remap(it) }
+        val nextRedo = redo.map { remap(it) }
+        undo.clear()
+        undo.addAll(nextUndo)
+        redo.clear()
+        redo.addAll(nextRedo)
     }
 
     private fun classify(points: List<StrokePoint>, next: StrokePoint): String {

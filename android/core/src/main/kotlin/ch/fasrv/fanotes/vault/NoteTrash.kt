@@ -199,13 +199,21 @@ fun writeTrashIndex(io: VaultIo, items: List<TrashItem>) {
 fun listTrashItems(io: VaultIo): List<TrashItem> = readTrashIndex(io).asReversed()
 
 /**
+ * The configured date, optionally plus `HH:mm`.
+ * `YYYY-MM-DD` on 2026-10-16 is `2026-10-16`. With 09:05 it is `2026-10-16 09:05`.
+ */
+fun formatNoteStamp(pattern: String, day: LocalDate, withTime: Boolean = false, time: LocalTime = LocalTime.MIDNIGHT): String {
+    val date = formatNoteDate(pattern, day)
+    if (!withTime) return date
+    return "$date %02d:%02d".format(time.hour, time.minute)
+}
+
+/**
  * Date and time in the daily-note pattern, then `HH:mm`.
  * `YYYY-MM-DD` at 16:19 is `2026-10-16 16:19`.
  */
-fun noteDateStamp(day: LocalDate, time: LocalTime, pattern: String): String {
-    val date = formatNoteDate(pattern, day)
-    return "$date %02d:%02d".format(time.hour, time.minute)
-}
+fun noteDateStamp(day: LocalDate, time: LocalTime, pattern: String): String =
+    formatNoteStamp(pattern, day, withTime = true, time = time)
 
 /** Puts the stamp on its own line at the end of the note. */
 fun insertNoteStamp(markdown: String, stamp: String): String {

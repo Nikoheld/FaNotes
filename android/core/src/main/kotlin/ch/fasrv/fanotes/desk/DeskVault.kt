@@ -5,6 +5,7 @@ import ch.fasrv.fanotes.json.jsonNumber
 import ch.fasrv.fanotes.json.jsonObject
 import ch.fasrv.fanotes.json.jsonString
 import ch.fasrv.fanotes.json.parseJson
+import java.time.DateTimeException
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -402,6 +403,103 @@ fun dailyNoteFileName(pattern: String, day: LocalDate): String {
     val illegal = formatted.isEmpty() || formatted == "." || formatted == ".." ||
         formatted.any { it == '/' || it == '\\' || it.code < 32 }
     return if (illegal) day.toString() else formatted.take(120)
+}
+
+const val NOT_A_DAILY_NOTE = "Diese Notiz ist keine Tagesnotiz."
+
+private data class CompiledDatePattern(val expression: Regex, val order: List<Char>)
+
+/** `YYYY`/`YY`, `MM`, and `DD` in the order the daily-note title uses them. */
+private fun compileDatePattern(pattern: String): CompiledDatePattern? {
+    val source = pattern.trim().ifBlank { "YYYY-MM-DD" }.take(80)
+    val order = mutableListOf<Char>()
+    val body = StringBuilder()
+    var index = 0
+    while (index < source.length) {
+        when {
+            source.startsWith("YYYY", index) -> {
+                body.append("(\\d{4})")
+                order += 'Y'
+                index += 4
+            }
+            source.startsWith("YY", index) -> {
+                body.append("(\\d{2})")
+                order += 'y'
+                index += 2
+            }
+            source.startsWith("MM", index) -> {
+                body.append("(\\d{2})")
+                order += 'M'
+                index += 2
+            }
+            source.startsWith("DD", index) -> {
+                body.append("(\\d{2})")
+                order += 'D'
+                index += 2
+            }
+            else -> {
+                body.append(Regex.escape(source[index].toString()))
+                index += 1
+            }
+        }
+    }
+    if ('M' !in order || 'D' !in order || ('Y' !in order && 'y' !in order)) return null
+    return CompiledDatePattern(Regex(body.toString()), order)
+}
+
+private fun yearFromTwoDigits(yy: Int, referenceYear: Int): Int {
+    val pivot = (referenceYear % 100) + 10
+    return if (yy <= pivot) 2000 + yy else 1900 + yy
+}
+
+/** Local calendar day of a daily-note title. An impossible day is not a date. */
+fun parseNoteDate(title: String, pattern: String, referenceYear: Int = LocalDate.now(ZoneId.systemDefault()).year): LocalDate? {
+    val compiled = compileDatePattern(pattern) ?: return null
+    val match = compiled.expression.matchEntire(title.trim()) ?: return null
+    var year = 0
+    var month = 0
+    var day = 0
+    compiled.order.forEachIndexed { index, token ->
+        val value = match.groupValues[index + 1].toInt()
+        when (token) {
+            'Y' -> year = value
+            'y' -> year = yearFromTwoDigits(value, referenceYear)
+            'M' -> month = value
+            else -> day = value
+        }
+    }
+    return try {
+        LocalDate.of(year, month, day)
+    } catch (_: DateTimeException) {
+        null
+    }
+}
+
+private fun vaultFolder(folder: String): String =
+    folder.replace('\\', '/').trim().trim('/')
+
+/** Stem of a daily note that lives in the daily-notes folder and matches the date format. */
+fun dailyNoteStem(relativePath: String, folder: String, pattern: String): String? {
+    val normalized = relativePath.replace('\\', '/').trim().trimStart('/')
+    if (!normalized.endsWith(".md", ignoreCase = true)) return null
+    val parent = if ('/' in normalized) normalized.substringBeforeLast('/') else ""
+    if (parent != vaultFolder(folder)) return null
+    val stem = normalized.substringAfterLast('/').replace(Regex("""\.md$""", RegexOption.IGNORE_CASE), "")
+    return if (parseNoteDate(stem, pattern) != null) stem else null
+}
+
+/**
+ * The calendar day `days` away from the open daily note.
+ * Null when this file is not a daily note in [folder] for [pattern], so the day does not move.
+ */
+fun shiftDailyNote(relativePath: String, folder: String, pattern: String, days: Int): LocalDate? {
+    val stem = dailyNoteStem(relativePath, folder, pattern) ?: return null
+    val parsed = parseNoteDate(stem, pattern) ?: return null
+    return try {
+        parsed.plusDays(days.toLong())
+    } catch (_: DateTimeException) {
+        null
+    }
 }
 
 /**

@@ -24,7 +24,9 @@ import ch.fasrv.fanotes.desk.SearchHit
 import ch.fasrv.fanotes.desk.SubjectBook
 import ch.fasrv.fanotes.desk.applyReview
 import ch.fasrv.fanotes.desk.cardsFromMarkdown
+import ch.fasrv.fanotes.desk.NOT_A_DAILY_NOTE
 import ch.fasrv.fanotes.desk.dailyNotePath
+import ch.fasrv.fanotes.desk.shiftDailyNote
 import ch.fasrv.fanotes.desk.emptyCalendar
 import ch.fasrv.fanotes.desk.loadCalendarMarkdown
 import ch.fasrv.fanotes.desk.loadHomeworkMarkdown
@@ -1421,7 +1423,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun insertDateStamp() {
+    fun insertDateStamp(withTime: Boolean = false) {
         val note = open.value
         if (note == null || note.kind != NoteKind.MARKDOWN) {
             message.value = ch.fasrv.fanotes.vault.STAMP_NEEDS_MARKDOWN
@@ -1431,10 +1433,12 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             message.value = ch.fasrv.fanotes.vault.STAMP_NEEDS_KEYBOARD
             return
         }
-        stampRequest.value = ch.fasrv.fanotes.vault.noteDateStamp(
-            java.time.LocalDate.now(),
-            java.time.LocalTime.now(),
+        val clock = java.time.LocalDateTime.now()
+        stampRequest.value = ch.fasrv.fanotes.vault.formatNoteStamp(
             deskSettings.value["date-format"].orEmpty(),
+            clock.toLocalDate(),
+            withTime = withTime,
+            time = clock.toLocalTime(),
         )
     }
 
@@ -3655,6 +3659,19 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
         walk(tree.value)
         return ch.fasrv.fanotes.desk.defaultNoteParent(deskSettings.value["default-folder"], folders)
+    }
+
+    /** One calendar day from the open daily note. A file that is not one stays put. */
+    fun openAdjacentDaily(days: Int) {
+        val folder = deskSettings.value["daily-folder"].orEmpty().ifBlank { "Tagesnotizen" }
+        val pattern = deskSettings.value["date-format"].orEmpty().ifBlank { "YYYY-MM-DD" }
+        val path = open.value?.path
+        val day = if (path.isNullOrBlank()) null else shiftDailyNote(path, folder, pattern, days)
+        if (day == null) {
+            message.value = NOT_A_DAILY_NOTE
+            return
+        }
+        openDaily(day)
     }
 
     fun openDaily(day: java.time.LocalDate = java.time.LocalDate.now()) {
