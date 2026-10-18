@@ -4,9 +4,11 @@ import ch.fasrv.fanotes.desk.NoteLinkMark
 import ch.fasrv.fanotes.desk.dropFolderColors
 import ch.fasrv.fanotes.desk.noteLinksJson
 import ch.fasrv.fanotes.desk.parseNoteLinkMarks
+import ch.fasrv.fanotes.famd.safeWorksheetSource
 import ch.fasrv.fanotes.famd.worksheetIdsFromMarkdown
 import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.deepCopy
+import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.ink.StrokePoint
 import java.nio.file.Files
 import java.time.LocalDate
@@ -141,6 +143,56 @@ class NoteTrashTest {
         assertEquals("2026-10-16 16:19\n", insertNoteStamp("", "2026-10-16 16:19"))
         assertEquals(mapOf("Physik" to "#112233"), dropFolderColors(mapOf("Schule" to "#abcdef", "Schule/Mathe" to "#445566", "Physik" to "#112233"), "Schule"))
         assertEquals("2 Einträge endgültig löschen?", trashEmptyMessage(2))
+    }
+
+    @Test
+    fun duplicatingANoteKeepsWorksheetBytesWhenTheIdIsAlsoInThePath() {
+        val (vault, store) = vault("fanotes-copy-worksheet-id")
+        val png = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+        val card = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 1, 2, 3, 4)
+        val card2 = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 5, 6, 7, 8)
+        writeWorksheet(vault, "png", "Bild", png)
+        writeWorksheet(vault, "card", "Karte", card)
+        writeWorksheet(vault, "card-2", "Karte 2", card2)
+        vault.write(
+            "Tafel.md",
+            """
+            # Tafel
+
+            <!-- fanotes-worksheet:png -->
+
+            <!-- fanotes-worksheet:card -->
+            <!-- fanotes-worksheet:card-2 -->
+            """.trimIndent().plus("\n").encodeToByteArray(),
+        )
+        val copy = store.duplicateNote("Tafel.md")
+        val copied = store.readNote(copy)
+        val ids = worksheetIdsFromMarkdown(copied.markdown)
+        assertEquals(listOf("png", "card", "card-2").size, ids.size)
+        assertEquals(png.toList(), worksheetBytes(vault, ids[0]))
+        assertEquals(card.toList(), worksheetBytes(vault, ids[1]))
+        assertEquals(card2.toList(), worksheetBytes(vault, ids[2]))
+        assertEquals(png.toList(), vault.read(".fanotes/worksheets/png.png")!!.toList())
+        assertTrue(ids.none { it == "png" || it == "card" || it == "card-2" })
+    }
+
+    private fun writeWorksheet(vault: DirectoryVault, id: String, title: String, bytes: ByteArray) {
+        val source = ".fanotes/worksheets/$id.png"
+        val record = ".fanotes/worksheets/$id.json"
+        vault.write(source, bytes)
+        vault.write(
+            record,
+            """
+            {"schemaVersion":1,"id":"$id","title":"$title","kind":"image","mimeType":"image/png","sourceRelativePath":"$source","dataRelativePath":"$record","createdAt":"2026-10-16T12:00:00.000Z","updatedAt":"2026-10-16T12:00:00.000Z","textBoxes":[],"highlights":[]}
+            """.trimIndent().encodeToByteArray(),
+        )
+    }
+
+    private fun worksheetBytes(vault: DirectoryVault, id: String): List<Byte> {
+        val record = parseJson(vault.read(".fanotes/worksheets/$id.json")!!.decodeToString()) as JsonValue.Obj
+        val source = safeWorksheetSource(id, record.string("sourceRelativePath"))
+        assertTrue(source != null, id)
+        return vault.read(source!!)!!.toList()
     }
 
     private fun vault(name: String): Pair<DirectoryVault, NoteStore> {

@@ -505,7 +505,7 @@ class NoteStore(private val io: VaultIo) {
     }
 
     private fun copyWorksheets(markdown: String): String {
-        var text = markdown
+        val copied = linkedMapOf<String, String>()
         for (id in worksheetIdsFromMarkdown(markdown).distinct()) {
             val recordPath = worksheetRecordPath(id) ?: continue
             val raw = io.read(recordPath)?.decodeToString() ?: continue
@@ -513,16 +513,22 @@ class NoteStore(private val io: VaultIo) {
             val source = ch.fasrv.fanotes.famd.safeWorksheetSource(id, obj.string("sourceRelativePath")) ?: continue
             val bytes = io.read(source) ?: continue
             val newId = UUID.randomUUID().toString()
-            val newSource = source.replace(id, newId)
+            val extension = source.substringAfterLast('.', "")
+            val newSource = ".fanotes/worksheets/$newId.$extension"
+            if (ch.fasrv.fanotes.famd.safeWorksheetSource(newId, newSource) == null) continue
             val newRecord = worksheetRecordPath(newId) ?: continue
             obj.put("id", jsonString(newId))
             obj.put("sourceRelativePath", jsonString(newSource))
             obj.put("dataRelativePath", jsonString(newRecord))
             io.write(newSource, bytes)
             io.write(newRecord, obj.stringify().encodeToByteArray())
-            text = text.replace("fanotes-worksheet:$id", "fanotes-worksheet:$newId")
+            copied[id] = newId
         }
-        return text
+        if (copied.isEmpty()) return markdown
+        return Regex("""<!--\s*fanotes-worksheet:([a-zA-Z0-9_-]{1,96})\s*-->""").replace(markdown) { match ->
+            val next = copied[match.groupValues[1]] ?: return@replace match.value
+            "<!-- fanotes-worksheet:$next -->"
+        }
     }
 
     private fun writeInkAsset(id: String, ink: JsonValue.Obj) {
