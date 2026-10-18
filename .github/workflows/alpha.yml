@@ -1,0 +1,67 @@
+name: Alpha
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: fanotes-alpha
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    name: Prepare the beta
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.tag.outputs.sha }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Commit and tag the next beta
+        id: tag
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(node fanotes/scripts/next-beta-version.mjs)"
+          node fanotes/scripts/check-release-policy.mjs --version "$version"
+          previous="$(git describe --tags --abbrev=0 HEAD)"
+          notes="$(git log --no-merges --invert-grep --grep='^Set the version to ' --format='%s' "${previous}..HEAD")"
+          if [ -z "$notes" ]; then
+            echo "No merged changes since ${previous}." >&2
+            exit 1
+          fi
+          node fanotes/scripts/set-version.mjs --version "$version" --notes "$notes"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add fanotes/package.json fanotes/package-lock.json fanotes/src-tauri/tauri.conf.json fanotes/CHANGELOG.md android/app/build.gradle.kts
+          if git diff --cached --quiet; then
+            echo "Version files did not change." >&2
+            exit 1
+          fi
+          git commit -m "Set the version to ${version}."
+          git push origin HEAD:main
+          sha="$(git rev-parse HEAD)"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          tag="v${version}"
+          git tag -a "$tag" "$sha" -m "FaNotes ${version}"
+          git push origin "$tag"
+
+  release:
+    name: Build the beta
+    needs: prepare
+    uses: ./.github/workflows/release.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      sha: ${{ needs.prepare.outputs.sha }}
+    secrets: inherit

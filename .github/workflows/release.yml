@@ -1,5 +1,7 @@
 name: Release
 
+# A called workflow still reports the caller's event name, so inputs are read
+# directly. Tag pushes leave inputs empty and use github.sha and github.ref_name.
 on:
   push:
     tags:
@@ -30,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_call' && inputs.sha || github.sha }}
+          ref: ${{ inputs.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -59,7 +61,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_call' && inputs.sha || github.sha }}
+          ref: ${{ inputs.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -86,7 +88,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_call' && inputs.sha || github.sha }}
+          ref: ${{ inputs.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -115,7 +117,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_call' && inputs.sha || github.sha }}
+          ref: ${{ inputs.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -142,12 +144,25 @@ jobs:
           "$sdk_root/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk_root" "platforms;android-37.0" "build-tools;36.0.0" "platform-tools"
       - name: Test and build the Android app
         working-directory: android
+        env:
+          FANOTES_ANDROID_KEYSTORE_B64: ${{ secrets.FANOTES_ANDROID_KEYSTORE_B64 }}
+          FANOTES_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.FANOTES_ANDROID_KEYSTORE_PASSWORD }}
+          FANOTES_ANDROID_KEY_PASSWORD: ${{ secrets.FANOTES_ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           chmod +x gradlew
+          if [ -z "${FANOTES_ANDROID_KEYSTORE_B64}" ] || [ -z "${FANOTES_ANDROID_KEYSTORE_PASSWORD}" ]; then
+            echo "The Android release keystore is not configured." >&2
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/fanotes-release.keystore"
+          printf '%s' "$FANOTES_ANDROID_KEYSTORE_B64" | base64 -d > "$keystore"
+          export FANOTES_ANDROID_KEYSTORE="$keystore"
           version="$(node -p "require('../fanotes/package.json').version")"
-          ./gradlew :core:test :app:assembleDebug -Pfanotes.version="$version" --stacktrace
-          cp app/build/outputs/apk/debug/app-debug.apk "FaNotes-${version}-android.apk"
+          ./gradlew :core:test :app:assembleRelease -Pfanotes.version="$version" --stacktrace
+          apk="app/build/outputs/apk/release/app-release.apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --min-sdk-version 29 "$apk"
+          cp "$apk" "FaNotes-${version}-android.apk"
       - uses: actions/upload-artifact@v4
         with:
           name: android
@@ -160,11 +175,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      RELEASE_VERSION: ${{ github.event_name == 'workflow_call' && inputs.version || github.ref_name }}
+      RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_call' && inputs.sha || github.sha }}
+          ref: ${{ inputs.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -191,9 +206,14 @@ jobs:
             keep { print }
           ' fanotes/CHANGELOG.md > "$notes"
           if [ ! -s "$notes" ]; then echo "FaNotes ${version}" > "$notes"; fi
+          if [[ "$version" == *-beta.* ]]; then
+            release_flags=(--prerelease=true --latest=false)
+          else
+            release_flags=(--prerelease=false)
+          fi
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" dist-artifacts/* --clobber
           else
-            gh release create "$tag" dist-artifacts/* --title "FaNotes ${version}" --notes-file "$notes" --verify-tag
+            gh release create "$tag" dist-artifacts/* --title "FaNotes ${version}" --notes-file "$notes" --verify-tag "${release_flags[@]}"
           fi
-          gh release edit "$tag" --draft=false --prerelease=false --title "FaNotes ${version}" --notes-file "$notes"
+          gh release edit "$tag" --draft=false --title "FaNotes ${version}" --notes-file "$notes" "${release_flags[@]}"

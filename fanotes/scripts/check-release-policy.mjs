@@ -29,9 +29,10 @@ if (year !== zurichParts.year || month !== zurichParts.month) {
   throw new Error(`Release ${version} is not in the current Europe/Zurich month ${zurichParts.year}.${zurichParts.month}.`)
 }
 
-const response = await fetch('https://api.github.com/repos/Nikoheld/FaNotes/releases?per_page=100', {
-  headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'FaNotes-release-policy/1.0' },
-})
+const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'FaNotes-release-policy/1.0' }
+const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || ''
+if (token) headers.Authorization = `Bearer ${token}`
+const response = await fetch('https://api.github.com/repos/Nikoheld/FaNotes/releases?per_page=100', { headers })
 if (!response.ok) throw new Error(`GitHub release policy check failed with HTTP ${response.status}.`)
 const releases = await response.json()
 assert.ok(Array.isArray(releases), 'GitHub returned an invalid release list.')

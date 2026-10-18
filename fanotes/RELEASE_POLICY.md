@@ -34,6 +34,8 @@ GitHub Actions builds every app when the version tag is pushed. The server does 
 
 Run **Update version** from the Actions tab. Give it a calendar version such as `2026.10.7` and one changelog line per change. The workflow writes that version into `fanotes/package.json`, the lockfile, the Tauri config, and the Android app, commits it on `main`, tags `v<version>`, and builds the GitHub release. Leave “Publish the release” off to only update the files.
 
+Run **Alpha** from the Actions tab, on `main`, when the merged branch should become the next beta. Alpha asks for no inputs. It reads every non-merge commit since the previous tag, chooses the next `YYYY.M.N-beta.B` for this month, commits that version on `main`, and builds the same Linux, Windows, macOS, and Android packages as a stable release. The GitHub release is a prerelease, so it does not replace Latest. Desktop beta manifests are named `FaNotes-update-linux-x64-beta.json` and `FaNotes-update-windows-x64-beta.json`. The Stable channel keeps reading the latest stable release. Android is signed with the stable FaNotes key. Alpha does nothing when `main` has no commits after the previous tag.
+
 Every release must include:
 
 1. Linux AppImage and portable tar archive.

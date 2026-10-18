@@ -53,6 +53,16 @@ const requireEntry = (directory, version, fileName, sums, label) => {
   return value
 }
 
+const channelForRelease = (version) => (
+  /^\d{4}\.\d{1,2}\.[1-9]\d*-beta\.[1-9]\d*$/u.test(version) ? 'beta' : 'stable'
+)
+
+const updateManifestFileName = (platform, channel) => (
+  channel === 'stable'
+    ? `FaNotes-update-${platform}-x64.json`
+    : `FaNotes-update-${platform}-x64-${channel}.json`
+)
+
 const sign = (payload, privateKeyPem) => {
   const key = crypto.createPrivateKey(privateKeyPem)
   const publicKey = crypto.createPublicKey(key)
@@ -68,12 +78,13 @@ const main = () => {
   if (!privateKeyPem.includes('PRIVATE KEY')) throw new Error('FANOTES_UPDATE_SIGNING_KEY fehlt.')
   const packageVersion = JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8')).version
   if (packageVersion !== version) throw new Error(`package.json ist ${packageVersion}, das Release ist ${version}.`)
+  const channel = channelForRelease(version)
 
   const sums = []
   const linux = {
     schemaVersion: 1,
     product: 'FaNotes',
-    channel: 'stable',
+    channel,
     platform: 'linux',
     arch: 'x64',
     latestVersion: version,
@@ -90,7 +101,7 @@ const main = () => {
   const windows = {
     schemaVersion: 1,
     product: 'FaNotes',
-    channel: 'stable',
+    channel,
     platform: 'windows',
     arch: 'x64',
     latestVersion: version,
@@ -113,9 +124,22 @@ const main = () => {
   ]) entry(directory, version, fileName, sums)
 
   fs.writeFileSync(path.join(directory, 'SHA256SUMS'), `${sums.sort().join('\n')}\n`)
-  fs.writeFileSync(path.join(directory, 'FaNotes-update-linux-x64.json'), `${JSON.stringify(sign(linux, privateKeyPem))}\n`)
-  fs.writeFileSync(path.join(directory, 'FaNotes-update-windows-x64.json'), `${JSON.stringify(sign(windows, privateKeyPem))}\n`)
+  fs.writeFileSync(path.join(directory, updateManifestFileName('linux', channel)), `${JSON.stringify(sign(linux, privateKeyPem))}\n`)
+  fs.writeFileSync(path.join(directory, updateManifestFileName('windows', channel)), `${JSON.stringify(sign(windows, privateKeyPem))}\n`)
   console.log(`Update-Manifeste für ${version} geschrieben.`)
 }
 
-main()
+if (process.argv.includes('--self-test')) {
+  const assert = (condition, message) => {
+    if (!condition) throw new Error(message)
+  }
+  assert(channelForRelease('2026.10.10') === 'stable', 'stable channel')
+  assert(channelForRelease('2026.10.11-beta.1') === 'beta', 'beta channel')
+  assert(updateManifestFileName('linux', 'stable') === 'FaNotes-update-linux-x64.json', 'stable linux manifest')
+  assert(updateManifestFileName('windows', 'stable') === 'FaNotes-update-windows-x64.json', 'stable windows manifest')
+  assert(updateManifestFileName('linux', 'beta') === 'FaNotes-update-linux-x64-beta.json', 'beta linux manifest')
+  assert(updateManifestFileName('windows', 'beta') === 'FaNotes-update-windows-x64-beta.json', 'beta windows manifest')
+  console.log('update manifest names ok')
+} else {
+  main()
+}
