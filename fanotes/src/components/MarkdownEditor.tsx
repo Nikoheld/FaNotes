@@ -374,6 +374,37 @@ class TaskWidget extends WidgetType {
   ignoreEvent() { return true }
 }
 
+const INLINE_MATH_SOURCE = String.raw`(?<!\$)\$([^$\n]+?)\$(?!\$)`
+
+export const editorMathKatexOptions = (display: boolean, throwOnError: boolean) => ({
+  displayMode: display,
+  output: 'htmlAndMathml' as const,
+  strict: false as const,
+  throwOnError,
+  trust: false as const,
+})
+
+/** The math span the live editor would hand to KaTeX, taken from stored note text. */
+export function editorMathSource(stored: string): { source: string; display: boolean } {
+  const trimmed = stored.trim()
+  const display = /^\$\$\s*([\s\S]*?)\s*\$\$$/u.exec(trimmed)
+  if (display && display[1].trim()) return { source: display[1].trim(), display: true }
+  const inline = new RegExp(`^${INLINE_MATH_SOURCE}$`, 'u').exec(trimmed)
+  if (!inline) throw new Error('Der Ausdruck ist kein Mathematikabschnitt des Editors.')
+  return { source: inline[1], display: false }
+}
+
+export async function renderEditorMathHtml(source: string, display = false): Promise<string> {
+  const { default: katex } = await loadMathRenderer()
+  return katex.renderToString(source, editorMathKatexOptions(display, true))
+}
+
+/** Renders one stored math span with the editor's KaTeX options. Invalid LaTeX throws. */
+export async function renderInsertedLatex(stored: string): Promise<string> {
+  const parsed = editorMathSource(stored)
+  return renderEditorMathHtml(parsed.source, parsed.display)
+}
+
 class MathWidget extends WidgetType {
   constructor(readonly source: string, readonly display: boolean) { super() }
   eq(other: MathWidget) { return other.source === this.source && other.display === this.display }
@@ -384,7 +415,7 @@ class MathWidget extends WidgetType {
     void loadMathRenderer().then(({ default: katex }) => {
       if (!node.isConnected) return
       try {
-        katex.render(this.source, node, { displayMode: this.display, output: 'htmlAndMathml', strict: false, throwOnError: false, trust: false })
+        katex.render(this.source, node, editorMathKatexOptions(this.display, false))
       } catch {
         node.textContent = this.source
       }
@@ -619,7 +650,7 @@ const buildLivePreviewDecorations = (view: EditorView) => {
       replace(to - match[1].length, to)
       mark(from + match[1].length, to - match[1].length, 'cm-live-code')
     }
-    for (const match of line.text.matchAll(/(?<!\$)\$([^$\n]+?)\$(?!\$)/gu)) {
+    for (const match of line.text.matchAll(new RegExp(INLINE_MATH_SOURCE, 'gu'))) {
       const from = match.index
       const to = from + match[0].length
       if (reserve(from, to)) replace(from, to, new MathWidget(match[1], false))

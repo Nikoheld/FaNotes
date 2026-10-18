@@ -334,7 +334,7 @@ void (async () => {
         bounds: { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom },
       }
     })()`)
-    if (noteMenu.buttons !== 6 || noteMenu.title !== 'Weitere Notizaktionen' || noteMenu.labels.join('|') !== 'Ansicht|Datei' || noteMenu.bounds.left < 0 || noteMenu.bounds.top < 0 || noteMenu.bounds.right > 1480 || noteMenu.bounds.bottom > 940) {
+    if (noteMenu.buttons !== 12 || noteMenu.title !== 'Weitere Notizaktionen' || noteMenu.labels.join('|') !== 'Ansicht|Schreiben|Datei' || noteMenu.bounds.left < 0 || noteMenu.bounds.top < 0 || noteMenu.bounds.right > 1480 || noteMenu.bounds.bottom > 940) {
       throw new Error(`Das neue Notizmenü ist unvollständig oder verlässt das Fenster: ${JSON.stringify(noteMenu)}`)
     }
     await capture(cdp, 'note-menu')

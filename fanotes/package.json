@@ -20,6 +20,7 @@
     "check:famd": "node scripts/check-famd.cjs",
     "check:packaged-i18n": "node scripts/check-packaged-i18n.cjs",
     "check:markdown": "node scripts/check-markdown.mjs",
+    "check:simple-latex": "node scripts/check-simple-latex.mjs",
     "check:recognition": "node scripts/check-context-recognition.mjs",
     "check:recognition:fusion": "node scripts/check-recognition-fusion.mjs",
     "audit:recognition": "node scripts/audit-personal-recognition.mjs",

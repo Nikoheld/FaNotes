@@ -16,13 +16,28 @@ import {
   Strikethrough,
   Table2,
 } from 'lucide-react'
-import { memo } from 'react'
+import { memo, useState } from 'react'
+import { operandsForButton, simpleLatexSnippet, type SimpleLatexButton, type SimpleLatexOperands } from '../lib/simpleLatex'
 import type { MarkdownFormatAction } from './MarkdownEditor'
 
 type FormattingToolbarProps = {
   disabled?: boolean
   onFormat: (action: MarkdownFormatAction) => void
+  onInsertLatex: (button: SimpleLatexButton, operands: SimpleLatexOperands) => void
+  onLatexError?: (message: string) => void
 }
+
+const LATEX_BUTTONS: Array<{ id: SimpleLatexButton; label: string; glyph: string }> = [
+  { id: 'fraction', label: 'Bruch', glyph: 'a/b' },
+  { id: 'sqrt', label: 'Quadratwurzel', glyph: '√' },
+  { id: 'superscript', label: 'Hochgestellt', glyph: 'x²' },
+  { id: 'subscript', label: 'Tiefgestellt', glyph: 'x₂' },
+  { id: 'plus', label: 'Plus', glyph: '+' },
+  { id: 'minus', label: 'Minus', glyph: '−' },
+  { id: 'equals', label: 'Gleich', glyph: '=' },
+  { id: 'pi', label: 'Pi', glyph: 'π' },
+  { id: 'alpha', label: 'Alpha', glyph: 'α' },
+]
 
 const ACTIONS: Array<{
   action: MarkdownFormatAction
@@ -49,7 +64,23 @@ const ACTIONS: Array<{
   { action: 'horizontalRule', label: 'Trennlinie', icon: Minus },
 ]
 
-export const FormattingToolbar = memo(function FormattingToolbar({ disabled = false, onFormat }: FormattingToolbarProps) {
+export const FormattingToolbar = memo(function FormattingToolbar({
+  disabled = false,
+  onFormat,
+  onInsertLatex,
+  onLatexError,
+}: FormattingToolbarProps) {
+  const [firstPiece, setFirstPiece] = useState('')
+  const [secondPiece, setSecondPiece] = useState('')
+  const insertLatex = (button: SimpleLatexButton) => {
+    const operands = operandsForButton(button, firstPiece, secondPiece)
+    try {
+      simpleLatexSnippet(button, operands)
+      onInsertLatex(button, operands)
+    } catch (error) {
+      onLatexError?.(error instanceof Error ? error.message : 'Nur Zahlen oder Wörter, kein LaTeX-Code.')
+    }
+  }
   return (
     <div className="formatting-toolbar" aria-label="Markdown formatieren" role="toolbar">
       {ACTIONS.map(({ action, label, shortcut, icon: Icon, divider }) => (
@@ -65,6 +96,36 @@ export const FormattingToolbar = memo(function FormattingToolbar({ disabled = fa
           <Icon aria-hidden="true" size={14} strokeWidth={2} />
         </button>
       ))}
+      <div className="simple-latex-tools" role="group" aria-label="Einfaches LaTeX" title="Zahlen oder Wörter. Die Schaltflächen setzen die Formel.">
+        <input
+          aria-label="Erstes Stück"
+          disabled={disabled}
+          placeholder="Zahl oder Wort"
+          spellCheck={false}
+          value={firstPiece}
+          onChange={(event) => setFirstPiece(event.target.value)}
+        />
+        <input
+          aria-label="Zweites Stück"
+          disabled={disabled}
+          placeholder="Zahl oder Wort"
+          spellCheck={false}
+          value={secondPiece}
+          onChange={(event) => setSecondPiece(event.target.value)}
+        />
+        {LATEX_BUTTONS.map(({ id, label, glyph }) => (
+          <button
+            aria-label={label}
+            disabled={disabled}
+            key={id}
+            onClick={() => insertLatex(id)}
+            title={label}
+            type="button"
+          >
+            {glyph}
+          </button>
+        ))}
+      </div>
     </div>
   )
 })

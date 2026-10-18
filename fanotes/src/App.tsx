@@ -21,6 +21,7 @@ import {
   Database,
   Download,
   File,
+  FileCode,
   FileDown,
   FilePlus2,
   Files,
@@ -65,6 +66,7 @@ import type { DrawingBoardHandle, DrawingSavePayload, InkActivity } from './comp
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { FolderPathDialog } from './components/FolderPathDialog'
 import { FileTree } from './components/FileTree'
+import { EditorExportControls } from './components/EditorExportControls'
 import { FormattingToolbar } from './components/FormattingToolbar'
 import { NoteLinkLayer } from './components/NoteLinkLayer'
 import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
@@ -84,6 +86,7 @@ import type { SettingsSection } from './components/SettingsModal'
 import { createAddonFetchText, createAddonStoragePort } from './lib/addons/storagePort'
 import type { AddonPromptRequest } from './components/addons/AddonPromptDialog'
 import { convertNoteSourceToCurrentStandard } from './lib/noteStandard'
+import { applySimpleLatexButton, exportNoteLatex, exportNotePdf, noteExportBaseName, type SimpleLatexButton, type SimpleLatexOperands } from './lib/simpleLatex'
 import { deleteConfirmHost } from './lib/confirmUx'
 import {
   closePageStats,
@@ -642,6 +645,18 @@ const THEME_CONTRAST_SURFACES: Record<string, string[]> = {
   forest: ['#171a18', '#1e221f', '#1e221f', '#2a2f2c'],
   aurora: ['#18181c', '#1f1f24', '#1f1f24', '#2c2c33'],
   sepia: ['#fbfaf7', '#f4f1ea', '#f4f1ea', '#fffdf8'],
+}
+
+const saveExportFile = (filename: string, blob: Blob) => {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.rel = 'noopener'
+  document.body.append(anchor)
+  anchor.click()
+  anchor.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000)
 }
 
 const useSystemDark = () => {
@@ -4167,20 +4182,71 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [activePath, toast, updateContent])
 
-  const exportCurrentPdf = useCallback(async () => {
-    if (!window.fanotes.exportNotePdf) {
-      document.documentElement.classList.add('is-printing')
-      window.print()
-      window.setTimeout(() => document.documentElement.classList.remove('is-printing'), 800)
+  const readExportNote = useCallback(() => {
+    const path = activePathRef.current
+    if (!path) return null
+    editorRef.current?.flushChanges()
+    const tab = tabsRef.current.find((item) => item.path === path)
+    const note = editorRef.current?.getText() ?? pendingWrites.current.get(path) ?? tab?.content ?? ''
+    return { note, title: tab?.title || 'FaNotes' }
+  }, [])
+
+  const exportCurrentPdf = useCallback(() => {
+    const current = readExportNote()
+    if (!current) {
+      toast('Öffne eine Notiz im Editor, um sie zu exportieren.', 'info')
       return
     }
     try {
-      const result = await window.fanotes.exportNotePdf()
-      if (result?.filePath && result.filePath !== 'print') toast('PDF gespeichert.', 'success')
+      const bytes = exportNotePdf(current.note, current.title)
+      const copy = new Uint8Array(bytes.byteLength)
+      copy.set(bytes)
+      saveExportFile(`${noteExportBaseName(current.title)}.pdf`, new Blob([copy], { type: 'application/pdf' }))
+      toast('PDF gespeichert.', 'success')
     } catch (error) {
       toast(error instanceof Error ? error.message : 'PDF-Export fehlgeschlagen.', 'error')
     }
-  }, [toast])
+  }, [readExportNote, toast])
+
+  const exportCurrentLatex = useCallback(() => {
+    const current = readExportNote()
+    if (!current) {
+      toast('Öffne eine Notiz im Editor, um sie zu exportieren.', 'info')
+      return
+    }
+    try {
+      const source = exportNoteLatex(current.note, current.title)
+      saveExportFile(`${noteExportBaseName(current.title)}.tex`, new Blob([source], { type: 'text/plain;charset=utf-8' }))
+      toast('LaTeX-Code exportiert.', 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'LaTeX-Export fehlgeschlagen.', 'error')
+    }
+  }, [readExportNote, toast])
+
+  const insertSimpleLatex = useCallback((button: SimpleLatexButton, operands: SimpleLatexOperands) => {
+    if (!activePathRef.current || drawingOpen || overviewOpen || homeworkOpen || calendarOpen || glyphenWerkOpen) {
+      toast('Öffne eine Notiz im Editor, um LaTeX einzufügen.', 'info')
+      return
+    }
+    if (activeEntryMutating) {
+      toast('Diese Notiz ist während der Dateiaktion schreibgeschützt.', 'error')
+      return
+    }
+    const text = editorRef.current?.getText()
+    const selection = editorRef.current?.getSelection()
+    if (text == null) {
+      toast('Die Formel konnte nicht eingefügt werden.', 'error')
+      return
+    }
+    try {
+      const cursor = selection?.to ?? text.length
+      const result = applySimpleLatexButton(text, button, operands, cursor)
+      const chunk = result.note.slice(cursor, cursor + (result.note.length - text.length))
+      if (!editorRef.current?.insertText(chunk, 'cursor')) toast('Die Formel konnte nicht eingefügt werden.', 'error')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Nur Zahlen oder Wörter, kein LaTeX-Code.', 'error')
+    }
+  }, [activeEntryMutating, calendarOpen, drawingOpen, glyphenWerkOpen, homeworkOpen, overviewOpen, toast])
 
   const removeWorksheetFromNote = useCallback(async (id: string) => {
     const document = worksheetSession.documents.find((item) => item.id === id)
@@ -4291,7 +4357,8 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'insert-date', label: 'Datum einfügen', detail: 'Setzt das Datumsformat an der Schreibmarke ein', shortcut: 'Ctrl ⇧ D', group: 'Werkzeuge', keywords: 'datum date stempel', icon: <CalendarDays size={15} />, run: () => insertStamp(false) },
     { id: 'insert-date-time', label: 'Datum und Uhrzeit einfügen', detail: 'Datum plus Stunde und Minute', group: 'Werkzeuge', keywords: 'datum uhrzeit date time stempel', icon: <CalendarDays size={15} />, run: () => insertStamp(true) },
     { id: 'toggle-task', label: 'Aufgabe umschalten', detail: 'Die Aufgabe der aktuellen Zeile umschalten', shortcut: 'Ctrl Enter', group: 'Schreiben', keywords: 'aufgabe checkbox todo erledigt task', icon: <ListChecks size={15} />, run: toggleTask },
-    { id: 'export-pdf', label: 'Notiz als PDF exportieren', detail: 'Text, Handschrift und Arbeitsblatt drucken oder speichern', group: 'Dateien', keywords: 'pdf export drucken print', icon: <FileDown size={15} />, run: () => void exportCurrentPdf() },
+    { id: 'export-pdf', label: 'Notiz als PDF exportieren', detail: 'Text und Formeln als PDF-Datei', group: 'Dateien', keywords: 'pdf export drucken print formel', icon: <FileDown size={15} />, run: () => void exportCurrentPdf() },
+    { id: 'export-latex', label: 'Notiz als LaTeX-Code exportieren', detail: 'LaTeX-Code der Notiz', group: 'Dateien', keywords: 'latex tex export formel', icon: <FileCode size={15} />, run: () => void exportCurrentLatex() },
     { id: 'history', label: 'Versionsverlauf', detail: 'Frühere Stände dieser Notiz ansehen und wiederherstellen', group: 'Dateien', keywords: 'history version wiederherstellen', icon: <History size={15} />, run: () => void openHistory() },
     { id: 'quick-open', label: 'Notiz öffnen …', detail: 'Schnell zu einer Notiz springen', shortcut: 'Ctrl O', group: 'Navigation', keywords: 'quick open switcher wechseln springen', icon: <Files size={15} />, run: () => { setPaletteMode('notes'); setPaletteOpen(true) } },
     { id: 'nav-back', label: 'Zurück', detail: 'Zur zuvor geöffneten Notiz', shortcut: 'Alt ←', group: 'Navigation', keywords: 'zurück verlauf history', icon: <ArrowLeft size={15} />, run: () => void navigateHistory(-1) },
@@ -4313,7 +4380,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'reveal', label: isWeb ? 'Notiz herunterladen' : 'Im Dateimanager zeigen', detail: isWeb ? 'Aktuelle Notiz exportieren' : 'Speicherort der geöffneten Notiz öffnen', group: 'Dateien', keywords: 'ordner explorer finder dateimanager download export', icon: isWeb ? <Download size={15} /> : <FolderOpen size={15} />, run: () => { if (activePath) void window.fanotes.revealInFolder(activePath) } },
     { id: 'bug-report', label: 'Fehler melden', detail: 'Kurz beschreiben; die letzten fünf Minuten werden angehängt', group: 'FaNotes', keywords: 'bug report fehler logs support', icon: <Bug size={15} />, run: () => setBugReportOpen(true) },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
-  ], [addonPaletteActions, activePath, activeTab, syncApi, syncState, attachBookToSubject, bookOpen, copyWikiLink, createDailyNote, createFolder, createNote, currentBook, drawingOpen, duplicateNote, exportCurrentPdf, focusMode, importOneNote, importPdfNote, insertStamp, isWeb, navigateHistory, openAdjacentDaily, openCalendar, openGlyphenWerk, openHistory, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleTask, toggleSplitOrientation])
+  ], [addonPaletteActions, activePath, activeTab, syncApi, syncState, attachBookToSubject, bookOpen, copyWikiLink, createDailyNote, createFolder, createNote, currentBook, drawingOpen, duplicateNote, exportCurrentLatex, exportCurrentPdf, focusMode, importOneNote, importPdfNote, insertStamp, isWeb, navigateHistory, openAdjacentDaily, openCalendar, openGlyphenWerk, openHistory, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleTask, toggleSplitOrientation])
 
   // ---- Add-ons -------------------------------------------------------------
   // Everything add-ons may touch flows through this bridge. The deps object is
@@ -5045,7 +5112,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 const slot = penModeToolbarSlot(drawingOpen, isPdfActive)
                 if (slot === 'ink') return <div id={INK_TOOLBAR_SLOT_ID} className="ink-toolbar-slot" />
                 if (slot === 'pdf') return <div id={PDF_TOOLBAR_SLOT_ID} className="pdf-toolbar-slot" />
-                return <FormattingToolbar disabled={!activeTab || overviewOpen || homeworkOpen || calendarOpen || glyphenWerkOpen || activeEntryMutating} onFormat={formatMarkdown} />
+                return <FormattingToolbar disabled={!activeTab || overviewOpen || homeworkOpen || calendarOpen || glyphenWerkOpen || activeEntryMutating} onFormat={formatMarkdown} onInsertLatex={insertSimpleLatex} onLatexError={(message) => toast(message, 'error')} />
               })()}
             </div>
             <div className="toolbar-group toolbar-end">
@@ -5177,7 +5244,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   <span className="editor-menu-label">Datei</span>
                   <button type="button" role="menuitem" disabled={!activePath || isPdfActive} onClick={() => { setEditorMenuOpen(false); if (activePath) void duplicateNote(activePath) }}><span><Files size={15} /></span><span><strong>Notiz duplizieren</strong><small>Text, Handschrift und Verlinkungen als neue Notiz</small></span><kbd>⌥⇧D</kbd></button>
                   <button type="button" role="menuitem" disabled={!activePath} onClick={() => { setEditorMenuOpen(false); if (activePath) copyWikiLink(activePath) }}><span><Link2 size={15} /></span><span><strong>Wiki-Link kopieren</strong><small>[[Titel]] in die Zwischenablage</small></span></button>
-                  <button type="button" role="menuitem" disabled={!activeTab} onClick={() => { setEditorMenuOpen(false); void exportCurrentPdf() }}><span><FileDown size={15} /></span><span><strong>Als PDF exportieren</strong><small>Text, Handschrift und Arbeitsblatt</small></span></button>
+                  <EditorExportControls disabled={!activeTab} onExportPdf={() => { setEditorMenuOpen(false); exportCurrentPdf() }} onExportLatex={() => { setEditorMenuOpen(false); exportCurrentLatex() }} />
                   <button type="button" role="menuitem" disabled={!activePath} onClick={() => { setEditorMenuOpen(false); void openHistory() }}><span><History size={15} /></span><span><strong>Versionsverlauf</strong><small>Frühere Stände wiederherstellen</small></span></button>
                   <button type="button" role="menuitem" onClick={() => { setEditorMenuOpen(false); toggleSplit() }}><span><Columns2 size={15} /></span><span><strong>{splitPath ? 'Teilung schließen' : 'Geteilte Ansicht'}</strong><small>Zwei Notizen nebeneinander oder untereinander</small></span></button>
                   <button type="button" role="menuitem" disabled={!activePath} onClick={() => { setEditorMenuOpen(false); if (activePath) void window.fanotes.revealInFolder(activePath) }}><span>{isWeb ? <Download size={15} /> : <FolderOpen size={15} />}</span><span><strong>{isWeb ? (isPdfActive ? 'PDF herunterladen' : 'Markdown herunterladen') : 'Im Dateimanager zeigen'}</strong><small>{isWeb ? 'Aktuelle Notiz exportieren' : 'Speicherort der Notiz öffnen'}</small></span></button>
