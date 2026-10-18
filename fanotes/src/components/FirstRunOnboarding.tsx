@@ -190,7 +190,7 @@ export function FirstRunOnboarding({ subjects, onComplete }: FirstRunOnboardingP
           <div className="first-run-picker-head">
             <div>
               <strong>{profile.title}</strong>
-              <span>{selected.size} von {folders.length} ausgewählt</span>
+              <span>{`${selected.size} von ${folders.length} ausgewählt`}</span>
             </div>
             <button
               type="button"

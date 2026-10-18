@@ -85,6 +85,44 @@ for (const selector of ['.first-run-setup', '.first-run-profiles', '.first-run-s
 }
 assert.doesNotMatch(phone, /\.first-run-continue[^{}]*\{[^}]*display:\s*none/u)
 
+const installTranslationDom = () => {
+  const documentStub = {
+    documentElement: { lang: '', dataset: {} },
+    querySelector: () => null,
+    createTreeWalker: () => ({ nextNode: () => null }),
+    body: {},
+  }
+  const windowStub = globalThis.window && typeof globalThis.window === 'object' ? globalThis.window : {}
+  Object.assign(windowStub, {
+    document: documentStub,
+    dispatchEvent: () => true,
+    addEventListener: () => undefined,
+    setTimeout,
+    clearTimeout,
+    requestIdleCallback: (callback) => {
+      callback()
+      return 0
+    },
+    MutationObserver: class {
+      observe() {}
+      disconnect() {}
+    },
+    CustomEvent: class {
+      constructor(type, init) {
+        this.type = type
+        this.detail = init?.detail
+      }
+    },
+  })
+  if (!globalThis.window) globalThis.window = windowStub
+  if (!globalThis.document) globalThis.document = documentStub
+  if (!globalThis.Node) globalThis.Node = { ELEMENT_NODE: 1, TEXT_NODE: 3 }
+  if (!globalThis.NodeFilter) globalThis.NodeFilter = { SHOW_ELEMENT: 1, SHOW_TEXT: 4 }
+  if (!globalThis.Element) globalThis.Element = class Element {}
+  if (!globalThis.Text) globalThis.Text = class Text {}
+  if (!globalThis.MutationObserver) globalThis.MutationObserver = windowStub.MutationObserver
+}
+
 const installNavigator = () => {
   const localStorage = {
     getItem: () => null,
@@ -146,6 +184,17 @@ async function main() {
     assert.ok(html.indexOf('first-run-subjects') < html.indexOf('FaNotes einrichten'))
     for (const heading of retiredHeadings) assert.equal(html.includes(heading), false, heading)
     assert.equal(html.includes('data-step='), false)
+    const countMatch = html.match(/(\d+) von (\d+) ausgewählt/u)
+    assert.ok(countMatch, 'Die Auswahlzeile fehlt.')
+    assert.equal(countMatch[1], String(subjects.length))
+    assert.equal(countMatch[2], String(subjects.length))
+    installTranslationDom()
+    const i18n = await server.ssrLoadModule('/src/i18n.ts')
+    await i18n.setUiLanguage('de')
+    assert.equal(i18n.translateUiText(countMatch[0]), countMatch[0])
+    await i18n.setUiLanguage('en')
+    assert.equal(i18n.translateUiText(countMatch[0]), `${countMatch[1]} of ${countMatch[2]} selected`)
+    assert.equal(i18n.translateUiText('von'), 'from')
     console.log('Onboarding geprüft: eine Einrichtung, vier Profile, Ordnerauswahl, Abschluss.')
   } finally {
     await server.close()

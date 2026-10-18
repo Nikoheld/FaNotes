@@ -160,6 +160,8 @@ void (async () => {
     await capture(cdp, 'onboarding-setup')
     const profiles = await cdp.evaluate(`[...document.querySelectorAll('.first-run-profiles strong')].map((node) => node.textContent)`)
     if (profiles.join('|') !== 'School|University|Personal|Work') throw new Error(`English profiles are incomplete: ${JSON.stringify(profiles)}`)
+    const selectedCount = await cdp.evaluate(`document.querySelector('.first-run-picker-head span')?.textContent?.replace(/\\s+/gu, ' ').trim() || ''`)
+    if (!/^\d+ of \d+ selected$/u.test(selectedCount)) throw new Error(`English selection count is wrong: ${JSON.stringify(selectedCount)}`)
     const subjects = await cdp.evaluate(`[...document.querySelectorAll('.first-run-subject-copy strong')].map((node) => node.textContent)`)
     if (!subjects.includes('Mathematics') || !subjects.includes('Computer Science') || !subjects.includes('Economics')) throw new Error(`English subjects are incomplete: ${JSON.stringify(subjects)}`)
     await cdp.evaluate(`document.querySelector('.first-run-continue').click()`)
