@@ -16,6 +16,9 @@ const {
   SECTION_BODY_MARGIN_PX,
   SECTION_HEADER_PX,
   SECTION_MIN_BODY_PX,
+  SUBSECTION_HEADER_PX,
+  SUBSECTION_WIDTH_MIN,
+  applySectionWidth,
   collapseSection,
   collapsibleBodyEnd,
   deserializeSections,
@@ -30,6 +33,7 @@ const {
   sectionIndexAt,
   serializeSections,
   sortSections,
+  topLevelSectionIndex,
 } = await server.ssrLoadModule('/src/lib/inkSections.ts')
 
 // ── A tiny model of the board ────────────────────────────────────────────────
@@ -94,6 +98,14 @@ const createBoard = (height) => {
       insertSection(plan, board.sections, board.sheet, board.tracked)
       return plan.section
     },
+    insertSub(yPx, id) {
+      const plan = planInsertSection(board.sections, yPx / board.sheet.height, board.sheet, id, { nested: true })
+      if (!plan) return null
+      board.sections = sortSections([...board.sections, plan.section])
+      board.resize(board.sheet.height + plan.growPx)
+      insertSection(plan, board.sections, board.sheet, board.tracked)
+      return plan.section
+    },
     collapse(section) {
       const plan = planCollapse(board.strokes, board.sections, section, board.sheet)
       board.strokes = collapseSection(plan, board.strokes, board.sections, board.sheet, board.tracked, clone)
@@ -132,6 +144,8 @@ const near = (actual, expected, message, tolerance = 0.51) => assert.ok(Math.abs
 
   const section = board.insert(500, 'a')
   assert.ok(section, 'a header lands on free paper')
+  assert.equal(section.parentId, null, 'a section has no parent')
+  assert.equal(section.width, 1, 'a section is full width')
   near(board.sheet.height, 1273 + SECTION_HEADER_PX, 'the page grew by the header')
   near(board.topPx(above), 300, 'ink above the header stays')
   near(board.topPx(below), 600 + SECTION_HEADER_PX, 'ink below moved down by the header')
@@ -269,7 +283,139 @@ const near = (actual, expected, message, tolerance = 0.51) => assert.ok(Math.abs
   assert.equal(restored[0].hidden.strokes.length, 1)
   assert.deepEqual(deserializeSections([{ top: .5, bodyTop: .4 }, null, 'x', { top: 'a' }], () => []), [], 'garbage is dropped')
   assert.equal(deserializeSections([{ top: .2, bodyTop: .25, collapsed: false, hidden: { widthPx: 900, heightPx: 100, strokes: [] } }], () => [])[0].hidden, null, 'an expanded section carries no hidden ink')
+  const legacy = deserializeSections([{ id: 'old', top: .1, bodyTop: .2, collapsed: false, hidden: null }], () => [])
+  assert.equal(legacy[0].parentId, null, 'an old section has no parent')
+  assert.equal(legacy[0].width, 1, 'an old section is full width')
+  const cleaned = deserializeSections([
+    { id: 'p', top: .1, bodyTop: .16, collapsed: false },
+    { id: 'c', top: .2, bodyTop: .25, parentId: 'p', width: .5, collapsed: false },
+    { id: 'g', top: .28, bodyTop: .33, parentId: 'c', width: .4, collapsed: false },
+    { id: 'm', top: .4, bodyTop: .46, parentId: 'missing', collapsed: false },
+  ], () => [])
+  assert.deepEqual(cleaned.map((section) => section.id), ['p', 'c'], 'a subsection of a subsection and an orphan are dropped')
+  assert.equal(cleaned[1].parentId, 'p')
+  assert.equal(cleaned[1].width, .5)
 }
+
+// ── Subsections nest one level; their width never moves ink or the page ────
+{
+  const board = createBoard(1273)
+  const parent = board.insert(120, 'parent')
+  const second = board.insert(980, 'second')
+  const sub = board.insertSub(board.px(parent.bodyTop.y) + 120, 'sub')
+  assert.ok(parent && second && sub, 'a subsection lands in a section body')
+  assert.equal(sub.parentId, parent.id)
+  assert.equal(sub.width, 1)
+  near(board.px(sub.bodyTop.y) - board.px(sub.top.y), SUBSECTION_HEADER_PX, 'a subsection header is shorter than a section header')
+  const sibling = board.insertSub(board.px(sub.bodyTop.y) + 36, 'sib')
+  assert.ok(sibling, 'a tap inside a subsection adds a sibling')
+  assert.equal(sibling.parentId, parent.id, 'the sibling stays under the same section')
+  assert.ok(board.sections.every((section) => section.parentId !== sub.id), 'one level only')
+  assert.equal(planInsertSection(board.sections, sub.top.y + 0.0002, board.sheet, 'in-header', { nested: true }), null, 'no subsection inside a header')
+  assert.equal(planInsertSection(board.sections, 0.002, board.sheet, 'above', { nested: true }), null, 'a subsection needs a section')
+  assert.equal(topLevelSectionIndex(board.sections, parent.id), 0, 'the first section still folds the first heading')
+  assert.equal(topLevelSectionIndex(board.sections, second.id), 1, 'a subsection does not take a heading slot')
+  assert.equal(topLevelSectionIndex(board.sections, sub.id), -1, 'a subsection does not fold a heading')
+
+  const parentInk = board.write(board.px(parent.bodyTop.y) + 16, 18)
+  const subTitle = board.write(board.px(sub.top.y) + 6, 12)
+  const subBody = board.write(board.px(sub.bodyTop.y) + 16, 18)
+  const secondInk = board.write(board.px(second.bodyTop.y) + 20, 16)
+  const bodyX = subBody.points[0].x
+  const bodyY = subBody.points[0].y
+  const edgeBefore = sub.top.y
+  const heightAtWidth = board.sheet.height
+  applySectionWidth(sub, 0.4)
+  assert.equal(sub.width, 0.4)
+  assert.equal(subBody.points[0].x, bodyX, 'narrowing a subsection does not move ink x')
+  assert.equal(subBody.points[0].y, bodyY, 'narrowing a subsection does not move ink y')
+  assert.equal(sub.top.y, edgeBefore, 'narrowing a subsection does not move the band')
+  assert.equal(board.sheet.height, heightAtWidth, 'narrowing a subsection does not resize the page')
+  assert.equal(board.sheet.width, WIDTH, 'narrowing a subsection does not change the page width')
+  applySectionWidth(parent, 0.3)
+  assert.equal(parent.width, 1, 'a section stays full width')
+  assert.equal(parentInk.points[0].x, bodyX, 'the section width stays off the ink too')
+  assert.equal(applySectionWidth(sub, 0.01), SUBSECTION_WIDTH_MIN, 'width clamps at the narrow end')
+  applySectionWidth(sub, 0.62)
+  assert.equal(applySectionWidth(sub, 4), 1, 'width clamps at the sheet edge')
+  applySectionWidth(sub, 0.62)
+
+  const snapshot = (stroke) => stroke.points.map((p) => [Math.round(p.x * board.sheet.width * 100) / 100, Math.round(p.y * board.sheet.height * 100) / 100])
+  const before = {
+    parentInk: snapshot(parentInk),
+    subTitle: snapshot(subTitle),
+    subBody: snapshot(subBody),
+    secondInk: snapshot(secondInk),
+    subTop: board.px(sub.top.y),
+    secondTop: board.px(second.top.y),
+    parentTop: board.px(parent.top.y),
+  }
+  const placed = (pixels) => board.strokes.some((stroke) => pixels.every((point, index) => (
+    Math.abs(stroke.points[index].x * board.sheet.width - point[0]) < 0.8
+    && Math.abs(stroke.points[index].y * board.sheet.height - point[1]) < 0.8
+  )))
+
+  board.collapse(sub)
+  assert.ok(sub.collapsed && sub.hidden, 'a subsection collapses on its own')
+  assert.equal(sub.width, 0.62, 'collapse keeps the width')
+  assert.ok(!board.strokes.includes(subBody), 'subsection body ink leaves the sheet')
+  assert.ok(board.strokes.includes(subTitle), 'the subsection title stays in the header')
+  assert.ok(board.strokes.includes(parentInk), 'ink in the section, above the subsection, stays')
+  near(board.topPx(parentInk), before.parentInk[0][1], 'that ink does not move up')
+  board.expand(sub)
+  assert.equal(sub.width, 0.62)
+  assert.ok(!sub.collapsed)
+  near(board.px(sub.top.y), before.subTop, 'the subsection header is back', 0.6)
+  assert.ok(placed(before.subBody), 'subsection ink returns at the same pixels and the same x')
+
+  board.collapse(sub)
+  const whileSubCollapsed = board.px(second.top.y)
+  board.collapse(parent)
+  assert.ok(!board.sections.includes(sub) && !board.sections.includes(sibling), 'subsections leave the sheet with the section body')
+  assert.ok(parent.hidden.sections.includes(sub) && parent.hidden.sections.includes(sibling))
+  assert.ok(sub.collapsed, 'a collapsed subsection stays collapsed while parked')
+  assert.equal(sub.width, 0.62)
+  assert.equal(board.sheet.width, WIDTH)
+  const saved = JSON.parse(JSON.stringify(serializeSections(board.sections)))
+  const parked = saved.find((section) => section.id === 'parent')
+  assert.equal(parked.hidden.sections.length, 2)
+  assert.equal(parked.hidden.sections.find((section) => section.id === 'sub').width, 0.62)
+  assert.ok(!saved.some((section) => section.id === 'sub'), 'a parked subsection is not a second heading')
+  const loaded = deserializeSections(saved, (value) => Array.isArray(value) ? value : [])
+  const loadedSub = loaded.find((section) => section.id === 'parent').hidden.sections.find((section) => section.id === 'sub')
+  assert.equal(loaded.length, 2, 'the saved page has the two sections')
+  assert.equal(loadedSub.width, 0.62)
+  assert.equal(loadedSub.collapsed, true)
+  assert.ok(loadedSub.hidden.strokes.length >= 1, 'the parked subsection keeps its own hidden ink')
+  board.expand(parent)
+  assert.ok(board.sections.includes(sub))
+  assert.ok(sub.collapsed, 'expanding the section does not expand the subsection')
+  assert.equal(sub.width, 0.62)
+  near(board.px(sub.top.y), before.subTop, 'the parked subsection returns to its pixel', 0.8)
+  near(board.px(parent.top.y), before.parentTop, 'the section header stayed', 0.8)
+  near(board.px(second.top.y), whileSubCollapsed, 'the following section returns to the collapsed layout', 0.8)
+  board.expand(sub)
+  near(board.px(second.top.y), before.secondTop, 'expanding the subsection puts the following section back', 0.8)
+  assert.ok(placed(before.subBody), 'subsection ink survived the section collapse, still at its x')
+  assert.ok(placed(before.parentInk), 'section ink is back')
+  assert.ok(placed(before.subTitle), 'subsection title is back')
+  assert.ok(placed(before.secondInk), 'ink below the section is back')
+  assert.equal(board.sheet.width, WIDTH)
+}
+
+{
+  const board = createBoard(1273)
+  const parent = board.insert(150, 'parent')
+  const sub = board.insertSub(board.px(parent.bodyTop.y) + 220, 'sub')
+  board.insert(board.px(sub.bodyTop.y) + 420, 'second')
+  const before = board.px(sub.top.y)
+  const written = board.write(before - 24, 30)
+  assert.ok(board.px(sub.top.y) > before, 'writing toward a subsection pushes the subsection down')
+  near(written.points[0].x * WIDTH, 200, 'the push does not move the stroke sideways')
+  assert.equal(board.sheet.width, WIDTH)
+  assert.equal(sub.width, 1)
+}
+
 
 // ── Board wiring ───────────────────────────────────────────────────────────
 {
@@ -286,6 +432,16 @@ const near = (actual, expected, message, tolerance = 0.51) => assert.ok(Math.abs
   assert.match(board, /\.lw-drawing-board\.is-inline \.lw-ink-sections\{inset:var\(--paper-scroll-room,0px\)/, 'the bands are laid over the sheet, not the scroll room')
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   assert.match(app, /sectionsEnabled=\{!isPdfActive\}/, 'PDF notes keep their ink on the page: no sections')
+  assert.match(board, /Unterabschnitt/, 'the subsection tool is in the pen toolbar')
+  assert.match(board, /lw-ink-section-width/, 'a subsection has a width handle')
+  assert.match(board, /if \(section\.parentId === null\) onSectionFoldRef\.current\?\.\(topLevelSectionIndex\(sectionsRef\.current, id\), section\.collapsed\)/, 'only a section folds a heading')
+  assert.match(board, /\.lw-ink-section-placeholder\{position:absolute;left:12%;top:50%;transform:translateY\(-50%\);color:rgba\(74,63,176,\.34\);font:600 22px\/1 var\(--ui-font,system-ui\)/, 'the title placeholder keeps its size when the band changes width')
+  const drag = board.match(/const beginSubsectionWidthDrag = useCallback\(\(id: string, event: ReactPointerEvent<HTMLElement>\) => \{[\s\S]*?\n  \}, \[bumpRevision/)
+  assert.ok(drag, 'width drag is a band gesture')
+  assert.doesNotMatch(drag[0], /setPageExtent|shiftFrom|foldHeading|contentWidth|onSectionFold|growSheetBy|strokesRef/, 'dragging the width does not move ink, the page, or the note text')
+  const setWidth = board.match(/const setSubsectionWidth = useCallback\(\(id: string, width: number\) => \{[\s\S]*?\n  \}, \[commitSections\]\)/)
+  assert.ok(setWidth, 'width is stored on the subsection')
+  assert.doesNotMatch(setWidth[0], /setPageExtent|shiftFrom|foldHeading|contentWidth|onSectionFold|strokesRef/, 'storing a width does not move ink or the note text')
 }
 
 await server.close()

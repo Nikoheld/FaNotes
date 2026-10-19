@@ -3,26 +3,38 @@
  *
  * A section is a horizontal band on the ink sheet: a header (where the title is
  * written by hand) followed by a body that reaches down to the next section's
- * header — or, for the last section, to the end of the page. Collapsing a
+ * header — or, for the last section, to the end of the page. A subsection is
+ * the same kind of band, nested one level inside a section. Collapsing a
  * section lifts its body ink off the sheet and pulls everything below up by
- * the body's height; expanding puts it back. Ink stays a flat 0–1 stroke list
- * the whole time, so painting, erasing, selection and saving never learn about
- * sections: they only see the current layout.
+ * the body's height; expanding puts it back. Subsections of a collapsed
+ * section are parked inside that hidden body and come back still collapsed
+ * if they were collapsed. Ink stays a flat 0–1 stroke list the whole time, so
+ * painting, erasing, selection and saving never learn about sections: they
+ * only see the current layout.
  *
  * Section edges are `StrokePoint`s. The board remaps every tracked point when
  * the sheet grows, pads or rescales, and by being points the edges ride along.
  * Hidden body ink is stored normalised to its own box (width × height in sheet
- * px at collapse time) so a later sheet resize cannot make it stale.
+ * px at collapse time) so a later sheet resize cannot make it stale. A
+ * subsection's `width` is only how wide its band is drawn. Changing it does
+ * not move strokes and does not change the page.
  */
 import type { StrokePoint } from '../../../src/types'
 import { WRITE_MARGIN_X } from './noteCanvas'
 
 /** Height of the title band in sheet px (≈ 17 mm on the A4 column). */
 export const SECTION_HEADER_PX = 72
+/** A subsection header is shorter so it reads as nested inside its section. */
+export const SUBSECTION_HEADER_PX = 48
 /** Room kept below the lowest stroke of a body so the pen never runs into the next header. */
 export const SECTION_BODY_MARGIN_PX = WRITE_MARGIN_X
 /** A body never becomes shorter than this when a header is inserted right above another one. */
 export const SECTION_MIN_BODY_PX = 144
+/** Shortest body kept when a subsection is inserted against the next header. */
+export const SUBSECTION_MIN_BODY_PX = 96
+/** Subsection band width, as a fraction of the sheet. The left edge stays put. */
+export const SUBSECTION_WIDTH_MIN = 0.28
+export const SUBSECTION_WIDTH_MAX = 1
 
 export type SectionStroke = { points: StrokePoint[] }
 
@@ -32,13 +44,25 @@ export type HiddenSectionInk<S extends SectionStroke> = {
   heightPx: number
   /** Body ink, x 0–1 of `widthPx`, y 0–1 of `heightPx` measured from the body top. */
   strokes: S[]
+  /**
+   * Subsections that lived in this body. Their edges are 0–1 of this box,
+   * not of the sheet, so a resize while the parent is collapsed leaves them alone.
+   */
+  sections: InkSection<S>[]
 }
 
 export type InkSection<S extends SectionStroke = SectionStroke> = {
   id: string
-  /** Header top edge, 0–1 of the sheet. */
+  /** `null` for a section. A subsection names its section; one level only. */
+  parentId: string | null
+  /**
+   * Fraction of the sheet the band occupies, from the left edge. Sections are
+   * always 1. Changing a subsection's width does not move ink or the page.
+   */
+  width: number
+  /** Header top edge, 0–1 of the sheet (or of the parent body box while parked). */
   top: StrokePoint
-  /** Header bottom edge = body top, 0–1 of the sheet. */
+  /** Header bottom edge = body top, 0–1 of the sheet (or of the parent body box while parked). */
   bodyTop: StrokePoint
   collapsed: boolean
   hidden: HiddenSectionInk<S> | null
@@ -77,7 +101,7 @@ export const sectionIndexAt = <S extends SectionStroke>(sections: readonly InkSe
 
 export const isInHeader = <S extends SectionStroke>(section: InkSection<S>, y: number) => y >= section.top.y && y < section.bodyTop.y
 
-/** Next header's top, or `null` for the last section (its body runs to the page end). */
+/** Next header's top, including a subsection inside this band, or `null` when nothing follows. */
 export const nextSectionTop = <S extends SectionStroke>(sections: readonly InkSection<S>[], section: InkSection<S>) => {
   let next: number | null = null
   for (const other of sections) {
@@ -87,9 +111,30 @@ export const nextSectionTop = <S extends SectionStroke>(sections: readonly InkSe
   return next
 }
 
-/** Live strokes whose top lies in the section's body. */
+/**
+ * Where this band's collapsible body ends: the next sibling, or the next
+ * section. A section's own subsections sit inside the body, so they do not
+ * end it.
+ */
+export const nextSpanTop = <S extends SectionStroke>(sections: readonly InkSection<S>[], section: InkSection<S>) => {
+  const parentId = section.parentId
+  let next: number | null = null
+  for (const other of sections) {
+    if (other === section || other.top.y < section.bodyTop.y) continue
+    if (other.parentId === section.id) continue
+    if (parentId === null) {
+      if (other.parentId !== null) continue
+    } else if (other.parentId !== null && other.parentId !== parentId) {
+      continue
+    }
+    if (next === null || other.top.y < next) next = other.top.y
+  }
+  return next
+}
+
+/** Live strokes whose top lies in the section's body, including ink inside its subsections. */
 export const bodyStrokes = <S extends SectionStroke>(strokes: readonly S[], sections: readonly InkSection<S>[], section: InkSection<S>) => {
-  const end = nextSectionTop(sections, section) ?? Number.POSITIVE_INFINITY
+  const end = nextSpanTop(sections, section) ?? Number.POSITIVE_INFINITY
   return strokes.filter((stroke) => { const top = strokeTop(stroke); return top >= section.bodyTop.y && top < end })
 }
 
@@ -103,11 +148,40 @@ export const headerStrokeCount = <S extends SectionStroke>(strokes: readonly S[]
  * without ink has a zero-height body — collapsing it only flips the arrow.
  */
 export const collapsibleBodyEnd = <S extends SectionStroke>(strokes: readonly S[], sections: readonly InkSection<S>[], section: InkSection<S>, sheet: SheetPx) => {
-  const next = nextSectionTop(sections, section)
+  const next = nextSpanTop(sections, section)
   if (next !== null) return next
   let lowest = section.bodyTop.y
   for (const stroke of bodyStrokes(strokes, sections, section)) lowest = Math.max(lowest, strokeBottom(stroke))
+  for (const other of sections) {
+    if (other.parentId !== section.id || other.top.y < section.bodyTop.y) continue
+    lowest = Math.max(lowest, other.bodyTop.y)
+  }
   return lowest === section.bodyTop.y ? section.bodyTop.y : lowest + SECTION_BODY_MARGIN_PX / sheet.height
+}
+
+/** Index among sections only. A subsection does not take a heading slot. */
+export const topLevelSectionIndex = <S extends SectionStroke>(sections: readonly InkSection<S>[], id: string) => (
+  sortSections(sections).filter((section) => section.parentId === null).findIndex((section) => section.id === id)
+)
+
+/** Keeps a subsection width inside the band limits. Anything else is full width. */
+export const clampSectionWidth = (value: unknown) => {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(parsed)) return 1
+  return Math.min(SUBSECTION_WIDTH_MAX, Math.max(SUBSECTION_WIDTH_MIN, parsed))
+}
+
+/**
+ * Sets a subsection's band width. Sections stay full width. No stroke moves
+ * and the sheet size is left untouched — the note text is not part of this.
+ */
+export const applySectionWidth = <S extends SectionStroke>(section: InkSection<S>, width: number) => {
+  if (section.parentId === null) {
+    section.width = 1
+    return 1
+  }
+  section.width = clampSectionWidth(width)
+  return section.width
 }
 
 /**
@@ -155,10 +229,33 @@ export type InsertSectionPlan<S extends SectionStroke> = {
  * against a header right below — and everything from `y` down moves by that.
  * Returns `null` when `y` lands inside an existing header.
  */
-export const planInsertSection = <S extends SectionStroke>(sections: readonly InkSection<S>[], y: number, sheet: SheetPx, id: string): InsertSectionPlan<S> | null => {
+export const planInsertSection = <S extends SectionStroke>(
+  sections: readonly InkSection<S>[],
+  y: number,
+  sheet: SheetPx,
+  id: string,
+  options?: { nested?: boolean },
+): InsertSectionPlan<S> | null => {
   if (sections.some((section) => isInHeader(section, y))) return null
+  const nested = options?.nested === true
+  let parentId: string | null = null
+  let headerPx = SECTION_HEADER_PX
+  let minBodyPx = SECTION_MIN_BODY_PX
+  if (nested) {
+    const index = sectionIndexAt(sections, y)
+    const host = index < 0 ? null : sections[index]
+    if (!host) return null
+    parentId = host.parentId ?? host.id
+    const parent = sections.find((section) => section.id === parentId) ?? null
+    if (!parent || parent.parentId !== null || parent.collapsed) return null
+    if (y < parent.bodyTop.y) return null
+    const spanEnd = nextSpanTop(sections, parent)
+    if (spanEnd !== null && y >= spanEnd) return null
+    headerPx = SUBSECTION_HEADER_PX
+    minBodyPx = SUBSECTION_MIN_BODY_PX
+  }
   const yPx = y * sheet.height
-  let growPx = SECTION_HEADER_PX
+  let growPx = headerPx
   let nextPx: number | null = null
   for (const section of sections) {
     const topPx = section.top.y * sheet.height
@@ -166,14 +263,16 @@ export const planInsertSection = <S extends SectionStroke>(sections: readonly In
   }
   if (nextPx !== null) {
     const bodyPx = nextPx - yPx
-    if (bodyPx < SECTION_MIN_BODY_PX) growPx += SECTION_MIN_BODY_PX - bodyPx
+    if (bodyPx < minBodyPx) growPx += minBodyPx - bodyPx
   }
   return {
     growPx,
     section: {
       id,
+      parentId,
+      width: 1,
       top: sectionPoint(0, y),
-      bodyTop: sectionPoint(0, y + SECTION_HEADER_PX / sheet.height),
+      bodyTop: sectionPoint(0, y + headerPx / sheet.height),
       collapsed: false,
       hidden: null,
     },
@@ -193,6 +292,15 @@ export const insertSection = <S extends SectionStroke>(
 ) => {
   const { section } = plan
   shiftFrom(section.top.y, plan.growPx / sheet.height, sections, forEachTrackedStroke, { edges: new Set([section.top, section.bodyTop]) })
+  if (section.parentId !== null) return
+  // A section inserted through an existing body takes the subsections that
+  // landed inside it, so they collapse and expand with their new parent.
+  const spanEnd = nextSpanTop(sections, section)
+  for (const other of sections) {
+    if (other === section || other.parentId === null || other.top.y < section.bodyTop.y) continue
+    if (spanEnd !== null && other.top.y >= spanEnd) continue
+    other.parentId = section.id
+  }
 }
 
 export type CollapsePlan<S extends SectionStroke> = {
@@ -232,6 +340,19 @@ export const collapseSection = <S extends SectionStroke>(
   const hiddenSet = new Set(hiddenStrokes)
   const box = { widthPx: sheet.width, heightPx: Math.max(1, hiddenPx) }
   const bodyTopPx = section.bodyTop.y * sheet.height
+  const live = sections as InkSection<S>[]
+  const parked: InkSection<S>[] = []
+  for (let index = live.length - 1; index >= 0; index -= 1) {
+    const other = live[index]!
+    if (other.parentId !== section.id || other.top.y < section.bodyTop.y || other.top.y >= bodyEnd) continue
+    parked.push(other)
+    live.splice(index, 1)
+  }
+  parked.reverse()
+  for (const child of parked) {
+    child.top = sectionPoint(0, (child.top.y * sheet.height - bodyTopPx) / box.heightPx)
+    child.bodyTop = sectionPoint(0, (child.bodyTop.y * sheet.height - bodyTopPx) / box.heightPx)
+  }
   section.hidden = {
     ...box,
     strokes: hiddenStrokes.map((stroke) => cloneStroke(stroke, stroke.points.map((point) => ({
@@ -239,6 +360,7 @@ export const collapseSection = <S extends SectionStroke>(
       x: point.x,
       y: (point.y * sheet.height - bodyTopPx) / box.heightPx,
     })))),
+    sections: parked,
   }
   section.collapsed = true
   // Edges sitting exactly on the body end (the next header) land exactly on this
@@ -264,6 +386,7 @@ export const expandSection = <S extends SectionStroke>(
   cloneStroke: (stroke: S, points: StrokePoint[]) => S,
 ): S[] => {
   const hidden = section.hidden
+  const parked = hidden?.sections ?? []
   section.collapsed = false
   section.hidden = null
   if (!hidden) return [...strokes]
@@ -275,6 +398,13 @@ export const expandSection = <S extends SectionStroke>(
     x: point.x * hidden.widthPx / sheet.width,
     y: (bodyTopPx + point.y * hidden.heightPx) / sheet.height,
   }))))
+  const live = sections as InkSection<S>[]
+  for (const child of parked) {
+    const fromBox = (y: number) => (hidden.heightPx > 0 ? (bodyTopPx + y * hidden.heightPx) / sheet.height : section.bodyTop.y)
+    child.top = sectionPoint(0, fromBox(child.top.y))
+    child.bodyTop = sectionPoint(0, fromBox(child.bodyTop.y))
+    live.push(child)
+  }
   return [...strokes, ...restored]
 }
 
@@ -320,23 +450,33 @@ export type SerializedSection = {
   top: number
   bodyTop: number
   collapsed: boolean
-  hidden: { widthPx: number; heightPx: number; strokes: unknown[] } | null
+  parentId?: string
+  width?: number
+  hidden: { widthPx: number; heightPx: number; strokes: unknown[]; sections?: SerializedSection[] } | null
 }
 
+const serializeOne = <S extends SectionStroke>(section: InkSection<S>): SerializedSection => ({
+  id: section.id,
+  top: section.top.y,
+  bodyTop: section.bodyTop.y,
+  collapsed: section.collapsed,
+  ...(section.parentId ? { parentId: section.parentId } : {}),
+  ...(section.parentId && section.width !== 1 ? { width: section.width } : {}),
+  hidden: section.hidden ? {
+    widthPx: section.hidden.widthPx,
+    heightPx: section.hidden.heightPx,
+    strokes: section.hidden.strokes,
+    ...(section.hidden.sections.length ? { sections: sortSections(section.hidden.sections).map(serializeOne) } : {}),
+  } : null,
+})
+
 export const serializeSections = <S extends SectionStroke>(sections: readonly InkSection<S>[]): SerializedSection[] => (
-  sortSections(sections).map((section) => ({
-    id: section.id,
-    top: section.top.y,
-    bodyTop: section.bodyTop.y,
-    collapsed: section.collapsed,
-    hidden: section.hidden ? { widthPx: section.hidden.widthPx, heightPx: section.hidden.heightPx, strokes: section.hidden.strokes } : null,
-  }))
+  sortSections(sections).map(serializeOne)
 )
 
-/** Rebuilds sections from a saved document; `parseStrokes` sanitises hidden ink. */
-export const deserializeSections = <S extends SectionStroke>(value: unknown, parseStrokes: (raw: unknown) => S[]): InkSection<S>[] => {
+const readSectionList = <S extends SectionStroke>(value: unknown, parseStrokes: (raw: unknown) => S[], allowNested: boolean): { section: InkSection<S>; hadParent: boolean }[] => {
   if (!Array.isArray(value)) return []
-  const sections: InkSection<S>[] = []
+  const sections: { section: InkSection<S>; hadParent: boolean }[] = []
   for (const entry of value) {
     if (!entry || typeof entry !== 'object') continue
     const raw = entry as Partial<SerializedSection>
@@ -344,15 +484,48 @@ export const deserializeSections = <S extends SectionStroke>(value: unknown, par
     const bodyTop = Number(raw.bodyTop)
     if (!Number.isFinite(top) || !Number.isFinite(bodyTop) || bodyTop <= top || top < 0 || bodyTop > 1.5) continue
     const id = typeof raw.id === 'string' && raw.id.length <= 64 ? raw.id : `section-${sections.length + 1}`
+    const hadParent = typeof raw.parentId === 'string' && raw.parentId.length > 0
+    const parentId = hadParent && raw.parentId!.length <= 64 && raw.parentId !== id ? raw.parentId! : null
     let hidden: HiddenSectionInk<S> | null = null
     if (raw.hidden && typeof raw.hidden === 'object') {
       const widthPx = Number(raw.hidden.widthPx)
       const heightPx = Number(raw.hidden.heightPx)
       if (Number.isFinite(widthPx) && widthPx > 0 && Number.isFinite(heightPx) && heightPx > 0) {
-        hidden = { widthPx, heightPx, strokes: parseStrokes(raw.hidden.strokes) }
+        const nested = allowNested ? readSectionList(raw.hidden.sections, parseStrokes, false) : []
+        hidden = {
+          widthPx,
+          heightPx,
+          strokes: parseStrokes(raw.hidden.strokes),
+          sections: nested.map((entry) => {
+            entry.section.parentId = id
+            entry.section.width = clampSectionWidth(entry.section.width)
+            return entry.section
+          }),
+        }
       }
     }
-    sections.push({ id, top: sectionPoint(0, top), bodyTop: sectionPoint(0, bodyTop), collapsed: raw.collapsed === true, hidden: raw.collapsed === true ? hidden : null })
+    sections.push({
+      hadParent,
+      section: {
+        id,
+        parentId,
+        width: parentId ? clampSectionWidth(raw.width) : 1,
+        top: sectionPoint(0, top),
+        bodyTop: sectionPoint(0, bodyTop),
+        collapsed: raw.collapsed === true,
+        hidden: raw.collapsed === true ? hidden : null,
+      },
+    })
   }
+  return sections
+}
+
+/** Rebuilds sections from a saved document; `parseStrokes` sanitises hidden ink. */
+export const deserializeSections = <S extends SectionStroke>(value: unknown, parseStrokes: (raw: unknown) => S[]): InkSection<S>[] => {
+  const parsed = readSectionList(value, parseStrokes, true)
+  const topLevel = new Set(parsed.filter((entry) => entry.section.parentId === null && !entry.hadParent).map((entry) => entry.section.id))
+  const sections = parsed.filter((entry) => (
+    entry.section.parentId === null ? !entry.hadParent : topLevel.has(entry.section.parentId)
+  )).map((entry) => entry.section)
   return sortSections(sections)
 }

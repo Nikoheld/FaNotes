@@ -11,6 +11,7 @@ import {
   LoaderCircle,
   ListChecks,
   ListCollapse,
+  ListTree,
   Move,
   Paintbrush,
   Palette,
@@ -179,6 +180,8 @@ import {
   type InkSection,
   type SerializedSection,
   SECTION_HEADER_PX,
+  applySectionWidth,
+  clampSectionWidth,
   collapseSection,
   deserializeSections,
   expandSection,
@@ -191,6 +194,7 @@ import {
   planInsertSection,
   serializeSections,
   sortSections,
+  topLevelSectionIndex,
 } from '../lib/inkSections'
 import {
   PAGE_START_WIDTH,
@@ -1457,9 +1461,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   /** Collapsible sections, kept sorted by header top. The ref is what callbacks read; the state renders the bands. */
   const sectionsRef = useRef<InkSection<InkStroke>[]>([])
   const [sections, setSections] = useState<InkSection<InkStroke>[]>([])
-  /** The next tap on the sheet inserts a section header there. */
-  const [sectionPlacing, setSectionPlacing] = useState(false)
-  const sectionPlacingRef = useRef(false)
+  /** The next tap on the sheet inserts a section or a subsection header there. */
+  const [sectionPlacing, setSectionPlacing] = useState<null | 'section' | 'subsection'>(null)
+  const sectionPlacingRef = useRef<null | 'section' | 'subsection'>(null)
   sectionPlacingRef.current = sectionPlacing
   const sectionGuideRef = useRef<HTMLDivElement | null>(null)
   const [selectionPurpose, setSelectionPurpose] = useState<SelectionPurpose>('conversion')
@@ -2307,7 +2311,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const loadedSections = deserializeSections<InkStroke>(raw.sections, (value) => safeInkStrokes(value, initialColorRef.current, { clampToSheet: false }))
       sectionsRef.current = loadedSections
       setSections(loadedSections)
-      setSectionPlacing(false)
+      setSectionPlacing(null)
       if (!pagePaperStyle && raw.paperStyle && raw.paperStyle in paperLabel) setPaperStyle(raw.paperStyle)
       if (typeof raw.sourceHeight === 'number' && raw.sourceHeight >= WRITE_SLACK_HEIGHT && raw.sourceHeight <= MAX_SOURCE_HEIGHT) {
         sourceHeightRef.current = raw.sourceHeight
@@ -3852,6 +3856,18 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return true
   }, [afterSectionChange, commitSections, forEachTrackedStroke, growSheetBy, sheetPx])
 
+  const insertSubsectionAt = useCallback((y: number) => {
+    const id = `section-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`
+    const plan = planInsertSection(sectionsRef.current, y, sheetPx(), id, { nested: true })
+    if (!plan) return false
+    sectionsRef.current = [...sectionsRef.current, plan.section]
+    const sheet = growSheetBy(plan.growPx)
+    insertSection(plan, sectionsRef.current, sheet, forEachTrackedStroke)
+    commitSections(sectionsRef.current)
+    afterSectionChange()
+    return true
+  }, [afterSectionChange, commitSections, forEachTrackedStroke, growSheetBy, sheetPx])
+
   const toggleSection = useCallback((id: string) => {
     const section = sectionsRef.current.find((entry) => entry.id === id)
     if (!section || activeStrokeRef.current) return
@@ -3868,8 +3884,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     indexedStrokeCountRef.current = handwritingStrokes(strokesRef.current).length
     commitSections([...sectionsRef.current])
-    const sectionIndex = sortSections(sectionsRef.current).findIndex((entry) => entry.id === id)
-    onSectionFoldRef.current?.(sectionIndex, section.collapsed)
+    // Only a section folds a heading. A subsection is not a markdown heading.
+    if (section.parentId === null) onSectionFoldRef.current?.(topLevelSectionIndex(sectionsRef.current, id), section.collapsed)
     afterSectionChange({ resetHistory: true })
   }, [afterSectionChange, cloneSectionStroke, commitSections, forEachTrackedStroke, growSheetBy, setPageExtent, sheetPx])
 
@@ -3878,13 +3894,18 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const section = sectionsRef.current.find((entry) => entry.id === id)
     if (!section || activeStrokeRef.current) return
     let resetHistory = false
-    if (section.collapsed) {
-      const sheet = growSheetBy(section.hidden?.heightPx ?? 0)
-      strokesRef.current = expandSection(strokesRef.current, sectionsRef.current, section, sheet, forEachTrackedStroke, cloneSectionStroke)
-      indexedStrokeCountRef.current = handwritingStrokes(strokesRef.current).length
+    const release = (target: InkSection<InkStroke>) => {
+      if (!target.collapsed) return
+      const sheet = growSheetBy(target.hidden?.heightPx ?? 0)
+      strokesRef.current = expandSection(strokesRef.current, sectionsRef.current, target, sheet, forEachTrackedStroke, cloneSectionStroke)
       resetHistory = true
     }
-    commitSections(sectionsRef.current.filter((entry) => entry !== section))
+    release(section)
+    const children = () => sectionsRef.current.filter((entry) => entry.parentId === section.id)
+    for (const child of children()) release(child)
+    if (resetHistory) indexedStrokeCountRef.current = handwritingStrokes(strokesRef.current).length
+    const drop = new Set([section.id, ...children().map((entry) => entry.id)])
+    commitSections(sectionsRef.current.filter((entry) => !drop.has(entry.id)))
     afterSectionChange({ resetHistory })
   }, [afterSectionChange, cloneSectionStroke, commitSections, forEachTrackedStroke, growSheetBy])
 
@@ -3906,12 +3927,46 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return new Set(sections.filter((section) => headerStrokeCount(strokesRef.current, section) > 0).map((section) => section.id))
   }, [revision, sections])
 
-  const beginSectionPlacement = useCallback(() => {
+  const beginBandPlacement = useCallback((kind: 'section' | 'subsection') => {
     clearRecognitionScope()
     closeMathSolverSelection()
     closeMathCorrectionSession()
-    setSectionPlacing((current) => !current)
+    setSectionPlacing((current) => current === kind ? null : kind)
   }, [clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection])
+
+  /** Band width only. Ink, the page and the note text stay where they are. */
+  const setSubsectionWidth = useCallback((id: string, width: number) => {
+    const section = sectionsRef.current.find((entry) => entry.id === id)
+    if (!section) return false
+    const before = section.width
+    applySectionWidth(section, width)
+    if (section.width === before) return false
+    commitSections([...sectionsRef.current])
+    return true
+  }, [commitSections])
+
+  const beginSubsectionWidthDrag = useCallback((id: string, event: ReactPointerEvent<HTMLElement>) => {
+    event.stopPropagation()
+    event.preventDefault()
+    const handle = event.currentTarget
+    handle.setPointerCapture(event.pointerId)
+    let moved = false
+    const onMove = (ev: PointerEvent) => {
+      const point = pointFromEvent(ev)
+      if (point && setSubsectionWidth(id, point.x)) moved = true
+    }
+    const onUp = () => {
+      handle.removeEventListener('pointermove', onMove)
+      handle.removeEventListener('pointerup', onUp)
+      handle.removeEventListener('pointercancel', onUp)
+      if (!moved) return
+      setDirty(true)
+      bumpRevision()
+    }
+    handle.addEventListener('pointermove', onMove)
+    handle.addEventListener('pointerup', onUp)
+    handle.addEventListener('pointercancel', onUp)
+  }, [bumpRevision, pointFromEvent, setDirty, setSubsectionWidth])
 
   useEffect(() => {
     if (!sectionPlacing) return
@@ -4073,8 +4128,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (lastCapturedPointerIdRef.current === event.pointerId) lastCapturedPointerIdRef.current = null
       activePointerTargetRef.current = null
       if (firstPoint) {
-        setSectionPlacing(false)
-        insertSectionAt(firstPoint.y)
+        const placing = sectionPlacing
+        setSectionPlacing(null)
+        if (placing === 'subsection') insertSubsectionAt(firstPoint.y)
+        else insertSectionAt(firstPoint.y)
       }
       return
     }
@@ -4160,7 +4217,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   // inputActive is a dependency: a board mounted inert (keyboard mode showing
   // saved ink) kept a handler that still saw inputActive=false after the pen
   // turned on, and every pen-down was refused until an unrelated grow rebuilt it.
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, inputActive, insertSectionAt, markPenContact, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, inputActive, insertSectionAt, insertSubsectionAt, markPenContact, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const pan = tabletPanRef.current
@@ -5092,7 +5149,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     sectionsRef.current = []
     setSections([])
-    setSectionPlacing(false)
+    setSectionPlacing(null)
     undoRef.current.push(snapshotStrokes(strokesRef.current))
     redoRef.current = []
     strokesRef.current = []
@@ -6473,7 +6530,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     if (event.key === 'Escape' && sectionPlacing) {
       event.preventDefault()
-      setSectionPlacing(false)
+      setSectionPlacing(null)
       return
     }
     if (event.key === 'Escape') {
@@ -6809,8 +6866,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             <button type="button" className="lw-draw-subtle" onClick={() => commitLasso('recolor')}>Färben</button>
             <button type="button" className="lw-draw-subtle lw-danger" onClick={() => commitLasso('delete')}>Löschen</button>
           </>}
-          {sectionsEnabled && inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${sectionPlacing ? 'is-active' : ''}`} aria-pressed={sectionPlacing} onClick={beginSectionPlacement} title="Abschnitt mit Titelzeile einfügen · der Pfeil am Rand klappt den Inhalt ein">
+          {sectionsEnabled && inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${sectionPlacing === 'section' ? 'is-active' : ''}`} aria-pressed={sectionPlacing === 'section'} onClick={() => beginBandPlacement('section')} title="Abschnitt mit Titelzeile einfügen · der Pfeil am Rand klappt den Inhalt ein">
             <ListCollapse size={14} /> <span className="lw-tool-label">Abschnitt</span>
+          </button>}
+          {sectionsEnabled && inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${sectionPlacing === 'subsection' ? 'is-active' : ''}`} aria-pressed={sectionPlacing === 'subsection'} onClick={() => beginBandPlacement('subsection')} title="Unterabschnitt in den Abschnitt einfügen · die Breite am rechten Rand ziehen, der Text bleibt stehen">
+            <ListTree size={14} /> <span className="lw-tool-label">Unterabschnitt</span>
           </button>}
           {selectionPurpose === 'edit' && selectionRect && !selectionMode && <>
             <button type="button" className="lw-draw-subtle" onClick={copySelectedInk} title="Auswahl duplizieren"><Copy size={14} /> <span className="lw-tool-label">Kopieren</span></button>
@@ -7005,21 +7065,30 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             )}
             {(sections.length > 0 || sectionPlacing) && <div className="lw-ink-sections" aria-label="Abschnitte">
               {sections.map((section) => {
+                const isSub = section.parentId !== null
+                const bandWidth = isSub ? clampSectionWidth(section.width) : 1
                 const bodyEnd = section.collapsed ? section.bodyTop.y : (nextSectionTop(sections, section) ?? 1)
                 const titled = titledSectionIds.has(section.id)
-                const hiddenCount = section.hidden?.strokes.length ?? 0
+                const hiddenCount = section.hidden
+                  ? section.hidden.strokes.length + section.hidden.sections.reduce((sum, child) => sum + (child.hidden?.strokes.length ?? 0), 0)
+                  : 0
+                const noun = isSub ? 'Unterabschnitt' : 'Abschnitt'
                 return (
                   <Fragment key={section.id}>
                     <div
-                      className={`lw-ink-section-header ${section.collapsed ? 'is-collapsed' : ''}`}
-                      style={{ top: `${section.top.y * 100}%`, height: `${(section.bodyTop.y - section.top.y) * 100}%` }}
+                      className={`lw-ink-section-header${isSub ? ' is-subsection' : ''}${section.collapsed ? ' is-collapsed' : ''}`}
+                      style={{
+                        top: `${section.top.y * 100}%`,
+                        height: `${(section.bodyTop.y - section.top.y) * 100}%`,
+                        ...(isSub ? { width: `${bandWidth * 100}%` } : {}),
+                      }}
                     >
                       <button
                         type="button"
                         className="lw-ink-section-control lw-ink-section-toggle"
                         aria-expanded={!section.collapsed}
-                        aria-label={section.collapsed ? 'Abschnitt ausklappen' : 'Abschnitt einklappen'}
-                        title={section.collapsed ? 'Abschnitt ausklappen' : 'Abschnitt einklappen'}
+                        aria-label={section.collapsed ? `${noun} ausklappen` : `${noun} einklappen`}
+                        title={section.collapsed ? `${noun} ausklappen` : `${noun} einklappen`}
                         onClick={() => toggleSection(section.id)}
                       >
                         {section.collapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
@@ -7029,21 +7098,49 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                       <button
                         type="button"
                         className="lw-ink-section-control lw-ink-section-remove"
-                        aria-label="Abschnitt auflösen"
-                        title="Abschnitt auflösen · die Tinte bleibt auf der Seite"
+                        aria-label={`${noun} auflösen`}
+                        title={`${noun} auflösen · die Tinte bleibt auf der Seite`}
                         onClick={() => removeSection(section.id)}
                       >
                         <X size={13} />
                       </button>
+                      {isSub && <div
+                        className="lw-ink-section-control lw-ink-section-width"
+                        role="slider"
+                        aria-valuemin={28}
+                        aria-valuemax={100}
+                        aria-valuenow={Math.round(bandWidth * 100)}
+                        aria-label="Breite des Unterabschnitts"
+                        title="Breite ziehen · die Schrift bleibt, wo sie ist"
+                        tabIndex={0}
+                        onPointerDown={(event) => beginSubsectionWidthDrag(section.id, event)}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+                          event.preventDefault()
+                          event.stopPropagation()
+                          if (setSubsectionWidth(section.id, bandWidth + (event.key === 'ArrowLeft' ? -0.02 : 0.02))) {
+                            setDirty(true)
+                            bumpRevision()
+                          }
+                        }}
+                      />}
                     </div>
                     {!section.collapsed && bodyEnd > section.bodyTop.y && <div
-                      className="lw-ink-section-rail"
+                      className={`lw-ink-section-rail${isSub ? ' is-subsection' : ''}`}
                       style={{ top: `${section.bodyTop.y * 100}%`, height: `${(bodyEnd - section.bodyTop.y) * 100}%` }}
+                    />}
+                    {isSub && !section.collapsed && bodyEnd > section.bodyTop.y && <div
+                      className="lw-ink-section-edge"
+                      style={{
+                        top: `${section.bodyTop.y * 100}%`,
+                        height: `${(bodyEnd - section.bodyTop.y) * 100}%`,
+                        left: `${bandWidth * 100}%`,
+                      }}
                     />}
                   </Fragment>
                 )
               })}
-              {sectionPlacing && <div ref={sectionGuideRef} className="lw-ink-section-guide" style={{ top: '-9999px', opacity: 0 }}><span>Neuer Abschnitt</span></div>}
+              {sectionPlacing && <div ref={sectionGuideRef} className="lw-ink-section-guide" style={{ top: '-9999px', opacity: 0 }}><span>{sectionPlacing === 'subsection' ? 'Neuer Unterabschnitt' : 'Neuer Abschnitt'}</span></div>}
             </div>}
             <div className="lw-page-overlay">
             {selectionRect && <div
@@ -7526,8 +7623,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${lassoOn ? 'is-active' : ''}`} aria-pressed={lassoOn} onClick={() => { setLassoOn((value) => !value); setLassoPoints([]); setLassoIndexes([]) }} disabled={!handwritingCount} title="Lasso: Striche einrahmen, dann verschieben, kopieren, färben oder löschen">
             <ScanSearch size={14} /> Lasso
           </button>}
-          {sectionsEnabled && inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${sectionPlacing ? 'is-active' : ''}`} aria-pressed={sectionPlacing} onClick={beginSectionPlacement} title="Abschnitt mit Titelzeile einfügen · der Pfeil am Rand klappt den Inhalt ein">
+          {sectionsEnabled && inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${sectionPlacing === 'section' ? 'is-active' : ''}`} aria-pressed={sectionPlacing === 'section'} onClick={() => beginBandPlacement('section')} title="Abschnitt mit Titelzeile einfügen · der Pfeil am Rand klappt den Inhalt ein">
             <ListCollapse size={14} /> Abschnitt
+          </button>}
+          {sectionsEnabled && inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${sectionPlacing === 'subsection' ? 'is-active' : ''}`} aria-pressed={sectionPlacing === 'subsection'} onClick={() => beginBandPlacement('subsection')} title="Unterabschnitt in den Abschnitt einfügen · die Breite am rechten Rand ziehen, der Text bleibt stehen">
+            <ListTree size={14} /> Unterabschnitt
           </button>}
           {selectionPurpose === 'edit' && selectionRect && !selectionMode && <>
             <button type="button" className="lw-draw-subtle" onClick={copySelectedInk} title="Auswahl duplizieren"><Copy size={14} /> Kopieren</button>
@@ -7612,7 +7712,12 @@ const drawingBoardStyles = `
 .lw-ink-sections{position:absolute;inset:0;z-index:3;pointer-events:none}
 .lw-drawing-board.is-inline .lw-ink-sections{inset:var(--paper-scroll-room,0px);width:calc(100% - 2 * var(--paper-scroll-room,0px));height:calc(100% - 2 * var(--paper-scroll-room,0px))}
 .lw-ink-section-header{position:absolute;left:0;right:0;box-sizing:border-box;border-top:1px solid rgba(var(--accent-rgb),.3);border-bottom:1px solid rgba(var(--accent-rgb),.3);background:linear-gradient(90deg,rgba(var(--accent-rgb),.11),rgba(var(--accent-rgb),.045) 55%,rgba(var(--accent-rgb),.02));pointer-events:none}
+.lw-ink-section-header.is-subsection{right:auto;border-left:3px solid rgba(var(--accent-rgb),.55);background:linear-gradient(90deg,rgba(var(--accent-rgb),.18),rgba(var(--accent-rgb),.07) 72%,rgba(var(--accent-rgb),.03))}
 .lw-ink-section-header.is-collapsed{border-bottom:2px dashed rgba(var(--accent-rgb),.45);background:linear-gradient(90deg,rgba(var(--accent-rgb),.16),rgba(var(--accent-rgb),.06) 55%,rgba(var(--accent-rgb),.03))}
+.lw-ink-section-width{position:absolute;top:0;right:-6px;width:14px;height:100%;padding:0;border:0;background:transparent;cursor:ew-resize;pointer-events:auto;touch-action:none}
+.lw-ink-section-width::after{content:"";position:absolute;top:8px;bottom:8px;left:5px;width:3px;border-radius:2px;background:rgba(var(--accent-rgb),.7)}
+.lw-ink-section-edge{position:absolute;width:2px;margin-left:-1px;background:rgba(var(--accent-rgb),.28);pointer-events:none}
+.lw-ink-section-rail.is-subsection{left:40px}
 .lw-ink-section-toggle{position:absolute;left:14px;top:50%;width:30px;height:30px;display:grid;place-items:center;transform:translateY(-50%);border:1px solid rgba(var(--accent-rgb),.36);border-radius:8px;color:var(--accent,#2a6f97);background:rgba(255,255,255,.96);box-shadow:0 2px 8px rgba(0,0,0,.14);cursor:pointer;pointer-events:auto;transition:background .12s ease,transform .12s ease}
 .lw-ink-section-toggle:hover{background:#efeafd}
 .lw-ink-section-toggle:active{transform:translateY(-50%) scale(.94)}
@@ -7624,7 +7729,7 @@ const drawingBoardStyles = `
 .lw-ink-section-guide{position:absolute;left:0;right:0;height:0;border-top:2px dashed var(--accent,#2a6f97);pointer-events:none;transition:opacity .12s ease}
 .lw-ink-section-guide span{position:absolute;left:14px;top:4px;padding:2px 7px;border-radius:6px;color:#fff;background:var(--accent,#2a6f97);font:700 12px/1.3 var(--ui-font,system-ui);white-space:nowrap}
 .lw-ink-sections .lw-selection-hint{top:18px}
-.lw-drawing-board.is-inline:not(.is-input-active) .lw-ink-section-toggle,.lw-drawing-board.is-inline:not(.is-input-active) .lw-ink-section-remove{opacity:.5;box-shadow:none}
+.lw-drawing-board.is-inline:not(.is-input-active) .lw-ink-section-toggle,.lw-drawing-board.is-inline:not(.is-input-active) .lw-ink-section-remove,.lw-drawing-board.is-inline:not(.is-input-active) .lw-ink-section-width{opacity:.5;box-shadow:none}
 .lw-drawing-board{--draw-accent:var(--accent,#2a6f97);--draw-border:var(--border-strong,color-mix(in srgb,var(--text,#e9e9ef) 20%,transparent));display:flex;flex-direction:column;min-width:0;height:100%;overflow:hidden;color:var(--text,#e9e9ef);background:linear-gradient(145deg,color-mix(in srgb,var(--background-secondary,#17171d) 96%,var(--draw-accent) 4%),var(--background,#191919));font:500 13px/1.4 var(--ui-font,Inter,system-ui,sans-serif)}
 .lw-drawing-board *{box-sizing:border-box}.lw-drawing-board button,.lw-drawing-board select,.lw-drawing-board textarea,.lw-drawing-board input{font:inherit}.lw-drawing-board button{color:inherit}.lw-draw-header{height:58px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid var(--draw-border);background:color-mix(in srgb,var(--background-secondary,#17171d) 88%,transparent)}
 .lw-draw-title,.lw-draw-header-actions,.lw-draw-toolgroup,.lw-draw-footer,.lw-footer-actions,.lw-conversion-head,.lw-confidence-row,.lw-model-card{display:flex;align-items:center}.lw-draw-title{gap:10px;min-width:0}.lw-draw-title-icon,.lw-spark{display:grid;place-items:center;color:var(--on-accent,#11131a);background:var(--draw-accent);box-shadow:0 6px 20px color-mix(in srgb,var(--draw-accent) 28%,transparent)}.lw-draw-title-icon{width:32px;height:32px;border-radius:10px}.lw-draw-title>span:last-child{display:flex;min-width:0;flex-direction:column}.lw-draw-title strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.lw-draw-title small,.lw-conversion-head small,.lw-model-card small{font-size: 12px;color:var(--text-muted,#9292a0)}.lw-draw-header-actions{gap:7px}
