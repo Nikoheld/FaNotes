@@ -3837,5 +3837,15 @@
   "So heißt der Connector in Grok.": "This is the connector's name in Grok.",
   "Unterabschnitt in den Abschnitt einfügen · die Breite am rechten Rand ziehen, der Text bleibt stehen": "Insert a subsection into the section · drag the width at the right edge, the text stays put",
   "Farben nicht mischen": "Do not mix colors",
-  "Ein Marker über einem anderen Marker lässt die vorhandene Farbe stehen": "A marker drawn over another marker leaves the existing color unchanged"
+  "Ein Marker über einem anderen Marker lässt die vorhandene Farbe stehen": "A marker drawn over another marker leaves the existing color unchanged",
+  "Figuren": "Figures",
+  "Figurenbibliothek": "Figure library",
+  "Figurenbibliothek: Figur wählen und auf die Seite tippen": "Figure library: choose a figure and tap the page",
+  "Figuren und Körper": "Figures and solids",
+  "Tippen setzt die Figur. Die Regler gelten für die nächste Figur.": "A tap places the figure. The sliders apply to the next figure.",
+  "Fläche": "Plane",
+  "Körper": "Solid",
+  "Größe der Figur": "Figure size",
+  "Drehung der Figur": "Figure rotation",
+  "Figurenbibliothek schließen": "Close the figure library"
 }

@@ -1,5 +1,6 @@
 import {
   Blend,
+  Box,
   Calculator,
   Compass,
   Copy,
@@ -122,6 +123,7 @@ import {
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
 import { createMarkerCoverage, drawInkStroke as paintInkStroke, inkStrokeIsTranslucent, inkStrokePaintMargin, shiftMarkerCoverage, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
+import { MATH_FIGURES, clampFigureParams, defaultFigureParams, isMathFigureId, mathFigurePaths, type MathFigureGroup, type MathFigureId, type MathFigureParam } from '../lib/mathFigures'
 import {
   INLINE_INK_ACTIVE_CLASS,
   INK_TOOLBAR_SLOT_ID,
@@ -570,6 +572,9 @@ type InkStroke = Stroke & {
   keepColor?: boolean
   symbolId?: ArtSymbolId
   symbolRotation?: number
+  /** Configured math stamp. Paths are rebuilt from these, so a reload keeps the same figure. */
+  figureId?: MathFigureId
+  figureParams?: Record<string, number>
 }
 
 type MathSolverHistoryEntry = {
@@ -735,6 +740,7 @@ type Notice = { kind: 'success' | 'error' | 'info'; text: string }
 const cloneStrokes = (strokes: InkStroke[]): InkStroke[] => strokes.map((stroke) => ({
   ...stroke,
   points: stroke.points.map((point) => ({ ...point })),
+  ...(stroke.figureParams ? { figureParams: { ...stroke.figureParams } } : {}),
 }))
 
 // Committed strokes are immutable. History can therefore share their point arrays
@@ -895,6 +901,17 @@ const ArtSymbolPreview = ({ symbol, size = 24 }: { symbol: ArtSymbolDefinition; 
   </svg>
 )
 
+const FigureGlyph = ({ paths }: { paths: readonly string[] }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {paths.map((path, index) => <path key={index} d={path} />)}
+  </svg>
+)
+
+const figureParamText = (param: MathFigureParam, value: number) => {
+  const shown = param.step >= 1 ? String(Math.round(value)) : String(Math.round(value * 100) / 100)
+  return param.id === 'degrees' || param.id === 'yaw' || param.id === 'pitch' ? `${shown}°` : shown
+}
+
 const SPECIAL_INKS: ReadonlyArray<{ id: Exclude<InkEffect, 'solid'>; label: string; css: string; stops: ReadonlyArray<readonly [number, string]> }> = [
   { id: 'rainbow', label: 'Regenbogen', css: 'linear-gradient(90deg,#ff4d6d,#ffb13b,#e9e34a,#48ce87,#3aa8ff,#815cff,#e84dba)', stops: [[0, '#ff4d6d'], [.17, '#ffb13b'], [.34, '#e9e34a'], [.51, '#48ce87'], [.68, '#3aa8ff'], [.84, '#815cff'], [1, '#e84dba']] },
   { id: 'aurora', label: 'Aurora', css: 'linear-gradient(110deg,#68f6ca,#32b9ef,#7968f4,#e85bd2)', stops: [[0, '#68f6ca'], [.34, '#32b9ef'], [.68, '#7968f4'], [1, '#e85bd2']] },
@@ -940,6 +957,14 @@ const drawPaper = (
   drawPaperBackground(context, width, height, style, squareMm)
 }
 
+const placedSymbolPaths = (stroke: Pick<InkStroke, 'figureId' | 'figureParams' | 'symbolId'>): readonly string[] | undefined => {
+  if (isMathFigureId(stroke.figureId)) {
+    const paths = mathFigurePaths(stroke.figureId, stroke.figureParams)
+    if (paths.length) return paths
+  }
+  return stroke.symbolId ? artSymbolById.get(stroke.symbolId)?.paths : undefined
+}
+
 const drawInkStroke = (
   context: CanvasRenderingContext2D,
   stroke: InkStroke,
@@ -955,7 +980,7 @@ const drawInkStroke = (
   context,
   {
     ...stroke,
-    symbolPaths: stroke.symbolId ? artSymbolById.get(stroke.symbolId)?.paths : undefined,
+    symbolPaths: placedSymbolPaths(stroke),
   },
   width,
   height,
@@ -1119,9 +1144,10 @@ const safeInkStrokes = (value: unknown, fallbackColor: string, options: { clampT
     })
     if (!points.length) return []
     const symbolId = raw.symbolId && artSymbolIds.has(raw.symbolId) ? raw.symbolId : undefined
+    const figureId = isMathFigureId(raw.figureId) ? raw.figureId : undefined
     return [{
       points,
-      baseWidth: clamp(Number(raw.baseWidth) || 4, 0.5, symbolId ? 180 : 48),
+      baseWidth: clamp(Number(raw.baseWidth) || 4, 0.5, figureId ? 320 : symbolId ? 180 : 48),
       pressureEnabled: raw.pressureEnabled !== false,
       color: typeof raw.color === 'string' && /^#[\da-f]{6}$/iu.test(raw.color) ? raw.color : fallbackColor,
       purpose: raw.purpose === 'art' ? 'art' : 'handwriting',
@@ -1131,7 +1157,9 @@ const safeInkStrokes = (value: unknown, fallbackColor: string, options: { clampT
       textureSeed: Math.round(clamp(Math.abs(Number(raw.textureSeed) || 1), 1, 2_147_483_647)),
       keepColor: raw.keepColor === true ? true : undefined,
       symbolId,
-      symbolRotation: symbolId ? clamp(Number(raw.symbolRotation) || 0, -180, 180) : undefined,
+      symbolRotation: symbolId || figureId ? clamp(Number(raw.symbolRotation) || 0, -180, 180) : undefined,
+      figureId,
+      figureParams: figureId ? clampFigureParams(figureId, raw.figureParams) : undefined,
     }]
   })
 }
@@ -1416,6 +1444,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [artSymbolId, setArtSymbolId] = useState<ArtSymbolId | null>(null)
   const [artSymbolSize, setArtSymbolSize] = useState(initialArtPreferences.symbolSize)
   const [artSymbolRotation, setArtSymbolRotation] = useState(initialArtPreferences.symbolRotation)
+  const [figureLibraryOpen, setFigureLibraryOpen] = useState(false)
+  const [figureId, setFigureId] = useState<MathFigureId>('cube')
+  const [figureParams, setFigureParams] = useState<Record<string, number>>(() => defaultFigureParams('cube'))
+  const [figureSize, setFigureSize] = useState(120)
+  const [figureRotation, setFigureRotation] = useState(0)
+  const [figureGroup, setFigureGroup] = useState<MathFigureGroup>('solid')
   const [penColor, setPenColor] = useState(settings.penColor)
   const [penWidth, setPenWidth] = useState(settings.penWidth)
   const [paperStyle, setPaperStyle] = useState(pagePaperStyle ?? settings.paperStyle)
@@ -1748,7 +1782,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const smoothing = settings.smoothing
     const sourceWidthNow = sourceWidthRef.current
     const margin = inkStrokePaintMargin(
-      { ...stroke, symbolPaths: stroke.symbolId ? artSymbolById.get(stroke.symbolId)?.paths : undefined },
+      { ...stroke, symbolPaths: placedSymbolPaths(stroke) },
       inkStrokePaintScale(pixelWidth, layoutWidth > 1 ? layoutWidth : sourceWidthNow),
     )
     const toDevice = (rect: LiveInkRect): LiveInkRect => ({
@@ -1775,7 +1809,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       stamp: false,
       coverageOrigin: { x: paintLeft, y: paintTop - topPx },
     } : undefined
-    if (!stroke.symbolId && inkStrokeIsTranslucent(stroke)) {
+    if (!stroke.symbolId && !stroke.figureId && inkStrokeIsTranslucent(stroke)) {
       // A see-through brush is composited once per paint (inkStrokePaint), so
       // the live layer repaints the whole stroke each frame. Appending a tail
       // would cover the joint twice and band the marker at every sample.
@@ -4231,6 +4265,49 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       return
     }
+    if (firstPoint && figureLibraryOpen && isMathFigureId(figureId) && tool === 'pen' && !pointerEraser) {
+      const snapshot = snapshotStrokes(strokesRef.current)
+      const figureStroke: InkStroke = {
+        points: [firstPoint],
+        baseWidth: figureSize,
+        pressureEnabled: false,
+        color: inkMode === 'drawing' ? artColor : penColor,
+        purpose: 'art',
+        brush: 'fineliner',
+        colorEffect: inkMode === 'drawing' ? artEffect : 'solid',
+        opacity: inkMode === 'drawing' ? artOpacity : 1,
+        textureSeed: Math.max(1, Math.round((performance.now() * 1_000 + event.pointerId * 7_919) % 2_147_483_647)),
+        figureId,
+        figureParams: { ...figureParams },
+        symbolRotation: figureRotation,
+      }
+      clearRecognitionScope()
+      closeMathSolverSelection()
+      closeMathCorrectionSession()
+      strokesRef.current.push(figureStroke)
+      commitStrokeToCanvas(figureStroke)
+      undoRef.current.push(snapshot)
+      if (undoRef.current.length > 80) undoRef.current.shift()
+      redoRef.current = []
+      setTokens([])
+      setCorrection('')
+      setAutomaticResult(null)
+      bumpInkRevision({ redrawCommitted: false, appendOnly: true, updateTranscript: false })
+      setDirty(true)
+      updateHistoryState()
+      gestureChangedRef.current = false
+      activePointerRef.current = null
+      inkSessionRef.current = null
+      pointerBoundsRef.current = null
+      releasePointerCaptureSafe(event.currentTarget, event.pointerId)
+      if (lastCapturedPointerIdRef.current === event.pointerId) lastCapturedPointerIdRef.current = null
+      activePointerTargetRef.current = null
+      if (event.pointerType === 'pen' || event.pointerType === 'touch') {
+        queueMicrotask(() => releaseStuckInputFocus(boardRef.current))
+      }
+      scheduleRedraw()
+      return
+    }
     if (firstPoint && inkMode === 'drawing' && tool === 'pen' && !pointerEraser && activeArtSymbol) {
       const snapshot = snapshotStrokes(strokesRef.current)
       const symbolStroke: InkStroke = {
@@ -4314,7 +4391,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   // inputActive is a dependency: a board mounted inert (keyboard mode showing
   // saved ink) kept a handler that still saw inputActive=false after the pen
   // turned on, and every pen-down was refused until an unrelated grow rebuilt it.
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, inputActive, insertSectionAt, insertSubsectionAt, markPenContact, markerKeepColor, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, figureId, figureLibraryOpen, figureParams, figureRotation, figureSize, inkMode, inline, inputActive, insertSectionAt, insertSubsectionAt, markPenContact, markerKeepColor, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (dragSheetWithPointer(event.pointerId, event.clientX, event.clientY)) {
@@ -6565,6 +6642,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setTool('pen')
     setArtSymbolId(null)
     setArtPanelOpen(!usesPenStrip(artBrush))
+    setFigureLibraryOpen(false)
     setMathSolverEnabled(false)
     setMathCorrectorEnabled(false)
     clearRecognitionScope()
@@ -6592,8 +6670,45 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   const chooseArtSymbol = (symbol: ArtSymbolDefinition) => {
     setArtSymbolId(symbol.id)
+    setFigureLibraryOpen(false)
     setTool('pen')
     requestAnimationFrame(() => boardRef.current?.focus({ preventScroll: true }))
+  }
+
+  const selectMathFigure = (id: MathFigureId) => {
+    setArtSymbolId(null)
+    setTool('pen')
+    setFigureLibraryOpen(true)
+    const nextGroup = MATH_FIGURES.find((figure) => figure.id === id)?.group ?? 'solid'
+    setFigureGroup(nextGroup)
+    if (id === figureId) return
+    const next = defaultFigureParams(id)
+    const currentGroup = MATH_FIGURES.find((figure) => figure.id === figureId)?.group
+    if (currentGroup === 'solid' && nextGroup === 'solid') {
+      if ('yaw' in next && typeof figureParams.yaw === 'number') next.yaw = figureParams.yaw
+      if ('pitch' in next && typeof figureParams.pitch === 'number') next.pitch = figureParams.pitch
+    }
+    setFigureParams(clampFigureParams(id, next))
+    setFigureId(id)
+    requestAnimationFrame(() => boardRef.current?.focus({ preventScroll: true }))
+  }
+
+  const showFigureGroup = (group: MathFigureGroup) => {
+    setFigureGroup(group)
+    if (MATH_FIGURES.find((figure) => figure.id === figureId)?.group === group) return
+    const next = MATH_FIGURES.find((figure) => figure.group === group)
+    if (next) selectMathFigure(next.id)
+  }
+
+  const toggleFigureLibrary = () => {
+    setFigureLibraryOpen((open) => {
+      if (open) return false
+      setArtSymbolId(null)
+      setArtPanelOpen(false)
+      setTool('pen')
+      requestAnimationFrame(() => boardRef.current?.focus({ preventScroll: true }))
+      return true
+    })
   }
 
   const chooseSpecialInk = (effect: Exclude<InkEffect, 'solid'>) => {
@@ -6636,6 +6751,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (activePointerRef.current !== null || activeStrokeRef.current || lastCapturedPointerIdRef.current !== null) {
         event.preventDefault()
         forceEndActivePointer('escape')
+        return
+      }
+      if (figureLibraryOpen) {
+        event.preventDefault()
+        setFigureLibraryOpen(false)
         return
       }
       if (viewZoomRef.current !== 1 || viewRotationRef.current !== 0 || viewPanRef.current.x !== 0 || viewPanRef.current.y !== 0) {
@@ -6722,6 +6842,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     updateHistoryState()
   }
 
+  const figureCatalogPaths = useMemo(() => {
+    const paths = new Map<MathFigureId, readonly string[]>()
+    for (const figure of MATH_FIGURES) paths.set(figure.id, mathFigurePaths(figure.id))
+    return paths
+  }, [])
+  const activeFigurePaths = useMemo(() => mathFigurePaths(figureId, figureParams), [figureId, figureParams])
+
   const paintToolClass = selectionMode
     ? 'tool-select'
     : tool === 'pen' && inkMode === 'drawing'
@@ -6807,6 +6934,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             onClick={() => toggleDraftingTool('compass')}
           >
             <Compass size={16} /> <span className="lw-tool-label">Zirkel</span>
+          </button>
+          <button
+            type="button"
+            className={figureLibraryOpen ? 'is-active' : ''}
+            aria-pressed={figureLibraryOpen}
+            title="Figurenbibliothek: Figur wählen und auf die Seite tippen"
+            onClick={toggleFigureLibrary}
+          >
+            <Box size={16} /> <span className="lw-tool-label">Figuren</span>
           </button>
           {(rulerPose || setSquarePose || compassPose) && (
             <button
@@ -6992,7 +7128,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             </div>
           </div>
         ) : tool === 'pen' ? <>
-          <button type="button" className="lw-art-studio-trigger" aria-expanded={artPanelOpen} onClick={() => setArtPanelOpen((open) => !open)}>
+          <button type="button" className="lw-art-studio-trigger" aria-expanded={artPanelOpen} onClick={() => setArtPanelOpen((open) => {
+            if (!open) setFigureLibraryOpen(false)
+            return !open
+          })}>
             {activeArtSymbol ? <Shapes size={16} /> : <Palette size={16} />}
             <span><strong>{activeArtSymbol?.label ?? activeArtBrush.label}</strong><small>{activeArtSymbol ? 'Auf Seite platzieren' : artEffect === 'solid' ? 'Vollfarbe' : SPECIAL_INKS.find(({ id }) => id === artEffect)?.label}</small></span>
             <i className={activeArtSymbol ? 'is-symbol' : ''} style={{ '--art-ink': artEffect === 'solid' ? artColor : SPECIAL_INKS.find(({ id }) => id === artEffect)?.css, color: artColor } as React.CSSProperties}>{activeArtSymbol && <ArtSymbolPreview symbol={activeArtSymbol} size={18} />}</i>
@@ -7096,6 +7235,72 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           onCompassDraw={handleCompassDraw}
           onClose={() => updateDraftingSettings({ panelOpen: false })}
         />,
+      )}
+
+      {figureLibraryOpen && (!inline || inputActive) && (inline ? (node: ReactNode) => createPortal(node, document.body) : (node: ReactNode) => node)(
+        <aside
+          className={`lw-figure-library ${inline ? 'is-viewport-chrome' : ''}`}
+          aria-label="Figurenbibliothek"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <header className="lw-figure-library-head">
+            <span><Box size={16} /></span>
+            <div>
+              <strong>Figuren und Körper</strong>
+              <small>Tippen setzt die Figur. Die Regler gelten für die nächste Figur.</small>
+            </div>
+            <button type="button" className="lw-draw-icon" aria-label="Figurenbibliothek schließen" onClick={() => setFigureLibraryOpen(false)}><X size={16} /></button>
+          </header>
+          <div className="lw-figure-groups" role="group" aria-label="Figuren und Körper">
+            <button type="button" className={figureGroup === 'plane' ? 'is-active' : ''} aria-pressed={figureGroup === 'plane'} onClick={() => showFigureGroup('plane')}>Fläche</button>
+            <button type="button" className={figureGroup === 'solid' ? 'is-active' : ''} aria-pressed={figureGroup === 'solid'} onClick={() => showFigureGroup('solid')}>Körper</button>
+          </div>
+          <div className="lw-figure-grid">
+            {MATH_FIGURES.filter((figure) => figure.group === figureGroup).map((figure) => (
+              <button
+                type="button"
+                key={figure.id}
+                className={figure.id === figureId ? 'is-active' : ''}
+                aria-pressed={figure.id === figureId}
+                title={figure.label}
+                onClick={() => selectMathFigure(figure.id)}
+              >
+                <FigureGlyph paths={figure.id === figureId ? activeFigurePaths : figureCatalogPaths.get(figure.id) ?? []} />
+                <small>{figure.label}</small>
+              </button>
+            ))}
+          </div>
+          <div className="lw-figure-controls">
+            {(MATH_FIGURES.find((figure) => figure.id === figureId)?.params ?? []).map((param) => (
+              <label key={param.id}>
+                <span>{param.label}</span>
+                <input
+                  type="range"
+                  min={param.min}
+                  max={param.max}
+                  step={param.step}
+                  value={figureParams[param.id] ?? param.value}
+                  aria-label={param.label}
+                  onChange={(event) => {
+                    const value = Number(event.target.value)
+                    setFigureParams((current) => clampFigureParams(figureId, { ...current, [param.id]: value }))
+                  }}
+                />
+                <output>{figureParamText(param, figureParams[param.id] ?? param.value)}</output>
+              </label>
+            ))}
+            <label>
+              <span>Größe</span>
+              <input aria-label="Größe der Figur" type="range" min={40} max={320} step={2} value={figureSize} onChange={(event) => setFigureSize(Number(event.target.value))} />
+              <output>{figureSize}</output>
+            </label>
+            <label>
+              <span>Drehung</span>
+              <input aria-label="Drehung der Figur" type="range" min={-180} max={180} step={5} value={figureRotation} onChange={(event) => setFigureRotation(Number(event.target.value))} />
+              <output>{figureRotation}°</output>
+            </label>
+          </div>
+        </aside>,
       )}
 
       {inkMode === 'drawing' && tool === 'pen' && artStudioOpenForBrush(artBrush, artPanelOpen) && (!inline || inputActive) && (inline ? (node: ReactNode) => createPortal(node, document.body) : (node: ReactNode) => node)(
@@ -7970,6 +8175,26 @@ const drawingBoardStyles = `
 .lw-drafting-readout{pointer-events:none}
 .lw-drafting-readout-bg{fill:rgba(21,48,90,.92);stroke:rgba(255,255,255,.7);stroke-width:1}
 .lw-drafting-readout-text{fill:#fff;font:700 12px/1 var(--ui-font,system-ui);text-anchor:middle;font-variant-numeric:tabular-nums}
+.lw-figure-library{position:relative;z-index:13;flex:0 0 auto;display:flex;flex-direction:column;gap:8px;margin:10px 14px 0;padding:10px;width:min(360px,calc(100% - 28px));max-height:calc(100vh - 170px);overflow:auto;border:1px solid color-mix(in srgb,var(--draw-accent) 36%,var(--draw-border));border-radius:12px;background:linear-gradient(145deg,color-mix(in srgb,var(--background-secondary,#19191f) 96%,var(--draw-accent) 4%),color-mix(in srgb,var(--background,#191919) 94%,transparent));box-shadow:0 22px 65px rgba(0,0,0,.24);color:var(--text,#fff);font-size:12px}
+.lw-figure-library.is-viewport-chrome{position:fixed;z-index:79;top:78px;left:14px;right:auto;width:min(360px,calc(100vw - 28px));margin:0;background:color-mix(in srgb,var(--background-secondary,#17171d) 95%,transparent);backdrop-filter:blur(18px);pointer-events:auto}
+.lw-figure-library-head{display:flex;align-items:center;gap:8px}
+.lw-figure-library-head>span{width:28px;height:28px;display:grid;place-items:center;border-radius:9px;color:var(--on-accent,#111);background:var(--draw-accent)}
+.lw-figure-library-head>div{display:flex;min-width:0;flex:1;flex-direction:column;gap:2px}
+.lw-figure-library-head strong{font-size:12px}
+.lw-figure-library-head small{color:var(--text-muted,#999);font-size:11px;line-height:1.35}
+.lw-figure-groups{display:flex;gap:4px}
+.lw-figure-groups button{height:24px;padding:0 10px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--text-muted,#999);font:700 12px/1 var(--ui-font,system-ui);cursor:pointer}
+.lw-figure-groups button.is-active{color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent,#6af) 18%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--draw-accent,#6af) 45%,transparent)}
+.lw-figure-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px}
+.lw-figure-grid button{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0;height:auto;padding:4px 2px 3px;border:0;border-radius:8px;background:transparent;color:var(--text,#fff);cursor:pointer}
+.lw-figure-grid button.is-active{background:color-mix(in srgb,var(--draw-accent,#6af) 18%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--draw-accent,#6af) 45%,transparent)}
+.lw-figure-grid svg{width:28px;height:28px;display:block}
+.lw-figure-grid small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px;line-height:1.2;color:var(--text-muted,#aaa)}
+.lw-figure-controls{display:flex;flex-direction:column;gap:6px}
+.lw-figure-controls label{display:grid;grid-template-columns:78px minmax(0,1fr) 46px;align-items:center;gap:6px}
+.lw-figure-controls input[type=range]{width:100%;min-width:0}
+.lw-figure-controls output{text-align:right;font-variant-numeric:tabular-nums;color:var(--text-muted,#aaa)}
+.lw-drawing-board.is-inline:not(.is-input-active) .lw-figure-library{display:none!important}
 .lw-drafting-panel{position:relative;z-index:13;flex:0 0 auto;display:flex;flex-direction:column;gap:8px;margin:10px 14px 0;padding:11px;border:1px solid color-mix(in srgb,var(--draw-accent) 36%,var(--draw-border));border-radius:12px;background:linear-gradient(145deg,color-mix(in srgb,var(--background-secondary,#19191f) 96%,var(--draw-accent) 4%),color-mix(in srgb,var(--background,#191919) 94%,transparent));box-shadow:0 22px 65px rgba(0,0,0,.24),inset 0 1px rgba(255,255,255,.035);color:var(--text,#fff);font-size: 12px;animation:lw-art-studio-in .24s cubic-bezier(.2,.8,.2,1)}
 .lw-drafting-panel.is-viewport-chrome{position:fixed;z-index:79;top:78px;right:14px;left:auto;width:min(420px,calc(100vw - 28px));max-height:calc(100vh - 170px);margin:0;overflow:auto;background:color-mix(in srgb,var(--background-secondary,#17171d) 95%,transparent);backdrop-filter:blur(18px);pointer-events:auto}
 .lw-drafting-panel-head{display:flex;align-items:center;gap:8px}
