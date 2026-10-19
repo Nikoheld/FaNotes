@@ -11,7 +11,7 @@ export type EncodedInkHistory<T> = {
   redo: InkStrokeRef[][]
 }
 
-const isIndex = (value: unknown, length: number) => (
+const isIndex = (value: unknown, length: number): value is number => (
   typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < length
 )
 
@@ -77,11 +77,13 @@ export const decodeInkHistory = <T>(
     const hasExtra = Object.prototype.hasOwnProperty.call(record, 'extra')
     if (hasLive === hasExtra) return null
     if (hasLive) {
-      if (!isIndex(record.live, live.length)) return null
-      return live[record.live]
+      const index = record.live
+      if (!isIndex(index, live.length)) return null
+      return live[index]
     }
-    if (!isIndex(record.extra, extras.length)) return null
-    return extras[record.extra as number]
+    const index = record.extra
+    if (!isIndex(index, extras.length)) return null
+    return extras[index]
   }
   const stack = (value: unknown[]): T[][] | null => {
     const snapshots: T[][] = []
