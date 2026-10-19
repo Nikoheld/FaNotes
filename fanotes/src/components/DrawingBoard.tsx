@@ -4302,7 +4302,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     const events = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent]
     if (gestureToolRef.current === 'eraser') {
-      eraseAt(events.map(pointFromEvent).filter((point): point is StrokePoint => Boolean(point)))
+      eraseAt(events.map((event, index) => pointFromEvent(event, index > 0)).filter((point): point is StrokePoint => Boolean(point)))
     } else {
       for (const sample of events) appendPointerEvent(sample, true)
       const predicted = event.nativeEvent.getPredictedEvents?.() ?? []
@@ -5010,7 +5010,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
       const events = event.getCoalescedEvents?.() ?? [event]
       if (gestureToolRef.current === 'eraser') {
-        eraseAt(events.map(pointFromEvent).filter((point): point is StrokePoint => Boolean(point)))
+        eraseAt(events.map((event, index) => pointFromEvent(event, index > 0)).filter((point): point is StrokePoint => Boolean(point)))
       } else {
         for (const sample of events) appendPointerEvent(sample, true)
         const predicted = event.getPredictedEvents?.() ?? []

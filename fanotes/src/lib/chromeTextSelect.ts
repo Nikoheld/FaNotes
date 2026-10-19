@@ -35,7 +35,7 @@ type ClosestNode = {
 
 const closestNode = (target: EventTarget | null): ClosestNode | null => {
   if (!target || typeof target !== 'object') return null
-  const node = target as ClosestNode & { nodeType?: number; parentElement?: ClosestNode | null }
+  const node = target as unknown as ClosestNode & { nodeType?: number; parentElement?: ClosestNode | null }
   if (typeof node.closest === 'function') return node
   if (node.nodeType === 3 && node.parentElement && typeof node.parentElement.closest === 'function') {
     return node.parentElement
