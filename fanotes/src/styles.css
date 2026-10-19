@@ -164,28 +164,66 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   color-scheme: light;
 }
 
+/* The shell background never shows: the ribbon, the sidebar, and the note
+   sheet each paint their own opaque fill. A design has to land on those
+   surfaces. The PDF stage is left alone so the room around a page stays one
+   flat colour. Clean keeps today's flat chrome and white sheet. */
 .app-shell.background-clean { background: var(--bg); }
 .app-shell.background-gradient {
-  background: radial-gradient(circle at 82% -20%, rgba(var(--accent-rgb), .09), transparent 35%), var(--bg);
+  --workspace-chrome:
+    linear-gradient(155deg, rgba(var(--accent-rgb), .48), transparent 58%),
+    linear-gradient(335deg, color-mix(in srgb, var(--accent-secondary) 36%, transparent), transparent 50%),
+    var(--bg-elevated);
+  --workspace-sheet: linear-gradient(118deg, rgba(var(--accent-rgb), .32) 0%, rgba(var(--accent-rgb), .12) 34%, #fff 70%);
+  background: var(--workspace-chrome);
 }
 .app-shell.background-mesh {
-  background:
-    radial-gradient(circle at 9% 4%, rgba(var(--accent-rgb), .14), transparent 30%),
-    radial-gradient(circle at 88% 86%, color-mix(in srgb, var(--accent-secondary) 13%, transparent), transparent 32%),
-    var(--bg);
+  --workspace-chrome:
+    linear-gradient(128deg, rgba(var(--accent-rgb), .66) 0%, transparent 46%),
+    linear-gradient(308deg, color-mix(in srgb, var(--accent-secondary) 62%, transparent), transparent 44%),
+    var(--bg-elevated);
+  --workspace-sheet: linear-gradient(200deg, color-mix(in srgb, var(--accent-secondary) 40%, #fff) 0%, rgba(var(--accent-rgb), .30) 100%);
+  background: var(--workspace-chrome);
 }
 .app-shell.background-paper {
-  background:
-    linear-gradient(rgba(var(--accent-rgb), .027) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(var(--accent-rgb), .027) 1px, transparent 1px),
-    var(--bg);
-  background-size: 24px 24px;
+  background-color: var(--bg-elevated);
+  background-image: radial-gradient(rgba(var(--accent-rgb), .72) 1.4px, transparent 1.55px);
+  background-size: 13px 13px;
 }
-.app-shell.background-mesh .workspace { background: color-mix(in srgb, var(--bg) 94%, transparent); }
-.app-shell.background-paper .workspace {
-  background-color: color-mix(in srgb, var(--bg) 96%, transparent);
-  background-image: radial-gradient(rgba(var(--accent-rgb), .12) .65px, transparent .65px);
-  background-size: 18px 18px;
+.app-shell.background-gradient :is(.sidebar, .ribbon, .tabs-bar, .editor-toolbar, .workspace, .split-pane-head, .glyphenwerk-workspace, .glyphenwerk-workspace-header),
+.app-shell.background-mesh :is(.sidebar, .ribbon, .tabs-bar, .editor-toolbar, .workspace, .split-pane-head, .glyphenwerk-workspace, .glyphenwerk-workspace-header) {
+  background: var(--workspace-chrome);
+}
+.app-shell.background-paper :is(.sidebar, .ribbon, .tabs-bar, .editor-toolbar, .workspace, .split-pane-head, .glyphenwerk-workspace, .glyphenwerk-workspace-header) {
+  background-color: var(--bg-elevated);
+  background-image: radial-gradient(rgba(var(--accent-rgb), .72) 1.4px, transparent 1.55px);
+  background-size: 13px 13px;
+}
+.app-shell.background-gradient .toolbar-end,
+.app-shell.background-mesh .toolbar-end,
+.app-shell.background-paper .toolbar-end { background: transparent; }
+.app-shell.background-gradient .unified-note-view:not(.is-pdf-note),
+.app-shell.background-gradient .unified-note-view:not(.is-pdf-note) .paper-sheet-plane {
+  background: var(--workspace-sheet);
+}
+.app-shell.background-mesh .unified-note-view:not(.is-pdf-note),
+.app-shell.background-mesh .unified-note-view:not(.is-pdf-note) .paper-sheet-plane {
+  background: var(--workspace-sheet);
+}
+.app-shell.background-paper .unified-note-view:not(.is-pdf-note),
+.app-shell.background-paper .unified-note-view:not(.is-pdf-note) .paper-sheet-plane {
+  background-color: #f3eadc;
+  background-image: radial-gradient(rgba(92, 70, 38, .42) 1.25px, transparent 1.4px);
+  background-size: 16px 16px;
+}
+/* The start screen paints its own shell later. These three-class rules win
+   for Verlauf, Aurora, and Papier; Klar keeps that screen's current wash. */
+.app-shell.dashboard-shell.background-gradient,
+.app-shell.dashboard-shell.background-mesh { background: var(--workspace-chrome); }
+.app-shell.dashboard-shell.background-paper {
+  background-color: var(--bg-elevated);
+  background-image: radial-gradient(rgba(var(--accent-rgb), .72) 1.4px, transparent 1.55px);
+  background-size: 16px 16px;
 }
 
 .app-shell.no-motion *, .app-shell.no-motion *::before, .app-shell.no-motion *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
@@ -1173,6 +1211,15 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
   html.is-printing .app-body { display: block !important; }
   html.is-printing .workspace, html.is-printing .editor-stage, html.is-printing .unified-note-view { overflow: visible !important; height: auto !important; }
   html.is-printing .unified-paper { margin: 0 !important; box-shadow: none !important; }
+  html.is-printing .app-shell.background-gradient .unified-note-view:not(.is-pdf-note),
+  html.is-printing .app-shell.background-gradient .unified-note-view:not(.is-pdf-note) .paper-sheet-plane,
+  html.is-printing .app-shell.background-mesh .unified-note-view:not(.is-pdf-note),
+  html.is-printing .app-shell.background-mesh .unified-note-view:not(.is-pdf-note) .paper-sheet-plane,
+  html.is-printing .app-shell.background-paper .unified-note-view:not(.is-pdf-note),
+  html.is-printing .app-shell.background-paper .unified-note-view:not(.is-pdf-note) .paper-sheet-plane {
+    background: #fff;
+    background-image: none;
+  }
 }
 .glyphenwerk-workspace { width: 100%; height: 100%; min-width: 0; min-height: 0; display: grid; grid-template-rows: 43px minmax(0, 1fr); overflow: hidden; background: var(--bg); }
 .glyphenwerk-workspace-header { min-width: 0; display: flex; align-items: center; gap: 12px; padding: 0 11px 0 14px; border-bottom: 1px solid var(--border); color: var(--text); background: color-mix(in srgb, var(--bg-elevated) 95%, var(--bg)); }
