@@ -124,7 +124,7 @@ export type AppSettings = {
   penColor: string
   penWidth: number
   pressureEnabled: boolean
-  /** When true, only pointerType "pen" can ink; touch/mouse (hand/palm) are ignored. */
+  /** When true, only pointerType "pen" can ink. A finger pans the sheet; palm and mouse do not. */
   penOnly: boolean
   /** Wacom pen and pad button → FaNotes action. */
   tabletButtons: import('./lib/tabletButtons').TabletButtonMap

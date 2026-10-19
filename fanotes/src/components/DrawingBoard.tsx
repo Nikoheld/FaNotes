@@ -167,6 +167,7 @@ import {
   applyWheelInkPolicy,
   keepGotPointerCaptureId,
   POST_PEN_IGNORE_MS,
+  shouldFingerPanInPenOnly,
   shouldIgnoreUnmappedPointerAfterPen,
   shouldRejectNonPenInk,
   shouldRejectNonPenInkMove,
@@ -3984,10 +3985,34 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return () => surface.removeEventListener('pointermove', onMove)
   }, [pointFromEvent, sectionPlacing])
 
+  const dragSheetWithPointer = useCallback((pointerId: number, clientX: number, clientY: number) => {
+    const pan = tabletPanRef.current
+    if (!pan || pan.pointerId !== pointerId) return false
+    const dx = clientX - pan.x
+    const dy = clientY - pan.y
+    tabletPanRef.current = { pointerId, x: clientX, y: clientY }
+    const paper = resolvePaperElement()
+    const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
+    if (scroller) {
+      scroller.scrollLeft -= dx
+      scroller.scrollTop -= dy
+      return true
+    }
+    if (!paperView) {
+      const current = viewPanRef.current
+      setView({ pan: { x: current.x + dx, y: current.y + dy } })
+    }
+    return true
+  }, [paperView, resolvePaperElement, setView])
+  const dragSheetWithPointerRef = useRef(dragSheetWithPointer)
+  dragSheetWithPointerRef.current = dragSheetWithPointer
+
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (overlayInert(inline, inputActive) || !overlayHitEnabled(inputActive)) return
     if (hitTestChrome(event.clientX, event.clientY)) return
     setArtPanelOpen(false)
+    // A pen touch ends a finger pan. The barrel-button pan below may start its own.
+    if (event.pointerType === 'pen') tabletPanRef.current = null
     const now = performance.now()
     const asStylus = event.pointerType === 'pen' || (
       lastPenContactRef.current > 0 && now - lastPenContactRef.current < POST_PEN_IGNORE_MS
@@ -4010,9 +4035,22 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       return
     }
-    // Pen-only (Windows palm / resting hand): ignore finger, mouse and trackpad ink.
+    // Pen-only (Windows palm / resting hand): finger, mouse and trackpad do not ink.
+    // A finger pans the sheet. A palm during the pen, or just after it, does not.
     // Mapped stylus/pad buttons still run even if Chromium labelled them `mouse`.
-    if (!buttonIdentity && shouldRejectNonPenInk(event.pointerType, settings.penOnly)) return
+    if (!buttonIdentity && shouldRejectNonPenInk(event.pointerType, settings.penOnly)) {
+      if (shouldFingerPanInPenOnly({
+        pointerType: event.pointerType,
+        penOnly: settings.penOnly,
+        penDown: inkSessionRef.current?.pointerType === 'pen' && activePointerRef.current !== null,
+        lastPenAt: lastPenContactRef.current,
+        now,
+      })) {
+        if (event.cancelable) event.preventDefault()
+        tabletPanRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
+      }
+      return
+    }
     if (activePointerRef.current !== null) {
       if (activePointerRef.current === event.pointerId) return
       if (!shouldAllowNewInkPointer(inkSessionRef.current, event, now)) return
@@ -4220,16 +4258,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, inputActive, insertSectionAt, insertSubsectionAt, markPenContact, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    const pan = tabletPanRef.current
-    if (pan && pan.pointerId === event.pointerId) {
-      event.preventDefault()
-      const paper = resolvePaperElement()
-      const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
-      if (scroller) {
-        scroller.scrollLeft -= event.clientX - pan.x
-        scroller.scrollTop -= event.clientY - pan.y
-      }
-      tabletPanRef.current = { ...pan, x: event.clientX, y: event.clientY }
+    if (dragSheetWithPointer(event.pointerId, event.clientX, event.clientY)) {
+      if (event.cancelable) event.preventDefault()
       return
     }
     if (shouldRejectNonPenInkMove(
@@ -4267,7 +4297,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const latest = activeStrokeRef.current?.points.at(-1)
       if (latest) ensureWriteRoom(latest.y, latest.x)
     }
-  }, [appendPointerEvent, ensureWriteRoom, eraseAt, inline, inputActive, paintActiveStrokeNow, pointFromEvent, resolvePaperElement, scheduleRedraw, settings.penOnly])
+  }, [appendPointerEvent, dragSheetWithPointer, ensureWriteRoom, eraseAt, inline, inputActive, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, settings.penOnly])
 
   const finishPointer = useCallback((event: ReactPointerEvent<HTMLElement> | PointerEvent) => {
     const pointerId = event.pointerId
@@ -4856,6 +4886,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   const discardHandGestureRef = useRef(() => {})
   discardHandGestureRef.current = () => {
+    // Two fingers take the sheet. The one-finger pan must stop or both would scroll.
+    tabletPanRef.current = null
     if (lastPointerTypeRef.current !== 'touch') {
       if (activePointerRef.current !== null || activeStrokeRef.current) {
         forceEndActivePointerRef.current('view-gesture')
@@ -4939,6 +4971,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
     }
     const onWindowPointerMove = (event: PointerEvent) => {
+      if (dragSheetWithPointerRef.current(event.pointerId, event.clientX, event.clientY)) return
       if (!inputActive || activePointerRef.current !== event.pointerId) return
       const now = performance.now()
       // Same helper as canvas move: pressure flicker must not cut a live stroke.
@@ -4974,7 +5007,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     const onWindowPointerEnd = (event: PointerEvent) => {
       if (activePointerRef.current === event.pointerId) finishPointer(event)
-      else scrub(event.pointerId)
+      else {
+        // Finger pan does not take the ink pointer, so a lift off the sheet
+        // still has to drop it. A pen-button pan is finished above.
+        if (tabletPanRef.current?.pointerId === event.pointerId) tabletPanRef.current = null
+        scrub(event.pointerId)
+      }
     }
     const onWindowPointerDown = (event: PointerEvent) => {
       const chrome = hitTestChrome(event.clientX, event.clientY)
@@ -6719,8 +6757,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             className={settings.penOnly ? 'is-active' : ''}
             aria-pressed={settings.penOnly}
             title={settings.penOnly
-              ? 'Nur Stift: Finger und Hand werden ignoriert. Klicken zum Ausschalten.'
-              : 'Nur Stift: nur der Grafikstift schreibt, nicht Finger oder Hand (empfohlen unter Windows).'}
+              ? 'Nur Stift: Der Stift schreibt, ein Finger verschiebt das Blatt. Klicken zum Ausschalten.'
+              : 'Nur Stift: nur der Grafikstift schreibt. Ein Finger verschiebt dann das Blatt (empfohlen unter Windows).'}
             onClick={() => onSettingsChange?.({ penOnly: !settings.penOnly })}
           >
             <PenLine size={16} /> <span className="lw-tool-label">{settings.penOnly ? 'Nur Stift' : 'Stift+Hand'}</span>

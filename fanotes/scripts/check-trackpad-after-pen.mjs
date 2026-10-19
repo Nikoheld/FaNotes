@@ -17,6 +17,7 @@ const {
   applyWheelInkPolicy,
   defaultPenOnlyForPlatform,
   keepGotPointerCaptureId,
+  shouldFingerPanInPenOnly,
   shouldIgnorePointerAfterPen,
   shouldRejectNonPenInk,
 } = await server.ssrLoadModule('/src/lib/inkPointerPolicy.ts')
@@ -68,6 +69,20 @@ try {
   assert.equal(shouldRejectNonPenInk('touch', defaultSettingsForPlatform('win32').penOnly), true, 'Windows palm/touch must not start ink')
   assert.equal(shouldRejectNonPenInk('mouse', defaultSettingsForPlatform('win32').penOnly), true, 'Windows mouse must not start ink')
   assert.equal(shouldRejectNonPenInk('pen', defaultSettingsForPlatform('win32').penOnly), false)
+  const fingerPan = {
+    pointerType: 'touch',
+    penOnly: true,
+    penDown: false,
+    lastPenAt: 0,
+    now: 5_000,
+  }
+  assert.equal(shouldFingerPanInPenOnly(fingerPan), true, 'pen-only: a finger pans the sheet')
+  assert.equal(shouldFingerPanInPenOnly({ ...fingerPan, pointerType: 'mouse' }), false, 'a mouse does not pan')
+  assert.equal(shouldFingerPanInPenOnly({ ...fingerPan, pointerType: 'pen' }), false)
+  assert.equal(shouldFingerPanInPenOnly({ ...fingerPan, penOnly: false }), false, 'finger still inks when pen-only is off')
+  assert.equal(shouldFingerPanInPenOnly({ ...fingerPan, penDown: true }), false, 'a palm does not pan while the pen is down')
+  assert.equal(shouldFingerPanInPenOnly({ ...fingerPan, lastPenAt: 4_800, now: 5_000 }), false, 'a palm just after the pen does not pan')
+  assert.match(drawing, /shouldFingerPanInPenOnly/)
   assert.equal(shouldRejectNonPenInk('mouse', false), false)
   assert.equal(shouldIgnorePointerAfterPen('mouse', leftover.lastContactAt, leftover.lastContactAt + 100), true)
   assert.equal(shouldIgnorePointerAfterPen('touch', leftover.lastContactAt, leftover.lastContactAt + 100), true)

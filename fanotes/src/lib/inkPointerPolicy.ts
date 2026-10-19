@@ -7,6 +7,23 @@ export const shouldRejectNonPenInk = (pointerType: string | undefined, penOnly: 
   Boolean(penOnly) && pointerType !== 'pen'
 )
 
+/**
+ * Pen-only: one finger pans the sheet instead of inking. A touch while the pen
+ * is down, or in the short window after it lifts, is a palm and must not pan.
+ */
+export const shouldFingerPanInPenOnly = (input: {
+  pointerType: string | undefined
+  penOnly: boolean
+  penDown: boolean
+  lastPenAt: number
+  now: number
+}) => (
+  input.pointerType === 'touch'
+  && Boolean(input.penOnly)
+  && !input.penDown
+  && !shouldIgnorePointerAfterPen(input.pointerType, input.lastPenAt, input.now)
+)
+
 export type InkInputSession = {
   activePointerId: number | null
   captureId: number | null
