@@ -25,6 +25,7 @@ const {
   pdfZoomModeForZoom,
   pdfZoomStep,
 } = await server.ssrLoadModule('/src/lib/pdfCamera.ts')
+const { PDF_PAGE_COLUMN_SELECTOR, centredScrollLeftForPage } = await server.ssrLoadModule('/src/lib/paperView.ts')
 
 // --- fit factors --------------------------------------------------------------
 // 1600px window: 1252px scroller, 820px page column (900px paper − 2 × 18px + border).
@@ -65,9 +66,29 @@ assert.equal(pdfColumnCentreScrollLeft({ clientWidth: 0, scrollLeft: 7 }, 0, { l
 assert.equal(pdfPageTopScrollTop({ scrollTop: 1041 }, 100, { top: -84 }), 839)
 assert.equal(pdfPageTopScrollTop({ scrollTop: 5 }, 100, { top: 90 }), 0, 'never negative')
 
+// Below the point where the sheet fills the window, centre the page column
+// even if the write plane is still wider than the viewport.
+assert.equal(PDF_PAGE_COLUMN_SELECTOR, '.pdf-note-pages')
+const narrowColumn = centredScrollLeftForPage(
+  { clientWidth: 1190, scrollLeft: 200 },
+  0,
+  { left: 400, width: 574 },
+)
+assert.equal(narrowColumn, 292, 'a sheet narrower than the window moves to the middle')
+const widePlaneStays = centredScrollLeftForPage(
+  { clientWidth: 1190, scrollLeft: 240 },
+  0,
+  { left: 40, width: 1600 },
+)
+assert.equal(widePlaneStays, 240, 'a page wider than the window keeps its pan')
+
 // --- wiring ------------------------------------------------------------------
 const here = dirname(fileURLToPath(import.meta.url))
 const pdfView = readFileSync(join(here, '../src/components/PdfNoteView.tsx'), 'utf8')
+const paperViewSource = readFileSync(join(here, '../src/lib/paperView.ts'), 'utf8')
+const paperViewUi = readFileSync(join(here, '../src/components/PaperView.tsx'), 'utf8')
+assert.match(paperViewSource, /PDF_PAGE_COLUMN_SELECTOR/, 'zoom centres the PDF page column, not the wide plane')
+assert.match(paperViewUi, /centrePageInViewportIfFits\(scroller, plane\)/, 'a pan while the sheet fits the window recentres it')
 assert.match(pdfView, /const camera = usePaperView\(\)/u, 'the PDF view reads the sheet camera')
 assert.match(pdfView, /style=\{\{ width: cameraHosted \? '100%' : `\$\{Math\.round\(appliedScale \* 100\)\}%` \}\}/u, 'camera-hosted column keeps its layout width (ink is 0–1 of the paper)')
 assert.match(pdfView, /if \(cam && autoFit\) \{/u, 'first open fits the column')

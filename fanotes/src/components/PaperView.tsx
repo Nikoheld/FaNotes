@@ -13,9 +13,11 @@ import {
 import {
   VIEW_ROTATE_STEP,
   VIEW_ZOOM_MIN,
+  PDF_PAGE_COLUMN_SELECTOR,
   applyPaperViewToElements,
   applyPaperZoomStayPut,
   centrePageInViewportIfFits,
+  centredScrollLeftForPage,
   clampPaperScrollerToZoomedSheet,
   clampViewZoom,
   defaultPaperView,
@@ -301,6 +303,13 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
         camera.scrollTop = scrollTopForAnchorClientY(scroller, scrollerRect, anchorY)
       }
       scrollTo(camera)
+      // A PDF column narrower than the window stays in the middle. The saved
+      // horizontal spot is the wide plane, which would leave the sheet on one side.
+      const pdfColumn = scroller.querySelector<HTMLElement>(PDF_PAGE_COLUMN_SELECTOR)
+      if (pdfColumn) {
+        const left = centredScrollLeftForPage(scroller, scrollerRect.left, pdfColumn.getBoundingClientRect())
+        if (Math.abs(left - scroller.scrollLeft) >= 0.5) scrollTo({ scrollLeft: left, scrollTop: scroller.scrollTop })
+      }
       return true
     }
     let flingFrames = 0
@@ -353,6 +362,9 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
         }
         return
       }
+      // While the PDF sheet is narrower than the window, a pan or a zoom anchor
+      // must not leave white on only one side.
+      centrePageInViewportIfFits(scroller, plane)
       // Layout and focus scrolls are not the user's camera — not even after
       // a real pan, or the next open would restore the jump.
       if (!fromGesture || !userOwned) return

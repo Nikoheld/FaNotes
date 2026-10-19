@@ -420,11 +420,16 @@ const resolveWritePage = (sheet: HTMLElement | null) => (
     : sheet?.querySelector<HTMLElement>('.unified-paper') ?? sheet
 )
 
+/** The white PDF page column. The write plane around it is wider than the sheet. */
+export const PDF_PAGE_COLUMN_SELECTOR = '.pdf-note-pages'
+
 /**
  * Horizontal camera after a zoom step. A page narrower than the viewport is
  * centred (like every PDF viewer); a wider page keeps the anchor. Without this
  * a zoom-out or reset left the page half under the sidebar with camera room
- * filling the other side.
+ * filling the other side. On a PDF the box is the page column: the plane stays
+ * at least as wide as the viewport, so empty stage on the sides is the column
+ * being narrower, not the plane.
  */
 export const centredScrollLeftForPage = (
   scroller: { clientWidth: number; scrollLeft: number },
@@ -438,9 +443,15 @@ export const centredScrollLeftForPage = (
   return Math.max(0, Math.round((scroller.scrollLeft + pageCentre - viewCentre) * 100) / 100)
 }
 
+const pageBoxToCentre = (scroller: HTMLElement, sheet: HTMLElement | null) => (
+  sheet?.querySelector<HTMLElement>(PDF_PAGE_COLUMN_SELECTOR)
+  ?? scroller.querySelector<HTMLElement>(PDF_PAGE_COLUMN_SELECTOR)
+  ?? resolveWritePage(sheet)
+)
+
 export const centrePageInViewportIfFits = (scroller: HTMLElement | null, sheet: HTMLElement | null) => {
   if (!scroller) return false
-  const page = resolveWritePage(sheet)
+  const page = pageBoxToCentre(scroller, sheet)
   if (!page) return false
   const pageRect = page.getBoundingClientRect()
   const scrollerRect = scroller.getBoundingClientRect()
