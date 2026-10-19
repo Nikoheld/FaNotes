@@ -124,6 +124,36 @@ function createCdp(socket) {
   }
 }
 
+// Page.reload resolves before the old document is gone. A readiness check in
+// that gap still sees the previous app, and the next read then hits a blank
+// document. Wait until the main frame actually commits the navigation.
+async function reloadPage(cdp) {
+  await new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (error) reject(error)
+      else resolve()
+    }
+    const timer = setTimeout(() => finish(new Error('Das Neuladen hat keine neue Seite geladen.')), timeoutMs)
+    cdp.onEvent((message) => {
+      if (message.method !== 'Page.frameNavigated') return
+      if (message.params?.frame?.parentId) return
+      finish()
+    })
+    cdp.send('Page.reload', { ignoreCache: true }).catch((error) => finish(error))
+  })
+}
+
+// A full load opens the start dashboard, which has no file tree and no editor.
+async function leaveDashboard(cdp) {
+  await waitFor(cdp, `Boolean(document.querySelector('.dashboard-actions .primary-button, .sidebar, .markdown-editor'))`, 'Die geladene Oberfläche')
+  await cdp.evaluate(`document.querySelector('.dashboard-actions .primary-button')?.click()`)
+  await waitFor(cdp, `!document.querySelector('.dashboard') && Boolean(document.querySelector('.sidebar, .markdown-editor, .file-tree__entry-button'))`, 'Die Notizseite nach der Startfläche')
+}
+
 async function waitFor(cdp, expression, label) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -230,8 +260,9 @@ void (async () => {
     }
 
     await cdp.evaluate(`window.fanotes.writeFile('Willkommen.md', '# Willkommen bei FaNotes\\n\\n- Unter **Durchkritzel-Empfindlichkeit** stellst du von 0 bis 100 Prozent ein, wie gründlich du dafür kritzeln musst.\\n- Mit \`Strg+Z\` holst du eine versehentliche Löschung sofort zurück.\\n\\nDieser Abschnitt muss hell bleiben.\\n')`)
-    await cdp.send('Page.reload', { ignoreCache: true })
+    await reloadPage(cdp)
     await waitFor(cdp, `Boolean(window.fanotes?.platform === 'web' && document.querySelector('.app-shell'))`, 'FaNotes nach der Welcome.md-Migration')
+    await leaveDashboard(cdp)
     const welcomeRepair = await cdp.evaluate(`(async () => {
       const content = await window.fanotes.readFile('Willkommen.md')
       const welcomeButton = [...document.querySelectorAll('.file-tree__entry-button')].find((node) => node.textContent.includes('Willkommen'))
@@ -270,11 +301,17 @@ void (async () => {
     const worksheet = await cdp.evaluate(`(async () => ({ source: await window.fanotes.readAssetDataUrl(window.__worksheet.sourceRelativePath), stored: (await window.fanotes.readWorksheet(window.__worksheet.id)).id === window.__worksheet.id }))()`)
     if (!worksheet.source.startsWith('blob:') || !worksheet.stored) throw new Error('Das importierte Arbeitsblatt wurde nicht dauerhaft gespeichert.')
 
-    await cdp.send('Page.reload', { ignoreCache: true })
+    await reloadPage(cdp)
     await waitFor(cdp, `Boolean(window.fanotes?.platform === 'web' && document.querySelector('.app-shell'))`, 'FaNotes nach dem Neuladen')
+    await leaveDashboard(cdp)
     const persisted = await cdp.evaluate(`window.fanotes.readFile('Mathematik/Web Persistenz.md')`)
     if (!persisted.includes('Web Persistenz')) throw new Error('Die IndexedDB-Persistenzprüfung ist fehlgeschlagen.')
-    await cdp.evaluate(`[...document.querySelectorAll('.file-tree__entry-button')].find((node) => node.textContent.includes('Mathematik'))?.click()`)
+    await waitFor(cdp, `Boolean([...document.querySelectorAll('.file-tree__entry-button')].find((node) => node.textContent.includes('Mathematik')))`, 'Der Mathematik-Ordner im Dateibaum')
+    await cdp.evaluate(`(() => {
+      const buttons = [...document.querySelectorAll('.file-tree__entry-button')]
+      if (buttons.some((node) => node.textContent.includes('Web Persistenz'))) return
+      buttons.find((node) => node.textContent.includes('Mathematik'))?.click()
+    })()`)
     await waitFor(cdp, `Boolean([...document.querySelectorAll('.file-tree__entry-button')].find((node) => node.textContent.includes('Web Persistenz')))`, 'Die persistierte Testnotiz im Dateibaum')
     await cdp.evaluate(`[...document.querySelectorAll('.file-tree__entry-button')].find((node) => node.textContent.includes('Web Persistenz'))?.click()`)
     await waitFor(cdp, `document.querySelectorAll('.cm-spelling-error').length === 2`, 'Die zweisprachige Web-Rechtschreibprüfung')
@@ -327,7 +364,8 @@ void (async () => {
 
     await waitFor(cdp, `caches.keys().then((keys) => keys.some((key) => key.startsWith('fanotes-web-')))`, 'Der versionsgebundene App-Cache')
     await cdp.send('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 })
-    await cdp.send('Page.reload', { ignoreCache: true })
+    await reloadPage(cdp)
+    await leaveDashboard(cdp)
     await waitFor(cdp, `Boolean(window.fanotes?.platform === 'web' && document.querySelector('.markdown-editor .cm-content'))`, 'Der vollständige Editor im Offline-Modus')
     const offlineContent = await cdp.evaluate(`window.fanotes.readFile('Mathematik/Web Persistenz.md')`)
     if (!offlineContent.includes('x^2')) throw new Error('Der Web-Vault war offline nicht verfügbar.')

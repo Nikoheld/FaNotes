@@ -164,18 +164,71 @@ void (async () => {
     await cdp.send('Runtime.enable')
     await cdp.send('Log.enable')
     await cdp.send('Page.enable')
-    await cdp.evaluate(`localStorage.setItem('fanotes.uiLanguage', 'de'); location.reload()`)
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1600, deviceScaleFactor: 1, mobile: false })
+    await cdp.evaluate(`localStorage.setItem('fanotes.uiLanguage', 'de'); window.__fanotesReloadMark = 1; location.reload()`)
 
+    // The shell opens on the start dashboard. The mark is only on the document
+    // that called reload, so the next checks run against the new page.
+    await waitFor(cdp, `!window.__fanotesReloadMark && Boolean([...document.querySelectorAll('.dashboard-note strong')].find((node) => node.textContent.includes('Darstellung')))`, 'Die Notiz auf der Startfläche')
+    await cdp.evaluate(`document.querySelector('.dashboard-actions .primary-button').click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.markdown-editor .cm-content'))`, 'Der Live-Editor')
-    await waitFor(cdp, `document.querySelectorAll('.katex').length >= 2`, 'Die mathematische Darstellung')
-    await waitFor(cdp, `Boolean(document.querySelector('.cm-live-details'))`, 'Der einklappbare Markdown-Bereich')
+    // The long note can open below the math and the misspelled lines. Keep the
+    // top in view so those rendered lines exist for the checks below.
+    const showNoteTop = `(() => {
+      const editor = document.querySelector('.cm-editor')
+      const view = editor?.cmView?.view || editor?.cmView
+      if (view?.dispatch && view.state?.doc) view.dispatch({ selection: { anchor: 0 }, scrollIntoView: true })
+      const scroller = document.querySelector('.unified-note-view')
+      if (scroller) scroller.scrollTop = 0
+      return true
+    })()`
+    const topDeadline = Date.now() + timeoutMs
+    let topReady = false
+    while (Date.now() < topDeadline) {
+      await cdp.evaluate(showNoteTop)
+      topReady = await cdp.evaluate(`document.querySelectorAll('.katex').length >= 2 && Boolean(document.querySelector('.cm-live-details'))`)
+      if (topReady) break
+      await wait(200)
+    }
+    if (!topReady) {
+      const snapshot = await cdp.evaluate(`(() => ({
+        katex: document.querySelectorAll('.katex').length,
+        details: Boolean(document.querySelector('.cm-live-details')),
+        text: (document.querySelector('.markdown-editor .cm-content')?.innerText || '').slice(0, 700),
+        viewport: { width: innerWidth, height: innerHeight },
+        scroller: (() => {
+          const node = document.querySelector('.unified-note-view')
+          if (!node) return null
+          return { top: node.scrollTop, height: node.clientHeight, scrollHeight: node.scrollHeight }
+        })(),
+        doc: (document.querySelector('.cm-editor')?.cmView?.view?.state?.doc?.toString?.() || '').slice(0, 400),
+      }))()`)
+      throw new Error(`Die mathematische Darstellung wurde nicht rechtzeitig dargestellt: ${JSON.stringify(snapshot)}`)
+    }
     const spellingResources = await cdp.evaluate(`window.fanotes.loadSpellingResources()
       .then((resources) => ({ format: resources.manifest?.format, de: resources.de?.byteLength, en: resources.en?.byteLength }))
       .catch((error) => ({ error: error?.message || String(error) }))`)
     if (spellingResources.error || spellingResources.format !== 'fanotes-spelling-bloom-v2' || spellingResources.de < 400000 || spellingResources.en < 150000) {
       throw new Error(`Die eingebetteten Rechtschreibressourcen sind ungültig: ${JSON.stringify(spellingResources)}`)
     }
-    await waitFor(cdp, `Boolean([...document.querySelectorAll('.cm-spelling-error')].find((node) => node.dataset.spellingWord === 'Tset')) && Boolean([...document.querySelectorAll('.cm-spelling-error')].find((node) => node.dataset.spellingWord === 'exampel'))`, 'Die zweisprachige Rechtschreibmarkierung')
+    const spellingDeadline = Date.now() + timeoutMs
+    let spellingSnapshot = null
+    while (Date.now() < spellingDeadline) {
+      await cdp.evaluate(showNoteTop)
+      spellingSnapshot = await cdp.evaluate(`(() => ({
+        errors: [...document.querySelectorAll('.cm-spelling-error')].map((node) => node.dataset.spellingWord),
+        detected: document.querySelector('.markdown-editor .cm-editor')?.dataset.detectedLanguage ?? null,
+        spellcheck: document.querySelector('.markdown-editor .cm-content')?.getAttribute('spellcheck'),
+        hasTset: (document.querySelector('.markdown-editor .cm-content')?.innerText || '').includes('Tset'),
+        docHasTset: Boolean(document.querySelector('.cm-editor')?.cmView?.view?.state?.doc?.toString?.().includes('Tset')),
+        text: (document.querySelector('.markdown-editor .cm-content')?.innerText || '').slice(0, 180),
+      }))()`)
+      if (spellingSnapshot?.errors?.includes('Tset') && spellingSnapshot?.errors?.includes('exampel')) break
+      await wait(200)
+    }
+    if (!spellingSnapshot?.errors?.includes('Tset') || !spellingSnapshot?.errors?.includes('exampel')) {
+      throw new Error(`Die zweisprachige Rechtschreibmarkierung wurde nicht rechtzeitig dargestellt: ${JSON.stringify(spellingSnapshot)}`)
+    }
     const spelling = await cdp.evaluate(`(() => ({
       words: [...document.querySelectorAll('.cm-spelling-error')].map((node) => node.dataset.spellingWord).sort(),
       languages: [...document.querySelectorAll('.cm-spelling-error')].map((node) => node.dataset.spellingLanguage).sort(),
@@ -262,6 +315,8 @@ void (async () => {
       await capture(cdp, `theme-${theme}`)
     }
 
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false })
+    await wait(150)
     await cdp.evaluate(`document.querySelector('button[aria-label="Einstellungen öffnen"]').click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.settings-modal'))`, 'Das Einstellungsfenster')
     const settingsLayout = await cdp.evaluate(`(() => {
@@ -276,7 +331,7 @@ void (async () => {
       sections: document.querySelectorAll('.settings-nav-group > button').length,
       searchPlaceholder: document.querySelector('.settings-search input')?.placeholder,
     }))()`)
-    if (settingsNavigation.groups.join('|') !== 'Aussehen & Schreiben|Stift & Arbeitsbereich|FaNotes & System' || settingsNavigation.sections !== 8 || settingsNavigation.searchPlaceholder !== 'Einstellungen suchen') {
+    if (settingsNavigation.groups.join('|') !== 'Aussehen & Schreiben|Stift & Arbeitsbereich|FaNotes & System' || settingsNavigation.sections !== 10 || settingsNavigation.searchPlaceholder !== 'Einstellungen suchen') {
       throw new Error(`Die neue Einstellungsnavigation ist unvollständig: ${JSON.stringify(settingsNavigation)}`)
     }
     await capture(cdp, 'settings')
@@ -297,6 +352,11 @@ void (async () => {
     }))()`)
     if (oneNoteSettings.title !== 'Microsoft OneNote Import' || !oneNoteSettings.formats.includes('.onepkg') || !oneNoteSettings.safety) throw new Error(`Die OneNote-Einstellungen sind unvollständig: ${JSON.stringify(oneNoteSettings)}`)
     await capture(cdp, 'settings-onenote')
+    // GlyphenWerk copies settings.theme, not a class painted onto the shell.
+    await cdp.evaluate(`[...document.querySelectorAll('.settings-nav-group > button')].find((button) => button.querySelector('b')?.textContent === 'Darstellung')?.click()`)
+    await waitFor(cdp, `Boolean(document.querySelector('.theme-grid'))`, 'Die Farbschema-Auswahl')
+    await cdp.evaluate(`[...document.querySelectorAll('.theme-choice')].find((button) => button.querySelector('strong')?.textContent === 'Dunkel')?.click()`)
+    await waitFor(cdp, `document.querySelector('.app-shell')?.classList.contains('theme-dark') && [...document.querySelectorAll('.theme-choice')].some((button) => button.classList.contains('active') && button.textContent.includes('Dunkel'))`, 'Das gewählte dunkle Farbschema')
     await cdp.evaluate(`document.querySelector('.settings-modal button[aria-label="Schließen"]').click()`)
     await waitFor(cdp, `!document.querySelector('.settings-modal')`, 'Das Schliessen des Einstellungsfensters')
 
@@ -354,7 +414,7 @@ void (async () => {
       labels: [...document.querySelectorAll('.file-tree__context-menu .file-tree__menu-label')].map((node) => node.textContent.trim()),
       buttons: document.querySelectorAll('.file-tree__context-menu > button').length,
     }))()`)
-    if (fileMenu.title !== 'Darstellung' || fileMenu.type !== 'Notiz' || fileMenu.labels.join('|') !== 'Verwalten' || fileMenu.buttons !== 2) {
+    if (fileMenu.title !== 'Darstellung' || fileMenu.type !== 'Notiz' || fileMenu.labels.join('|') !== 'Öffnen|Kopieren|Verwalten' || fileMenu.buttons !== 6) {
       throw new Error(`Das Datei-Kontextmenü ist nicht klar gruppiert: ${JSON.stringify(fileMenu)}`)
     }
     await capture(cdp, 'file-menu')
