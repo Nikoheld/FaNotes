@@ -4,6 +4,7 @@ import { createServer } from 'vite'
 
 const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+const settingsModal = readFileSync(new URL('../src/components/SettingsModal.tsx', import.meta.url), 'utf8')
 const main = readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8')
 
 const server = await createServer({
@@ -42,7 +43,8 @@ try {
   assert.match(css, /--paper-square-size, 28px/)
   assert.match(css, /background-size:\s*28px 28px/)
   assert.match(app, /--paper-square-size/)
-  assert.match(app, /aria-label="Kästchengrösse"/)
+  assert.match(settingsModal, /aria-label="Kästchengrösse"/)
+  assert.doesNotMatch(app, /aria-label="Kästchengrösse"/)
   assert.match(main, /paperSquareMm: \{ type: 'number', min: 0, max: 20 \}/)
 
   const canvas = {

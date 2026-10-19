@@ -56,7 +56,8 @@ import type {
 import type { Stroke, StrokePoint } from '../../../src/types'
 import type { AppSettings, DrawingAsset, PaperStyle } from '../types'
 import { PAPER_STYLES, drawPaperBackground } from '../lib/paperStyles'
-import { clampPaperSquareMm, paperSquareSizeLabel } from '../lib/paperSquare'
+import { artStudioOpenForBrush, usesPenStrip } from '../lib/inkOptionSurface'
+import { clampPaperSquareMm } from '../lib/paperSquare'
 import { strokeDurationMs, strokeLengthMm, summarizeInkStrokes, type InkStrokeActivity, type InkSummary } from '../lib/pageStats'
 import { TextToHandwritingDialog } from './TextToHandwritingDialog'
 import type {
@@ -6517,7 +6518,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setInkMode('drawing')
     setTool('pen')
     setArtSymbolId(null)
-    setArtPanelOpen(true)
+    setArtPanelOpen(!usesPenStrip(artBrush))
     setMathSolverEnabled(false)
     setMathCorrectorEnabled(false)
     clearRecognitionScope()
@@ -6540,6 +6541,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setArtSymbolId(null)
     setArtBrush(brush.id)
     setArtWidth(brush.defaultWidth)
+    if (usesPenStrip(brush.id)) setArtPanelOpen(false)
   }
 
   const chooseArtSymbol = (symbol: ArtSymbolDefinition) => {
@@ -6808,7 +6810,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           </button>}
         </div>}
 
-        {tool === 'pen' && inkMode === 'writing' ? <>
+        {tool === 'pen' && inkMode === 'writing' ? (
+          <div className="lw-pen-strip" data-ink-surface="pen-strip" aria-label="Stift">
           <div className="lw-draw-toolgroup lw-colors" aria-label="Stiftfarbe">
             {colorChoices.map((color) => (
               <button
@@ -6833,6 +6836,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               min="1"
               max="18"
               step="0.5"
+              aria-label="Breite"
               value={penWidth}
               onChange={(event) => {
                 const value = Number(event.target.value)
@@ -6842,7 +6846,90 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             />
             <output>{penWidth.toFixed(penWidth % 1 ? 1 : 0)} px</output>
           </label>
-        </> : tool === 'pen' ? <>
+          </div>
+        ) : tool === 'pen' && usesPenStrip(artBrush) ? (
+          <div className="lw-pen-strip" data-ink-surface="pen-strip" data-ink-brush={artBrush} aria-label={activeArtBrush.label}>
+            <div className="lw-pen-strip-brushes" role="group" aria-label="Pinsel">
+              {ART_BRUSHES.map((brush) => (
+                <button
+                  type="button"
+                  key={brush.id}
+                  className={artBrush === brush.id ? 'is-active' : ''}
+                  aria-pressed={artBrush === brush.id}
+                  aria-label={brush.label}
+                  title={`${brush.label}: ${brush.description}`}
+                  onClick={() => chooseArtBrush(brush)}
+                >
+                  <span className={`lw-art-brush-preview is-${brush.id}`}><i /></span>
+                </button>
+              ))}
+            </div>
+            <div className="lw-colors" aria-label="Zeichenfarbe">
+              {artColorChoices.map((color) => (
+                <button
+                  type="button"
+                  key={color}
+                  className={artEffect === 'solid' && artColor === color ? 'is-active' : ''}
+                  aria-label={`Zeichenfarbe ${color}`}
+                  aria-pressed={artEffect === 'solid' && artColor === color}
+                  style={{ '--ink-color': color } as React.CSSProperties}
+                  onClick={() => { setArtColor(color); setArtEffect('solid') }}
+                />
+              ))}
+              <label className="lw-color-custom" title="Eigene Zeichenfarbe">
+                <input type="color" value={artColor} onChange={(event) => { setArtColor(event.target.value); setArtEffect('solid') }} />
+                <span style={{ background: artColor }} />
+              </label>
+            </div>
+            <div className="lw-pen-strip-inks" role="group" aria-label="Spezialfarben">
+              {SPECIAL_INKS.map((ink) => (
+                <button
+                  type="button"
+                  key={ink.id}
+                  className={artEffect === ink.id ? 'is-active' : ''}
+                  aria-pressed={artEffect === ink.id}
+                  aria-label={`${ink.label} Spezialtinte`}
+                  title={`${ink.label} Spezialtinte`}
+                  style={{ '--art-ink': ink.css } as React.CSSProperties}
+                  onClick={() => chooseSpecialInk(ink.id)}
+                />
+              ))}
+            </div>
+            <label className="lw-draw-range">
+              <span>{activeArtSymbol ? 'Größe' : 'Breite'}</span>
+              <input
+                type="range"
+                aria-label={activeArtSymbol ? 'Piktogrammgröße' : 'Breite'}
+                min={activeArtSymbol ? 20 : 0.75}
+                max={activeArtSymbol ? 180 : 42}
+                step={activeArtSymbol ? 2 : 0.25}
+                value={activeArtSymbol ? artSymbolSize : artWidth}
+                onChange={(event) => activeArtSymbol ? setArtSymbolSize(Number(event.target.value)) : setArtWidth(Number(event.target.value))}
+              />
+              <output>{activeArtSymbol ? artSymbolSize : artWidth.toFixed(artWidth % 1 ? 1 : 0)} px</output>
+            </label>
+            <label className="lw-draw-range">
+              <span>Deckkraft</span>
+              <input aria-label="Deckkraft" type="range" min="12" max="100" step="1" value={Math.round(artOpacity * 100)} onChange={(event) => setArtOpacity(Number(event.target.value) / 100)} />
+              <output>{Math.round(artOpacity * 100)}%</output>
+            </label>
+            <div className="lw-pen-strip-symbols" role="group" aria-label="Piktogramme">
+              {ART_SYMBOLS.map((symbol) => (
+                <button
+                  type="button"
+                  key={symbol.id}
+                  className={artSymbolId === symbol.id ? 'is-active' : ''}
+                  aria-label={`${symbol.label} einfügen`}
+                  aria-pressed={artSymbolId === symbol.id}
+                  title={`${symbol.label} auf der Seite platzieren`}
+                  onClick={() => chooseArtSymbol(symbol)}
+                >
+                  <ArtSymbolPreview symbol={symbol} size={14} />
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : tool === 'pen' ? <>
           <button type="button" className="lw-art-studio-trigger" aria-expanded={artPanelOpen} onClick={() => setArtPanelOpen((open) => !open)}>
             {activeArtSymbol ? <Shapes size={16} /> : <Palette size={16} />}
             <span><strong>{activeArtSymbol?.label ?? activeArtBrush.label}</strong><small>{activeArtSymbol ? 'Auf Seite platzieren' : artEffect === 'solid' ? 'Vollfarbe' : SPECIAL_INKS.find(({ id }) => id === artEffect)?.label}</small></span>
@@ -6866,22 +6953,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           </select>
           <ChevronDown size={14} />
         </label>
-        {(paperStyle === 'squares' || paperStyle === 'grid') && (
-          <label className="lw-draw-range" title="Seitenlänge der Quadrate auf Häuschen- und Kariertpapier">
-            <span>Kästchen</span>
-            <input
-              type="range"
-              min={0}
-              max={20}
-              step={0.5}
-              aria-label="Kästchengrösse"
-              value={clampPaperSquareMm(settings.paperSquareMm)}
-              onChange={(event) => onSettingsChange?.({ paperSquareMm: clampPaperSquareMm(Number(event.target.value)) })}
-            />
-            <output>{paperSquareSizeLabel(settings.paperSquareMm)}</output>
-          </label>
-        )}
-
         <div className="lw-draw-toolgroup lw-view-controls" aria-label="Blattansicht">
           <button type="button" className="lw-draw-icon" aria-label="Herauszoomen" title="Herauszoomen (Strg+- · Strg+Mausrad)" onClick={() => zoomBy(-zoomStepFromSpeed(readSharedZoomSpeed()))} disabled={viewZoom <= VIEW_ZOOM_MIN}><ZoomOut size={17} /></button>
           <button type="button" className="lw-draw-icon" aria-label="Hineinzoomen" title="Hineinzoomen (Strg++ · Strg+Mausrad)" onClick={() => zoomBy(zoomStepFromSpeed(readSharedZoomSpeed()))} disabled={viewZoom >= readSharedZoomMax()}><ZoomIn size={17} /></button>
@@ -6965,7 +7036,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         />,
       )}
 
-      {inkMode === 'drawing' && tool === 'pen' && artPanelOpen && (!inline || inputActive) && (inline ? (node: ReactNode) => createPortal(node, document.body) : (node: ReactNode) => node)(
+      {inkMode === 'drawing' && tool === 'pen' && artStudioOpenForBrush(artBrush, artPanelOpen) && (!inline || inputActive) && (inline ? (node: ReactNode) => createPortal(node, document.body) : (node: ReactNode) => node)(
       <aside className={`lw-art-studio ${inline ? 'is-viewport-chrome' : ''}`} aria-label="Zeichenstudio">
         <header>
           <span><Palette size={17} /></span>
@@ -7785,9 +7856,9 @@ const drawingBoardStyles = `
 .lw-drawing-board *{box-sizing:border-box}.lw-drawing-board button,.lw-drawing-board select,.lw-drawing-board textarea,.lw-drawing-board input{font:inherit}.lw-drawing-board button{color:inherit}.lw-draw-header{height:58px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid var(--draw-border);background:color-mix(in srgb,var(--background-secondary,#17171d) 88%,transparent)}
 .lw-draw-title,.lw-draw-header-actions,.lw-draw-toolgroup,.lw-draw-footer,.lw-footer-actions,.lw-conversion-head,.lw-confidence-row,.lw-model-card{display:flex;align-items:center}.lw-draw-title{gap:10px;min-width:0}.lw-draw-title-icon,.lw-spark{display:grid;place-items:center;color:var(--on-accent,#11131a);background:var(--draw-accent);box-shadow:0 6px 20px color-mix(in srgb,var(--draw-accent) 28%,transparent)}.lw-draw-title-icon{width:32px;height:32px;border-radius:10px}.lw-draw-title>span:last-child{display:flex;min-width:0;flex-direction:column}.lw-draw-title strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.lw-draw-title small,.lw-conversion-head small,.lw-model-card small{font-size: 12px;color:var(--text-muted,#9292a0)}.lw-draw-header-actions{gap:7px}
 .lw-draw-toolbar{min-height:58px;flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--draw-border);overflow-x:auto;background:color-mix(in srgb,var(--background,#191919) 74%,transparent)}.lw-draw-toolgroup{gap:4px}.lw-segmented{padding:3px;border:1px solid var(--draw-border);border-radius:11px;background:color-mix(in srgb,var(--background-secondary,#17171d) 82%,transparent)}.lw-segmented button,.lw-mode-switch button{display:flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:8px;background:transparent;color:var(--text-muted,#9999a7);cursor:pointer}.lw-segmented button{height:30px;padding:0 10px}.lw-segmented button.is-active,.lw-mode-switch button.is-active{color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 22%,var(--background-secondary,#17171d));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--draw-accent) 36%,transparent)}
-.lw-colors{padding:0 4px}.lw-colors>button,.lw-color-custom{position:relative;width:23px;height:23px;border-radius:50%;border:2px solid transparent;background:var(--ink-color);cursor:pointer}.lw-colors>button.is-active{border-color:var(--text,#fff);box-shadow:0 0 0 2px color-mix(in srgb,var(--ink-color) 50%,transparent)}.lw-color-custom{display:block;overflow:hidden;border:1px dashed var(--text-muted,#777);background:conic-gradient(#e45,#fb3,#6d5,#4ce,#65f,#c5e,#e45)}.lw-color-custom input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}.lw-color-custom span{position:absolute;inset:5px;border-radius:50%}
+.lw-colors{display:flex;align-items:center;gap:3px;padding:0 2px}.lw-colors>button,.lw-color-custom{position:relative;width:18px;height:18px;flex:none;border-radius:50%;border:2px solid transparent;background:var(--ink-color);cursor:pointer}.lw-colors>button.is-active{border-color:var(--text,#fff);box-shadow:0 0 0 2px color-mix(in srgb,var(--ink-color) 50%,transparent)}.lw-color-custom{display:block;overflow:hidden;border:1px dashed var(--text-muted,#777);background:conic-gradient(#e45,#fb3,#6d5,#4ce,#65f,#c5e,#e45)}.lw-color-custom input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}.lw-color-custom span{position:absolute;inset:5px;border-radius:50%}
 .lw-draw-range{display:grid;grid-template-columns:auto minmax(64px,105px) 42px;align-items:center;gap:7px;color:var(--text-muted,#9999a7);white-space:nowrap}.lw-draw-range input{accent-color:var(--draw-accent);width:100%}.lw-draw-range output{text-align:right;font-size: 12px;font-variant-numeric:tabular-nums}.lw-paper-select{position:relative;display:flex;align-items:center}.lw-paper-select select{height:34px;appearance:none;padding:0 30px 0 10px;border:1px solid var(--draw-border);border-radius:9px;color:var(--text,#fff);background:var(--background-secondary,#1a1a20);outline:none}.lw-paper-select svg{position:absolute;right:9px;pointer-events:none;color:var(--text-muted,#999)}.lw-view-controls{gap:2px;padding:2px;border:1px solid var(--draw-border);border-radius:10px;background:color-mix(in srgb,var(--background-secondary,#17171d) 82%,transparent)}.lw-view-reset{min-width:64px;height:30px;padding:0 8px;font-size: 12px;font-variant-numeric:tabular-nums}.lw-history{margin-left:auto}.lw-drawing-board:focus{outline:none}.lw-drawing-board:focus-visible{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--draw-accent) 55%,transparent)}
-.lw-art-studio-trigger{height:38px;display:grid;grid-template-columns:19px minmax(68px,auto) 25px;align-items:center;gap:7px;padding:0 8px;border:1px solid color-mix(in srgb,var(--draw-accent) 32%,var(--draw-border));border-radius:10px;color:var(--text,#fff);background:linear-gradient(130deg,color-mix(in srgb,var(--draw-accent) 12%,var(--background-secondary,#18181f)),var(--background-secondary,#18181f));cursor:pointer}.lw-art-studio-trigger>svg{color:var(--accent-readable,var(--draw-accent))}.lw-art-studio-trigger>span{display:flex;min-width:0;flex-direction:column;text-align:left}.lw-art-studio-trigger strong{font-size: 12px}.lw-art-studio-trigger small{max-width:92px;overflow:hidden;color:var(--text-muted,#999);font-size: 12px;text-overflow:ellipsis;white-space:nowrap}.lw-art-studio-trigger>i{width:25px;height:25px;border:2px solid color-mix(in srgb,var(--text,#fff) 25%,transparent);border-radius:8px;background:var(--art-ink);box-shadow:inset 0 1px rgba(255,255,255,.25)}
+.lw-pen-strip{display:flex;align-items:center;gap:6px;min-width:0;height:28px;max-height:28px}.lw-pen-strip-brushes,.lw-pen-strip-symbols,.lw-pen-strip-inks{display:flex;align-items:center;gap:2px;min-width:0;overflow:auto hidden;scrollbar-width:none}.lw-pen-strip-symbols{max-width:168px}.lw-pen-strip-brushes button,.lw-pen-strip-symbols button,.lw-pen-strip-inks button{width:22px;height:22px;flex:none;display:grid;place-items:center;padding:0;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--text-muted,#999);cursor:pointer}.lw-pen-strip-brushes button.is-active,.lw-pen-strip-symbols button.is-active,.lw-pen-strip-inks button.is-active{border-color:color-mix(in srgb,var(--draw-accent) 48%,var(--draw-border));color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 14%,transparent)}.lw-pen-strip-inks button{border-radius:50%;background:var(--art-ink)}.lw-pen-strip-brushes .lw-art-brush-preview{width:14px;height:8px}.lw-pen-strip-brushes .lw-art-brush-preview i{width:12px}.lw-art-studio-trigger{height:28px;display:grid;grid-template-columns:16px minmax(52px,auto) 16px;align-items:center;gap:6px;padding:0 7px;border:1px solid color-mix(in srgb,var(--draw-accent) 32%,var(--draw-border));border-radius:8px;color:var(--text,#fff);background:linear-gradient(130deg,color-mix(in srgb,var(--draw-accent) 12%,var(--background-secondary,#18181f)),var(--background-secondary,#18181f));cursor:pointer}.lw-art-studio-trigger>svg{color:var(--accent-readable,var(--draw-accent))}.lw-art-studio-trigger>span{display:flex;min-width:0;flex-direction:column;text-align:left}.lw-art-studio-trigger strong{font-size: 12px}.lw-art-studio-trigger small{max-width:92px;overflow:hidden;color:var(--text-muted,#999);font-size: 12px;text-overflow:ellipsis;white-space:nowrap}.lw-art-studio-trigger>i{width:16px;height:16px;border:2px solid color-mix(in srgb,var(--text,#fff) 25%,transparent);border-radius:5px;background:var(--art-ink);box-shadow:inset 0 1px rgba(255,255,255,.25)}
 .lw-art-studio{position:relative;z-index:13;flex:0 0 auto;margin:10px 14px 0;padding:11px;border:1px solid color-mix(in srgb,var(--draw-accent) 36%,var(--draw-border));border-radius:12px;background:linear-gradient(145deg,color-mix(in srgb,var(--background-secondary,#19191f) 96%,var(--draw-accent) 4%),color-mix(in srgb,var(--background,#191919) 94%,transparent));box-shadow:0 22px 65px rgba(0,0,0,.24),inset 0 1px rgba(255,255,255,.035);animation:lw-art-studio-in .24s cubic-bezier(.2,.8,.2,1)}.lw-art-studio>header{display:flex;align-items:center;gap:8px;margin-bottom:9px}.lw-art-studio>header>span{width:29px;height:29px;display:grid;place-items:center;border-radius:9px;color:var(--on-accent,#111);background:var(--draw-accent)}.lw-art-studio>header>div{display:flex;min-width:0;flex:1;flex-direction:column}.lw-art-studio>header strong{font-size: 12px}.lw-art-studio>header small{color:var(--text-muted,#999);font-size: 12px}.lw-art-studio-body{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(160px,.64fr);gap:10px}.lw-art-studio-body>section{min-width:0;padding:9px;border:1px solid var(--draw-border);border-radius:12px;background:color-mix(in srgb,var(--background,#191919) 43%,transparent)}.lw-art-section-head{height:23px;display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.lw-art-section-head strong{font-size: 12px}.lw-art-section-head span{overflow:hidden;color:var(--text-muted,#999);font-size: 12px;text-overflow:ellipsis;white-space:nowrap}.lw-art-brushes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}.lw-art-brushes>button{min-width:0;height:49px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:3px;padding:3px;border:1px solid transparent;border-radius:8px;color:var(--text-muted,#999);background:transparent;cursor:pointer}.lw-art-brushes>button:hover{background:color-mix(in srgb,var(--text,#fff) 6%,transparent)}.lw-art-brushes>button.is-active{border-color:color-mix(in srgb,var(--draw-accent) 48%,var(--draw-border));color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 12%,transparent)}.lw-art-brushes small{max-width:100%;overflow:hidden;font-size: 12px;text-overflow:ellipsis;white-space:nowrap}.lw-art-brush-preview{position:relative;width:42px;height:16px;display:grid;place-items:center;overflow:hidden}.lw-art-brush-preview i{display:block;width:37px;height:3px;border-radius:99px;background:currentColor;transform:rotate(-5deg)}.lw-art-brush-preview.is-fineliner i{height:2px}.lw-art-brush-preview.is-pencil i{height:2px;opacity:.65;background:repeating-linear-gradient(90deg,currentColor 0 3px,transparent 3px 4px)}.lw-art-brush-preview.is-marker i{height:6px;border-radius:2px;opacity:.88}.lw-art-brush-preview.is-paintbrush i{height:7px;border-radius:90% 15% 80% 20%;transform:rotate(-5deg) scaleX(1.02)}.lw-art-brush-preview.is-calligraphy i{height:7px;border-radius:1px;transform:rotate(-5deg) skewX(-28deg)}.lw-art-brush-preview.is-highlighter i{height:9px;border-radius:2px;opacity:.35}.lw-art-brush-preview.is-watercolor i{height:10px;opacity:.28;filter:blur(.45px);box-shadow:0 -2px currentColor,0 2px currentColor}.lw-art-brush-preview.is-spray i{height:13px;opacity:.75;background:radial-gradient(circle,currentColor 0 1px,transparent 1.3px) 0 0/5px 5px;transform:rotate(-5deg)}
 .lw-art-solid-colors{display:flex;flex-wrap:wrap;gap:5px}.lw-art-solid-colors>button,.lw-art-custom-color{position:relative;width:20px;height:20px;flex:0 0 auto;border:2px solid color-mix(in srgb,var(--text,#fff) 8%,transparent);border-radius:7px;background:var(--art-ink);cursor:pointer}.lw-art-solid-colors>button.is-active{border-color:var(--text,#fff);box-shadow:0 0 0 2px color-mix(in srgb,var(--art-ink) 40%,transparent)}.lw-art-custom-color{display:block;overflow:hidden;background:conic-gradient(#e45,#fb3,#5d7,#4ce,#65f,#d5e,#e45)}.lw-art-custom-color input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}.lw-art-custom-color span{position:absolute;inset:5px;border-radius:3px}.lw-art-special-inks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin-top:7px}.lw-art-special-inks>button{height:34px;display:flex;min-width:0;align-items:stretch;justify-content:center;flex-direction:column;gap:2px;padding:3px 4px;border:1px solid var(--draw-border);border-radius:7px;color:var(--text-muted,#999);background:transparent;cursor:pointer}.lw-art-special-inks>button:hover{background:color-mix(in srgb,var(--text,#fff) 5%,transparent)}.lw-art-special-inks>button.is-active{border-color:color-mix(in srgb,var(--draw-accent) 60%,var(--draw-border));color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 9%,transparent)}.lw-art-special-inks i{width:100%;height:12px;flex:0 0 auto;border-radius:4px;background:var(--art-ink);box-shadow:inset 0 1px rgba(255,255,255,.25)}.lw-art-special-inks span{overflow:hidden;font-size: 12px;line-height:1;text-align:center;text-overflow:ellipsis;white-space:nowrap}.lw-art-control-section{display:flex;flex-direction:column;gap:7px}.lw-art-control-section>label{display:grid;grid-template-columns:minmax(65px,1fr) minmax(60px,1fr) 30px;align-items:center;gap:5px}.lw-art-control-section label>span{display:flex;min-width:0;flex-direction:column}.lw-art-control-section label strong{font-size: 12px}.lw-art-control-section label small{overflow:hidden;color:var(--text-muted,#999);font-size: 12px;text-overflow:ellipsis;white-space:nowrap}.lw-art-control-section input{width:100%;accent-color:var(--draw-accent)}.lw-art-control-section output{color:var(--text-muted,#999);font-size: 12px;text-align:right;font-variant-numeric:tabular-nums}.lw-art-current-stroke{min-height:35px;display:flex;align-items:center;gap:7px;margin-top:auto;padding:4px 6px;border-radius:8px;background:color-mix(in srgb,var(--text,#fff) 4%,transparent)}.lw-art-current-stroke>span{height:var(--art-width);max-height:20px;min-height:2px;flex:1;border-radius:99px;background:var(--art-ink);opacity:var(--art-opacity)}.lw-art-current-stroke small{color:var(--text-muted,#999);font-size: 12px;white-space:nowrap}.lw-art-footer-note{display:inline-flex;align-items:center;gap:6px;padding:0 7px;color:var(--text-muted,#999);font-size: 12px}.lw-tablet-canvas.tool-art{cursor:crosshair}@keyframes lw-art-studio-in{from{opacity:0;transform:translateY(-7px) scale(.99)}}
 .lw-draw-icon,.lw-draw-subtle,.lw-primary-action,.lw-convert-action,.lw-model-card button{border:0;cursor:pointer;transition:transform .16s ease,background .16s ease,opacity .16s ease}.lw-draw-icon{display:grid;place-items:center;width:32px;height:32px;border-radius:8px;background:transparent}.lw-draw-icon:hover:not(:disabled){background:color-mix(in srgb,var(--text,#fff) 8%,transparent)}.lw-draw-icon.lw-danger:hover:not(:disabled){color:var(--danger,#d94b63);background:color-mix(in srgb,var(--danger,#d94b63) 10%,transparent)}.lw-drawing-board button:disabled{opacity:.5;cursor:not-allowed}.lw-draw-subtle{display:flex;align-items:center;justify-content:center;gap:7px;height:32px;padding:0 10px;border-radius:8px;background:color-mix(in srgb,var(--text,#fff) 6%,transparent)}.lw-draw-subtle:hover:not(:disabled){background:color-mix(in srgb,var(--text,#fff) 10%,transparent)}.lw-draw-subtle.is-active{color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 22%,var(--background-secondary,#17171d));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--draw-accent) 38%,transparent)}

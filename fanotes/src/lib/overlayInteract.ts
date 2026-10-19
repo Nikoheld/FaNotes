@@ -273,7 +273,7 @@ export const DRAWING_CHROME_SELECTOR = [
   '.note-tab',
   '.paper-view-hud',
   '.sidebar',
-  '.statusbar',
+  '.ribbon-status',
   '[data-fanotes-drawing-chrome]',
   'button',
   'select',

@@ -652,13 +652,14 @@ void (async () => {
         const bounds = node.getBoundingClientRect()
         return { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom, width: bounds.width, height: bounds.height }
       }
-      const required = ['.app-shell', '.ribbon', '.sidebar', '.workspace', '.editor-toolbar', '.unified-paper', '.statusbar']
+      const required = ['.app-shell', '.ribbon', '.sidebar', '.workspace', '.editor-toolbar', '.unified-paper', '.app-body']
       const rectangles = Object.fromEntries(required.map((selector) => [selector, rect(selector)]))
       return {
         viewport: { width: innerWidth, height: innerHeight },
         pageOverflowX: document.documentElement.scrollWidth > innerWidth + 1,
         pageOverflowY: document.documentElement.scrollHeight > innerHeight + 1,
         rectangles,
+        statusBar: Boolean(document.querySelector('footer.statusbar, .note-meta-bar')),
         rawMathVisible: [...document.querySelectorAll('.cm-live-math-inline, .cm-live-math-block')].some((node) => !node.querySelector('.katex')),
       }
     })()`)
@@ -666,8 +667,10 @@ void (async () => {
     if (missing.length) throw new Error(`Unsichtbare Kernbereiche bei 940 × 640: ${missing.join(', ')}`)
     if (layout.pageOverflowX || layout.pageOverflowY) throw new Error(`Unerwartetes Seiten-Overflow bei 940 × 640: ${JSON.stringify(layout)}`)
     if (layout.rawMathVisible) throw new Error('Mindestens eine sichtbare Formel blieb als unformatierter Quelltext stehen.')
-    const status = layout.rectangles['.statusbar']
-    if (Math.abs(status.bottom - layout.viewport.height) > 1) throw new Error('Die Statusleiste sitzt nicht bündig am unteren Fensterrand.')
+    if (layout.statusBar) throw new Error('Die Notizseite darf keine Tag-Zeile und keine Statusleiste mehr zeigen.')
+    const shell = layout.rectangles['.app-shell']
+    const body = layout.rectangles['.app-body']
+    if (Math.abs(shell.bottom - layout.viewport.height) > 1 || Math.abs(body.bottom - layout.viewport.height) > 1) throw new Error('Der Notizbereich füllt das Fenster unter der oberen Leiste nicht.')
     await capture(cdp, 'responsive-940x640')
 
     await cdp.evaluate(`document.querySelector('.tabs-menu').click()`)

@@ -57,6 +57,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Tag,
   Trash2,
   X,
 } from 'lucide-react'
@@ -208,7 +209,7 @@ import { defaultSettingsForPlatform } from './defaults'
 import { PaperStylePicker } from './components/PaperStylePicker'
 import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
-import { clampPaperSquareMm, paperSheetPx, paperSquarePx, paperSquareSizeLabel } from './lib/paperSquare'
+import { clampPaperSquareMm, paperSheetPx, paperSquarePx } from './lib/paperSquare'
 import { clampViewZoom, createPaperViewStore, sharedPaperViewStore, writeSharedZoomMaxPercent, writeSharedZoomSpeed, type PaperViewStore } from './lib/paperView'
 import { flushPaperViewMemory } from './lib/paperViewMemory'
 import { diagnosticLog } from './lib/bugReport'
@@ -256,7 +257,7 @@ import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from 
 import { applyRendererResourceLimits } from './lib/resourceLimits'
 import { getUiLanguage, getUiLocale, setUiLanguage, translateUiText } from './i18n'
 import { bestContrastText, ensureReadableColor } from './lib/colorContrast'
-import type { AppSettings, BootstrapData, CreateResult, DetectedTextLanguage, DrawingLibraryDocument, NoteHistorySnapshot, NoteTab, OneNoteImportResult, PaperStyle, SearchHit, UpdateState, VaultEntry, WorksheetDocument } from './types'
+import type { AppSettings, BootstrapData, CreateResult, DrawingLibraryDocument, NoteHistorySnapshot, NoteTab, OneNoteImportResult, PaperStyle, SearchHit, UpdateState, VaultEntry, WorksheetDocument } from './types'
 
 const DrawingBoard = lazy(() => import('./components/DrawingBoard').then((module) => ({ default: module.DrawingBoard })))
 const FirstRunOnboarding = lazy(() => import('./components/FirstRunOnboarding').then((module) => ({ default: module.FirstRunOnboarding })))
@@ -700,7 +701,6 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [settings.viewZoomMax, splitPaperViewStore])
   useEffect(() => installChromeTextSelect(), [])
   const [saveState, setSaveState] = useState<SaveState>('saved')
-  const [detectedTextLanguage, setDetectedTextLanguage] = useState<DetectedTextLanguage>('unknown')
   const [sidebarVisible, setSidebarVisible] = useState(true)
   const [inspectorVisible, setInspectorVisible] = useState(false)
   const [focusMode, setFocusMode] = useState(false)
@@ -773,6 +773,8 @@ export default function App({ startupBootstrap }: AppProps) {
     try { return decodeURIComponent(match[1]) } catch { return '' }
   })()
   const [tagDraft, setTagDraft] = useState('')
+  const [tagMenuOpen, setTagMenuOpen] = useState(false)
+  const tagMenuRef = useRef<HTMLDivElement>(null)
   const [splitPath, setSplitPath] = useState<string | null>(null)
   const [splitLayout, setSplitLayout] = useState<SplitLayout>(() => loadSplitLayout())
   const [splitDragging, setSplitDragging] = useState(false)
@@ -954,7 +956,7 @@ export default function App({ startupBootstrap }: AppProps) {
     window.addEventListener('error', onError)
     return () => window.removeEventListener('error', onError)
   }, [updateState.currentVersion])
-  useEffect(() => { setDetectedTextLanguage('unknown') }, [activePath])
+  useEffect(() => { setTagMenuOpen(false); setTagDraft('') }, [activePath])
   useEffect(() => { treeRef.current = tree }, [tree])
   useEffect(() => { settingsRef.current = settings }, [settings])
   useEffect(() => {
@@ -1031,6 +1033,22 @@ export default function App({ startupBootstrap }: AppProps) {
       document.removeEventListener('keydown', closeOnEscape)
     }
   }, [backupMenuOpen, editorMenuOpen])
+  useEffect(() => {
+    if (!tagMenuOpen) return
+    const close = (event: PointerEvent) => {
+      if (tagMenuRef.current?.contains(event.target as Node)) return
+      setTagMenuOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setTagMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', close)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', close)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [tagMenuOpen])
   const activeTab = useMemo(() => tabs.find((tab) => tab.path === activePath) ?? null, [activePath, tabs])
   // The overlay renders only the session loaded for the active note; the
   // switch effect below replaces a previous note's session one commit later.
@@ -1128,12 +1146,6 @@ export default function App({ startupBootstrap }: AppProps) {
     relativePath: activeTab.path,
     markdown: visibleNoteContent(pendingWrites.current.get(activeTab.path) ?? activeTab.content),
   } : null, [activeTab, lmStudioOpen])
-  const activeWordCount = useMemo(() => {
-    if (!settings.showWordCount || !activeTab) return 0
-    const visible = visibleNoteContent(activeTab.content)
-    return visible ? visible.split(/\s+/u).length : 0
-  }, [activeTab, settings.showWordCount])
-
   useEffect(() => {
     const requestId = ++drawingLoadRequestRef.current
     drawingDirtyRef.current = false
@@ -4921,11 +4933,12 @@ export default function App({ startupBootstrap }: AppProps) {
       {sanitizeCustomCss(settings.customCss) && <style>{sanitizeCustomCss(settings.customCss)}</style>}
       <nav className="ribbon" aria-label="Hauptnavigation">
         <div className="ribbon-brand"><span aria-hidden="true">F</span><strong>FaNotes</strong></div>
-        <button type="button" className={!searchOpen && !overviewOpen && !homeworkOpen && !calendarOpen && !lmStudioOpen && !glyphenWerkOpen ? 'active' : ''} title="Dateien" data-tooltip="Notizen" aria-label="Notizen" onClick={showFiles}><Files size={16} /><span className="ribbon-label">Notizen</span></button>
-        <button type="button" className={searchOpen ? 'active' : ''} title="Im Vault suchen (Strg+Umschalt+F)" data-tooltip="Suchen · Strg ⇧ F" aria-label="Im gesamten Vault suchen" onClick={() => { setSearchOpen(true); setSidebarVisible(true) }}><Search size={16} /><span className="ribbon-label">Suchen</span></button>
-        <button type="button" className={drawingOpen ? 'active' : ''} title={drawingOpen ? 'Zur Tastatureingabe wechseln' : 'Auf derselben Seite mit Stift schreiben'} data-tooltip={drawingOpen ? 'Zur Tastatur · Strg D' : 'Mit Stift schreiben · Strg D'} aria-pressed={drawingOpen} onClick={toggleDrawing}><PenLine size={16} /><span className="ribbon-label">Stift</span></button>
-        <button type="button" className={homeworkOpen ? 'active' : ''} title="Hausaufgaben & Termine" data-tooltip="Hausaufgaben" aria-label="Hausaufgaben und Termine öffnen" onClick={openHomework}><ClipboardList size={16} /><span className="ribbon-label">Aufgaben</span></button>
-        <button type="button" className={calendarOpen ? 'active' : ''} title="Kalender" data-tooltip="Kalender" aria-label="Kalender öffnen" onClick={openCalendar}><CalendarDays size={16} /><span className="ribbon-label">Kalender</span></button>
+        <button type="button" title={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} aria-label={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} onClick={() => setSidebarVisible((value) => !value)}>{sidebarVisible ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}</button>
+        <button type="button" className={!searchOpen && !overviewOpen && !homeworkOpen && !calendarOpen && !lmStudioOpen && !glyphenWerkOpen ? 'active' : ''} title="Dateien" data-tooltip="Notizen" aria-label="Notizen" onClick={showFiles}><Files size={14} /><span className="ribbon-label">Notizen</span></button>
+        <button type="button" className={searchOpen ? 'active' : ''} title="Im Vault suchen (Strg+Umschalt+F)" data-tooltip="Suchen · Strg ⇧ F" aria-label="Im gesamten Vault suchen" onClick={() => { setSearchOpen(true); setSidebarVisible(true) }}><Search size={14} /><span className="ribbon-label">Suchen</span></button>
+        <button type="button" className={drawingOpen ? 'active' : ''} title={drawingOpen ? 'Zur Tastatureingabe wechseln' : 'Auf derselben Seite mit Stift schreiben'} data-tooltip={drawingOpen ? 'Zur Tastatur · Strg D' : 'Mit Stift schreiben · Strg D'} aria-pressed={drawingOpen} onClick={toggleDrawing}><PenLine size={14} /><span className="ribbon-label">Stift</span></button>
+        <button type="button" className={homeworkOpen ? 'active' : ''} title="Hausaufgaben & Termine" data-tooltip="Hausaufgaben" aria-label="Hausaufgaben und Termine öffnen" onClick={openHomework}><ClipboardList size={14} /><span className="ribbon-label">Aufgaben</span></button>
+        <button type="button" className={calendarOpen ? 'active' : ''} title="Kalender" data-tooltip="Kalender" aria-label="Kalender öffnen" onClick={openCalendar}><CalendarDays size={14} /><span className="ribbon-label">Kalender</span></button>
         <div className="ribbon-spacer" />
         <button
           type="button"
@@ -4936,17 +4949,25 @@ export default function App({ startupBootstrap }: AppProps) {
           aria-expanded={sidebarToolsOpen}
           onClick={() => setSidebarToolsOpen((open) => !open)}
         >
-          <MoreVertical size={16} /><span className="ribbon-label">Werkzeuge</span>
+          <MoreVertical size={14} /><span className="ribbon-label">Werkzeuge</span>
         </button>
         {sidebarToolsOpen && (
           <div className="ribbon-extras" role="group" aria-label="Weitere Werkzeuge">
-            <button type="button" title="Heutige Tagesnotiz" data-tooltip="Tagesnotiz" aria-label="Heutige Tagesnotiz öffnen" onClick={() => void createDailyNote()}><CalendarDays size={16} /><span className="ribbon-label">Tagesnotiz</span></button>
-            <button type="button" className={overviewOpen ? 'active' : ''} title="Vault-Übersicht" data-tooltip="Übersicht" aria-label="Vault-Übersicht öffnen" onClick={openOverview}><Network size={16} /><span className="ribbon-label">Übersicht</span></button>
-            <button type="button" className={glyphenWerkOpen ? 'active' : ''} title="GlyphenWerk" data-tooltip="GlyphenWerk" aria-label="GlyphenWerk öffnen" onClick={openGlyphenWerk}><Database size={16} /><span className="ribbon-label">GlyphenWerk</span></button>
-            <button type="button" title="Befehlspalette (Strg+P)" data-tooltip="Befehle · Strg P" aria-label="Befehlspalette öffnen" onClick={() => setPaletteOpen(true)}><Command size={16} /><span className="ribbon-label">Befehle</span></button>
+            <button type="button" title="Heutige Tagesnotiz" data-tooltip="Tagesnotiz" aria-label="Heutige Tagesnotiz öffnen" onClick={() => void createDailyNote()}><CalendarDays size={14} /><span className="ribbon-label">Tagesnotiz</span></button>
+            <button type="button" className={overviewOpen ? 'active' : ''} title="Vault-Übersicht" data-tooltip="Übersicht" aria-label="Vault-Übersicht öffnen" onClick={openOverview}><Network size={14} /><span className="ribbon-label">Übersicht</span></button>
+            <button type="button" className={glyphenWerkOpen ? 'active' : ''} title="GlyphenWerk" data-tooltip="GlyphenWerk" aria-label="GlyphenWerk öffnen" onClick={openGlyphenWerk}><Database size={14} /><span className="ribbon-label">GlyphenWerk</span></button>
+            <button type="button" title="Befehlspalette (Strg+P)" data-tooltip="Befehle · Strg P" aria-label="Befehlspalette öffnen" onClick={() => setPaletteOpen(true)}><Command size={14} /><span className="ribbon-label">Befehle</span></button>
           </div>
         )}
-        <button type="button" title="Einstellungen (Strg+,)" data-tooltip="Einstellungen · Strg ," aria-label="Einstellungen öffnen" onClick={() => openSettings()}><Settings size={16} /><span className="ribbon-label">Einstellungen</span></button>
+        <div className="ribbon-status">
+          {updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={12} /> Update bereit</button>}
+          {updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={12} /> Update {Math.round(updateState.progress * 100)} %</span>}
+          {addonState.statusItems.map((item) => item.clickable ? <button key={`${item.addonId}/${item.id}`} type="button" className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore onClick={() => addonRuntime.clickStatusItem(item.addonId, item.id)}>{item.text}</button> : <span key={`${item.addonId}/${item.id}`} className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore>{item.text}</span>)}
+          {addonState.panels.length > 0 && !addonState.dockOpen && <button type="button" className="addon-status-item addon-status-item--dock" title="Add-on-Panels einblenden" onClick={() => addonRuntime.setDockOpen(true)}><Puzzle size={12} /> {addonState.panels.length}</button>}
+          {syncApi && syncState.account && <button type="button" className={`sync-status-item is-${syncState.status}`} title={`Sync · ${syncState.account.email} · ${syncStatusLabel(syncState)}${syncState.error ? ` · ${syncState.error}` : ''}`} aria-live="polite" onClick={() => openSettings('sync')}>{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={12} /> : syncState.status === 'offline' ? <CloudOff size={12} /> : syncState.status === 'error' ? <CircleAlert size={12} /> : <Cloud size={12} />}{syncState.status === 'syncing' ? 'Sync …' : syncState.status === 'offline' ? 'Offline' : syncState.status === 'error' ? 'Sync-Fehler' : 'Synchron'}{syncState.conflicts.length > 0 && <em>{syncState.conflicts.length}</em>}</button>}
+          <button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-label="Jetzt speichern" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={12} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={12} /> : <CircleAlert size={12} />}<span>{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</span></button>
+        </div>
+        <button type="button" title="Einstellungen (Strg+,)" data-tooltip="Einstellungen · Strg ," aria-label="Einstellungen öffnen" onClick={() => openSettings()}><Settings size={14} /><span className="ribbon-label">Einstellungen</span></button>
       </nav>
 
       <div className="app-body" style={{ gridTemplateColumns: `${sidebarVisible ? 'var(--sidebar-width)' : '0px'} minmax(420px, 1fr) auto` }}>
@@ -5106,7 +5127,19 @@ export default function App({ startupBootstrap }: AppProps) {
                 />
               ))}
             </div>
-            <button type="button" className="tabs-menu" title="Neue Notiz (Strg+N)" aria-label="Neue Notiz" onClick={() => void createNote()}><Plus size={15} /></button>
+            {activeTab && !glyphenWerkOpen && !homeworkOpen && !calendarOpen && !overviewOpen && (
+              <nav className="note-breadcrumbs" aria-label="Pfad der Notiz">
+                {breadcrumbsFor(activeTab.path).map((crumb, index) => (
+                  <span key={crumb.path} className="note-breadcrumbs__item">
+                    {index > 0 && <ChevronRight aria-hidden="true" size={10} />}
+                    {crumb.isNote
+                      ? <b title={activeTab.path}>{crumb.label}</b>
+                      : <button type="button" title={`„${crumb.label}“ in der Dateileiste zeigen`} onClick={() => { setSidebarVisible(true); setRevealPath(null); window.setTimeout(() => setRevealPath(crumb.path), 0) }}>{crumb.label}</button>}
+                  </span>
+                ))}
+              </nav>
+            )}
+            <button type="button" className="tabs-menu" title="Neue Notiz (Strg+N)" aria-label="Neue Notiz" onClick={() => void createNote()}><Plus size={14} /></button>
           </div>
           {tabMenu && (() => {
             const menuTab = tabs.find((tab) => tab.path === tabMenu.path)
@@ -5165,6 +5198,36 @@ export default function App({ startupBootstrap }: AppProps) {
               })()}
             </div>
             <div className="toolbar-group toolbar-end">
+              {activeTab && dailyNoteStem(activeTab.path, normalizePath(settings.dailyNotesFolder || translateUiText('Tagesnotizen')), settings.dateFormat || 'YYYY-MM-DD') && (
+                <div className="daily-nav" role="group" aria-label="Benachbarte Tagesnotizen">
+                  <button type="button" title="Vorherige Tagesnotiz" aria-label="Vorherige Tagesnotiz" onClick={() => void openAdjacentDaily(-1)}><ArrowLeft size={13} /></button>
+                  <button type="button" title="Nächste Tagesnotiz" aria-label="Nächste Tagesnotiz" onClick={() => void openAdjacentDaily(1)}><ArrowRight size={13} /></button>
+                </div>
+              )}
+              {activeTab && !isPdfActive && (
+                <PaperStylePicker
+                  value={activePaper}
+                  disabled={activeEntryMutating}
+                  onChange={(style) => { if (activeTab) void applyNotePaper(activeTab.path, style) }}
+                />
+              )}
+              {activeTab && (
+                <div className="note-tags-menu" ref={tagMenuRef}>
+                  <button type="button" className={`toolbar-button ${tagMenuOpen ? 'active' : ''}`} aria-label="Schlagwörter" aria-expanded={tagMenuOpen} title="Tags dieser Notiz" onClick={() => setTagMenuOpen((open) => !open)}><Tag size={14} />{activeTags.length > 0 && <span>{activeTags.length}</span>}</button>
+                  {tagMenuOpen && (
+                    <div className="note-tags-popover" role="dialog" aria-label="Schlagwörter">
+                      <div className="note-tags">
+                        {activeTags.map((tag) => (
+                          <button key={tag} type="button" className="note-tag" onClick={() => applyTagsToNote(activeTags.filter((item) => item !== tag))} title="Tag entfernen">#{tag}<X size={10} /></button>
+                        ))}
+                        <form onSubmit={(event) => { event.preventDefault(); const next = tagDraft.trim(); if (!next) return; applyTagsToNote([...activeTags, next]); setTagDraft('') }}>
+                          <input value={tagDraft} onChange={(event) => setTagDraft(event.target.value)} placeholder="Tag hinzufügen" maxLength={40} aria-label="Neues Schlagwort" />
+                        </form>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
               {bookPolicy.controlVisible && (
                 <div className="subject-book-control">
                   <button
@@ -5348,48 +5411,6 @@ export default function App({ startupBootstrap }: AppProps) {
               <VaultOverview entries={tree} openTabs={tabs} onOpen={(path) => { setOverviewOpen(false); return openNote(path) }} onCreateNote={() => createNote()} onClose={() => setOverviewOpen(false)} />
             ) : activeTab ? (
               <>
-              {activeTab && (
-                <div className="note-meta-bar">
-                  <div className="note-tags" aria-label="Schlagwörter">
-                    {activeTags.map((tag) => (
-                      <button key={tag} type="button" className="note-tag" onClick={() => applyTagsToNote(activeTags.filter((item) => item !== tag))} title="Tag entfernen">#{tag}<X size={10} /></button>
-                    ))}
-                    <form onSubmit={(event) => { event.preventDefault(); const next = tagDraft.trim(); if (!next) return; applyTagsToNote([...activeTags, next]); setTagDraft('') }}>
-                      <input value={tagDraft} onChange={(event) => setTagDraft(event.target.value)} placeholder="Tag hinzufügen" maxLength={40} aria-label="Neues Schlagwort" />
-                    </form>
-                  </div>
-                  {dailyNoteStem(activeTab.path, normalizePath(settings.dailyNotesFolder || translateUiText('Tagesnotizen')), settings.dateFormat || 'YYYY-MM-DD') && (
-                    <div className="daily-nav" role="group" aria-label="Benachbarte Tagesnotizen">
-                      <button type="button" title="Vorherige Tagesnotiz" aria-label="Vorherige Tagesnotiz" onClick={() => void openAdjacentDaily(-1)}><ArrowLeft size={13} /></button>
-                      <button type="button" title="Nächste Tagesnotiz" aria-label="Nächste Tagesnotiz" onClick={() => void openAdjacentDaily(1)}><ArrowRight size={13} /></button>
-                    </div>
-                  )}
-                  {!isPdfActive && (
-                  <div className="note-paper-controls">
-                    {(activePaper === 'squares' || activePaper === 'grid') && (
-                      <label className="paper-square-size" title="Seitenlänge der Quadrate auf Häuschen- und Kariertpapier">
-                        <span>Kästchen</span>
-                        <input
-                          type="range"
-                          min={0}
-                          max={20}
-                          step={0.5}
-                          aria-label="Kästchengrösse"
-                          value={clampPaperSquareMm(settings.paperSquareMm)}
-                          onChange={(event) => applySettings({ ...settings, paperSquareMm: clampPaperSquareMm(Number(event.target.value)) })}
-                        />
-                        <output>{paperSquareSizeLabel(settings.paperSquareMm)}</output>
-                      </label>
-                    )}
-                    <PaperStylePicker
-                      value={activePaper}
-                      disabled={activeEntryMutating}
-                      onChange={(style) => { if (activeTab) void applyNotePaper(activeTab.path, style) }}
-                    />
-                  </div>
-                  )}
-                </div>
-              )}
               <div
                 ref={splitContainerRef}
                 className={`editor-split ${splitTab ? 'is-split' : ''} ${splitTab ? `is-${splitLayout.orientation}` : ''} ${splitDragging ? 'is-resizing' : ''} ${splitTab ? `focus-${focusedPane}` : ''}`}
@@ -5423,7 +5444,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   ) : (
                   <div className="editor-pane">
                     <SafeBoundary name="Editor" fallbackTitle="Der Editor ist abgestürzt">
-                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || (drawingOpen && focusedPane === 'main')} paperMode onLanguageDetected={setDetectedTextLanguage} onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} />
+                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || (drawingOpen && focusedPane === 'main')} paperMode onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} />
                     </SafeBoundary>
                   </div>
                   )}
@@ -5606,22 +5627,6 @@ export default function App({ startupBootstrap }: AppProps) {
         {addonState.dockOpen && addonState.panels.length > 0 && !glyphenWerkOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Dock" fallbackTitle="Das Add-on-Dock ist abgestürzt"><AddonPanelDock panels={addonState.panels} activeKey={addonState.activePanel} runtime={addonRuntime} onClose={() => addonRuntime.setDockOpen(false)} /></SafeBoundary></Suspense>}
         {searchOpen && <Suspense fallback={null}><SearchPanel query={searchQuery} hits={searchHits} loading={searchLoading} failed={searchFailed} onQueryChange={setSearchQuery} onOpen={(hit) => { void openSearchHit(hit) }} onClose={() => setSearchOpen(false)} /></Suspense>}
       </div>
-
-      <footer className="statusbar">
-        <div className="statusbar-left"><button type="button" title={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} aria-label={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} onClick={() => setSidebarVisible((value) => !value)}>{sidebarVisible ? <PanelLeftClose size={12} /> : <PanelLeftOpen size={12} />}</button><span>{glyphenWerkOpen ? `GlyphenWerk · ${GLYPHENWERK_VIEW_LABELS[glyphenWerkView]}` : calendarOpen ? 'Kalender' : homeworkOpen ? 'Hausaufgaben & Termine' : overviewOpen ? 'Vault-Übersicht' : activeTab ? drawingOpen ? 'Stiftmodus' : isPdfActive ? 'PDF-Notiz' : worksheetSession.documents.length ? 'Notiz mit Arbeitsblatt' : 'Schreibmodus' : 'Bereit'}</span>{worksheetSession.documents.length > 0 && <span>{worksheetSession.documents.length} {worksheetSession.documents.length === 1 ? 'Arbeitsblatt' : 'Arbeitsblätter'}</span>}{activeTab && !glyphenWerkOpen && !homeworkOpen && !calendarOpen && !overviewOpen && (
-          <nav className="note-breadcrumbs" aria-label="Pfad der Notiz">
-            {breadcrumbsFor(activeTab.path).map((crumb, index) => (
-              <span key={crumb.path} className="note-breadcrumbs__item">
-                {index > 0 && <ChevronRight aria-hidden="true" size={10} />}
-                {crumb.isNote
-                  ? <b title={activeTab.path}>{crumb.label}</b>
-                  : <button type="button" title={`„${crumb.label}“ in der Dateileiste zeigen`} onClick={() => { setSidebarVisible(true); setRevealPath(null); window.setTimeout(() => setRevealPath(crumb.path), 0) }}>{crumb.label}</button>}
-              </span>
-            ))}
-          </nav>
-        )}</div>
-        <div className="statusbar-right">{updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={11} /> Update bereit</button>}{updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={11} /> Update {Math.round(updateState.progress * 100)} %</span>}{settings.spellcheck && activeTab && !drawingOpen && detectedTextLanguage !== 'unknown' && <span className="detected-text-language" title="Automatisch erkannte Sprache für die lokale Rechtschreibprüfung"><b>Aa</b> {detectedTextLanguage === 'de' ? 'Deutsch' : detectedTextLanguage === 'en' ? 'English' : detectedTextLanguage === 'fr' ? 'Français' : 'DE / EN'}</span>}{settings.showWordCount && activeTab && <span>{activeWordCount} Wörter</span>}{addonState.statusItems.map((item) => item.clickable ? <button key={`${item.addonId}/${item.id}`} type="button" className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore onClick={() => addonRuntime.clickStatusItem(item.addonId, item.id)}>{item.text}</button> : <span key={`${item.addonId}/${item.id}`} className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore>{item.text}</span>)}{addonState.panels.length > 0 && !addonState.dockOpen && <button type="button" className="addon-status-item addon-status-item--dock" title="Add-on-Panels einblenden" onClick={() => addonRuntime.setDockOpen(true)}><Puzzle size={11} /> {addonState.panels.length}</button>}{syncApi && syncState.account && <button type="button" className={`sync-status-item is-${syncState.status}`} title={`Sync · ${syncState.account.email} · ${syncStatusLabel(syncState)}${syncState.error ? ` · ${syncState.error}` : ''}`} aria-live="polite" onClick={() => openSettings('sync')}>{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={11} /> : syncState.status === 'offline' ? <CloudOff size={11} /> : syncState.status === 'error' ? <CircleAlert size={11} /> : <Cloud size={11} />}{syncState.status === 'syncing' ? 'Sync …' : syncState.status === 'offline' ? 'Offline' : syncState.status === 'error' ? 'Sync-Fehler' : 'Synchron'}{syncState.conflicts.length > 0 && <em>{syncState.conflicts.length}</em>}</button>}<button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={11} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={11} /> : <CircleAlert size={11} />}{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</button><span title={isWeb ? 'Die Daten bleiben in diesem Browser' : 'Dein Vault bleibt auf deinem Gerät'}><ShieldCheck size={11} /> {isWeb ? 'Im Browser gespeichert' : 'Lokal & privat'}</span></div>
-      </footer>
 
       {folderPathTarget && (
         <FolderPathDialog

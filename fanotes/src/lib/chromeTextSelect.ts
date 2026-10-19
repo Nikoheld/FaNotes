@@ -3,7 +3,6 @@ export const TOP_CHROME_SELECTORS = [
   '.ribbon',
   '.tabs-bar',
   '.editor-toolbar',
-  '.note-meta-bar',
   '.pdf-note-toolbar',
   '.pdf-note-search',
   '.subject-book-pdf-toolbar',
@@ -19,8 +18,7 @@ export const CHROME_LABEL_SELECTOR = [
   '.pdf-note-identity small',
   '.pdf-note-pager > span',
   '.pdf-note-search small',
-  '.paper-square-size > span',
-  '.paper-square-size output',
+  '.note-breadcrumbs b',
   '.subject-book-pane-bar strong',
   '.split-pane-head strong',
 ].join(', ')
