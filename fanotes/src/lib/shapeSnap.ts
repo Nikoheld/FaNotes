@@ -63,7 +63,8 @@ export const shapeSnapProfile = (sensitivity = SHAPE_SNAP_SENSITIVITY_DEFAULT) =
     hintMs: Math.round(lerp(400, 120, t)),
     axisSnapRad: lerp(6, 18, t) * Math.PI / 180,
     loosen: lerp(0.76, 1.24, t),
-    minPoints: Math.round(lerp(12, 8, t)),
+    // Two samples are a segment. A higher minimum dropped short lines.
+    minPoints: 2,
     ambiguity: lerp(0.08, 0.02, t),
   }
 }
@@ -370,20 +371,23 @@ export const snapStrokeToShape = (
   if (stroke.points.length < profile.minPoints) return null
   const pts = physical(stroke.points, sourceWidth, sourceHeight)
   const length = pathLength(pts)
-  if (length < 40 / loose) return null
+  if (!(length > 0)) return null
   const box = bboxOf(pts)
   const diagonal = hypot(box.width, box.height)
-  if (diagonal < 32 / loose) return null
 
   const start = pts[0]
   const end = pts[pts.length - 1]
   const chord = hypot(end.x - start.x, end.y - start.y)
-  const closed = chord <= Math.max(18 * loose, diagonal * 0.2 * loose)
+  // Ends meet relative to the figure. The old absolute gap (18px) was longer
+  // than a short line, so that line was treated as closed and never snapped.
+  const closed = diagonal > 0
+    && chord <= Math.max(18 * loose, diagonal * 0.2 * loose)
+    && chord <= diagonal * 0.72
   const template = templateFrom(pts)
 
-  // --- Line (open, almost straight, not a tiny glyph) ---
+  // --- Line (open, almost straight). No minimum length: a short hold still snaps. ---
   let lineScore = 0
-  if (!closed && chord >= 56 / loose) {
+  if (!closed && chord > 0) {
     let maxDev = 0
     let sumDev = 0
     const nx = (end.x - start.x) / chord

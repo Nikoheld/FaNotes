@@ -59,6 +59,32 @@ const runOnce = () => {
 
   const clean = snapStrokeToShape(lineStroke(), WIDTH, HEIGHT, 50)
   assert.equal(clean?.kind, 'line')
+
+  // A few pixels and only a handful of samples used to miss the length floor.
+  const shortPoints = []
+  for (let index = 0; index < 4; index += 1) {
+    const t = index / 3
+    shortPoints.push(point(0.2 + t * (12 / WIDTH), 0.5, index))
+  }
+  const short = snapStrokeToShape({ ...lineStroke(), points: shortPoints }, WIDTH, HEIGHT, 50)
+  assert.equal(short?.kind, 'line', 'a 12px line still snaps')
+  const shortEnd = short.stroke.points.at(-1)
+  const shortSpan = Math.hypot((shortEnd.x - short.stroke.points[0].x) * WIDTH, (shortEnd.y - short.stroke.points[0].y) * HEIGHT)
+  assert.ok(shortSpan > 8 && shortSpan < 16, `short line kept its length (${shortSpan.toFixed(2)}px)`)
+
+  const circlePoints = []
+  for (let index = 0; index <= 48; index += 1) {
+    const angle = (index / 48) * Math.PI * 2
+    circlePoints.push(point(0.5 + Math.cos(angle) * (70 / WIDTH), 0.45 + Math.sin(angle) * (70 / HEIGHT), index))
+  }
+  const circle = snapStrokeToShape({ ...lineStroke(), points: circlePoints }, WIDTH, HEIGHT, 50)
+  assert.equal(circle?.kind, 'circle', 'a closed ring still snaps')
+
+  const dot = snapStrokeToShape({
+    ...lineStroke(),
+    points: Array.from({ length: 8 }, (_, index) => point(0.2, 0.5, index)),
+  }, WIDTH, HEIGHT, 50)
+  assert.equal(dot, null, 'a hold with no movement is not a line')
   const cleanEnd = clean.stroke.points.at(-1)
   const held = { snapped: true, points: clean.stroke.points.map((sample) => ({ ...sample })) }
 
