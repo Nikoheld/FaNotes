@@ -4,6 +4,7 @@ import type { Sample } from '../../../src/types'
 import type { PaperStyle } from '../types'
 import { drawPaperBackground } from '../lib/paperStyles'
 import { getUiLocale } from '../i18n'
+import { loadToolMemory, saveToolMemory } from '../lib/toolMemory'
 import {
   createHandwritingSeed,
   synthesizeHandwriting,
@@ -116,13 +117,20 @@ export function TextToHandwritingDialog({
   onInsert,
   onRequestTraining,
 }: TextToHandwritingDialogProps) {
+  const [initialHandwriting] = useState(() => loadToolMemory().handwriting)
   const [text, setText] = useState('')
-  const [fontSize, setFontSize] = useState(42)
-  const [lineSpacing, setLineSpacing] = useState(1.42)
-  const [variation, setVariation] = useState(0.62)
-  const [connectLetters, setConnectLetters] = useState(true)
-  const [fitToPage, setFitToPage] = useState(true)
-  const [placement, setPlacement] = useState<Placement>('free-line')
+  const [fontSize, setFontSize] = useState(initialHandwriting.fontSize)
+  const [lineSpacing, setLineSpacing] = useState(initialHandwriting.lineSpacing)
+  const [variation, setVariation] = useState(initialHandwriting.variation)
+  const [connectLetters, setConnectLetters] = useState(initialHandwriting.connectLetters)
+  const [fitToPage, setFitToPage] = useState(initialHandwriting.fitToPage)
+  const [placement, setPlacement] = useState<Placement>(initialHandwriting.placement)
+
+  useEffect(() => {
+    saveToolMemory({
+      handwriting: { fontSize, lineSpacing, variation, connectLetters, fitToPage, placement },
+    })
+  }, [connectLetters, fitToPage, fontSize, lineSpacing, placement, variation])
   const [seed, setSeed] = useState(createHandwritingSeed)
   const textRef = useRef<HTMLTextAreaElement>(null)
   const dialogRef = useRef<HTMLElement>(null)

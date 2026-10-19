@@ -125,6 +125,7 @@ import {
 } from '../lib/inkSampleMap'
 import { createMarkerCoverage, drawInkStroke as paintInkStroke, inkStrokeIsTranslucent, inkStrokePaintMargin, shiftMarkerCoverage, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
 import { MATH_FIGURES, clampFigureParams, defaultFigureParams, isMathFigureId, mathFigurePaths, type MathFigureGroup, type MathFigureId, type MathFigureParam } from '../lib/mathFigures'
+import { loadToolMemory, saveToolMemory } from '../lib/toolMemory'
 import {
   INLINE_INK_ACTIVE_CLASS,
   INK_TOOLBAR_SLOT_ID,
@@ -1435,8 +1436,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const mathSolverHistoryRef = useRef<MathSolverHistoryEntry[]>([])
 
   const [initialArtPreferences] = useState(loadArtPreferences)
-  const [tool, setTool] = useState<DrawingTool>('pen')
-  const [inkMode, setInkMode] = useState<InkMode>('writing')
+  const [initialToolMemory] = useState(loadToolMemory)
+  const [tool, setTool] = useState<DrawingTool>(initialToolMemory.tool)
+  const [inkMode, setInkMode] = useState<InkMode>(initialToolMemory.inkMode)
   const [artPanelOpen, setArtPanelOpen] = useState(false)
   const [artStudioTab, setArtStudioTab] = useState<ArtStudioTab>('brushes')
   const [artBrush, setArtBrush] = useState<ArtBrush>(initialArtPreferences.brush)
@@ -1446,15 +1448,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [artOpacity, setArtOpacity] = useState(initialArtPreferences.opacity)
   const [markerKeepColor, setMarkerKeepColor] = useState(initialArtPreferences.keepColor)
   const [artSymbolCategory, setArtSymbolCategory] = useState<ArtSymbolCategory>('all')
-  const [artSymbolId, setArtSymbolId] = useState<ArtSymbolId | null>(null)
+  const [artSymbolId, setArtSymbolId] = useState<ArtSymbolId | null>(
+    initialToolMemory.symbolId && artSymbolIds.has(initialToolMemory.symbolId as ArtSymbolId)
+      ? initialToolMemory.symbolId as ArtSymbolId
+      : null,
+  )
   const [artSymbolSize, setArtSymbolSize] = useState(initialArtPreferences.symbolSize)
   const [artSymbolRotation, setArtSymbolRotation] = useState(initialArtPreferences.symbolRotation)
   const [figureLibraryOpen, setFigureLibraryOpen] = useState(false)
-  const [figureId, setFigureId] = useState<MathFigureId>('cube')
-  const [figureParams, setFigureParams] = useState<Record<string, number>>(() => defaultFigureParams('cube'))
-  const [figureSize, setFigureSize] = useState(120)
-  const [figureRotation, setFigureRotation] = useState(0)
-  const [figureGroup, setFigureGroup] = useState<MathFigureGroup>('solid')
+  const [figureId, setFigureId] = useState<MathFigureId>(initialToolMemory.figureId)
+  const [figureParams, setFigureParams] = useState<Record<string, number>>(initialToolMemory.figureParams)
+  const [figureSize, setFigureSize] = useState(initialToolMemory.figureSize)
+  const [figureRotation, setFigureRotation] = useState(initialToolMemory.figureRotation)
+  const [figureGroup, setFigureGroup] = useState<MathFigureGroup>(initialToolMemory.figureGroup)
   const [penColor, setPenColor] = useState(settings.penColor)
   const [penWidth, setPenWidth] = useState(settings.penWidth)
   const [paperStyle, setPaperStyle] = useState(pagePaperStyle ?? settings.paperStyle)
@@ -1463,7 +1469,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [viewZoom, setViewZoom] = useState(1)
   const [viewRotation, setViewRotation] = useState(0)
   const [viewPan, setViewPan] = useState({ x: 0, y: 0 })
-  const [eraserSize, setEraserSize] = useState(24)
+  const [eraserSize, setEraserSize] = useState(initialToolMemory.eraserSize)
 
   viewZoomRef.current = viewZoom
   viewRotationRef.current = viewRotation
@@ -1510,7 +1516,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [mathSolverSelection, setMathSolverSelection] = useState<MathSolverSelection | null>(null)
   const [mathSolverInput, setMathSolverInput] = useState('')
   const [mathSolverVariable, setMathSolverVariable] = useState('')
-  const [mathSolverPlacement, setMathSolverPlacement] = useState<MathSolverPlacement>('auto')
+  const [mathSolverPlacement, setMathSolverPlacement] = useState<MathSolverPlacement>(initialToolMemory.mathPlacement)
   const [isMathSolving, setIsMathSolving] = useState(false)
   const [mathCorrectorEnabled, setMathCorrectorEnabled] = useState(false)
   const [mathCorrectionSession, setMathCorrectionSession] = useState<MathCorrectionSession | null>(null)
@@ -1712,6 +1718,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       // Die Zeichenwerkzeuge bleiben auch ohne verfügbaren Web-Speicher nutzbar.
     }
   }, [artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, markerKeepColor])
+
+  useEffect(() => {
+    saveToolMemory({
+      eraserSize,
+      ...(tool === 'pen' || tool === 'eraser' ? { tool } : {}),
+      inkMode,
+      symbolId: artSymbolId,
+      figureId,
+      figureParams,
+      figureSize,
+      figureRotation,
+      mathPlacement: mathSolverPlacement,
+    })
+  }, [artSymbolId, eraserSize, figureId, figureParams, figureRotation, figureSize, inkMode, mathSolverPlacement, tool])
 
   useEffect(() => {
     if (drawingId) drawingIdRef.current = drawingId
