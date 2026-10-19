@@ -264,6 +264,23 @@ const layers = () => {
   assert.equal(atTwo.editorInline, '', 'editor must inherit the camera, not specify its own zoom')
   assert.equal(atTwo.rulingInline, '', 'ruling must inherit the camera, not specify its own zoom')
   assert.equal(atTwo.inkInline, '', 'ink must inherit the camera, not specify its own zoom')
+  assert.equal(plane.classList.contains('is-view-rotated'), false, 'zoom alone must not mark the sheet rotated')
+  assert.equal(plane.style.transform, '', 'zoom alone must not leave a transform')
+
+  applyPaperViewToElements(paper, noteView, { zoom: 2, rotation: 15, pan: { x: 0, y: 0 } })
+  assert.equal(plane.style.zoom, '2', 'rotation must keep the single camera zoom')
+  assert.equal(plane.style.transform, 'rotate(15deg)', 'rotation stays a rotate, not a scale')
+  assert.equal(plane.style.transformOrigin, 'center center')
+  assert.equal(plane.classList.contains('is-view-rotated'), true)
+  assert.equal(editor.style.zoom, '', 'rotated text must still inherit zoom')
+  assert.equal(ruling.style.zoom, '', 'rotated ruling must still inherit zoom')
+  assert.equal(ink.style.zoom, '')
+  assert.equal(editor.classList.contains('is-view-rotated'), false, 'text inherits rotation from the plane')
+  assert.equal(ruling.classList.contains('is-view-rotated'), false, 'ruling is not a second rotated layer')
+
+  applyPaperViewToElements(paper, noteView, { zoom: 2, rotation: 0, pan: { x: 0, y: 0 } })
+  assert.equal(plane.style.transform, '', 'clearing rotation must drop the transform')
+  assert.equal(plane.classList.contains('is-view-rotated'), false)
   assert.equal(atTwo.plane, 2)
   assert.equal(atTwo.ruling, atTwo.plane)
   assert.equal(atTwo.editor, atTwo.plane)
@@ -275,6 +292,14 @@ const layers = () => {
     Math.abs(atTwo.ink - atTwo.editor) / atTwo.plane,
   )
   assert.ok(relative < 0.01, `layer zooms must match, relative error ${relative}`)
+
+  const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/styles.css'), 'utf8')
+  const paperView = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/lib/paperView.ts'), 'utf8')
+  assert.match(css, /\.paper-sheet-plane\.is-view-rotated \.markdown-editor \.cm-content[\s\S]*?filter:\s*contrast\(1\.25\)/)
+  assert.match(css, /\.paper-sheet-plane\.is-view-rotated \.pdf-note-text-layer[\s\S]*?filter:\s*contrast\(1\.25\)/)
+  assert.doesNotMatch(css, /\.paper-sheet-plane\.is-view-rotated\s*\{[^}]*\bfilter\s*:/)
+  assert.match(paperView, /classList\.toggle\('is-view-rotated', view\.rotation !== 0\)/)
+  assert.match(paperView, /rotate\(\$\{view\.rotation\}deg\)/)
   return { atOne, atTwo, relative }
 }
 

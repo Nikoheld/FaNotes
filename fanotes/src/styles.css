@@ -1238,6 +1238,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   text-rendering: auto;
   -webkit-font-smoothing: antialiased;
 }
+/* A turned sheet is one rotated bitmap, so 16px type loses stem contrast and
+   looks soft. Contrast sits on the text only, and only while the sheet is
+   turned: ruling, ink and the PDF page keep their colour. 1.25 puts the gray
+   fringe back near an unrotated stem. Do not filter the plane itself. */
+.paper-sheet-plane.is-view-rotated .markdown-editor .cm-content,
+.unified-paper.is-view-rotated .markdown-editor .cm-content,
+.paper-sheet-plane.is-view-rotated .pdf-note-text-layer,
+.unified-paper.is-view-rotated .pdf-note-text-layer {
+  filter: contrast(1.25);
+}
 /* Toolbar/footer are portaled outside the paper; keep a high stacking context for ink chrome. */
 .unified-note-view.is-inking { position: relative; }
 /* Paper grows with content plus a modest writing slack. Do not floor to A4

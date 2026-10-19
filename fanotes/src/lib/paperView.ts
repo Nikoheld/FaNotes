@@ -121,7 +121,7 @@ const clearInlineViewStyle = (element: HTMLElement | null) => {
   element.style.removeProperty('transform-origin')
   element.style.removeProperty('will-change')
   element.style.removeProperty('--view-zoom')
-  element.classList.remove('is-view-transformed', 'is-view-zoomed')
+  element.classList.remove('is-view-transformed', 'is-view-zoomed', 'is-view-rotated')
 }
 
 const stripLocalSheetZoom = (element: HTMLElement | null) => {
@@ -232,7 +232,9 @@ export const watchSheetZoom = (element: HTMLElement, onChange: () => void) => {
  * Chromium rasterizes `transform: scale()` at layout size and stretches the
  * bitmap — markdown shears. CSS `zoom` on a *single* node raises the raster
  * scale so type, ruling and ink stay sharp and the same size. Pan is native
- * scroll. Rotate stays on `transform` (unused at 0°).
+ * scroll. Rotate stays on `transform` (unused at 0°). A turned sheet is one
+ * bitmap, so typed text loses stem contrast; `is-view-rotated` lets CSS pull
+ * that fringe back on the text only.
  *
  * Never pin `zoom` on children. A second specified zoom multiplies the camera
  * (text 4×, dots 2×). `zoom: ''` specifies 1 and freezes that layer.
@@ -265,12 +267,14 @@ export const applyPaperViewToElements = (
     target.style.willChange = 'auto'
     target.classList.toggle('is-view-transformed', active)
     target.classList.toggle('is-view-zoomed', zoom !== 1)
+    target.classList.toggle('is-view-rotated', view.rotation !== 0)
   }
   if (paper && paper !== target) {
     stripLocalSheetZoom(paper)
     paper.style.setProperty('--view-zoom', String(zoom))
     paper.classList.toggle('is-view-transformed', active)
     paper.classList.toggle('is-view-zoomed', zoom !== 1)
+    paper.classList.toggle('is-view-rotated', view.rotation !== 0)
   }
   stripSheetLayerZooms(target)
   if (paper && paper !== target) stripSheetLayerZooms(paper)
