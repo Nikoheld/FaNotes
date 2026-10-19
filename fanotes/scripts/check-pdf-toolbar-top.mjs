@@ -6,6 +6,7 @@ import { createServer } from 'vite'
 const appRoot = fileURLToPath(new URL('..', import.meta.url))
 const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const pdfSource = readFileSync(new URL('../src/components/PdfNoteView.tsx', import.meta.url), 'utf8')
+const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
 
 const server = await createServer({
   root: appRoot,
@@ -37,6 +38,15 @@ const runOnce = () => {
     pdfSource,
     /<header className="pdf-note-toolbar">[\s\S]*<\/header>\s*\{loading &&/,
   )
+  const ribbonStart = css.indexOf('.toolbar-context .pdf-note-toolbar {')
+  const ribbonEnd = css.indexOf('.toolbar-group {', ribbonStart)
+  assert.ok(ribbonStart >= 0 && ribbonEnd > ribbonStart)
+  const ribbon = css.slice(ribbonStart, ribbonEnd)
+  assert.match(ribbon, /\.toolbar-context \.pdf-note-toolbar button,[\s\S]*?background:\s*transparent/)
+  assert.match(ribbon, /\.toolbar-context \.pdf-note-toolbar button\.is-active \{[\s\S]*?background:\s*var\(--panel-active\)/)
+  assert.match(ribbon, /\.toolbar-context \.pdf-note-pager input,[\s\S]*?background:\s*var\(--panel\)/)
+  assert.match(ribbon, /\.toolbar-context \.pdf-note-identity svg \{ color: var\(--accent-readable\)/)
+  assert.doesNotMatch(ribbon, /#fff|#f1f2f6|249,\s*249,\s*252/)
 }
 
 try {
