@@ -30,6 +30,9 @@ const {
   planBodyRoom,
   planCollapse,
   planInsertSection,
+  reorderSection,
+  sectionDropIndex,
+  sectionReorderMark,
   sectionIndexAt,
   serializeSections,
   sortSections,
@@ -417,6 +420,92 @@ const near = (actual, expected, message, tolerance = 0.51) => assert.ok(Math.abs
 }
 
 
+// ── Reordering moves a band and its ink, and leaves the rest of the page ──
+{
+  const board = createBoard(1273)
+  const above = board.write(40, 16)
+  const first = board.insert(160, 'first')
+  const second = board.insert(640, 'second')
+  const third = board.insert(1040, 'third')
+  const firstTitle = board.write(board.px(first.top.y) + 8, 16)
+  const firstBody = board.write(board.px(first.bodyTop.y) + 30, 20)
+  const secondTitle = board.write(board.px(second.top.y) + 8, 16)
+  const secondBody = board.write(board.px(second.bodyTop.y) + 24, 18)
+  const thirdBody = board.write(board.px(third.bodyTop.y) + 20, 16)
+  const abovePx = board.topPx(above)
+  const heightBefore = board.sheet.height
+  const orderBefore = sortSections(board.sections).map((section) => section.id)
+  assert.equal(reorderSection(board.strokes, board.sections, 'second', 1, board.sheet, board.tracked), false, 'dropping a section on itself does nothing')
+  assert.deepEqual(sortSections(board.sections).map((section) => section.id), orderBefore)
+  assert.equal(reorderSection(board.strokes, board.sections, 'missing', 0, board.sheet, board.tracked), false)
+
+  assert.equal(reorderSection(board.strokes, board.sections, 'first', 2, board.sheet, board.tracked), true, 'the first section moves to the bottom')
+  assert.equal(board.sheet.height, heightBefore, 'reordering does not resize the page')
+  assert.equal(board.sheet.width, WIDTH, 'reordering does not change the page width')
+  near(board.topPx(above), abovePx, 'ink above the sections stays')
+  const tops = Object.fromEntries(board.sections.map((section) => [section.id, board.px(section.top.y)]))
+  assert.ok(tops.second < tops.third && tops.third < tops.first, `order is second, third, first (${tops.second}, ${tops.third}, ${tops.first})`)
+  assert.ok(board.topPx(secondTitle) > tops.second && board.topPx(secondTitle) < board.px(second.bodyTop.y), 'the second title stays in its header')
+  assert.ok(board.topPx(secondBody) >= board.px(second.bodyTop.y) && board.topPx(secondBody) < tops.third, 'the second body stays above the next section')
+  assert.ok(board.topPx(firstTitle) > tops.first && board.topPx(firstTitle) < board.px(first.bodyTop.y), 'the moved title stays in its header')
+  assert.ok(board.topPx(firstBody) >= board.px(first.bodyTop.y), 'the moved body follows its header')
+  assert.ok(board.topPx(thirdBody) >= board.px(third.bodyTop.y) && board.topPx(thirdBody) < tops.first, 'the middle section keeps its ink')
+  assert.ok(firstBody.points.every((point) => point.x > 0 && point.x < 1), 'a moved stroke keeps its x')
+
+  const spans = sortSections(board.sections).map((section) => [board.px(section.top.y), board.px(section.bodyTop.y)])
+  assert.ok(spans.every(([top, body]) => body > top), 'every header still has a height')
+
+  // A collapsed section carries its hidden ink to the new place.
+  const hiddenPx = board.collapse(second).hiddenPx
+  const parked = second.hidden.strokes[0].points[0].y
+  assert.equal(reorderSection(board.strokes, board.sections, 'second', 2, board.sheet, board.tracked), true, 'a collapsed section moves below the others')
+  assert.equal(second.hidden.strokes[0].points[0].y, parked, 'hidden ink stays in its own box')
+  assert.ok(second.collapsed)
+  assert.deepEqual(sortSections(board.sections).map((section) => section.id), ['third', 'first', 'second'])
+  board.expand(second)
+  assert.ok(!second.collapsed && second.hidden === null)
+  const restored = board.strokes.find((stroke) => stroke !== above && stroke !== firstTitle && stroke !== firstBody && stroke !== secondTitle && stroke !== thirdBody && board.topPx(stroke) >= board.px(second.bodyTop.y))
+  assert.ok(restored, 'the hidden body comes back under the moved header')
+  assert.ok(hiddenPx > 0)
+
+  const mark = [
+    { start: 0.1, end: 0.3 },
+    { start: 0.3, end: 0.5 },
+    { start: 0.5, end: 0.9 },
+  ]
+  assert.equal(sectionDropIndex(mark, 0, 0.05), 0)
+  assert.equal(sectionDropIndex(mark, 0, 0.42), 1)
+  assert.equal(sectionDropIndex(mark, 0, 0.8), 2)
+  assert.equal(sectionDropIndex(mark, 2, 0.05), 0)
+  assert.equal(sectionReorderMark(mark, 0, 2), 0.9)
+  assert.equal(sectionReorderMark(mark, 2, 0), 0.1)
+  assert.equal(sectionReorderMark(mark, 1, 1), null)
+}
+
+{
+  const board = createBoard(1273)
+  const parent = board.insert(140, 'parent')
+  const sub = board.insertSub(board.px(parent.bodyTop.y) + 80, 'sub')
+  const sibling = board.insertSub(board.px(sub.bodyTop.y) + 40, 'sib')
+  const parentTop = board.px(parent.top.y)
+  const subInk = board.write(board.px(sub.bodyTop.y) + 12, 14)
+  const siblingInk = board.write(board.px(sibling.bodyTop.y) + 12, 14)
+  applySectionWidth(sub, 0.62)
+  const width = sub.width
+  const heightBefore = board.sheet.height
+  assert.equal(reorderSection(board.strokes, board.sections, 'sib', 0, board.sheet, board.tracked), true, 'a subsection moves above its sibling')
+  assert.ok(board.px(sibling.top.y) < board.px(sub.top.y), 'the subsection order changed')
+  assert.equal(sibling.parentId, parent.id)
+  assert.equal(sub.parentId, parent.id)
+  near(board.px(parent.top.y), parentTop, 'the section header stays')
+  assert.equal(sub.width, width, 'reordering does not change a subsection width')
+  assert.equal(board.sheet.height, heightBefore, 'reordering a subsection does not resize the page')
+  assert.equal(board.sheet.width, WIDTH)
+  assert.ok(board.topPx(siblingInk) >= board.px(sibling.bodyTop.y) && board.topPx(siblingInk) < board.px(sub.top.y), 'subsection ink follows its header')
+  assert.ok(board.topPx(subInk) >= board.px(sub.bodyTop.y), 'the other subsection keeps its ink')
+  assert.equal(subInk.points[0].x, siblingInk.points[0].x, 'reordering does not slide ink sideways')
+}
+
 // ── Board wiring ───────────────────────────────────────────────────────────
 {
   const board = readFileSync(new URL('../src/components/DrawingBoard.tsx', import.meta.url), 'utf8')
@@ -434,6 +523,12 @@ const near = (actual, expected, message, tolerance = 0.51) => assert.ok(Math.abs
   assert.match(app, /sectionsEnabled=\{!isPdfActive\}/, 'PDF notes keep their ink on the page: no sections')
   assert.match(board, /Unterabschnitt/, 'the subsection tool is in the pen toolbar')
   assert.match(board, /lw-ink-section-width/, 'a subsection has a width handle')
+  assert.match(board, /lw-ink-section-move/, 'a section has a handle to change its order')
+  assert.match(board, /reorderSection\(strokesRef\.current, sectionsRef\.current, id, toIndex/, 'the handle reorders the band and its ink')
+  assert.match(board, /aria-label=\{isSub \? 'Unterabschnitt verschieben' : 'Abschnitt verschieben'\}/, 'the handle names the band it moves')
+  const moveDrag = board.match(/const beginSectionReorderDrag = useCallback\(\(id: string, event: ReactPointerEvent<HTMLElement>\) => \{[\s\S]*?\n  \}, \[moveSectionTo/)
+  assert.ok(moveDrag, 'reorder drag is a band gesture')
+  assert.doesNotMatch(moveDrag[0], /onSectionFold|contentWidth|foldHeading/, 'reordering does not rewrite the note text')
   assert.match(board, /if \(section\.parentId === null\) onSectionFoldRef\.current\?\.\(topLevelSectionIndex\(sectionsRef\.current, id\), section\.collapsed\)/, 'only a section folds a heading')
   assert.match(board, /\.lw-ink-section-placeholder\{position:absolute;left:12%;top:50%;transform:translateY\(-50%\);color:rgba\(74,63,176,\.34\);font:600 22px\/1 var\(--ui-font,system-ui\)/, 'the title placeholder keeps its size when the band changes width')
   const drag = board.match(/const beginSubsectionWidthDrag = useCallback\(\(id: string, event: ReactPointerEvent<HTMLElement>\) => \{[\s\S]*?\n  \}, \[bumpRevision/)

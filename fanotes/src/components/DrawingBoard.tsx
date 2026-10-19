@@ -10,6 +10,7 @@ import {
   CircleAlert,
   Eraser,
   FileInput,
+  GripVertical,
   LoaderCircle,
   ListChecks,
   ListCollapse,
@@ -197,6 +198,10 @@ import {
   planBodyRoom,
   planCollapse,
   planInsertSection,
+  reorderSection,
+  sectionDropIndex,
+  sectionMoveLayout,
+  sectionReorderMark,
   serializeSections,
   sortSections,
   topLevelSectionIndex,
@@ -4027,6 +4032,55 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setSectionPlacing((current) => current === kind ? null : kind)
   }, [clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection])
 
+  /**
+   * Moves a section among its siblings. Header, body ink and subsections travel
+   * together. The note text is not part of the band, so it stays where it is.
+   */
+  const moveSectionTo = useCallback((id: string, toIndex: number) => {
+    if (activeStrokeRef.current) return false
+    const moved = reorderSection(strokesRef.current, sectionsRef.current, id, toIndex, sheetPx(), forEachTrackedStroke)
+    if (!moved) return false
+    commitSections([...sectionsRef.current])
+    afterSectionChange({ resetHistory: true })
+    return true
+  }, [afterSectionChange, commitSections, forEachTrackedStroke, sheetPx])
+
+  const [sectionDropY, setSectionDropY] = useState<number | null>(null)
+
+  const beginSectionReorderDrag = useCallback((id: string, event: ReactPointerEvent<HTMLElement>) => {
+    if (event.button !== 0) return
+    event.stopPropagation()
+    event.preventDefault()
+    const handle = event.currentTarget
+    const originY = event.clientY
+    handle.setPointerCapture(event.pointerId)
+    let dragging = false
+    const onMove = (ev: PointerEvent) => {
+      const point = pointFromEvent(ev)
+      const layout = sectionMoveLayout(strokesRef.current, sectionsRef.current, id, sheetPx())
+      if (!point || !layout) return
+      if (!dragging && Math.abs(ev.clientY - originY) < 4) return
+      dragging = true
+      const toIndex = sectionDropIndex(layout.spans, layout.fromIndex, point.y)
+      setSectionDropY(sectionReorderMark(layout.spans, layout.fromIndex, toIndex))
+    }
+    const onUp = (ev: PointerEvent) => {
+      handle.removeEventListener('pointermove', onMove)
+      handle.removeEventListener('pointerup', onUp)
+      handle.removeEventListener('pointercancel', onUp)
+      setSectionDropY(null)
+      if (!dragging) return
+      const point = pointFromEvent(ev)
+      const layout = sectionMoveLayout(strokesRef.current, sectionsRef.current, id, sheetPx())
+      if (!point || !layout) return
+      const toIndex = sectionDropIndex(layout.spans, layout.fromIndex, point.y)
+      if (toIndex !== layout.fromIndex) moveSectionTo(id, toIndex)
+    }
+    handle.addEventListener('pointermove', onMove)
+    handle.addEventListener('pointerup', onUp)
+    handle.addEventListener('pointercancel', onUp)
+  }, [moveSectionTo, pointFromEvent, sheetPx])
+
   /** Band width only. Ink, the page and the note text stay where they are. */
   const setSubsectionWidth = useCallback((id: string, width: number) => {
     const section = sectionsRef.current.find((entry) => entry.id === id)
@@ -7462,6 +7516,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                   ? section.hidden.strokes.length + section.hidden.sections.reduce((sum, child) => sum + (child.hidden?.strokes.length ?? 0), 0)
                   : 0
                 const noun = isSub ? 'Unterabschnitt' : 'Abschnitt'
+                const canMove = sections.some((other) => other !== section && other.parentId === section.parentId)
                 return (
                   <Fragment key={section.id}>
                     <div
@@ -7482,6 +7537,24 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                       >
                         {section.collapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
                       </button>
+                      {canMove && <button
+                        type="button"
+                        className="lw-ink-section-control lw-ink-section-move"
+                        aria-label={isSub ? 'Unterabschnitt verschieben' : 'Abschnitt verschieben'}
+                        title="Ziehen, um die Reihenfolge zu ändern"
+                        onPointerDown={(event) => beginSectionReorderDrag(section.id, event)}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+                          event.preventDefault()
+                          event.stopPropagation()
+                          const layout = sectionMoveLayout(strokesRef.current, sectionsRef.current, section.id, sheetPx())
+                          if (!layout) return
+                          const toIndex = layout.fromIndex + (event.key === 'ArrowUp' ? -1 : 1)
+                          if (toIndex >= 0 && toIndex < layout.spans.length) moveSectionTo(section.id, toIndex)
+                        }}
+                      >
+                        <GripVertical size={14} />
+                      </button>}
                       {!titled && <span className="lw-ink-section-placeholder" aria-hidden="true">Titel</span>}
                       {section.collapsed && <span className="lw-ink-section-badge" title={`${hiddenCount} Striche`}>Eingeklappt</span>}
                       <button
@@ -7530,6 +7603,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                 )
               })}
               {sectionPlacing && <div ref={sectionGuideRef} className="lw-ink-section-guide" style={{ top: '-9999px', opacity: 0 }}><span>{sectionPlacing === 'subsection' ? 'Neuer Unterabschnitt' : 'Neuer Abschnitt'}</span></div>}
+              {sectionDropY !== null && <div className="lw-ink-section-guide is-drop" style={{ top: `${sectionDropY * 100}%`, opacity: 1 }}><span>Neue Position</span></div>}
             </div>}
             <div className="lw-page-overlay">
             {selectionRect && <div
@@ -8108,6 +8182,9 @@ const drawingBoardStyles = `
 .lw-ink-section-edge{position:absolute;width:2px;margin-left:-1px;background:rgba(var(--accent-rgb),.28);pointer-events:none}
 .lw-ink-section-rail.is-subsection{left:40px}
 .lw-ink-section-toggle{position:absolute;left:14px;top:50%;width:30px;height:30px;display:grid;place-items:center;transform:translateY(-50%);border:1px solid rgba(var(--accent-rgb),.36);border-radius:8px;color:var(--accent,#2a6f97);background:rgba(255,255,255,.96);box-shadow:0 2px 8px rgba(0,0,0,.14);cursor:pointer;pointer-events:auto;transition:background .12s ease,transform .12s ease}
+.lw-ink-section-move{position:absolute;left:48px;top:50%;width:22px;height:22px;display:grid;place-items:center;transform:translateY(-50%);padding:0;border:0;border-radius:6px;color:rgba(74,63,176,.72);background:rgba(255,255,255,.92);cursor:grab;pointer-events:auto;touch-action:none}
+.lw-ink-section-move:active{cursor:grabbing}
+.lw-ink-section-guide.is-drop{z-index:4}
 .lw-ink-section-toggle:hover{background:#efeafd}
 .lw-ink-section-toggle:active{transform:translateY(-50%) scale(.94)}
 .lw-ink-section-placeholder{position:absolute;left:12%;top:50%;transform:translateY(-50%);color:rgba(74,63,176,.34);font:600 22px/1 var(--ui-font,system-ui);letter-spacing:.02em;pointer-events:none;user-select:none}
@@ -8118,7 +8195,7 @@ const drawingBoardStyles = `
 .lw-ink-section-guide{position:absolute;left:0;right:0;height:0;border-top:2px dashed var(--accent,#2a6f97);pointer-events:none;transition:opacity .12s ease}
 .lw-ink-section-guide span{position:absolute;left:14px;top:4px;padding:2px 7px;border-radius:6px;color:#fff;background:var(--accent,#2a6f97);font:700 12px/1.3 var(--ui-font,system-ui);white-space:nowrap}
 .lw-ink-sections .lw-selection-hint{top:18px}
-.lw-drawing-board.is-inline:not(.is-input-active) .lw-ink-section-toggle,.lw-drawing-board.is-inline:not(.is-input-active) .lw-ink-section-remove,.lw-drawing-board.is-inline:not(.is-input-active) .lw-ink-section-width{opacity:.5;box-shadow:none}
+.lw-drawing-board.is-inline:not(.is-input-active) .lw-ink-section-toggle,.lw-drawing-board.is-inline:not(.is-input-active) .lw-ink-section-remove,.lw-drawing-board.is-inline:not(.is-input-active) .lw-ink-section-width,.lw-drawing-board.is-inline:not(.is-input-active) .lw-ink-section-move{opacity:.5;box-shadow:none}
 .lw-drawing-board{--draw-accent:var(--accent,#2a6f97);--draw-border:var(--border-strong,color-mix(in srgb,var(--text,#e9e9ef) 20%,transparent));display:flex;flex-direction:column;min-width:0;height:100%;overflow:hidden;color:var(--text,#e9e9ef);background:linear-gradient(145deg,color-mix(in srgb,var(--background-secondary,#17171d) 96%,var(--draw-accent) 4%),var(--background,#191919));font:500 13px/1.4 var(--ui-font,Inter,system-ui,sans-serif)}
 .lw-drawing-board *{box-sizing:border-box}.lw-drawing-board button,.lw-drawing-board select,.lw-drawing-board textarea,.lw-drawing-board input{font:inherit}.lw-drawing-board button{color:inherit}.lw-draw-header{height:58px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid var(--draw-border);background:color-mix(in srgb,var(--background-secondary,#17171d) 88%,transparent)}
 .lw-draw-title,.lw-draw-header-actions,.lw-draw-toolgroup,.lw-draw-footer,.lw-footer-actions,.lw-conversion-head,.lw-confidence-row,.lw-model-card{display:flex;align-items:center}.lw-draw-title{gap:10px;min-width:0}.lw-draw-title-icon,.lw-spark{display:grid;place-items:center;color:var(--on-accent,#11131a);background:var(--draw-accent);box-shadow:0 6px 20px color-mix(in srgb,var(--draw-accent) 28%,transparent)}.lw-draw-title-icon{width:32px;height:32px;border-radius:10px}.lw-draw-title>span:last-child{display:flex;min-width:0;flex-direction:column}.lw-draw-title strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.lw-draw-title small,.lw-conversion-head small,.lw-model-card small{font-size: 12px;color:var(--text-muted,#9292a0)}.lw-draw-header-actions{gap:7px}

@@ -445,6 +445,141 @@ export const growBodyRoom = <S extends SectionStroke>(
   shiftFrom(plan.next.top.y, plan.growPx / sheet.height, sections, forEachTrackedStroke)
 }
 
+export type SectionSpan = { start: number; end: number }
+
+const siblingBands = <S extends SectionStroke>(sections: readonly InkSection<S>[], parentId: string | null) => (
+  sortSections(sections).filter((section) => section.parentId === parentId)
+)
+
+/**
+ * The band this section occupies among its siblings. A section that has
+ * another below it runs up to that header. The last one runs through its ink
+ * and the write margin, not through the empty page under it.
+ */
+export const sectionBlockSpan = <S extends SectionStroke>(
+  strokes: readonly S[],
+  sections: readonly InkSection<S>[],
+  section: InkSection<S>,
+  sheet: SheetPx,
+  nextTop: number | null,
+): SectionSpan => {
+  const start = section.top.y
+  const end = nextTop === null
+    ? Math.max(section.bodyTop.y, collapsibleBodyEnd(strokes, sections, section, sheet))
+    : nextTop
+  return { start, end: Math.max(end, section.bodyTop.y) }
+}
+
+/** Where `sectionId` sits among its siblings, and the span of each sibling. */
+export const sectionMoveLayout = <S extends SectionStroke>(
+  strokes: readonly S[],
+  sections: readonly InkSection<S>[],
+  sectionId: string,
+  sheet: SheetPx,
+) => {
+  const section = sections.find((entry) => entry.id === sectionId)
+  if (!section) return null
+  const siblings = siblingBands(sections, section.parentId)
+  const fromIndex = siblings.findIndex((entry) => entry.id === sectionId)
+  if (fromIndex < 0) return null
+  const spans = siblings.map((entry, index) => sectionBlockSpan(
+    strokes,
+    sections,
+    entry,
+    sheet,
+    index + 1 < siblings.length ? siblings[index + 1]!.top.y : null,
+  ))
+  return { fromIndex, spans }
+}
+
+/**
+ * Final sibling index while dragging. `y` is 0–1 of the sheet. Siblings whose
+ * middle is above the pointer count as already passed.
+ */
+export const sectionDropIndex = (spans: readonly SectionSpan[], fromIndex: number, y: number) => {
+  let index = 0
+  for (let cursor = 0; cursor < spans.length; cursor += 1) {
+    if (cursor === fromIndex) continue
+    const span = spans[cursor]!
+    if (y > (span.start + span.end) / 2) index += 1
+  }
+  return index
+}
+
+/** Sheet fraction where the moved band will start, or `null` when the order would not change. */
+export const sectionReorderMark = (spans: readonly SectionSpan[], fromIndex: number, toIndex: number) => {
+  if (toIndex === fromIndex || toIndex < 0 || toIndex >= spans.length) return null
+  return toIndex < fromIndex ? spans[toIndex]!.start : spans[toIndex]!.end
+}
+
+const shiftOwnedPoints = (points: readonly StrokePoint[], delta: number, seen: Set<StrokePoint>) => {
+  if (delta === 0) return
+  for (const point of points) {
+    if (seen.has(point)) continue
+    seen.add(point)
+    point.y += delta
+  }
+}
+
+/**
+ * Moves a section to `toIndex` among its siblings (0 is the top). The header,
+ * the body ink, and any subsections move together. Ink above the group, and
+ * the empty page below the last band, stay put. The sheet size does not change.
+ * Returns false when the section is missing, alone, or already there.
+ */
+export const reorderSection = <S extends SectionStroke>(
+  strokes: readonly S[],
+  sections: readonly InkSection<S>[],
+  sectionId: string,
+  toIndex: number,
+  sheet: SheetPx,
+  forEachTrackedStroke: TrackedStrokeVisitor<S>,
+) => {
+  const layout = sectionMoveLayout(strokes, sections, sectionId, sheet)
+  if (!layout || layout.spans.length < 2) return false
+  const target = Math.max(0, Math.min(layout.spans.length - 1, Math.round(toIndex)))
+  if (target === layout.fromIndex) return false
+  const { spans, fromIndex } = layout
+  for (let index = 0; index < spans.length; index += 1) {
+    const span = spans[index]!
+    if (!(span.end > span.start)) return false
+    if (index > 0 && span.start < spans[index - 1]!.end - 1e-6) return false
+  }
+  const section = sections.find((entry) => entry.id === sectionId)!
+  const siblings = siblingBands(sections, section.parentId)
+  const order = siblings.map((_, index) => index)
+  const [moved] = order.splice(fromIndex, 1)
+  order.splice(target, 0, moved!)
+  let cursor = spans[0]!.start
+  const deltas = spans.map(() => 0)
+  for (const index of order) {
+    deltas[index] = cursor - spans[index]!.start
+    cursor += spans[index]!.end - spans[index]!.start
+  }
+  const seen = new Set<StrokePoint>()
+  const deltaAt = (y: number) => {
+    for (let index = 0; index < spans.length; index += 1) {
+      const span = spans[index]!
+      if (y >= span.start && y < span.end) return deltas[index]!
+    }
+    return 0
+  }
+  forEachTrackedStroke((stroke) => {
+    shiftOwnedPoints(stroke.points, deltaAt(strokeTop(stroke)), seen)
+  })
+  for (let index = 0; index < siblings.length; index += 1) {
+    const delta = deltas[index]!
+    if (delta === 0) continue
+    const span = spans[index]!
+    const root = siblings[index]!
+    for (const entry of sections) {
+      if (entry !== root && (entry.top.y < span.start || entry.top.y >= span.end)) continue
+      shiftOwnedPoints([entry.top, entry.bodyTop], delta, seen)
+    }
+  }
+  return true
+}
+
 export type SerializedSection = {
   id: string
   top: number
