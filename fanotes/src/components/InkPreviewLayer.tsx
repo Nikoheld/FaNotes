@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { drawInkStroke, type InkPaintStroke } from '../lib/inkStrokePaint'
+import { createMarkerCoverage, drawInkStroke, type InkPaintStroke } from '../lib/inkStrokePaint'
 import { textOriginCssPx } from '../lib/noteCanvas'
 import { usePaperViewController } from './PaperView'
 
@@ -68,6 +68,7 @@ export const parseInkPreviewPage = (drawingJson: string): ParsedInkPage | null =
       opacity: isFiniteNumber(stroke.opacity) ? stroke.opacity : undefined,
       textureSeed: isFiniteNumber(stroke.textureSeed) ? stroke.textureSeed : undefined,
       symbolRotation: isFiniteNumber(stroke.symbolRotation) ? stroke.symbolRotation : undefined,
+      keepColor: stroke.keepColor === true ? true : undefined,
     })
   }
   return { strokes, width, height, originX, originY }
@@ -146,7 +147,10 @@ export function InkPreviewLayer({ load, smoothing, reloadKey }: {
       if (!context) return
       context.setTransform(1, 0, 0, 1, 0, 0)
       context.clearRect(0, 0, width, height)
-      for (const stroke of page.strokes) drawInkStroke(context, stroke, width, height, smoothing, 1, page.width)
+      const coverage = createMarkerCoverage(width, height)
+      for (const stroke of page.strokes) {
+        drawInkStroke(context, stroke, width, height, smoothing, 1, page.width, 0, stroke.points.length, { coverage, stamp: true })
+      }
     }
     const repaint = () => {
       paintedScale = 0

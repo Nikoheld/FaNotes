@@ -34,7 +34,7 @@ try {
   const markerEnd = board.indexOf(") : tool === 'pen' ?", markerAt)
   assert.ok(markerAt > 0 && markerEnd > markerAt)
   const marker = board.slice(markerAt, markerEnd)
-  for (const token of ['lw-pen-strip', 'Pinsel', 'Zeichenfarbe', 'Breite', 'Größe', 'Deckkraft', 'Piktogramme']) {
+  for (const token of ['lw-pen-strip', 'Pinsel', 'Zeichenfarbe', 'Breite', 'Größe', 'Deckkraft', 'Piktogramme', 'Farben nicht mischen']) {
     assert.ok(marker.includes(token), token)
   }
   assert.equal(marker.includes('lw-art-studio'), false)

@@ -1,4 +1,5 @@
 import {
+  Blend,
   Calculator,
   Compass,
   Copy,
@@ -120,7 +121,7 @@ import {
   mapClientToPaperPoint,
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
-import { drawInkStroke as paintInkStroke, inkStrokeIsTranslucent, inkStrokePaintMargin } from '../lib/inkStrokePaint'
+import { createMarkerCoverage, drawInkStroke as paintInkStroke, inkStrokeIsTranslucent, inkStrokePaintMargin, shiftMarkerCoverage, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
 import {
   INLINE_INK_ACTIVE_CLASS,
   INK_TOOLBAR_SLOT_ID,
@@ -566,6 +567,7 @@ type InkStroke = Stroke & {
   colorEffect?: InkEffect
   opacity?: number
   textureSeed?: number
+  keepColor?: boolean
   symbolId?: ArtSymbolId
   symbolRotation?: number
 }
@@ -910,7 +912,7 @@ const isHandwritingStroke = (stroke: InkStroke) => stroke.purpose !== 'art'
 const handwritingStrokes = (strokes: InkStroke[]) => strokes.filter(isHandwritingStroke)
 
 const loadArtPreferences = () => {
-  const fallback = { brush: 'fineliner' as ArtBrush, color: '#3478df', effect: 'solid' as InkEffect, width: 3, opacity: 1, symbolSize: 72, symbolRotation: 0 }
+  const fallback = { brush: 'fineliner' as ArtBrush, color: '#3478df', effect: 'solid' as InkEffect, width: 3, opacity: 1, symbolSize: 72, symbolRotation: 0, keepColor: false }
   try {
     const raw = JSON.parse(globalThis.localStorage?.getItem(ART_PREFERENCES_KEY) ?? '{}') as Partial<typeof fallback>
     return {
@@ -921,6 +923,7 @@ const loadArtPreferences = () => {
       opacity: clamp(Number(raw.opacity) || fallback.opacity, .12, 1),
       symbolSize: clamp(Number(raw.symbolSize) || fallback.symbolSize, 20, 180),
       symbolRotation: clamp(Number(raw.symbolRotation) || fallback.symbolRotation, -180, 180),
+      keepColor: raw.keepColor === true,
     }
   } catch {
     return fallback
@@ -947,6 +950,7 @@ const drawInkStroke = (
   sourceWidth = SOURCE_WIDTH,
   layoutWidth = 0,
   endSegment = stroke.points.length,
+  options?: InkPaintOptions,
 ) => paintInkStroke(
   context,
   {
@@ -960,6 +964,7 @@ const drawInkStroke = (
   sourceWidth,
   layoutWidth,
   endSegment,
+  options,
 )
 
 /** Bitmap-space box (paint coordinates, inclusive edges). */
@@ -1025,7 +1030,8 @@ const renderDocument = (
   layoutWidth = 0,
   band: { y: number; height: number } | null = null,
   squareMm = 0,
-) => {
+  coverage: MarkerCoverage | null = null,
+): MarkerCoverage | null => {
   const context = canvas.getContext('2d')
   if (!context) return
   const span = inkWindowSpan(inkWindow)
@@ -1044,8 +1050,15 @@ const renderDocument = (
   context.setTransform(1, 0, 0, 1, 0, -topPx)
   const filter = band ? inkBandWindow(Math.round(topPx), band, virtualHeight) : inkWindow
   const visible = !band && isFullInkWindow(inkWindow) ? strokes : strokes.filter((stroke) => strokeIntersectsWindow(stroke, filter))
-  visible.forEach((stroke) => drawInkStroke(context, stroke, width, virtualHeight, smoothing, 1, sourceWidth, layoutWidth))
+  let active = coverage
+  if (!band) {
+    if (!active || active.width !== canvas.width || active.height !== canvas.height) active = createMarkerCoverage(canvas.width, canvas.height)
+    else active.mask.fill(0)
+  }
+  const paintOptions = active ? { coverage: active, stamp: true } : undefined
+  visible.forEach((stroke) => drawInkStroke(context, stroke, width, virtualHeight, smoothing, 1, sourceWidth, layoutWidth, stroke.points.length, paintOptions))
   context.restore()
+  return active
 }
 
 /**
@@ -1116,6 +1129,7 @@ const safeInkStrokes = (value: unknown, fallbackColor: string, options: { clampT
       colorEffect: raw.colorEffect && inkEffectIds.has(raw.colorEffect) ? raw.colorEffect : 'solid',
       opacity: clamp(Number(raw.opacity) || 1, .08, 1),
       textureSeed: Math.round(clamp(Math.abs(Number(raw.textureSeed) || 1), 1, 2_147_483_647)),
+      keepColor: raw.keepColor === true ? true : undefined,
       symbolId,
       symbolRotation: symbolId ? clamp(Number(raw.symbolRotation) || 0, -180, 180) : undefined,
     }]
@@ -1268,6 +1282,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
   const committedCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const markerCoverageRef = useRef<MarkerCoverage | null>(null)
   const committedCanvasDirtyRef = useRef(true)
   const canvasPixelSizeRef = useRef({ width: 0, height: 0, virtualHeight: 0, layoutWidth: 0, layoutHeight: 0, topPx: 0 })
   /** Paint-time slice as paper fractions; derived from inkWindowLayoutRef in redraw. */
@@ -1396,6 +1411,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [artEffect, setArtEffect] = useState<InkEffect>(initialArtPreferences.effect)
   const [artWidth, setArtWidth] = useState(initialArtPreferences.width)
   const [artOpacity, setArtOpacity] = useState(initialArtPreferences.opacity)
+  const [markerKeepColor, setMarkerKeepColor] = useState(initialArtPreferences.keepColor)
   const [artSymbolCategory, setArtSymbolCategory] = useState<ArtSymbolCategory>('all')
   const [artSymbolId, setArtSymbolId] = useState<ArtSymbolId | null>(null)
   const [artSymbolSize, setArtSymbolSize] = useState(initialArtPreferences.symbolSize)
@@ -1651,11 +1667,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         opacity: artOpacity,
         symbolSize: artSymbolSize,
         symbolRotation: artSymbolRotation,
+        keepColor: markerKeepColor,
       }))
     } catch {
       // Die Zeichenwerkzeuge bleiben auch ohne verfügbaren Web-Speicher nutzbar.
     }
-  }, [artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth])
+  }, [artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, markerKeepColor])
 
   useEffect(() => {
     if (drawingId) drawingIdRef.current = drawingId
@@ -1752,6 +1769,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     ) return true
     liveTailRef.current = { count: stroke.points.length, predicted: previewPoints.length > 0 }
     context.imageSmoothingEnabled = false
+    const coverage = markerCoverageRef.current
+    const liveInkOptions = coverage ? {
+      coverage,
+      stamp: false,
+      coverageOrigin: { x: paintLeft, y: paintTop - topPx },
+    } : undefined
     if (!stroke.symbolId && inkStrokeIsTranslucent(stroke)) {
       // A see-through brush is composited once per paint (inkStrokePaint), so
       // the live layer repaints the whole stroke each frame. Appending a tail
@@ -1768,7 +1791,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         ? { ...stroke, points: [...stroke.points, ...previewPoints as StrokePoint[]] }
         : stroke
       context.setTransform(1, 0, 0, 1, -paintLeft, -paintTop)
-      drawInkStroke(context, whole, pixelWidth, virtualHeight, smoothing, 1, sourceWidthNow, layoutWidth)
+      drawInkStroke(context, whole, pixelWidth, virtualHeight, smoothing, 1, sourceWidthNow, layoutWidth, whole.points.length, liveInkOptions)
       remember(liveInkSegmentBox(whole.points, 0, whole.points.length - 1, pixelWidth, virtualHeight, margin))
       activeRenderedPointCountRef.current = Math.max(1, stroke.points.length)
       liveCanvasHasInkRef.current = true
@@ -1801,7 +1824,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           && liveInkRectsTouch(volatile, liveInkSegmentBox(stroke.points, segment - 1, segment, pixelWidth, virtualHeight, margin)!)
         if (touches && runStart < 0) runStart = segment
         if (!touches && runStart >= 0) {
-          drawInkStroke(context, stroke, pixelWidth, virtualHeight, smoothing, runStart, sourceWidthNow, layoutWidth, segment)
+          drawInkStroke(context, stroke, pixelWidth, virtualHeight, smoothing, runStart, sourceWidthNow, layoutWidth, segment, liveInkOptions)
           runStart = -1
         }
       }
@@ -1813,7 +1836,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const permanentEnd = Math.max(1, count - 1)
     const startSegment = Math.max(1, activeRenderedPointCountRef.current)
     if (permanentEnd > startSegment) {
-      drawInkStroke(context, stroke, pixelWidth, virtualHeight, smoothing, startSegment, sourceWidthNow, layoutWidth, permanentEnd)
+      drawInkStroke(context, stroke, pixelWidth, virtualHeight, smoothing, startSegment, sourceWidthNow, layoutWidth, permanentEnd, liveInkOptions)
       remember(liveInkSegmentBox(stroke.points, startSegment - 1, permanentEnd - 1, pixelWidth, virtualHeight, margin))
     }
     activeRenderedPointCountRef.current = permanentEnd
@@ -1822,16 +1845,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // bend ink that already happened off in another direction.
     const tailStart = Math.max(1, count - 1)
     if (count === 1) {
-      drawInkStroke(context, stroke, pixelWidth, virtualHeight, smoothing, 1, sourceWidthNow, layoutWidth)
+      drawInkStroke(context, stroke, pixelWidth, virtualHeight, smoothing, 1, sourceWidthNow, layoutWidth, stroke.points.length, liveInkOptions)
       liveVolatileRectRef.current = liveInkSegmentBox(stroke.points, 0, 0, pixelWidth, virtualHeight, margin)
     } else {
-      drawInkStroke(context, stroke, pixelWidth, virtualHeight, smoothing, tailStart, sourceWidthNow, layoutWidth)
+      drawInkStroke(context, stroke, pixelWidth, virtualHeight, smoothing, tailStart, sourceWidthNow, layoutWidth, stroke.points.length, liveInkOptions)
       liveVolatileRectRef.current = liveInkSegmentBox(stroke.points, tailStart - 1, count - 1, pixelWidth, virtualHeight, margin)
     }
     if (previewPoints.length) {
       const extensionPoints = [stroke.points[count - 1], ...previewPoints]
       const extension: InkStroke = { ...stroke, points: extensionPoints as StrokePoint[] }
-      drawInkStroke(context, extension, pixelWidth, virtualHeight, smoothing, 1, sourceWidthNow, layoutWidth)
+      drawInkStroke(context, extension, pixelWidth, virtualHeight, smoothing, 1, sourceWidthNow, layoutWidth, extension.points.length, liveInkOptions)
       liveVolatileRectRef.current = unionLiveInkRect(
         liveVolatileRectRef.current,
         liveInkSegmentBox(extensionPoints, 0, extensionPoints.length - 1, pixelWidth, virtualHeight, margin),
@@ -2135,7 +2158,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (shift) {
       if (shift.dy !== 0) {
         shiftInkWindowBitmap(committedCanvas, shift.dy)
-        renderDocument(
+        const coverage = markerCoverageRef.current
+        if (coverage && coverage.width === committedCanvas.width && coverage.height === committedCanvas.height) {
+          shiftMarkerCoverage(coverage, shift.dy)
+        } else {
+          markerCoverageRef.current = null
+        }
+        markerCoverageRef.current = renderDocument(
           committedCanvas,
           strokesRef.current,
           paperStyle,
@@ -2147,11 +2176,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           inkWindow,
           paintLayoutWidth || layoutWidth,
           shift.band,
+          settings.paperSquareMm,
+          markerCoverageRef.current,
         )
         committedBitmapRef.current = { key: contentKey, topPx }
       }
     } else {
-      renderDocument(
+      markerCoverageRef.current = renderDocument(
         committedCanvas,
         strokesRef.current,
         paperStyle,
@@ -2164,6 +2195,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         paintLayoutWidth || layoutWidth,
         null,
         settings.paperSquareMm,
+        markerCoverageRef.current,
       )
       committedBitmapRef.current = { key: contentKey, topPx }
       committedCanvasDirtyRef.current = false
@@ -2244,7 +2276,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     context.rect(0, 0, width, height)
     context.clip()
     context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
-    drawInkStroke(context, stroke, width, virtualHeight, settings.smoothing, 1, sourceWidth, layoutWidth)
+    const coverage = markerCoverageRef.current
+    drawInkStroke(
+      context,
+      stroke,
+      width,
+      virtualHeight,
+      settings.smoothing,
+      1,
+      sourceWidth,
+      layoutWidth,
+      stroke.points.length,
+      coverage && coverage.width === canvas.width && coverage.height === canvas.height ? { coverage, stamp: true } : undefined,
+    )
     context.restore()
   }, [noteStrokeDrawn, paintViewportCommitted, settings.smoothing, sourceWidth, syncViewportScene])
 
@@ -4250,6 +4294,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           brush: artBrush,
           colorEffect: artEffect,
           opacity: artOpacity,
+          keepColor: (artBrush === 'marker' || artBrush === 'highlighter') && markerKeepColor ? true : undefined,
           textureSeed: Math.max(1, Math.round((performance.now() * 1_000 + event.pointerId * 7_919) % 2_147_483_647)),
         } : {
           points: [],
@@ -4269,7 +4314,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   // inputActive is a dependency: a board mounted inert (keyboard mode showing
   // saved ink) kept a handler that still saw inputActive=false after the pen
   // turned on, and every pen-down was refused until an unrelated grow rebuilt it.
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, inputActive, insertSectionAt, insertSubsectionAt, markPenContact, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, inputActive, insertSectionAt, insertSubsectionAt, markPenContact, markerKeepColor, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (dragSheetWithPointer(event.pointerId, event.clientX, event.clientY)) {
@@ -4583,6 +4628,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             brush: artBrush,
             colorEffect: artEffect,
             opacity: artOpacity,
+            keepColor: (artBrush === 'marker' || artBrush === 'highlighter') && markerKeepColor ? true : undefined,
             textureSeed: Math.max(1, Math.round((performance.now() * 1_000) % 2_147_483_647)),
           }
         : {
@@ -4721,7 +4767,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       [makeStroke(points), ...centreMarkStrokes(pose, g)],
       `Kreis mit r ${formatLength(pose.radiusMm, unit)} gezeichnet.`,
     )
-  }, [artBrush, artColor, artEffect, artOpacity, artWidth, bumpInkRevision, commitStrokeToCanvas, ensureWriteRoom, fitPageToInk, inkMode, paintActiveStrokeNow, penColor, penWidth, readDraftingDisplay, scheduleRedraw, setDirty, updateHistoryState, wipeLiveInk])
+  }, [artBrush, artColor, artEffect, artOpacity, artWidth, bumpInkRevision, commitStrokeToCanvas, ensureWriteRoom, fitPageToInk, inkMode, markerKeepColor, paintActiveStrokeNow, penColor, penWidth, readDraftingDisplay, scheduleRedraw, setDirty, updateHistoryState, wipeLiveInk])
 
   /** Centre of the sheet the user can currently see, in normalised sheet coordinates. */
   const visibleSheetCentre = useCallback((): { x: number; y: number } => {
@@ -6913,6 +6959,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               <input aria-label="Deckkraft" type="range" min="12" max="100" step="1" value={Math.round(artOpacity * 100)} onChange={(event) => setArtOpacity(Number(event.target.value) / 100)} />
               <output>{Math.round(artOpacity * 100)}%</output>
             </label>
+            <button
+              type="button"
+              className={`lw-draw-icon${markerKeepColor ? ' is-active' : ''}`}
+              aria-pressed={markerKeepColor}
+              aria-label="Farben nicht mischen"
+              title="Ein Marker über einem anderen Marker lässt die vorhandene Farbe stehen"
+              onClick={() => setMarkerKeepColor((on) => !on)}
+            >
+              <Blend size={16} />
+            </button>
             <div className="lw-pen-strip-symbols" role="group" aria-label="Piktogramme">
               {ART_SYMBOLS.map((symbol) => (
                 <button
@@ -7861,7 +7917,7 @@ const drawingBoardStyles = `
 .lw-pen-strip{display:flex;align-items:center;gap:6px;min-width:0;height:28px;max-height:28px}.lw-pen-strip-brushes,.lw-pen-strip-symbols,.lw-pen-strip-inks{display:flex;align-items:center;gap:2px;min-width:0;overflow:auto hidden;scrollbar-width:none}.lw-pen-strip-symbols{max-width:168px}.lw-pen-strip-brushes button,.lw-pen-strip-symbols button,.lw-pen-strip-inks button{width:22px;height:22px;flex:none;display:grid;place-items:center;padding:0;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--text-muted,#999);cursor:pointer}.lw-pen-strip-brushes button.is-active,.lw-pen-strip-symbols button.is-active,.lw-pen-strip-inks button.is-active{border-color:color-mix(in srgb,var(--draw-accent) 48%,var(--draw-border));color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 14%,transparent)}.lw-pen-strip-inks button{border-radius:50%;background:var(--art-ink)}.lw-pen-strip-brushes .lw-art-brush-preview{width:14px;height:8px}.lw-pen-strip-brushes .lw-art-brush-preview i{width:12px}.lw-art-studio-trigger{height:28px;display:grid;grid-template-columns:16px minmax(52px,auto) 16px;align-items:center;gap:6px;padding:0 7px;border:1px solid color-mix(in srgb,var(--draw-accent) 32%,var(--draw-border));border-radius:8px;color:var(--text,#fff);background:linear-gradient(130deg,color-mix(in srgb,var(--draw-accent) 12%,var(--background-secondary,#18181f)),var(--background-secondary,#18181f));cursor:pointer}.lw-art-studio-trigger>svg{color:var(--accent-readable,var(--draw-accent))}.lw-art-studio-trigger>span{display:flex;min-width:0;flex-direction:column;text-align:left}.lw-art-studio-trigger strong{font-size: 12px}.lw-art-studio-trigger small{max-width:92px;overflow:hidden;color:var(--text-muted,#999);font-size: 12px;text-overflow:ellipsis;white-space:nowrap}.lw-art-studio-trigger>i{width:16px;height:16px;border:2px solid color-mix(in srgb,var(--text,#fff) 25%,transparent);border-radius:5px;background:var(--art-ink);box-shadow:inset 0 1px rgba(255,255,255,.25)}
 .lw-art-studio{position:relative;z-index:13;flex:0 0 auto;margin:10px 14px 0;padding:11px;border:1px solid color-mix(in srgb,var(--draw-accent) 36%,var(--draw-border));border-radius:12px;background:linear-gradient(145deg,color-mix(in srgb,var(--background-secondary,#19191f) 96%,var(--draw-accent) 4%),color-mix(in srgb,var(--background,#191919) 94%,transparent));box-shadow:0 22px 65px rgba(0,0,0,.24),inset 0 1px rgba(255,255,255,.035);animation:lw-art-studio-in .24s cubic-bezier(.2,.8,.2,1)}.lw-art-studio>header{display:flex;align-items:center;gap:8px;margin-bottom:9px}.lw-art-studio>header>span{width:29px;height:29px;display:grid;place-items:center;border-radius:9px;color:var(--on-accent,#111);background:var(--draw-accent)}.lw-art-studio>header>div{display:flex;min-width:0;flex:1;flex-direction:column}.lw-art-studio>header strong{font-size: 12px}.lw-art-studio>header small{color:var(--text-muted,#999);font-size: 12px}.lw-art-studio-body{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(160px,.64fr);gap:10px}.lw-art-studio-body>section{min-width:0;padding:9px;border:1px solid var(--draw-border);border-radius:12px;background:color-mix(in srgb,var(--background,#191919) 43%,transparent)}.lw-art-section-head{height:23px;display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.lw-art-section-head strong{font-size: 12px}.lw-art-section-head span{overflow:hidden;color:var(--text-muted,#999);font-size: 12px;text-overflow:ellipsis;white-space:nowrap}.lw-art-brushes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}.lw-art-brushes>button{min-width:0;height:49px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:3px;padding:3px;border:1px solid transparent;border-radius:8px;color:var(--text-muted,#999);background:transparent;cursor:pointer}.lw-art-brushes>button:hover{background:color-mix(in srgb,var(--text,#fff) 6%,transparent)}.lw-art-brushes>button.is-active{border-color:color-mix(in srgb,var(--draw-accent) 48%,var(--draw-border));color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 12%,transparent)}.lw-art-brushes small{max-width:100%;overflow:hidden;font-size: 12px;text-overflow:ellipsis;white-space:nowrap}.lw-art-brush-preview{position:relative;width:42px;height:16px;display:grid;place-items:center;overflow:hidden}.lw-art-brush-preview i{display:block;width:37px;height:3px;border-radius:99px;background:currentColor;transform:rotate(-5deg)}.lw-art-brush-preview.is-fineliner i{height:2px}.lw-art-brush-preview.is-pencil i{height:2px;opacity:.65;background:repeating-linear-gradient(90deg,currentColor 0 3px,transparent 3px 4px)}.lw-art-brush-preview.is-marker i{height:6px;border-radius:2px;opacity:.88}.lw-art-brush-preview.is-paintbrush i{height:7px;border-radius:90% 15% 80% 20%;transform:rotate(-5deg) scaleX(1.02)}.lw-art-brush-preview.is-calligraphy i{height:7px;border-radius:1px;transform:rotate(-5deg) skewX(-28deg)}.lw-art-brush-preview.is-highlighter i{height:9px;border-radius:2px;opacity:.35}.lw-art-brush-preview.is-watercolor i{height:10px;opacity:.28;filter:blur(.45px);box-shadow:0 -2px currentColor,0 2px currentColor}.lw-art-brush-preview.is-spray i{height:13px;opacity:.75;background:radial-gradient(circle,currentColor 0 1px,transparent 1.3px) 0 0/5px 5px;transform:rotate(-5deg)}
 .lw-art-solid-colors{display:flex;flex-wrap:wrap;gap:5px}.lw-art-solid-colors>button,.lw-art-custom-color{position:relative;width:20px;height:20px;flex:0 0 auto;border:2px solid color-mix(in srgb,var(--text,#fff) 8%,transparent);border-radius:7px;background:var(--art-ink);cursor:pointer}.lw-art-solid-colors>button.is-active{border-color:var(--text,#fff);box-shadow:0 0 0 2px color-mix(in srgb,var(--art-ink) 40%,transparent)}.lw-art-custom-color{display:block;overflow:hidden;background:conic-gradient(#e45,#fb3,#5d7,#4ce,#65f,#d5e,#e45)}.lw-art-custom-color input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}.lw-art-custom-color span{position:absolute;inset:5px;border-radius:3px}.lw-art-special-inks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin-top:7px}.lw-art-special-inks>button{height:34px;display:flex;min-width:0;align-items:stretch;justify-content:center;flex-direction:column;gap:2px;padding:3px 4px;border:1px solid var(--draw-border);border-radius:7px;color:var(--text-muted,#999);background:transparent;cursor:pointer}.lw-art-special-inks>button:hover{background:color-mix(in srgb,var(--text,#fff) 5%,transparent)}.lw-art-special-inks>button.is-active{border-color:color-mix(in srgb,var(--draw-accent) 60%,var(--draw-border));color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 9%,transparent)}.lw-art-special-inks i{width:100%;height:12px;flex:0 0 auto;border-radius:4px;background:var(--art-ink);box-shadow:inset 0 1px rgba(255,255,255,.25)}.lw-art-special-inks span{overflow:hidden;font-size: 12px;line-height:1;text-align:center;text-overflow:ellipsis;white-space:nowrap}.lw-art-control-section{display:flex;flex-direction:column;gap:7px}.lw-art-control-section>label{display:grid;grid-template-columns:minmax(65px,1fr) minmax(60px,1fr) 30px;align-items:center;gap:5px}.lw-art-control-section label>span{display:flex;min-width:0;flex-direction:column}.lw-art-control-section label strong{font-size: 12px}.lw-art-control-section label small{overflow:hidden;color:var(--text-muted,#999);font-size: 12px;text-overflow:ellipsis;white-space:nowrap}.lw-art-control-section input{width:100%;accent-color:var(--draw-accent)}.lw-art-control-section output{color:var(--text-muted,#999);font-size: 12px;text-align:right;font-variant-numeric:tabular-nums}.lw-art-current-stroke{min-height:35px;display:flex;align-items:center;gap:7px;margin-top:auto;padding:4px 6px;border-radius:8px;background:color-mix(in srgb,var(--text,#fff) 4%,transparent)}.lw-art-current-stroke>span{height:var(--art-width);max-height:20px;min-height:2px;flex:1;border-radius:99px;background:var(--art-ink);opacity:var(--art-opacity)}.lw-art-current-stroke small{color:var(--text-muted,#999);font-size: 12px;white-space:nowrap}.lw-art-footer-note{display:inline-flex;align-items:center;gap:6px;padding:0 7px;color:var(--text-muted,#999);font-size: 12px}.lw-tablet-canvas.tool-art{cursor:crosshair}@keyframes lw-art-studio-in{from{opacity:0;transform:translateY(-7px) scale(.99)}}
-.lw-draw-icon,.lw-draw-subtle,.lw-primary-action,.lw-convert-action,.lw-model-card button{border:0;cursor:pointer;transition:transform .16s ease,background .16s ease,opacity .16s ease}.lw-draw-icon{display:grid;place-items:center;width:32px;height:32px;border-radius:8px;background:transparent}.lw-draw-icon:hover:not(:disabled){background:color-mix(in srgb,var(--text,#fff) 8%,transparent)}.lw-draw-icon.lw-danger:hover:not(:disabled){color:var(--danger,#d94b63);background:color-mix(in srgb,var(--danger,#d94b63) 10%,transparent)}.lw-drawing-board button:disabled{opacity:.5;cursor:not-allowed}.lw-draw-subtle{display:flex;align-items:center;justify-content:center;gap:7px;height:32px;padding:0 10px;border-radius:8px;background:color-mix(in srgb,var(--text,#fff) 6%,transparent)}.lw-draw-subtle:hover:not(:disabled){background:color-mix(in srgb,var(--text,#fff) 10%,transparent)}.lw-draw-subtle.is-active{color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 22%,var(--background-secondary,#17171d));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--draw-accent) 38%,transparent)}
+.lw-draw-icon,.lw-draw-subtle,.lw-primary-action,.lw-convert-action,.lw-model-card button{border:0;cursor:pointer;transition:transform .16s ease,background .16s ease,opacity .16s ease}.lw-draw-icon{display:grid;place-items:center;width:32px;height:32px;border-radius:8px;background:transparent}.lw-draw-icon.is-active{color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 22%,transparent)}.lw-draw-icon:hover:not(:disabled){background:color-mix(in srgb,var(--text,#fff) 8%,transparent)}.lw-draw-icon.lw-danger:hover:not(:disabled){color:var(--danger,#d94b63);background:color-mix(in srgb,var(--danger,#d94b63) 10%,transparent)}.lw-drawing-board button:disabled{opacity:.5;cursor:not-allowed}.lw-draw-subtle{display:flex;align-items:center;justify-content:center;gap:7px;height:32px;padding:0 10px;border-radius:8px;background:color-mix(in srgb,var(--text,#fff) 6%,transparent)}.lw-draw-subtle:hover:not(:disabled){background:color-mix(in srgb,var(--text,#fff) 10%,transparent)}.lw-draw-subtle.is-active{color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 22%,var(--background-secondary,#17171d));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--draw-accent) 38%,transparent)}
 .lw-draw-workspace{position:relative;display:grid;grid-template-columns:minmax(0,1fr);flex:1;min-height:0;padding:18px;gap:14px}.lw-draw-workspace.has-conversion{grid-template-columns:minmax(0,1fr) minmax(300px,370px)}.lw-canvas-shell{position:relative;display:flex;min-width:0;min-height:0;flex-direction:column;padding:10px 10px 7px;border:1px solid var(--draw-border);border-radius:12px;background:color-mix(in srgb,var(--background-secondary,#17171d) 84%,transparent);box-shadow:0 20px 55px rgba(0,0,0,.16)}.lw-canvas-glow{position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;background:radial-gradient(circle at 15% 0,color-mix(in srgb,var(--draw-accent) 10%,transparent),transparent 36%)}.lw-canvas-surface{position:relative;z-index:1;flex:0 0 auto;min-width:220px;min-height:300px;aspect-ratio:210/297;margin:auto;overflow:hidden;border-radius:8px;background:#fbfcff;box-shadow:0 8px 32px rgba(0,0,0,.2),inset 0 0 0 1px rgba(30,42,65,.08);will-change:transform;touch-action:none}.lw-tablet-canvas{position:absolute;inset:0;display:block;width:100%;height:100%;outline:none;touch-action:none;user-select:none;-webkit-user-select:none;image-rendering:auto}
 .lw-drafting-layer{position:absolute;inset:0;z-index:6;width:100%;height:100%;overflow:visible;pointer-events:none;touch-action:none}
 .lw-drafting-body{fill:#e8edf4;stroke:#2a3348;stroke-width:1.2;cursor:grab;pointer-events:auto}

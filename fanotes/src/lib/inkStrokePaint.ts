@@ -23,7 +23,121 @@ export type InkPaintStroke = {
   textureSeed?: number
   symbolRotation?: number
   symbolPaths?: readonly string[]
+  /**
+   * Marker and Textmarker only. When set, this stroke does not recolor pixels
+   * already covered by an earlier marker or Textmarker.
+   */
+  keepColor?: boolean
 }
+
+/** Device-pixel coverage of marker and Textmarker ink. 0 empty, 1 claimed. */
+export type MarkerCoverage = {
+  width: number
+  height: number
+  mask: Uint8Array
+}
+
+export type InkPaintOptions = {
+  coverage?: MarkerCoverage | null
+  /** Write this stroke into the coverage mask. Live paint leaves this off. */
+  stamp?: boolean
+  /** Device pixels from this canvas's origin to the coverage bitmap's origin. */
+  coverageOrigin?: { x: number; y: number }
+}
+
+export const createMarkerCoverage = (width: number, height: number): MarkerCoverage => {
+  const w = Math.max(1, Math.ceil(width))
+  const h = Math.max(1, Math.ceil(height))
+  return { width: w, height: h, mask: new Uint8Array(w * h) }
+}
+
+/** Same row move as `shiftInkWindowBitmap`: positive `dy` shifts content down. */
+export const shiftMarkerCoverage = (coverage: MarkerCoverage, dy: number) => {
+  const shift = Math.trunc(dy)
+  if (!shift) return
+  const { width, height, mask } = coverage
+  const next = new Uint8Array(mask.length)
+  if (shift > 0) {
+    const rows = height - shift
+    if (rows > 0) next.set(mask.subarray(0, rows * width), shift * width)
+  } else {
+    const up = -shift
+    const rows = height - up
+    if (rows > 0) next.set(mask.subarray(up * width), 0)
+  }
+  mask.set(next)
+}
+
+type MarkerGuard = {
+  mask: Uint8Array
+  width: number
+  height: number
+  originX: number
+  originY: number
+  keep: boolean
+  stamp: boolean
+  touched: boolean
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+}
+
+const beginMarkerGuard = (
+  coverage: MarkerCoverage,
+  origin: { x: number; y: number } | undefined,
+  keep: boolean,
+  stamp: boolean,
+): MarkerGuard => ({
+  mask: coverage.mask,
+  width: coverage.width,
+  height: coverage.height,
+  originX: Math.round(origin?.x ?? 0),
+  originY: Math.round(origin?.y ?? 0),
+  keep,
+  stamp,
+  touched: false,
+  x0: coverage.width,
+  y0: coverage.height,
+  x1: -1,
+  y1: -1,
+})
+
+const markerPixelBlocked = (guard: MarkerGuard, x: number, y: number) => {
+  if (!guard.keep) return false
+  const mx = Math.round(x) + guard.originX
+  const my = Math.round(y) + guard.originY
+  if (mx < 0 || my < 0 || mx >= guard.width || my >= guard.height) return false
+  return guard.mask[my * guard.width + mx] === 1
+}
+
+const claimMarkerPixel = (guard: MarkerGuard, x: number, y: number) => {
+  if (!guard.stamp) return
+  const mx = Math.round(x) + guard.originX
+  const my = Math.round(y) + guard.originY
+  if (mx < 0 || my < 0 || mx >= guard.width || my >= guard.height) return
+  const index = my * guard.width + mx
+  if (guard.mask[index] !== 0) return
+  guard.mask[index] = 2
+  guard.touched = true
+  if (mx < guard.x0) guard.x0 = mx
+  if (my < guard.y0) guard.y0 = my
+  if (mx > guard.x1) guard.x1 = mx
+  if (my > guard.y1) guard.y1 = my
+}
+
+const commitMarkerGuard = (guard: MarkerGuard) => {
+  if (!guard.stamp || !guard.touched) return
+  const { mask, width, x0, y0, x1, y1 } = guard
+  for (let y = y0; y <= y1; y += 1) {
+    let index = y * width + x0
+    for (let x = x0; x <= x1; x += 1, index += 1) {
+      if (mask[index] === 2) mask[index] = 1
+    }
+  }
+}
+
+const markerBrush = (brush: string) => brush === 'marker' || brush === 'highlighter'
 
 type InkPaintContext = CanvasRenderingContext2D
 
@@ -205,6 +319,73 @@ const canComposite = (context: InkPaintContext) => (
   && Boolean((context as { canvas?: unknown }).canvas)
 )
 
+const knockOutCoveredMarker = (
+  scratch: InkPaintContext,
+  box: { x: number; y: number; w: number; h: number },
+  guard: MarkerGuard,
+) => {
+  const scratchCtx = scratch as CanvasRenderingContext2D
+  if (typeof scratchCtx.getImageData !== 'function' || typeof scratchCtx.drawImage !== 'function') return
+  const host = globalThis as typeof globalThis & {
+    OffscreenCanvas?: new (width: number, height: number) => OffscreenCanvas
+    document?: Document
+  }
+  const w = Math.max(1, Math.ceil(box.w))
+  const h = Math.max(1, Math.ceil(box.h))
+  let canvas: HTMLCanvasElement | OffscreenCanvas | null = null
+  if (host.OffscreenCanvas) canvas = new host.OffscreenCanvas(w, h)
+  else if (host.document?.createElement) {
+    const element = host.document.createElement('canvas')
+    element.width = w
+    element.height = h
+    canvas = element
+  }
+  if (!canvas) return
+  const punch = canvas.getContext('2d')
+  if (!punch) return
+  const image = punch.createImageData(w, h)
+  const { mask, width, height, originX, originY } = guard
+  let covered = 0
+  for (let y = 0; y < h; y += 1) {
+    const my = box.y + y + originY
+    if (my < 0 || my >= height) continue
+    for (let x = 0; x < w; x += 1) {
+      const mx = box.x + x + originX
+      if (mx < 0 || mx >= width) continue
+      if (mask[my * width + mx] !== 1) continue
+      image.data[(y * w + x) * 4 + 3] = 255
+      covered += 1
+    }
+  }
+  if (!covered) return
+  punch.putImageData(image, 0, 0)
+  scratchCtx.save()
+  scratchCtx.setTransform(1, 0, 0, 1, 0, 0)
+  scratchCtx.globalCompositeOperation = 'destination-out'
+  scratchCtx.globalAlpha = 1
+  scratchCtx.drawImage(canvas, 0, 0)
+  scratchCtx.restore()
+}
+
+const stampScratchCoverage = (
+  scratch: InkPaintContext,
+  box: { x: number; y: number; w: number; h: number },
+  guard: MarkerGuard,
+) => {
+  if (!guard.stamp) return
+  const scratchCtx = scratch as CanvasRenderingContext2D
+  if (typeof scratchCtx.getImageData !== 'function') return
+  const w = Math.max(1, Math.ceil(box.w))
+  const h = Math.max(1, Math.ceil(box.h))
+  const image = scratchCtx.getImageData(0, 0, w, h)
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      if (image.data[(y * w + x) * 4 + 3] < 8) continue
+      claimMarkerPixel(guard, box.x + x, box.y + y)
+    }
+  }
+}
+
 /**
  * One paint path for live/committed ink. Tests call this — a missing line is a
  * failed pixel assertion, not a CSS-scale guess. Segments `startSegment` up to
@@ -222,6 +403,7 @@ export const drawInkStroke = (
   sourceWidth = 900,
   layoutWidth = 0,
   endSegment = stroke.points.length,
+  options?: InkPaintOptions,
 ) => {
   if (stroke.points.length === 0) return
   if (!(width > 0) || !(height > 0)) return
@@ -233,6 +415,13 @@ export const drawInkStroke = (
   const brush = inkBrushOf(stroke)
   const opacity = inkOpacityOf(stroke)
   const paint = strokePaint(context, stroke, width, height)
+  const markerLike = markerBrush(brush)
+  const guard = options?.coverage && markerLike
+    ? beginMarkerGuard(options.coverage, options.coverageOrigin, stroke.keepColor === true, options.stamp === true)
+    : null
+  const guardHost = context as InkPaintContext & { setMarkerGuard?: (value: MarkerGuard | null) => void }
+  if (guard) guardHost.setMarkerGuard?.(guard)
+  try {
   context.save()
   context.strokeStyle = paint
   context.fillStyle = paint
@@ -580,11 +769,13 @@ export const drawInkStroke = (
         paintPassSegments(scratch, pass, passIndex, 1)
       }
       scratch.restore()
+      if (guard?.keep) knockOutCoveredMarker(scratch, box, guard)
       const restoreTransform = context.getTransform()
       context.setTransform(1, 0, 0, 1, 0, 0)
       context.globalAlpha = alpha
       context.drawImage(source, 0, 0, box.w, box.h, box.x, box.y, box.w, box.h)
       context.setTransform(restoreTransform)
+      if (guard && !guardHost.setMarkerGuard) stampScratchCoverage(scratch, box, guard)
       return
     }
     if (brush === 'calligraphy') {
@@ -601,6 +792,12 @@ export const drawInkStroke = (
     paintPassSegments(context, pass, passIndex, alpha)
   })
   context.restore()
+  } finally {
+    if (guard) {
+      commitMarkerGuard(guard)
+      guardHost.setMarkerGuard?.(null)
+    }
+  }
 }
 
 const parseCssColor = (value: string | CanvasGradient): [number, number, number, number] => {
@@ -701,6 +898,7 @@ export const createInkReadbackContext = (width: number, height: number): InkRead
   })
   const stack: Style[] = []
   let style = baseStyle()
+  let guard: MarkerGuard | null = null
   let path: ReadbackPathCmd[] = []
   let pathStart: { x: number; y: number } | null = null
   let pathAt: { x: number; y: number } | null = null
@@ -714,6 +912,7 @@ export const createInkReadbackContext = (width: number, height: number): InkRead
     if (px < 0 || py < 0 || px >= w || py >= h) return
     const sa = Math.max(0, Math.min(1, rgba[3] * alpha * style.globalAlpha))
     if (sa <= 0) return
+    if (guard && markerPixelBlocked(guard, px, py)) return
     const i = (py * w + px) * 4
     const da = data[i + 3] / 255
     const outA = sa + da * (1 - sa)
@@ -722,6 +921,7 @@ export const createInkReadbackContext = (width: number, height: number): InkRead
     data[i + 1] = Math.round((rgba[1] * sa + data[i + 1] * da * (1 - sa)) / outA)
     data[i + 2] = Math.round((rgba[2] * sa + data[i + 2] * da * (1 - sa)) / outA)
     data[i + 3] = Math.round(outA * 255)
+    if (guard) claimMarkerPixel(guard, px, py)
   }
 
   const stampDisk = (cx: number, cy: number, radius: number, rgba: [number, number, number, number], alpha: number) => {
@@ -885,6 +1085,7 @@ export const createInkReadbackContext = (width: number, height: number): InkRead
     },
     setTransform: (a: number, b: number, c: number, d: number, e: number, f: number) => { style.transform = [a, b, c, d, e, f] },
     createLinearGradient: () => ({ addColorStop: () => {} }),
+    setMarkerGuard: (value: MarkerGuard | null) => { guard = value },
   }
 
   void pathAt

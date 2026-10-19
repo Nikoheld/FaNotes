@@ -3835,5 +3835,7 @@
   "Nur ein Grok, das du selbst freigibst": "Only a Grok that you approve yourself",
   "Seitenlänge der Quadrate auf Häuschen- und Kariertpapier. Automatisch behält Häuschen bei 5 mm und Kariert bei 7,5 mm.": "Side length of the squares on square and grid paper. Automatic keeps squares at 5 mm and grid at 7.5 mm.",
   "So heißt der Connector in Grok.": "This is the connector's name in Grok.",
-  "Unterabschnitt in den Abschnitt einfügen · die Breite am rechten Rand ziehen, der Text bleibt stehen": "Insert a subsection into the section · drag the width at the right edge, the text stays put"
+  "Unterabschnitt in den Abschnitt einfügen · die Breite am rechten Rand ziehen, der Text bleibt stehen": "Insert a subsection into the section · drag the width at the right edge, the text stays put",
+  "Farben nicht mischen": "Do not mix colors",
+  "Ein Marker über einem anderen Marker lässt die vorhandene Farbe stehen": "A marker drawn over another marker leaves the existing color unchanged"
 }

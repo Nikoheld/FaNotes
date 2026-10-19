@@ -1006,6 +1006,7 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
   color: var(--text-muted);
 }
 .lw-draw-toolbar.is-docked-chrome .lw-draw-icon:hover:not(:disabled) { color: var(--text); background: var(--panel-hover); }
+.lw-draw-toolbar.is-docked-chrome .lw-draw-icon.is-active { color: var(--text); background: color-mix(in srgb, var(--accent) 16%, var(--panel)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent); }
 .lw-draw-toolbar.is-docked-chrome .lw-view-reset {
   min-width: 46px;
   height: 26px;
