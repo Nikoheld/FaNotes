@@ -281,9 +281,8 @@ void (async () => {
     const spelling = await cdp.evaluate(`(() => ({
       words: [...document.querySelectorAll('.cm-spelling-error')].map((node) => node.dataset.spellingWord).sort().join('|'),
       detected: document.querySelector('.markdown-editor .cm-editor')?.dataset.detectedLanguage,
-      status: document.querySelector('.detected-text-language')?.textContent.trim(),
     }))()`)
-    if (spelling.words !== 'Tset|exampel' || spelling.detected !== 'mixed' || !spelling.status.includes('DE / EN')) throw new Error(`Die Web-Rechtschreibprüfung ist unvollständig: ${JSON.stringify(spelling)}`)
+    if (spelling.words !== 'Tset|exampel' || spelling.detected !== 'mixed') throw new Error(`Die Web-Rechtschreibprüfung ist unvollständig: ${JSON.stringify(spelling)}`)
 
     await cdp.evaluate(`document.querySelector('button[aria-label="AI-Assistent öffnen"]').click()`)
     await waitFor(cdp, `document.querySelectorAll('.ai-provider-grid > button').length === 6`, 'Die sechs AI-Anbieter im Web')

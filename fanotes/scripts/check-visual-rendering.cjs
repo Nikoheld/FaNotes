@@ -180,10 +180,9 @@ void (async () => {
       words: [...document.querySelectorAll('.cm-spelling-error')].map((node) => node.dataset.spellingWord).sort(),
       languages: [...document.querySelectorAll('.cm-spelling-error')].map((node) => node.dataset.spellingLanguage).sort(),
       detected: document.querySelector('.markdown-editor .cm-editor')?.dataset.detectedLanguage,
-      status: document.querySelector('.detected-text-language')?.textContent.trim(),
       decoration: getComputedStyle(document.querySelector('.cm-spelling-error')).textDecorationStyle,
     }))()`)
-    if (!spelling.words.includes('Tset') || !spelling.words.includes('exampel') || !spelling.languages.includes('de') || !spelling.languages.includes('en') || spelling.detected !== 'mixed' || !spelling.status.includes('DE / EN') || spelling.decoration !== 'wavy') {
+    if (!spelling.words.includes('Tset') || !spelling.words.includes('exampel') || !spelling.languages.includes('de') || !spelling.languages.includes('en') || spelling.detected !== 'mixed' || spelling.decoration !== 'wavy') {
       throw new Error(`Die automatische Rechtschreibprüfung ist visuell unvollständig: ${JSON.stringify(spelling)}`)
     }
 

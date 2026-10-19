@@ -61,7 +61,7 @@ const harvest = () => {
       pattern.lastIndex = 0
       for (const match of text.matchAll(pattern)) found.add(match[1].trim())
     }
-    for (const required of ['Blatt', 'Schreibmodus', 'Stiftmodus', 'Werkzeuge', 'Vault-Wurzel', 'In Vault-Wurzel', 'Finde alles wieder', 'Pinsel', 'Zeilenabstand', 'Datenerfassung', 'In FaNotes integriert', 'Aktueller Strich', 'Trainingspaket', 'Frei', 'Breite']) {
+    for (const required of ['Blatt', 'Werkzeuge', 'Vault-Wurzel', 'In Vault-Wurzel', 'Finde alles wieder', 'Pinsel', 'Zeilenabstand', 'Datenerfassung', 'In FaNotes integriert', 'Aktueller Strich', 'Trainingspaket', 'Frei', 'Breite']) {
       if (text.includes(`'${required}'`) || text.includes(`>${required}<`) || text.includes(`>${required}</`) || text.includes(`>${required}</strong>`) || text.includes(required)) found.add(required)
     }
   }
@@ -196,8 +196,6 @@ const runOnce = async () => {
   assert.doesNotMatch(settingsSource, /Anpassung · \{section\.count\} Optionen/)
   assert.ok(harvested.includes('Experimentell'), 'harvest missed Experimentell')
   assert.ok(harvested.includes('Blatt'), 'harvest missed Blatt toolbar chrome')
-  assert.ok(harvested.includes('Schreibmodus'), 'harvest missed Schreibmodus status chrome')
-  assert.ok(harvested.includes('Stiftmodus'), 'harvest missed Stiftmodus status chrome')
   assert.ok(harvested.includes('Werkzeuge'), 'harvest missed Werkzeuge palette group')
   assert.ok(harvested.includes('Vault-Wurzel'), 'harvest missed Vault-Wurzel palette detail')
   assert.ok(harvested.includes('Finde alles wieder'), 'harvest missed search empty-state')

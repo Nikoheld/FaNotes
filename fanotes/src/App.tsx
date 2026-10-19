@@ -5213,7 +5213,7 @@ export default function App({ startupBootstrap }: AppProps) {
               )}
               {activeTab && (
                 <div className="note-tags-menu" ref={tagMenuRef}>
-                  <button type="button" className={`toolbar-button ${tagMenuOpen ? 'active' : ''}`} aria-label="Schlagwörter" aria-expanded={tagMenuOpen} title="Tags dieser Notiz" onClick={() => setTagMenuOpen((open) => !open)}><Tag size={14} />{activeTags.length > 0 && <span>{activeTags.length}</span>}</button>
+                  <button type="button" className={`toolbar-button ${tagMenuOpen ? 'active' : ''}`} aria-label="Schlagwörter" aria-expanded={tagMenuOpen} title="Schlagwörter" onClick={() => setTagMenuOpen((open) => !open)}><Tag size={14} />{activeTags.length > 0 && <span>{activeTags.length}</span>}</button>
                   {tagMenuOpen && (
                     <div className="note-tags-popover" role="dialog" aria-label="Schlagwörter">
                       <div className="note-tags">
