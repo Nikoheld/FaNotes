@@ -2380,7 +2380,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
   }, [initialDrawingJson])
 
-  const pointFromEvent = useCallback((event: PointerEvent): StrokePoint | null => {
+  const pointFromEvent = useCallback((event: PointerEvent, preview = false): StrokePoint | null => {
     const canvas = canvasRef.current
     const originEl = (inline
       ? ((canvas?.closest('.unified-paper') as HTMLElement | null)
@@ -2388,7 +2388,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         ?? (canvas?.closest('.lw-canvas-surface') as HTMLElement | null))
       : null) ?? canvas
     if (!originEl) return null
-    commitPendingGrowRemapRef.current(originEl.offsetWidth, originEl.offsetHeight)
+    // A predicted sample must not rescale the page or move the last real
+    // point. That mutation is what flashed a spike and then put the ink back.
+    if (!preview) commitPendingGrowRemapRef.current(originEl.offsetWidth, originEl.offsetHeight)
     const originRect = originEl.getBoundingClientRect()
     const surface = {
       left: originRect.left,
@@ -2400,7 +2402,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     const leftover = pendingGrowRemapRef.current
     const lastLive = activeStrokeRef.current?.points.at(-1)
-    let mapped = leftover && lastLive
+    let mapped = !preview && leftover && lastLive
       ? (() => {
         const continued = growLiveInkAndMapNext(
           lastLive,
@@ -2427,6 +2429,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         ? mapClientToSheet(event, surface, viewRotationRef.current)
         : mapClientToPaperPoint(event, surface, viewRotationRef.current))
     if (!mapped) {
+      // The page mapper rejects a ghost coordinate. The unclamped fallback
+      // would still aim a one-frame preview at that ghost.
+      if (preview) return null
       const fallback = inline ? mapClientToPage(event.clientX, event.clientY, surface) : null
       if (!fallback) return null
       mapped = {
@@ -2468,7 +2473,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (rulerPoseRef.current) guides.push({ kind: 'ruler', pose: rulerPoseRef.current })
     if (setSquarePoseRef.current) guides.push({ kind: 'setSquare', pose: setSquarePoseRef.current })
     if (compassPoseRef.current) guides.push({ kind: 'compass', pose: compassPoseRef.current })
-    if (guides.length && !selectionStartRef.current && gestureToolRef.current !== 'eraser') {
+    if (!preview && guides.length && !selectionStartRef.current && gestureToolRef.current !== 'eraser') {
       const drafting = draftingSettingsRef.current
       const snapped = snapToDraftingTools(
         x,
@@ -3424,8 +3429,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // leave a ghost copy of the writing behind.
     // Predicted samples must not draw a tail past a figure that already snapped.
     const livePredicted = shapeSnapAllowsLiveSample(shapeSnappedRef.current) ? predicted : []
+    const { layoutWidth: previewLayoutW, layoutHeight: previewLayoutH } = canvasPixelSizeRef.current
+    // 14 CSS px on the long page edge. A page-fraction budget is a long line
+    // on a tall sheet, which is the spike that flashes and is not stored.
+    const previewBudget = 14 / Math.max(previewLayoutW || 0, previewLayoutH || 0, 1)
     const previewPoints = livePredicted.length
-      ? collectPreviewInkPoints(stroke.points, livePredicted.map(pointFromEvent)) as StrokePoint[]
+      ? collectPreviewInkPoints(
+        stroke.points,
+        livePredicted.map((sample) => pointFromEvent(sample, true)),
+        previewBudget,
+      ) as StrokePoint[]
       : []
     return paintLiveInk(context, stroke, previewPoints)
   }, [paintLiveInk, pointFromEvent, redraw])

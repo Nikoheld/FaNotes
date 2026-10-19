@@ -103,16 +103,21 @@ try {
   assert.equal(downGhost.openStroke, true)
 
   const preview = collectPreviewInkPoints(
-    [{ x: 0.33, y: 0.33 }],
+    [{ x: 0.33, y: 0.33 }, { x: 0.34, y: 0.33 }],
     [
       mapClientToPaperPoint(ghostZero, surface),
       mapClientToPaperPoint(leapTop, surface),
       mapClientToPaperPoint(nextReal, surface),
     ],
   )
+  assert.equal(preview.length, 0, 'a predicted leap ends the preview instead of skipping ahead')
   assert.equal(preview.some((point) => point.y < 0.05), false, 'predicted leap to y≈0 must not paint a line')
-  assert.ok(preview.length >= 1, 'in-band predicted samples may still preview')
-  assert.ok(preview.every((point) => point.y > 0.2))
+  const keptPreview = collectPreviewInkPoints(
+    [{ x: 0.33, y: 0.33 }, { x: 0.34, y: 0.33 }],
+    [mapClientToPaperPoint(clientAt(0.37, 0.331), surface)],
+  )
+  assert.ok(keptPreview.length >= 1, 'in-band predicted samples may still preview')
+  assert.ok(keptPreview.every((point) => point.y > 0.2))
 
   assert.equal(isInkCorridorLeap({ x: 0.51, y: 0.12 }, { x: 0.51, y: 0.02 }), true, 'y≈0.12 → top band is a leap')
   assert.equal(isInkCorridorLeap({ x: 0.51, y: 0.02 }, { x: 0.53, y: 0.03 }), false, 'writing along the top edge may continue')

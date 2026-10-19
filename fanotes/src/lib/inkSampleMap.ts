@@ -254,42 +254,51 @@ const PREVIEW_MAX_PAGE = 0.02
 const PREVIEW_MIN_COS = 0.766
 
 /**
- * Predicted extras use the same leap rules as committed samples, then stay a
- * short continuation of the last real step. A long or sideways prediction is
- * what paints a line in the wrong direction for one frame.
+ * Predicted extras stay a short continuation of the last real step.
+ * Each hop used to be allowed its own budget and then became the new
+ * heading, so a bad pen prediction could walk across the page in small
+ * steps, paint a spike for one frame, and vanish on the next sample.
+ * The whole preview now shares one budget, keeps the real heading, and
+ * stops at the first leap or turn.
  */
 export const collectPreviewInkPoints = (
   committed: Array<{ x: number; y: number }>,
   predicted: Array<{ x: number; y: number } | null | undefined>,
+  maxPage = PREVIEW_MAX_PAGE,
 ) => {
   const extra: Array<{ x: number; y: number }> = []
   const last = committed.at(-1)
   if (!last) return extra
+  const budget = Math.min(
+    PREVIEW_MAX_PAGE,
+    Number.isFinite(maxPage) && maxPage > 0 ? maxPage : PREVIEW_MAX_PAGE,
+  )
   let previous: { x: number; y: number } = last
   const prior = committed.length >= 2 ? committed[committed.length - 2] : null
-  let heading = prior ? { x: previous.x - prior.x, y: previous.y - prior.y } : null
-  let recent = heading ? Math.hypot(heading.x, heading.y) : 0
+  // A one-sample dot has no direction. Predicting from it draws toward
+  // wherever the driver guessed, which is the random one-frame spike.
+  if (!prior) return extra
+  const heading = { x: last.x - prior.x, y: last.y - prior.y }
+  const headingLength = Math.hypot(heading.x, heading.y)
+  if (!(headingLength >= Math.min(0.004, budget * 0.2))) return extra
+  let spent = 0
   for (const candidate of predicted) {
     if (!candidate || !Number.isFinite(candidate.x) || !Number.isFinite(candidate.y)) continue
-    if (isInkCorridorLeap(previous, candidate)) continue
+    if (isInkCorridorLeap(previous, candidate)) break
     const dx = candidate.x - previous.x
     const dy = candidate.y - previous.y
     const dist = Math.hypot(dx, dy)
     if (!(dist > 1e-6)) continue
-    if (heading) {
-      const headingLength = Math.hypot(heading.x, heading.y)
-      if (headingLength > 1e-6 && (heading.x * dx + heading.y * dy) / (headingLength * dist) < PREVIEW_MIN_COS) {
-        continue
-      }
-    }
-    const limit = Math.min(PREVIEW_MAX_PAGE, Math.max(recent * 1.35, 0.004))
+    if ((heading.x * dx + heading.y * dy) / (headingLength * dist) < PREVIEW_MIN_COS) break
+    const room = budget - spent
+    if (!(room > 1e-6)) break
+    const limit = Math.min(room, Math.max(headingLength * 1.35, Math.min(0.004, room)))
     const scale = dist > limit ? limit / dist : 1
     const next: { x: number; y: number } = scale === 1
       ? { x: candidate.x, y: candidate.y }
       : { x: previous.x + dx * scale, y: previous.y + dy * scale }
     extra.push(next)
-    heading = { x: next.x - previous.x, y: next.y - previous.y }
-    recent = Math.hypot(heading.x, heading.y)
+    spent += Math.hypot(next.x - previous.x, next.y - previous.y)
     previous = next
   }
   return extra

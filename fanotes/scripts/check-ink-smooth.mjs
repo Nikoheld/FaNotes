@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'vite'
 
 const server = await createServer({
@@ -162,9 +162,44 @@ try {
   assert.equal(shortened.length, 1)
   assert.ok(shortened[0].x > 0.41 && shortened[0].x < 0.44, 'a long prediction is shortened onto the heading')
 
-  mkdirSync('/opt/cursor/artifacts', { recursive: true })
-  await writePng(turn, '/opt/cursor/artifacts/handwriting-turn.png')
-  await writePng(smooth, '/opt/cursor/artifacts/handwriting-wave.png')
+  const walked = collectPreviewInkPoints(
+    [{ x: 0.4, y: 0.4 }, { x: 0.42, y: 0.4 }],
+    Array.from({ length: 12 }, (_, index) => ({ x: 0.45 + index * 0.04, y: 0.4 })),
+  )
+  assert.ok(walked.length >= 1, 'the first step of a forward prediction may show')
+  const walkedReach = Math.hypot(walked.at(-1).x - 0.42, walked.at(-1).y - 0.4)
+  assert.ok(walkedReach <= 0.02 + 1e-6, `a prediction must not walk across the page (${walkedReach})`)
+
+  const turned = collectPreviewInkPoints(
+    [{ x: 0.4, y: 0.4 }, { x: 0.42, y: 0.4 }],
+    [{ x: 0.43, y: 0.4 }, { x: 0.43, y: 0.5 }, { x: 0.43, y: 0.7 }],
+  )
+  assert.ok(turned.every((point) => point.y < 0.42), 'a prediction must not turn off the stroke and keep going')
+  assert.equal(
+    collectPreviewInkPoints([{ x: 0.4, y: 0.4 }], [{ x: 0.9, y: 0.9 }]).length,
+    0,
+    'a single real sample has no heading, so a prediction must not draw',
+  )
+  const pixelCap = collectPreviewInkPoints(
+    [{ x: 0.4, y: 0.4 }, { x: 0.42, y: 0.4 }],
+    [{ x: 0.5, y: 0.4 }],
+    0.005,
+  )
+  assert.ok(pixelCap.length === 1 && pixelCap[0].x - 0.42 <= 0.005 + 1e-6, 'a caller pixel budget caps the flash')
+
+  const board = readFileSync(new URL('../src/components/DrawingBoard.tsx', import.meta.url), 'utf8')
+  assert.match(board, /pointFromEvent\(sample, true\)/)
+  assert.match(board, /14 \/ Math\.max\(previewLayoutW/)
+
+  let artifactDir = '/opt/cursor/artifacts'
+  try {
+    mkdirSync(artifactDir, { recursive: true })
+  } catch {
+    artifactDir = '/tmp/fanotes-ink-smooth'
+    mkdirSync(artifactDir, { recursive: true })
+  }
+  await writePng(turn, `${artifactDir}/handwriting-turn.png`)
+  await writePng(smooth, `${artifactDir}/handwriting-wave.png`)
   console.log(JSON.stringify({
     turnHook: alphaAt(turn, 216, 220),
     turnCorner: alphaAt(turn, 200, 200),
