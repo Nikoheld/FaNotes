@@ -766,6 +766,9 @@ export function PdfNoteView({
     if (expected !== null && Math.abs(cameraZoom - expected) <= 0.006) return
     expectedZoomRef.current = null
     const derived = pdfZoomModeForZoom(cameraZoom, fit)
+    // A remembered zoom that happens to match "Breite" or "Seite" must stay
+    // the user's camera. Reclassifying it re-applies the fit and recentres.
+    if (cameraRef.current?.recalled && cameraModeRef.current === 'custom') return
     if (derived !== cameraModeRef.current) setCameraMode(derived)
   }, [cameraHosted, cameraZoom, fit, setCameraMode])
 

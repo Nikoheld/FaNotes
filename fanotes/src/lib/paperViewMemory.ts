@@ -270,6 +270,74 @@ export const shouldKeepRestoringPaperView = (input: {
   !input.userInteracted && input.now - input.startedAt <= (input.settleMs ?? PAPER_VIEW_RESTORE_SETTLE_MS)
 )
 
+/**
+ * Upper bound for re-applying a camera while the note is still laying out
+ * (PDF pages, ink extent, editor line heights). The short settle window stays
+ * in `shouldKeepRestoringPaperView`; this only covers a camera that has not
+ * landed yet.
+ */
+export const PAPER_VIEW_RESTORE_MAX_MS = 12_000
+
+/** The scroller is actually at the offset the restore asked for. */
+export const paperCameraLanded = (
+  actual: { scrollLeft: number; scrollTop: number },
+  requested: { scrollLeft: number; scrollTop: number } | null,
+) => isProgrammaticScroll(actual, requested)
+
+/**
+ * The saved spot fits in the current scroll range. A wheel or pan before this
+ * is true is the page still loading, not a new camera — storing it would
+ * replace the spot the user left with the top of a short sheet.
+ */
+export const paperScrollerCanReach = (
+  scroller: { scrollWidth: number; scrollHeight: number; clientWidth: number; clientHeight: number },
+  requested: { scrollLeft: number; scrollTop: number } | null,
+  tolerance = PAPER_VIEW_PROGRAMMATIC_SCROLL_TOLERANCE,
+) => {
+  if (!requested) return true
+  const maxLeft = Math.max(0, scroller.scrollWidth - scroller.clientWidth)
+  const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+  return requested.scrollLeft <= maxLeft + tolerance && requested.scrollTop <= maxTop + tolerance
+}
+
+/**
+ * Keep restoring past the short settle window when the page was too short to
+ * reach the saved spot (content still loading). Stops once the spot is on
+ * screen, the user takes the camera, or the cap is reached.
+ */
+export const shouldExtendPaperViewRestore = (input: {
+  startedAt: number
+  now: number
+  userInteracted: boolean
+  landed: boolean
+  maxMs?: number
+}) => (
+  !input.userInteracted
+  && !input.landed
+  && input.now - input.startedAt <= (input.maxMs ?? PAPER_VIEW_RESTORE_MAX_MS)
+)
+
+type PaperViewMemoryFlush = () => void
+
+const paperViewMemoryFlushes = new Set<PaperViewMemoryFlush>()
+
+/** The open note registers this so a quit can save the camera before the page is torn down. */
+export const registerPaperViewMemoryFlush = (flush: PaperViewMemoryFlush) => {
+  paperViewMemoryFlushes.add(flush)
+  return () => { paperViewMemoryFlushes.delete(flush) }
+}
+
+/** Save every open note's camera. Safe to call when nothing is registered. */
+export const flushPaperViewMemory = () => {
+  paperViewMemoryFlushes.forEach((flush) => {
+    try {
+      flush()
+    } catch {
+      // A pane that is already gone must not block the others.
+    }
+  })
+}
+
 const MODIFIER_KEYS = new Set(['Alt', 'AltGraph', 'Control', 'Meta', 'Shift', 'CapsLock', 'NumLock', 'ScrollLock', 'Fn', 'Hyper', 'Super', 'OS'])
 
 /**

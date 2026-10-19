@@ -40,14 +40,18 @@ import {
   isPaperViewTakeoverKey,
   isProgrammaticScroll,
   loadPaperViewMemory,
+  paperCameraLanded,
   paperCentreFromCamera,
+  paperScrollerCanReach,
   paperViewFromMemory,
   paperViewMemoryKey,
   recallPaperView,
+  registerPaperViewMemoryFlush,
   rememberPaperView,
   savePaperViewMemory,
   scaledPaperCentre,
   scrollTopForAnchorClientY,
+  shouldExtendPaperViewRestore,
   shouldKeepRestoringPaperView,
   type PaperViewMemoryEntry,
 } from '../lib/paperViewMemory'
@@ -135,6 +139,9 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
   const lastZoomOriginRef = useRef<{ x: number; y: number } | null>(null)
   const onEdgeSwipeRef = useRef(onEdgeSwipe)
   onEdgeSwipeRef.current = onEdgeSwipe
+  // Set by a user zoom/rotate/reset immediately before the store write. PDF
+  // fit calls zoomTo and must not set this — that zoom is not the user's.
+  const userAdjustedRef = useRef(false)
   const [view, setViewState] = useState(store.read)
   const [recalled, setRecalled] = useState(false)
 
@@ -175,7 +182,40 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     let lastProgrammatic: { scrollLeft: number; scrollTop: number } | null = null
     let userInteracted = false
     let saveTimer = 0
-    let measureFrame = 0
+    let restoring = false
+    let alive = true
+    // Wheel, scrollbar, zoom and scroll keys. A click alone is not a pan.
+    let userOwned = false
+    let gaveUp = false
+    let pointerHeld = false
+    let scrollArm = false
+    // Set for one turn by a wheel, key, click, or scrollbar. A later layout
+    // scroll must not inherit it.
+    let gestureArm = 0
+    let gestureTimer = 0
+    userAdjustedRef.current = false
+    const ownCamera = () => {
+      userOwned = true
+      gaveUp = false
+    }
+    const claimUserCamera = () => {
+      ownCamera()
+      userInteracted = true
+    }
+    const armGesture = () => {
+      gestureArm = 1
+      if (gestureTimer) window.clearTimeout(gestureTimer)
+      gestureTimer = window.setTimeout(() => {
+        gestureTimer = 0
+        gestureArm = 0
+      }, 0)
+    }
+    const rememberedSpotReachable = () => (
+      !remembered
+      || !lastProgrammatic
+      || paperCameraLanded(scroller, lastProgrammatic)
+      || paperScrollerCanReach(scroller, lastProgrammatic)
+    )
     // Measured while this note's sheet is still in the DOM. The effect cleanup
     // runs after React swapped in the next note, so it must not measure then.
     let latestEntry: Omit<PaperViewMemoryEntry, 'at'> | null = null
@@ -217,28 +257,29 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
         window.clearTimeout(saveTimer)
         saveTimer = 0
       }
-      persist(measureEntry())
+      // A sheet that is still too short to reach the saved spot, or a layout
+      // scroll after open, would record the top of the page over the camera
+      // the user left. Quit also remeasures a scroller that has already
+      // collapsed — keep the entry captured while this sheet was on screen.
+      if (gaveUp && !userOwned) return
+      if (!userOwned && remembered && !paperCameraLanded(scroller, lastProgrammatic)) return
+      if (!userOwned) return
+      persist(latestEntry ?? measureEntry())
     }
     const scheduleSave = () => {
-      if (!memoryKey) return
+      if (!memoryKey || !alive) return
       if (saveTimer) window.clearTimeout(saveTimer)
       saveTimer = window.setTimeout(saveNow, 220)
     }
-    // Zoom listeners fire before the anchor scroll is restored; measure a frame later.
-    const scheduleMeasureAndSave = () => {
-      if (!memoryKey) return
-      if (!measureFrame) {
-        measureFrame = window.requestAnimationFrame(() => {
-          measureFrame = 0
-          measureEntry()
-          scheduleSave()
-        })
-      }
+    const cameraBody = (entry: Omit<PaperViewMemoryEntry, 'at'> & { at?: number }) => {
+      const rest = { ...entry }
+      delete rest.at
+      return rest
     }
     // Remembered camera: put the same paper point back under the viewport
     // centre. Layout is still settling (lazy editor, PDF page ratios), so the
-    // camera is re-applied on every plane resize until the user takes over.
-    let restoring = false
+    // camera is re-applied on every plane resize until the user takes over
+    // or the saved spot is actually on screen.
     let restoreFrame = 0
     const restoreRemembered = () => {
       if (!remembered) return false
@@ -290,6 +331,15 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
         ?? scroller.querySelector<HTMLElement>('.unified-paper')
       clampPaperScrollerToZoomedSheet(scroller, plane)
+      const fromGesture = userAdjustedRef.current || gestureArm > 0 || (pointerHeld && scrollArm)
+      if (userAdjustedRef.current) userAdjustedRef.current = false
+      if (gestureArm > 0) gestureArm = 0
+      // Scrollbar and touch pan: the button is still down on a later frame.
+      // The scroll on the pointerdown turn itself is focus or layout, unless
+      // it came from the scrollbar (armed in markInteraction).
+      // A short page cannot show the saved spot yet. A wheel there would
+      // record the top and erase the camera the user left.
+      if (fromGesture && rememberedSpotReachable()) claimUserCamera()
       if (restoring && !userInteracted) {
         // Layout is still settling: the camera is not the user's yet, so it
         // must not overwrite the remembered one. Another scroller (browser
@@ -303,6 +353,9 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
         }
         return
       }
+      // Layout and focus scrolls are not the user's camera — not even after
+      // a real pan, or the next open would restore the jump.
+      if (!fromGesture || !userOwned) return
       measureEntry()
       scheduleSave()
     }
@@ -310,13 +363,32 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     // The user takes the camera over with any input — also outside the
     // scroller: an outline jump or a search hit right after opening must not be
     // undone as a "foreign" scroll. The listeners attach after the pointerdown
-    // that switched the note, so the switch itself never counts.
-    const markInteraction = () => { userInteracted = true }
-    const markKeyInteraction = (event: KeyboardEvent) => {
-      if (isPaperViewTakeoverKey(event)) userInteracted = true
+    // that switched the note, so the switch itself never counts. A click before
+    // the saved spot is on screen is not a pan and must not be stored.
+    const markInteraction = (event: Event) => {
+      pointerHeld = true
+      scrollArm = false
+      window.requestAnimationFrame(() => { scrollArm = true })
+      // The scrollbar is the scroller itself. A track click scrolls once, on
+      // this turn, before the arming frame — and that spot is where the user left.
+      if (event.target === scroller) armGesture()
+      if (!restoring || paperCameraLanded(scroller, lastProgrammatic)) userInteracted = true
     }
-    scroller.addEventListener('wheel', markInteraction, { passive: true })
+    const releasePointer = () => { pointerHeld = false }
+    const markWheel = () => { armGesture() }
+    const markClick = () => { armGesture() }
+    const markKeyInteraction = (event: KeyboardEvent) => {
+      if (!isPaperViewTakeoverKey(event)) return
+      userInteracted = true
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === 'PageUp' || event.key === 'Home' || event.key === 'End' || event.key === ' ') {
+        armGesture()
+      }
+    }
+    scroller.addEventListener('wheel', markWheel, { passive: true })
+    window.addEventListener('click', markClick, true)
     window.addEventListener('pointerdown', markInteraction, { passive: true, capture: true })
+    window.addEventListener('pointerup', releasePointer, { passive: true, capture: true })
+    window.addEventListener('pointercancel', releasePointer, { passive: true, capture: true })
     window.addEventListener('touchstart', markInteraction, { passive: true, capture: true })
     window.addEventListener('keydown', markKeyInteraction, true)
     const applyOpenCamera = () => {
@@ -353,6 +425,23 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
         restoreTimer = 0
       }
     }
+    const stillRestoring = (now = performance.now()) => (
+      !userInteracted && (
+        shouldKeepRestoringPaperView({ startedAt: restoreStartedAt, now, userInteracted })
+        || shouldExtendPaperViewRestore({
+          startedAt: restoreStartedAt,
+          now,
+          userInteracted,
+          landed: paperCameraLanded(scroller, lastProgrammatic),
+        })
+      )
+    )
+    const finishRestore = () => {
+      const landed = paperCameraLanded(scroller, lastProgrammatic)
+      stopRestoring()
+      if (landed) measureEntry()
+      else if (!userOwned) gaveUp = true
+    }
     if (remembered) {
       restoring = true
       restoreRemembered()
@@ -371,18 +460,25 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
       if (plane && typeof ResizeObserver === 'function') {
         restoreObserver = new ResizeObserver(() => {
-          if (!shouldKeepRestoringPaperView({ startedAt: restoreStartedAt, now: performance.now(), userInteracted })) {
-            stopRestoring()
+          if (!stillRestoring()) {
+            finishRestore()
             return
           }
           restoreRemembered()
         })
         restoreObserver.observe(plane)
       }
-      restoreTimer = window.setTimeout(() => {
-        stopRestoring()
-        measureEntry()
-      }, PAPER_VIEW_RESTORE_SETTLE_MS)
+      const considerRestored = () => {
+        restoreTimer = 0
+        if (!restoring) return
+        if (stillRestoring() && !paperCameraLanded(scroller, lastProgrammatic)) {
+          restoreRemembered()
+          restoreTimer = window.setTimeout(considerRestored, 280)
+          return
+        }
+        finishRestore()
+      }
+      restoreTimer = window.setTimeout(considerRestored, PAPER_VIEW_RESTORE_SETTLE_MS)
     } else if (!applyOpenCamera()) {
       openCameraId = window.requestAnimationFrame(() => {
         openCameraId = 0
@@ -419,29 +515,62 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       columnObserver = new ResizeObserver(pinColumnStayPut)
       columnObserver.observe(scroller)
     }
-    const unsubscribeZoom = storeRef.current.subscribe(scheduleMeasureAndSave)
+    const unsubscribeZoom = storeRef.current.subscribe(() => {
+      if (!userAdjustedRef.current) return
+      userAdjustedRef.current = false
+      const view = viewRef.current
+      const base = latestEntry ?? remembered
+      // Zoom before the saved spot fits: keep that spot and only store the
+      // new zoom. Stopping the restore here would leave the short page on screen.
+      if (base && !rememberedSpotReachable()) {
+        latestEntry = { ...cameraBody(base), zoom: view.zoom, rotation: view.rotation }
+        ownCamera()
+        scheduleSave()
+        return
+      }
+      latestEntry = base
+        ? { ...cameraBody(base), zoom: view.zoom, rotation: view.rotation }
+        : { zoom: view.zoom, rotation: view.rotation, centreX: 0, centreY: 0 }
+      claimUserCamera()
+      // The write happens before stay-put restores the anchor. Measure after
+      // this stack so the centre is the one the user is actually looking at.
+      queueMicrotask(() => {
+        if (!alive) return
+        measureEntry()
+        scheduleSave()
+      })
+    })
+    const unregisterFlush = registerPaperViewMemoryFlush(saveNow)
     window.addEventListener('pagehide', saveNow)
     return () => {
+      alive = false
+      unregisterFlush()
       unsubscribeZoom()
       window.removeEventListener('pagehide', saveNow)
       scroller.removeEventListener('scroll', clampScroll)
-      scroller.removeEventListener('wheel', markInteraction)
+      scroller.removeEventListener('wheel', markWheel)
+      window.removeEventListener('click', markClick, true)
       window.removeEventListener('pointerdown', markInteraction, true)
+      window.removeEventListener('pointerup', releasePointer, true)
+      window.removeEventListener('pointercancel', releasePointer, true)
       window.removeEventListener('touchstart', markInteraction, true)
       window.removeEventListener('keydown', markKeyInteraction, true)
       columnObserver?.disconnect()
       if (flingId) window.cancelAnimationFrame(flingId)
       if (openCameraId) window.cancelAnimationFrame(openCameraId)
       if (restoreFrame) window.cancelAnimationFrame(restoreFrame)
-      if (measureFrame) window.cancelAnimationFrame(measureFrame)
       if (saveTimer) window.clearTimeout(saveTimer)
+      if (gestureTimer) window.clearTimeout(gestureTimer)
       stopRestoring()
       // Leaving the note: remember the last camera measured on this note's sheet.
-      persist(latestEntry)
+      // The DOM is already the next note, so this must not measure again.
+      // A visit that only restored the stored camera leaves that entry as it is.
+      if (userOwned) persist(latestEntry)
     }
   }, [viewKey])
 
   const setView = useCallback((next: Partial<PaperViewSnapshot>) => {
+    userAdjustedRef.current = true
     const current = viewRef.current
     const zoom = clampViewZoom(next.zoom ?? current.zoom)
     const rotation = normalizeRotation(next.rotation ?? current.rotation)
@@ -477,14 +606,17 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
   }, [apply])
 
   const zoomBy = useCallback((delta: number, originClient?: { x: number; y: number }) => {
+    userAdjustedRef.current = true
     zoomTo(viewRef.current.zoom + delta, originClient)
   }, [zoomTo])
 
   const rotateBy = useCallback((delta: number) => {
+    userAdjustedRef.current = true
     apply({ ...viewRef.current, rotation: normalizeRotation(viewRef.current.rotation + delta), pan: { x: 0, y: 0 } })
   }, [apply])
 
   const resetView = useCallback(() => {
+    userAdjustedRef.current = true
     const current = viewRef.current
     const scroller = noteViewRef.current
     const sheet = scroller?.querySelector<HTMLElement>('.paper-sheet-plane')
@@ -545,6 +677,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       pendingFactor = 1
       pendingOrigin = null
       if (factor === 1) return
+      userAdjustedRef.current = true
       zoomTo(viewRef.current.zoom * factor, origin ?? undefined)
     }
     const onInterceptWheel = (event: WheelEvent) => {
@@ -656,12 +789,14 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       if (factor === 1) return
       lastWheelZoomAtRef.current = performance.now()
       if (origin) lastZoomOriginRef.current = origin
+      userAdjustedRef.current = true
       zoomTo(viewRef.current.zoom * factor, origin ?? undefined)
     }
     const unbind = bindHandGestures(root, {
       captureNavigation: true,
       onPan: (dx, dy) => {
         if (performance.now() - lastPanWheelAtRef.current < 48) return
+        userAdjustedRef.current = true
         root.scrollLeft -= dx
         root.scrollTop -= dy
       },

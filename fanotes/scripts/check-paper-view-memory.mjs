@@ -21,10 +21,14 @@ const anchorMod = await server.ssrLoadModule('/src/lib/paperTextAnchor.ts')
 const {
   PAPER_VIEW_MEMORY_KEY,
   cameraForPaperCentre,
+  flushPaperViewMemory,
   isPaperViewTakeoverKey,
   isProgrammaticScroll,
   loadPaperViewMemory,
+  paperCameraLanded,
   paperCentreFromCamera,
+  paperScrollerCanReach,
+  registerPaperViewMemoryFlush,
   paperViewFromMemory,
   paperViewMemoryKey,
   parsePaperViewMemory,
@@ -34,6 +38,7 @@ const {
   savePaperViewMemory,
   scaledPaperCentre,
   scrollTopForAnchorClientY,
+  shouldExtendPaperViewRestore,
   shouldKeepRestoringPaperView,
 } = memory
 const { clientYFromTextAnchor, normalizeTextAnchor, textAnchorFromView } = anchorMod
@@ -162,6 +167,36 @@ assert.equal(isPaperViewTakeoverKey({ key: 'Tab', repeat: true }), false, 'a hel
 assert.equal(isPaperViewTakeoverKey({ key: 'Control' }), false, 'a bare modifier is not')
 assert.equal(isPaperViewTakeoverKey({ key: 'Shift', repeat: true }), false)
 
+// A clamped scroll (page still short) has not landed, so restore keeps going
+// past the short settle window. Once the offset matches, or the user pans,
+// or the cap is reached, it stops.
+assert.equal(paperCameraLanded({ scrollLeft: 10, scrollTop: 400 }, { scrollLeft: 10, scrollTop: 400.4 }), true)
+assert.equal(paperCameraLanded({ scrollLeft: 0, scrollTop: 80 }, { scrollLeft: 0, scrollTop: 2400 }), false, 'a clamped short page is not the saved spot')
+assert.equal(paperCameraLanded({ scrollLeft: 0, scrollTop: 0 }, null), false)
+assert.equal(paperScrollerCanReach(
+  { scrollWidth: 800, scrollHeight: 4000, clientWidth: 800, clientHeight: 600 },
+  { scrollLeft: 0, scrollTop: 2400 },
+), true, 'a tall page can show the saved spot')
+assert.equal(paperScrollerCanReach(
+  { scrollWidth: 800, scrollHeight: 900, clientWidth: 800, clientHeight: 600 },
+  { scrollLeft: 0, scrollTop: 2400 },
+), false, 'a short page must not let a gesture replace the saved camera')
+assert.equal(paperScrollerCanReach(
+  { scrollWidth: 100, scrollHeight: 100, clientWidth: 100, clientHeight: 100 },
+  null,
+), true)
+assert.equal(shouldExtendPaperViewRestore({ startedAt: 0, now: 3000, userInteracted: false, landed: false }), true, 'content still loading after the short settle')
+assert.equal(shouldExtendPaperViewRestore({ startedAt: 0, now: 3000, userInteracted: false, landed: true }), false, 'landed camera does not keep fighting')
+assert.equal(shouldExtendPaperViewRestore({ startedAt: 0, now: 3000, userInteracted: true, landed: false }), false)
+assert.equal(shouldExtendPaperViewRestore({ startedAt: 0, now: 13000, userInteracted: false, landed: false }), false, 'cap so a missing page cannot restore forever')
+let flushed = 0
+const unregisterFlush = registerPaperViewMemoryFlush(() => { flushed += 1 })
+flushPaperViewMemory()
+assert.equal(flushed, 1, 'quit flushes the open note camera')
+unregisterFlush()
+flushPaperViewMemory()
+assert.equal(flushed, 1, 'a closed note is not flushed')
+
 // --- wiring ------------------------------------------------------------------
 const here = dirname(fileURLToPath(import.meta.url))
 const paperView = readFileSync(join(here, '../src/components/PaperView.tsx'), 'utf8')
@@ -173,10 +208,18 @@ assert.match(paperView, /window\.addEventListener\('pointerdown', markInteractio
 assert.match(paperView, /window\.addEventListener\('keydown', markKeyInteraction, true\)/u, 'any key press hands the camera to the user')
 assert.match(paperView, /window\.addEventListener\('pagehide', saveNow\)/u, 'camera saved on window close')
 assert.match(paperView, /persist\(latestEntry\)/u, 'camera saved when leaving the note')
+assert.match(paperView, /shouldExtendPaperViewRestore\(\{/u, 'restore waits while the page is still too short')
+assert.match(paperView, /if \(gaveUp && !userOwned\) return/u, 'a failed restore does not overwrite the saved camera')
+assert.match(paperView, /paperScrollerCanReach\(scroller, lastProgrammatic\)/u, 'a gesture on a short page does not replace the saved camera')
+assert.match(paperView, /if \(!fromGesture \|\| !userOwned\) return/u, 'a layout scroll after a pan does not become the saved camera')
+assert.match(paperView, /registerPaperViewMemoryFlush\(saveNow\)/u, 'quit saves the camera while the sheet is still laid out')
+const app = readFileSync(join(here, '../src/App.tsx'), 'utf8')
+assert.match(app, /flushPaperViewMemory\(\)/u, 'closing the app flushes the per-note camera before the window is torn down')
 const editor = readFileSync(join(here, '../src/components/MarkdownEditor.tsx'), 'utf8')
 assert.match(editor, /registerPaperTextAnchorProvider\(host, \{/u, 'editor provides the text anchor')
 const pdfView = readFileSync(join(here, '../src/components/PdfNoteView.tsx'), 'utf8')
 assert.match(pdfView, /if \(cam \? cam\.recalled : recallPaperView\(loadPaperViewMemory\(\), path\)\) \{/u, 'PDF page-into-view and first-open fit yield to the remembered camera')
+assert.match(pdfView, /if \(cameraRef\.current\?\.recalled && cameraModeRef\.current === 'custom'\) return/u, 'a remembered PDF zoom is not reclassified as a fit')
 assert.match(pdfView, /\{loading && !pdf && <div className="pdf-note-status">/u, 'loading placeholder leaves the flow once the document exists (no 220px column jump)')
 const pkg = JSON.parse(readFileSync(join(here, '../package.json'), 'utf8'))
 const cmView = readFileSync(join(here, '../node_modules/@codemirror/view/package.json'), 'utf8')

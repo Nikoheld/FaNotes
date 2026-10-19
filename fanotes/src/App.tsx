@@ -209,6 +209,7 @@ import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
 import { clampPaperSquareMm, paperSheetPx, paperSquarePx, paperSquareSizeLabel } from './lib/paperSquare'
 import { clampViewZoom, createPaperViewStore, sharedPaperViewStore, writeSharedZoomMaxPercent, writeSharedZoomSpeed, type PaperViewStore } from './lib/paperView'
+import { flushPaperViewMemory } from './lib/paperViewMemory'
 import { diagnosticLog } from './lib/bugReport'
 import {
   collectSendDataNutzerdaten,
@@ -3600,6 +3601,9 @@ export default function App({ startupBootstrap }: AppProps) {
 
   useEffect(() => window.fanotes?.onBeforeClose(() => {
     if (closeInProgressRef.current) return
+    // The sheet is still laid out. pagehide can run after the scroller has
+    // collapsed, which used to store the top of the page.
+    flushPaperViewMemory()
     // Stop Main's watchdog while a deliberate renderer confirmation dialog is
     // open; after confirmation requestClose below arms it again for the flush.
     window.fanotes.cancelClose()
@@ -3632,6 +3636,7 @@ export default function App({ startupBootstrap }: AppProps) {
   useEffect(() => {
     if (!isWeb) return
     const guard = (event: BeforeUnloadEvent) => {
+      flushPaperViewMemory()
       editorRef.current?.flushChanges()
       splitEditorRef.current?.flushChanges()
       const unsaved = pendingWrites.current.size > 0 || drawingDirtyRef.current || worksheetDirtyIdsRef.current.size > 0
