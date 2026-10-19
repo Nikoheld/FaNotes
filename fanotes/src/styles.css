@@ -884,6 +884,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   border-left: 1px solid var(--border);
   background: var(--bg);
 }
+/* While a drag starts off a label, the top bars drop out of the selection.
+   A drag that starts on the label still selects it. Fields stay editable. */
+html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .note-meta-bar, .pdf-note-toolbar, .pdf-note-search, .subject-book-pdf-toolbar, .subject-book-pane-bar, .split-pane-head),
+html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .note-meta-bar, .pdf-note-toolbar, .pdf-note-search, .subject-book-pdf-toolbar, .subject-book-pane-bar, .split-pane-head) * {
+  -webkit-user-select: none;
+  user-select: none;
+}
 .toolbar-button { height: 27px; min-width: 27px; padding: 0 7px; display: flex; align-items: center; justify-content: center; gap: 5px; border: 0; border-radius: 7px; color: var(--text-muted); background: transparent; cursor: pointer; font-size: 12px; }
 .toolbar-button:hover { color: var(--text); background: var(--panel-hover); }
 .toolbar-button.active { color: var(--accent-readable); background: var(--panel-active); }

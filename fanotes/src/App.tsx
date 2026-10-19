@@ -201,6 +201,7 @@ import {
   overlaySessionForNote,
   type NoteOverlaySession,
 } from './lib/overlayInteract'
+import { installChromeTextSelect } from './lib/chromeTextSelect'
 import { drawingSessionFromLoad, INK_OVERLAY_CRASH_TITLE, INK_TOOLBAR_SLOT_ID, overlayAfterNoteSwitch, PDF_TOOLBAR_SLOT_ID, penModeToolbarSlot } from './lib/pdfInkHit'
 import { APP_VERSION } from './lib/appVersion'
 import { defaultSettingsForPlatform } from './defaults'
@@ -697,6 +698,7 @@ export default function App({ startupBootstrap }: AppProps) {
       store.write(zoom === view.zoom ? { ...view } : { ...view, zoom })
     }
   }, [settings.viewZoomMax, splitPaperViewStore])
+  useEffect(() => installChromeTextSelect(), [])
   const [saveState, setSaveState] = useState<SaveState>('saved')
   const [detectedTextLanguage, setDetectedTextLanguage] = useState<DetectedTextLanguage>('unknown')
   const [sidebarVisible, setSidebarVisible] = useState(true)
