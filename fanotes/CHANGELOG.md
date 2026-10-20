@@ -1,5 +1,23 @@
 # Änderungsverlauf
 
+## 2026.10.11
+
+- **Kariertes Papier.** Die Kästchengröße lässt sich einstellen.
+- **Radierer.** Der Radierer beginnt bei einem Pixel und lässt ferne Tinte stehen.
+- **Rückgängig.** Die Tinten-Historie bleibt erhalten, wenn die App geschlossen wird.
+- **Werkzeugwahl.** Die Popups für Werkzeugwahl und Formerkennung sind entfernt.
+- **Werkzeuge.** Größen und die zuletzt gewählten Werkzeuge bleiben über einen Neustart erhalten.
+- **Handschriftabschnitte.** Abschnitte lassen sich in eine neue Reihenfolge ziehen. Ein Unterabschnitt hat eine Breite, und der Text bleibt an seinem Platz.
+- **Erscheinungsbild.** Ein Arbeitsflächen-Design ändert Blatt und Rahmen.
+- **Figuren.** Eine Bibliothek bietet einstellbare zwei- und dreidimensionale Mathematikfiguren.
+- **Stift.** Beim Zeichnen erscheint ein kleiner Punktcursor. Ein kurzes Halten rastet als Linie ein. Eine Vorhersage zeichnet keinen Strich quer über die Seite.
+- **Marker.** Ein Marker behält seine Farbe, wenn ein anderer darüberfährt. Die Markerleiste sitzt in der Editorleiste.
+- **PDF.** Eine Seite bleibt in der Mitte, wenn der Zoom Lücken an den Seiten lässt. Die Tastaturleiste entspricht dem Band.
+- **Ziehen.** Ein Ziehen auf der Seite markiert die obere Leiste nicht.
+- **Drehung.** Geschriebener Text bleibt scharf, wenn das Blatt gedreht ist.
+- **Finger.** Ein Finger verschiebt die Seite, auch wenn nur der Stift zeichnet.
+- **Notiz.** Jede Notiz öffnet wieder bei Zoom und Scrollposition, an der sie verlassen wurde.
+
 ## 2026.10.11-beta.2
 
 - Remember tool sizes and choices across restarts.
