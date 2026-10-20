@@ -1064,7 +1064,7 @@ const renderDocument = (
   coverage: MarkerCoverage | null = null,
 ): MarkerCoverage | null => {
   const context = canvas.getContext('2d')
-  if (!context) return
+  if (!context) return null
   const span = inkWindowSpan(inkWindow)
   const virtualHeight = height / span
   const topPx = inkWindow.y0 * virtualHeight
