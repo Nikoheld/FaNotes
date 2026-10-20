@@ -1,5 +1,28 @@
 # Änderungsverlauf
 
+## 2026.10.11-beta.2
+
+- Remember tool sizes and choices across restarts.
+- Let handwriting sections be dragged into a new order.
+- Make each workspace design change the sheet and the chrome.
+- Add a library of configurable 2D and 3D math figures.
+- Show a small point cursor while painting.
+- Let a marker keep its color when another marker crosses it.
+- Fit the docked ink toolbar inside the editor bar.
+- Satisfy the strict TypeScript build without changing ink results.
+- Add English keys for chrome the catalog harvest still reports.
+- Stop checks from requiring the removed status labels.
+- Compact the note chrome and the Marker strip.
+- Center a PDF page when zoom leaves gaps on the sides.
+- Stop a page drag from highlighting the top bar.
+- Stop a pen prediction from flashing a line across the page.
+- Match the PDF keyboard bar to the ribbon.
+- Keep typed text sharp when the sheet is rotated.
+- Let one finger move the page while pen-only is on.
+- Snap a short pen hold into a line.
+- Restore each note at the zoom and scroll position where it was left.
+- Add handwriting subsections with a width that leaves the text in place.
+
 ## 2026.10.11-beta.1
 
 - Add an Alpha action that publishes the next beta from main.
