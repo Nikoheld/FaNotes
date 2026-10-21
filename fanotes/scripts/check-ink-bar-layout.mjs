@@ -65,7 +65,7 @@ body.bar-fixture { min-width: 0; margin: 0; }
             <div class="lw-draw-toolgroup lw-colors" aria-label="Stiftfarbe">${chips}<label class="lw-color-custom"><input type="color" value="#3d52d5"><span></span></label></div>
             <label class="lw-draw-range"><span>Breite</span><input type="range" min="1" max="18" step="0.5" value="18.5" aria-label="Breite"><output>18.5 px</output></label>
           </div>
-          <label class="lw-paper-select"><span class="sr-only">Papierart</span><select aria-label="Papierart"><option>Millimeter</option></select></label>
+          <label class="lw-paper-select"><span class="sr-only">Papierart</span><select aria-label="Papierart"><option>Leer</option><option>Gepunktet</option><option>Häuschen</option><option selected>Millimeter</option><option>Kariert</option><option>Liniert</option></select><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></label>
           <div class="lw-draw-toolgroup lw-view-controls">
             <button type="button" class="lw-draw-icon" aria-label="Herauszoomen">${icon}</button>
             <button type="button" class="lw-draw-icon" aria-label="Hineinzoomen">${icon}</button>
@@ -192,7 +192,7 @@ const expression = `(() => {
       width: Math.round(rect.width * 10) / 10,
       scroll: node.scrollWidth,
       client: node.clientWidth,
-      text: (node.innerText || node.value || '').trim().slice(0, 40),
+      text: (node.tagName === 'SELECT' ? (node.selectedOptions[0]?.text || '') : (node.innerText || node.value || '')).trim().slice(0, 40),
     }
   }
   const dock = document.querySelector('.lw-draw-toolbar').getBoundingClientRect()
@@ -201,6 +201,36 @@ const expression = `(() => {
   for (let i = 1; i < kids.length; i += 1) gaps.push(kids[i].getBoundingClientRect().left - kids[i - 1].getBoundingClientRect().right)
   const chrome = document.querySelector('.editor-toolbar').getBoundingClientRect()
   const strip = document.querySelector('.lw-pen-strip').getBoundingClientRect()
+  const paperSelect = document.querySelector('.lw-paper-select select')
+  const paperChevron = document.querySelector('.lw-paper-select svg')
+  const glyphCanvas = document.createElement('canvas').getContext('2d')
+  const paperGlyph = (label) => {
+    const option = [...paperSelect.options].find((item) => item.text === label)
+    option.selected = true
+    const rect = paperSelect.getBoundingClientRect()
+    const style = getComputedStyle(paperSelect)
+    glyphCanvas.font = style.font
+    const textLeft = rect.left + (parseFloat(style.borderLeftWidth) || 0) + (parseFloat(style.paddingLeft) || 0)
+    const textRight = textLeft + glyphCanvas.measureText(label).width
+    const textBox = {
+      left: textLeft,
+      top: rect.top + (parseFloat(style.borderTopWidth) || 0),
+      right: textRight,
+      bottom: rect.bottom - (parseFloat(style.borderBottomWidth) || 0),
+    }
+    const icon = paperChevron.getBoundingClientRect()
+    const iconBox = { left: icon.left, top: icon.top, right: icon.right, bottom: icon.bottom }
+    return {
+      label,
+      gap: Math.round((icon.left - textRight) * 10) / 10,
+      hit: hits(textBox, iconBox),
+      iconW: Math.round(icon.width * 10) / 10,
+      iconH: Math.round(icon.height * 10) / 10,
+    }
+  }
+  const paperGlyphs = ['Gepunktet', 'Millimeter', 'Häuschen'].map(paperGlyph)
+  paperSelect.querySelector('option[selected], option').selected = false
+  ;[...paperSelect.options].find((item) => item.text === 'Millimeter').selected = true
   const output = document.querySelector('output')
   const word = [...document.querySelectorAll('.lw-ink-actions .lw-draw-subtle')].find((node) => (node.innerText || '').includes('Verschieben'))
   return {
@@ -215,6 +245,7 @@ const expression = `(() => {
     word: word ? { text: word.innerText.trim(), width: Math.round(word.getBoundingClientRect().width), scroll: word.scrollWidth, client: word.clientWidth } : null,
     groups: kids.length,
     paper: shown('.lw-paper-select select'),
+    paperGlyphs,
     reset: shown('.lw-view-reset'),
     modeLabel: shown('.mode-switch button span'),
     dock: { top: dock.top, bottom: dock.bottom, h: dock.height },
@@ -295,6 +326,12 @@ try {
     assert.equal(sample.paper?.text, 'Millimeter')
     assert.notEqual(sample.paper.display, 'none')
     assert.ok(sample.paper.width > 40 && sample.paper.scroll <= sample.paper.client + 1, JSON.stringify(sample.paper))
+    assert.deepEqual(sample.paperGlyphs.map((glyph) => glyph.label), ['Gepunktet', 'Millimeter', 'Häuschen'])
+    for (const glyph of sample.paperGlyphs) {
+      assert.equal(glyph.hit, false, `${name} ${glyph.label} meets the chevron`)
+      assert.ok(glyph.gap >= 2, `${name} ${glyph.label} gap ${glyph.gap}`)
+      assert.ok(Math.abs(glyph.iconW - 14) <= 0.5 && Math.abs(glyph.iconH - 14) <= 0.5, JSON.stringify(glyph))
+    }
     assert.equal(sample.reset?.text, '600% · 180°')
     assert.notEqual(sample.reset.display, 'none')
     assert.ok(sample.reset.scroll <= sample.reset.client + 1, JSON.stringify(sample.reset))
