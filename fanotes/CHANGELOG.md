@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.10.12-beta.2
+
+- Keep handwriting on the paper when the sheet is turned. (#951)
+
 ## 2026.10.12-beta.1
 
 - Keep handwriting on the same paper point when the sheet is turned or panned. A turned page was mapped through its axis-aligned box, so strokes slid and squashed.
