@@ -327,6 +327,8 @@ async function main() {
           draft: false,
           prerelease: true,
           assets: [{ name: 'FaNotes-update-linux-x64-beta.json', browser_download_url: betaManifestAssetUrl }],
+          // Larger than the manifest cap. The release index must still be accepted.
+          body: 'x'.repeat(600 * 1024),
         }])
       }
       if (url === manifestAssetUrl) return jsonResponse(signedManifest)

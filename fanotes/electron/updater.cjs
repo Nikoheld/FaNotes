@@ -60,6 +60,10 @@ const UPDATE_EVENT = 'fanotes:update-state'
 const EXPECTED_KEY_ID = '33006e5c06939bc9'
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u
 const MAX_MANIFEST_BYTES = 512 * 1024
+// The GitHub release index is not the manifest. Thirty releases already
+// exceed 512 KiB, which made every beta and nightly check fail before the
+// manifest was downloaded. The manifest file itself stays at the smaller cap.
+const MAX_RELEASE_LIST_BYTES = 4 * 1024 * 1024
 const MIN_PACKAGE_BYTES = 10 * 1024 * 1024
 const MAX_PACKAGE_BYTES = 1024 * 1024 * 1024
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
@@ -935,16 +939,16 @@ function createUpdateManager({
     return fetchGithub(next.href, options, redirectsLeft - 1)
   }
 
-  const readJsonResponse = async (response, url, emptyMessage) => {
+  const readJsonResponse = async (response, url, emptyMessage, maxBytes = MAX_MANIFEST_BYTES) => {
     if (response.status >= 300 && response.status < 400) {
       const bodyText = await readFailureBody(response)
       const diagnosis = diagnoseUpdateFailure({ phase: 'check', url, response, bodyText })
       throw attachDiagnosis(new Error(diagnosis.message), diagnosis)
     }
     const advertisedLength = Number(response.headers.get('content-length'))
-    if (Number.isFinite(advertisedLength) && advertisedLength > MAX_MANIFEST_BYTES) throw new Error('Das Update-Manifest ist unerwartet groß.')
+    if (Number.isFinite(advertisedLength) && advertisedLength > maxBytes) throw new Error('Das Update-Manifest ist unerwartet groß.')
     const text = await response.text()
-    if (Buffer.byteLength(text, 'utf8') > MAX_MANIFEST_BYTES) throw new Error('Das Update-Manifest ist unerwartet groß.')
+    if (Buffer.byteLength(text, 'utf8') > maxBytes) throw new Error('Das Update-Manifest ist unerwartet groß.')
     if (!response.ok) {
       const diagnosis = diagnoseUpdateFailure({ phase: 'check', url, response, bodyText: text })
       throw attachDiagnosis(new Error(diagnosis.message), diagnosis)
@@ -975,7 +979,7 @@ function createUpdateManager({
         },
         signal: controller.signal,
       })
-      const listed = await readJsonResponse(listResponse, listUrl, 'GitHub hat keine gültige Release-Liste geliefert.')
+      const listed = await readJsonResponse(listResponse, listUrl, 'GitHub hat keine gültige Release-Liste geliefert.', MAX_RELEASE_LIST_BYTES)
       const releases = Array.isArray(listed) ? listed : [listed]
       const assetName = updateManifestName(platformConfig.manifestPlatform, channel)
       const release = releases.find((item) => (
