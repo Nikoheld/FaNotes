@@ -29,8 +29,8 @@ const runOnce = () => {
 
   assert.match(typeBlock, /display:\s*flex/)
   assert.match(typeBlock, /align-items:\s*center/)
-  assert.match(typeBlock, /min-height:\s*36px/)
-  assert.match(typeBlock, /height:\s*36px/)
+  assert.match(typeBlock, /min-height:\s*30px/)
+  assert.match(typeBlock, /height:\s*30px/)
   assert.match(typeBlock, /background:\s*var\(--bg\)/)
   assert.match(typeBlock, /color:\s*var\(--text\)/)
   assert.doesNotMatch(typeBlock, /color:\s*#/)
@@ -49,10 +49,10 @@ const runOnce = () => {
   assert.match(typeBlock, /\.editor-toolbar\.is-type \.formatting-toolbar \{/)
   const formatStart = typeBlock.indexOf('.editor-toolbar.is-type .formatting-toolbar {')
   const formatBlock = typeBlock.slice(formatStart, typeBlock.indexOf('}', formatStart) + 1)
-  assert.match(formatBlock, /height:\s*28px/)
+  assert.match(formatBlock, /height:\s*24px/)
   assert.match(formatBlock, /mask-image:\s*none/)
   assert.match(typeBlock, /\.editor-toolbar\.is-type \.formatting-toolbar button \{/)
-  assert.match(typeBlock, /height:\s*28px/)
+  assert.match(typeBlock, /height:\s*24px/)
 
   const inkActive = css.slice(
     css.indexOf('.editor-toolbar.is-ink .mode-switch button.is-active {'),

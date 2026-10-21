@@ -805,6 +805,23 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   height: 24px;
   min-width: 24px;
 }
+.editor-toolbar.is-type .simple-latex-tools {
+  height: 24px;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  padding-left: 4px;
+}
+.editor-toolbar.is-type .simple-latex-tools input {
+  width: 84px;
+  height: 22px;
+}
+.editor-toolbar.is-type .simple-latex-tools button {
+  width: auto;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 5px;
+}
 .mode-switch {
   flex: none;
   display: flex;
@@ -834,10 +851,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   background: color-mix(in srgb, var(--bg) 55%, var(--panel-hover));
   box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 6%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--border-strong) 70%, transparent);
 }
+.editor-toolbar.is-ink .mode-switch {
+  height: 24px;
+  padding: 2px;
+  border-radius: 7px;
+}
+.editor-toolbar.is-ink .mode-switch button {
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 5px;
+  font-size: 12px;
+}
 .editor-toolbar.is-ink .mode-switch button.is-active {
   color: var(--on-accent);
   background: var(--accent);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 28%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-accent) 35%, transparent);
 }
 .pdf-toolbar-hint {
   min-width: 0;
@@ -986,7 +1014,7 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
   align-self: center;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   padding: 0;
   border: 0;
   overflow: auto hidden;
@@ -995,21 +1023,25 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
   pointer-events: auto;
 }
 .lw-draw-toolbar.is-docked-chrome::-webkit-scrollbar { display: none; }
+.lw-draw-toolbar.is-docked-chrome > * { flex: none; }
 .lw-draw-toolbar.is-docked-chrome .lw-draw-toolgroup { display: flex; align-items: center; gap: 2px; }
 .lw-draw-toolbar.is-docked-chrome .lw-segmented {
   padding: 0;
-  gap: 1px;
+  gap: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: color-mix(in srgb, var(--panel) 82%, transparent);
 }
 .lw-draw-toolbar.is-docked-chrome .lw-segmented button {
+  width: 24px;
   height: 24px;
-  padding: 0 7px;
-  gap: 4px;
+  flex: none;
+  padding: 0;
+  gap: 0;
   border-radius: 6px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 0;
+  overflow: visible;
 }
 .lw-draw-toolbar.is-docked-chrome .lw-segmented button.is-active {
   color: var(--text);
@@ -1017,20 +1049,56 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
 }
 .lw-draw-toolbar.is-docked-chrome .lw-tool-label { display: none; }
-.lw-draw-toolbar.is-docked-chrome .lw-colors { padding: 0 2px; gap: 3px; display: flex; align-items: center; }
+.lw-draw-toolbar.is-docked-chrome .lw-colors {
+  flex: none;
+  padding: 0;
+  gap: 4px;
+  display: flex;
+  align-items: center;
+}
 .lw-draw-toolbar.is-docked-chrome .lw-colors > button,
-.lw-draw-toolbar.is-docked-chrome .lw-color-custom { width: 15px; height: 15px; }
+.lw-draw-toolbar.is-docked-chrome .lw-color-custom {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-width: 1px;
+  box-shadow: none;
+}
+.lw-draw-toolbar.is-docked-chrome .lw-colors > button:nth-of-type(n + 5) { display: block; }
+.lw-draw-toolbar.is-docked-chrome .lw-colors > button.is-active {
+  border-width: 2px;
+  border-color: var(--text);
+  box-shadow: none;
+}
 .lw-draw-toolbar.is-docked-chrome .lw-draw-range {
-  grid-template-columns: minmax(52px, 68px) 28px;
-  gap: 3px;
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+  min-width: max-content;
   font-size: 12px;
   color: var(--text-muted);
 }
 .lw-draw-toolbar.is-docked-chrome .lw-draw-range span { display: none; }
-.lw-draw-toolbar.is-docked-chrome .lw-paper-select { height: 26px; }
+.lw-draw-toolbar.is-docked-chrome .lw-draw-range input {
+  width: 56px;
+  height: 16px;
+  flex: none;
+  margin: 0;
+}
+.lw-draw-toolbar.is-docked-chrome .lw-draw-range output {
+  flex: none;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1;
+}
+.lw-draw-toolbar.is-docked-chrome .lw-paper-select { height: 24px; flex: none; }
 .lw-draw-toolbar.is-docked-chrome .lw-paper-select select {
-  height: 26px;
-  padding: 0 22px 0 7px;
+  height: 24px;
+  padding: 0 18px 0 6px;
   border-color: var(--border);
   border-radius: 7px;
   color: var(--text-soft);
@@ -1038,60 +1106,85 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
   font-size: 12px;
 }
 .lw-draw-toolbar.is-docked-chrome .lw-draw-icon {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  padding: 0;
   border-radius: 7px;
   color: var(--text-muted);
 }
 .lw-draw-toolbar.is-docked-chrome .lw-draw-icon:hover:not(:disabled) { color: var(--text); background: var(--panel-hover); }
 .lw-draw-toolbar.is-docked-chrome .lw-draw-icon.is-active { color: var(--text); background: color-mix(in srgb, var(--accent) 16%, var(--panel)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent); }
+.lw-draw-toolbar.is-docked-chrome .lw-view-controls {
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
 .lw-draw-toolbar.is-docked-chrome .lw-view-reset {
-  min-width: 46px;
-  height: 26px;
+  min-width: 0;
+  width: auto;
+  height: 24px;
   padding: 0 6px;
   font-size: 12px;
 }
 .lw-draw-toolbar.is-docked-chrome .lw-draw-subtle,
 .lw-draw-toolbar.is-docked-chrome .lw-convert-action {
-  height: 26px;
-  min-height: 26px;
-  padding: 0 8px;
+  height: 24px;
+  min-height: 0;
+  width: auto;
+  max-width: none;
+  flex: none;
+  padding: 0 6px;
   border-radius: 7px;
   font-size: 12px;
+  overflow: visible;
   box-shadow: none;
+}
+.lw-draw-toolbar.is-docked-chrome .lw-ink-actions .lw-draw-subtle:has(svg),
+.lw-draw-toolbar.is-docked-chrome .lw-convert-action {
+  width: 24px;
+  padding: 0;
+  gap: 0;
+  font-size: 0;
 }
 .lw-draw-toolbar.is-docked-chrome .lw-convert-action {
   color: var(--on-accent);
   background: var(--accent);
 }
+.lw-draw-toolbar.is-docked-chrome .lw-history,
 .lw-draw-toolbar.is-docked-chrome .lw-ink-actions {
-  position: sticky;
-  right: 0;
-  z-index: 1;
-  margin-left: auto;
-  padding-left: 6px;
-  background: var(--bg);
+  position: static;
+  margin-left: 0;
+  padding-left: 0;
+  background: transparent;
+  z-index: auto;
 }
 .lw-draw-toolbar.is-docked-chrome .lw-writing-actions button {
-  max-width: 28px;
-  overflow: hidden;
+  width: 24px;
+  max-width: none;
+  overflow: visible;
+  padding: 0;
 }
 .lw-draw-toolbar.is-docked-chrome .lw-writing-actions button > svg { flex: none; }
 .lw-draw-toolbar.is-docked-chrome .lw-art-studio-trigger {
-  height: 26px;
-  grid-template-columns: 15px minmax(48px, auto) 18px;
-  gap: 5px;
+  height: 24px;
+  flex: none;
+  grid-template-columns: 16px auto 16px;
+  gap: 4px;
   padding: 0 6px;
   border-radius: 7px;
 }
 .lw-draw-toolbar.is-docked-chrome .lw-art-studio-trigger strong { font-size: 12px; }
 .lw-draw-toolbar.is-docked-chrome .lw-art-studio-trigger small { display: none; }
 .lw-draw-toolbar.is-docked-chrome .lw-art-studio-trigger > i { width: 16px; height: 16px; border-radius: 5px; }
+/* Keep the strip at its content width so color chips scroll instead of painting over the next label. */
 .lw-draw-toolbar.is-docked-chrome .lw-pen-strip {
-  height: 26px;
-  max-height: 26px;
+  flex: none;
+  height: 24px;
+  max-height: 24px;
   gap: 4px;
-  min-width: 0;
+  min-width: max-content;
 }
 .lw-draw-toolbar.is-docked-chrome .lw-pen-strip-brushes button,
 .lw-draw-toolbar.is-docked-chrome .lw-pen-strip-symbols button,
@@ -2876,12 +2969,8 @@ kbd { padding: 3px 6px; border: 1px solid var(--border-strong); border-bottom-wi
 @media (max-width: 1180px) {
   .right-inspector { display: none; }
   .app-body { grid-template-columns: var(--sidebar-width) minmax(420px, 1fr); }
-  .mode-switch button span,
   .toolbar-end .toolbar-button span { display: none; }
-  .mode-switch button { padding: 0 7px; }
-  .toolbar-button { width: 28px; min-width: 28px; padding: 0; }
-  .lw-draw-toolbar.is-docked-chrome .lw-paper-select,
-  .lw-draw-toolbar.is-docked-chrome .lw-view-reset { display: none; }
+  .toolbar-button { width: 24px; min-width: 24px; padding: 0; }
 }
 
 @media (max-width: 980px) {
