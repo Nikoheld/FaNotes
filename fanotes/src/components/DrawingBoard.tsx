@@ -7251,9 +7251,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               <span className="lw-tool-label">GlyphenWerk</span>
             </button>
           )}
-          {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${tool === 'select' ? 'is-active' : ''}`} onClick={beginInkEdit} disabled={!handwritingCount} title="Handschrift einrahmen und dann verschieben">
-            <Move size={14} /> <span className="lw-tool-label">Verschieben</span>
-          </button>}
           {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${lassoOn ? 'is-active' : ''}`} aria-pressed={lassoOn} onClick={() => { setLassoOn((value) => !value); setLassoPoints([]); setLassoIndexes([]) }} disabled={!handwritingCount} title="Lasso: Striche einrahmen, dann verschieben, kopieren, färben oder löschen">
             <ScanSearch size={14} /> <span className="lw-tool-label">Lasso</span>
           </button>}

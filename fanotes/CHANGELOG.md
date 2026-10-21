@@ -3,6 +3,7 @@
 ## 2026.10.12-beta.1
 
 - Keep handwriting on the same paper point when the sheet is turned or panned. A turned page was mapped through its axis-aligned box, so strokes slid and squashed.
+- Shrink the note-link styles and the other icon-and-word buttons on the top bars, and leave each of those controls on the bar once.
 - Keep the paper name clear of the dropdown chevron.
 - Pack the editor bar so labels no longer sit on the color chips.
 - Accept a GitHub release index larger than the update manifest.

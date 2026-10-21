@@ -50,6 +50,8 @@ try {
   ]) {
     assert.ok(chrome.includes(token), token)
   }
+  assert.match(chrome, /!isPdfActive && !drawingOpen && \([\s\S]*<PaperStylePicker/)
+  assert.equal((board.match(/onClick=\{beginInkEdit\}/g) || []).length, 2)
   assert.equal(chrome.includes('Kästchengrösse'), false)
   assert.equal(chrome.includes('<footer'), false)
 

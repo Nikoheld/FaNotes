@@ -438,7 +438,7 @@ void (async () => {
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
     await waitFor(cdp, `!document.querySelector('.search-panel')`, 'Das Schliessen der Suche mit Escape')
 
-    await cdp.evaluate(`document.querySelector('button[title^="Auf derselben Seite"]').click()`)
+    await cdp.evaluate(`document.querySelector('.mode-switch button[aria-label="Stift"]').click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.lw-drawing-board.is-inline.is-input-active .lw-tablet-canvas'))`, 'Die Stiftebene')
     await waitFor(cdp, `Boolean(document.querySelector('.editor-toolbar.is-ink #fanotes-ink-toolbar-slot .lw-draw-toolbar.is-docked-chrome'))`, 'Die Stiftwerkzeuge in der oberen Leiste')
     await waitFor(cdp, `Boolean(document.querySelector('#fanotes-ink-toolbar-slot button[title="GlyphenWerk öffnen"]'))`, 'Der optionale GlyphenWerk-Knopf ohne persönliches Training')
@@ -613,7 +613,7 @@ void (async () => {
     await waitFor(cdp, `Boolean(document.querySelector('.lw-conversion-panel .lw-model-card > span.is-ready'))`, 'Das erst bei Bedarf geladene Handschriftmodell')
     await waitFor(cdp, `Boolean(document.querySelector('.lw-conversion-panel textarea'))`, 'Die Handschriftkonvertierung nach dem Lazy-Load')
     await cdp.evaluate(`document.querySelector('.lw-conversion-head button[aria-label="Konvertierung schließen"]')?.click()`)
-    await cdp.evaluate(`document.querySelector('button[title="Zur Tastatureingabe wechseln"]').click()`)
+    await cdp.evaluate(`document.querySelector('.mode-switch button[aria-label="Tastatur"]').click()`)
 
     await cdp.evaluate(`(() => {
       const shell = document.querySelector('.app-shell')

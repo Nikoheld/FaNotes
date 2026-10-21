@@ -4928,6 +4928,8 @@ export default function App({ startupBootstrap }: AppProps) {
     </div>
   )
 
+  const editorToolbarVisible = !calendarOpen && !homeworkOpen && !overviewOpen && !glyphenWerkOpen
+
   return (
     <div className={`app-shell theme-${theme} background-${settings.workspaceBackground} ${focusMode ? 'focus-mode' : ''} ${settings.compactMode ? 'compact' : ''} ${settings.reduceMotion ? 'no-motion' : ''} ${settings.glassEffects ? 'with-glass' : 'no-glass'}`} style={cssVars}>
       {sanitizeCustomCss(settings.customCss) && <style>{sanitizeCustomCss(settings.customCss)}</style>}
@@ -4936,7 +4938,7 @@ export default function App({ startupBootstrap }: AppProps) {
         <button type="button" title={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} aria-label={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} onClick={() => setSidebarVisible((value) => !value)}>{sidebarVisible ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}</button>
         <button type="button" className={!searchOpen && !overviewOpen && !homeworkOpen && !calendarOpen && !lmStudioOpen && !glyphenWerkOpen ? 'active' : ''} title="Dateien" data-tooltip="Notizen" aria-label="Notizen" onClick={showFiles}><Files size={14} /><span className="ribbon-label">Notizen</span></button>
         <button type="button" className={searchOpen ? 'active' : ''} title="Im Vault suchen (Strg+Umschalt+F)" data-tooltip="Suchen · Strg ⇧ F" aria-label="Im gesamten Vault suchen" onClick={() => { setSearchOpen(true); setSidebarVisible(true) }}><Search size={14} /><span className="ribbon-label">Suchen</span></button>
-        <button type="button" className={drawingOpen ? 'active' : ''} title={drawingOpen ? 'Zur Tastatureingabe wechseln' : 'Auf derselben Seite mit Stift schreiben'} data-tooltip={drawingOpen ? 'Zur Tastatur · Strg D' : 'Mit Stift schreiben · Strg D'} aria-pressed={drawingOpen} onClick={toggleDrawing}><PenLine size={14} /><span className="ribbon-label">Stift</span></button>
+        {!editorToolbarVisible && <button type="button" className={drawingOpen ? 'active' : ''} title={drawingOpen ? 'Zur Tastatureingabe wechseln' : 'Auf derselben Seite mit Stift schreiben'} data-tooltip={drawingOpen ? 'Zur Tastatur · Strg D' : 'Mit Stift schreiben · Strg D'} aria-label={drawingOpen ? 'Zur Tastatur wechseln' : 'Mit Stift schreiben'} aria-pressed={drawingOpen} onClick={toggleDrawing}><PenLine size={14} /><span className="ribbon-label">Stift</span></button>}
         <button type="button" className={homeworkOpen ? 'active' : ''} title="Hausaufgaben & Termine" data-tooltip="Hausaufgaben" aria-label="Hausaufgaben und Termine öffnen" onClick={openHomework}><ClipboardList size={14} /><span className="ribbon-label">Aufgaben</span></button>
         <button type="button" className={calendarOpen ? 'active' : ''} title="Kalender" data-tooltip="Kalender" aria-label="Kalender öffnen" onClick={openCalendar}><CalendarDays size={14} /><span className="ribbon-label">Kalender</span></button>
         <div className="ribbon-spacer" />
@@ -5072,7 +5074,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 disabled={!canGoBack(noteHistory)}
                 onClick={() => void navigateHistory(-1)}
               >
-                <ArrowLeft size={14} /> Zurück
+                <ArrowLeft size={14} />
               </button>
               <button
                 type="button"
@@ -5166,12 +5168,13 @@ export default function App({ startupBootstrap }: AppProps) {
               />
             )
           })()}
-          {!calendarOpen && !homeworkOpen && !overviewOpen && !glyphenWerkOpen && <div className={`editor-toolbar ${drawingOpen ? 'is-ink' : 'is-type'}`}>
+          {editorToolbarVisible && <div className={`editor-toolbar ${drawingOpen ? 'is-ink' : 'is-type'}`}>
             <div className="mode-switch" role="group" aria-label="Eingabemodus">
               <button
                 type="button"
                 className={!drawingOpen ? 'is-active' : ''}
                 aria-pressed={!drawingOpen}
+                aria-label="Tastatur"
                 title="Mit der Tastatur schreiben (Strg+D)"
                 onClick={() => { if (drawingOpen) toggleDrawing() }}
               >
@@ -5182,6 +5185,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 type="button"
                 className={drawingOpen ? 'is-active' : ''}
                 aria-pressed={drawingOpen}
+                aria-label="Stift"
                 title="Mit dem Stift schreiben (Strg+D)"
                 onClick={() => { if (!drawingOpen) toggleDrawing() }}
               >
@@ -5204,7 +5208,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   <button type="button" title="Nächste Tagesnotiz" aria-label="Nächste Tagesnotiz" onClick={() => void openAdjacentDaily(1)}><ArrowRight size={13} /></button>
                 </div>
               )}
-              {activeTab && !isPdfActive && (
+              {activeTab && !isPdfActive && !drawingOpen && (
                 <PaperStylePicker
                   value={activePaper}
                   disabled={activeEntryMutating}
@@ -5307,12 +5311,14 @@ export default function App({ startupBootstrap }: AppProps) {
                     <button
                       key={style.id}
                       type="button"
-                      className={noteLinkStyle === style.id ? 'is-active' : ''}
+                      className={`is-${style.id}${noteLinkStyle === style.id ? ' is-active' : ''}`}
                       aria-pressed={noteLinkStyle === style.id}
+                      aria-label={style.label}
                       title={style.label}
                       onClick={() => void applyNoteLinkStyle(style.id)}
                     >
-                      {style.label}
+                      {style.appearance !== 'text' ? <Link2 size={13} aria-hidden="true" /> : null}
+                      {style.appearance !== 'symbol' ? <span aria-hidden="true">Aa</span> : null}
                     </button>
                   ))}
                 </div>
