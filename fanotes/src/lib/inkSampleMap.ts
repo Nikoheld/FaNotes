@@ -91,11 +91,24 @@ export const mapClientToPaperPoint = (
   }
   const paperW = Math.max(1, surface.offsetWidth ?? surface.width)
   const paperH = Math.max(1, surface.offsetHeight ?? surface.height)
+  // CSS rotate() is clockwise around the paper centre. The client rect is the
+  // axis-aligned box of that turned rectangle, so its aspect is not the
+  // paper's. Fractions of that box, scaled by paperW×paperH and then rotated,
+  // land off the pen and squash a square into a shear. Undo the turn in
+  // uniform screen pixels, then divide by the unrotated visual size.
+  const turned = Math.abs(rotation) > 0.01
+  const rad = turned ? (rotation * Math.PI) / 180 : 0
+  const cos = turned ? Math.cos(rad) : 1
+  const sin = turned ? Math.sin(rad) : 0
+  const spanX = Math.abs(paperW * cos) + Math.abs(paperH * sin)
+  const spanY = Math.abs(paperW * sin) + Math.abs(paperH * cos)
+  const zoom = turned ? ((surface.width / spanX) + (surface.height / spanY)) / 2 : 1
   // Extra paper around the write page (matches noteCanvas.SCROLL_ROOM).
   // Samples just past the current 0–1 box must map, not return null —
-  // that null is the invisible handwriting wall.
-  const hitRoomX = SCROLL_ROOM * (surface.width / paperW)
-  const hitRoomY = SCROLL_ROOM * (surface.height / paperH)
+  // that null is the invisible handwriting wall. An untilted rect's zoom is
+  // visual/layout per axis. A turned rect's zoom is the uniform camera.
+  const hitRoomX = SCROLL_ROOM * (turned ? zoom : surface.width / paperW)
+  const hitRoomY = SCROLL_ROOM * (turned ? zoom : surface.height / paperH)
   const padX = Math.max(48, hitRoomX)
   const padY = Math.max(48, hitRoomY)
   if (
@@ -117,22 +130,18 @@ export const mapClientToPaperPoint = (
     || visualY > 1 + edgeSlopY
   ) return null
 
-  let paperLocalX = visualX * paperW
-  let paperLocalY = visualY * paperH
-  if (Math.abs(rotation) > 0.01) {
-    const rad = (-rotation * Math.PI) / 180
-    const cos = Math.cos(rad)
-    const sin = Math.sin(rad)
-    const dx = (visualX - 0.5) * paperW
-    const dy = (visualY - 0.5) * paperH
-    paperLocalX = dx * cos - dy * sin + paperW / 2
-    paperLocalY = dx * sin + dy * cos + paperH / 2
-  }
-
   // Keep out-of-range samples so the write surface can grow left/up.
   // Clamping to 0 here drew a ghost line to the top of the sheet.
-  const x = paperLocalX / paperW
-  const y = paperLocalY / paperH
+  let x = visualX
+  let y = visualY
+  if (turned) {
+    const vx = event.clientX! - (surface.left + surface.width / 2)
+    const vy = event.clientY! - (surface.top + surface.height / 2)
+    const ux = vx * cos + vy * sin
+    const uy = -vx * sin + vy * cos
+    x = (ux / zoom + paperW / 2) / paperW
+    y = (uy / zoom + paperH / 2) / paperH
+  }
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null
   const rawPressure = (event.pressure ?? 0) > 0
     ? event.pressure!
