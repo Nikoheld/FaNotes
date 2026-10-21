@@ -1,5 +1,11 @@
 # Änderungsverlauf
 
+## 2026.10.12-beta.1
+
+- Keep the paper name clear of the dropdown chevron.
+- Pack the editor bar so labels no longer sit on the color chips.
+- Accept a GitHub release index larger than the update manifest.
+
 ## 2026.10.11
 
 - **Kariertes Papier.** Die Kästchengröße lässt sich einstellen.
