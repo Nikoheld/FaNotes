@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.10.12-beta.3
+
+- Tighten the top bar and drop the controls that appeared twice.
+
 ## 2026.10.12-beta.2
 
 - Keep handwriting on the paper when the sheet is turned. (#951)
