@@ -203,7 +203,7 @@ void (async () => {
 
     const idle = await cpuWindow(child.pid, () => wait(4_000))
 
-    await cdp.evaluate(`document.querySelector('button[title^="Auf derselben Seite"]').click()`)
+    await cdp.evaluate(`document.querySelector('.mode-switch button[aria-label="Stift"]').click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.lw-tablet-canvas.is-input-active'))`, 'Der aktive Stiftmodus')
     const bounds = await cdp.evaluate(`(() => { const rect = document.querySelector('.lw-tablet-canvas').getBoundingClientRect(); return { left: rect.left, top: rect.top, width: rect.width, height: rect.height } })()`)
     const hitTarget = await cdp.evaluate(`(() => { const rect = document.querySelector('.lw-tablet-canvas').getBoundingClientRect(); const y = Math.min(rect.bottom - 20, innerHeight - 80, rect.top + rect.height * .35); const node = document.elementFromPoint(rect.left + rect.width * .5, y); return { tag: node?.tagName, className: node?.className ?? '', viewportHeight: innerHeight, y, bounds: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } } })()`)

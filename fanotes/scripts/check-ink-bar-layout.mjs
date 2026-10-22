@@ -80,7 +80,6 @@ body.bar-fixture { min-width: 0; margin: 0; }
           </div>
           <div class="lw-draw-toolgroup lw-ink-actions">
             <button type="button" class="lw-draw-subtle" aria-label="Lasso">${icon} <span class="lw-tool-label">Lasso</span></button>
-            <button type="button" class="lw-draw-subtle">Verschieben</button>
           </div>
         </div>
       </div></div>
@@ -248,6 +247,11 @@ const expression = `(() => {
     paperGlyphs,
     reset: shown('.lw-view-reset'),
     modeLabel: shown('.mode-switch button span'),
+    modeButtons: [...document.querySelectorAll('.mode-switch button')].map((node) => ({
+      width: Math.round(node.getBoundingClientRect().width * 10) / 10,
+      text: (node.innerText || '').trim(),
+    })),
+    names: [...document.querySelectorAll('.editor-toolbar button')].filter(visible).map((node) => node.getAttribute('aria-label') || (node.innerText || '').trim()).filter(Boolean),
     dock: { top: dock.top, bottom: dock.bottom, h: dock.height },
     chrome: { top: chrome.top, bottom: chrome.bottom, h: chrome.height },
     strip: { h: strip.height },
@@ -335,10 +339,17 @@ try {
     assert.equal(sample.reset?.text, '600% · 180°')
     assert.notEqual(sample.reset.display, 'none')
     assert.ok(sample.reset.scroll <= sample.reset.client + 1, JSON.stringify(sample.reset))
-    assert.notEqual(sample.modeLabel?.display, 'none', `${name} mode label`)
-    assert.ok(sample.modeLabel.scroll <= sample.modeLabel.client + 1, JSON.stringify(sample.modeLabel))
-    assert.equal(sample.word?.text, 'Verschieben')
-    assert.ok(sample.word.width > 40 && sample.word.scroll <= sample.word.client + 1, JSON.stringify(sample.word))
+    assert.equal(sample.modeLabel?.display, 'none', `${name} mode label takes no width`)
+    assert.equal(sample.modeButtons.length, 2, `${name} mode buttons`)
+    for (const button of sample.modeButtons) {
+      assert.equal(button.text, '', `${name} mode caption ${JSON.stringify(button)}`)
+      assert.ok(button.width <= 24.5 && button.width >= 18, `${name} mode width ${JSON.stringify(button)}`)
+    }
+    assert.equal(sample.word, null, `${name} duplicate Verschieben caption`)
+    const move = sample.icons.find((iconButton) => iconButton.label === 'Verschieben')
+    assert.ok(move && move.width <= 24.5, `${name} move tool ${JSON.stringify(move)}`)
+    const duplicateNames = sample.names.filter((label, index) => sample.names.indexOf(label) !== index)
+    assert.deepEqual(duplicateNames, [], `${name} duplicate controls ${JSON.stringify(duplicateNames)}`)
   }
   console.log('ink-bar-layout ok')
 } finally {
