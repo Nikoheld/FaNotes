@@ -5,7 +5,11 @@
 - Tighten the top bar and drop the controls that appeared twice.
 - Draw the handwriting dot as a vector in the page, so it stays sharp on a high-resolution screen.
 - Keep the Marker on the same color as the pen. A color chosen on either tool is the color of both. The Textmarker keeps its own color.
+<<<<<<< HEAD
 - Keep PDF text selection on the words under the pointer. A drag no longer jumps across the gaps between glyph runs, and the selectable layer uses the same box as the page.
+=======
+- Scale the ruler and the compass with their size. A small tool keeps its shape; grips, strokes and ticks shrink with it instead of squashing the body. The ruler can be 2 cm long and 1 cm wide, and the compass radius can be 1 mm.
+>>>>>>> origin/main
 
 ## 2026.10.12-beta.2
 
