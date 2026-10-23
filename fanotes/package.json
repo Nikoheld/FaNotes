@@ -72,6 +72,7 @@
     "check:drawing": "node scripts/check-drawing-mode.cjs && node scripts/check-ink-pointer-session.mjs && node scripts/check-note-canvas.mjs && node scripts/check-one-canvas.mjs && node scripts/check-sheet-write.mjs && node scripts/check-pdf-write.mjs && node scripts/check-pdf-paint-sharp.mjs && node scripts/check-pdf-write-stay.mjs && node scripts/check-ink-stroke.mjs && node scripts/check-ink-smooth.mjs && node scripts/check-ink-visible.mjs && node scripts/check-paper-canvas.mjs && node scripts/check-ink-rotation-stay.mjs",
     "check:paper-canvas": "node scripts/check-paper-canvas.mjs",
     "check:ink-stroke": "node scripts/check-ink-stroke.mjs",
+    "check:ink-turn": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/check-ink-turn.mjs",
     "check:ink-visible": "node scripts/check-ink-visible.mjs",
     "check:marker": "node scripts/check-marker.mjs",
     "check:shape-snap": "node scripts/check-shape-snap-hold.mjs",

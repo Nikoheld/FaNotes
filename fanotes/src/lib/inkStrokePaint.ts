@@ -1,3 +1,4 @@
+import { inkQuickTurnKeep } from './inkTurn'
 import { inkStrokePaintScale } from './paperGrow'
 import { commitInkPointerSequence, type InkPointerLike } from './inkSampleMap'
 import { markdownInkPageBox } from './noteCanvas'
@@ -424,14 +425,38 @@ export const drawInkStroke = (
   layoutWidth = 0,
   endSegment = stroke.points.length,
   options?: InkPaintOptions,
+  trimLiftHook = true,
 ) => {
   if (stroke.points.length === 0) return
   if (!(width > 0) || !(height > 0)) return
+  const layout = layoutWidth > 1 ? layoutWidth : width
+  const scale = inkStrokePaintScale(width, layout > 1 ? layout : sourceWidth)
+  // The stored stroke keeps the lift hook (recognition). A paint of the
+  // current end leaves that hook out, once: the shortened view does not trim again.
+  if (trimLiftHook && endSegment >= stroke.points.length && stroke.points.length > 1 && !stroke.symbolPaths?.length) {
+    const last = stroke.points[stroke.points.length - 1]
+    const nib = inkStrokeBitmapWidth(stroke, last.pressure ?? 0.5, scale)
+    const keep = inkQuickTurnKeep(stroke.points, width, height, nib)
+    if (keep < stroke.points.length - 1) {
+      drawInkStroke(
+        context,
+        { ...stroke, points: stroke.points.slice(0, keep + 1) },
+        width,
+        height,
+        smoothing,
+        startSegment,
+        sourceWidth,
+        layoutWidth,
+        Math.min(endSegment, keep + 1),
+        options,
+        false,
+      )
+      return
+    }
+  }
   const lastSegment = Math.min(endSegment, stroke.points.length)
   if (stroke.points.length > 1 && lastSegment <= Math.max(1, startSegment)) return
   const first = stroke.points[0]
-  const layout = layoutWidth > 1 ? layoutWidth : width
-  const scale = inkStrokePaintScale(width, layout > 1 ? layout : sourceWidth)
   const brush = inkBrushOf(stroke)
   const opacity = inkOpacityOf(stroke)
   const paint = strokePaint(context, stroke, width, height)
@@ -612,6 +637,11 @@ export const drawInkStroke = (
   /** Direct paint, one `stroke()` per segment, exactly as before. */
   const paintPassSegments = (target: InkPaintContext, pass: InkPaintPass, passIndex: number, alpha: number) => {
     for (let index = firstSegment; index < lastSegment; index += 1) {
+      const previous = stroke.points[index - 1]
+      const point = stroke.points[index]
+      // A round cap on a zero-length segment is a disk. Real samples are at
+      // least ~0.35 CSS px apart, so this only skips a duplicate.
+      if (Math.hypot((point.x - previous.x) * width, (point.y - previous.y) * height) < 0.2) continue
       const [offsetX, offsetY] = passOffset(pass, passIndex, index)
       target.globalAlpha = alpha
       target.beginPath()
