@@ -135,9 +135,44 @@ export const writePageStatsIntoNote = (content: string, stats: PageStats) => {
   const next: FamdPayload = {
     ...(payload ?? emptyFamdPayload(stats.modifiedAt)),
     pageStats: stats,
-    updatedAt: stats.modifiedAt,
+    // Statistics move on a timer. The note's own timestamp stays, or a later
+    // statistics-only save would look like an edit to every other device.
+    updatedAt: payload?.updatedAt || stats.modifiedAt,
   }
   return serializeFamd(markdown, next)
+}
+
+const syncTextDecoder = new TextDecoder()
+const syncTextEncoder = new TextEncoder()
+
+/** A note file whose body can carry a `.famd` payload. PDF bytes are not notes. */
+export const isFamdSyncPath = (path: string) => /\.(?:md|markdown|famd)$/iu.test(path)
+
+/**
+ * Bytes that decide whether a note changed for sync.
+ * A file without page statistics is returned untouched, so a vault that never
+ * stored them is not rewritten. Statistics are removed; the note timestamp is kept.
+ */
+export const canonicalSyncBytes = (path: string, bytes: Uint8Array): Uint8Array => {
+  if (!isFamdSyncPath(path)) return bytes
+  const text = syncTextDecoder.decode(bytes)
+  const parsed = parseFamd(text)
+  if (!parsed.payload?.pageStats) return bytes
+  const { pageStats: _pageStats, ...rest } = parsed.payload
+  return syncTextEncoder.encode(serializeFamd(parsed.markdown, rest))
+}
+
+/** Put this device's page statistics back into a note downloaded from sync. */
+export const withLocalPageStats = (downloaded: string, local: string): string => {
+  const stats = parseFamd(local).payload?.pageStats
+  if (!stats) return downloaded
+  const remote = parseFamd(downloaded)
+  if (!remote.payload) return downloaded
+  return serializeFamd(remote.markdown, {
+    ...remote.payload,
+    updatedAt: remote.payload.updatedAt,
+    pageStats: stats,
+  })
 }
 
 export const serializeFamd = (markdown: string, payload: FamdPayload) => {

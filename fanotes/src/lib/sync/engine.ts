@@ -12,6 +12,9 @@
 // as "Name (Konflikt <Gerät> <Datum>).ext", which is then uploaded as a new
 // file so every device ends up with both.
 import type { SyncHostApi, SyncScanEntry } from '../../types'
+import { canonicalSyncBytes, isFamdSyncPath, withLocalPageStats } from '../famd'
+
+const syncText = (bytes: Uint8Array) => new TextDecoder().decode(bytes)
 import { pathIsSyncExcluded, RECOGNITION_MODEL_SYNC_PATH } from './folderSync'
 import { SyncApi, SyncApiError, type SyncAccountInfo, type SyncRemoteEntry, type SyncSession } from './api'
 import { mcpReaderRequest, newReaderKey, type McpGrantInfo } from '../mcp/client'
@@ -582,11 +585,14 @@ export class SyncEngine {
 
   // ── Pull ────────────────────────────────────────────────────────────────
 
-  private async localSnapshot(path: string): Promise<{ bytes: Uint8Array; sha256: string; stat: SyncScanEntry } | null> {
+  private async localSnapshot(path: string): Promise<{ bytes: Uint8Array; sha256: string; rawSha256: string; stat: SyncScanEntry } | null> {
     if (!this.host) return null
     try {
       const bytes = await this.host.read(path)
-      return { bytes, sha256: await sha256Hex(bytes), stat: { path, size: bytes.byteLength, mtimeMs: 0 } }
+      const syncBytes = canonicalSyncBytes(path, bytes)
+      const rawSha256 = await sha256Hex(bytes)
+      const sha256 = syncBytes === bytes ? rawSha256 : await sha256Hex(syncBytes)
+      return { bytes, sha256, rawSha256, stat: { path, size: bytes.byteLength, mtimeMs: 0 } }
     } catch {
       return null
     }
@@ -642,7 +648,7 @@ export class SyncEngine {
         idIndex.delete(entry.id)
         return { result: 'noop', path: knownPath }
       }
-      if (local.sha256 === base.sha256) {
+      if (local.sha256 === base.sha256 || local.rawSha256 === base.sha256) {
         await this.host.remove(knownPath)
         delete this.state.files[knownPath]
         idIndex.delete(entry.id)
@@ -669,12 +675,44 @@ export class SyncEngine {
     if (base && base.id === entry.id && entry.revision <= base.revision) return { result: 'noop', path }
     if (this.options?.isPathBusy?.(path)) return { result: 'deferred', path }
     const local = await this.localSnapshot(path)
-    if (local && local.sha256 === meta.sha256) {
-      this.state.files[path] = { id: entry.id, revision: entry.revision, sha256: meta.sha256, size: local.stat.size, mtimeMs: (await this.statOf(path))?.mtimeMs ?? 0 }
+    if (local && (local.sha256 === meta.sha256 || local.rawSha256 === meta.sha256)) {
+      const stat = await this.statOf(path)
+      // Remember the canonical hash once the file still matches the server, so a
+      // later statistics write (new size, same note) is not uploaded.
+      this.state.files[path] = {
+        id: entry.id,
+        revision: entry.revision,
+        sha256: local.sha256,
+        size: stat?.size ?? local.stat.size,
+        mtimeMs: stat?.mtimeMs ?? local.stat.mtimeMs,
+      }
       idIndex.set(entry.id, path)
       return { result: 'noop', path }
     }
-    const localChanged = Boolean(local) && (!base || local!.sha256 !== base.sha256)
+    const localChanged = Boolean(local) && (!base || (local!.sha256 !== base.sha256 && local!.rawSha256 !== base.sha256))
+    const download = await this.api.download(this.session, entry.id)
+    if ('deleted' in download) {
+      // Deleted again between the change list and the download; the tombstone arrives with the next pull.
+      return { result: 'noop', path }
+    }
+    if (await sha256Hex(download.blob) !== download.sha256) throw new Error(`Die Datei „${path}“ kam beschädigt vom Server.`)
+    const plain = await decryptBytes(this.keys, entry.id, download.blob)
+    if (await sha256Hex(plain) !== meta.sha256) throw new Error(`Die Prüfsumme von „${path}“ stimmt nach dem Entschlüsseln nicht.`)
+    const plainCanonical = canonicalSyncBytes(path, plain)
+    const plainCanonicalSha = plainCanonical === plain ? meta.sha256 : await sha256Hex(plainCanonical)
+    if (local && plainCanonicalSha === local.sha256) {
+      // The note matches. Only page statistics differ, and those stay on this device.
+      const stat = await this.statOf(path)
+      this.state.files[path] = {
+        id: entry.id,
+        revision: download.revision,
+        sha256: plainCanonicalSha,
+        size: stat?.size ?? local.stat.size,
+        mtimeMs: stat?.mtimeMs ?? 0,
+      }
+      idIndex.set(entry.id, path)
+      return { result: 'noop', path }
+    }
     let result: 'written' | 'conflict' = 'written'
     if (localChanged && local) {
       const at = new Date(this.options?.now?.() ?? Date.now())
@@ -686,15 +724,12 @@ export class SyncEngine {
       this.options?.onConflict?.(conflict)
       result = 'conflict'
     }
-    const download = await this.api.download(this.session, entry.id)
-    if ('deleted' in download) {
-      // Deleted again between the change list and the download; the tombstone arrives with the next pull.
-      return { result: 'noop', path }
+    let body = plain
+    if (local && isFamdSyncPath(path)) {
+      const spliced = withLocalPageStats(syncText(plain), syncText(local.bytes))
+      body = new TextEncoder().encode(spliced)
     }
-    if (await sha256Hex(download.blob) !== download.sha256) throw new Error(`Die Datei „${path}“ kam beschädigt vom Server.`)
-    const plain = await decryptBytes(this.keys, entry.id, download.blob)
-    if (await sha256Hex(plain) !== meta.sha256) throw new Error(`Die Prüfsumme von „${path}“ stimmt nach dem Entschlüsseln nicht.`)
-    const stat = await this.host.write(path, plain, meta.mtimeMs || Date.now())
+    const stat = await this.host.write(path, body, meta.mtimeMs || Date.now())
     this.state.files[path] = { id: entry.id, revision: download.revision, sha256: meta.sha256, size: stat.size, mtimeMs: stat.mtimeMs }
     idIndex.set(entry.id, path)
     return { result, path }
@@ -756,13 +791,16 @@ export class SyncEngine {
 
   private async uploadPath(entry: SyncScanEntry): Promise<'uploaded' | 'unchanged' | 'conflict' | 'skipped'> {
     if (!this.session || !this.host || !this.state || !this.keys) return 'skipped'
-    const bytes = await this.host.read(entry.path).catch(() => null)
-    if (!bytes) return 'skipped'
-    const sha256 = await sha256Hex(bytes)
+    const raw = await this.host.read(entry.path).catch(() => null)
+    if (!raw) return 'skipped'
+    const bytes = canonicalSyncBytes(entry.path, raw)
+    const rawSha256 = await sha256Hex(raw)
+    const sha256 = bytes === raw ? rawSha256 : await sha256Hex(bytes)
     const base = this.state.files[entry.path]
-    if (base && base.sha256 === sha256) {
-      // Touched but identical (an editor re-saved the same text): remember the new stat, nothing to send.
-      this.state.files[entry.path] = { ...base, size: entry.size, mtimeMs: entry.mtimeMs }
+    if (base && (base.sha256 === sha256 || base.sha256 === rawSha256)) {
+      // Touched but the same note (a statistics write, or the editor saved the
+      // same text): remember the canonical hash and the new stat, nothing to send.
+      this.state.files[entry.path] = { ...base, sha256, size: entry.size, mtimeMs: entry.mtimeMs }
       return 'unchanged'
     }
     const id = base?.id ?? await fileIdFor(this.keys, entry.path)

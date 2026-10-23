@@ -1839,7 +1839,9 @@ export default function App({ startupBootstrap }: AppProps) {
       const visibleContent = stripFamdPayload(nextContent)
       await window.fanotes.writeFile(isPdfNotePath(path) ? companionNotePath(path, '.famd') : path, nextContent)
       addonRuntime.emit('note:saved', { path, title: fileName(path).replace(/\.(md|markdown|pdf)$/iu, ''), length: visibleContent.length })
-      syncEngine.notifyLocalChange()
+      // A statistics-only save must not start a sync. The timer still runs;
+      // the engine then sees the same note and skips the upload.
+      if (!options?.quiet) syncEngine.notifyLocalChange()
       if (savedSession) {
         // Activity during the write builds on the saved session; only the
         // revision that actually reached the disk counts as persisted.
