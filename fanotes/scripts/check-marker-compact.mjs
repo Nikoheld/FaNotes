@@ -14,7 +14,7 @@ const server = await createServer({
   server: { middlewareMode: true },
 })
 
-const { artStudioOpenForBrush, usesPenStrip } = await server.ssrLoadModule('/src/lib/inkOptionSurface.ts')
+const { artStudioOpenForBrush, inkColorForBrush, usesPenStrip } = await server.ssrLoadModule('/src/lib/inkOptionSurface.ts')
 
 try {
   assert.equal(usesPenStrip('marker'), true)
@@ -24,6 +24,12 @@ try {
   assert.equal(artStudioOpenForBrush('highlighter', true), false)
   assert.equal(artStudioOpenForBrush('fineliner', true), true)
   assert.equal(artStudioOpenForBrush('paintbrush', false), false)
+  assert.equal(inkColorForBrush('marker', '#202333', '#3478df'), '#202333')
+  assert.equal(inkColorForBrush('highlighter', '#202333', '#f2b735'), '#f2b735')
+  assert.equal(inkColorForBrush('fineliner', '#202333', '#3478df'), '#3478df')
+  assert.match(board, /inkColorForBrush\(artBrush, penColor, artColor\)/)
+  assert.match(board, /stripUsesPenColor \? penColor : artColor/)
+  assert.match(board, /stripUsesPenColor \? colorChoices : artColorChoices/)
 
   assert.match(board, /usesPenStrip\(artBrush\)/)
   assert.match(board, /artStudioOpenForBrush\(artBrush, artPanelOpen\)/)

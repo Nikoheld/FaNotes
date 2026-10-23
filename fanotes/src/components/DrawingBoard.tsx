@@ -59,7 +59,7 @@ import type {
 import type { Stroke, StrokePoint } from '../../../src/types'
 import type { AppSettings, DrawingAsset, PaperStyle } from '../types'
 import { PAPER_STYLES, drawPaperBackground } from '../lib/paperStyles'
-import { artStudioOpenForBrush, usesPenStrip } from '../lib/inkOptionSurface'
+import { artStudioOpenForBrush, inkColorForBrush, usesPenStrip } from '../lib/inkOptionSurface'
 import { mountPenPointer } from '../lib/penPointer'
 import { clampPaperSquareMm } from '../lib/paperSquare'
 import { strokeDurationMs, strokeLengthMm, summarizeInkStrokes, type InkStrokeActivity, type InkSummary } from '../lib/pageStats'
@@ -4347,7 +4347,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         points: [firstPoint],
         baseWidth: figureSize,
         pressureEnabled: false,
-        color: inkMode === 'drawing' ? artColor : penColor,
+        color: inkMode === 'drawing' ? inkColorForBrush(artBrush, penColor, artColor) : penColor,
         purpose: 'art',
         brush: 'fineliner',
         colorEffect: inkMode === 'drawing' ? artEffect : 'solid',
@@ -4390,7 +4390,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         points: [firstPoint],
         baseWidth: artSymbolSize,
         pressureEnabled: false,
-        color: artColor,
+        color: inkColorForBrush(artBrush, penColor, artColor),
         purpose: 'art',
         brush: 'fineliner',
         colorEffect: artEffect,
@@ -4442,7 +4442,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           points: [],
           baseWidth: artWidth,
           pressureEnabled: settings.pressureEnabled && activeArtBrush.pressure,
-          color: artColor,
+          color: inkColorForBrush(artBrush, penColor, artColor),
           purpose: 'art',
           brush: artBrush,
           colorEffect: artEffect,
@@ -4776,7 +4776,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             points,
             baseWidth: artWidth,
             pressureEnabled: false,
-            color: artColor,
+            color: inkColorForBrush(artBrush, penColor, artColor),
             purpose: 'art',
             brush: artBrush,
             colorEffect: artEffect,
@@ -6925,6 +6925,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [])
   const activeFigurePaths = useMemo(() => mathFigurePaths(figureId, figureParams), [figureId, figureParams])
 
+  const choosePenColor = (color: string) => {
+    setPenColor(color)
+    onSettingsChange?.({ penColor: color })
+    if (artBrush === 'marker') setArtEffect('solid')
+  }
+  const stripUsesPenColor = artBrush === 'marker'
+  const stripColor = stripUsesPenColor ? penColor : artColor
+  const stripPalette = stripUsesPenColor ? colorChoices : artColorChoices
+  const chooseStripColor = (color: string) => {
+    setArtEffect('solid')
+    if (stripUsesPenColor) choosePenColor(color)
+    else setArtColor(color)
+  }
+
   const paintToolClass = selectionMode
     ? 'tool-select'
     : tool === 'pen' && inkMode === 'drawing'
@@ -7085,11 +7099,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                 aria-label={`Farbe ${color}`}
                 aria-pressed={penColor.toLowerCase() === color}
                 style={{ '--ink-color': color } as React.CSSProperties}
-                onClick={() => { setPenColor(color); onSettingsChange?.({ penColor: color }) }}
+                onClick={() => choosePenColor(color)}
               />
             ))}
             <label className="lw-color-custom" title="Eigene Farbe">
-              <input type="color" value={penColor} onChange={(event) => { setPenColor(event.target.value); onSettingsChange?.({ penColor: event.target.value }) }} />
+              <input type="color" value={penColor} onChange={(event) => choosePenColor(event.target.value)} />
               <span style={{ background: penColor }} />
             </label>
           </div>
@@ -7129,20 +7143,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               ))}
             </div>
             <div className="lw-colors" aria-label="Zeichenfarbe">
-              {artColorChoices.map((color) => (
+              {stripPalette.map((color) => (
                 <button
                   type="button"
                   key={color}
-                  className={artEffect === 'solid' && artColor === color ? 'is-active' : ''}
+                  className={artEffect === 'solid' && stripColor.toLowerCase() === color.toLowerCase() ? 'is-active' : ''}
                   aria-label={`Zeichenfarbe ${color}`}
-                  aria-pressed={artEffect === 'solid' && artColor === color}
+                  aria-pressed={artEffect === 'solid' && stripColor.toLowerCase() === color.toLowerCase()}
                   style={{ '--ink-color': color } as React.CSSProperties}
-                  onClick={() => { setArtColor(color); setArtEffect('solid') }}
+                  onClick={() => chooseStripColor(color)}
                 />
               ))}
               <label className="lw-color-custom" title="Eigene Zeichenfarbe">
-                <input type="color" value={artColor} onChange={(event) => { setArtColor(event.target.value); setArtEffect('solid') }} />
-                <span style={{ background: artColor }} />
+                <input type="color" value={stripColor} onChange={(event) => chooseStripColor(event.target.value)} />
+                <span style={{ background: stripColor }} />
               </label>
             </div>
             <div className="lw-pen-strip-inks" role="group" aria-label="Spezialfarben">
