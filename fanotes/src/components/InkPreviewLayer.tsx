@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createMarkerCoverage, drawInkStroke, type InkPaintStroke } from '../lib/inkStrokePaint'
-import { clampFigureParams, isMathFigureId, mathFigurePaths } from '../lib/mathFigures'
+import { clampFigureLineWidth, clampFigureParams, figureLineWidthForSize, isMathFigureId, mathFigurePaths } from '../lib/mathFigures'
 import { textOriginCssPx } from '../lib/noteCanvas'
 import { usePaperViewController } from './PaperView'
 
@@ -52,7 +52,7 @@ export const parseInkPreviewPage = (drawingJson: string): ParsedInkPage | null =
   const strokes: InkPaintStroke[] = []
   for (const entry of document.strokes) {
     if (!entry || typeof entry !== 'object') continue
-    const stroke = entry as Partial<InkPaintStroke> & { figureId?: unknown; figureParams?: unknown }
+    const stroke = entry as Partial<InkPaintStroke> & { figureId?: unknown; figureParams?: unknown; figureLineWidth?: unknown }
     if (!Array.isArray(stroke.points) || typeof stroke.color !== 'string') continue
     const points = stroke.points.filter((point): point is { x: number; y: number; pressure?: number } => (
       Boolean(point) && typeof point === 'object' && isFiniteNumber(point.x) && isFiniteNumber(point.y)
@@ -71,6 +71,9 @@ export const parseInkPreviewPage = (drawingJson: string): ParsedInkPage | null =
       opacity: isFiniteNumber(stroke.opacity) ? stroke.opacity : undefined,
       textureSeed: isFiniteNumber(stroke.textureSeed) ? stroke.textureSeed : undefined,
       symbolRotation: isFiniteNumber(stroke.symbolRotation) ? stroke.symbolRotation : undefined,
+      figureLineWidth: figureId
+        ? clampFigureLineWidth(stroke.figureLineWidth, figureLineWidthForSize(isFiniteNumber(stroke.baseWidth) ? stroke.baseWidth : 4))
+        : undefined,
       symbolPaths: figurePaths.length ? figurePaths : undefined,
       keepColor: stroke.keepColor === true ? true : undefined,
     })

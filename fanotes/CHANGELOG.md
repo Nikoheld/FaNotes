@@ -5,6 +5,7 @@
 - Tighten the top bar and drop the controls that appeared twice.
 - Draw the handwriting dot as a vector in the page, so it stays sharp on a high-resolution screen.
 - Keep the Marker on the same color as the pen. A color chosen on either tool is the color of both. The Textmarker keeps its own color.
+- Set the line thickness of a math figure separately from its size.
 
 ## 2026.10.12-beta.2
 

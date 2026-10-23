@@ -125,7 +125,7 @@ import {
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
 import { createMarkerCoverage, drawInkStroke as paintInkStroke, inkStrokeIsTranslucent, inkStrokePaintMargin, shiftMarkerCoverage, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
-import { MATH_FIGURES, clampFigureParams, defaultFigureParams, isMathFigureId, mathFigurePaths, type MathFigureGroup, type MathFigureId, type MathFigureParam } from '../lib/mathFigures'
+import { MATH_FIGURES, FIGURE_LINE_MAX, FIGURE_LINE_MIN, FIGURE_LINE_STEP, clampFigureLineWidth, clampFigureParams, defaultFigureParams, figureLineWidthForSize, isMathFigureId, mathFigurePaths, type MathFigureGroup, type MathFigureId, type MathFigureParam } from '../lib/mathFigures'
 import { loadToolMemory, saveToolMemory } from '../lib/toolMemory'
 import {
   INLINE_INK_ACTIVE_CLASS,
@@ -582,6 +582,10 @@ type InkStroke = Stroke & {
   /** Configured math stamp. Paths are rebuilt from these, so a reload keeps the same figure. */
   figureId?: MathFigureId
   figureParams?: Record<string, number>
+  /** Line thickness in page units. Size does not change it. */
+  figureLineWidth?: number
+  /** SVG paths stored with the stamp so another app can stroke the same figure. */
+  figurePaths?: readonly string[]
 }
 
 type MathSolverHistoryEntry = {
@@ -748,6 +752,7 @@ const cloneStrokes = (strokes: InkStroke[]): InkStroke[] => strokes.map((stroke)
   ...stroke,
   points: stroke.points.map((point) => ({ ...point })),
   ...(stroke.figureParams ? { figureParams: { ...stroke.figureParams } } : {}),
+  ...(stroke.figurePaths ? { figurePaths: stroke.figurePaths.slice() } : {}),
 }))
 
 // Committed strokes are immutable. History can therefore share their point arrays
@@ -908,11 +913,17 @@ const ArtSymbolPreview = ({ symbol, size = 24 }: { symbol: ArtSymbolDefinition; 
   </svg>
 )
 
-const FigureGlyph = ({ paths }: { paths: readonly string[] }) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+const FigureGlyph = ({ paths, strokeWidth = 1.4 }: { paths: readonly string[]; strokeWidth?: number }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     {paths.map((path, index) => <path key={index} d={path} />)}
   </svg>
 )
+
+/** Windows and Linux are the apps that place figures. The site and macOS keep the fixed stroke. */
+const figureLineWidthControl = () => {
+  const platform = window.fanotes?.platform
+  return platform === 'win32' || platform === 'linux'
+}
 
 const figureParamText = (param: MathFigureParam, value: number) => {
   const shown = param.step >= 1 ? String(Math.round(value)) : String(Math.round(value * 100) / 100)
@@ -1152,9 +1163,12 @@ const safeInkStrokes = (value: unknown, fallbackColor: string, options: { clampT
     if (!points.length) return []
     const symbolId = raw.symbolId && artSymbolIds.has(raw.symbolId) ? raw.symbolId : undefined
     const figureId = isMathFigureId(raw.figureId) ? raw.figureId : undefined
+    const figureParams = figureId ? clampFigureParams(figureId, raw.figureParams) : undefined
+    const baseWidth = clamp(Number(raw.baseWidth) || 4, 0.5, figureId ? 320 : symbolId ? 180 : 48)
+    const figurePaths = figureId ? mathFigurePaths(figureId, figureParams) : undefined
     return [{
       points,
-      baseWidth: clamp(Number(raw.baseWidth) || 4, 0.5, figureId ? 320 : symbolId ? 180 : 48),
+      baseWidth,
       pressureEnabled: raw.pressureEnabled !== false,
       color: typeof raw.color === 'string' && /^#[\da-f]{6}$/iu.test(raw.color) ? raw.color : fallbackColor,
       purpose: raw.purpose === 'art' ? 'art' : 'handwriting',
@@ -1166,7 +1180,9 @@ const safeInkStrokes = (value: unknown, fallbackColor: string, options: { clampT
       symbolId,
       symbolRotation: symbolId || figureId ? clamp(Number(raw.symbolRotation) || 0, -180, 180) : undefined,
       figureId,
-      figureParams: figureId ? clampFigureParams(figureId, raw.figureParams) : undefined,
+      figureParams,
+      figureLineWidth: figureId ? clampFigureLineWidth(raw.figureLineWidth, figureLineWidthForSize(baseWidth)) : undefined,
+      figurePaths: figurePaths?.length ? figurePaths : undefined,
     }]
   })
 }
@@ -1462,6 +1478,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [figureParams, setFigureParams] = useState<Record<string, number>>(initialToolMemory.figureParams)
   const [figureSize, setFigureSize] = useState(initialToolMemory.figureSize)
   const [figureRotation, setFigureRotation] = useState(initialToolMemory.figureRotation)
+  const [figureLineWidth, setFigureLineWidth] = useState(initialToolMemory.figureLineWidth)
   const [figureGroup, setFigureGroup] = useState<MathFigureGroup>(initialToolMemory.figureGroup)
   const [penColor, setPenColor] = useState(settings.penColor)
   const [penWidth, setPenWidth] = useState(settings.penWidth)
@@ -1731,9 +1748,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       figureParams,
       figureSize,
       figureRotation,
+      figureLineWidth,
       mathPlacement: mathSolverPlacement,
     })
-  }, [artSymbolId, eraserSize, figureId, figureParams, figureRotation, figureSize, inkMode, mathSolverPlacement, tool])
+  }, [artSymbolId, eraserSize, figureId, figureLineWidth, figureParams, figureRotation, figureSize, inkMode, mathSolverPlacement, tool])
 
   useEffect(() => {
     if (drawingId) drawingIdRef.current = drawingId
@@ -4355,6 +4373,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         textureSeed: Math.max(1, Math.round((performance.now() * 1_000 + event.pointerId * 7_919) % 2_147_483_647)),
         figureId,
         figureParams: { ...figureParams },
+        figureLineWidth: clampFigureLineWidth(figureLineWidth, figureLineWidthForSize(figureSize)),
+        figurePaths: mathFigurePaths(figureId, figureParams),
         symbolRotation: figureRotation,
       }
       clearRecognitionScope()
@@ -4467,7 +4487,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   // inputActive is a dependency: a board mounted inert (keyboard mode showing
   // saved ink) kept a handler that still saw inputActive=false after the pen
   // turned on, and every pen-down was refused until an unrelated grow rebuilt it.
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, figureId, figureLibraryOpen, figureParams, figureRotation, figureSize, inkMode, inline, inputActive, insertSectionAt, insertSubsectionAt, markPenContact, markerKeepColor, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, figureId, figureLibraryOpen, figureLineWidth, figureParams, figureRotation, figureSize, inkMode, inline, inputActive, insertSectionAt, insertSubsectionAt, markPenContact, markerKeepColor, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (dragSheetWithPointer(event.pointerId, event.clientX, event.clientY)) {
@@ -7352,7 +7372,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                 title={figure.label}
                 onClick={() => selectMathFigure(figure.id)}
               >
-                <FigureGlyph paths={figure.id === figureId ? activeFigurePaths : figureCatalogPaths.get(figure.id) ?? []} />
+                <FigureGlyph
+                  paths={figure.id === figureId ? activeFigurePaths : figureCatalogPaths.get(figure.id) ?? []}
+                  strokeWidth={figure.id === figureId ? Math.min(6, Math.max(0.4, 24 * figureLineWidth / figureSize)) : 1.4}
+                />
                 <small>{figure.label}</small>
               </button>
             ))}
@@ -7381,6 +7404,21 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               <input aria-label="Größe der Figur" type="range" min={40} max={320} step={2} value={figureSize} onChange={(event) => setFigureSize(Number(event.target.value))} />
               <output>{figureSize}</output>
             </label>
+            {figureLineWidthControl() && (
+              <label>
+                <span>Linienstärke</span>
+                <input
+                  aria-label="Linienstärke der Figur"
+                  type="range"
+                  min={FIGURE_LINE_MIN}
+                  max={FIGURE_LINE_MAX}
+                  step={FIGURE_LINE_STEP}
+                  value={figureLineWidth}
+                  onChange={(event) => setFigureLineWidth(clampFigureLineWidth(Number(event.target.value), figureLineWidth))}
+                />
+                <output>{figureLineWidth}</output>
+              </label>
+            )}
             <label>
               <span>Drehung</span>
               <input aria-label="Drehung der Figur" type="range" min={-180} max={180} step={5} value={figureRotation} onChange={(event) => setFigureRotation(Number(event.target.value))} />
