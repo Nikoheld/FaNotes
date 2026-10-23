@@ -1,7 +1,8 @@
 /**
  * Touch hand gestures shared by the note sheet, subject books and GlyphenWerk.
- * A pen or mouse pointer never joins a gesture. Two fingers pan, pinch and
- * rotate; one finger can swipe. The recogniser is pure so the thresholds can
+ * A pen or mouse pointer never joins a gesture. Two fingers pan and pinch.
+ * A twist is measured and ignored by the sheet, so hands cannot turn the
+ * paper. One finger can swipe. The recogniser is pure so the thresholds can
  * be checked without a browser.
  */
 

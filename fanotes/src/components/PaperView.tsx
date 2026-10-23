@@ -893,7 +893,6 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
         pendingOrigin = origin
         if (!zoomFrame) zoomFrame = window.requestAnimationFrame(flushZoom)
       },
-      onRotate: (degrees) => rotateBy(degrees),
       onSwipe: (direction, origin) => {
         if (origin.target instanceof Element && getComputedStyle(origin.target).touchAction.split(/\s+/u).includes('none')) return
         const box = root.getBoundingClientRect()
@@ -907,7 +906,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       unbind()
       commitZoomGestureRef.current()
     }
-  }, [rotateBy, zoomTo])
+  }, [zoomTo])
 
   useEffect(() => {
     if (!showHud || !globalShortcuts) return

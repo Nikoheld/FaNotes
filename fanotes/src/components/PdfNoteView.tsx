@@ -828,7 +828,6 @@ export function PdfNoteView({
     if (!node) return undefined
     const host = (node.closest('[data-hand-gesture-root]') as HTMLElement | null) ?? node
     let pageCarry = 0
-    let rotateCarry = 0
     let lastWheelAt = 0
     const onWheel = (event: WheelEvent) => {
       if (!event.ctrlKey && !event.metaKey) return
@@ -861,13 +860,6 @@ export function PdfNoteView({
         const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scaleRef.current * factor))
         scaleRef.current = next
         changeScaleRef.current(next)
-      },
-      onRotate: (degrees) => {
-        rotateCarry += degrees
-        if (Math.abs(rotateCarry) < 40) return
-        const step = rotateCarry > 0 ? 90 : -90
-        rotateCarry = 0
-        setRotation((value) => (value + step + 360) % 360)
       },
     })
     const subscribe = window.fanotes?.onSheetZoom
