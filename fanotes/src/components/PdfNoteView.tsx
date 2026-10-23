@@ -35,6 +35,7 @@ import {
   pdfStartPageForLoad,
 } from '../lib/pdfDocument'
 import { createPdfPagePainter, type PdfBasePaintInfo, type PdfPagePainter } from '../lib/pdfPagePainter'
+import { bindPdfTextSelection, releasePdfTextSelection } from '../lib/pdfTextSelection'
 import {
   PDF_FIT_GUTTER,
   pdfColumnCentreScrollLeft,
@@ -125,6 +126,7 @@ function PdfPageCanvas({
   const detailBRef = useRef<HTMLCanvasElement>(null)
   const textRef = useRef<HTMLDivElement>(null)
   const textLayerRef = useRef<TextLayer | null>(null)
+  const releaseTextSelectionRef = useRef<(() => void) | null>(null)
   const painterRef = useRef<PdfPagePainter | null>(null)
   const onReadyRef = useRef(onReady)
   onReadyRef.current = onReady
@@ -148,16 +150,27 @@ function PdfPageCanvas({
     if (!textHost) return
     if (!(textEnabledRef.current || textHost.childElementCount > 0)) return
     try { textLayerRef.current?.cancel() } catch { /* ignore */ }
+    releaseTextSelectionRef.current?.()
+    releaseTextSelectionRef.current = null
+    releasePdfTextSelection(textHost)
     textHost.replaceChildren()
     const overlayScale = applyPdfTextOverlayScale(textHost, cssWidth, naturalWidth)
     const layer = new TextLayer({
-      textContentSource: page.streamTextContent(),
+      textContentSource: page.streamTextContent({
+        includeMarkedContent: true,
+        disableNormalization: true,
+      }),
       container: textHost,
       viewport: page.getViewport({ scale: overlayScale, rotation: used }),
     })
+    // pdf.js rounds the layer box down to a whole pixel. The page bitmap fills
+    // the host, so the glyph percentages have to use that same box.
+    textHost.style.width = '100%'
+    textHost.style.height = '100%'
     textLayerRef.current = layer
     try {
       await layer.render()
+      if (textLayerRef.current !== layer) return
       for (const quote of quotesRef.current) {
         if (!quote) continue
         textHost.querySelectorAll('span').forEach((span) => {
@@ -165,6 +178,7 @@ function PdfPageCanvas({
           if (text.length > 1 && quote.includes(text)) span.classList.add('pdf-anchored-mark')
         })
       }
+      releaseTextSelectionRef.current = bindPdfTextSelection(textHost)
     } catch (error: unknown) {
       if (!(error instanceof Error) || !/cancel/iu.test(error.name)) {
         console.error(`Textebene der PDF-Seite ${number} konnte nicht aufgebaut werden.`, error)
@@ -200,6 +214,8 @@ function PdfPageCanvas({
       painter.dispose()
       try { textLayerRef.current?.cancel() } catch { /* ignore */ }
       textLayerRef.current = null
+      releaseTextSelectionRef.current?.()
+      releaseTextSelectionRef.current = null
     }
   }, [number, paintTextLayer, password, sourcePath])
 
