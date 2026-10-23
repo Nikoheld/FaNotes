@@ -11,6 +11,7 @@
 - Keep the paper still when two fingers twist. Pinch, pan, the turn buttons and Alt+wheel still turn or zoom the sheet.
 - A large PDF on Linux and Windows rasters only the visible window and keeps the document open. Zoom scales on the compositor until the gesture stops.
 - Page statistics stay on this device. Sync runs when the note itself changes, and a statistics-only save does not upload the note.
+- Keep a pen stroke smooth through a quick turn. The end no longer finishes as a circle when the lift hooks back inside the nib.
 
 ## 2026.10.12-beta.2
 

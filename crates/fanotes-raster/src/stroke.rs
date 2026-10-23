@@ -364,3 +364,137 @@ pub(crate) fn seeded_unit(seed: f64) -> f64 {
 pub(crate) fn js_round(value: f64) -> f64 {
     (value + 0.5).floor()
 }
+
+/// Last sample index to paint. Matches `inkQuickTurnKeep` in `inkTurn.ts`.
+pub(crate) fn ink_quick_turn_keep(
+    points: &[InkPoint],
+    scale_x: f64,
+    scale_y: f64,
+    nib_px: f64,
+) -> usize {
+    let mut end = points.len().saturating_sub(1);
+    if end < 1 {
+        return end;
+    }
+    let reach = (nib_px * 0.9).max(1.5);
+    let at = |index: usize| (points[index].x * scale_x, points[index].y * scale_y);
+    let dist = |left: usize, right: usize| {
+        let (ax, ay) = at(left);
+        let (bx, by) = at(right);
+        (ax - bx).hypot(ay - by)
+    };
+    let mut dropped = 0;
+    while end >= 1 && dropped < 10 && dist(end, end - 1) < 0.9 {
+        end -= 1;
+        dropped += 1;
+    }
+    dropped = 0;
+    while end >= 2 && dropped < 10 {
+        let (ax, ay) = at(end - 2);
+        let (bx, by) = at(end - 1);
+        let (cx, cy) = at(end);
+        let (in_x, in_y) = (bx - ax, by - ay);
+        let (out_x, out_y) = (cx - bx, cy - by);
+        let in_len = in_x.hypot(in_y);
+        let out_len = out_x.hypot(out_y);
+        if out_len < 0.9 {
+            end -= 1;
+            dropped += 1;
+            continue;
+        }
+        if out_len >= reach || in_len < 0.01 {
+            break;
+        }
+        let cos = (in_x * out_x + in_y * out_y) / (in_len * out_len);
+        if cos > 0.2 {
+            break;
+        }
+        end -= 1;
+        dropped += 1;
+    }
+    if end >= 2 {
+        let mut anchor = end;
+        let mut path = 0.0;
+        let mut steps = 0;
+        while anchor >= 1 && steps < 10 {
+            let step = dist(anchor, anchor - 1);
+            if step >= reach {
+                break;
+            }
+            path += step;
+            anchor -= 1;
+            steps += 1;
+        }
+        if steps >= 2 && anchor >= 1 {
+            let chord = dist(anchor, end);
+            let (incoming_x, incoming_y) = at(anchor);
+            let (before_x, before_y) = at(anchor - 1);
+            let (tip_x, tip_y) = at(end);
+            let (prev_x, prev_y) = at(end - 1);
+            let (in_x, in_y) = (incoming_x - before_x, incoming_y - before_y);
+            let (out_x, out_y) = (tip_x - prev_x, tip_y - prev_y);
+            let in_len = in_x.hypot(in_y);
+            let out_len = out_x.hypot(out_y);
+            let cos = if in_len > 0.01 && out_len > 0.01 {
+                (in_x * out_x + in_y * out_y) / (in_len * out_len)
+            } else {
+                1.0
+            };
+            if chord <= reach && path > chord * 1.35 && path > chord + 1.25 && cos <= 0.2 {
+                end = anchor;
+            }
+        }
+    }
+    end
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ink_quick_turn_keep, InkPoint};
+
+    fn pts(coords: &[(f64, f64)]) -> Vec<InkPoint> {
+        coords
+            .iter()
+            .map(|(x, y)| InkPoint {
+                x: *x,
+                y: *y,
+                pressure: 0.5,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_lift_hook_inside_the_nib_is_not_painted() {
+        let points = pts(&[
+            (0.0, 0.0),
+            (30.0, 0.0),
+            (60.0, 0.0),
+            (62.0, 2.0),
+            (62.0, 4.0),
+            (60.0, 5.0),
+            (58.0, 4.0),
+            (58.0, 2.0),
+        ]);
+        assert_eq!(ink_quick_turn_keep(&points, 1.0, 1.0, 6.0), 2);
+        let kept = ink_quick_turn_keep(&points, 1.0, 1.0, 6.0);
+        assert_eq!(ink_quick_turn_keep(&points[..=kept], 1.0, 1.0, 6.0), kept);
+    }
+
+    #[test]
+    fn a_long_corner_and_a_forward_tail_stay() {
+        let corner = pts(&[(0.0, 0.0), (120.0, 0.0), (120.0, 80.0)]);
+        assert_eq!(ink_quick_turn_keep(&corner, 1.0, 1.0, 6.0), 2);
+        let slow = pts(&[
+            (0.0, 0.0),
+            (20.0, 0.0),
+            (22.0, 0.0),
+            (24.0, 0.0),
+            (26.0, 0.0),
+        ]);
+        assert_eq!(ink_quick_turn_keep(&slow, 1.0, 1.0, 6.0), 4);
+        let tap = pts(&[(1.0, 1.0)]);
+        assert_eq!(ink_quick_turn_keep(&tap, 1.0, 1.0, 6.0), 0);
+        let dash = pts(&[(0.0, 0.0), (10.0, 0.0)]);
+        assert_eq!(ink_quick_turn_keep(&dash, 1.0, 1.0, 6.0), 1);
+    }
+}

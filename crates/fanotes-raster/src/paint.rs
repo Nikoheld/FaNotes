@@ -16,9 +16,9 @@ use tiny_skia::{
 
 use crate::blur::{blur_alpha, blur_reach};
 use crate::stroke::{
-    brush_passes, clamp, ink_brush_of, ink_opacity_of, ink_stroke_bitmap_width,
-    ink_stroke_is_translucent, ink_stroke_paint_margin, ink_stroke_paint_scale, js_round,
-    opaque_pass, seeded_unit, Brush, Effect, InkStroke, Pass,
+    brush_passes, clamp, ink_brush_of, ink_opacity_of, ink_quick_turn_keep,
+    ink_stroke_bitmap_width, ink_stroke_is_translucent, ink_stroke_paint_margin,
+    ink_stroke_paint_scale, js_round, opaque_pass, seeded_unit, Brush, Effect, InkStroke, Pass,
 };
 
 /// Circle and ellipse quadrants as cubic Béziers.
@@ -575,6 +575,11 @@ impl Strokes<'_> {
         alpha: f64,
     ) {
         for index in self.first_segment..self.last_segment {
+            let previous = index - 1;
+            if (self.px(index) - self.px(previous)).hypot(self.py(index) - self.py(previous)) < 0.2
+            {
+                continue;
+            }
             let (ox, oy) = self.pass_offset(pass, pass_index, index);
             ctx.state.alpha = alpha;
             ctx.begin_path();
@@ -758,6 +763,32 @@ pub fn draw_ink_stroke(
     if count == 0 || !(width > 0.0) || !(height > 0.0) {
         return;
     }
+    let layout = if layout_width > 1.0 {
+        layout_width
+    } else {
+        width
+    };
+    let scale = ink_stroke_paint_scale(width, if layout > 1.0 { layout } else { source_width });
+    // Stored points stay intact. A paint that includes the current end drops
+    // a lift hook inside the nib, once.
+    let shortened;
+    let mut end_segment = end_segment;
+    let stroke = if end_segment >= count && count > 1 && !stroke.has_symbol() {
+        let nib = ink_stroke_bitmap_width(stroke, stroke.points[count - 1].pressure, scale);
+        let keep = ink_quick_turn_keep(&stroke.points, width, height, nib);
+        if keep + 1 < count {
+            let mut copy = stroke.clone();
+            copy.points.truncate(keep + 1);
+            end_segment = end_segment.min(keep + 1);
+            shortened = copy;
+            &shortened
+        } else {
+            stroke
+        }
+    } else {
+        stroke
+    };
+    let count = stroke.points.len();
     let last_segment = end_segment.min(count);
     if count > 1 && last_segment <= start_segment.max(1) {
         return;
@@ -765,12 +796,6 @@ pub fn draw_ink_stroke(
     if count == 1 && start_segment > 1 {
         return;
     }
-    let layout = if layout_width > 1.0 {
-        layout_width
-    } else {
-        width
-    };
-    let scale = ink_stroke_paint_scale(width, if layout > 1.0 { layout } else { source_width });
     let brush = ink_brush_of(stroke);
     let opacity = ink_opacity_of(stroke);
     let mut ctx = Ctx::new(origin, stroke_ink(stroke, width, height));
