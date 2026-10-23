@@ -21,7 +21,8 @@ const bugReport = fs.readFileSync(path.join(root, 'src', 'lib', 'bugReport.ts'),
 const settingsModal = fs.readFileSync(path.join(root, 'src', 'components', 'SettingsModal.tsx'), 'utf8')
 const pdfInk = fs.readFileSync(path.join(root, 'src', 'lib', 'pdfInkHit.ts'), 'utf8')
 const overlayInteract = fs.readFileSync(path.join(root, 'src', 'lib', 'overlayInteract.ts'), 'utf8')
-const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow, inkPaint, paperCanvas, defaults, appSource, drafting, bugReport, settingsModal, pdfInk, overlayInteract].join('\n')
+const penPointer = fs.readFileSync(path.join(root, 'src', 'lib', 'penPointer.ts'), 'utf8')
+const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow, inkPaint, paperCanvas, defaults, appSource, drafting, bugReport, settingsModal, pdfInk, overlayInteract, penPointer].join('\n')
 
 const requiredBrushes = ['fineliner', 'pencil', 'marker', 'paintbrush', 'calligraphy', 'highlighter', 'watercolor', 'spray']
 const requiredEffects = ['solid', 'rainbow', 'aurora', 'sunset', 'ocean', 'gold', 'silver', 'neon']
@@ -68,7 +69,9 @@ const safeguards = [
   ["const DRAWING_INK_SURFACE_SELECTOR = '.lw-canvas-surface, .lw-tablet-canvas, .lw-drawing-board.is-inline.is-input-active'", 'Inline-Overlay und Tintenfläche zählen als Stiftziel'],
   ['lw-canvas-surface ${paintToolClass}', 'Stiftfläche trägt dieselbe Werkzeugklasse wie die Leinwand'],
   ['lw-canvas-surface.tool-pen,.lw-canvas-surface.tool-art', 'Mal-Cursor ist ein kleiner Punkt auf der Fläche, die den Zeiger empfängt'],
-  ['cursor:url("data:image/svg+xml', 'Punkt-Cursor liegt auf dem Stift und den Pinseln'],
+  ['cursor:none}.lw-pen-pointer', 'Punktcursor ist ein Vektor, kein skaliertes Bitmap'],
+  ['mountPenPointer', 'Punktcursor folgt dem Zeiger in der Seite'],
+  ['shape-rendering="geometricPrecision"', 'Punktcursor wird in Gerätepixeln scharf gezeichnet'],
   ['DRAWING_MODAL_CHROME_SELECTOR', 'Text-zu-Handschrift-Dialog bleibt Chrome auf dem Inline-Blatt'],
   ['drawingChromeFromHit', 'Chrome-Hit-Test für Dialoge auf dem Inline-Blatt'],
   ['position:fixed;z-index:80;top:78px;right:16px', 'Konvertierungs-Panel bleibt im Viewport'],

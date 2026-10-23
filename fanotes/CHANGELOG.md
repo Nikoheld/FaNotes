@@ -3,6 +3,7 @@
 ## 2026.10.12-beta.3
 
 - Tighten the top bar and drop the controls that appeared twice.
+- Draw the handwriting dot as a vector in the page, so it stays sharp on a high-resolution screen.
 
 ## 2026.10.12-beta.2
 
