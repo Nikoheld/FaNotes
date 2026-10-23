@@ -45,6 +45,28 @@ export const isMathFigureId = (value: unknown): value is MathFigureId => (
   typeof value === 'string' && FIGURE_ID_SET.has(value)
 )
 
+/** Stroke inside the 24×24 stamp before a figure had its own line thickness. */
+export const FIGURE_ICON_STROKE = 1.75
+/** Line thickness in page units. Size scales the stamp; this stays put. */
+export const FIGURE_LINE_MIN = 0.5
+export const FIGURE_LINE_MAX = 36
+export const FIGURE_LINE_STEP = 0.25
+
+const snapFigureLine = (value: number) => (
+  Math.round(Math.round(value / FIGURE_LINE_STEP) * FIGURE_LINE_STEP * 100) / 100
+)
+
+/** The thickness a figure of `size` page units had when the stroke was fixed at 1.75. */
+export const figureLineWidthForSize = (size: number) => (
+  snapFigureLine(FIGURE_ICON_STROKE * size / 24)
+)
+
+export const clampFigureLineWidth = (value: unknown, fallback: number) => {
+  const number = typeof value === 'number' ? value : Number(value)
+  const raw = Number.isFinite(number) ? number : fallback
+  return snapFigureLine(Math.min(FIGURE_LINE_MAX, Math.max(FIGURE_LINE_MIN, raw)))
+}
+
 const yawPitch = (): MathFigureParam[] => [
   { id: 'yaw', label: 'Drehung', min: 0, max: 360, step: 1, value: 35 },
   { id: 'pitch', label: 'Neigung', min: -60, max: 60, step: 1, value: 24 },

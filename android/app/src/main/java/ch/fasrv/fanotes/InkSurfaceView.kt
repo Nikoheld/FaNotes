@@ -1584,7 +1584,9 @@ class InkSurfaceView @JvmOverloads constructor(
         return stroke.points.any { point ->
             val px = point.x * width
             val py = point.y * height
-            val pad = if (stroke.symbolId != null) stroke.baseWidth else 40.0
+            val pad = if (stroke.symbolId != null || stroke.figurePaths.isNotEmpty()) {
+                stroke.baseWidth + (stroke.figureLineWidth ?: 0.0)
+            } else 40.0
             px >= x - pad && px <= x + tile + pad && py >= y - pad && py <= y + tile + pad
         }
     }
@@ -1593,6 +1595,7 @@ class InkSurfaceView @JvmOverloads constructor(
         if (stroke.points.isEmpty()) return
         inkPaint.color = parseColor(stroke.color)
         inkPaint.alpha = 255
+        if (drawMathFigure(canvas, inkPaint, stroke, scale, sessionWidth(), sessionHeight())) return
         if (stroke.symbolId != null) {
             drawArtSymbol(canvas, inkPaint, stroke, scale, sessionWidth(), sessionHeight())
             return

@@ -25,6 +25,10 @@ const {
   normalizeToolMemory,
   saveToolMemory,
 } = await server.ssrLoadModule('/src/lib/toolMemory.ts')
+const { symbolStampLineWidth } = await server.ssrLoadModule('/src/lib/inkStrokePaint.ts')
+assert.equal(symbolStampLineWidth({ baseWidth: 120 }), 1.75)
+assert.equal(symbolStampLineWidth({ baseWidth: 120, figureLineWidth: 8.75 }), 1.75)
+assert.equal(symbolStampLineWidth({ baseWidth: 240, figureLineWidth: 8.75 }), 0.875)
 
 const fresh = loadToolMemory()
 assert.equal(fresh.eraserSize, 24)
@@ -33,6 +37,7 @@ assert.equal(fresh.inkMode, 'writing')
 assert.equal(fresh.figureId, 'cube')
 assert.equal(fresh.figureGroup, 'solid')
 assert.equal(fresh.figureSize, 120)
+assert.equal(fresh.figureLineWidth, 8.75)
 assert.equal(fresh.handwriting.fontSize, 42)
 assert.equal(fresh.handwriting.variation, 0.62)
 assert.equal(fresh.mathPlacement, 'auto')
@@ -49,6 +54,7 @@ saveToolMemory({
   figureParams: { yaw: 10, pitch: 24 },
   figureSize: 200,
   figureRotation: -15,
+  figureLineWidth: 4.5,
   mathPlacement: 'next-line',
 })
 
@@ -65,6 +71,7 @@ assert.equal(stored.inkMode, 'drawing')
 assert.equal(stored.symbolId, 'star')
 assert.equal(stored.figureSize, 200)
 assert.equal(stored.figureRotation, -15)
+assert.equal(stored.figureLineWidth, 4.5)
 assert.equal(stored.figureParams.yaw, 10)
 assert.equal(stored.mathPlacement, 'next-line')
 memory.set(TOOL_MEMORY_KEY, JSON.stringify({ ...JSON.parse(memory.get(TOOL_MEMORY_KEY)), figureId: 'cube', figureGroup: 'plane' }))
@@ -84,6 +91,7 @@ assert.equal(repaired.figureId, 'cube')
 assert.deepEqual(repaired.figureParams, defaultToolMemory().figureParams)
 assert.equal(repaired.figureSize, 320)
 assert.equal(repaired.figureRotation, 5)
+assert.equal(repaired.figureLineWidth, 23.25, 'a missing thickness follows the saved size')
 assert.equal(repaired.symbolId, null)
 assert.equal(repaired.handwriting.fontSize, 20)
 assert.equal(repaired.handwriting.variation, 1)
@@ -93,6 +101,7 @@ saveToolMemory({ figureId: 'circle' })
 const circle = loadToolMemory()
 assert.equal(circle.figureId, 'circle')
 assert.equal(circle.figureGroup, 'plane')
+assert.equal(circle.figureLineWidth, 4.5, 'switching figure keeps the line thickness')
 assert.equal(circle.eraserSize, 8, 'switching figure keeps the eraser size')
 assert.ok(!('yaw' in circle.figureParams), 'a plane figure does not keep a solid angle')
 
@@ -101,6 +110,8 @@ const dialog = readFileSync(new URL('../src/components/TextToHandwritingDialog.t
 assert.match(board, /const \[initialToolMemory\] = useState\(loadToolMemory\)/)
 assert.match(board, /useState\(initialToolMemory\.eraserSize\)/)
 assert.match(board, /useState<MathFigureId>\(initialToolMemory\.figureId\)/)
+assert.match(board, /aria-label="Linienstärke der Figur"/)
+assert.match(board, /figureLineWidth,/)
 assert.match(board, /artSymbolIds\.has\(initialToolMemory\.symbolId as ArtSymbolId\)/)
 assert.match(board, /saveToolMemory\(\{/)
 assert.match(board, /eraserSize,/)

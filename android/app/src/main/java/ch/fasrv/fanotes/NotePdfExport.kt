@@ -385,6 +385,7 @@ private fun drawStroke(canvas: Canvas, stroke: InkStroke, sourceWidth: Double, s
     if (stroke.points.isEmpty()) return
     paint.color = parsePdfColor(stroke.color)
     paint.alpha = 255
+    if (drawMathFigure(canvas, paint, stroke, scale, sourceWidth, sourceHeight)) return
     if (stroke.symbolId != null) {
         drawArtSymbol(canvas, paint, stroke, scale, sourceWidth, sourceHeight)
         return

@@ -1,6 +1,8 @@
 import {
+  clampFigureLineWidth,
   clampFigureParams,
   defaultFigureParams,
+  figureLineWidthForSize,
   isMathFigureId,
   mathFigureById,
   type MathFigureGroup,
@@ -37,6 +39,8 @@ export type ToolMemory = {
   figureParams: Record<string, number>
   figureSize: number
   figureRotation: number
+  /** Page units. Independent of `figureSize`, so a larger stamp can keep a thin line. */
+  figureLineWidth: number
   figureGroup: MathFigureGroup
   handwriting: HandwritingToolMemory
   mathPlacement: ToolMemoryMathPlacement
@@ -70,6 +74,7 @@ export const defaultToolMemory = (): ToolMemory => ({
   figureParams: defaultFigureParams(DEFAULT_FIGURE_ID),
   figureSize: 120,
   figureRotation: 0,
+  figureLineWidth: figureLineWidthForSize(120),
   figureGroup: mathFigureById(DEFAULT_FIGURE_ID).group,
   handwriting: defaultHandwritingToolMemory(),
   mathPlacement: 'auto',
@@ -98,6 +103,7 @@ export const normalizeToolMemory = (raw: unknown): ToolMemory => {
   const source = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
   const defaults = defaultToolMemory()
   const figureId = isMathFigureId(source.figureId) ? source.figureId : defaults.figureId
+  const figureSize = snap(Math.round(clampNumber(source.figureSize, 40, 320, defaults.figureSize)), 2)
   const mathPlacement = source.mathPlacement === 'same-line' || source.mathPlacement === 'next-line'
     ? source.mathPlacement
     : defaults.mathPlacement
@@ -108,8 +114,9 @@ export const normalizeToolMemory = (raw: unknown): ToolMemory => {
     symbolId: readSymbolId(source.symbolId),
     figureId,
     figureParams: clampFigureParams(figureId, source.figureParams),
-    figureSize: snap(Math.round(clampNumber(source.figureSize, 40, 320, defaults.figureSize)), 2),
+    figureSize,
     figureRotation: snap(Math.round(clampNumber(source.figureRotation, -180, 180, defaults.figureRotation)), 5),
+    figureLineWidth: clampFigureLineWidth(source.figureLineWidth, figureLineWidthForSize(figureSize)),
     figureGroup: mathFigureById(figureId).group,
     handwriting: readHandwriting(source.handwriting),
     mathPlacement,

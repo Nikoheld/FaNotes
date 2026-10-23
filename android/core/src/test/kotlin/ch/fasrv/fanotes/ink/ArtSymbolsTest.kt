@@ -59,6 +59,28 @@ class ArtSymbolsTest {
     }
 
     @Test
+    fun figureLineWidthStaysIndependentOfStampSize() {
+        assertEquals(1.75, figureStampStrokeWidth(120.0, null))
+        assertEquals(1.75, figureStampStrokeWidth(240.0, 17.5))
+        assertEquals(3.5, figureStampStrokeWidth(120.0, 17.5))
+        val stroke = InkStroke(
+            points = listOf(StrokePoint(0.5, 0.4, 1.0, 0.5, 0.0, 0.0, "pen")),
+            baseWidth = 120.0,
+            pressureEnabled = false,
+            color = "#202333",
+            purpose = "art",
+            symbolRotation = 15.0,
+            figureLineWidth = 8.75,
+            figurePaths = listOf("M4 4 L20 20"),
+        )
+        val document = newInkDocument("Figuren", "blank", "2026-01-01T00:00:00.000Z").copy(strokes = listOf(stroke))
+        val restored = parseInkDocument(document.toJson(), "Figuren", "blank", "2026-01-01T00:00:00.000Z")
+        assertEquals(8.75, restored.strokes.single().figureLineWidth)
+        assertEquals(listOf("M4 4 L20 20"), restored.strokes.single().figurePaths)
+        assertEquals(15.0, restored.strokes.single().symbolRotation)
+    }
+
+    @Test
     fun sprayUsesTheDesktopParticleCount() {
         val dots = sprayDots(0.0, 0.0, 10.0, 0.0, 5.0, 10.0, 1, 0, 1.0)
         assertEquals(7, dots.size)
