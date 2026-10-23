@@ -20,6 +20,8 @@ const {
   writeSharedZoomMaxPercent,
   readUsedSheetZoom,
   restorePaperAnchor,
+  paperZoomPreviewStyle,
+  stepPaperZoomGesture,
   zoomAroundPoint,
   zoomFactorFromWheel,
   isSheetZoomWheel,
@@ -167,6 +169,24 @@ const math = () => {
   assert.match(paperView, /if \(firstTick\) onInterceptWheel\(event\)/)
   assert.match(paperView, /onSheetZoom/)
   assert.match(paperView, /sheetZoomStepFromDirection/)
+  assert.match(paperView, /pushZoomGestureRef\.current\(factor, origin\)/)
+  assert.match(paperView, /applyPaperZoomGestureFrame/)
+  let gesture = {
+    baseZoom: 1,
+    zoom: 1,
+    rotation: 0,
+    origin: { x: 10, y: 20 },
+    anchorLocalX: 40,
+    anchorLocalY: 80,
+  }
+  gesture = stepPaperZoomGesture(gesture, zoomIn)
+  const preview = paperZoomPreviewStyle(gesture)
+  assert.equal(preview.transform, `scale(${gesture.zoom})`)
+  assert.equal(preview.transformOrigin, '40px 80px')
+  assert.equal(gesture.anchorLocalX, 40)
+  const stepped = stepPaperZoomGesture(gesture, zoomIn)
+  assert.ok(stepped.zoom > gesture.zoom)
+  assert.equal(paperZoomPreviewStyle({ ...gesture, zoom: gesture.baseZoom }).scale, 1)
   const first = clampViewZoom(1 * zoomIn)
   const second = clampViewZoom(1 * zoomIn)
   assert.equal(first, second, 'the same wheel input must yield the same next zoom')

@@ -16,6 +16,7 @@ const {
   MAX_PDF_DPR,
   MAX_PDF_EDGE,
   MAX_PDF_PIXELS,
+  PDF_FULL_PAGE_PIXEL_BUDGET,
   paintSizeForPage,
   pdfPaintDeviceScale,
   planPdfPagePaint,
@@ -82,7 +83,51 @@ const runOnce = () => {
     { baseKey: '', detail: null },
   )
   assert.ok(base.base, 'first plan paints the base')
+  assert.equal(base.base.key.includes('|window'), false, 'A4 at 2× stays a full-page base')
   assert.equal(base.detail, 'drop', 'no detail layer at 100%')
+  const fullA4 = base.base.box.pixelWidth * base.base.box.pixelHeight
+  assert.ok(fullA4 <= PDF_FULL_PAGE_PIXEL_BUDGET, 'A4 at 2× stays inside the full-page budget')
+
+  // A long page at 2× is tens of megapixels. The base is the visible window,
+  // and it stays until the viewport leaves that window.
+  const tall = { width: 900, height: 8_000 }
+  const tallView = {
+    viewWidth: 1000,
+    viewHeight: 800,
+    scrollLeft: 0,
+    scrollTop: 2_000,
+    pageOffsetLeft: 0,
+    pageOffsetTop: 0,
+  }
+  const tallPlan = planPdfPagePaint(
+    { cssWidth: tall.width, cssHeight: tall.height, rotation: 0, dpr: 2, viewZoom: 1, view: tallView },
+    { baseKey: '', detail: null },
+  )
+  assert.ok(tallPlan.base, 'a long page paints a base')
+  assert.match(tallPlan.base.key, /\|window$/)
+  assert.ok(tallPlan.base.box.cssHeight < tall.height * 0.5, 'the long-page base is a window, not the sheet')
+  assert.ok(
+    tallPlan.base.box.pixelWidth * tallPlan.base.box.pixelHeight < tall.width * 2 * tall.height * 2 * 0.5,
+    'the long-page base allocates far fewer pixels than the sheet',
+  )
+  assert.equal(tallPlan.detail, 'drop')
+  const tallStay = planPdfPagePaint(
+    { cssWidth: tall.width, cssHeight: tall.height, rotation: 0, dpr: 2, viewZoom: 1, view: tallView },
+    { baseKey: tallPlan.base.key, baseBox: tallPlan.base.box, detail: null },
+  )
+  assert.equal(tallStay.base, null, 'scrolling inside the painted window keeps the base')
+  const tallMove = planPdfPagePaint(
+    {
+      cssWidth: tall.width,
+      cssHeight: tall.height,
+      rotation: 0,
+      dpr: 2,
+      viewZoom: 1,
+      view: { ...tallView, scrollTop: 6_000 },
+    },
+    { baseKey: tallPlan.base.key, baseBox: tallPlan.base.box, detail: null },
+  )
+  assert.ok(tallMove.base, 'leaving the painted window plans a new base')
   const zoomedPlan = planPdfPagePaint(
     {
       cssWidth: A4.width,

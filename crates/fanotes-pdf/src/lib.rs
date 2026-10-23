@@ -1,15 +1,17 @@
 //! PDFium page rasters for the paper camera.
 //!
-//! A page is rendered at the camera's pixel size, then clipped to the paint
-//! window the PDF painter already planned (`planPdfPagePaint`). pdf.js keeps
-//! the selectable text layer; this crate only supplies pixels.
+//! A window paints only its own pixels. The full page is rendered only when the
+//! window is the page, or when a viewer rotation still needs the upright bitmap.
+//! pdf.js keeps the selectable text layer; this crate only supplies pixels.
 
 mod protocol;
 
 use std::sync::{Mutex, OnceLock};
 
 use base64::Engine;
-use pdfium_bundled::pdfium_render::prelude::{PdfBitmap, Pdfium};
+use pdfium_bundled::pdfium_render::prelude::{
+    PdfBitmap, PdfBitmapFormat, PdfDocument, PdfPage, PdfRenderConfig, Pdfium,
+};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -109,6 +111,40 @@ pub fn parse_vault_request(value: &Value) -> Result<(String, RenderRequest), Err
     Ok((parsed.path, parsed.job))
 }
 
+/// A parsed document. The sidecar keeps one of these per open file so a large
+/// PDF is not read and parsed again on every scroll.
+pub struct OpenedPdf {
+    document: PdfDocument<'static>,
+}
+
+/// Parse `bytes` once. The document keeps the buffer.
+pub fn open_pdf(bytes: Vec<u8>, password: &str) -> Result<OpenedPdf, Error> {
+    if bytes.is_empty() || bytes.len() > MAX_PDF_BYTES {
+        return Err(Error::Open(
+            "Die PDF-Datei ist leer oder zu groß.".to_owned(),
+        ));
+    }
+    let _render = RENDER.lock().unwrap_or_else(|error| error.into_inner());
+    let pdfium = library()?;
+    let password = truncate_utf16(password, 1024);
+    let password = if password.is_empty() {
+        None
+    } else {
+        Some(password.as_str())
+    };
+    let document = pdfium
+        .load_pdf_from_byte_vec(bytes, password)
+        .map_err(|error| Error::Open(error.to_string()))?;
+    Ok(OpenedPdf { document })
+}
+
+/// Rasterize one page of an already open document.
+pub fn render_opened(opened: &OpenedPdf, request: &RenderRequest) -> Result<PageBitmap, Error> {
+    validate_request(request)?;
+    let _render = RENDER.lock().unwrap_or_else(|error| error.into_inner());
+    render_document(&opened.document, request)
+}
+
 /// Rasterize one page to `request`'s bitmap size. PDFium paints the upright
 /// page; a 90/180/270 viewer rotation is applied to those pixels so the crop
 /// window matches the paper camera. Pixels outside the page are white.
@@ -130,6 +166,13 @@ pub fn render_pdf_page(pdf: &[u8], request: &RenderRequest) -> Result<PageBitmap
     let document = pdfium
         .load_pdf_from_byte_slice(pdf, password)
         .map_err(|error| Error::Open(error.to_string()))?;
+    render_document(&document, request)
+}
+
+fn render_document(
+    document: &PdfDocument<'_>,
+    request: &RenderRequest,
+) -> Result<PageBitmap, Error> {
     let pages = document.pages();
     if request.page_index < 0 || request.page_index >= pages.len() {
         return Err(Error::Page);
@@ -138,6 +181,12 @@ pub fn render_pdf_page(pdf: &[u8], request: &RenderRequest) -> Result<PageBitmap
         .get(request.page_index)
         .map_err(|error| Error::Render(error.to_string()))?;
     let rotation = normalized_rotation(request.rotation)?;
+    // A crop at rotation 0 is painted straight into the window bitmap. Rendering
+    // the whole page first (tens of megapixels on a zoomed sheet) is what made
+    // a large PDF stall on every scroll.
+    if rotation == 0 && !window_is_full_page(request) {
+        return render_window(&page, request);
+    }
     let (src_w, src_h) = match rotation {
         90 | 270 => (request.page_pixel_height, request.page_pixel_width),
         _ => (request.page_pixel_width, request.page_pixel_height),
@@ -169,6 +218,43 @@ pub fn render_pdf_page(pdf: &[u8], request: &RenderRequest) -> Result<PageBitmap
         width: request.pixel_width as u32,
         height: request.pixel_height as u32,
         rgba,
+    })
+}
+
+fn window_is_full_page(request: &RenderRequest) -> bool {
+    request.origin_x <= 0
+        && request.origin_y <= 0
+        && request.origin_x.saturating_add(request.pixel_width) >= request.page_pixel_width
+        && request.origin_y.saturating_add(request.pixel_height) >= request.page_pixel_height
+}
+
+/// Paint `page` at the full page pixel size, shifted so `origin` lands on the
+/// window bitmap. PDFium clips to that bitmap, so the rest of the page is not
+/// allocated.
+fn render_window(page: &PdfPage<'_>, request: &RenderRequest) -> Result<PageBitmap, Error> {
+    let mut bitmap = PdfBitmap::empty(
+        request.pixel_width,
+        request.pixel_height,
+        PdfBitmapFormat::default(),
+    )
+    .map_err(|error| Error::Render(error.to_string()))?;
+    let config = PdfRenderConfig::new()
+        .set_target_size(request.page_pixel_width, request.page_pixel_height)
+        .set_origin(
+            request.origin_x.saturating_neg(),
+            request.origin_y.saturating_neg(),
+        );
+    page.render_into_bitmap_with_config(&mut bitmap, &config)
+        .map_err(|error| Error::Render(error.to_string()))?;
+    if bitmap.width() != request.pixel_width || bitmap.height() != request.pixel_height {
+        return Err(Error::Render(
+            "PDFium hat nicht die angeforderte Fenstergröße geliefert.".to_owned(),
+        ));
+    }
+    Ok(PageBitmap {
+        width: request.pixel_width as u32,
+        height: request.pixel_height as u32,
+        rgba: tight_rgba(&bitmap)?,
     })
 }
 

@@ -9,6 +9,7 @@
 - Set the line thickness of a math figure separately from its size.
 - Keep PDF text selection on the words under the pointer. A drag no longer jumps across the gaps between glyph runs, and the selectable layer uses the same box as the page.
 - Keep the paper still when two fingers twist. Pinch, pan, the turn buttons and Alt+wheel still turn or zoom the sheet.
+- A large PDF on Linux and Windows rasters only the visible window and keeps the document open. Zoom scales on the compositor until the gesture stops.
 
 ## 2026.10.12-beta.2
 

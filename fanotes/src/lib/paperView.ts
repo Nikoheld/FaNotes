@@ -465,6 +465,87 @@ export const centrePageInViewportIfFits = (scroller: HTMLElement | null, sheet: 
  * One camera zoom: CSS zoom on the sheet plane, pan as native scroller offset.
  * Capture the paper point under the origin, apply zoom, restore that point.
  */
+export const PAPER_ZOOM_GESTURE_SETTLE_MS = 80
+
+/**
+ * A wheel or pinch burst. `zoom` is the camera the gesture has reached;
+ * `baseZoom` is the CSS zoom still on the sheet. Frames in between are a
+ * compositor scale around the anchor, so the page does not reflow per tick.
+ */
+export type PaperZoomGesture = {
+  baseZoom: number
+  zoom: number
+  rotation: number
+  origin: { x: number; y: number }
+  anchorLocalX: number
+  anchorLocalY: number
+}
+
+export const beginPaperZoomGesture = (
+  scroller: HTMLElement,
+  sheet: HTMLElement | null,
+  view: PaperViewSnapshot,
+  origin: { x: number; y: number },
+): PaperZoomGesture => {
+  const plane = resolvePaperViewTarget(sheet, scroller) ?? sheet
+  const anchor = capturePaperAnchor(scroller, plane, origin)
+  return {
+    baseZoom: Math.max(0.01, view.zoom),
+    zoom: view.zoom,
+    rotation: view.rotation,
+    origin,
+    anchorLocalX: anchor.localX,
+    anchorLocalY: anchor.localY,
+  }
+}
+
+/** Multiply the running zoom. The anchor stays the point captured at the start. */
+export const stepPaperZoomGesture = (gesture: PaperZoomGesture, factor: number): PaperZoomGesture => ({
+  ...gesture,
+  zoom: clampViewZoom(gesture.zoom * factor),
+})
+
+/**
+ * Scale around the unzoomed paper point. Chromium treats transform-origin
+ * lengths as CSS px before `zoom`, which is the same space as `anchor.localX`.
+ */
+export const paperZoomPreviewStyle = (
+  gesture: Pick<PaperZoomGesture, 'baseZoom' | 'zoom' | 'anchorLocalX' | 'anchorLocalY'>,
+) => {
+  const scale = gesture.zoom / Math.max(0.01, gesture.baseZoom)
+  return {
+    scale,
+    transform: `scale(${scale})`,
+    transformOrigin: `${gesture.anchorLocalX}px ${gesture.anchorLocalY}px`,
+  }
+}
+
+/** False when the sheet is rotated: one transform-origin cannot serve both. */
+export const applyPaperZoomGestureFrame = (plane: HTMLElement | null, gesture: PaperZoomGesture) => {
+  if (!plane || gesture.rotation !== 0) return false
+  const preview = paperZoomPreviewStyle(gesture)
+  if (Math.abs(preview.scale - 1) < 0.0005) {
+    clearPaperZoomGestureFrame(plane, gesture.rotation)
+    return true
+  }
+  plane.style.transformOrigin = preview.transformOrigin
+  plane.style.transform = preview.transform
+  plane.style.willChange = 'transform'
+  return true
+}
+
+export const clearPaperZoomGestureFrame = (plane: HTMLElement | null, rotation: number) => {
+  if (!plane) return
+  plane.style.willChange = 'auto'
+  if (rotation) {
+    plane.style.transform = `rotate(${rotation}deg)`
+    plane.style.transformOrigin = 'center center'
+  } else {
+    plane.style.removeProperty('transform')
+    plane.style.removeProperty('transform-origin')
+  }
+}
+
 export const applyPaperZoomStayPut = (
   scroller: HTMLElement | null,
   paper: HTMLElement | null,
