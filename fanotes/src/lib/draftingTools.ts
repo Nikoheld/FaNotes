@@ -13,12 +13,12 @@ export const MM_PER_INCH = 25.4
 const MM_PER_SOURCE_PX = A4_WIDTH_MM / SOURCE_A4_PX
 
 export const RULER_LENGTH_MM = 160
-export const RULER_MIN_LENGTH_MM = 50
+export const RULER_MIN_LENGTH_MM = 20
 export const RULER_MAX_LENGTH_MM = 500
-export const RULER_LENGTH_PRESETS_MM = [100, 150, 160, 200, 300]
+export const RULER_LENGTH_PRESETS_MM = [30, 50, 100, 150, 200, 300]
 /** Default width of the ruler body, across the two drawing edges. */
 export const RULER_WIDTH_MM = 26
-export const RULER_MIN_WIDTH_MM = 16
+export const RULER_MIN_WIDTH_MM = 10
 export const RULER_MAX_WIDTH_MM = 80
 export const RULER_WIDTH_PRESETS_MM = [18, 26, 40, 60]
 /** Default body width. Geometry reads `rulerWidth(pose)`; this stays for callers that mean the default. */
@@ -39,7 +39,7 @@ export const SNAP_MM = 3.2
 export const ATTACH_DISTANCE_MM = 7
 export const ATTACH_ANGLE_RAD = 10 * Math.PI / 180
 
-export const COMPASS_MIN_RADIUS_MM = 3
+export const COMPASS_MIN_RADIUS_MM = 1
 export const COMPASS_MAX_RADIUS_MM = 200
 export const COMPASS_DEFAULT_RADIUS_MM = 35
 export const COMPASS_ARC_PRESETS_DEG = [30, 45, 60, 90, 180, 270]
@@ -670,6 +670,58 @@ export const distanceToDrawingEdgeMm = (
  * along it, not to move the tool; further inside, the body is a handle.
  */
 export const PEN_EDGE_ZONE_MM = 6
+
+/**
+ * Pen zone on a ruler edge. A narrow ruler keeps a strip in the middle for
+ * grabbing: the zone shrinks instead of eating the whole body.
+ */
+export const penEdgeZoneForWidth = (widthMm: number) => {
+  const half = Math.max(0, widthMm) / 2
+  return Math.min(PEN_EDGE_ZONE_MM, Math.max(0, half - 1.5))
+}
+
+/** Page scale at which grips are the size they were designed at (9 px handles). */
+const CHROME_REFERENCE_PX_PER_MM = 3.8
+
+export type DraftingChrome = {
+  /** 1 is a normal tool on a normal page. Smaller tools and pages scale down together. */
+  scale: number
+  handle: number
+  arm: number
+  tick: number
+  fontFloor: number
+}
+
+/**
+ * Screen chrome for a drafting tool.
+ * `spanPx` is the tool's short side (ruler: the smaller of length and width;
+ * compass: the radius). Past a point a fixed grip is bigger than the tool and
+ * the shape reads as a squashed block, so the grip follows the span.
+ */
+export const draftingChrome = (pxPerMm: number, spanPx: number): DraftingChrome => {
+  const px = Number.isFinite(pxPerMm) && pxPerMm > 0 ? pxPerMm : CHROME_REFERENCE_PX_PER_MM
+  const span = Number.isFinite(spanPx) && spanPx > 0 ? spanPx : 160
+  const page = Math.min(1.2, Math.max(0.34, px / CHROME_REFERENCE_PX_PER_MM))
+  const fit = Math.min(1, Math.max(0.22, span / 78))
+  const scale = Math.min(page, fit)
+  return {
+    scale,
+    handle: 9 * scale,
+    arm: Math.min(10 * scale, Math.max(2 * scale, span * 0.14)),
+    tick: 8 * scale,
+    fontFloor: 7 * scale,
+  }
+}
+
+/** Finest tick level that still has a gap on screen. 0 = every minor tick. */
+export const visibleTickLevel = (pxPerMm: number, unit: DraftingUnit): 0 | 1 | 2 => {
+  const px = Math.max(0, pxPerMm)
+  const minorMm = unit === 'in' ? MM_PER_INCH / 16 : 1
+  const midMm = unit === 'in' ? MM_PER_INCH / 4 : 5
+  if (px * minorMm >= 3.1) return 0
+  if (px * midMm >= 3.1) return 1
+  return 2
+}
 
 export const rulerDrawingEdges = (pose: DraftingPose, sourceWidth: number, sourceHeight: number): DraftingEdge[] => (
   rulerLocalLines(pose).map((line) => localLineToEdge(line, pose, sourceWidth, sourceHeight))

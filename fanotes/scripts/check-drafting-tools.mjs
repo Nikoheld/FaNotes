@@ -13,6 +13,9 @@ const {
   ATTACH_DISTANCE_MM,
   DEFAULT_DRAFTING_SETTINGS,
   PEN_EDGE_ZONE_MM,
+  draftingChrome,
+  penEdgeZoneForWidth,
+  visibleTickLevel,
   RULER_HEIGHT_MM,
   RULER_LENGTH_MM,
   RULER_MAX_WIDTH_MM,
@@ -113,7 +116,19 @@ try {
   assert.equal(resizeRulerWidth(ruler, 500, W, H).widthMm, RULER_MAX_WIDTH_MM, 'the ruler cannot get wider than its maximum')
   assert.equal(resizeRulerWidth(ruler, 20.4, W, H).widthMm, 33, 'width snaps to whole millimetres')
   assert.equal(resizeRulerWidth(ruler, 20.4, W, H, true).widthMm, 33.5, 'Alt keeps half millimetres')
-  assert.ok(PEN_EDGE_ZONE_MM < RULER_MIN_WIDTH_MM / 2, 'the narrowest ruler still has a grab zone between the pen edge zones')
+  assert.ok(penEdgeZoneForWidth(RULER_MIN_WIDTH_MM) < RULER_MIN_WIDTH_MM / 2, 'the narrowest ruler still has a grab zone between the pen edge zones')
+  assert.equal(penEdgeZoneForWidth(RULER_WIDTH_MM), PEN_EDGE_ZONE_MM, 'a normal ruler keeps the full pen edge zone')
+  const normalChrome = draftingChrome(3.8, 160)
+  near(normalChrome.scale, 1, 1e-9, 'a full-size tool on a normal page keeps full-size grips')
+  const smallTool = draftingChrome(3.8, 16)
+  assert.ok(smallTool.scale < 0.3, 'a short tool shrinks its grips instead of covering the body')
+  assert.ok(smallTool.handle < normalChrome.handle, 'the grip radius follows the scale')
+  assert.ok(smallTool.arm < 10, 'the compass arm gets thinner with the radius')
+  const smallPage = draftingChrome(1.2, 160)
+  assert.ok(smallPage.scale < normalChrome.scale, 'a smaller page scales the grips down with the sheet')
+  assert.equal(visibleTickLevel(4, 'cm'), 0, 'millimetre ticks stay when they have room')
+  assert.equal(visibleTickLevel(1.5, 'cm'), 1, 'crowded millimetre ticks drop out before they smear')
+  assert.equal(visibleTickLevel(0.4, 'cm'), 2, 'a very small scale keeps the centimetre marks')
 
   // The sheet is 900 × 1273: a turned tool must keep its angle and length on the
   // paper, otherwise the snap edges shear away from the SVG that draws the tool.
