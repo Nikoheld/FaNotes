@@ -16,9 +16,10 @@ import { layoutOffsetInScroller, readUsedSheetZoom, resolvePaperZoomScroller } f
  * wipes the bitmap first — the old code did that on every scroll stop, so the
  * page went white until the worker finished. Here every layer owns two
  * canvases: the next bitmap is painted into the hidden one and swapped in
- * the same synchronous step that hides the old one. The base layer (whole
- * page at screen density) is never touched by scrolling or camera zoom; the
- * detail layer (camera zoom > 1, possibly a window of the page) sits on top
+ * the same synchronous step that hides the old one. The base layer (the whole
+ * page at screen density, or the visible window when that page is huge) stays
+ * while it still covers the camera. The detail layer (camera zoom > 1,
+ * possibly a window of the page) sits on top
  * and re-renders only once the viewport leaves the painted window.
  */
 export type PdfPageLayerCanvases = readonly [HTMLCanvasElement, HTMLCanvasElement]
@@ -55,7 +56,7 @@ export type PdfPagePainterOptions = {
   label: string
   /** Vault PDF for PDFium. The same paper camera still plans the bitmap. */
   pdfium?: () => PdfiumPageSource | null
-  /** After a base paint has been swapped in (text layer). Awaited in the render queue slot. */
+  /** After a base paint has been swapped in (text layer). Not awaited on the raster queue. */
   onBasePainted?: (info: PdfBasePaintInfo) => void | Promise<void>
   onFirstPaint?: () => void
 }
@@ -121,6 +122,7 @@ export const createPdfPagePainter = (options: PdfPagePainterOptions): PdfPagePai
   let rotation = 0
   let disposed = false
   let firstPaintSent = false
+  let pageCssWidth = 0
   for (const canvas of [...options.base, ...options.detail]) releaseCanvas(canvas)
 
   const cancelLayer = (layer: Layer) => {
@@ -169,7 +171,7 @@ export const createPdfPagePainter = (options: PdfPagePainterOptions): PdfPagePai
       context.fillStyle = '#ffffff'
       context.fillRect(0, 0, box.pixelWidth, box.pixelHeight)
       const showBack = async () => {
-        if (disposed || token !== layer.token) return
+        if (disposed || token !== layer.token) return false
         // One synchronous step: the new bitmap shows in the frame the old one hides.
         const front = layer.canvases[layer.front]
         placePdfCanvas(back, box, { cssWidth, cssHeight })
@@ -179,11 +181,15 @@ export const createPdfPagePainter = (options: PdfPagePainterOptions): PdfPagePai
         layer.key = job.key
         layer.box = box
         layer.pending = ''
-        if (afterSwap) await afterSwap()
         if (layer === base && !firstPaintSent) {
           firstPaintSent = true
           options.onFirstPaint?.()
         }
+        return true
+      }
+      const swapped = async () => {
+        if (!(await showBack()) || !afterSwap) return
+        void Promise.resolve(afterSwap()).catch(() => undefined)
       }
       const source = options.pdfium?.() ?? null
       if (source?.path) {
@@ -204,10 +210,8 @@ export const createPdfPagePainter = (options: PdfPagePainterOptions): PdfPagePai
         })
         if (bitmap && bitmap.length === box.pixelWidth * box.pixelHeight * 4 && token === layer.token) {
           try {
-            const pixels = new Uint8ClampedArray(bitmap.length)
-            pixels.set(bitmap)
-            context.putImageData(new ImageData(pixels, box.pixelWidth, box.pixelHeight), 0, 0)
-            await showBack()
+            context.putImageData(new ImageData(bitmap, box.pixelWidth, box.pixelHeight), 0, 0)
+            await swapped()
             return
           } catch {
             // pdf.js paints this window when the bitmap cannot be blitted.
@@ -225,7 +229,7 @@ export const createPdfPagePainter = (options: PdfPagePainterOptions): PdfPagePai
       layer.task = task
       try {
         await task.promise
-        await showBack()
+        await swapped()
       } catch (error: unknown) {
         if (token === layer.token) layer.pending = ''
         if (!isCancel(error)) console.error(`${label} konnte nicht gerendert werden.`, error)
@@ -235,10 +239,15 @@ export const createPdfPagePainter = (options: PdfPagePainterOptions): PdfPagePai
     })
   }
 
+  // The text layer is the whole page. A windowed base moves on scroll; rebuilding
+  // text for that move is what stalled the next raster.
+  let textStamp = ''
+
   const paint = async () => {
     if (disposed || !page) return
     const livePage = page
-    const cssWidth = stablePageCssWidth(host.clientWidth, base.box?.cssWidth ?? 0)
+    const cssWidth = stablePageCssWidth(host.clientWidth, pageCssWidth)
+    pageCssWidth = cssWidth
     if (cssWidth < 8) return
     const natural = livePage.getViewport({ scale: 1, rotation })
     const cssHeight = Math.max(1, Math.round(cssWidth * (natural.height / Math.max(1, natural.width))))
@@ -262,6 +271,7 @@ export const createPdfPagePainter = (options: PdfPagePainterOptions): PdfPagePai
         : null,
     }, {
       baseKey: base.key,
+      baseBox: base.box,
       detail: detail.key && detail.box ? { key: detail.key, box: detail.box } : null,
     })
 
@@ -272,13 +282,18 @@ export const createPdfPagePainter = (options: PdfPagePainterOptions): PdfPagePai
       if (base.box) placePdfCanvas(base.canvases[base.front], plan.base.box, { cssWidth, cssHeight })
       dropLayer(detail)
       const job = plan.base
-      paintLayer(base, job, livePage, cssWidth, cssHeight, natural.width, () => options.onBasePainted?.({
-        page: livePage,
-        cssWidth,
-        cssHeight,
-        naturalWidth: natural.width,
-        rotation,
-      }))
+      const stamp = `${cssWidth}x${cssHeight}:${rotation}`
+      paintLayer(base, job, livePage, cssWidth, cssHeight, natural.width, () => {
+        if (textStamp === stamp) return
+        textStamp = stamp
+        return options.onBasePainted?.({
+          page: livePage,
+          cssWidth,
+          cssHeight,
+          naturalWidth: natural.width,
+          rotation,
+        })
+      })
     }
     if (plan.detail === 'drop') {
       dropLayer(detail)
@@ -292,6 +307,8 @@ export const createPdfPagePainter = (options: PdfPagePainterOptions): PdfPagePai
     if (next !== page) {
       dropLayer(base)
       dropLayer(detail)
+      pageCssWidth = 0
+      textStamp = ''
     }
     page = next
     rotation = nextRotation

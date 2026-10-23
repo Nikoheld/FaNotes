@@ -9,7 +9,10 @@ use std::collections::{HashMap, VecDeque};
 use std::io::{self, BufReader, BufWriter, Write};
 use std::process::ExitCode;
 
-use fanotes_pdf::{read_frame, render_pdf_page, write_frame, Error, RenderRequest, MAX_PDF_BYTES};
+use fanotes_pdf::{
+    open_pdf, read_frame, render_opened, write_frame, Error, OpenedPdf, RenderRequest,
+    MAX_PDF_BYTES,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -44,7 +47,10 @@ struct RequestHeader {
 
 struct Docs {
     order: VecDeque<String>,
-    bytes: HashMap<String, Vec<u8>>,
+    /// Bytes waiting for the first render, which carries the password.
+    pending: HashMap<String, Vec<u8>>,
+    opened: HashMap<String, OpenedPdf>,
+    sizes: HashMap<String, usize>,
     total: usize,
 }
 
@@ -52,9 +58,20 @@ impl Docs {
     fn new() -> Self {
         Self {
             order: VecDeque::new(),
-            bytes: HashMap::new(),
+            pending: HashMap::new(),
+            opened: HashMap::new(),
+            sizes: HashMap::new(),
             total: 0,
         }
+    }
+
+    fn forget(&mut self, key: &str) {
+        if let Some(size) = self.sizes.remove(key) {
+            self.total = self.total.saturating_sub(size);
+        }
+        self.pending.remove(key);
+        self.opened.remove(key);
+        self.order.retain(|item| item != key);
     }
 
     fn insert(&mut self, key: String, bytes: Vec<u8>) -> Result<(), Error> {
@@ -63,23 +80,50 @@ impl Docs {
                 "Die PDF-Datei ist leer oder zu groß.".to_owned(),
             ));
         }
-        if let Some(previous) = self.bytes.remove(&key) {
-            self.total -= previous.len();
-            self.order.retain(|item| item != &key);
-        }
-        self.total += bytes.len();
+        self.forget(&key);
+        let size = bytes.len();
+        self.total += size;
         self.order.push_back(key.clone());
-        self.bytes.insert(key, bytes);
-        while self.order.len() > 1 && (self.bytes.len() > MAX_DOCS || self.total > MAX_CACHED_BYTES)
+        self.sizes.insert(key.clone(), size);
+        self.pending.insert(key, bytes);
+        self.evict();
+        Ok(())
+    }
+
+    fn evict(&mut self) {
+        while self.order.len() > 1 && (self.order.len() > MAX_DOCS || self.total > MAX_CACHED_BYTES)
         {
             let Some(oldest) = self.order.pop_front() else {
                 break;
             };
-            if let Some(dropped) = self.bytes.remove(&oldest) {
-                self.total -= dropped.len();
+            if let Some(size) = self.sizes.remove(&oldest) {
+                self.total = self.total.saturating_sub(size);
             }
+            self.pending.remove(&oldest);
+            self.opened.remove(&oldest);
         }
-        Ok(())
+    }
+
+    /// Parse on the first render and keep the document for the next window.
+    fn render(
+        &mut self,
+        key: &str,
+        password: &str,
+        request: &RenderRequest,
+    ) -> Result<fanotes_pdf::PageBitmap, Error> {
+        if !self.opened.contains_key(key) {
+            let Some(bytes) = self.pending.get(key).cloned() else {
+                return Err(Error::Open("Das PDF ist nicht geöffnet.".to_owned()));
+            };
+            let opened = open_pdf(bytes, password)?;
+            self.pending.remove(key);
+            self.opened.insert(key.to_owned(), opened);
+        }
+        let opened = self
+            .opened
+            .get(key)
+            .expect("the document was opened just above");
+        render_opened(opened, request)
     }
 }
 
@@ -113,19 +157,10 @@ fn handle(docs: &mut Docs, header: RequestHeader, payload: Vec<u8>) -> (Value, V
     let result = match header.op.as_str() {
         "open" => docs.insert(header.key, payload).map(|()| None),
         "close" => {
-            if let Some(bytes) = docs.bytes.remove(&header.key) {
-                docs.total -= bytes.len();
-                docs.order.retain(|item| item != &header.key);
-            }
+            docs.forget(&header.key);
             Ok(None)
         }
         "render" => {
-            let Some(bytes) = docs.bytes.get(&header.key) else {
-                return reply(
-                    header.id,
-                    Err(Error::Open("Das PDF ist nicht geöffnet.".to_owned())),
-                );
-            };
             let request = RenderRequest {
                 page_index: header.page_index,
                 pixel_width: header.pixel_width,
@@ -135,9 +170,10 @@ fn handle(docs: &mut Docs, header: RequestHeader, payload: Vec<u8>) -> (Value, V
                 origin_x: header.origin_x,
                 origin_y: header.origin_y,
                 rotation: header.rotation,
-                password: header.password,
+                password: header.password.clone(),
             };
-            render_pdf_page(bytes, &request).map(Some)
+            docs.render(&header.key, &header.password, &request)
+                .map(Some)
         }
         _ => Err(Error::Request),
     };

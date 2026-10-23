@@ -16,6 +16,12 @@ export const DEFAULT_PDF_PAGE_RATIO = 297 / 210
 export const MAX_PDF_DPR = 3
 export const MAX_PDF_EDGE = 16_384
 export const MAX_PDF_PIXELS = 48_000_000
+/**
+ * A full-page bitmap above this is painted as the visible window instead.
+ * An A4 sheet at 2× still fits; a long or zoomed page does not allocate the
+ * whole sheet on every scroll.
+ */
+export const PDF_FULL_PAGE_PIXEL_BUDGET = 8_000_000
 /** Match sheet zoom through 600% so 500% is not a 3× bitmap stretched by CSS. */
 export const MAX_PDF_VIEW_QUALITY_ZOOM = 6
 
@@ -26,6 +32,12 @@ export type PdfPaintOptions = {
   visibleTop?: number
   visibleCssWidth?: number
   visibleCssHeight?: number
+  /**
+   * Paint the visible rect even when the whole page would fit the pixel cap.
+   * A long page at screen density still fits 48 megapixels and used to allocate
+   * that bitmap on every camera move.
+   */
+  confineToVisible?: boolean
 }
 
 export type PdfPaintBox = {
@@ -233,7 +245,8 @@ export const paintBoxForPage = (cssWidth: number, cssHeight: number, options: Pd
   const visW = Number(options.visibleCssWidth)
   const visH = Number(options.visibleCssHeight)
   const hasVisible = Number.isFinite(visW) && visW > 0 && Number.isFinite(visH) && visH > 0
-  if (fullKeepsDensity || !hasVisible) {
+  const confine = options.confineToVisible === true && hasVisible
+  if ((fullKeepsDensity && !confine) || !hasVisible) {
     return {
       ...full,
       cssLeft: 0,
@@ -268,9 +281,11 @@ export type PdfPaintJob = { key: string; box: PdfPaintBox }
 /**
  * Two bitmaps per page. The *base* is the whole page at screen density and
  * depends only on the page box — scrolling and camera zoom never touch it,
- * so it is what stays on screen while anything else re-renders. The *detail*
- * exists only when the camera zoom asks for more than screen density; at a
- * zoom where the full page no longer fits the pixel budget it covers just the
+ * so it is what stays on screen while anything else re-renders. A page whose
+ * full bitmap is above `PDF_FULL_PAGE_PIXEL_BUDGET` uses a window instead,
+ * and that window stays until the viewport leaves it. The *detail* exists
+ * only when the camera zoom asks for more than screen density; at a zoom
+ * where the full page no longer fits the pixel budget it covers just the
  * padded visible window.
  */
 const normalizePdfRotation = (rotation: number) => (((Math.round(Number(rotation) || 0) % 360) + 360) % 360)
@@ -335,6 +350,8 @@ export type PdfPaintPlanInput = {
 
 export type PdfPaintState = {
   baseKey: string
+  /** The bitmap currently on screen, so a windowed base can stay while it still covers the viewport. */
+  baseBox?: PdfPaintBox | null
   detail: PdfPaintJob | null
 }
 
@@ -351,11 +368,7 @@ export const planPdfPagePaint = (input: PdfPaintPlanInput, current: PdfPaintStat
   const dpr = pdfScreenScale(input.dpr)
   const viewZoom = Math.max(0.01, Number(input.viewZoom) || 1)
   const baseKey = pdfBasePaintKey(cssWidth, cssHeight, input.rotation, dpr)
-  const base = baseKey === current.baseKey
-    ? null
-    : { key: baseKey, box: paintBoxForPage(cssWidth, cssHeight, { dpr, viewZoom: 1 }) }
-  if (!pdfDetailNeeded(dpr, viewZoom)) return { base, detail: 'drop' }
-  const scaleKey = pdfDetailScaleKey(cssWidth, cssHeight, input.rotation, dpr, viewZoom)
+  const fullBase = paintBoxForPage(cssWidth, cssHeight, { dpr, viewZoom: 1 })
   const windowInput = input.view
     ? {
       pageWidth: cssWidth,
@@ -369,6 +382,36 @@ export const planPdfPagePaint = (input: PdfPaintPlanInput, current: PdfPaintStat
       pageOffsetTop: input.view.pageOffsetTop,
     }
     : null
+  const hugePage = fullBase.pixelWidth * fullBase.pixelHeight > PDF_FULL_PAGE_PIXEL_BUDGET
+  let base: PdfPaintJob | null
+  if (hugePage && windowInput) {
+    const unpadded = visiblePageCssWindow({ ...windowInput, padRatio: 0 })
+    const windowKey = `${baseKey}|window`
+    if (
+      current.baseKey === windowKey
+      && pdfPaintBoxCovers(current.baseBox ?? null, unpadded, { cssWidth, cssHeight })
+    ) {
+      base = null
+    } else {
+      const padded = visiblePageCssWindow(windowInput)
+      base = {
+        key: windowKey,
+        box: paintBoxForPage(cssWidth, cssHeight, {
+          dpr,
+          viewZoom: 1,
+          visibleLeft: padded.left,
+          visibleTop: padded.top,
+          visibleCssWidth: padded.width,
+          visibleCssHeight: padded.height,
+          confineToVisible: true,
+        }),
+      }
+    }
+  } else {
+    base = baseKey === current.baseKey ? null : { key: baseKey, box: fullBase }
+  }
+  if (!pdfDetailNeeded(dpr, viewZoom)) return { base, detail: 'drop' }
+  const scaleKey = pdfDetailScaleKey(cssWidth, cssHeight, input.rotation, dpr, viewZoom)
   const unpadded = windowInput ? visiblePageCssWindow({ ...windowInput, padRatio: 0 }) : null
   if (
     current.detail

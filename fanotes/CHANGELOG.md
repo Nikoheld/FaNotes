@@ -8,6 +8,7 @@
 - Scale the ruler and the compass with their size. A small tool keeps its shape; grips, strokes and ticks shrink with it instead of squashing the body. The ruler can be 2 cm long and 1 cm wide, and the compass radius can be 1 mm.
 - Set the line thickness of a math figure separately from its size.
 - Keep PDF text selection on the words under the pointer. A drag no longer jumps across the gaps between glyph runs, and the selectable layer uses the same box as the page.
+- A large PDF on Linux and Windows rasters only the visible window and keeps the document open. Zoom scales on the compositor until the gesture stops.
 
 ## 2026.10.12-beta.2
 
