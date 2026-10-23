@@ -9,3 +9,10 @@ export const usesPenStrip = (brush: string) =>
 /** The large Zeichenstudio card stays closed for Marker and Textmarker. */
 export const artStudioOpenForBrush = (brush: string, panelRequested: boolean) =>
   panelRequested && !usesPenStrip(brush)
+
+/**
+ * The Marker draws in the writing pen's color. Textmarker and the other
+ * brushes keep the drawing color, so a yellow highlight stays put.
+ */
+export const inkColorForBrush = (brush: string, penColor: string, artColor: string) =>
+  brush === 'marker' ? penColor : artColor
