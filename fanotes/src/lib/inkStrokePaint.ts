@@ -23,6 +23,8 @@ export type InkPaintStroke = {
   textureSeed?: number
   symbolRotation?: number
   symbolPaths?: readonly string[]
+  /** Math-figure line thickness in page units. Omitted stamps keep the 1.75 icon stroke. */
+  figureLineWidth?: number
   /**
    * Marker and Textmarker only. When set, this stroke does not recolor pixels
    * already covered by an earlier marker or Textmarker.
@@ -190,6 +192,21 @@ const strokePaint = (
   return gradient
 }
 
+/** Icon-space stroke used when a stamp has no separate line thickness. */
+export const FIGURE_ICON_STROKE = 1.75
+
+/**
+ * Stroke width inside the 24×24 stamp. A figure stores thickness in page
+ * units, so changing the stamp size does not change the line.
+ */
+export const symbolStampLineWidth = (
+  stroke: Pick<InkPaintStroke, 'baseWidth' | 'figureLineWidth'>,
+) => {
+  const page = stroke.figureLineWidth
+  if (page == null || !(page > 0) || !(stroke.baseWidth > 0)) return FIGURE_ICON_STROKE
+  return page * 24 / stroke.baseWidth
+}
+
 /** Bitmap px for a CSS pen so a normal stroke cannot collapse to a hairline. */
 export const inkStrokeBitmapWidth = (
   stroke: { baseWidth: number; pressureEnabled?: boolean },
@@ -205,10 +222,13 @@ export const inkStrokeBitmapWidth = (
  * can have touched.
  */
 export const inkStrokePaintMargin = (
-  stroke: Pick<InkPaintStroke, 'baseWidth' | 'pressureEnabled' | 'colorEffect' | 'symbolPaths' | 'brush' | 'purpose'>,
+  stroke: Pick<InkPaintStroke, 'baseWidth' | 'pressureEnabled' | 'colorEffect' | 'symbolPaths' | 'brush' | 'purpose' | 'figureLineWidth'>,
   scale: number,
 ) => {
-  if (stroke.symbolPaths?.length) return stroke.baseWidth * scale * Math.SQRT2 + 2
+  if (stroke.symbolPaths?.length) {
+    const extra = Math.max(0, symbolStampLineWidth(stroke) - FIGURE_ICON_STROKE) * stroke.baseWidth * scale / 24
+    return stroke.baseWidth * scale * Math.SQRT2 + extra / 2 + 2
+  }
   const widest = inkStrokeBitmapWidth(stroke, 1, scale) * 1.5
   const glow = stroke.colorEffect === 'neon' ? Math.max(4, stroke.baseWidth * scale * .85) * 2 : 0
   return widest / 2 + glow + 2
@@ -441,7 +461,7 @@ export const drawInkStroke = (
     context.rotate((stroke.symbolRotation ?? 0) * Math.PI / 180)
     context.scale(symbolScale, symbolScale)
     context.translate(-12, -12)
-    context.lineWidth = 1.75
+    context.lineWidth = symbolStampLineWidth(stroke)
     if (typeof Path2D === 'function') {
       symbolPaths.forEach((path) => context.stroke(new Path2D(path)))
     }

@@ -25,6 +25,20 @@ const val DEFAULT_PEN_COLOR = "#202333"
 const val DEFAULT_PEN_WIDTH = 3.5
 const val DEFAULT_PAPER = "dots"
 
+/** Icon-space stroke used when a math figure has no separate line thickness. */
+const val FIGURE_ICON_STROKE = 1.75
+
+/**
+ * Stroke width inside the 24×24 stamp. `figureLineWidth` is page units, so the
+ * stamp size and the line thickness stay independent. A missing width keeps 1.75.
+ */
+fun figureStampStrokeWidth(baseWidth: Double, figureLineWidth: Double?): Double {
+    if (figureLineWidth == null || !figureLineWidth.isFinite() || figureLineWidth <= 0.0 || baseWidth <= 0.0) {
+        return FIGURE_ICON_STROKE
+    }
+    return figureLineWidth * 24.0 / baseWidth
+}
+
 /** Matches `pressureWidth` in `inkStrokePaint.ts`. */
 fun pressureWidth(baseWidth: Double, pressure: Double, pressureEnabled: Boolean): Double {
     if (!pressureEnabled) return baseWidth
@@ -52,6 +66,10 @@ data class InkStroke(
     val colorEffect: String? = null,
     val symbolId: String? = null,
     val symbolRotation: Double = 0.0,
+    /** Math-figure line thickness in page units. Null keeps the desktop 1.75 icon stroke. */
+    val figureLineWidth: Double? = null,
+    /** SVG paths of a math figure, in the same 24×24 box as an art symbol. */
+    val figurePaths: List<String> = emptyList(),
     /** Fields this client does not edit, preserved on save. */
     val extras: JsonValue.Obj = JsonValue.Obj(),
 )
@@ -100,6 +118,12 @@ fun InkStroke.toJson(): JsonValue.Obj {
     if (symbolId != null) {
         obj.put("symbolId", jsonString(symbolId))
         obj.put("symbolRotation", jsonNumber(symbolRotation))
+    } else if (figurePaths.isNotEmpty() || figureLineWidth != null) {
+        obj.put("symbolRotation", jsonNumber(symbolRotation))
+    }
+    if (figureLineWidth != null) obj.put("figureLineWidth", jsonNumber(figureLineWidth))
+    if (figurePaths.isNotEmpty()) {
+        obj.put("figurePaths", JsonValue.Arr(figurePaths.map { jsonString(it) }.toMutableList()))
     }
     return obj
 }
@@ -116,7 +140,7 @@ fun StrokePoint.toJson(): JsonValue.Obj = JsonValue.Obj().also { obj ->
 
 private val KNOWN_STROKE_KEYS = setOf(
     "points", "baseWidth", "pressureEnabled", "color", "purpose", "brush", "opacity", "colorEffect",
-    "symbolId", "symbolRotation",
+    "symbolId", "symbolRotation", "figureLineWidth", "figurePaths",
 )
 
 fun parseInkDocument(value: JsonValue.Obj?, title: String, paperStyle: String, now: String): InkDocument {
@@ -180,8 +204,17 @@ internal fun parseStroke(obj: JsonValue.Obj): InkStroke? {
         colorEffect = obj.string("colorEffect"),
         symbolId = obj.string("symbolId")?.takeIf { artSymbol(it) != null },
         symbolRotation = obj.double("symbolRotation")?.takeIf { it.isFinite() } ?: 0.0,
+        figureLineWidth = obj.double("figureLineWidth")?.takeIf { it.isFinite() && it > 0.0 },
+        figurePaths = figurePathsOf(obj),
         extras = extras,
     )
+}
+
+private fun figurePathsOf(obj: JsonValue.Obj): List<String> {
+    val items = obj.array("figurePaths")?.items ?: return emptyList()
+    return items.mapNotNull { item ->
+        (item as? JsonValue.Str)?.value?.takeIf { it.isNotEmpty() && it.length <= 64_000 }
+    }.take(128)
 }
 
 fun newInkDocument(title: String, paperStyle: String, now: String) = InkDocument(
