@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { HAND_GESTURE_CLAIM } from '../../../src/lib/handGestures'
 import {
   PEN_EDGE_ZONE_MM,
@@ -9,6 +9,7 @@ import {
   clampCompassRadius,
   clampRulerLength,
   distanceToDrawingEdgeMm,
+  draftingChrome,
   draftingLocalToNorm,
   formatArcDegrees,
   formatDegrees,
@@ -16,6 +17,7 @@ import {
   magnetThresholdMm,
   normToLocalMm,
   normalizeAngle,
+  penEdgeZoneForWidth,
   pxPerMmOnDisplay,
   radiusMmBetween,
   resizeRulerWidth,
@@ -28,6 +30,7 @@ import {
   snapAngle,
   snapRadiusMm,
   snapToDraftingTools,
+  visibleTickLevel,
   type CompassDrawEvent,
   type CompassPose,
   type DraftingKind,
@@ -99,7 +102,8 @@ const RulerBody = memo(function RulerBody({ lengthMm, widthMm, pxPerMm, unit, fl
   const maxTick = Math.max(mm(1.2), height / 2 - mm(1))
   const tickLength = [mm(2), mm(3.4), mm(5)].map((value) => Math.min(value, maxTick))
   const fontSize = mm(2.7)
-  const ticks = scaleTicks(lengthMm, unit)
+  const minLevel = visibleTickLevel(pxPerMm, unit)
+  const ticks = scaleTicks(lengthMm, unit).filter((tick) => tick.level >= minLevel)
   const topLabelY = top + tickLength[2] + fontSize * 1.02
   const bottomLabelY = bottom - tickLength[2] - fontSize * 0.28
   const bothLabels = bottomLabelY - topLabelY >= fontSize
@@ -161,7 +165,8 @@ const SetSquareBody = memo(function SetSquareBody({ sizeMm, pxPerMm, unit, flipp
   const half = mm(halfMm)
   const apexY = sign * half
   const fontSize = mm(2.6)
-  const baseTicks = scaleTicks(halfMm, unit)
+  const minLevel = visibleTickLevel(pxPerMm, unit)
+  const baseTicks = scaleTicks(halfMm, unit).filter((tick) => tick.level >= minLevel)
   const tickLength = [mm(1.6), mm(2.8), mm(4.2)]
   const protractorOuterMm = sizeMm * 0.305
   const protractorInnerMm = sizeMm * 0.26
@@ -182,7 +187,9 @@ const SetSquareBody = memo(function SetSquareBody({ sizeMm, pxPerMm, unit, flipp
   if (parallels) {
     for (let h = 5; h < halfMm - 7; h += 5) parallelRows.push(h)
   }
-  const degreeTicks = Array.from({ length: 181 }, (_, degrees) => degrees)
+  const pxPerDegree = outer * Math.PI / 180
+  const degreeStep = pxPerDegree >= 2.2 ? 1 : pxPerDegree * 5 >= 2.2 ? 5 : 10
+  const degreeTicks = Array.from({ length: Math.floor(180 / degreeStep) + 1 }, (_, index) => index * degreeStep)
   return (
     <g>
       <path className="lw-drafting-body" d={`M ${-half} 0 L ${half} 0 L 0 ${apexY} Z`} onPointerDown={onGrab} />
@@ -461,7 +468,8 @@ export function DraftingGuides({
     if (event.pointerType !== 'pen' || kind === 'compass') return false
     const { sourceWidth: width, sourceHeight: height } = latestRef.current
     const point = toNormFromClient(event.clientX, event.clientY)
-    return distanceToDrawingEdgeMm(kind, pose, point.x, point.y, width, height) <= PEN_EDGE_ZONE_MM
+    const zone = kind === 'ruler' ? penEdgeZoneForWidth(rulerWidth(pose)) : PEN_EDGE_ZONE_MM
+    return distanceToDrawingEdgeMm(kind, pose, point.x, point.y, width, height) <= zone
   }
 
   const beginDrag = (kind: DraftingKind, mode: DragMode, event: ReactPointerEvent<SVGElement>) => {
@@ -510,25 +518,34 @@ export function DraftingGuides({
   const nx = (value: number) => value * viewport.width
   const ny = (value: number) => value * viewport.height
   const degrees = (radians: number) => radians * 180 / Math.PI
-  const captionSize = Math.max(9, mm(2.5))
   const compassGeometry = compass ? { radiusPx: mm(compass.radiusMm) } : null
   const rulerLengthMm = ruler ? rulerLength(ruler) : 0
   const rulerWidthMm = ruler ? rulerWidth(ruler) : 0
+  const rulerLengthPx = mm(rulerLengthMm)
+  const rulerWidthPx = mm(rulerWidthMm)
+  const rulerChrome = draftingChrome(pxPerMm, Math.min(rulerLengthPx, rulerWidthPx) || 1)
+  const squareSizeMm = setSquare ? setSquareSize(setSquare) : 0
+  const squarePx = mm(squareSizeMm)
+  const squareChrome = draftingChrome(pxPerMm, squarePx * 0.5 || 1)
+  const compassChrome = draftingChrome(pxPerMm, compassGeometry?.radiusPx ?? 1)
+  const captionSize = (chromeScale: number) => Math.max(7 * chromeScale, mm(2.5))
   // Keep the width grip inside the body, clear of the pen's edge zone, so a
   // stroke along the drawing edge still reaches the ink layer.
-  const rulerWidthClearanceMm = PEN_EDGE_ZONE_MM + 9 / Math.max(pxPerMm, 1e-6) + 0.4
+  const rulerWidthClearanceMm = penEdgeZoneForWidth(rulerWidthMm) + rulerChrome.handle / Math.max(pxPerMm, 1e-6) + 0.4
   const rulerWidthHandleY = mm(Math.max(0, rulerWidthMm / 2 - rulerWidthClearanceMm))
-  const squareSizeMm = setSquare ? setSquareSize(setSquare) : 0
+  const rulerHalfPx = rulerLengthPx / 2
+  const rulerEndInset = Math.min(rulerChrome.handle + 3, Math.max(rulerChrome.handle, rulerHalfPx * 0.35))
   const squareSign = setSquare ? setSquareApexSign(setSquare) : -1
+  const chromeVars = (scale: number): CSSProperties => ({ '--lw-draft-chrome': String(scale) } as CSSProperties)
 
   return (
     <svg
       ref={svgRef}
       className={`lw-drafting-layer ${settings.translucent ? 'is-translucent' : ''}`}
-      width={viewport.width}
-      height={viewport.height}
+      width="100%"
+      height="100%"
       viewBox={`0 0 ${viewport.width} ${viewport.height}`}
-      preserveAspectRatio="none"
+      preserveAspectRatio="xMidYMid meet"
       aria-hidden="true"
     >
       {ruler && (
@@ -536,21 +553,22 @@ export function DraftingGuides({
           className={`lw-drafting-tool is-ruler ${ruler.pinned ? 'is-pinned' : ''}`}
           transform={`translate(${nx(ruler.x)} ${ny(ruler.y)}) rotate(${degrees(ruler.rotation)})`}
         >
-          <RulerBody lengthMm={rulerLengthMm} widthMm={rulerWidthMm} pxPerMm={pxPerMm} unit={settings.unit} flipLabels={upsideDown(ruler.rotation)} onGrab={grabRuler} />
+          <g style={chromeVars(rulerChrome.scale)}>
+            <RulerBody lengthMm={rulerLengthMm} widthMm={rulerWidthMm} pxPerMm={pxPerMm} unit={settings.unit} flipLabels={upsideDown(ruler.rotation)} onGrab={grabRuler} />
+          </g>
           {!ruler.pinned && (
             <>
-              <circle
-                className="lw-drafting-rotate"
-                cx={mm(rulerLengthMm) / 2 - 12}
-                cy="0"
-                r="9"
+              <g
+                transform={`translate(${rulerHalfPx - rulerEndInset} 0) scale(${rulerChrome.scale})`}
                 onPointerDown={(event) => beginDrag('ruler', 'rotate', event)}
               >
-                <title>Drehen (Alt: ohne Winkelraster)</title>
-              </circle>
+                <circle className="lw-drafting-rotate" r="9">
+                  <title>Drehen (Alt: ohne Winkelraster)</title>
+                </circle>
+              </g>
               <g
                 className="lw-drafting-length"
-                transform={`translate(${-mm(rulerLengthMm) / 2 + 12} 0)`}
+                transform={`translate(${-rulerHalfPx + rulerEndInset} 0) scale(${rulerChrome.scale})`}
                 onPointerDown={(event) => beginDrag('ruler', 'length', event)}
               >
                 <circle className="lw-drafting-length-bg" r="9" />
@@ -559,7 +577,7 @@ export function DraftingGuides({
               </g>
               <g
                 className="lw-drafting-width"
-                transform={`translate(0 ${rulerWidthHandleY})`}
+                transform={`translate(0 ${rulerWidthHandleY}) scale(${rulerChrome.scale})`}
                 onPointerDown={(event) => beginDrag('ruler', 'width', event)}
               >
                 <circle className="lw-drafting-length-bg" r="9" />
@@ -568,13 +586,17 @@ export function DraftingGuides({
               </g>
             </>
           )}
-          {ruler.pinned && <PinGlyph x={mm(rulerLengthMm) / 2 - 14} y={0} />}
+          {ruler.pinned && (
+            <g transform={`translate(${rulerHalfPx - rulerEndInset} 0) scale(${rulerChrome.scale})`}>
+              <PinGlyph x={0} y={0} />
+            </g>
+          )}
           <text
             className="lw-drafting-caption"
             x="0"
-            y={captionSize * 0.36}
-            style={{ fontSize: captionSize }}
-            transform={flipTransform(0, captionSize * 0.36, upsideDown(ruler.rotation))}
+            y={captionSize(rulerChrome.scale) * 0.36}
+            style={{ fontSize: captionSize(rulerChrome.scale) }}
+            transform={flipTransform(0, captionSize(rulerChrome.scale) * 0.36, upsideDown(ruler.rotation))}
           >
             {`Lineal · ${formatLength(rulerLengthMm, settings.unit)} × ${formatLength(rulerWidthMm, settings.unit)} · ${formatDegrees(ruler.rotation)}`}
           </text>
@@ -585,29 +607,30 @@ export function DraftingGuides({
           className={`lw-drafting-tool is-setsquare ${setSquare.pinned ? 'is-pinned' : ''}`}
           transform={`translate(${nx(setSquare.x)} ${ny(setSquare.y)}) rotate(${degrees(setSquare.rotation)})`}
         >
-          <SetSquareBody
-            sizeMm={squareSizeMm}
-            pxPerMm={pxPerMm}
-            unit={settings.unit}
-            flipped={Boolean(setSquare.flipped)}
-            parallels={settings.setSquareParallels}
-            flipLabels={upsideDown(setSquare.rotation)}
-            onGrab={grabSetSquare}
-          />
+          <g style={chromeVars(squareChrome.scale)}>
+            <SetSquareBody
+              sizeMm={squareSizeMm}
+              pxPerMm={pxPerMm}
+              unit={settings.unit}
+              flipped={Boolean(setSquare.flipped)}
+              parallels={settings.setSquareParallels}
+              flipLabels={upsideDown(setSquare.rotation)}
+              onGrab={grabSetSquare}
+            />
+          </g>
           {!setSquare.pinned && (
             <>
-              <circle
-                className="lw-drafting-rotate"
-                cx="0"
-                cy={squareSign * (mm(squareSizeMm) / 2 - 12)}
-                r="9"
+              <g
+                transform={`translate(0 ${squareSign * (squarePx / 2 - squareChrome.handle - 3)}) scale(${squareChrome.scale})`}
                 onPointerDown={(event) => beginDrag('setSquare', 'rotate', event)}
               >
-                <title>Drehen (Alt: ohne Winkelraster)</title>
-              </circle>
+                <circle className="lw-drafting-rotate" r="9">
+                  <title>Drehen (Alt: ohne Winkelraster)</title>
+                </circle>
+              </g>
               <g
                 className="lw-drafting-action is-flip"
-                transform={`translate(${-mm(16)} ${squareSign * mm(22)})`}
+                transform={`translate(${-mm(16)} ${squareSign * mm(22)}) scale(${squareChrome.scale})`}
                 onPointerDown={(event) => tapAction(event, () => {
                   onActivate?.('setSquare')
                   onMove('setSquare', { ...setSquare, flipped: !setSquare.flipped })
@@ -619,13 +642,17 @@ export function DraftingGuides({
               </g>
             </>
           )}
-          {setSquare.pinned && <PinGlyph x={mm(16)} y={squareSign * mm(22)} />}
+          {setSquare.pinned && (
+            <g transform={`translate(${mm(16)} ${squareSign * mm(22)}) scale(${squareChrome.scale})`}>
+              <PinGlyph x={0} y={0} />
+            </g>
+          )}
           <text
             className="lw-drafting-caption"
             x="0"
-            y={squareSign * mm(squareSizeMm) * 0.31 + captionSize * 0.36}
-            style={{ fontSize: captionSize }}
-            transform={flipTransform(0, squareSign * mm(squareSizeMm) * 0.31 + captionSize * 0.36, upsideDown(setSquare.rotation))}
+            y={squareSign * squarePx * 0.31 + captionSize(squareChrome.scale) * 0.36}
+            style={{ fontSize: captionSize(squareChrome.scale) }}
+            transform={flipTransform(0, squareSign * squarePx * 0.31 + captionSize(squareChrome.scale) * 0.36, upsideDown(setSquare.rotation))}
           >
             {`Geodreieck · ${formatLength(squareSizeMm, settings.unit)} · ${formatDegrees(setSquare.rotation)}`}
           </text>
@@ -633,89 +660,88 @@ export function DraftingGuides({
       )}
       {compass && compassGeometry && (
         <>
-          <circle
-            className="lw-drafting-compass-ghost"
-            cx={nx(compass.x)}
-            cy={ny(compass.y)}
-            r={compassGeometry.radiusPx}
-          />
-          {settings.compassCentreMark && (
-            <path
-              className="lw-drafting-centre-mark"
-              d={`M ${nx(compass.x) - mm(1.6)} ${ny(compass.y)} h ${mm(3.2)} M ${nx(compass.x)} ${ny(compass.y) - mm(1.6)} v ${mm(3.2)}`}
+          <g style={chromeVars(compassChrome.scale)}>
+            <circle
+              className="lw-drafting-compass-ghost"
+              cx={nx(compass.x)}
+              cy={ny(compass.y)}
+              r={compassGeometry.radiusPx}
             />
-          )}
-          {drawPreview && Math.abs(drawPreview.to - drawPreview.from) > 0.02 && (
-            <path
-              className="lw-drafting-compass-arc"
-              d={describePaperArc(
-                nx(compass.x),
-                ny(compass.y),
-                compassGeometry.radiusPx,
-                drawPreview.from,
-                drawPreview.to,
-              )}
-            />
-          )}
+            {settings.compassCentreMark && (
+              <path
+                className="lw-drafting-centre-mark"
+                d={`M ${nx(compass.x) - mm(1.6)} ${ny(compass.y)} h ${mm(3.2)} M ${nx(compass.x)} ${ny(compass.y) - mm(1.6)} v ${mm(3.2)}`}
+              />
+            )}
+            {drawPreview && Math.abs(drawPreview.to - drawPreview.from) > 0.02 && (
+              <path
+                className="lw-drafting-compass-arc"
+                d={describePaperArc(
+                  nx(compass.x),
+                  ny(compass.y),
+                  compassGeometry.radiusPx,
+                  drawPreview.from,
+                  drawPreview.to,
+                )}
+              />
+            )}
+          </g>
           <g
             className={`lw-drafting-tool is-compass ${compass.pinned ? 'is-pinned' : ''}`}
             transform={`translate(${nx(compass.x)} ${ny(compass.y)})`}
           >
             <g transform={`rotate(${degrees(compass.rotation)})`}>
-              <line className="lw-drafting-span" x1="0" y1="0" x2={compassGeometry.radiusPx} y2="0" />
-              <rect
-                className="lw-drafting-arm"
-                x="0"
-                y={-5}
-                width={compassGeometry.radiusPx}
-                height="10"
-                rx="1"
-                onPointerDown={(event) => beginDrag('compass', 'move', event)}
-              />
-              {scaleTicks(compass.radiusMm, settings.unit).filter((tick) => tick.level === 2).map((tick) => {
-                const x = mm(tick.mm)
-                if (x > compassGeometry.radiusPx) return null
-                return (
-                  <g key={`c${tick.mm}`}>
-                    <line className="lw-drafting-tick is-major" x1={x} y1="-8" x2={x} y2="8" />
-                    {tick.mm > 0 && (
-                      <text className="lw-drafting-label" x={x} y="20" style={{ fontSize: Math.max(8, mm(2.4)) }}>{tick.label}</text>
-                    )}
-                  </g>
-                )
-              })}
-              <circle className="lw-drafting-needle-dot" cx="0" cy="0" r="4" />
-              <circle
-                className="lw-drafting-needle"
-                cx="0"
-                cy="0"
-                r="7"
+              <g style={chromeVars(compassChrome.scale)}>
+                <line className="lw-drafting-span" x1="0" y1="0" x2={compassGeometry.radiusPx} y2="0" />
+                <rect
+                  className="lw-drafting-arm"
+                  x="0"
+                  y={-compassChrome.arm / 2}
+                  width={compassGeometry.radiusPx}
+                  height={compassChrome.arm}
+                  rx={Math.min(1, compassChrome.arm / 4)}
+                  onPointerDown={(event) => beginDrag('compass', 'move', event)}
+                />
+                {scaleTicks(compass.radiusMm, settings.unit).filter((tick) => tick.level === 2 && tick.mm > 0).map((tick) => {
+                  const x = mm(tick.mm)
+                  if (x <= compassChrome.handle || x >= compassGeometry.radiusPx - compassChrome.handle) return null
+                  return (
+                    <g key={`c${tick.mm}`}>
+                      <line className="lw-drafting-tick is-major" x1={x} y1={-compassChrome.tick} x2={x} y2={compassChrome.tick} />
+                      <text className="lw-drafting-label" x={x} y={compassChrome.tick + captionSize(compassChrome.scale)} style={{ fontSize: Math.max(compassChrome.fontFloor, mm(2.4)) }}>{tick.label}</text>
+                    </g>
+                  )
+                })}
+              </g>
+              <g
+                transform={`scale(${compassChrome.scale})`}
                 onPointerDown={(event) => beginDrag('compass', 'move', event)}
               >
-                <title>Nadel: Zirkel verschieben (rastet an Lineal und Geodreieck)</title>
-              </circle>
-              <circle
-                className="lw-drafting-draw"
-                cx={compassGeometry.radiusPx}
-                cy="0"
-                r="10"
+                <circle className="lw-drafting-needle-dot" r="4" />
+                <circle className="lw-drafting-needle" r="7">
+                  <title>Nadel: Zirkel verschieben (rastet an Lineal und Geodreieck)</title>
+                </circle>
+              </g>
+              <g
+                transform={`translate(${compassGeometry.radiusPx} 0) scale(${compassChrome.scale})`}
                 onPointerDown={(event) => beginDrag('compass', 'draw', event)}
               >
-                <title>Mine drehen: Bogen oder Kreis zeichnen</title>
-              </circle>
-              <circle
-                className="lw-drafting-radius"
-                cx={compassGeometry.radiusPx * 0.55}
-                cy="0"
-                r="8"
+                <circle className="lw-drafting-draw" r="10">
+                  <title>Mine drehen: Bogen oder Kreis zeichnen</title>
+                </circle>
+              </g>
+              <g
+                transform={`translate(${compassGeometry.radiusPx * 0.55} 0) scale(${compassChrome.scale})`}
                 onPointerDown={(event) => beginDrag('compass', 'radius', event)}
               >
-                <title>{compass.locked ? 'Radius gesperrt · drehen zum Übertragen' : 'Radius einstellen / abmessen'}</title>
-              </circle>
+                <circle className="lw-drafting-radius" r="8">
+                  <title>{compass.locked ? 'Radius gesperrt · drehen zum Übertragen' : 'Radius einstellen / abmessen'}</title>
+                </circle>
+              </g>
             </g>
             <g
               className={`lw-drafting-action ${compass.locked ? 'is-locked' : ''}`}
-              transform="translate(-18 -28)"
+              transform={`translate(${-18 * compassChrome.scale} ${-28 * compassChrome.scale}) scale(${compassChrome.scale})`}
               onPointerDown={(event) => tapAction(event, () => onMove('compass', { ...compass, locked: !compass.locked }))}
             >
               <circle className="lw-drafting-action-bg" r="9" />
@@ -729,15 +755,19 @@ export function DraftingGuides({
             </g>
             <g
               className="lw-drafting-action is-circle"
-              transform="translate(18 -28)"
+              transform={`translate(${18 * compassChrome.scale} ${-28 * compassChrome.scale}) scale(${compassChrome.scale})`}
               onPointerDown={(event) => tapAction(event, () => onCompassDraw?.({ type: 'circle', pose: compass }))}
             >
               <circle className="lw-drafting-action-bg" r="9" />
               <circle className="lw-drafting-action-icon-ring" r="4.2" />
               <title>Ganzen Kreis zeichnen</title>
             </g>
-            {compass.pinned && <PinGlyph x={0} y={-50} />}
-            <text className="lw-drafting-caption" x="0" y="-44" style={{ fontSize: captionSize }}>
+            {compass.pinned && (
+              <g transform={`translate(0 ${-50 * compassChrome.scale}) scale(${compassChrome.scale})`}>
+                <PinGlyph x={0} y={0} />
+              </g>
+            )}
+            <text className="lw-drafting-caption" x="0" y={-44 * compassChrome.scale} style={{ fontSize: captionSize(compassChrome.scale) }}>
               {`Zirkel · r ${formatLength(compass.radiusMm, settings.unit)}`}
               {drawPreview ? ` · ${formatArcDegrees(drawPreview.to - drawPreview.from)}` : compass.locked ? ' · gesperrt' : ''}
             </text>
