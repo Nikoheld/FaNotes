@@ -5,6 +5,7 @@
 - Tighten the top bar and drop the controls that appeared twice.
 - Draw the handwriting dot as a vector in the page, so it stays sharp on a high-resolution screen.
 - Keep the Marker on the same color as the pen. A color chosen on either tool is the color of both. The Textmarker keeps its own color.
+- Keep PDF text selection on the words under the pointer. A drag no longer jumps across the gaps between glyph runs, and the selectable layer uses the same box as the page.
 
 ## 2026.10.12-beta.2
 

@@ -83,6 +83,13 @@ const runOnce = () => {
 
   assert.match(board, /applyPdfTextOverlayScale/)
   assert.match(board, /getViewport\(\{ scale: overlayScale, rotation: used \}\)/)
+  assert.match(board, /includeMarkedContent: true/)
+  assert.match(board, /disableNormalization: true/)
+  assert.match(board, /textHost\.style\.width = '100%'/)
+  assert.match(board, /bindPdfTextSelection\(textHost\)/)
+  assert.match(css, /\.pdf-note-text-layer \.endOfContent \{[^}]*user-select:\s*none/)
+  assert.match(css, /\.pdf-note-text-layer\.selecting \.endOfContent \{[^}]*top:\s*0/)
+  assert.match(css, /\.pdf-note-text-layer :is\(span, br\) \{[\s\S]*?z-index:\s*1/)
   const support = pdfJsSupportUrls('file:///opt/fanotes/dist/index.html')
   assert.equal(support.cMapUrl, 'file:///opt/fanotes/dist/pdfjs/cmaps/')
   assert.equal(support.standardFontDataUrl, 'file:///opt/fanotes/dist/pdfjs/standard_fonts/')

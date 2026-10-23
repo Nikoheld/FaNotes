@@ -144,6 +144,7 @@
     "check:pdf-write-stay": "node scripts/check-pdf-write-stay.mjs",
     "check:bug-pixel-ink": "node scripts/check-pdf-paint-sharp.mjs",
     "check:pdf-text-select": "node scripts/check-pdf-text-select.mjs",
+    "check:pdf-text-selection": "node scripts/check-pdf-text-selection.mjs",
     "check:pdf-assets": "node scripts/check-pdf-assets.mjs",
     "check:pdf-text-while-write": "node scripts/check-pdf-text-while-write.mjs",
     "check:ink-vs-text-select": "node scripts/check-ink-vs-text-select.mjs",
