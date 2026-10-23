@@ -32,6 +32,8 @@ const {
 const {
   readPageStatsFromNote,
   stripFamdPayload,
+  canonicalSyncBytes,
+  withLocalPageStats,
   writePageStatsIntoNote,
 } = await server.ssrLoadModule('/src/lib/famd.ts')
 
@@ -206,6 +208,20 @@ const runOnce = () => {
   assert.equal('typingBurstStartedAtMs' in closed, false)
 
   const persistedNote = writePageStatsIntoNote('# Hello\n', closed)
+  const laterStats = { ...closed, modifiedAt: new Date(t0 + 200_000).toISOString(), dwellMs: closed.dwellMs + 5_000 }
+  const statsOnlyNote = writePageStatsIntoNote(persistedNote, laterStats)
+  const noteUpdatedAt = persistedNote.match(/"updatedAt":"([^"]+)"/u)?.[1]
+  assert.equal(statsOnlyNote.match(/"updatedAt":"([^"]+)"/u)?.[1], noteUpdatedAt, 'statistics do not move the note timestamp')
+  const encoded = new TextEncoder()
+  const firstCanonical = canonicalSyncBytes('Hello.md', encoded.encode(persistedNote))
+  const secondCanonical = canonicalSyncBytes('Hello.md', encoded.encode(statsOnlyNote))
+  assert.deepEqual(secondCanonical, firstCanonical, 'statistics are not part of the synced note')
+  const plain = encoded.encode('# Plain\n')
+  assert.equal(canonicalSyncBytes('Plain.md', plain), plain, 'a note without statistics is not rewritten')
+  assert.equal(canonicalSyncBytes('Scan.pdf', plain), plain, 'a PDF is not treated as a note payload')
+  const restored = withLocalPageStats(new TextDecoder().decode(firstCanonical), statsOnlyNote)
+  assert.deepEqual(readPageStatsFromNote(restored, t0 + 210_000), laterStats, 'a download keeps this device\'s statistics')
+  assert.deepEqual(canonicalSyncBytes('Hello.md', encoded.encode(restored)), firstCanonical, 'restored statistics do not change the synced bytes')
   const reloaded = readPageStatsFromNote(persistedNote, t0 + 130_000)
   assert.deepEqual(reloaded, closed, 'the full record must survive the .famd round trip')
   assert.deepEqual(parsePageStats(JSON.parse(JSON.stringify(reloaded))), reloaded, 'parsing is idempotent')
