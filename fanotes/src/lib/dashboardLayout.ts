@@ -26,7 +26,7 @@ export type DashboardTarget = {
 }
 
 export type DashboardStartDecision = {
-  surface: 'onboarding' | 'dashboard'
+  surface: 'onboarding' | 'note'
   openLastNote: boolean
 }
 
@@ -101,11 +101,11 @@ export const dashboardSubjectsFromTree = (entries: TreeNode[] | null | undefined
   return subjects
 }
 
-/** Onboarding stays first when it is required. Otherwise the dashboard is first and the last note waits. */
+/** Onboarding stays first when it is required. Otherwise the last note opens. */
 export const chooseStartSurface = (onboardingRequired: boolean): DashboardStartDecision => (
   onboardingRequired
     ? { surface: 'onboarding', openLastNote: false }
-    : { surface: 'dashboard', openLastNote: false }
+    : { surface: 'note', openLastNote: true }
 )
 
 export const formatDashboardClock = (time: Date) => {

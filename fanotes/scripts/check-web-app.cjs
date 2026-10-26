@@ -147,11 +147,9 @@ async function reloadPage(cdp) {
   })
 }
 
-// A full load opens the start dashboard, which has no file tree and no editor.
+// A full load opens the last note. The start page is not part of the shell.
 async function leaveDashboard(cdp) {
-  await waitFor(cdp, `Boolean(document.querySelector('.dashboard-actions .primary-button, .sidebar, .markdown-editor'))`, 'Die geladene Oberfläche')
-  await cdp.evaluate(`document.querySelector('.dashboard-actions .primary-button')?.click()`)
-  await waitFor(cdp, `!document.querySelector('.dashboard') && Boolean(document.querySelector('.sidebar, .markdown-editor, .file-tree__entry-button'))`, 'Die Notizseite nach der Startfläche')
+  await waitFor(cdp, `!document.querySelector('.dashboard') && Boolean(document.querySelector('.sidebar, .markdown-editor, .file-tree__entry-button'))`, 'Die Notizseite')
 }
 
 async function waitFor(cdp, expression, label) {

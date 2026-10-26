@@ -110,8 +110,7 @@ import {
   type PageStatsSession,
 } from './lib/pageStats'
 import { chooseRestoredNote, collectNotePaths } from './lib/lastOpenNote'
-import { chooseStartSurface, dashboardNotesFromTree, dashboardSubjectsFromTree } from './lib/dashboardLayout'
-import { StartDashboard } from './components/StartDashboard'
+import { chooseStartSurface } from './lib/dashboardLayout'
 import {
   clonedWorksheetDocument,
   drawingTitleFromJson,
@@ -679,8 +678,6 @@ const useSystemDark = () => {
 export default function App({ startupBootstrap }: AppProps) {
   const isWeb = window.fanotes?.platform === 'web'
   const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null)
-  const [dashboardOpen, setDashboardOpen] = useState(true)
-  const dashboardOpenRef = useRef(true)
   const [tree, setTree] = useState<VaultEntry[]>([])
   const [tabs, setTabs] = useState<NoteTab[]>([])
   const [activePath, setActivePath] = useState<string | null>(null)
@@ -1684,13 +1681,7 @@ export default function App({ startupBootstrap }: AppProps) {
         settingsRef.current = launchedSettings
         setSettings(launchedSettings)
         const start = chooseStartSurface(Boolean(data.onboardingRequired))
-        if (start.surface === 'onboarding') {
-          dashboardOpenRef.current = false
-          setDashboardOpen(false)
-          return
-        }
-        dashboardOpenRef.current = true
-        setDashboardOpen(true)
+        if (start.surface === 'onboarding') return
         // Let the shell paint first, then parse the editor chunk in parallel
         // with local tree-cache/NAS work. The shared promise also prevents the
         // later React.lazy render from scheduling a duplicate module request.
@@ -1717,7 +1708,7 @@ export default function App({ startupBootstrap }: AppProps) {
             }
             treeRef.current = nextTree
             setTree(nextTree)
-            if (!dashboardOpenRef.current && nextNote && !activePathRef.current) await openNote(nextNote)
+            if (nextNote && !activePathRef.current) await openNote(nextNote)
             if (alive) await restoreWorkspace(data.vaultPath, nextTree)
           }
 
@@ -1804,8 +1795,6 @@ export default function App({ startupBootstrap }: AppProps) {
     }
     treeRef.current = initialTree
     setTree(initialTree)
-    dashboardOpenRef.current = false
-    setDashboardOpen(false)
     if (initialNote) await openNote(initialNote)
     // A fresh vault has no workspace to restore, but from here on it remembers one.
     await restoreWorkspace(data.vaultPath, initialTree)
@@ -3471,8 +3460,6 @@ export default function App({ startupBootstrap }: AppProps) {
       setSearchFailed(false)
       const nextTree = await refreshTree()
       const start = chooseStartSurface(Boolean(selected.onboardingRequired))
-      dashboardOpenRef.current = start.surface === 'dashboard'
-      setDashboardOpen(start.surface === 'dashboard')
       const remembered = chooseRestoredNote(selectedSettings.lastOpenNotePath, collectNotePaths(nextTree), firstNote(nextTree))
       if (start.openLastNote && remembered) await openNote(remembered)
       await restoreWorkspace(selected.vaultPath, nextTree)
@@ -4907,29 +4894,6 @@ export default function App({ startupBootstrap }: AppProps) {
       </Suspense>
     </div>
   )
-  if (dashboardOpen) return (
-    <div className={`app-shell dashboard-shell theme-${theme} background-${settings.workspaceBackground} ${settings.reduceMotion ? 'no-motion' : ''}`} style={cssVars}>
-      {sanitizeCustomCss(settings.customCss) && <style>{sanitizeCustomCss(settings.customCss)}</style>}
-      <StartDashboard
-        notes={dashboardNotesFromTree(tree)}
-        subjects={dashboardSubjectsFromTree(tree)}
-        layoutPayload={settings.dashboardLayout}
-        onOpenNote={(path) => {
-          dashboardOpenRef.current = false
-          setDashboardOpen(false)
-          void openNote(path)
-        }}
-        onLeave={() => {
-          const path = chooseRestoredNote(settingsRef.current.lastOpenNotePath, collectNotePaths(treeRef.current), firstNote(treeRef.current))
-          dashboardOpenRef.current = false
-          setDashboardOpen(false)
-          if (path) void openNote(path)
-        }}
-        onLayoutChange={(payload) => applySettings({ ...settingsRef.current, dashboardLayout: payload })}
-      />
-    </div>
-  )
-
   const editorToolbarVisible = !calendarOpen && !homeworkOpen && !overviewOpen && !glyphenWerkOpen
 
   return (

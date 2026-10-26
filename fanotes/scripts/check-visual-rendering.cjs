@@ -167,11 +167,9 @@ void (async () => {
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1600, deviceScaleFactor: 1, mobile: false })
     await cdp.evaluate(`localStorage.setItem('fanotes.uiLanguage', 'de'); window.__fanotesReloadMark = 1; location.reload()`)
 
-    // The shell opens on the start dashboard. The mark is only on the document
+    // The shell opens on the last note. The mark is only on the document
     // that called reload, so the next checks run against the new page.
-    await waitFor(cdp, `!window.__fanotesReloadMark && Boolean([...document.querySelectorAll('.dashboard-note strong')].find((node) => node.textContent.includes('Darstellung')))`, 'Die Notiz auf der Startfläche')
-    await cdp.evaluate(`document.querySelector('.dashboard-actions .primary-button').click()`)
-    await waitFor(cdp, `Boolean(document.querySelector('.markdown-editor .cm-content'))`, 'Der Live-Editor')
+    await waitFor(cdp, `!window.__fanotesReloadMark && !document.querySelector('.dashboard') && Boolean(document.querySelector('.markdown-editor .cm-content'))`, 'Der Live-Editor')
     // The long note can open below the math and the misspelled lines. Keep the
     // top in view so those rendered lines exist for the checks below.
     const showNoteTop = `(() => {

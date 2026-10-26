@@ -173,7 +173,8 @@ async function main() {
     const componentSource = fs.readFileSync(path.join(root, 'src', 'components', 'StartDashboard.tsx'), 'utf8')
     assert.match(appSource, /chooseStartSurface\(/u)
     assert.match(appSource, /start\.openLastNote && startupNote/u)
-    assert.match(appSource, /dashboardLayout: payload/u)
+    assert.doesNotMatch(appSource, /StartDashboard/u)
+    assert.doesNotMatch(appSource, /dashboardOpen/u)
     assert.match(componentSource, /moveDashboardCard\(/u)
     assert.match(componentSource, /resizeDashboardCard\(/u)
     assert.match(componentSource, /retargetDashboardCard\(/u)
@@ -183,7 +184,7 @@ async function main() {
     const onboarding = layoutApi.chooseStartSurface(true)
     const started = layoutApi.chooseStartSurface(false)
     assert.deepEqual(onboarding, { surface: 'onboarding', openLastNote: false })
-    assert.deepEqual(started, { surface: 'dashboard', openLastNote: false })
+    assert.deepEqual(started, { surface: 'note', openLastNote: true })
     const electron = fs.readFileSync(path.join(root, 'electron', 'main.cjs'), 'utf8')
     assert.match(electron, /dashboardLayout:\s*\{\s*type:\s*'string',\s*max:\s*100000\s*\}/u)
 
