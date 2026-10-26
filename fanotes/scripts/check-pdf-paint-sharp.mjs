@@ -27,6 +27,8 @@ const {
   inkOverlayPixelSize,
   inkStrokeCssPixels,
 } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
+const { inkWindowSpan } = await server.ssrLoadModule('/src/lib/pdfInkHit.ts')
+const { inkWindowHeightFor } = await server.ssrLoadModule('/src/lib/inkWindowPlan.ts')
 
 const A4 = { width: 900, height: 1273 }
 
@@ -75,6 +77,29 @@ const runOnce = () => {
   )
   const cssPen = bitmapPen * 900 / viewportInk.width
   assert.ok(Math.abs(cssPen - 3.5) < 1e-6, `pen must still read as 3.5 CSS px, got ${cssPen}`)
+
+  // A long PDF keeps a three-viewport slice. Stretching that slice up to 6%
+  // of the stack, or pre-shrinking every tall window, dropped the pen below
+  // one device pixel.
+  const tinySpan = inkWindowSpan({ y0: 0.1, y1: 0.12 })
+  assert.ok(Math.abs(tinySpan - 0.02) < 1e-9, `a 2% slice must not be raised to 6%, got ${tinySpan}`)
+  const longSlice = inkWindowHeightFor(200_000, 800)
+  assert.equal(longSlice, 2_400, `a long PDF slice stays three viewports, got ${longSlice}`)
+  const longInk = inkOverlayPixelSize(900, longSlice, 1, true, 2)
+  assert.ok(
+    longInk.width / 900 >= 2 * 0.92,
+    `a long PDF window at DPR 2 must stay at device pixels, got ${longInk.width}`,
+  )
+  const longZoomed = inkOverlayPixelSize(900, longSlice, 2, true, 2)
+  assert.ok(
+    longZoomed.width / 900 >= 2 * 2 * 0.92,
+    `a zoomed long PDF window must stay at device pixels, got ${longZoomed.width}`,
+  )
+  const longPen = inkStrokeCssPixels(3.5, longZoomed.width, 900)
+  assert.ok(
+    longPen >= 3.5 * 2 * 2 * 0.92,
+    `a 3.5px pen on a zoomed long PDF must occupy device pixels, got ${longPen}`,
+  )
 
   // Camera zoom 2× at DPR 2: the base bitmap (screen density) stays while a
   // detail window for the viewport is painted on top.
@@ -162,6 +187,11 @@ const runOnce = () => {
   assert.match(painter, /canvas\.style\.height = `\$\{box\.cssHeight\.toFixed\(2\)\}px`/)
   assert.doesNotMatch(worksheet, /MAX_PDF_PIXELS = 2_400_000/)
   assert.match(board, /inkOverlayPixelSize\(/)
+  assert.match(board, /inkWindowSpan,/)
+  assert.doesNotMatch(board, /const inkWindowSpan = /)
+  assert.doesNotMatch(board, /Math\.max\(0\.06/)
+  assert.doesNotMatch(readFileSync(join(root, 'src', 'lib', 'pdfInkHit.ts'), 'utf8'), /Math\.max\(0\.06/)
+  assert.doesNotMatch(readFileSync(join(root, 'src', 'lib', 'inkWindowPlan.ts'), 'utf8'), /INK_WINDOW_MIN_SPAN/)
   assert.doesNotMatch(board, /MAX_CANVAS_PIXELS_TALL = 4_200_000/)
   assert.match(paperView, /export const watchSheetZoom/)
   assert.match(css, /\.pdf-note-page canvas \{[\s\S]*?image-rendering:\s*auto/)
@@ -172,6 +202,9 @@ const runOnce = () => {
     inkWidth: viewportInk.width,
     bitmapPen,
     cssPen,
+    longSlice,
+    longInkWidth: longInk.width,
+    longZoomedWidth: longZoomed.width,
   }
 }
 

@@ -202,7 +202,16 @@ const clamp01 = (value: number) => Math.max(0, Math.min(1, value))
 
 export const isFullInkWindow = (window: InkWindow) => window.y0 <= 0.002 && window.y1 >= 0.998
 
-export const inkWindowSpan = (window: InkWindow) => Math.max(0.06, Math.min(1, window.y1 - window.y0))
+/**
+ * Fraction of the sheet this slice covers. It must be the real span: a floor
+ * stretches a bitmap that was painted for a shorter slice, and the pen on a
+ * long PDF goes blocky.
+ */
+export const inkWindowSpan = (window: InkWindow) => {
+  const span = window.y1 - window.y0
+  if (!(span > 0)) return 1
+  return span > 1 ? 1 : span
+}
 
 export const inkWindowsDiffer = (left: InkWindow, right: InkWindow) => (
   Math.abs(left.y0 - right.y0) > 0.04 || Math.abs(left.y1 - right.y1) > 0.04

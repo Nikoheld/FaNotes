@@ -132,6 +132,7 @@ import {
   INK_TOOLBAR_SLOT_ID,
   FULL_INK_WINDOW,
   inkWindowLayoutStyle,
+  inkWindowSpan,
   isFullInkWindow,
   liveInkSliceLayoutStyle,
   markdownNoteInkOverlaySize,
@@ -373,7 +374,6 @@ const computeInkPixelSize = (layoutWidth: number, layoutHeight: number, viewZoom
 )
 
 type InkWindow = { y0: number; y1: number }
-const inkWindowSpan = (window: InkWindow) => Math.max(0.06, Math.min(1, window.y1 - window.y0))
 /** Final slice check after the last scroll event, in case scrollend never fires. */
 const INK_WINDOW_IDLE_MS = 320
 /**
@@ -3371,6 +3371,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setViewZoom(initial.zoom)
     setViewRotation(initial.rotation)
     setViewPan(initial.pan)
+    // Fit-width on a PDF often lands before this board's first paint. The
+    // resize pass above still rasterised at zoom 1, and CSS zoom then
+    // stretched that bitmap for the whole stroke. Re-raster at the camera
+    // that is already in effect.
+    if (initial.zoom > 1.02) settleZoomedInk()
     const unsubscribe = paperView.subscribe((view) => {
       const zoomed = view.zoom !== viewZoomRef.current
       adopt(view)

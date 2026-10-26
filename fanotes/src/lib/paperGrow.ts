@@ -577,7 +577,12 @@ export const INK_MAX_CANVAS_PIXELS = 48_000_000
 /** Tall PDF/worksheet overlays: keep HiDPI on the visible window. */
 export const INK_MAX_CANVAS_PIXELS_TALL = 40_000_000
 export const INK_TALL_LAYOUT_HEIGHT = 1_800
-/** Floor so a long PDF cannot collapse a 3.5px pen to a few stretched pixels. */
+/**
+ * Minimum density a normal ink window must keep, as a fraction of screen pixels.
+ * The painter does not pre-multiply by this. Doing that on every slice taller
+ * than 1800px (a normal PDF window) left the pen short of a device pixel as
+ * soon as the sheet was zoomed. Only the edge and pixel budgets may go lower.
+ */
 export const INK_TALL_SCALE_FLOOR = 0.85
 
 /** Sheet-zoom boost used on the ink backing. Not multiplied with the inline floor. */
@@ -601,10 +606,7 @@ export const inkOverlayPixelSize = (
   const zoomBoost = inkViewQualityZoom(viewZoom)
   const baseBoost = inlineMode ? INK_MIN_INLINE_QUALITY : 1
   const quality = Math.max(baseBoost, zoomBoost)
-  const tallFactor = layoutHeight > INK_TALL_LAYOUT_HEIGHT
-    ? Math.max(INK_TALL_SCALE_FLOOR, Math.min(1, INK_TALL_LAYOUT_HEIGHT / layoutHeight))
-    : 1
-  let scale = screenDpr * quality * tallFactor
+  let scale = screenDpr * quality
   let width = Math.max(1, Math.round(Math.max(1, layoutWidth) * scale))
   let height = Math.max(1, Math.round(Math.max(1, layoutHeight) * scale))
   const edge = Math.max(width, height)

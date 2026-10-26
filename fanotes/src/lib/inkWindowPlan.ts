@@ -17,8 +17,6 @@ export type InkVisibleRange = { top: number; bottom: number }
 export const INK_WINDOW_VIEWPORTS = 3
 /** Move the slice once the visible sheet gets this close (in viewports) to its edge. */
 export const INK_WINDOW_GUARD_VIEWPORTS = 0.5
-/** inkWindowSpan floors the CSS span at 0.06; keep the slice above that. */
-export const INK_WINDOW_MIN_SPAN = 0.061
 /** A sheet within 2 % of the slice height paints as one full bitmap. */
 export const INK_WINDOW_FULL_RATIO = 0.98
 
@@ -47,11 +45,15 @@ export const measureVisibleInkLayout = (input: {
   return { visible: { top, bottom: top + viewportHeight }, viewportHeight, zoom }
 }
 
-/** Slice height for a sheet: three viewports, at least the CSS span floor, at most the sheet. */
+/**
+ * Slice height for a sheet: three viewports, and never more than the sheet.
+ * A fraction of a long PDF (the old 6.1% floor) grew the slice until the
+ * 16384px edge cap dropped the pen below one device pixel.
+ */
 export const inkWindowHeightFor = (paperHeight: number, viewportHeight: number) => {
   const paper = Math.max(1, finite(paperHeight, 1))
   const viewport = Math.max(1, finite(viewportHeight, 1))
-  return Math.min(paper, Math.max(INK_WINDOW_VIEWPORTS * viewport, INK_WINDOW_MIN_SPAN * paper))
+  return Math.min(paper, INK_WINDOW_VIEWPORTS * viewport)
 }
 
 export const inkWindowIsFull = (paperHeight: number, height: number) => (
