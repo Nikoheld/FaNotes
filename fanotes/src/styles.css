@@ -2566,6 +2566,14 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
 .setting-copy small { display: block; color: var(--text-muted); font-size: 12px; line-height: 1.45; margin-top: 3px; }
 .setting-control { min-width: 170px; max-width: 360px; display: flex; justify-content: flex-end; }
 .setting-control select, .setting-control input:not([type="range"]):not([type="color"]) { width: 100%; min-width: 170px; height: 31px; border-radius: 7px; border: 1px solid var(--border-strong); color: var(--text-soft); background: var(--bg-elevated); padding: 0 8px; font-size: 12px; }
+.share-publish-control { flex-direction: column; align-items: stretch; gap: 8px; }
+.share-notice, .share-empty { margin: 0; padding: 10px 15px 14px; color: var(--text-muted); font-size: 12px; }
+.share-recent-list { list-style: none; margin: 0; padding: 0; }
+.share-recent-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 15px; border-bottom: 1px solid var(--border); }
+.share-recent-list li > span { min-width: 0; display: grid; gap: 2px; }
+.share-recent-list b { font-size: 13px; }
+.share-recent-list small { color: var(--text-muted); font-size: 12px; word-break: break-all; }
+.share-recent-list .share-stop { flex: none; }
 .settings-resource-note { min-height: 38px; display: flex; align-items: center; gap: 8px; padding: 8px 15px; color: var(--text-muted); background: color-mix(in srgb, var(--accent) 5%, transparent); font-size: 12px; line-height: 1.45; }
 .settings-resource-note svg { flex: none; color: var(--accent-readable); }
 .settings-inline-button { min-height: 31px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 11px; border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border)); border-radius: 8px; color: var(--text); background: color-mix(in srgb, var(--accent) 10%, var(--bg-elevated)); font: 650 12px/1 var(--ui-font); cursor: pointer; }

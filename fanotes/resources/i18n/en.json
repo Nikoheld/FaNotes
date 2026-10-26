@@ -3854,5 +3854,21 @@
   "Körper": "Solid",
   "Größe der Figur": "Figure size",
   "Drehung der Figur": "Figure rotation",
-  "Figurenbibliothek schließen": "Close the figure library"
+  "Figurenbibliothek schließen": "Close the figure library",
+  "Link, Kopie oder Live": "Link, copy, or live",
+  "Öffentliche Freigabe": "Public share",
+  "Kopie oder Live": "Copy or live",
+  "Eine Kopie bleibt so, wie sie hochgeladen wurde.": "A copy stays as it was uploaded.",
+  "Eine Live-Freigabe zeigt spätere Änderungen.": "A live share shows later edits.",
+  "Der private Vault-Sync bleibt verschlüsselt und ist kein öffentlicher Link.": "Private vault sync stays encrypted and is not a public link.",
+  "Freigabeart": "Share kind",
+  "Notiz oder Ordner": "Note or folder",
+  "Ein Ordner enthält jede Notiz darin, auch in verschachtelten Ordnern.": "A folder includes every note inside it, including nested folders.",
+  "Der Link zeigt Titel und geschriebenen Text im Browser.": "The link shows the title and the written text in the browser.",
+  "Die Notizen konnten nicht gelesen werden.": "The notes could not be read.",
+  "Die Freigabe wurde erstellt.": "The share was created.",
+  "Die Freigabe konnte nicht hochgeladen werden.": "The share could not be uploaded.",
+  "Letzte Freigaben": "Recent shares",
+  "Keine Freigabe": "No share",
+  "Link erstellen": "Create link"
 }

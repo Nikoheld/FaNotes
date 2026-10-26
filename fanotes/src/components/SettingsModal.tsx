@@ -27,6 +27,7 @@ import {
   Rocket,
   Search,
   Settings2,
+  Share2,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
@@ -57,6 +58,16 @@ import {
 import type { AppSettings, EnhancedMathRecognitionState, OneNoteImportResult, QwenVisionState, ServerBackupState, UpdateState } from '../types'
 import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
 import { SyncSettingsSection } from './SyncSettingsSection'
+import { ShareSettingsPage, type ShareTarget } from './ShareSettingsPage'
+import {
+  createFetchSharePort,
+  loadShareEntries,
+  parseShareDirectory,
+  publishShare,
+  refreshLiveShares,
+  resolveShareOrigin,
+  serializeShareDirectory,
+} from '../lib/sync/share'
 
 const UPDATE_CHANNEL_COPY = {
   stable: {
@@ -78,7 +89,7 @@ const UPDATE_CHANNEL_COPY = {
 
 const updateChannelCopy = (channel: AppSettings['updateChannel']) => UPDATE_CHANNEL_COPY[channel] ?? UPDATE_CHANNEL_COPY.stable
 
-export type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'sync' | 'addons' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
+export type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'sync' | 'share' | 'addons' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
 
 export type SettingsModalProps = {
   platform?: string
@@ -114,6 +125,7 @@ const SECTIONS: { id: SettingsSection; label: string; description: string; icon:
   { id: 'drawing', label: 'Stift & Erkennung', description: 'Tablet, Papier und Handschrift', icon: Brush, count: 16 },
   { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 7 },
   { id: 'sync', label: 'Sync', description: 'Konto, Geräte und Verschlüsselung', icon: Cloud, count: 7 },
+  { id: 'share', label: 'Teilen', description: 'Link, Kopie oder Live', icon: Share2, count: 3 },
   { id: 'addons', label: 'Add-ons', description: 'Store, Quelle und Updates', icon: Puzzle, count: 3 },
   { id: 'updates', label: 'Updates', description: 'Stable, Beta und Sicherheit', icon: RefreshCw, count: 4 },
   { id: 'accessibility', label: 'Bedienung', description: 'Bewegung und Lesbarkeit', icon: Accessibility, count: 3 },
@@ -124,7 +136,7 @@ const SECTIONS: { id: SettingsSection; label: string; description: string; icon:
 const SECTION_GROUPS: Array<{ label: string; sections: SettingsSection[] }> = [
   { label: 'Aussehen & Schreiben', sections: ['appearance', 'editor'] },
   { label: 'Stift & Arbeitsbereich', sections: ['drawing', 'files'] },
-  { label: 'FaNotes & System', sections: ['sync', 'addons', 'updates', 'accessibility', 'experimental', 'advanced'] },
+  { label: 'FaNotes & System', sections: ['sync', 'share', 'addons', 'updates', 'accessibility', 'experimental', 'advanced'] },
 ]
 
 type SettingsSearchItem = {
@@ -141,6 +153,7 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Angemeldete Geräte', detail: 'Sync', section: 'sync', target: 'settings-sync-devices', keywords: 'sync geräte devices laptop tablet abmelden' },
   { label: 'Sync-Passwort ändern', detail: 'Sync', section: 'sync', target: 'settings-sync-password', keywords: 'sync passwort ändern password schlüssel' },
   { label: 'Sync-Konto löschen', detail: 'Sync', section: 'sync', target: 'settings-sync-delete', keywords: 'sync konto löschen account delete server' },
+  { label: 'Freigaben', detail: 'Teilen', section: 'share', target: 'settings-share', keywords: 'teilen freigabe link kopie live ordner notiz öffentlich stoppen beenden' },
   { label: 'App-Sprache', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'sprache language system deutsch englisch english' },
   { label: 'Farbschema & Themes', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'theme dunkel hell system graphit klar mitternacht wald aurora sepia farbe' },
   { label: 'Arbeitsflächen-Design', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'hintergrund verlauf mesh papier clean' },
@@ -365,6 +378,13 @@ export function SettingsModal({
   const [qwenVisionState, setQwenVisionState] = useState<QwenVisionState | null>(null)
   const [qwenVisionBusy, setQwenVisionBusy] = useState(false)
   const [qwenVisionError, setQwenVisionError] = useState<string | null>(null)
+  const [shareTargets, setShareTargets] = useState<ShareTarget[]>([])
+  const [sharePath, setSharePath] = useState('')
+  const [sharePublishing, setSharePublishing] = useState(false)
+  const [shareLink, setShareLink] = useState<string | null>(null)
+  const [shareNotice, setShareNotice] = useState<string | null>(null)
+  const sharePort = useMemo(() => createFetchSharePort(), [])
+  const shareOrigin = useMemo(() => resolveShareOrigin(), [])
   const trainingInputRef = useRef<HTMLInputElement>(null)
   const modalRef = useRef<HTMLElement>(null)
   const section = useMemo(() => SECTIONS.find((candidate) => candidate.id === active)!, [active])
@@ -414,6 +434,50 @@ export function SettingsModal({
   }, [isWeb])
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     onChange({ ...settings, [key]: value })
+  }
+  useEffect(() => {
+    if (active !== 'share' || typeof window === 'undefined' || !window.fanotes?.getTree || !window.fanotes.readFile) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const entries = await loadShareEntries(await window.fanotes.getTree(), (path) => window.fanotes.readFile(path))
+        if (cancelled) return
+        setShareTargets(entries.map((entry) => ({ path: entry.path, kind: entry.kind })))
+        const directory = parseShareDirectory(settings.shareRecent)
+        if (!directory.shares.some((item) => item.mode === 'live' && !item.stopped)) return
+        try {
+          await refreshLiveShares({ entries, directory, port: sharePort, origin: shareOrigin })
+        } catch {
+          if (!cancelled) setShareNotice('Die Freigabe konnte nicht hochgeladen werden.')
+        }
+      } catch {
+        if (!cancelled) setShareNotice('Die Notizen konnten nicht gelesen werden.')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [active, settings.shareRecent, shareOrigin, sharePort])
+  const publishFromSettings = async () => {
+    if (!sharePath || typeof window === 'undefined' || !window.fanotes?.getTree || !window.fanotes.readFile) return
+    setSharePublishing(true)
+    setShareNotice(null)
+    try {
+      const entries = await loadShareEntries(await window.fanotes.getTree(), (path) => window.fanotes.readFile(path))
+      const published = await publishShare({
+        entries,
+        rootPath: sharePath,
+        mode: settings.shareMode === 'live' ? 'live' : 'copy',
+        port: sharePort,
+        origin: shareOrigin,
+        directory: parseShareDirectory(settings.shareRecent),
+      })
+      onChange({ ...settings, shareRecent: serializeShareDirectory(published.directory) })
+      setShareLink(published.record.link)
+      setShareNotice('Die Freigabe wurde erstellt.')
+    } catch (error) {
+      setShareNotice(error instanceof Error ? error.message : 'Die Freigabe konnte nicht hochgeladen werden.')
+    } finally {
+      setSharePublishing(false)
+    }
   }
   const installEnhancedMathModel = async () => {
     if (!window.fanotes.installEnhancedMathRecognitionModel) return
@@ -951,6 +1015,24 @@ export function SettingsModal({
               syncEngine && syncState
                 ? <SyncSettingsSection engine={syncEngine} syncState={syncState} settings={settings} update={update} platform={platform} />
                 : <div className="setting-card"><div className="setting-card-title"><Cloud size={16} /><span>Sync</span></div><div className="setting-row"><div className="setting-copy"><span>Sync steht in dieser Umgebung nicht zur Verfügung.</span></div></div></div>
+            )}
+
+            {active === 'share' && (
+              <ShareSettingsPage
+                mode={settings.shareMode === 'live' ? 'live' : 'copy'}
+                onModeChange={(shareMode) => update('shareMode', shareMode)}
+                directory={parseShareDirectory(settings.shareRecent)}
+                targets={shareTargets}
+                selectedPath={sharePath}
+                onSelectPath={setSharePath}
+                publishing={sharePublishing}
+                lastLink={shareLink}
+                notice={shareNotice}
+                onPublish={() => { void publishFromSettings() }}
+                onDirectory={(next) => update('shareRecent', serializeShareDirectory(next))}
+                port={sharePort}
+                origin={shareOrigin}
+              />
             )}
 
             {active === 'addons' && (

@@ -111,6 +111,10 @@ export type AppSettings = {
   syncHandwritingModel: boolean
   /** Also synchronise the local note-history folder. */
   syncNoteHistory: boolean
+  /** Public share links. `copy` freezes the upload; `live` follows later edits. */
+  shareMode: 'copy' | 'live'
+  /** JSON list of recent public shares. Empty until the first link is created. */
+  shareRecent: string
   /** Show the invisible handwriting transcript in the margin. */
   marginTranscript: boolean
   showWordCount: boolean

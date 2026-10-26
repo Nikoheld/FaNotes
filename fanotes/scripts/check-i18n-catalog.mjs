@@ -30,6 +30,7 @@ const CHROME_FILES = [
   'src/components/TextToHandwritingDialog.tsx',
   'src/components/GlyphenWerkWorkspace.tsx',
   'src/components/SyncSettingsSection.tsx',
+  'src/components/ShareSettingsPage.tsx',
   'src/components/CalendarView.tsx',
   'src/components/FlashcardReview.tsx',
   'src/components/RightInspector.tsx',

@@ -203,6 +203,7 @@ import { installChromeTextSelect } from './lib/chromeTextSelect'
 import { drawingSessionFromLoad, INK_OVERLAY_CRASH_TITLE, INK_TOOLBAR_SLOT_ID, overlayAfterNoteSwitch, PDF_TOOLBAR_SLOT_ID, penModeToolbarSlot } from './lib/pdfInkHit'
 import { APP_VERSION } from './lib/appVersion'
 import { defaultSettingsForPlatform } from './defaults'
+import { loadShareEntries, queueLiveShareRefresh } from './lib/sync/share'
 import { PaperStylePicker } from './components/PaperStylePicker'
 import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
@@ -1829,6 +1830,10 @@ export default function App({ startupBootstrap }: AppProps) {
       // A statistics-only save must not start a sync. The timer still runs;
       // the engine then sees the same note and skips the upload.
       if (!options?.quiet) syncEngine.notifyLocalChange()
+      if (!options?.quiet) queueLiveShareRefresh({
+        settingsRecent: settingsRef.current.shareRecent ?? '',
+        loadEntries: () => loadShareEntries(treeRef.current, (path) => window.fanotes.readFile(path)),
+      })
       if (savedSession) {
         // Activity during the write builds on the saved session; only the
         // revision that actually reached the disk counts as persisted.

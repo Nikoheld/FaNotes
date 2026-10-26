@@ -35,6 +35,8 @@ export const defaultSettingsForPlatform = (platform: string | undefined): AppSet
   syncExcludedFolders: '',
   syncHandwritingModel: false,
   syncNoteHistory: false,
+  shareMode: 'copy',
+  shareRecent: '',
   marginTranscript: true,
   showWordCount: true,
   showOutline: true,

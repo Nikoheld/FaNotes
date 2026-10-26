@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FaNotes Freigabe</title>
+  <style>
+    body { margin: 0; background: #f7f6f3; color: #1c1c1c; font: 17px/1.55 "Iowan Old Style", Palatino, Georgia, serif; }
+    main { max-width: 42rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+    h1 { font-size: 1.8rem; line-height: 1.25; margin: 0 0 1.25rem; }
+    article { margin: 0 0 1.75rem; }
+    h2 { font-size: 1.15rem; margin: 0 0 0.4rem; }
+    .share-body { margin: 0; white-space: pre-wrap; font: inherit; }
+    .share-stopped, .share-missing, .share-loading { color: #5c5c5c; font-family: system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+  <main id="share-view"><p class="share-loading">Freigabe wird geladen …</p></main>
+  <script>
+    (function () {
+      var root = document.getElementById('share-view')
+      function clear(node) { while (node.firstChild) node.removeChild(node.firstChild) }
+      function paragraph(className, text) {
+        var element = document.createElement('p')
+        element.className = className
+        element.textContent = text
+        return element
+      }
+      function showStopped() {
+        clear(root)
+        root.appendChild(paragraph('share-stopped', 'Diese Freigabe wurde beendet.'))
+      }
+      function showPayload(payload) {
+        clear(root)
+        if (!payload || payload.stopped || !payload.notes || !payload.notes.length) {
+          showStopped()
+          return
+        }
+        var heading = document.createElement('h1')
+        heading.className = 'share-title'
+        heading.textContent = payload.title || ''
+        root.appendChild(heading)
+        payload.notes.forEach(function (note) {
+          var article = document.createElement('article')
+          article.className = 'share-note'
+          var title = document.createElement('h2')
+          title.className = 'share-note-title'
+          title.textContent = note.title || ''
+          var body = document.createElement('p')
+          body.className = 'share-body'
+          body.textContent = note.content || ''
+          article.appendChild(title)
+          article.appendChild(body)
+          root.appendChild(article)
+        })
+      }
+      if (location.protocol === 'file:') {
+        clear(root)
+        root.appendChild(paragraph('share-missing', 'Diese Seite braucht einen Webserver. Im Ordner public zum Beispiel npx serve ausführen und dann /share/?id= öffnen.'))
+        return
+      }
+      var params = new URLSearchParams(location.search)
+      var inline = params.get('payload')
+      if (inline) {
+        try { showPayload(JSON.parse(decodeURIComponent(inline))); return } catch (error) { /* fetch the id */ }
+      }
+      var id = params.get('id') || ''
+      if (!id) {
+        clear(root)
+        root.appendChild(paragraph('share-missing', 'Öffne diese Seite mit der id aus einem Freigabe-Link.'))
+        return
+      }
+      fetch('/api/v1/share/' + encodeURIComponent(id), { headers: { Accept: 'application/json' }, cache: 'no-store' })
+        .then(function (response) {
+          if (response.status === 404 || response.status === 410) { showStopped(); return null }
+          if (!response.ok) throw new Error('status ' + response.status)
+          return response.json()
+        })
+        .then(function (payload) { if (payload) showPayload(payload) })
+        .catch(function () {
+          clear(root)
+          root.appendChild(paragraph('share-missing', 'Die Freigabe konnte nicht geladen werden.'))
+        })
+    })()
+  </script>
+</body>
+</html>
