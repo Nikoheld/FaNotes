@@ -15,6 +15,19 @@ const MAX_PATH_CHARS = 512
 const MAX_TITLE_CHARS = 300
 
 const rateWindows = new Map()
+const shareTails = new Map()
+
+/** One writer at a time per link, so a stop cannot be overwritten by an older upload. */
+const withShareLock = (id, task) => {
+  const previous = shareTails.get(id) ?? Promise.resolve()
+  const run = previous.then(task, task)
+  const settled = run.then(() => undefined, () => undefined)
+  shareTails.set(id, settled)
+  settled.then(() => {
+    if (shareTails.get(id) === settled) shareTails.delete(id)
+  })
+  return run
+}
 
 class ShareApiError extends Error {
   constructor(status, publicMessage) {
@@ -157,10 +170,12 @@ export const handleShareRequest = async (request, response, url) => {
 
     if (request.method === 'PUT') {
       rateLimit(`share-put:${clientAddress(request)}`, 60, 60_000)
-      const existing = await readRecord(id)
-      if (existing?.stopped) fail(410, 'Diese Freigabe wurde beendet.')
       const payload = sanitizeSharePayload(await readJsonBody(request), id)
-      await writeRecord(id, payload)
+      await withShareLock(id, async () => {
+        const existing = await readRecord(id)
+        if (existing?.stopped) fail(410, 'Diese Freigabe wurde beendet.')
+        await writeRecord(id, payload)
+      })
       writeJson(response, 200, { ok: true, id })
       return true
     }
@@ -187,10 +202,12 @@ export const handleShareRequest = async (request, response, url) => {
 
     if (request.method === 'DELETE') {
       rateLimit(`share-delete:${clientAddress(request)}`, 60, 60_000)
-      const record = await readRecord(id)
-      if (record && !record.stopped) {
-        await writeRecord(id, { ...record, stopped: true, notes: [] })
-      }
+      await withShareLock(id, async () => {
+        const record = await readRecord(id)
+        if (record && !record.stopped) {
+          await writeRecord(id, { ...record, stopped: true, notes: [] })
+        }
+      })
       writeJson(response, 200, { ok: true, stopped: true })
       return true
     }

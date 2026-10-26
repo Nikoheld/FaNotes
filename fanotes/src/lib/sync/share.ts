@@ -341,7 +341,7 @@ export async function stopShare(input: {
   return markShareStopped(input.directory ?? emptyShareDirectory(), input.id)
 }
 
-/** Push the current notes for every live share. Copies stay as they were uploaded. */
+/** Push the current notes for every live share. Copies stay as they were uploaded. A stop ends this refresh before the next upload. */
 export async function refreshLiveShares(input: {
   entries: readonly ShareEntry[]
   directory: ShareDirectory
@@ -350,7 +350,9 @@ export async function refreshLiveShares(input: {
   now?: string
 }): Promise<void> {
   const origin = input.origin ?? resolveShareOrigin()
+  const revision = liveRefreshGeneration
   for (const share of input.directory.shares) {
+    if (revision !== liveRefreshGeneration) return
     if (share.stopped || share.mode !== 'live') continue
     const collected = collectShareNotes(input.entries, share.rootPath)
     const payload: SharePayload = {
@@ -363,11 +365,45 @@ export async function refreshLiveShares(input: {
       notes: collected.notes,
       updatedAt: input.now ?? new Date().toISOString(),
     }
+    if (revision !== liveRefreshGeneration) return
     const response = await input.port.exchange(buildShareUpload(payload, origin))
+    if (revision !== liveRefreshGeneration) return
+    if (response.status === 410) continue
     if (response.status < 200 || response.status >= 300) {
       throw new Error(`Live-Freigabe wurde nicht aktualisiert (${response.status}).`)
     }
   }
+}
+
+export function liveShareRevision(): number {
+  return liveRefreshGeneration
+}
+
+/** The Teilen page reads the vault, then uploads live shares. Stop cancels it, including while the vault is still being read. */
+export async function refreshSharesOpenedInSettings(input: {
+  loadEntries: () => Promise<readonly ShareEntry[]>
+  readDirectory: () => string
+  port: SharePort
+  origin?: string
+  onEntries?: (entries: readonly ShareEntry[]) => void
+}): Promise<'ok' | 'skipped' | 'read-failed' | 'upload-failed'> {
+  const revision = liveRefreshGeneration
+  let entries: readonly ShareEntry[]
+  try {
+    entries = await input.loadEntries()
+  } catch {
+    return revision === liveRefreshGeneration ? 'read-failed' : 'skipped'
+  }
+  if (revision !== liveRefreshGeneration) return 'skipped'
+  input.onEntries?.(entries)
+  const directory = readShareDirectorySetting(input.readDirectory)
+  if (!directoryHasLiveShare(directory) || revision !== liveRefreshGeneration) return 'ok'
+  try {
+    await refreshLiveShares({ entries, directory, port: input.port, origin: input.origin })
+  } catch {
+    return revision === liveRefreshGeneration ? 'upload-failed' : 'skipped'
+  }
+  return revision === liveRefreshGeneration ? 'ok' : 'skipped'
 }
 
 let liveRefreshTimer: ReturnType<typeof setTimeout> | null = null

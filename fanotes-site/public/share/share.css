@@ -1,0 +1,7 @@
+body { margin: 0; background: #f7f6f3; color: #1c1c1c; font: 17px/1.55 "Iowan Old Style", Palatino, Georgia, serif; }
+main { max-width: 42rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+h1 { font-size: 1.8rem; line-height: 1.25; margin: 0 0 1.25rem; }
+article { margin: 0 0 1.75rem; }
+h2 { font-size: 1.15rem; margin: 0 0 0.4rem; }
+.share-body { margin: 0; white-space: pre-wrap; font: inherit; }
+.share-stopped, .share-missing, .share-loading { color: #5c5c5c; font-family: system-ui, sans-serif; }

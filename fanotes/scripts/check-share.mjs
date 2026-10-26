@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import { request as httpRequest } from 'node:http'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -14,7 +15,11 @@ import { createServer } from 'vite'
 
 const appRoot = fileURLToPath(new URL('..', import.meta.url))
 const viewerPath = fileURLToPath(new URL('../public/share/index.html', import.meta.url))
+const viewerScriptPath = fileURLToPath(new URL('../public/share/share.js', import.meta.url))
+const viewerStylePath = fileURLToPath(new URL('../public/share/share.css', import.meta.url))
 const viewerHtml = readFileSync(viewerPath, 'utf8')
+const viewerScript = readFileSync(viewerScriptPath, 'utf8')
+const viewerStyle = readFileSync(viewerStylePath, 'utf8')
 const scratch = process.env.FANOTES_SHARE_SCRATCH || ''
 const writeScratch = (name, text) => {
   if (scratch) writeFileSync(join(scratch, name), text)
@@ -43,7 +48,18 @@ if (typeof globalThis.document === 'undefined') globalThis.document = globalThis
 const siteRoot = fileURLToPath(new URL('../../fanotes-site/', import.meta.url))
 const siteViewerPath = join(siteRoot, 'public', 'share', 'index.html')
 const serverSource = readFileSync(join(siteRoot, 'server.mjs'), 'utf8')
+const serviceSource = readFileSync(join(siteRoot, 'deploy', 'fanotes-site.service'), 'utf8')
+const nginxSource = readFileSync(join(siteRoot, 'deploy', 'fanotes-fasrv.conf'), 'utf8')
 assert.equal(readFileSync(siteViewerPath, 'utf8'), viewerHtml, 'the site must serve the shipped share viewer')
+assert.equal(readFileSync(join(siteRoot, 'public', 'share', 'share.js'), 'utf8'), viewerScript)
+assert.equal(readFileSync(join(siteRoot, 'public', 'share', 'share.css'), 'utf8'), viewerStyle)
+assert.doesNotMatch(viewerHtml, /<style[\s>]/u)
+assert.match(viewerHtml, /<script src="share\.js"><\/script>/u)
+assert.match(viewerHtml, /href="share\.css"/u)
+assert.match(viewerScript, /share-note-title/u)
+assert.match(serviceSource, /Environment=FANOTES_SHARE_DIR=\/var\/lib\/fanotes-shares/u)
+assert.match(serviceSource, /ReadWritePaths=\/var\/lib\/fanotes-shares/u)
+assert.match(nginxSource, /location \^~ \/api\/v1\/share\/ \{[\s\S]*?client_max_body_size 8m;/u)
 const shareRoute = serverSource.indexOf('handleShareRequest(request, response, url)')
 const getGuard = serverSource.indexOf('Nur GET und HEAD sind erlaubt.')
 assert.ok(shareRoute >= 0 && getGuard >= 0 && shareRoute < getGuard, 'share route must run before the GET/HEAD guard')
@@ -139,6 +155,12 @@ try {
   const servedViewer = await fetch(`${origin}/share/?id=${encodeURIComponent(note.record.id)}`)
   assert.equal(servedViewer.status, 200)
   assert.equal(await servedViewer.text(), viewerHtml)
+  const servedScript = await fetch(`${origin}/share/share.js`)
+  const servedStyle = await fetch(`${origin}/share/share.css`)
+  assert.equal(servedScript.status, 200)
+  assert.equal(servedStyle.status, 200)
+  assert.equal(await servedScript.text(), viewerScript)
+  assert.equal(await servedStyle.text(), viewerStyle)
   assert.match(note.request.body, /Guten Tag aus der Notiz/)
   assert.match(note.request.url, /\/api\/v1\/share\//u)
   assert.doesNotMatch(note.request.url, /\/api\/v1\/sync/u)
@@ -216,6 +238,7 @@ try {
   assert.doesNotMatch(copyFile, /Spaeter geaendert/)
   assert.match(liveFile, /Spaeter geaendert/)
   await assertLiveRefreshTimer(share, sharePort, origin)
+  await assertStopBeatsLateUpload(share, sharePort, origin, sitePort)
 
   const settings = {
     ...defaults.defaultSettingsForPlatform('linux'),
@@ -331,13 +354,23 @@ try {
   if (viewed?.socket) viewed.socket.close()
 } finally {
   if (chromium && chromium.exitCode === null) {
-    chromium.kill('SIGTERM')
+    try { process.kill(-chromium.pid, 'SIGTERM') } catch { chromium.kill('SIGTERM') }
     await new Promise((resolve) => {
-      const timer = setTimeout(resolve, 1500)
+      const timer = setTimeout(resolve, 2000)
       chromium.once('exit', () => { clearTimeout(timer); resolve() })
     })
   }
-  if (chromiumProfile) rmSync(chromiumProfile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  if (chromiumProfile) {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      try {
+        rmSync(chromiumProfile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+        break
+      } catch (error) {
+        if (attempt === 7) throw error
+        await wait(250)
+      }
+    }
+  }
   if (siteServer && siteServer.exitCode === null) {
     siteServer.kill('SIGTERM')
     await new Promise((resolve) => {
@@ -420,6 +453,142 @@ async function assertLiveRefreshTimer(share, sharePort, origin) {
   assert.equal(await share.readShare({ id: stopping.record.id, port: sharePort, origin }), null)
 }
 
+function startBlockedPut(port, id) {
+  let release = () => undefined
+  const response = new Promise((resolve, reject) => {
+    const req = httpRequest({
+      hostname: '127.0.0.1',
+      port,
+      path: `/api/v1/share/${id}`,
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'X-FaNotes-Share': '1',
+      },
+    }, (res) => {
+      const chunks = []
+      res.on('data', (chunk) => chunks.push(chunk))
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') }))
+    })
+    req.on('error', reject)
+    req.flushHeaders()
+    release = (body) => req.end(body)
+  })
+  return { response, release: (body) => release(body) }
+}
+
+async function assertStopBeatsLateUpload(share, sharePort, origin, sitePort) {
+  const chunk = 'B'.repeat(400_000)
+  const large = await share.publishShare({
+    entries: [1, 2, 3].map((number) => ({
+      path: `Gross/Blatt-${number}.md`,
+      kind: 'file',
+      content: `# Blatt ${number}\n\n${chunk}`,
+    })),
+    rootPath: 'Gross',
+    mode: 'copy',
+    port: sharePort,
+    origin,
+  })
+  const largeFile = readFileSync(join(shareDir, `${large.record.id}.json`), 'utf8')
+  assert.ok(largeFile.length > 1_000_000, 'a share larger than the old 1 MB proxy cap was not stored')
+  assert.equal(largeFile.split(chunk).length, 4)
+
+  const existing = await share.publishShare({
+    entries: [{ path: 'Rennen.md', kind: 'file', content: '# Rennen\n\nOriginal-Rennen' }],
+    rootPath: 'Rennen.md',
+    mode: 'live',
+    port: sharePort,
+    origin,
+  })
+  const replacement = JSON.stringify({
+    schemaVersion: 1,
+    id: existing.record.id,
+    mode: 'live',
+    kind: 'note',
+    rootPath: 'Rennen.md',
+    title: 'Rennen',
+    notes: [{ path: 'Rennen.md', title: 'Rennen', content: '# Rennen\n\nWIEDER-DA' }],
+    updatedAt: '2026-10-26T12:03:00.000Z',
+  })
+  const blocked = startBlockedPut(sitePort, existing.record.id)
+  await wait(150)
+  const deleted = await fetch(`${origin}/api/v1/share/${existing.record.id}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json', 'X-FaNotes-Share': '1' },
+  })
+  assert.equal(deleted.status, 200)
+  blocked.release(replacement)
+  const latePut = await blocked.response
+  assert.equal(latePut.status, 410)
+  assert.doesNotMatch(latePut.body, /WIEDER-DA/)
+  const after = await fetch(`${origin}/api/v1/share/${existing.record.id}`)
+  assert.equal(after.status, 410)
+  const disk = readFileSync(join(shareDir, `${existing.record.id}.json`), 'utf8')
+  assert.doesNotMatch(disk, /WIEDER-DA/)
+  assert.match(disk, /"stopped":true/u)
+
+  let releaseEntries
+  const calls = []
+  const recording = {
+    async exchange(request) {
+      calls.push(request.method)
+      return { status: 200, body: '{}' }
+    },
+  }
+  const pending = share.refreshSharesOpenedInSettings({
+    loadEntries: () => new Promise((resolve) => { releaseEntries = resolve }),
+    readDirectory: () => share.serializeShareDirectory(existing.directory),
+    port: recording,
+    origin,
+  })
+  await share.stopShare({ id: existing.record.id, port: recording, origin, directory: existing.directory })
+  releaseEntries([{ path: 'Rennen.md', kind: 'file', content: '# Rennen\n\nSpaeter' }])
+  assert.equal(await pending, 'skipped')
+  assert.equal(calls.filter((method) => method === 'PUT').length, 0)
+  assert.ok(calls.includes('DELETE'))
+
+  let releaseFirst = null
+  let markStarted = () => undefined
+  const started = new Promise((resolve) => { markStarted = resolve })
+  const methods = []
+  const blockingPort = {
+    async exchange(request) {
+      methods.push(request.method)
+      if (request.method === 'PUT' && releaseFirst === null) {
+        await new Promise((resolve) => {
+          releaseFirst = resolve
+          markStarted()
+        })
+      }
+      return { status: 200, body: '{}' }
+    },
+  }
+  const liveShare = (id, path) => ({
+    id, link: `${origin}/share/?id=${id}`, title: path, rootPath: path, mode: 'live', kind: 'note', createdAt: '', stopped: false,
+  })
+  const refreshing = share.refreshLiveShares({
+    entries: [
+      { path: 'A.md', kind: 'file', content: '# A\n\nEins' },
+      { path: 'B.md', kind: 'file', content: '# B\n\nZwei' },
+    ],
+    directory: { shares: [liveShare('a'.repeat(32), 'A.md'), liveShare('b'.repeat(32), 'B.md')] },
+    port: blockingPort,
+    origin,
+  })
+  await started
+  await share.stopShare({
+    id: 'a'.repeat(32),
+    port: blockingPort,
+    origin,
+    directory: { shares: [liveShare('a'.repeat(32), 'A.md'), liveShare('b'.repeat(32), 'B.md')] },
+  })
+  releaseFirst()
+  await refreshing
+  assert.equal(methods.filter((method) => method === 'PUT').length, 1, 'a settings refresh must not upload another note after stop')
+}
+
 function createCdp(socket, errors) {
   let sequence = 0
   const pending = new Map()
@@ -467,7 +636,7 @@ async function openViewer(link, expected) {
       `--user-data-dir=${chromiumProfile}`,
       `--remote-debugging-port=${debugPort}`,
       'about:blank',
-    ], { stdio: ['ignore', 'ignore', 'pipe'] })
+    ], { stdio: ['ignore', 'ignore', 'pipe'], detached: true })
     let socket
     const deadline = Date.now() + 20000
     while (Date.now() < deadline) {

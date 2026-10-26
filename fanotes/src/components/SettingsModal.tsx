@@ -64,7 +64,7 @@ import {
   loadShareEntries,
   parseShareDirectory,
   publishShare,
-  refreshLiveShares,
+  refreshSharesOpenedInSettings,
   resolveShareOrigin,
   serializeShareDirectory,
 } from '../lib/sync/share'
@@ -438,22 +438,18 @@ export function SettingsModal({
   useEffect(() => {
     if (active !== 'share' || typeof window === 'undefined' || !window.fanotes?.getTree || !window.fanotes.readFile) return
     let cancelled = false
-    void (async () => {
-      try {
-        const entries = await loadShareEntries(await window.fanotes.getTree(), (path) => window.fanotes.readFile(path))
-        if (cancelled) return
-        setShareTargets(entries.map((entry) => ({ path: entry.path, kind: entry.kind })))
-        const directory = parseShareDirectory(settings.shareRecent)
-        if (!directory.shares.some((item) => item.mode === 'live' && !item.stopped)) return
-        try {
-          await refreshLiveShares({ entries, directory, port: sharePort, origin: shareOrigin })
-        } catch {
-          if (!cancelled) setShareNotice('Die Freigabe konnte nicht hochgeladen werden.')
-        }
-      } catch {
-        if (!cancelled) setShareNotice('Die Notizen konnten nicht gelesen werden.')
-      }
-    })()
+    void refreshSharesOpenedInSettings({
+      loadEntries: async () => loadShareEntries(await window.fanotes.getTree(), (path) => window.fanotes.readFile(path)),
+      readDirectory: () => settings.shareRecent,
+      port: sharePort,
+      origin: shareOrigin,
+      onEntries: (entries) => {
+        if (!cancelled) setShareTargets(entries.map((entry) => ({ path: entry.path, kind: entry.kind })))
+      },
+    }).then((result) => {
+      if (cancelled || result === 'ok' || result === 'skipped') return
+      setShareNotice(result === 'read-failed' ? 'Die Notizen konnten nicht gelesen werden.' : 'Die Freigabe konnte nicht hochgeladen werden.')
+    })
     return () => { cancelled = true }
   }, [active, settings.shareRecent, shareOrigin, sharePort])
   const publishFromSettings = async () => {
