@@ -6,6 +6,7 @@ import { extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { handleBackupRequest, initializeBackupService } from './backup-service.mjs'
 import { handleHomeworkRequest } from './homework-api.mjs'
+import { handleShareRequest } from './share-api.mjs'
 import { handleRemoteSupportRequest } from './remote-support-api.mjs'
 import { handleBugReportRequest } from './bug-report-api.mjs'
 import { handleSendDataRequest } from './send-data-api.mjs'
@@ -537,6 +538,7 @@ const server = createServer(async (request, response) => {
     if (await handleSyncRequest(request, response, url)) return
     if (await handleMcpRequest(request, response, url)) return
     if (await handleHomeworkRequest(request, response, url)) return
+    if (await handleShareRequest(request, response, url)) return
     if (await handleRemoteSupportRequest(request, response, url)) return
     if (await handleBugReportRequest(request, response, url)) return
     if (await handleSendDataRequest(request, response, url)) return
@@ -561,6 +563,11 @@ const server = createServer(async (request, response) => {
     }
     if (url.pathname === '/notes') {
       response.writeHead(308, { Location: '/notes/', 'Cache-Control': 'no-store' })
+      response.end()
+      return
+    }
+    if (url.pathname === '/share') {
+      response.writeHead(308, { Location: `/share/${url.search}`, 'Cache-Control': 'no-store' })
       response.end()
       return
     }

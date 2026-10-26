@@ -1831,8 +1831,8 @@ export default function App({ startupBootstrap }: AppProps) {
       // the engine then sees the same note and skips the upload.
       if (!options?.quiet) syncEngine.notifyLocalChange()
       if (!options?.quiet) queueLiveShareRefresh({
-        settingsRecent: settingsRef.current.shareRecent ?? '',
-        loadEntries: () => loadShareEntries(treeRef.current, (path) => window.fanotes.readFile(path)),
+        settingsRecent: () => settingsRef.current.shareRecent ?? '',
+        loadEntries: () => loadShareEntries(treeRef.current, (notePath) => window.fanotes.readFile(notePath)),
       })
       if (savedSession) {
         // Activity during the write builds on the saved session; only the

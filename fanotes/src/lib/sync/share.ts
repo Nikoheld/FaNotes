@@ -332,6 +332,9 @@ export async function stopShare(input: {
   origin?: string
   directory?: ShareDirectory
 }): Promise<ShareDirectory> {
+  // A save may already have queued a live upload. Drop it before the revoke
+  // so that upload cannot put the notes back on this link.
+  cancelQueuedLiveShareRefresh()
   const origin = input.origin ?? resolveShareOrigin()
   const response = await input.port.exchange(buildShareRevoke(input.id, origin))
   if (response.status >= 400) throw new Error(`Freigabe konnte nicht beendet werden (${response.status}).`)
@@ -368,26 +371,57 @@ export async function refreshLiveShares(input: {
 }
 
 let liveRefreshTimer: ReturnType<typeof setTimeout> | null = null
+let liveRefreshGeneration = 0
+
+const readShareDirectorySetting = (settingsRecent: string | (() => string)) => (
+  parseShareDirectory(typeof settingsRecent === 'function' ? settingsRecent() : settingsRecent)
+)
+
+const directoryHasLiveShare = (directory: ShareDirectory) => (
+  directory.shares.some((share) => share.mode === 'live' && !share.stopped)
+)
+
+/** Drop a pending live upload, including one whose request has not been sent yet. */
+export function cancelQueuedLiveShareRefresh() {
+  liveRefreshGeneration += 1
+  if (liveRefreshTimer !== null) {
+    clearTimeout(liveRefreshTimer)
+    liveRefreshTimer = null
+  }
+}
 
 /** Debounced push after a local save. No-op when nothing is shared live. Never throws into the save path. */
 export function queueLiveShareRefresh(input: {
-  settingsRecent: string
+  settingsRecent: string | (() => string)
   loadEntries: () => Promise<readonly ShareEntry[]>
   port?: SharePort
   origin?: string
 }) {
-  const directory = parseShareDirectory(input.settingsRecent)
-  if (!directory.shares.some((share) => share.mode === 'live' && !share.stopped)) return
-  if (liveRefreshTimer) clearTimeout(liveRefreshTimer)
+  const directory = readShareDirectorySetting(input.settingsRecent)
+  if (!directoryHasLiveShare(directory)) {
+    cancelQueuedLiveShareRefresh()
+    return
+  }
+  cancelQueuedLiveShareRefresh()
+  const generation = liveRefreshGeneration
+  const loadEntries = input.loadEntries
+  const port = input.port
+  const origin = input.origin
   liveRefreshTimer = setTimeout(() => {
+    if (generation !== liveRefreshGeneration) return
     liveRefreshTimer = null
-    void input.loadEntries()
-      .then((entries) => refreshLiveShares({
-        entries,
-        directory: parseShareDirectory(input.settingsRecent),
-        port: input.port ?? createFetchSharePort(),
-        origin: input.origin,
-      }))
+    void loadEntries()
+      .then((entries) => {
+        if (generation !== liveRefreshGeneration) return
+        const current = readShareDirectorySetting(input.settingsRecent)
+        if (!directoryHasLiveShare(current)) return
+        return refreshLiveShares({
+          entries,
+          directory: current,
+          port: port ?? createFetchSharePort(),
+          origin,
+        })
+      })
       .catch(() => undefined)
   }, 1500)
 }

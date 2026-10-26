@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
+import { randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { createServer as createHttpServer } from 'node:http'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createElement } from 'react'
@@ -40,72 +40,38 @@ if (typeof globalThis.window === 'undefined') {
 }
 if (typeof globalThis.document === 'undefined') globalThis.document = globalThis.window.document
 
-const recorded = []
-const store = new Map()
+const siteRoot = fileURLToPath(new URL('../../fanotes-site/', import.meta.url))
+const siteViewerPath = join(siteRoot, 'public', 'share', 'index.html')
+const serverSource = readFileSync(join(siteRoot, 'server.mjs'), 'utf8')
+assert.equal(readFileSync(siteViewerPath, 'utf8'), viewerHtml, 'the site must serve the shipped share viewer')
+const shareRoute = serverSource.indexOf('handleShareRequest(request, response, url)')
+const getGuard = serverSource.indexOf('Nur GET und HEAD sind erlaubt.')
+assert.ok(shareRoute >= 0 && getGuard >= 0 && shareRoute < getGuard, 'share route must run before the GET/HEAD guard')
 
-const readBody = (request) => new Promise((resolve, reject) => {
-  const chunks = []
-  request.on('data', (chunk) => chunks.push(chunk))
-  request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
-  request.on('error', reject)
+const serverTemp = mkdtempSync(join(tmpdir(), 'fanotes-share-server-'))
+const shareDir = join(serverTemp, 'shares')
+const enrollmentPath = join(serverTemp, 'enrollment-token')
+mkdirSync(shareDir, { recursive: true })
+writeFileSync(enrollmentPath, randomBytes(36).toString('base64url'), { mode: 0o600 })
+const sitePort = 18400 + Math.floor(Math.random() * 800)
+const origin = `http://127.0.0.1:${sitePort}`
+let childOutput = ''
+const siteServer = spawn(process.execPath, [join(siteRoot, 'server.mjs')], {
+  cwd: siteRoot,
+  env: {
+    ...process.env,
+    FANOTES_HOST: '127.0.0.1',
+    FANOTES_PORT: String(sitePort),
+    FANOTES_PUBLIC_ORIGIN: origin,
+    FANOTES_SHARE_DIR: shareDir,
+    FANOTES_BACKUP_DIR: join(serverTemp, 'backups'),
+    FANOTES_BACKUP_ENROLLMENT_TOKEN_PATH: enrollmentPath,
+    FANOTES_ANALYTICS_DIR: join(serverTemp, 'analytics'),
+  },
+  stdio: ['ignore', 'pipe', 'pipe'],
 })
-
-const httpServer = createHttpServer(async (request, response) => {
-  const url = new URL(request.url ?? '/', 'http://127.0.0.1')
-  if (url.pathname === '/share' || url.pathname === '/share/' || url.pathname === '/share/index.html') {
-    response.setHeader('content-type', 'text/html; charset=utf-8')
-    response.end(viewerHtml)
-    return
-  }
-  const match = /^\/api\/v1\/share\/([^/]+)$/u.exec(url.pathname)
-  if (!match) {
-    response.statusCode = 404
-    response.end('missing')
-    return
-  }
-  const id = decodeURIComponent(match[1])
-  if (request.method === 'PUT') {
-    const body = await readBody(request)
-    recorded.push({ method: 'PUT', url: request.url, body })
-    store.set(id, body)
-    response.setHeader('content-type', 'application/json')
-    response.end(JSON.stringify({ ok: true, id }))
-    return
-  }
-  if (request.method === 'DELETE') {
-    recorded.push({ method: 'DELETE', url: request.url, body: '' })
-    const current = store.get(id)
-    if (current) {
-      const payload = JSON.parse(current)
-      payload.stopped = true
-      payload.notes = []
-      store.set(id, JSON.stringify(payload))
-    }
-    response.setHeader('content-type', 'application/json')
-    response.end('{}')
-    return
-  }
-  if (request.method === 'GET') {
-    const current = store.get(id)
-    const payload = current ? JSON.parse(current) : null
-    if (!payload || payload.stopped) {
-      response.statusCode = 410
-      response.setHeader('content-type', 'application/json')
-      response.end(JSON.stringify({ stopped: true, notes: [] }))
-      return
-    }
-    response.setHeader('content-type', 'application/json')
-    response.end(current)
-    return
-  }
-  response.statusCode = 405
-  response.end()
-})
-
-await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve))
-const address = httpServer.address()
-const port = typeof address === 'object' && address ? address.port : 0
-const origin = `http://127.0.0.1:${port}`
+siteServer.stdout.on('data', (chunk) => { childOutput += chunk })
+siteServer.stderr.on('data', (chunk) => { childOutput += chunk })
 
 const vite = await createServer({
   root: appRoot,
@@ -117,12 +83,22 @@ const vite = await createServer({
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+const waitForSite = async () => {
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    if (siteServer.exitCode !== null) throw new Error(`share server exited ${siteServer.exitCode}\n${childOutput}`)
+    if (childOutput.includes('FaNotes website listening')) return
+    await wait(100)
+  }
+  throw new Error(`share server did not listen\n${childOutput}`)
+}
+
 const noteText = (payload) => (payload?.notes ?? []).map((note) => `${note.title}\n${note.content}`).join('\n')
 
 let chromium = null
 let chromiumProfile = ''
 
 try {
+  await waitForSite()
   const share = await vite.ssrLoadModule('/src/lib/sync/share.ts')
   const api = await vite.ssrLoadModule('/src/lib/sync/api.ts')
   const page = await vite.ssrLoadModule('/src/components/ShareSettingsPage.tsx')
@@ -147,7 +123,12 @@ try {
   })
   assert.ok(note.record.link.length > 0, 'share link is empty')
   assert.match(note.record.link, /\/share\/\?id=/u)
-  assert.equal(recorded.at(-1).body, note.request.body)
+  assert.equal(note.record.link, `${origin}/share/?id=${encodeURIComponent(note.record.id)}`)
+  const storedNote = readFileSync(join(shareDir, `${note.record.id}.json`), 'utf8')
+  assert.match(storedNote, /Guten Tag aus der Notiz/)
+  const servedViewer = await fetch(`${origin}/share/?id=${encodeURIComponent(note.record.id)}`)
+  assert.equal(servedViewer.status, 200)
+  assert.equal(await servedViewer.text(), viewerHtml)
   assert.match(note.request.body, /Guten Tag aus der Notiz/)
   assert.match(note.request.url, /\/api\/v1\/share\//u)
   assert.doesNotMatch(note.request.url, /\/api\/v1\/sync/u)
@@ -192,6 +173,11 @@ try {
   assert.match(folder.request.body, /Verschachtelte Uebung/)
   assert.doesNotMatch(folder.request.body, /NICHT-TEILEN-AUSSEN/)
   assert.doesNotMatch(folder.request.body, /AUSSEN-NOTIZ/)
+  const storedFolder = readFileSync(join(shareDir, `${folder.record.id}.json`), 'utf8')
+  assert.match(storedFolder, /Integral von x/)
+  assert.match(storedFolder, /Verschachtelte Uebung/)
+  assert.doesNotMatch(storedFolder, /NICHT-TEILEN-AUSSEN/)
+  assert.doesNotMatch(storedFolder, /AUSSEN-NOTIZ/)
   const folderRead = await share.readShare({ id: folder.record.id, port: sharePort, origin, entries: folderEntries })
   assert.equal(folderRead.notes.length, 2)
   assert.match(noteText(folderRead), /Integral von x/)
@@ -214,6 +200,12 @@ try {
   const copyStored = await share.readShare({ id: copy.record.id, port: sharePort, origin })
   assert.match(noteText(copyStored), /Erster Satz/)
   assert.doesNotMatch(noteText(copyStored), /Spaeter geaendert/)
+  const copyFile = readFileSync(join(shareDir, `${copy.record.id}.json`), 'utf8')
+  const liveFile = readFileSync(join(shareDir, `${live.record.id}.json`), 'utf8')
+  assert.match(copyFile, /Erster Satz/)
+  assert.doesNotMatch(copyFile, /Spaeter geaendert/)
+  assert.match(liveFile, /Spaeter geaendert/)
+  await assertLiveRefreshTimer(share, sharePort, origin)
 
   const settings = {
     ...defaults.defaultSettingsForPlatform('linux'),
@@ -281,11 +273,18 @@ try {
     assert.match(viewed.text, /Hallo/)
     assert.match(viewed.text, /Guten Tag aus der Notiz/)
     if (scratch && viewed.screenshot) writeFileSync(join(scratch, 'share-view.png'), viewed.screenshot)
+    const folderView = await reloadViewer({ ...viewed, link: folder.record.link }, 'Verschachtelte Uebung')
+    assert.equal(folderView.errors.length, 0, `folder page errors: ${folderView.errors.join(' | ')}`)
+    assert.match(folderView.text, /Integral von x/)
+    assert.match(folderView.text, /Verschachtelte Uebung/)
+    assert.doesNotMatch(folderView.text, /NICHT-TEILEN-AUSSEN/)
+    assert.doesNotMatch(folderView.text, /AUSSEN-NOTIZ/)
   }
 
   const stopped = await page.shareStopControl({ id: note.record.id, port: sharePort, origin, directory: note.directory })
   assert.equal(stopped.shares.find((item) => item.id === note.record.id)?.stopped, true)
-  assert.ok(recorded.some((request) => request.method === 'DELETE' && request.url.includes(note.record.id)))
+  const stoppedResponse = await fetch(`${origin}/api/v1/share/${note.record.id}`)
+  assert.equal(stoppedResponse.status, 410)
   const afterStop = await share.readShare({ id: note.record.id, port: sharePort, origin, entries: oneEntries })
   assert.equal(afterStop, null)
 
@@ -297,7 +296,12 @@ try {
     assert.doesNotMatch(stoppedView.text, /Hallo/)
   }
 
-  const hostLog = await probeHost(share)
+  const hostLog = [
+    'local-server 200',
+    `local-link ${note.record.link}`,
+    `local-store ${note.record.id}.json`,
+    await probeHost(share),
+  ].join('\n')
   writeScratch('share-host.log', hostLog)
   console.log(hostLog.trim())
   console.log(JSON.stringify({
@@ -309,6 +313,7 @@ try {
     settingsSections: sections,
     placeholder,
     viewer: viewed.launched ? 'shown' : 'launch-failed',
+    cloud: 'server.mjs',
   }))
   console.log('share-check ok')
   if (viewed?.socket) viewed.socket.close()
@@ -321,8 +326,86 @@ try {
     })
   }
   if (chromiumProfile) rmSync(chromiumProfile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  if (siteServer && siteServer.exitCode === null) {
+    siteServer.kill('SIGTERM')
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, 1500)
+      siteServer.once('exit', () => { clearTimeout(timer); resolve() })
+    })
+  }
+  rmSync(serverTemp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   await vite.close()
-  httpServer.close()
+}
+
+async function assertLiveRefreshTimer(share, sharePort, origin) {
+  const calls = []
+  const recordingPort = {
+    async exchange(request) {
+      calls.push({ method: request.method, body: request.body })
+      return sharePort.exchange(request)
+    },
+  }
+  const published = await share.publishShare({
+    entries: [{ path: 'Timer.md', kind: 'file', content: '# Timer\n\nVorher' }],
+    rootPath: 'Timer.md',
+    mode: 'live',
+    port: sharePort,
+    origin,
+  })
+  const recent = share.serializeShareDirectory(published.directory)
+  share.queueLiveShareRefresh({
+    settingsRecent: () => recent,
+    loadEntries: async () => [{ path: 'Timer.md', kind: 'file', content: '# Timer\n\nNachher-Timer' }],
+    port: recordingPort,
+    origin,
+  })
+  await wait(2500)
+  assert.ok(calls.some((call) => call.method === 'PUT' && call.body.includes('Nachher-Timer')))
+  const updated = await share.readShare({ id: published.record.id, port: sharePort, origin })
+  assert.match(noteText(updated), /Nachher-Timer/)
+
+  const currentShare = await share.publishShare({
+    entries: [{ path: 'Aktuell.md', kind: 'file', content: '# Aktuell\n\nOriginal-Timer' }],
+    rootPath: 'Aktuell.md',
+    mode: 'live',
+    port: sharePort,
+    origin,
+  })
+  let current = share.serializeShareDirectory(currentShare.directory)
+  calls.length = 0
+  share.queueLiveShareRefresh({
+    settingsRecent: () => current,
+    loadEntries: async () => [{ path: 'Aktuell.md', kind: 'file', content: '# Aktuell\n\nDARF-NICHT-HOCH' }],
+    port: recordingPort,
+    origin,
+  })
+  current = share.serializeShareDirectory(share.markShareStopped(currentShare.directory, currentShare.record.id))
+  await wait(2500)
+  assert.equal(calls.filter((call) => call.method === 'PUT').length, 0, 'timer must read the directory when it fires')
+  const untouched = await share.readShare({ id: currentShare.record.id, port: sharePort, origin })
+  assert.match(noteText(untouched), /Original-Timer/)
+  assert.doesNotMatch(noteText(untouched), /DARF-NICHT-HOCH/)
+
+  const stopping = await share.publishShare({
+    entries: [{ path: 'Stopp.md', kind: 'file', content: '# Stopp\n\nBleibt-weg' }],
+    rootPath: 'Stopp.md',
+    mode: 'live',
+    port: sharePort,
+    origin,
+  })
+  const stale = share.serializeShareDirectory(stopping.directory)
+  calls.length = 0
+  share.queueLiveShareRefresh({
+    settingsRecent: () => stale,
+    loadEntries: async () => [{ path: 'Stopp.md', kind: 'file', content: '# Stopp\n\nWIEDER-DA' }],
+    port: recordingPort,
+    origin,
+  })
+  await share.stopShare({ id: stopping.record.id, port: recordingPort, origin, directory: stopping.directory })
+  await wait(2500)
+  assert.equal(calls.filter((call) => call.method === 'PUT').length, 0, 'stop must cancel the pending live refresh')
+  assert.ok(calls.some((call) => call.method === 'DELETE'))
+  assert.equal(await share.readShare({ id: stopping.record.id, port: sharePort, origin }), null)
 }
 
 async function probeHost(share) {
