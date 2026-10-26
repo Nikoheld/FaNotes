@@ -7580,7 +7580,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             {(sections.length > 0 || sectionPlacing) && <div className="lw-ink-sections" aria-label="Abschnitte">
               {sections.map((section) => {
                 const isSub = section.parentId !== null
-                const bandWidth = isSub ? clampSectionWidth(section.width) : 1
+                const bandWidth = clampSectionWidth(section.width)
                 const bodyEnd = section.collapsed ? section.bodyTop.y : (nextSectionTop(sections, section) ?? 1)
                 const titled = titledSectionIds.has(section.id)
                 const hiddenCount = section.hidden
@@ -7595,7 +7595,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                       style={{
                         top: `${section.top.y * 100}%`,
                         height: `${(section.bodyTop.y - section.top.y) * 100}%`,
-                        ...(isSub ? { width: `${bandWidth * 100}%` } : {}),
+                        width: `${bandWidth * 100}%`,
+                        right: 'auto',
                       }}
                     >
                       <button
@@ -7637,13 +7638,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                       >
                         <X size={13} />
                       </button>
-                      {isSub && <div
+                      <div
                         className="lw-ink-section-control lw-ink-section-width"
                         role="slider"
                         aria-valuemin={28}
                         aria-valuemax={100}
                         aria-valuenow={Math.round(bandWidth * 100)}
-                        aria-label="Breite des Unterabschnitts"
+                        aria-label={isSub ? 'Breite des Unterabschnitts' : 'Breite des Abschnitts'}
                         title="Breite ziehen · die Schrift bleibt, wo sie ist"
                         tabIndex={0}
                         onPointerDown={(event) => beginSubsectionWidthDrag(section.id, event)}
@@ -7656,13 +7657,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                             bumpRevision()
                           }
                         }}
-                      />}
+                      />
                     </div>
                     {!section.collapsed && bodyEnd > section.bodyTop.y && <div
                       className={`lw-ink-section-rail${isSub ? ' is-subsection' : ''}`}
                       style={{ top: `${section.bodyTop.y * 100}%`, height: `${(bodyEnd - section.bodyTop.y) * 100}%` }}
                     />}
-                    {isSub && !section.collapsed && bodyEnd > section.bodyTop.y && <div
+                    {!section.collapsed && bodyEnd > section.bodyTop.y && <div
                       className="lw-ink-section-edge"
                       style={{
                         top: `${section.bodyTop.y * 100}%`,

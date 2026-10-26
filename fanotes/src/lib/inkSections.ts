@@ -16,7 +16,7 @@
  * the sheet grows, pads or rescales, and by being points the edges ride along.
  * Hidden body ink is stored normalised to its own box (width × height in sheet
  * px at collapse time) so a later sheet resize cannot make it stale. A
- * subsection's `width` is only how wide its band is drawn. Changing it does
+ * section's `width` is only how wide its band is drawn. Changing it does
  * not move strokes and does not change the page.
  */
 import type { StrokePoint } from '../../../src/types'
@@ -56,8 +56,8 @@ export type InkSection<S extends SectionStroke = SectionStroke> = {
   /** `null` for a section. A subsection names its section; one level only. */
   parentId: string | null
   /**
-   * Fraction of the sheet the band occupies, from the left edge. Sections are
-   * always 1. Changing a subsection's width does not move ink or the page.
+   * Fraction of the sheet the band occupies, from the left edge. A new band
+   * starts at 1. Changing the width does not move ink or the page.
    */
   width: number
   /** Header top edge, 0–1 of the sheet (or of the parent body box while parked). */
@@ -164,7 +164,7 @@ export const topLevelSectionIndex = <S extends SectionStroke>(sections: readonly
   sortSections(sections).filter((section) => section.parentId === null).findIndex((section) => section.id === id)
 )
 
-/** Keeps a subsection width inside the band limits. Anything else is full width. */
+/** Keeps a band width inside the limits. Anything else is full width. */
 export const clampSectionWidth = (value: unknown) => {
   const parsed = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(parsed)) return 1
@@ -172,14 +172,10 @@ export const clampSectionWidth = (value: unknown) => {
 }
 
 /**
- * Sets a subsection's band width. Sections stay full width. No stroke moves
- * and the sheet size is left untouched — the note text is not part of this.
+ * Sets a section or subsection band width. No stroke moves and the sheet
+ * size is left untouched — the note text is not part of this.
  */
 export const applySectionWidth = <S extends SectionStroke>(section: InkSection<S>, width: number) => {
-  if (section.parentId === null) {
-    section.width = 1
-    return 1
-  }
   section.width = clampSectionWidth(width)
   return section.width
 }
@@ -596,7 +592,7 @@ const serializeOne = <S extends SectionStroke>(section: InkSection<S>): Serializ
   bodyTop: section.bodyTop.y,
   collapsed: section.collapsed,
   ...(section.parentId ? { parentId: section.parentId } : {}),
-  ...(section.parentId && section.width !== 1 ? { width: section.width } : {}),
+  ...(section.width !== 1 ? { width: section.width } : {}),
   hidden: section.hidden ? {
     widthPx: section.hidden.widthPx,
     heightPx: section.hidden.heightPx,
@@ -644,7 +640,7 @@ const readSectionList = <S extends SectionStroke>(value: unknown, parseStrokes: 
       section: {
         id,
         parentId,
-        width: parentId ? clampSectionWidth(raw.width) : 1,
+        width: clampSectionWidth(raw.width),
         top: sectionPoint(0, top),
         bodyTop: sectionPoint(0, bodyTop),
         collapsed: raw.collapsed === true,
