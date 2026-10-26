@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { handleBackupRequest, initializeBackupService } from './backup-service.mjs'
 import { handleHomeworkRequest } from './homework-api.mjs'
 import { handleShareRequest } from './share-api.mjs'
+import { handleProfileRequest } from './profile-api.mjs'
 import { handleRemoteSupportRequest } from './remote-support-api.mjs'
 import { handleBugReportRequest } from './bug-report-api.mjs'
 import { handleSendDataRequest } from './send-data-api.mjs'
@@ -539,6 +540,7 @@ const server = createServer(async (request, response) => {
     if (await handleMcpRequest(request, response, url)) return
     if (await handleHomeworkRequest(request, response, url)) return
     if (await handleShareRequest(request, response, url)) return
+    if (await handleProfileRequest(request, response, url)) return
     if (await handleRemoteSupportRequest(request, response, url)) return
     if (await handleBugReportRequest(request, response, url)) return
     if (await handleSendDataRequest(request, response, url)) return

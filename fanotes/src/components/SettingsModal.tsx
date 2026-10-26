@@ -59,6 +59,7 @@ import type { AppSettings, EnhancedMathRecognitionState, OneNoteImportResult, Qw
 import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
 import { SyncSettingsSection } from './SyncSettingsSection'
 import { ShareSettingsPage, type ShareTarget } from './ShareSettingsPage'
+import { ProfileSettingsCard } from './ProfileSettingsCard'
 import {
   createFetchSharePort,
   loadShareEntries,
@@ -68,6 +69,7 @@ import {
   resolveShareOrigin,
   serializeShareDirectory,
 } from '../lib/sync/share'
+import { createFetchProfilePort, resolveProfileOrigin } from '../lib/sync/profile'
 
 const UPDATE_CHANNEL_COPY = {
   stable: {
@@ -124,7 +126,7 @@ const SECTIONS: { id: SettingsSection; label: string; description: string; icon:
   { id: 'editor', label: 'Editor', description: 'Markdown und Schreiben', icon: FileText, count: 8 },
   { id: 'drawing', label: 'Stift & Erkennung', description: 'Tablet, Papier und Handschrift', icon: Brush, count: 16 },
   { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 7 },
-  { id: 'sync', label: 'Sync', description: 'Konto, Geräte und Verschlüsselung', icon: Cloud, count: 7 },
+  { id: 'sync', label: 'Sync', description: 'Konto, Geräte und Verschlüsselung', icon: Cloud, count: 8 },
   { id: 'share', label: 'Teilen', description: 'Link, Kopie oder Live', icon: Share2, count: 3 },
   { id: 'addons', label: 'Add-ons', description: 'Store, Quelle und Updates', icon: Puzzle, count: 3 },
   { id: 'updates', label: 'Updates', description: 'Stable, Beta und Sicherheit', icon: RefreshCw, count: 4 },
@@ -150,6 +152,7 @@ type SettingsSearchItem = {
 const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Grok-Connector', detail: 'Sync', section: 'sync', target: 'settings-grok-connector', keywords: 'grok mcp connector server url notizen prüfung klausur hausaufgaben oauth' },
   { label: 'Sync-Konto', detail: 'Sync', section: 'sync', target: 'settings-sync-account', keywords: 'sync konto anmelden registrieren account login passwort e-mail cloud server geräte' },
+  { label: 'Öffentliche Aktivitätsübersicht', detail: 'Sync', section: 'sync', target: 'settings-profile', keywords: 'benutzername profil user übersicht aktivität notizen zeit beigetreten tage öffentlich' },
   { label: 'Angemeldete Geräte', detail: 'Sync', section: 'sync', target: 'settings-sync-devices', keywords: 'sync geräte devices laptop tablet abmelden' },
   { label: 'Sync-Passwort ändern', detail: 'Sync', section: 'sync', target: 'settings-sync-password', keywords: 'sync passwort ändern password schlüssel' },
   { label: 'Sync-Konto löschen', detail: 'Sync', section: 'sync', target: 'settings-sync-delete', keywords: 'sync konto löschen account delete server' },
@@ -385,6 +388,8 @@ export function SettingsModal({
   const [shareNotice, setShareNotice] = useState<string | null>(null)
   const sharePort = useMemo(() => createFetchSharePort(), [])
   const shareOrigin = useMemo(() => resolveShareOrigin(), [])
+  const profilePort = useMemo(() => createFetchProfilePort(), [])
+  const profileOrigin = useMemo(() => resolveProfileOrigin(), [])
   const trainingInputRef = useRef<HTMLInputElement>(null)
   const modalRef = useRef<HTMLElement>(null)
   const section = useMemo(() => SECTIONS.find((candidate) => candidate.id === active)!, [active])
@@ -1008,9 +1013,12 @@ export function SettingsModal({
             )}
 
             {active === 'sync' && (
-              syncEngine && syncState
-                ? <SyncSettingsSection engine={syncEngine} syncState={syncState} settings={settings} update={update} platform={platform} />
-                : <div className="setting-card"><div className="setting-card-title"><Cloud size={16} /><span>Sync</span></div><div className="setting-row"><div className="setting-copy"><span>Sync steht in dieser Umgebung nicht zur Verfügung.</span></div></div></div>
+              <>
+                {syncEngine && syncState
+                  ? <SyncSettingsSection engine={syncEngine} syncState={syncState} settings={settings} update={update} platform={platform} />
+                  : <div className="setting-card"><div className="setting-card-title"><Cloud size={16} /><span>Sync</span></div><div className="setting-row"><div className="setting-copy"><span>Sync steht in dieser Umgebung nicht zur Verfügung.</span></div></div></div>}
+                <ProfileSettingsCard settings={settings} onChange={onChange} port={profilePort} origin={profileOrigin} />
+              </>
             )}
 
             {active === 'share' && (

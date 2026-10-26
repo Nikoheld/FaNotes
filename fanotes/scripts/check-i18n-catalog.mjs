@@ -31,6 +31,7 @@ const CHROME_FILES = [
   'src/components/GlyphenWerkWorkspace.tsx',
   'src/components/SyncSettingsSection.tsx',
   'src/components/ShareSettingsPage.tsx',
+  'src/components/ProfileSettingsCard.tsx',
   'src/components/CalendarView.tsx',
   'src/components/FlashcardReview.tsx',
   'src/components/RightInspector.tsx',

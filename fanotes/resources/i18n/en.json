@@ -3870,5 +3870,21 @@
   "Die Freigabe konnte nicht hochgeladen werden.": "The share could not be uploaded.",
   "Letzte Freigaben": "Recent shares",
   "Keine Freigabe": "No share",
-  "Link erstellen": "Create link"
+  "Link erstellen": "Create link",
+  "Öffentliche Aktivitätsübersicht": "Public activity overview",
+  "Öffentlicher Benutzername": "Public username",
+  "Ein eindeutiger Benutzername gehört zu deinem Konto. Die Übersicht darunter zeigt Beitritt, Notizanzahl, Zeit in FaNotes und die aktiven Tage, sobald du sie einschaltest.": "A unique username belongs to your account. The page under it shows when you joined, your note count, time in FaNotes, and the active days, once you turn it on.",
+  "Öffentliche Adresse": "Public address",
+  "Noch kein Benutzername festgelegt.": "No username chosen yet.",
+  "Benutzername festlegen": "Choose username",
+  "Benutzername wird gespeichert …": "Saving the username …",
+  "Die öffentliche Aktivitätsübersicht zeigen": "Show the public activity overview",
+  "Ohne festgelegten Benutzernamen bleibt diese Übersicht aus.": "This overview stays off until a username is chosen.",
+  "Der Benutzername ist gespeichert.": "The username is saved.",
+  "Dieser Benutzername ist schon vergeben.": "This username is already taken.",
+  "Der Benutzername ist ungültig. Drei bis vierundzwanzig Zeichen, beginnend mit einem Buchstaben oder einer Ziffer.": "That username is not valid. Use three to twenty-four characters, starting and ending with a letter or digit.",
+  "Zuerst einen Benutzernamen festlegen.": "Choose a username first.",
+  "Die öffentliche Aktivitätsübersicht ist eingeschaltet.": "The public activity overview is on.",
+  "Die öffentliche Aktivitätsübersicht ist ausgeschaltet.": "The public activity overview is off.",
+  "Die Übersicht konnte nicht gespeichert werden.": "The overview could not be saved."
 }

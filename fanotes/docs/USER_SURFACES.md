@@ -148,6 +148,9 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Share settings page | `src/components/ShareSettingsPage.tsx` | `data-share-stop` |
 | Share settings destination | `src/components/SettingsModal.tsx` | `id: 'share'` |
 | Browser share viewer | `public/share/share.js` | `share-note-title` |
+| Public username and activity overview | `src/lib/sync/profile.ts` | `export async function claimUsername` |
+| Public overview settings | `src/components/ProfileSettingsCard.tsx` | `id="settings-profile"` |
+| Browser profile overview | `public/user/profile.js` | `profile-joined` |
 | Blocked-update diagnosis | `src/components/SettingsModal.tsx` | `update-block-report` |
 | Update download failure log | `electron/updater.cjs` | `download-failures.log` |
 | Theme / zoom / updates / experimental | `src/components/SettingsModal.tsx` | `id: 'experimental'` |

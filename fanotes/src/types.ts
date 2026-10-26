@@ -115,6 +115,12 @@ export type AppSettings = {
   shareMode: 'copy' | 'live'
   /** JSON list of recent public shares. Empty until the first link is created. */
   shareRecent: string
+  /** Stable id for the public username. Empty until the first claim on this device. */
+  profileOwnerId: string
+  /** Unique public name. Empty until it is claimed. The overview lives at /user/ plus this name. */
+  profileUsername: string
+  /** When true, /user/<name> shows joined time, note count, duration, and active days. */
+  profilePublic: boolean
   /** Show the invisible handwriting transcript in the margin. */
   marginTranscript: boolean
   showWordCount: boolean
