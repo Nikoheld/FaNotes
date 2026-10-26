@@ -1370,13 +1370,20 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
   overflow: auto;
   /* Extra pan room is the same paper, not a dark stage. */
   background: #fff;
-  scrollbar-gutter: stable;
+  /* A classic scrollbar is a strip past the sheet on the right and the bottom.
+     The sheet is this scroller, so that strip stays paper. Wheel, pen and keys still pan. */
+  scrollbar-width: none;
   overscroll-behavior: contain;
   /* Native compositor scrolling — never `smooth` (lags and smears glyphs). */
   scroll-behavior: auto;
   will-change: scroll-position;
   /* Zoom grows the sheet; anchoring would fight our cursor-lock scroll. */
   overflow-anchor: none;
+}
+.unified-note-view::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 .unified-note-view.is-pdf-note {
   background: #edeff3;
