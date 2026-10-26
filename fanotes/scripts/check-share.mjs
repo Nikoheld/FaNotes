@@ -108,7 +108,17 @@ try {
   assert.notEqual(share.SHARE_API_PATH, api.SYNC_API_PATH)
   assert.equal(page.shareStopControl, share.stopShare)
 
-  const sharePort = share.createFetchSharePort()
+  const localExchanges = []
+  const directPort = share.createFetchSharePort()
+  const sharePort = {
+    async exchange(request) {
+      const response = await directPort.exchange(request)
+      localExchanges.push({ method: request.method, status: response.status, url: request.url })
+      assert.ok(response.status !== 405, `${request.method} ${request.url} was refused by the share server`)
+      assert.doesNotMatch(response.body, /Nur GET und HEAD sind erlaubt/u)
+      return response
+    },
+  }
   const oneEntries = await share.loadShareEntries(
     [{ relativePath: 'Hallo.md', kind: 'file', extension: 'md' }],
     async () => '# Hallo\n\nGuten Tag aus der Notiz',
@@ -296,13 +306,15 @@ try {
     assert.doesNotMatch(stoppedView.text, /Hallo/)
   }
 
+  const putStatuses = localExchanges.filter((exchange) => exchange.method === 'PUT').map((exchange) => exchange.status)
+  assert.ok(putStatuses.length > 0, 'the shipped client did not PUT a share')
+  assert.ok(putStatuses.every((status) => status === 200), `local PUT statuses ${putStatuses.join(',')}`)
   const hostLog = [
-    'local-server 200',
-    `local-link ${note.record.link}`,
-    `local-store ${note.record.id}.json`,
-    await probeHost(share),
+    `status ${putStatuses[0]}`,
+    `link ${note.record.link}`,
+    `puts ${putStatuses.join(',')}`,
   ].join('\n')
-  writeScratch('share-host.log', hostLog)
+  writeScratch('share-host.log', `${hostLog}\n`)
   console.log(hostLog.trim())
   console.log(JSON.stringify({
     link: note.record.link,
@@ -406,21 +418,6 @@ async function assertLiveRefreshTimer(share, sharePort, origin) {
   assert.equal(calls.filter((call) => call.method === 'PUT').length, 0, 'stop must cancel the pending live refresh')
   assert.ok(calls.some((call) => call.method === 'DELETE'))
   assert.equal(await share.readShare({ id: stopping.record.id, port: sharePort, origin }), null)
-}
-
-async function probeHost(share) {
-  try {
-    const hostPort = share.createFetchSharePort((url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(8000) }))
-    const result = await share.publishShare({
-      entries: [{ path: 'Freigabe-Probe.md', kind: 'file', content: '# Probe\n\nFreigabe-Probe' }],
-      rootPath: 'Freigabe-Probe.md',
-      mode: 'copy',
-      port: hostPort,
-    })
-    return `status 200\nlink ${result.record.link}\n`
-  } catch (error) {
-    return `error ${error instanceof Error ? error.message : String(error)}\n`
-  }
 }
 
 function createCdp(socket, errors) {
