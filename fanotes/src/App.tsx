@@ -9,7 +9,6 @@ import {
   BookOpen,
   CalendarDays,
   CheckCircle2,
-  ChevronRight,
   CircleAlert,
   Clock,
   Cloud,
@@ -128,7 +127,6 @@ import {
   worksheetIdsIn,
 } from './lib/noteQoL'
 import {
-  breadcrumbsFor,
   canGoBack,
   canGoForward,
   clampSplitRatio,
@@ -5095,18 +5093,6 @@ export default function App({ startupBootstrap }: AppProps) {
                 />
               ))}
             </div>
-            {activeTab && !glyphenWerkOpen && !homeworkOpen && !calendarOpen && !overviewOpen && (
-              <nav className="note-breadcrumbs" aria-label="Pfad der Notiz">
-                {breadcrumbsFor(activeTab.path).map((crumb, index) => (
-                  <span key={crumb.path} className="note-breadcrumbs__item">
-                    {index > 0 && <ChevronRight aria-hidden="true" size={10} />}
-                    {crumb.isNote
-                      ? <b title={activeTab.path}>{crumb.label}</b>
-                      : <button type="button" title={`„${crumb.label}“ in der Dateileiste zeigen`} onClick={() => { setSidebarVisible(true); setRevealPath(null); window.setTimeout(() => setRevealPath(crumb.path), 0) }}>{crumb.label}</button>}
-                  </span>
-                ))}
-              </nav>
-            )}
             <button type="button" className="tabs-menu" title="Neue Notiz (Strg+N)" aria-label="Neue Notiz" onClick={() => void createNote()}><Plus size={14} /></button>
           </div>
           {tabMenu && (() => {

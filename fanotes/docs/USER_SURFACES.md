@@ -31,7 +31,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Reopen closed tab / tab order / workspace memory helpers | `src/lib/workspaceNav.ts` | `export const rememberClosedTab` |
 | Quick switcher (Strg+O) | `src/components/CommandPalette.tsx` | `mode === 'notes'` |
 | Fuzzy recent-first note ranking | `src/lib/workspaceNav.ts` | `export const rankSwitcherNotes` |
-| Breadcrumbs in the status bar | `src/App.tsx` | `note-breadcrumbs` |
+| Open note tabs fill the tab row | `src/App.tsx` | `tabs-scroll` |
 | File tree keyboard navigation | `src/components/FileTree.tsx` | `event.key === 'Delete'` |
 | Autocorrect while typing (space, punctuation, Enter; Backspace reverts) | `src/lib/spellingCorrections.ts` | `key: 'Backspace', run: revertAutocorrect` |
 | Spelling suggestion menu (right-click / Strg+.) with Ignore and Add to dictionary | `src/lib/spellingCorrections.ts` | `cm-spelling-menu__learn` |

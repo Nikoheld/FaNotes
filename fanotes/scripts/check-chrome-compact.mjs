@@ -46,10 +46,14 @@ try {
     'Jetzt speichern',
     'sync-status-item',
     'addon-status-item',
-    'Pfad der Notiz',
   ]) {
     assert.ok(chrome.includes(token), token)
   }
+  assert.equal(chrome.includes('Pfad der Notiz'), false)
+  assert.equal(app.includes('note-breadcrumbs'), false)
+  assert.equal(css.includes('.note-breadcrumbs'), false)
+  assert.match(css, /\.note-tab \{[^}]*flex:\s*1 1 160px/)
+  assert.match(css, /\.note-tab \{[^}]*max-width:\s*320px/)
   assert.match(chrome, /!isPdfActive && !drawingOpen && \([\s\S]*<PaperStylePicker/)
   assert.equal((board.match(/onClick=\{beginInkEdit\}/g) || []).length, 2)
   assert.equal(chrome.includes('Kästchengrösse'), false)

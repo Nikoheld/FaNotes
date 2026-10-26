@@ -706,7 +706,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .note-link-marker span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tabs-scroll { flex: 1; min-width: 0; display: flex; overflow: auto hidden; scrollbar-width: none; }
 .tabs-scroll::-webkit-scrollbar { display: none; }
-.note-tab { min-width: 108px; max-width: 180px; height: 28px; flex: 0 1 156px; border-right: 1px solid var(--border); background: transparent; color: var(--text-muted); display: flex; align-items: center; padding: 0 4px 0 8px; font-size: 12px; position: relative; transition: background var(--motion-fast) ease, color var(--motion-fast) ease; }
+.note-tab { min-width: 108px; max-width: 320px; height: 28px; flex: 1 1 160px; border-right: 1px solid var(--border); background: transparent; color: var(--text-muted); display: flex; align-items: center; padding: 0 4px 0 8px; font-size: 12px; position: relative; transition: background var(--motion-fast) ease, color var(--motion-fast) ease; }
 .note-tab:hover { background: color-mix(in srgb, var(--text) 4%, transparent); color: var(--text-soft); }
 .note-tab.active { color: var(--text); background: var(--bg); }
 .note-tab.active::after { content: ''; position: absolute; inset: auto 0 -1px; height: 2px; background: var(--accent); }
@@ -2204,14 +2204,6 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
 .ribbon-status button { height: 24px; border: 0; border-radius: 6px; color: inherit; background: transparent; font-size: inherit; cursor: pointer; }
 .ribbon-status button:hover { background: var(--panel-hover); color: var(--text); }
 .ribbon-status .save-status { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; }
-/* Breadcrumbs sit in the tab row: folder segments reveal themselves in the file tree. */
-.tabs-bar .note-breadcrumbs { max-width: 34%; flex: none; height: 100%; margin-left: auto; }
-.note-breadcrumbs { min-width: 0; display: flex; align-items: center; gap: 1px; overflow: hidden; padding-left: 8px; border-left: 1px solid var(--border); }
-.note-breadcrumbs__item { display: inline-flex; align-items: center; gap: 1px; min-width: 0; color: var(--text-muted); }
-.note-breadcrumbs__item > svg { flex: none; opacity: .6; }
-.note-breadcrumbs__item button { max-width: 160px; height: 20px; padding: 0 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.note-breadcrumbs__item b { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-soft); font-weight: 600; }
-.note-breadcrumbs__item:last-child { min-width: 0; }
 .ribbon-status .update-ready-button { display: inline-flex; align-items: center; gap: 4px; padding-inline: 6px; color: var(--accent-readable); background: rgba(var(--accent-rgb), .1); }
 
 /* CodeMirror and Markdown */
@@ -3035,7 +3027,6 @@ kbd { padding: 3px 6px; border: 1px solid var(--border-strong); border-bottom-wi
   .first-run-intro h1 { font-size: 32px; }
   .first-run-setup-grid { grid-template-columns: 1fr; }
   .first-run-setup-head h1 { font-size: 36px; }
-  .tabs-bar .note-breadcrumbs { display: none; }
 }
 
 @media (max-width: 760px) {

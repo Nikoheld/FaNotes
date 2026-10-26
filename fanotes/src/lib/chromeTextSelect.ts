@@ -18,7 +18,6 @@ export const CHROME_LABEL_SELECTOR = [
   '.pdf-note-identity small',
   '.pdf-note-pager > span',
   '.pdf-note-search small',
-  '.note-breadcrumbs b',
   '.subject-book-pane-bar strong',
   '.split-pane-head strong',
 ].join(', ')
