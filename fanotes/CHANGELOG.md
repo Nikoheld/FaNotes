@@ -1,5 +1,19 @@
 # Änderungsverlauf
 
+## 2026.10.12-beta.4
+
+- Keep a quick pen turn from ending in a circle.
+- Keep page statistics off the sync.
+- Raster a large PDF as the visible window and keep it open.
+- Keep two fingers from turning the paper.
+- Drop the changelog conflict markers.
+- Keep both changelog notes after merging main.
+- Keep PDF text selection on the words under the pointer.
+- Set a math figure's line thickness separately from its size.
+- Scale the ruler and compass down without squashing them.
+- Keep the Marker on the same color as the pen.
+- Draw the handwriting dot as a vector so it stays sharp.
+
 ## 2026.10.12-beta.3
 
 - Tighten the top bar and drop the controls that appeared twice.
