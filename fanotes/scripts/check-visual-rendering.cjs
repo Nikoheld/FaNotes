@@ -227,13 +227,32 @@ void (async () => {
     if (!spellingSnapshot?.errors?.includes('Tset') || !spellingSnapshot?.errors?.includes('exampel')) {
       throw new Error(`Die zweisprachige Rechtschreibmarkierung wurde nicht rechtzeitig dargestellt: ${JSON.stringify(spellingSnapshot)}`)
     }
-    const spelling = await cdp.evaluate(`(() => ({
-      words: [...document.querySelectorAll('.cm-spelling-error')].map((node) => node.dataset.spellingWord).sort(),
-      languages: [...document.querySelectorAll('.cm-spelling-error')].map((node) => node.dataset.spellingLanguage).sort(),
-      detected: document.querySelector('.markdown-editor .cm-editor')?.dataset.detectedLanguage,
-      decoration: getComputedStyle(document.querySelector('.cm-spelling-error')).textDecorationStyle,
-    }))()`)
-    if (!spelling.words.includes('Tset') || !spelling.words.includes('exampel') || !spelling.languages.includes('de') || !spelling.languages.includes('en') || spelling.detected !== 'mixed' || spelling.decoration !== 'wavy') {
+    const spelling = await cdp.evaluate(`(() => {
+      const node = document.querySelector('.cm-spelling-error')
+      const style = node ? getComputedStyle(node) : null
+      const line = node?.closest('.cm-line')
+      let shift = null
+      if (node && line) {
+        const wordRange = document.createRange()
+        wordRange.selectNodeContents(node)
+        const word = wordRange.getBoundingClientRect()
+        const neighborNode = [...line.childNodes].find((child) => child !== node && child.textContent && child.textContent.trim())
+        if (neighborNode) {
+          const neighborRange = document.createRange()
+          neighborRange.selectNodeContents(neighborNode)
+          shift = Math.abs(word.top - neighborRange.getBoundingClientRect().top)
+        }
+      }
+      return {
+        words: [...document.querySelectorAll('.cm-spelling-error')].map((item) => item.dataset.spellingWord).sort(),
+        languages: [...document.querySelectorAll('.cm-spelling-error')].map((item) => item.dataset.spellingLanguage).sort(),
+        detected: document.querySelector('.markdown-editor .cm-editor')?.dataset.detectedLanguage,
+        decoration: style?.textDecorationLine ?? null,
+        wave: style?.backgroundImage ?? '',
+        shift,
+      }
+    })()`)
+    if (!spelling.words.includes('Tset') || !spelling.words.includes('exampel') || !spelling.languages.includes('de') || !spelling.languages.includes('en') || spelling.detected !== 'mixed' || spelling.decoration !== 'none' || !String(spelling.wave).includes('svg') || spelling.shift == null || spelling.shift > 0.75) {
       throw new Error(`Die automatische Rechtschreibprüfung ist visuell unvollständig: ${JSON.stringify(spelling)}`)
     }
 

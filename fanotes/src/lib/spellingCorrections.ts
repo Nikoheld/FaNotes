@@ -9,7 +9,7 @@ import {
   type EditorState,
   type Extension,
 } from '@codemirror/state'
-import { Decoration, EditorView, keymap, showTooltip, type DecorationSet, type Tooltip, type TooltipView } from '@codemirror/view'
+import { Decoration, EditorView, keymap, showTooltip, tooltips, type DecorationSet, type Tooltip, type TooltipView } from '@codemirror/view'
 import type { SpellingLanguage } from '../types'
 import {
   addPersonalWord,
@@ -23,8 +23,8 @@ import {
 
 /**
  * Corrections for the spellchecker: an autocorrect that fires when a word is
- * finished (space, punctuation, Enter) and a suggestion menu on a right-click or
- * Ctrl+. — both fed by the same dictionaries as the red underline.
+ * finished (space, punctuation, Enter) and a suggestion menu on a click,
+ * right-click, or Ctrl+. — both fed by the same dictionaries as the red underline.
  */
 
 type SpellingModule = typeof import('./spelling')
@@ -192,6 +192,8 @@ type MenuState = {
   suggestions: SpellingSuggestion[] | null
   /** Set when the word is the result of an autocorrect, offering a revert. */
   autocorrected: AutocorrectRecord | null
+  /** Right-click and Ctrl+. focus the first suggestion. A plain click leaves the caret. */
+  focusOnOpen: boolean
 }
 
 const openMenu = StateEffect.define<MenuState | null>()
@@ -227,7 +229,9 @@ const createMenuView = (view: EditorView): TooltipView => {
   const focusFirst = () => dom.querySelector<HTMLButtonElement>('button')?.focus()
   return {
     dom,
-    mount: focusFirst,
+    mount: () => {
+      if (view.state.field(spellingMenu)?.focusOnOpen) focusFirst()
+    },
     update: (update) => {
       const next = update.state.field(spellingMenu)
       if (!next || next === rendered) return
@@ -240,7 +244,7 @@ const createMenuView = (view: EditorView): TooltipView => {
 }
 
 const menuTooltip = (menu: MenuState | null): Tooltip | null => (
-  menu ? { pos: menu.from, end: menu.to, above: false, strictSide: false, arrow: false, create: createMenuView } : null
+  menu ? { pos: menu.from, end: menu.to, above: false, strictSide: false, arrow: false, create: createMenuView, clip: false } : null
 )
 
 const menuButton = (label: string, className: string, onClick: () => void) => {
@@ -332,14 +336,51 @@ const renderMenu = (dom: HTMLElement, view: EditorView, menu: MenuState) => {
   }
 }
 
+const elementAt = (view: EditorView, pos: number, side: -1 | 1) => {
+  const clamped = Math.max(0, Math.min(pos, view.state.doc.length))
+  const place = view.domAtPos(clamped, side)
+  const node = place.node
+  return node instanceof Element ? node : node.parentElement
+}
+
+/** True when `pos` sits on a red spelling mark or a just-autocorrected word. */
+const markedWordAt = (view: EditorView, pos: number) => {
+  if (elementAt(view, pos, 1)?.closest('.cm-spelling-error, .cm-autocorrected')) return true
+  return Boolean(elementAt(view, pos, -1)?.closest('.cm-spelling-error, .cm-autocorrected'))
+}
+
+/**
+ * The note scroller clips overflow, so a tooltip inside the editor is cut off
+ * at the bottom and the right of the sheet. A zero-size host in the editor
+ * stage stays in the theme, out of that clip, and out of the shell grid.
+ */
+const spellingTooltipParent = (): HTMLElement | undefined => {
+  if (typeof document === 'undefined') return undefined
+  const stage = document.querySelector('.editor-stage')
+  if (!(stage instanceof HTMLElement)) return document.body
+  let host = stage.querySelector(':scope > .cm-spelling-tooltip-host')
+  if (!(host instanceof HTMLElement)) {
+    host = document.createElement('div')
+    host.className = 'cm-spelling-tooltip-host'
+    host.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;overflow:visible;z-index:80;pointer-events:none;'
+    stage.appendChild(host)
+  }
+  return host
+}
+
 /** Opens the suggestion menu for the word around `pos`; suggestions arrive asynchronously. */
-export const openSpellingMenuAt = (view: EditorView, pos: number, options: SpellingCorrectionsOptions): boolean => {
+export const openSpellingMenuAt = (view: EditorView, pos: number, options: SpellingCorrectionsOptions, focusOnOpen = true): boolean => {
   const range = wordRangeAt(view.state, pos)
   if (!range) return false
   const record = view.state.field(lastAutocorrect)
   const autocorrected = record && record.from === range.from && record.to === range.to ? record : null
   const language = options.languageAt(view.state, range.from)
-  const menu: MenuState = { ...range, language, suggestions: null, autocorrected }
+  const open = view.state.field(spellingMenu, false)
+  if (open && open.word === range.word && open.from === range.from && open.to === range.to) {
+    if (open.focusOnOpen !== focusOnOpen) view.dispatch({ effects: openMenu.of({ ...open, focusOnOpen }) })
+    return true
+  }
+  const menu: MenuState = { ...range, language, suggestions: null, autocorrected, focusOnOpen }
   view.dispatch({ effects: openMenu.of(menu) })
   void primeSpellingCorrections()
     .then((module) => {
@@ -365,6 +406,7 @@ export const closeSpellingMenu = (view: EditorView) => {
 
 export function spellingCorrections(options: SpellingCorrectionsOptions): Extension {
   return [
+    tooltips({ parent: spellingTooltipParent(), position: 'fixed' }),
     lastAutocorrect,
     spellingMenu,
     EditorView.inputHandler.of((view, from, to, text) => {
@@ -400,13 +442,22 @@ export function spellingCorrections(options: SpellingCorrectionsOptions): Extens
       { key: 'Escape', run: closeSpellingMenu },
     ])),
     EditorView.domEventHandlers({
+      // A click on the red word offers the same list Word shows on right-click.
+      // Return false so the caret from this click stays put.
+      click: (event, view) => {
+        if (event.button !== 0 || !view.state.selection.main.empty) return false
+        const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
+        if (pos === null || !markedWordAt(view, pos)) return false
+        openSpellingMenuAt(view, pos, options, false)
+        return false
+      },
       contextmenu: (event, view) => {
         const target = event.target instanceof Element ? event.target : null
-        if (!target?.closest('.cm-spelling-error, .cm-autocorrected')) return false
+        const onMark = Boolean(target?.closest('.cm-spelling-error, .cm-autocorrected'))
         const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
-        if (pos === null) return false
+        if (pos === null || (!onMark && !markedWordAt(view, pos))) return false
         event.preventDefault()
-        return openSpellingMenuAt(view, pos, options)
+        return openSpellingMenuAt(view, pos, options, true)
       },
     }),
   ]

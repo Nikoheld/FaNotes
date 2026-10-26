@@ -907,6 +907,12 @@ function spellingExtensions(onLanguageDetected: (language: DetectedTextLanguage)
   return [spellingDecorations, plugin]
 }
 
+/** Red squiggle under a misspelled word. Painted in the span's own box so the glyphs stay put. */
+const spellingWave = (color: string) => {
+  const stroke = color.replace('#', '%23')
+  return `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3' viewBox='0 0 6 3'%3E%3Cpath d='M0 2.2Q1.5.4 3 2.2T6 2.2' fill='none' stroke='${stroke}' stroke-width='.7'/%3E%3C/svg%3E")`
+}
+
 function editorAppearance(
   settings: MarkdownEditorSettings,
   dark: boolean,
@@ -978,6 +984,8 @@ function editorAppearance(
         boxShadow: 'var(--shadow-lg)',
         color: 'var(--text-primary)',
         overflow: 'hidden',
+        // The host under the editor stage ignores hits so it cannot cover the note.
+        pointerEvents: 'auto',
       },
       '.cm-searchMatch': {
         backgroundColor: 'color-mix(in srgb, var(--warning) 32%, transparent)',
@@ -986,21 +994,30 @@ function editorAppearance(
       '.cm-searchMatch.cm-searchMatch-selected': {
         backgroundColor: 'color-mix(in srgb, var(--accent) 36%, transparent)',
       },
+      // A background wave, not text-decoration. Chrome's wavy underline is a
+      // separate paint for that span and sits the word off the rest of the line.
       '.cm-spelling-error': {
-        textDecorationLine: 'underline',
-        textDecorationStyle: 'wavy',
-        textDecorationColor: 'var(--danger)',
-        textDecorationThickness: '1.5px',
-        textUnderlineOffset: '3px',
-        textDecorationSkipInk: 'none',
+        textDecoration: 'none',
+        backgroundImage: spellingWave(dark ? '#ff8d90' : '#c03543'),
+        backgroundRepeat: 'repeat-x',
+        backgroundPosition: 'left bottom',
+        backgroundSize: '6px 3px',
+        display: 'inline',
+        margin: '0',
+        padding: '0',
+        border: '0',
+        verticalAlign: 'baseline',
+        font: 'inherit',
+        letterSpacing: 'inherit',
+        lineHeight: 'inherit',
       },
       // A word autocorrect just changed: dotted accent underline until the next edit elsewhere.
       '.cm-autocorrected': {
-        textDecorationLine: 'underline',
-        textDecorationStyle: 'dotted',
-        textDecorationColor: 'var(--accent)',
-        textDecorationThickness: '1.5px',
-        textUnderlineOffset: '3px',
+        textDecoration: 'none',
+        backgroundImage: 'radial-gradient(circle, var(--accent) 0.7px, transparent 0.85px)',
+        backgroundRepeat: 'repeat-x',
+        backgroundPosition: 'left bottom',
+        backgroundSize: '5px 3px',
       },
       '.cm-tooltip:has(> .cm-spelling-menu)': {
         border: '1px solid var(--border)',
@@ -1456,7 +1473,8 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
             'aria-label': ariaLabel,
             autocapitalize: 'sentences',
             autocomplete: 'off',
-            spellcheck: settings.spellcheck ? 'true' : 'false',
+            // The browser's own spellcheck paints a second wave and can shift the word.
+            spellcheck: 'false',
           }),
         ),
         compartments.editable.of([
@@ -1529,7 +1547,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
             'aria-label': ariaLabel,
             autocapitalize: 'sentences',
             autocomplete: 'off',
-            spellcheck: settings.spellcheck ? 'true' : 'false',
+            spellcheck: 'false',
           }),
         ),
         compartments.editable.reconfigure([

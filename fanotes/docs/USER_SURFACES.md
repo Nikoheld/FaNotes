@@ -34,7 +34,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Open note tabs fill the tab row | `src/App.tsx` | `tabs-scroll` |
 | File tree keyboard navigation | `src/components/FileTree.tsx` | `event.key === 'Delete'` |
 | Autocorrect while typing (space, punctuation, Enter; Backspace reverts) | `src/lib/spellingCorrections.ts` | `key: 'Backspace', run: revertAutocorrect` |
-| Spelling suggestion menu (right-click / Strg+.) with Ignore and Add to dictionary | `src/lib/spellingCorrections.ts` | `cm-spelling-menu__learn` |
+| Spelling suggestion menu (click / right-click / Strg+.) with Ignore and Add to dictionary | `src/lib/spellingCorrections.ts` | `cm-spelling-menu__learn` |
 | Correction candidates, ranking and the autocorrect decision | `src/lib/spellingSuggest.ts` | `export const decideAutocorrect` |
 | Autokorrektur setting | `src/components/SettingsModal.tsx` | `title="Autokorrektur"` |
 | Lernzeit | `src/App.tsx` | `id: 'study'` |
