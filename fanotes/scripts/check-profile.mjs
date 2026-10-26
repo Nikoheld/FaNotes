@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createElement } from 'react'
@@ -244,11 +245,61 @@ try {
   assert.equal(await (await fetch(`${origin}/user/profile.js`)).text(), viewerScript)
   assert.equal(await (await fetch(`${origin}/user/profile.css`)).text(), viewerStyle)
 
-  const settings = {
+  const require = createRequire(import.meta.url)
+  const { sanitizeSettings: sanitizeStoredSettings, SETTINGS_SCHEMA } = require(join(appRoot, 'electron', 'settings-sanitize.cjs'))
+  const mainSource = readFileSync(join(appRoot, 'electron', 'main.cjs'), 'utf8')
+  assert.match(mainSource, /require\('\.\/settings-sanitize\.cjs'\)/u)
+  assert.match(
+    mainSource,
+    /function sanitizeSettings\(candidate, base = DEFAULT_SETTINGS\) \{\n  return sanitizeStoredSettings\(candidate, base, DEFAULT_SETTINGS\)\n\}/u,
+  )
+  assert.match(mainSource, /const nextSettings = sanitizeSettings\(settings, previousSettings\)/u)
+  assert.match(mainSource, /const sanitized = sanitizeSettings\(settingsCandidate\)/u)
+  assert.match(mainSource, /profileOwnerId: ''/u)
+  assert.match(mainSource, /profileUsername: ''/u)
+  assert.match(mainSource, /profilePublic: false/u)
+  assert.deepEqual(SETTINGS_SCHEMA.profileOwnerId, { type: 'string', max: 32 })
+  assert.deepEqual(SETTINGS_SCHEMA.profileUsername, { type: 'string', max: 24 })
+  assert.deepEqual(SETTINGS_SCHEMA.profilePublic, { type: 'boolean' })
+  const desktopDefaults = {
+    profileOwnerId: '',
+    profileUsername: '',
+    profilePublic: false,
+  }
+  const previousDesktop = sanitizeStoredSettings(desktopDefaults, desktopDefaults, desktopDefaults)
+  const savedProfile = sanitizeStoredSettings({
     ...defaults.defaultSettingsForPlatform('linux'),
     profileOwnerId: ownerA,
     profileUsername: 'feldnotiz',
     profilePublic: true,
+  }, previousDesktop, desktopDefaults)
+  const restartedProfile = sanitizeStoredSettings(savedProfile, desktopDefaults, desktopDefaults)
+  assert.equal(restartedProfile.profileOwnerId, ownerA)
+  assert.equal(restartedProfile.profileUsername, 'feldnotiz')
+  assert.equal(restartedProfile.profilePublic, true)
+  const clearedProfile = sanitizeStoredSettings({
+    profileOwnerId: '',
+    profileUsername: '',
+    profilePublic: false,
+  }, desktopDefaults, desktopDefaults)
+  const clearedRestart = sanitizeStoredSettings(clearedProfile, desktopDefaults, desktopDefaults)
+  assert.equal(clearedRestart.profileOwnerId, '')
+  assert.equal(clearedRestart.profileUsername, '')
+  assert.equal(clearedRestart.profilePublic, false)
+  const rejectedProfile = sanitizeStoredSettings({
+    profileOwnerId: 'z'.repeat(33),
+    profileUsername: 'n'.repeat(25),
+    profilePublic: 'yes',
+  }, savedProfile, desktopDefaults)
+  assert.equal(rejectedProfile.profileOwnerId, ownerA)
+  assert.equal(rejectedProfile.profileUsername, 'feldnotiz')
+  assert.equal(rejectedProfile.profilePublic, true)
+
+  const settings = {
+    ...defaults.defaultSettingsForPlatform('linux'),
+    profileOwnerId: restartedProfile.profileOwnerId,
+    profileUsername: restartedProfile.profileUsername,
+    profilePublic: restartedProfile.profilePublic,
   }
   const html = renderToStaticMarkup(createElement(settingsModule.SettingsModal, {
     platform: 'linux',
@@ -300,6 +351,7 @@ try {
     `searchPlaceholder ${placeholder}`,
     'toggle Die öffentliche Aktivitätsübersicht zeigen',
     'visibility setProfileVisibility',
+    `desktopSanitize ${restartedProfile.profileOwnerId} ${restartedProfile.profileUsername} ${restartedProfile.profilePublic}`,
   ].join('\n')
   writeScratch('profile-settings.log', `${settingsLog}\nprofile-settings ok\n`)
   console.log(settingsLog)
