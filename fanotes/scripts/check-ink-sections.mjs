@@ -19,6 +19,7 @@ const {
   SUBSECTION_HEADER_PX,
   SUBSECTION_WIDTH_MIN,
   applySectionWidth,
+  applySharedSectionEdges,
   collapseSection,
   collapsibleBodyEnd,
   deserializeSections,
@@ -149,6 +150,7 @@ const near = (actual, expected, message, tolerance = 0.51) => assert.ok(Math.abs
   assert.ok(section, 'a header lands on free paper')
   assert.equal(section.parentId, null, 'a section has no parent')
   assert.equal(section.width, 1, 'a section is full width')
+  assert.equal(section.left, 0, 'a section starts at the left edge')
   assert.equal(section.title, '', 'a new section starts without a typed title')
   near(board.sheet.height, 1273 + SECTION_HEADER_PX, 'the page grew by the header')
   near(board.topPx(above), 300, 'ink above the header stays')
@@ -290,8 +292,10 @@ const near = (actual, expected, message, tolerance = 0.51) => assert.ok(Math.abs
   const legacy = deserializeSections([{ id: 'old', top: .1, bodyTop: .2, collapsed: false, hidden: null }], () => [])
   assert.equal(legacy[0].parentId, null, 'an old section has no parent')
   assert.equal(legacy[0].width, 1, 'an old section is full width')
+  assert.equal(legacy[0].left, 0, 'an old section starts at the left edge')
   assert.equal(legacy[0].title, '', 'an old section has no typed title')
   assert.equal(Object.hasOwn(serializeSections(legacy)[0], 'title'), false, 'an empty title is not stored')
+  assert.equal(Object.hasOwn(serializeSections(legacy)[0], 'left'), false, 'a left edge of zero is not stored')
   const cleaned = deserializeSections([
     { id: 'p', top: .1, bodyTop: .16, collapsed: false },
     { id: 'c', top: .2, bodyTop: .25, parentId: 'p', width: .5, collapsed: false },
@@ -421,6 +425,97 @@ const near = (actual, expected, message, tolerance = 0.51) => assert.ok(Math.abs
   assert.ok(placed(before.subTitle), 'subsection title is back')
   assert.ok(placed(before.secondInk), 'ink below the section is back')
   assert.equal(board.sheet.width, WIDTH)
+}
+
+// ── One edge moves every band, and neither edge moves the writing ──────────
+{
+  const board = createBoard(1273)
+  const parent = board.insert(140, 'parent')
+  const second = board.insert(700, 'second')
+  const sub = board.insertSub(board.px(parent.bodyTop.y) + 80, 'sub')
+  const ink = board.write(board.px(sub.bodyTop.y) + 20, 16)
+  const outside = strokeAt(board.px(parent.bodyTop.y) + 24, board.sheet.height, 12, 30)
+  const far = strokeAt(board.px(second.bodyTop.y) + 24, board.sheet.height, 12, 860)
+  board.strokes.push(outside, far)
+  const inkX = ink.points[0].x
+  const inkY = ink.points[0].y
+  const outsideX = outside.points.map((point) => point.x)
+  const farX = far.points.map((point) => point.x)
+  const edge = parent.top.y
+  const heightAtEdges = board.sheet.height
+  assert.equal(applySharedSectionEdges(board.sections, 'missing', { width: 0.4 }).changed, false, 'an unknown band changes nothing')
+  assert.equal(parent.width, 1)
+  const narrowed = applySharedSectionEdges(board.sections, sub.id, { width: 0.5 })
+  assert.equal(narrowed.changed, true)
+  assert.equal(narrowed.width, 0.5)
+  assert.equal(narrowed.left, 0)
+  for (const section of [parent, second, sub]) {
+    assert.equal(section.width, 0.5, `${section.id} takes the same right edge`)
+    assert.equal(section.left, 0, `${section.id} keeps the shared left edge`)
+  }
+  assert.equal(ink.points[0].x, inkX, 'a shared right edge does not move ink x')
+  assert.equal(ink.points[0].y, inkY, 'a shared right edge does not move ink y')
+  assert.deepEqual(outside.points.map((point) => point.x), outsideX, 'ink left of the band stays')
+  assert.deepEqual(far.points.map((point) => point.x), farX, 'ink right of the band stays')
+  assert.equal(parent.top.y, edge, 'a shared right edge does not move the band')
+  assert.equal(board.sheet.height, heightAtEdges, 'a shared right edge does not resize the page')
+  assert.equal(board.sheet.width, WIDTH, 'a shared right edge does not change the page width')
+  const fromLeft = applySharedSectionEdges(board.sections, parent.id, { left: 0.18 })
+  assert.equal(fromLeft.left, 0.18)
+  assert.equal(fromLeft.width, 0.5, 'the left edge leaves the right edge')
+  for (const section of [parent, second, sub]) {
+    assert.equal(section.left, 0.18, `${section.id} takes the same left edge`)
+    assert.equal(section.width, 0.5, `${section.id} keeps the shared right edge`)
+  }
+  assert.equal(ink.points[0].x, inkX, 'a shared left edge does not move ink x')
+  assert.equal(ink.points[0].y, inkY, 'a shared left edge does not move ink y')
+  assert.deepEqual(outside.points.map((point) => point.x), outsideX, 'ink outside the left edge stays')
+  assert.deepEqual(far.points.map((point) => point.x), farX, 'ink outside the right edge stays')
+  assert.equal(outside.points.length, 2, 'no ink point is removed')
+  assert.equal(far.points.length, 2, 'no far ink point is removed')
+  assert.equal(parent.top.y, edge, 'a shared left edge does not move the band')
+  assert.equal(board.sheet.height, heightAtEdges, 'a shared left edge does not resize the page')
+  assert.equal(board.sheet.width, WIDTH)
+  assert.equal(applySharedSectionEdges(board.sections, second.id, { left: 0.9 }).left, 0.5 - SUBSECTION_WIDTH_MIN, 'the left edge stops at the minimum span')
+  assert.equal(parent.left, second.left)
+  assert.equal(sub.left, second.left)
+  assert.equal(applySharedSectionEdges(board.sections, sub.id, { width: 0.1 }).width, sub.left + SUBSECTION_WIDTH_MIN, 'the right edge stops at the minimum span')
+  assert.equal(parent.width, sub.width)
+  assert.equal(ink.points[0].x, inkX, 'clamping an edge does not move ink')
+  const fresh = board.insert(board.px(second.bodyTop.y) + 40, 'fresh')
+  assert.equal(fresh.left, parent.left, 'a new section copies the shared left edge')
+  assert.equal(fresh.width, parent.width, 'a new section copies the shared right edge')
+  assert.equal(ink.points[0].x, inkX, 'inserting a synced section does not slide older ink')
+  applySharedSectionEdges(board.sections, parent.id, { left: 0.12, width: 0.66 })
+  const saved = JSON.parse(JSON.stringify(serializeSections(board.sections)))
+  assert.equal(saved.find((section) => section.id === 'parent').left, 0.12, 'the left edge is saved')
+  assert.equal(saved.find((section) => section.id === 'second').width, 0.66, 'every saved band has the shared right edge')
+  const loaded = deserializeSections(saved, (value) => Array.isArray(value) ? value : [])
+  assert.equal(loaded.find((section) => section.id === 'sub').left, 0.12, 'the left edge comes back')
+  assert.equal(loaded.find((section) => section.id === 'fresh').width, 0.66, 'the shared right edge comes back')
+  const parkedInkX = ink.points[0].x
+  board.collapse(sub)
+  board.collapse(parent)
+  const parked = parent.hidden.sections.find((section) => section.id === 'sub')
+  assert.equal(parked.left, 0.12, 'a parked band keeps the left edge')
+  applySharedSectionEdges(board.sections, parent.id, { left: 0.08, width: 0.6 })
+  assert.equal(parked.left, 0.08, 'a parked band takes the new left edge')
+  assert.equal(parked.width, 0.6, 'a parked band takes the new right edge')
+  assert.equal(second.left, 0.08)
+  assert.equal(second.width, 0.6)
+  const parkedStroke = parked.hidden.strokes[0]
+  assert.equal(parkedStroke.points.length, 2, 'parked ink is not removed')
+  assert.equal(parkedStroke.points[0].x, parkedInkX, 'syncing a parked band does not move its ink')
+  assert.equal(ink.points[0].x, parkedInkX, 'the original stroke is not rewritten')
+  assert.equal(board.sheet.width, WIDTH)
+  const opened = applySharedSectionEdges(board.sections, second.id, { left: 0, width: 1 })
+  assert.equal(opened.left, 0)
+  assert.equal(opened.width, 1)
+  assert.equal(Object.hasOwn(serializeSections([second])[0], 'left'), false, 'a restored left edge is not stored')
+  assert.equal(Object.hasOwn(serializeSections([second])[0], 'width'), false, 'a restored right edge is not stored')
+  const crooked = deserializeSections([{ id: 'crooked', top: .1, bodyTop: .2, collapsed: false, left: .9, width: .4 }], () => [])
+  assert.equal(crooked[0].width, .4, 'a saved right edge stays')
+  assert.equal(crooked[0].left, .4 - SUBSECTION_WIDTH_MIN, 'a left edge that would squash the band is pulled back')
 }
 
 {
@@ -575,6 +670,8 @@ const near = (actual, expected, message, tolerance = 0.51) => assert.ok(Math.abs
   assert.match(app, /sectionsEnabled=\{!isPdfActive\}/, 'PDF notes keep their ink on the page: no sections')
   assert.match(board, /Unterabschnitt/, 'the subsection tool is in the pen toolbar')
   assert.match(board, /lw-ink-section-width/, 'a subsection has a width handle')
+  assert.match(board, /lw-ink-section-width is-left/, 'a section band has a left edge handle')
+  assert.match(board, /data-edge="left"/, 'the left handle drags the left edge')
   assert.match(board, /aria-label=\{isSub \? 'Breite des Unterabschnitts' : 'Breite des Abschnitts'\}/, 'a section has the same width handle')
   assert.match(board, /lw-ink-section-move/, 'a section has a handle to change its order')
   assert.match(board, /reorderSection\(strokesRef\.current, sectionsRef\.current, id, toIndex/, 'the handle reorders the band and its ink')
@@ -590,6 +687,12 @@ const near = (actual, expected, message, tolerance = 0.51) => assert.ok(Math.abs
   const setWidth = board.match(/const setSubsectionWidth = useCallback\(\(id: string, width: number\) => \{[\s\S]*?\n  \}, \[commitSections\]\)/)
   assert.ok(setWidth, 'width is stored on the subsection')
   assert.doesNotMatch(setWidth[0], /setPageExtent|shiftFrom|foldHeading|contentWidth|onSectionFold|strokesRef/, 'storing a width does not move ink or the note text')
+  assert.match(setWidth[0], /applySharedSectionEdges\(sectionsRef\.current, id, \{ width \}\)/, 'the right edge is copied onto every section')
+  const setLeft = board.match(/const setSubsectionLeft = useCallback\(\(id: string, left: number\) => \{[\s\S]*?\n  \}, \[commitSections\]\)/)
+  assert.ok(setLeft, 'the left edge is stored on every section')
+  assert.doesNotMatch(setLeft[0], /setPageExtent|shiftFrom|foldHeading|contentWidth|onSectionFold|strokesRef/, 'storing a left edge does not move ink or the note text')
+  assert.match(setLeft[0], /applySharedSectionEdges\(sectionsRef\.current, id, \{ left \}\)/, 'the left edge is copied onto every section')
+  assert.match(drag[0], /dataset\.edge === 'left'/, 'the drag follows the handle that was held')
   const setTitle = board.match(/const setSectionTitle = useCallback\(\(id: string, value: string\) => \{[\s\S]*?\n  \}, \[commitSections, setDirty\]\)/)
   assert.ok(setTitle, 'a typed title is stored on the section')
   assert.doesNotMatch(setTitle[0], /afterSectionChange|setPageExtent|shiftFrom|foldHeading|contentWidth|onSectionFold|growSheetBy|strokesRef/, 'typing a title does not move ink, the page, or the note text')

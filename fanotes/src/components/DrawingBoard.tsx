@@ -200,7 +200,9 @@ import {
   type SerializedSection,
   SECTION_HEADER_PX,
   SECTION_TITLE_MAX,
-  applySectionWidth,
+  SUBSECTION_WIDTH_MIN,
+  applySharedSectionEdges,
+  clampSectionLeft,
   clampSectionWidth,
   collapseSection,
   deserializeSections,
@@ -4239,13 +4241,18 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setDirty(true)
   }, [commitSections, setDirty])
 
-  /** Band width only. Ink, the page and the note text stay where they are. */
+  /** Right edge only. Every band takes the same edges. Ink, the page and the note text stay where they are. */
   const setSubsectionWidth = useCallback((id: string, width: number) => {
-    const section = sectionsRef.current.find((entry) => entry.id === id)
-    if (!section) return false
-    const before = section.width
-    applySectionWidth(section, width)
-    if (section.width === before) return false
+    const next = applySharedSectionEdges(sectionsRef.current, id, { width })
+    if (!next.changed) return false
+    commitSections([...sectionsRef.current])
+    return true
+  }, [commitSections])
+
+  /** Left edge only. Every band takes the same edges. Ink, the page and the note text stay where they are. */
+  const setSubsectionLeft = useCallback((id: string, left: number) => {
+    const next = applySharedSectionEdges(sectionsRef.current, id, { left })
+    if (!next.changed) return false
     commitSections([...sectionsRef.current])
     return true
   }, [commitSections])
@@ -4254,11 +4261,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     event.stopPropagation()
     event.preventDefault()
     const handle = event.currentTarget
+    const moveLeft = handle.dataset.edge === 'left'
     handle.setPointerCapture(event.pointerId)
     let moved = false
     const onMove = (ev: PointerEvent) => {
       const point = pointFromEvent(ev)
-      if (point && setSubsectionWidth(id, point.x)) moved = true
+      if (!point) return
+      if (moveLeft ? setSubsectionLeft(id, point.x) : setSubsectionWidth(id, point.x)) moved = true
     }
     const onUp = () => {
       handle.removeEventListener('pointermove', onMove)
@@ -4271,7 +4280,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     handle.addEventListener('pointermove', onMove)
     handle.addEventListener('pointerup', onUp)
     handle.addEventListener('pointercancel', onUp)
-  }, [bumpRevision, pointFromEvent, setDirty, setSubsectionWidth])
+  }, [bumpRevision, pointFromEvent, setDirty, setSubsectionLeft, setSubsectionWidth])
 
   useEffect(() => {
     if (!sectionPlacing) return
@@ -8183,7 +8192,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             {(sections.length > 0 || sectionPlacing) && <div className="lw-ink-sections" aria-label="Abschnitte">
               {sections.map((section) => {
                 const isSub = section.parentId !== null
-                const bandWidth = clampSectionWidth(section.width)
+                const bandRight = clampSectionWidth(section.width)
+                const bandLeft = clampSectionLeft(section.left, bandRight)
                 const bodyEnd = section.collapsed ? section.bodyTop.y : (nextSectionTop(sections, section) ?? 1)
                 const hiddenCount = section.hidden
                   ? section.hidden.strokes.length + section.hidden.sections.reduce((sum, child) => sum + (child.hidden?.strokes.length ?? 0), 0)
@@ -8197,7 +8207,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                       style={{
                         top: `${section.top.y * 100}%`,
                         height: `${(section.bodyTop.y - section.top.y) * 100}%`,
-                        width: `${bandWidth * 100}%`,
+                        left: `${bandLeft * 100}%`,
+                        width: `${(bandRight - bandLeft) * 100}%`,
                         right: 'auto',
                       }}
                     >
@@ -8241,11 +8252,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                         <X size={13} />
                       </button>
                       <div
-                        className="lw-ink-section-control lw-ink-section-width"
+                        className="lw-ink-section-control lw-ink-section-width is-left"
+                        data-edge="left"
                         role="slider"
-                        aria-valuemin={28}
-                        aria-valuemax={100}
-                        aria-valuenow={Math.round(bandWidth * 100)}
+                        aria-valuemin={0}
+                        aria-valuemax={Math.round((bandRight - SUBSECTION_WIDTH_MIN) * 100)}
+                        aria-valuenow={Math.round(bandLeft * 100)}
                         aria-label={isSub ? 'Breite des Unterabschnitts' : 'Breite des Abschnitts'}
                         title="Breite ziehen · die Schrift bleibt, wo sie ist"
                         tabIndex={0}
@@ -8254,7 +8266,27 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                           if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
                           event.preventDefault()
                           event.stopPropagation()
-                          if (setSubsectionWidth(section.id, bandWidth + (event.key === 'ArrowLeft' ? -0.02 : 0.02))) {
+                          if (setSubsectionLeft(section.id, bandLeft + (event.key === 'ArrowLeft' ? -0.02 : 0.02))) {
+                            setDirty(true)
+                            bumpRevision()
+                          }
+                        }}
+                      />
+                      <div
+                        className="lw-ink-section-control lw-ink-section-width"
+                        role="slider"
+                        aria-valuemin={Math.round((bandLeft + SUBSECTION_WIDTH_MIN) * 100)}
+                        aria-valuemax={100}
+                        aria-valuenow={Math.round(bandRight * 100)}
+                        aria-label={isSub ? 'Breite des Unterabschnitts' : 'Breite des Abschnitts'}
+                        title="Breite ziehen · die Schrift bleibt, wo sie ist"
+                        tabIndex={0}
+                        onPointerDown={(event) => beginSubsectionWidthDrag(section.id, event)}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+                          event.preventDefault()
+                          event.stopPropagation()
+                          if (setSubsectionWidth(section.id, bandRight + (event.key === 'ArrowLeft' ? -0.02 : 0.02))) {
                             setDirty(true)
                             bumpRevision()
                           }
@@ -8263,14 +8295,22 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                     </div>
                     {!section.collapsed && bodyEnd > section.bodyTop.y && <div
                       className={`lw-ink-section-rail${isSub ? ' is-subsection' : ''}`}
-                      style={{ top: `${section.bodyTop.y * 100}%`, height: `${(bodyEnd - section.bodyTop.y) * 100}%` }}
+                      style={{ top: `${section.bodyTop.y * 100}%`, height: `${(bodyEnd - section.bodyTop.y) * 100}%`, left: `calc(${bandLeft * 100}% + ${isSub ? 40 : 28}px)` }}
+                    />}
+                    {!section.collapsed && bodyEnd > section.bodyTop.y && bandLeft > 0 && <div
+                      className="lw-ink-section-edge"
+                      style={{
+                        top: `${section.bodyTop.y * 100}%`,
+                        height: `${(bodyEnd - section.bodyTop.y) * 100}%`,
+                        left: `${bandLeft * 100}%`,
+                      }}
                     />}
                     {!section.collapsed && bodyEnd > section.bodyTop.y && <div
                       className="lw-ink-section-edge"
                       style={{
                         top: `${section.bodyTop.y * 100}%`,
                         height: `${(bodyEnd - section.bodyTop.y) * 100}%`,
-                        left: `${bandWidth * 100}%`,
+                        left: `${bandRight * 100}%`,
                       }}
                     />}
                   </Fragment>
@@ -8282,7 +8322,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             {inline && !inputActive && sectionTitleHost ? createPortal(
               <div className="lw-ink-section-titles">
                 {sections.map((section) => {
-                  const bandWidth = clampSectionWidth(section.width)
+                  const bandRight = clampSectionWidth(section.width)
+                  const bandLeft = clampSectionLeft(section.left, bandRight)
                   return (
                     <div
                       key={section.id}
@@ -8290,7 +8331,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                       style={{
                         top: `${section.top.y * 100}%`,
                         height: `${Math.max(0, section.bodyTop.y - section.top.y) * 100}%`,
-                        width: `${bandWidth * 100}%`,
+                        left: `${bandLeft * 100}%`,
+                        width: `${(bandRight - bandLeft) * 100}%`,
                       }}
                     >
                       {sectionTitleField(section, section.parentId !== null)}
@@ -8878,6 +8920,7 @@ const drawingBoardStyles = `
 .lw-ink-section-header.is-subsection{right:auto;border-left:3px solid rgba(var(--accent-rgb),.55);background:linear-gradient(90deg,rgba(var(--accent-rgb),.18),rgba(var(--accent-rgb),.07) 72%,rgba(var(--accent-rgb),.03))}
 .lw-ink-section-header.is-collapsed{border-bottom:2px dashed rgba(var(--accent-rgb),.45);background:linear-gradient(90deg,rgba(var(--accent-rgb),.16),rgba(var(--accent-rgb),.06) 55%,rgba(var(--accent-rgb),.03))}
 .lw-ink-section-width{position:absolute;top:0;right:-6px;width:14px;height:100%;padding:0;border:0;background:transparent;cursor:ew-resize;pointer-events:auto;touch-action:none}
+.lw-ink-section-width.is-left{left:-6px;right:auto}
 .lw-ink-section-width::after{content:"";position:absolute;top:8px;bottom:8px;left:5px;width:3px;border-radius:2px;background:rgba(var(--accent-rgb),.7)}
 .lw-ink-section-edge{position:absolute;width:2px;margin-left:-1px;background:rgba(var(--accent-rgb),.28);pointer-events:none}
 .lw-ink-section-rail.is-subsection{left:40px}

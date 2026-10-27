@@ -16,8 +16,10 @@
  * the sheet grows, pads or rescales, and by being points the edges ride along.
  * Hidden body ink is stored normalised to its own box (width × height in sheet
  * px at collapse time) so a later sheet resize cannot make it stale. A
- * section's `width` is only how wide its band is drawn. Changing it does
- * not move strokes and does not change the page.
+ * section's `left` and `width` are the band's left and right edges. Changing
+ * either edge copies that pair onto every section. It does not move strokes
+ * and does not change the page. Writing that falls outside the band stays
+ * where it is.
  */
 import type { StrokePoint } from '../../../src/types'
 import { WRITE_MARGIN_X } from './noteCanvas'
@@ -32,7 +34,7 @@ export const SECTION_BODY_MARGIN_PX = WRITE_MARGIN_X
 export const SECTION_MIN_BODY_PX = 144
 /** Shortest body kept when a subsection is inserted against the next header. */
 export const SUBSECTION_MIN_BODY_PX = 96
-/** Subsection band width, as a fraction of the sheet. The left edge stays put. */
+/** Narrowest band, as a fraction of the sheet (`width` minus `left`). */
 export const SUBSECTION_WIDTH_MIN = 0.28
 export const SUBSECTION_WIDTH_MAX = 1
 /** Typed title length. Longer text is cut; blank text is the same as no title. */
@@ -58,8 +60,15 @@ export type InkSection<S extends SectionStroke = SectionStroke> = {
   /** `null` for a section. A subsection names its section; one level only. */
   parentId: string | null
   /**
-   * Fraction of the sheet the band occupies, from the left edge. A new band
-   * starts at 1. Changing the width does not move ink or the page.
+   * Left edge of the band, 0–1 of the sheet. A new band copies the edges the
+   * other bands already share, or 0 when it is the first. Omitted from a save
+   * when it is 0. Changing it does not move ink or the page.
+   */
+  left: number
+  /**
+   * Right edge of the band, 0–1 of the sheet. A new band copies the edges the
+   * other bands already share, or 1 when it is the first. Omitted from a save
+   * when it is 1. Changing it does not move ink or the page.
    */
   width: number
   /** Header top edge, 0–1 of the sheet (or of the parent body box while parked). */
@@ -174,20 +183,81 @@ export const readSectionTitle = (value: unknown) => {
   return value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, SECTION_TITLE_MAX)
 }
 
-/** Keeps a band width inside the limits. Anything else is full width. */
+/** Keeps a right edge inside the limits. Anything else is the sheet's right edge. */
 export const clampSectionWidth = (value: unknown) => {
   const parsed = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(parsed)) return 1
   return Math.min(SUBSECTION_WIDTH_MAX, Math.max(SUBSECTION_WIDTH_MIN, parsed))
 }
 
+/** Keeps a left edge on the sheet and at least the minimum span away from `right`. Anything else is the sheet's left edge. */
+export const clampSectionLeft = (value: unknown, right: number) => {
+  const edge = Number.isFinite(right) ? right : SUBSECTION_WIDTH_MAX
+  const maxLeft = Math.max(0, edge - SUBSECTION_WIDTH_MIN)
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(parsed)) return 0
+  return Math.min(maxLeft, Math.max(0, parsed))
+}
+
+const fitSectionRight = (left: number, requested: number) => {
+  const minRight = left + SUBSECTION_WIDTH_MIN
+  if (minRight >= SUBSECTION_WIDTH_MAX) return { left: SUBSECTION_WIDTH_MAX - SUBSECTION_WIDTH_MIN, width: SUBSECTION_WIDTH_MAX }
+  return { left, width: Math.max(clampSectionWidth(requested), minRight) }
+}
+
+const fitSectionLeft = (requested: number, width: number) => {
+  const right = clampSectionWidth(width)
+  return { left: clampSectionLeft(requested, right), width: right }
+}
+
 /**
- * Sets a section or subsection band width. No stroke moves and the sheet
- * size is left untouched — the note text is not part of this.
+ * Sets one band's right edge. The left edge stays unless the span would
+ * become shorter than the minimum. No stroke moves and the sheet size is
+ * left untouched — the note text is not part of this.
  */
 export const applySectionWidth = <S extends SectionStroke>(section: InkSection<S>, width: number) => {
-  section.width = clampSectionWidth(width)
+  const fitted = fitSectionRight(Number.isFinite(section.left) ? section.left : 0, width)
+  section.left = fitted.left
+  section.width = fitted.width
   return section.width
+}
+
+const writeSectionEdges = <S extends SectionStroke>(section: InkSection<S>, left: number, width: number, changed: { value: boolean }) => {
+  if (section.left !== left || section.width !== width) changed.value = true
+  section.left = left
+  section.width = width
+  const nested = section.hidden?.sections
+  if (nested) for (const child of nested) writeSectionEdges(child, left, width, changed)
+}
+
+/**
+ * Copies one left edge and one right edge onto every section, including
+ * bands parked inside a collapsed body. Strokes and the page stay put.
+ * `width` is the right edge. Passing only one side keeps the other side of
+ * `id` and stops at the minimum span.
+ */
+export const applySharedSectionEdges = <S extends SectionStroke>(
+  sections: readonly InkSection<S>[],
+  id: string,
+  patch: { left?: number; width?: number },
+) => {
+  const sample = sections.find((section) => section.id === id)
+  if (!sample) return { left: 0, width: 1, changed: false }
+  let left = Number.isFinite(sample.left) ? sample.left : 0
+  let width = clampSectionWidth(sample.width)
+  if (patch.width !== undefined) {
+    const fitted = fitSectionRight(left, patch.width)
+    left = fitted.left
+    width = fitted.width
+  }
+  if (patch.left !== undefined) {
+    const fitted = fitSectionLeft(patch.left, width)
+    left = fitted.left
+    width = fitted.width
+  }
+  const changed = { value: false }
+  for (const section of sections) writeSectionEdges(section, left, width, changed)
+  return { left, width, changed: changed.value }
 }
 
 /**
@@ -271,12 +341,16 @@ export const planInsertSection = <S extends SectionStroke>(
     const bodyPx = nextPx - yPx
     if (bodyPx < minBodyPx) growPx += minBodyPx - bodyPx
   }
+  const adopted = (parentId ? sections.find((section) => section.id === parentId) : undefined) ?? sections[0]
+  const width = adopted ? clampSectionWidth(adopted.width) : 1
+  const left = adopted ? clampSectionLeft(adopted.left, width) : 0
   return {
     growPx,
     section: {
       id,
       parentId,
-      width: 1,
+      left,
+      width,
       top: sectionPoint(0, y),
       bodyTop: sectionPoint(0, y + headerPx / sheet.height),
       collapsed: false,
@@ -593,6 +667,8 @@ export type SerializedSection = {
   bodyTop: number
   collapsed: boolean
   parentId?: string
+  /** Omitted when the band starts at the sheet's left edge, so older drawings stay valid. */
+  left?: number
   width?: number
   /** Omitted when the band has no typed title, so older drawings stay valid. */
   title?: string
@@ -605,6 +681,7 @@ const serializeOne = <S extends SectionStroke>(section: InkSection<S>): Serializ
   bodyTop: section.bodyTop.y,
   collapsed: section.collapsed,
   ...(section.parentId ? { parentId: section.parentId } : {}),
+  ...(section.left ? { left: section.left } : {}),
   ...(section.width !== 1 ? { width: section.width } : {}),
   ...(section.title.trim() ? { title: section.title.trim().slice(0, SECTION_TITLE_MAX) } : {}),
   hidden: section.hidden ? {
@@ -631,6 +708,8 @@ const readSectionList = <S extends SectionStroke>(value: unknown, parseStrokes: 
     const id = typeof raw.id === 'string' && raw.id.length <= 64 ? raw.id : `section-${sections.length + 1}`
     const hadParent = typeof raw.parentId === 'string' && raw.parentId.length > 0
     const parentId = hadParent && raw.parentId!.length <= 64 && raw.parentId !== id ? raw.parentId! : null
+    const width = clampSectionWidth(raw.width)
+    const left = clampSectionLeft(raw.left, width)
     let hidden: HiddenSectionInk<S> | null = null
     if (raw.hidden && typeof raw.hidden === 'object') {
       const widthPx = Number(raw.hidden.widthPx)
@@ -644,6 +723,7 @@ const readSectionList = <S extends SectionStroke>(value: unknown, parseStrokes: 
           sections: nested.map((entry) => {
             entry.section.parentId = id
             entry.section.width = clampSectionWidth(entry.section.width)
+            entry.section.left = clampSectionLeft(entry.section.left, entry.section.width)
             return entry.section
           }),
         }
@@ -654,7 +734,8 @@ const readSectionList = <S extends SectionStroke>(value: unknown, parseStrokes: 
       section: {
         id,
         parentId,
-        width: clampSectionWidth(raw.width),
+        left,
+        width,
         top: sectionPoint(0, top),
         bodyTop: sectionPoint(0, bodyTop),
         collapsed: raw.collapsed === true,
