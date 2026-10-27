@@ -540,7 +540,7 @@ void (async () => {
       })
     }
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: artEnd.x, y: artEnd.y, button: 'left', buttons: 0, clickCount: 1 })
-    await waitFor(cdp, `Boolean(document.querySelector('.lw-draw-toolbar button[aria-label="Rückgängig"]:not(:disabled)'))`, 'Ein gezeichneter Kunststrich')
+    await waitFor(cdp, `window.fanotes.listDrawings().then((items) => items.length > 0)`, 'Ein gezeichneter Kunststrich')
     await waitFor(cdp, `window.fanotes.listDrawings().then((items) => items.length > 0)`, 'Die automatische Speicherung der Zeichnung')
     const savedArt = await cdp.evaluate(`(async () => {
       const drawings = await window.fanotes.listDrawings()

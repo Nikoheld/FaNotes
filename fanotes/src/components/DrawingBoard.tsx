@@ -19,10 +19,7 @@ import {
   Paintbrush,
   Palette,
   PenLine,
-  Redo2,
   Ruler,
-  RotateCcw,
-  RotateCw,
   Save,
   ScanSearch,
   Shapes,
@@ -31,10 +28,7 @@ import {
   Trash2,
   Triangle,
   Type,
-  Undo2,
   X,
-  ZoomIn,
-  ZoomOut,
 } from 'lucide-react'
 import {
   Fragment,
@@ -71,13 +65,11 @@ import { decodeInkHistory, encodeInkHistory, type EncodedInkHistory } from '../l
 import { inkStrokeAllowsShapeSnap, shapeSnapAllowsLiveSample, shapeSnapProfile, snapStrokeToShape } from '../lib/shapeSnap'
 import {
   VIEW_ROTATE_STEP,
-  VIEW_ZOOM_MIN,
   applyPaperViewToElements,
   applyPaperZoomStayPut,
   clampViewZoom,
   clearPaperViewFromElements,
   normalizeRotation,
-  readSharedZoomMax,
   readSharedZoomSpeed,
   readUsedSheetZoom,
   resolvePaperViewTarget,
@@ -1565,8 +1557,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   sourceWidthRef.current = sourceWidth
   const [revision, setRevision] = useState(0)
   const [transcriptRevision, setTranscriptRevision] = useState(0)
-  const [canUndo, setCanUndo] = useState(false)
-  const [canRedo, setCanRedo] = useState(false)
   const [isDirty, setIsDirty] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isRecognizing, setIsRecognizing] = useState(false)
@@ -1856,8 +1846,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [bumpRevision])
 
   const updateHistoryState = useCallback(() => {
-    setCanUndo(undoRef.current.length > 0)
-    setCanRedo(redoRef.current.length > 0)
+    // Undo, redo, and clear stay on the keyboard. The bar no longer shows them.
   }, [])
 
   const clearRecognitionScope = useCallback(() => {
@@ -7454,25 +7443,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
         <label className="lw-paper-select">
           <span className="sr-only">Papierart</span>
-          <select value={paperStyle} onChange={(event) => changePaper(event.target.value as PaperStyle)}>
+          <span className={`paper-picker__swatch lw-paper-swatch paper-${paperStyle}`} aria-hidden="true" />
+          <select value={paperStyle} title={paperLabel[paperStyle]} onChange={(event) => changePaper(event.target.value as PaperStyle)}>
             {Object.entries(paperLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
           <ChevronDown size={14} />
         </label>
         <div className="lw-draw-toolgroup lw-view-controls" aria-label="Blattansicht">
-          <button type="button" className="lw-draw-icon" aria-label="Herauszoomen" title="Herauszoomen (Strg+- · Strg+Mausrad)" onClick={() => zoomBy(-zoomStepFromSpeed(readSharedZoomSpeed()))} disabled={viewZoom <= VIEW_ZOOM_MIN}><ZoomOut size={17} /></button>
-          <button type="button" className="lw-draw-icon" aria-label="Hineinzoomen" title="Hineinzoomen (Strg++ · Strg+Mausrad)" onClick={() => zoomBy(zoomStepFromSpeed(readSharedZoomSpeed()))} disabled={viewZoom >= readSharedZoomMax()}><ZoomIn size={17} /></button>
-          <button type="button" className="lw-draw-icon" aria-label="Blatt gegen den Uhrzeigersinn drehen" title="Blatt drehen ( [  · Alt+Mausrad )" onClick={() => rotateBy(-90)}><RotateCcw size={17} /></button>
-          <button type="button" className="lw-draw-icon" aria-label="Blatt im Uhrzeigersinn drehen" title="Blatt drehen ( ]  · Alt+Mausrad )" onClick={() => rotateBy(90)}><RotateCw size={17} /></button>
           <button type="button" className="lw-draw-subtle lw-view-reset" aria-label="Ansicht zurücksetzen" title="Zoom und Drehung zurücksetzen (Strg+0 · Esc)" onClick={resetView} disabled={viewZoom === 1 && viewRotation === 0 && viewPan.x === 0 && viewPan.y === 0}>
             {Math.round(viewZoom * 100)}%{viewRotation ? ` · ${viewRotation}°` : ''}
           </button>
-        </div>
-
-        <div className="lw-draw-toolgroup lw-history">
-          <button type="button" className="lw-draw-icon" aria-label="Rückgängig" title="Rückgängig (Strg+Z)" onClick={undo} disabled={!canUndo}><Undo2 size={17} /></button>
-          <button type="button" className="lw-draw-icon" aria-label="Wiederholen" title="Wiederholen (Strg+Umschalt+Z)" onClick={redo} disabled={!canRedo}><Redo2 size={17} /></button>
-          <button type="button" className="lw-draw-icon lw-danger" aria-label="Alles löschen" title="Alles löschen" onClick={clear} disabled={!inkCount}><Trash2 size={17} /></button>
         </div>
 
         {inline && <div className="lw-draw-toolgroup lw-ink-actions">

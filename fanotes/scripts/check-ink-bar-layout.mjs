@@ -19,6 +19,19 @@ if (start < 0 || end < 0) throw new Error('drawingBoardStyles not found')
 const boardCss = board.slice(start + 'const drawingBoardStyles = `'.length, end)
   .replaceAll('</style', '<\\/style')
   .replaceAll('</script', '<\\/script')
+for (const gone of [
+  'aria-label="Herauszoomen"',
+  'aria-label="Hineinzoomen"',
+  'aria-label="Rückgängig"',
+  'aria-label="Wiederholen"',
+  'aria-label="Alles löschen"',
+  'Blatt gegen den Uhrzeigersinn drehen',
+  'Blatt im Uhrzeigersinn drehen',
+]) {
+  assert.equal(board.includes(gone), false, gone)
+}
+assert.ok(board.includes('lw-paper-swatch'))
+assert.ok(board.includes('aria-label="Ansicht zurücksetzen"'))
 
 const icon = '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h16" stroke="currentColor" stroke-width="2"/></svg>'
 const colors = ['#191c24', '#3d52d5', '#7654d6', '#d74769', '#df7627', '#138d75']
@@ -65,18 +78,9 @@ body.bar-fixture { min-width: 0; margin: 0; }
             <div class="lw-draw-toolgroup lw-colors" aria-label="Stiftfarbe">${chips}<label class="lw-color-custom"><input type="color" value="#3d52d5"><span></span></label></div>
             <label class="lw-draw-range"><span>Breite</span><input type="range" min="1" max="18" step="0.5" value="18.5" aria-label="Breite"><output>18.5 px</output></label>
           </div>
-          <label class="lw-paper-select"><span class="sr-only">Papierart</span><select aria-label="Papierart"><option>Leer</option><option>Gepunktet</option><option>Häuschen</option><option selected>Millimeter</option><option>Kariert</option><option>Liniert</option></select><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></label>
+          <label class="lw-paper-select"><span class="sr-only">Papierart</span><span class="paper-picker__swatch lw-paper-swatch paper-millimeter" aria-hidden="true"></span><select aria-label="Papierart" title="Millimeter"><option>Leer</option><option>Gepunktet</option><option>Häuschen</option><option selected>Millimeter</option><option>Kariert</option><option>Liniert</option></select><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></label>
           <div class="lw-draw-toolgroup lw-view-controls">
-            <button type="button" class="lw-draw-icon" aria-label="Herauszoomen">${icon}</button>
-            <button type="button" class="lw-draw-icon" aria-label="Hineinzoomen">${icon}</button>
-            <button type="button" class="lw-draw-icon" aria-label="Drehen links">${icon}</button>
-            <button type="button" class="lw-draw-icon" aria-label="Drehen rechts">${icon}</button>
             <button type="button" class="lw-draw-subtle lw-view-reset">600% · 180°</button>
-          </div>
-          <div class="lw-draw-toolgroup lw-history">
-            <button type="button" class="lw-draw-icon" aria-label="Rückgängig">${icon}</button>
-            <button type="button" class="lw-draw-icon" aria-label="Wiederholen">${icon}</button>
-            <button type="button" class="lw-draw-icon" aria-label="Alles löschen">${icon}</button>
           </div>
           <div class="lw-draw-toolgroup lw-ink-actions">
             <button type="button" class="lw-draw-subtle" aria-label="Lasso">${icon} <span class="lw-tool-label">Lasso</span></button>
@@ -167,6 +171,7 @@ const expression = `(() => {
   const clipped = []
   for (const node of document.querySelectorAll('.lw-draw-toolbar button, .lw-draw-toolbar output, .lw-draw-toolbar select')) {
     if (!visible(node)) continue
+    if (node.matches('.lw-paper-select select')) continue
     if (node.scrollWidth > node.clientWidth + 1 || node.scrollHeight > node.clientHeight + 1) {
       clipped.push({ label: node.getAttribute('aria-label') || node.className || node.tagName, scroll: node.scrollWidth, client: node.clientWidth, text: (node.innerText || node.value || '').trim().slice(0, 24) })
     }
@@ -200,36 +205,18 @@ const expression = `(() => {
   for (let i = 1; i < kids.length; i += 1) gaps.push(kids[i].getBoundingClientRect().left - kids[i - 1].getBoundingClientRect().right)
   const chrome = document.querySelector('.editor-toolbar').getBoundingClientRect()
   const strip = document.querySelector('.lw-pen-strip').getBoundingClientRect()
-  const paperSelect = document.querySelector('.lw-paper-select select')
-  const paperChevron = document.querySelector('.lw-paper-select svg')
-  const glyphCanvas = document.createElement('canvas').getContext('2d')
-  const paperGlyph = (label) => {
-    const option = [...paperSelect.options].find((item) => item.text === label)
-    option.selected = true
-    const rect = paperSelect.getBoundingClientRect()
-    const style = getComputedStyle(paperSelect)
-    glyphCanvas.font = style.font
-    const textLeft = rect.left + (parseFloat(style.borderLeftWidth) || 0) + (parseFloat(style.paddingLeft) || 0)
-    const textRight = textLeft + glyphCanvas.measureText(label).width
-    const textBox = {
-      left: textLeft,
-      top: rect.top + (parseFloat(style.borderTopWidth) || 0),
-      right: textRight,
-      bottom: rect.bottom - (parseFloat(style.borderBottomWidth) || 0),
-    }
-    const icon = paperChevron.getBoundingClientRect()
-    const iconBox = { left: icon.left, top: icon.top, right: icon.right, bottom: icon.bottom }
-    return {
-      label,
-      gap: Math.round((icon.left - textRight) * 10) / 10,
-      hit: hits(textBox, iconBox),
-      iconW: Math.round(icon.width * 10) / 10,
-      iconH: Math.round(icon.height * 10) / 10,
-    }
+  const paperSwatchNode = document.querySelector('.lw-paper-swatch')
+  const paperSwatchStyle = getComputedStyle(paperSwatchNode)
+  const paperSwatchRect = paperSwatchNode.getBoundingClientRect()
+  const paperHost = document.querySelector('.lw-paper-select').getBoundingClientRect()
+  const paperSwatch = {
+    display: paperSwatchStyle.display,
+    width: Math.round(paperSwatchRect.width * 10) / 10,
+    height: Math.round(paperSwatchRect.height * 10) / 10,
+    pattern: paperSwatchStyle.backgroundImage !== 'none',
+    host: Math.round(paperHost.width * 10) / 10,
   }
-  const paperGlyphs = ['Gepunktet', 'Millimeter', 'Häuschen'].map(paperGlyph)
-  paperSelect.querySelector('option[selected], option').selected = false
-  ;[...paperSelect.options].find((item) => item.text === 'Millimeter').selected = true
+  const paperChevron = getComputedStyle(document.querySelector('.lw-paper-select svg')).display
   const output = document.querySelector('output')
   const word = [...document.querySelectorAll('.lw-ink-actions .lw-draw-subtle')].find((node) => (node.innerText || '').includes('Verschieben'))
   return {
@@ -244,7 +231,8 @@ const expression = `(() => {
     word: word ? { text: word.innerText.trim(), width: Math.round(word.getBoundingClientRect().width), scroll: word.scrollWidth, client: word.clientWidth } : null,
     groups: kids.length,
     paper: shown('.lw-paper-select select'),
-    paperGlyphs,
+    paperSwatch,
+    paperChevron,
     reset: shown('.lw-view-reset'),
     modeLabel: shown('.mode-switch button span'),
     modeButtons: [...document.querySelectorAll('.mode-switch button')].map((node) => ({
@@ -318,23 +306,24 @@ try {
     assert.ok(sample.chrome.h <= 32 && sample.chrome.h >= 28, `${name} chrome ${sample.chrome.h}`)
     assert.ok(sample.dock.h <= 32 && sample.dock.h >= 24, `${name} dock ${sample.dock.h}`)
     assert.ok(sample.strip.h > 0 && sample.strip.h <= sample.dock.h + 0.5, `${name} strip ${sample.strip.h} dock ${sample.dock.h}`)
-    assert.ok(sample.icons.length >= 12, `${name} icons ${sample.icons.length}`)
+    assert.ok(sample.icons.length >= 11, `${name} icons ${sample.icons.length}`)
     for (const iconButton of sample.icons) {
       assert.ok(iconButton.width <= 24.5, `${name} ${iconButton.label} is ${iconButton.width}px`)
     }
-    assert.equal(sample.groups, 7, `${name} groups`)
-    assert.equal(sample.gaps.length, 6, `${name} gaps ${sample.gaps}`)
+    assert.equal(sample.groups, 6, `${name} groups`)
+    assert.equal(sample.gaps.length, 5, `${name} gaps ${sample.gaps}`)
     const gapMin = Math.min(...sample.gaps)
     const gapMax = Math.max(...sample.gaps)
     assert.ok(gapMin >= 2 && gapMax <= 6 && gapMax - gapMin <= 1.5, `${name} gaps ${sample.gaps}`)
     assert.equal(sample.paper?.text, 'Millimeter')
     assert.notEqual(sample.paper.display, 'none')
-    assert.ok(sample.paper.width > 40 && sample.paper.scroll <= sample.paper.client + 1, JSON.stringify(sample.paper))
-    assert.deepEqual(sample.paperGlyphs.map((glyph) => glyph.label), ['Gepunktet', 'Millimeter', 'Häuschen'])
-    for (const glyph of sample.paperGlyphs) {
-      assert.equal(glyph.hit, false, `${name} ${glyph.label} meets the chevron`)
-      assert.ok(glyph.gap >= 2, `${name} ${glyph.label} gap ${glyph.gap}`)
-      assert.ok(Math.abs(glyph.iconW - 14) <= 0.5 && Math.abs(glyph.iconH - 14) <= 0.5, JSON.stringify(glyph))
+    assert.ok(sample.paperSwatch.host >= 22 && sample.paperSwatch.host <= 26, JSON.stringify(sample.paperSwatch))
+    assert.equal(sample.paperSwatch.display, 'block', `${name} paper swatch`)
+    assert.equal(sample.paperSwatch.pattern, true, `${name} paper pattern`)
+    assert.ok(Math.abs(sample.paperSwatch.width - 16) <= 0.6 && Math.abs(sample.paperSwatch.height - 16) <= 0.6, JSON.stringify(sample.paperSwatch))
+    assert.equal(sample.paperChevron, 'none', `${name} paper chevron`)
+    for (const gone of ['Herauszoomen', 'Hineinzoomen', 'Rückgängig', 'Wiederholen', 'Alles löschen']) {
+      assert.equal(sample.names.includes(gone), false, `${name} still shows ${gone}`)
     }
     assert.equal(sample.reset?.text, '600% · 180°')
     assert.notEqual(sample.reset.display, 'none')
