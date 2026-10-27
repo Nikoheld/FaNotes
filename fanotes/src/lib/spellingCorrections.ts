@@ -358,13 +358,12 @@ const spellingTooltipParent = (): HTMLElement | undefined => {
   if (typeof document === 'undefined') return undefined
   const stage = document.querySelector('.editor-stage')
   if (!(stage instanceof HTMLElement)) return document.body
-  let host = stage.querySelector(':scope > .cm-spelling-tooltip-host')
-  if (!(host instanceof HTMLElement)) {
-    host = document.createElement('div')
-    host.className = 'cm-spelling-tooltip-host'
-    host.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;overflow:visible;z-index:80;pointer-events:none;'
-    stage.appendChild(host)
-  }
+  const existing = stage.querySelector(':scope > .cm-spelling-tooltip-host')
+  if (existing instanceof HTMLElement) return existing
+  const host = document.createElement('div')
+  host.className = 'cm-spelling-tooltip-host'
+  host.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;overflow:visible;z-index:80;pointer-events:none;'
+  stage.appendChild(host)
   return host
 }
 
