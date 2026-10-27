@@ -21,6 +21,12 @@ const {
   shouldIgnorePointerAfterPen,
   shouldRejectNonPenInk,
 } = await server.ssrLoadModule('/src/lib/inkPointerPolicy.ts')
+const {
+  FINGER_PAN_FLING_TAU_MS,
+  fingerPanReleaseVelocity,
+  pushFingerPanSample,
+  stepFingerPanFling,
+} = await server.ssrLoadModule('/src/lib/fingerPanFling.ts')
 const { defaultSettingsForPlatform } = await server.ssrLoadModule('/src/defaults.ts')
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -83,6 +89,43 @@ try {
   assert.equal(shouldFingerPanInPenOnly({ ...fingerPan, penDown: true }), false, 'a palm does not pan while the pen is down')
   assert.equal(shouldFingerPanInPenOnly({ ...fingerPan, lastPenAt: 4_800, now: 5_000 }), false, 'a palm just after the pen does not pan')
   assert.match(drawing, /shouldFingerPanInPenOnly/)
+  assert.match(drawing, /fingerPanReleaseVelocity/)
+  assert.match(drawing, /stepFingerPanFling/)
+  const flick = [
+    { t: 1_000, x: 0, y: 40 },
+    { t: 1_040, x: 80, y: 40 },
+  ]
+  const released = fingerPanReleaseVelocity(flick, 1_040)
+  assert.ok(released.vx > 1.5 && released.vx < 2.2, `a rightward flick keeps speed, got ${released.vx}`)
+  assert.equal(released.vy, 0)
+  const held = fingerPanReleaseVelocity(flick, 1_040 + 220)
+  assert.deepEqual(held, { vx: 0, vy: 0 }, 'a finger that has stopped does not fling')
+  const capped = fingerPanReleaseVelocity([
+    { t: 0, x: 0, y: 0 },
+    { t: 16, x: 400, y: 0 },
+  ], 16)
+  assert.ok(capped.vx > 3 && capped.vx <= 3.2, `a wild flick is capped, got ${capped.vx}`)
+  let velocity = { vx: 1, vy: -0.5 }
+  let distanceX = 0
+  let distanceY = 0
+  let frames = 0
+  for (let t = 0; t < 2_000 && frames < 200; t += 16) {
+    const step = stepFingerPanFling(velocity, 16)
+    distanceX += step.dx
+    distanceY += step.dy
+    assert.ok(step.vx < velocity.vx, 'the coast slows down')
+    assert.ok(step.vy > velocity.vy, 'an upward coast stays upward while it slows')
+    velocity = { vx: step.vx, vy: step.vy }
+    frames += 1
+    if (step.done) break
+  }
+  assert.ok(frames > 8, 'the coast lasts more than a few frames')
+  assert.ok(Math.abs(distanceX - FINGER_PAN_FLING_TAU_MS) < 12, `rightward coast covers about one tau, got ${distanceX}`)
+  assert.ok(Math.abs(distanceY + FINGER_PAN_FLING_TAU_MS / 2) < 12, `upward coast covers about half a tau, got ${distanceY}`)
+  const trimmed = pushFingerPanSample(flick, { t: 1_200, x: 80, y: 40 }, 1_200)
+  assert.equal(trimmed.some((sample) => sample.t === 1_000), false, 'samples older than the fling window are dropped')
+  assert.deepEqual(fingerPanReleaseVelocity(trimmed, 1_200), { vx: 0, vy: 0 })
+  assert.equal(stepFingerPanFling({ vx: 1, vy: 0 }, 200).done, true, 'a stalled frame ends the coast instead of jumping')
   assert.equal(shouldRejectNonPenInk('mouse', false), false)
   assert.equal(shouldIgnorePointerAfterPen('mouse', leftover.lastContactAt, leftover.lastContactAt + 100), true)
   assert.equal(shouldIgnorePointerAfterPen('touch', leftover.lastContactAt, leftover.lastContactAt + 100), true)

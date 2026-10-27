@@ -171,6 +171,12 @@ import {
 } from '../lib/inkWindowPlan'
 import { mapClientToSheet } from '../lib/paperCanvas'
 import {
+  fingerPanReleaseVelocity,
+  pushFingerPanSample,
+  stepFingerPanFling,
+  type FingerPanSample,
+} from '../lib/fingerPanFling'
+import {
   applyPenUpInkCleanup,
   applyWheelInkPolicy,
   keepGotPointerCaptureId,
@@ -1424,7 +1430,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   // event that added nothing (all samples filtered) needs no repaint.
   const liveTailRef = useRef<{ count: number; predicted: boolean }>({ count: 0, predicted: false })
   const lastPenContactRef = useRef(0)
-  const tabletPanRef = useRef<{ pointerId: number; x: number; y: number } | null>(null)
+  const tabletPanRef = useRef<{
+    pointerId: number
+    x: number
+    y: number
+    pointerType: string
+    samples: FingerPanSample[]
+  } | null>(null)
+  const fingerPanFlingRef = useRef(0)
+  const lastFingerPanAtRef = useRef(0)
   const undoNowRef = useRef<() => void>(() => {})
   const redoNowRef = useRef<() => void>(() => {})
   const shapeDwellTimerRef = useRef<number | null>(null)
@@ -4176,25 +4190,84 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return () => surface.removeEventListener('pointermove', onMove)
   }, [pointFromEvent, sectionPlacing])
 
+  const paperViewForPanRef = useRef(false)
+  paperViewForPanRef.current = Boolean(paperView)
+  const cancelFingerPanFling = useCallback(() => {
+    if (fingerPanFlingRef.current) {
+      window.cancelAnimationFrame(fingerPanFlingRef.current)
+      fingerPanFlingRef.current = 0
+    }
+  }, [])
+  const shiftSheetByFinger = useCallback((dx: number, dy: number) => {
+    const paper = resolvePaperElement()
+    const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
+    if (scroller) {
+      const left = scroller.scrollLeft
+      const top = scroller.scrollTop
+      if (dx) scroller.scrollLeft -= dx
+      if (dy) scroller.scrollTop -= dy
+      return { x: scroller.scrollLeft !== left, y: scroller.scrollTop !== top }
+    }
+    if (!paperViewForPanRef.current) {
+      const current = viewPanRef.current
+      setView({ pan: { x: current.x + dx, y: current.y + dy } })
+      return { x: dx !== 0, y: dy !== 0 }
+    }
+    return { x: false, y: false }
+  }, [resolvePaperElement, setView])
+  const startFingerPanFling = useCallback((velocity: { vx: number; vy: number }) => {
+    cancelFingerPanFling()
+    if (velocity.vx === 0 && velocity.vy === 0) return
+    let vx = velocity.vx
+    let vy = velocity.vy
+    let last = performance.now()
+    const tick = (now: number) => {
+      const step = stepFingerPanFling({ vx, vy }, now - last)
+      last = now
+      const moved = shiftSheetByFinger(step.dx, step.dy)
+      vx = moved.x ? step.vx : 0
+      vy = moved.y ? step.vy : 0
+      if (step.done || (vx === 0 && vy === 0)) {
+        fingerPanFlingRef.current = 0
+        return
+      }
+      fingerPanFlingRef.current = window.requestAnimationFrame(tick)
+    }
+    fingerPanFlingRef.current = window.requestAnimationFrame(tick)
+  }, [cancelFingerPanFling, shiftSheetByFinger])
+  const releaseTabletPan = useCallback((pointerId: number, coast: boolean, now = performance.now()) => {
+    const pan = tabletPanRef.current
+    if (!pan || pan.pointerId !== pointerId) return false
+    tabletPanRef.current = null
+    if (pan.pointerType === 'touch') {
+      lastFingerPanAtRef.current = now
+      if (coast) startFingerPanFling(fingerPanReleaseVelocity(pan.samples, now))
+    }
+    return true
+  }, [startFingerPanFling])
+  const beginTabletPan = (pointerId: number, clientX: number, clientY: number, pointerType: string, now: number) => {
+    cancelFingerPanFling()
+    tabletPanRef.current = {
+      pointerId,
+      x: clientX,
+      y: clientY,
+      pointerType,
+      samples: [{ t: now, x: clientX, y: clientY }],
+    }
+  }
   const dragSheetWithPointer = useCallback((pointerId: number, clientX: number, clientY: number) => {
     const pan = tabletPanRef.current
     if (!pan || pan.pointerId !== pointerId) return false
     const dx = clientX - pan.x
     const dy = clientY - pan.y
-    tabletPanRef.current = { pointerId, x: clientX, y: clientY }
-    const paper = resolvePaperElement()
-    const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
-    if (scroller) {
-      scroller.scrollLeft -= dx
-      scroller.scrollTop -= dy
-      return true
-    }
-    if (!paperView) {
-      const current = viewPanRef.current
-      setView({ pan: { x: current.x + dx, y: current.y + dy } })
-    }
+    const now = performance.now()
+    pan.x = clientX
+    pan.y = clientY
+    pan.samples = pushFingerPanSample(pan.samples, { t: now, x: clientX, y: clientY }, now)
+    if (pan.pointerType === 'touch') lastFingerPanAtRef.current = now
+    shiftSheetByFinger(dx, dy)
     return true
-  }, [paperView, resolvePaperElement, setView])
+  }, [shiftSheetByFinger])
   const dragSheetWithPointerRef = useRef(dragSheetWithPointer)
   dragSheetWithPointerRef.current = dragSheetWithPointer
 
@@ -4202,7 +4275,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (overlayInert(inline, inputActive) || !overlayHitEnabled(inputActive)) return
     if (hitTestChrome(event.clientX, event.clientY)) return
     setArtPanelOpen(false)
-    // A pen touch ends a finger pan. The barrel-button pan below may start its own.
+    // A new contact stops a coasting finger pan. The mouse event a touch lift
+    // synthesizes must not, or the coast would die in the same gesture.
+    if (!(event.pointerType === 'mouse' && performance.now() - lastFingerPanAtRef.current < 500)) cancelFingerPanFling()
     if (event.pointerType === 'pen') tabletPanRef.current = null
     const now = performance.now()
     const asStylus = event.pointerType === 'pen' || (
@@ -4217,7 +4292,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (buttonAction === 'undo') undoNowRef.current()
       if (buttonAction === 'redo') redoNowRef.current()
       if (buttonAction === 'pan') {
-        tabletPanRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
+        beginTabletPan(event.pointerId, event.clientX, event.clientY, event.pointerType, now)
         activePointerRef.current = event.pointerId
         if (event.pointerType === 'pen') {
           lastPenContactRef.current = now
@@ -4238,7 +4313,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         now,
       })) {
         if (event.cancelable) event.preventDefault()
-        tabletPanRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
+        beginTabletPan(event.pointerId, event.clientX, event.clientY, event.pointerType, now)
       }
       return
     }
@@ -4492,7 +4567,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   // inputActive is a dependency: a board mounted inert (keyboard mode showing
   // saved ink) kept a handler that still saw inputActive=false after the pen
   // turned on, and every pen-down was refused until an unrelated grow rebuilt it.
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, figureId, figureLibraryOpen, figureLineWidth, figureParams, figureRotation, figureSize, inkMode, inline, inputActive, insertSectionAt, insertSubsectionAt, markPenContact, markerKeepColor, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, cancelFingerPanFling, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, figureId, figureLibraryOpen, figureLineWidth, figureParams, figureRotation, figureSize, inkMode, inline, inputActive, insertSectionAt, insertSubsectionAt, markPenContact, markerKeepColor, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (dragSheetWithPointer(event.pointerId, event.clientX, event.clientY)) {
@@ -4539,7 +4614,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const finishPointer = useCallback((event: ReactPointerEvent<HTMLElement> | PointerEvent) => {
     const pointerId = event.pointerId
     if (tabletPanRef.current?.pointerId === pointerId) {
-      tabletPanRef.current = null
+      const coast = event.type === 'pointerup' || event.type === 'pointercancel'
+      releaseTabletPan(pointerId, coast)
       if (activePointerRef.current === pointerId) activePointerRef.current = null
       return
     }
@@ -4759,7 +4835,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (!roomGrown) fitPageToInk()
     }
     scheduleRedraw()
-  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, ensureSectionRoom, fitPageToInk, flushPaintedLayoutGrow, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, readShapeSnapProfile, planInkWindowNow, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, trySnapActiveShape, updateHistoryState, wipeLiveInk])
+  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, ensureSectionRoom, fitPageToInk, flushPaintedLayoutGrow, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, readShapeSnapProfile, planInkWindowNow, redraw, releaseTabletPan, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, trySnapActiveShape, updateHistoryState, wipeLiveInk])
 
   const readDraftingDisplay = useCallback((): DraftingDisplay => {
     const surface = surfaceRef.current
@@ -5066,6 +5142,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     sample?: PointerEvent | ReactPointerEvent<HTMLElement>,
   ) => {
     void reason
+    cancelFingerPanFling()
+    tabletPanRef.current = null
     const pointerId = activePointerRef.current
     const scrubId = pointerId ?? lastCapturedPointerIdRef.current
     if (pointerId !== null) {
@@ -5119,12 +5197,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       clearInkCursor()
     }, 0)
     if (sawPenRef.current) markPenContact(false)
-  }, [finishPointer, markPenContact, scheduleRedraw])
+  }, [cancelFingerPanFling, finishPointer, markPenContact, scheduleRedraw])
   forceEndActivePointerRef.current = forceEndActivePointer
 
   const discardHandGestureRef = useRef(() => {})
   discardHandGestureRef.current = () => {
     // Two fingers take the sheet. The one-finger pan must stop or both would scroll.
+    cancelFingerPanFling()
     tabletPanRef.current = null
     if (lastPointerTypeRef.current !== 'touch') {
       if (activePointerRef.current !== null || activeStrokeRef.current) {
@@ -5248,11 +5327,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       else {
         // Finger pan does not take the ink pointer, so a lift off the sheet
         // still has to drop it. A pen-button pan is finished above.
-        if (tabletPanRef.current?.pointerId === event.pointerId) tabletPanRef.current = null
+        // pointerup coasts like keyboard-mode scrolling; cancel just lets go.
+        if (event.type === 'pointerup') releaseTabletPan(event.pointerId, true)
+        else if (tabletPanRef.current?.pointerId === event.pointerId) tabletPanRef.current = null
         scrub(event.pointerId)
       }
     }
     const onWindowPointerDown = (event: PointerEvent) => {
+      // A new touch stops a coast the way a tap stops keyboard-mode scrolling.
+      // A mouse echo of the finger that just lifted must not stop it.
+      if (!(event.pointerType === 'mouse' && performance.now() - lastFingerPanAtRef.current < 500)) cancelFingerPanFling()
       const chrome = hitTestChrome(event.clientX, event.clientY)
       if (chrome) {
         const stuck = activePointerRef.current !== null
@@ -5287,6 +5371,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
     }
     const onWheel = () => {
+      cancelFingerPanFling()
       if (activePointerRef.current !== null || lastCapturedPointerIdRef.current !== null || inkSessionRef.current) {
         forceEndActivePointer('view-gesture')
       }
@@ -5336,11 +5421,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       window.removeEventListener('blur', onWindowBlur)
       document.removeEventListener('visibilitychange', onVisibility)
       window.clearInterval(watchdog)
+      cancelFingerPanFling()
       releaseInkPointerCaptures(captureTargets(), lastCapturedPointerIdRef.current)
       releaseInkPointerCaptures(captureTargets(), activePointerRef.current)
       clearInkCursor()
     }
-  }, [appendPointerEvent, eraseAt, ensureWriteRoom, finishPointer, forceEndActivePointer, inline, inputActive, paintActiveStrokeNow, pointFromEvent, scheduleRedraw])
+  }, [appendPointerEvent, cancelFingerPanFling, eraseAt, ensureWriteRoom, finishPointer, forceEndActivePointer, inline, inputActive, paintActiveStrokeNow, pointFromEvent, releaseTabletPan, scheduleRedraw])
 
   const handleWheel = useCallback((event: React.WheelEvent) => {
     const policy = applyWheelInkPolicy({
