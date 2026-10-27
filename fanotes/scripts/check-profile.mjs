@@ -118,6 +118,11 @@ try {
   const card = await vite.ssrLoadModule('/src/components/ProfileSettingsCard.tsx')
   const defaults = await vite.ssrLoadModule('/src/defaults.ts')
   assert.equal(card.profileVisibilityControl, profile.setProfileVisibility)
+  const cardSource = readFileSync(join(appRoot, 'src/components/ProfileSettingsCard.tsx'), 'utf8')
+  assert.match(cardSource, /enableProfileOverview\(\{/u)
+  assert.match(cardSource, /loadNotes: readVaultNotes/u)
+  assert.match(cardSource, /stillEnabled: \(\) => toggleGeneration\.current === token/u)
+  assert.doesNotMatch(cardSource, /await readVaultNotes\(\)/u)
   assert.equal(profile.PROFILE_API_PATH, '/api/v1/profile')
   assert.equal(profile.PROFILE_VIEW_PATH, '/user/')
 
@@ -207,6 +212,57 @@ try {
   assert.equal(lost.length, 1, 'the other account must be refused')
   assert.equal(lost[0].reason?.status, 409)
   assert.equal(won[0].value.path, '/user/parallelname')
+
+  const sofortOwner = 'e'.repeat(32)
+  await profile.claimUsername({ username: 'sofortname', ownerId: sofortOwner, joinedAt, port, origin })
+  let releaseNotes = null
+  let notesStarted = false
+  let openedFlag = false
+  const enabling = profile.enableProfileOverview({
+    username: 'sofortname',
+    ownerId: sofortOwner,
+    loadNotes: () => {
+      notesStarted = true
+      return new Promise((resolve) => { releaseNotes = () => resolve(notes) })
+    },
+    port,
+    origin,
+    onPublic: () => { openedFlag = true },
+  })
+  for (let attempt = 0; attempt < 50 && !openedFlag; attempt += 1) await wait(20)
+  assert.equal(notesStarted, true, 'counting notes starts when the overview is switched on')
+  assert.equal(openedFlag, true, 'the public page opens before the note count finishes')
+  assert.equal(typeof releaseNotes, 'function')
+  const early = await profile.readPublicProfile({ username: 'sofortname', port, origin })
+  assert.equal(early.noteCount, 0)
+  assert.equal(early.joinedAt, joinedAt)
+  const earlyPublish = exchanges.filter((item) => item.body.includes('"sofortname"') && item.body.includes('"publish"'))
+  assert.equal(earlyPublish.length, 1)
+  assert.match(earlyPublish[0].body, /"noteCount":0/u)
+  releaseNotes()
+  const filled = await enabling
+  assert.equal(filled.noteCount, summary.noteCount)
+  assert.equal(filled.dwellMs, summary.dwellMs)
+  assert.deepEqual(filled.activeDays, summary.activeDays)
+  const live = await profile.readPublicProfile({ username: 'sofortname', port, origin })
+  assert.equal(live.noteCount, 2)
+
+  let allowSecond = true
+  let releaseLater = null
+  const cancelled = profile.enableProfileOverview({
+    username: 'sofortname',
+    ownerId: sofortOwner,
+    loadNotes: () => new Promise((resolve) => { releaseLater = () => resolve(notes) }),
+    port,
+    origin,
+    stillEnabled: () => allowSecond,
+  })
+  for (let attempt = 0; attempt < 50 && !releaseLater; attempt += 1) await wait(20)
+  assert.equal(typeof releaseLater, 'function')
+  allowSecond = false
+  releaseLater()
+  assert.equal(await cancelled, null)
+  assert.equal(await profile.readPublicProfile({ username: 'sofortname', port, origin }), null)
 
   const published = await profile.setProfileVisibility({
     enabled: true,

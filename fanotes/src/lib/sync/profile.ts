@@ -350,6 +350,64 @@ export async function setProfileVisibility(input: {
   return publishProfile({ ...input, notes: input.notes ?? [] })
 }
 
+const adoptNotes = (loadNotes: () => Promise<readonly ProfileNoteSource[]> | readonly ProfileNoteSource[]) => new Promise<readonly ProfileNoteSource[]>((resolve, reject) => {
+  try {
+    resolve(loadNotes())
+  } catch (error) {
+    reject(error)
+  }
+})
+
+/**
+ * Opens the public page with one small upload, then sends the activity
+ * numbers as soon as they are counted. The page is public before the vault
+ * walk finishes. A later switch-off withdraws the page instead of publishing
+ * numbers over that choice.
+ */
+export async function enableProfileOverview(input: {
+  username: string
+  ownerId: string
+  loadNotes: () => Promise<readonly ProfileNoteSource[]> | readonly ProfileNoteSource[]
+  port: ProfilePort
+  origin?: string
+  joinedAt?: string
+  stillEnabled?: () => boolean
+  onPublic?: (overview: PublicProfile) => void
+}): Promise<PublicProfile | null> {
+  requireUsername(input.username)
+  requireOwner(input.ownerId)
+  const current = () => input.stillEnabled?.() !== false
+  if (!current()) return null
+  const notesPromise = adoptNotes(input.loadNotes)
+  void notesPromise.catch(() => undefined)
+  const publish = (notes: readonly ProfileNoteSource[]) => publishProfile({
+    username: input.username,
+    ownerId: input.ownerId,
+    notes,
+    joinedAt: input.joinedAt,
+    port: input.port,
+    origin: input.origin,
+  })
+  const opened = await publish([])
+  if (!current()) {
+    await unpublishProfile(input)
+    return null
+  }
+  input.onPublic?.(opened)
+  const notes = await notesPromise
+  if (!current()) {
+    await unpublishProfile(input)
+    return null
+  }
+  if (!notes.length) return opened
+  const published = await publish(notes)
+  if (!current()) {
+    await unpublishProfile(input)
+    return null
+  }
+  return published
+}
+
 export async function readPublicProfile(input: {
   username: string
   port: ProfilePort

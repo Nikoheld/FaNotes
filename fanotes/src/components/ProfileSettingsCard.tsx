@@ -1,9 +1,10 @@
 import { Globe } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   claimUsername,
   createFetchProfilePort,
   createProfileOwnerId,
+  enableProfileOverview,
   loadProfileNotes,
   normalizeUsername,
   ProfileRequestError,
@@ -40,6 +41,9 @@ export function ProfileSettingsCard({
   const [busy, setBusy] = useState<'claim' | 'toggle' | null>(null)
   const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
   const savedName = normalizeUsername(settings.profileUsername)
+  const settingsRef = useRef(settings)
+  settingsRef.current = settings
+  const toggleGeneration = useRef(0)
 
   useEffect(() => {
     setDraft(settings.profileUsername)
@@ -76,32 +80,54 @@ export function ProfileSettingsCard({
     }
   }
 
-  const toggle = async (enabled: boolean) => {
+  const toggle = (enabled: boolean) => {
     if (enabled && !savedName) {
       setNotice({ kind: 'error', text: 'Zuerst einen Benutzernamen festlegen.' })
       return
     }
+    const token = ++toggleGeneration.current
+    const current = settingsRef.current
     setBusy('toggle')
     setNotice(null)
-    try {
-      await profileVisibilityControl({
-        enabled,
-        username: settings.profileUsername,
-        ownerId: settings.profileOwnerId,
-        notes: enabled ? await readVaultNotes() : [],
-        port: profilePort,
-        origin: profileOrigin,
-      })
-      onChange({ ...settings, profilePublic: enabled })
-      setNotice({ kind: 'success', text: enabled ? 'Die öffentliche Aktivitätsübersicht ist eingeschaltet.' : 'Die öffentliche Aktivitätsübersicht ist ausgeschaltet.' })
-    } catch (error) {
-      const text = error instanceof ProfileRequestError && error.status === 400
-        ? 'Zuerst einen Benutzernamen festlegen.'
-        : 'Die Übersicht konnte nicht gespeichert werden.'
-      setNotice({ kind: 'error', text })
-    } finally {
-      setBusy(null)
-    }
+    void (async () => {
+      try {
+        if (!enabled) {
+          await profileVisibilityControl({
+            enabled: false,
+            username: current.profileUsername,
+            ownerId: current.profileOwnerId,
+            port: profilePort,
+            origin: profileOrigin,
+          })
+          if (toggleGeneration.current !== token) return
+          onChange({ ...settingsRef.current, profilePublic: false })
+          setNotice({ kind: 'success', text: 'Die öffentliche Aktivitätsübersicht ist ausgeschaltet.' })
+          return
+        }
+        await enableProfileOverview({
+          username: current.profileUsername,
+          ownerId: current.profileOwnerId,
+          loadNotes: readVaultNotes,
+          port: profilePort,
+          origin: profileOrigin,
+          stillEnabled: () => toggleGeneration.current === token,
+          onPublic: () => {
+            if (toggleGeneration.current !== token) return
+            onChange({ ...settingsRef.current, profilePublic: true })
+            setNotice({ kind: 'success', text: 'Die öffentliche Aktivitätsübersicht ist eingeschaltet.' })
+            setBusy(null)
+          },
+        })
+      } catch (error) {
+        if (toggleGeneration.current !== token) return
+        const text = error instanceof ProfileRequestError && error.status === 400
+          ? 'Zuerst einen Benutzernamen festlegen.'
+          : 'Die Übersicht konnte nicht gespeichert werden.'
+        setNotice({ kind: 'error', text })
+      } finally {
+        if (toggleGeneration.current === token) setBusy(null)
+      }
+    })()
   }
 
   return (
