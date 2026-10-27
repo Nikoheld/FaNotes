@@ -2,7 +2,9 @@ import {
   Blend,
   Box,
   Calculator,
+  ChartSpline,
   Compass,
+  Crosshair,
   Copy,
   Check,
   ChevronDown,
@@ -118,6 +120,16 @@ import {
 } from '../lib/inkSampleMap'
 import { createMarkerCoverage, drawInkStroke as paintInkStroke, inkStrokeIsTranslucent, inkStrokePaintMargin, shiftMarkerCoverage, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
 import { MATH_FIGURES, FIGURE_LINE_MAX, FIGURE_LINE_MIN, FIGURE_LINE_STEP, clampFigureLineWidth, clampFigureParams, defaultFigureParams, figureLineWidthForSize, isMathFigureId, mathFigurePaths, type MathFigureGroup, type MathFigureId, type MathFigureParam } from '../lib/mathFigures'
+import {
+  DEFAULT_GRAPH_EXPRESSION,
+  DEFAULT_GRAPH_X_MAX,
+  DEFAULT_GRAPH_X_MIN,
+  GRAPH_PRESETS,
+  functionGraphPaths,
+  readFunctionGraphStamp,
+  type FunctionGraphStamp,
+} from '../lib/functionGraph'
+import { LASER_TRAIL_MS, paintLaserPointer, pushLaserSample, trimLaserSamples, type LaserSample } from '../lib/laserPointer'
 import { loadToolMemory, saveToolMemory } from '../lib/toolMemory'
 import {
   INLINE_INK_ACTIVE_CLASS,
@@ -598,7 +610,7 @@ const releaseStuckInputFocus = (preferred?: HTMLElement | null) => {
   }
 }
 
-type DrawingTool = 'pen' | 'eraser' | 'select'
+type DrawingTool = 'pen' | 'eraser' | 'select' | 'laser'
 type InkMode = 'writing' | 'drawing'
 type ArtStudioTab = 'brushes' | 'colors' | 'symbols'
 type ArtBrush = 'fineliner' | 'pencil' | 'marker' | 'paintbrush' | 'calligraphy' | 'highlighter' | 'watercolor' | 'spray'
@@ -638,6 +650,11 @@ type InkStroke = Stroke & {
   figureLineWidth?: number
   /** SVG paths stored with the stamp so another app can stroke the same figure. */
   figurePaths?: readonly string[]
+  /** Typed f(x). Paths are sampled again from the expression when the page loads. */
+  graphExpression?: string
+  graphXMin?: number
+  graphXMax?: number
+  graphPaths?: readonly string[]
 }
 
 type MathSolverHistoryEntry = {
@@ -805,6 +822,7 @@ const cloneStrokes = (strokes: InkStroke[]): InkStroke[] => strokes.map((stroke)
   points: stroke.points.map((point) => ({ ...point })),
   ...(stroke.figureParams ? { figureParams: { ...stroke.figureParams } } : {}),
   ...(stroke.figurePaths ? { figurePaths: stroke.figurePaths.slice() } : {}),
+  ...(stroke.graphPaths ? { graphPaths: stroke.graphPaths.slice() } : {}),
 }))
 
 // Committed strokes are immutable. History can therefore share their point arrays
@@ -1027,7 +1045,8 @@ const drawPaper = (
   drawPaperBackground(context, width, height, style, squareMm)
 }
 
-const placedSymbolPaths = (stroke: Pick<InkStroke, 'figureId' | 'figureParams' | 'symbolId'>): readonly string[] | undefined => {
+const placedSymbolPaths = (stroke: Pick<InkStroke, 'figureId' | 'figureParams' | 'symbolId' | 'graphPaths'>): readonly string[] | undefined => {
+  if (stroke.graphPaths?.length) return stroke.graphPaths
   if (isMathFigureId(stroke.figureId)) {
     const paths = mathFigurePaths(stroke.figureId, stroke.figureParams)
     if (paths.length) return paths
@@ -1216,7 +1235,8 @@ const safeInkStrokes = (value: unknown, fallbackColor: string, options: { clampT
     const symbolId = raw.symbolId && artSymbolIds.has(raw.symbolId) ? raw.symbolId : undefined
     const figureId = isMathFigureId(raw.figureId) ? raw.figureId : undefined
     const figureParams = figureId ? clampFigureParams(figureId, raw.figureParams) : undefined
-    const baseWidth = clamp(Number(raw.baseWidth) || 4, 0.5, figureId ? 320 : symbolId ? 180 : 48)
+    const graph = readFunctionGraphStamp(raw)
+    const baseWidth = clamp(Number(raw.baseWidth) || 4, 0.5, figureId || graph ? 320 : symbolId ? 180 : 48)
     const figurePaths = figureId ? mathFigurePaths(figureId, figureParams) : undefined
     return [{
       points,
@@ -1230,11 +1250,15 @@ const safeInkStrokes = (value: unknown, fallbackColor: string, options: { clampT
       textureSeed: Math.round(clamp(Math.abs(Number(raw.textureSeed) || 1), 1, 2_147_483_647)),
       keepColor: raw.keepColor === true ? true : undefined,
       symbolId,
-      symbolRotation: symbolId || figureId ? clamp(Number(raw.symbolRotation) || 0, -180, 180) : undefined,
+      symbolRotation: symbolId || figureId ? clamp(Number(raw.symbolRotation) || 0, -180, 180) : graph ? 0 : undefined,
       figureId,
       figureParams,
-      figureLineWidth: figureId ? clampFigureLineWidth(raw.figureLineWidth, figureLineWidthForSize(baseWidth)) : undefined,
+      figureLineWidth: figureId || graph ? clampFigureLineWidth(raw.figureLineWidth, figureLineWidthForSize(baseWidth)) : undefined,
       figurePaths: figurePaths?.length ? figurePaths : undefined,
+      graphExpression: graph?.expression || undefined,
+      graphXMin: graph ? graph.xMin : undefined,
+      graphXMax: graph ? graph.xMax : undefined,
+      graphPaths: graph?.paths.length ? graph.paths.slice() : undefined,
     }]
   })
 }
@@ -1540,6 +1564,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [figureRotation, setFigureRotation] = useState(initialToolMemory.figureRotation)
   const [figureLineWidth, setFigureLineWidth] = useState(initialToolMemory.figureLineWidth)
   const [figureGroup, setFigureGroup] = useState<MathFigureGroup>(initialToolMemory.figureGroup)
+  const [graphPanelOpen, setGraphPanelOpen] = useState(false)
+  const [graphExpression, setGraphExpression] = useState(DEFAULT_GRAPH_EXPRESSION)
+  const [graphXMin, setGraphXMin] = useState(DEFAULT_GRAPH_X_MIN)
+  const [graphXMax, setGraphXMax] = useState(DEFAULT_GRAPH_X_MAX)
+  const graphPlaceRef = useRef<FunctionGraphStamp | null>(null)
+  const graphPanelOpenRef = useRef(false)
+  const laserSamplesRef = useRef<LaserSample[]>([])
+  const laserLiveRef = useRef(false)
   const [penColor, setPenColor] = useState(settings.penColor)
   const [penWidth, setPenWidth] = useState(settings.penWidth)
   const [paperStyle, setPaperStyle] = useState(pagePaperStyle ?? settings.paperStyle)
@@ -4334,6 +4366,97 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const dragSheetWithPointerRef = useRef(dragSheetWithPointer)
   dragSheetWithPointerRef.current = dragSheetWithPointer
 
+  useEffect(() => {
+    if (tool !== 'laser' || (inline && !inputActive)) return undefined
+    const canvas = document.createElement('canvas')
+    canvas.className = 'lw-laser-layer'
+    canvas.setAttribute('aria-hidden', 'true')
+    document.body.appendChild(canvas)
+    const resize = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2)
+      const width = Math.max(1, window.innerWidth)
+      const height = Math.max(1, window.innerHeight)
+      canvas.width = Math.round(width * dpr)
+      canvas.height = Math.round(height * dpr)
+      canvas.style.width = `${width}px`
+      canvas.style.height = `${height}px`
+      canvas.getContext('2d')?.setTransform(dpr, 0, 0, dpr, 0, 0)
+    }
+    resize()
+    let frame = 0
+    const paint = (now: number) => {
+      frame = 0
+      if (laserLiveRef.current && laserSamplesRef.current.length) {
+        const head = laserSamplesRef.current[laserSamplesRef.current.length - 1]
+        laserSamplesRef.current[laserSamplesRef.current.length - 1] = { x: head.x, y: head.y, t: now }
+      }
+      laserSamplesRef.current = trimLaserSamples(laserSamplesRef.current, now, LASER_TRAIL_MS)
+      paintLaserPointer(canvas, laserSamplesRef.current, now, laserLiveRef.current)
+      if (laserLiveRef.current || laserSamplesRef.current.length) frame = window.requestAnimationFrame(paint)
+    }
+    const kick = () => {
+      if (!frame) frame = window.requestAnimationFrame(paint)
+    }
+    const overSheet = (clientX: number, clientY: number) => {
+      const hit = elementFromPointSafe(clientX, clientY)
+      if (!(hit instanceof Element)) return false
+      if (drawingChromeFromHit(hit)) return false
+      const board = boardRef.current
+      if (!board) return false
+      const surface = hit.closest('.lw-canvas-surface, .lw-tablet-canvas')
+      if (surface && board.contains(surface)) return true
+      const paper = hit.closest('.unified-paper')
+      return Boolean(paper && board.contains(hit) && paper.contains(board))
+    }
+    const aim = (event: PointerEvent) => {
+      if (event.pointerType === 'pen') {
+        lastPenContactRef.current = performance.now()
+        markPenContact(true)
+      }
+      if (!overSheet(event.clientX, event.clientY)) {
+        if (laserLiveRef.current) {
+          laserLiveRef.current = false
+          kick()
+        }
+        return
+      }
+      laserLiveRef.current = true
+      laserSamplesRef.current = pushLaserSample(laserSamplesRef.current, {
+        x: event.clientX,
+        y: event.clientY,
+        t: event.timeStamp || performance.now(),
+      })
+      kick()
+    }
+    const liftPen = (event: PointerEvent) => {
+      if (event.pointerType === 'pen') markPenContact(false)
+    }
+    const leave = () => {
+      if (!laserLiveRef.current) return
+      laserLiveRef.current = false
+      kick()
+    }
+    window.addEventListener('resize', resize)
+    window.addEventListener('pointermove', aim, { passive: true })
+    window.addEventListener('pointerdown', aim, { passive: true })
+    window.addEventListener('pointerup', liftPen)
+    window.addEventListener('pointercancel', liftPen)
+    window.addEventListener('blur', leave)
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame)
+      laserLiveRef.current = false
+      laserSamplesRef.current = []
+      markPenContact(false)
+      window.removeEventListener('resize', resize)
+      window.removeEventListener('pointermove', aim)
+      window.removeEventListener('pointerdown', aim)
+      window.removeEventListener('pointerup', liftPen)
+      window.removeEventListener('pointercancel', liftPen)
+      window.removeEventListener('blur', leave)
+      canvas.remove()
+    }
+  }, [inline, inputActive, markPenContact, tool])
+
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (overlayInert(inline, inputActive) || !overlayHitEnabled(inputActive)) return
     if (hitTestChrome(event.clientX, event.clientY)) return
@@ -4368,15 +4491,26 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // A finger pans the sheet. A palm during the pen, or just after it, does not.
     // Mapped stylus/pad buttons still run even if Chromium labelled them `mouse`.
     if (!buttonIdentity && shouldRejectNonPenInk(event.pointerType, settings.penOnly)) {
-      if (shouldFingerPanInPenOnly({
-        pointerType: event.pointerType,
-        penOnly: settings.penOnly,
-        penDown: inkSessionRef.current?.pointerType === 'pen' && activePointerRef.current !== null,
-        lastPenAt: lastPenContactRef.current,
-        now,
-      })) {
-        if (event.cancelable) event.preventDefault()
-        beginTabletPan(event.pointerId, event.clientX, event.clientY, event.pointerType, now)
+      // A mouse laser still aims when pen-only is on. A finger keeps panning.
+      if (!(tool === 'laser' && event.pointerType === 'mouse')) {
+        if (shouldFingerPanInPenOnly({
+          pointerType: event.pointerType,
+          penOnly: settings.penOnly,
+          penDown: inkSessionRef.current?.pointerType === 'pen' && activePointerRef.current !== null,
+          lastPenAt: lastPenContactRef.current,
+          now,
+        })) {
+          if (event.cancelable) event.preventDefault()
+          beginTabletPan(event.pointerId, event.clientX, event.clientY, event.pointerType, now)
+        }
+        return
+      }
+    }
+    if (tool === 'laser') {
+      if (event.cancelable) event.preventDefault()
+      if (event.pointerType === 'pen') {
+        lastPenContactRef.current = now
+        markPenContact(true)
       }
       return
     }
@@ -4500,6 +4634,55 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         if (placing === 'subsection') insertSubsectionAt(firstPoint.y)
         else insertSectionAt(firstPoint.y)
       }
+      return
+    }
+    if (firstPoint && graphPanelOpenRef.current && tool === 'pen' && !pointerEraser && !figureLibraryOpen) {
+      const stamp = graphPlaceRef.current
+      if (stamp) {
+        const snapshot = snapshotStrokes(strokesRef.current)
+        const graphStroke: InkStroke = {
+          points: [firstPoint],
+          baseWidth: figureSize,
+          pressureEnabled: false,
+          color: inkMode === 'drawing' ? inkColorForBrush(artBrush, penColor, artColor) : penColor,
+          purpose: 'art',
+          brush: 'fineliner',
+          colorEffect: inkMode === 'drawing' ? artEffect : 'solid',
+          opacity: inkMode === 'drawing' ? artOpacity : 1,
+          textureSeed: Math.max(1, Math.round((performance.now() * 1_000 + event.pointerId * 7_919) % 2_147_483_647)),
+          graphExpression: stamp.expression,
+          graphXMin: stamp.xMin,
+          graphXMax: stamp.xMax,
+          graphPaths: stamp.paths.slice(),
+          figureLineWidth: clampFigureLineWidth(figureLineWidth, figureLineWidthForSize(figureSize)),
+          symbolRotation: 0,
+        }
+        clearRecognitionScope()
+        closeMathSolverSelection()
+        closeMathCorrectionSession()
+        strokesRef.current.push(graphStroke)
+        commitStrokeToCanvas(graphStroke)
+        undoRef.current.push(snapshot)
+        if (undoRef.current.length > 80) undoRef.current.shift()
+        redoRef.current = []
+        setTokens([])
+        setCorrection('')
+        setAutomaticResult(null)
+        bumpInkRevision({ redrawCommitted: false, appendOnly: true, updateTranscript: false })
+        setDirty(true)
+        updateHistoryState()
+      }
+      gestureChangedRef.current = false
+      activePointerRef.current = null
+      inkSessionRef.current = null
+      pointerBoundsRef.current = null
+      releasePointerCaptureSafe(event.currentTarget, event.pointerId)
+      if (lastCapturedPointerIdRef.current === event.pointerId) lastCapturedPointerIdRef.current = null
+      activePointerTargetRef.current = null
+      if (event.pointerType === 'pen' || event.pointerType === 'touch') {
+        queueMicrotask(() => releaseStuckInputFocus(boardRef.current))
+      }
+      if (stamp) scheduleRedraw()
       return
     }
     if (firstPoint && figureLibraryOpen && isMathFigureId(figureId) && tool === 'pen' && !pointerEraser) {
@@ -5818,6 +6001,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         restoreUnmovedSelection()
         setTool('eraser')
         setArtPanelOpen(false)
+        setGraphPanelOpen(false)
         setSelectionMode(false)
         setSelectionRect(null)
         return
@@ -5826,23 +6010,35 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         restoreUnmovedSelection()
         setTool('select')
         setArtPanelOpen(false)
+        setGraphPanelOpen(false)
         setSelectionMode(true)
         setSelectionPurpose('edit')
         setSelectionRect(null)
         return
       }
+      if (next === 'laser') {
+        setTool('laser')
+        setArtPanelOpen(false)
+        setFigureLibraryOpen(false)
+        setGraphPanelOpen(false)
+        setSelectionMode(false)
+        return
+      }
       if (next === 'drawing') {
         setInkMode('drawing')
         setTool('pen')
+        setGraphPanelOpen(false)
         return
       }
       if (next === 'writing') {
         setInkMode('writing')
         setTool('pen')
         setArtPanelOpen(false)
+        setGraphPanelOpen(false)
         return
       }
       setTool('pen')
+      setGraphPanelOpen(false)
     },
   }), [drawingPayload, inkMode, inkRecordExists, restoreUnmovedSelection, setDirty, tool, writeInkPage])
 
@@ -6171,6 +6367,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setMathCorrectorEnabled(false)
     setConversionOpen(false)
     setArtPanelOpen(false)
+    setGraphPanelOpen(false)
     setLassoOn(false)
     setLassoPoints([])
     setLassoIndexes([])
@@ -6881,6 +7078,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setTool('pen')
     setArtSymbolId(null)
     setArtPanelOpen(false)
+    setGraphPanelOpen(false)
     setNotice(null)
   }
 
@@ -6893,6 +7091,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setArtSymbolId(null)
     setArtPanelOpen(!usesPenStrip(artBrush))
     setFigureLibraryOpen(false)
+    setGraphPanelOpen(false)
     setMathSolverEnabled(false)
     setMathCorrectorEnabled(false)
     clearRecognitionScope()
@@ -6908,6 +7107,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setSelectionRect(null)
     setTool('eraser')
     setArtPanelOpen(false)
+    setGraphPanelOpen(false)
+    setNotice(null)
+  }
+
+  const activateLaser = () => {
+    restoreUnmovedSelection()
+    setSelectionMode(false)
+    setSelectionRect(null)
+    setTool('laser')
+    setArtSymbolId(null)
+    setArtPanelOpen(false)
+    setFigureLibraryOpen(false)
+    setGraphPanelOpen(false)
     setNotice(null)
   }
 
@@ -6921,6 +7133,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const chooseArtSymbol = (symbol: ArtSymbolDefinition) => {
     setArtSymbolId(symbol.id)
     setFigureLibraryOpen(false)
+    setGraphPanelOpen(false)
     setTool('pen')
     requestAnimationFrame(() => boardRef.current?.focus({ preventScroll: true }))
   }
@@ -6929,6 +7142,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setArtSymbolId(null)
     setTool('pen')
     setFigureLibraryOpen(true)
+    setGraphPanelOpen(false)
     const nextGroup = MATH_FIGURES.find((figure) => figure.id === id)?.group ?? 'solid'
     setFigureGroup(nextGroup)
     if (id === figureId) return
@@ -6955,6 +7169,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (open) return false
       setArtSymbolId(null)
       setArtPanelOpen(false)
+      setGraphPanelOpen(false)
+      setTool('pen')
+      requestAnimationFrame(() => boardRef.current?.focus({ preventScroll: true }))
+      return true
+    })
+  }
+
+  const toggleGraphPanel = () => {
+    setGraphPanelOpen((open) => {
+      if (open) return false
+      setFigureLibraryOpen(false)
+      setArtSymbolId(null)
+      setArtPanelOpen(false)
+      setSelectionMode(false)
       setTool('pen')
       requestAnimationFrame(() => boardRef.current?.focus({ preventScroll: true }))
       return true
@@ -6969,7 +7197,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   const handleKeyboard = (event: React.KeyboardEvent) => {
     const keyTarget = event.target
-    if (keyTarget instanceof Element && keyTarget.closest('.lw-tth-dialog, .lw-tth-backdrop')) return
+    if (keyTarget instanceof Element && keyTarget.closest('.lw-tth-dialog, .lw-tth-backdrop, .lw-graph-panel')) return
     if (event.key === 'Escape' && mathCorrectionSession) {
       event.preventDefault()
       closeMathCorrectionSession()
@@ -7001,6 +7229,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (activePointerRef.current !== null || activeStrokeRef.current || lastCapturedPointerIdRef.current !== null) {
         event.preventDefault()
         forceEndActivePointer('escape')
+        return
+      }
+      if (graphPanelOpen) {
+        event.preventDefault()
+        setGraphPanelOpen(false)
         return
       }
       if (figureLibraryOpen) {
@@ -7091,6 +7324,24 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     bumpInkRevision({ redrawCommitted: true })
     updateHistoryState()
   }
+
+  const graphPreview = useMemo(() => {
+    try {
+      const paths = functionGraphPaths(graphExpression, graphXMin, graphXMax)
+      return { paths, error: '' }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : ''
+      return { paths: [] as readonly string[], error: message }
+    }
+  }, [graphExpression, graphXMin, graphXMax])
+  const graphStamp = useMemo<FunctionGraphStamp | null>(() => {
+    if (!graphPanelOpen || graphPreview.error || !graphPreview.paths.length) return null
+    const expression = graphExpression.trim()
+    if (!expression) return null
+    return { expression, xMin: graphXMin, xMax: graphXMax, paths: graphPreview.paths }
+  }, [graphExpression, graphPanelOpen, graphPreview.error, graphPreview.paths, graphXMax, graphXMin])
+  graphPlaceRef.current = graphStamp
+  graphPanelOpenRef.current = graphPanelOpen
 
   const figureCatalogPaths = useMemo(() => {
     const paths = new Map<MathFigureId, readonly string[]>()
@@ -7237,6 +7488,26 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             onClick={toggleFigureLibrary}
           >
             <Box size={16} /> <span className="lw-tool-label">Figuren</span>
+          </button>
+          <button
+            type="button"
+            className={graphPanelOpen ? 'is-active' : ''}
+            aria-pressed={graphPanelOpen}
+            aria-label="Funktionsgraph einfügen"
+            title="Funktionsgraph einfügen: Formel wählen und auf die Seite tippen"
+            onClick={toggleGraphPanel}
+          >
+            <ChartSpline size={16} /> <span className="lw-tool-label">Funktionsgraph</span>
+          </button>
+          <button
+            type="button"
+            className={tool === 'laser' ? 'is-active' : ''}
+            aria-pressed={tool === 'laser'}
+            aria-label="Laserpointer"
+            title="Laserpointer: zeigt einen Punkt, ohne zu schreiben"
+            onClick={activateLaser}
+          >
+            <Crosshair size={16} /> <span className="lw-tool-label">Laser</span>
           </button>
           {(rulerPose || setSquarePose || compassPose) && (
             <button
@@ -7423,7 +7694,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           </div>
         ) : tool === 'pen' ? <>
           <button type="button" className="lw-art-studio-trigger" aria-expanded={artPanelOpen} onClick={() => setArtPanelOpen((open) => {
-            if (!open) setFigureLibraryOpen(false)
+            if (!open) {
+              setFigureLibraryOpen(false)
+              setGraphPanelOpen(false)
+            }
             return !open
           })}>
             {activeArtSymbol ? <Shapes size={16} /> : <Palette size={16} />}
@@ -7517,6 +7791,123 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           onCompassDraw={handleCompassDraw}
           onClose={() => updateDraftingSettings({ panelOpen: false })}
         />,
+      )}
+
+      {graphPanelOpen && (!inline || inputActive) && (inline ? (node: ReactNode) => createPortal(node, document.body) : (node: ReactNode) => node)(
+        <aside
+          className={`lw-figure-library lw-graph-panel ${inline ? 'is-viewport-chrome' : ''}`}
+          aria-label="Funktionsgraph"
+          onPointerDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              event.stopPropagation()
+              setGraphPanelOpen(false)
+            }
+          }}
+        >
+          <header className="lw-figure-library-head">
+            <span><ChartSpline size={16} /></span>
+            <div>
+              <strong>Funktionsgraph</strong>
+              <small>Tippen setzt die Formel auf die Seite.</small>
+            </div>
+            <button type="button" className="lw-draw-icon" aria-label="Funktionsgraph schließen" onClick={() => setGraphPanelOpen(false)}><X size={16} /></button>
+          </header>
+          <label className="lw-graph-formula">
+            <span>Funktionsformel</span>
+            <input
+              type="text"
+              value={graphExpression}
+              placeholder="sin(x)"
+              aria-label="Funktionsformel"
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => setGraphExpression(event.target.value.slice(0, 180))}
+              onKeyDown={(event) => {
+                event.stopPropagation()
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  event.currentTarget.blur()
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  setGraphPanelOpen(false)
+                }
+              }}
+            />
+          </label>
+          <div className="lw-graph-presets" role="group" aria-label="Funktionsgraph">
+            {GRAPH_PRESETS.map((preset) => (
+              <button
+                type="button"
+                key={preset}
+                className={graphExpression.trim() === preset ? 'is-active' : ''}
+                aria-pressed={graphExpression.trim() === preset}
+                onClick={() => setGraphExpression(preset)}
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+          {graphPreview.error ? <p className="lw-graph-error">{graphPreview.error}</p> : (
+            <div className="lw-graph-preview" aria-hidden="true">
+              <FigureGlyph paths={graphPreview.paths} strokeWidth={Math.min(6, Math.max(0.4, 24 * figureLineWidth / figureSize))} />
+            </div>
+          )}
+          <div className="lw-graph-domain">
+            <label>
+              <span>x-Minimum</span>
+              <input
+                type="number"
+                aria-label="x-Minimum"
+                step="any"
+                value={graphXMin}
+                onChange={(event) => {
+                  const value = Number(event.target.value)
+                  if (Number.isFinite(value)) setGraphXMin(Math.min(1_000_000, Math.max(-1_000_000, value)))
+                }}
+                onKeyDown={(event) => event.stopPropagation()}
+              />
+            </label>
+            <label>
+              <span>x-Maximum</span>
+              <input
+                type="number"
+                aria-label="x-Maximum"
+                step="any"
+                value={graphXMax}
+                onChange={(event) => {
+                  const value = Number(event.target.value)
+                  if (Number.isFinite(value)) setGraphXMax(Math.min(1_000_000, Math.max(-1_000_000, value)))
+                }}
+                onKeyDown={(event) => event.stopPropagation()}
+              />
+            </label>
+          </div>
+          <div className="lw-figure-controls">
+            <label>
+              <span>Größe</span>
+              <input aria-label="Größe der Figur" type="range" min={40} max={320} step={2} value={figureSize} onChange={(event) => setFigureSize(Number(event.target.value))} />
+              <output>{figureSize}</output>
+            </label>
+            {figureLineWidthControl() && (
+              <label>
+                <span>Linienstärke</span>
+                <input
+                  aria-label="Linienstärke der Figur"
+                  type="range"
+                  min={FIGURE_LINE_MIN}
+                  max={FIGURE_LINE_MAX}
+                  step={FIGURE_LINE_STEP}
+                  value={figureLineWidth}
+                  onChange={(event) => setFigureLineWidth(clampFigureLineWidth(Number(event.target.value), figureLineWidth))}
+                />
+                <output>{figureLineWidth}</output>
+              </label>
+            )}
+          </div>
+        </aside>,
       )}
 
       {figureLibraryOpen && (!inline || inputActive) && (inline ? (node: ReactNode) => createPortal(node, document.body) : (node: ReactNode) => node)(
@@ -7717,7 +8108,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               tabIndex={-1}
               aria-label={selectionMode
                 ? selectionPurpose === 'math-correction' ? 'Rechenweg zur mathematischen Korrektur auswählen' : selectionPurpose === 'edit' ? 'Handschrift zum Verschieben einrahmen' : 'Bereich für Handschrifterkennung auswählen'
-                : tool === 'select' ? 'Ausgewählte Handschrift verschieben' : inkMode === 'drawing' ? activeArtSymbol ? `Piktogramm ${activeArtSymbol.label} auf Seite platzieren` : `Zeichenfläche mit ${activeArtBrush.label}` : 'Druckempfindliche Handschriftfläche'}
+                : tool === 'laser' ? 'Laserpointer' : graphPanelOpen ? 'Funktionsgraph einfügen' : tool === 'select' ? 'Ausgewählte Handschrift verschieben' : inkMode === 'drawing' ? activeArtSymbol ? `Piktogramm ${activeArtSymbol.label} auf Seite platzieren` : `Zeichenfläche mit ${activeArtBrush.label}` : 'Druckempfindliche Handschriftfläche'}
               onPointerDown={inline ? undefined : handlePointerDown}
               onPointerMove={inline ? undefined : handlePointerMove}
               onPointerUp={inline ? undefined : finishPointer}
@@ -8546,6 +8937,17 @@ const drawingBoardStyles = `
 .lw-figure-controls input[type=range]{width:100%;min-width:0}
 .lw-figure-controls output{text-align:right;font-variant-numeric:tabular-nums;color:var(--text-muted,#aaa)}
 .lw-drawing-board.is-inline:not(.is-input-active) .lw-figure-library{display:none!important}
+.lw-graph-formula{display:flex;flex-direction:column;gap:4px}
+.lw-graph-formula input,.lw-graph-domain input{width:100%;height:28px;padding:0 8px;border:1px solid var(--draw-border,rgba(255,255,255,.16));border-radius:8px;background:color-mix(in srgb,var(--background,#111) 72%,transparent);color:inherit;font:13px/1 ui-monospace,monospace}
+.lw-graph-presets{display:flex;flex-wrap:wrap;gap:4px}
+.lw-graph-presets>button{height:24px;padding:0 7px;border:1px solid var(--draw-border,rgba(255,255,255,.16));border-radius:999px;background:transparent;color:inherit;font:12px/1 ui-monospace,monospace;cursor:pointer}
+.lw-graph-presets>button.is-active{border-color:var(--draw-accent);color:var(--draw-accent)}
+.lw-graph-error{margin:0;color:#ff8d8d;font-size:11px;line-height:1.35}
+.lw-graph-preview{display:grid;place-items:center;height:108px;border-radius:10px;background:color-mix(in srgb,#fff 6%,transparent)}
+.lw-graph-preview svg{width:96px;height:96px}
+.lw-graph-domain{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.lw-graph-domain label{display:flex;flex-direction:column;gap:3px;font-size:11px}
+.lw-laser-layer{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:70}
 .lw-drafting-panel{position:relative;z-index:13;flex:0 0 auto;display:flex;flex-direction:column;gap:8px;margin:10px 14px 0;padding:11px;border:1px solid color-mix(in srgb,var(--draw-accent) 36%,var(--draw-border));border-radius:12px;background:linear-gradient(145deg,color-mix(in srgb,var(--background-secondary,#19191f) 96%,var(--draw-accent) 4%),color-mix(in srgb,var(--background,#191919) 94%,transparent));box-shadow:0 22px 65px rgba(0,0,0,.24),inset 0 1px rgba(255,255,255,.035);color:var(--text,#fff);font-size: 12px;animation:lw-art-studio-in .24s cubic-bezier(.2,.8,.2,1)}
 .lw-drafting-panel.is-viewport-chrome{position:fixed;z-index:79;top:78px;right:14px;left:auto;width:min(420px,calc(100vw - 28px));max-height:calc(100vh - 170px);margin:0;overflow:auto;background:color-mix(in srgb,var(--background-secondary,#17171d) 95%,transparent);backdrop-filter:blur(18px);pointer-events:auto}
 .lw-drafting-panel-head{display:flex;align-items:center;gap:8px}
@@ -8580,7 +8982,7 @@ const drawingBoardStyles = `
 .lw-drafting-panel .lw-draw-subtle{height:26px;padding:0 9px;font-size: 12px}
 .lw-drafting-direction-icon{display:grid;place-items:center;color:var(--text-muted,#9999a7)}
 .lw-drafting-panel-foot{color:var(--text-muted,#8b8b99);font-size: 12px;line-height:1.4}
-.lw-drawing-board.is-inline:not(.is-input-active) .lw-drafting-panel{display:none!important}.lw-tablet-canvas-committed{z-index:1;pointer-events:none}.lw-tablet-canvas-live{z-index:2;pointer-events:auto}.lw-canvas-surface.tool-pen,.lw-canvas-surface.tool-art,.lw-tablet-canvas.tool-pen,.lw-tablet-canvas.tool-art{cursor:none}.lw-pen-pointer{position:fixed;left:0;top:0;z-index:2147483000;width:24px;height:24px;pointer-events:none;opacity:0;overflow:visible;will-change:transform}.lw-pen-pointer svg{display:block;width:24px;height:24px;overflow:visible}.lw-tablet-canvas.tool-select,.lw-canvas-surface.tool-select{cursor:crosshair}.lw-tablet-canvas.tool-eraser,.lw-canvas-surface.tool-eraser{cursor:cell}.lw-tablet-canvas:focus-visible{box-shadow:inset 0 0 0 2px var(--draw-accent)}.lw-selection-hint{position:absolute;z-index:3;top:18px;left:50%;display:flex;align-items:center;gap:7px;padding:8px 11px;transform:translateX(-50%);border:1px solid rgba(var(--accent-rgb),.32);border-radius:9px;color:#28233d;background:rgba(255,255,255,.92);box-shadow:0 8px 24px rgba(0,0,0,.18);font:700 12px/1.2 var(--ui-font,system-ui);pointer-events:none;white-space:nowrap}.lw-selection-rect{position:absolute;z-index:3;min-width:2px;min-height:2px;border:2px dashed var(--accent,#2a6f97);background:rgba(var(--accent-rgb),.1);box-shadow:0 0 0 9999px rgba(0,0,0,.08);pointer-events:none}.lw-selection-rect.is-editable{pointer-events:auto;cursor:move;box-shadow:0 0 0 2px rgba(var(--accent-rgb),.2)}.lw-page-overlay{position:absolute;inset:0;z-index:4;pointer-events:none}.lw-drawing-board.is-inline .lw-page-overlay{inset:var(--paper-scroll-room,0px);width:calc(100% - 2 * var(--paper-scroll-room,0px));height:calc(100% - 2 * var(--paper-scroll-room,0px))}.lw-selection-scale{position:absolute;right:-6px;bottom:-6px;width:13px;height:13px;border-radius:3px;background:var(--accent,#2a6f97);cursor:nwse-resize}.lw-selection-rect.is-selected{border-style:solid;background:rgba(var(--accent-rgb),.07);box-shadow:0 0 0 9999px rgba(0,0,0,.04),0 0 0 3px rgba(var(--accent-rgb),.14)}.lw-selection-rect span{position:absolute;bottom:calc(100% + 5px);left:-2px;padding:3px 7px;border-radius:6px;color:#fff;background:var(--accent,#2a6f97);font:700 12px/1.3 var(--ui-font,system-ui);white-space:nowrap}.lw-canvas-meta{display:flex;align-items:center;justify-content:space-between;padding:7px 3px 0;color:var(--text-muted,#9292a0);font-size: 12px}.lw-canvas-meta span{display:flex;align-items:center;gap:6px}.lw-pressure-dot{width:6px;height:6px;border-radius:50%;background:#4bd7a4;box-shadow:0 0 7px #4bd7a4}
+.lw-drawing-board.is-inline:not(.is-input-active) .lw-drafting-panel{display:none!important}.lw-tablet-canvas-committed{z-index:1;pointer-events:none}.lw-tablet-canvas-live{z-index:2;pointer-events:auto}.lw-canvas-surface.tool-pen,.lw-canvas-surface.tool-art,.lw-canvas-surface.tool-laser,.lw-tablet-canvas.tool-pen,.lw-tablet-canvas.tool-art,.lw-tablet-canvas.tool-laser{cursor:none}.lw-pen-pointer{position:fixed;left:0;top:0;z-index:2147483000;width:24px;height:24px;pointer-events:none;opacity:0;overflow:visible;will-change:transform}.lw-pen-pointer svg{display:block;width:24px;height:24px;overflow:visible}.lw-tablet-canvas.tool-select,.lw-canvas-surface.tool-select{cursor:crosshair}.lw-tablet-canvas.tool-eraser,.lw-canvas-surface.tool-eraser{cursor:cell}.lw-tablet-canvas:focus-visible{box-shadow:inset 0 0 0 2px var(--draw-accent)}.lw-selection-hint{position:absolute;z-index:3;top:18px;left:50%;display:flex;align-items:center;gap:7px;padding:8px 11px;transform:translateX(-50%);border:1px solid rgba(var(--accent-rgb),.32);border-radius:9px;color:#28233d;background:rgba(255,255,255,.92);box-shadow:0 8px 24px rgba(0,0,0,.18);font:700 12px/1.2 var(--ui-font,system-ui);pointer-events:none;white-space:nowrap}.lw-selection-rect{position:absolute;z-index:3;min-width:2px;min-height:2px;border:2px dashed var(--accent,#2a6f97);background:rgba(var(--accent-rgb),.1);box-shadow:0 0 0 9999px rgba(0,0,0,.08);pointer-events:none}.lw-selection-rect.is-editable{pointer-events:auto;cursor:move;box-shadow:0 0 0 2px rgba(var(--accent-rgb),.2)}.lw-page-overlay{position:absolute;inset:0;z-index:4;pointer-events:none}.lw-drawing-board.is-inline .lw-page-overlay{inset:var(--paper-scroll-room,0px);width:calc(100% - 2 * var(--paper-scroll-room,0px));height:calc(100% - 2 * var(--paper-scroll-room,0px))}.lw-selection-scale{position:absolute;right:-6px;bottom:-6px;width:13px;height:13px;border-radius:3px;background:var(--accent,#2a6f97);cursor:nwse-resize}.lw-selection-rect.is-selected{border-style:solid;background:rgba(var(--accent-rgb),.07);box-shadow:0 0 0 9999px rgba(0,0,0,.04),0 0 0 3px rgba(var(--accent-rgb),.14)}.lw-selection-rect span{position:absolute;bottom:calc(100% + 5px);left:-2px;padding:3px 7px;border-radius:6px;color:#fff;background:var(--accent,#2a6f97);font:700 12px/1.3 var(--ui-font,system-ui);white-space:nowrap}.lw-canvas-meta{display:flex;align-items:center;justify-content:space-between;padding:7px 3px 0;color:var(--text-muted,#9292a0);font-size: 12px}.lw-canvas-meta span{display:flex;align-items:center;gap:6px}.lw-pressure-dot{width:6px;height:6px;border-radius:50%;background:#4bd7a4;box-shadow:0 0 7px #4bd7a4}
 .lw-selection-hint.is-correction{border-color:rgba(30,142,115,.42);color:#153b32;background:rgba(242,255,250,.95)}.lw-math-correction-scope{position:absolute;z-index:3;border:1px dashed rgba(60,95,178,.5);border-radius:7px;background:rgba(67,102,190,.025);pointer-events:none}.lw-math-step-mark{position:absolute;z-index:4;min-width:5px;min-height:5px;border:2px solid rgba(91,106,151,.5);border-radius:6px;background:rgba(91,106,151,.04);pointer-events:none;transition:border-color .22s,background .22s,box-shadow .22s}.lw-math-step-mark>span{position:absolute;top:-8px;left:-8px;display:grid;width:17px;height:17px;place-items:center;border-radius:50%;color:#fff;background:#667091;font:800 12px/1 var(--ui-font,system-ui);box-shadow:0 3px 8px rgba(0,0,0,.2)}.lw-math-step-mark.is-start{border-color:var(--accent,#2a6f97);background:rgba(var(--accent-rgb),.06)}.lw-math-step-mark.is-start>span{background:var(--accent,#2a6f97)}.lw-math-step-mark.is-correct{border-color:#249671;background:rgba(36,150,113,.07);box-shadow:0 0 0 3px rgba(36,150,113,.09)}.lw-math-step-mark.is-correct>span{background:#208963}.lw-math-step-mark.is-incorrect,.lw-math-step-mark.is-unreadable{border-color:#dc3f59;background:rgba(220,63,89,.09);box-shadow:0 0 0 3px rgba(220,63,89,.12)}.lw-math-step-mark.is-incorrect>span,.lw-math-step-mark.is-unreadable>span{background:#c9354e}.lw-math-step-mark.is-uncertain{border-color:#d18b25;background:rgba(209,139,37,.09)}.lw-math-step-mark.is-uncertain>span{background:#b87518}.lw-math-error-spot{position:absolute;z-index:7;min-width:12px;min-height:12px;border:3px solid #df304d;border-radius:7px;background:rgba(238,45,75,.14);box-shadow:0 0 0 4px rgba(238,45,75,.12),0 0 25px rgba(222,39,69,.3);pointer-events:none;animation:lw-error-pulse 1.35s ease-in-out infinite}.lw-math-error-spot.is-uncertain,.lw-math-error-spot.is-unreadable{border-color:#d38b20;background:rgba(230,151,33,.12);box-shadow:0 0 0 4px rgba(230,151,33,.12)}.lw-math-error-spot>span{position:absolute;bottom:calc(100% + 5px);left:-3px;padding:3px 7px;border-radius:6px;color:#fff;background:#d9304b;font:800 12px/1.2 var(--ui-font,system-ui);white-space:nowrap}.lw-math-error-spot.is-uncertain>span,.lw-math-error-spot.is-unreadable>span{background:#b87518}@keyframes lw-error-pulse{50%{box-shadow:0 0 0 7px rgba(238,45,75,.05),0 0 30px rgba(222,39,69,.34)}}
 .lw-math-correction-popover{position:absolute;z-index:9;display:flex;width:min(390px,calc(100% - 22px));max-height:min(560px,86%);flex-direction:column;gap:9px;overflow:auto;padding:11px;border:1px solid color-mix(in srgb,var(--success,#5dcc78) 42%,var(--draw-border));border-radius:12px;color:var(--text,#f4f2fa);background:linear-gradient(150deg,color-mix(in srgb,var(--background-secondary,#1e1f23) 95%,var(--success,#5dcc78) 5%),var(--background,#191919));box-shadow:0 24px 70px rgba(15,25,23,.42),0 0 0 1px rgba(255,255,255,.03);backdrop-filter:blur(18px);pointer-events:auto}.lw-math-correction-head{display:flex;align-items:center;gap:8px}.lw-math-correction-head>span{display:grid;width:28px;height:28px;flex:0 0 auto;place-items:center;border-radius:9px;color:var(--on-danger,#191919);background:var(--success,#5dcc78)}.lw-math-correction-head>div{display:flex;min-width:0;flex:1;flex-direction:column}.lw-math-correction-head strong{font-size: 12px}.lw-math-correction-head small,.lw-math-correction-footnote{color:var(--text-muted,#aaa);font-size: 12px;line-height:1.45}.lw-math-correction-loading,.lw-math-correction-error{display:flex;min-height:82px;align-items:center;justify-content:center;gap:8px;color:var(--text-muted,#aaa);text-align:center;font-size: 12px}.lw-math-correction-error{flex-direction:column;color:var(--danger,#e16778)}.lw-math-correction-result{display:flex;align-items:flex-start;gap:8px;padding:8px 9px;border:1px solid var(--draw-border);border-radius:9px}.lw-math-correction-result>svg{flex:0 0 auto;margin-top:1px}.lw-math-correction-result>span,.lw-math-correction-result strong,.lw-math-correction-result small{display:block}.lw-math-correction-result strong{font-size: 12px}.lw-math-correction-result small{margin-top:2px;color:var(--text-muted,#aaa);font-size: 12px;line-height:1.45}.lw-math-correction-result.is-correct{color:var(--success,#4bc69d);border-color:color-mix(in srgb,var(--success,#4bc69d) 32%,var(--draw-border));background:color-mix(in srgb,var(--success,#4bc69d) 8%,transparent)}.lw-math-correction-result.is-incorrect,.lw-math-correction-result.is-unreadable{color:var(--danger,#e16778);border-color:color-mix(in srgb,var(--danger,#e16778) 34%,var(--draw-border));background:color-mix(in srgb,var(--danger,#e16778) 8%,transparent)}.lw-math-correction-result.is-uncertain,.lw-math-correction-result.is-editing{color:var(--warning,#d49a48);border-color:color-mix(in srgb,var(--warning,#d49a48) 34%,var(--draw-border));background:color-mix(in srgb,var(--warning,#d49a48) 8%,transparent)}
 .lw-math-step-list{display:flex;flex-direction:column;gap:5px}.lw-math-step-row{display:grid;grid-template-columns:22px minmax(0,1fr) 39px;align-items:center;gap:6px;padding:6px;border:1px solid var(--draw-border);border-radius:9px;background:color-mix(in srgb,var(--background,#191919) 46%,transparent)}.lw-math-step-row.is-incorrect,.lw-math-step-row.is-unreadable{border-color:color-mix(in srgb,var(--danger,#e16778) 48%,var(--draw-border));background:color-mix(in srgb,var(--danger,#e16778) 7%,transparent)}.lw-math-step-row.is-correct{border-color:color-mix(in srgb,var(--success,#4bc69d) 28%,var(--draw-border))}.lw-math-step-number{display:grid;width:20px;height:20px;place-items:center;border-radius:6px;color:var(--text-muted,#aaa);background:color-mix(in srgb,var(--background-modifier-border,#555) 42%,transparent);font:800 12px/1 var(--ui-font,system-ui)}.lw-math-step-input{display:flex;min-width:0;flex-direction:column;gap:2px}.lw-math-step-input input{width:100%;min-width:0;padding:5px 7px;border:1px solid transparent;border-radius:6px;outline:none;color:inherit;background:transparent;font:600 12px/1.2 var(--mono-font,monospace)}.lw-math-step-input input:hover,.lw-math-step-input input:focus{border-color:var(--draw-border);background:color-mix(in srgb,var(--background,#191919) 82%,transparent)}.lw-math-step-input small{overflow:hidden;color:var(--text-muted,#aaa);font-size: 12px;line-height:1.25;text-overflow:ellipsis;white-space:nowrap}.lw-math-step-status{overflow:hidden;color:var(--text-muted,#aaa);font-size: 12px;text-align:right;text-overflow:ellipsis;white-space:nowrap}.lw-math-step-row.is-incorrect .lw-math-step-status,.lw-math-step-row.is-unreadable .lw-math-step-status{color:var(--danger,#e16778)}.lw-math-step-row.is-correct .lw-math-step-status{color:var(--success,#4bc69d)}.lw-math-step-row.is-uncertain .lw-math-step-status{color:var(--warning,#d49a48)}.lw-math-correction-suggestion{display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:8px;color:var(--text-normal,#ddd);background:color-mix(in srgb,var(--accent,#2a6f97) 11%,transparent);font-size: 12px}.lw-math-correction-suggestion code{overflow:hidden;color:#b9acf9;text-overflow:ellipsis;white-space:nowrap}.lw-math-correction-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}.lw-math-correction-actions button{display:flex;min-height:30px;align-items:center;justify-content:center;gap:5px;border:1px solid var(--draw-border);border-radius:8px;color:inherit;background:color-mix(in srgb,var(--background-secondary,#18171f) 78%,transparent);font:700 12px/1 var(--ui-font,system-ui);cursor:pointer}.lw-math-correction-actions button:first-child{border-color:color-mix(in srgb,#35b68e 40%,var(--draw-border));background:color-mix(in srgb,#35b68e 11%,transparent)}.lw-math-correction-actions button:hover{filter:brightness(1.12)}.lw-math-correction-actions button:disabled{opacity:.55;cursor:wait}.lw-math-correction-footnote{margin:0}

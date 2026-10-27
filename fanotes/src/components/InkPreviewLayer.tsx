@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createMarkerCoverage, drawInkStroke, type InkPaintStroke } from '../lib/inkStrokePaint'
+import { readFunctionGraphStamp } from '../lib/functionGraph'
 import { clampFigureLineWidth, clampFigureParams, figureLineWidthForSize, isMathFigureId, mathFigurePaths } from '../lib/mathFigures'
 import { textOriginCssPx } from '../lib/noteCanvas'
 import { usePaperViewController } from './PaperView'
@@ -52,7 +53,16 @@ export const parseInkPreviewPage = (drawingJson: string): ParsedInkPage | null =
   const strokes: InkPaintStroke[] = []
   for (const entry of document.strokes) {
     if (!entry || typeof entry !== 'object') continue
-    const stroke = entry as Partial<InkPaintStroke> & { figureId?: unknown; figureParams?: unknown; figureLineWidth?: unknown }
+    const stroke = entry as Partial<InkPaintStroke> & {
+      figureId?: unknown
+      figureParams?: unknown
+      figureLineWidth?: unknown
+      graphExpression?: unknown
+      graphXMin?: unknown
+      graphXMax?: unknown
+      graphPaths?: unknown
+      symbolRotation?: unknown
+    }
     if (!Array.isArray(stroke.points) || typeof stroke.color !== 'string') continue
     const points = stroke.points.filter((point): point is { x: number; y: number; pressure?: number } => (
       Boolean(point) && typeof point === 'object' && isFiniteNumber(point.x) && isFiniteNumber(point.y)
@@ -60,9 +70,11 @@ export const parseInkPreviewPage = (drawingJson: string): ParsedInkPage | null =
     if (!points.length) continue
     const figureId = isMathFigureId(stroke.figureId) ? stroke.figureId : undefined
     const figurePaths = figureId ? mathFigurePaths(figureId, clampFigureParams(figureId, stroke.figureParams)) : []
+    const graph = figurePaths.length ? null : readFunctionGraphStamp(stroke)
+    const stampWidth = isFiniteNumber(stroke.baseWidth) ? stroke.baseWidth : 4
     strokes.push({
       points,
-      baseWidth: isFiniteNumber(stroke.baseWidth) ? stroke.baseWidth : 4,
+      baseWidth: stampWidth,
       pressureEnabled: stroke.pressureEnabled !== false,
       color: stroke.color,
       purpose: stroke.purpose === 'art' ? 'art' : 'handwriting',
@@ -70,11 +82,15 @@ export const parseInkPreviewPage = (drawingJson: string): ParsedInkPage | null =
       colorEffect: typeof stroke.colorEffect === 'string' ? stroke.colorEffect : undefined,
       opacity: isFiniteNumber(stroke.opacity) ? stroke.opacity : undefined,
       textureSeed: isFiniteNumber(stroke.textureSeed) ? stroke.textureSeed : undefined,
-      symbolRotation: isFiniteNumber(stroke.symbolRotation) ? stroke.symbolRotation : undefined,
-      figureLineWidth: figureId
-        ? clampFigureLineWidth(stroke.figureLineWidth, figureLineWidthForSize(isFiniteNumber(stroke.baseWidth) ? stroke.baseWidth : 4))
+      symbolRotation: figureId
+        ? (isFiniteNumber(stroke.symbolRotation) ? stroke.symbolRotation : 0)
+        : graph
+          ? 0
+          : isFiniteNumber(stroke.symbolRotation) ? stroke.symbolRotation : undefined,
+      figureLineWidth: figureId || graph
+        ? clampFigureLineWidth(stroke.figureLineWidth, figureLineWidthForSize(stampWidth))
         : undefined,
-      symbolPaths: figurePaths.length ? figurePaths : undefined,
+      symbolPaths: figurePaths.length ? figurePaths : graph?.paths,
       keepColor: stroke.keepColor === true ? true : undefined,
     })
   }
