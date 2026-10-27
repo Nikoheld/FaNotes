@@ -1,5 +1,24 @@
 # Änderungsverlauf
 
+## 2026.10.13-beta.1
+
+- Let section edges be dragged in keyboard mode.
+- Merge chosen sections into the top one.
+- Share one left and right edge across every section.
+- Publish the activity overview as soon as it is switched on.
+- Select handwriting with a freehand loop.
+- Add a laser pointer and placeable function graphs.
+- Show the AI edit button only after a provider is connected.
+- Shrink the pen-bar paper control and drop the view buttons.
+- Let a section title be typed or handwritten.
+- Keep sheet zoom on the compositor until the gesture pauses.
+- Coast the sheet after a finger pan in pen mode.
+- Count Grok grant rows in the Sync settings heading.
+- Rearrange settings so each page holds one kind of control.
+- Share a note or folder from the sidebar menu.
+- Let the desktop app save a public username.
+- Prefer a newer stable release on beta and resume GitHub downloads.
+
 ## 2026.10.12
 
 - **Update.** Die Prüfung für Beta und Nightly liest die Release-Liste, auch wenn sie größer ist als das Manifest.
