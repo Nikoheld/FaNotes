@@ -203,7 +203,7 @@ import { installChromeTextSelect } from './lib/chromeTextSelect'
 import { drawingSessionFromLoad, INK_OVERLAY_CRASH_TITLE, INK_TOOLBAR_SLOT_ID, overlayAfterNoteSwitch, PDF_TOOLBAR_SLOT_ID, penModeToolbarSlot } from './lib/pdfInkHit'
 import { APP_VERSION } from './lib/appVersion'
 import { defaultSettingsForPlatform } from './defaults'
-import { loadShareEntries, queueLiveShareRefresh } from './lib/sync/share'
+import { collectShareNotes, createFetchSharePort, loadShareEntries, parseShareDirectory, publishShare, queueLiveShareRefresh, resolveShareOrigin, serializeShareDirectory } from './lib/sync/share'
 import { PaperStylePicker } from './components/PaperStylePicker'
 import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
@@ -738,6 +738,9 @@ export default function App({ startupBootstrap }: AppProps) {
   const syncState = useSyncExternalStore(syncEngine.subscribe, syncEngine.getState, syncEngine.getState)
   const syncApi = window.fanotes?.sync ?? null
   const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined)
+  const [shareLinkDialog, setShareLinkDialog] = useState<{ link: string; mode: 'copy' | 'live' } | null>(null)
+  const shareLinkInputRef = useRef<HTMLInputElement>(null)
+  const shareInFlight = useRef(false)
   const addonNoteChangedRef = useRef<((path: string, content: string) => void) | null>(null)
   const [confirmRequest, setConfirmRequest] = useState<{
     message: string
@@ -3307,6 +3310,53 @@ export default function App({ startupBootstrap }: AppProps) {
     settingsTimer.current = timer
   }, [stopRemoteSupport, syncPublishedHomework, toast])
 
+  const shareVaultEntry = useCallback(async (relativePath: string) => {
+    if (shareInFlight.current || !relativePath || !window.fanotes?.getTree || !window.fanotes.readFile) return
+    shareInFlight.current = true
+    try {
+      const saved = await flushPendingEntry(relativePath)
+      if (!saved) {
+        toast('Die Notiz konnte nicht vollständig gespeichert werden.', 'error')
+        return
+      }
+      const entries = await loadShareEntries(await window.fanotes.getTree(), (path) => window.fanotes.readFile(path))
+      const collected = collectShareNotes(entries, relativePath)
+      if (collected.notes.length === 0) {
+        toast(collected.kind === 'folder' ? 'Noch keine Notizen vorhanden' : 'Diese Notiz ist noch leer.', 'info')
+        return
+      }
+      toast('Lädt hoch', 'info')
+      const mode = settingsRef.current.shareMode === 'live' ? 'live' : 'copy'
+      const published = await publishShare({
+        entries,
+        rootPath: relativePath,
+        mode,
+        port: createFetchSharePort(),
+        origin: resolveShareOrigin(),
+        directory: parseShareDirectory(settingsRef.current.shareRecent),
+      })
+      applySettings({ ...settingsRef.current, shareRecent: serializeShareDirectory(published.directory) })
+      setShareLinkDialog({ link: published.record.link, mode })
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Die Freigabe konnte nicht hochgeladen werden.', 'error')
+    } finally {
+      shareInFlight.current = false
+    }
+  }, [applySettings, flushPendingEntry, toast])
+
+  useEffect(() => {
+    if (!shareLinkDialog) return
+    shareLinkInputRef.current?.focus()
+    shareLinkInputRef.current?.select()
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      setShareLinkDialog(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [shareLinkDialog])
+
   const resetSettings = useCallback(() => {
     if (settingsTimer.current) window.clearTimeout(settingsTimer.current)
     settingsTimer.current = null
@@ -5025,6 +5075,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 onDuplicate={(path) => void duplicateNote(path)}
                 onCopyWikiLink={copyWikiLink}
                 onCopyPath={(path) => { void copyPlainText(path, 'Pfad kopiert.') }}
+                onShare={shareVaultEntry}
                 confirmTrash={(message) => requestConfirm(message, { title: 'In den Papierkorb', confirmLabel: 'Verschieben' })}
               />
             </div>
@@ -5635,6 +5686,24 @@ export default function App({ startupBootstrap }: AppProps) {
       {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal syncEngine={syncApi ? syncEngine : undefined} syncState={syncState} initialSection={settingsSection} platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => { setSettingsOpen(false); setSettingsSection(undefined) }} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onOpenAddonStore={() => { setSettingsOpen(false); openAddonStore() }} addonSummary={{ installed: addonState.installed.length, running: addonState.installed.filter((record) => addonState.statuses[record.id]?.state === 'running').length }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} onConvertNotes={convertAllNotesToCurrentStandard} remoteSupportSession={remoteSupportSession} onRemoteSupportStart={startRemoteSupport} onRemoteSupportStop={stopRemoteSupport} /></SafeBoundary></Suspense>}
       {addonStoreOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Store" fallbackTitle="Der Add-on-Store ist abgestürzt"><AddonStoreModal open onClose={() => setAddonStoreOpen(false)} runtime={addonRuntime} runtimeState={addonState} source={addonSource} fetchText={addonFetchText} onOpenExternal={(url) => { void window.fanotes.openExternal(url).catch(() => toast('Der Link konnte nicht geöffnet werden.', 'error')) }} toast={toast} sourceText={settings.addonSource} onChangeSource={(value) => { addonIndexCache.reset(); applySettings({ ...settingsRef.current, addonSource: value }) }} autoUpdate={settings.addonsAutoUpdate} onChangeAutoUpdate={(value) => applySettings({ ...settingsRef.current, addonsAutoUpdate: value })} /></SafeBoundary></Suspense>}
       {addonPrompt && <Suspense fallback={null}><SafeBoundary name="Add-on-Eingabe" fallbackTitle="Der Add-on-Dialog ist abgestürzt"><AddonPromptDialog request={addonPrompt} /></SafeBoundary></Suspense>}
+      {shareLinkDialog && (
+        <div className="modal-backdrop confirm-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) setShareLinkDialog(null) }}>
+          <section className="confirm-dialog share-link-dialog" role="dialog" aria-modal="true" aria-labelledby="fanotes-share-link-title" onPointerDown={(event) => event.stopPropagation()}>
+            <header className="confirm-dialog-header">
+              <span className="confirm-dialog-icon"><Link2 size={16} /></span>
+              <div><h3 id="fanotes-share-link-title">Die Freigabe wurde erstellt.</h3></div>
+            </header>
+            <div className="confirm-dialog-body">
+              <small>{shareLinkDialog.mode === 'live' ? 'Live' : 'Kopie'}</small>
+              <input ref={shareLinkInputRef} data-i18n-ignore readOnly value={shareLinkDialog.link} aria-label="Freigabe-Link" onFocus={(event) => event.currentTarget.select()} />
+            </div>
+            <div className="confirm-dialog-actions">
+              <button type="button" className="secondary-button" onClick={() => setShareLinkDialog(null)}>Schließen</button>
+              <button type="button" className="primary-button" onClick={() => { void copyPlainText(shareLinkDialog.link, 'Die Freigabe wurde erstellt.') }}>Kopieren</button>
+            </div>
+          </section>
+        </div>
+      )}
       <ConfirmDialog
         open={Boolean(confirmRequest)}
         title={confirmRequest?.title}

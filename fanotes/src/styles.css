@@ -2574,6 +2574,9 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
 .share-recent-list b { font-size: 13px; }
 .share-recent-list small { color: var(--text-muted); font-size: 12px; word-break: break-all; }
 .share-recent-list .share-stop { flex: none; }
+.share-link-dialog .confirm-dialog-body { display: grid; gap: 8px; }
+.share-link-dialog .confirm-dialog-body small { color: var(--text-muted); font-size: 12px; }
+.share-link-dialog input { width: 100%; min-height: 34px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text); background: var(--bg-elevated); padding: 0 8px; font-size: 12px; }
 .settings-resource-note { min-height: 38px; display: flex; align-items: center; gap: 8px; padding: 8px 15px; color: var(--text-muted); background: color-mix(in srgb, var(--accent) 5%, transparent); font-size: 12px; line-height: 1.45; }
 .settings-resource-note svg { flex: none; color: var(--accent-readable); }
 .settings-inline-button { min-height: 31px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 11px; border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border)); border-radius: 8px; color: var(--text); background: color-mix(in srgb, var(--accent) 10%, var(--bg-elevated)); font: 650 12px/1 var(--ui-font); cursor: pointer; }

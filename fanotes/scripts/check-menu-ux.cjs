@@ -23,6 +23,8 @@ const requirements = [
   [tree, 'className="file-tree__menu-head"', 'Kontextmenü mit erkennbarem Objektkopf'],
   [tree, 'file-tree__menu-label">Erstellen', 'Erstellen-Gruppe im Ordner-Menü'],
   [tree, 'file-tree__menu-label">Verwalten', 'Verwalten-Gruppe im Datei-Menü'],
+  [tree, 'file-tree__menu-label">Teilen', 'Teilen im Datei- und Ordner-Menü'],
+  [app, 'onShare={shareVaultEntry}', 'Seitenleiste teilt die gewählte Notiz oder den Ordner'],
   [settings, "label: 'Aussehen & Schreiben'", 'übersichtliche Einstellungsgruppe für Aussehen und Schreiben'],
   [settings, "label: 'Stift & Arbeitsbereich'", 'übersichtliche Einstellungsgruppe für Stift und Arbeitsbereich'],
   [settings, "label: 'FaNotes & System'", 'übersichtliche Einstellungsgruppe für FaNotes und System'],

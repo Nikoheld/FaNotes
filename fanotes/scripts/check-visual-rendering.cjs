@@ -431,7 +431,7 @@ void (async () => {
       labels: [...document.querySelectorAll('.file-tree__context-menu .file-tree__menu-label')].map((node) => node.textContent.trim()),
       buttons: document.querySelectorAll('.file-tree__context-menu > button').length,
     }))()`)
-    if (fileMenu.title !== 'Darstellung' || fileMenu.type !== 'Notiz' || fileMenu.labels.join('|') !== 'Öffnen|Kopieren|Verwalten' || fileMenu.buttons !== 6) {
+    if (fileMenu.title !== 'Darstellung' || fileMenu.type !== 'Notiz' || fileMenu.labels.join('|') !== 'Öffnen|Kopieren|Teilen|Verwalten' || fileMenu.buttons !== 7) {
       throw new Error(`Das Datei-Kontextmenü ist nicht klar gruppiert: ${JSON.stringify(fileMenu)}`)
     }
     await capture(cdp, 'file-menu')

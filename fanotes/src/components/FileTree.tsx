@@ -29,6 +29,7 @@ import {
   Palette,
   Pencil,
   Plus,
+  Share2,
   Trash2,
   X,
 } from 'lucide-react'
@@ -64,6 +65,8 @@ export type FileTreeProps = {
   onDuplicate?: (relativePath: string) => MaybePromise
   onCopyWikiLink?: (relativePath: string) => MaybePromise
   onCopyPath?: (relativePath: string) => MaybePromise
+  /** Upload this note, or every note in this folder, and show the public link. */
+  onShare?: (relativePath: string) => MaybePromise
   confirmTrash?: (message: string) => Promise<boolean>
   className?: string
   rootLabel?: string
@@ -204,6 +207,7 @@ export const FileTree = memo(function FileTree({
   onDuplicate,
   onCopyWikiLink,
   onCopyPath,
+  onShare,
   confirmTrash,
   className = '',
   rootLabel = 'Dateien',
@@ -788,7 +792,7 @@ export const FileTree = memo(function FileTree({
             left: Math.min(Math.max(8, contextMenu.x), window.innerWidth - 232),
             top: Math.min(
               Math.max(8, contextMenu.y),
-              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 620 : 420),
+              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 700 : 500),
             ),
           }}
         >
@@ -982,6 +986,24 @@ export const FileTree = memo(function FileTree({
                   Pfad kopieren
                 </button>
               )}
+              <span className="file-tree__menu-separator" role="separator" />
+            </>
+          )}
+          {onShare && (contextMenu.entry.kind === 'folder' || !isPdfEntry(contextMenu.entry)) && (
+            <>
+              <span className="file-tree__menu-label">Teilen</span>
+              <button
+                onClick={() => {
+                  const path = contextMenu.entry.relativePath
+                  setContextMenu(null)
+                  void Promise.resolve(onShare(path))
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <Share2 aria-hidden="true" size={15} />
+                Teilen
+              </button>
               <span className="file-tree__menu-separator" role="separator" />
             </>
           )}
