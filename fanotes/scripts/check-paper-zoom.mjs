@@ -22,6 +22,7 @@ const {
   restorePaperAnchor,
   paperZoomPreviewStyle,
   stepPaperZoomGesture,
+  PAPER_ZOOM_GESTURE_SETTLE_MS,
   zoomAroundPoint,
   zoomFactorFromWheel,
   isSheetZoomWheel,
@@ -171,6 +172,17 @@ const math = () => {
   assert.match(paperView, /sheetZoomStepFromDirection/)
   assert.match(paperView, /pushZoomGestureRef\.current\(factor, origin\)/)
   assert.match(paperView, /applyPaperZoomGestureFrame/)
+  assert.match(paperView, /zoomGestureActiveRef/)
+  assert.match(paperView, /cancelZoomGestureRef\.current\(\)/)
+  assert.match(paperView, /liveZoom/)
+  assert.ok(
+    PAPER_ZOOM_GESTURE_SETTLE_MS >= 200,
+    `a zoom burst must stay on the compositor across a wheel notch, settle is ${PAPER_ZOOM_GESTURE_SETTLE_MS}`,
+  )
+  const zoomByStart = paperView.indexOf('const zoomBy = useCallback')
+  const zoomByBody = paperView.slice(zoomByStart, paperView.indexOf('}, [])', zoomByStart))
+  assert.match(zoomByBody, /pushZoomGestureRef\.current/)
+  assert.doesNotMatch(zoomByBody, /applyPaperZoomStayPut/)
   let gesture = {
     baseZoom: 1,
     zoom: 1,

@@ -1473,9 +1473,15 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
 .unified-paper.is-view-zoomed {
   transition: none;
   /* Do not use will-change:transform — Chromium then rasterizes text at 1× and
-     stretches it when zoomed, which makes markdown unreadable. */
+     stretches it when zoomed, which makes markdown unreadable. The pinch
+     preview sets will-change inline only while .is-zoom-gesture is on. */
   will-change: auto;
   transform-origin: center center;
+}
+/* Live pinch / wheel / button zoom. The settled camera above must not animate
+   the handoff from this scale to CSS zoom. */
+.paper-sheet-plane.is-zoom-gesture {
+  transition: none;
 }
 .unified-paper .markdown-editor,
 .unified-paper .markdown-editor .cm-editor,

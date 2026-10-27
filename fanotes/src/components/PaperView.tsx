@@ -84,6 +84,8 @@ export type PaperViewApi = PaperViewSnapshot & {
   rotateBy: (delta: number) => void
   resetView: () => void
   setView: (next: Partial<PaperViewSnapshot>) => void
+  /** Zoom the in-flight pinch has reached. Falls back to the committed camera. */
+  liveZoom: () => number
   /**
    * The current note came back with a remembered camera. False on a first
    * open — memory written while the note is loading does not count.
@@ -146,6 +148,15 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
   const lastWheelZoomAtRef = useRef(0)
   const lastPanWheelAtRef = useRef(0)
   const lastZoomOriginRef = useRef<{ x: number; y: number } | null>(null)
+  const zoomGestureRef = useRef<PaperZoomGesture | null>(null)
+  const zoomGestureTimerRef = useRef(0)
+  const zoomGestureCommitFrameRef = useRef(0)
+  /** While set, scroll listeners must not measure the sheet. Stay-put already does. */
+  const zoomGestureActiveRef = useRef(false)
+  const zoomPlaneRef = useRef<HTMLElement | null>(null)
+  const commitZoomGestureRef = useRef(() => {})
+  const cancelZoomGestureRef = useRef(() => {})
+  const pushZoomGestureRef = useRef<(factor: number, origin: { x: number; y: number }) => void>(() => {})
   const onEdgeSwipeRef = useRef(onEdgeSwipe)
   onEdgeSwipeRef.current = onEdgeSwipe
   // Set by a user zoom/rotate/reset immediately before the store write. PDF
@@ -175,6 +186,9 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
   // Layout effects: a note opened after an async read would otherwise paint
   // one frame at 100% / scroll 0 before the remembered camera lands.
   useLayoutEffect(() => {
+    // The plane element survives a note switch. An in-flight pinch must not
+    // commit its CSS zoom onto the note that just opened.
+    cancelZoomGestureRef.current()
     // Only when the note identity changes. Toggling the HUD (pen vs keyboard)
     // must keep the same sheet zoom so ruling, ink and text stay one. A note
     // that was open before comes back at its remembered zoom.
@@ -327,6 +341,16 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       flingId = flingFrames > 0 ? window.requestAnimationFrame(holdFling) : 0
     }
     const clampScroll = () => {
+      // A zoom preview does not scroll. Stay-put then writes scroll several
+      // times; measuring the sheet on each write is the hitch at the end of
+      // the gesture. Claiming the camera does not need those rectangles.
+      if (zoomGestureActiveRef.current) {
+        const fromGesture = userAdjustedRef.current || gestureArm > 0 || (pointerHeld && scrollArm)
+        if (userAdjustedRef.current) userAdjustedRef.current = false
+        if (gestureArm > 0) gestureArm = 0
+        if (fromGesture) claimUserCamera()
+        return
+      }
       const editor = scroller.querySelector<HTMLElement>('.markdown-editor, .cm-scroller')
       const captured = captureGhostTextAroundLock(scroller, editor)
       const now = Date.now()
@@ -588,7 +612,23 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     }
   }, [viewKey])
 
+  const clearZoomGestureClock = () => {
+    if (zoomGestureTimerRef.current) {
+      window.clearTimeout(zoomGestureTimerRef.current)
+      zoomGestureTimerRef.current = 0
+    }
+    if (zoomGestureCommitFrameRef.current) {
+      window.cancelAnimationFrame(zoomGestureCommitFrameRef.current)
+      zoomGestureCommitFrameRef.current = 0
+    }
+  }
+
+  const liveZoom = useCallback(() => (
+    zoomGestureRef.current?.zoom ?? viewRef.current.zoom
+  ), [])
+
   const setView = useCallback((next: Partial<PaperViewSnapshot>) => {
+    commitZoomGestureRef.current()
     userAdjustedRef.current = true
     const current = viewRef.current
     const zoom = clampViewZoom(next.zoom ?? current.zoom)
@@ -611,11 +651,6 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     apply({ zoom, rotation, pan: { x: 0, y: 0 } })
   }, [apply])
 
-  const zoomGestureRef = useRef<PaperZoomGesture | null>(null)
-  const zoomGestureTimerRef = useRef(0)
-  const commitZoomGestureRef = useRef(() => {})
-  const pushZoomGestureRef = useRef<(factor: number, origin: { x: number; y: number }) => void>(() => {})
-
   const zoomTo = useCallback((nextZoom: number, originClient?: { x: number; y: number }) => {
     commitZoomGestureRef.current()
     const current = viewRef.current
@@ -631,28 +666,55 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
   }, [apply])
 
   const zoomBy = useCallback((delta: number, originClient?: { x: number; y: number }) => {
-    commitZoomGestureRef.current()
+    const live = zoomGestureRef.current?.zoom ?? viewRef.current.zoom
+    const next = clampViewZoom(live + delta)
+    if (Math.abs(next - live) < 0.0005) return
     userAdjustedRef.current = true
-    zoomTo(viewRef.current.zoom + delta, originClient)
-  }, [zoomTo])
+    let origin = originClient ?? lastZoomOriginRef.current
+    if (!origin) {
+      const scroller = noteViewRef.current
+      const box = scroller?.getBoundingClientRect()
+      origin = box
+        ? { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+        : { x: 0, y: 0 }
+    }
+    pushZoomGestureRef.current(next / Math.max(0.01, live), origin)
+  }, [])
+
+  cancelZoomGestureRef.current = () => {
+    clearZoomGestureClock()
+    const plane = zoomPlaneRef.current
+    zoomGestureRef.current = null
+    zoomGestureActiveRef.current = false
+    zoomPlaneRef.current = null
+    if (plane) clearPaperZoomGestureFrame(plane, 0)
+  }
 
   commitZoomGestureRef.current = () => {
-    if (zoomGestureTimerRef.current) {
-      window.clearTimeout(zoomGestureTimerRef.current)
-      zoomGestureTimerRef.current = 0
-    }
+    clearZoomGestureClock()
     const gesture = zoomGestureRef.current
+    const plane = zoomPlaneRef.current
     zoomGestureRef.current = null
-    if (!gesture) return
+    zoomPlaneRef.current = null
+    if (!gesture) {
+      zoomGestureActiveRef.current = false
+      return
+    }
     const scroller = noteViewRef.current
-    const sheet = scroller?.querySelector<HTMLElement>('.paper-sheet-plane')
+    const sheet = plane
+      ?? scroller?.querySelector<HTMLElement>('.paper-sheet-plane')
       ?? scroller?.querySelector<HTMLElement>('.unified-paper')
       ?? null
-    clearPaperZoomGestureFrame(resolvePaperViewTarget(sheet, scroller), gesture.rotation)
-    if (Math.abs(gesture.zoom - gesture.baseZoom) < 0.0005) return
+    clearPaperZoomGestureFrame(plane ?? resolvePaperViewTarget(sheet, scroller), gesture.rotation)
+    if (Math.abs(gesture.zoom - gesture.baseZoom) < 0.0005) {
+      zoomGestureActiveRef.current = false
+      return
+    }
     userAdjustedRef.current = true
     lastWheelZoomAtRef.current = performance.now()
     lastZoomOriginRef.current = gesture.origin
+    // Stay-put scrolls. Keep the scroll listener from measuring on each write.
+    zoomGestureActiveRef.current = true
     applyPaperZoomStayPut(
       scroller,
       sheet,
@@ -661,6 +723,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       gesture.origin,
       apply,
     )
+    zoomGestureActiveRef.current = false
   }
   pushZoomGestureRef.current = (factor, origin) => {
     if (!(factor > 0) || Math.abs(factor - 1) < 1e-8) return
@@ -675,21 +738,33 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       zoomTo((current?.zoom ?? viewRef.current.zoom) * factor, origin)
       return
     }
-    const sheet = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
-      ?? scroller.querySelector<HTMLElement>('.unified-paper')
-    if (!current) zoomGestureRef.current = beginPaperZoomGesture(scroller, sheet, viewRef.current, origin)
+    if (!current) {
+      const sheet = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
+        ?? scroller.querySelector<HTMLElement>('.unified-paper')
+      zoomPlaneRef.current = resolvePaperViewTarget(sheet, scroller)
+      zoomGestureActiveRef.current = true
+      zoomGestureRef.current = beginPaperZoomGesture(scroller, sheet, viewRef.current, origin)
+    }
     const gesture = stepPaperZoomGesture(zoomGestureRef.current!, factor)
     zoomGestureRef.current = gesture
-    const plane = resolvePaperViewTarget(sheet, scroller)
+    const plane = zoomPlaneRef.current
     if (!applyPaperZoomGestureFrame(plane, gesture)) {
       zoomGestureRef.current = null
+      zoomPlaneRef.current = null
       clearPaperZoomGestureFrame(plane, gesture.rotation)
       userAdjustedRef.current = true
       zoomTo(gesture.zoom, gesture.origin)
+      zoomGestureActiveRef.current = false
       return
     }
-    if (zoomGestureTimerRef.current) window.clearTimeout(zoomGestureTimerRef.current)
-    zoomGestureTimerRef.current = window.setTimeout(() => commitZoomGestureRef.current(), PAPER_ZOOM_GESTURE_SETTLE_MS)
+    clearZoomGestureClock()
+    zoomGestureTimerRef.current = window.setTimeout(() => {
+      zoomGestureTimerRef.current = 0
+      zoomGestureCommitFrameRef.current = window.requestAnimationFrame(() => {
+        zoomGestureCommitFrameRef.current = 0
+        commitZoomGestureRef.current()
+      })
+    }, PAPER_ZOOM_GESTURE_SETTLE_MS)
   }
 
   const rotateBy = useCallback((delta: number) => {
@@ -730,8 +805,9 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     rotateBy,
     resetView,
     setView,
+    liveZoom,
     recalled,
-  }), [recalled, resetView, rotateBy, setView, view, zoomBy, zoomTo])
+  }), [liveZoom, recalled, resetView, rotateBy, setView, view, zoomBy, zoomTo])
 
   const controller = useMemo<PaperViewController>(() => ({
     zoomBy,

@@ -268,6 +268,7 @@ export const applyPaperViewToElements = (
     target.classList.toggle('is-view-transformed', active)
     target.classList.toggle('is-view-zoomed', zoom !== 1)
     target.classList.toggle('is-view-rotated', view.rotation !== 0)
+    target.classList.remove('is-zoom-gesture')
   }
   if (paper && paper !== target) {
     stripLocalSheetZoom(paper)
@@ -464,8 +465,14 @@ export const centrePageInViewportIfFits = (scroller: HTMLElement | null, sheet: 
 /**
  * One camera zoom: CSS zoom on the sheet plane, pan as native scroller offset.
  * Capture the paper point under the origin, apply zoom, restore that point.
+ *
+ * Wheel notches, pinch samples and zoom-button repeats often arrive more than
+ * one frame apart. Committing CSS zoom in that gap reflows the sheet and
+ * re-rasterizes type on every step — the hitch while zooming in or out.
+ * The preview stays a compositor scale until the burst has been quiet for this
+ * long, then one sharp camera is committed.
  */
-export const PAPER_ZOOM_GESTURE_SETTLE_MS = 80
+export const PAPER_ZOOM_GESTURE_SETTLE_MS = 240
 
 /**
  * A wheel or pinch burst. `zoom` is the camera the gesture has reached;
@@ -520,7 +527,11 @@ export const paperZoomPreviewStyle = (
   }
 }
 
-/** False when the sheet is rotated: one transform-origin cannot serve both. */
+/**
+ * False when the sheet is rotated: one transform-origin cannot serve both.
+ * Only the scale string is written on later frames. Repeating the origin and
+ * `will-change` still invalidates style on some Chromium builds.
+ */
 export const applyPaperZoomGestureFrame = (plane: HTMLElement | null, gesture: PaperZoomGesture) => {
   if (!plane || gesture.rotation !== 0) return false
   const preview = paperZoomPreviewStyle(gesture)
@@ -528,14 +539,18 @@ export const applyPaperZoomGestureFrame = (plane: HTMLElement | null, gesture: P
     clearPaperZoomGestureFrame(plane, gesture.rotation)
     return true
   }
-  plane.style.transformOrigin = preview.transformOrigin
-  plane.style.transform = preview.transform
-  plane.style.willChange = 'transform'
+  if (plane.style.transformOrigin !== preview.transformOrigin) {
+    plane.style.transformOrigin = preview.transformOrigin
+  }
+  if (plane.style.willChange !== 'transform') plane.style.willChange = 'transform'
+  if (!plane.classList.contains('is-zoom-gesture')) plane.classList.add('is-zoom-gesture')
+  if (plane.style.transform !== preview.transform) plane.style.transform = preview.transform
   return true
 }
 
 export const clearPaperZoomGestureFrame = (plane: HTMLElement | null, rotation: number) => {
   if (!plane) return
+  plane.classList.remove('is-zoom-gesture')
   plane.style.willChange = 'auto'
   if (rotation) {
     plane.style.transform = `rotate(${rotation}deg)`

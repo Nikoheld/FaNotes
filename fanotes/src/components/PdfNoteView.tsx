@@ -986,12 +986,27 @@ export function PdfNoteView({
     : zoomMode === 'fit-width' ? 'Breite' : zoomMode === 'fit-page' ? 'Seite' : `${Math.round(appliedScale * 100)} %`
   const zoomOutDisabled = cameraHosted ? cameraZoom <= VIEW_ZOOM_MIN + 1e-6 : appliedScale <= MIN_SCALE
   const zoomInDisabled = cameraHosted ? cameraZoom >= readSharedZoomMax() - 1e-6 : appliedScale >= MAX_SCALE
+  const stepCameraZoom = (direction: 1 | -1) => {
+    const cam = cameraRef.current
+    const scroller = resolvePaperZoomScroller(pagesRef.current)
+    if (!cam || !scroller) return
+    setCameraMode('custom')
+    const live = cam.liveZoom()
+    const next = pdfZoomStep(live, direction, VIEW_ZOOM_MIN, readSharedZoomMax())
+    if (Math.abs(next - live) < 0.0005) return
+    expectedZoomRef.current = next
+    const box = scroller.getBoundingClientRect()
+    cam.zoomBy(next - live, {
+      x: box.left + scroller.clientWidth / 2,
+      y: box.top + scroller.clientHeight / 2,
+    })
+  }
   const zoomOut = () => {
-    if (cameraHosted) applyCameraZoom(pdfZoomStep(cameraZoom, -1, VIEW_ZOOM_MIN, readSharedZoomMax()), 'custom')
+    if (cameraHosted) stepCameraZoom(-1)
     else changeScale(appliedScale - SCALE_STEP)
   }
   const zoomIn = () => {
-    if (cameraHosted) applyCameraZoom(pdfZoomStep(cameraZoom, 1, VIEW_ZOOM_MIN, readSharedZoomMax()), 'custom')
+    if (cameraHosted) stepCameraZoom(1)
     else changeScale(appliedScale + SCALE_STEP)
   }
   const fitWidth = () => {
