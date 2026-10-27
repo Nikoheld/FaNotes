@@ -1849,14 +1849,26 @@ async function relocatePath(source, destination) {
   await fsp.rm(source, { recursive: true, force: true })
 }
 
+function fileBirthIso(info) {
+  const birth = info && info.birthtime
+  if (!birth || typeof birth.getTime !== 'function') return ''
+  const ms = birth.getTime()
+  if (!Number.isFinite(ms)) return ''
+  const year = new Date(ms).getUTCFullYear()
+  if (year < 2000 || year > 2100) return ''
+  return new Date(ms).toISOString()
+}
+
 function entryFromStat(root, absolutePath, info, children, color) {
   const extension = info.isFile() ? path.extname(absolutePath).slice(1).toLocaleLowerCase('en-US') : undefined
+  const createdAt = fileBirthIso(info)
   return {
     name: path.basename(absolutePath),
     relativePath: toRelativePosix(root, absolutePath),
     kind: info.isDirectory() ? 'folder' : 'file',
     ...(extension ? { extension } : {}),
     modifiedAt: info.mtime.toISOString(),
+    ...(createdAt ? { createdAt } : {}),
     size: info.isFile() ? info.size : undefined,
     ...(info.isDirectory() && color ? { color } : {}),
     ...(info.isDirectory() ? { children: children ?? [] } : {}),

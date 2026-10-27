@@ -32,8 +32,12 @@ assert.doesNotMatch(viewerHtml, /<script(?![^>]*\bsrc=)/u)
 assert.match(viewerHtml, /src="\/user\/profile\.js"/u)
 assert.match(viewerHtml, /href="\/user\/profile\.css"/u)
 assert.match(viewerScript, /profile-joined/u)
+assert.match(viewerScript, /profile-cal/u)
+assert.match(viewerScript, /data-active-days/u)
+assert.match(viewerScript, /data-appearance/u)
 assert.match(viewerStyle, /#0b0b12/u)
 assert.match(viewerStyle, /#a795ff/u)
+assert.match(viewerStyle, /data-appearance="light"/u)
 
 const serverSource = readFileSync(join(siteRoot, 'server.mjs'), 'utf8')
 const serviceSource = readFileSync(join(siteRoot, 'deploy', 'fanotes-site.service'), 'utf8')
@@ -119,7 +123,10 @@ try {
   const defaults = await vite.ssrLoadModule('/src/defaults.ts')
   assert.equal(card.profileVisibilityControl, profile.setProfileVisibility)
   const cardSource = readFileSync(join(appRoot, 'src/components/ProfileSettingsCard.tsx'), 'utf8')
+  const appSource = readFileSync(join(appRoot, 'src/App.tsx'), 'utf8')
+  assert.match(appSource, /<ProfileOverviewPublisher /u)
   assert.match(cardSource, /enableProfileOverview\(\{/u)
+  assert.match(cardSource, /appearance: profileAppearanceFromSettings\(current\)/u)
   assert.match(cardSource, /loadNotes: readVaultNotes/u)
   assert.match(cardSource, /stillEnabled: \(\) => toggleGeneration\.current === token/u)
   assert.doesNotMatch(cardSource, /await readVaultNotes\(\)/u)
@@ -158,7 +165,25 @@ try {
   assert.equal(summary.durationLabel, pageStats.formatPageDwell(summary.dwellMs))
   assert.equal(summary.durationLabel, '1 h 6 min')
   assert.deepEqual(summary.activeDays, ['2024-03-02', '2024-04-01', '2024-11-19'])
+  assert.equal(summary.dayCounts['2024-03-02'], 2)
+  assert.equal(summary.dayCounts['2024-04-01'], 1)
   assert.equal(summary.joinedAt, joinedAt)
+  assert.equal(profile.earliestProfileJoinedAt([]), null)
+  assert.equal(profile.earliestProfileJoinedAt([{
+    createdAt: 'not-a-date',
+    pageStats: { createdAt: '', firstOpenedAt: new Date().toISOString(), dwellMs: 1, activeDays: ['2020-01-02'] },
+  }]), '2020-01-02T00:00:00.000Z')
+  assert.equal(profile.earliestProfileJoinedAt([{
+    createdAt: '2022-08-01T00:00:00.000Z',
+    pageStats: { createdAt: '1999-01-01T00:00:00.000Z', firstOpenedAt: '', dwellMs: 1, activeDays: ['1999-05-05'] },
+  }]), '2022-08-01T00:00:00.000Z')
+  assert.equal(profile.resolveProfileTheme('system'), 'dark')
+  assert.equal(profile.resolveProfileTheme('forest'), 'forest')
+  assert.equal(profile.resolveProfileTheme('nope'), 'dark')
+  const appearance = profile.profileAppearanceFromSettings({ theme: 'sepia', accent: '#C4554D', accentSecondary: 'red' })
+  assert.equal(appearance.theme, 'sepia')
+  assert.equal(appearance.accent, '#c4554d')
+  assert.equal(appearance.accentSecondary, '#6b7280')
   assert.doesNotMatch(JSON.stringify(summary), /GEHEIMER-NOTIZTEXT/u)
   assert.equal(profile.normalizeUsername('FeldNotiz'), 'feldnotiz')
   assert.equal(profile.normalizeUsername('ab'), null)
@@ -294,6 +319,98 @@ try {
   assert.equal(readBack.noteCount, 2)
   assert.equal(readBack.durationLabel, '1 h 6 min')
   assert.deepEqual(readBack.activeDays, summary.activeDays)
+  assert.equal(readBack.dayCounts['2024-03-02'], 2)
+
+  const earlyOwner = 'f'.repeat(32)
+  const claimedLate = '2026-10-27T12:00:00.000Z'
+  await profile.claimUsername({ username: 'fruehername', ownerId: earlyOwner, joinedAt: claimedLate, port, origin })
+  const rawPublish = await fetch(`${origin}/api/v1/profile`, {
+    method: 'PUT',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      schemaVersion: 1,
+      action: 'publish',
+      username: 'fruehername',
+      ownerId: earlyOwner,
+      noteCount: 1,
+      dwellMs: 1000,
+      activeDays: ['2021-05-04'],
+    }),
+  })
+  assert.equal(rawPublish.status, 200)
+  const shownEarly = await rawPublish.json()
+  assert.equal(shownEarly.joinedAt, '2021-05-04T00:00:00.000Z')
+  const storedEarly = JSON.parse(readFileSync(join(profileDir, 'names', 'fruehername.json'), 'utf8'))
+  assert.equal(storedEarly.joinedAt, claimedLate, 'the active day corrects the page without rewriting the claim')
+  const historyNotes = [{
+    pageStats: {
+      createdAt: '2021-05-04T08:00:00.000Z',
+      firstOpenedAt: '2026-10-27T12:00:00.000Z',
+      dwellMs: 1000,
+      activeDays: ['2021-05-04'],
+    },
+  }]
+  const corrected = await profile.publishProfile({
+    username: 'fruehername',
+    ownerId: earlyOwner,
+    notes: historyNotes,
+    port,
+    origin,
+  })
+  assert.equal(corrected.joinedAt, '2021-05-04T00:00:00.000Z')
+  assert.equal(JSON.parse(readFileSync(join(profileDir, 'names', 'fruehername.json'), 'utf8')).joinedAt, '2021-05-04T00:00:00.000Z')
+  const laterPublish = await profile.publishProfile({
+    username: 'fruehername',
+    ownerId: earlyOwner,
+    notes: [],
+    joinedAt: '2026-12-01T00:00:00.000Z',
+    port,
+    origin,
+  })
+  assert.equal(laterPublish.joinedAt, '2021-05-04T00:00:00.000Z', 'a later publish must not move the join date forward')
+  const earlierClaim = await profile.claimUsername({
+    username: 'fruehername',
+    ownerId: earlyOwner,
+    joinedAt: '2019-03-03T00:00:00.000Z',
+    port,
+    origin,
+  })
+  assert.equal(earlierClaim.joinedAt, '2019-03-03T00:00:00.000Z')
+  const themed = await profile.publishProfile({
+    username: 'fruehername',
+    ownerId: earlyOwner,
+    notes: historyNotes,
+    appearance: { theme: 'forest', accent: '#0F7B6C', accentSecondary: '#D9730D' },
+    port,
+    origin,
+  })
+  assert.equal(themed.theme, 'forest')
+  assert.equal(themed.accent, '#0f7b6c')
+  assert.equal(themed.accentSecondary, '#d9730d')
+  assert.equal(themed.joinedAt, '2019-03-03T00:00:00.000Z')
+  const evil = await fetch(`${origin}/api/v1/profile`, {
+    method: 'PUT',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      schemaVersion: 1,
+      action: 'publish',
+      username: 'fruehername',
+      ownerId: earlyOwner,
+      noteCount: 1,
+      dwellMs: 1000,
+      activeDays: ['2021-05-04'],
+      theme: 'expression(alert(1))',
+      accent: '#0f7b6c;color:red',
+      accentSecondary: 'red',
+    }),
+  })
+  assert.equal(evil.status, 200)
+  const evilBody = await evil.text()
+  assert.doesNotMatch(evilBody, /expression|alert|color:red/u)
+  const evilJson = JSON.parse(evilBody)
+  assert.equal(evilJson.theme, 'forest')
+  assert.equal(evilJson.accent, '#0f7b6c')
+  assert.equal(evilJson.accentSecondary, '#d9730d')
 
   const servedViewer = await fetch(`${origin}/user/feldnotiz`)
   assert.equal(servedViewer.status, 200)
@@ -512,9 +629,13 @@ try {
     assert.match(viewed.text, /2024-01-15T09:30:00\.000Z/u)
     assert.match(viewed.text, /notizen\s+2/iu)
     assert.match(viewed.text, /1 h 6 min/u)
-    assert.match(viewed.text, /2024-03-02/u)
-    assert.match(viewed.text, /2024-04-01/u)
-    assert.match(viewed.text, /2024-11-19/u)
+    assert.match(viewed.text, /aktive tage/iu)
+    assert.match(viewed.text, /letzten Jahr/u)
+    const markedDays = await viewed.cdp.evaluate(`document.querySelector('.profile-cal')?.getAttribute('data-active-days') || ''`)
+    assert.match(markedDays, /2024-03-02/u)
+    assert.match(markedDays, /2024-04-01/u)
+    assert.match(markedDays, /2024-11-19/u)
+    assert.equal(await viewed.cdp.evaluate(`document.querySelectorAll('.profile-cal-grid .profile-cal-cell').length`), 53 * 7)
     assert.doesNotMatch(viewed.text, /GEHEIMER-NOTIZTEXT/u)
   }
 

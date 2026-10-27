@@ -7,6 +7,7 @@ import {
   enableProfileOverview,
   loadProfileNotes,
   normalizeUsername,
+  profileAppearanceFromSettings,
   ProfileRequestError,
   profilePath,
   resolveProfileOrigin,
@@ -57,7 +58,7 @@ export function ProfileSettingsCard({
       const claimed = await claimUsername({
         username: draft,
         ownerId,
-        joinedAt: new Date().toISOString(),
+        loadNotes: readVaultNotes,
         port: profilePort,
         origin: profileOrigin,
       })
@@ -108,6 +109,7 @@ export function ProfileSettingsCard({
           username: current.profileUsername,
           ownerId: current.profileOwnerId,
           loadNotes: readVaultNotes,
+          appearance: profileAppearanceFromSettings(current),
           port: profilePort,
           origin: profileOrigin,
           stillEnabled: () => toggleGeneration.current === token,

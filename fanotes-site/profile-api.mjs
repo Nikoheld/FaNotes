@@ -14,6 +14,8 @@ const OWNER_PATTERN = /^[a-f0-9]{32}$/u
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/u
 const MAX_BODY_BYTES = 64 * 1024
 const MAX_ACTIVE_DAYS = 800
+const THEME_IDS = new Set(['dark', 'light', 'midnight', 'forest', 'aurora', 'sepia'])
+const HEX_COLOR = /^#[0-9a-f]{6}$/iu
 
 const RESERVED_USERNAMES = new Set([
   'about', 'admin', 'api', 'assets', 'css', 'download', 'fanotes', 'favicon',
@@ -152,6 +154,40 @@ const parseJoined = (value) => {
   return new Date(ms).toISOString()
 }
 
+/** A later date never replaces the stored one. An earlier date may. */
+const earlierJoined = (current, requested) => {
+  const stored = parseJoined(current)
+  const next = parseJoined(requested)
+  if (stored && next) return next < stored ? next : stored
+  return stored || next || (typeof current === 'string' ? current : new Date().toISOString())
+}
+
+const visibleJoinedAt = (record) => {
+  let best = parseJoined(record?.joinedAt)
+  const days = Array.isArray(record?.activeDays) ? record.activeDays : []
+  for (const day of days) {
+    if (typeof day !== 'string' || !DAY_PATTERN.test(day)) continue
+    const stamp = parseJoined(`${day}T00:00:00.000Z`)
+    if (stamp && (!best || stamp < best)) best = stamp
+  }
+  return best || record?.joinedAt
+}
+
+const sanitizeHex = (value) => (typeof value === 'string' && HEX_COLOR.test(value) ? value.toLowerCase() : '')
+
+const sanitizeTheme = (value) => (typeof value === 'string' && THEME_IDS.has(value) ? value : '')
+
+const sanitizeDayCounts = (raw, activeDays) => {
+  const counts = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return counts
+  for (const day of activeDays) {
+    const value = raw[day]
+    if (!Number.isSafeInteger(value) || value <= 0 || value > 10000) continue
+    counts[day] = value
+  }
+  return counts
+}
+
 const sanitizeActivity = (raw) => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail(400, 'Ungültige Übersicht.')
   if (!Number.isSafeInteger(raw.noteCount) || raw.noteCount < 0 || raw.noteCount > 1_000_000) fail(400, 'Ungültige Übersicht.')
@@ -197,10 +233,10 @@ const claimRecord = async (raw) => {
     if (previous?.ownerId === ownerId) await fs.rm(namePath(previousName), { force: true })
   }
   const joinedAt = existing?.ownerId === ownerId
-    ? existing.joinedAt
+    ? earlierJoined(existing.joinedAt, raw.joinedAt)
     : parseJoined(raw.joinedAt) || new Date().toISOString()
   const record = existing?.ownerId === ownerId
-    ? { ...existing, username, path: profilePath(username), joinedAt: existing.joinedAt }
+    ? { ...existing, username, path: profilePath(username), joinedAt }
     : { ...identityOf({ ownerId, joinedAt }, username), joinedAt }
   await writeRecord(username, record)
   await writeOwnerName(ownerId, username)
@@ -212,13 +248,25 @@ const publishRecord = async (raw) => {
   const existing = await readRecord(username)
   if (!existing || existing.ownerId !== ownerId) fail(409, 'Zuerst den Benutzernamen festlegen.')
   const activity = sanitizeActivity(raw)
+  const joinedAt = earlierJoined(existing.joinedAt, raw.joinedAt)
+  const theme = sanitizeTheme(raw.theme) || sanitizeTheme(existing.theme)
+  const accent = sanitizeHex(raw.accent) || sanitizeHex(existing.accent)
+  const accentSecondary = sanitizeHex(raw.accentSecondary) || sanitizeHex(existing.accentSecondary)
+  const dayCounts = raw.dayCounts === undefined && existing.dayCounts
+    ? sanitizeDayCounts(existing.dayCounts, activity.activeDays)
+    : sanitizeDayCounts(raw.dayCounts, activity.activeDays)
   const record = {
     ...identityOf(existing, username),
+    joinedAt,
     public: true,
     noteCount: activity.noteCount,
     dwellMs: activity.dwellMs,
     durationLabel: activity.durationLabel,
     activeDays: activity.activeDays,
+    ...(theme ? { theme } : {}),
+    ...(accent ? { accent } : {}),
+    ...(accentSecondary ? { accentSecondary } : {}),
+    ...(raw.dayCounts !== undefined || existing.dayCounts ? { dayCounts } : {}),
   }
   await writeRecord(username, record)
   return record
@@ -243,17 +291,28 @@ const claimResponse = (record) => ({
   public: record.public === true,
 })
 
-const overviewResponse = (record) => ({
-  public: true,
-  username: record.username,
-  path: record.path,
-  link: `${publicOrigin()}${record.path}`,
-  joinedAt: record.joinedAt,
-  noteCount: record.noteCount,
-  dwellMs: record.dwellMs,
-  durationLabel: record.durationLabel,
-  activeDays: record.activeDays,
-})
+const overviewResponse = (record) => {
+  const theme = sanitizeTheme(record.theme)
+  const accent = sanitizeHex(record.accent)
+  const accentSecondary = sanitizeHex(record.accentSecondary)
+  const activeDays = Array.isArray(record.activeDays) ? record.activeDays : []
+  const dayCounts = record.dayCounts ? sanitizeDayCounts(record.dayCounts, activeDays) : null
+  return {
+    public: true,
+    username: record.username,
+    path: record.path,
+    link: `${publicOrigin()}${record.path}`,
+    joinedAt: visibleJoinedAt(record),
+    noteCount: record.noteCount,
+    dwellMs: record.dwellMs,
+    durationLabel: record.durationLabel,
+    activeDays,
+    ...(theme ? { theme } : {}),
+    ...(accent ? { accent } : {}),
+    ...(accentSecondary ? { accentSecondary } : {}),
+    ...(dayCounts ? { dayCounts } : {}),
+  }
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',

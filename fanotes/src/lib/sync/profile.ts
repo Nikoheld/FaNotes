@@ -25,6 +25,7 @@ export type ProfileVaultNode = {
   relativePath: string
   kind: 'file' | 'folder'
   extension?: string
+  createdAt?: string
   children?: ProfileVaultNode[]
 }
 
@@ -33,10 +34,21 @@ export type ProfileNoteSource = {
   path?: string
   title?: string
   content?: string
+  /** File birth time, when the vault entry has one. Not a page-stat default. */
   createdAt?: string
+  firstOpenedAt?: string
   dwellMs?: number
   activeDays?: readonly string[]
-  pageStats?: Pick<PageStats, 'createdAt' | 'dwellMs' | 'activeDays'> | null
+  pageStats?: Pick<PageStats, 'createdAt' | 'firstOpenedAt' | 'dwellMs' | 'activeDays'> | null
+}
+
+export const PROFILE_THEMES = ['dark', 'light', 'midnight', 'forest', 'aurora', 'sepia'] as const
+export type ProfileTheme = (typeof PROFILE_THEMES)[number]
+
+export type ProfileAppearance = {
+  theme: ProfileTheme
+  accent: string
+  accentSecondary: string
 }
 
 export type ProfileActivity = {
@@ -45,6 +57,8 @@ export type ProfileActivity = {
   dwellMs: number
   durationLabel: string
   activeDays: string[]
+  /** How many notes were used on that day. Missing days count as one on the page. */
+  dayCounts: Record<string, number>
 }
 
 export type ProfileClaim = {
@@ -59,6 +73,9 @@ export type PublicProfile = ProfileActivity & {
   username: string
   path: string
   public: true
+  theme?: ProfileTheme
+  accent?: string
+  accentSecondary?: string
 }
 
 export type ProfileHttpRequest = {
@@ -122,17 +139,97 @@ const daysFrom = (value: readonly string[] | undefined) => {
   return days
 }
 
+const HEX_COLOR = /^#[0-9a-f]{6}$/iu
+
+/** A stored instant. Empty and out-of-range values are ignored, never replaced with now. */
+export const profileStamp = (value: unknown): string | null => {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 40) return null
+  const ms = Date.parse(value)
+  if (!Number.isFinite(ms)) return null
+  const date = new Date(ms)
+  const year = date.getUTCFullYear()
+  if (year < 2000 || year > 2100) return null
+  return date.toISOString()
+}
+
+const dayStamp = (day: string) => (DAY_PATTERN.test(day) ? profileStamp(`${day}T00:00:00.000Z`) : null)
+
+export const earlierProfileStamp = (left: unknown, right: unknown): string | null => {
+  const first = profileStamp(left)
+  const second = profileStamp(right)
+  if (first && second) return first < second ? first : second
+  return first || second
+}
+
+/**
+ * The earliest real note history. Page-stat fields are read as stored.
+ * A missing timestamp is skipped so it cannot become "today".
+ */
+export const earliestProfileJoinedAt = (notes: readonly ProfileNoteSource[]): string | null => {
+  let best: string | null = null
+  const consider = (value: unknown) => {
+    const stamp = profileStamp(value)
+    if (!stamp) return
+    if (!best || stamp < best) best = stamp
+  }
+  for (const note of notes) {
+    const stats = note.pageStats
+    consider(stats?.createdAt)
+    consider(stats?.firstOpenedAt)
+    consider(note.createdAt)
+    consider(note.firstOpenedAt)
+    for (const day of daysFrom(stats?.activeDays ?? note.activeDays)) consider(dayStamp(day))
+  }
+  return best
+}
+
+const normalizeHex = (value: unknown, fallback: string) => {
+  if (typeof value === 'string' && HEX_COLOR.test(value)) return value.toLowerCase()
+  return fallback
+}
+
+/** `system` becomes the device's light or dark theme. The visitor's OS is not consulted. */
+export const resolveProfileTheme = (theme: string | undefined): ProfileTheme => {
+  if (theme === 'system') {
+    try {
+      const light = typeof window !== 'undefined'
+        && typeof window.matchMedia === 'function'
+        && window.matchMedia('(prefers-color-scheme: light)').matches
+      return light ? 'light' : 'dark'
+    } catch {
+      return 'dark'
+    }
+  }
+  if (theme && (PROFILE_THEMES as readonly string[]).includes(theme)) return theme as ProfileTheme
+  return 'dark'
+}
+
+export const profileAppearanceFromSettings = (settings: {
+  theme?: string
+  accent?: string
+  accentSecondary?: string
+}): ProfileAppearance => ({
+  theme: resolveProfileTheme(settings.theme),
+  accent: normalizeHex(settings.accent, '#2a6f97'),
+  accentSecondary: normalizeHex(settings.accentSecondary, '#6b7280'),
+})
+
 /**
  * Joined time, note count, total visible time, and the dates those notes were
  * used. Titles, paths, and written text are not copied into the result.
  */
 export const summarizeProfileActivity = (notes: readonly ProfileNoteSource[], joinedAt: string): ProfileActivity => {
   const days = new Set<string>()
+  const dayCounts: Record<string, number> = {}
   let dwellMs = 0
   for (const note of notes) {
     const stats = note.pageStats
     dwellMs += finiteMs(stats?.dwellMs ?? note.dwellMs)
-    for (const day of daysFrom(stats?.activeDays ?? note.activeDays)) days.add(day)
+    const seen = new Set(daysFrom(stats?.activeDays ?? note.activeDays))
+    for (const day of seen) {
+      days.add(day)
+      dayCounts[day] = (dayCounts[day] ?? 0) + 1
+    }
   }
   return {
     joinedAt,
@@ -140,6 +237,7 @@ export const summarizeProfileActivity = (notes: readonly ProfileNoteSource[], jo
     dwellMs,
     durationLabel: formatPageDwell(dwellMs),
     activeDays: [...days].sort(),
+    dayCounts,
   }
 }
 
@@ -161,9 +259,10 @@ export const loadProfileNotes = async (
       try {
         const raw = await readStats(node.relativePath)
         if (raw && typeof raw === 'object') {
-          const record = raw as { dwellMs?: unknown; activeDays?: unknown }
+          const record = raw as { createdAt?: unknown; firstOpenedAt?: unknown; dwellMs?: unknown; activeDays?: unknown }
           pageStats = {
-            createdAt: '',
+            createdAt: typeof record.createdAt === 'string' ? record.createdAt : '',
+            firstOpenedAt: typeof record.firstOpenedAt === 'string' ? record.firstOpenedAt : '',
             dwellMs: finiteMs(record.dwellMs),
             activeDays: Array.isArray(record.activeDays) ? record.activeDays.filter((day): day is string => typeof day === 'string') : [],
           }
@@ -171,7 +270,10 @@ export const loadProfileNotes = async (
       } catch {
         pageStats = null
       }
-      notes.push({ pageStats })
+      notes.push({
+        createdAt: typeof node.createdAt === 'string' ? node.createdAt : undefined,
+        pageStats,
+      })
     }
   }
   await walk(nodes)
@@ -243,12 +345,23 @@ export async function claimUsername(input: {
   username: string
   ownerId: string
   joinedAt?: string
+  loadNotes?: () => Promise<readonly ProfileNoteSource[]> | readonly ProfileNoteSource[]
   port: ProfilePort
   origin?: string
 }): Promise<ProfileClaim> {
   const username = requireUsername(input.username)
   const ownerId = requireOwner(input.ownerId)
   const origin = (input.origin ?? resolveProfileOrigin()).replace(/\/$/u, '')
+  let joinedAt = input.joinedAt
+  if (input.loadNotes) {
+    try {
+      const notes = await adoptNotes(input.loadNotes)
+      joinedAt = earlierProfileStamp(joinedAt, earliestProfileJoinedAt(notes)) ?? joinedAt
+    } catch {
+      // No history yet: the claim time below is the fallback.
+    }
+  }
+  if (!joinedAt) joinedAt = new Date().toISOString()
   const response = await input.port.exchange({
     method: 'PUT',
     url: `${origin}${PROFILE_API_PATH}`,
@@ -258,7 +371,7 @@ export async function claimUsername(input: {
       action: 'claim',
       username,
       ownerId,
-      ...(input.joinedAt ? { joinedAt: input.joinedAt } : {}),
+      joinedAt,
     }),
   })
   if (response.status < 200 || response.status >= 300) refuse(response)
@@ -282,6 +395,7 @@ const activityBody = (notes: readonly ProfileNoteSource[], joinedAt: string) => 
     noteCount: activity.noteCount,
     dwellMs: activity.dwellMs,
     activeDays: activity.activeDays,
+    dayCounts: activity.dayCounts,
   }
 }
 
@@ -290,12 +404,14 @@ export async function publishProfile(input: {
   ownerId: string
   notes: readonly ProfileNoteSource[]
   joinedAt?: string
+  appearance?: ProfileAppearance
   port: ProfilePort
   origin?: string
 }): Promise<PublicProfile> {
   const username = requireUsername(input.username)
   const ownerId = requireOwner(input.ownerId)
   const origin = (input.origin ?? resolveProfileOrigin()).replace(/\/$/u, '')
+  const joinedAt = earlierProfileStamp(input.joinedAt, earliestProfileJoinedAt(input.notes))
   const response = await input.port.exchange({
     method: 'PUT',
     url: `${origin}${PROFILE_API_PATH}`,
@@ -305,7 +421,13 @@ export async function publishProfile(input: {
       action: 'publish',
       username,
       ownerId,
-      ...activityBody(input.notes, input.joinedAt ?? ''),
+      ...activityBody(input.notes, joinedAt ?? input.joinedAt ?? ''),
+      ...(joinedAt ? { joinedAt } : {}),
+      ...(input.appearance ? {
+        theme: input.appearance.theme,
+        accent: input.appearance.accent,
+        accentSecondary: input.appearance.accentSecondary,
+      } : {}),
     }),
   })
   if (response.status < 200 || response.status >= 300) refuse(response)
@@ -331,6 +453,33 @@ export async function unpublishProfile(input: {
     body: JSON.stringify({ schemaVersion: 1, action: 'unpublish', username, ownerId }),
   })
   if (response.status < 200 || response.status >= 300) refuse(response)
+}
+
+/**
+ * Republishes an overview that is already public. An empty read is ignored so
+ * a vault that is not open yet cannot replace the stored activity with zeros.
+ */
+export async function refreshPublicOverview(input: {
+  username: string
+  ownerId: string
+  loadNotes: () => Promise<readonly ProfileNoteSource[]> | readonly ProfileNoteSource[]
+  appearance?: ProfileAppearance
+  port: ProfilePort
+  origin?: string
+  stillEnabled?: () => boolean
+}): Promise<PublicProfile | null> {
+  if (input.stillEnabled && !input.stillEnabled()) return null
+  const notes = await adoptNotes(input.loadNotes)
+  if (input.stillEnabled && !input.stillEnabled()) return null
+  if (!notes.length) return null
+  return publishProfile({
+    username: input.username,
+    ownerId: input.ownerId,
+    notes,
+    appearance: input.appearance,
+    port: input.port,
+    origin: input.origin,
+  })
 }
 
 /** The settings switch. It publishes the summary, or withdraws it. It does not claim a name. */
@@ -371,6 +520,7 @@ export async function enableProfileOverview(input: {
   port: ProfilePort
   origin?: string
   joinedAt?: string
+  appearance?: ProfileAppearance
   stillEnabled?: () => boolean
   onPublic?: (overview: PublicProfile) => void
 }): Promise<PublicProfile | null> {
@@ -385,6 +535,7 @@ export async function enableProfileOverview(input: {
     ownerId: input.ownerId,
     notes,
     joinedAt: input.joinedAt,
+    appearance: input.appearance,
     port: input.port,
     origin: input.origin,
   })
@@ -434,6 +585,21 @@ export const parsePublicProfile = (parsed: Record<string, unknown> | null): Publ
   if (!Array.isArray(parsed.activeDays) || parsed.activeDays.some((day) => typeof day !== 'string')) return null
   const username = normalizeUsername(parsed.username)
   if (!username) return null
+  const dayCounts: Record<string, number> = {}
+  if (parsed.dayCounts && typeof parsed.dayCounts === 'object' && !Array.isArray(parsed.dayCounts)) {
+    const counts = parsed.dayCounts as Record<string, unknown>
+    for (const day of Object.keys(counts)) {
+      const value = counts[day]
+      if (DAY_PATTERN.test(day) && typeof value === 'number' && Number.isSafeInteger(value) && value > 0) dayCounts[day] = value
+    }
+  }
+  const theme = typeof parsed.theme === 'string' && (PROFILE_THEMES as readonly string[]).includes(parsed.theme)
+    ? parsed.theme as ProfileTheme
+    : undefined
+  const accent = typeof parsed.accent === 'string' && HEX_COLOR.test(parsed.accent) ? parsed.accent.toLowerCase() : undefined
+  const accentSecondary = typeof parsed.accentSecondary === 'string' && HEX_COLOR.test(parsed.accentSecondary)
+    ? parsed.accentSecondary.toLowerCase()
+    : undefined
   return {
     public: true,
     username,
@@ -443,5 +609,9 @@ export const parsePublicProfile = (parsed: Record<string, unknown> | null): Publ
     dwellMs: parsed.dwellMs,
     durationLabel: parsed.durationLabel,
     activeDays: parsed.activeDays.filter((day): day is string => typeof day === 'string'),
+    dayCounts,
+    ...(theme ? { theme } : {}),
+    ...(accent ? { accent } : {}),
+    ...(accentSecondary ? { accentSecondary } : {}),
   }
 }

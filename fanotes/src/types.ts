@@ -9,6 +9,8 @@ export type VaultEntry = {
   kind: 'file' | 'folder'
   extension?: string
   modifiedAt?: string
+  /** File birth time when the filesystem recorded one. Absent when it did not. */
+  createdAt?: string
   size?: number
   color?: string
   /** Absolute directories on the desktop, or other vault folders in the browser, whose files appear in this folder. */
