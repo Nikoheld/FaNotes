@@ -149,6 +149,7 @@ const near = (actual, expected, message, tolerance = 0.51) => assert.ok(Math.abs
   assert.ok(section, 'a header lands on free paper')
   assert.equal(section.parentId, null, 'a section has no parent')
   assert.equal(section.width, 1, 'a section is full width')
+  assert.equal(section.title, '', 'a new section starts without a typed title')
   near(board.sheet.height, 1273 + SECTION_HEADER_PX, 'the page grew by the header')
   near(board.topPx(above), 300, 'ink above the header stays')
   near(board.topPx(below), 600 + SECTION_HEADER_PX, 'ink below moved down by the header')
@@ -289,6 +290,8 @@ const near = (actual, expected, message, tolerance = 0.51) => assert.ok(Math.abs
   const legacy = deserializeSections([{ id: 'old', top: .1, bodyTop: .2, collapsed: false, hidden: null }], () => [])
   assert.equal(legacy[0].parentId, null, 'an old section has no parent')
   assert.equal(legacy[0].width, 1, 'an old section is full width')
+  assert.equal(legacy[0].title, '', 'an old section has no typed title')
+  assert.equal(Object.hasOwn(serializeSections(legacy)[0], 'title'), false, 'an empty title is not stored')
   const cleaned = deserializeSections([
     { id: 'p', top: .1, bodyTop: .16, collapsed: false },
     { id: 'c', top: .2, bodyTop: .25, parentId: 'p', width: .5, collapsed: false },
@@ -520,6 +523,41 @@ const near = (actual, expected, message, tolerance = 0.51) => assert.ok(Math.abs
   assert.equal(subInk.points[0].x, siblingInk.points[0].x, 'reordering does not slide ink sideways')
 }
 
+// ── A typed title is stored with the band and does not move ink ────────────
+{
+  const board = createBoard(1273)
+  const section = board.insert(180, 'chapter')
+  const sub = board.insertSub(board.px(section.bodyTop.y) + 48, 'task')
+  const ink = board.write(board.px(sub.bodyTop.y) + 18, 14)
+  const x = ink.points[0].x
+  const y = ink.points[0].y
+  const edge = section.top.y
+  section.title = 'Kapitel'
+  sub.title = 'Aufgabe 1'
+  applySectionWidth(section, 0.46)
+  assert.equal(ink.points[0].x, x, 'a typed title does not move ink x')
+  assert.equal(ink.points[0].y, y, 'a typed title does not move ink y')
+  assert.equal(section.top.y, edge, 'a typed title does not move the band')
+  assert.equal(section.title, 'Kapitel')
+  assert.equal(sub.title, 'Aufgabe 1')
+  board.collapse(section)
+  const saved = JSON.parse(JSON.stringify(serializeSections(board.sections)))
+  assert.equal(saved[0].title, 'Kapitel', 'the section title is saved')
+  const parked = saved[0].hidden.sections.find((entry) => entry.id === 'task')
+  assert.equal(parked.title, 'Aufgabe 1', 'a subsection title is saved inside the collapsed body')
+  const loaded = deserializeSections(saved, (value) => Array.isArray(value) ? value : [])
+  assert.equal(loaded[0].title, 'Kapitel')
+  assert.equal(loaded[0].hidden.sections.find((entry) => entry.id === 'task').title, 'Aufgabe 1', 'a parked subsection title comes back')
+  assert.equal(ink.points[0].x, x, 'saving a title does not move ink')
+  section.title = '   '
+  assert.equal(Object.hasOwn(serializeSections(board.sections)[0], 'title'), false, 'whitespace is not a title')
+  const blank = deserializeSections([{ id: 'blank', top: .1, bodyTop: .2, collapsed: false, title: '   \n  ' }], () => [])
+  assert.equal(blank[0].title, '', 'a blank saved title loads as empty')
+  const capped = deserializeSections([{ id: 'long', top: .1, bodyTop: .2, collapsed: false, title: ` ${'ä'.repeat(200)}` }], () => [])
+  assert.equal(capped[0].title.length, 120, 'a typed title is capped')
+  assert.equal(capped[0].title.startsWith('ä'), true)
+}
+
 // ── Board wiring ───────────────────────────────────────────────────────────
 {
   const board = readFileSync(new URL('../src/components/DrawingBoard.tsx', import.meta.url), 'utf8')
@@ -552,6 +590,23 @@ const near = (actual, expected, message, tolerance = 0.51) => assert.ok(Math.abs
   const setWidth = board.match(/const setSubsectionWidth = useCallback\(\(id: string, width: number\) => \{[\s\S]*?\n  \}, \[commitSections\]\)/)
   assert.ok(setWidth, 'width is stored on the subsection')
   assert.doesNotMatch(setWidth[0], /setPageExtent|shiftFrom|foldHeading|contentWidth|onSectionFold|strokesRef/, 'storing a width does not move ink or the note text')
+  const setTitle = board.match(/const setSectionTitle = useCallback\(\(id: string, value: string\) => \{[\s\S]*?\n  \}, \[commitSections, setDirty\]\)/)
+  assert.ok(setTitle, 'a typed title is stored on the section')
+  assert.doesNotMatch(setTitle[0], /afterSectionChange|setPageExtent|shiftFrom|foldHeading|contentWidth|onSectionFold|growSheetBy|strokesRef/, 'typing a title does not move ink, the page, or the note text')
+  assert.match(board, /inert=\{overlayInert\(inline, inputActive\) \|\| undefined\}/, 'keyboard mode keeps the ink board inert')
+  assert.match(board, /closest\('\.unified-paper'\)/, 'the keyboard title is portaled onto the paper')
+  assert.match(board, /inline && !inputActive && sectionTitleHost \? createPortal\(/, 'a typed title in keyboard mode is outside the inert board')
+  assert.match(board, /className="lw-ink-section-titles"/, 'keyboard titles sit in their own layer')
+  assert.match(board, /const forwardSectionTitlePointer = \(event: ReactPointerEvent<HTMLInputElement>\) => \{/, 'pen and touch on the title are forwarded')
+  assert.match(board, /event\.pointerType !== 'pen' && event\.pointerType !== 'touch'/, 'only a pen or a finger passes through the title')
+  assert.match(board, /input\.style\.pointerEvents = 'none'/, 'the title drops out of the hit test for the rest of the stroke')
+  assert.match(board, /new PointerEvent\('pointerdown'/, 'the stroke starts on the sheet under the title')
+  assert.match(board, /if \(inputActive && forwardSectionTitlePointer\(event\)\) return/, 'handwriting the title still reaches the sheet')
+  const titleClass = board.match(/className=\{`lw-ink-section-title\$\{isSub \? ' is-subsection' : ''\}`\}/)
+  assert.ok(titleClass, 'the title field is one input')
+  assert.doesNotMatch(titleClass[0], /lw-ink-section-control/, 'the title field is not pen chrome')
+  assert.match(board, /aria-label="Titel"/, 'the title field reuses the Titel label')
+  assert.match(board, /\.lw-ink-section-title\{position:absolute;left:78px;/, 'the typed title starts after the section buttons and keeps a fixed size')
 }
 
 await server.close()

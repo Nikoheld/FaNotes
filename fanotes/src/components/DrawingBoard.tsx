@@ -195,6 +195,7 @@ import {
   type InkSection,
   type SerializedSection,
   SECTION_HEADER_PX,
+  SECTION_TITLE_MAX,
   applySectionWidth,
   clampSectionWidth,
   collapseSection,
@@ -522,6 +523,59 @@ const elementFromPointSafe = (x: number, y: number) => {
   } catch {
     return null
   }
+}
+
+/**
+ * Pen and touch on a section title must keep drawing. The field is the hit
+ * target, so this drops it for the rest of the gesture and starts the stroke
+ * on whatever sits underneath (the sheet). A mouse click is left on the field.
+ */
+const forwardSectionTitlePointer = (event: ReactPointerEvent<HTMLInputElement>) => {
+  if (event.pointerType !== 'pen' && event.pointerType !== 'touch') return false
+  const input = event.currentTarget
+  event.preventDefault()
+  event.stopPropagation()
+  try {
+    if (input.hasPointerCapture(event.pointerId)) input.releasePointerCapture(event.pointerId)
+  } catch {
+    // The pen must not stay captured on the title.
+  }
+  input.style.pointerEvents = 'none'
+  const restore = () => {
+    input.style.pointerEvents = ''
+    window.removeEventListener('pointerup', restore, true)
+    window.removeEventListener('pointercancel', restore, true)
+  }
+  window.addEventListener('pointerup', restore, true)
+  window.addEventListener('pointercancel', restore, true)
+  const below = elementFromPointSafe(event.clientX, event.clientY)
+  if (!(below instanceof Element) || below === input) return true
+  const source = event.nativeEvent
+  try {
+    below.dispatchEvent(new PointerEvent('pointerdown', {
+      bubbles: true,
+      cancelable: true,
+      clientX: source.clientX,
+      clientY: source.clientY,
+      screenX: source.screenX,
+      screenY: source.screenY,
+      pointerId: source.pointerId,
+      pointerType: source.pointerType,
+      pressure: source.pressure,
+      tiltX: source.tiltX,
+      tiltY: source.tiltY,
+      twist: source.twist,
+      width: source.width,
+      height: source.height,
+      button: source.button,
+      buttons: source.buttons,
+      isPrimary: source.isPrimary,
+      view: window,
+    }))
+  } catch {
+    // The sheet still receives the rest of the gesture: the field is transparent.
+  }
+  return true
 }
 
 /** Real hit under the cursor — ignores leftover pointer-capture retargeting. */
@@ -1557,6 +1611,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   /** Collapsible sections, kept sorted by header top. The ref is what callbacks read; the state renders the bands. */
   const sectionsRef = useRef<InkSection<InkStroke>[]>([])
   const [sections, setSections] = useState<InkSection<InkStroke>[]>([])
+  // Keyboard mode makes this board inert, so the title field is portaled onto the paper.
+  const [sectionTitleHost, setSectionTitleHost] = useState<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    const host = inline ? (boardRef.current?.closest('.unified-paper') as HTMLElement | null) : null
+    setSectionTitleHost((current) => current === host ? current : host)
+  }, [inline])
   /** The next tap on the sheet inserts a section or a subsection header there. */
   const [sectionPlacing, setSectionPlacing] = useState<null | 'section' | 'subsection'>(null)
   const sectionPlacingRef = useRef<null | 'section' | 'subsection'>(null)
@@ -3953,7 +4013,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [clearRecognitionScope, recognitionLanguage, sourceHeight])
 
   // ── Collapsible sections ──────────────────────────────────────────────────
-  // A section is a handwritten title band with a body below it. Collapsing lifts
+  // A section is a title band (typed or handwritten) with a body below it. Collapsing lifts
   // the body ink into the section record and pulls the rest of the page up; the
   // flat stroke list stays the only thing painting, erasing and saving look at.
 
@@ -4078,7 +4138,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return true
   }, [afterSectionChange, commitSections, forEachTrackedStroke, growSheetBy, sheetPx])
 
-  /** Sections whose header band already holds ink; the others show the „Titel“ placeholder. */
+  /** Sections whose header band already holds ink. A typed title hides the placeholder too. */
   const titledSectionIds = useMemo(() => {
     void revision
     return new Set(sections.filter((section) => headerStrokeCount(strokesRef.current, section) > 0).map((section) => section.id))
@@ -4139,6 +4199,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     handle.addEventListener('pointerup', onUp)
     handle.addEventListener('pointercancel', onUp)
   }, [moveSectionTo, pointFromEvent, sheetPx])
+
+  /**
+   * Typed title only. Ink, the page, the note text and the markdown heading stay
+   * where they are — a title is not a fold and not a stroke.
+   */
+  const setSectionTitle = useCallback((id: string, value: string) => {
+    const section = sectionsRef.current.find((entry) => entry.id === id)
+    if (!section) return
+    const next = value.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, SECTION_TITLE_MAX)
+    if (section.title === next) return
+    section.title = next
+    commitSections([...sectionsRef.current])
+    setDirty(true)
+  }, [commitSections, setDirty])
 
   /** Band width only. Ink, the page and the note text stay where they are. */
   const setSubsectionWidth = useCallback((id: string, width: number) => {
@@ -7050,6 +7124,36 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     else setArtColor(color)
   }
 
+  const sectionTitleField = (section: InkSection<InkStroke>, isSub: boolean) => {
+    const handwritten = titledSectionIds.has(section.id)
+    const typed = section.title.trim().length > 0
+    return (
+      <input
+        className={`lw-ink-section-title${isSub ? ' is-subsection' : ''}`}
+        value={section.title}
+        placeholder={handwritten || typed ? '' : 'Titel'}
+        aria-label="Titel"
+        maxLength={SECTION_TITLE_MAX}
+        autoComplete="off"
+        spellCheck={false}
+        onChange={(event) => setSectionTitle(section.id, event.target.value)}
+        onBlur={(event) => setSectionTitle(section.id, event.target.value.trim())}
+        onKeyDown={(event) => {
+          event.stopPropagation()
+          if (event.key === 'Enter' || event.key === 'Escape') {
+            event.preventDefault()
+            event.currentTarget.blur()
+          }
+        }}
+        onPointerDown={(event) => {
+          // Pen mode: the pen and a finger keep writing or panning. A mouse click types.
+          if (inputActive && forwardSectionTitlePointer(event)) return
+          event.stopPropagation()
+        }}
+      />
+    )
+  }
+
   const paintToolClass = selectionMode
     ? 'tool-select'
     : tool === 'pen' && inkMode === 'drawing'
@@ -7673,7 +7777,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                 const isSub = section.parentId !== null
                 const bandWidth = clampSectionWidth(section.width)
                 const bodyEnd = section.collapsed ? section.bodyTop.y : (nextSectionTop(sections, section) ?? 1)
-                const titled = titledSectionIds.has(section.id)
                 const hiddenCount = section.hidden
                   ? section.hidden.strokes.length + section.hidden.sections.reduce((sum, child) => sum + (child.hidden?.strokes.length ?? 0), 0)
                   : 0
@@ -7718,7 +7821,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                       >
                         <GripVertical size={14} />
                       </button>}
-                      {!titled && <span className="lw-ink-section-placeholder" aria-hidden="true">Titel</span>}
+                      {!(inline && !inputActive) && sectionTitleField(section, isSub)}
                       {section.collapsed && <span className="lw-ink-section-badge" title={`${hiddenCount} Striche`}>Eingeklappt</span>}
                       <button
                         type="button"
@@ -7768,6 +7871,27 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               {sectionPlacing && <div ref={sectionGuideRef} className="lw-ink-section-guide" style={{ top: '-9999px', opacity: 0 }}><span>{sectionPlacing === 'subsection' ? 'Neuer Unterabschnitt' : 'Neuer Abschnitt'}</span></div>}
               {sectionDropY !== null && <div className="lw-ink-section-guide is-drop" style={{ top: `${sectionDropY * 100}%`, opacity: 1 }}><span>Neue Position</span></div>}
             </div>}
+            {inline && !inputActive && sectionTitleHost ? createPortal(
+              <div className="lw-ink-section-titles">
+                {sections.map((section) => {
+                  const bandWidth = clampSectionWidth(section.width)
+                  return (
+                    <div
+                      key={section.id}
+                      className="lw-ink-section-title-slot"
+                      style={{
+                        top: `${section.top.y * 100}%`,
+                        height: `${Math.max(0, section.bodyTop.y - section.top.y) * 100}%`,
+                        width: `${bandWidth * 100}%`,
+                      }}
+                    >
+                      {sectionTitleField(section, section.parentId !== null)}
+                    </div>
+                  )
+                })}
+              </div>,
+              sectionTitleHost,
+            ) : null}
             <div className="lw-page-overlay">
             {selectionRect && <div
               className={`lw-selection-rect ${selectionMode ? 'is-selecting' : 'is-selected'} ${selectionPurpose === 'edit' && !selectionMode ? 'is-editable' : ''}`}
@@ -8351,6 +8475,13 @@ const drawingBoardStyles = `
 .lw-ink-section-toggle:hover{background:#efeafd}
 .lw-ink-section-toggle:active{transform:translateY(-50%) scale(.94)}
 .lw-ink-section-placeholder{position:absolute;left:12%;top:50%;transform:translateY(-50%);color:rgba(74,63,176,.34);font:600 22px/1 var(--ui-font,system-ui);letter-spacing:.02em;pointer-events:none;user-select:none}
+.lw-ink-section-title{position:absolute;left:78px;right:44px;top:50%;height:34px;transform:translateY(-50%);margin:0;padding:0 2px;border:0;border-radius:6px;background:transparent;color:#252630;font:600 22px/1 var(--ui-font,system-ui);letter-spacing:.02em;outline:none;pointer-events:auto;z-index:2}
+.lw-ink-section-header .lw-ink-section-title,.lw-ink-section-title-slot .lw-ink-section-title{font:600 22px/1 var(--ui-font,system-ui)}
+.lw-ink-section-title.is-subsection,.lw-ink-section-header .lw-ink-section-title.is-subsection,.lw-ink-section-title-slot .lw-ink-section-title.is-subsection{height:28px;font-size:18px}
+.lw-ink-section-title::placeholder{color:rgba(74,63,176,.34)}
+.lw-ink-section-title:focus{background:rgba(255,255,255,.55)}
+.lw-ink-section-titles{position:absolute;inset:0;z-index:6;pointer-events:none}
+.lw-ink-section-title-slot{position:absolute;left:0;overflow:hidden;pointer-events:none}
 .lw-ink-section-badge{position:absolute;right:48px;top:50%;transform:translateY(-50%);padding:3px 9px;border-radius:999px;color:var(--accent,#2a6f97);background:rgba(var(--accent-rgb),.14);font:700 12px/1.3 var(--ui-font,system-ui);white-space:nowrap;pointer-events:none}
 .lw-ink-section-remove{position:absolute;right:14px;top:50%;width:22px;height:22px;display:grid;place-items:center;transform:translateY(-50%);border:0;border-radius:6px;color:rgba(74,63,176,.6);background:transparent;cursor:pointer;pointer-events:auto;opacity:.65}
 .lw-ink-section-remove:hover{color:#b3261e;background:rgba(220,60,60,.12);opacity:1}

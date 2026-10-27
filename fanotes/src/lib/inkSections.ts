@@ -1,8 +1,8 @@
 /**
  * Collapsible handwriting sections.
  *
- * A section is a horizontal band on the ink sheet: a header (where the title is
- * written by hand) followed by a body that reaches down to the next section's
+ * A section is a horizontal band on the ink sheet: a header (the title, typed
+ * or written by hand) followed by a body that reaches down to the next section's
  * header — or, for the last section, to the end of the page. A subsection is
  * the same kind of band, nested one level inside a section. Collapsing a
  * section lifts its body ink off the sheet and pulls everything below up by
@@ -35,6 +35,8 @@ export const SUBSECTION_MIN_BODY_PX = 96
 /** Subsection band width, as a fraction of the sheet. The left edge stays put. */
 export const SUBSECTION_WIDTH_MIN = 0.28
 export const SUBSECTION_WIDTH_MAX = 1
+/** Typed title length. Longer text is cut; blank text is the same as no title. */
+export const SECTION_TITLE_MAX = 120
 
 export type SectionStroke = { points: StrokePoint[] }
 
@@ -65,6 +67,8 @@ export type InkSection<S extends SectionStroke = SectionStroke> = {
   /** Header bottom edge = body top, 0–1 of the sheet (or of the parent body box while parked). */
   bodyTop: StrokePoint
   collapsed: boolean
+  /** Typed title. Empty when the header is still the placeholder or only ink. */
+  title: string
   hidden: HiddenSectionInk<S> | null
 }
 
@@ -163,6 +167,12 @@ export const collapsibleBodyEnd = <S extends SectionStroke>(strokes: readonly S[
 export const topLevelSectionIndex = <S extends SectionStroke>(sections: readonly InkSection<S>[], id: string) => (
   sortSections(sections).filter((section) => section.parentId === null).findIndex((section) => section.id === id)
 )
+
+/** A saved or pasted title: no control characters, no surrounding space, capped. */
+export const readSectionTitle = (value: unknown) => {
+  if (typeof value !== 'string') return ''
+  return value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, SECTION_TITLE_MAX)
+}
 
 /** Keeps a band width inside the limits. Anything else is full width. */
 export const clampSectionWidth = (value: unknown) => {
@@ -270,6 +280,7 @@ export const planInsertSection = <S extends SectionStroke>(
       top: sectionPoint(0, y),
       bodyTop: sectionPoint(0, y + headerPx / sheet.height),
       collapsed: false,
+      title: '',
       hidden: null,
     },
   }
@@ -583,6 +594,8 @@ export type SerializedSection = {
   collapsed: boolean
   parentId?: string
   width?: number
+  /** Omitted when the band has no typed title, so older drawings stay valid. */
+  title?: string
   hidden: { widthPx: number; heightPx: number; strokes: unknown[]; sections?: SerializedSection[] } | null
 }
 
@@ -593,6 +606,7 @@ const serializeOne = <S extends SectionStroke>(section: InkSection<S>): Serializ
   collapsed: section.collapsed,
   ...(section.parentId ? { parentId: section.parentId } : {}),
   ...(section.width !== 1 ? { width: section.width } : {}),
+  ...(section.title.trim() ? { title: section.title.trim().slice(0, SECTION_TITLE_MAX) } : {}),
   hidden: section.hidden ? {
     widthPx: section.hidden.widthPx,
     heightPx: section.hidden.heightPx,
@@ -644,6 +658,7 @@ const readSectionList = <S extends SectionStroke>(value: unknown, parseStrokes: 
         top: sectionPoint(0, top),
         bodyTop: sectionPoint(0, bodyTop),
         collapsed: raw.collapsed === true,
+        title: readSectionTitle(raw.title),
         hidden: raw.collapsed === true ? hidden : null,
       },
     })
