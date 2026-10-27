@@ -680,7 +680,7 @@ export function SettingsModal({
       <section ref={modalRef} className="settings-modal" role="dialog" aria-modal="true" aria-label="Einstellungen" onPointerDown={(event) => event.stopPropagation()}>
         <aside className="settings-nav">
           <div className="settings-brand">
-            <span className="brand-glyph"><Settings2 size={17} /></span>
+            <span className="brand-glyph"><Settings2 size={14} /></span>
             <div><strong>Einstellungen</strong><small>FaNotes an dich anpassen</small></div>
           </div>
           <label className="settings-search">
@@ -717,10 +717,10 @@ export function SettingsModal({
                   const item = SECTIONS.find((candidate) => candidate.id === sectionId)!
                   const Icon = item.icon
                   return (
-                    <button key={item.id} type="button" className={active === item.id ? 'active' : ''} onClick={() => setActive(item.id)}>
-                      <Icon size={16} />
+                    <button key={item.id} type="button" className={active === item.id ? 'active' : ''} title={item.description} onClick={() => setActive(item.id)}>
+                      <Icon size={14} />
                       <span><b>{item.label}</b><small>{item.description}</small></span>
-                      <ChevronRight size={14} />
+                      <ChevronRight size={12} />
                     </button>
                   )
                 })}
