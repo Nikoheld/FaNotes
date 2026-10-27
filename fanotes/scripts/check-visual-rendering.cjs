@@ -377,7 +377,10 @@ void (async () => {
     await cdp.evaluate(`document.querySelector('.settings-modal button[aria-label="Schließen"]').click()`)
     await waitFor(cdp, `!document.querySelector('.settings-modal')`, 'Das Schliessen des Einstellungsfensters')
 
-    await cdp.evaluate(`document.querySelector('button[aria-label="AI-Assistent öffnen"]').click()`)
+    const aiButtonBefore = await cdp.evaluate(`Boolean(document.querySelector('button[aria-label="AI-Assistent öffnen"]'))`)
+    if (aiButtonBefore) throw new Error('Die AI-Schaltfläche ist ohne verbundenen Anbieter sichtbar.')
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', modifiers: 10, key: 'A', code: 'KeyA', windowsVirtualKeyCode: 65 })
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', modifiers: 10, key: 'A', code: 'KeyA', windowsVirtualKeyCode: 65 })
     await waitFor(cdp, `Boolean(document.querySelector('.ai-panel'))`, 'Der gemeinsame AI-Bereich')
     const aiPanel = await cdp.evaluate(`(() => {
       const panel = document.querySelector('.ai-panel')
