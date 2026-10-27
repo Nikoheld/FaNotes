@@ -214,6 +214,8 @@ import {
   planBodyRoom,
   planCollapse,
   planInsertSection,
+  planMergeSections,
+  sectionsAfterMerge,
   reorderSection,
   sectionDropIndex,
   sectionMoveLayout,
@@ -1645,6 +1647,29 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [sectionPlacing, setSectionPlacing] = useState<null | 'section' | 'subsection'>(null)
   const sectionPlacingRef = useRef<null | 'section' | 'subsection'>(null)
   sectionPlacingRef.current = sectionPlacing
+  const [mergePicking, setMergePicking] = useState(false)
+  const [mergePickIds, setMergePickIds] = useState<string[]>([])
+  const mergePlan = useMemo(
+    () => (mergePicking ? planMergeSections(sections, mergePickIds) : null),
+    [mergePickIds, mergePicking, sections],
+  )
+  const mergeKeeperId = useMemo(() => {
+    if (!mergePicking) return null
+    if (mergePlan) return mergePlan.keeperId
+    let keeper: InkSection<InkStroke> | null = null
+    for (const section of sections) {
+      if (!mergePickIds.includes(section.id)) continue
+      if (!keeper || section.top.y < keeper.top.y) keeper = section
+    }
+    return keeper?.id ?? null
+  }, [mergePickIds, mergePicking, mergePlan, sections])
+  useEffect(() => {
+    if (!mergePicking) return
+    setMergePickIds((current) => {
+      const next = current.filter((id) => sections.some((section) => section.id === id))
+      return next.length === current.length ? current : next
+    })
+  }, [mergePicking, sections])
   const sectionGuideRef = useRef<HTMLDivElement | null>(null)
   const [selectionPurpose, setSelectionPurpose] = useState<SelectionPurpose>('conversion')
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null)
@@ -4153,6 +4178,51 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     afterSectionChange({ resetHistory })
   }, [afterSectionChange, cloneSectionStroke, commitSections, forEachTrackedStroke, growSheetBy])
 
+  const toggleMergePick = useCallback((id: string) => {
+    setMergePickIds((current) => (current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]))
+  }, [])
+
+  /**
+   * The topmost chosen band stays and covers every band down through the
+   * lowest chosen one. Those bands are removed. Ink stays on the page. A
+   * collapsed band is opened first so its ink is not dropped with the band.
+   */
+  const commitMerge = useCallback(() => {
+    if (activeStrokeRef.current) return
+    let resetHistory = false
+    const release = (target: InkSection<InkStroke>) => {
+      if (!target.collapsed) return
+      const sheet = growSheetBy(target.hidden?.heightPx ?? 0)
+      strokesRef.current = expandSection(strokesRef.current, sectionsRef.current, target, sheet, forEachTrackedStroke, cloneSectionStroke)
+      resetHistory = true
+    }
+    const expandTree = (target: InkSection<InkStroke>) => {
+      release(target)
+      for (const child of sectionsRef.current.filter((entry) => entry.parentId === target.id)) expandTree(child)
+    }
+    const chosen = () => mergePickIds.filter((id) => sectionsRef.current.some((entry) => entry.id === id))
+    for (const id of chosen()) {
+      const section = sectionsRef.current.find((entry) => entry.id === id)
+      if (section) expandTree(section)
+    }
+    let plan = planMergeSections(sectionsRef.current, chosen())
+    if (!plan) return
+    for (const id of plan.removeIds) {
+      const section = sectionsRef.current.find((entry) => entry.id === id)
+      if (section) expandTree(section)
+    }
+    const keeperId = plan.keeperId
+    const keeper = sectionsRef.current.find((entry) => entry.id === keeperId)
+    if (keeper) expandTree(keeper)
+    plan = planMergeSections(sectionsRef.current, chosen())
+    if (!plan) return
+    commitSections(sectionsAfterMerge(sectionsRef.current, plan.removeIds))
+    if (resetHistory) indexedStrokeCountRef.current = handwritingStrokes(strokesRef.current).length
+    setMergePicking(false)
+    setMergePickIds([])
+    afterSectionChange({ resetHistory })
+  }, [afterSectionChange, cloneSectionStroke, commitSections, forEachTrackedStroke, growSheetBy, mergePickIds])
+
   /** A stroke near the bottom of a body pushes the next header down: writing inside a section never runs out of room. */
   const ensureSectionRoom = useCallback((stroke: InkStroke) => {
     if (!sectionsRef.current.length) return false
@@ -4175,6 +4245,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     clearRecognitionScope()
     closeMathSolverSelection()
     closeMathCorrectionSession()
+    setMergePicking(false)
+    setMergePickIds([])
     setSectionPlacing((current) => current === kind ? null : kind)
   }, [clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection])
 
@@ -7271,6 +7343,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       setSectionPlacing(null)
       return
     }
+    if (event.key === 'Escape' && mergePicking) {
+      event.preventDefault()
+      setMergePicking(false)
+      setMergePickIds([])
+      return
+    }
     if (event.key === 'Escape') {
       if (activePointerRef.current !== null || activeStrokeRef.current || lastCapturedPointerIdRef.current !== null) {
         event.preventDefault()
@@ -7409,6 +7487,36 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (stripUsesPenColor) choosePenColor(color)
     else setArtColor(color)
   }
+
+  const mergeActions = (labeled: boolean) => (
+    sectionsEnabled && inkMode === 'writing' && sections.length > 1 ? <>
+      <button
+        type="button"
+        className={`lw-draw-subtle ${mergePicking ? 'is-active' : ''}`}
+        aria-pressed={mergePicking}
+        title="Abschnitte antippen · der oberste bleibt und deckt die anderen ab"
+        onClick={() => {
+          if (mergePicking) {
+            setMergePicking(false)
+            setMergePickIds([])
+            return
+          }
+          setSectionPlacing(null)
+          setMergePicking(true)
+        }}
+      >
+        <ListChecks size={14} /> {labeled ? <span className="lw-tool-label">Zusammenführen</span> : 'Zusammenführen'}
+      </button>
+      {mergePlan && <button
+        type="button"
+        className="lw-draw-subtle"
+        title="Die ausgewählten Abschnitte im obersten zusammenführen · die Schrift bleibt, wo sie ist"
+        onClick={commitMerge}
+      >
+        <Check size={14} /> {labeled ? <span className="lw-tool-label">Im obersten zusammenführen</span> : 'Im obersten zusammenführen'}
+      </button>}
+    </> : null
+  )
 
   const sectionTitleField = (section: InkSection<InkStroke>, isSub: boolean) => {
     const handwritten = titledSectionIds.has(section.id)
@@ -7797,6 +7905,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           {sectionsEnabled && inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${sectionPlacing === 'subsection' ? 'is-active' : ''}`} aria-pressed={sectionPlacing === 'subsection'} onClick={() => beginBandPlacement('subsection')} title="Unterabschnitt in den Abschnitt einfügen · die Breite am rechten Rand ziehen, der Text bleibt stehen">
             <ListTree size={14} /> <span className="lw-tool-label">Unterabschnitt</span>
           </button>}
+          {mergeActions(true)}
           {selectionPurpose === 'edit' && selectionRect && !selectionMode && <>
             <button type="button" className="lw-draw-subtle" onClick={copySelectedInk} title="Auswahl duplizieren"><Copy size={14} /> <span className="lw-tool-label">Kopieren</span></button>
             <button type="button" className="lw-draw-subtle lw-danger" onClick={deleteSelectedInk} title="Auswahl löschen"><Trash2 size={14} /> <span className="lw-tool-label">Löschen</span></button>
@@ -8200,10 +8309,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                   : 0
                 const noun = isSub ? 'Unterabschnitt' : 'Abschnitt'
                 const canMove = sections.some((other) => other !== section && other.parentId === section.parentId)
+                const mergeIncluded = mergePicking && (section.id === mergeKeeperId || mergePickIds.includes(section.id) || Boolean(mergePlan?.removeIds.includes(section.id)))
                 return (
                   <Fragment key={section.id}>
                     <div
-                      className={`lw-ink-section-header${isSub ? ' is-subsection' : ''}${section.collapsed ? ' is-collapsed' : ''}`}
+                      className={`lw-ink-section-header${isSub ? ' is-subsection' : ''}${section.collapsed ? ' is-collapsed' : ''}${mergePicking ? ' is-merge-armed' : ''}${mergeIncluded ? (section.id === mergeKeeperId ? ' is-merge-keeper' : ' is-merge-picked') : ''}`}
+                      onClick={mergePicking ? (event) => {
+                        const target = event.target
+                        if (!(target instanceof Element) || target.closest('.lw-ink-section-control, .lw-ink-section-title')) return
+                        toggleMergePick(section.id)
+                      } : undefined}
                       style={{
                         top: `${section.top.y * 100}%`,
                         height: `${(section.bodyTop.y - section.top.y) * 100}%`,
@@ -8251,6 +8366,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                       >
                         <X size={13} />
                       </button>
+                      {mergePicking && <button
+                        type="button"
+                        className="lw-ink-section-control lw-ink-section-pick"
+                        aria-pressed={mergeIncluded}
+                        aria-label="Abschnitt zum Zusammenführen auswählen"
+                        title="Abschnitte antippen · der oberste bleibt und deckt die anderen ab"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          toggleMergePick(section.id)
+                        }}
+                      >
+                        {mergeIncluded ? <Check size={13} /> : null}
+                      </button>}
                       <div
                         className="lw-ink-section-control lw-ink-section-width is-left"
                         data-edge="left"
@@ -8324,10 +8452,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                 {sections.map((section) => {
                   const bandRight = clampSectionWidth(section.width)
                   const bandLeft = clampSectionLeft(section.left, bandRight)
+                  const mergeIncluded = mergePicking && (section.id === mergeKeeperId || mergePickIds.includes(section.id) || Boolean(mergePlan?.removeIds.includes(section.id)))
                   return (
                     <div
                       key={section.id}
-                      className="lw-ink-section-title-slot"
+                      className={`lw-ink-section-title-slot${mergeIncluded ? (section.id === mergeKeeperId ? ' is-merge-keeper' : ' is-merge-picked') : ''}`}
                       style={{
                         top: `${section.top.y * 100}%`,
                         height: `${Math.max(0, section.bodyTop.y - section.top.y) * 100}%`,
@@ -8336,6 +8465,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                       }}
                     >
                       {sectionTitleField(section, section.parentId !== null)}
+                      {mergePicking && <button
+                        type="button"
+                        className="lw-ink-section-merge-key"
+                        aria-pressed={mergeIncluded}
+                        aria-label="Abschnitt zum Zusammenführen auswählen"
+                        title="Abschnitte antippen · der oberste bleibt und deckt die anderen ab"
+                        onClick={() => toggleMergePick(section.id)}
+                      >
+                        {mergeIncluded ? <Check size={14} /> : null}
+                      </button>}
                     </div>
                   )
                 })}
@@ -8834,6 +8973,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           {sectionsEnabled && inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${sectionPlacing === 'subsection' ? 'is-active' : ''}`} aria-pressed={sectionPlacing === 'subsection'} onClick={() => beginBandPlacement('subsection')} title="Unterabschnitt in den Abschnitt einfügen · die Breite am rechten Rand ziehen, der Text bleibt stehen">
             <ListTree size={14} /> Unterabschnitt
           </button>}
+          {mergeActions(false)}
           {selectionPurpose === 'edit' && selectionRect && !selectionMode && <>
             <button type="button" className="lw-draw-subtle" onClick={copySelectedInk} title="Auswahl duplizieren"><Copy size={14} /> Kopieren</button>
             <button type="button" className="lw-draw-subtle lw-danger" onClick={deleteSelectedInk} title="Auswahl löschen"><Trash2 size={14} /> Löschen</button>
@@ -8921,6 +9061,18 @@ const drawingBoardStyles = `
 .lw-ink-section-header.is-collapsed{border-bottom:2px dashed rgba(var(--accent-rgb),.45);background:linear-gradient(90deg,rgba(var(--accent-rgb),.16),rgba(var(--accent-rgb),.06) 55%,rgba(var(--accent-rgb),.03))}
 .lw-ink-section-width{position:absolute;top:0;right:-6px;width:14px;height:100%;padding:0;border:0;background:transparent;cursor:ew-resize;pointer-events:auto;touch-action:none}
 .lw-ink-section-width.is-left{left:-6px;right:auto}
+.lw-ink-section-header.is-merge-armed::before{content:"";position:absolute;inset:0;z-index:1;pointer-events:auto;cursor:pointer}
+.lw-ink-section-header.is-merge-armed .lw-ink-section-control{z-index:2}
+.lw-ink-section-header.is-merge-picked{box-shadow:inset 0 0 0 2px rgba(var(--accent-rgb),.5)}
+.lw-ink-section-header.is-merge-keeper{box-shadow:inset 0 0 0 2px rgba(var(--accent-rgb),.95)}
+.lw-ink-section-header.is-merge-armed .lw-ink-section-title{right:70px}
+.lw-ink-section-pick{position:absolute;right:40px;top:50%;width:22px;height:22px;display:grid;place-items:center;transform:translateY(-50%);border:1px solid rgba(var(--accent-rgb),.4);border-radius:6px;color:var(--accent,#2a6f97);background:rgba(255,255,255,.96);cursor:pointer;pointer-events:auto}
+.lw-ink-section-pick[aria-pressed="true"]{background:rgba(var(--accent-rgb),.18)}
+.lw-ink-section-header.is-merge-armed .lw-ink-section-badge{right:74px}
+.lw-ink-section-merge-key{position:absolute;right:8px;top:50%;width:28px;height:28px;display:grid;place-items:center;transform:translateY(-50%);border:1px solid rgba(var(--accent-rgb),.45);border-radius:8px;color:var(--accent,#2a6f97);background:rgba(255,255,255,.96);cursor:pointer;pointer-events:auto;z-index:3}
+.lw-ink-section-merge-key[aria-pressed="true"]{background:rgba(var(--accent-rgb),.18)}
+.lw-ink-section-title-slot.is-merge-picked{box-shadow:inset 0 0 0 2px rgba(var(--accent-rgb),.5)}
+.lw-ink-section-title-slot.is-merge-keeper{box-shadow:inset 0 0 0 2px rgba(var(--accent-rgb),.95)}
 .lw-ink-section-width::after{content:"";position:absolute;top:8px;bottom:8px;left:5px;width:3px;border-radius:2px;background:rgba(var(--accent-rgb),.7)}
 .lw-ink-section-edge{position:absolute;width:2px;margin-left:-1px;background:rgba(var(--accent-rgb),.28);pointer-events:none}
 .lw-ink-section-rail.is-subsection{left:40px}

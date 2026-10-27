@@ -31,6 +31,8 @@ const {
   planBodyRoom,
   planCollapse,
   planInsertSection,
+  planMergeSections,
+  sectionsAfterMerge,
   reorderSection,
   sectionDropIndex,
   sectionReorderMark,
@@ -653,6 +655,78 @@ const near = (actual, expected, message, tolerance = 0.51) => assert.ok(Math.abs
   assert.equal(capped[0].title.startsWith('ä'), true)
 }
 
+// ── Merge keeps the top band and leaves every stroke where it is ───────────
+{
+  const board = createBoard(1600)
+  const first = board.insert(120, 'first')
+  const middle = board.insert(520, 'middle')
+  const third = board.insert(900, 'third')
+  const tail = board.insert(1280, 'tail')
+  const sub = board.insertSub(board.px(first.bodyTop.y) + 36, 'sub')
+  assert.ok(first && middle && third && tail && sub)
+  first.title = 'Oben'
+  middle.title = 'Mitte'
+  const inFirst = board.write(board.px(first.bodyTop.y) + 8, 12)
+  const inSub = board.write(board.px(sub.bodyTop.y) + 8, 12)
+  const inMiddle = board.write(board.px(middle.top.y) + 6, 10)
+  const inThird = board.write(board.px(third.bodyTop.y) + 8, 12)
+  const inTail = board.write(board.px(tail.bodyTop.y) + 8, 12)
+  applySharedSectionEdges(board.sections, first.id, { left: 0.08, width: 0.74 })
+  const marks = [inFirst, inSub, inMiddle, inThird, inTail].map((stroke) => stroke.points.map((point) => [point.x, point.y]))
+  const firstTop = first.top.y
+  const tailTop = tail.top.y
+  const heightAtMerge = board.sheet.height
+  assert.equal(planMergeSections(board.sections, [first.id]), null, 'one band is not a merge')
+  assert.equal(planMergeSections(board.sections, [first.id, 'missing']), null, 'an unknown band is not a second selection')
+  const plan = planMergeSections(board.sections, [third.id, first.id])
+  assert.equal(plan.keeperId, first.id, 'the top selected band is the one that stays')
+  assert.deepEqual(plan.removeIds, [sub.id, middle.id, third.id])
+  assert.ok(!plan.removeIds.includes(tail.id), 'a band below the selection stays')
+  board.sections = sectionsAfterMerge(board.sections, plan.removeIds)
+  assert.deepEqual(board.sections.map((section) => section.id), [first.id, tail.id])
+  assert.equal(first.title, 'Oben', 'the top title stays')
+  assert.equal(first.top.y, firstTop, 'merging does not move the top band')
+  assert.equal(tail.top.y, tailTop, 'merging does not move the band below')
+  assert.equal(first.left, 0.08, 'merging does not change the left edge')
+  assert.equal(first.width, 0.74, 'merging does not change the right edge')
+  assert.equal(tail.left, 0.08)
+  assert.equal(tail.width, 0.74)
+  assert.equal(board.sheet.height, heightAtMerge, 'merging does not resize the page')
+  assert.equal(board.sheet.width, WIDTH, 'merging does not change the page width')
+  ;[inFirst, inSub, inMiddle, inThird, inTail].forEach((stroke, index) => {
+    assert.deepEqual(stroke.points.map((point) => [point.x, point.y]), marks[index], 'merging does not move ink')
+    assert.equal(stroke.points.length, 2, 'merging does not remove ink')
+    assert.ok(board.strokes.includes(stroke), 'ink from a removed band stays on the page')
+  })
+
+  const onlySubs = createBoard(1600)
+  const parent = onlySubs.insert(160, 'parent')
+  const upper = onlySubs.insertSub(onlySubs.px(parent.bodyTop.y) + 30, 'upper')
+  const lower = onlySubs.insertSub(onlySubs.px(upper.bodyTop.y) + 30, 'lower')
+  const after = onlySubs.insert(onlySubs.px(lower.bodyTop.y) + 200, 'after')
+  const subInk = onlySubs.write(onlySubs.px(lower.bodyTop.y) + 10, 12)
+  const subX = subInk.points[0].x
+  const subY = subInk.points[0].y
+  const subPlan = planMergeSections(onlySubs.sections, [lower.id, upper.id])
+  assert.equal(subPlan.keeperId, upper.id, 'the upper subsection stays')
+  assert.deepEqual(subPlan.removeIds, [lower.id])
+  onlySubs.sections = sectionsAfterMerge(onlySubs.sections, subPlan.removeIds)
+  assert.deepEqual(onlySubs.sections.map((section) => section.id), [parent.id, upper.id, after.id])
+  assert.equal(subInk.points[0].x, subX, 'merging subsections does not move ink x')
+  assert.equal(subInk.points[0].y, subY, 'merging subsections does not move ink y')
+  assert.equal(onlySubs.sheet.width, WIDTH)
+
+  const collapsed = createBoard(1600)
+  const top = collapsed.insert(140, 'top')
+  const folded = collapsed.insert(480, 'folded')
+  const bottom = collapsed.insert(860, 'bottom')
+  collapsed.collapse(folded)
+  const foldedPlan = planMergeSections(collapsed.sections, [top.id, bottom.id])
+  assert.ok(foldedPlan.removeIds.includes(folded.id), 'a collapsed band between the selection is part of the merge')
+  assert.equal(folded.collapsed, true, 'planning a merge does not open the band')
+  assert.equal(collapsed.strokes.length, 0)
+}
+
 // ── Board wiring ───────────────────────────────────────────────────────────
 {
   const board = readFileSync(new URL('../src/components/DrawingBoard.tsx', import.meta.url), 'utf8')
@@ -710,6 +784,15 @@ const near = (actual, expected, message, tolerance = 0.51) => assert.ok(Math.abs
   assert.doesNotMatch(titleClass[0], /lw-ink-section-control/, 'the title field is not pen chrome')
   assert.match(board, /aria-label="Titel"/, 'the title field reuses the Titel label')
   assert.match(board, /\.lw-ink-section-title\{position:absolute;left:78px;/, 'the typed title starts after the section buttons and keeps a fixed size')
+  assert.match(board, /title="Abschnitte antippen · der oberste bleibt und deckt die anderen ab"/, 'merge mode asks for the sections')
+  assert.match(board, /Im obersten zusammenführen/, 'the merge confirms into the top section')
+  assert.match(board, /aria-label="Abschnitt zum Zusammenführen auswählen"/, 'a section can be chosen for the merge')
+  const mergeFn = board.match(/const commitMerge = useCallback\(\(\) => \{[\s\S]*?\n  \}, \[afterSectionChange/)
+  assert.ok(mergeFn, 'merge keeps the top section')
+  assert.match(mergeFn[0], /planMergeSections\(sectionsRef\.current/)
+  assert.match(mergeFn[0], /sectionsAfterMerge\(sectionsRef\.current/)
+  assert.ok(mergeFn[0].indexOf('expandSection') < mergeFn[0].indexOf('sectionsAfterMerge'), 'a collapsed band is opened before it is dropped')
+  assert.doesNotMatch(mergeFn[0], /foldHeading|contentWidth|shiftFrom/, 'merging does not rewrite the note text or slide the ink itself')
 }
 
 await server.close()

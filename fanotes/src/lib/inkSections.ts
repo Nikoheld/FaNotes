@@ -19,7 +19,9 @@
  * section's `left` and `width` are the band's left and right edges. Changing
  * either edge copies that pair onto every section. It does not move strokes
  * and does not change the page. Writing that falls outside the band stays
- * where it is.
+ * where it is. Merging keeps the topmost chosen band and removes every band
+ * down through the lowest chosen one, so that one band covers them. The
+ * writing is not moved.
  */
 import type { StrokePoint } from '../../../src/types'
 import { WRITE_MARGIN_X } from './noteCanvas'
@@ -258,6 +260,60 @@ export const applySharedSectionEdges = <S extends SectionStroke>(
   const changed = { value: false }
   for (const section of sections) writeSectionEdges(section, left, width, changed)
   return { left, width, changed: changed.value }
+}
+
+export type SectionMergePlan = {
+  /** The topmost chosen band. It stays, and its body then covers the removed bands. */
+  keeperId: string
+  /** Bands whose headers lie below the keeper and above the end of the lowest chosen band. */
+  removeIds: string[]
+}
+
+/**
+ * Plans a merge of the named bands. The topmost one stays. Every band from
+ * just under it through the end of the lowest named band is removed, including
+ * a band that was not named, so the keeper covers the whole run. Strokes and
+ * the page are not touched. Fewer than two live bands returns `null`.
+ * A collapsed band stays in the plan; the caller opens it before dropping it
+ * so its hidden ink is not thrown away with the band.
+ */
+export const planMergeSections = <S extends SectionStroke>(
+  sections: readonly InkSection<S>[],
+  ids: readonly string[],
+): SectionMergePlan | null => {
+  const wanted = new Set(ids)
+  const selected = sections.filter((section) => wanted.has(section.id))
+  if (selected.length < 2) return null
+  let keeper = selected[0]!
+  let lowest = selected[0]!
+  for (const section of selected) {
+    if (section.top.y < keeper.top.y) keeper = section
+    if (section.top.y >= lowest.top.y) lowest = section
+  }
+  if (keeper === lowest) return null
+  const end = nextSpanTop(sections, lowest) ?? Number.POSITIVE_INFINITY
+  const removeIds = sections
+    .filter((section) => section !== keeper && section.top.y > keeper.top.y && section.top.y < end)
+    .map((section) => section.id)
+  return removeIds.length ? { keeperId: keeper.id, removeIds } : null
+}
+
+/** Drops merged bands. Children of a dropped band go too. Section objects that stay are not copied and no stroke is moved. */
+export const sectionsAfterMerge = <S extends SectionStroke>(
+  sections: readonly InkSection<S>[],
+  removeIds: readonly string[],
+) => {
+  const drop = new Set(removeIds)
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const section of sections) {
+      if (drop.has(section.id) || !section.parentId || !drop.has(section.parentId)) continue
+      drop.add(section.id)
+      grew = true
+    }
+  }
+  return sections.filter((section) => !drop.has(section.id))
 }
 
 /**
