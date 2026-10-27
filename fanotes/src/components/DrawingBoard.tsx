@@ -1576,6 +1576,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const graphPanelOpenRef = useRef(false)
   const laserSamplesRef = useRef<LaserSample[]>([])
   const laserLiveRef = useRef(false)
+  const laserPressedRef = useRef(false)
   const [penColor, setPenColor] = useState(settings.penColor)
   const [penWidth, setPenWidth] = useState(settings.penWidth)
   const [paperStyle, setPaperStyle] = useState(pagePaperStyle ?? settings.paperStyle)
@@ -4493,50 +4494,74 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const paper = hit.closest('.unified-paper')
       return Boolean(paper && board.contains(hit) && paper.contains(board))
     }
+    const stampOf = (event: PointerEvent) => event.timeStamp || performance.now()
+    // The dot follows the pointer. The line is only the stroke while it is held down.
     const aim = (event: PointerEvent) => {
       if (event.pointerType === 'pen') {
         lastPenContactRef.current = performance.now()
         markPenContact(true)
       }
       if (!overSheet(event.clientX, event.clientY)) {
-        if (laserLiveRef.current) {
+        if (laserLiveRef.current || laserPressedRef.current) {
           laserLiveRef.current = false
+          laserPressedRef.current = false
+          laserSamplesRef.current = []
           kick()
         }
         return
       }
+      if (laserPressedRef.current && event.type === 'pointermove' && event.pointerType === 'mouse' && event.buttons === 0) {
+        laserPressedRef.current = false
+      }
+      const sample = { x: event.clientX, y: event.clientY, t: stampOf(event) }
       laserLiveRef.current = true
-      laserSamplesRef.current = pushLaserSample(laserSamplesRef.current, {
-        x: event.clientX,
-        y: event.clientY,
-        t: event.timeStamp || performance.now(),
-      })
+      laserSamplesRef.current = laserPressedRef.current
+        ? pushLaserSample(laserSamplesRef.current, sample)
+        : [sample]
       kick()
     }
-    const liftPen = (event: PointerEvent) => {
+    const press = (event: PointerEvent) => {
+      if (event.button !== 0 && event.pointerType !== 'pen') return
+      if (!overSheet(event.clientX, event.clientY)) return
+      laserPressedRef.current = true
+      laserSamplesRef.current = []
+      aim(event)
+    }
+    const release = (event: PointerEvent) => {
       if (event.pointerType === 'pen') markPenContact(false)
+      if (!laserPressedRef.current) return
+      laserPressedRef.current = false
+      const head = laserSamplesRef.current[laserSamplesRef.current.length - 1]
+      laserSamplesRef.current = head && event.pointerType !== 'touch'
+        ? [{ x: head.x, y: head.y, t: stampOf(event) }]
+        : []
+      if (!laserSamplesRef.current.length) laserLiveRef.current = false
+      kick()
     }
     const leave = () => {
-      if (!laserLiveRef.current) return
+      if (!laserLiveRef.current && !laserPressedRef.current) return
       laserLiveRef.current = false
+      laserPressedRef.current = false
+      laserSamplesRef.current = []
       kick()
     }
     window.addEventListener('resize', resize)
     window.addEventListener('pointermove', aim, { passive: true })
-    window.addEventListener('pointerdown', aim, { passive: true })
-    window.addEventListener('pointerup', liftPen)
-    window.addEventListener('pointercancel', liftPen)
+    window.addEventListener('pointerdown', press, { passive: true })
+    window.addEventListener('pointerup', release)
+    window.addEventListener('pointercancel', release)
     window.addEventListener('blur', leave)
     return () => {
       if (frame) window.cancelAnimationFrame(frame)
       laserLiveRef.current = false
+      laserPressedRef.current = false
       laserSamplesRef.current = []
       markPenContact(false)
       window.removeEventListener('resize', resize)
       window.removeEventListener('pointermove', aim)
-      window.removeEventListener('pointerdown', aim)
-      window.removeEventListener('pointerup', liftPen)
-      window.removeEventListener('pointercancel', liftPen)
+      window.removeEventListener('pointerdown', press)
+      window.removeEventListener('pointerup', release)
+      window.removeEventListener('pointercancel', release)
       window.removeEventListener('blur', leave)
       canvas.remove()
     }

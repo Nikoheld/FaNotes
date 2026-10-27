@@ -87,6 +87,8 @@ try {
   assert.doesNotMatch(source, /\beval\s*\(|\bnew Function\b/u)
   const board = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
   assert.match(board, /tool === 'laser' && event\.pointerType === 'mouse'/u)
+  assert.match(board, /laserPressedRef/u)
+  assert.match(board, /The dot follows the pointer\. The line is only the stroke while it is held down\./u)
   assert.match(board, /graphPlaceRef\.current/u)
   assert.match(board, /aria-label="Laserpointer"/u)
   assert.match(board, /aria-label="Funktionsgraph einfügen"/u)
