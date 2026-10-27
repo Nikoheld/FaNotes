@@ -11,7 +11,7 @@ const { pipeline } = require('node:stream/promises')
 const { applyDeltaPatch } = require('../electron/delta.cjs')
 const { createDeltaPatch } = require('./create-delta.cjs')
 const { EventEmitter } = require('node:events')
-const { compareVersions, createUpdateManager, diagnoseUpdateFailure, githubReleaseAssetUrl, INSTALL_HELPER, isPrivateAddress, shouldReplaceManagedDesktopFile, stableStringify, verifyManifest, waitForChildSpawn } = require('../electron/updater.cjs')
+const { compareVersions, createUpdateManager, diagnoseUpdateFailure, githubReleaseAssetUrl, INSTALL_HELPER, isPrivateAddress, pickUpdateRelease, shouldReplaceManagedDesktopFile, stableStringify, verifyManifest, waitForChildSpawn } = require('../electron/updater.cjs')
 const {
   EMPTY_NIGHTLY_CHANGELOG,
   DELTA_ROUTE_PATTERN,
@@ -129,6 +129,28 @@ async function main() {
     assert.equal(channelForPackagedVersion('2026.10.2-beta.1'), 'beta')
     assert.equal(channelForPackagedVersion('2026.10.2'), 'stable')
     assert.equal(channelForPackagedVersion('nope'), 'stable')
+    const manifestAsset = (version, channel) => {
+      const name = channel === 'stable' ? 'FaNotes-update-linux-x64.json' : `FaNotes-update-linux-x64-${channel}.json`
+      return { name, browser_download_url: githubReleaseAssetUrl(version, name) }
+    }
+    const releaseRow = (version, channel, extras = {}) => ({
+      tag_name: `v${version}`,
+      draft: false,
+      assets: [manifestAsset(version, channel)],
+      ...extras,
+    })
+    const stableRow = releaseRow(targetVersion, 'stable')
+    const olderBetaRow = releaseRow(`${targetVersion}-beta.2`, 'beta')
+    const newerBetaRow = releaseRow('2.18.0-beta.1', 'beta')
+    const nightlyRow = releaseRow(`${targetVersion}-nightly.20261011120000.abcdef0`, 'nightly')
+    assert.equal(pickUpdateRelease([olderBetaRow, stableRow], 'beta', 'linux').tagVersion, targetVersion)
+    assert.equal(pickUpdateRelease([olderBetaRow, stableRow], 'beta', 'linux').kind, 'stable')
+    assert.equal(pickUpdateRelease([stableRow, newerBetaRow], 'beta', 'linux').tagVersion, '2.18.0-beta.1')
+    assert.equal(pickUpdateRelease([olderBetaRow, stableRow], 'stable', 'linux').tagVersion, targetVersion)
+    assert.equal(pickUpdateRelease([olderBetaRow, nightlyRow, stableRow], 'nightly', 'linux').tagVersion, nightlyRow.tag_name.slice(1))
+    assert.equal(pickUpdateRelease([olderBetaRow], 'nightly', 'linux'), null)
+    assert.equal(pickUpdateRelease([olderBetaRow], 'stable', 'linux'), null)
+    assert.equal(pickUpdateRelease([{ ...stableRow, draft: true }, olderBetaRow], 'beta', 'linux').tagVersion, `${targetVersion}-beta.2`)
     assert.equal(LINUX_PACKAGE_PATTERN.test('FaNotes-2026.10.2-x86_64.AppImage'), true)
     assert.equal(LINUX_PACKAGE_PATTERN.test('FaNotes-2026.10.2-x86_64.tar.gz'), true)
     assert.equal(LINUX_PACKAGE_PATTERN.test(`FaNotes-${nightlySample}-x86_64.AppImage`), true)
@@ -301,11 +323,14 @@ async function main() {
 
     const patchBytes = await fsp.readFile(patchPath)
     const releaseListUrl = 'https://api.github.com/repos/Nikoheld/FaNotes/releases/latest'
-    const betaReleaseListUrl = 'https://api.github.com/repos/Nikoheld/FaNotes/releases?per_page=30'
+    const betaReleaseListUrl = 'https://api.github.com/repos/Nikoheld/FaNotes/releases?per_page=100'
+    const olderBetaVersion = `${targetVersion}-beta.2`
     const manifestAssetUrl = githubReleaseAssetUrl(targetVersion, 'FaNotes-update-linux-x64.json')
-    const betaManifestAssetUrl = githubReleaseAssetUrl(targetVersion, 'FaNotes-update-linux-x64-beta.json')
+    const betaManifestAssetUrl = githubReleaseAssetUrl(olderBetaVersion, 'FaNotes-update-linux-x64-beta.json')
     const patchUrl = payload.delta.url
     const betaPatchUrl = betaPayload.delta.url
+    let dropNextPatch = false
+    let patchFetches = 0
     const fullPackageUrl = payload.packages.appimage.url
     const jsonResponse = (body) => {
       const text = JSON.stringify(body)
@@ -323,7 +348,7 @@ async function main() {
       }
       if (url === betaReleaseListUrl) {
         return jsonResponse([{
-          tag_name: `v${targetVersion}`,
+          tag_name: `v${olderBetaVersion}`,
           draft: false,
           prerelease: true,
           assets: [{ name: 'FaNotes-update-linux-x64-beta.json', browser_download_url: betaManifestAssetUrl }],
@@ -332,11 +357,29 @@ async function main() {
         }])
       }
       if (url === manifestAssetUrl) return jsonResponse(signedManifest)
-      if (url === betaManifestAssetUrl) return jsonResponse(signedBetaManifest)
+      if (url === betaManifestAssetUrl) return new Response('missing beta manifest', { status: 404 })
       if (url === fullPackageUrl) return new Response(targetBytes, { status: 200, headers: { 'content-length': String(targetBytes.length) } })
       if (url !== patchUrl && url !== betaPatchUrl) return new Response('not found', { status: 404 })
+      patchFetches += 1
       const range = /^bytes=(\d+)-$/u.exec(options.headers?.Range || '')
       const offset = range ? Number(range[1]) : 0
+      if (dropNextPatch) {
+        dropNextPatch = false
+        const chunk = patchBytes.subarray(offset, Math.min(patchBytes.length, offset + 1024))
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(chunk)
+            controller.error(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }))
+          },
+        })
+        return new Response(stream, {
+          status: offset ? 206 : 200,
+          headers: {
+            'content-length': String(patchBytes.length - offset),
+            ...(offset ? { 'content-range': `bytes ${offset}-${patchBytes.length - 1}/${patchBytes.length}` } : {}),
+          },
+        })
+      }
       const body = patchBytes.subarray(offset)
       return new Response(body, {
         status: offset ? 206 : 200,
@@ -423,6 +466,11 @@ async function main() {
     const betaChecked = await betaManager.check({ manual: true })
     assert.equal(betaChecked.status, 'available')
     assert.equal(betaChecked.updateChannel, 'beta')
+    assert.equal(betaChecked.latestVersion, targetVersion)
+    const betaDownloaded = await betaManager.download()
+    assert.equal(betaDownloaded.status, 'downloaded')
+    assert.equal(betaDownloaded.latestVersion, targetVersion)
+    assert.equal(betaDownloaded.error, null)
     betaManager.stop()
     settings.updateChannel = 'stable'
 
@@ -466,7 +514,7 @@ async function main() {
     const blockedHtml = '<!doctype html><html><head><title>Schulfilter</title></head><body>blocked</body></html>'
     const blockedFetch = async (input, options = {}) => {
       const url = String(input)
-      if (url === manifestUrl) return fetchImpl(input, options)
+      if (url === manifestAssetUrl || url === releaseListUrl) return fetchImpl(input, options)
       if (url === patchUrl || url === fullPackageUrl) {
         return new Response(blockedHtml, { status: 302, headers: { location: 'http://captive.schule.local/login', 'content-type': 'text/html' } })
       }
@@ -522,7 +570,32 @@ async function main() {
     assert.equal(await fsp.readFile(helperTarget, 'utf8'), nextExecutable)
     assert.equal(JSON.parse(await fsp.readFile(markerPath, 'utf8')).version, targetVersion)
 
-    console.log(`Updaterprüfung erfolgreich: signiertes ${DELTA_LABEL(delta.patchSizeBytes, targetBytes.length)}, Range-Fortsetzung, automatische Vollpaket-Ausweichroute, lokale Rekonstruktion, persistierter Seamless-Download, SHA-256, atomarer Rollback-Pfad und Diagnose blockierter Schul-WLAN-Downloads.`)
+    const patchFetchesBeforeResume = patchFetches
+    const resumeDropManager = createUpdateManager({
+      app: {
+        ...app,
+        getPath: (name) => name === 'home' ? path.join(temporary, 'resume-home') : path.join(temporary, 'resume-user-data'),
+      },
+      getWindow: () => null,
+      getSettings: () => settings,
+      forceSupported: true,
+      platform: 'linux',
+      appImagePath: sourcePath,
+      fetchImpl,
+      publicKeyPemOverride: publicPem,
+      expectedKeyId: keyId,
+      logger: { warn: () => undefined },
+    })
+    const resumeChecked = await resumeDropManager.check({ manual: true })
+    assert.equal(resumeChecked.status, 'available')
+    dropNextPatch = true
+    const resumeDownloaded = await resumeDropManager.download()
+    assert.equal(resumeDownloaded.status, 'downloaded')
+    assert.equal(resumeDownloaded.error, null)
+    assert.ok(patchFetches >= patchFetchesBeforeResume + 2, `Unterbrochene GitHub-Downloads müssen von selbst weiterlaufen (${patchFetches} nach ${patchFetchesBeforeResume}).`)
+    resumeDropManager.stop()
+
+    console.log(`Updaterprüfung erfolgreich: signiertes ${DELTA_LABEL(delta.patchSizeBytes, targetBytes.length)}, Range-Fortsetzung, Beta übernimmt neuere Stable-Releases, automatische Fortsetzung nach Verbindungsabbruch, automatische Vollpaket-Ausweichroute, lokale Rekonstruktion, persistierter Seamless-Download, SHA-256, atomarer Rollback-Pfad und Diagnose blockierter Schul-WLAN-Downloads.`)
   } finally {
     await fsp.rm(temporary, { recursive: true, force: true })
   }

@@ -16,6 +16,7 @@ import { handleMcpRequest } from './mcp-api.mjs'
 import { handleAiProxyRequest } from './ai-proxy.mjs'
 import { languageForRequest, localizeExactText, localizeResponse } from './i18n.mjs'
 import { createAnalyticsService } from './analytics.mjs'
+import { loadGithubReleases, pickGithubPackage } from './github-release.mjs'
 import {
   DELTA_ROUTE_PATTERN,
   DOWNLOAD_ROUTE_PATTERN,
@@ -419,7 +420,31 @@ const deltaDownload = async (request, response, platform, currentVersion, channe
   response.end()
 }
 
+const PACKAGE_DOWNLOAD_KINDS = new Set(['appimage', 'portable', 'windows-installer', 'windows-portable'])
+
 const releaseDownload = async (request, response, kind, channel = 'stable') => {
+  if (PACKAGE_DOWNLOAD_KINDS.has(kind)) {
+    let redirect = null
+    try {
+      redirect = pickGithubPackage(await loadGithubReleases(), channel, kind)
+    } catch (error) {
+      console.warn('GitHub-Release konnte nicht gelesen werden:', error?.message ?? error)
+    }
+    if (redirect) {
+      if ((request.method || 'GET') === 'GET') {
+        await analytics.recordDownload(request, { artifact: kind, version: redirect.version }).catch((error) => {
+          console.warn('FaNotes-Downloadstatistik konnte nicht gespeichert werden:', error?.message ?? error)
+        })
+      }
+      response.writeHead(302, {
+        Location: redirect.url,
+        'Cache-Control': 'no-store',
+        'X-FaNotes-Version': redirect.version,
+      })
+      response.end()
+      return
+    }
+  }
   const releases = await discoverReleases(channel)
   const target = kind === 'appimage'
     ? releases.linux.packages.appimage

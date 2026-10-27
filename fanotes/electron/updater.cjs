@@ -8,7 +8,7 @@ const { spawn } = require('node:child_process')
 const { Readable, Transform } = require('node:stream')
 const { pipeline } = require('node:stream/promises')
 const { DELTA_FORMAT, applyDeltaPatch } = require('./delta.cjs')
-const { VERSION_PATTERN, compareSemanticVersions, deltaPathname, packagePathname } = require('./releaseVersion.cjs')
+const { VERSION_PATTERN, compareSemanticVersions, deltaPathname, packagePathname, releaseVisibleOnChannel, versionChannel } = require('./releaseVersion.cjs')
 
 const PRODUCT_ORIGIN = 'https://fanotes.fasrv.ch'
 const GITHUB_REPOSITORY = 'Nikoheld/FaNotes'
@@ -27,6 +27,27 @@ const updateManifestName = (manifestPlatform, channel) => (
     ? `FaNotes-update-${manifestPlatform}-x64.json`
     : `FaNotes-update-${manifestPlatform}-x64-${channel}.json`
 )
+
+// Beta and Nightly also receive a newer Stable release. The GitHub list is
+// ordered by publication time, so the choice is the highest visible version
+// that actually ships this channel's manifest, not the first matching row.
+const pickUpdateRelease = (releases, channel, manifestPlatform) => {
+  if (!Array.isArray(releases)) return null
+  let best = null
+  for (const item of releases) {
+    if (!item || item.draft === true || !Array.isArray(item.assets)) continue
+    const tagVersion = typeof item.tag_name === 'string' && item.tag_name.startsWith('v') ? item.tag_name.slice(1) : ''
+    if (!VERSION_PATTERN.test(tagVersion) || !releaseVisibleOnChannel(tagVersion, channel)) continue
+    const kind = versionChannel(tagVersion)
+    const assetName = updateManifestName(manifestPlatform, kind)
+    const asset = item.assets.find((entry) => entry?.name === assetName && typeof entry.browser_download_url === 'string')
+    if (!asset) continue
+    if (!best || compareVersions(tagVersion, best.tagVersion) > 0) {
+      best = { tagVersion, assetName, asset, kind }
+    }
+  }
+  return best
+}
 const PLATFORM_RELEASES = Object.freeze({
   linux: Object.freeze({
     api: GITHUB_API_RELEASES,
@@ -70,6 +91,15 @@ const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 /** Short first poll so a staged update can be adopted before the user settles in. */
 const INITIAL_CHECK_DELAY_MS = 2_500
 const DOWNLOAD_TIMEOUT_MS = 45 * 60 * 1000
+const DOWNLOAD_IDLE_MS = 12_000
+const MAX_DOWNLOAD_ATTEMPTS = 200
+const MAX_ZERO_PROGRESS_STALLS = 4
+const RETRYABLE_TRANSFER_CODES = new Set([
+  'ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ECONNABORTED', 'EAI_AGAIN', 'ECONNREFUSED',
+  'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_CLOSED',
+  'ERR_STREAM_PREMATURE_CLOSE',
+])
 const WINDOWS_INSTALLER_ARGS = Object.freeze(['/S', '--updated', '--force-run'])
 
 const WINDOWS_DELTA_HELPER = `param(
@@ -461,6 +491,23 @@ const nodeErrorCode = (error) => {
   return String(code || (error.name === 'AbortError' ? 'AbortError' : ''))
 }
 
+// A dropped GitHub connection is resumed from the partial file. A checksum
+// failure, a filter page, and an explicit stop are not tried again.
+const isRetryableTransferError = (error, { idleStall = false } = {}) => {
+  if (idleStall) return true
+  if (error?.diagnosis) return false
+  let current = error
+  for (let depth = 0; current && depth < 5; depth += 1) {
+    if (current.name === 'AbortError' || current.code === 'AbortError') return false
+    const code = typeof current.code === 'string' ? current.code : ''
+    if (RETRYABLE_TRANSFER_CODES.has(code)) return true
+    const message = String(current.message || '')
+    if (/ECONNRESET|socket hang up|premature close|other side closed|UND_ERR_|ERR_STREAM_PREMATURE_CLOSE|terminated/iu.test(message)) return true
+    current = current.cause
+  }
+  return false
+}
+
 const extractHtmlTitle = (text) => {
   const match = /<title[^>]*>([^<]{1,180})<\/title>/iu.exec(String(text || ''))
   if (!match) return null
@@ -670,6 +717,8 @@ function createUpdateManager({
   let intervalTimer = null
   let initialTimer = null
   let activeDownloadController = null
+  let downloadCancelled = false
+  let downloadTimedOut = false
   const highestSeenVersions = { stable: null, beta: null, nightly: null }
   /** Survives restarts so a finished background download can install on next launch. */
   let pendingInstall = null
@@ -936,6 +985,7 @@ function createUpdateManager({
       next = null
     }
     if (!next || next.protocol !== 'https:' || !ALLOWED_UPDATE_HOSTS.has(next.host)) return response
+    await response.body?.cancel?.().catch(() => {})
     return fetchGithub(next.href, options, redirectsLeft - 1)
   }
 
@@ -967,35 +1017,40 @@ function createUpdateManager({
   const fetchManifest = async (channel) => {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 25_000)
-    const listUrl = channel === 'stable' ? `${platformConfig.api}/latest` : `${platformConfig.api}?per_page=30`
+    const listUrl = channel === 'stable' ? `${platformConfig.api}/latest` : `${platformConfig.api}?per_page=100`
     const userAgent = `FaNotes/${currentVersion} ${platformConfig.userAgentPlatform} updater`
     try {
       if (!platformConfig) throw new Error('Automatische Updates werden auf dieser Plattform nicht unterstützt.')
-      const listResponse = await fetchGithub(listUrl, {
-        headers: {
-          Accept: 'application/vnd.github+json',
-          'User-Agent': userAgent,
-          'X-GitHub-Api-Version': '2022-11-28',
-        },
-        signal: controller.signal,
-      })
+      const headers = {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': userAgent,
+        'X-GitHub-Api-Version': '2022-11-28',
+      }
+      const listResponse = await fetchGithub(listUrl, { headers, signal: controller.signal })
       const listed = await readJsonResponse(listResponse, listUrl, 'GitHub hat keine gültige Release-Liste geliefert.', MAX_RELEASE_LIST_BYTES)
-      const releases = Array.isArray(listed) ? listed : [listed]
-      const assetName = updateManifestName(platformConfig.manifestPlatform, channel)
-      const release = releases.find((item) => (
-        item && item.draft !== true && Array.isArray(item.assets) && item.assets.some((asset) => asset?.name === assetName)
-      ))
-      if (!release) throw new Error('GitHub bietet für diesen Update-Kanal kein FaNotes-Release an.')
-      const tagVersion = typeof release.tag_name === 'string' && release.tag_name.startsWith('v') ? release.tag_name.slice(1) : ''
-      if (!VERSION_PATTERN.test(tagVersion)) throw new Error('Das GitHub-Release hat keine gültige Versionsnummer.')
-      const asset = release.assets.find((item) => item?.name === assetName)
-      const manifestUrl = assertGithubReleaseUrl(asset?.browser_download_url, tagVersion, assetName, 'Die Manifest-Adresse')
+      const releases = Array.isArray(listed) ? [...listed] : [listed]
+      // GitHub orders the index by publication time and /releases/latest is the
+      // newest non-prerelease. Beta and Nightly need both, or a newer Stable
+      // release stays hidden behind a long prerelease list.
+      if (channel !== 'stable') {
+        const latestUrl = `${platformConfig.api}/latest`
+        try {
+          const latestResponse = await fetchGithub(latestUrl, { headers, signal: controller.signal })
+          const latest = await readJsonResponse(latestResponse, latestUrl, 'GitHub hat keine gültige Release-Liste geliefert.', MAX_RELEASE_LIST_BYTES)
+          if (latest && typeof latest === 'object' && !Array.isArray(latest)) releases.push(latest)
+        } catch {
+          // The index still covers Stable when that release is on the first page.
+        }
+      }
+      const picked = pickUpdateRelease(releases, channel, platformConfig.manifestPlatform)
+      if (!picked) throw new Error('GitHub bietet für diesen Update-Kanal kein FaNotes-Release an.')
+      const manifestUrl = assertGithubReleaseUrl(picked.asset.browser_download_url, picked.tagVersion, picked.assetName, 'Die Manifest-Adresse')
       const manifestResponse = await fetchGithub(manifestUrl, {
         headers: { Accept: 'application/json', 'User-Agent': userAgent },
         signal: controller.signal,
       })
       const candidate = await readJsonResponse(manifestResponse, manifestUrl, 'GitHub hat kein gültiges JSON-Manifest geliefert.')
-      return verifyManifest(candidate, currentVersion, publicKeyPem, platform, expectedKeyId, channel)
+      return verifyManifest(candidate, currentVersion, publicKeyPem, platform, expectedKeyId, picked.kind)
     } catch (error) {
       if (!error?.diagnosis) {
         const resolvedAddress = await lookupHost(hostOf(listUrl))
@@ -1123,101 +1178,150 @@ function createUpdateManager({
     if (existing?.isFile() && !existing.isSymbolicLink() && existing.size === transferInfo.sizeBytes && await sha256File(finalPath) === transferInfo.sha256) return finalPath
     if (existing) await fsp.rm(finalPath, { force: true })
 
-    let offset = 0
-    const partial = await fsp.lstat(partPath).catch(() => null)
-    if (partial?.isFile() && !partial.isSymbolicLink() && partial.size > 0 && partial.size < transferInfo.sizeBytes) offset = partial.size
-    else if (partial) await fsp.rm(partPath, { force: true })
-    emit({ status: 'downloading', downloadedBytes: offset, totalBytes: transferInfo.sizeBytes, progress: offset / transferInfo.sizeBytes, error: null, block: null })
-
-    const controller = new AbortController()
-    activeDownloadController = controller
-    const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS)
+    const deadline = Date.now() + DOWNLOAD_TIMEOUT_MS
+    const deadlineTimer = setTimeout(() => {
+      downloadTimedOut = true
+      activeDownloadController?.abort()
+    }, DOWNLOAD_TIMEOUT_MS)
+    deadlineTimer.unref?.()
+    let attempts = 0
+    let stalls = 0
+    let lastError = null
+    let finished = false
     try {
-      const response = await fetchGithub(transferInfo.url, {
-        headers: {
-          Accept: accept,
-          'User-Agent': `FaNotes/${currentVersion} ${platformConfig.userAgentPlatform} updater`,
-          ...(offset ? { Range: `bytes=${offset}-` } : {}),
-        },
-        signal: controller.signal,
-      })
-      const rejectDownloadResponse = async (reasonStatus) => {
-        const bodyText = await readFailureBody(response)
-        const diagnosis = diagnoseUpdateFailure({
-          phase: 'download',
-          url: transferInfo.url,
-          response,
-          bodyText,
-          error: new Error(`Der Update-Download antwortet mit HTTP ${reasonStatus}.`),
-        })
-        throw attachDiagnosis(new Error(diagnosis.message), diagnosis)
-      }
-      if (response.status >= 300 && response.status < 400) {
-        await rejectDownloadResponse(response.status)
-      }
-      if (offset && response.status !== 206) {
-        if (response.status === 200) {
-          offset = 0
-          await fsp.rm(partPath, { force: true })
-        } else {
-          await rejectDownloadResponse(response.status)
+      while (attempts < MAX_DOWNLOAD_ATTEMPTS && !finished) {
+        if (downloadCancelled) {
+          const cancelError = new Error('Der Update-Download wurde abgebrochen.')
+          cancelError.name = 'AbortError'
+          throw cancelError
         }
-      } else if (!offset && response.status !== 200) {
-        await rejectDownloadResponse(response.status)
-      }
-      const earlyType = response.headers.get('content-type') || ''
-      if (looksLikeHtml(earlyType, '')) {
-        await rejectDownloadResponse(response.status)
-      }
-      if (offset) {
-        const range = /^bytes (\d+)-(\d+)\/(\d+)$/u.exec(response.headers.get('content-range') || '')
-        if (!range || Number(range[1]) !== offset || Number(range[3]) !== transferInfo.sizeBytes) throw new Error('Der Update-Server hat einen ungültigen Fortsetzungsbereich geliefert.')
-      }
-      const advertisedLength = Number(response.headers.get('content-length'))
-      const expectedResponseBytes = transferInfo.sizeBytes - offset
-      if (Number.isFinite(advertisedLength) && advertisedLength !== expectedResponseBytes) throw new Error('Der Update-Server hat eine unerwartete Downloadgröße angekündigt.')
-      if (!response.body) throw new Error('Der Update-Server hat keine Datei geliefert.')
-      let downloaded = offset
-      let lastProgressAt = 0
-      const progressStream = new Transform({
-        transform(chunk, _encoding, callback) {
-          downloaded += chunk.length
-          if (downloaded > transferInfo.sizeBytes) {
-            callback(new Error('Der Update-Download ist größer als angekündigt.'))
-            return
+        if (downloadTimedOut || Date.now() >= deadline) {
+          throw lastError || Object.assign(new Error('Der Update-Download hat das Zeitlimit überschritten.'), { code: 'ETIMEDOUT' })
+        }
+        attempts += 1
+        let offset = 0
+        const partial = await fsp.lstat(partPath).catch(() => null)
+        if (partial?.isFile() && !partial.isSymbolicLink()) {
+          if (partial.size === transferInfo.sizeBytes) {
+            finished = true
+            break
           }
-          const now = Date.now()
-          if (now - lastProgressAt > 180 || downloaded === transferInfo.sizeBytes) {
-            lastProgressAt = now
-            emit({ downloadedBytes: downloaded, progress: downloaded / transferInfo.sizeBytes })
+          if (partial.size > 0 && partial.size < transferInfo.sizeBytes) offset = partial.size
+          else await fsp.rm(partPath, { force: true })
+        } else if (partial) {
+          await fsp.rm(partPath, { force: true })
+        }
+        emit({ status: 'downloading', downloadedBytes: offset, totalBytes: transferInfo.sizeBytes, progress: offset / transferInfo.sizeBytes, error: null, block: null })
+
+        const controller = new AbortController()
+        activeDownloadController = controller
+        let idleStall = false
+        let lastByteAt = Date.now()
+        const idleTimer = setInterval(() => {
+          if (Date.now() - lastByteAt < DOWNLOAD_IDLE_MS) return
+          idleStall = true
+          controller.abort()
+        }, 1000)
+        idleTimer.unref?.()
+        const sizeBefore = offset
+        let openResponse = null
+        try {
+          const response = await fetchGithub(transferInfo.url, {
+            headers: {
+              Accept: accept,
+              'User-Agent': `FaNotes/${currentVersion} ${platformConfig.userAgentPlatform} updater`,
+              ...(offset ? { Range: `bytes=${offset}-` } : {}),
+            },
+            signal: controller.signal,
+          })
+          openResponse = response
+          const rejectDownloadResponse = async (reasonStatus) => {
+            const bodyText = await readFailureBody(response)
+            const diagnosis = diagnoseUpdateFailure({
+              phase: 'download',
+              url: transferInfo.url,
+              response,
+              bodyText,
+              error: new Error(`Der Update-Download antwortet mit HTTP ${reasonStatus}.`),
+            })
+            throw attachDiagnosis(new Error(diagnosis.message), diagnosis)
           }
-          callback(null, chunk)
-        },
-      })
-      await pipeline(
-        Readable.fromWeb(response.body),
-        progressStream,
-        fs.createWriteStream(partPath, {
-          flags: fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW |
-            (offset ? fs.constants.O_APPEND : fs.constants.O_TRUNC),
-          mode: 0o600,
-        }),
-      )
-    } catch (error) {
-      if (!error?.diagnosis) {
-        const resolvedAddress = await lookupHost(hostOf(transferInfo.url))
-        attachDiagnosis(error, diagnoseUpdateFailure({
-          phase: 'download',
-          url: transferInfo.url,
-          error,
-          resolvedAddress,
-        }))
+          if (response.status >= 300 && response.status < 400) await rejectDownloadResponse(response.status)
+          if (offset && response.status !== 206) {
+            if (response.status === 200) {
+              offset = 0
+              await fsp.rm(partPath, { force: true })
+            } else {
+              await rejectDownloadResponse(response.status)
+            }
+          } else if (!offset && response.status !== 200) {
+            await rejectDownloadResponse(response.status)
+          }
+          const earlyType = response.headers.get('content-type') || ''
+          if (looksLikeHtml(earlyType, '')) await rejectDownloadResponse(response.status)
+          if (offset) {
+            const range = /^bytes (\d+)-(\d+)\/(\d+)$/u.exec(response.headers.get('content-range') || '')
+            if (!range || Number(range[1]) !== offset || Number(range[3]) !== transferInfo.sizeBytes) throw new Error('Der Update-Server hat einen ungültigen Fortsetzungsbereich geliefert.')
+          }
+          const advertisedLength = Number(response.headers.get('content-length'))
+          const expectedResponseBytes = transferInfo.sizeBytes - offset
+          if (Number.isFinite(advertisedLength) && advertisedLength !== expectedResponseBytes) throw new Error('Der Update-Server hat eine unerwartete Downloadgröße angekündigt.')
+          if (!response.body) throw new Error('Der Update-Server hat keine Datei geliefert.')
+          let downloaded = offset
+          let lastProgressAt = 0
+          const progressStream = new Transform({
+            transform(chunk, _encoding, callback) {
+              lastByteAt = Date.now()
+              downloaded += chunk.length
+              if (downloaded > transferInfo.sizeBytes) {
+                callback(new Error('Der Update-Download ist größer als angekündigt.'))
+                return
+              }
+              const now = Date.now()
+              if (now - lastProgressAt > 180 || downloaded === transferInfo.sizeBytes) {
+                lastProgressAt = now
+                emit({ downloadedBytes: downloaded, progress: downloaded / transferInfo.sizeBytes })
+              }
+              callback(null, chunk)
+            },
+          })
+          await pipeline(
+            Readable.fromWeb(response.body),
+            progressStream,
+            fs.createWriteStream(partPath, {
+              flags: fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW |
+                (offset ? fs.constants.O_APPEND : fs.constants.O_TRUNC),
+              mode: 0o600,
+            }),
+          )
+          const written = await fsp.lstat(partPath).catch(() => null)
+          if (!written?.isFile() || written.isSymbolicLink() || written.size !== transferInfo.sizeBytes) {
+            throw Object.assign(new Error('Das Update wurde nicht vollständig heruntergeladen.'), { code: 'ERR_STREAM_PREMATURE_CLOSE' })
+          }
+          finished = true
+        } catch (error) {
+          await openResponse?.body?.cancel?.().catch(() => {})
+          if (downloadCancelled || downloadTimedOut) throw error
+          const written = await fsp.lstat(partPath).catch(() => null)
+          const sizeNow = written?.isFile() && !written.isSymbolicLink() ? written.size : 0
+          const grew = sizeNow > sizeBefore
+          if (!isRetryableTransferError(error, { idleStall }) || attempts >= MAX_DOWNLOAD_ATTEMPTS) throw error
+          if (!grew) {
+            stalls += 1
+            if (stalls >= MAX_ZERO_PROGRESS_STALLS) throw error
+          } else stalls = 0
+          lastError = error
+          await new Promise((resolve) => { setTimeout(resolve, 50) })
+        } finally {
+          clearInterval(idleTimer)
+          if (activeDownloadController === controller) activeDownloadController = null
+        }
       }
-      throw error
     } finally {
-      clearTimeout(timeout)
+      clearTimeout(deadlineTimer)
       activeDownloadController = null
     }
+    if (!finished) throw lastError || new Error('Das Update wurde nicht vollständig heruntergeladen.')
     const info = await fsp.stat(partPath)
     if (!info.isFile() || info.size !== transferInfo.sizeBytes) throw new Error('Das Update wurde nicht vollständig heruntergeladen.')
     if (await sha256File(partPath) !== transferInfo.sha256) {
@@ -1231,6 +1335,8 @@ function createUpdateManager({
   const download = () => {
     if (downloadPromise) return downloadPromise
     downloadPromise = (async () => {
+      downloadCancelled = false
+      downloadTimedOut = false
       if (!manifest?.updateAvailable) {
         await check({ manual: true })
         if (!manifest?.updateAvailable) return snapshot()
@@ -1297,6 +1403,7 @@ function createUpdateManager({
           try {
             staged = await stageSelectedUpdate(delta, deltaSource)
           } catch (error) {
+            if (downloadCancelled || downloadTimedOut) throw error
             logger.warn('Das Delta-Update konnte nicht sicher rekonstruiert werden; FaNotes verwendet das signierte Vollpaket:', error?.message ?? error)
             delta = null
             staged = await stageSelectedUpdate(null, null)
@@ -1590,7 +1697,10 @@ function createUpdateManager({
     if (intervalTimer) clearInterval(intervalTimer)
     initialTimer = null
     intervalTimer = null
-    if (abortDownload) activeDownloadController?.abort()
+    if (abortDownload) {
+      downloadCancelled = true
+      activeDownloadController?.abort()
+    }
   }
 
   return {
@@ -1617,6 +1727,7 @@ module.exports = {
   WINDOWS_INSTALLER_ARGS,
   compareVersions,
   createUpdateManager,
+  pickUpdateRelease,
   shouldReplaceManagedDesktopFile,
   waitForChildSpawn,
   diagnoseUpdateFailure,
