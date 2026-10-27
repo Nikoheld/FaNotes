@@ -1,5 +1,22 @@
 # Änderungsverlauf
 
+## 2026.10.12
+
+- **Update.** Die Prüfung für Beta und Nightly liest die Release-Liste, auch wenn sie größer ist als das Manifest.
+- **Handschrift.** Striche bleiben auf dem Papier, wenn das Blatt gedreht oder verschoben wird. Ein schnelles Umwenden endet nicht als Kreis. Der Punktcursor bleibt scharf. Ein Abschnitt lässt sich von rechts schmaler ziehen.
+- **Zwei Finger.** Zwei Finger drehen das Blatt nicht. Zusammendrücken, Verschieben, die Drehknöpfe und Alt+Rad drehen oder zoomen weiter.
+- **Marker.** Marker und Stift teilen eine Farbe. Der Textmarker behält seine eigene.
+- **Werkzeuge.** Lineal und Zirkel werden kleiner, ohne ihre Form zu verlieren.
+- **Figuren.** Die Linienstärke einer Mathematikfigur ist unabhängig von ihrer Größe.
+- **PDF.** Eine große PDF bleibt offen und zeichnet nur das sichtbare Fenster. Die Textauswahl bleibt auf den Wörtern unter dem Zeiger. Stiftstriche werden in Bildschirmdichte gezeichnet.
+- **Leiste.** Die obere Leiste ist enger, doppelte Knöpfe sind weg, und der Papiername bleibt frei vom Aufklapp-Pfeil. Die Editorleiste packt die Beschriftungen neben die Farbfelder.
+- **Blatt.** Das Blatt reicht bis an die Scrollbalken. Offene Notizreiter nutzen die Pfad-Ecke.
+- **Start.** Es öffnet sich die letzte Notiz statt der Startseite.
+- **Teilen.** Eine Notiz oder ein Ordner lässt sich teilen, und der Link öffnet sich im Browser. Ein gestopptes Teilen bleibt gestoppt.
+- **Name.** Der Nutzername ist eindeutig und hat eine öffentliche Aktivitätsseite. Ein vergebener Name bleibt beim Speichern der Desktop-Einstellungen erhalten.
+- **Rechtschreibung.** Ein Korrekturvorschlag verschiebt das Wort nicht.
+- **Statistik.** Seitenzahlen bleiben auf diesem Gerät und lösen keinen Abgleich aus.
+
 ## 2026.10.12-beta.5
 
 - Keep a claimed username when desktop settings are saved.
