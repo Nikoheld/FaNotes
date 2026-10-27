@@ -1,5 +1,20 @@
 # Änderungsverlauf
 
+## 2026.10.12-beta.5
+
+- Keep a claimed username when desktop settings are saved.
+- Require a unique username and a public activity page.
+- Keep a stopped share stopped on the real site service.
+- Record the local share upload status from the site server.
+- Serve shared notes from the site and keep a stopped live share stopped.
+- Share a note or a folder and open the link in the browser.
+- Offer spelling corrections without shifting the word.
+- Let the note sheet fill the scrollbar edges.
+- Let open note tabs use the path corner.
+- Paint PDF pen ink at screen density.
+- Open the last note instead of the start page.
+- Let a handwriting section band be narrowed from the right.
+
 ## 2026.10.12-beta.4
 
 - Keep a quick pen turn from ending in a circle.
