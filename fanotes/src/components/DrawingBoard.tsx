@@ -1637,7 +1637,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   /** Collapsible sections, kept sorted by header top. The ref is what callbacks read; the state renders the bands. */
   const sectionsRef = useRef<InkSection<InkStroke>[]>([])
   const [sections, setSections] = useState<InkSection<InkStroke>[]>([])
-  // Keyboard mode makes this board inert, so the title field is portaled onto the paper.
+  // Keyboard mode makes this board inert, so the title and the edge handles are portaled onto the paper.
   const [sectionTitleHost, setSectionTitleHost] = useState<HTMLElement | null>(null)
   useLayoutEffect(() => {
     const host = inline ? (boardRef.current?.closest('.unified-paper') as HTMLElement | null) : null
@@ -7548,6 +7548,54 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     )
   }
 
+  // One pair for the band (pen mode) and the paper portal (keyboard mode).
+  // The drag only stores the shared edges. Ink and the note stay where they are.
+  const sectionWidthHandles = (section: InkSection<InkStroke>, isSub: boolean, bandLeft: number, bandRight: number) => (
+    <>
+      <div
+        className="lw-ink-section-control lw-ink-section-width is-left"
+        data-edge="left"
+        role="slider"
+        aria-valuemin={0}
+        aria-valuemax={Math.round((bandRight - SUBSECTION_WIDTH_MIN) * 100)}
+        aria-valuenow={Math.round(bandLeft * 100)}
+        aria-label={isSub ? 'Breite des Unterabschnitts' : 'Breite des Abschnitts'}
+        title="Breite ziehen · die Schrift bleibt, wo sie ist"
+        tabIndex={0}
+        onPointerDown={(event) => beginSubsectionWidthDrag(section.id, event)}
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+          event.preventDefault()
+          event.stopPropagation()
+          if (setSubsectionLeft(section.id, bandLeft + (event.key === 'ArrowLeft' ? -0.02 : 0.02))) {
+            setDirty(true)
+            bumpRevision()
+          }
+        }}
+      />
+      <div
+        className="lw-ink-section-control lw-ink-section-width"
+        role="slider"
+        aria-valuemin={Math.round((bandLeft + SUBSECTION_WIDTH_MIN) * 100)}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(bandRight * 100)}
+        aria-label={isSub ? 'Breite des Unterabschnitts' : 'Breite des Abschnitts'}
+        title="Breite ziehen · die Schrift bleibt, wo sie ist"
+        tabIndex={0}
+        onPointerDown={(event) => beginSubsectionWidthDrag(section.id, event)}
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+          event.preventDefault()
+          event.stopPropagation()
+          if (setSubsectionWidth(section.id, bandRight + (event.key === 'ArrowLeft' ? -0.02 : 0.02))) {
+            setDirty(true)
+            bumpRevision()
+          }
+        }}
+      />
+    </>
+  )
+
   const paintToolClass = selectionMode
     ? 'tool-select'
     : tool === 'pen' && inkMode === 'drawing'
@@ -8379,47 +8427,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                       >
                         {mergeIncluded ? <Check size={13} /> : null}
                       </button>}
-                      <div
-                        className="lw-ink-section-control lw-ink-section-width is-left"
-                        data-edge="left"
-                        role="slider"
-                        aria-valuemin={0}
-                        aria-valuemax={Math.round((bandRight - SUBSECTION_WIDTH_MIN) * 100)}
-                        aria-valuenow={Math.round(bandLeft * 100)}
-                        aria-label={isSub ? 'Breite des Unterabschnitts' : 'Breite des Abschnitts'}
-                        title="Breite ziehen · die Schrift bleibt, wo sie ist"
-                        tabIndex={0}
-                        onPointerDown={(event) => beginSubsectionWidthDrag(section.id, event)}
-                        onKeyDown={(event) => {
-                          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-                          event.preventDefault()
-                          event.stopPropagation()
-                          if (setSubsectionLeft(section.id, bandLeft + (event.key === 'ArrowLeft' ? -0.02 : 0.02))) {
-                            setDirty(true)
-                            bumpRevision()
-                          }
-                        }}
-                      />
-                      <div
-                        className="lw-ink-section-control lw-ink-section-width"
-                        role="slider"
-                        aria-valuemin={Math.round((bandLeft + SUBSECTION_WIDTH_MIN) * 100)}
-                        aria-valuemax={100}
-                        aria-valuenow={Math.round(bandRight * 100)}
-                        aria-label={isSub ? 'Breite des Unterabschnitts' : 'Breite des Abschnitts'}
-                        title="Breite ziehen · die Schrift bleibt, wo sie ist"
-                        tabIndex={0}
-                        onPointerDown={(event) => beginSubsectionWidthDrag(section.id, event)}
-                        onKeyDown={(event) => {
-                          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-                          event.preventDefault()
-                          event.stopPropagation()
-                          if (setSubsectionWidth(section.id, bandRight + (event.key === 'ArrowLeft' ? -0.02 : 0.02))) {
-                            setDirty(true)
-                            bumpRevision()
-                          }
-                        }}
-                      />
+                      {!(inline && !inputActive) && sectionWidthHandles(section, isSub, bandLeft, bandRight)}
                     </div>
                     {!section.collapsed && bodyEnd > section.bodyTop.y && <div
                       className={`lw-ink-section-rail${isSub ? ' is-subsection' : ''}`}
@@ -8453,29 +8461,34 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                   const bandRight = clampSectionWidth(section.width)
                   const bandLeft = clampSectionLeft(section.left, bandRight)
                   const mergeIncluded = mergePicking && (section.id === mergeKeeperId || mergePickIds.includes(section.id) || Boolean(mergePlan?.removeIds.includes(section.id)))
+                  const bandStyle = {
+                    top: `${section.top.y * 100}%`,
+                    height: `${Math.max(0, section.bodyTop.y - section.top.y) * 100}%`,
+                    left: `${bandLeft * 100}%`,
+                    width: `${(bandRight - bandLeft) * 100}%`,
+                  }
                   return (
-                    <div
-                      key={section.id}
-                      className={`lw-ink-section-title-slot${mergeIncluded ? (section.id === mergeKeeperId ? ' is-merge-keeper' : ' is-merge-picked') : ''}`}
-                      style={{
-                        top: `${section.top.y * 100}%`,
-                        height: `${Math.max(0, section.bodyTop.y - section.top.y) * 100}%`,
-                        left: `${bandLeft * 100}%`,
-                        width: `${(bandRight - bandLeft) * 100}%`,
-                      }}
-                    >
-                      {sectionTitleField(section, section.parentId !== null)}
-                      {mergePicking && <button
-                        type="button"
-                        className="lw-ink-section-merge-key"
-                        aria-pressed={mergeIncluded}
-                        aria-label="Abschnitt zum Zusammenführen auswählen"
-                        title="Abschnitte antippen · der oberste bleibt und deckt die anderen ab"
-                        onClick={() => toggleMergePick(section.id)}
+                    <Fragment key={section.id}>
+                      <div
+                        className={`lw-ink-section-title-slot${mergeIncluded ? (section.id === mergeKeeperId ? ' is-merge-keeper' : ' is-merge-picked') : ''}`}
+                        style={bandStyle}
                       >
-                        {mergeIncluded ? <Check size={14} /> : null}
-                      </button>}
-                    </div>
+                        {sectionTitleField(section, section.parentId !== null)}
+                        {mergePicking && <button
+                          type="button"
+                          className="lw-ink-section-merge-key"
+                          aria-pressed={mergeIncluded}
+                          aria-label="Abschnitt zum Zusammenführen auswählen"
+                          title="Abschnitte antippen · der oberste bleibt und deckt die anderen ab"
+                          onClick={() => toggleMergePick(section.id)}
+                        >
+                          {mergeIncluded ? <Check size={14} /> : null}
+                        </button>}
+                      </div>
+                      <div className="lw-ink-section-width-slot" style={bandStyle}>
+                        {sectionWidthHandles(section, section.parentId !== null, bandLeft, bandRight)}
+                      </div>
+                    </Fragment>
                   )
                 })}
               </div>,
@@ -9090,6 +9103,7 @@ const drawingBoardStyles = `
 .lw-ink-section-title:focus{background:rgba(255,255,255,.55)}
 .lw-ink-section-titles{position:absolute;inset:0;z-index:6;pointer-events:none}
 .lw-ink-section-title-slot{position:absolute;left:0;overflow:hidden;pointer-events:none}
+.lw-ink-section-width-slot{position:absolute;overflow:visible;pointer-events:none;z-index:2}
 .lw-ink-section-badge{position:absolute;right:48px;top:50%;transform:translateY(-50%);padding:3px 9px;border-radius:999px;color:var(--accent,#2a6f97);background:rgba(var(--accent-rgb),.14);font:700 12px/1.3 var(--ui-font,system-ui);white-space:nowrap;pointer-events:none}
 .lw-ink-section-remove{position:absolute;right:14px;top:50%;width:22px;height:22px;display:grid;place-items:center;transform:translateY(-50%);border:0;border-radius:6px;color:rgba(74,63,176,.6);background:transparent;cursor:pointer;pointer-events:auto;opacity:.65}
 .lw-ink-section-remove:hover{color:#b3261e;background:rgba(220,60,60,.12);opacity:1}
