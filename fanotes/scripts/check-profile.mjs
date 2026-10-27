@@ -301,11 +301,11 @@ try {
     profileUsername: restartedProfile.profileUsername,
     profilePublic: restartedProfile.profilePublic,
   }
-  const html = renderToStaticMarkup(createElement(settingsModule.SettingsModal, {
-    platform: 'linux',
+  const renderSettingsPage = (initialSection, platform = 'linux') => renderToStaticMarkup(createElement(settingsModule.SettingsModal, {
+    platform,
     settings,
     vaultPath: '/vault',
-    initialSection: 'sync',
+    initialSection,
     onChange: () => undefined,
     onClose: () => undefined,
     onSelectVault: () => undefined,
@@ -334,17 +334,62 @@ try {
     onResetSettings: () => undefined,
     onResetAppData: async () => undefined,
   }))
+  const optionRows = (markup) => {
+    const count = Number(markup.match(/Anpassung · (\d+) Optionen/u)?.[1])
+    const rows = markup.match(/class="setting-row"/gu)?.length ?? 0
+    assert.equal(count, rows, `${initialSectionLabel(markup)} shows ${count} options and ${rows} rows`)
+    return rows
+  }
+  const initialSectionLabel = (markup) => markup.match(/<h2>([^<]+)<\/h2>/u)?.[1] ?? 'settings'
+  const html = renderSettingsPage('profile')
   const nav = html.slice(html.indexOf('aria-label="Einstellungsbereiche"'), html.indexOf('reset-settings'))
   const groups = [...nav.matchAll(/<div class="settings-nav-group"><small>([^<]+)<\/small>/gu)].map((match) => match[1].replaceAll('&amp;', '&'))
   const sections = [...nav.matchAll(/<span><b>[^<]+<\/b>/gu)].length
   const placeholder = html.match(/placeholder="([^"]+)"/u)?.[1] ?? ''
-  assert.deepEqual(groups, ['Aussehen & Schreiben', 'Stift & Arbeitsbereich', 'FaNotes & System'])
-  assert.equal(sections, 11)
+  assert.deepEqual(groups, ['Aussehen & Schreiben', 'Bedienung', 'Stift & Arbeitsbereich', 'Dateien & Vault', 'Sync', 'Profil', 'Teilen', 'Add-ons', 'Updates', 'Experimentell', 'Erweitert'])
+  assert.equal(groups.includes('FaNotes & System'), false)
+  assert.equal(sections, 12)
   assert.equal(placeholder, 'Einstellungen suchen')
   assert.match(html, /id="settings-profile"/u)
   assert.match(html, /aria-label="Die öffentliche Aktivitätsübersicht zeigen"/u)
   assert.match(html, /aria-checked="true"/u)
   assert.match(html, /Benutzername festlegen/u)
+  assert.doesNotMatch(html, /id="settings-sync-account"/u)
+  assert.doesNotMatch(html, /Ende-zu-Ende verschlüsselt/u)
+  assert.equal(optionRows(html), 3)
+  const drawingHtml = renderSettingsPage('drawing')
+  const advancedHtml = renderSettingsPage('advanced')
+  const filesHtml = renderSettingsPage('files')
+  const webFilesHtml = renderSettingsPage('files', 'web')
+  const updatesHtml = renderSettingsPage('updates')
+  const experimentalHtml = renderSettingsPage('experimental')
+  assert.match(drawingHtml, /Präzises Formelmodell/u)
+  assert.match(drawingHtml, /Qwen3-VL/u)
+  assert.match(drawingHtml, /id="settings-enhanced-math"/u)
+  assert.match(drawingHtml, /id="settings-qwen-vision"/u)
+  assert.doesNotMatch(drawingHtml, /App-Daten zurücksetzen/u)
+  assert.doesNotMatch(drawingHtml, /id="settings-css"/u)
+  assert.doesNotMatch(drawingHtml, /id="settings-reset"/u)
+  assert.match(advancedHtml, /App-Daten zurücksetzen/u)
+  assert.match(advancedHtml, /Eigenes CSS/u)
+  assert.match(advancedHtml, /id="settings-bug-report"/u)
+  assert.match(advancedHtml, /Fehler melden/u)
+  assert.doesNotMatch(advancedHtml, /Präzises Formelmodell/u)
+  assert.doesNotMatch(advancedHtml, /Qwen3-VL/u)
+  assert.doesNotMatch(advancedHtml, /id="settings-enhanced-math"/u)
+  assert.doesNotMatch(advancedHtml, /id="settings-qwen-vision"/u)
+  assert.match(filesHtml, /id="settings-note-backup"/u)
+  assert.match(filesHtml, /Experimentell/u)
+  assert.match(filesHtml, /Standard aus/u)
+  assert.doesNotMatch(filesHtml, /id="settings-backup"/u)
+  assert.match(webFilesHtml, /id="settings-backup"/u)
+  assert.match(webFilesHtml, /id="settings-note-backup"/u)
+  assert.doesNotMatch(updatesHtml, /id="settings-bug-report"/u)
+  assert.doesNotMatch(updatesHtml, /Fehler melden/u)
+  assert.ok(updatesHtml.indexOf('update-hero') >= 0 && updatesHtml.indexOf('settings-update-automation') > updatesHtml.indexOf('update-hero'))
+  assert.doesNotMatch(experimentalHtml, /id="settings-note-backup"/u)
+  assert.doesNotMatch(experimentalHtml, /title="Notiz-Backup"/u)
+  for (const markup of [drawingHtml, advancedHtml, filesHtml, webFilesHtml, updatesHtml, experimentalHtml]) optionRows(markup)
   const settingsLog = [
     `groups ${groups.join('|')}`,
     `sections ${sections}`,

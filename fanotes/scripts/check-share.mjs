@@ -290,11 +290,15 @@ try {
   const groups = [...nav.matchAll(/<div class="settings-nav-group"><small>([^<]+)<\/small>/gu)].map((match) => match[1].replaceAll('&amp;', '&'))
   const sections = [...nav.matchAll(/<span><b>[^<]+<\/b>/gu)].length
   const placeholder = html.match(/placeholder="([^"]+)"/u)?.[1] ?? ''
-  assert.deepEqual(groups, ['Aussehen & Schreiben', 'Stift & Arbeitsbereich', 'FaNotes & System'])
-  assert.equal(sections, 11)
+  assert.deepEqual(groups, ['Aussehen & Schreiben', 'Bedienung', 'Stift & Arbeitsbereich', 'Dateien & Vault', 'Sync', 'Profil', 'Teilen', 'Add-ons', 'Updates', 'Experimentell', 'Erweitert'])
+  assert.equal(groups.includes('FaNotes & System'), false)
+  assert.equal(sections, 12)
   assert.equal(placeholder, 'Einstellungen suchen')
   assert.match(html, /id="settings-share"/u)
   assert.doesNotMatch(html, /id="settings-editor"/u)
+  assert.doesNotMatch(html, /id="settings-update-channel"/u)
+  assert.doesNotMatch(html, /id="settings-reset"/u)
+  assert.equal(Number(html.match(/Anpassung · (\d+) Optionen/u)?.[1]), html.match(/class="setting-row"/gu)?.length ?? 0)
   assert.match(html, /<b>Hallo<\/b>/u)
   assert.match(html, new RegExp(`data-share-stop="${note.record.id}"`, 'u'))
   const settingsLog = [

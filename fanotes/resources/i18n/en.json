@@ -2582,7 +2582,7 @@
   "Ressourcen, Datenschutz und App-Daten": "Resources, privacy, and app data",
   "Richtung": "Direction",
   "Rot wird nur markiert, wenn die Algebra einen echten Widerspruch beweist. Unsichere Handschrift und nicht beweisbare Mehrvariablen-Schritte bleiben gelb.": "Red is only marked if the algebra proves a real contradiction. Unsafe handwriting and unprovable multivariable steps remain yellow.",
-  "Rückfallebene ohne NPU. Kompakt ist das schnelle 21-MB-Zeilenmodell. Erweitert ergänzt schwierige Zeilen mit dem Kontextmodell. Für Handschrift auf Intel-NPU ist Qwen3-VL unten die empfohlene Texterkennung.": "Fallback without an NPU. Compact is the fast 21 MB line model. Extended adds the context model for difficult lines. For handwriting on Intel NPU, Qwen3-VL below is the recommended text engine.",
+  "Rückfallebene ohne NPU. Kompakt ist das schnelle 21-MB-Zeilenmodell. Erweitert ergänzt schwierige Zeilen mit dem Kontextmodell.": "Fallback without an NPU. Compact is the fast 21 MB line model. Extended adds the context model for difficult lines.",
   "Rückgängig": "Undo",
   "Rückgängig (Strg/⌘ Z)": "Undo (Ctrl/⌘ Z)",
   "Rückgängig (Strg+Z)": "Undo (Ctrl+Z)",

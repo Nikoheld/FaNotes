@@ -348,7 +348,7 @@ void (async () => {
       sections: document.querySelectorAll('.settings-nav-group > button').length,
       searchPlaceholder: document.querySelector('.settings-search input')?.placeholder,
     }))()`)
-    if (settingsNavigation.groups.join('|') !== 'Aussehen & Schreiben|Stift & Arbeitsbereich|FaNotes & System' || settingsNavigation.sections !== 11 || settingsNavigation.searchPlaceholder !== 'Einstellungen suchen') {
+    if (settingsNavigation.groups.join('|') !== 'Aussehen & Schreiben|Bedienung|Stift & Arbeitsbereich|Dateien & Vault|Sync|Profil|Teilen|Add-ons|Updates|Experimentell|Erweitert' || settingsNavigation.groups.includes('FaNotes & System') || settingsNavigation.sections !== 12 || settingsNavigation.searchPlaceholder !== 'Einstellungen suchen') {
       throw new Error(`Die neue Einstellungsnavigation ist unvollständig: ${JSON.stringify(settingsNavigation)}`)
     }
     await capture(cdp, 'settings')

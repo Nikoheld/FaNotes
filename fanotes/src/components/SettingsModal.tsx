@@ -34,6 +34,7 @@ import {
   Trash2,
   TriangleAlert,
   UploadCloud,
+  User,
   X,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -91,7 +92,7 @@ const UPDATE_CHANNEL_COPY = {
 
 const updateChannelCopy = (channel: AppSettings['updateChannel']) => UPDATE_CHANNEL_COPY[channel] ?? UPDATE_CHANNEL_COPY.stable
 
-export type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'sync' | 'share' | 'addons' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
+export type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'sync' | 'profile' | 'share' | 'addons' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
 
 export type SettingsModalProps = {
   platform?: string
@@ -123,23 +124,63 @@ export type SettingsModalProps = {
 
 const SECTIONS: { id: SettingsSection; label: string; description: string; icon: typeof Palette; count: number }[] = [
   { id: 'appearance', label: 'Darstellung', description: 'Farben, Schriften und Dichte', icon: Palette, count: 12 },
-  { id: 'editor', label: 'Editor', description: 'Markdown und Schreiben', icon: FileText, count: 8 },
-  { id: 'drawing', label: 'Stift & Erkennung', description: 'Tablet, Papier und Handschrift', icon: Brush, count: 16 },
-  { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 7 },
-  { id: 'sync', label: 'Sync', description: 'Konto, Geräte und Verschlüsselung', icon: Cloud, count: 8 },
-  { id: 'share', label: 'Teilen', description: 'Link, Kopie oder Live', icon: Share2, count: 3 },
-  { id: 'addons', label: 'Add-ons', description: 'Store, Quelle und Updates', icon: Puzzle, count: 3 },
-  { id: 'updates', label: 'Updates', description: 'Stable, Beta und Sicherheit', icon: RefreshCw, count: 4 },
+  { id: 'editor', label: 'Editor', description: 'Markdown und Schreiben', icon: FileText, count: 10 },
   { id: 'accessibility', label: 'Bedienung', description: 'Bewegung und Lesbarkeit', icon: Accessibility, count: 3 },
-  { id: 'experimental', label: 'Experimentell', description: 'Unfertige Funktionen, standardmässig aus', icon: FlaskConical, count: 5 },
-  { id: 'advanced', label: 'Erweitert', description: 'Ressourcen, Datenschutz und App-Daten', icon: Code2, count: 10 },
+  { id: 'drawing', label: 'Stift & Erkennung', description: 'Tablet, Papier und Handschrift', icon: Brush, count: 18 },
+  { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 5 },
+  { id: 'sync', label: 'Sync', description: 'Konto, Geräte und Verschlüsselung', icon: Cloud, count: 1 },
+  { id: 'profile', label: 'Profil', description: 'Öffentliche Aktivitätsübersicht', icon: User, count: 3 },
+  { id: 'share', label: 'Teilen', description: 'Link, Kopie oder Live', icon: Share2, count: 3 },
+  { id: 'addons', label: 'Add-ons', description: 'Store, Quelle und Updates', icon: Puzzle, count: 2 },
+  { id: 'updates', label: 'Updates', description: 'Stable, Beta und Sicherheit', icon: RefreshCw, count: 4 },
+  { id: 'experimental', label: 'Experimentell', description: 'Unfertige Funktionen, standardmässig aus', icon: FlaskConical, count: 4 },
+  { id: 'advanced', label: 'Erweitert', description: 'Ressourcen, Datenschutz und App-Daten', icon: Code2, count: 8 },
 ]
 
 const SECTION_GROUPS: Array<{ label: string; sections: SettingsSection[] }> = [
   { label: 'Aussehen & Schreiben', sections: ['appearance', 'editor'] },
-  { label: 'Stift & Arbeitsbereich', sections: ['drawing', 'files'] },
-  { label: 'FaNotes & System', sections: ['sync', 'share', 'addons', 'updates', 'accessibility', 'experimental', 'advanced'] },
+  { label: 'Bedienung', sections: ['accessibility'] },
+  { label: 'Stift & Arbeitsbereich', sections: ['drawing'] },
+  { label: 'Dateien & Vault', sections: ['files'] },
+  { label: 'Sync', sections: ['sync'] },
+  { label: 'Profil', sections: ['profile'] },
+  { label: 'Teilen', sections: ['share'] },
+  { label: 'Add-ons', sections: ['addons'] },
+  { label: 'Updates', sections: ['updates'] },
+  { label: 'Experimentell', sections: ['experimental'] },
+  { label: 'Erweitert', sections: ['advanced'] },
 ]
+
+const settingsOptionCount = (
+  id: SettingsSection,
+  input: {
+    isWeb: boolean
+    hasSync: boolean
+    syncUnavailable: boolean
+    syncSignedIn: boolean
+    syncDeviceRows: number
+    syncConflictRows: number
+  },
+) => {
+  switch (id) {
+    case 'appearance': return 12
+    case 'editor': return 10
+    case 'drawing': return input.isWeb ? 16 : 18
+    case 'files': return 5
+    case 'sync':
+      if (!input.hasSync || input.syncUnavailable) return 1
+      if (!input.syncSignedIn) return 0
+      return 5 + 3 + input.syncDeviceRows + input.syncConflictRows + 1
+    case 'profile': return 3
+    case 'share': return 3
+    case 'addons': return 2
+    case 'updates': return input.isWeb ? 2 : 4
+    case 'accessibility': return 3
+    case 'experimental': return 4
+    case 'advanced': return input.isWeb ? 6 : 8
+    default: return 0
+  }
+}
 
 type SettingsSearchItem = {
   label: string
@@ -152,7 +193,7 @@ type SettingsSearchItem = {
 const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Grok-Connector', detail: 'Sync', section: 'sync', target: 'settings-grok-connector', keywords: 'grok mcp connector server url notizen prüfung klausur hausaufgaben oauth' },
   { label: 'Sync-Konto', detail: 'Sync', section: 'sync', target: 'settings-sync-account', keywords: 'sync konto anmelden registrieren account login passwort e-mail cloud server geräte' },
-  { label: 'Öffentliche Aktivitätsübersicht', detail: 'Sync', section: 'sync', target: 'settings-profile', keywords: 'benutzername profil user übersicht aktivität notizen zeit beigetreten tage öffentlich' },
+  { label: 'Öffentliche Aktivitätsübersicht', detail: 'Profil', section: 'profile', target: 'settings-profile', keywords: 'benutzername profil user übersicht aktivität notizen zeit beigetreten tage öffentlich' },
   { label: 'Angemeldete Geräte', detail: 'Sync', section: 'sync', target: 'settings-sync-devices', keywords: 'sync geräte devices laptop tablet abmelden' },
   { label: 'Sync-Passwort ändern', detail: 'Sync', section: 'sync', target: 'settings-sync-password', keywords: 'sync passwort ändern password schlüssel' },
   { label: 'Sync-Konto löschen', detail: 'Sync', section: 'sync', target: 'settings-sync-delete', keywords: 'sync konto löschen account delete server' },
@@ -171,7 +212,8 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Autokorrektur', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'autokorrektur tippfehler korrigieren vorschläge wörterbuch autocorrect' },
   { label: 'Zeilennummern, Wortzahl & Gliederung', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'statusleiste outline struktur markdown' },
   { label: 'GlyphenWerk & Training', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-glyphenwerk', keywords: 'handschrift trainieren import zip symbole mathematik' },
-  { label: 'Präzises Formelmodell', detail: 'Erweitert', section: 'advanced', target: 'settings-enhanced-math', keywords: 'mathematik formel latex posformer q4 sequenzmodell lokal download' },
+  { label: 'Präzises Formelmodell', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-enhanced-math', keywords: 'mathematik formel latex posformer q4 sequenzmodell lokal download' },
+  { label: 'Empfohlen: Qwen3-VL Texterkennung (Intel NPU)', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-qwen-vision', keywords: 'qwen3-vl qwen vision npu intel openvino texterkennung handschrift modell' },
   { label: 'Papier & Stift', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'tablet karos linien punkte gepunktet häuschen kästchen millimeter farbe breite druck glättung hintergrund' },
   { label: 'Stifte- und Tablett-Tasten', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet-buttons', keywords: 'wacom tablett taste barrel radierer expresskey stift knopf mapping' },
   { label: 'Durchkritzel-Empfindlichkeit', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'löschen radierer scribble sensitivity' },
@@ -180,7 +222,7 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Handschrift zu Text', detail: 'Experimentell', section: 'experimental', target: 'settings-experimental', keywords: 'experimentell ocr konvertieren mathe korrigierer löser suchindex qwen vision handschrift text' },
   { label: 'Hausaufgaben API', detail: 'Experimentell', section: 'experimental', target: 'settings-homework-api', keywords: 'hausaufgaben api fasrv passwort auth termine liste erledigt patch post delete' },
   { label: 'Remote Support', detail: 'Experimentell', section: 'experimental', target: 'settings-remote-support', keywords: 'remote support sitzung debug test code token fernwartung' },
-  { label: 'Notiz-Backup', detail: 'Experimentell', section: 'experimental', target: 'settings-note-backup', keywords: 'backup sichern wiederherstellen snapshot notiz' },
+  { label: 'Notiz-Backup', detail: 'Dateien & Vault', section: 'files', target: 'settings-note-backup', keywords: 'backup sichern wiederherstellen snapshot notiz experimentell' },
   { label: 'Send Data', detail: 'Experimentell', section: 'experimental', target: 'settings-send-data', keywords: 'send data logs nutzerdaten hyprland telemetry diagnostik server' },
   { label: 'Vault & Speicherort', detail: 'Dateien & Vault', section: 'files', target: 'settings-vault', keywords: 'ordner wechseln pfad notizen markdown nas browser' },
   { label: 'Microsoft OneNote importieren', detail: 'Dateien & Vault', section: 'files', target: 'settings-onenote', keywords: 'one onetoc2 onepkg onedrive zip notizbuch migration' },
@@ -196,6 +238,7 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Anonyme Nutzungsstatistik', detail: 'Erweitert', section: 'advanced', target: 'settings-privacy', keywords: 'datenschutz statistik anonym land app start downloads analytics privacy' },
   { label: 'Eigenes CSS', detail: 'Erweitert', section: 'advanced', target: 'settings-css', keywords: 'custom style design code variablen' },
   { label: 'Vim-Modus', detail: 'Erweitert', section: 'advanced', target: 'settings-vim', keywords: 'tastatur keyboard shortcuts' },
+  { label: 'Fehler melden', detail: 'Erweitert', section: 'advanced', target: 'settings-bug-report', keywords: 'bug report fehler melden problem absturz protokoll' },
   { label: 'App-Daten zurücksetzen', detail: 'Erweitert', section: 'advanced', target: 'settings-reset', keywords: 'reset löschen cache ausgangszustand werkseinstellung' },
 ]
 
@@ -392,7 +435,20 @@ export function SettingsModal({
   const profileOrigin = useMemo(() => resolveProfileOrigin(), [])
   const trainingInputRef = useRef<HTMLInputElement>(null)
   const modalRef = useRef<HTMLElement>(null)
-  const section = useMemo(() => SECTIONS.find((candidate) => candidate.id === active)!, [active])
+  const section = useMemo(() => {
+    const found = SECTIONS.find((candidate) => candidate.id === active)!
+    return {
+      ...found,
+      count: settingsOptionCount(found.id, {
+        isWeb,
+        hasSync: Boolean(syncEngine && syncState),
+        syncUnavailable: syncState?.status === 'unavailable',
+        syncSignedIn: Boolean(syncState?.account),
+        syncDeviceRows: syncState?.info ? syncState.info.devices.length : 1,
+        syncConflictRows: syncState?.conflicts.length ?? 0,
+      }),
+    }
+  }, [active, isWeb, syncEngine, syncState])
   const ActiveSectionIcon = section.icon
   const searchResults = useMemo(() => {
     const terms = normalizeSearch(searchQuery).split(/\s+/u).filter(Boolean)
@@ -937,6 +993,102 @@ export function SettingsModal({
                   <SettingRow title="Lokales Kontextlernen" description="Löst unsichere Buchstaben anhand plausibler Wörter auf und übernimmt ausschließlich sichere Entscheidungen als begrenzte persönliche Trainingsbeispiele."><span>Automatisch aktiv</span></SettingRow>
                   <SettingRow title="Unsichtbarer Suchindex" description="Nur aktiv, wenn „Handschrift zu Text“ unter Experimentell eingeschaltet ist. Die Seite bleibt Handschrift; die Vault-Suche nutzt dann im Hintergrund eine lokale Transkription."><span>{settings.experimentalHandwritingToText ? 'Lokal aktiv' : 'Experimentell aus'}</span></SettingRow>
                   <SettingRow title="Zeichnung nach Einfügen behalten"><Toggle label="Zeichnung behalten" checked={settings.keepDrawingAfterInsert} onChange={(value) => update('keepDrawingAfterInsert', value)} /></SettingRow>
+                  {!isWeb && <div id="settings-enhanced-math">
+                    <SettingRow
+                      title="Präzises Formelmodell"
+                      description="Liest eine komplette zweidimensionale Formel gemeinsam statt Zeichen einzeln zu erraten. Das etwa 10 MB grosse Q4-Modell wird nur nach deiner Bestätigung geladen und nie beim App-Start ausgeführt."
+                    >
+                      {enhancedMathState?.installed ? (
+                        <Toggle
+                          label="Präzises Formelmodell"
+                          checked={settings.enhancedMathRecognition}
+                          onChange={(value) => update('enhancedMathRecognition', value)}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="settings-inline-button"
+                          disabled={enhancedMathBusy || enhancedMathState?.supported === false}
+                          onClick={() => void installEnhancedMathModel()}
+                        >
+                          {enhancedMathBusy ? <LoaderCircle className="spin" size={15} /> : <Download size={15} />}
+                          {enhancedMathBusy ? 'Wird geprüft und geladen …' : 'Lizenz akzeptieren & laden'}
+                        </button>
+                      )}
+                    </SettingRow>
+                    <div className="settings-resource-note">
+                      <ShieldCheck size={14} />
+                      <span>
+                        PosFormer · CC BY-NC-SA 3.0 · nur lokal · SHA-256-geprüft.{' '}
+                        <button type="button" className="settings-link-button" onClick={() => void window.fanotes.openExternal(enhancedMathState?.homepage ?? 'https://huggingface.co/cstr/posformer-crohme-GGUF')}>Modellkarte und Lizenz</button>
+                        {enhancedMathState?.supported === false && ' · Native Laufzeit ist in diesem Paket nicht enthalten.'}
+                      </span>
+                    </div>
+                    {enhancedMathError && <div className="settings-inline-error">{enhancedMathError}</div>}
+                  </div>}
+                  {!isWeb && <div id="settings-qwen-vision">
+                    <SettingRow
+                      title="Empfohlen: Qwen3-VL Texterkennung (Intel NPU)"
+                      description="Empfohlene lokale Texterkennung für Handschrift. Qwen3-VL 2B liest die Notiz als Bild auf der Intel-NPU (OpenVINO INT4). Nach der Lizenzbestätigung werden Laufzeit und das ~1,8 GB-Modell automatisch geladen; jederzeit deaktivierbar."
+                    >
+                      {qwenVisionState?.installed && qwenVisionState?.supported ? (
+                        <Toggle
+                          label="Qwen3-VL · empfohlen"
+                          checked={settings.qwenVisionRecognition}
+                          onChange={(value) => update('qwenVisionRecognition', value)}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="settings-inline-button"
+                          disabled={qwenVisionBusy}
+                          onClick={() => void installQwenVisionModel()}
+                        >
+                          {qwenVisionBusy ? <LoaderCircle className="spin" size={15} /> : <Download size={15} />}
+                          {qwenVisionBusy
+                            ? (qwenVisionState?.runtimeInstalling
+                              ? 'OpenVINO-Laufzeit wird geladen …'
+                              : 'NPU-Modell wird geladen …')
+                            : qwenVisionState?.installed
+                              ? 'OpenVINO-Laufzeit reparieren'
+                              : 'Lizenz akzeptieren & alles laden'}
+                        </button>
+                      )}
+                    </SettingRow>
+                    <div className="settings-resource-note">
+                      <ShieldCheck size={14} />
+                      <span>
+                        Empfohlen für Text · Qwen3-VL 2B · OpenVINO INT4 · nur Intel-NPU · Apache-2.0 · OpenVINO-Pakete auto · Modell ~1,8&nbsp;GB · SHA-256-geprüft.
+                        {' '}
+                        <button type="button" className="settings-link-button" onClick={() => void window.fanotes.openExternal(qwenVisionState?.homepage ?? 'https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct')}>Modellkarte</button>
+                        {qwenVisionState?.supported && qwenVisionState?.npu && (
+                          qwenVisionState.openvinoVersion
+                            ? ` · NPU bereit · OpenVINO ${qwenVisionState.openvinoVersion}.`
+                            : ' · NPU bereit.'
+                        )}
+                        {qwenVisionState?.runtimeReady && !qwenVisionState?.supported && ' · OpenVINO installiert, NPU prüfen.'}
+                      </span>
+                    </div>
+                    {(qwenVisionBusy || qwenVisionState?.runtimeInstalling) && qwenVisionState?.runtimeMessage && (
+                      <div className="settings-resource-note" role="status">
+                        <LoaderCircle className="spin" size={14} />
+                        <span>{qwenVisionState.runtimeMessage}</span>
+                      </div>
+                    )}
+                    {qwenVisionState?.supported === false && qwenVisionState?.error && !qwenVisionBusy && (
+                      <div className="settings-inline-error" role="status">
+                        <strong>Laufzeit / Hardware</strong>
+                        <span>{qwenVisionState.error}</span>
+                        {Array.isArray(qwenVisionState.devices) && qwenVisionState.devices.length > 0 && (
+                          <span>OpenVINO-Geräte: {qwenVisionState.devices.join(', ')}</span>
+                        )}
+                        {Array.isArray(qwenVisionState.host?.hints) && qwenVisionState.host.hints.length > 0 && (
+                          <span>{qwenVisionState.host.hints.join(' ')}</span>
+                        )}
+                      </div>
+                    )}
+                    {qwenVisionError && <div className="settings-inline-error">{qwenVisionError}</div>}
+                  </div>}
                 </div>
               </>
             )}
@@ -1002,6 +1154,19 @@ export function SettingsModal({
                   {backupNotice && <div className={`backup-notice is-${backupNotice.kind}`} role={backupNotice.kind === 'error' ? 'alert' : 'status'}>{backupNotice.kind === 'success' ? <Check size={14} /> : <TriangleAlert size={14} />}<span>{backupNotice.text}</span></div>}
                   {backupState.error && backupNotice?.text !== backupState.error && <div className="backup-notice is-error" role="alert"><TriangleAlert size={14} /><span>{backupState.error}</span></div>}
                 </div>}
+                <div id="settings-note-backup" className="setting-card">
+                  <div className="setting-card-title"><ShieldCheck size={16} /><span>Notiz-Backup</span><small className="settings-feature-badge">Experimentell</small></div>
+                  <SettingRow
+                    title="Notiz-Backup"
+                    description="Zeigt oben in der Notizleiste Backup. Die aktuelle Notiz lässt sich so sichern, wie sie gerade ist, und später wiederherstellen. Standard aus. Der automatische Versionsverlauf bleibt unabhängig davon."
+                  >
+                    <Toggle
+                      label="Notiz-Backup"
+                      checked={settings.experimentalNoteBackup}
+                      onChange={(value) => update('experimentalNoteBackup', value)}
+                    />
+                  </SettingRow>
+                </div>
                 <div id="settings-files" className="setting-card">
                   <div className="setting-card-title"><SlidersHorizontal size={16} /><span>Dateiverhalten</span></div>
                   <SettingRow title="Automatisch speichern"><Range value={settings.autosaveDelay} min={250} max={3000} step={250} suffix=" ms" onChange={(value) => update('autosaveDelay', value)} /></SettingRow>
@@ -1013,12 +1178,13 @@ export function SettingsModal({
             )}
 
             {active === 'sync' && (
-              <>
-                {syncEngine && syncState
-                  ? <SyncSettingsSection engine={syncEngine} syncState={syncState} settings={settings} update={update} platform={platform} />
-                  : <div className="setting-card"><div className="setting-card-title"><Cloud size={16} /><span>Sync</span></div><div className="setting-row"><div className="setting-copy"><span>Sync steht in dieser Umgebung nicht zur Verfügung.</span></div></div></div>}
-                <ProfileSettingsCard settings={settings} onChange={onChange} port={profilePort} origin={profileOrigin} />
-              </>
+              syncEngine && syncState
+                ? <SyncSettingsSection engine={syncEngine} syncState={syncState} settings={settings} update={update} platform={platform} />
+                : <div className="setting-card"><div className="setting-card-title"><Cloud size={16} /><span>Sync</span></div><div className="setting-row"><div className="setting-copy"><span>Sync steht in dieser Umgebung nicht zur Verfügung.</span></div></div></div>
+            )}
+
+            {active === 'profile' && (
+              <ProfileSettingsCard settings={settings} onChange={onChange} port={profilePort} origin={profileOrigin} />
             )}
 
             {active === 'share' && (
@@ -1132,15 +1298,6 @@ export function SettingsModal({
                     <p className="update-block-log">Der Vorgang steht im Update-Protokoll unter updates/download-failures.log.</p>
                   </div>
                 )}
-
-                <div id="settings-bug-report" className="setting-card">
-                  <div className="setting-card-title"><Bug size={16} /><span>Fehler melden</span></div>
-                  <SettingRow title="Bug Report" description="Schreib kurz, was schiefging. Die letzten fünf Minuten (Stiftposition, Notiz, Werkzeug, Version) werden automatisch angehängt und nur an fanotes.fasrv.ch geschickt.">
-                    <button type="button" className="secondary-button" onClick={() => onOpenBugReport?.()}>
-                      <Bug size={15} /> Fehler melden
-                    </button>
-                  </SettingRow>
-                </div>
 
                 <div id="settings-update-automation" className="setting-card">
                   <div className="setting-card-title"><RefreshCw size={16} /><span>Automatisierung</span></div>
@@ -1267,18 +1424,6 @@ export function SettingsModal({
                     )}
                   </div>
                 )}
-                <div id="settings-note-backup">
-                <SettingRow
-                  title="Notiz-Backup"
-                  description="Zeigt oben in der Notizleiste Backup. Die aktuelle Notiz lässt sich so sichern, wie sie gerade ist, und später wiederherstellen. Standard aus. Der automatische Versionsverlauf bleibt unabhängig davon."
-                >
-                  <Toggle
-                    label="Notiz-Backup"
-                    checked={settings.experimentalNoteBackup}
-                    onChange={(value) => update('experimentalNoteBackup', value)}
-                  />
-                </SettingRow>
-                </div>
                 <div id="settings-send-data">
                 <SettingRow
                   title="Send Data"
@@ -1363,108 +1508,12 @@ export function SettingsModal({
                       <option value={4}>4 Kerne · schnell</option>
                     </select>
                   </SettingRow>
-                  {!isWeb && <SettingRow title="Desktop-Erkennungsmodell" description="Rückfallebene ohne NPU. Kompakt ist das schnelle 21-MB-Zeilenmodell. Erweitert ergänzt schwierige Zeilen mit dem Kontextmodell. Für Handschrift auf Intel-NPU ist Qwen3-VL unten die empfohlene Texterkennung.">
+                  {!isWeb && <SettingRow title="Desktop-Erkennungsmodell" description="Rückfallebene ohne NPU. Kompakt ist das schnelle 21-MB-Zeilenmodell. Erweitert ergänzt schwierige Zeilen mit dem Kontextmodell.">
                     <select value={settings.desktopOcrModel} onChange={(event) => update('desktopOcrModel', event.target.value as AppSettings['desktopOcrModel'])}>
                       <option value="compact">Kompakt · weniger RAM</option>
                       <option value="extended">Erweitert · ohne NPU</option>
                     </select>
                   </SettingRow>}
-                  {!isWeb && <div id="settings-enhanced-math">
-                    <SettingRow
-                      title="Präzises Formelmodell"
-                      description="Liest eine komplette zweidimensionale Formel gemeinsam statt Zeichen einzeln zu erraten. Das etwa 10 MB grosse Q4-Modell wird nur nach deiner Bestätigung geladen und nie beim App-Start ausgeführt."
-                    >
-                      {enhancedMathState?.installed ? (
-                        <Toggle
-                          label="Präzises Formelmodell"
-                          checked={settings.enhancedMathRecognition}
-                          onChange={(value) => update('enhancedMathRecognition', value)}
-                        />
-                      ) : (
-                        <button
-                          type="button"
-                          className="settings-inline-button"
-                          disabled={enhancedMathBusy || enhancedMathState?.supported === false}
-                          onClick={() => void installEnhancedMathModel()}
-                        >
-                          {enhancedMathBusy ? <LoaderCircle className="spin" size={15} /> : <Download size={15} />}
-                          {enhancedMathBusy ? 'Wird geprüft und geladen …' : 'Lizenz akzeptieren & laden'}
-                        </button>
-                      )}
-                    </SettingRow>
-                    <div className="settings-resource-note">
-                      <ShieldCheck size={14} />
-                      <span>
-                        PosFormer · CC BY-NC-SA 3.0 · nur lokal · SHA-256-geprüft.{' '}
-                        <button type="button" className="settings-link-button" onClick={() => void window.fanotes.openExternal(enhancedMathState?.homepage ?? 'https://huggingface.co/cstr/posformer-crohme-GGUF')}>Modellkarte und Lizenz</button>
-                        {enhancedMathState?.supported === false && ' · Native Laufzeit ist in diesem Paket nicht enthalten.'}
-                      </span>
-                    </div>
-                    {enhancedMathError && <div className="settings-inline-error">{enhancedMathError}</div>}
-                  </div>}
-                  {!isWeb && <div id="settings-qwen-vision">
-                    <SettingRow
-                      title="Empfohlen: Qwen3-VL Texterkennung (Intel NPU)"
-                      description="Empfohlene lokale Texterkennung für Handschrift. Qwen3-VL 2B liest die Notiz als Bild auf der Intel-NPU (OpenVINO INT4). Nach der Lizenzbestätigung werden Laufzeit und das ~1,8 GB-Modell automatisch geladen; jederzeit deaktivierbar."
-                    >
-                      {qwenVisionState?.installed && qwenVisionState?.supported ? (
-                        <Toggle
-                          label="Qwen3-VL · empfohlen"
-                          checked={settings.qwenVisionRecognition}
-                          onChange={(value) => update('qwenVisionRecognition', value)}
-                        />
-                      ) : (
-                        <button
-                          type="button"
-                          className="settings-inline-button"
-                          disabled={qwenVisionBusy}
-                          onClick={() => void installQwenVisionModel()}
-                        >
-                          {qwenVisionBusy ? <LoaderCircle className="spin" size={15} /> : <Download size={15} />}
-                          {qwenVisionBusy
-                            ? (qwenVisionState?.runtimeInstalling
-                              ? 'OpenVINO-Laufzeit wird geladen …'
-                              : 'NPU-Modell wird geladen …')
-                            : qwenVisionState?.installed
-                              ? 'OpenVINO-Laufzeit reparieren'
-                              : 'Lizenz akzeptieren & alles laden'}
-                        </button>
-                      )}
-                    </SettingRow>
-                    <div className="settings-resource-note">
-                      <ShieldCheck size={14} />
-                      <span>
-                        Empfohlen für Text · Qwen3-VL 2B · OpenVINO INT4 · nur Intel-NPU · Apache-2.0 · OpenVINO-Pakete auto · Modell ~1,8&nbsp;GB · SHA-256-geprüft.
-                        {' '}
-                        <button type="button" className="settings-link-button" onClick={() => void window.fanotes.openExternal(qwenVisionState?.homepage ?? 'https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct')}>Modellkarte</button>
-                        {qwenVisionState?.supported && qwenVisionState?.npu && (
-                          qwenVisionState.openvinoVersion
-                            ? ` · NPU bereit · OpenVINO ${qwenVisionState.openvinoVersion}.`
-                            : ' · NPU bereit.'
-                        )}
-                        {qwenVisionState?.runtimeReady && !qwenVisionState?.supported && ' · OpenVINO installiert, NPU prüfen.'}
-                      </span>
-                    </div>
-                    {(qwenVisionBusy || qwenVisionState?.runtimeInstalling) && qwenVisionState?.runtimeMessage && (
-                      <div className="settings-resource-note" role="status">
-                        <LoaderCircle className="spin" size={14} />
-                        <span>{qwenVisionState.runtimeMessage}</span>
-                      </div>
-                    )}
-                    {qwenVisionState?.supported === false && qwenVisionState?.error && !qwenVisionBusy && (
-                      <div className="settings-inline-error" role="status">
-                        <strong>Laufzeit / Hardware</strong>
-                        <span>{qwenVisionState.error}</span>
-                        {Array.isArray(qwenVisionState.devices) && qwenVisionState.devices.length > 0 && (
-                          <span>OpenVINO-Geräte: {qwenVisionState.devices.join(', ')}</span>
-                        )}
-                        {Array.isArray(qwenVisionState.host?.hints) && qwenVisionState.host.hints.length > 0 && (
-                          <span>{qwenVisionState.host.hints.join(' ')}</span>
-                        )}
-                      </div>
-                    )}
-                    {qwenVisionError && <div className="settings-inline-error">{qwenVisionError}</div>}
-                  </div>}
                   <SettingRow title="OCR-Modell im RAM behalten" description="Kürzere Zeiten geben den grossen lokalen Erkennungsworker früher frei; die nächste Konvertierung muss das Modell dann neu laden.">
                     <select value={settings.ocrModelKeepAliveSeconds} onChange={(event) => update('ocrModelKeepAliveSeconds', Number(event.target.value))}>
                       <option value={0}>Nach der Konvertierung freigeben</option>
@@ -1490,6 +1539,14 @@ export function SettingsModal({
                 <div id="settings-privacy" className="setting-card">
                   <div className="setting-card-title"><ShieldCheck size={16} /><span>Anonyme Nutzungsstatistik</span></div>
                   <SettingRow title="Tägliche Summen" description="FaNotes zählt Website-Sitzungen, Downloads und App-Starts nach Land, Plattform und Version. Es werden keine IP-Adressen, Cookies, Gerätekennungen oder einzelnen Rohereignisse in der Statistik gespeichert."><span>Keine Kennung</span></SettingRow>
+                </div>
+                <div id="settings-bug-report" className="setting-card">
+                  <div className="setting-card-title"><Bug size={16} /><span>Fehler melden</span></div>
+                  <SettingRow title="Bug Report" description="Schreib kurz, was schiefging. Die letzten fünf Minuten (Stiftposition, Notiz, Werkzeug, Version) werden automatisch angehängt und nur an fanotes.fasrv.ch geschickt.">
+                    <button type="button" className="secondary-button" onClick={() => onOpenBugReport?.()}>
+                      <Bug size={15} /> Fehler melden
+                    </button>
+                  </SettingRow>
                 </div>
                 <div id="settings-css" className="setting-card custom-css-card">
                   <div className="setting-card-title"><Code2 size={16} /><span>Eigenes CSS</span></div>
