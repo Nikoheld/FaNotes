@@ -247,3 +247,80 @@ export const boundsOfInkIndexes = <T extends InkPieceStroke>(
     height: Math.max(0.012, maxY - minY + padY * 2),
   }
 }
+
+type EditablePoint = { x: number; y: number }
+
+type EditableStroke = { points: EditablePoint[] }
+
+const clampRange = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
+
+const movedPoint = <T extends EditablePoint>(point: T, x: number, y: number): T => ({
+  ...point,
+  x: clampRange(x, 0, 1),
+  y: clampRange(y, 0, 8),
+})
+
+/** Shallow copy of the stroke list, the snapshot the edit gesture pushes before it changes ink. */
+export const inkEditUndoSnapshot = <T>(strokes: readonly T[]): T[] => strokes.slice()
+
+export const moveInkSelection = <T extends EditableStroke>(
+  strokes: readonly T[],
+  indexes: readonly number[],
+  dx: number,
+  dy: number,
+): T[] => {
+  const selected = new Set(indexes)
+  return strokes.map((stroke, index) => (
+    selected.has(index)
+      ? { ...stroke, points: stroke.points.map((point) => movedPoint(point, point.x + dx, point.y + dy)) }
+      : stroke
+  ))
+}
+
+/** Scales selected points away from the anchor. Unselected strokes stay the same objects. */
+export const scaleInkSelection = <T extends EditableStroke>(
+  strokes: readonly T[],
+  indexes: readonly number[],
+  anchor: EditablePoint,
+  factor: number,
+): T[] => {
+  const selected = new Set(indexes)
+  return strokes.map((stroke, index) => (
+    selected.has(index)
+      ? {
+        ...stroke,
+        points: stroke.points.map((point) => movedPoint(
+          point,
+          anchor.x + (point.x - anchor.x) * factor,
+          anchor.y + (point.y - anchor.y) * factor,
+        )),
+      }
+      : stroke
+  ))
+}
+
+/**
+ * Appends one duplicate per selected stroke. The originals stay in place.
+ * The returned indexes are the copies.
+ */
+export const copyInkSelection = <T extends EditableStroke>(
+  strokes: readonly T[],
+  indexes: readonly number[],
+  dx = 0.03,
+  dy = 0.03,
+): { strokes: T[]; indexes: number[] } => {
+  const copies: T[] = []
+  for (const index of indexes) {
+    const stroke = strokes[index]
+    if (!stroke) continue
+    copies.push({
+      ...stroke,
+      points: stroke.points.map((point) => movedPoint(point, point.x + dx, point.y + dy)),
+    })
+  }
+  const start = strokes.length
+  return {
+    strokes: [...strokes, ...copies],
+    indexes: copies.map((_, offset) => start + offset),
+  }
+}

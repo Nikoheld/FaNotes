@@ -91,7 +91,7 @@ import {
 } from '../lib/recognitionModeSelection'
 import type { MathSolverAction, MathSolverResult } from '../lib/mathSolver'
 import { polishRecognizedText } from '../lib/recognitionPolish'
-import { applyLasso, strokesInsideLasso, type LassoPoint } from '../lib/inkLasso'
+import { appendLoopPoint, applyLasso, loopIsDrawable, strokesInsideLasso, strokesTouchingLasso, type LassoPoint } from '../lib/inkLasso'
 import { MarginTranscript } from './MarginTranscript'
 import { addPersonalWord } from '../lib/spellingSuggest'
 import { replaceTranscriptWord } from '../lib/marginTranscript'
@@ -101,7 +101,7 @@ import {
   inkNoticeAutoClearDelayMs,
 } from '../lib/inkNotice'
 import { BUG_REPORT_PEN_SAMPLE_MS, buildPenDiagnosticEvent, diagnosticLog } from '../lib/bugReport'
-import { boundsOfInkIndexes, takeInkSelection } from '../lib/inkSelect'
+import { boundsOfInkIndexes, copyInkSelection, inkEditUndoSnapshot, moveInkSelection, scaleInkSelection } from '../lib/inkSelect'
 import { applyToolErase } from '../lib/toolErase'
 import {
   inkPointerSessionFromSample,
@@ -1646,6 +1646,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const sectionGuideRef = useRef<HTMLDivElement | null>(null)
   const [selectionPurpose, setSelectionPurpose] = useState<SelectionPurpose>('conversion')
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null)
+  const [selectionLoop, setSelectionLoop] = useState<LassoPoint[]>([])
+  const selectionLoopRef = useRef<LassoPoint[] | null>(null)
   const [rulerPose, setRulerPose] = useState<DraftingPose | null>(null)
   const [setSquarePose, setSetSquarePose] = useState<DraftingPose | null>(null)
   const [compassPose, setCompassPose] = useState<CompassPose | null>(null)
@@ -1883,6 +1885,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   const clearRecognitionScope = useCallback(() => {
     selectionStartRef.current = null
+    selectionLoopRef.current = null
+    setSelectionLoop([])
     recognitionStrokesRef.current = null
     setSelectionMode(false)
     setSelectionRect(null)
@@ -4607,7 +4611,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (!firstPoint) return
       selectionStartRef.current = firstPoint
       recognitionStrokesRef.current = null
-      setSelectionRect({ x: firstPoint.x, y: firstPoint.y, width: 0, height: 0 })
+      if (selectionPurpose === 'edit') {
+        selectionLoopRef.current = [{ x: firstPoint.x, y: firstPoint.y }]
+        setSelectionLoop(selectionLoopRef.current)
+        setSelectionRect(null)
+      } else {
+        selectionLoopRef.current = null
+        setSelectionLoop([])
+        setSelectionRect({ x: firstPoint.x, y: firstPoint.y, width: 0, height: 0 })
+      }
       return
     }
     if (tool === 'select' && !pointerEraser) {
@@ -4615,9 +4627,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       restoreUnmovedSelection()
       selectionStartRef.current = firstPoint
       recognitionStrokesRef.current = null
+      selectionLoopRef.current = [{ x: firstPoint.x, y: firstPoint.y }]
+      setSelectionLoop(selectionLoopRef.current)
       setSelectionMode(true)
       setSelectionPurpose('edit')
-      setSelectionRect({ x: firstPoint.x, y: firstPoint.y, width: 0, height: 0 })
+      setSelectionRect(null)
       return
     }
     if (sectionPlacing) {
@@ -4813,7 +4827,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   // inputActive is a dependency: a board mounted inert (keyboard mode showing
   // saved ink) kept a handler that still saw inputActive=false after the pen
   // turned on, and every pen-down was refused until an unrelated grow rebuilt it.
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, cancelFingerPanFling, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, figureId, figureLibraryOpen, figureLineWidth, figureParams, figureRotation, figureSize, inkMode, inline, inputActive, insertSectionAt, insertSubsectionAt, markPenContact, markerKeepColor, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, cancelFingerPanFling, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, figureId, figureLibraryOpen, figureLineWidth, figureParams, figureRotation, figureSize, inkMode, inline, inputActive, insertSectionAt, insertSubsectionAt, markPenContact, markerKeepColor, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, selectionPurpose, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (dragSheetWithPointer(event.pointerId, event.clientX, event.clientY)) {
@@ -4835,6 +4849,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     if (inkSessionRef.current) inkSessionRef.current = touchInkPointerSession(inkSessionRef.current, event.nativeEvent, now)
     event.preventDefault()
+    if (selectionLoopRef.current) {
+      const samples = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent]
+      for (const sample of samples) {
+        const next = pointFromEvent(sample)
+        const loop: LassoPoint[] | null = selectionLoopRef.current
+        if (!next || !loop) continue
+        const extended = appendLoopPoint(loop, next)
+        if (extended === loop) continue
+        selectionLoopRef.current = extended
+        setSelectionLoop(extended)
+      }
+      return
+    }
     if (selectionStartRef.current) {
       const next = pointFromEvent(event.nativeEvent)
       if (next) setSelectionRect(selectionBetween(selectionStartRef.current, next))
@@ -4915,6 +4942,34 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         window.setTimeout(() => releaseStuckInputFocus(boardRef.current), 0)
       }
     }
+    if (selectionLoopRef.current) {
+      const editLoop = selectionLoopRef.current
+      selectionLoopRef.current = null
+      selectionStartRef.current = null
+      setSelectionLoop([])
+      endInteraction()
+      if (event.type === 'pointercancel' || !loopIsDrawable(editLoop)) {
+        setSelectionMode(selectionPurpose === 'edit')
+        setSelectionRect(null)
+        selectedStrokeIndexesRef.current = []
+        if (selectionPurpose === 'math-correction') setMathCorrectorEnabled(false)
+        return
+      }
+      const loopIndexes = strokesTouchingLasso(strokesRef.current, editLoop)
+      if (!loopIndexes.length) {
+        setSelectionMode(selectionPurpose === 'edit')
+        setSelectionRect(null)
+        selectedStrokeIndexesRef.current = []
+        if (selectionPurpose === 'math-correction') setMathCorrectorEnabled(false)
+        return
+      }
+      selectionOriginRef.current = null
+      selectionMovedRef.current = false
+      selectedStrokeIndexesRef.current = loopIndexes
+      setSelectionMode(false)
+      setSelectionRect(boundsOfInkIndexes(strokesRef.current, loopIndexes))
+      return
+    }
     if (selectionStartRef.current) {
       const start = selectionStartRef.current
       const selection = selectionBetween(start, finalPoint ?? start)
@@ -4942,26 +4997,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         return
       }
       if (selectionPurpose === 'edit') {
-        const origin = snapshotStrokes(strokesRef.current)
-        const taken = takeInkSelection(strokesRef.current, selection, sourceWidth, sourceHeight)
-        if (!taken.indexes.length) {
-          setSelectionMode(true)
-          setSelectionRect(null)
-          selectedStrokeIndexesRef.current = []
-          return
-        }
-        if (taken.strokes !== strokesRef.current) {
-          selectionOriginRef.current = origin
-          selectionMovedRef.current = false
-          strokesRef.current = taken.strokes
-          scheduleRedraw()
-        } else {
-          selectionOriginRef.current = null
-          selectionMovedRef.current = false
-        }
-        selectedStrokeIndexesRef.current = taken.indexes
-        setSelectionMode(false)
-        setSelectionRect(boundsOfInkIndexes(taken.strokes, taken.indexes) ?? selection)
+        setSelectionMode(true)
+        setSelectionRect(null)
+        selectedStrokeIndexesRef.current = []
         return
       }
       recognitionStrokesRef.current = selectedStrokes
@@ -5474,6 +5512,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setLassoPoints([])
     setLassoIndexes([])
     selectionStartRef.current = null
+    selectionLoopRef.current = null
+    setSelectionLoop([])
     setSelectionRect(null)
     shapeSnappedRef.current = false
     clearShapeDwellTimer()
@@ -5546,6 +5586,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const canvas = canvasRef.current
       const hitTarget = inline ? surfaceRef.current : canvas
       if (hitTarget && (event.target === hitTarget || (event.target instanceof Node && hitTarget.contains(event.target)))) {
+        return
+      }
+      if (selectionLoopRef.current) {
+        const samples = event.getCoalescedEvents?.() ?? [event]
+        for (const sample of samples) {
+          const next = pointFromEvent(sample)
+          const loop: LassoPoint[] | null = selectionLoopRef.current
+          if (!next || !loop) continue
+          const extended = appendLoopPoint(loop, next)
+          if (extended === loop) continue
+          selectionLoopRef.current = extended
+          setSelectionLoop(extended)
+        }
         return
       }
       if (selectionStartRef.current) {
@@ -6008,6 +6061,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       if (next === 'select') {
         restoreUnmovedSelection()
+        selectionLoopRef.current = null
+        setSelectionLoop([])
         setTool('select')
         setArtPanelOpen(false)
         setGraphPanelOpen(false)
@@ -6341,19 +6396,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     void recognize(mode, handwritingStrokes(strokesRef.current))
   }, [closeMathCorrectionSession, closeMathSolverSelection, mode, recognize, settings.experimentalHandwritingToText])
 
-  const applyInkTransform = useCallback((mutatePoint: (x: number, y: number) => { x: number; y: number }) => {
-    const indexes = new Set(selectedStrokeIndexesRef.current)
-    if (!indexes.size) return
-    strokesRef.current = strokesRef.current.map((stroke, index) => {
-      if (!indexes.has(index)) return stroke
-      return {
-        ...stroke,
-        points: stroke.points.map((point) => {
-          const next = mutatePoint(point.x, point.y)
-          return { ...point, x: clamp(next.x), y: clamp(next.y, 0, 8) }
-        }),
-      }
-    })
+  const commitTransformedInk = useCallback((next: InkStroke[]) => {
+    strokesRef.current = next
     committedCanvasDirtyRef.current = true
     scheduleRedraw()
     setDirty(true)
@@ -6371,6 +6415,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setLassoOn(false)
     setLassoPoints([])
     setLassoIndexes([])
+    selectionLoopRef.current = null
+    setSelectionLoop([])
     setTool('select')
     selectedStrokeIndexesRef.current = []
     setSelectionMode(true)
@@ -6383,23 +6429,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (!indexes.length) return
     undoRef.current.push(selectionOriginRef.current && !selectionMovedRef.current
       ? selectionOriginRef.current
-      : snapshotStrokes(strokesRef.current))
+      : inkEditUndoSnapshot(strokesRef.current))
     if (undoRef.current.length > 80) undoRef.current.shift()
     redoRef.current = []
     selectionOriginRef.current = null
     selectionMovedRef.current = true
-    const copies: InkStroke[] = []
-    for (const index of indexes) {
-      const stroke = strokesRef.current[index]
-      if (!stroke) continue
-      copies.push({
-        ...stroke,
-        points: stroke.points.map((point) => ({ ...point, x: clamp(point.x + 0.03), y: clamp(point.y + 0.03, 0, 8) })),
-      })
-    }
-    const start = strokesRef.current.length
-    strokesRef.current = [...strokesRef.current, ...copies]
-    selectedStrokeIndexesRef.current = copies.map((_, offset) => start + offset)
+    const copied = copyInkSelection(strokesRef.current, indexes, 0.03, 0.03)
+    strokesRef.current = copied.strokes
+    selectedStrokeIndexesRef.current = copied.indexes
     setSelectionRect((current) => current && { ...current, x: clamp(current.x + 0.03), y: clamp(current.y + 0.03, 0, 8) })
     committedCanvasDirtyRef.current = true
     scheduleRedraw()
@@ -6412,7 +6449,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (!indexes.size) return
     undoRef.current.push(selectionOriginRef.current && !selectionMovedRef.current
       ? selectionOriginRef.current
-      : snapshotStrokes(strokesRef.current))
+      : inkEditUndoSnapshot(strokesRef.current))
     if (undoRef.current.length > 80) undoRef.current.shift()
     redoRef.current = []
     selectionOriginRef.current = null
@@ -8264,6 +8301,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               sectionTitleHost,
             ) : null}
             <div className="lw-page-overlay">
+            {selectionLoop.length > 1 && selectionPurpose === 'edit' && <svg className="lw-selection-loop" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true">
+              <polygon points={selectionLoop.map((point) => `${point.x},${point.y}`).join(' ')} />
+            </svg>}
             {selectionRect && <div
               className={`lw-selection-rect ${selectionMode ? 'is-selecting' : 'is-selected'} ${selectionPurpose === 'edit' && !selectionMode ? 'is-editable' : ''}`}
               style={{
@@ -8297,7 +8337,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                 if (!drag.committed && (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001)) {
                   undoRef.current.push(selectionOriginRef.current && !selectionMovedRef.current
                     ? selectionOriginRef.current
-                    : snapshotStrokes(strokesRef.current))
+                    : inkEditUndoSnapshot(strokesRef.current))
                   if (undoRef.current.length > 80) undoRef.current.shift()
                   redoRef.current = []
                   selectionOriginRef.current = null
@@ -8306,7 +8346,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                   updateHistoryState()
                 }
                 if (drag.kind === 'move') {
-                  applyInkTransform((px, py) => ({ x: px + dx, y: py + dy }))
+                  commitTransformedInk(moveInkSelection(strokesRef.current, selectedStrokeIndexesRef.current, dx, dy))
                   setSelectionRect({ ...drag.origin, x: clamp(drag.origin.x + dx), y: clamp(drag.origin.y + dy, 0, 8) })
                   inkDragRef.current = { ...drag, startX: x, startY: y, origin: { ...drag.origin, x: drag.origin.x + dx, y: drag.origin.y + dy } }
                   return
@@ -8316,10 +8356,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                 const scaleX = drag.origin.width > 0.001 ? Math.max(0.2, (drag.origin.width + dx) / drag.origin.width) : 1
                 const scaleY = drag.origin.height > 0.001 ? Math.max(0.2, (drag.origin.height + dy) / drag.origin.height) : 1
                 const scale = (scaleX + scaleY) / 2
-                applyInkTransform((px, py) => ({
-                  x: originX + (px - originX) * scale,
-                  y: originY + (py - originY) * scale,
-                }))
+                commitTransformedInk(scaleInkSelection(
+                  strokesRef.current,
+                  selectedStrokeIndexesRef.current,
+                  { x: originX, y: originY },
+                  scale,
+                ))
                 setSelectionRect({
                   x: originX,
                   y: originY,
@@ -9026,6 +9068,8 @@ const drawingBoardStyles = `
 .lw-art-studio-body>.lw-art-control-section{display:flex;flex-direction:column}
 @media(max-width:640px){.lw-art-studio-tabs>button{height:38px;justify-content:center;padding:0 6px}.lw-art-studio-tabs>button>span small{display:none}.lw-art-studio-body{grid-template-columns:1fr}.lw-art-studio-body>.lw-art-brush-section,.lw-art-studio-body>.lw-art-color-section,.lw-art-studio-body>.lw-art-symbol-section,.lw-art-studio-body>.lw-art-control-section{grid-column:1;grid-row:auto}.lw-art-symbols{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(prefers-reduced-motion:reduce){.lw-drawing-board *{scroll-behavior:auto!important;transition:none!important;animation-duration:.001ms!important}}
+.lw-selection-loop{position:absolute;inset:0;z-index:4;width:100%;height:100%;overflow:visible;pointer-events:none}
+.lw-selection-loop polygon{fill:rgba(42,111,151,.12);stroke:#2a6f97;stroke-width:.004}
 .lw-lasso-layer{position:absolute;inset:0;z-index:6;touch-action:none}
 .lw-lasso-layer svg{width:100%;height:100%;overflow:visible}
 .lw-lasso-layer polyline{fill:rgba(42,111,151,.12);stroke:#2a6f97;stroke-width:.004}
