@@ -298,7 +298,7 @@ try {
   assert.doesNotMatch(html, /id="settings-editor"/u)
   assert.doesNotMatch(html, /id="settings-update-channel"/u)
   assert.doesNotMatch(html, /id="settings-reset"/u)
-  assert.equal(Number(html.match(/Anpassung · (\d+) Optionen/u)?.[1]), html.match(/class="setting-row"/gu)?.length ?? 0)
+  assert.equal(Number(html.match(/Anpassung · (\d+) Optionen/u)?.[1]), html.match(/class="setting-row(?: [^"]*)?"/gu)?.length ?? 0)
   assert.match(html, /<b>Hallo<\/b>/u)
   assert.match(html, new RegExp(`data-share-stop="${note.record.id}"`, 'u'))
   const settingsLog = [

@@ -301,7 +301,7 @@ try {
     profileUsername: restartedProfile.profileUsername,
     profilePublic: restartedProfile.profilePublic,
   }
-  const renderSettingsPage = (initialSection, platform = 'linux') => renderToStaticMarkup(createElement(settingsModule.SettingsModal, {
+  const renderSettingsPage = (initialSection, platform = 'linux', extra = {}) => renderToStaticMarkup(createElement(settingsModule.SettingsModal, {
     platform,
     settings,
     vaultPath: '/vault',
@@ -333,10 +333,12 @@ try {
     onInstallUpdate: async () => undefined,
     onResetSettings: () => undefined,
     onResetAppData: async () => undefined,
+    syncEngine: extra.syncEngine,
+    syncState: extra.syncState,
   }))
   const optionRows = (markup) => {
     const count = Number(markup.match(/Anpassung · (\d+) Optionen/u)?.[1])
-    const rows = markup.match(/class="setting-row"/gu)?.length ?? 0
+    const rows = markup.match(/class="setting-row(?: [^"]*)?"/gu)?.length ?? 0
     assert.equal(count, rows, `${initialSectionLabel(markup)} shows ${count} options and ${rows} rows`)
     return rows
   }
@@ -390,6 +392,49 @@ try {
   assert.doesNotMatch(experimentalHtml, /id="settings-note-backup"/u)
   assert.doesNotMatch(experimentalHtml, /title="Notiz-Backup"/u)
   for (const markup of [drawingHtml, advancedHtml, filesHtml, webFilesHtml, updatesHtml, experimentalHtml]) optionRows(markup)
+  const grokGrant = {
+    id: 'grant-1',
+    clientName: 'Grok Testgrant',
+    redirectHost: 'grok.com',
+    createdAt: '2026-01-02T03:04:05.000Z',
+    lastUsedAt: null,
+  }
+  const signedInSyncHtml = renderSettingsPage('sync', 'linux', {
+    syncEngine: {
+      currentMcpGrants: () => [grokGrant],
+      mcpGrants: async () => [grokGrant],
+      refreshAccount: async () => null,
+      revokeMcpGrant: async () => undefined,
+    },
+    syncState: {
+      status: 'idle',
+      account: { email: 'ada@example.com', accountId: 'a'.repeat(32), deviceId: 'device-1' },
+      vaultId: 'vault-1',
+      lastSyncAt: '2026-01-02T03:04:05.000Z',
+      error: null,
+      progress: null,
+      pendingLocal: 0,
+      trackedFiles: 1,
+      conflicts: [],
+      log: [],
+      mcpReader: true,
+      info: {
+        accountId: 'a'.repeat(32),
+        email: 'ada@example.com',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        revision: 1,
+        usage: { files: 1, bytes: 10, quotaBytes: 1000, maxFiles: 10, maxFileBytes: 1000 },
+        devices: [{ id: 'device-1', name: 'Laptop', platform: 'linux', createdAt: '2026-01-01T00:00:00.000Z', lastSeenAt: '2026-01-02T03:04:05.000Z', current: true }],
+      },
+    },
+  })
+  const syncOptions = Number(signedInSyncHtml.match(/Anpassung · (\d+) Optionen/u)?.[1])
+  const syncRows = signedInSyncHtml.match(/class="setting-row(?: [^"]*)?"/gu)?.length ?? 0
+  assert.equal(syncRows, 11, `signed-in sync rendered ${syncRows} rows`)
+  assert.equal(syncOptions, syncRows)
+  assert.equal(syncOptions, 11)
+  assert.match(signedInSyncHtml, /Grok Testgrant/u)
+  assert.match(signedInSyncHtml, /id="settings-grok-connector"/u)
   const settingsLog = [
     `groups ${groups.join('|')}`,
     `sections ${sections}`,
@@ -397,6 +442,9 @@ try {
     'toggle Die öffentliche Aktivitätsübersicht zeigen',
     'visibility setProfileVisibility',
     `desktopSanitize ${restartedProfile.profileOwnerId} ${restartedProfile.profileUsername} ${restartedProfile.profilePublic}`,
+    `syncGrantHeading Anpassung · ${syncOptions} Optionen`,
+    `syncGrantRows ${syncRows}`,
+    'syncGrant Grok Testgrant',
   ].join('\n')
   writeScratch('profile-settings.log', `${settingsLog}\nprofile-settings ok\n`)
   console.log(settingsLog)

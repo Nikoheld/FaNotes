@@ -13,6 +13,8 @@ type Props = {
   settings: AppSettings
   update: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void
   platform?: string
+  grants: McpGrantInfo[]
+  onGrants: (grants: McpGrantInfo[]) => void
 }
 
 type Notice = { kind: 'success' | 'error'; text: string } | null
@@ -26,7 +28,7 @@ const formatWhen = (iso: string | null) => {
   return date.toLocaleString(getUiLocale(), { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-export function SyncSettingsSection({ engine, syncState, settings, update, platform }: Props) {
+export function SyncSettingsSection({ engine, syncState, settings, update, platform, grants, onGrants }: Props) {
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -40,7 +42,6 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
   const [deletePassword, setDeletePassword] = useState('')
   const [logOpen, setLogOpen] = useState(false)
   const [connectorPassword, setConnectorPassword] = useState('')
-  const [grants, setGrants] = useState<McpGrantInfo[]>([])
   const connectorUrl = mcpServerUrl()
   const [review, setReview] = useState<{ path: string; copyPath: string; remote: string; local: string } | null>(null)
   const signedIn = Boolean(syncState.account)
@@ -53,11 +54,17 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
 
   useEffect(() => {
     if (!signedIn || !syncState.mcpReader) {
-      setGrants([])
+      onGrants([])
       return
     }
-    void engine.mcpGrants().then(setGrants).catch(() => setGrants([]))
-  }, [engine, signedIn, syncState.mcpReader, syncState.lastSyncAt])
+    let cancelled = false
+    void engine.mcpGrants().then((next) => {
+      if (!cancelled) onGrants(Array.isArray(next) ? next : [])
+    }).catch(() => {
+      if (!cancelled) onGrants([])
+    })
+    return () => { cancelled = true }
+  }, [engine, signedIn, syncState.mcpReader, syncState.lastSyncAt, onGrants])
 
   const run = async (label: string, task: () => Promise<void>, success?: string) => {
     setBusy(label)
@@ -222,7 +229,7 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
             {syncState.mcpReader && grants.map((grant) => (
               <div key={grant.id} className="setting-row">
                 <div className="setting-copy"><span data-i18n-ignore>{grant.clientName}</span><small data-i18n-ignore>{grant.redirectHost} · {formatWhen(grant.createdAt)}</small></div>
-                <div className="setting-control"><button type="button" className="secondary-button" disabled={busy !== null} onClick={() => void run(`grant-${grant.id}`, async () => { await engine.revokeMcpGrant(grant.id); setGrants(await engine.mcpGrants()) }, 'Diese Grok-Freigabe wurde widerrufen.')}>Widerrufen</button></div>
+                <div className="setting-control"><button type="button" className="secondary-button" disabled={busy !== null} onClick={() => void run(`grant-${grant.id}`, async () => { await engine.revokeMcpGrant(grant.id); onGrants(await engine.mcpGrants()) }, 'Diese Grok-Freigabe wurde widerrufen.')}>Widerrufen</button></div>
               </div>
             ))}
           </div>

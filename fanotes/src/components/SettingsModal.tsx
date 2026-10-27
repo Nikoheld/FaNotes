@@ -37,7 +37,7 @@ import {
   User,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getUiLocale } from '../i18n'
 import {
   generateHomeworkApiChannelId,
@@ -57,6 +57,7 @@ import {
   type TabletButtonAction,
 } from '../lib/tabletButtons'
 import type { AppSettings, EnhancedMathRecognitionState, OneNoteImportResult, QwenVisionState, ServerBackupState, UpdateState } from '../types'
+import type { McpGrantInfo } from '../lib/mcp/client'
 import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
 import { SyncSettingsSection } from './SyncSettingsSection'
 import { ShareSettingsPage, type ShareTarget } from './ShareSettingsPage'
@@ -160,6 +161,7 @@ const settingsOptionCount = (
     syncSignedIn: boolean
     syncDeviceRows: number
     syncConflictRows: number
+    syncGrantRows: number
   },
 ) => {
   switch (id) {
@@ -170,7 +172,7 @@ const settingsOptionCount = (
     case 'sync':
       if (!input.hasSync || input.syncUnavailable) return 1
       if (!input.syncSignedIn) return 0
-      return 5 + 3 + input.syncDeviceRows + input.syncConflictRows + 1
+      return 5 + 3 + input.syncGrantRows + input.syncDeviceRows + input.syncConflictRows + 1
     case 'profile': return 3
     case 'share': return 3
     case 'addons': return 2
@@ -435,6 +437,15 @@ export function SettingsModal({
   const profileOrigin = useMemo(() => resolveProfileOrigin(), [])
   const trainingInputRef = useRef<HTMLInputElement>(null)
   const modalRef = useRef<HTMLElement>(null)
+  const [mcpGrants, setMcpGrants] = useState<McpGrantInfo[]>(() => (
+    syncState?.mcpReader && syncEngine && typeof syncEngine.currentMcpGrants === 'function'
+      ? syncEngine.currentMcpGrants()
+      : []
+  ))
+  const replaceMcpGrants = useCallback((grants: McpGrantInfo[]) => {
+    setMcpGrants(Array.isArray(grants) ? grants : [])
+  }, [])
+  const visibleMcpGrants = syncState?.account && syncState.mcpReader ? mcpGrants : []
   const section = useMemo(() => {
     const found = SECTIONS.find((candidate) => candidate.id === active)!
     return {
@@ -446,9 +457,10 @@ export function SettingsModal({
         syncSignedIn: Boolean(syncState?.account),
         syncDeviceRows: syncState?.info ? syncState.info.devices.length : 1,
         syncConflictRows: syncState?.conflicts.length ?? 0,
+        syncGrantRows: visibleMcpGrants.length,
       }),
     }
-  }, [active, isWeb, syncEngine, syncState])
+  }, [active, isWeb, syncEngine, syncState, visibleMcpGrants.length])
   const ActiveSectionIcon = section.icon
   const searchResults = useMemo(() => {
     const terms = normalizeSearch(searchQuery).split(/\s+/u).filter(Boolean)
@@ -1179,7 +1191,7 @@ export function SettingsModal({
 
             {active === 'sync' && (
               syncEngine && syncState
-                ? <SyncSettingsSection engine={syncEngine} syncState={syncState} settings={settings} update={update} platform={platform} />
+                ? <SyncSettingsSection engine={syncEngine} syncState={syncState} settings={settings} update={update} platform={platform} grants={visibleMcpGrants} onGrants={replaceMcpGrants} />
                 : <div className="setting-card"><div className="setting-card-title"><Cloud size={16} /><span>Sync</span></div><div className="setting-row"><div className="setting-copy"><span>Sync steht in dieser Umgebung nicht zur Verfügung.</span></div></div></div>
             )}
 

@@ -180,6 +180,7 @@ export class SyncEngine {
   private keys: SyncKeys | null = null
   private vaultSecretBase64: string | null = null
   private mcpReader: string | null = null
+  private mcpGrantSnapshot: McpGrantInfo[] = []
   private vaultId: string | null = null
   private state: PersistedState | null = null
   private listeners = new Set<() => void>()
@@ -377,6 +378,7 @@ export class SyncEngine {
     this.keys = null
     this.vaultSecretBase64 = null
     this.mcpReader = null
+    this.mcpGrantSnapshot = []
     this.state = null
     if (this.timer !== null) window.clearTimeout(this.timer)
     this.timer = null
@@ -447,6 +449,7 @@ export class SyncEngine {
 
   private async rememberReader(key: string | null) {
     this.mcpReader = key
+    if (!key) this.mcpGrantSnapshot = []
     const secrets = this.currentSecrets(key)
     if (secrets) await this.persistSecrets(secrets)
     this.setState({ mcpReader: Boolean(key) })
@@ -488,10 +491,19 @@ export class SyncEngine {
     this.log('info', 'Grok-Connector ist aus. Bestehende Freigaben wurden widerrufen.')
   }
 
+  currentMcpGrants(): McpGrantInfo[] {
+    return this.mcpGrantSnapshot
+  }
+
   async mcpGrants(): Promise<McpGrantInfo[]> {
-    if (!this.session || !this.mcpReader) return []
+    if (!this.session || !this.mcpReader) {
+      this.mcpGrantSnapshot = []
+      return []
+    }
     const body = await mcpReaderRequest(this.session, '/reader', { method: 'GET', readerKey: this.mcpReader }) as { grants?: McpGrantInfo[] }
-    return Array.isArray(body?.grants) ? body.grants : []
+    const grants = Array.isArray(body?.grants) ? body.grants : []
+    this.mcpGrantSnapshot = grants
+    return grants
   }
 
   async revokeMcpGrant(grantId: string) {
