@@ -278,9 +278,12 @@ import {
   INK_MIN_INLINE_QUALITY,
   inkStrokePaintScale,
   inkWidthNeedsAnchor,
+  adoptPaintedInkPage,
+  inkPageForLayoutScale,
   pendingGrowScale,
   resolvePaintedLayoutGrow,
 } from '../lib/paperGrow'
+import { readSavedInkStrokes } from '../lib/inkDocument'
 import { DraftingGuides, type DraftingReadout } from './DraftingGuides'
 import { DraftingPanel } from './DraftingPanel'
 import {
@@ -1214,58 +1217,13 @@ const shiftCanvasBitmap = (canvas: HTMLCanvasElement, dx: number, dy: number) =>
  * is normalised to its own body box and may legitimately reach past it (a
  * stroke that ran into the next header), so that box is only bounded loosely.
  */
-const safeInkStrokes = (value: unknown, fallbackColor: string, options: { clampToSheet?: boolean } = {}): InkStroke[] => {
-  if (!Array.isArray(value)) return []
-  const bound = options.clampToSheet === false
-    ? (coordinate: number) => clamp(coordinate, -4, 4)
-    : (coordinate: number) => clamp(coordinate)
-  return value.flatMap((entry) => {
-    if (!entry || typeof entry !== 'object') return []
-    const raw = entry as Partial<InkStroke>
-    if (!Array.isArray(raw.points)) return []
-    const points = raw.points.flatMap((point) => {
-      if (!point || typeof point !== 'object') return []
-      return [{
-        x: bound(Number(point.x) || 0),
-        y: bound(Number(point.y) || 0),
-        t: Number(point.t) || 0,
-        pressure: clamp(Number(point.pressure) || 0.5),
-        tiltX: clamp(Number(point.tiltX) || 0, -90, 90),
-        tiltY: clamp(Number(point.tiltY) || 0, -90, 90),
-        pointerType: typeof point.pointerType === 'string' ? point.pointerType : 'pen',
-      }]
-    })
-    if (!points.length) return []
-    const symbolId = raw.symbolId && artSymbolIds.has(raw.symbolId) ? raw.symbolId : undefined
-    const figureId = isMathFigureId(raw.figureId) ? raw.figureId : undefined
-    const figureParams = figureId ? clampFigureParams(figureId, raw.figureParams) : undefined
-    const graph = readFunctionGraphStamp(raw)
-    const baseWidth = clamp(Number(raw.baseWidth) || 4, 0.5, figureId || graph ? 320 : symbolId ? 180 : 48)
-    const figurePaths = figureId ? mathFigurePaths(figureId, figureParams) : undefined
-    return [{
-      points,
-      baseWidth,
-      pressureEnabled: raw.pressureEnabled !== false,
-      color: typeof raw.color === 'string' && /^#[\da-f]{6}$/iu.test(raw.color) ? raw.color : fallbackColor,
-      purpose: raw.purpose === 'art' ? 'art' : 'handwriting',
-      brush: raw.brush && artBrushIds.has(raw.brush) ? raw.brush : undefined,
-      colorEffect: raw.colorEffect && inkEffectIds.has(raw.colorEffect) ? raw.colorEffect : 'solid',
-      opacity: clamp(Number(raw.opacity) || 1, .08, 1),
-      textureSeed: Math.round(clamp(Math.abs(Number(raw.textureSeed) || 1), 1, 2_147_483_647)),
-      keepColor: raw.keepColor === true ? true : undefined,
-      symbolId,
-      symbolRotation: symbolId || figureId ? clamp(Number(raw.symbolRotation) || 0, -180, 180) : graph ? 0 : undefined,
-      figureId,
-      figureParams,
-      figureLineWidth: figureId || graph ? clampFigureLineWidth(raw.figureLineWidth, figureLineWidthForSize(baseWidth)) : undefined,
-      figurePaths: figurePaths?.length ? figurePaths : undefined,
-      graphExpression: graph?.expression || undefined,
-      graphXMin: graph ? graph.xMin : undefined,
-      graphXMax: graph ? graph.xMax : undefined,
-      graphPaths: graph?.paths.length ? graph.paths.slice() : undefined,
-    }]
-  })
-}
+const safeInkStrokes = (value: unknown, fallbackColor: string, options: { clampToSheet?: boolean } = {}): InkStroke[] => (
+  readSavedInkStrokes(value, fallbackColor, options, {
+    symbolIds: artSymbolIds as ReadonlySet<string>,
+    brushIds: artBrushIds as ReadonlySet<string>,
+    effectIds: inkEffectIds as ReadonlySet<string>,
+  }) as InkStroke[]
+)
 
 const safeMathSolverHistory = (value: unknown): MathSolverHistoryEntry[] => {
   if (!Array.isArray(value)) return []
@@ -2983,20 +2941,55 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const prevW = paintedLayoutRef.current.w
     const prevH = paintedLayoutRef.current.h
     if (nextW === prevW && nextH === prevH && !pendingGrowRemapRef.current) return false
-    const resolved = resolvePaintedLayoutGrow({
-      pending: pendingGrowRemapRef.current,
-      prevLayoutW: prevW,
-      prevLayoutH: prevH,
-      nextLayoutW: nextW,
-      nextLayoutH: nextH,
-      sourceW: sourceWidthRef.current,
-      sourceH: sourceHeightRef.current,
-    })
-    if (resolved.discard) pendingGrowRemapRef.current = null
-    else pendingGrowRemapRef.current = resolved.pending
+    const sourceW = sourceWidthRef.current
+    const sourceH = sourceHeightRef.current
+    const pending = pendingGrowRemapRef.current
+    const resolved = pending
+      ? resolvePaintedLayoutGrow({
+        pending,
+        prevLayoutW: prevW,
+        prevLayoutH: prevH,
+        nextLayoutW: nextW,
+        nextLayoutH: nextH,
+        sourceW,
+        sourceH,
+      })
+      : null
+    const adopted = pending
+      ? {
+        ...inkPageForLayoutScale({
+          sourceW,
+          sourceH,
+          nextLayoutW: nextW,
+          nextLayoutH: nextH,
+          scaleX: resolved?.scaleX ?? 1,
+          scaleY: resolved?.scaleY ?? 1,
+        }),
+        scaleX: resolved?.scaleX ?? 1,
+        scaleY: resolved?.scaleY ?? 1,
+        apply: resolved?.apply ?? false,
+      }
+      : adoptPaintedInkPage({
+        sourceW,
+        sourceH,
+        prevLayoutW: prevW,
+        prevLayoutH: prevH,
+        nextLayoutW: nextW,
+        nextLayoutH: nextH,
+      })
+    if (resolved?.discard) pendingGrowRemapRef.current = null
+    else if (resolved) pendingGrowRemapRef.current = resolved.pending
     paintedLayoutRef.current = { w: nextW, h: nextH }
-    if (!resolved.apply) return false
-    scaleNormalizedSpace(resolved.scaleX, resolved.scaleY)
+    if (!adopted.apply) return false
+    scaleNormalizedSpace(adopted.scaleX, adopted.scaleY)
+    // Scaled 0–1 coordinates belong to the grown sheet. The eraser multiplies
+    // by the page size; keeping the saved page pulls distant marks into one disk.
+    if (adopted.pageWidth !== sourceW || adopted.pageHeight !== sourceH) {
+      sourceWidthRef.current = adopted.pageWidth
+      sourceHeightRef.current = adopted.pageHeight
+      setSourceWidth(adopted.pageWidth)
+      setSourceHeight(adopted.pageHeight)
+    }
     canvasQualityKeyRef.current = ''
     committedCanvasDirtyRef.current = true
     return true
@@ -3603,7 +3596,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const points = Array.isArray(value) ? value : [value]
     const anchor = eraserAnchorRef.current
     const samples = anchor ? [anchor, ...points] : points
-    const next = applyToolErase(strokesRef.current, samples, eraserSize, sourceWidth, sourceHeight)
+    const next = applyToolErase(
+      strokesRef.current,
+      samples,
+      eraserSize,
+      sourceWidthRef.current,
+      sourceHeightRef.current,
+    )
     const last = points.at(-1)
     if (last) eraserAnchorRef.current = last
     if (next === strokesRef.current) return
@@ -3612,7 +3611,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     gestureChangedRef.current = true
     committedCanvasDirtyRef.current = true
     scheduleRedraw()
-  }, [eraserSize, scheduleRedraw, sourceHeight, sourceWidth])
+  }, [eraserSize, scheduleRedraw])
 
   const clearShapeDwellTimer = useCallback(() => {
     if (shapeDwellTimerRef.current !== null) {

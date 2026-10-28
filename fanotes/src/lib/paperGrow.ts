@@ -320,6 +320,58 @@ export const resolvePaintedLayoutGrow = (input: {
   }
 }
 
+/**
+ * Page size the scaled 0–1 ink belongs to. The scale's denominator is the
+ * sheet (`writePageStayExtent`), so the eraser must use that sheet on every
+ * axis that moved. Keeping the saved page pulls distant marks together.
+ */
+export const inkPageForLayoutScale = (input: {
+  sourceW: number
+  sourceH: number
+  nextLayoutW: number
+  nextLayoutH: number
+  scaleX: number
+  scaleY: number
+}) => ({
+  pageWidth: input.scaleX !== 1 ? writePageStayExtent(input.sourceW, input.nextLayoutW) : input.sourceW,
+  pageHeight: input.scaleY !== 1 ? writePageStayExtent(input.sourceH, input.nextLayoutH) : input.sourceH,
+})
+
+/** Redraw path when a saved page is opened onto a larger sheet. */
+export const adoptPaintedInkPage = (input: {
+  sourceW: number
+  sourceH: number
+  prevLayoutW: number
+  prevLayoutH: number
+  nextLayoutW: number
+  nextLayoutH: number
+}) => {
+  const resolved = resolvePaintedLayoutGrow({
+    pending: null,
+    prevLayoutW: input.prevLayoutW,
+    prevLayoutH: input.prevLayoutH,
+    nextLayoutW: input.nextLayoutW,
+    nextLayoutH: input.nextLayoutH,
+    sourceW: input.sourceW,
+    sourceH: input.sourceH,
+  })
+  const page = inkPageForLayoutScale({
+    sourceW: input.sourceW,
+    sourceH: input.sourceH,
+    nextLayoutW: input.nextLayoutW,
+    nextLayoutH: input.nextLayoutH,
+    scaleX: resolved.scaleX,
+    scaleY: resolved.scaleY,
+  })
+  return {
+    scaleX: resolved.scaleX,
+    scaleY: resolved.scaleY,
+    apply: resolved.apply,
+    pageWidth: page.pageWidth,
+    pageHeight: page.pageHeight,
+  }
+}
+
 export type WritePageExtent = {
   width: number
   height: number

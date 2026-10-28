@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { createServer } from 'vite'
 
 const server = await createServer({
@@ -9,6 +10,9 @@ const server = await createServer({
 })
 
 const { applyToolErase, strokeTouchesEraser } = await server.ssrLoadModule('/src/lib/toolErase.ts')
+const { readSavedInkStrokes } = await server.ssrLoadModule('/src/lib/inkDocument.ts')
+const { savedInkPage, keepMarkOnPage } = await server.ssrLoadModule('/src/lib/noteCanvas.ts')
+const { adoptPaintedInkPage } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
 
 const SOURCE_WIDTH = 900
 const SOURCE_HEIGHT = 1273
@@ -194,10 +198,175 @@ try {
   assert.equal(jumpParts.some((stroke) => hasPointNear(stroke, 80, 230, 8)), false, 'the touched end of a jumped stroke is gone')
   assert.equal(jumpParts.some((stroke) => hasPointNear(stroke, 740, 900, 50)), true, 'the far end of a jumped stroke stays')
 
+  // Reopen: strokes saved as 0–1 of the page, then the sheet is much taller
+  // than that page. The old eraser kept the saved page after the layout
+  // scale, so a 110 px gap collapsed inside a 16 px disk. The open path
+  // adopts the sheet the scale belongs to.
+  const boardSource = readFileSync(new URL('../src/components/DrawingBoard.tsx', import.meta.url), 'utf8')
+  assert.match(boardSource, /readSavedInkStrokes\(value, fallbackColor/, 'the board opens a drawing with the shared parser')
+  assert.match(boardSource, /adoptPaintedInkPage\(\{/, 'reopen catch-up adopts the painted page')
+  assert.match(boardSource, /sourceWidthRef\.current = adopted\.pageWidth/, 'catch-up stores the adopted page width')
+  assert.match(boardSource, /sourceHeightRef\.current = adopted\.pageHeight/, 'catch-up stores the adopted page height')
+  assert.match(
+    boardSource,
+    /applyToolErase\(\s*strokesRef\.current,\s*samples,\s*eraserSize,\s*sourceWidthRef\.current,\s*sourceHeightRef\.current,/,
+    'the eraser multiplies by the page refs catch-up just stored',
+  )
+
+  const savedPage = savedInkPage(
+    { width: SOURCE_WIDTH, height: SOURCE_HEIGHT },
+    { w: SOURCE_WIDTH, h: SOURCE_HEIGHT },
+  )
+  const sheetHeight = 9000
+  const savedLetter = polyline([
+    [120 / savedPage.width, 220 / savedPage.height],
+    [120 / savedPage.width, 300 / savedPage.height],
+    [150 / savedPage.width, 240 / savedPage.height],
+    [180 / savedPage.width, 300 / savedPage.height],
+  ])
+  const savedBelow = polyline([
+    [135 / savedPage.width, 380 / savedPage.height],
+    [175 / savedPage.width, 380 / savedPage.height],
+  ])
+  const savedFar = polyline([
+    [560 / savedPage.width, 260 / savedPage.height],
+    [620 / savedPage.width, 280 / savedPage.height],
+    [580 / savedPage.width, 320 / savedPage.height],
+  ])
+  const savedLine = polyline([
+    [40 / savedPage.width, 720 / savedPage.height],
+    [200 / savedPage.width, 720 / savedPage.height],
+    [400 / savedPage.width, 720 / savedPage.height],
+    [700 / savedPage.width, 720 / savedPage.height],
+  ])
+  const drawing = {
+    schemaVersion: 1,
+    sourceWidth: savedPage.width,
+    sourceHeight: savedPage.height,
+    strokes: [savedLetter, savedBelow, savedFar, savedLine],
+  }
+  const opened = readSavedInkStrokes(JSON.parse(JSON.stringify(drawing)).strokes, '#191c24')
+  assert.equal(opened.length, 4, 'the open parser returns every saved stroke')
+  assert.ok(Math.abs(opened[0].points[0].x - savedLetter.points[0].x) < 1e-9, 'open keeps the saved 0–1 x')
+  assert.ok(Math.abs(opened[1].points[0].y - savedBelow.points[0].y) < 1e-9, 'open keeps the saved 0–1 y')
+  const reopenLabels = ['letter', 'below', 'far', 'line']
+  opened.forEach((stroke, index) => {
+    stroke.id = reopenLabels[index]
+  })
+
+  const adopted = adoptPaintedInkPage({
+    sourceW: drawing.sourceWidth,
+    sourceH: drawing.sourceHeight,
+    prevLayoutW: drawing.sourceWidth,
+    prevLayoutH: drawing.sourceHeight,
+    nextLayoutW: drawing.sourceWidth,
+    nextLayoutH: sheetHeight,
+  })
+  assert.equal(adopted.apply, true, 'a taller sheet rescales the saved page')
+  assert.equal(adopted.scaleX, 1, 'a width that did not grow is not rescaled')
+  assert.equal(adopted.pageWidth, drawing.sourceWidth)
+  assert.equal(adopted.pageHeight, sheetHeight, 'the eraser page is the sheet the strokes were scaled into')
+  assert.ok(Math.abs(adopted.scaleY - (drawing.sourceHeight / sheetHeight)) < 1e-9)
+
+  const scaleOpened = (scaleX, scaleY) => opened.map((stroke) => ({
+    ...stroke,
+    points: stroke.points.map((entry) => ({ ...entry, x: entry.x * scaleX, y: entry.y * scaleY })),
+  }))
+  const reopened = scaleOpened(adopted.scaleX, adopted.scaleY)
+  const onAdopted = (stroke, x, y, slack = 4) => stroke.points.some((entry) => (
+    Math.hypot(entry.x * adopted.pageWidth - x, entry.y * adopted.pageHeight - y) <= slack
+  ))
+  const letterTouch = { x: 135 / adopted.pageWidth, y: 270 / adopted.pageHeight }
+  const adoptedGap = Math.hypot(
+    (reopened[1].points[0].x - letterTouch.x) * adopted.pageWidth,
+    (reopened[1].points[0].y - letterTouch.y) * adopted.pageHeight,
+  )
+  assert.ok(adoptedGap > RADIUS + 2, 'after reopen the neighbour is still outside the configured range')
+  assert.ok(Math.abs(adoptedGap - 110) < 1, 'the 110 px gap survives the open remap')
+
+  const stalePage = scaleOpened(adopted.scaleX, adopted.scaleY)
+  const staleHit = applyToolErase(stalePage, [letterTouch], RADIUS, drawing.sourceWidth, drawing.sourceHeight)
+  assert.equal(staleHit.some((stroke) => stroke.id === 'below'), false, 'the saved page after the layout scale deletes the neighbour the disk does not meet')
+  const staleGap = Math.hypot(
+    (stalePage[1].points[0].x - letterTouch.x) * drawing.sourceWidth,
+    (stalePage[1].points[0].y - letterTouch.y) * drawing.sourceHeight,
+  )
+  assert.ok(staleGap < RADIUS, 'the stale page pulls that neighbour inside the disk')
+
+  const erasedReopen = applyToolErase(reopened, [letterTouch], RADIUS, adopted.pageWidth, adopted.pageHeight)
+  const keptBelow = erasedReopen.find((stroke) => stroke.id === 'below')
+  const keptFar = erasedReopen.find((stroke) => stroke.id === 'far')
+  assert.equal(keptBelow, reopened[1], 'the mark outside the disk stays, and it is the same stroke')
+  assert.equal(keptFar, reopened[2], 'a mark far from the touch stays the same stroke')
+  assert.equal(erasedReopen.some((stroke) => stroke.id === 'letter'), false, 'the mark under the eraser is removed')
+  assert.equal(onAdopted(keptBelow, 135, 380), true, 'the neighbour keeps the ink that was saved')
+
+  const lineTouch = { x: 200 / adopted.pageWidth, y: 720 / adopted.pageHeight }
+  const erasedSpan = applyToolErase(
+    scaleOpened(adopted.scaleX, adopted.scaleY),
+    [lineTouch],
+    RADIUS,
+    adopted.pageWidth,
+    adopted.pageHeight,
+  )
+  const spanParts = erasedSpan.filter((stroke) => stroke.id === 'line')
+  assert.equal(spanParts.some((stroke) => onAdopted(stroke, 200, 720, 2)), false, 'a reopened line loses only the covered span')
+  assert.equal(spanParts.some((stroke) => onAdopted(stroke, 40, 720, 2)), true, 'the uncovered start of a reopened line stays')
+  assert.equal(spanParts.some((stroke) => onAdopted(stroke, 700, 720, 2)), true, 'the uncovered end of a reopened line stays')
+  assert.equal(erasedSpan.some((stroke) => stroke.id === 'far'), true, 'a partial erase does not remove a distant mark')
+  assert.equal(erasedSpan.some((stroke) => stroke.id === 'below'), true, 'a partial erase does not remove the other mark')
+
+  const missed = scaleOpened(adopted.scaleX, adopted.scaleY)
+  const missSample = { x: 120 / adopted.pageWidth, y: 180 / adopted.pageHeight }
+  assert.ok(
+    Math.abs((220 / savedPage.height) * adopted.scaleY * adopted.pageHeight - 220) < 1,
+    'the top of the opened letter is still 40 px under the miss',
+  )
+  const afterReopenMiss = applyToolErase(missed, [missSample], RADIUS, adopted.pageWidth, adopted.pageHeight)
+  assert.equal(afterReopenMiss, missed, 'a touch farther than the configured range leaves the opened handwriting unchanged')
+  const staleMissed = scaleOpened(adopted.scaleX, adopted.scaleY)
+  const staleMiss = applyToolErase(
+    staleMissed,
+    [missSample],
+    RADIUS,
+    drawing.sourceWidth,
+    drawing.sourceHeight,
+  )
+  assert.notEqual(staleMiss, staleMissed, 'the same miss deletes ink when the page is still the saved one')
+  const staleTopY = 220 * drawing.sourceHeight / sheetHeight
+  const staleLetterKeepsTop = staleMiss.some((stroke) => stroke.id === 'letter' && stroke.points.some((entry) => (
+    Math.hypot(entry.x * drawing.sourceWidth - 120, entry.y * drawing.sourceHeight - staleTopY) <= 3
+  )))
+  assert.equal(staleLetterKeepsTop, false, 'the stale page treats a 40 px miss as a hit on the letter')
+
+  const absorbedY = keepMarkOnPage(380 / savedPage.height, savedPage.height, sheetHeight, 0)
+  assert.ok(Math.abs(absorbedY * sheetHeight - 380) < 0.05, 'absorbing the sheet keeps the pixel')
+  const afterAbsorb = adoptPaintedInkPage({
+    sourceW: savedPage.width,
+    sourceH: sheetHeight,
+    prevLayoutW: savedPage.width,
+    prevLayoutH: savedPage.height,
+    nextLayoutW: savedPage.width,
+    nextLayoutH: sheetHeight,
+  })
+  assert.equal(afterAbsorb.apply, false, 'a page absorb already grew does not scale again')
+  assert.equal(afterAbsorb.scaleY, 1)
+  assert.equal(afterAbsorb.pageHeight, sheetHeight)
+
   console.log(JSON.stringify({
     lineRemnants: remnants.length,
     wordParts: wordParts.map((stroke) => stroke.points.length),
     underlineParts: lineParts.map((stroke) => stroke.points.length),
+    reopen: {
+      adoptedGap,
+      staleGap,
+      pageHeight: adopted.pageHeight,
+      scaleY: adopted.scaleY,
+      belowStays: keptBelow === reopened[1],
+      farStays: keptFar === reopened[2],
+      spanParts: spanParts.map((stroke) => stroke.points.length),
+      missUnchanged: afterReopenMiss === missed,
+    },
   }))
   console.log('tool-erase ok')
 } finally {
