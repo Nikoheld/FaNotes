@@ -290,6 +290,7 @@ export function createBrowserPreviewApi(): FaNotesApi {
     writeNoteLinks: async (_path, links) => links,
     readNoteBackups: async () => [],
     writeNoteBackups: async (_path, backups) => backups,
+    writeNoteTextFields: async (_path, fields) => fields,
     readSubjectBooks: async () => [],
     writeSubjectBooks: async (books) => books,
     importSubjectBook: async () => null,

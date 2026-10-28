@@ -7,6 +7,7 @@ import { germanCount, germanIndexOf } from './germanSearch'
 import { inkAnchorForQuery, noteSearchExcerpt, readableTranscript } from './searchInkAnchor'
 import { parseNoteBackups, type NoteBackupSnapshot } from './noteBackup'
 import { parseNoteLinks, type NoteLinkRecord } from './noteLink'
+import { parseNoteTextFields } from './noteTextField'
 import { parseSubjectBooks, type SubjectBookRecord } from './subjectBook'
 import { isPaperStyle } from './paperStyles'
 import { browserInitialFiles, browserStarterFolders, browserStarterSubjects } from './browserPreview'
@@ -1308,6 +1309,7 @@ export function createBrowserApi(): FaNotesApi {
         paperStyle: payload?.paperStyle || inkStyle,
         noteLinks: payload?.noteLinks ?? [],
         noteBackups: payload?.noteBackups ?? [],
+        textFields: payload?.textFields ?? [],
       }
     },
     readNotePaperStyle: async (rawPath) => {
@@ -1381,6 +1383,28 @@ export function createBrowserApi(): FaNotesApi {
       files.set(famdPath, record)
       cachedTree = null
       return backups
+    },
+    writeNoteTextFields: async (rawPath, rawFields) => {
+      await ready
+      const path = normalizePath(rawPath)
+      const fields = parseNoteTextFields(rawFields)
+      const famdPath = companionNotePath(path, '.famd')
+      const existing = files.get(famdPath)
+      const parsed = parseFamd(existing?.content ?? '')
+      const payload = {
+        ...(parsed.payload || emptyFamdPayload()),
+        updatedAt: new Date().toISOString(),
+        textFields: fields,
+      }
+      const record = {
+        path: famdPath,
+        content: serializeFamd(parsed.markdown, payload),
+        modifiedAt: new Date().toISOString(),
+      }
+      await write('files', (store) => { store.put(record) })
+      files.set(famdPath, record)
+      cachedTree = null
+      return fields
     },
     readSubjectBooks: async () => {
       await ready

@@ -10,8 +10,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use fanotes_famd::{
     companion_note_path, empty_famd_payload, is_paper_style, parse_famd, parse_note_backups,
-    parse_note_links, serialize_famd, strip_famd_payload, worksheet_ids_from_markdown, FamdPayload,
-    NoteBackup, NoteLink,
+    parse_note_links, parse_note_text_fields, serialize_famd, strip_famd_payload,
+    worksheet_ids_from_markdown, FamdPayload, NoteBackup, NoteLink, NoteTextField,
 };
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
@@ -223,6 +223,9 @@ pub fn attach_sidecar_with(
         if !incoming_payload.note_backups.is_empty() {
             payload.note_backups = incoming_payload.note_backups;
         }
+        if !incoming_payload.text_fields.is_empty() {
+            payload.text_fields = incoming_payload.text_fields;
+        }
         if incoming_payload.page_stats.is_some() {
             payload.page_stats = incoming_payload.page_stats;
         }
@@ -368,6 +371,7 @@ pub fn read_note_companion(host: &Host, relative: &str) -> Result<Value, String>
         "paperStyle": paper_style,
         "noteLinks": payload.note_links.iter().map(NoteLink::to_json).collect::<Vec<_>>(),
         "noteBackups": payload.note_backups.iter().map(NoteBackup::to_json).collect::<Vec<_>>(),
+        "textFields": payload.text_fields.iter().map(NoteTextField::to_json).collect::<Vec<_>>(),
     }))
 }
 
@@ -378,6 +382,21 @@ pub fn read_backups(host: &Host, relative: &str) -> Result<Value, String> {
             .unwrap_or_default()
             .iter()
             .map(NoteBackup::to_json)
+            .collect(),
+    ))
+}
+
+pub fn write_text_fields(host: &Host, relative: &str, raw: &Value) -> Result<Value, String> {
+    let note = note_path(relative)?;
+    let fields = parse_note_text_fields(raw);
+    let (path, body, mut payload) = load_note(host, &note)?;
+    payload.text_fields = fields;
+    store_note(&path, &body, &payload)?;
+    Ok(Value::Array(
+        payload
+            .text_fields
+            .iter()
+            .map(NoteTextField::to_json)
             .collect(),
     ))
 }

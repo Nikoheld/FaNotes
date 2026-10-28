@@ -58,6 +58,7 @@ import {
   Sparkles,
   Tag,
   Trash2,
+  Type,
   X,
 } from 'lucide-react'
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
@@ -69,6 +70,7 @@ import { FileTree } from './components/FileTree'
 import { EditorExportControls } from './components/EditorExportControls'
 import { FormattingToolbar } from './components/FormattingToolbar'
 import { NoteLinkLayer } from './components/NoteLinkLayer'
+import { NoteTextFieldLayer } from './components/NoteTextFieldLayer'
 import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
@@ -172,6 +174,13 @@ import {
   type NoteLinkRecord,
   type NoteLinkStyleId,
 } from './lib/noteLink'
+import {
+  newNoteTextFieldId,
+  parseNoteTextFields,
+  patchNoteTextField,
+  placeNoteTextField,
+  type NoteTextField,
+} from './lib/noteTextField'
 import {
   createNoteBackup,
   listNoteBackups,
@@ -499,6 +508,7 @@ type NoteCompanionFields = {
   paperStyle: PaperStyle | null
   noteLinks: NoteLinkRecord[]
   noteBackups: NoteBackupSnapshot[]
+  textFields: NoteTextField[]
 }
 
 /** One in-flight companion read per note, shared by open, ink, and the field effect. */
@@ -520,6 +530,7 @@ const readCompanionFields = async (path: string): Promise<NoteCompanionFields> =
     paperStyle: paperStyle ?? null,
     noteLinks: Array.isArray(noteLinks) ? noteLinks : [],
     noteBackups: Array.isArray(noteBackups) ? noteBackups : [],
+    textFields: [],
   }
 }
 
@@ -795,7 +806,10 @@ export default function App({ startupBootstrap }: AppProps) {
   const [tagIndex, setTagIndex] = useState<Record<string, string[]>>({})
   const [notePaperByPath, setNotePaperByPath] = useState<Record<string, PaperStyle>>({})
   const [noteLinks, setNoteLinks] = useState<NoteLinkRecord[]>([])
+  const [noteTextFields, setNoteTextFields] = useState<NoteTextField[]>([])
   const [noteLinkPlacing, setNoteLinkPlacing] = useState(false)
+  const [textFieldPlacing, setTextFieldPlacing] = useState(false)
+  const [textFieldFocusId, setTextFieldFocusId] = useState<string | null>(null)
   const [noteLinkStyle, setNoteLinkStyle] = useState<NoteLinkStyleId>('symbol')
   const [selectedNoteLinkId, setSelectedNoteLinkId] = useState<string | null>(null)
   const [noteHistory, setNoteHistory] = useState<NoteHistory>(EMPTY_NOTE_HISTORY)
@@ -843,6 +857,12 @@ export default function App({ startupBootstrap }: AppProps) {
   const workspaceRestoredRef = useRef(false)
   const splitContainerRef = useRef<HTMLDivElement>(null)
   const noteLinksRef = useRef<NoteLinkRecord[]>([])
+  const noteTextFieldsRef = useRef<NoteTextField[]>([])
+  const noteTextFieldsEditedRef = useRef(false)
+  const textFieldDirtyRef = useRef(false)
+  const textFieldSavePathRef = useRef<string | null>(null)
+  const textFieldTimerRef = useRef<number | null>(null)
+  const flushNoteTextFieldsRef = useRef<() => Promise<boolean>>(async () => true)
   const noteBackupsRef = useRef<NoteBackupSnapshot[]>([])
   const subjectBooksRef = useRef<SubjectBookRecord[]>([])
   const subjectBooksDiskRef = useRef<SubjectBookRecord[]>([])
@@ -1236,12 +1256,22 @@ export default function App({ startupBootstrap }: AppProps) {
 
   useEffect(() => {
     const path = activePath
+    const previousFieldPath = textFieldSavePathRef.current
+    if (previousFieldPath && previousFieldPath !== path) void flushNoteTextFieldsRef.current()
     setNoteLinkPlacing(false)
+    setTextFieldPlacing(false)
+    setTextFieldFocusId(null)
     setSelectedNoteLinkId(null)
     setBackupMenuOpen(false)
+    noteTextFieldsEditedRef.current = false
+    noteTextFieldsRef.current = []
+    setNoteTextFields([])
+    textFieldDirtyRef.current = false
+    textFieldSavePathRef.current = path
     if (!path) {
       noteLinksRef.current = []
       setNoteLinks([])
+      textFieldSavePathRef.current = null
       noteBackupsRef.current = []
       setNoteBackups([])
       return
@@ -1255,6 +1285,22 @@ export default function App({ startupBootstrap }: AppProps) {
       const links = Array.isArray(fields?.noteLinks) ? fields.noteLinks : []
       noteLinksRef.current = links
       setNoteLinks(links)
+      const loadedFields = parseNoteTextFields(fields?.textFields)
+      if (noteTextFieldsEditedRef.current) {
+        const localIds = new Set(noteTextFieldsRef.current.map((field) => field.id))
+        const merged = parseNoteTextFields([
+          ...loadedFields.filter((field) => !localIds.has(field.id)),
+          ...noteTextFieldsRef.current,
+        ])
+        noteTextFieldsRef.current = merged
+        setNoteTextFields(merged)
+        textFieldDirtyRef.current = true
+        textFieldSavePathRef.current = path
+        void flushNoteTextFieldsRef.current()
+      } else {
+        noteTextFieldsRef.current = loadedFields
+        setNoteTextFields(loadedFields)
+      }
       const backups = listNoteBackups(fields?.noteBackups ?? [], path)
       noteBackupsRef.current = backups
       setNoteBackups(backups)
@@ -1262,6 +1308,10 @@ export default function App({ startupBootstrap }: AppProps) {
       if (!alive) return
       noteLinksRef.current = []
       setNoteLinks([])
+      if (!noteTextFieldsEditedRef.current) {
+        noteTextFieldsRef.current = []
+        setNoteTextFields([])
+      }
       noteBackupsRef.current = []
       setNoteBackups([])
     })
@@ -1533,8 +1583,12 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [toast])
 
   const flushDocumentLayers = useCallback(async () => {
-    const [drawingSaved, worksheetsSaved] = await Promise.all([flushDrawing(), flushWorksheets()])
-    return drawingSaved && worksheetsSaved
+    const [drawingSaved, worksheetsSaved, textFieldsSaved] = await Promise.all([
+      flushDrawing(),
+      flushWorksheets(),
+      flushNoteTextFieldsRef.current(),
+    ])
+    return drawingSaved && worksheetsSaved && textFieldsSaved
   }, [flushDrawing, flushWorksheets])
 
   const refreshTree = useCallback(async () => {
@@ -1604,9 +1658,12 @@ export default function App({ startupBootstrap }: AppProps) {
     const task = (async (): Promise<NoteCompanionFields | null> => {
       const hadSession = pageStatsRef.current.has(path)
       try {
-        const fields = typeof window.fanotes.readNoteCompanion === 'function'
+        const loaded = typeof window.fanotes.readNoteCompanion === 'function'
           ? await window.fanotes.readNoteCompanion(path)
           : await readCompanionFields(path)
+        const fields = loaded
+          ? { ...loaded, textFields: parseNoteTextFields(loaded.textFields) }
+          : null
         installCompanionPageStats(path, fields, hadSession)
         return fields
       } catch {
@@ -2625,6 +2682,20 @@ export default function App({ startupBootstrap }: AppProps) {
           sourcePath: created.relativePath,
         }))).catch(() => undefined)
       }
+      let textFields: NoteTextField[] = []
+      if (path === activePathRef.current) {
+        await flushNoteTextFieldsRef.current()
+        textFields = noteTextFieldsRef.current
+      } else if (window.fanotes.readNoteCompanion) {
+        const companion = await window.fanotes.readNoteCompanion(path).catch(() => null)
+        textFields = parseNoteTextFields(companion?.textFields)
+      }
+      if (textFields.length && window.fanotes.writeNoteTextFields) {
+        await window.fanotes.writeNoteTextFields(created.relativePath, textFields.map((field) => ({
+          ...field,
+          id: newNoteTextFieldId(),
+        }))).catch(() => undefined)
+      }
       if (paper && window.fanotes.setNotePaperStyle) {
         await window.fanotes.setNotePaperStyle(created.relativePath, paper).catch(() => undefined)
       }
@@ -2655,6 +2726,54 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [flushDocumentLayers, openNote, refreshTree, saveContent, toast])
 
+  const flushNoteTextFields = useCallback(async () => {
+    if (textFieldTimerRef.current !== null) {
+      window.clearTimeout(textFieldTimerRef.current)
+      textFieldTimerRef.current = null
+    }
+    const path = textFieldSavePathRef.current
+    if (!path || !textFieldDirtyRef.current) return true
+    if (typeof window.fanotes.writeNoteTextFields !== 'function') {
+      textFieldDirtyRef.current = false
+      return true
+    }
+    const fields = noteTextFieldsRef.current
+    textFieldDirtyRef.current = false
+    try {
+      await window.fanotes.writeNoteTextFields(path, fields)
+      return true
+    } catch (error) {
+      if (textFieldSavePathRef.current === path) textFieldDirtyRef.current = true
+      toast(error instanceof Error ? error.message : 'Das Textfeld konnte nicht gespeichert werden.', 'error')
+      return false
+    }
+  }, [toast])
+  flushNoteTextFieldsRef.current = flushNoteTextFields
+
+  const queueNoteTextFields = useCallback((path: string) => {
+    textFieldSavePathRef.current = path
+    textFieldDirtyRef.current = true
+    if (textFieldTimerRef.current !== null) window.clearTimeout(textFieldTimerRef.current)
+    textFieldTimerRef.current = window.setTimeout(() => {
+      textFieldTimerRef.current = null
+      void flushNoteTextFieldsRef.current()
+    }, 650)
+  }, [])
+
+  const rememberNoteTextFields = useCallback((path: string, fields: readonly NoteTextField[], commit: boolean) => {
+    const next = parseNoteTextFields(fields)
+    noteTextFieldsRef.current = next
+    noteTextFieldsEditedRef.current = true
+    setNoteTextFields(next)
+    if (commit) {
+      textFieldDirtyRef.current = true
+      textFieldSavePathRef.current = path
+      void flushNoteTextFields()
+      return
+    }
+    queueNoteTextFields(path)
+  }, [flushNoteTextFields, queueNoteTextFields])
+
   const persistNoteLinks = useCallback(async (path: string, links: readonly NoteLinkRecord[]) => {
     const next = [...links]
     noteLinksRef.current = next
@@ -2669,6 +2788,13 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!path || links === noteLinksRef.current) return
     void persistNoteLinks(path, links)
   }, [activeTab?.path, isPdfActive, persistNoteLinks])
+
+  const remapPlacedTextFields = useCallback((fields: readonly NoteTextField[]) => {
+    if (isPdfActive) return
+    const path = activeTab?.path
+    if (!path || fields === noteTextFieldsRef.current) return
+    rememberNoteTextFields(path, fields, true)
+  }, [activeTab?.path, isPdfActive, rememberNoteTextFields])
 
   const persistNoteBackups = useCallback(async (path: string, backups: NoteBackupSnapshot[]) => {
     const next = listNoteBackups(backups, path)
@@ -2801,8 +2927,52 @@ export default function App({ startupBootstrap }: AppProps) {
       toast('Öffne zuerst eine Notiz, um eine Verlinkung zu setzen.', 'info')
       return
     }
+    setTextFieldPlacing(false)
     setNoteLinkPlacing((current) => !current)
   }, [toast])
+
+  const startTextFieldPlacement = useCallback(() => {
+    if (!activePathRef.current) {
+      toast('Öffne zuerst eine Notiz, um ein Textfeld einzufügen.', 'info')
+      return
+    }
+    setNoteLinkPlacing(false)
+    setTextFieldPlacing((current) => !current)
+  }, [toast])
+
+  const placeTextFieldAt = useCallback((point: { page: number; x: number; y: number }) => {
+    const path = activePathRef.current
+    if (!path) return
+    if (noteTextFieldsRef.current.length >= 200) {
+      toast('Auf dieser Notiz sind schon 200 Textfelder.', 'info')
+      return
+    }
+    const field = placeNoteTextField(point)
+    rememberNoteTextFields(path, [...noteTextFieldsRef.current, field], true)
+    setTextFieldPlacing(false)
+    setTextFieldFocusId(field.id)
+  }, [rememberNoteTextFields, toast])
+
+  const changeTextFieldText = useCallback((id: string, text: string) => {
+    const path = activePathRef.current
+    if (!path) return
+    rememberNoteTextFields(path, patchNoteTextField(noteTextFieldsRef.current, id, { text }), false)
+  }, [rememberNoteTextFields])
+
+  const changeTextFieldGeometry = useCallback((id: string, patch: { page?: number; x?: number; y?: number; width?: number }, commit: boolean) => {
+    const path = activePathRef.current
+    if (!path) return
+    rememberNoteTextFields(path, patchNoteTextField(noteTextFieldsRef.current, id, patch), commit)
+  }, [rememberNoteTextFields])
+
+  const clearTextFieldFocus = useCallback(() => setTextFieldFocusId(null), [])
+
+  const removePlacedTextField = useCallback((id: string) => {
+    const path = activePathRef.current
+    if (!path) return
+    rememberNoteTextFields(path, noteTextFieldsRef.current.filter((field) => field.id !== id), true)
+    setTextFieldFocusId((current) => current === id ? null : current)
+  }, [rememberNoteTextFields])
 
   const applyNoteLinkStyle = useCallback(async (style: NoteLinkStyleId) => {
     setNoteLinkStyle(style)
@@ -4456,6 +4626,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'search', label: 'Im Vault suchen', shortcut: 'Ctrl ⇧ F', group: 'Navigation', icon: <Search size={15} />, run: () => setSearchOpen(true) },
     { id: 'drawing', label: drawingOpen ? 'Zur Tastatur wechseln' : 'Mit Stift schreiben', detail: 'Eingabeart auf derselben Notizseite wechseln', shortcut: 'Ctrl D', group: 'Werkzeuge', keywords: 'tablet stift erkennen mathe', icon: <PenLine size={15} />, run: toggleDrawing },
     { id: 'note-link', label: 'Verlinkung setzen', detail: 'Irgendwo auf der Seite eine neue Notiz verlinken', group: 'Werkzeuge', keywords: 'verlinkung link notiz pdf symbol text', icon: <Link2 size={15} />, run: startNoteLinkPlacement },
+    { id: 'text-field', label: 'Textfeld einfügen', detail: 'Irgendwo auf der Seite mit der Tastatur schreiben', group: 'Werkzeuge', keywords: 'textfeld text tastatur pdf schreiben', icon: <Type size={15} />, run: startTextFieldPlacement },
     { id: 'subject-book', label: bookOpen ? 'Buch ausblenden' : 'Buch einblenden', detail: currentBook ? 'PDF-Buch des Fachs neben der Notiz' : 'Zuerst über das Fachmenü ein Buch hinzufügen', group: 'Werkzeuge', keywords: 'buch pdf fach links rechts oben unten auspoppen', icon: <BookOpen size={15} />, run: () => {
       if (!currentBook) {
         const subject = activePath ? parentPath(activePath) : ''
@@ -4520,7 +4691,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'reveal', label: isWeb ? 'Notiz herunterladen' : 'Im Dateimanager zeigen', detail: isWeb ? 'Aktuelle Notiz exportieren' : 'Speicherort der geöffneten Notiz öffnen', group: 'Dateien', keywords: 'ordner explorer finder dateimanager download export', icon: isWeb ? <Download size={15} /> : <FolderOpen size={15} />, run: () => { if (activePath) void window.fanotes.revealInFolder(activePath) } },
     { id: 'bug-report', label: 'Fehler melden', detail: 'Kurz beschreiben; die letzten fünf Minuten werden angehängt', group: 'FaNotes', keywords: 'bug report fehler logs support', icon: <Bug size={15} />, run: () => setBugReportOpen(true) },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
-  ], [addonPaletteActions, activePath, activeTab, syncApi, syncState, attachBookToSubject, bookOpen, copyWikiLink, createDailyNote, createFolder, createNote, currentBook, drawingOpen, duplicateNote, exportCurrentLatex, exportCurrentPdf, focusMode, importOneNote, importPdfNote, insertStamp, isWeb, navigateHistory, openAdjacentDaily, openCalendar, openGlyphenWerk, openHistory, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleTask, toggleSplitOrientation])
+  ], [addonPaletteActions, activePath, activeTab, syncApi, syncState, attachBookToSubject, bookOpen, copyWikiLink, createDailyNote, createFolder, createNote, currentBook, drawingOpen, duplicateNote, exportCurrentLatex, exportCurrentPdf, focusMode, importOneNote, importPdfNote, insertStamp, isWeb, navigateHistory, openAdjacentDaily, openCalendar, openGlyphenWerk, openHistory, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, startTextFieldPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleTask, toggleSplitOrientation])
 
   // ---- Add-ons -------------------------------------------------------------
   // Everything add-ons may touch flows through this bridge. The deps object is
@@ -4899,13 +5070,14 @@ export default function App({ startupBootstrap }: AppProps) {
       if (mod && event.key.toLowerCase() === 'q') { event.preventDefault(); window.fanotes.requestClose() }
       if ((event.key === 'Delete' || event.key === 'Backspace') && selectedNoteLinkId) {
         const target = event.target as HTMLElement | null
-        if (target?.closest('textarea, input, [contenteditable="true"], .cm-editor, .markdown-editor, .worksheet-textbox')) return
+        if (target?.closest('textarea, input, [contenteditable="true"], .cm-editor, .markdown-editor, .worksheet-textbox, .note-text-field')) return
         event.preventDefault()
         void removeSelectedNoteLink()
         return
       }
       if (event.key === 'Escape') {
-        if (noteLinkPlacing) setNoteLinkPlacing(false)
+        if (textFieldPlacing) setTextFieldPlacing(false)
+        else if (noteLinkPlacing) setNoteLinkPlacing(false)
         else if (selectedNoteLinkId) setSelectedNoteLinkId(null)
         else if (worksheetImportOpen) setWorksheetImportOpen(false)
         else if (paletteOpen) setPaletteOpen(false)
@@ -4932,7 +5104,7 @@ export default function App({ startupBootstrap }: AppProps) {
       window.removeEventListener('keydown', handler)
       window.removeEventListener('mouseup', mouseNav)
     }
-  }, [calendarOpen, closeDrawing, closeTab, createNote, cycleTabs, duplicateNote, focusMode, glyphenWerkOpen, homeworkOpen, insertStamp, lmStudioOpen, navigateHistory, noteLinkPlacing, openGlyphenWerk, openLmStudio, openSettings, openTabByDigit, openWorksheetImport, overviewOpen, paletteOpen, removeSelectedNoteLink, reopenClosedTab, saveCurrentWork, searchOpen, selectedNoteLinkId, settingsOpen, swapSplitPanes, toast, toggleDrawing, toggleFocusMode, toggleSplit, worksheetImportOpen])
+  }, [calendarOpen, closeDrawing, closeTab, createNote, cycleTabs, duplicateNote, focusMode, glyphenWerkOpen, homeworkOpen, insertStamp, lmStudioOpen, navigateHistory, noteLinkPlacing, openGlyphenWerk, openLmStudio, openSettings, openTabByDigit, openWorksheetImport, overviewOpen, paletteOpen, removeSelectedNoteLink, reopenClosedTab, saveCurrentWork, searchOpen, selectedNoteLinkId, settingsOpen, swapSplitPanes, textFieldPlacing, toast, toggleDrawing, toggleFocusMode, toggleSplit, worksheetImportOpen])
 
   useEffect(() => {
     const placeImage = (data: DataTransfer | null, event: Event, failure: string) => {
@@ -5415,6 +5587,17 @@ export default function App({ startupBootstrap }: AppProps) {
               >
                 <Link2 size={14} /><span>Verlinkung</span>
               </button>
+              <button
+                type="button"
+                className={`toolbar-button ${textFieldPlacing ? 'active' : ''}`}
+                title="Textfeld einfügen"
+                aria-label="Textfeld einfügen"
+                aria-pressed={textFieldPlacing}
+                disabled={!activeTab}
+                onClick={startTextFieldPlacement}
+              >
+                <Type size={14} /><span>Textfeld</span>
+              </button>
               {!isPdfActive && <button type="button" className="toolbar-button" title="Bild oder PDF als Arbeitsblatt importieren" aria-label="Arbeitsblatt importieren" onClick={openWorksheetImport}><FileUp size={14} /><span>Blatt</span></button>}
               {hasConnectedAiProvider(settings) && (
                 <button type="button" className={`toolbar-button ai ${lmStudioOpen ? 'active' : ''}`} title="Mit einem AI-Anbieter bearbeiten" aria-label="AI-Assistent öffnen" onClick={openLmStudio}><Bot size={14} /><span>AI</span></button>
@@ -5432,7 +5615,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   <button type="button" role="menuitem" disabled={!activeTab || isPdfActive} onClick={() => { setEditorMenuOpen(false); toggleTask() }}><span><ListChecks size={15} /></span><span><strong>Aufgabe umschalten</strong><small>Erledigt oder offen</small></span><kbd>⌃↵</kbd></button>
                   <span className="editor-menu-separator" role="separator" />
                   <span className="editor-menu-label">Datei</span>
-                  <button type="button" role="menuitem" disabled={!activePath || isPdfActive} onClick={() => { setEditorMenuOpen(false); if (activePath) void duplicateNote(activePath) }}><span><Files size={15} /></span><span><strong>Notiz duplizieren</strong><small>Text, Handschrift und Verlinkungen als neue Notiz</small></span><kbd>⌥⇧D</kbd></button>
+                  <button type="button" role="menuitem" disabled={!activePath || isPdfActive} onClick={() => { setEditorMenuOpen(false); if (activePath) void duplicateNote(activePath) }}><span><Files size={15} /></span><span><strong>Notiz duplizieren</strong><small>Text, Handschrift, Verlinkungen und Textfelder als neue Notiz</small></span><kbd>⌥⇧D</kbd></button>
                   <button type="button" role="menuitem" disabled={!activePath} onClick={() => { setEditorMenuOpen(false); if (activePath) copyWikiLink(activePath) }}><span><Link2 size={15} /></span><span><strong>Wiki-Link kopieren</strong><small>[[Titel]] in die Zwischenablage</small></span></button>
                   <EditorExportControls disabled={!activeTab} onExportPdf={() => { setEditorMenuOpen(false); exportCurrentPdf() }} onExportLatex={() => { setEditorMenuOpen(false); exportCurrentLatex() }} />
                   <button type="button" role="menuitem" disabled={!activePath} onClick={() => { setEditorMenuOpen(false); void openHistory() }}><span><History size={15} /></span><span><strong>Versionsverlauf</strong><small>Frühere Stände wiederherstellen</small></span></button>
@@ -5503,7 +5686,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 onPointerDownCapture={() => setFocusedPane('main')}
                 onFocusCapture={() => setFocusedPane('main')}
               >
-                <article className={`unified-paper ${worksheetSession.documents.length ? 'has-worksheet' : ''} ${isPdfActive ? 'is-pdf-note' : ''} ${noteLinkPlacing ? 'is-placing-note-link' : ''}`} aria-label={`${activeTab.title} · ${isPdfActive ? 'PDF-Notiz mit Handschrift' : 'gemeinsame Tastatur- und Handschriftseite'}`}>
+                <article className={`unified-paper ${worksheetSession.documents.length ? 'has-worksheet' : ''} ${isPdfActive ? 'is-pdf-note' : ''} ${noteLinkPlacing ? 'is-placing-note-link' : ''} ${textFieldPlacing ? 'is-placing-text-field' : ''}`} aria-label={`${activeTab.title} · ${isPdfActive ? 'PDF-Notiz mit Handschrift' : 'gemeinsame Tastatur- und Handschriftseite'}`}>
                   {isPdfActive ? (
                     <Suspense fallback={<div className="pdf-note-status"><LoaderCircle className="spin" size={20} /> PDF wird geladen …</div>}>
                       <SafeBoundary name="PDF-Notiz" fallbackTitle="Der PDF-Viewer ist abgestürzt">
@@ -5563,6 +5746,8 @@ export default function App({ startupBootstrap }: AppProps) {
                         onDirtyChange={handleDrawingDirtyChange}
                         noteLinks={noteLinks}
                         onNoteLinksExtent={remapPlacedNoteLinks}
+                        textFields={noteTextFields}
+                        onTextFieldsExtent={remapPlacedTextFields}
                         onInkActivity={handleInkActivity}
                         onTrainingChanged={handleTrainingChanged}
                         onOpenGlyphenWerk={openGlyphenWerk}
@@ -5587,6 +5772,17 @@ export default function App({ startupBootstrap }: AppProps) {
                       setNoteLinkStyle(link.style)
                     }}
                     onRemove={(link) => void removePlacedNoteLink(link)}
+                  />
+                  <NoteTextFieldLayer
+                    fields={noteTextFields}
+                    placing={textFieldPlacing}
+                    pdf={isPdfActive}
+                    focusId={textFieldFocusId}
+                    onPlace={placeTextFieldAt}
+                    onText={changeTextFieldText}
+                    onGeometry={changeTextFieldGeometry}
+                    onRemove={removePlacedTextField}
+                    onFocusHandled={clearTextFieldFocus}
                   />
                 </article>
               </PaperView>

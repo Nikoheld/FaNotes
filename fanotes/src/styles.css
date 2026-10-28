@@ -638,9 +638,97 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   pointer-events: none;
 }
 .note-link-layer.is-placing { pointer-events: auto; cursor: crosshair; }
-.unified-paper.is-placing-note-link .lw-drawing-board.is-inline.is-input-active .lw-canvas-surface {
+.unified-paper.is-placing-note-link .lw-drawing-board.is-inline.is-input-active .lw-canvas-surface,
+.unified-paper.is-placing-text-field .lw-drawing-board.is-inline.is-input-active .lw-canvas-surface {
   pointer-events: none;
 }
+.note-text-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+}
+.note-text-layer.is-placing { pointer-events: auto; cursor: crosshair; }
+.note-text-field {
+  position: absolute;
+  z-index: 7;
+  pointer-events: auto;
+  min-width: 96px;
+}
+.note-text-field textarea {
+  width: 100%;
+  min-height: 38px;
+  display: block;
+  resize: none;
+  overflow: hidden;
+  padding: 6px 8px 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--paper-accent-readable, var(--accent)) 34%, rgba(45, 48, 60, .18));
+  border-radius: 6px;
+  outline: 0;
+  color: #20222b;
+  background: rgba(255, 255, 255, .88);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .08);
+  font-family: var(--ui-font);
+  line-height: 1.35;
+}
+.note-text-field textarea:focus {
+  border-color: var(--paper-accent-readable, var(--accent));
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--paper-accent-readable, var(--accent)) 15%, transparent), 0 4px 14px rgba(0, 0, 0, .12);
+}
+.note-text-field textarea::placeholder { color: #747887; }
+.note-text-field-move {
+  position: absolute;
+  top: -7px;
+  left: 8px;
+  width: 28px;
+  height: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--paper-accent-readable, var(--accent)) 55%, #8b909c);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .16);
+  cursor: grab;
+  opacity: 0;
+}
+.note-text-field:hover .note-text-field-move,
+.note-text-field:focus-within .note-text-field-move,
+.note-text-field-move:active { opacity: 1; }
+.note-text-field-move:active { cursor: grabbing; }
+.note-text-field-resize {
+  position: absolute;
+  top: 8px;
+  right: -5px;
+  bottom: 8px;
+  width: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 99px;
+  background: transparent;
+  cursor: ew-resize;
+}
+.note-text-field-resize:hover,
+.note-text-field-resize:active {
+  background: color-mix(in srgb, var(--paper-accent-readable, var(--accent)) 45%, transparent);
+}
+.note-text-field-remove {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  width: 22px;
+  height: 22px;
+  display: none;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(88, 34, 47, .18);
+  border-radius: 50%;
+  color: #a33f56;
+  background: #fff;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, .16);
+  cursor: pointer;
+}
+.note-text-field:hover .note-text-field-remove,
+.note-text-field:focus-within .note-text-field-remove { display: grid; }
 .note-link-wrap {
   position: absolute;
   z-index: 7;

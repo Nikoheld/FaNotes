@@ -115,6 +115,42 @@ function parseNoteBackups(value) {
   return snapshots.slice(-NOTE_BACKUP_LIMIT)
 }
 
+const TEXT_FIELD_ID = /^[a-zA-Z0-9._-]{1,96}$/u
+const TEXT_FIELD_LIMIT = 200
+const TEXT_FIELD_MAX_CHARS = 8000
+
+function sanitizeNoteTextField(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const page = Number(value.page)
+  const x = Number(value.x)
+  const y = Number(value.y)
+  const width = Number(value.width)
+  const fontSize = Number(value.fontSize)
+  return {
+    id: typeof value.id === 'string' && TEXT_FIELD_ID.test(value.id) ? value.id : `tf-${Date.now().toString(36)}`,
+    page: Number.isSafeInteger(page) && page >= 1 && page <= 10000 ? page : 1,
+    x: Number.isFinite(x) ? Math.min(1, Math.max(0, x)) : 0.5,
+    y: Number.isFinite(y) ? Math.min(1, Math.max(0, y)) : 0.5,
+    width: Number.isFinite(width) ? Math.min(0.92, Math.max(0.12, width)) : 0.32,
+    fontSize: Number.isSafeInteger(fontSize) && fontSize >= 10 && fontSize <= 48 ? fontSize : 16,
+    text: typeof value.text === 'string' ? value.text.slice(0, TEXT_FIELD_MAX_CHARS) : '',
+  }
+}
+
+function parseNoteTextFields(value) {
+  if (!Array.isArray(value)) return []
+  const seen = new Set()
+  const fields = []
+  for (const entry of value) {
+    const field = sanitizeNoteTextField(entry)
+    if (!field || seen.has(field.id)) continue
+    seen.add(field.id)
+    fields.push(field)
+    if (fields.length === TEXT_FIELD_LIMIT) break
+  }
+  return fields
+}
+
 function emptyFamdPayload(updatedAt = new Date().toISOString()) {
   return { schema: FAMD_SCHEMA, updatedAt, ink: null, worksheets: [] }
 }
@@ -202,6 +238,7 @@ function parseFamd(source) {
     const noteLinks = parseNoteLinks(parsed.noteLinks)
     const noteBackups = parseNoteBackups(parsed.noteBackups)
     const pageStats = parsePageStats(parsed.pageStats)
+    const textFields = parseNoteTextFields(parsed.textFields)
     return {
       markdown,
       payload: {
@@ -213,6 +250,7 @@ function parseFamd(source) {
         ...(noteLinks.length ? { noteLinks } : {}),
         ...(noteBackups.length ? { noteBackups } : {}),
         ...(pageStats ? { pageStats } : {}),
+        ...(textFields.length ? { textFields } : {}),
       },
     }
   } catch {
@@ -222,7 +260,7 @@ function parseFamd(source) {
 
 /**
  * One read of a companion: the header JSON is parsed once, then ink, page
- * stats, links, paper style, and backups come from that object. Callers that
+ * stats, links, paper style, backups, and text fields come from that object. Callers that
  * only need the visible note use `stripFamdPayload`, which does not parse it.
  */
 function readFamdCompanion(source) {
@@ -238,6 +276,7 @@ function readFamdCompanion(source) {
     paperStyle: payload?.paperStyle || inkStyle,
     noteLinks: payload?.noteLinks ?? [],
     noteBackups: payload?.noteBackups ?? [],
+    textFields: payload?.textFields ?? [],
   }
 }
 
@@ -258,6 +297,8 @@ function serializeFamd(markdown, payload) {
   if (noteBackups.length) next.noteBackups = noteBackups
   const pageStats = parsePageStats(payload?.pageStats)
   if (pageStats) next.pageStats = pageStats
+  const textFields = parseNoteTextFields(payload?.textFields)
+  if (textFields.length) next.textFields = textFields
   const json = JSON.stringify(next)
   return `${body ? `${body}\n\n` : ''}<!-- fanotes-famd:v1 chars=${json.length} -->\n${json}\n`
 }
@@ -279,6 +320,7 @@ module.exports = {
   readFamdCompanion,
   parseNoteBackups,
   parseNoteLinks,
+  parseNoteTextFields,
   serializeFamd,
   stripFamdPayload,
   worksheetIdsFromMarkdown,

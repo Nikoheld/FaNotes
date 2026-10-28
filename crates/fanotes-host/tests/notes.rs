@@ -2127,6 +2127,10 @@ fn a_companion_save_does_not_create_a_missing_folder() {
             "fanotes:write-note-backups",
             json!(["Neu/Seite.md", [{ "content": "alt" }]]),
         ),
+        (
+            "fanotes:write-note-text-fields",
+            json!(["Neu/Seite.md", [{ "id": "tf-a", "text": "Hallo" }]]),
+        ),
     ] {
         let error = host
             .dispatch(channel, args.as_array().unwrap())

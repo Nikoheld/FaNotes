@@ -239,6 +239,11 @@ impl Host {
                 &arg_text(args, 0, "Ungültiger Notizpfad.")?,
                 args.get(1).unwrap_or(&Value::Null),
             ),
+            "fanotes:write-note-text-fields" => notes::write_text_fields(
+                self,
+                &arg_text(args, 0, "Ungültiger Notizpfad.")?,
+                args.get(1).unwrap_or(&Value::Null),
+            ),
             "fanotes:read-subject-books" => notes::read_subject_books(self),
             "fanotes:write-subject-books" => {
                 notes::write_subject_books(self, args.first().unwrap_or(&Value::Null))

@@ -37,7 +37,7 @@ function loadEnglishCatalog() {
   return CORE_ENGLISH_CATALOG
 }
 
-const EXACT_ONLY_REPLACEMENTS = new Set(['Frei', 'Breite', 'Pinsel', 'Farben', 'Strich', 'gespeichert', 'werden', 'Holt', 'Kopie'])
+const EXACT_ONLY_REPLACEMENTS = new Set(['Frei', 'Breite', 'Pinsel', 'Farben', 'Strich', 'gespeichert', 'werden', 'Holt', 'Kopie', 'Textfeld'])
 
 function translateComposedChrome(source) {
   const syncing = /^(Holt|Lädt hoch|Prüft) (\d+)\/(\d+)$/u.exec(source)

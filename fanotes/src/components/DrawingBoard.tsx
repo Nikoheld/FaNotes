@@ -258,6 +258,7 @@ import {
   paperRulingTileOrigin,
 } from '../lib/paperRuling'
 import { noteLinksAfterOriginGrow, type NoteLinkRecord } from '../lib/noteLink'
+import { noteTextFieldsAfterOriginGrow, type NoteTextField } from '../lib/noteTextField'
 import {
   applyVisualGrowCorrection,
   lockPaperViewportEditorScroll,
@@ -819,6 +820,9 @@ export type DrawingBoardProps = {
   /** Sheet-relative note links. Remapped with the ink when the write page grows. */
   noteLinks?: readonly NoteLinkRecord[]
   onNoteLinksExtent?: (links: readonly NoteLinkRecord[]) => void
+  /** Sheet-relative keyboard text fields. Remapped with the ink when the write page grows. */
+  textFields?: readonly NoteTextField[]
+  onTextFieldsExtent?: (fields: readonly NoteTextField[]) => void
 }
 
 type Notice = { kind: 'success' | 'error' | 'info'; text: string }
@@ -1337,6 +1341,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   sectionsEnabled = true,
   noteLinks,
   onNoteLinksExtent,
+  textFields,
+  onTextFieldsExtent,
   onSectionFold,
 }: DrawingBoardProps, forwardedRef) {
   const lineLanguage = settings.recognitionLanguage
@@ -2391,6 +2397,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   noteLinksRef.current = noteLinks ?? []
   const onNoteLinksExtentRef = useRef(onNoteLinksExtent)
   onNoteLinksExtentRef.current = onNoteLinksExtent
+  const textFieldsRef = useRef(textFields ?? [])
+  textFieldsRef.current = textFields ?? []
+  const onTextFieldsExtentRef = useRef(onTextFieldsExtent)
+  onTextFieldsExtentRef.current = onTextFieldsExtent
 
   /** Every path that adds a finished stroke to the page passes through here. */
   const noteStrokeDrawn = useCallback((stroke: InkStroke) => {
@@ -3227,6 +3237,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       { width: nextPaintW, height: nextPaintH, padX: addX, padY: addY },
     )
     if (remappedLinks !== noteLinksRef.current) onNoteLinksExtentRef.current?.(remappedLinks)
+    const remappedFields = noteTextFieldsAfterOriginGrow(
+      textFieldsRef.current,
+      { width: prevPaintW, height: prevPaintH },
+      { width: nextPaintW, height: nextPaintH, padX: addX, padY: addY },
+    )
+    if (remappedFields !== textFieldsRef.current) onTextFieldsExtentRef.current?.(remappedFields)
     const afterBox = scroller
       ? {
         left: scroller.getBoundingClientRect().left,

@@ -1,5 +1,6 @@
 import { parseNoteBackups, serializeNoteBackups, type NoteBackupSnapshot } from './noteBackup'
 import { parseNoteLinks, serializeNoteLinks, type NoteLinkRecord } from './noteLink'
+import { parseNoteTextFields, type NoteTextField } from './noteTextField'
 import { parsePageStats, type PageStats } from './pageStats'
 import { isPaperStyle } from './paperStyles'
 import type { PaperStyle } from '../types'
@@ -21,6 +22,7 @@ export type FamdPayload = {
   noteLinks?: NoteLinkRecord[]
   noteBackups?: NoteBackupSnapshot[]
   pageStats?: PageStats
+  textFields?: NoteTextField[]
 }
 
 export const isNoteFileName = (name: string) => (
@@ -103,6 +105,7 @@ export const parseFamd = (source: string): { markdown: string; payload: FamdPayl
     const noteLinks = parseNoteLinks(parsed.noteLinks)
     const noteBackups = parseNoteBackups(parsed.noteBackups)
     const pageStats = parsed.pageStats ? parsePageStats(parsed.pageStats, Date.parse(updatedAt) || Date.now()) : undefined
+    const textFields = parseNoteTextFields(parsed.textFields)
     return {
       markdown,
       payload: {
@@ -114,6 +117,7 @@ export const parseFamd = (source: string): { markdown: string; payload: FamdPayl
         ...(noteLinks.length ? { noteLinks } : {}),
         ...(noteBackups.length ? { noteBackups } : {}),
         ...(pageStats ? { pageStats } : {}),
+        ...(textFields.length ? { textFields } : {}),
       },
     }
   } catch {
@@ -189,6 +193,8 @@ export const serializeFamd = (markdown: string, payload: FamdPayload) => {
   const noteBackups = serializeNoteBackups(payload.noteBackups)
   if (noteBackups.length) next.noteBackups = noteBackups
   if (payload.pageStats) next.pageStats = payload.pageStats
+  const textFields = parseNoteTextFields(payload.textFields)
+  if (textFields.length) next.textFields = textFields
   const json = JSON.stringify(next)
   return `${body ? `${body}\n\n` : ''}<!-- fanotes-famd:v1 chars=${json.length} -->\n${json}\n`
 }

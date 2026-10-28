@@ -39,6 +39,17 @@ pub struct NoteBackup {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct NoteTextField {
+    pub id: String,
+    pub page: i64,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub font_size: i64,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct FamdPayload {
     pub schema: String,
     pub updated_at: String,
@@ -48,6 +59,7 @@ pub struct FamdPayload {
     pub note_links: Vec<NoteLink>,
     pub note_backups: Vec<NoteBackup>,
     pub page_stats: Option<Value>,
+    pub text_fields: Vec<NoteTextField>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -66,6 +78,7 @@ pub fn empty_famd_payload(updated_at: impl Into<String>) -> FamdPayload {
         note_links: Vec::new(),
         note_backups: Vec::new(),
         page_stats: None,
+        text_fields: Vec::new(),
     }
 }
 
@@ -243,6 +256,13 @@ pub fn serialize_famd(markdown: &str, payload: &FamdPayload) -> String {
     if let Some(stats) = parse_page_stats(payload.page_stats.as_ref()) {
         object.insert("pageStats".into(), stats);
     }
+    let text_fields = sanitize_note_text_fields(&payload.text_fields);
+    if !text_fields.is_empty() {
+        object.insert(
+            "textFields".into(),
+            Value::Array(text_fields.iter().map(NoteTextField::to_json).collect()),
+        );
+    }
     let json = Value::Object(object).to_string();
     let header = format!("<!-- fanotes-famd:v1 chars={} -->\n{json}\n", js_len(&json));
     if body.is_empty() {
@@ -289,6 +309,10 @@ impl FamdPayload {
             .map(parse_note_backups_value)
             .unwrap_or_default();
         let page_stats = parse_page_stats(object.get("pageStats"));
+        let text_fields = object
+            .get("textFields")
+            .map(parse_note_text_fields_value)
+            .unwrap_or_default();
         Self {
             schema: FAMD_SCHEMA.to_string(),
             updated_at,
@@ -298,6 +322,7 @@ impl FamdPayload {
             note_links,
             note_backups,
             page_stats,
+            text_fields,
         }
     }
 }
@@ -308,6 +333,10 @@ pub fn parse_note_links(value: &Value) -> Vec<NoteLink> {
 
 pub fn parse_note_backups(value: &Value) -> Vec<NoteBackup> {
     parse_note_backups_value(value)
+}
+
+pub fn parse_note_text_fields(value: &Value) -> Vec<NoteTextField> {
+    parse_note_text_fields_value(value)
 }
 
 fn parse_note_links_value(value: &Value) -> Vec<NoteLink> {
@@ -473,6 +502,107 @@ fn sanitize_note_backup(value: &Value) -> Option<NoteBackup> {
         note_path,
         created_at,
         content,
+    })
+}
+
+const TEXT_FIELD_LIMIT: usize = 200;
+const TEXT_FIELD_MAX_CHARS: usize = 8000;
+
+fn parse_note_text_fields_value(value: &Value) -> Vec<NoteTextField> {
+    let Some(items) = value.as_array() else {
+        return Vec::new();
+    };
+    let mut seen = Vec::new();
+    let mut fields = Vec::new();
+    for entry in items {
+        let Some(field) = sanitize_note_text_field(entry) else {
+            continue;
+        };
+        if seen.iter().any(|id: &String| id == &field.id) {
+            continue;
+        }
+        seen.push(field.id.clone());
+        fields.push(field);
+        if fields.len() == TEXT_FIELD_LIMIT {
+            break;
+        }
+    }
+    fields
+}
+
+fn sanitize_note_text_fields(fields: &[NoteTextField]) -> Vec<NoteTextField> {
+    parse_note_text_fields_value(&Value::Array(
+        fields.iter().map(NoteTextField::to_json).collect(),
+    ))
+}
+
+impl NoteTextField {
+    pub fn to_json(&self) -> Value {
+        let mut object = Map::new();
+        object.insert("id".into(), Value::String(self.id.clone()));
+        object.insert("page".into(), Value::from(self.page));
+        object.insert("x".into(), json_number(self.x));
+        object.insert("y".into(), json_number(self.y));
+        object.insert("width".into(), json_number(self.width));
+        object.insert("fontSize".into(), Value::from(self.font_size));
+        object.insert("text".into(), Value::String(self.text.clone()));
+        Value::Object(object)
+    }
+}
+
+fn finite_unit(value: f64, fallback: f64) -> f64 {
+    if value.is_finite() {
+        value.clamp(0.0, 1.0)
+    } else {
+        fallback
+    }
+}
+
+fn sanitize_note_text_field(value: &Value) -> Option<NoteTextField> {
+    let object = value.as_object()?;
+    let page_number = js_number(object.get("page"));
+    let page = if page_number.is_finite()
+        && page_number.fract() == 0.0
+        && page_number.abs() <= 9_007_199_254_740_991.0
+        && (1.0..=10_000.0).contains(&page_number)
+    {
+        page_number as i64
+    } else {
+        1
+    };
+    let width_number = js_number(object.get("width"));
+    let width = if width_number.is_finite() {
+        width_number.clamp(0.12, 0.92)
+    } else {
+        0.32
+    };
+    let font_number = js_number(object.get("fontSize"));
+    let font_size = if font_number.is_finite()
+        && font_number.fract() == 0.0
+        && (10.0..=48.0).contains(&font_number)
+    {
+        font_number as i64
+    } else {
+        16
+    };
+    let id = object
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| is_record_id(id))
+        .map(str::to_owned)
+        .unwrap_or_else(|| js_now_id("tf"));
+    let text = truncate_js(
+        object.get("text").and_then(Value::as_str).unwrap_or(""),
+        TEXT_FIELD_MAX_CHARS,
+    );
+    Some(NoteTextField {
+        id,
+        page,
+        x: finite_unit(js_number(object.get("x")), 0.5),
+        y: finite_unit(js_number(object.get("y")), 0.5),
+        width,
+        font_size,
+        text,
     })
 }
 
@@ -1042,7 +1172,10 @@ pub fn js_value_string(value: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_famd, parse_note_links, serialize_famd, FamdPayload, FAMD_SCHEMA};
+    use super::{
+        empty_famd_payload, parse_famd, parse_note_links, parse_note_text_fields, serialize_famd,
+        FamdPayload, NoteTextField, FAMD_SCHEMA,
+    };
 
     #[test]
     fn a_year_or_year_month_is_the_first_day() {
@@ -6240,6 +6373,7 @@ mod tests {
             note_links: Vec::new(),
             note_backups: Vec::new(),
             page_stats: None,
+            text_fields: Vec::new(),
         };
         let saved = serialize_famd("", &payload);
         assert!(
@@ -7110,9 +7244,56 @@ mod tests {
             note_links: Vec::new(),
             note_backups: Vec::new(),
             page_stats: Some(serde_json::json!({ "words": 2 })),
+            text_fields: Vec::new(),
         };
         let saved = serialize_famd("", &payload);
         assert!(parse_famd(&saved).payload.unwrap().page_stats.is_none());
+    }
+
+    #[test]
+    fn a_text_field_round_trips_and_an_empty_list_is_omitted() {
+        let empty = empty_famd_payload("2026-01-02T00:00:00.000Z");
+        let saved_empty = serialize_famd("Hallo\n", &empty);
+        assert!(!saved_empty.contains("textFields"), "{saved_empty}");
+
+        let mut payload = empty;
+        payload.text_fields = vec![NoteTextField {
+            id: "tf-check".into(),
+            page: 2,
+            x: 0.2,
+            y: 0.4,
+            width: 0.32,
+            font_size: 16,
+            text: "Hallo Feld".into(),
+        }];
+        let saved = serialize_famd("Hallo\n", &payload);
+        let parsed = parse_famd(&saved).payload.unwrap();
+        assert_eq!(parsed.text_fields.len(), 1);
+        assert_eq!(parsed.text_fields[0].id, "tf-check");
+        assert_eq!(parsed.text_fields[0].page, 2);
+        assert_eq!(parsed.text_fields[0].text, "Hallo Feld");
+        assert_eq!(parsed.text_fields[0].font_size, 16);
+        assert!((parsed.text_fields[0].x - 0.2).abs() < 1e-9);
+        assert!((parsed.text_fields[0].width - 0.32).abs() < 1e-9);
+
+        let long = "x".repeat(8001);
+        let repaired = parse_note_text_fields(&serde_json::json!([
+            { "page": "nope", "x": 4, "y": -2, "width": 9, "fontSize": 3, "text": long },
+            null,
+            1
+        ]));
+        assert_eq!(repaired.len(), 1);
+        assert_eq!(repaired[0].page, 1);
+        assert_eq!(repaired[0].x, 1.0);
+        assert_eq!(repaired[0].y, 0.0);
+        assert!((repaired[0].width - 0.92).abs() < 1e-9);
+        assert_eq!(repaired[0].font_size, 16);
+        assert_eq!(repaired[0].text.chars().count(), 8000);
+
+        let mut cleared = parsed;
+        cleared.text_fields.clear();
+        let again = serialize_famd("Hallo\n", &cleared);
+        assert!(!again.contains("textFields"), "{again}");
     }
 
     #[test]

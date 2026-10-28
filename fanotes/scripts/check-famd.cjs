@@ -7,6 +7,7 @@ const {
   parseFamd,
   parseNoteBackups,
   parseNoteLinks,
+  parseNoteTextFields,
   readFamdCompanion,
   serializeFamd,
   stripFamdPayload,
@@ -133,6 +134,11 @@ assert.doesNotMatch(linkWrite, /atomicWrite\(/u)
 const backupWrite = main.slice(main.indexOf('handle(IPC.writeNoteBackups'), main.indexOf('handle(IPC.readSubjectBooks'))
 assert.match(backupWrite, /mutateFamdCompanion\(notePath/u)
 assert.doesNotMatch(backupWrite, /atomicWrite\(/u)
+const textFieldWrite = main.slice(main.indexOf('handle(IPC.writeNoteTextFields'), main.indexOf('handle(IPC.readSubjectBooks'))
+assert.match(textFieldWrite, /parseNoteTextFields\(rawFields\)/u)
+assert.match(textFieldWrite, /mutateFamdCompanion\(notePath/u)
+assert.doesNotMatch(textFieldWrite, /atomicWrite\(/u)
+assert.match(main, /textFields: loaded\.textFields/u)
 const drawingSave = main.slice(main.indexOf('handle(IPC.saveDrawing'), main.indexOf('handle(IPC.listDrawings'))
 const inkEmbed = drawingSave.slice(drawingSave.indexOf('queueFileWrite(famdTarget'))
 assert.ok(inkEmbed.indexOf('readOptionalNoteFile') > inkEmbed.indexOf('queueFileWrite(famdTarget'))
@@ -174,7 +180,10 @@ assert.match(readNoteTabSource, /stripFamdPayload\(await window\.fanotes\.readFi
 assert.doesNotMatch(readNoteTabSource, /parseFamd|readNotePageStats|preparePageStats|readNoteCompanion/u)
 const loaderSource = app.slice(app.indexOf('const loadNoteCompanion = useCallback'), app.indexOf('const revealOpenedNote = useCallback'))
 assert.match(loaderSource, /readNoteCompanion\(path\)/u)
-assert.doesNotMatch(loaderSource, /readNotePageStats|readNotePaperStyle|readNoteLinks|readNoteBackups|readFamdInk/u)
+assert.doesNotMatch(loaderSource, /readNotePageStats|readNotePaperStyle|readNoteLinks|readNoteBackups|readFamdInk|readNoteTextFields/u)
+assert.match(app, /NoteTextFieldLayer/u)
+assert.match(app, /writeNoteTextFields/u)
+assert.match(app, /is-placing-text-field/u)
 const revealSource = app.slice(app.indexOf('const revealOpenedNote = useCallback'), app.indexOf('const openNote = useCallback'))
 assert.match(revealSource, /setActivePath\(path\)/u)
 assert.match(revealSource, /void loadNoteCompanion\(path\)/u)
@@ -224,6 +233,15 @@ const heavyBackup = {
   createdAt: '2026-03-01T08:30:00.000Z',
   content: 'Stand vor dem Öffnen',
 }
+const heavyField = {
+  id: 'tf-open-check',
+  page: 1,
+  x: 0.25,
+  y: 0.5,
+  width: 0.32,
+  fontSize: 18,
+  text: 'Neben dem Text',
+}
 const heavyBody = '# Instant\n\nThe note text is already here.\n'
 const heavyEncoded = serializeFamd(heavyBody, {
   ...emptyFamdPayload('2026-03-01T08:00:00.000Z'),
@@ -232,6 +250,7 @@ const heavyEncoded = serializeFamd(heavyBody, {
   pageStats: heavyStats,
   noteLinks: [heavyLink],
   noteBackups: [heavyBackup],
+  textFields: [heavyField],
 })
 const originalJsonParse = JSON.parse
 const countParses = (run) => {
@@ -264,6 +283,20 @@ assert.equal(opened.value.pageStats.document.words, 12)
 assert.equal(opened.value.pageStats.version, 2)
 assert.deepEqual(opened.value.noteLinks, parseNoteLinks([heavyLink]))
 assert.deepEqual(opened.value.noteBackups, parseNoteBackups([heavyBackup]))
+assert.deepEqual(opened.value.textFields, parseNoteTextFields([heavyField]))
+const emptySaved = serializeFamd('Hallo\n', emptyFamdPayload('2026-01-02T00:00:00.000Z'))
+assert.equal(emptySaved.includes('textFields'), false)
+const repaired = parseNoteTextFields([{ page: 'nope', x: 4, y: -2, width: 9, fontSize: 3, text: 'x'.repeat(8001) }, null, 1])
+assert.equal(repaired.length, 1)
+assert.equal(repaired[0].page, 1)
+assert.equal(repaired[0].x, 1)
+assert.equal(repaired[0].y, 0)
+assert.equal(repaired[0].width, 0.92)
+assert.equal(repaired[0].fontSize, 16)
+assert.equal(repaired[0].text.length, 8000)
+assert.equal(parseNoteTextFields(Array.from({ length: 205 }, (_, index) => ({ id: `tf-${index}`, text: 'a' }))).length, 200)
+const cleared = serializeFamd('Hallo\n', { ...parseFamd(serializeFamd('Hallo\n', { ...emptyFamdPayload('2026-01-02T00:00:00.000Z'), textFields: [heavyField] })).payload, textFields: [] })
+assert.equal(cleared.includes('textFields'), false)
 const payloadBytes = Buffer.byteLength(heavyEncoded, 'utf8')
 console.log(`payload size ${payloadBytes}`)
 console.log(`strip parse count ${stripped.count}`)
