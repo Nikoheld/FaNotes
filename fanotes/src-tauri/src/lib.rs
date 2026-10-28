@@ -419,6 +419,7 @@ fanotes_commands! {
     write_note_links => "fanotes:write-note-links",
     read_note_backups => "fanotes:read-note-backups",
     write_note_backups => "fanotes:write-note-backups",
+    read_note_companion => "fanotes:read-note-companion",
     read_subject_books => "fanotes:read-subject-books",
     write_subject_books => "fanotes:write-subject-books",
     import_subject_book => "fanotes:import-subject-book",

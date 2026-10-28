@@ -90,6 +90,7 @@ if (typeof window !== 'undefined') {
     writeNoteLinks: (relativePath, links) => invoke('fanotes:write-note-links', relativePath, links),
     readNoteBackups: (relativePath) => invoke('fanotes:read-note-backups', relativePath),
     writeNoteBackups: (relativePath, backups) => invoke('fanotes:write-note-backups', relativePath, backups),
+    readNoteCompanion: (relativePath) => invoke('fanotes:read-note-companion', relativePath),
     readSubjectBooks: () => invoke('fanotes:read-subject-books'),
     writeSubjectBooks: (books) => invoke('fanotes:write-subject-books', books),
     importSubjectBook: (subjectPath) => invoke('fanotes:import-subject-book', subjectPath),

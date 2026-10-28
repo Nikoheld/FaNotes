@@ -5,6 +5,9 @@ const {
   companionNotePath,
   emptyFamdPayload,
   parseFamd,
+  parseNoteBackups,
+  parseNoteLinks,
+  readFamdCompanion,
   serializeFamd,
   stripFamdPayload,
   worksheetIdsFromMarkdown,
@@ -164,6 +167,107 @@ assert.match(app, /const restored = stripFamdPayload\(raw\)/u)
 assert.match(app, /pendingHistoryInkRef/u)
 assert.match(app, /pageStatsRef\.current\.delete\(path\)/u)
 assert.match(app, /drawingLoadRequestRef\.current/u)
+
+const readNoteTabSource = app.slice(app.indexOf('const readNoteTab = useCallback'), app.indexOf('const installCompanionPageStats'))
+assert.match(readNoteTabSource, /stripFamdPayload\(await window\.fanotes\.readFile\(companionNotePath\(path, '\.famd'\)\)\)/u)
+assert.match(readNoteTabSource, /stripFamdPayload\(await window\.fanotes\.readFile\(path\)\)/u)
+assert.doesNotMatch(readNoteTabSource, /parseFamd|readNotePageStats|preparePageStats|readNoteCompanion/u)
+const loaderSource = app.slice(app.indexOf('const loadNoteCompanion = useCallback'), app.indexOf('const revealOpenedNote = useCallback'))
+assert.match(loaderSource, /readNoteCompanion\(path\)/u)
+assert.doesNotMatch(loaderSource, /readNotePageStats|readNotePaperStyle|readNoteLinks|readNoteBackups|readFamdInk/u)
+const revealSource = app.slice(app.indexOf('const revealOpenedNote = useCallback'), app.indexOf('const openNote = useCallback'))
+assert.match(revealSource, /setActivePath\(path\)/u)
+assert.match(revealSource, /void loadNoteCompanion\(path\)/u)
+assert.doesNotMatch(revealSource, /await /u)
+const openSource = app.slice(app.indexOf('const openNote = useCallback'), app.indexOf('const restoreWorkspace = useCallback'))
+assert.equal(openSource.match(/revealOpenedNote\(/g).length, 2)
+assert.doesNotMatch(openSource, /await preparePageStats/u)
+assert.doesNotMatch(openSource, /await loadNoteCompanion/u)
+assert.match(main, /readNoteCompanion: 'fanotes:read-note-companion'/u)
+assert.match(preload, /readNoteCompanion:\s*\(relativePath\)/u)
+assert.match(main, /readFamdCompanion\(source\)/u)
+const famdInkRead = main.slice(main.indexOf('handle(IPC.readFamdInk'), main.indexOf('handle(IPC.readNotePaperStyle'))
+assert.match(famdInkRead, /noteInkMarkerId\(parsed\.markdown\)/u)
+assert.match(famdInkRead, /markerId \?\? /u)
+assert.doesNotMatch(famdInkRead, /validateDrawingJson\(drawingJson\)/u)
+
+const points = Array.from({ length: 4000 }, (_, index) => ({ x: index / 4000, y: 0.25, t: index, pressure: 0.4 }))
+const heavyInk = {
+  schemaVersion: 1,
+  title: 'Handschrift',
+  strokes: [{ points }],
+  paperStyle: 'squares',
+}
+const heavyStats = {
+  version: 2,
+  createdAt: '2026-03-01T08:00:00.000Z',
+  modifiedAt: '2026-03-01T09:00:00.000Z',
+  lastOpenedAt: '2026-03-01T09:30:00.000Z',
+  dwellMs: 2400,
+  openCount: 6,
+  typing: { wordsAdded: 4, wordsRemoved: 1 },
+  document: { words: 12 },
+}
+const heavyLink = {
+  id: 'nl-open-check',
+  sourcePath: 'Mathe/Skript.pdf',
+  targetPath: 'Mathe/Skript-Notiz.md',
+  page: 2,
+  x: 0.4,
+  y: 0.6,
+  style: 'text',
+  label: 'Skript-Notiz',
+}
+const heavyBackup = {
+  id: 'nb-open-check',
+  notePath: 'Mathe/Analysis.md',
+  createdAt: '2026-03-01T08:30:00.000Z',
+  content: 'Stand vor dem Öffnen',
+}
+const heavyBody = '# Instant\n\nThe note text is already here.\n'
+const heavyEncoded = serializeFamd(heavyBody, {
+  ...emptyFamdPayload('2026-03-01T08:00:00.000Z'),
+  ink: heavyInk,
+  paperStyle: 'squares',
+  pageStats: heavyStats,
+  noteLinks: [heavyLink],
+  noteBackups: [heavyBackup],
+})
+const originalJsonParse = JSON.parse
+const countParses = (run) => {
+  let count = 0
+  JSON.parse = (...args) => {
+    count += 1
+    return originalJsonParse.apply(JSON, args)
+  }
+  try {
+    const value = run()
+    return { count, value }
+  } finally {
+    JSON.parse = originalJsonParse
+  }
+}
+const stripped = countParses(() => stripFamdPayload(heavyEncoded))
+assert.equal(stripped.count, 0)
+assert.equal(stripped.value, '# Instant\n\nThe note text is already here.')
+assert.equal(stripped.value.includes('fanotes-famd'), false)
+const opened = countParses(() => readFamdCompanion(heavyEncoded))
+assert.equal(opened.count, 1)
+assert.equal(opened.value.markdown, stripped.value)
+assert.equal(opened.value.ink.strokes[0].points.length, 4000)
+assert.equal(opened.value.ink.title, 'Handschrift')
+assert.equal(opened.value.paperStyle, 'squares')
+assert.equal(opened.value.pageStats.dwellMs, 2400)
+assert.equal(opened.value.pageStats.openCount, 6)
+assert.equal(opened.value.pageStats.typing.wordsAdded, 4)
+assert.equal(opened.value.pageStats.document.words, 12)
+assert.equal(opened.value.pageStats.version, 2)
+assert.deepEqual(opened.value.noteLinks, parseNoteLinks([heavyLink]))
+assert.deepEqual(opened.value.noteBackups, parseNoteBackups([heavyBackup]))
+const payloadBytes = Buffer.byteLength(heavyEncoded, 'utf8')
+console.log(`payload size ${payloadBytes}`)
+console.log(`strip parse count ${stripped.count}`)
+console.log(`companion parse count ${opened.count}`)
 
 const os = require('node:os')
 const fsp = require('node:fs/promises')

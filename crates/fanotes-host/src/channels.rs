@@ -45,6 +45,7 @@ pub const CHANNELS: &[Channel] = &[
     channel("fanotes:write-note-links", ChannelKind::Command),
     channel("fanotes:read-note-backups", ChannelKind::Command),
     channel("fanotes:write-note-backups", ChannelKind::Command),
+    channel("fanotes:read-note-companion", ChannelKind::Command),
     channel("fanotes:read-subject-books", ChannelKind::Command),
     channel("fanotes:write-subject-books", ChannelKind::Command),
     channel("fanotes:import-subject-book", ChannelKind::Command),

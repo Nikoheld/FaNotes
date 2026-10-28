@@ -231,6 +231,9 @@ impl Host {
             "fanotes:read-note-backups" => {
                 notes::read_backups(self, &arg_text(args, 0, "Ungültiger Notizpfad.")?)
             }
+            "fanotes:read-note-companion" => {
+                notes::read_note_companion(self, &arg_text(args, 0, "Ungültiger Notizpfad.")?)
+            }
             "fanotes:write-note-backups" => notes::write_backups(
                 self,
                 &arg_text(args, 0, "Ungültiger Notizpfad.")?,

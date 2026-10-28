@@ -340,6 +340,37 @@ pub fn write_links(host: &Host, relative: &str, raw: &Value) -> Result<Value, St
     ))
 }
 
+pub fn read_note_companion(host: &Host, relative: &str) -> Result<Value, String> {
+    let Some(payload) = read_companion(host, relative)? else {
+        return Ok(Value::Null);
+    };
+    let paper_style = if let Some(style) = payload
+        .paper_style
+        .as_deref()
+        .filter(|style| is_paper_style(style))
+    {
+        Value::String(style.to_owned())
+    } else {
+        payload
+            .ink
+            .as_ref()
+            .and_then(|ink| ink.get("paperStyle"))
+            .and_then(Value::as_str)
+            .filter(|style| is_paper_style(style))
+            .map(|style| Value::String(style.to_owned()))
+            .unwrap_or(Value::Null)
+    };
+    // A damaged drawing must not hide the rest of the companion.
+    let ink = crate::drawings::read_famd_ink(host, relative).unwrap_or(Value::Null);
+    Ok(json!({
+        "ink": ink,
+        "pageStats": payload.page_stats.clone().unwrap_or(Value::Null),
+        "paperStyle": paper_style,
+        "noteLinks": payload.note_links.iter().map(NoteLink::to_json).collect::<Vec<_>>(),
+        "noteBackups": payload.note_backups.iter().map(NoteBackup::to_json).collect::<Vec<_>>(),
+    }))
+}
+
 pub fn read_backups(host: &Host, relative: &str) -> Result<Value, String> {
     let backups = read_companion(host, relative)?.map(|payload| payload.note_backups);
     Ok(Value::Array(

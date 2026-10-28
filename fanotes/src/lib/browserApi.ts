@@ -1293,6 +1293,23 @@ export function createBrowserApi(): FaNotesApi {
       await ready
       return null
     },
+    readNoteCompanion: async (rawPath) => {
+      await ready
+      const path = normalizePath(rawPath)
+      const famdPath = companionNotePath(path, '.famd')
+      const record = files.get(famdPath)
+      if (!record) return null
+      const parsed = parseFamd(record.content)
+      const payload = parsed.payload
+      const inkStyle = payload?.ink && isPaperStyle(payload.ink.paperStyle) ? payload.ink.paperStyle : null
+      return {
+        ink: null,
+        pageStats: payload?.pageStats ?? null,
+        paperStyle: payload?.paperStyle || inkStyle,
+        noteLinks: payload?.noteLinks ?? [],
+        noteBackups: payload?.noteBackups ?? [],
+      }
+    },
     readNotePaperStyle: async (rawPath) => {
       await ready
       return notePaper.get(normalizePath(rawPath)) ?? null

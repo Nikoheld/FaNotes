@@ -283,6 +283,7 @@ export function createBrowserPreviewApi(): FaNotesApi {
     },
     readAssetDataUrl: async (path) => assets.get(path) ?? '',
     readFamdInk: async () => null,
+    readNoteCompanion: async () => null,
     readNotePaperStyle: async () => null,
     setNotePaperStyle: async (_path, paperStyle) => paperStyle,
     readNoteLinks: async () => [],

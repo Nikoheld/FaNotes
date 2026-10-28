@@ -197,6 +197,7 @@ fn a_non_string_argument_uses_the_desktop_message() {
         "fanotes:write-note-links",
         "fanotes:read-note-backups",
         "fanotes:write-note-backups",
+        "fanotes:read-note-companion",
     ] {
         assert_eq!(
             host.dispatch(channel, &[json!(1)]).unwrap_err(),

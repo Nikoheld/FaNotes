@@ -47,6 +47,7 @@ const {
   isPdfNoteExtension,
   noteStem,
   parseFamd,
+  readFamdCompanion,
   parseNoteBackups,
   parseNoteLinks,
   serializeFamd,
@@ -187,6 +188,7 @@ const IPC = Object.freeze({
   writeNoteLinks: 'fanotes:write-note-links',
   readNoteBackups: 'fanotes:read-note-backups',
   writeNoteBackups: 'fanotes:write-note-backups',
+  readNoteCompanion: 'fanotes:read-note-companion',
   readSubjectBooks: 'fanotes:read-subject-books',
   writeSubjectBooks: 'fanotes:write-subject-books',
   importSubjectBook: 'fanotes:import-subject-book',
@@ -1566,6 +1568,91 @@ async function readOptionalNoteFile(relativePath, maxBytes = MAX_FAMD_BYTES) {
 }
 
 /**
+ * One parse of a companion file, shared by every field read that overlaps it.
+ * The key is path + mtime + size. A write bumps the generation and drops the
+ * entry so the next open cannot reuse bytes from before that write.
+ */
+const famdCompanionCache = new Map()
+const famdCompanionInflight = new Map()
+const famdCompanionGeneration = new Map()
+
+function invalidateFamdCompanion(famdRelativePath) {
+  if (typeof famdRelativePath !== 'string' || !famdRelativePath) return
+  famdCompanionGeneration.set(famdRelativePath, (famdCompanionGeneration.get(famdRelativePath) || 0) + 1)
+  for (const key of [...famdCompanionCache.keys()]) {
+    if (key.startsWith(`${famdRelativePath}\0`)) famdCompanionCache.delete(key)
+  }
+  famdCompanionInflight.delete(famdRelativePath)
+}
+
+async function loadFamdCompanion(notePath) {
+  const famdRelative = companionNotePath(notePath, '.famd')
+  const pending = famdCompanionInflight.get(famdRelative)
+  if (pending) return pending
+  const generation = famdCompanionGeneration.get(famdRelative) || 0
+  const load = (async () => {
+    const { target } = await resolveVaultPath(famdRelative, { allowMissing: true, expected: 'file' })
+    let info
+    try {
+      info = await statRegularFileNoFollow(target, MAX_FAMD_BYTES)
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null
+      throw error
+    }
+    const cacheKey = `${famdRelative}\0${info.mtimeMs}\0${info.size}`
+    const cached = famdCompanionCache.get(cacheKey)
+    if (cached && (famdCompanionGeneration.get(famdRelative) || 0) === generation) return cached
+    const source = await readOptionalNoteFile(famdRelative)
+    if (!source) return null
+    const parsed = readFamdCompanion(source)
+    if ((famdCompanionGeneration.get(famdRelative) || 0) !== generation) return parsed
+    for (const key of [...famdCompanionCache.keys()]) {
+      if (key.startsWith(`${famdRelative}\0`) && key !== cacheKey) famdCompanionCache.delete(key)
+    }
+    famdCompanionCache.set(cacheKey, parsed)
+    while (famdCompanionCache.size > 8) {
+      const oldest = famdCompanionCache.keys().next().value
+      if (oldest === undefined) break
+      famdCompanionCache.delete(oldest)
+    }
+    return parsed
+  })()
+  famdCompanionInflight.set(famdRelative, load)
+  try {
+    return await load
+  } finally {
+    if (famdCompanionInflight.get(famdRelative) === load) famdCompanionInflight.delete(famdRelative)
+  }
+}
+
+function readCompanionInkDocument(loaded, famdRelative, markerHint) {
+  const accepted = acceptDrawingDocument(loaded.ink)
+  const document = accepted.value
+  const drawingJson = accepted.drawingJson
+  const parsed = { markdown: loaded.markdown, payload: loaded }
+  const markerId = arguments.length >= 3 ? markerHint : noteInkMarkerId(parsed.markdown)
+  let metadata
+  try {
+    const id = markerId ?? (typeof document.id === 'string' ? assertDrawingId(document.id) : FAMD_INK_ID)
+    metadata = drawingLibraryMetadata(document, id, loaded.updatedAt)
+  } catch {
+    return {
+      id: markerId ?? (typeof document.id === 'string' ? document.id : FAMD_INK_ID),
+      title: typeof document.title === 'string' ? document.title : 'Handschrift',
+      updatedAt: loaded.updatedAt,
+      imageRelativePath: '',
+      dataRelativePath: famdRelative,
+      drawingJson,
+    }
+  }
+  return {
+    ...metadata,
+    drawingJson,
+    dataRelativePath: famdRelative,
+  }
+}
+
+/**
  * Rewrite the `.famd` companion with new markdown and/or ink.
  *
  * Text and ink saves both read-modify-write the same file. The write is
@@ -1593,6 +1680,7 @@ async function mutateFamdCompanion(notePath, mutate) {
   const famdRelative = companionNotePath(notePath, '.famd')
   const { target } = await resolveVaultPath(famdRelative, { allowMissing: true, expected: 'file' })
   return queueFileWrite(target, async () => {
+    invalidateFamdCompanion(famdRelative)
     const markdown = (await readOptionalNoteFile(markdownPath, noteByteLimit(markdownPath))) ?? ''
     const existingSource = await readOptionalNoteFile(famdRelative)
     const existing = existingSource ? parseFamd(existingSource) : { markdown: stripFamdPayload(markdown), payload: emptyFamdPayload() }
@@ -1616,6 +1704,7 @@ async function mutateFamdCompanion(notePath, mutate) {
 }
 
 async function writeFamdCompanionNow(markdownRelativePath, famdRelativePath, target, markdown, ink) {
+  invalidateFamdCompanion(famdRelativePath)
   const extension = path.extname(markdownRelativePath).toLocaleLowerCase('en-US')
   const mdRelativePath = companionNotePath(markdownRelativePath, '.md')
   const existingSource = await readOptionalNoteFile(famdRelativePath)
@@ -2346,6 +2435,16 @@ function validateDrawingJson(drawingJson) {
   } catch {
     throw new Error('Die Zeichnungsdaten sind kein gültiges JSON.')
   }
+}
+
+/** A drawing object that was already parsed with the companion. No second JSON.parse. */
+function acceptDrawingDocument(value) {
+  if (!isPlainObject(value)) throw new Error('Die Zeichnungsdaten sind kein gültiges JSON.')
+  const drawingJson = JSON.stringify(value)
+  if (Buffer.byteLength(drawingJson, 'utf8') > MAX_DRAWING_JSON_BYTES) {
+    throw new Error('Die Zeichnungsdaten sind ungültig oder zu groß.')
+  }
+  return { value, drawingJson }
 }
 
 function drawingLibraryMetadata(document, id, fileModifiedAt) {
@@ -3106,6 +3205,9 @@ function registerIpcHandlers() {
           }
           assertVaultWriteContext(requestedVaultPath, requestedVaultGeneration)
           const markdownBody = stripFamdPayload(content)
+          if (path.extname(normalizedRelativePath).toLocaleLowerCase('en-US') === '.famd') {
+            invalidateFamdCompanion(normalizedRelativePath)
+          }
           try {
             const previous = await readRegularFileNoFollow(target, noteByteLimit(normalizedRelativePath))
             const { recordNoteHistorySnapshot } = require('./note-history.cjs')
@@ -3776,35 +3878,14 @@ function registerIpcHandlers() {
     const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
     assertNotePath(notePath)
     const famdRelative = companionNotePath(notePath, '.famd')
-    const source = await readOptionalNoteFile(famdRelative)
-    if (!source) return null
-    const parsed = parseFamd(source)
-    if (!parsed.payload?.ink) return null
-    const drawingJson = JSON.stringify(parsed.payload.ink)
-    const document = validateDrawingJson(drawingJson)
+    const loaded = await loadFamdCompanion(notePath)
+    if (!loaded?.ink) return null
     // The embedded ink is the note's own page. Report it under the library id
     // the note's ink marker points at, so the renderer's next save updates
     // that record instead of a `famd-ink` record shared by every note.
+    const parsed = { markdown: loaded.markdown, payload: loaded }
     const markerId = noteInkMarkerId(parsed.markdown)
-    let metadata
-    try {
-      const id = markerId ?? (typeof document.id === 'string' ? assertDrawingId(document.id) : FAMD_INK_ID)
-      metadata = drawingLibraryMetadata(document, id, parsed.payload.updatedAt)
-    } catch {
-      return {
-        id: markerId ?? (typeof document.id === 'string' ? document.id : FAMD_INK_ID),
-        title: typeof document.title === 'string' ? document.title : 'Handschrift',
-        updatedAt: parsed.payload.updatedAt,
-        imageRelativePath: '',
-        dataRelativePath: famdRelative,
-        drawingJson,
-      }
-    }
-    return {
-      ...metadata,
-      drawingJson,
-      dataRelativePath: famdRelative,
-    }
+    return readCompanionInkDocument(loaded, famdRelative, markerId ?? null)
   })
 
   handle(IPC.readNotePageStats, async (_event, relativePath) => {
@@ -3812,10 +3893,8 @@ function registerIpcHandlers() {
     if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
     const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
     assertNotePath(notePath)
-    const source = await readOptionalNoteFile(companionNotePath(notePath, '.famd'))
-    if (!source) return null
-    const parsed = parseFamd(source)
-    return parsed.payload?.pageStats ?? null
+    const loaded = await loadFamdCompanion(notePath)
+    return loaded?.pageStats ?? null
   })
 
   handle(IPC.readNotePaperStyle, async (_event, relativePath) => {
@@ -3823,12 +3902,8 @@ function registerIpcHandlers() {
     if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
     const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
     assertNotePath(notePath)
-    const source = await readOptionalNoteFile(companionNotePath(notePath, '.famd'))
-    if (!source) return null
-    const parsed = parseFamd(source)
-    if (isPaperStyle(parsed.payload?.paperStyle)) return parsed.payload.paperStyle
-    const inkStyle = parsed.payload?.ink && typeof parsed.payload.ink === 'object' ? parsed.payload.ink.paperStyle : null
-    return isPaperStyle(inkStyle) ? inkStyle : null
+    const loaded = await loadFamdCompanion(notePath)
+    return isPaperStyle(loaded?.paperStyle) ? loaded.paperStyle : null
   })
 
   handle(IPC.setNotePaperStyle, async (_event, relativePath, paperStyle) => {
@@ -3850,9 +3925,8 @@ function registerIpcHandlers() {
     if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
     const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
     assertNotePath(notePath)
-    const source = await readOptionalNoteFile(companionNotePath(notePath, '.famd'))
-    if (!source) return []
-    return parseNoteLinks(parseFamd(source).payload?.noteLinks)
+    const loaded = await loadFamdCompanion(notePath)
+    return loaded?.noteLinks ?? []
   })
 
   handle(IPC.writeNoteLinks, async (_event, relativePath, rawLinks) => {
@@ -3869,9 +3943,33 @@ function registerIpcHandlers() {
     if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
     const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
     assertNotePath(notePath)
-    const source = await readOptionalNoteFile(companionNotePath(notePath, '.famd'))
-    if (!source) return []
-    return parseNoteBackups(parseFamd(source).payload?.noteBackups)
+    const loaded = await loadFamdCompanion(notePath)
+    return loaded?.noteBackups ?? []
+  })
+
+  handle(IPC.readNoteCompanion, async (_event, relativePath) => {
+    await ensureBootstrap()
+    if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
+    const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    assertNotePath(notePath)
+    const loaded = await loadFamdCompanion(notePath)
+    if (!loaded) return null
+    const famdRelative = companionNotePath(notePath, '.famd')
+    let ink = null
+    if (loaded.ink) {
+      try {
+        ink = readCompanionInkDocument(loaded, famdRelative)
+      } catch {
+        ink = null
+      }
+    }
+    return {
+      ink,
+      pageStats: loaded.pageStats ?? null,
+      paperStyle: isPaperStyle(loaded.paperStyle) ? loaded.paperStyle : null,
+      noteLinks: loaded.noteLinks ?? [],
+      noteBackups: loaded.noteBackups ?? [],
+    }
   })
 
   handle(IPC.writeNoteBackups, async (_event, relativePath, rawBackups) => {

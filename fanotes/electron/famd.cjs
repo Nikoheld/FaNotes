@@ -220,6 +220,27 @@ function parseFamd(source) {
   }
 }
 
+/**
+ * One read of a companion: the header JSON is parsed once, then ink, page
+ * stats, links, paper style, and backups come from that object. Callers that
+ * only need the visible note use `stripFamdPayload`, which does not parse it.
+ */
+function readFamdCompanion(source) {
+  const parsed = parseFamd(source)
+  const payload = parsed.payload
+  const ink = payload?.ink ?? null
+  const inkStyle = ink && isPaperStyle(ink.paperStyle) ? ink.paperStyle : null
+  return {
+    markdown: parsed.markdown,
+    updatedAt: payload?.updatedAt ?? null,
+    ink,
+    pageStats: payload?.pageStats ?? null,
+    paperStyle: payload?.paperStyle || inkStyle,
+    noteLinks: payload?.noteLinks ?? [],
+    noteBackups: payload?.noteBackups ?? [],
+  }
+}
+
 function serializeFamd(markdown, payload) {
   const body = stripFamdPayload(markdown)
   const next = {
@@ -255,6 +276,7 @@ module.exports = {
   isPdfNoteExtension,
   noteStem,
   parseFamd,
+  readFamdCompanion,
   parseNoteBackups,
   parseNoteLinks,
   serializeFamd,

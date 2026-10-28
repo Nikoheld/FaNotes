@@ -493,6 +493,36 @@ const GLYPHENWERK_VIEW_LABELS: Record<GlyphenWerkView, string> = {
 
 const noteInkId = (content: string) => NOTE_INK_MARKER.exec(content)?.[1] ?? null
 
+type NoteCompanionFields = {
+  ink: DrawingLibraryDocument | null
+  pageStats: unknown
+  paperStyle: PaperStyle | null
+  noteLinks: NoteLinkRecord[]
+  noteBackups: NoteBackupSnapshot[]
+}
+
+/** One in-flight companion read per note, shared by open, ink, and the field effect. */
+const noteCompanionLoads = new Map<string, Promise<NoteCompanionFields | null>>()
+
+/** Used only when the desktop build has no combined companion read. */
+const readCompanionFields = async (path: string): Promise<NoteCompanionFields> => {
+  const api = window.fanotes
+  const [pageStats, paperStyle, noteLinks, noteBackups, ink] = await Promise.all([
+    api.readNotePageStats?.(path) ?? null,
+    api.readNotePaperStyle?.(path) ?? null,
+    api.readNoteLinks?.(path) ?? [],
+    api.readNoteBackups?.(path) ?? [],
+    typeof api.readFamdInk === 'function' ? api.readFamdInk(path).catch(() => null) : null,
+  ])
+  return {
+    ink: ink ?? null,
+    pageStats: pageStats ?? null,
+    paperStyle: paperStyle ?? null,
+    noteLinks: Array.isArray(noteLinks) ? noteLinks : [],
+    noteBackups: Array.isArray(noteBackups) ? noteBackups : [],
+  }
+}
+
 const attachNoteInk = (content: string, id: string) => {
   if (noteInkId(content)) return content
   const separator = content && !content.endsWith('\n') ? '\n\n' : content ? '\n' : ''
@@ -511,6 +541,15 @@ const replaceNoteInk = (content: string, id: string) => noteInkId(content)
  */
 const readNoteInk = async (path: string, content: string): Promise<DrawingLibraryDocument | null> => {
   const markerId = noteInkId(content)
+  const pending = noteCompanionLoads.get(path)
+  if (pending) {
+    try {
+      const loaded = await pending
+      if (loaded?.ink) return noteInkDocument(loaded.ink, markerId)
+    } catch {
+      // The shared read failed; the file read below is the fallback.
+    }
+  }
   if (typeof window.fanotes.readFamdInk === 'function') {
     try {
       const embedded = await window.fanotes.readFamdInk(path)
@@ -828,6 +867,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const pageStatsRef = useRef(new Map<string, PageStatsSession>())
   /** A failed page-stats read. Saving must not invent a fresh session over the companion. */
   const pageStatsUnreadableRef = useRef(new Set<string>())
+  const loadNoteCompanionRef = useRef<(path: string) => Promise<NoteCompanionFields | null>>(async () => null)
   /** Ink from a PDF history snapshot. The next save of that note writes it back. */
   const pendingHistoryInkRef = useRef(new Map<string, Record<string, unknown>>())
   const worksheetEffectPathRef = useRef('')
@@ -1196,63 +1236,35 @@ export default function App({ startupBootstrap }: AppProps) {
 
   useEffect(() => {
     const path = activePath
-    if (!path || !window.fanotes.readNotePaperStyle) return
-    let alive = true
-    void window.fanotes.readNotePaperStyle(path)
-      .then((style) => {
-        if (!alive || !style) return
-        setNotePaperByPath((current) => current[path] === style ? current : { ...current, [path]: style })
-      })
-      .catch(() => undefined)
-    return () => { alive = false }
-  }, [activePath])
-
-  useEffect(() => {
-    const path = activePath
     setNoteLinkPlacing(false)
     setSelectedNoteLinkId(null)
-    if (!path || !window.fanotes.readNoteLinks) {
+    setBackupMenuOpen(false)
+    if (!path) {
       noteLinksRef.current = []
       setNoteLinks([])
-      return
-    }
-    let alive = true
-    void window.fanotes.readNoteLinks(path)
-      .then((links) => {
-        if (!alive) return
-        const next = Array.isArray(links) ? links : []
-        noteLinksRef.current = next
-        setNoteLinks(next)
-      })
-      .catch(() => {
-        if (!alive) return
-        noteLinksRef.current = []
-        setNoteLinks([])
-      })
-    return () => { alive = false }
-  }, [activePath])
-
-  useEffect(() => {
-    const path = activePath
-    setBackupMenuOpen(false)
-    if (!path || !window.fanotes.readNoteBackups) {
       noteBackupsRef.current = []
       setNoteBackups([])
       return
     }
     let alive = true
-    void window.fanotes.readNoteBackups(path)
-      .then((list) => {
-        if (!alive) return
-        const next = listNoteBackups(list, path)
-        noteBackupsRef.current = next
-        setNoteBackups(next)
-      })
-      .catch(() => {
-        if (!alive) return
-        noteBackupsRef.current = []
-        setNoteBackups([])
-      })
+    const pending = noteCompanionLoads.get(path) ?? loadNoteCompanionRef.current(path)
+    void pending.then((fields) => {
+      if (!alive) return
+      const style = fields?.paperStyle
+      if (style) setNotePaperByPath((current) => current[path] === style ? current : { ...current, [path]: style })
+      const links = Array.isArray(fields?.noteLinks) ? fields.noteLinks : []
+      noteLinksRef.current = links
+      setNoteLinks(links)
+      const backups = listNoteBackups(fields?.noteBackups ?? [], path)
+      noteBackupsRef.current = backups
+      setNoteBackups(backups)
+    }).catch(() => {
+      if (!alive) return
+      noteLinksRef.current = []
+      setNoteLinks([])
+      noteBackupsRef.current = []
+      setNoteBackups([])
+    })
     return () => { alive = false }
   }, [activePath])
 
@@ -1410,6 +1422,7 @@ export default function App({ startupBootstrap }: AppProps) {
     const existing = pageStatsRef.current.get(path)
     if (existing) return existing
     if (pageStatsUnreadableRef.current.has(path)) return null
+    if (noteCompanionLoads.has(path)) return null
     const tab = tabsRef.current.find((candidate) => candidate.path === path)
     if (!tab) return null
     const session = idlePageStatsSession(readPageStatsFromNote(pendingWrites.current.get(path) ?? tab.content))
@@ -1563,6 +1576,67 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [])
 
+  /**
+   * File stats become the open session only after the companion returns, so a
+   * blank session cannot swallow them or count the open twice. A failed read
+   * is latched and any session created during the wait is dropped: the next
+   * save must not replace the statistics still on disk.
+   */
+  const installCompanionPageStats = useCallback((path: string, fields: NoteCompanionFields | null, hadSession: boolean) => {
+    if (hadSession || pageStatsRef.current.has(path)) return
+    pageStatsUnreadableRef.current.delete(path)
+    const raw = fields?.pageStats
+    if (raw && typeof raw === 'object') {
+      const idle = idlePageStatsSession(parsePageStats(raw))
+      pageStatsRef.current.set(path, idle)
+      if (activePathRef.current === path) activatePageStats(path, '')
+      return
+    }
+    if (activePathRef.current === path) {
+      const tab = tabsRef.current.find((candidate) => candidate.path === path)
+      if (tab) activatePageStats(path, tab.content)
+    }
+  }, [activatePageStats])
+
+  const loadNoteCompanion = useCallback((path: string) => {
+    const existing = noteCompanionLoads.get(path)
+    if (existing) return existing
+    const task = (async (): Promise<NoteCompanionFields | null> => {
+      const hadSession = pageStatsRef.current.has(path)
+      try {
+        const fields = typeof window.fanotes.readNoteCompanion === 'function'
+          ? await window.fanotes.readNoteCompanion(path)
+          : await readCompanionFields(path)
+        installCompanionPageStats(path, fields, hadSession)
+        return fields
+      } catch {
+        if (!hadSession) {
+          pageStatsRef.current.delete(path)
+          pageStatsUnreadableRef.current.add(path)
+        }
+        return null
+      }
+    })()
+    noteCompanionLoads.set(path, task)
+    void task.finally(() => {
+      if (noteCompanionLoads.get(path) === task) noteCompanionLoads.delete(path)
+    })
+    return task
+  }, [installCompanionPageStats])
+  loadNoteCompanionRef.current = loadNoteCompanion
+
+  const revealOpenedNote = useCallback((path: string, content: string, splitSwap: string | null) => {
+    const previousPath = activePathRef.current
+    if (previousPath && previousPath !== path) flushPageStats(previousPath, Date.now(), false)
+    if (pageStatsRef.current.has(path)) activatePageStats(path, content)
+    activePathRef.current = path
+    setActivePath(path)
+    if (splitSwap) setSplitPath(splitSwap)
+    setFocusToken((value) => value + 1)
+    rememberLastOpenNote(path)
+    void loadNoteCompanion(path)
+  }, [activatePageStats, flushPageStats, loadNoteCompanion, rememberLastOpenNote])
+
   const openNote = useCallback(async (path: string): Promise<boolean> => {
     if (activePathRef.current && activePathRef.current !== path) {
       // Book the last keystrokes under the note that is leaving before its editor unmounts.
@@ -1584,14 +1658,9 @@ export default function App({ startupBootstrap }: AppProps) {
     const swapIntoSplit = splitPathRef.current === path && previousActive && previousActive !== path
     const existing = tabsRef.current.find((tab) => tab.path === path)
     if (existing) {
-      await preparePageStats(path)
       if (session !== vaultSessionGenerationRef.current) return false
       if (!isPdfNotePath(path)) await loadMarkdownEditor()
-      activatePageStats(path, existing.content)
-      setActivePath(path)
-      if (swapIntoSplit) setSplitPath(previousActive)
-      setFocusToken((value) => value + 1)
-      rememberLastOpenNote(path)
+      revealOpenedNote(path, existing.content, swapIntoSplit ? previousActive : null)
       return true
     }
     const requestKey = `${session}:${structureRevision}:${path}`
@@ -1604,19 +1673,10 @@ export default function App({ startupBootstrap }: AppProps) {
         structureRevision !== vaultStructureRevisionRef.current
       ) return false
       const { content } = tab
-      await preparePageStats(path)
-      if (
-        session !== vaultSessionGenerationRef.current ||
-        structureRevision !== vaultStructureRevisionRef.current
-      ) return false
       if (!isPdfNotePath(path)) await loadMarkdownEditor()
       setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
       setTabs((current) => current.some((item) => item.path === path) ? current : [...current, tab])
-      activatePageStats(path, content)
-      setActivePath(path)
-      if (swapIntoSplit) setSplitPath(previousActive)
-      setFocusToken((value) => value + 1)
-      rememberLastOpenNote(path)
+      revealOpenedNote(path, content, swapIntoSplit ? previousActive : null)
       return true
     } catch (error) {
       if (
@@ -1629,7 +1689,7 @@ export default function App({ startupBootstrap }: AppProps) {
     } finally {
       openingNotesRef.current.delete(requestKey)
     }
-  }, [activatePageStats, flushDocumentLayers, preparePageStats, readNoteTab, rememberLastOpenNote, toast])
+  }, [flushDocumentLayers, readNoteTab, revealOpenedNote, toast])
 
   /**
    * Bring back the tabs, pins and split the vault was left with. The active
