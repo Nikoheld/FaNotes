@@ -54,9 +54,12 @@ assert.equal(readFileSync(siteViewerPath, 'utf8'), viewerHtml, 'the site must se
 assert.equal(readFileSync(join(siteRoot, 'public', 'share', 'share.js'), 'utf8'), viewerScript)
 assert.equal(readFileSync(join(siteRoot, 'public', 'share', 'share.css'), 'utf8'), viewerStyle)
 assert.doesNotMatch(viewerHtml, /<style[\s>]/u)
-assert.match(viewerHtml, /<script src="share\.js"><\/script>/u)
-assert.match(viewerHtml, /href="share\.css"/u)
+assert.match(viewerHtml, /<script src="share\.js\?v=2"><\/script>/u)
+assert.match(viewerHtml, /href="share\.css\?v=2"/u)
 assert.match(viewerScript, /share-note-title/u)
+assert.match(viewerScript, /share-prose/u)
+assert.match(viewerScript, /share-ink/u)
+assert.doesNotMatch(viewerScript, /innerHTML/u)
 assert.match(serviceSource, /Environment=FANOTES_SHARE_DIR=\/var\/lib\/fanotes-shares/u)
 assert.match(serviceSource, /ReadWritePaths=\/var\/lib\/fanotes-shares/u)
 assert.match(nginxSource, /location \^~ \/api\/v1\/share\/ \{[\s\S]*?client_max_body_size 8m;/u)
@@ -175,6 +178,48 @@ try {
   const noteRead = await share.readShare({ id: note.record.id, port: sharePort, origin, entries: oneEntries })
   assert.match(noteText(noteRead), /Hallo/)
   assert.match(noteText(noteRead), /Guten Tag aus der Notiz/)
+
+  const inkDocument = {
+    schemaVersion: 1,
+    sourceWidth: 900,
+    sourceHeight: 600,
+    strokes: [{
+      points: [
+        { x: 0.2, y: 0.3, t: 0, pressure: 0.4, tiltX: 0, tiltY: 0, pointerType: 'pen' },
+        { x: 0.55, y: 0.62, t: 8, pressure: 0.8, tiltX: 0, tiltY: 0, pointerType: 'pen' },
+      ],
+      baseWidth: 3.5,
+      color: '#203040',
+      pressureEnabled: true,
+    }],
+    inkHistory: { undo: ['INK-HISTORY-MUST-NOT-UPLOAD'] },
+  }
+  const inkEntries = await share.loadShareEntries(
+    [{ relativePath: 'Skizze.md', kind: 'file', extension: 'md' }],
+    async () => '# Skizze\n\n<!-- fanotes-ink:abc -->\n',
+    async () => ({
+      ink: { drawingJson: JSON.stringify(inkDocument) },
+      textFields: [{ id: 'tf-1', page: 1, x: 0.2, y: 0.15, width: 0.32, fontSize: 16, text: 'Neben der Linie' }],
+    }),
+  )
+  assert.equal(inkEntries[0].ink.strokes[0].color, '#203040')
+  assert.equal(inkEntries[0].textFields[0].text, 'Neben der Linie')
+  const inkShare = await share.publishShare({
+    entries: inkEntries,
+    rootPath: 'Skizze.md',
+    mode: 'copy',
+    port: sharePort,
+    origin,
+    now: '2026-10-29T12:00:00.000Z',
+  })
+  assert.match(inkShare.request.body, /#203040/)
+  assert.match(inkShare.request.body, /Neben der Linie/)
+  assert.doesNotMatch(inkShare.request.body, /INK-HISTORY-MUST-NOT-UPLOAD/)
+  assert.doesNotMatch(inkShare.request.body, /pressureEnabled/)
+  const storedInk = readFileSync(join(shareDir, `${inkShare.record.id}.json`), 'utf8')
+  assert.match(storedInk, /#203040/)
+  assert.match(storedInk, /Neben der Linie/)
+  assert.doesNotMatch(storedInk, /INK-HISTORY-MUST-NOT-UPLOAD/)
 
   const folderEntries = await share.loadShareEntries([
     {
@@ -317,6 +362,15 @@ try {
     assert.equal(viewed.errors.length, 0, `page errors: ${viewed.errors.join(' | ')}`)
     assert.match(viewed.text, /Hallo/)
     assert.match(viewed.text, /Guten Tag aus der Notiz/)
+    assert.doesNotMatch(viewed.text, /# Hallo/)
+    const inkView = await reloadViewer({ ...viewed, link: inkShare.record.link }, 'Neben der Linie')
+    assert.equal(inkView.errors.length, 0, `ink page errors: ${inkView.errors.join(' | ')}`)
+    assert.match(inkView.text, /Skizze/)
+    assert.match(inkView.text, /Neben der Linie/)
+    assert.doesNotMatch(inkView.text, /fanotes-ink/)
+    assert.doesNotMatch(inkView.text, /Die Handschrift fehlt/)
+    const inkShapes = await viewed.cdp.evaluate('document.querySelectorAll(".share-ink polyline").length')
+    assert.equal(inkShapes, 1)
     if (scratch && viewed.screenshot) writeFileSync(join(scratch, 'share-view.png'), viewed.screenshot)
     const folderView = await reloadViewer({ ...viewed, link: folder.record.link }, 'Verschachtelte Uebung')
     assert.equal(folderView.errors.length, 0, `folder page errors: ${folderView.errors.join(' | ')}`)

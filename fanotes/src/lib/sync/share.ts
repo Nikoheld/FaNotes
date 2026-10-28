@@ -1,5 +1,6 @@
 // Public note and folder links. This is not vault sync: encrypted device sync
-// stays on /api/v1/sync. A share uploads readable title and markdown only.
+// stays on /api/v1/sync. A share uploads the readable title, the markdown, and
+// a public drawing of the handwriting. Undo history stays in the vault.
 
 export const SHARE_HOST = 'fanotes.fasrv.ch'
 export const SHARE_ORIGIN = `https://${SHARE_HOST}`
@@ -8,10 +9,37 @@ export const SHARE_VIEW_PATH = '/share/'
 
 export type ShareMode = 'copy' | 'live'
 
+export type ShareInkPoint = { x: number; y: number }
+
+export type ShareInkStroke = {
+  color: string
+  width: number
+  opacity: number
+  points: ShareInkPoint[]
+}
+
+/** 0–1 strokes on the saved page. Pressure samples and undo history are omitted. */
+export type ShareInk = {
+  width: number
+  height: number
+  strokes: ShareInkStroke[]
+}
+
+export type ShareTextField = {
+  page: number
+  x: number
+  y: number
+  width: number
+  fontSize: number
+  text: string
+}
+
 export type ShareEntry = {
   path: string
   kind: 'file' | 'folder'
   content?: string
+  ink?: ShareInk
+  textFields?: ShareTextField[]
 }
 
 export type ShareVaultNode = {
@@ -25,6 +53,8 @@ export type ShareNote = {
   path: string
   title: string
   content: string
+  ink?: ShareInk
+  textFields?: ShareTextField[]
 }
 
 export type SharePayload = {
@@ -105,6 +135,118 @@ export const createShareId = () => {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
+const SHARE_INK_STROKES = 2500
+const SHARE_INK_POINTS = 40_000
+
+const finiteNumber = (value: unknown) => {
+  const number = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+const roundUnit = (value: number) => Math.round(Math.max(-0.25, Math.min(1.25, value)) * 10000) / 10000
+
+const drawingRecord = (value: unknown): Record<string, unknown> | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  if (typeof record.drawingJson !== 'string') return record
+  try {
+    const parsed = JSON.parse(record.drawingJson) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    return parsed as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+const thinPoints = (points: ShareInkPoint[], budget: number) => {
+  if (points.length <= budget) return points
+  const step = Math.ceil(points.length / budget)
+  const next: ShareInkPoint[] = []
+  for (let index = 0; index < points.length; index += step) next.push(points[index])
+  const last = points[points.length - 1]
+  if (next[next.length - 1] !== last) next.push(last)
+  return next
+}
+
+/** The strokes a public page can draw. A full drawing document or its JSON string both work. */
+export const publicShareInk = (value: unknown): ShareInk | undefined => {
+  const record = drawingRecord(value)
+  if (!record || !Array.isArray(record.strokes)) return undefined
+  const widthNumber = finiteNumber(record.width ?? record.sourceWidth)
+  const heightNumber = finiteNumber(record.height ?? record.sourceHeight)
+  const width = widthNumber !== null && widthNumber >= 200 && widthNumber <= 24000 ? Math.round(widthNumber) : 900
+  const height = heightNumber !== null && heightNumber >= 200 && heightNumber <= 80000 ? Math.round(heightNumber) : 1273
+  const strokes: ShareInkStroke[] = []
+  let pointsUsed = 0
+  for (const entry of record.strokes) {
+    if (strokes.length >= SHARE_INK_STROKES || pointsUsed >= SHARE_INK_POINTS) break
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const raw = entry as { color?: unknown; width?: unknown; baseWidth?: unknown; opacity?: unknown; points?: unknown }
+    if (!Array.isArray(raw.points)) continue
+    const points: ShareInkPoint[] = []
+    for (const point of raw.points) {
+      if (!point || typeof point !== 'object') continue
+      const sample = point as { x?: unknown; y?: unknown }
+      const x = finiteNumber(sample.x)
+      const y = finiteNumber(sample.y)
+      if (x === null || y === null) continue
+      points.push({ x: roundUnit(x), y: roundUnit(y) })
+    }
+    if (!points.length) continue
+    const budget = Math.min(500, SHARE_INK_POINTS - pointsUsed)
+    const kept = thinPoints(points, budget)
+    if (!kept.length) continue
+    const widthValue = finiteNumber(raw.width ?? raw.baseWidth)
+    const opacityValue = finiteNumber(raw.opacity)
+    strokes.push({
+      color: typeof raw.color === 'string' && /^#[0-9a-fA-F]{6}$/u.test(raw.color) ? raw.color : '#20222b',
+      width: widthValue !== null ? Math.max(0.5, Math.min(48, widthValue)) : 3.5,
+      opacity: opacityValue !== null ? Math.max(0.08, Math.min(1, opacityValue)) : 1,
+      points: kept,
+    })
+    pointsUsed += kept.length
+  }
+  return strokes.length ? { width, height, strokes } : undefined
+}
+
+export const publicShareTextFields = (value: unknown): ShareTextField[] => {
+  if (!Array.isArray(value)) return []
+  const fields: ShareTextField[] = []
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const raw = entry as { page?: unknown; x?: unknown; y?: unknown; width?: unknown; fontSize?: unknown; text?: unknown }
+    const text = typeof raw.text === 'string' ? raw.text.slice(0, 8000) : ''
+    if (!text.trim()) continue
+    const page = finiteNumber(raw.page)
+    const x = finiteNumber(raw.x)
+    const y = finiteNumber(raw.y)
+    const width = finiteNumber(raw.width)
+    const fontSize = finiteNumber(raw.fontSize)
+    fields.push({
+      page: page !== null && Number.isInteger(page) && page >= 1 && page <= 10000 ? page : 1,
+      x: x !== null ? Math.max(0, Math.min(1, x)) : 0.5,
+      y: y !== null ? Math.max(0, Math.min(1, y)) : 0.5,
+      width: width !== null ? Math.max(0.12, Math.min(0.92, width)) : 0.32,
+      fontSize: fontSize !== null && Number.isInteger(fontSize) && fontSize >= 10 && fontSize <= 48 ? fontSize : 16,
+      text,
+    })
+    if (fields.length >= 200) break
+  }
+  return fields
+}
+
+const shareNoteFrom = (path: string, content: string, entry: ShareEntry): ShareNote => {
+  const ink = publicShareInk(entry.ink)
+  const textFields = publicShareTextFields(entry.textFields)
+  return {
+    path,
+    title: shareNoteTitle(path, content),
+    content,
+    ...(ink ? { ink } : {}),
+    ...(textFields.length ? { textFields } : {}),
+  }
+}
+
 /** One note, or every markdown note under a folder, including nested folders. */
 export const collectShareNotes = (entries: readonly ShareEntry[], rootPath: string) => {
   const root = normalizePath(rootPath)
@@ -117,15 +259,11 @@ export const collectShareNotes = (entries: readonly ShareEntry[], rootPath: stri
       return { kind, title: shareNoteTitle(root, ''), rootPath: root, notes: [] as ShareNote[] }
     }
     const title = shareNoteTitle(root, file.content)
-    return { kind, title, rootPath: root, notes: [{ path: root, title, content: file.content }] }
+    return { kind, title, rootPath: root, notes: [shareNoteFrom(root, file.content, file)] }
   }
   const notes = entries
     .filter((entry) => entry.kind !== 'folder' && typeof entry.content === 'string' && isInsideFolder(entry.path, root))
-    .map((entry) => {
-      const path = normalizePath(entry.path)
-      const content = entry.content ?? ''
-      return { path, title: shareNoteTitle(path, content), content }
-    })
+    .map((entry) => shareNoteFrom(normalizePath(entry.path), entry.content ?? '', entry))
     .sort((left, right) => left.path.localeCompare(right.path, 'de'))
   const title = root.split('/').pop() || root
   return { kind, title, rootPath: root, notes }
@@ -148,6 +286,7 @@ const isMarkdownPath = (path: string, extension?: string) => extension === 'md' 
 export const loadShareEntries = async (
   nodes: readonly ShareVaultNode[],
   readFile: (path: string) => Promise<string>,
+  readCompanion?: (path: string) => Promise<{ ink?: unknown; textFields?: unknown } | null>,
 ): Promise<ShareEntry[]> => {
   const entries: ShareEntry[] = []
   for (const node of flattenShareVault(nodes)) {
@@ -156,7 +295,17 @@ export const loadShareEntries = async (
       continue
     }
     if (!isMarkdownPath(node.path, node.extension)) continue
-    entries.push({ path: node.path, kind: 'file', content: await readFile(node.path) })
+    const content = await readFile(node.path)
+    const companion = readCompanion ? await readCompanion(node.path).catch(() => null) : null
+    const ink = publicShareInk(companion?.ink)
+    const textFields = publicShareTextFields(companion?.textFields)
+    entries.push({
+      path: node.path,
+      kind: 'file',
+      content,
+      ...(ink ? { ink } : {}),
+      ...(textFields.length ? { textFields } : {}),
+    })
   }
   return entries
 }
@@ -189,7 +338,15 @@ export const parseSharePayload = (body: string): SharePayload | null => {
     if (parsed.mode !== 'copy' && parsed.mode !== 'live') return null
     const notes = parsed.notes.flatMap((note) => {
       if (!note || typeof note.content !== 'string' || typeof note.path !== 'string') return []
-      return [{ path: note.path, title: typeof note.title === 'string' ? note.title : shareNoteTitle(note.path, note.content), content: note.content }]
+      const ink = publicShareInk((note as { ink?: unknown }).ink)
+      const textFields = publicShareTextFields((note as { textFields?: unknown }).textFields)
+      return [{
+        path: note.path,
+        title: typeof note.title === 'string' ? note.title : shareNoteTitle(note.path, note.content),
+        content: note.content,
+        ...(ink ? { ink } : {}),
+        ...(textFields.length ? { textFields } : {}),
+      }]
     })
     return {
       schemaVersion: 1,

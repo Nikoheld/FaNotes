@@ -3,8 +3,9 @@ import { promises as fs } from 'node:fs'
 import { resolve, sep } from 'node:path'
 
 // Public note links. This store is not vault sync (/api/v1/sync).
-// The link id is the capability: the desktop client uploads readable
-// title and markdown, and the browser viewer reads the same record.
+// The link id is the capability: the desktop client uploads the readable
+// title, the markdown, and a public drawing of the handwriting. The browser
+// viewer reads the same record. Undo history is not accepted.
 
 const SHARE_ROOT = resolve(process.env.FANOTES_SHARE_DIR || '/var/lib/fanotes-shares')
 const ID_PATTERN = /^[a-f0-9]{32}$/u
@@ -105,6 +106,77 @@ const boundedString = (value, maximum, label) => {
   return value
 }
 
+const finiteNumber = (value) => {
+  const number = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+const SHARE_INK_STROKES = 2500
+const SHARE_INK_POINTS = 40_000
+
+const sanitizeShareInk = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !Array.isArray(value.strokes)) return undefined
+  const widthNumber = finiteNumber(value.width)
+  const heightNumber = finiteNumber(value.height)
+  const width = widthNumber !== null && widthNumber >= 200 && widthNumber <= 24000 ? Math.round(widthNumber) : 900
+  const height = heightNumber !== null && heightNumber >= 200 && heightNumber <= 80000 ? Math.round(heightNumber) : 1273
+  const strokes = []
+  let pointsUsed = 0
+  for (const entry of value.strokes) {
+    if (strokes.length >= SHARE_INK_STROKES || pointsUsed >= SHARE_INK_POINTS) break
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) || !Array.isArray(entry.points)) continue
+    const points = []
+    for (const point of entry.points) {
+      if (pointsUsed + points.length >= SHARE_INK_POINTS) break
+      if (!point || typeof point !== 'object') continue
+      const x = finiteNumber(point.x)
+      const y = finiteNumber(point.y)
+      if (x === null || y === null) continue
+      points.push({
+        x: Math.round(Math.max(-0.25, Math.min(1.25, x)) * 10000) / 10000,
+        y: Math.round(Math.max(-0.25, Math.min(1.25, y)) * 10000) / 10000,
+      })
+      if (points.length >= 500) break
+    }
+    if (!points.length) continue
+    const widthValue = finiteNumber(entry.width)
+    const opacityValue = finiteNumber(entry.opacity)
+    strokes.push({
+      color: typeof entry.color === 'string' && /^#[0-9a-fA-F]{6}$/u.test(entry.color) ? entry.color : '#20222b',
+      width: widthValue !== null ? Math.max(0.5, Math.min(48, widthValue)) : 3.5,
+      opacity: opacityValue !== null ? Math.max(0.08, Math.min(1, opacityValue)) : 1,
+      points,
+    })
+    pointsUsed += points.length
+  }
+  return strokes.length ? { width, height, strokes } : undefined
+}
+
+const sanitizeShareTextFields = (value) => {
+  if (!Array.isArray(value)) return []
+  const fields = []
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const text = typeof entry.text === 'string' ? entry.text.slice(0, 8000) : ''
+    if (!text.trim()) continue
+    const page = finiteNumber(entry.page)
+    const x = finiteNumber(entry.x)
+    const y = finiteNumber(entry.y)
+    const width = finiteNumber(entry.width)
+    const fontSize = finiteNumber(entry.fontSize)
+    fields.push({
+      page: page !== null && Number.isInteger(page) && page >= 1 && page <= 10000 ? page : 1,
+      x: x !== null ? Math.max(0, Math.min(1, x)) : 0.5,
+      y: y !== null ? Math.max(0, Math.min(1, y)) : 0.5,
+      width: width !== null ? Math.max(0.12, Math.min(0.92, width)) : 0.32,
+      fontSize: fontSize !== null && Number.isInteger(fontSize) && fontSize >= 10 && fontSize <= 48 ? fontSize : 16,
+      text,
+    })
+    if (fields.length >= 200) break
+  }
+  return fields
+}
+
 export const sanitizeSharePayload = (raw, id) => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail(400, 'Ungültige Freigabe.')
   if (raw.schemaVersion !== 1) fail(400, 'Ungültige Freigabe.')
@@ -113,10 +185,14 @@ export const sanitizeSharePayload = (raw, id) => {
   if (!Array.isArray(raw.notes) || raw.notes.length > MAX_NOTES) fail(400, 'Ungültige Freigabe.')
   const notes = raw.notes.map((note) => {
     if (!note || typeof note !== 'object' || Array.isArray(note)) fail(400, 'Ungültige Notiz.')
+    const ink = sanitizeShareInk(note.ink)
+    const textFields = sanitizeShareTextFields(note.textFields)
     return {
       path: boundedString(note.path, MAX_PATH_CHARS, 'Ungültige Notiz.'),
       title: boundedString(typeof note.title === 'string' ? note.title : '', MAX_TITLE_CHARS, 'Ungültige Notiz.'),
       content: boundedString(note.content, MAX_NOTE_CHARS, 'Ungültige Notiz.'),
+      ...(ink ? { ink } : {}),
+      ...(textFields.length ? { textFields } : {}),
     }
   })
   return {

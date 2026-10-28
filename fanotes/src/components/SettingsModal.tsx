@@ -512,7 +512,9 @@ export function SettingsModal({
     if (active !== 'share' || typeof window === 'undefined' || !window.fanotes?.getTree || !window.fanotes.readFile) return
     let cancelled = false
     void refreshSharesOpenedInSettings({
-      loadEntries: async () => loadShareEntries(await window.fanotes.getTree(), (path) => window.fanotes.readFile(path)),
+      loadEntries: async () => loadShareEntries(await window.fanotes.getTree(), (path) => window.fanotes.readFile(path), (path) => (
+        window.fanotes.readNoteCompanion ? window.fanotes.readNoteCompanion(path).catch(() => null) : Promise.resolve(null)
+      )),
       readDirectory: () => settings.shareRecent,
       port: sharePort,
       origin: shareOrigin,
@@ -530,7 +532,9 @@ export function SettingsModal({
     setSharePublishing(true)
     setShareNotice(null)
     try {
-      const entries = await loadShareEntries(await window.fanotes.getTree(), (path) => window.fanotes.readFile(path))
+      const entries = await loadShareEntries(await window.fanotes.getTree(), (path) => window.fanotes.readFile(path), (path) => (
+        window.fanotes.readNoteCompanion ? window.fanotes.readNoteCompanion(path).catch(() => null) : Promise.resolve(null)
+      ))
       const published = await publishShare({
         entries,
         rootPath: sharePath,
