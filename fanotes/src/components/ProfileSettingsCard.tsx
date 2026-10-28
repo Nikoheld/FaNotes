@@ -7,6 +7,7 @@ import {
   enableProfileOverview,
   loadProfileNotes,
   normalizeUsername,
+  profileHistoryReader,
   profileAppearanceFromSettings,
   ProfileRequestError,
   profilePath,
@@ -22,7 +23,11 @@ export { profileVisibilityControl }
 const readVaultNotes = async () => {
   const fanotes = typeof window !== 'undefined' ? window.fanotes : undefined
   if (!fanotes?.getTree || !fanotes.readNotePageStats) return []
-  return loadProfileNotes(await fanotes.getTree(), (path) => fanotes.readNotePageStats!(path))
+  return loadProfileNotes(
+    await fanotes.getTree(),
+    (path) => fanotes.readNotePageStats!(path),
+    profileHistoryReader(fanotes.listNoteHistory),
+  )
 }
 
 export function ProfileSettingsCard({

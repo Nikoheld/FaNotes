@@ -128,9 +128,54 @@
     return count + ' Notizen am ' + label
   }
 
-  function yearLabel(count) {
-    if (count === 1) return '1 aktiver Tag im letzten Jahr'
-    return count + ' aktive Tage im letzten Jahr'
+  function totalLabel(count) {
+    if (count === 1) return '1 aktiver Tag'
+    return count + ' aktive Tage'
+  }
+
+  function utcDay(iso) {
+    var date = new Date(iso)
+    if (!isFinite(date.getTime())) return ''
+    var year = date.getUTCFullYear()
+    if (year < 2000 || year > 2100) return ''
+    var month = String(date.getUTCMonth() + 1).padStart(2, '0')
+    var day = String(date.getUTCDate()).padStart(2, '0')
+    return year + '-' + month + '-' + day
+  }
+
+  function parseDay(key) {
+    var parts = String(key).split('-')
+    if (parts.length !== 3) return null
+    var year = Number(parts[0])
+    var month = Number(parts[1])
+    var day = Number(parts[2])
+    var date = new Date(year, month - 1, day)
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null
+    return date
+  }
+
+  function earliestDay(keys) {
+    var best = ''
+    keys.forEach(function (key) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return
+      var year = Number(key.slice(0, 4))
+      if (year < 2000 || year > 2100) return
+      if (!best || key < best) best = key
+    })
+    return best
+  }
+
+  function weeksFrom(startMonday, untilDate) {
+    var weeks = []
+    var cursor = new Date(startMonday.getFullYear(), startMonday.getMonth(), startMonday.getDate())
+    var end = untilDate.getTime()
+    while (cursor.getTime() <= end && weeks.length < 54) {
+      var days = []
+      for (var row = 0; row < 7; row += 1) days.push(addDays(cursor, row))
+      weeks.push(days)
+      cursor = addDays(cursor, 7)
+    }
+    return weeks
   }
 
   function activityPanel(payload) {
@@ -141,58 +186,74 @@
     var hasCounts = !!counts
     var today = new Date()
     var todayKey = localDay(today)
-    var start = mondayOf(addDays(new Date(today.getFullYear(), today.getMonth(), today.getDate()), -52 * 7))
+    var joinedKey = typeof payload.joinedAt === 'string' ? utcDay(payload.joinedAt) : ''
+    var firstActive = earliestDay(active)
+    var rangeStart = firstActive
+    if (joinedKey && joinedKey <= todayKey && (!rangeStart || joinedKey < rangeStart)) rangeStart = joinedKey
+    if (!rangeStart || rangeStart > todayKey) rangeStart = today.getFullYear() + '-01-01'
+    var startDate = parseDay(rangeStart) || new Date(today.getFullYear(), 0, 1)
     var block = element('section', 'profile-days-block')
     block.appendChild(element('h2', '', 'Aktive Tage'))
     var panel = element('div', 'profile-cal')
     panel.setAttribute('data-active-days', active.join(' '))
-    var yearCount = 0
-    var weeks = []
-    for (var week = 0; week < 53; week += 1) {
-      var days = []
-      for (var row = 0; row < 7; row += 1) days.push(addDays(start, week * 7 + row))
-      weeks.push(days)
+    var total = 0
+    var seenDays = {}
+    active.forEach(function (day) {
+      if (seenDays[day]) return
+      seenDays[day] = true
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return
+      if (day >= rangeStart && day <= todayKey) total += 1
+    })
+    block.appendChild(element('p', 'profile-cal-count', totalLabel(total)))
+    var years = element('div', 'profile-cal-years')
+    var startYear = startDate.getFullYear()
+    var endYear = today.getFullYear()
+    for (var year = startYear; year <= endYear; year += 1) {
+      var from = year === startYear ? mondayOf(startDate) : mondayOf(new Date(year, 0, 1))
+      var until = year === endYear
+        ? addDays(mondayOf(today), 6)
+        : addDays(mondayOf(new Date(year + 1, 0, 1)), -1)
+      if (from.getTime() > until.getTime()) continue
+      var weeks = weeksFrom(from, until)
+      if (!weeks.length) continue
+      var section = element('section', 'profile-cal-year')
+      section.appendChild(element('h3', '', String(year)))
+      var scroll = element('div', 'profile-cal-scroll' + (year === endYear ? ' is-current' : ''))
+      var months = element('div', 'profile-cal-months')
+      var lastMonth = -1
+      weeks.forEach(function (days) {
+        var month = days[0].getMonth()
+        var label = month === lastMonth ? '' : MONTH_SHORT[month]
+        lastMonth = month
+        months.appendChild(element('span', 'profile-cal-month', label))
+      })
+      var body = element('div', 'profile-cal-body')
+      var weekdayCol = element('div', 'profile-cal-weekdays')
+      WEEKDAYS.forEach(function (name) {
+        weekdayCol.appendChild(element('span', '', name))
+      })
+      var grid = element('div', 'profile-cal-grid')
+      weeks.forEach(function (days) {
+        days.forEach(function (date) {
+          var key = localDay(date)
+          var future = key > todayKey
+          var noted = counts && typeof counts[key] === 'number' ? counts[key] : 0
+          var count = noted > 0 ? noted : (!future && active.indexOf(key) !== -1 ? 1 : 0)
+          var level = future ? 0 : levelFor(count)
+          var cell = element('span', 'profile-cal-cell' + (level ? ' is-on is-l' + level : '') + (future ? ' is-future' : ''))
+          cell.title = tipFor(key, count, hasCounts, future)
+          cell.setAttribute('data-day', key)
+          grid.appendChild(cell)
+        })
+      })
+      body.appendChild(weekdayCol)
+      body.appendChild(grid)
+      scroll.appendChild(months)
+      scroll.appendChild(body)
+      section.appendChild(scroll)
+      years.appendChild(section)
     }
-    weeks.forEach(function (days) {
-      days.forEach(function (date) {
-        var key = localDay(date)
-        if (key <= todayKey && active.indexOf(key) !== -1) yearCount += 1
-      })
-    })
-    block.appendChild(element('p', 'profile-cal-count', yearLabel(yearCount)))
-    var scroll = element('div', 'profile-cal-scroll')
-    var months = element('div', 'profile-cal-months')
-    var lastMonth = -1
-    weeks.forEach(function (days) {
-      var month = days[0].getMonth()
-      var label = month === lastMonth ? '' : MONTH_SHORT[month]
-      lastMonth = month
-      months.appendChild(element('span', 'profile-cal-month', label))
-    })
-    var body = element('div', 'profile-cal-body')
-    var weekdayCol = element('div', 'profile-cal-weekdays')
-    WEEKDAYS.forEach(function (name) {
-      weekdayCol.appendChild(element('span', '', name))
-    })
-    var grid = element('div', 'profile-cal-grid')
-    weeks.forEach(function (days) {
-      days.forEach(function (date) {
-        var key = localDay(date)
-        var future = key > todayKey
-        var noted = counts && typeof counts[key] === 'number' ? counts[key] : 0
-        var count = noted > 0 ? noted : (!future && active.indexOf(key) !== -1 ? 1 : 0)
-        var level = future ? 0 : levelFor(count)
-        var cell = element('span', 'profile-cal-cell' + (level ? ' is-on is-l' + level : '') + (future ? ' is-future' : ''))
-        cell.title = tipFor(key, count, hasCounts, future)
-        cell.setAttribute('data-day', key)
-        grid.appendChild(cell)
-      })
-    })
-    body.appendChild(weekdayCol)
-    body.appendChild(grid)
-    scroll.appendChild(months)
-    scroll.appendChild(body)
-    panel.appendChild(scroll)
+    panel.appendChild(years)
     var legend = element('div', 'profile-cal-legend')
     legend.appendChild(element('span', '', 'Weniger'))
     for (var level = 0; level <= 4; level += 1) {
@@ -241,6 +302,10 @@
     sheet.appendChild(stats)
     sheet.appendChild(activityPanel(payload))
     root.appendChild(sheet)
+    requestAnimationFrame(function () {
+      var nodes = root.querySelectorAll('.profile-cal-scroll.is-current')
+      for (var index = 0; index < nodes.length; index += 1) nodes[index].scrollLeft = nodes[index].scrollWidth
+    })
   }
 
   var name = usernameFromPath()

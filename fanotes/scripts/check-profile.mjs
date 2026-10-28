@@ -33,6 +33,8 @@ assert.match(viewerHtml, /src="\/user\/profile\.js"/u)
 assert.match(viewerHtml, /href="\/user\/profile\.css"/u)
 assert.match(viewerScript, /profile-joined/u)
 assert.match(viewerScript, /profile-cal/u)
+assert.match(viewerScript, /profile-cal-year/u)
+assert.doesNotMatch(viewerScript, /letzten Jahr/u)
 assert.match(viewerScript, /data-active-days/u)
 assert.match(viewerScript, /data-appearance/u)
 assert.match(viewerStyle, /#0b0b12/u)
@@ -123,12 +125,17 @@ try {
   const defaults = await vite.ssrLoadModule('/src/defaults.ts')
   assert.equal(card.profileVisibilityControl, profile.setProfileVisibility)
   const cardSource = readFileSync(join(appRoot, 'src/components/ProfileSettingsCard.tsx'), 'utf8')
+  const publisherSource = readFileSync(join(appRoot, 'src/components/ProfileOverviewPublisher.tsx'), 'utf8')
   const appSource = readFileSync(join(appRoot, 'src/App.tsx'), 'utf8')
   assert.match(appSource, /<ProfileOverviewPublisher /u)
   assert.match(cardSource, /enableProfileOverview\(\{/u)
   assert.match(cardSource, /appearance: profileAppearanceFromSettings\(current\)/u)
   assert.match(cardSource, /loadNotes: readVaultNotes/u)
   assert.match(cardSource, /stillEnabled: \(\) => toggleGeneration\.current === token/u)
+  assert.match(cardSource, /listNoteHistory/u)
+  assert.match(publisherSource, /listNoteHistory/u)
+  assert.doesNotMatch(cardSource, /readNoteHistory/u)
+  assert.doesNotMatch(publisherSource, /readNoteHistory/u)
   assert.doesNotMatch(cardSource, /await readVaultNotes\(\)/u)
   assert.equal(profile.PROFILE_API_PATH, '/api/v1/profile')
   assert.equal(profile.PROFILE_VIEW_PATH, '/user/')
@@ -168,6 +175,35 @@ try {
   assert.equal(summary.dayCounts['2024-03-02'], 2)
   assert.equal(summary.dayCounts['2024-04-01'], 1)
   assert.equal(summary.joinedAt, joinedAt)
+  const stamped = profile.summarizeProfileActivity([{
+    createdAt: '2023-06-01T08:00:00.000Z',
+    modifiedAt: '2023-07-04T08:00:00.000Z',
+    historyAt: ['2023-08-09T12:00:00.000Z', 'not-a-date'],
+    activeDays: [],
+    pageStats: null,
+  }], joinedAt)
+  assert.deepEqual(stamped.activeDays, ['2023-06-01', '2023-07-04', '2023-08-09'])
+  assert.equal(stamped.dayCounts['2023-06-01'], 1)
+  assert.equal(stamped.noteCount, 1)
+  const crowded = []
+  for (let index = 0; index < 1600; index += 1) {
+    crowded.push(new Date(Date.UTC(2016, 0, 1 + index)).toISOString().slice(0, 10))
+  }
+  const cappedSummary = profile.summarizeProfileActivity([{ activeDays: crowded }], joinedAt)
+  assert.equal(cappedSummary.activeDays.length, 1500)
+  assert.equal(cappedSummary.activeDays[0], crowded[0])
+  assert.equal(cappedSummary.activeDays.at(-1), crowded.at(-1))
+  assert.equal(Object.keys(cappedSummary.dayCounts).length, 1500)
+  const loadedHistory = await profile.loadProfileNotes(
+    [{ relativePath: 'alt.md', kind: 'file', extension: 'md', createdAt: '2022-02-02T10:00:00.000Z', modifiedAt: '2022-03-03T10:00:00.000Z' }],
+    async () => ({ createdAt: '', firstOpenedAt: '', lastOpenedAt: '', modifiedAt: '', lastSavedAt: '', dwellMs: 0, activeDays: [] }),
+    async () => [{ createdAt: '2022-04-04T10:00:00.000Z', content: secret }],
+  )
+  assert.deepEqual(loadedHistory[0].historyAt, ['2022-04-04T10:00:00.000Z'])
+  assert.equal(loadedHistory[0].content, undefined)
+  const fromHistory = profile.summarizeProfileActivity(loadedHistory, joinedAt)
+  assert.deepEqual(fromHistory.activeDays, ['2022-02-02', '2022-03-03', '2022-04-04'])
+  assert.doesNotMatch(JSON.stringify(fromHistory), /GEHEIMER-NOTIZTEXT/u)
   assert.equal(profile.earliestProfileJoinedAt([]), null)
   assert.equal(profile.earliestProfileJoinedAt([{
     createdAt: 'not-a-date',
@@ -412,6 +448,53 @@ try {
   assert.equal(evilJson.accent, '#0f7b6c')
   assert.equal(evilJson.accentSecondary, '#d9730d')
 
+  const longOwner = 'c'.repeat(32)
+  await profile.claimUsername({ username: 'langname', ownerId: longOwner, port, origin })
+  const longDays = []
+  for (let index = 0; index < 900; index += 1) {
+    longDays.push(new Date(Date.UTC(2010, 0, 1 + index)).toISOString().slice(0, 10))
+  }
+  const longPublish = await fetch(`${origin}/api/v1/profile`, {
+    method: 'PUT',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      schemaVersion: 1,
+      action: 'publish',
+      username: 'langname',
+      ownerId: longOwner,
+      noteCount: 3,
+      dwellMs: 1000,
+      activeDays: longDays,
+    }),
+  })
+  assert.equal(longPublish.status, 200)
+  const longBody = await longPublish.json()
+  assert.equal(longBody.activeDays.length, 900)
+  assert.equal(longBody.activeDays[0], longDays[0])
+  assert.equal(longBody.activeDays.at(-1), longDays.at(-1))
+  const hugeDays = []
+  for (let index = 0; index < 1600; index += 1) {
+    hugeDays.push(new Date(Date.UTC(2016, 0, 1 + index)).toISOString().slice(0, 10))
+  }
+  const hugePublish = await fetch(`${origin}/api/v1/profile`, {
+    method: 'PUT',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      schemaVersion: 1,
+      action: 'publish',
+      username: 'langname',
+      ownerId: longOwner,
+      noteCount: 3,
+      dwellMs: 1000,
+      activeDays: hugeDays,
+    }),
+  })
+  assert.equal(hugePublish.status, 200)
+  const hugeBody = await hugePublish.json()
+  assert.equal(hugeBody.activeDays.length, 1500)
+  assert.equal(hugeBody.activeDays[0], hugeDays[0])
+  assert.equal(hugeBody.activeDays.at(-1), hugeDays.at(-1))
+
   const servedViewer = await fetch(`${origin}/user/feldnotiz`)
   assert.equal(servedViewer.status, 200)
   assert.equal(await servedViewer.text(), viewerHtml)
@@ -630,12 +713,19 @@ try {
     assert.match(viewed.text, /notizen\s+2/iu)
     assert.match(viewed.text, /1 h 6 min/u)
     assert.match(viewed.text, /aktive tage/iu)
-    assert.match(viewed.text, /letzten Jahr/u)
+    assert.match(viewed.text, /3 aktive Tage/u)
+    assert.doesNotMatch(viewed.text, /letzten Jahr/u)
     const markedDays = await viewed.cdp.evaluate(`document.querySelector('.profile-cal')?.getAttribute('data-active-days') || ''`)
     assert.match(markedDays, /2024-03-02/u)
     assert.match(markedDays, /2024-04-01/u)
     assert.match(markedDays, /2024-11-19/u)
-    assert.equal(await viewed.cdp.evaluate(`document.querySelectorAll('.profile-cal-grid .profile-cal-cell').length`), 53 * 7)
+    const painted = async (day) => viewed.cdp.evaluate(`document.querySelector('.profile-cal-grid .profile-cal-cell.is-on[data-day="${day}"]') ? 'yes' : 'no'`)
+    assert.equal(await painted('2024-03-02'), 'yes')
+    assert.equal(await painted('2024-04-01'), 'yes')
+    assert.equal(await painted('2024-11-19'), 'yes')
+    assert.equal(await viewed.cdp.evaluate(`document.querySelector('.profile-cal-grid .profile-cal-cell[data-day="2024-01-15"]')?.className.includes('is-on') ? 'yes' : 'no'`), 'no')
+    const yearCount = new Date().getFullYear() - 2024 + 1
+    assert.equal(await viewed.cdp.evaluate(`document.querySelectorAll('.profile-cal-year').length`), yearCount)
     assert.doesNotMatch(viewed.text, /GEHEIMER-NOTIZTEXT/u)
   }
 

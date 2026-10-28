@@ -13,7 +13,7 @@ const USERNAME_PATTERN = /^[a-z0-9](?:[a-z0-9]|[-_](?![_-])){1,22}[a-z0-9]$/u
 const OWNER_PATTERN = /^[a-f0-9]{32}$/u
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/u
 const MAX_BODY_BYTES = 64 * 1024
-const MAX_ACTIVE_DAYS = 800
+const MAX_ACTIVE_DAYS = 1500
 const THEME_IDS = new Set(['dark', 'light', 'midnight', 'forest', 'aurora', 'sepia'])
 const HEX_COLOR = /^#[0-9a-f]{6}$/iu
 
@@ -188,11 +188,21 @@ const sanitizeDayCounts = (raw, activeDays) => {
   return counts
 }
 
+/** Same even sample as the client's capProfileDays: the first day, the last day, and the shape stay. */
+const capActiveDays = (days) => {
+  const unique = [...new Set(days)].sort()
+  if (unique.length <= MAX_ACTIVE_DAYS) return unique
+  const kept = new Set()
+  const stride = (unique.length - 1) / (MAX_ACTIVE_DAYS - 1)
+  for (let index = 0; index < MAX_ACTIVE_DAYS; index += 1) kept.add(unique[Math.round(index * stride)])
+  return [...kept].sort()
+}
+
 const sanitizeActivity = (raw) => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail(400, 'Ungültige Übersicht.')
   if (!Number.isSafeInteger(raw.noteCount) || raw.noteCount < 0 || raw.noteCount > 1_000_000) fail(400, 'Ungültige Übersicht.')
   if (!Number.isSafeInteger(raw.dwellMs) || raw.dwellMs < 0 || raw.dwellMs > 100 * 365 * 24 * 60 * 60 * 1000) fail(400, 'Ungültige Übersicht.')
-  if (!Array.isArray(raw.activeDays) || raw.activeDays.length > MAX_ACTIVE_DAYS) fail(400, 'Ungültige Übersicht.')
+  if (!Array.isArray(raw.activeDays)) fail(400, 'Ungültige Übersicht.')
   const activeDays = []
   for (const day of raw.activeDays) {
     if (typeof day !== 'string' || !DAY_PATTERN.test(day)) fail(400, 'Ungültige Übersicht.')
@@ -202,7 +212,7 @@ const sanitizeActivity = (raw) => {
     noteCount: raw.noteCount,
     dwellMs: raw.dwellMs,
     durationLabel: formatDwell(raw.dwellMs),
-    activeDays: [...new Set(activeDays)].sort(),
+    activeDays: capActiveDays(activeDays),
   }
 }
 

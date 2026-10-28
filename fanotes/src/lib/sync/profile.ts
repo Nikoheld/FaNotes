@@ -26,6 +26,7 @@ export type ProfileVaultNode = {
   kind: 'file' | 'folder'
   extension?: string
   createdAt?: string
+  modifiedAt?: string
   children?: ProfileVaultNode[]
 }
 
@@ -36,10 +37,14 @@ export type ProfileNoteSource = {
   content?: string
   /** File birth time, when the vault entry has one. Not a page-stat default. */
   createdAt?: string
+  /** File modification time. One day, not the span between edits. */
+  modifiedAt?: string
   firstOpenedAt?: string
+  /** Revision times. The snapshot text is never copied. */
+  historyAt?: readonly string[]
   dwellMs?: number
   activeDays?: readonly string[]
-  pageStats?: Pick<PageStats, 'createdAt' | 'firstOpenedAt' | 'dwellMs' | 'activeDays'> | null
+  pageStats?: Pick<PageStats, 'createdAt' | 'firstOpenedAt' | 'lastOpenedAt' | 'modifiedAt' | 'lastSavedAt' | 'dwellMs' | 'activeDays'> | null
 }
 
 export const PROFILE_THEMES = ['dark', 'light', 'midnight', 'forest', 'aurora', 'sepia'] as const
@@ -154,6 +159,31 @@ export const profileStamp = (value: unknown): string | null => {
 
 const dayStamp = (day: string) => (DAY_PATTERN.test(day) ? profileStamp(`${day}T00:00:00.000Z`) : null)
 
+/** Calendar day on this device. A stored `YYYY-MM-DD` is kept as written. */
+export const profileLocalDay = (value: unknown): string | null => {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 40) return null
+  if (DAY_PATTERN.test(value)) {
+    const year = Number(value.slice(0, 4))
+    return year >= 2000 && year <= 2100 ? value : null
+  }
+  const stamp = profileStamp(value)
+  if (!stamp) return null
+  const date = new Date(stamp)
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
+}
+
+/** Keep the start and the shape when a vault has more days than the request can carry. */
+export const capProfileDays = (days: readonly string[], max = 1500) => {
+  const unique = [...new Set(days.filter((day) => DAY_PATTERN.test(day)))].sort()
+  if (unique.length <= max) return unique
+  const kept = new Set<string>()
+  const stride = (unique.length - 1) / (max - 1)
+  for (let index = 0; index < max; index += 1) kept.add(unique[Math.round(index * stride)])
+  return [...kept].sort()
+}
+
 export const earlierProfileStamp = (left: unknown, right: unknown): string | null => {
   const first = profileStamp(left)
   const second = profileStamp(right)
@@ -226,18 +256,39 @@ export const summarizeProfileActivity = (notes: readonly ProfileNoteSource[], jo
     const stats = note.pageStats
     dwellMs += finiteMs(stats?.dwellMs ?? note.dwellMs)
     const seen = new Set(daysFrom(stats?.activeDays ?? note.activeDays))
+    const stamps = [
+      stats?.createdAt,
+      stats?.firstOpenedAt,
+      stats?.lastOpenedAt,
+      stats?.modifiedAt,
+      stats?.lastSavedAt,
+      note.createdAt,
+      note.modifiedAt,
+      note.firstOpenedAt,
+    ]
+    for (const stamp of stamps) {
+      const day = profileLocalDay(stamp)
+      if (day) seen.add(day)
+    }
+    for (const stamp of note.historyAt ?? []) {
+      const day = profileLocalDay(stamp)
+      if (day) seen.add(day)
+    }
     for (const day of seen) {
       days.add(day)
       dayCounts[day] = (dayCounts[day] ?? 0) + 1
     }
   }
+  const activeDays = capProfileDays([...days].sort())
+  const cappedCounts: Record<string, number> = {}
+  for (const day of activeDays) cappedCounts[day] = dayCounts[day] ?? 1
   return {
     joinedAt,
     noteCount: notes.length,
     dwellMs,
     durationLabel: formatPageDwell(dwellMs),
-    activeDays: [...days].sort(),
-    dayCounts,
+    activeDays,
+    dayCounts: cappedCounts,
   }
 }
 
@@ -245,10 +296,25 @@ const isMarkdownNote = (node: ProfileVaultNode) => (
   node.kind === 'file' && (node.extension === 'md' || node.relativePath.toLowerCase().endsWith('.md'))
 )
 
+/** Dates of saved revisions. The reader must return timestamps only, never note text. */
+export const profileHistoryReader = (
+  listNoteHistory?: (path: string) => Promise<readonly { createdAt?: string }[] | null | undefined>,
+) => {
+  if (typeof listNoteHistory !== 'function') return undefined
+  return async (path: string) => {
+    const entries = await listNoteHistory(path)
+    if (!Array.isArray(entries)) return null
+    return entries.map((entry) => ({
+      createdAt: entry && typeof entry.createdAt === 'string' ? entry.createdAt : undefined,
+    }))
+  }
+}
+
 /** Counts markdown notes and reads their page stats. File text is never read. */
 export const loadProfileNotes = async (
   nodes: readonly ProfileVaultNode[],
   readStats: (path: string) => Promise<unknown>,
+  readHistory?: (path: string) => Promise<readonly { createdAt?: string }[] | null>,
 ): Promise<ProfileNoteSource[]> => {
   const notes: ProfileNoteSource[] = []
   const walk = async (list: readonly ProfileVaultNode[]) => {
@@ -259,10 +325,21 @@ export const loadProfileNotes = async (
       try {
         const raw = await readStats(node.relativePath)
         if (raw && typeof raw === 'object') {
-          const record = raw as { createdAt?: unknown; firstOpenedAt?: unknown; dwellMs?: unknown; activeDays?: unknown }
+          const record = raw as {
+            createdAt?: unknown
+            firstOpenedAt?: unknown
+            lastOpenedAt?: unknown
+            modifiedAt?: unknown
+            lastSavedAt?: unknown
+            dwellMs?: unknown
+            activeDays?: unknown
+          }
           pageStats = {
             createdAt: typeof record.createdAt === 'string' ? record.createdAt : '',
             firstOpenedAt: typeof record.firstOpenedAt === 'string' ? record.firstOpenedAt : '',
+            lastOpenedAt: typeof record.lastOpenedAt === 'string' ? record.lastOpenedAt : '',
+            modifiedAt: typeof record.modifiedAt === 'string' ? record.modifiedAt : '',
+            lastSavedAt: typeof record.lastSavedAt === 'string' ? record.lastSavedAt : '',
             dwellMs: finiteMs(record.dwellMs),
             activeDays: Array.isArray(record.activeDays) ? record.activeDays.filter((day): day is string => typeof day === 'string') : [],
           }
@@ -270,8 +347,23 @@ export const loadProfileNotes = async (
       } catch {
         pageStats = null
       }
+      let historyAt: string[] | undefined
+      if (readHistory) {
+        try {
+          const entries = await readHistory(node.relativePath)
+          if (Array.isArray(entries)) {
+            historyAt = entries
+              .map((entry) => entry?.createdAt)
+              .filter((value): value is string => typeof value === 'string' && value.length > 0)
+          }
+        } catch {
+          historyAt = undefined
+        }
+      }
       notes.push({
         createdAt: typeof node.createdAt === 'string' ? node.createdAt : undefined,
+        modifiedAt: typeof node.modifiedAt === 'string' ? node.modifiedAt : undefined,
+        historyAt,
         pageStats,
       })
     }

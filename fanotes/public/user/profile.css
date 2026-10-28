@@ -148,6 +148,19 @@ body {
   color: var(--text-soft);
   font-size: 14px;
 }
+.profile-cal-years { display: grid; gap: 14px; }
+.profile-cal-year h3 {
+  margin: 0 0 8px;
+  color: var(--text-soft);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: .08em;
+}
+.profile-cal-year + .profile-cal-year {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
 .profile-cal-scroll {
   overflow-x: auto;
   overscroll-behavior: contain;

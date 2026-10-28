@@ -4,6 +4,7 @@ import {
   isProfileOwnerId,
   loadProfileNotes,
   normalizeUsername,
+  profileHistoryReader,
   profileAppearanceFromSettings,
   refreshPublicOverview,
 } from '../lib/sync/profile'
@@ -12,7 +13,11 @@ import type { AppSettings } from '../types'
 const readVaultNotes = async () => {
   const fanotes = typeof window !== 'undefined' ? window.fanotes : undefined
   if (!fanotes?.getTree || !fanotes.readNotePageStats) return []
-  return loadProfileNotes(await fanotes.getTree(), (path) => fanotes.readNotePageStats!(path))
+  return loadProfileNotes(
+    await fanotes.getTree(),
+    (path) => fanotes.readNotePageStats!(path),
+    profileHistoryReader(fanotes.listNoteHistory),
+  )
 }
 
 /**
