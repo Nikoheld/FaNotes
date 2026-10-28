@@ -1,5 +1,11 @@
 # Änderungsverlauf
 
+## 2026.10.13-beta.2
+
+- Show a contribution calendar on the public profile.
+- Draw the laser line only while the pointer is pressed.
+- Let every settings page scroll, and tighten the section list.
+
 ## 2026.10.13-beta.1
 
 - Let section edges be dragged in keyboard mode.
