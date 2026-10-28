@@ -1094,6 +1094,10 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
   border-width: 1px;
   box-shadow: none;
 }
+.lw-draw-toolbar.is-docked-chrome .lw-color-custom {
+  border: 0;
+  box-shadow: inset 0 0 0 1px rgba(15, 18, 28, .28);
+}
 .lw-draw-toolbar.is-docked-chrome .lw-colors > button:nth-of-type(n + 5) { display: block; }
 .lw-draw-toolbar.is-docked-chrome .lw-colors > button.is-active {
   border-width: 2px;
