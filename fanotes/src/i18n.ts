@@ -493,9 +493,9 @@ const englishMeasure = (text: string) => text.replace(/(\d),(\d)/gu, '$1.$2')
 const DRAFTING_TOOL_NAMES: Record<string, string> = { Lineal: 'Ruler', Geodreieck: 'Set square', Zirkel: 'Compass' }
 
 /**
- * Ruler, set square and compass captions, live readouts, panel captions and
- * notices: names are translated, measurements keep their value with English
- * decimals, degree marks stay as they are.
+ * Ruler, set square and compass captions, live readouts and panel captions:
+ * names are translated, measurements keep their value with English decimals,
+ * degree marks stay as they are.
  */
 function translateDraftingReadout(source: string): string | null {
   const toolReadout = /^(Lineal|Geodreieck|Zirkel) · (.+)$/u.exec(source)
@@ -513,12 +513,6 @@ function translateDraftingReadout(source: string): string | null {
   if (angleRaster) return `Rotation and compass arcs snap every ${angleRaster[1]}°`
   const presetArc = /^Bogen von (\d+)° ab der Mine zeichnen$/u.exec(source)
   if (presetArc) return `Draw a ${presetArc[1]}° arc from the pencil`
-  const arcDrawn = /^Bogen (\d+°) mit r (.+) gezeichnet\.$/u.exec(source)
-  if (arcDrawn) return `Arc of ${arcDrawn[1]} with r ${englishMeasure(arcDrawn[2])} drawn.`
-  const freeArcDrawn = /^Bogen mit r (.+) gezeichnet\.$/u.exec(source)
-  if (freeArcDrawn) return `Arc with r ${englishMeasure(freeArcDrawn[1])} drawn.`
-  const circleDrawn = /^Kreis mit r (.+) gezeichnet\.$/u.exec(source)
-  if (circleDrawn) return `Circle with r ${englishMeasure(circleDrawn[1])} drawn.`
   if (/^[+−-]?\d+(?:,\d+)? ?(?:cm|mm|″)$/u.test(source)) return englishMeasure(source)
   return null
 }

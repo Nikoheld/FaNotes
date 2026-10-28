@@ -350,6 +350,13 @@ try {
     'the inline tool layer shares the paper box, not the scroll room around it',
   )
   assert.match(boardSource, /keepPoseOnSheet\(\s*kind,/u, 'tools are shown inside the sheet')
+  const compassDraw = boardSource.slice(
+    boardSource.indexOf('const handleCompassDraw'),
+    boardSource.indexOf('const visibleSheetCentre'),
+  )
+  assert.ok(compassDraw.includes('commitReadyStrokes'), 'the compass still commits the arc and the circle')
+  assert.equal(compassDraw.includes('setNotice'), false, 'drawing with the compass never opens a notice')
+  assert.equal(compassDraw.includes('gezeichnet'), false, 'drawing with the compass never announces the arc')
   const guidesSource = readFileSync(new URL('../src/components/DraftingGuides.tsx', import.meta.url), 'utf8')
   assert.match(guidesSource, /if \(mode === 'move' && pose && penWantsEdge\(kind, pose, event\)\) return/u, 'a pen near an edge draws instead of dragging the body')
   assert.match(guidesSource, /beginDrag\('ruler', 'width'/u, 'the ruler has a grip that changes its width')

@@ -292,7 +292,6 @@ import {
   compassRadiiNorm,
   defaultPoseFor,
   draftingToolLabel,
-  formatArcDegrees,
   formatDegrees,
   formatHeading,
   formatLength,
@@ -5301,7 +5300,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return geometry()
     }
     const drafting = draftingSettingsRef.current
-    const unit = drafting.unit
     /** Small cross at the needle, when the construction should keep its centre. */
     const centreMarkStrokes = (pose: CompassPose, g = geometry()): InkStroke[] => (
       drafting.compassCentreMark
@@ -5309,7 +5307,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         : []
     )
     /** One undo step for the arc/circle together with its centre mark. */
-    const commitReadyStrokes = (strokes: Array<InkStroke | null>, label: string) => {
+    const commitReadyStrokes = (strokes: Array<InkStroke | null>) => {
       activeStrokeRef.current = null
       wipeLiveInk()
       activeRenderedPointCountRef.current = 0
@@ -5328,7 +5326,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       bumpInkRevision({ redrawCommitted: false, appendOnly: true, updateTranscript: ready.some((stroke) => stroke.purpose !== 'art') })
       setDirty(true)
       updateHistoryState()
-      setNotice({ kind: 'success', text: label })
       fitPageToInk()
       scheduleRedraw()
     }
@@ -5345,10 +5342,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         ...sampleCompassArc(pose, from, to, g.sw, g.sh, 0.035, g.display),
       ].map((point) => toPoint(point.x, point.y))
       beforeGestureRef.current = snapshotStrokes(strokesRef.current)
-      commitReadyStrokes(
-        [makeStroke(points), ...centreMarkStrokes(pose, g)],
-        `Bogen ${formatArcDegrees(event.sweep)} mit r ${formatLength(pose.radiusMm, unit)} gezeichnet.`,
-      )
+      commitReadyStrokes([makeStroke(points), ...centreMarkStrokes(pose, g)])
       // Like a real compass, the pencil now rests at the end of the arc.
       const turned = { ...pose, rotation: to }
       compassPoseRef.current = turned
@@ -5398,18 +5392,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     if (event.type === 'commit') {
       const pose = compassPoseRef.current ?? event.pose
-      const label = `Bogen mit r ${formatLength(pose.radiusMm, unit)} gezeichnet.`
-      commitReadyStrokes([activeStrokeRef.current, ...centreMarkStrokes(pose)], label)
+      commitReadyStrokes([activeStrokeRef.current, ...centreMarkStrokes(pose)])
       return
     }
     const g = growForPose(event.pose)
     const pose = compassPoseRef.current ?? event.pose
     const points = sampleCompassCircle(pose, g.sw, g.sh, g.display).map((point) => toPoint(point.x, point.y))
     beforeGestureRef.current = snapshotStrokes(strokesRef.current)
-    commitReadyStrokes(
-      [makeStroke(points), ...centreMarkStrokes(pose, g)],
-      `Kreis mit r ${formatLength(pose.radiusMm, unit)} gezeichnet.`,
-    )
+    commitReadyStrokes([makeStroke(points), ...centreMarkStrokes(pose, g)])
   }, [artBrush, artColor, artEffect, artOpacity, artWidth, bumpInkRevision, commitStrokeToCanvas, ensureWriteRoom, fitPageToInk, inkMode, markerKeepColor, paintActiveStrokeNow, penColor, penWidth, readDraftingDisplay, scheduleRedraw, setDirty, updateHistoryState, wipeLiveInk])
 
   /** Centre of the sheet the user can currently see, in normalised sheet coordinates. */
