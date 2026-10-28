@@ -65,8 +65,8 @@ export type FileTreeProps = {
   onDuplicate?: (relativePath: string) => MaybePromise
   onCopyWikiLink?: (relativePath: string) => MaybePromise
   onCopyPath?: (relativePath: string) => MaybePromise
-  /** Upload this note, or every note in this folder, and show the public link. */
-  onShare?: (relativePath: string) => MaybePromise
+  /** Upload this note, or every note in this folder, as a frozen copy or a live link. */
+  onShare?: (relativePath: string, mode: 'copy' | 'live') => MaybePromise
   confirmTrash?: (message: string) => Promise<boolean>
   className?: string
   rootLabel?: string
@@ -993,16 +993,36 @@ export const FileTree = memo(function FileTree({
             <>
               <span className="file-tree__menu-label">Teilen</span>
               <button
+                className="file-tree__share-choice"
                 onClick={() => {
                   const path = contextMenu.entry.relativePath
                   setContextMenu(null)
-                  void Promise.resolve(onShare(path))
+                  void Promise.resolve(onShare(path, 'copy'))
                 }}
                 role="menuitem"
                 type="button"
               >
                 <Share2 aria-hidden="true" size={15} />
-                Teilen
+                <span>
+                  <strong>Kopie</strong>
+                  <small>Eine Kopie bleibt so, wie sie hochgeladen wurde.</small>
+                </span>
+              </button>
+              <button
+                className="file-tree__share-choice"
+                onClick={() => {
+                  const path = contextMenu.entry.relativePath
+                  setContextMenu(null)
+                  void Promise.resolve(onShare(path, 'live'))
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <Share2 aria-hidden="true" size={15} />
+                <span>
+                  <strong>Live</strong>
+                  <small>Eine Live-Freigabe zeigt spätere Änderungen.</small>
+                </span>
               </button>
               <span className="file-tree__menu-separator" role="separator" />
             </>

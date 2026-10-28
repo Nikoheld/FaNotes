@@ -3544,7 +3544,7 @@ export default function App({ startupBootstrap }: AppProps) {
     settingsTimer.current = timer
   }, [stopRemoteSupport, syncPublishedHomework, toast])
 
-  const shareVaultEntry = useCallback(async (relativePath: string) => {
+  const shareVaultEntry = useCallback(async (relativePath: string, mode: 'copy' | 'live') => {
     if (shareInFlight.current || !relativePath || !window.fanotes?.getTree || !window.fanotes.readFile) return
     shareInFlight.current = true
     try {
@@ -3562,17 +3562,17 @@ export default function App({ startupBootstrap }: AppProps) {
         return
       }
       toast('Lädt hoch', 'info')
-      const mode = settingsRef.current.shareMode === 'live' ? 'live' : 'copy'
+      const shareMode = mode === 'live' ? 'live' : 'copy'
       const published = await publishShare({
         entries,
         rootPath: relativePath,
-        mode,
+        mode: shareMode,
         port: createFetchSharePort(),
         origin: resolveShareOrigin(),
         directory: parseShareDirectory(settingsRef.current.shareRecent),
       })
       applySettings({ ...settingsRef.current, shareRecent: serializeShareDirectory(published.directory) })
-      setShareLinkDialog({ link: published.record.link, mode })
+      setShareLinkDialog({ link: published.record.link, mode: shareMode })
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Die Freigabe konnte nicht hochgeladen werden.', 'error')
     } finally {
