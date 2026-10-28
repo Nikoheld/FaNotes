@@ -472,6 +472,8 @@ try {
   assert.equal(longBody.activeDays.length, 900)
   assert.equal(longBody.activeDays[0], longDays[0])
   assert.equal(longBody.activeDays.at(-1), longDays.at(-1))
+  const hugeOwner = 'd'.repeat(32)
+  await profile.claimUsername({ username: 'riesenname', ownerId: hugeOwner, port, origin })
   const hugeDays = []
   for (let index = 0; index < 1600; index += 1) {
     hugeDays.push(new Date(Date.UTC(2016, 0, 1 + index)).toISOString().slice(0, 10))
@@ -482,8 +484,8 @@ try {
     body: JSON.stringify({
       schemaVersion: 1,
       action: 'publish',
-      username: 'langname',
-      ownerId: longOwner,
+      username: 'riesenname',
+      ownerId: hugeOwner,
       noteCount: 3,
       dwellMs: 1000,
       activeDays: hugeDays,
@@ -494,6 +496,43 @@ try {
   assert.equal(hugeBody.activeDays.length, 1500)
   assert.equal(hugeBody.activeDays[0], hugeDays[0])
   assert.equal(hugeBody.activeDays.at(-1), hugeDays.at(-1))
+  const keptOwner = 'e'.repeat(32)
+  await profile.claimUsername({ username: 'merkname', ownerId: keptOwner, port, origin })
+  const remembered = await fetch(`${origin}/api/v1/profile`, {
+    method: 'PUT',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      schemaVersion: 1,
+      action: 'publish',
+      username: 'merkname',
+      ownerId: keptOwner,
+      noteCount: 2,
+      dwellMs: 1000,
+      activeDays: ['2020-01-01', '2020-06-01', '2020-12-01'],
+      dayCounts: { '2020-01-01': 4, '2020-06-01': 1, '2020-12-01': 2 },
+    }),
+  })
+  assert.equal(remembered.status, 200)
+  const shorter = await fetch(`${origin}/api/v1/profile`, {
+    method: 'PUT',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      schemaVersion: 1,
+      action: 'publish',
+      username: 'merkname',
+      ownerId: keptOwner,
+      noteCount: 2,
+      dwellMs: 1000,
+      activeDays: ['2020-06-01'],
+      dayCounts: { '2020-06-01': 3 },
+    }),
+  })
+  assert.equal(shorter.status, 200)
+  const shorterBody = await shorter.json()
+  assert.deepEqual(shorterBody.activeDays, ['2020-01-01', '2020-06-01', '2020-12-01'])
+  assert.equal(shorterBody.dayCounts['2020-01-01'], 4)
+  assert.equal(shorterBody.dayCounts['2020-06-01'], 3)
+  assert.equal(shorterBody.dayCounts['2020-12-01'], 2)
 
   const servedViewer = await fetch(`${origin}/user/feldnotiz`)
   assert.equal(servedViewer.status, 200)

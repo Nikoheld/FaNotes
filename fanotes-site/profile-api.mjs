@@ -258,13 +258,19 @@ const publishRecord = async (raw) => {
   const existing = await readRecord(username)
   if (!existing || existing.ownerId !== ownerId) fail(409, 'Zuerst den Benutzernamen festlegen.')
   const activity = sanitizeActivity(raw)
+  const previousDays = Array.isArray(existing.activeDays)
+    ? existing.activeDays.filter((day) => typeof day === 'string' && DAY_PATTERN.test(day))
+    : []
+  activity.activeDays = capActiveDays([...previousDays, ...activity.activeDays])
   const joinedAt = earlierJoined(existing.joinedAt, raw.joinedAt)
   const theme = sanitizeTheme(raw.theme) || sanitizeTheme(existing.theme)
   const accent = sanitizeHex(raw.accent) || sanitizeHex(existing.accent)
   const accentSecondary = sanitizeHex(raw.accentSecondary) || sanitizeHex(existing.accentSecondary)
+  const rememberedCounts = sanitizeDayCounts(existing.dayCounts, activity.activeDays)
+  const incomingCounts = sanitizeDayCounts(raw.dayCounts, activity.activeDays)
   const dayCounts = raw.dayCounts === undefined && existing.dayCounts
-    ? sanitizeDayCounts(existing.dayCounts, activity.activeDays)
-    : sanitizeDayCounts(raw.dayCounts, activity.activeDays)
+    ? rememberedCounts
+    : { ...rememberedCounts, ...incomingCounts }
   const record = {
     ...identityOf(existing, username),
     joinedAt,
