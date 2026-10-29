@@ -331,6 +331,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   geminiApiKey: '',
   anthropicModel: '',
   anthropicApiKey: '',
+  grokModel: '',
+  grokApiKey: '',
   openCodeBaseUrl: 'http://127.0.0.1:4096',
   openCodeModel: '',
   openCodeUsername: 'opencode',
@@ -344,6 +346,7 @@ const SECRET_SETTING_KEYS = Object.freeze([
   'openAiApiKey',
   'geminiApiKey',
   'anthropicApiKey',
+  'grokApiKey',
   'openCodePassword',
   'homeworkApiSecret',
 ])

@@ -25,6 +25,8 @@ try {
     geminiApiKey: '',
     anthropicModel: '',
     anthropicApiKey: '',
+    grokModel: '',
+    grokApiKey: '',
   }
   assert.equal(hasConnectedAiProvider(empty), false)
   assert.equal(hasConnectedAiProvider({ ...empty, lmStudioModel: '  ' }), false)
@@ -35,6 +37,8 @@ try {
   assert.equal(hasConnectedAiProvider({ ...empty, openAiModel: 'gpt-test' }), true)
   assert.equal(hasConnectedAiProvider({ ...empty, geminiApiKey: 'gem-test' }), true)
   assert.equal(hasConnectedAiProvider({ ...empty, anthropicModel: 'claude-test' }), true)
+  assert.equal(hasConnectedAiProvider({ ...empty, grokApiKey: 'xai-test' }), true)
+  assert.equal(hasConnectedAiProvider({ ...empty, grokModel: 'grok-4.7' }), true)
   const app = readFileSync(join(root, 'src/App.tsx'), 'utf8')
   assert.match(app, /\{hasConnectedAiProvider\(settings\) && \([\s\S]*?aria-label="AI-Assistent öffnen"/u)
   console.log('ai provider button ok')

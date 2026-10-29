@@ -20,6 +20,7 @@ import {
   Terminal,
   WandSparkles,
   X,
+  Zap,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { AiConnection, AiModel, AiProviderId, AiTransformResult, AppSettings, LmStudioAction } from '../types'
@@ -38,6 +39,7 @@ const PROVIDERS: ProviderDefinition[] = [
   { id: 'openai', title: 'OpenAI', short: 'OA', description: 'Responses API und verfügbare Modelle', kind: 'cloud', icon: <Cloud size={15} /> },
   { id: 'gemini', title: 'Gemini', short: 'GE', description: 'Google Gemini generateContent', kind: 'cloud', icon: <Sparkles size={15} /> },
   { id: 'anthropic', title: 'Anthropic', short: 'AN', description: 'Claude Messages API', kind: 'cloud', icon: <Bot size={15} /> },
+  { id: 'grok', title: 'Grok', short: 'GR', description: 'Responses API und verfügbare Modelle', kind: 'cloud', icon: <Zap size={15} /> },
   { id: 'opencode', title: 'OpenCode', short: 'OC', description: 'Konfigurierte OpenCode-Provider', kind: 'local', icon: <Terminal size={15} /> },
 ]
 
@@ -60,6 +62,7 @@ const connectionFromSettings = (provider: AiProviderId, settings: AppSettings): 
   if (provider === 'openai') return { provider, baseUrl: '', model: settings.openAiModel, apiKey: settings.openAiApiKey }
   if (provider === 'gemini') return { provider, baseUrl: '', model: settings.geminiModel, apiKey: settings.geminiApiKey }
   if (provider === 'anthropic') return { provider, baseUrl: '', model: settings.anthropicModel, apiKey: settings.anthropicApiKey }
+  if (provider === 'grok') return { provider, baseUrl: '', model: settings.grokModel, apiKey: settings.grokApiKey }
   return { provider, baseUrl: settings.openCodeBaseUrl, model: settings.openCodeModel, apiKey: settings.openCodePassword, username: settings.openCodeUsername }
 }
 
@@ -69,6 +72,7 @@ const settingsForConnection = (connection: AiConnection, includeSecret: boolean)
   if (connection.provider === 'openai') return { openAiModel: connection.model, ...(includeSecret ? { openAiApiKey: connection.apiKey } : {}) }
   if (connection.provider === 'gemini') return { geminiModel: connection.model, ...(includeSecret ? { geminiApiKey: connection.apiKey } : {}) }
   if (connection.provider === 'anthropic') return { anthropicModel: connection.model, ...(includeSecret ? { anthropicApiKey: connection.apiKey } : {}) }
+  if (connection.provider === 'grok') return { grokModel: connection.model, ...(includeSecret ? { grokApiKey: connection.apiKey } : {}) }
   return { openCodeBaseUrl: connection.baseUrl, openCodeModel: connection.model, openCodeUsername: connection.username || 'opencode', ...(includeSecret ? { openCodePassword: connection.apiKey } : {}) }
 }
 
@@ -235,7 +239,7 @@ export function AiPanel({ settings, note, vaultNotes, pdfPath = null, onSettings
   return (
     <div className="modal-backdrop lm-studio-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget && !running) onClose() }}>
       <section className="lm-studio-panel ai-panel" role="dialog" aria-modal="true" aria-labelledby="ai-panel-title">
-        <header className="lm-studio-header"><span className="lm-studio-mark"><Bot size={22} /></span><div><span className="eyebrow">Ein Assistent · sechs Anbieter</span><h2 id="ai-panel-title">AI</h2><p>Anbieter und Modell wählen, Aufgaben kombinieren und jede Änderung vor dem Übernehmen prüfen.</p></div><button type="button" className="icon-button" onClick={onClose} disabled={running} aria-label="AI-Menü schließen"><X size={18} /></button></header>
+        <header className="lm-studio-header"><span className="lm-studio-mark"><Bot size={22} /></span><div><span className="eyebrow">Ein Assistent · sieben Anbieter</span><h2 id="ai-panel-title">AI</h2><p>Anbieter und Modell wählen, Aufgaben kombinieren und jede Änderung vor dem Übernehmen prüfen.</p></div><button type="button" className="icon-button" onClick={onClose} disabled={running} aria-label="AI-Menü schließen"><X size={18} /></button></header>
         <div className="lm-studio-body">
           <aside className="lm-studio-config">
             <section className="lm-step ai-provider-step">

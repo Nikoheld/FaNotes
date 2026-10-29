@@ -3934,5 +3934,8 @@
   "Markierungen übernehmen": "Apply marks",
   "Stellen suchen": "Find passages",
   "Wichtige Stellen wurden mit dem Textmarker markiert.": "Important passages were marked with the highlighter.",
-  "Wichtiges markieren läuft ohne weitere Aktionen.": "Mark important runs on its own, without other actions."
+  "Wichtiges markieren läuft ohne weitere Aktionen.": "Mark important runs on its own, without other actions.",
+  "Ein Assistent · sieben Anbieter": "One assistant · seven providers",
+  "LM Studio, Ollama, OpenAI, Gemini, Anthropic, Grok oder OpenCode nutzen": "Use LM Studio, Ollama, OpenAI, Gemini, Anthropic, Grok or OpenCode",
+  "Grok hat keine Modellliste geliefert.": "Grok did not provide a model list."
 }

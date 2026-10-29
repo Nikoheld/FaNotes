@@ -2,7 +2,7 @@
 
 const { Buffer } = require('node:buffer')
 
-const PROVIDERS = new Set(['lmstudio', 'ollama', 'openai', 'gemini', 'anthropic', 'opencode'])
+const PROVIDERS = new Set(['lmstudio', 'ollama', 'openai', 'gemini', 'anthropic', 'grok', 'opencode'])
 const LOCAL_PROVIDERS = new Set(['lmstudio', 'ollama', 'opencode'])
 const ACTIONS = new Set(['instruction', 'spelling', 'links', 'facts', 'style', 'structure', 'expand', 'summary', 'study', 'markImportant'])
 const PDF_IMPORTANT_SYSTEM = 'Du markierst wichtige Stellen in einem PDF. Gib nur JSON mit wortgetreuen Zitaten zurück. Schreibe den Text nicht um, fasse ihn nicht zusammen und erfinde keine Stellen.'
@@ -72,7 +72,7 @@ const authHeaders = (connection) => {
 async function requestJson(url, connection, options = {}) {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 20_000)
-  const label = { lmstudio: 'LM Studio', ollama: 'Ollama', openai: 'OpenAI', gemini: 'Gemini', anthropic: 'Anthropic', opencode: 'OpenCode' }[connection.provider]
+  const label = { lmstudio: 'LM Studio', ollama: 'Ollama', openai: 'OpenAI', gemini: 'Gemini', anthropic: 'Anthropic', grok: 'Grok', opencode: 'OpenCode' }[connection.provider]
   try {
     const response = await fetch(url, {
       method: options.method ?? 'GET',
@@ -170,8 +170,13 @@ async function listAiModels(rawConnection) {
     const response = await requestJson('https://api.anthropic.com/v1/models?limit=1000', connection)
     if (!Array.isArray(response?.data)) throw new Error('Anthropic hat keine Modellliste geliefert.')
     models = response.data.flatMap((entry) => isObject(entry) && typeof entry.id === 'string' ? [model('anthropic', entry.id, entry.display_name, { publisher: 'Anthropic', maxContextLength: entry.max_input_tokens })] : [])
+  } else if (connection.provider === 'grok') {
+    const response = await requestJson('https://api.x.ai/v1/language-models', connection)
+    if (!Array.isArray(response?.models)) throw new Error('Grok hat keine Modellliste geliefert.')
+    models = response.models.flatMap((entry) => isObject(entry) && typeof entry.id === 'string' && Array.isArray(entry.output_modalities) && entry.output_modalities.includes('text') ? [model('grok', entry.id, entry.id, { publisher: entry.owned_by })] : [])
   } else models = await listOpenCode(connection)
-  return models.sort((left, right) => Number(right.loaded) - Number(left.loaded) || left.displayName.localeCompare(right.displayName, 'de')).slice(0, 1000)
+  const preferred = connection.provider === 'grok' ? 'grok-4.7' : ''
+  return models.sort((left, right) => Number(right.key === preferred) - Number(left.key === preferred) || Number(right.loaded) - Number(left.loaded) || left.displayName.localeCompare(right.displayName, 'de')).slice(0, 1000)
 }
 
 function validateTransformPayload(payload) {
@@ -276,6 +281,10 @@ async function transformWithAi(rawPayload) {
   } else if (connection.provider === 'anthropic') {
     const response = await requestJson('https://api.anthropic.com/v1/messages', connection, { method: 'POST', timeoutMs: 10 * 60_000, body: { model: connection.model, max_tokens: maxTokens, system: systemPrompt, messages: [{ role: 'user', content: prompt }] } })
     markdown = Array.isArray(response?.content) ? response.content.filter((part) => part?.type === 'text' && typeof part.text === 'string').map((part) => part.text).join('\n\n') : ''
+    stats = { inputTokens: response?.usage?.input_tokens, outputTokens: response?.usage?.output_tokens }
+  } else if (connection.provider === 'grok') {
+    const response = await requestJson('https://api.x.ai/v1/responses', connection, { method: 'POST', timeoutMs: 10 * 60_000, body: { model: connection.model, input: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }], temperature, store: false } })
+    markdown = typeof response?.output_text === 'string' ? response.output_text : Array.isArray(response?.output) ? response.output.flatMap((item) => Array.isArray(item?.content) ? item.content : []).filter((part) => part?.type === 'output_text' && typeof part.text === 'string').map((part) => part.text).join('\n\n') : ''
     stats = { inputTokens: response?.usage?.input_tokens, outputTokens: response?.usage?.output_tokens }
   } else {
     const result = await transformOpenCode(request, prompt, systemPrompt)

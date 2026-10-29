@@ -552,6 +552,7 @@ export function createBrowserApi(): FaNotesApi {
       delete safeSettings.openAiApiKey
       delete safeSettings.geminiApiKey
       delete safeSettings.anthropicApiKey
+      delete safeSettings.grokApiKey
       delete safeSettings.openCodePassword
       delete safeSettings.homeworkApiSecret
       const response = await backupFetch('/api/v1/backups/snapshot', {
@@ -693,6 +694,7 @@ export function createBrowserApi(): FaNotesApi {
         openAiApiKey: settings.openAiApiKey,
         geminiApiKey: settings.geminiApiKey,
         anthropicApiKey: settings.anthropicApiKey,
+        grokApiKey: settings.grokApiKey,
         openCodePassword: settings.openCodePassword,
       }
       serverBackup.automatic = true

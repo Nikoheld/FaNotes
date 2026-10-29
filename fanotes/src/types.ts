@@ -209,6 +209,8 @@ export type AppSettings = {
   geminiApiKey: string
   anthropicModel: string
   anthropicApiKey: string
+  grokModel: string
+  grokApiKey: string
   openCodeBaseUrl: string
   openCodeModel: string
   openCodeUsername: string
@@ -434,7 +436,7 @@ export type LmStudioTransformResult = {
   }
 }
 
-export type AiProviderId = 'lmstudio' | 'ollama' | 'openai' | 'gemini' | 'anthropic' | 'opencode'
+export type AiProviderId = 'lmstudio' | 'ollama' | 'openai' | 'gemini' | 'anthropic' | 'grok' | 'opencode'
 
 export type AiConnection = {
   provider: AiProviderId

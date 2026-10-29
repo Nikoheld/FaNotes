@@ -97,6 +97,8 @@ export const defaultSettingsForPlatform = (platform: string | undefined): AppSet
   geminiApiKey: '',
   anthropicModel: '',
   anthropicApiKey: '',
+  grokModel: '',
+  grokApiKey: '',
   openCodeBaseUrl: 'http://127.0.0.1:4096',
   openCodeModel: '',
   openCodeUsername: 'opencode',

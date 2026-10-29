@@ -1781,6 +1781,8 @@
   "LM Studio verbinden": "Connect LM Studio",
   "LM Studio, Ollama und OpenCode direkt lokal nutzbar": "LM Studio, Ollama and OpenCode can be used directly locally",
   "LM Studio, Ollama, OpenAI, Gemini, Anthropic oder OpenCode korrigieren, verlinken, strukturieren und fassen zusammen. Mehrere Aktionen lassen sich kombinieren.": "LM Studio, Ollama, OpenAI, Gemini, Anthropic or OpenCode correct, link, structure and summarize. Several actions can be combined.",
+  "LM Studio, Ollama, OpenAI, Gemini, Anthropic, Grok oder OpenCode korrigieren, verlinken, strukturieren und fassen zusammen. Mehrere Aktionen lassen sich kombinieren.": "LM Studio, Ollama, OpenAI, Gemini, Anthropic, Grok or OpenCode correct, link, structure and summarize. Several actions can be combined.",
+  "Grok hat keine Modellliste geliefert.": "Grok did not provide a model list.",
   "LM Studio, Ollama, OpenAI, Gemini, Anthropic oder OpenCode nutzen": "Use LM Studio, Ollama, OpenAI, Gemini, Anthropic or OpenCode",
   "LM-Studio-Menü schließen": "Close LM Studio menu",
   "Local first ist kein Etikett.": "Local first is not a label.",

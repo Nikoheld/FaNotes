@@ -1,6 +1,6 @@
 import { localizeResponse } from './i18n.mjs'
 
-const PROVIDERS = new Set(['openai', 'gemini', 'anthropic'])
+const PROVIDERS = new Set(['openai', 'gemini', 'anthropic', 'grok'])
 const MAX_BODY_BYTES = 2 * 1024 * 1024
 const MAX_PROVIDER_BYTES = 8 * 1024 * 1024
 const WINDOW_MS = 5 * 60_000
@@ -81,7 +81,8 @@ const providerJson = async (url, provider, options = {}) => {
     try { data = text ? JSON.parse(text) : null } catch { throw new Error('Der Cloud-Anbieter hat keine gültige JSON-Antwort geliefert.') }
     if (!response.ok) {
       const detail = typeof data?.error?.message === 'string' ? data.error.message : typeof data?.error === 'string' ? data.error : typeof data?.message === 'string' ? data.message : `HTTP ${response.status}`
-      throw Object.assign(new Error(`${provider.provider === 'openai' ? 'OpenAI' : provider.provider === 'gemini' ? 'Gemini' : 'Anthropic'}: ${detail.slice(0, 700)}`), { status: response.status >= 400 && response.status < 500 ? 400 : 502 })
+      const label = { openai: 'OpenAI', gemini: 'Gemini', anthropic: 'Anthropic', grok: 'Grok' }[provider.provider] ?? 'Cloud'
+      throw Object.assign(new Error(`${label}: ${detail.slice(0, 700)}`), { status: response.status >= 400 && response.status < 500 ? 400 : 502 })
     }
     return data
   } catch (error) {
@@ -105,6 +106,11 @@ const listModels = async (provider) => {
     if (!Array.isArray(data?.models)) throw new Error('Gemini hat keine Modellliste geliefert.')
     return data.models.flatMap((entry) => isObject(entry) && typeof entry.name === 'string' && Array.isArray(entry.supportedGenerationMethods) && entry.supportedGenerationMethods.includes('generateContent') ? [aiModel('gemini', entry.name.replace(/^models\//u, ''), entry.displayName, { publisher: 'Google', maxContextLength: entry.inputTokenLimit, description: entry.description })] : [])
   }
+  if (provider.provider === 'grok') {
+    const data = await providerJson('https://api.x.ai/v1/language-models', provider)
+    if (!Array.isArray(data?.models)) throw new Error('Grok hat keine Modellliste geliefert.')
+    return data.models.flatMap((entry) => isObject(entry) && typeof entry.id === 'string' && Array.isArray(entry.output_modalities) && entry.output_modalities.includes('text') ? [aiModel('grok', entry.id, entry.id, { publisher: entry.owned_by })] : []).sort((left, right) => Number(right.key === 'grok-4.7') - Number(left.key === 'grok-4.7') || left.displayName.localeCompare(right.displayName)).slice(0, 1000)
+  }
   const data = await providerJson('https://api.anthropic.com/v1/models?limit=1000', provider)
   if (!Array.isArray(data?.data)) throw new Error('Anthropic hat keine Modellliste geliefert.')
   return data.data.flatMap((entry) => isObject(entry) && typeof entry.id === 'string' ? [aiModel('anthropic', entry.id, entry.display_name, { publisher: 'Anthropic', maxContextLength: entry.max_input_tokens })] : [])
@@ -115,6 +121,7 @@ const transform = async (provider, body) => {
   const systemPrompt = cleanString(body.systemPrompt, 4000, 'Die Systemanweisung')
   const prompt = cleanString(body.prompt, 1_800_000, 'Der AI-Auftrag')
   const maxTokens = Number.isSafeInteger(body.maxTokens) ? Math.min(16_000, Math.max(512, body.maxTokens)) : 4096
+  const temperature = typeof body.temperature === 'number' && Number.isFinite(body.temperature) ? Math.min(1, Math.max(0, body.temperature)) : 0.15
   let markdown = ''
   let stats = {}
   if (provider.provider === 'openai') {
@@ -125,6 +132,10 @@ const transform = async (provider, body) => {
     const data = await providerJson(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, provider, { method: 'POST', timeoutMs: 10 * 60_000, body: { systemInstruction: { parts: [{ text: systemPrompt }] }, contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: maxTokens, temperature: 0.15 } } })
     markdown = Array.isArray(data?.candidates?.[0]?.content?.parts) ? data.candidates[0].content.parts.filter((part) => typeof part?.text === 'string').map((part) => part.text).join('\n\n') : ''
     stats = { inputTokens: data?.usageMetadata?.promptTokenCount, outputTokens: data?.usageMetadata?.candidatesTokenCount }
+  } else if (provider.provider === 'grok') {
+    const data = await providerJson('https://api.x.ai/v1/responses', provider, { method: 'POST', timeoutMs: 10 * 60_000, body: { model, input: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }], temperature, store: false } })
+    markdown = typeof data?.output_text === 'string' ? data.output_text : Array.isArray(data?.output) ? data.output.flatMap((item) => Array.isArray(item?.content) ? item.content : []).filter((part) => part?.type === 'output_text' && typeof part.text === 'string').map((part) => part.text).join('\n\n') : ''
+    stats = { inputTokens: data?.usage?.input_tokens, outputTokens: data?.usage?.output_tokens }
   } else {
     const data = await providerJson('https://api.anthropic.com/v1/messages', provider, { method: 'POST', timeoutMs: 10 * 60_000, body: { model, max_tokens: maxTokens, system: systemPrompt, messages: [{ role: 'user', content: prompt }] } })
     markdown = Array.isArray(data?.content) ? data.content.filter((part) => part?.type === 'text' && typeof part.text === 'string').map((part) => part.text).join('\n\n') : ''

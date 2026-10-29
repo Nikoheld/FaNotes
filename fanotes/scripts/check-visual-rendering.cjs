@@ -392,7 +392,7 @@ void (async () => {
         bounds: { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom },
       }
     })()`)
-    if (aiPanel.title !== 'AI' || aiPanel.providers.join('|') !== 'LM Studio|Ollama|OpenAI|Gemini|Anthropic|OpenCode' || aiPanel.selected !== 1 || aiPanel.bounds.left < 0 || aiPanel.bounds.top < 0 || aiPanel.bounds.right > 1480 || aiPanel.bounds.bottom > 940) {
+    if (aiPanel.title !== 'AI' || aiPanel.providers.join('|') !== 'LM Studio|Ollama|OpenAI|Gemini|Anthropic|Grok|OpenCode' || aiPanel.selected !== 1 || aiPanel.bounds.left < 0 || aiPanel.bounds.top < 0 || aiPanel.bounds.right > 1480 || aiPanel.bounds.bottom > 940) {
       throw new Error(`Der AI-Bereich ist unvollständig oder verlässt das Fenster: ${JSON.stringify(aiPanel)}`)
     }
     await cdp.evaluate(`[...document.querySelectorAll('.ai-provider-grid > button')].find((button) => button.textContent.includes('OpenCode'))?.click()`)

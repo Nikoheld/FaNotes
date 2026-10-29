@@ -48,6 +48,7 @@ const liveFor = () => createRemoteSupportLiveState({
     experimentalRemoteSupport: true,
     experimentalHomeworkApi: false,
     openAiApiKey: 'sk-live-secret',
+    grokApiKey: 'xai-live-secret',
     homeworkApiSecret: 'homework-secret-value',
     customCss: 'body{background:url(https://evil.example)}',
   },
@@ -89,6 +90,8 @@ const runOnce = () => {
   assert.equal(inspect.inspect.platform, 'linux')
   assert.ok(inspect.inspect.settings.experimentalRemoteSupport)
   assert.equal(inspect.inspect.settings.openAiApiKey, undefined)
+  assert.equal(inspect.inspect.settings.grokApiKey, undefined)
+  assert.equal(JSON.stringify(inspect).includes('xai-live-secret'), false)
   assert.equal(inspect.inspect.settings.homeworkApiSecret, undefined)
   assert.equal(JSON.stringify(inspect).includes('sk-live-secret'), false)
   assert.equal(JSON.stringify(inspect).includes('homework-secret-value'), false)

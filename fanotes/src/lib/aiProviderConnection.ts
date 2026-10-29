@@ -3,7 +3,7 @@ import type { AppSettings } from '../types'
 type AiConnectionSettings = Pick<AppSettings,
   'lmStudioModel' | 'ollamaModel' | 'openCodeModel' |
   'openAiModel' | 'openAiApiKey' | 'geminiModel' | 'geminiApiKey' |
-  'anthropicModel' | 'anthropicApiKey'>
+  'anthropicModel' | 'anthropicApiKey' | 'grokModel' | 'grokApiKey'>
 
 const filled = (value: string) => value.trim() !== ''
 
@@ -18,4 +18,6 @@ export const hasConnectedAiProvider = (settings: AiConnectionSettings) => (
   || filled(settings.geminiApiKey)
   || filled(settings.anthropicModel)
   || filled(settings.anthropicApiKey)
+  || filled(settings.grokModel)
+  || filled(settings.grokApiKey)
 )

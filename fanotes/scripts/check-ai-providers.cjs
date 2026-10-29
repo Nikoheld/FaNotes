@@ -67,20 +67,34 @@ const payload = (connection) => ({ connection, title: 'Test', relativePath: 'Tes
     else if (address.includes('generativelanguage.googleapis.com')) value = { candidates: [{ content: { parts: [{ text: '# Gemini\n\nKorrigiert' }] } }], usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 } }
     else if (address.includes('api.anthropic.com/v1/models')) value = { data: [{ id: 'claude-test', display_name: 'Claude Test', max_input_tokens: 200000 }] }
     else if (address === 'https://api.anthropic.com/v1/messages') value = { content: [{ type: 'text', text: '# Anthropic\n\nKorrigiert' }], usage: { input_tokens: 10, output_tokens: 5 } }
+    else if (address === 'https://api.x.ai/v1/language-models') value = { models: [{ id: 'grok-imagine-image', output_modalities: ['image'], owned_by: 'xai' }, { id: 'grok-4.5', output_modalities: ['text'], owned_by: 'xai' }, { id: 'grok-4.7', output_modalities: ['text'], owned_by: 'xai' }] }
+    else if (address === 'https://api.x.ai/v1/responses') value = { output_text: '# Grok\n\nKorrigiert', usage: { input_tokens: 10, output_tokens: 5 } }
     else return new Response(JSON.stringify({ error: { message: 'unbekannt' } }), { status: 404, headers: { 'Content-Type': 'application/json' } })
     return new Response(JSON.stringify(value), { status: 200, headers: { 'Content-Type': 'application/json' } })
   }
   try {
-    for (const [provider, model] of [['openai', 'gpt-test'], ['gemini', 'gemini-test'], ['anthropic', 'claude-test']]) {
-      const connection = { provider, baseUrl: '', apiKey: `${provider}-secret`, model }
+    for (const [provider, model] of [['openai', 'gpt-test'], ['gemini', 'gemini-test'], ['anthropic', 'claude-test'], ['grok', 'grok-4.7']]) {
+      const connection = { provider, baseUrl: 'https://evil.example', apiKey: `${provider}-secret`, model }
       assert.equal((await listAiModels({ ...connection, model: '' }))[0].provider, provider)
-      assert.equal((await transformWithAi(payload(connection))).provider, provider)
+      const result = await transformWithAi(payload(connection))
+      assert.equal(result.provider, provider)
+      assert.match(result.markdown, /Korrigiert/u)
     }
+    const grokModels = await listAiModels({ provider: 'grok', baseUrl: 'https://evil.example', apiKey: 'grok-secret', model: '' })
+    assert.deepEqual(grokModels.map((entry) => entry.key), ['grok-4.7', 'grok-4.5'])
+    const grokTransform = cloudRequests.find((entry) => entry.address === 'https://api.x.ai/v1/responses')
+    const grokBody = JSON.parse(grokTransform.options.body)
+    assert.equal(grokBody.store, false)
+    assert.equal(grokBody.model, 'grok-4.7')
+    assert.deepEqual(grokBody.input.map((item) => item.role), ['system', 'user'])
+    assert.equal(JSON.stringify(grokBody).includes('grok-secret'), false)
+    assert.ok(cloudRequests.filter((entry) => entry.address.includes('x.ai')).every((entry) => entry.address.startsWith('https://api.x.ai/')))
   } finally { global.fetch = nativeFetch }
   assert.ok(cloudRequests.every((entry) => !entry.address.includes('secret')), 'API-Schlüssel dürfen nie in einer URL stehen.')
   assert.ok(cloudRequests.some((entry) => entry.options.headers?.Authorization === 'Bearer openai-secret'))
   assert.ok(cloudRequests.some((entry) => entry.options.headers?.['x-goog-api-key'] === 'gemini-secret'))
   assert.ok(cloudRequests.some((entry) => entry.options.headers?.['x-api-key'] === 'anthropic-secret'))
+  assert.ok(cloudRequests.some((entry) => entry.options.headers?.Authorization === 'Bearer grok-secret'))
 
   const root = path.resolve(__dirname, '..')
   const [panel, app, browserApi, main, proxy] = await Promise.all([
@@ -90,11 +104,13 @@ const payload = (connection) => ({ connection, title: 'Test', relativePath: 'Tes
     fs.readFile(path.join(root, 'electron/main.cjs'), 'utf8'),
     fs.readFile(path.resolve(root, '..', 'fanotes-site/ai-proxy.mjs'), 'utf8'),
   ])
-  for (const name of ['LM Studio', 'Ollama', 'OpenAI', 'Gemini', 'Anthropic', 'OpenCode']) assert.match(panel, new RegExp(name, 'u'))
+  for (const name of ['LM Studio', 'Ollama', 'OpenAI', 'Gemini', 'Anthropic', 'Grok', 'OpenCode']) assert.match(panel, new RegExp(name, 'u'))
   assert.match(app, /\{hasConnectedAiProvider\(settings\) && \([\s\S]*?aria-label="AI-Assistent öffnen"[\s\S]*?<span>AI<\/span><\/button>/u)
-  for (const key of ['ollamaApiToken', 'openAiApiKey', 'geminiApiKey', 'anthropicApiKey', 'openCodePassword']) assert.match(browserApi, new RegExp(`delete safeSettings\\.${key}`, 'u'))
+  for (const key of ['ollamaApiToken', 'openAiApiKey', 'geminiApiKey', 'anthropicApiKey', 'grokApiKey', 'openCodePassword']) assert.match(browserApi, new RegExp(`delete safeSettings\\.${key}`, 'u'))
   assert.match(main, /safeStorage\.encryptString/u)
-  assert.match(proxy, /new Set\(\['openai', 'gemini', 'anthropic'\]\)/u)
+  assert.match(main, /'grokApiKey'/)
+  assert.match(proxy, /new Set\(\['openai', 'gemini', 'anthropic', 'grok'\]\)/u)
+  assert.match(proxy, /https:\/\/api\.x\.ai\/v1\/responses/)
   assert.doesNotMatch(proxy, /body\.baseUrl/u)
-  console.log('AI-Prüfung erfolgreich: LM Studio, Ollama, OpenAI, Gemini, Anthropic und OpenCode; Modelllisten, Transformation, Schlüsselschutz, Backup-Ausschluss und OpenCode-Sandbox geprüft.')
+  console.log('AI-Prüfung erfolgreich: LM Studio, Ollama, OpenAI, Gemini, Anthropic, Grok und OpenCode; Modelllisten, Transformation, Schlüsselschutz, Backup-Ausschluss und OpenCode-Sandbox geprüft.')
 })().finally(close).catch((error) => { console.error(error); process.exitCode = 1 })

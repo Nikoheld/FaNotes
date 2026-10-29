@@ -2,7 +2,7 @@
 
 Öffentliche Download- und Produktseite für `fanotes.fasrv.ch`.
 
-Unter `/notes/` wird zusätzlich die installierbare FaNotes-Web-App ausgeliefert. Das gebaute Bundle liegt in `public/notes`, speichert Benutzerdaten ausschließlich im Browser und besitzt eine eigene, eng begrenzte CSP für Blob-Arbeitsblätter, Web Worker, eingebettete Schriften sowie lokale AI-Dienste auf `localhost`. OpenAI, Gemini und Anthropic werden über `/api/v1/ai` an feste offizielle Endpunkte weitergeleitet; API-Schlüssel werden weder protokolliert noch gespeichert.
+Unter `/notes/` wird zusätzlich die installierbare FaNotes-Web-App ausgeliefert. Das gebaute Bundle liegt in `public/notes`, speichert Benutzerdaten ausschließlich im Browser und besitzt eine eigene, eng begrenzte CSP für Blob-Arbeitsblätter, Web Worker, eingebettete Schriften sowie lokale AI-Dienste auf `localhost`. OpenAI, Gemini, Anthropic und Grok werden über `/api/v1/ai` an feste offizielle Endpunkte weitergeleitet; API-Schlüssel werden weder protokolliert noch gespeichert.
 
 Der Node-Dienst erkennt den neuesten vollständigen FaNotes-Release bei jedem API- und Downloadaufruf automatisch im Ordner:
 

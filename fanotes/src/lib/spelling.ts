@@ -39,7 +39,7 @@ type FilterDescriptor = SpellingResources['manifest']['languages'][SpellingLangu
 const WORD_PATTERN = /\p{L}[\p{L}\p{M}'’\-]*/gu
 const TECHNICAL_WORDS = new Set([
   'ai', 'amat', 'anthropic', 'appimage', 'arch', 'browser', 'chromium', 'codemirror', 'codex',
-  'electron', 'fanotes', 'gemini', 'glyphenwerk', 'github', 'google', 'html', 'hyprland',
+  'electron', 'fanotes', 'gemini', 'glyphenwerk', 'github', 'google', 'grok', 'html', 'hyprland',
   'javascript', 'katex', 'latex', 'linux', 'lm', 'markdown', 'nas', 'ollama', 'openai',
   'opencode', 'pdf', 'typescript', 'url', 'vulkan', 'wayland', 'web', 'windows',
 ])

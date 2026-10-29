@@ -14,7 +14,7 @@ type TransformPayload = {
 }
 
 const LOCAL = new Set<AiProviderId>(['lmstudio', 'ollama', 'opencode'])
-const CLOUD = new Set<AiProviderId>(['openai', 'gemini', 'anthropic'])
+const CLOUD = new Set<AiProviderId>(['openai', 'gemini', 'anthropic', 'grok'])
 const isObject = (value: unknown): value is JsonObject => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 
 const cleanSecret = (value: string) => {
@@ -149,7 +149,7 @@ export const transformWithBrowserAi = async (payload: TransformPayload): Promise
   const maxTokens = marking ? 4_000 : Math.min(16_000, Math.max(2_048, Math.ceil(payload.markdown.length / 2)))
   const temperature = marking || payload.actions.includes('facts') ? 0.05 : 0.15
   if (CLOUD.has(connection.provider)) {
-    const response = await cloudProxy<AiTransformResult>('transform', { provider: connection.provider, apiKey: connection.apiKey, model: connection.model, systemPrompt, prompt, maxTokens })
+    const response = await cloudProxy<AiTransformResult>('transform', { provider: connection.provider, apiKey: connection.apiKey, model: connection.model, systemPrompt, prompt, maxTokens, temperature })
     return { ...response, markdown: unwrap(response.markdown) }
   }
   if (connection.provider === 'ollama') {
