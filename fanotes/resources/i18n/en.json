@@ -3918,5 +3918,21 @@
   "Zuerst einen Benutzernamen festlegen.": "Choose a username first.",
   "Die öffentliche Aktivitätsübersicht ist eingeschaltet.": "The public activity overview is on.",
   "Die öffentliche Aktivitätsübersicht ist ausgeschaltet.": "The public activity overview is off.",
-  "Die Übersicht konnte nicht gespeichert werden.": "The overview could not be saved."
+  "Die Übersicht konnte nicht gespeichert werden.": "The overview could not be saved.",
+  "Wichtiges markieren": "Mark important passages",
+  "Markiert wichtige Textstellen mit dem normalen Textmarker. Der Text bleibt unverändert.": "Marks important passages with the normal highlighter. The text stays unchanged.",
+  "PDF-Text wird gelesen …": "Reading the PDF text …",
+  "Dieses PDF enthält keinen auswählbaren Text.": "This PDF has no selectable text.",
+  "Dieses PDF ist passwortgeschützt.": "This PDF is password-protected.",
+  "Der PDF-Text konnte nicht gelesen werden.": "The PDF text could not be read.",
+  "Nur der vordere Teil des PDFs wird an die AI geschickt.": "Only the front of the PDF is sent to the AI.",
+  "Öffne zuerst ein PDF mit auswählbarem Text.": "Open a PDF with selectable text first.",
+  "Keine wichtige Textstelle konnte im PDF gefunden werden.": "No important passage in the PDF could be marked.",
+  "Die wichtigen Stellen werden gesucht. Der PDF-Text bleibt unverändert.": "Important passages are being looked up. The PDF text stays unchanged.",
+  "Die Stellen werden mit dem normalen Textmarker markiert. Der PDF-Text bleibt unverändert.": "The passages are marked with the normal highlighter. The PDF text stays unchanged.",
+  "FaNotes sucht wichtige Stellen und markiert sie mit dem normalen Textmarker. Der PDF-Text wird nicht umgeschrieben.": "FaNotes finds important passages and marks them with the normal highlighter. The PDF text is not rewritten.",
+  "Markierungen übernehmen": "Apply marks",
+  "Stellen suchen": "Find passages",
+  "Wichtige Stellen wurden mit dem Textmarker markiert.": "Important passages were marked with the highlighter.",
+  "Wichtiges markieren läuft ohne weitere Aktionen.": "Mark important runs on its own, without other actions."
 }

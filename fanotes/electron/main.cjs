@@ -2660,6 +2660,7 @@ const LM_STUDIO_ACTIONS = new Set([
   'expand',
   'summary',
   'study',
+  'markImportant',
 ])
 
 function normalizeLmStudioBaseUrl(rawUrl) {
@@ -2820,6 +2821,7 @@ function validateLmStudioTransformPayload(payload) {
   if (!Array.isArray(payload.actions)) throw new Error('Wähle mindestens eine KI-Aktion.')
   const actions = [...new Set(payload.actions.filter((action) => LM_STUDIO_ACTIONS.has(action)))]
   if (!actions.length || actions.length !== payload.actions.length) throw new Error('Die ausgewählten KI-Aktionen sind ungültig.')
+  if (actions.includes('markImportant') && actions.length !== 1) throw new Error('Wichtiges markieren läuft ohne weitere Aktionen.')
   const instruction = typeof payload.instruction === 'string' ? payload.instruction.trim().slice(0, 12_000) : ''
   if (actions.includes('instruction') && !instruction) throw new Error('Schreibe zuerst den freien Auftrag für LM Studio.')
   const title = typeof payload.title === 'string' ? payload.title.slice(0, 500) : 'Notiz'
@@ -2844,6 +2846,7 @@ function lmStudioPrompt(request) {
     expand: 'Ergänze nur wirklich relevante Erklärungen, Beispiele oder Hintergrundinformationen. Trenne Ergänzungen organisch vom Original, bleibe knapp und erfinde bei Wissenslücken nichts.',
     summary: 'Ergänze oder aktualisiere am Ende einen kompakten Abschnitt „## KI-Zusammenfassung“. Erzeuge keinen doppelten Zusammenfassungsabschnitt.',
     study: 'Ergänze oder aktualisiere am Ende „## Lernfragen“ mit hilfreichen Verständnisfragen und kurzen, einklappbaren Antworten. Erzeuge keinen doppelten Lernfragenabschnitt.',
+    markImportant: 'Diese Aktion markiert PDF-Text und gibt kein Markdown-Dokument zurück.',
   }
   const availableNotes = request.vaultNotes.length
     ? request.vaultNotes.map((note) => `- ${note.title} → ${note.relativePath.replace(/\.md$/iu, '')}`).join('\n')
@@ -2864,8 +2867,12 @@ function unwrapLmStudioMarkdown(value) {
 
 async function transformWithLmStudio(rawPayload) {
   const request = validateLmStudioTransformPayload(rawPayload)
-  const prompt = lmStudioPrompt(request)
-  const systemPrompt = 'Du bist der lokale Markdown-Assistent von FaNotes. Arbeite sorgfältig, erfinde keine Fakten und befolge das geforderte Ausgabeformat exakt.'
+  aiProviderModule ??= require('./ai-provider.cjs')
+  const marking = aiProviderModule.isPdfImportantAction(request.actions)
+  const prompt = marking ? request.markdown : lmStudioPrompt(request)
+  const systemPrompt = marking ? aiProviderModule.PDF_IMPORTANT_SYSTEM : 'Du bist der lokale Markdown-Assistent von FaNotes. Arbeite sorgfältig, erfinde keine Fakten und befolge das geforderte Ausgabeformat exakt.'
+  const maxTokens = marking ? 4_000 : Math.min(16_000, Math.max(2_048, Math.ceil(request.markdown.length / 2)))
+  const temperature = marking || request.actions.includes('facts') ? 0.05 : 0.15
   let markdown
   let stats = {}
   try {
@@ -2879,8 +2886,8 @@ async function transformWithLmStudio(rawPayload) {
         system_prompt: systemPrompt,
         stream: false,
         store: false,
-        temperature: request.actions.includes('facts') ? 0.05 : 0.15,
-        max_output_tokens: Math.min(16_000, Math.max(2_048, Math.ceil(request.markdown.length / 2))),
+        temperature,
+        max_output_tokens: maxTokens,
       },
     })
     const messages = Array.isArray(response?.output)
@@ -2905,8 +2912,8 @@ async function transformWithLmStudio(rawPayload) {
         model: request.model,
         messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }],
         stream: false,
-        temperature: request.actions.includes('facts') ? 0.05 : 0.15,
-        max_tokens: Math.min(16_000, Math.max(2_048, Math.ceil(request.markdown.length / 2))),
+        temperature,
+        max_tokens: maxTokens,
       },
     })
     markdown = response?.choices?.[0]?.message?.content

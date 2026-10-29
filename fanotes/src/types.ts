@@ -411,6 +411,7 @@ export type LmStudioAction =
   | 'expand'
   | 'summary'
   | 'study'
+  | 'markImportant'
 
 export type LmStudioModel = {
   key: string

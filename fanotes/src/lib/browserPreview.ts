@@ -611,7 +611,9 @@ export function createBrowserPreviewApi(): FaNotesApi {
       maxContextLength: 32_768,
       description: 'Vorschaumodell für den gemeinsamen AI-Bereich.',
     }],
-    aiTransform: async ({ connection, markdown, actions, instruction }) => ({
+    aiTransform: async ({ connection, markdown, actions, instruction }) => actions.length === 1 && actions[0] === 'markImportant'
+      ? { provider: connection.provider, model: connection.model, markdown: '{"marks":[]}', stats: { inputTokens: 32, outputTokens: 8, tokensPerSecond: 40 } }
+      : ({
       provider: connection.provider,
       model: connection.model,
       markdown: `${markdown.trimEnd()}${actions.includes('summary') ? '\n\n## AI-Zusammenfassung\n\n- Erzeugte Vorschau der Notiz.' : ''}${actions.includes('instruction') && instruction ? `\n\n> Freier Auftrag: ${instruction}` : ''}\n`,

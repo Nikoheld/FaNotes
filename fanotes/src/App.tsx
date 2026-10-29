@@ -259,6 +259,7 @@ import { sanitizeAddonStrokes, inkDocumentWithStrokes } from './lib/addonInk'
 import { sanitizeCalendarDocument, serializeCalendarMarkdown, emptyCalendarDocument, isMissingNoteError, loadCalendarMarkdown, CALENDAR_NOTE_PATH } from './lib/calendarModel'
 import { templatesToSeed, templatePath, NOTE_TEMPLATES, type NoteProfileId } from './lib/noteTemplates'
 import { backlinksFor } from './lib/backlinks'
+import { highlightPdfImportantMarks } from './lib/pdfImportantMarks'
 import { readPdfMarks, writePdfMarks, addPdfMark } from './lib/pdfTextMarks'
 import { getHandwritingSamples, getMathLayoutExamples, getImportedLabels, putHandwritingSamples, putMathLayoutExamples, putHandwritingLabels } from './lib/handwritingDb'
 import { SafeBoundary } from './components/SafeBoundary'
@@ -5984,7 +5985,13 @@ export default function App({ startupBootstrap }: AppProps) {
         }}
       />
       {bugReportOpen && <Suspense fallback={null}><SafeBoundary name="Fehlerbericht"><BugReportModal version={updateState.currentVersion} platform={window.fanotes.platform} onClose={() => setBugReportOpen(false)} onSent={() => toast('Fehlerbericht wurde an fanotes.fasrv.ch gesendet.', 'success')} /></SafeBoundary></Suspense>}
-      {lmStudioOpen && <Suspense fallback={null}><AiPanel settings={settings} note={lmStudioNote} vaultNotes={vaultNoteReferences} onSettingsChange={(changes) => applySettings({ ...settingsRef.current, ...changes })} onApply={applyLmStudioResult} onClose={() => setLmStudioOpen(false)} /></Suspense>}
+      {lmStudioOpen && <Suspense fallback={null}><AiPanel settings={settings} note={lmStudioNote} vaultNotes={vaultNoteReferences} pdfPath={isPdfActive && activeTab ? activeTab.path : null} onSettingsChange={(changes) => applySettings({ ...settingsRef.current, ...changes })} onApply={applyLmStudioResult} onApplyMarks={(found) => {
+        if (!activeTab || !isPdfActive) return
+        if (activeEntryMutating) { toast('Diese Notiz ist während der Dateiaktion schreibgeschützt.', 'error'); return }
+        const current = pendingWrites.current.get(activeTab.path) ?? activeTab.content
+        updateContentFor(activeTab.path, highlightPdfImportantMarks(current, found))
+        toast('Wichtige Stellen wurden mit dem Textmarker markiert.', 'success')
+      }} onClose={() => setLmStudioOpen(false)} /></Suspense>}
       {worksheetImportOpen && <div className="modal-backdrop worksheet-import-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) setWorksheetImportOpen(false) }}>
         <section className="worksheet-import-dialog" role="dialog" aria-modal="true" aria-labelledby="worksheet-import-title">
           <header><div><span><FileUp size={19} /></span><div><small>Bild oder PDF</small><h2 id="worksheet-import-title">Arbeitsblatt importieren</h2></div></div><button type="button" aria-label="Schließen" onClick={() => setWorksheetImportOpen(false)}><X size={17} /></button></header>

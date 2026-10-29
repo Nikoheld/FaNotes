@@ -35,6 +35,7 @@ import {
   pdfStartPageForLoad,
 } from '../lib/pdfDocument'
 import { createPdfPagePainter, type PdfBasePaintInfo, type PdfPagePainter } from '../lib/pdfPagePainter'
+import { spanIndexesForQuotes } from '../lib/pdfTextMarks'
 import { bindPdfTextSelection, releasePdfTextSelection } from '../lib/pdfTextSelection'
 import {
   PDF_FIT_GUTTER,
@@ -171,13 +172,10 @@ function PdfPageCanvas({
     try {
       await layer.render()
       if (textLayerRef.current !== layer) return
-      for (const quote of quotesRef.current) {
-        if (!quote) continue
-        textHost.querySelectorAll('span').forEach((span) => {
-          const text = span.textContent?.trim() ?? ''
-          if (text.length > 1 && quote.includes(text)) span.classList.add('pdf-anchored-mark')
-        })
-      }
+      // Marked-content wrappers are spans too. Only the leaf runs carry the glyphs.
+      const spans = [...textHost.querySelectorAll('span')].filter((span) => !span.querySelector('span'))
+      const marked = new Set(spanIndexesForQuotes(spans.map((span) => span.textContent ?? ''), quotesRef.current))
+      spans.forEach((span, index) => { if (marked.has(index)) span.classList.add('pdf-anchored-mark') })
       releaseTextSelectionRef.current = bindPdfTextSelection(textHost)
     } catch (error: unknown) {
       if (!(error instanceof Error) || !/cancel/iu.test(error.name)) {

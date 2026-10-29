@@ -78,3 +78,40 @@ export const addPdfMark = (
 export const quotesOnPage = (marks: readonly PdfTextMark[], page: number) => (
   marks.filter((mark) => mark.page === page).map((mark) => mark.quote)
 )
+
+/**
+ * Spans that cover a stored quote. The quote marks that passage.
+ * A shorter span is not marked just because its text also occurs inside the quote.
+ */
+export const spanIndexesForQuotes = (spanTexts: readonly string[], quotes: readonly string[]): number[] => {
+  const spanAt: number[] = []
+  let norm = ''
+  spanTexts.forEach((raw, index) => {
+    const text = raw.replace(/\s+/gu, ' ').trim()
+    if (!text) return
+    if (norm && !norm.endsWith(' ')) {
+      norm += ' '
+      spanAt.push(-1)
+    }
+    for (const char of text) {
+      norm += char
+      spanAt.push(index)
+    }
+  })
+  const hit = new Set<number>()
+  for (const quote of quotes) {
+    const needle = quote.replace(/\s+/gu, ' ').trim()
+    if (needle.length < 2) continue
+    let from = 0
+    while (from < norm.length) {
+      const at = norm.indexOf(needle, from)
+      if (at < 0) break
+      for (let cursor = at; cursor < at + needle.length; cursor += 1) {
+        const span = spanAt[cursor]
+        if (span >= 0) hit.add(span)
+      }
+      from = at + needle.length
+    }
+  }
+  return [...hit].sort((left, right) => left - right)
+}

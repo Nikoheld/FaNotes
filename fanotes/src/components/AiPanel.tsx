@@ -6,6 +6,7 @@ import {
   Cloud,
   Cpu,
   FileCheck2,
+  Highlighter,
   KeyRound,
   Link2,
   Lightbulb,
@@ -23,6 +24,8 @@ import {
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { AiConnection, AiModel, AiProviderId, AiTransformResult, AppSettings, LmStudioAction } from '../types'
 import { getUiLanguage, getUiLocale } from '../i18n'
+import { buildPdfImportantPrompt, parsePdfImportantMarks, type PdfImportantMark, type PdfPageText } from '../lib/pdfImportantMarks'
+import { readPdfPageTexts } from '../lib/pdfPageText'
 import { MarkdownPreview } from './MarkdownPreview'
 
 type ActiveNote = { title: string; relativePath: string; markdown: string }
@@ -39,6 +42,7 @@ const PROVIDERS: ProviderDefinition[] = [
 ]
 
 const ACTIONS: ActionDefinition[] = [
+  { id: 'markImportant', title: 'Wichtiges markieren', description: 'Markiert wichtige Textstellen mit dem normalen Textmarker. Der Text bleibt unverändert.', icon: <Highlighter size={17} /> },
   { id: 'instruction', title: 'Freien Auftrag ausführen', description: 'Deine eigene Anweisung für diese Notiz ausführen.', icon: <WandSparkles size={17} /> },
   { id: 'spelling', title: 'Rechtschreibung korrigieren', description: 'Grammatik, Zeichensetzung und Tippfehler verbessern.', icon: <SpellCheck2 size={17} /> },
   { id: 'links', title: 'Notizen intelligent verlinken', description: 'Passende Seiten mit Wikilinks verbinden.', icon: <Link2 size={17} /> },
@@ -70,12 +74,14 @@ const settingsForConnection = (connection: AiConnection, includeSecret: boolean)
 
 const modelMeta = (entry: AiModel) => [entry.publisher, entry.params, entry.quantization, entry.maxContextLength ? `${Math.round(entry.maxContextLength / 1000)}k Kontext` : ''].filter(Boolean).join(' · ')
 
-export function AiPanel({ settings, note, vaultNotes, onSettingsChange, onApply, onClose }: {
+export function AiPanel({ settings, note, vaultNotes, pdfPath = null, onSettingsChange, onApply, onApplyMarks, onClose }: {
   settings: AppSettings
   note: ActiveNote | null
   vaultNotes: Array<{ title: string; relativePath: string }>
+  pdfPath?: string | null
   onSettingsChange: (settings: Partial<AppSettings>) => void
   onApply: (markdown: string, relativePath: string) => void
+  onApplyMarks?: (marks: PdfImportantMark[]) => void
   onClose: () => void
 }) {
   const [provider, setProvider] = useState<AiProviderId>(settings.aiProvider)
@@ -87,6 +93,10 @@ export function AiPanel({ settings, note, vaultNotes, onSettingsChange, onApply,
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState<AiTransformResult | null>(null)
+  const [markPreview, setMarkPreview] = useState<PdfImportantMark[] | null>(null)
+  const [pdfPages, setPdfPages] = useState<PdfPageText[] | null>(null)
+  const [pdfStatus, setPdfStatus] = useState('')
+  const [pdfTruncated, setPdfTruncated] = useState(false)
   const [previewMode, setPreviewMode] = useState<'rendered' | 'source'>('rendered')
   const isWeb = window.fanotes.platform === 'web'
   const definition = PROVIDERS.find((entry) => entry.id === provider) ?? PROVIDERS[0]
@@ -98,6 +108,44 @@ export function AiPanel({ settings, note, vaultNotes, onSettingsChange, onApply,
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [onClose, running])
+
+  useEffect(() => {
+    let alive = true
+    setMarkPreview(null)
+    setPdfStatus('')
+    setPdfTruncated(false)
+    if (!pdfPath) {
+      setPdfPages([])
+      setActions((current) => {
+        if (!current.has('markImportant')) return current
+        const next = new Set(current)
+        next.delete('markImportant')
+        if (!next.size) next.add('spelling')
+        return next
+      })
+      return () => { alive = false }
+    }
+    setPdfPages(null)
+    const dropMarkAction = () => setActions((current) => {
+      if (!current.has('markImportant')) return current
+      const next = new Set(current)
+      next.delete('markImportant')
+      if (!next.size) next.add('spelling')
+      return next
+    })
+    void readPdfPageTexts(pdfPath).then((extracted) => {
+      if (!alive) return
+      setPdfPages(extracted.pages)
+      setPdfTruncated(extracted.truncated)
+      if (!extracted.pages.length) dropMarkAction()
+    }).catch((error: unknown) => {
+      if (!alive) return
+      setPdfPages([])
+      dropMarkAction()
+      setPdfStatus(error instanceof Error && error.name === 'PasswordException' ? 'Dieses PDF ist passwortgeschützt.' : 'Der PDF-Text konnte nicht gelesen werden.')
+    })
+    return () => { alive = false }
+  }, [pdfPath])
 
   const persist = useCallback((next: AiConnection, includeSecret = true) => {
     onSettingsChange({ aiProvider: next.provider, ...settingsForConnection(next, includeSecret && !(isWeb && !['lmstudio', 'ollama', 'opencode'].includes(next.provider))) })
@@ -136,14 +184,41 @@ export function AiPanel({ settings, note, vaultNotes, onSettingsChange, onApply,
   }
 
   const selectedModel = useMemo(() => models.find((candidate) => candidate.key === connection.model) ?? null, [connection.model, models])
-  const toggleAction = (action: LmStudioAction) => { setResult(null); setActions((current) => { const next = new Set(current); if (next.has(action)) next.delete(action); else next.add(action); return next }) }
+  const textPdf = Boolean(pdfPages?.length)
+  const shownActions = textPdf ? ACTIONS : ACTIONS.filter((action) => action.id !== 'markImportant')
+  const pdfNote = !pdfPath ? '' : pdfPages === null ? 'PDF-Text wird gelesen …' : pdfStatus ? pdfStatus : pdfPages.length === 0 ? 'Dieses PDF enthält keinen auswählbaren Text.' : pdfTruncated ? 'Nur der vordere Teil des PDFs wird an die AI geschickt.' : ''
+  const toggleAction = (action: LmStudioAction) => {
+    setResult(null)
+    setMarkPreview(null)
+    setActions((current) => {
+      if (action === 'markImportant') return current.size === 1 && current.has('markImportant') ? new Set<LmStudioAction>() : new Set(['markImportant'])
+      const next = new Set(current)
+      next.delete('markImportant')
+      if (next.has(action)) next.delete(action)
+      else next.add(action)
+      return next
+    })
+  }
 
   const run = async () => {
     if (!note) { setError('Öffne zuerst eine Markdown-Notiz.'); return }
     if (!connection.model) { setError('Wähle zuerst ein AI-Modell.'); return }
     if (!actions.size) { setError('Wähle mindestens eine Aktion.'); return }
     if (actions.has('instruction') && !instruction.trim()) { setError('Schreibe den freien Auftrag in das Textfeld.'); return }
-    setRunning(true); setError(''); setResult(null)
+    if (actions.has('markImportant')) {
+      if (!pdfPages?.length) { setError('Öffne zuerst ein PDF mit auswählbarem Text.'); return }
+      setRunning(true); setError(''); setResult(null); setMarkPreview(null)
+      try {
+        const transformed = await window.fanotes.aiTransform({ connection, title: note.title, relativePath: note.relativePath, markdown: buildPdfImportantPrompt(pdfPages), actions: ['markImportant'], instruction: '', vaultNotes: [] })
+        const found = parsePdfImportantMarks(transformed.markdown, pdfPages)
+        if (!found.length) setError('Keine wichtige Textstelle konnte im PDF gefunden werden.')
+        else setMarkPreview(found)
+        persist(connection, !cloudInWeb)
+      } catch (runError) { setError(runError instanceof Error ? runError.message : 'Der AI-Auftrag ist fehlgeschlagen.') }
+      finally { setRunning(false) }
+      return
+    }
+    setRunning(true); setError(''); setResult(null); setMarkPreview(null)
     try {
       const transformed = await window.fanotes.aiTransform({ connection, title: note.title, relativePath: note.relativePath, markdown: note.markdown, actions: [...actions], instruction, vaultNotes })
       setResult(transformed)
@@ -177,12 +252,12 @@ export function AiPanel({ settings, note, vaultNotes, onSettingsChange, onApply,
               {cloudInWeb && <div className="ai-privacy-note"><ShieldCheck size={14} /><span><strong>Nicht im Browser gespeichert</strong><small>Der Schlüssel wird vom FaNotes-Server weder protokolliert noch gesichert und verlässt diesen AI-Dialog nach dem Schließen.</small></span></div>}
               {provider === 'opencode' && <div className="ai-privacy-note"><ShieldCheck size={14} /><span><strong>Sicherer Vorschau-Modus</strong><small>Shell-, Datei-, Web- und Agentenwerkzeuge sind deaktiviert; die temporäre OpenCode-Sitzung wird danach gelöscht.</small></span></div>}
             </section>
-            <section className="lm-step lm-actions-step"><div className="lm-step-heading"><b>2</b><span><strong>Aktionen kombinieren</strong><small>{actions.size} ausgewählt · Mehrfachauswahl möglich</small></span></div><div className="lm-action-grid">{ACTIONS.map((action) => <button type="button" key={action.id} className={actions.has(action.id) ? 'is-selected' : ''} aria-pressed={actions.has(action.id)} onClick={() => toggleAction(action.id)}><span className="lm-action-icon">{action.icon}</span><span><strong>{action.title}</strong><small>{action.description}</small></span><i>{actions.has(action.id) && <Check size={13} />}</i>{action.additive && <em>ergänzt</em>}</button>)}</div>{actions.has('instruction') && <label className="lm-field lm-instruction"><span>Dein freier Auftrag</span><textarea value={instruction} rows={4} placeholder="Zum Beispiel: Erkläre jeden Fachbegriff einfacher und ergänze pro Abschnitt ein Beispiel …" onChange={(event) => { setInstruction(event.target.value); setResult(null) }} /></label>}{actions.has('facts') && <div className="lm-fact-warning"><CircleAlert size={15} /><span>Die Faktenprüfung verwendet das Modellwissen. FaNotes aktiviert dafür keine Websuche und markiert Unsicherheit, statt Live-Quellen vorzutäuschen.</span></div>}</section>
+            <section className="lm-step lm-actions-step"><div className="lm-step-heading"><b>2</b><span><strong>Aktionen kombinieren</strong><small>{actions.size} ausgewählt · Mehrfachauswahl möglich</small></span></div><div className="lm-action-grid">{shownActions.map((action) => <button type="button" key={action.id} className={actions.has(action.id) ? 'is-selected' : ''} aria-pressed={actions.has(action.id)} onClick={() => toggleAction(action.id)}><span className="lm-action-icon">{action.icon}</span><span><strong>{action.title}</strong><small>{action.description}</small></span><i>{actions.has(action.id) && <Check size={13} />}</i>{action.additive && <em>ergänzt</em>}</button>)}</div>{pdfNote && <div className="lm-fact-warning">{pdfPages === null ? <LoaderCircle className="spin" size={15} /> : <CircleAlert size={15} />}<span>{pdfNote}</span></div>}{actions.has('instruction') && <label className="lm-field lm-instruction"><span>Dein freier Auftrag</span><textarea value={instruction} rows={4} placeholder="Zum Beispiel: Erkläre jeden Fachbegriff einfacher und ergänze pro Abschnitt ein Beispiel …" onChange={(event) => { setInstruction(event.target.value); setResult(null); setMarkPreview(null) }} /></label>}{actions.has('facts') && <div className="lm-fact-warning"><CircleAlert size={15} /><span>Die Faktenprüfung verwendet das Modellwissen. FaNotes aktiviert dafür keine Websuche und markiert Unsicherheit, statt Live-Quellen vorzutäuschen.</span></div>}</section>
           </aside>
           <main className="lm-studio-preview"><div className="lm-preview-toolbar"><div><span className="eyebrow">3 · Prüfen</span><strong>{result ? `${definition.title} · Ergebnis` : note ? note.title : 'Keine Notiz geöffnet'}</strong></div>{result && <div className="segmented"><button type="button" className={previewMode === 'rendered' ? 'active' : ''} onClick={() => setPreviewMode('rendered')}>Schön</button><button type="button" className={previewMode === 'source' ? 'active' : ''} onClick={() => setPreviewMode('source')}>Markdown</button></div>}</div>
-            <div className="lm-preview-surface">{running ? <div className="lm-processing"><span><LoaderCircle className="spin" size={26} /></span><strong>{selectedModel?.displayName ?? connection.model} arbeitet …</strong><p>{definition.title} führt {actions.size} {actions.size === 1 ? 'Aktion' : 'Aktionen'} gemeinsam aus. Die geöffnete Notiz bleibt bis zur Bestätigung unverändert.</p></div> : result ? previewMode === 'rendered' ? <MarkdownPreview content={result.markdown} /> : <textarea className="lm-result-source" value={result.markdown} readOnly spellCheck={false} /> : <div className="lm-preview-empty"><span><Sparkles size={27} /></span><strong>Deine Notiz bleibt unverändert</strong><p>FaNotes erstellt zuerst eine Vorschau. Erst „Ergebnis übernehmen“ ersetzt den Inhalt der geöffneten Markdown-Datei.</p>{note && <div><small>Aktuelle Notiz</small><b>{note.relativePath}</b><em>{note.markdown.length.toLocaleString(getUiLocale())} Zeichen</em></div>}</div>}</div>
+            <div className="lm-preview-surface">{running ? <div className="lm-processing"><span><LoaderCircle className="spin" size={26} /></span><strong>{selectedModel?.displayName ?? connection.model} arbeitet …</strong><p>{actions.has('markImportant') ? 'Die wichtigen Stellen werden gesucht. Der PDF-Text bleibt unverändert.' : `${definition.title} führt ${actions.size} ${actions.size === 1 ? 'Aktion' : 'Aktionen'} gemeinsam aus. Die geöffnete Notiz bleibt bis zur Bestätigung unverändert.`}</p></div> : markPreview ? <div className="lm-pdf-mark-preview"><strong>Die Stellen werden mit dem normalen Textmarker markiert. Der PDF-Text bleibt unverändert.</strong><ul>{markPreview.map((mark) => <li key={`${mark.page}:${mark.quote}`}><small>Seite {mark.page}</small><span data-i18n-ignore>{mark.quote}</span></li>)}</ul></div> : result ? previewMode === 'rendered' ? <MarkdownPreview content={result.markdown} /> : <textarea className="lm-result-source" value={result.markdown} readOnly spellCheck={false} /> : <div className="lm-preview-empty"><span><Sparkles size={27} /></span><strong>Deine Notiz bleibt unverändert</strong><p>{actions.has('markImportant') ? 'FaNotes sucht wichtige Stellen und markiert sie mit dem normalen Textmarker. Der PDF-Text wird nicht umgeschrieben.' : 'FaNotes erstellt zuerst eine Vorschau. Erst „Ergebnis übernehmen“ ersetzt den Inhalt der geöffneten Markdown-Datei.'}</p>{note && <div><small>Aktuelle Notiz</small><b>{note.relativePath}</b><em>{note.markdown.length.toLocaleString(getUiLocale())} Zeichen</em></div>}</div>}</div>
             {error && <div className="lm-error" role="alert"><CircleAlert size={16} /><span>{error}</span></div>}
-            <footer className="lm-studio-footer"><div>{result ? <><span><Check size={13} /> Vorschau bereit</span>{stats && <small>{stats}</small>}</> : <><span><ShieldCheck size={13} /> {providerStatus}</span><small>{definition.kind === 'cloud' ? 'Es gelten Datenschutz und Kosten des gewählten Anbieters.' : 'Keine Cloud-Verbindung durch FaNotes.'}</small></>}</div><div>{result && <button type="button" className="secondary-button" onClick={() => setResult(null)}>Neu bearbeiten</button>}{result ? <button type="button" className="primary-button" onClick={() => { onApply(result.markdown, note?.relativePath ?? ''); onClose() }}><Check size={15} /> Ergebnis übernehmen</button> : <button type="button" className="primary-button lm-run" onClick={() => void run()} disabled={running || modelsLoading || !note || !connection.model || !actions.size}>{running ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />} Vorschau erzeugen</button>}</div></footer>
+            <footer className="lm-studio-footer"><div>{result || markPreview ? <><span><Check size={13} /> Vorschau bereit</span>{stats && <small>{stats}</small>}</> : <><span><ShieldCheck size={13} /> {providerStatus}</span><small>{definition.kind === 'cloud' ? 'Es gelten Datenschutz und Kosten des gewählten Anbieters.' : 'Keine Cloud-Verbindung durch FaNotes.'}</small></>}</div><div>{(result || markPreview) && <button type="button" className="secondary-button" onClick={() => { setResult(null); setMarkPreview(null) }}>Neu bearbeiten</button>}{markPreview ? <button type="button" className="primary-button" onClick={() => { onApplyMarks?.(markPreview); onClose() }}><Check size={15} /> Markierungen übernehmen</button> : result ? <button type="button" className="primary-button" onClick={() => { onApply(result.markdown, note?.relativePath ?? ''); onClose() }}><Check size={15} /> Ergebnis übernehmen</button> : <button type="button" className="primary-button lm-run" onClick={() => void run()} disabled={running || modelsLoading || !note || !connection.model || !actions.size || (actions.has('markImportant') && !textPdf)}>{running ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />} {actions.has('markImportant') ? 'Stellen suchen' : 'Vorschau erzeugen'}</button>}</div></footer>
           </main>
         </div>
       </section>

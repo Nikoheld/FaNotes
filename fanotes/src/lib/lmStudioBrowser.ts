@@ -1,4 +1,5 @@
 import type { LmStudioAction, LmStudioModel, LmStudioTransformResult } from '../types'
+import { isPdfImportantAction, PDF_IMPORTANT_SYSTEM } from './pdfImportantMarks'
 
 type TransformRequest = {
   baseUrl: string
@@ -145,9 +146,10 @@ const validateRequest = (request: TransformRequest) => {
   cleanToken(request.apiToken)
   if (!request.model.trim() || request.model.length > 500 || /[\0\r\n]/u.test(request.model)) throw new Error('Wähle zuerst ein gültiges LM-Studio-Modell.')
   if (byteLength(request.markdown) > 1_500_000) throw new Error('Die Notiz ist für einen einzelnen LM-Studio-Auftrag zu groß.')
-  const validActions = new Set<LmStudioAction>(['instruction', 'spelling', 'links', 'facts', 'style', 'structure', 'expand', 'summary', 'study'])
+  const validActions = new Set<LmStudioAction>(['instruction', 'spelling', 'links', 'facts', 'style', 'structure', 'expand', 'summary', 'study', 'markImportant'])
   const actions = [...new Set(request.actions)]
   if (!actions.length || actions.some((action) => !validActions.has(action))) throw new Error('Die ausgewählten KI-Aktionen sind ungültig.')
+  if (actions.includes('markImportant') && !isPdfImportantAction(actions)) throw new Error('Wichtiges markieren läuft ohne weitere Aktionen.')
   const instruction = request.instruction.trim().slice(0, 12_000)
   if (actions.includes('instruction') && !instruction) throw new Error('Schreibe zuerst den freien Auftrag für LM Studio.')
   return {
@@ -172,6 +174,7 @@ const promptFor = (request: ReturnType<typeof validateRequest>) => {
     expand: 'Ergänze nur relevante Erklärungen oder Beispiele und erfinde bei Wissenslücken nichts.',
     summary: 'Ergänze oder aktualisiere am Ende einen kompakten Abschnitt „## KI-Zusammenfassung“.',
     study: 'Ergänze oder aktualisiere am Ende „## Lernfragen“ mit Verständnisfragen und einklappbaren Antworten.',
+    markImportant: 'Diese Aktion markiert PDF-Text und gibt kein Markdown-Dokument zurück.',
   }
   const notes = request.vaultNotes.length
     ? request.vaultNotes.map((note) => `- ${note.title} → ${note.relativePath.replace(/\.md$/iu, '')}`).join('\n')
@@ -189,8 +192,11 @@ const unwrapMarkdown = (value: string) => {
 
 export const transformWithBrowserLmStudio = async (raw: TransformRequest): Promise<LmStudioTransformResult> => {
   const request = validateRequest(raw)
-  const input = promptFor(request)
-  const systemPrompt = 'Du bist der lokale Markdown-Assistent von FaNotes. Arbeite sorgfältig, erfinde keine Fakten und befolge das Ausgabeformat exakt.'
+  const marking = isPdfImportantAction(request.actions)
+  const input = marking ? request.markdown : promptFor(request)
+  const systemPrompt = marking ? PDF_IMPORTANT_SYSTEM : 'Du bist der lokale Markdown-Assistent von FaNotes. Arbeite sorgfältig, erfinde keine Fakten und befolge das Ausgabeformat exakt.'
+  const maxTokens = marking ? 4_000 : Math.min(16_000, Math.max(2_048, Math.ceil(request.markdown.length / 2)))
+  const temperature = marking || request.actions.includes('facts') ? 0.05 : 0.15
   let markdown: unknown
   let stats: LmStudioTransformResult['stats'] = {}
   try {
@@ -198,7 +204,7 @@ export const transformWithBrowserLmStudio = async (raw: TransformRequest): Promi
       apiToken: request.apiToken,
       method: 'POST',
       timeoutMs: 10 * 60_000,
-      body: { model: request.model, input, system_prompt: systemPrompt, stream: false, store: false, temperature: request.actions.includes('facts') ? 0.05 : 0.15, max_output_tokens: Math.min(16_000, Math.max(2_048, Math.ceil(request.markdown.length / 2))) },
+      body: { model: request.model, input, system_prompt: systemPrompt, stream: false, store: false, temperature, max_output_tokens: maxTokens },
     })
     if (!isObject(response)) throw new Error('LM Studio hat keine Textantwort geliefert.')
     const messages = Array.isArray(response.output) ? response.output.flatMap((item) => isObject(item) && item.type === 'message' && typeof item.content === 'string' ? [item.content] : []) : []
@@ -215,7 +221,7 @@ export const transformWithBrowserLmStudio = async (raw: TransformRequest): Promi
       apiToken: request.apiToken,
       method: 'POST',
       timeoutMs: 10 * 60_000,
-      body: { model: request.model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: input }], stream: false, temperature: request.actions.includes('facts') ? 0.05 : 0.15, max_tokens: Math.min(16_000, Math.max(2_048, Math.ceil(request.markdown.length / 2))) },
+      body: { model: request.model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: input }], stream: false, temperature, max_tokens: maxTokens },
     })
     if (!isObject(response)) throw new Error('LM Studio hat keine Textantwort geliefert.')
     const first = Array.isArray(response.choices) ? response.choices[0] : null
