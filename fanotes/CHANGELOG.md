@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.10.13-beta.4
+
+- Mark important PDF passages with the highlighter from the AI menu.
+
 ## 2026.10.13-beta.3
 
 - Choose a copy or a live share from the note menu.
