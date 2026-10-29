@@ -1,5 +1,17 @@
 # Änderungsverlauf
 
+## 2026.10.13-beta.3
+
+- Choose a copy or a live share from the note menu.
+- Render a shared note instead of its source.
+- Place a keyboard text field anywhere on a note.
+- Clean the edges of the custom-color wheel.
+- Stop the compass from announcing a drawn arc.
+- Show a note's text before its .famd companion is parsed.
+- Keep reopened handwriting outside the eraser until the disk meets it.
+- Keep activity days the profile already published.
+- Show every proven activity day on the public profile.
+
 ## 2026.10.13-beta.2
 
 - Show a contribution calendar on the public profile.
