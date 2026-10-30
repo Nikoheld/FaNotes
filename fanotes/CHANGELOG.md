@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.10.13-beta.5
+
+- Add Grok as a cloud AI provider.
+
 ## 2026.10.13-beta.4
 
 - Mark important PDF passages with the highlighter from the AI menu.
