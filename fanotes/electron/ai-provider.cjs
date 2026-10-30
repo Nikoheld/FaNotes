@@ -1,6 +1,7 @@
 'use strict'
 
 const { Buffer } = require('node:buffer')
+const { completeGrokBuild, listGrokBuildModels } = require('./grok-build.cjs')
 
 const PROVIDERS = new Set(['lmstudio', 'ollama', 'openai', 'gemini', 'anthropic', 'grok', 'opencode'])
 const LOCAL_PROVIDERS = new Set(['lmstudio', 'ollama', 'opencode'])
@@ -20,9 +21,9 @@ class AiHttpError extends Error {
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 
-function cleanSecret(value, label = 'API-Schlüssel') {
+function cleanSecret(value, label = 'API-Schlüssel', max = 4096) {
   if (value === undefined || value === null || value === '') return ''
-  if (typeof value !== 'string' || value.length > 4096 || /[\0\r\n]/u.test(value)) throw new Error(`Der ${label} ist ungültig.`)
+  if (typeof value !== 'string' || value.length > max || /[\0\r\n]/u.test(value)) throw new Error(`Der ${label} ist ungültig.`)
   return value.trim()
 }
 
@@ -53,12 +54,13 @@ function validateConnection(candidate, { requireModel = false } = {}) {
   if (!isObject(candidate) || !PROVIDERS.has(candidate.provider)) throw new Error('Wähle einen unterstützten AI-Anbieter.')
   const provider = candidate.provider
   const baseUrl = LOCAL_PROVIDERS.has(provider) ? normalizeLocalUrl(candidate.baseUrl, provider) : ''
-  const apiKey = cleanSecret(candidate.apiKey, provider === 'opencode' ? 'OpenCode-Passwort' : 'API-Schlüssel')
+  const grokUsage = provider === 'grok' && candidate.grokUsage === 'build' ? 'build' : 'api'
+  const apiKey = cleanSecret(candidate.apiKey, provider === 'opencode' ? 'OpenCode-Passwort' : grokUsage === 'build' ? 'Grok-Build-Zugang' : 'API-Schlüssel', grokUsage === 'build' ? 8192 : 4096)
   const username = provider === 'opencode'
     ? (typeof candidate.username === 'string' && candidate.username.trim() && candidate.username.length <= 200 && !/[\0\r\n:]/u.test(candidate.username) ? candidate.username.trim() : 'opencode')
     : ''
-  if (!LOCAL_PROVIDERS.has(provider) && !apiKey) throw new Error('Gib zuerst den API-Schlüssel dieses Anbieters ein.')
-  return { provider, baseUrl, apiKey, username, model: requireModel ? cleanModel(candidate.model) : typeof candidate.model === 'string' ? candidate.model.trim().slice(0, 500) : '' }
+  if (!LOCAL_PROVIDERS.has(provider) && !apiKey) throw new Error(grokUsage === 'build' ? 'Melde dich zuerst bei Grok Build an.' : 'Gib zuerst den API-Schlüssel dieses Anbieters ein.')
+  return { provider, baseUrl, apiKey, username, grokUsage, model: requireModel ? cleanModel(candidate.model) : typeof candidate.model === 'string' ? candidate.model.trim().slice(0, 500) : '' }
 }
 
 const authHeaders = (connection) => {
@@ -170,12 +172,14 @@ async function listAiModels(rawConnection) {
     const response = await requestJson('https://api.anthropic.com/v1/models?limit=1000', connection)
     if (!Array.isArray(response?.data)) throw new Error('Anthropic hat keine Modellliste geliefert.')
     models = response.data.flatMap((entry) => isObject(entry) && typeof entry.id === 'string' ? [model('anthropic', entry.id, entry.display_name, { publisher: 'Anthropic', maxContextLength: entry.max_input_tokens })] : [])
+  } else if (connection.provider === 'grok' && connection.grokUsage === 'build') {
+    models = await listGrokBuildModels(connection.apiKey)
   } else if (connection.provider === 'grok') {
     const response = await requestJson('https://api.x.ai/v1/language-models', connection)
     if (!Array.isArray(response?.models)) throw new Error('Grok hat keine Modellliste geliefert.')
     models = response.models.flatMap((entry) => isObject(entry) && typeof entry.id === 'string' && Array.isArray(entry.output_modalities) && entry.output_modalities.includes('text') ? [model('grok', entry.id, entry.id, { publisher: entry.owned_by })] : [])
   } else models = await listOpenCode(connection)
-  const preferred = connection.provider === 'grok' ? 'grok-4.7' : ''
+  const preferred = connection.provider !== 'grok' ? '' : connection.grokUsage === 'build' ? 'grok-build' : 'grok-4.7'
   return models.sort((left, right) => Number(right.key === preferred) - Number(left.key === preferred) || Number(right.loaded) - Number(left.loaded) || left.displayName.localeCompare(right.displayName, 'de')).slice(0, 1000)
 }
 
@@ -282,6 +286,10 @@ async function transformWithAi(rawPayload) {
     const response = await requestJson('https://api.anthropic.com/v1/messages', connection, { method: 'POST', timeoutMs: 10 * 60_000, body: { model: connection.model, max_tokens: maxTokens, system: systemPrompt, messages: [{ role: 'user', content: prompt }] } })
     markdown = Array.isArray(response?.content) ? response.content.filter((part) => part?.type === 'text' && typeof part.text === 'string').map((part) => part.text).join('\n\n') : ''
     stats = { inputTokens: response?.usage?.input_tokens, outputTokens: response?.usage?.output_tokens }
+  } else if (connection.provider === 'grok' && connection.grokUsage === 'build') {
+    const result = await completeGrokBuild({ accessToken: connection.apiKey, model: connection.model, systemPrompt, prompt })
+    markdown = result.markdown
+    stats = result.stats
   } else if (connection.provider === 'grok') {
     const response = await requestJson('https://api.x.ai/v1/responses', connection, { method: 'POST', timeoutMs: 10 * 60_000, body: { model: connection.model, input: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }], temperature, store: false } })
     markdown = typeof response?.output_text === 'string' ? response.output_text : Array.isArray(response?.output) ? response.output.flatMap((item) => Array.isArray(item?.content) ? item.content : []).filter((part) => part?.type === 'output_text' && typeof part.text === 'string').map((part) => part.text).join('\n\n') : ''

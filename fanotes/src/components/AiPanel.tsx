@@ -22,7 +22,7 @@ import {
   X,
   Zap,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { AiConnection, AiModel, AiProviderId, AiTransformResult, AppSettings, LmStudioAction } from '../types'
 import { getUiLanguage, getUiLocale } from '../i18n'
 import { buildPdfImportantPrompt, parsePdfImportantMarks, type PdfImportantMark, type PdfPageText } from '../lib/pdfImportantMarks'
@@ -39,7 +39,7 @@ const PROVIDERS: ProviderDefinition[] = [
   { id: 'openai', title: 'OpenAI', short: 'OA', description: 'Responses API und verfügbare Modelle', kind: 'cloud', icon: <Cloud size={15} /> },
   { id: 'gemini', title: 'Gemini', short: 'GE', description: 'Google Gemini generateContent', kind: 'cloud', icon: <Sparkles size={15} /> },
   { id: 'anthropic', title: 'Anthropic', short: 'AN', description: 'Claude Messages API', kind: 'cloud', icon: <Bot size={15} /> },
-  { id: 'grok', title: 'Grok', short: 'GR', description: 'Responses API und verfügbare Modelle', kind: 'cloud', icon: <Zap size={15} /> },
+  { id: 'grok', title: 'Grok', short: 'GR', description: 'API-Schlüssel oder Grok-Build-Abo', kind: 'cloud', icon: <Zap size={15} /> },
   { id: 'opencode', title: 'OpenCode', short: 'OC', description: 'Konfigurierte OpenCode-Provider', kind: 'local', icon: <Terminal size={15} /> },
 ]
 
@@ -62,7 +62,7 @@ const connectionFromSettings = (provider: AiProviderId, settings: AppSettings): 
   if (provider === 'openai') return { provider, baseUrl: '', model: settings.openAiModel, apiKey: settings.openAiApiKey }
   if (provider === 'gemini') return { provider, baseUrl: '', model: settings.geminiModel, apiKey: settings.geminiApiKey }
   if (provider === 'anthropic') return { provider, baseUrl: '', model: settings.anthropicModel, apiKey: settings.anthropicApiKey }
-  if (provider === 'grok') return { provider, baseUrl: '', model: settings.grokModel, apiKey: settings.grokApiKey }
+  if (provider === 'grok') return { provider, baseUrl: '', model: settings.grokModel, apiKey: settings.grokApiKey, grokUsage: settings.grokUsage === 'build' ? 'build' : 'api' }
   return { provider, baseUrl: settings.openCodeBaseUrl, model: settings.openCodeModel, apiKey: settings.openCodePassword, username: settings.openCodeUsername }
 }
 
@@ -72,7 +72,7 @@ const settingsForConnection = (connection: AiConnection, includeSecret: boolean)
   if (connection.provider === 'openai') return { openAiModel: connection.model, ...(includeSecret ? { openAiApiKey: connection.apiKey } : {}) }
   if (connection.provider === 'gemini') return { geminiModel: connection.model, ...(includeSecret ? { geminiApiKey: connection.apiKey } : {}) }
   if (connection.provider === 'anthropic') return { anthropicModel: connection.model, ...(includeSecret ? { anthropicApiKey: connection.apiKey } : {}) }
-  if (connection.provider === 'grok') return { grokModel: connection.model, ...(includeSecret ? { grokApiKey: connection.apiKey } : {}) }
+  if (connection.provider === 'grok') return { grokModel: connection.model, grokUsage: connection.grokUsage === 'build' ? 'build' : 'api', ...(includeSecret ? { grokApiKey: connection.apiKey } : {}) }
   return { openCodeBaseUrl: connection.baseUrl, openCodeModel: connection.model, openCodeUsername: connection.username || 'opencode', ...(includeSecret ? { openCodePassword: connection.apiKey } : {}) }
 }
 
@@ -102,10 +102,26 @@ export function AiPanel({ settings, note, vaultNotes, pdfPath = null, onSettings
   const [pdfStatus, setPdfStatus] = useState('')
   const [pdfTruncated, setPdfTruncated] = useState(false)
   const [previewMode, setPreviewMode] = useState<'rendered' | 'source'>('rendered')
+  const [buildLogin, setBuildLogin] = useState<{ userCode: string; verificationUri: string; verificationUriComplete?: string } | null>(null)
+  const [buildWaiting, setBuildWaiting] = useState(false)
+  const [buildConnected, setBuildConnected] = useState(() => settings.grokUsage === 'build' && settings.grokBuildRefreshToken.trim() !== '')
   const isWeb = window.fanotes.platform === 'web'
   const definition = PROVIDERS.find((entry) => entry.id === provider) ?? PROVIDERS[0]
   const connection = connections[provider]
   const cloudInWeb = definition.kind === 'cloud' && isWeb
+  const buildSessionRef = useRef({ accessToken: settings.grokBuildAccessToken, refreshToken: settings.grokBuildRefreshToken, expiresAt: settings.grokBuildExpiresAt })
+  const buildAttemptRef = useRef(0)
+  const buildWaitingRef = useRef(false)
+  const connectionRef = useRef(connection)
+  const onSettingsChangeRef = useRef(onSettingsChange)
+  connectionRef.current = connection
+  onSettingsChangeRef.current = onSettingsChange
+  buildWaitingRef.current = buildWaiting
+
+  useEffect(() => {
+    buildSessionRef.current = { accessToken: settings.grokBuildAccessToken, refreshToken: settings.grokBuildRefreshToken, expiresAt: settings.grokBuildExpiresAt }
+    setBuildConnected(settings.grokUsage === 'build' && settings.grokBuildRefreshToken.trim() !== '')
+  }, [settings.grokBuildAccessToken, settings.grokBuildExpiresAt, settings.grokBuildRefreshToken, settings.grokUsage])
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !running) onClose() }
@@ -162,6 +178,98 @@ export function AiPanel({ settings, note, vaultNotes, pdfPath = null, onSettings
     if (persistNow) persist(next, includeSecret)
   }
 
+  const accessForRequest = async (current: AiConnection): Promise<AiConnection> => {
+    if (current.provider !== 'grok' || current.grokUsage !== 'build') return current
+    if (isWeb || !window.fanotes.grokBuild) throw new Error('Grok Build verbindest du in der Desktop-App. Im Browser bleibt der API-Schlüssel.')
+    const session = await window.fanotes.grokBuild({
+      action: 'refresh',
+      refreshToken: buildSessionRef.current.refreshToken,
+      accessToken: buildSessionRef.current.accessToken,
+      expiresAt: buildSessionRef.current.expiresAt,
+    })
+    if (!session?.accessToken) throw new Error('Melde dich zuerst bei Grok Build an.')
+    if (session.rotated) {
+      buildSessionRef.current = { accessToken: session.accessToken, refreshToken: session.refreshToken ?? '', expiresAt: session.expiresAt ?? 0 }
+      onSettingsChange({ grokUsage: 'build', grokBuildAccessToken: session.accessToken, grokBuildRefreshToken: session.refreshToken ?? '', grokBuildExpiresAt: session.expiresAt ?? 0 })
+    }
+    return { ...current, apiKey: session.accessToken, grokUsage: 'build' }
+  }
+
+  const chooseGrokUsage = (usage: 'api' | 'build') => {
+    if (usage !== 'build' && buildWaiting) {
+      buildAttemptRef.current += 1
+      setBuildWaiting(false)
+      setBuildLogin(null)
+      void window.fanotes.grokBuild?.({ action: 'cancel' })
+    }
+    const model = usage === 'build' && !connection.model && !isWeb ? 'grok-build' : connection.model
+    updateConnection({ grokUsage: usage, model }, true, !cloudInWeb)
+  }
+
+  const startBuildLogin = async () => {
+    if (isWeb || !window.fanotes.grokBuild) { setError('Grok Build verbindest du in der Desktop-App. Im Browser bleibt der API-Schlüssel.'); return }
+    const attempt = buildAttemptRef.current + 1
+    buildAttemptRef.current = attempt
+    setError('')
+    setBuildWaiting(true)
+    try {
+      const view = await window.fanotes.grokBuild({ action: 'start' })
+      if (buildAttemptRef.current !== attempt) return
+      if (view?.userCode && view.verificationUri) setBuildLogin({ userCode: view.userCode, verificationUri: view.verificationUri, verificationUriComplete: view.verificationUriComplete })
+    } catch (startError) {
+      if (buildAttemptRef.current !== attempt) return
+      setBuildWaiting(false)
+      setError(startError instanceof Error ? startError.message : 'Die Grok-Build-Anmeldung ist fehlgeschlagen.')
+    }
+  }
+
+  const signOutBuild = () => {
+    buildAttemptRef.current += 1
+    const keepModel = settings.grokApiKey.trim() !== ''
+    setBuildConnected(false)
+    setBuildLogin(null)
+    setBuildWaiting(false)
+    buildSessionRef.current = { accessToken: '', refreshToken: '', expiresAt: 0 }
+    setConnections((current) => ({ ...current, grok: { ...current.grok, grokUsage: 'api', model: keepModel ? current.grok.model : '' } }))
+    void window.fanotes.grokBuild?.({ action: 'cancel' })
+    onSettingsChange({ aiProvider: 'grok', grokUsage: 'api', grokModel: keepModel ? connection.model : '', grokBuildAccessToken: '', grokBuildRefreshToken: '', grokBuildExpiresAt: 0 })
+  }
+
+  useEffect(() => {
+    if (!buildWaiting || !window.fanotes.grokBuild) return
+    let alive = true
+    const attempt = buildAttemptRef.current
+    const tick = async () => {
+      try {
+        const status = await window.fanotes.grokBuild?.({ action: 'status' })
+        if (!alive || buildAttemptRef.current !== attempt || !status) return
+        if (status.status === 'error') { setBuildWaiting(false); setError(status.error || 'Die Grok-Build-Anmeldung ist fehlgeschlagen.'); return }
+        if (status.status !== 'ready') return
+        const session = await window.fanotes.grokBuild?.({ action: 'take' })
+        if (!alive || buildAttemptRef.current !== attempt || !session?.accessToken || !session.refreshToken) return
+        buildSessionRef.current = { accessToken: session.accessToken, refreshToken: session.refreshToken, expiresAt: session.expiresAt ?? 0 }
+        const model = connectionRef.current.model || 'grok-build'
+        setConnections((current) => ({ ...current, grok: { ...current.grok, grokUsage: 'build', model } }))
+        setBuildConnected(true)
+        setBuildWaiting(false)
+        setBuildLogin(null)
+        onSettingsChangeRef.current({ aiProvider: 'grok', grokUsage: 'build', grokModel: model, grokBuildAccessToken: session.accessToken, grokBuildRefreshToken: session.refreshToken, grokBuildExpiresAt: session.expiresAt ?? 0 })
+      } catch (pollError) {
+        if (!alive) return
+        setBuildWaiting(false)
+        setError(pollError instanceof Error ? pollError.message : 'Die Grok-Build-Anmeldung ist fehlgeschlagen.')
+      }
+    }
+    void tick()
+    const timer = window.setInterval(() => void tick(), 1000)
+    return () => { alive = false; window.clearInterval(timer) }
+  }, [buildWaiting])
+
+  useEffect(() => () => {
+    buildAttemptRef.current += 1
+    if (buildWaitingRef.current) void window.fanotes.grokBuild?.({ action: 'cancel' })
+  }, [])
+
   const chooseProvider = (nextProvider: AiProviderId) => {
     if (running) return
     setProvider(nextProvider)
@@ -176,7 +284,7 @@ export function AiPanel({ settings, note, vaultNotes, pdfPath = null, onSettings
     setError('')
     setResult(null)
     try {
-      const available = await window.fanotes.aiListModels(connection)
+      const available = await window.fanotes.aiListModels(await accessForRequest(connection))
       setModels(available)
       if (!available.length) { updateConnection({ model: '' }, true, !cloudInWeb); setError(`${definition.title} ist erreichbar, hat aber kein verwendbares Textmodell gemeldet.`); return }
       const selected = available.some((candidate) => candidate.key === connection.model) ? connection.model : available.find((candidate) => candidate.loaded)?.key ?? available[0].key
@@ -213,7 +321,7 @@ export function AiPanel({ settings, note, vaultNotes, pdfPath = null, onSettings
       if (!pdfPages?.length) { setError('Öffne zuerst ein PDF mit auswählbarem Text.'); return }
       setRunning(true); setError(''); setResult(null); setMarkPreview(null)
       try {
-        const transformed = await window.fanotes.aiTransform({ connection, title: note.title, relativePath: note.relativePath, markdown: buildPdfImportantPrompt(pdfPages), actions: ['markImportant'], instruction: '', vaultNotes: [] })
+        const transformed = await window.fanotes.aiTransform({ connection: await accessForRequest(connection), title: note.title, relativePath: note.relativePath, markdown: buildPdfImportantPrompt(pdfPages), actions: ['markImportant'], instruction: '', vaultNotes: [] })
         const found = parsePdfImportantMarks(transformed.markdown, pdfPages)
         if (!found.length) setError('Keine wichtige Textstelle konnte im PDF gefunden werden.')
         else setMarkPreview(found)
@@ -224,7 +332,7 @@ export function AiPanel({ settings, note, vaultNotes, pdfPath = null, onSettings
     }
     setRunning(true); setError(''); setResult(null); setMarkPreview(null)
     try {
-      const transformed = await window.fanotes.aiTransform({ connection, title: note.title, relativePath: note.relativePath, markdown: note.markdown, actions: [...actions], instruction, vaultNotes })
+      const transformed = await window.fanotes.aiTransform({ connection: await accessForRequest(connection), title: note.title, relativePath: note.relativePath, markdown: note.markdown, actions: [...actions], instruction, vaultNotes })
       setResult(transformed)
       persist(connection, !cloudInWeb)
     } catch (runError) { setError(runError instanceof Error ? runError.message : 'Der AI-Auftrag ist fehlgeschlagen.') }
@@ -234,7 +342,9 @@ export function AiPanel({ settings, note, vaultNotes, pdfPath = null, onSettings
   const stats = result ? [result.stats.inputTokens !== undefined ? `${result.stats.inputTokens} Input-Tokens` : '', result.stats.outputTokens !== undefined ? `${result.stats.outputTokens} Output-Tokens` : '', result.stats.tokensPerSecond !== undefined ? `${result.stats.tokensPerSecond.toFixed(1)} Token/s` : ''].filter(Boolean).join(' · ') : ''
   const providerStatus = definition.kind === 'local'
     ? `${definition.title} verarbeitet die Notiz über ${connection.baseUrl || 'den lokalen Server'}`
-    : cloudInWeb ? `Schlüssel wird nur für diese Sitzung über den FaNotes-Proxy an ${definition.title} weitergereicht` : `Direkte verschlüsselte Verbindung zu ${definition.title}`
+    : provider === 'grok' && connection.grokUsage === 'build'
+      ? 'Direkte Verbindung zu Grok Build. Die Nutzung zählt zu deinem Abo.'
+      : cloudInWeb ? `Schlüssel wird nur für diese Sitzung über den FaNotes-Proxy an ${definition.title} weitergereicht` : `Direkte verschlüsselte Verbindung zu ${definition.title}`
 
   return (
     <div className="modal-backdrop lm-studio-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget && !running) onClose() }}>
@@ -248,11 +358,41 @@ export function AiPanel({ settings, note, vaultNotes, pdfPath = null, onSettings
                 {PROVIDERS.map((entry) => <button type="button" role="tab" aria-selected={provider === entry.id} className={provider === entry.id ? 'is-selected' : ''} key={entry.id} onClick={() => chooseProvider(entry.id)}><span>{entry.icon}</span><span><strong>{entry.title}</strong><small>{entry.description}</small></span><em>{entry.kind === 'local' ? 'Lokal' : 'Cloud'}</em></button>)}
               </div>
               <div className="ai-connection-head"><span>{definition.icon}</span><div><strong>{getUiLanguage() === 'en' ? `Connect ${definition.title}` : `${definition.title} verbinden`}</strong><small>{definition.kind === 'local' ? 'Deine Notiz bleibt im lokalen Netzwerk.' : 'Die Notiz wird zur Verarbeitung an den gewählten Anbieter übertragen.'}</small></div></div>
+              {provider === 'grok' && (
+                <>
+                  <div className="segmented ai-usage-toggle" role="group" aria-label="Grok-Nutzung">
+                    <button type="button" className={connection.grokUsage === 'build' ? '' : 'active'} aria-pressed={connection.grokUsage !== 'build'} onClick={() => chooseGrokUsage('api')}>API-Schlüssel</button>
+                    <button type="button" className={connection.grokUsage === 'build' ? 'active' : ''} aria-pressed={connection.grokUsage === 'build'} onClick={() => chooseGrokUsage('build')}>Grok Build</button>
+                  </div>
+                  {connection.grokUsage === 'build' && (isWeb ? (
+                    <div className="ai-privacy-note"><ShieldCheck size={14} /><span><strong>Nur in der Desktop-App</strong><small>Die Abo-Anmeldung gibt es nur in der installierten App.</small></span></div>
+                  ) : (
+                    <>
+                      {buildConnected ? (
+                        <div className="ai-privacy-note"><ShieldCheck size={14} /><span><strong>Grok Build ist verbunden</strong><small>Die Nutzung zählt zu deinem Abo.</small></span></div>
+                      ) : buildLogin ? (
+                        <>
+                          <p className="ai-build-code">{buildLogin.userCode}</p>
+                          <p className="ai-build-hint">Gib diesen Code auf der Anmeldeseite ein.</p>
+                        </>
+                      ) : (
+                        <div className="ai-privacy-note"><ShieldCheck size={14} /><span><strong>Grok-Build-Abo</strong><small>Die Anmeldung zählt zur Abo-Nutzung.</small></span></div>
+                      )}
+                      <div className="ai-build-actions">
+                        {buildLogin && <button type="button" className="secondary-button" onClick={() => { const uri = buildLogin.verificationUriComplete || buildLogin.verificationUri; if (uri) void window.fanotes.openExternal(uri) }}>Anmeldeseite</button>}
+                        {buildConnected
+                          ? <button type="button" className="secondary-button" onClick={signOutBuild}>Abmelden</button>
+                          : <button type="button" className="secondary-button" onClick={() => void startBuildLogin()} disabled={buildWaiting}>{buildWaiting ? 'Warte auf die Anmeldung …' : 'Bei Grok Build anmelden'}</button>}
+                      </div>
+                    </>
+                  ))}
+                </>
+              )}
               {definition.kind === 'local' && <label className="lm-field"><span>Server-Adresse</span><input value={connection.baseUrl} spellCheck={false} placeholder={provider === 'ollama' ? 'http://127.0.0.1:11434' : provider === 'opencode' ? 'http://127.0.0.1:4096' : 'http://127.0.0.1:1234'} onChange={(event) => updateConnection({ baseUrl: event.target.value })} onBlur={() => persist(connection)} /></label>}
               {provider === 'opencode' && <label className="lm-field"><span>Benutzername <i>Standard: opencode</i></span><input value={connection.username ?? ''} autoComplete="username" onChange={(event) => updateConnection({ username: event.target.value })} onBlur={() => persist(connection)} /></label>}
-              <label className="lm-field"><span>{provider === 'opencode' ? 'Server-Passwort' : definition.kind === 'cloud' ? 'API-Schlüssel' : 'API-Token'} <i>{definition.kind === 'local' ? 'optional' : cloudInWeb ? 'nur diese Sitzung' : 'geschützt gespeichert'}</i></span><div className="ai-secret-field"><KeyRound size={13} /><input type="password" value={connection.apiKey} autoComplete="off" placeholder={definition.kind === 'cloud' ? `${definition.title}-Schlüssel eingeben` : 'Nur bei aktivierter Authentifizierung'} onChange={(event) => updateConnection({ apiKey: event.target.value })} onBlur={() => { if (!cloudInWeb) persist(connection) }} /></div></label>
+              {!(provider === 'grok' && connection.grokUsage === 'build') && <label className="lm-field"><span>{provider === 'opencode' ? 'Server-Passwort' : definition.kind === 'cloud' ? 'API-Schlüssel' : 'API-Token'} <i>{definition.kind === 'local' ? 'optional' : cloudInWeb ? 'nur diese Sitzung' : 'geschützt gespeichert'}</i></span><div className="ai-secret-field"><KeyRound size={13} /><input type="password" value={connection.apiKey} autoComplete="off" placeholder={definition.kind === 'cloud' ? `${definition.title}-Schlüssel eingeben` : 'Nur bei aktivierter Authentifizierung'} onChange={(event) => updateConnection({ apiKey: event.target.value })} onBlur={() => { if (!cloudInWeb) persist(connection) }} /></div></label>}
               <div className="lm-model-row"><label className="lm-field"><span>Modell</span><select value={connection.model} disabled={modelsLoading || !models.length} onChange={(event) => updateConnection({ model: event.target.value }, true, !cloudInWeb)}><option value="">Modell auswählen …</option>{models.map((candidate) => <option key={candidate.key} value={candidate.key}>{candidate.loaded ? '● ' : ''}{candidate.displayName}</option>)}</select></label><button type="button" className="lm-refresh" onClick={() => void loadModels()} disabled={modelsLoading} title="Verbindung prüfen und Modelle laden">{modelsLoading ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}</button></div>
-              {selectedModel && <div className="lm-model-card"><span className={selectedModel.loaded ? 'is-loaded' : ''} /><div><strong>{selectedModel.displayName}</strong><small>{modelMeta(selectedModel) || selectedModel.key}</small></div><b>{definition.kind === 'local' ? selectedModel.loaded ? 'bereit' : 'lädt bei Nutzung' : 'API'}</b></div>}
+              {selectedModel && <div className="lm-model-card"><span className={selectedModel.loaded ? 'is-loaded' : ''} /><div><strong>{selectedModel.displayName}</strong><small>{modelMeta(selectedModel) || selectedModel.key}</small></div><b>{definition.kind === 'local' ? selectedModel.loaded ? 'bereit' : 'lädt bei Nutzung' : provider === 'grok' && connection.grokUsage === 'build' ? 'Abo' : 'API'}</b></div>}
               {cloudInWeb && <div className="ai-privacy-note"><ShieldCheck size={14} /><span><strong>Nicht im Browser gespeichert</strong><small>Der Schlüssel wird vom FaNotes-Server weder protokolliert noch gesichert und verlässt diesen AI-Dialog nach dem Schließen.</small></span></div>}
               {provider === 'opencode' && <div className="ai-privacy-note"><ShieldCheck size={14} /><span><strong>Sicherer Vorschau-Modus</strong><small>Shell-, Datei-, Web- und Agentenwerkzeuge sind deaktiviert; die temporäre OpenCode-Sitzung wird danach gelöscht.</small></span></div>}
             </section>

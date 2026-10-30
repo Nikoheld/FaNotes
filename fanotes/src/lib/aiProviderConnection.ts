@@ -3,9 +3,9 @@ import type { AppSettings } from '../types'
 type AiConnectionSettings = Pick<AppSettings,
   'lmStudioModel' | 'ollamaModel' | 'openCodeModel' |
   'openAiModel' | 'openAiApiKey' | 'geminiModel' | 'geminiApiKey' |
-  'anthropicModel' | 'anthropicApiKey' | 'grokModel' | 'grokApiKey'>
+  'anthropicModel' | 'anthropicApiKey' | 'grokModel' | 'grokApiKey' | 'grokBuildRefreshToken'>
 
-const filled = (value: string) => value.trim() !== ''
+const filled = (value?: string) => typeof value === 'string' && value.trim() !== ''
 
 /** A saved model or cloud key means the provider was connected. Default server addresses do not. */
 export const hasConnectedAiProvider = (settings: AiConnectionSettings) => (
@@ -20,4 +20,5 @@ export const hasConnectedAiProvider = (settings: AiConnectionSettings) => (
   || filled(settings.anthropicApiKey)
   || filled(settings.grokModel)
   || filled(settings.grokApiKey)
+  || filled(settings.grokBuildRefreshToken)
 )

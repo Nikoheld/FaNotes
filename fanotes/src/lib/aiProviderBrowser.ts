@@ -96,7 +96,14 @@ const openCodeModels = (response: unknown): AiModel[] => !isObject(response) || 
   return entries.map(([id, entry]) => aiModel('opencode', `${provider.id}/${id}`, `${providerName} · ${isObject(entry) && typeof entry.name === 'string' ? entry.name : id}`, { publisher: providerName, maxContextLength: isObject(entry) && isObject(entry.limit) && typeof entry.limit.context === 'number' ? entry.limit.context : null }))
 })
 
+const rejectGrokBuildInBrowser = (connection: AiConnection) => {
+  if (connection.provider === 'grok' && connection.grokUsage === 'build') {
+    throw new Error('Grok Build verbindest du in der Desktop-App. Im Browser bleibt der API-Schlüssel.')
+  }
+}
+
 export const listBrowserAiModels = async (connection: AiConnection): Promise<AiModel[]> => {
+  rejectGrokBuildInBrowser(connection)
   if (connection.provider === 'lmstudio') return (await listBrowserLmStudioModels(connection.baseUrl, connection.apiKey)).map((entry) => ({ ...entry, provider: 'lmstudio' }))
   if (CLOUD.has(connection.provider)) {
     if (!cleanSecret(connection.apiKey)) throw new Error('Gib zuerst den API-Schlüssel dieses Anbieters ein.')
@@ -140,6 +147,7 @@ const unwrap = (value: string) => {
 
 export const transformWithBrowserAi = async (payload: TransformPayload): Promise<AiTransformResult> => {
   const { connection } = payload
+  rejectGrokBuildInBrowser(connection)
   if (!connection.model.trim()) throw new Error('Wähle zuerst ein AI-Modell.')
   if (payload.actions.includes('markImportant') && !isPdfImportantAction(payload.actions)) throw new Error('Wichtiges markieren läuft ohne weitere Aktionen.')
   if (connection.provider === 'lmstudio') return { ...(await transformWithBrowserLmStudio({ baseUrl: connection.baseUrl, apiToken: connection.apiKey, model: connection.model, title: payload.title, relativePath: payload.relativePath, markdown: payload.markdown, actions: payload.actions, instruction: payload.instruction, vaultNotes: payload.vaultNotes })), provider: 'lmstudio' }

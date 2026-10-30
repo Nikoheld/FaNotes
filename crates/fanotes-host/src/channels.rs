@@ -88,6 +88,7 @@ pub const CHANNELS: &[Channel] = &[
     channel("fanotes:lm-studio-transform", ChannelKind::Command),
     channel("fanotes:ai-list-models", ChannelKind::Command),
     channel("fanotes:ai-transform", ChannelKind::Command),
+    channel("fanotes:grok-build", ChannelKind::Command),
     channel("fanotes:load-secure-settings", ChannelKind::Command),
     channel("fanotes:save-settings", ChannelKind::Command),
     channel("fanotes:reset-app-data", ChannelKind::Command),

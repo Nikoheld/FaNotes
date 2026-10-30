@@ -619,6 +619,7 @@ export function createBrowserPreviewApi(): FaNotesApi {
       markdown: `${markdown.trimEnd()}${actions.includes('summary') ? '\n\n## AI-Zusammenfassung\n\n- Erzeugte Vorschau der Notiz.' : ''}${actions.includes('instruction') && instruction ? `\n\n> Freier Auftrag: ${instruction}` : ''}\n`,
       stats: { inputTokens: 128, outputTokens: 64, tokensPerSecond: 42 },
     }),
+    grokBuild: async () => { throw new Error('Grok Build verbindest du in der Desktop-App.') },
     saveSettings: async (next: AppSettings) => { settings = next; return settings },
     resetAppData: async () => { settings = { ...DEFAULT_SETTINGS }; return { restarting: false } },
     getUpdateState: async () => ({ ...updateState, autoCheckUpdates: settings.autoCheckUpdates, autoDownloadUpdates: settings.autoDownloadUpdates, installUpdatesOnQuit: settings.installUpdatesOnQuit, updateChannel: settings.updateChannel }),

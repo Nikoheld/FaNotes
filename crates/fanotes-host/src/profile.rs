@@ -139,10 +139,10 @@ fn take_plaintext_secrets(settings: &mut Value) -> Map<String, Value> {
         };
         let value = value.to_owned();
         object.insert((*key).to_owned(), Value::String(String::new()));
-        let limit = if *key == "homeworkApiSecret" {
-            256
-        } else {
-            4096
+        let limit = match *key {
+            "homeworkApiSecret" => 256,
+            "grokBuildAccessToken" | "grokBuildRefreshToken" => 8192,
+            _ => 4096,
         };
         if value.is_empty()
             || value.starts_with(SECRET_PREFIX)

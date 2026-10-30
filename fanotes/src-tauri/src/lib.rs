@@ -450,6 +450,7 @@ fanotes_commands! {
     lm_studio_transform => "fanotes:lm-studio-transform",
     ai_list_models => "fanotes:ai-list-models",
     ai_transform => "fanotes:ai-transform",
+    grok_build => "fanotes:grok-build",
     load_secure_settings => "fanotes:load-secure-settings",
     save_settings => "fanotes:save-settings",
     update_get_state => "fanotes:update-get-state",

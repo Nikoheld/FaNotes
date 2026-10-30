@@ -211,6 +211,14 @@ export type AppSettings = {
   anthropicApiKey: string
   grokModel: string
   grokApiKey: string
+  /** `build` spends the Grok subscription via Grok Build. `api` keeps the xAI API key. */
+  grokUsage: 'api' | 'build'
+  /** Desktop-only Grok Build access token. Never sent to backups or the website. */
+  grokBuildAccessToken: string
+  /** Desktop-only Grok Build refresh token. Never sent to backups or the website. */
+  grokBuildRefreshToken: string
+  /** Epoch milliseconds when the Grok Build access token expires. */
+  grokBuildExpiresAt: number
   openCodeBaseUrl: string
   openCodeModel: string
   openCodeUsername: string
@@ -444,6 +452,8 @@ export type AiConnection = {
   apiKey: string
   username?: string
   model: string
+  /** Grok only. `build` calls the subscription proxy; omitted and `api` keep the API key. */
+  grokUsage?: 'api' | 'build'
 }
 
 export type AiModel = LmStudioModel & {
@@ -614,6 +624,23 @@ export type FaNotesApi = {
     instruction: string
     vaultNotes: Array<{ title: string; relativePath: string }>
   }) => Promise<AiTransformResult>
+  grokBuild: (request: {
+    action: 'start' | 'status' | 'take' | 'cancel' | 'refresh'
+    refreshToken?: string
+    accessToken?: string
+    expiresAt?: number
+  }) => Promise<{
+    status?: 'idle' | 'pending' | 'ready' | 'error'
+    error?: string
+    userCode?: string
+    verificationUri?: string
+    verificationUriComplete?: string
+    expiresIn?: number
+    accessToken?: string
+    refreshToken?: string
+    expiresAt?: number
+    rotated?: boolean
+  } | null>
   loadSecureSettings?: () => Promise<Partial<AppSettings>>
   saveSettings: (settings: AppSettings, options?: { clearProtectedSecrets?: boolean }) => Promise<AppSettings>
   getServerBackupState?: () => Promise<ServerBackupState>

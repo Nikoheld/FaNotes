@@ -222,6 +222,7 @@ const IPC = Object.freeze({
   lmStudioTransform: 'fanotes:lm-studio-transform',
   aiListModels: 'fanotes:ai-list-models',
   aiTransform: 'fanotes:ai-transform',
+  grokBuild: 'fanotes:grok-build',
   loadSecureSettings: 'fanotes:load-secure-settings',
   saveSettings: 'fanotes:save-settings',
   resetAppData: 'fanotes:reset-app-data',
@@ -333,6 +334,10 @@ const DEFAULT_SETTINGS = Object.freeze({
   anthropicApiKey: '',
   grokModel: '',
   grokApiKey: '',
+  grokUsage: 'api',
+  grokBuildAccessToken: '',
+  grokBuildRefreshToken: '',
+  grokBuildExpiresAt: 0,
   openCodeBaseUrl: 'http://127.0.0.1:4096',
   openCodeModel: '',
   openCodeUsername: 'opencode',
@@ -347,6 +352,8 @@ const SECRET_SETTING_KEYS = Object.freeze([
   'geminiApiKey',
   'anthropicApiKey',
   'grokApiKey',
+  'grokBuildAccessToken',
+  'grokBuildRefreshToken',
   'openCodePassword',
   'homeworkApiSecret',
 ])
@@ -545,6 +552,7 @@ let configMutationQueue = Promise.resolve()
 let updateManager = null
 let updateManagerPromise = null
 let aiProviderModule = null
+let grokBuildLogin = null
 let postStartupWorkStarted = false
 let appDataResetInProgress = false
 let protectedSettingsLoaded = false
@@ -4615,6 +4623,23 @@ function registerIpcHandlers() {
     await ensureBootstrap()
     aiProviderModule ??= require('./ai-provider.cjs')
     return aiProviderModule.transformWithAi(payload)
+  })
+
+  handle(IPC.grokBuild, async (_event, request) => {
+    await ensureBootstrap()
+    const grokBuild = require('./grok-build.cjs')
+    grokBuildLogin ??= grokBuild.createLogin()
+    const action = request && typeof request === 'object' ? request.action : ''
+    if (action === 'start') return grokBuildLogin.start()
+    if (action === 'status') return grokBuildLogin.status()
+    if (action === 'take') {
+      const session = grokBuildLogin.take()
+      if (!session) throw new Error('Die Grok-Build-Anmeldung ist noch nicht fertig.')
+      return session
+    }
+    if (action === 'cancel') return grokBuildLogin.cancel()
+    if (action === 'refresh') return grokBuild.refreshSession(request)
+    throw new Error('Unbekannte Grok-Build-Aktion.')
   })
 
   handle(IPC.loadSecureSettings, async () => loadSecureSettings())

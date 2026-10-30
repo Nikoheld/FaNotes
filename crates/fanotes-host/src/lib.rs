@@ -46,6 +46,9 @@ pub(crate) const SECRET_KEYS: &[&str] = &[
     "openAiApiKey",
     "geminiApiKey",
     "anthropicApiKey",
+    "grokApiKey",
+    "grokBuildAccessToken",
+    "grokBuildRefreshToken",
     "openCodePassword",
     "homeworkApiSecret",
 ];
@@ -318,6 +321,9 @@ impl Host {
             }
             "fanotes:ai-list-models" => ai::list_models(args.first().unwrap_or(&Value::Null)),
             "fanotes:ai-transform" => ai::transform(args.first().unwrap_or(&Value::Null)),
+            "fanotes:grok-build" => {
+                Err("Grok Build ist in dieser Version nur in der Electron-App verfügbar.".to_owned())
+            }
             "fanotes:load-secure-settings" => Ok(self.load_secure_settings()),
             "fanotes:save-settings" => self.save_settings(
                 args.first().cloned().unwrap_or(Value::Null),
@@ -1524,10 +1530,10 @@ impl Host {
                 let Some(value) = object.get(*key).and_then(Value::as_str) else {
                     continue;
                 };
-                let limit = if *key == "homeworkApiSecret" {
-                    256
-                } else {
-                    4096
+                let limit = match *key {
+                    "homeworkApiSecret" => 256,
+                    "grokBuildAccessToken" | "grokBuildRefreshToken" => 8192,
+                    _ => 4096,
                 };
                 if value.contains('\0') || vault::utf16_len(value) > limit {
                     continue;

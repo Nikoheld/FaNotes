@@ -152,6 +152,7 @@ if (typeof window !== 'undefined') {
     lmStudioTransform: (payload) => invoke('fanotes:lm-studio-transform', payload),
     aiListModels: (connection) => invoke('fanotes:ai-list-models', connection),
     aiTransform: (payload) => invoke('fanotes:ai-transform', payload),
+    grokBuild: (request) => invoke('fanotes:grok-build', request),
     loadSecureSettings: () => invoke('fanotes:load-secure-settings'),
     saveSettings: (settings, options) => invoke('fanotes:save-settings', settings, options),
     resetAppData: () => invoke('fanotes:reset-app-data'),

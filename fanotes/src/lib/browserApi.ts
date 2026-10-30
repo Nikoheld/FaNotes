@@ -553,6 +553,8 @@ export function createBrowserApi(): FaNotesApi {
       delete safeSettings.geminiApiKey
       delete safeSettings.anthropicApiKey
       delete safeSettings.grokApiKey
+      delete safeSettings.grokBuildAccessToken
+      delete safeSettings.grokBuildRefreshToken
       delete safeSettings.openCodePassword
       delete safeSettings.homeworkApiSecret
       const response = await backupFetch('/api/v1/backups/snapshot', {
@@ -695,6 +697,8 @@ export function createBrowserApi(): FaNotesApi {
         geminiApiKey: settings.geminiApiKey,
         anthropicApiKey: settings.anthropicApiKey,
         grokApiKey: settings.grokApiKey,
+        grokBuildAccessToken: settings.grokBuildAccessToken,
+        grokBuildRefreshToken: settings.grokBuildRefreshToken,
         openCodePassword: settings.openCodePassword,
       }
       serverBackup.automatic = true
@@ -1579,6 +1583,7 @@ export function createBrowserApi(): FaNotesApi {
     lmStudioTransform: transformWithBrowserLmStudio,
     aiListModels: listBrowserAiModels,
     aiTransform: transformWithBrowserAi,
+    grokBuild: async () => { throw new Error('Grok Build verbindest du in der Desktop-App. Im Browser bleibt der API-Schlüssel.') },
     saveSettings: async (next) => {
       await ready
       settings = { ...localizedDefaults, ...clone(next) }

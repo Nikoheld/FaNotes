@@ -49,6 +49,8 @@ const liveFor = () => createRemoteSupportLiveState({
     experimentalHomeworkApi: false,
     openAiApiKey: 'sk-live-secret',
     grokApiKey: 'xai-live-secret',
+    grokBuildAccessToken: 'access-live-secret',
+    grokBuildRefreshToken: 'refresh-live-secret',
     homeworkApiSecret: 'homework-secret-value',
     customCss: 'body{background:url(https://evil.example)}',
   },
@@ -91,7 +93,11 @@ const runOnce = () => {
   assert.ok(inspect.inspect.settings.experimentalRemoteSupport)
   assert.equal(inspect.inspect.settings.openAiApiKey, undefined)
   assert.equal(inspect.inspect.settings.grokApiKey, undefined)
+  assert.equal(inspect.inspect.settings.grokBuildAccessToken, undefined)
+  assert.equal(inspect.inspect.settings.grokBuildRefreshToken, undefined)
   assert.equal(JSON.stringify(inspect).includes('xai-live-secret'), false)
+  assert.equal(JSON.stringify(inspect).includes('access-live-secret'), false)
+  assert.equal(JSON.stringify(inspect).includes('refresh-live-secret'), false)
   assert.equal(inspect.inspect.settings.homeworkApiSecret, undefined)
   assert.equal(JSON.stringify(inspect).includes('sk-live-secret'), false)
   assert.equal(JSON.stringify(inspect).includes('homework-secret-value'), false)
