@@ -182,14 +182,41 @@
     return Number.isFinite(number) ? number : fallback
   }
 
-  function drawInk(page, ink) {
+  var TEXT_PAD_X = 72
+  var TEXT_PAD_Y = 78
+  var TEXT_SLACK = 144
+  var TEXT_COLUMN = 820
+  var TEXT_FONT = 16
+  var TEXT_LEADING = 1.72
+
+  function textColumnOf(note) {
+    var column = note && note.textColumn
+    return {
+      originX: Math.max(0, finite(column && column.originX, 0)),
+      originY: Math.max(0, finite(column && column.originY, 0)),
+      column: Math.max(540, Math.min(900, finite(column && column.column, TEXT_COLUMN))),
+      padX: Math.max(0, finite(column && column.padX, TEXT_PAD_X)),
+      padY: Math.max(0, finite(column && column.padY, TEXT_PAD_Y)),
+      fontSize: Math.max(12, Math.min(26, finite(column && column.fontSize, TEXT_FONT))),
+      lineHeight: Math.max(1.3, Math.min(2.2, finite(column && column.lineHeight, TEXT_LEADING))),
+    }
+  }
+
+  function sourceLines(source) {
+    var text = String(source || '').replace(/\r\n/g, '\n')
+    var marker = /<!--\s*fanotes-ink:[a-zA-Z0-9_-]{1,96}\s*-->/gu
+    return text.split('\n').map(function (line) { return line.replace(marker, '') })
+  }
+
+  function drawInk(page, ink, viewHeight) {
     if (!ink || !Array.isArray(ink.strokes) || !ink.strokes.length) return false
     var width = finite(ink.width, 900)
     var height = finite(ink.height, 1273)
-    if (!(width > 0) || !(height > 0)) return false
+    var view = finite(viewHeight, height)
+    if (!(width > 0) || !(height > 0) || !(view > 0)) return false
     var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
     svg.setAttribute('class', 'share-ink')
-    svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height)
+    svg.setAttribute('viewBox', '0 0 ' + width + ' ' + view)
     svg.setAttribute('role', 'img')
     svg.setAttribute('aria-label', 'Handschrift')
     var drawn = false
@@ -228,16 +255,88 @@
     return true
   }
 
-  function drawFields(page, fields) {
+  function sectionEnd(section, sections) {
+    var end = 1
+    var body = finite(section.bodyTop, 0)
+    sections.forEach(function (other) {
+      if (!other || other === section) return
+      var top = finite(other.top, 1)
+      if (top >= body && top < end) end = top
+    })
+    return end
+  }
+
+  function drawSections(page, ink) {
+    if (!ink || !Array.isArray(ink.sections) || !ink.sections.length) return
+    var width = finite(ink.width, 900)
+    var height = finite(ink.height, 1273)
+    if (!(width > 0) || !(height > 0)) return
+    var host = document.createElement('div')
+    host.className = 'share-sections'
+    host.setAttribute('aria-label', 'Abschnitte')
+    ink.sections.forEach(function (section) {
+      if (!section) return
+      var top = finite(section.top, 0)
+      var bodyTop = finite(section.bodyTop, top)
+      if (!(bodyTop > top)) return
+      var left = Math.max(0, Math.min(1, finite(section.left, 0)))
+      var right = Math.max(left, Math.min(1, finite(section.width, 1)))
+      var nested = typeof section.parentId === 'string' && section.parentId.length > 0
+      var band = document.createElement('div')
+      band.className = 'share-section' + (nested ? ' is-subsection' : '')
+      band.style.top = (top * height) + 'px'
+      band.style.height = ((bodyTop - top) * height) + 'px'
+      band.style.left = (left * 100) + '%'
+      band.style.width = ((right - left) * 100) + '%'
+      var mark = document.createElement('span')
+      mark.className = 'share-section-mark'
+      mark.setAttribute('aria-hidden', 'true')
+      band.appendChild(mark)
+      if (typeof section.title === 'string' && section.title.trim()) {
+        var title = document.createElement('span')
+        title.className = 'share-section-title'
+        title.textContent = section.title.trim()
+        band.appendChild(title)
+      }
+      host.appendChild(band)
+      var end = sectionEnd(section, ink.sections)
+      if (end <= bodyTop) return
+      var rail = document.createElement('div')
+      rail.className = 'share-section-rail' + (nested ? ' is-subsection' : '')
+      rail.style.top = (bodyTop * height) + 'px'
+      rail.style.height = ((end - bodyTop) * height) + 'px'
+      rail.style.left = (left * width + (nested ? 40 : 28)) + 'px'
+      host.appendChild(rail)
+      if (left > 0) {
+        var edge = document.createElement('div')
+        edge.className = 'share-section-edge'
+        edge.style.top = (bodyTop * height) + 'px'
+        edge.style.height = ((end - bodyTop) * height) + 'px'
+        edge.style.left = (left * 100) + '%'
+        host.appendChild(edge)
+      }
+      var rightEdge = document.createElement('div')
+      rightEdge.className = 'share-section-edge'
+      rightEdge.style.top = (bodyTop * height) + 'px'
+      rightEdge.style.height = ((end - bodyTop) * height) + 'px'
+      rightEdge.style.left = (right * 100) + '%'
+      host.appendChild(rightEdge)
+    })
+    if (host.childNodes.length) page.appendChild(host)
+  }
+
+  function drawFields(page, fields, width, height) {
     if (!Array.isArray(fields)) return
+    var sheetW = finite(width, 900)
+    var sheetH = finite(height, 1273)
     fields.forEach(function (field) {
       if (!field || typeof field.text !== 'string' || !field.text.trim()) return
       var box = document.createElement('div')
       box.className = 'share-field'
       box.textContent = field.text
-      box.style.left = (Math.max(0, Math.min(1, finite(field.x, 0))) * 100) + '%'
-      box.style.top = (Math.max(0, Math.min(1, finite(field.y, 0))) * 100) + '%'
-      box.style.width = (Math.max(0.12, Math.min(0.92, finite(field.width, 0.32))) * 100) + '%'
+      box.style.left = (Math.max(0, Math.min(1, finite(field.x, 0))) * sheetW) + 'px'
+      box.style.top = (Math.max(0, Math.min(1, finite(field.y, 0))) * sheetH) + 'px'
+      box.style.width = (Math.max(0.12, Math.min(0.92, finite(field.width, 0.32))) * sheetW) + 'px'
       box.style.fontSize = Math.max(10, Math.min(48, finite(field.fontSize, 16))) + 'px'
       page.appendChild(box)
     })
@@ -254,27 +353,56 @@
     }
     var ink = note.ink
     var fields = note.textFields
-    var hasPage = (ink && Array.isArray(ink.strokes) && ink.strokes.length) || (Array.isArray(fields) && fields.length)
+    var hasInk = ink && ((Array.isArray(ink.strokes) && ink.strokes.length) || (Array.isArray(ink.sections) && ink.sections.length))
+    var hasPage = hasInk || (Array.isArray(fields) && fields.length)
     var proseHost = article
     var page = null
+    var pageHeight = 0
+    var wrote = false
     if (hasPage) {
+      var metrics = textColumnOf(note)
+      var width = finite(ink && ink.width, 900)
+      var sheetHeight = finite(ink && ink.height, 1273)
+      var lines = sourceLines(note.content || '')
+      var textBottom = metrics.originY + metrics.padY + lines.length * metrics.fontSize * metrics.lineHeight + TEXT_SLACK
+      pageHeight = Math.max(sheetHeight, Math.ceil(textBottom))
+      var fit = document.createElement('div')
+      fit.className = 'share-fit'
+      fit.style.setProperty('--sheet-w', width + 'px')
+      fit.style.setProperty('--sheet-h', pageHeight + 'px')
+      var frame = document.createElement('div')
+      frame.className = 'share-frame'
       page = document.createElement('div')
       page.className = 'share-page'
-      var width = finite(ink && ink.width, 900)
-      var height = finite(ink && ink.height, 1273)
-      page.style.aspectRatio = width + ' / ' + height
-      article.appendChild(page)
+      frame.appendChild(page)
+      fit.appendChild(frame)
+      article.appendChild(fit)
       proseHost = document.createElement('div')
-      proseHost.className = 'share-prose'
+      proseHost.className = 'share-prose share-column'
+      var columnLeft = metrics.originX + metrics.padX
+      var columnWidth = Math.max(40, Math.min(metrics.column - metrics.padX * 2, width - columnLeft - metrics.padX))
+      proseHost.style.left = columnLeft + 'px'
+      proseHost.style.top = (metrics.originY + metrics.padY) + 'px'
+      proseHost.style.width = columnWidth + 'px'
+      proseHost.style.fontSize = metrics.fontSize + 'px'
+      proseHost.style.lineHeight = String(metrics.lineHeight)
+      lines.forEach(function (line) {
+        var row = document.createElement('div')
+        row.className = 'share-line'
+        row.textContent = line
+        if (line.trim()) wrote = true
+        proseHost.appendChild(row)
+      })
       page.appendChild(proseHost)
+      if (ink && Array.isArray(ink.sections)) drawSections(page, ink)
     } else {
       proseHost = document.createElement('div')
       proseHost.className = 'share-prose'
       article.appendChild(proseHost)
+      wrote = renderMarkdown(proseHost, note.content || '')
     }
-    var wrote = renderMarkdown(proseHost, note.content || '')
-    var drew = page ? drawInk(page, ink) : false
-    if (page) drawFields(page, fields)
+    var drew = page ? drawInk(page, ink, pageHeight) : false
+    if (page) drawFields(page, fields, finite(ink && ink.width, 900), finite(ink && ink.height, 1273))
     if (!wrote && !drew && !showTitle) {
       var fallback = document.createElement('h1')
       fallback.textContent = note.title || ''

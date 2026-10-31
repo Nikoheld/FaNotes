@@ -149,7 +149,70 @@ const sanitizeShareInk = (value) => {
     })
     pointsUsed += points.length
   }
-  return strokes.length ? { width, height, strokes } : undefined
+  const sections = sanitizeShareSections(value.sections)
+  if (!strokes.length && !sections.length) return undefined
+  return { width, height, strokes, ...(sections.length ? { sections } : {}) }
+}
+
+const clampUnit = (value, fallback) => {
+  const number = finiteNumber(value)
+  if (number === null) return fallback
+  return Math.round(Math.max(0, Math.min(1, number)) * 10000) / 10000
+}
+
+const sanitizeShareSections = (value) => {
+  if (!Array.isArray(value)) return []
+  const sections = []
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const top = finiteNumber(entry.top)
+    const bodyTop = finiteNumber(entry.bodyTop)
+    if (top === null || bodyTop === null || !(bodyTop > top) || top < -0.25 || bodyTop > 1.5) continue
+    const id = typeof entry.id === 'string' && entry.id.length > 0 && entry.id.length <= 64 ? entry.id : `section-${sections.length + 1}`
+    const parentId = typeof entry.parentId === 'string' && entry.parentId.length > 0 && entry.parentId.length <= 64 && entry.parentId !== id
+      ? entry.parentId
+      : ''
+    const title = typeof entry.title === 'string'
+      ? entry.title.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 120)
+      : ''
+    const left = clampUnit(entry.left, 0)
+    const right = clampUnit(entry.width, 1)
+    if (!(right > left)) continue
+    sections.push({
+      id,
+      ...(parentId ? { parentId } : {}),
+      ...(title ? { title } : {}),
+      top: Math.round(Math.max(-0.25, Math.min(1.25, top)) * 10000) / 10000,
+      bodyTop: Math.round(Math.max(-0.25, Math.min(1.25, bodyTop)) * 10000) / 10000,
+      ...(left ? { left } : {}),
+      ...(right !== 1 ? { width: right } : {}),
+    })
+    if (sections.length >= 80) break
+  }
+  return sections
+}
+
+const sanitizeShareTextColumn = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const origin = (number) => {
+    const parsed = finiteNumber(number)
+    if (parsed === null || parsed < 0) return 0
+    return Math.min(20000, Math.round(parsed))
+  }
+  const fontSize = finiteNumber(value.fontSize)
+  const lineHeight = finiteNumber(value.lineHeight)
+  const column = finiteNumber(value.column)
+  const padX = finiteNumber(value.padX)
+  const padY = finiteNumber(value.padY)
+  return {
+    originX: origin(value.originX),
+    originY: origin(value.originY),
+    column: column !== null ? Math.min(900, Math.max(540, Math.round(column))) : 820,
+    padX: padX !== null ? Math.min(240, Math.max(0, Math.round(padX))) : 72,
+    padY: padY !== null ? Math.min(240, Math.max(0, Math.round(padY))) : 78,
+    fontSize: fontSize !== null ? Math.min(26, Math.max(12, Math.round(fontSize))) : 16,
+    lineHeight: lineHeight !== null ? Math.min(2.2, Math.max(1.3, Math.round(lineHeight * 100) / 100)) : 1.72,
+  }
 }
 
 const sanitizeShareTextFields = (value) => {
@@ -187,12 +250,14 @@ export const sanitizeSharePayload = (raw, id) => {
     if (!note || typeof note !== 'object' || Array.isArray(note)) fail(400, 'Ungültige Notiz.')
     const ink = sanitizeShareInk(note.ink)
     const textFields = sanitizeShareTextFields(note.textFields)
+    const textColumn = sanitizeShareTextColumn(note.textColumn)
     return {
       path: boundedString(note.path, MAX_PATH_CHARS, 'Ungültige Notiz.'),
       title: boundedString(typeof note.title === 'string' ? note.title : '', MAX_TITLE_CHARS, 'Ungültige Notiz.'),
       content: boundedString(note.content, MAX_NOTE_CHARS, 'Ungültige Notiz.'),
       ...(ink ? { ink } : {}),
       ...(textFields.length ? { textFields } : {}),
+      ...(textColumn && (ink || textFields.length) ? { textColumn } : {}),
     }
   })
   return {

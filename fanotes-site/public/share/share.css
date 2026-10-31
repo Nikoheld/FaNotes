@@ -14,8 +14,102 @@ h2 { font-size: 1.15rem; margin: 0 0 0.4rem; }
 .share-prose code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; }
 .share-prose pre { overflow: auto; padding: 0.75rem 0.85rem; border-radius: 8px; background: #f3f1ec; }
 .share-prose blockquote { padding-left: 0.85rem; border-left: 3px solid rgba(32, 34, 43, .18); color: #3c3c3c; }
-.share-page { position: relative; width: min(100%, 900px); margin: 0 auto; background: #fff; box-shadow: 0 1px 0 rgba(32, 34, 43, .06); }
-.share-page .share-prose { position: absolute; z-index: 1; left: 8%; right: 8%; top: 6%; max-width: none; }
+.share-fit { container-type: inline-size; width: 100%; }
+.share-frame {
+  position: relative;
+  width: min(100cqi, var(--sheet-w));
+  height: calc(var(--sheet-h) * min(1, 100cqi / var(--sheet-w)));
+  margin: 0 auto;
+}
+.share-page {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--sheet-w);
+  height: var(--sheet-h);
+  transform: scale(min(1, 100cqi / var(--sheet-w)));
+  transform-origin: top left;
+  background: #fff;
+  box-shadow: 0 1px 0 rgba(32, 34, 43, .06);
+}
+.share-column {
+  position: absolute;
+  z-index: 1;
+  margin: 0;
+  max-width: none;
+  color: #20222b;
+  font-family: "JetBrains Mono", "DejaVu Sans Mono", ui-monospace, monospace;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.share-line {
+  margin: 0;
+  padding: 0 2px;
+  min-height: 1lh;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .share-ink { position: absolute; z-index: 2; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.share-field { position: absolute; z-index: 3; box-sizing: border-box; padding: 4px 6px; white-space: pre-wrap; color: #20222b; background: rgba(255, 255, 255, .88); border: 1px solid rgba(45, 48, 60, .18); border-radius: 6px; }
+.share-sections { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.share-section {
+  position: absolute;
+  box-sizing: border-box;
+  border-top: 1px solid rgba(42, 111, 151, .3);
+  border-bottom: 1px solid rgba(42, 111, 151, .3);
+  background: linear-gradient(90deg, rgba(42, 111, 151, .11), rgba(42, 111, 151, .045) 55%, rgba(42, 111, 151, .02));
+  pointer-events: none;
+}
+.share-section.is-subsection {
+  border-left: 3px solid rgba(42, 111, 151, .55);
+  background: linear-gradient(90deg, rgba(42, 111, 151, .18), rgba(42, 111, 151, .07) 72%, rgba(42, 111, 151, .03));
+}
+.share-section-mark {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  width: 30px;
+  height: 30px;
+  transform: translateY(-50%);
+  border: 1px solid rgba(42, 111, 151, .36);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .14);
+}
+.share-section-mark::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 11px;
+  border: 5px solid transparent;
+  border-top-color: #2a6f97;
+}
+.share-section-title {
+  position: absolute;
+  left: 78px;
+  right: 16px;
+  top: 50%;
+  overflow: hidden;
+  transform: translateY(-50%);
+  color: #252630;
+  font: 600 22px/1 system-ui, sans-serif;
+  letter-spacing: .02em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.share-section.is-subsection .share-section-title { font-size: 18px; }
+.share-section-rail {
+  position: absolute;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, rgba(42, 111, 151, .36), rgba(42, 111, 151, .08));
+  pointer-events: none;
+}
+.share-section-edge {
+  position: absolute;
+  width: 2px;
+  margin-left: -1px;
+  background: rgba(42, 111, 151, .28);
+  pointer-events: none;
+}
+.share-field { position: absolute; z-index: 4; box-sizing: border-box; padding: 4px 6px; white-space: pre-wrap; color: #20222b; background: rgba(255, 255, 255, .88); border: 1px solid rgba(45, 48, 60, .18); border-radius: 6px; font-family: system-ui, sans-serif; }
 .share-stopped, .share-missing, .share-loading, .share-ink-missing { color: #5c5c5c; font-family: system-ui, sans-serif; }

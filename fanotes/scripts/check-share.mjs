@@ -54,11 +54,15 @@ assert.equal(readFileSync(siteViewerPath, 'utf8'), viewerHtml, 'the site must se
 assert.equal(readFileSync(join(siteRoot, 'public', 'share', 'share.js'), 'utf8'), viewerScript)
 assert.equal(readFileSync(join(siteRoot, 'public', 'share', 'share.css'), 'utf8'), viewerStyle)
 assert.doesNotMatch(viewerHtml, /<style[\s>]/u)
-assert.match(viewerHtml, /<script src="share\.js\?v=2"><\/script>/u)
-assert.match(viewerHtml, /href="share\.css\?v=2"/u)
+assert.match(viewerHtml, /<script src="share\.js\?v=3"><\/script>/u)
+assert.match(viewerHtml, /href="share\.css\?v=3"/u)
 assert.match(viewerScript, /share-note-title/u)
 assert.match(viewerScript, /share-prose/u)
 assert.match(viewerScript, /share-ink/u)
+assert.match(viewerScript, /share-section/u)
+assert.match(viewerScript, /share-column/u)
+assert.match(viewerStyle, /share-column/u)
+assert.doesNotMatch(viewerStyle, /left:\s*8%/u)
 assert.doesNotMatch(viewerScript, /innerHTML/u)
 assert.match(serviceSource, /Environment=FANOTES_SHARE_DIR=\/var\/lib\/fanotes-shares/u)
 assert.match(serviceSource, /ReadWritePaths=\/var\/lib\/fanotes-shares/u)
@@ -228,6 +232,101 @@ try {
   assert.match(storedInk, /#203040/)
   assert.match(storedInk, /Neben der Linie/)
   assert.doesNotMatch(storedInk, /INK-HISTORY-MUST-NOT-UPLOAD/)
+  assert.equal(inkEntries[0].textColumn.padX, 72)
+  assert.equal(inkEntries[0].textColumn.padY, 78)
+  assert.equal(inkEntries[0].textColumn.column, 820)
+  assert.equal(inkEntries[0].textColumn.fontSize, 16)
+  assert.equal(inkEntries[0].ink.height, 600)
+
+  const sectionDocument = {
+    schemaVersion: 1,
+    sourceWidth: 900,
+    sourceHeight: 800,
+    sourceOriginX: 12,
+    sourceOriginY: 20,
+    strokes: [{
+      points: [
+        { x: 0.1, y: 0.1, t: 0, pressure: 0.4, tiltX: 0, tiltY: 0, pointerType: 'pen' },
+        { x: 0.2, y: 0.12, t: 8, pressure: 0.5, tiltX: 0, tiltY: 0, pointerType: 'pen' },
+      ],
+      baseWidth: 2,
+      color: '#112233',
+    }],
+    sections: [{
+      id: 'sec-1',
+      top: 0.2,
+      bodyTop: 0.29,
+      collapsed: true,
+      title: 'Strahlensatz',
+      hidden: {
+        widthPx: 900,
+        heightPx: 200,
+        strokes: [{
+          points: [
+            { x: 0.3, y: 0.4, t: 0, pressure: 0.4, tiltX: 0, tiltY: 0, pointerType: 'pen' },
+            { x: 0.5, y: 0.6, t: 8, pressure: 0.5, tiltX: 0, tiltY: 0, pointerType: 'pen' },
+          ],
+          baseWidth: 3,
+          color: '#445566',
+          secret: 'SECRET-MUST-NOT-UPLOAD',
+        }],
+        sections: [{
+          id: 'sub-1',
+          top: 0.05,
+          bodyTop: 0.29,
+          collapsed: false,
+          title: 'Unterteil',
+          hidden: null,
+        }],
+      },
+    }],
+    inkHistory: { undo: ['INK-HISTORY-MUST-NOT-UPLOAD'] },
+  }
+  const sectionEntries = await share.loadShareEntries(
+    [{ relativePath: 'Theorie.md', kind: 'file', extension: 'md' }],
+    async () => '# Theorie\n\nZeile unter dem Abschnitt\n',
+    async () => ({
+      ink: { drawingJson: JSON.stringify(sectionDocument) },
+      textFields: [{ id: 'tf-2', page: 1, x: 0.2, y: 0.5, width: 0.32, fontSize: 16, text: 'Im Abschnitt' }],
+    }),
+  )
+  const sectionInk = sectionEntries[0].ink
+  assert.equal(sectionInk.strokes.length, 2)
+  assert.equal(sectionInk.strokes[0].color, '#112233')
+  assert.equal(sectionInk.strokes[1].color, '#445566')
+  assert.equal(sectionInk.height, 1000)
+  assert.equal(sectionInk.sections.length, 2)
+  assert.equal(sectionInk.sections[0].title, 'Strahlensatz')
+  assert.equal(sectionInk.sections[1].title, 'Unterteil')
+  assert.equal(sectionInk.sections[1].parentId, 'sec-1')
+  assert.equal(sectionEntries[0].textColumn.originX, 12)
+  assert.equal(sectionEntries[0].textColumn.originY, 20)
+  assert.ok(Math.abs(sectionEntries[0].textFields[0].y - 0.4) < 0.001, `field y ${sectionEntries[0].textFields[0].y}`)
+  assert.ok(Math.abs(sectionInk.strokes[0].points[0].y - 0.08) < 0.001, `live y ${sectionInk.strokes[0].points[0].y}`)
+  assert.ok(Math.abs(sectionInk.sections[0].top - 0.16) < 0.001, `section top ${sectionInk.sections[0].top}`)
+  const sectionShare = await share.publishShare({
+    entries: sectionEntries,
+    rootPath: 'Theorie.md',
+    mode: 'copy',
+    port: sharePort,
+    origin,
+    now: '2026-10-29T12:05:00.000Z',
+  })
+  assert.match(sectionShare.request.body, /Strahlensatz/)
+  assert.match(sectionShare.request.body, /Unterteil/)
+  assert.match(sectionShare.request.body, /#445566/)
+  assert.match(sectionShare.request.body, /Zeile unter dem Abschnitt/)
+  assert.doesNotMatch(sectionShare.request.body, /SECRET-MUST-NOT-UPLOAD/)
+  assert.doesNotMatch(sectionShare.request.body, /INK-HISTORY-MUST-NOT-UPLOAD/)
+  const storedSection = readFileSync(join(shareDir, `${sectionShare.record.id}.json`), 'utf8')
+  assert.match(storedSection, /Strahlensatz/)
+  assert.match(storedSection, /Unterteil/)
+  assert.match(storedSection, /#445566/)
+  assert.doesNotMatch(storedSection, /SECRET-MUST-NOT-UPLOAD/)
+  const sectionRead = share.parseSharePayload(sectionShare.request.body)
+  assert.equal(sectionRead.notes[0].ink.sections.length, 2)
+  assert.equal(sectionRead.notes[0].ink.strokes.length, 2)
+  assert.equal(sectionRead.notes[0].textColumn.originY, 20)
 
   const folderEntries = await share.loadShareEntries([
     {
@@ -379,6 +478,26 @@ try {
     assert.doesNotMatch(inkView.text, /Die Handschrift fehlt/)
     const inkShapes = await viewed.cdp.evaluate('document.querySelectorAll(".share-ink polyline").length')
     assert.equal(inkShapes, 1)
+    const columnLeft = await viewed.cdp.evaluate('document.querySelector(".share-column").style.left')
+    assert.equal(columnLeft, '72px')
+    const columnTop = await viewed.cdp.evaluate('document.querySelector(".share-column").style.top')
+    assert.equal(columnTop, '78px')
+    const lineText = await viewed.cdp.evaluate('[...document.querySelectorAll(".share-line")].map((line) => line.textContent).join("\\n")')
+    assert.match(lineText, /# Skizze/)
+    assert.doesNotMatch(lineText, /fanotes-ink/)
+    const sectionView = await reloadViewer({ ...viewed, link: sectionShare.record.link }, 'Strahlensatz')
+    assert.equal(sectionView.errors.length, 0, `section page errors: ${sectionView.errors.join(' | ')}`)
+    assert.match(sectionView.text, /Strahlensatz/)
+    assert.match(sectionView.text, /Unterteil/)
+    assert.match(sectionView.text, /Zeile unter dem Abschnitt/)
+    assert.match(sectionView.text, /Im Abschnitt/)
+    assert.doesNotMatch(sectionView.text, /fanotes-ink/)
+    const sectionBands = await viewed.cdp.evaluate('document.querySelectorAll(".share-section").length')
+    assert.equal(sectionBands, 2)
+    const sectionShapes = await viewed.cdp.evaluate('document.querySelectorAll(".share-ink polyline").length')
+    assert.equal(sectionShapes, 2)
+    const sectionOrigin = await viewed.cdp.evaluate('document.querySelector(".share-column").style.top')
+    assert.equal(sectionOrigin, '98px')
     if (scratch && viewed.screenshot) writeFileSync(join(scratch, 'share-view.png'), viewed.screenshot)
     const folderView = await reloadViewer({ ...viewed, link: folder.record.link }, 'Verschachtelte Uebung')
     assert.equal(folderView.errors.length, 0, `folder page errors: ${folderView.errors.join(' | ')}`)

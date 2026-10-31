@@ -518,7 +518,12 @@ export function SettingsModal({
     void refreshSharesOpenedInSettings({
       loadEntries: async () => loadShareEntries(await window.fanotes.getTree(), (path) => window.fanotes.readFile(path), (path) => (
         window.fanotes.readNoteCompanion ? window.fanotes.readNoteCompanion(path).catch(() => null) : Promise.resolve(null)
-      )),
+      ), {
+        fontSize: settings.editorFontSize,
+        lineHeight: settings.lineHeight,
+        contentWidth: settings.contentWidth,
+        readable: settings.readableLineLength,
+      }),
       readDirectory: () => settings.shareRecent,
       port: sharePort,
       origin: shareOrigin,
@@ -538,7 +543,12 @@ export function SettingsModal({
     try {
       const entries = await loadShareEntries(await window.fanotes.getTree(), (path) => window.fanotes.readFile(path), (path) => (
         window.fanotes.readNoteCompanion ? window.fanotes.readNoteCompanion(path).catch(() => null) : Promise.resolve(null)
-      ))
+      ), {
+        fontSize: settings.editorFontSize,
+        lineHeight: settings.lineHeight,
+        contentWidth: settings.contentWidth,
+        readable: settings.readableLineLength,
+      })
       const published = await publishShare({
         entries,
         rootPath: sharePath,

@@ -1958,7 +1958,12 @@ export default function App({ startupBootstrap }: AppProps) {
         settingsRecent: () => settingsRef.current.shareRecent ?? '',
         loadEntries: () => loadShareEntries(treeRef.current, (notePath) => window.fanotes.readFile(notePath), (notePath) => (
         window.fanotes.readNoteCompanion ? window.fanotes.readNoteCompanion(notePath).catch(() => null) : Promise.resolve(null)
-      )),
+      ), {
+        fontSize: settingsRef.current.editorFontSize,
+        lineHeight: settingsRef.current.lineHeight,
+        contentWidth: settingsRef.current.contentWidth,
+        readable: settingsRef.current.readableLineLength,
+      }),
       })
       if (savedSession) {
         // Activity during the write builds on the saved session; only the
@@ -3563,7 +3568,12 @@ export default function App({ startupBootstrap }: AppProps) {
       }
       const entries = await loadShareEntries(await window.fanotes.getTree(), (path) => window.fanotes.readFile(path), (path) => (
         window.fanotes.readNoteCompanion ? window.fanotes.readNoteCompanion(path).catch(() => null) : Promise.resolve(null)
-      ))
+      ), {
+        fontSize: settingsRef.current.editorFontSize,
+        lineHeight: settingsRef.current.lineHeight,
+        contentWidth: settingsRef.current.contentWidth,
+        readable: settingsRef.current.readableLineLength,
+      })
       const collected = collectShareNotes(entries, relativePath)
       if (collected.notes.length === 0) {
         toast(collected.kind === 'folder' ? 'Noch keine Notizen vorhanden' : 'Diese Notiz ist noch leer.', 'info')

@@ -1,6 +1,12 @@
 // Public note and folder links. This is not vault sync: encrypted device sync
 // stays on /api/v1/sync. A share uploads the readable title, the markdown, and
 // a public drawing of the handwriting. Undo history stays in the vault.
+// Collapsed sections are opened first so the page matches the sheet with every
+// band open: hidden ink comes back, and the text column uses the editor's pad.
+
+import { deserializeSections, expandSection, readSectionTitle, sectionPoint, sortSections, type InkSection } from '../inkSections'
+import { keepMarkOnPage } from '../noteCanvas'
+import type { StrokePoint } from '../../../../src/types'
 
 export const SHARE_HOST = 'fanotes.fasrv.ch'
 export const SHARE_ORIGIN = `https://${SHARE_HOST}`
@@ -18,11 +24,49 @@ export type ShareInkStroke = {
   points: ShareInkPoint[]
 }
 
+/**
+ * One open band on the public sheet. `top` and `bodyTop` are 0–1 of the page.
+ * `width` is the right edge, 0–1, and is omitted when it is the sheet edge.
+ * Every band is open: a collapsed body was expanded before upload.
+ */
+export type ShareInkSection = {
+  id: string
+  parentId?: string
+  title?: string
+  top: number
+  bodyTop: number
+  left?: number
+  width?: number
+}
+
+/**
+ * Where typed lines sit on the sheet, in the same pixels as the editor.
+ * `column` is the text pane width. The pad is inside that pane.
+ */
+export type ShareTextColumn = {
+  originX: number
+  originY: number
+  column: number
+  padX: number
+  padY: number
+  fontSize: number
+  lineHeight: number
+}
+
+/** Font size, line height, and content width from the settings that wrote the note. */
+export type ShareTextLayout = {
+  fontSize?: number
+  lineHeight?: number
+  contentWidth?: number
+  readable?: boolean
+}
+
 /** 0–1 strokes on the saved page. Pressure samples and undo history are omitted. */
 export type ShareInk = {
   width: number
   height: number
   strokes: ShareInkStroke[]
+  sections?: ShareInkSection[]
 }
 
 export type ShareTextField = {
@@ -40,6 +84,7 @@ export type ShareEntry = {
   content?: string
   ink?: ShareInk
   textFields?: ShareTextField[]
+  textColumn?: ShareTextColumn
 }
 
 export type ShareVaultNode = {
@@ -55,6 +100,7 @@ export type ShareNote = {
   content: string
   ink?: ShareInk
   textFields?: ShareTextField[]
+  textColumn?: ShareTextColumn
 }
 
 export type SharePayload = {
@@ -168,30 +214,70 @@ const thinPoints = (points: ShareInkPoint[], budget: number) => {
   return next
 }
 
-/** The strokes a public page can draw. A full drawing document or its JSON string both work. */
-export const publicShareInk = (value: unknown): ShareInk | undefined => {
-  const record = drawingRecord(value)
-  if (!record || !Array.isArray(record.strokes)) return undefined
+/** Editor column. Matches `--paper-width` (at most 900) and the text pad. */
+const SHARE_COLUMN_MAX = 900
+const SHARE_COLUMN_MIN = 540
+const SHARE_COLUMN = 820
+const SHARE_PAD_X = 72
+const SHARE_PAD_Y = 78
+const SHARE_TEXT_SLACK = 144
+const SHARE_FONT_SIZE = 16
+const SHARE_LINE_HEIGHT = 1.72
+const SHARE_SECTIONS = 80
+
+type ShareStrokeDraft = {
+  color?: unknown
+  width?: unknown
+  baseWidth?: unknown
+  opacity?: unknown
+  points: StrokePoint[]
+}
+
+const readOrigin = (value: unknown) => {
+  const number = finiteNumber(value)
+  if (number === null || number < 0) return 0
+  return Math.min(20000, Math.round(number))
+}
+
+const readSheetExtent = (record: Record<string, unknown>) => {
   const widthNumber = finiteNumber(record.width ?? record.sourceWidth)
   const heightNumber = finiteNumber(record.height ?? record.sourceHeight)
-  const width = widthNumber !== null && widthNumber >= 200 && widthNumber <= 24000 ? Math.round(widthNumber) : 900
-  const height = heightNumber !== null && heightNumber >= 200 && heightNumber <= 80000 ? Math.round(heightNumber) : 1273
-  const strokes: ShareInkStroke[] = []
-  let pointsUsed = 0
-  for (const entry of record.strokes) {
-    if (strokes.length >= SHARE_INK_STROKES || pointsUsed >= SHARE_INK_POINTS) break
+  return {
+    width: widthNumber !== null && widthNumber >= 200 && widthNumber <= 24000 ? Math.round(widthNumber) : 900,
+    height: heightNumber !== null && heightNumber >= 200 && heightNumber <= 80000 ? Math.round(heightNumber) : 1273,
+  }
+}
+
+const penPoint = (x: number, y: number): StrokePoint => sectionPoint(x, y)
+
+const draftStrokes = (value: unknown): ShareStrokeDraft[] => {
+  if (!Array.isArray(value)) return []
+  const strokes: ShareStrokeDraft[] = []
+  for (const entry of value) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
     const raw = entry as { color?: unknown; width?: unknown; baseWidth?: unknown; opacity?: unknown; points?: unknown }
     if (!Array.isArray(raw.points)) continue
-    const points: ShareInkPoint[] = []
+    const points: StrokePoint[] = []
     for (const point of raw.points) {
       if (!point || typeof point !== 'object') continue
       const sample = point as { x?: unknown; y?: unknown }
       const x = finiteNumber(sample.x)
       const y = finiteNumber(sample.y)
       if (x === null || y === null) continue
-      points.push({ x: roundUnit(x), y: roundUnit(y) })
+      points.push(penPoint(x, y))
     }
+    if (!points.length) continue
+    strokes.push({ color: raw.color, width: raw.width, baseWidth: raw.baseWidth, opacity: raw.opacity, points })
+  }
+  return strokes
+}
+
+const publishStrokes = (drafts: readonly ShareStrokeDraft[]): ShareInkStroke[] => {
+  const strokes: ShareInkStroke[] = []
+  let pointsUsed = 0
+  for (const raw of drafts) {
+    if (strokes.length >= SHARE_INK_STROKES || pointsUsed >= SHARE_INK_POINTS) break
+    const points = raw.points.map((point) => ({ x: roundUnit(point.x), y: roundUnit(point.y) }))
     if (!points.length) continue
     const budget = Math.min(500, SHARE_INK_POINTS - pointsUsed)
     const kept = thinPoints(points, budget)
@@ -206,7 +292,196 @@ export const publicShareInk = (value: unknown): ShareInk | undefined => {
     })
     pointsUsed += kept.length
   }
-  return strokes.length ? { width, height, strokes } : undefined
+  return strokes
+}
+
+const publishSections = (sections: readonly InkSection<ShareStrokeDraft>[]): ShareInkSection[] => {
+  const list: ShareInkSection[] = []
+  for (const section of sortSections(sections)) {
+    if (section.collapsed) continue
+    const top = roundUnit(section.top.y)
+    const bodyTop = roundUnit(section.bodyTop.y)
+    if (!(bodyTop > top)) continue
+    const title = readSectionTitle(section.title)
+    const left = section.left > 0 ? roundUnit(section.left) : 0
+    const right = section.width < 1 ? roundUnit(section.width) : 1
+    if (!(right > left)) continue
+    list.push({
+      id: section.id.slice(0, 64),
+      ...(section.parentId ? { parentId: section.parentId.slice(0, 64) } : {}),
+      ...(title ? { title } : {}),
+      top,
+      bodyTop,
+      ...(left ? { left } : {}),
+      ...(right !== 1 ? { width: right } : {}),
+    })
+    if (list.length >= SHARE_SECTIONS) break
+  }
+  return list
+}
+
+/** Grow the bottom of the sheet and keep every mark on the same pixel. Hidden ink stays in its own box. */
+const growShareSheet = (
+  height: number,
+  addPx: number,
+  strokes: readonly ShareStrokeDraft[],
+  sections: readonly InkSection<ShareStrokeDraft>[],
+  fields: unknown,
+) => {
+  const next = height + addPx
+  if (!(addPx > 0) || !(next > height)) return { height, fields }
+  const move = (point: { y: number }) => {
+    point.y = keepMarkOnPage(point.y, height, next, 0)
+  }
+  for (const stroke of strokes) for (const point of stroke.points) move(point)
+  for (const section of sections) {
+    move(section.top)
+    move(section.bodyTop)
+  }
+  const remapped = Array.isArray(fields)
+    ? fields.map((field) => {
+      if (!field || typeof field !== 'object' || Array.isArray(field)) return field
+      const y = finiteNumber((field as { y?: unknown }).y)
+      if (y === null) return field
+      return { ...(field as Record<string, unknown>), y: keepMarkOnPage(y, height, next, 0) }
+    })
+    : fields
+  return { height: next, fields: remapped }
+}
+
+/**
+ * Opens every collapsed band the way the board does: grow by the hidden body,
+ * then put that ink and its subsections back. The result is the open sheet.
+ */
+const openShareDrawing = (record: Record<string, unknown>, fieldsValue: unknown) => {
+  const extent = readSheetExtent(record)
+  let height = extent.height
+  let fields = fieldsValue
+  const live = { strokes: draftStrokes(record.strokes) }
+  const sections = deserializeSections<ShareStrokeDraft>(record.sections, draftStrokes)
+  const visit = (fn: (stroke: ShareStrokeDraft) => void) => {
+    for (const stroke of live.strokes) fn(stroke)
+  }
+  for (let guard = 0; guard < SHARE_SECTIONS && height < 80000; guard += 1) {
+    const section = sections.find((entry) => entry.collapsed)
+    if (!section) break
+    const hiddenPx = Math.max(0, section.hidden?.heightPx ?? 0)
+    const room = Math.max(0, 80000 - height)
+    // The expand shifts by the whole hidden body. A partial grow would overlap the ink below it.
+    if (hiddenPx > room) break
+    const growPx = hiddenPx
+    if (growPx > 0) {
+      const grown = growShareSheet(height, growPx, live.strokes, sections, fields)
+      height = grown.height
+      fields = grown.fields
+    }
+    live.strokes = expandSection(
+      live.strokes,
+      sections,
+      section,
+      { width: extent.width, height },
+      visit,
+      (stroke, points) => ({ ...stroke, points }),
+    )
+  }
+  return { width: extent.width, height, strokes: live.strokes, sections, fields, originX: readOrigin(record.sourceOriginX), originY: readOrigin(record.sourceOriginY) }
+}
+
+export const shareSourceLineCount = (content: string) => (
+  String(content ?? '').replace(/\r\n/g, '\n').split('\n').length
+)
+
+export const shareTextColumnFor = (
+  originX: number,
+  originY: number,
+  layout?: ShareTextLayout,
+): ShareTextColumn => {
+  const content = finiteNumber(layout?.contentWidth)
+  const fontSize = finiteNumber(layout?.fontSize)
+  const lineHeight = finiteNumber(layout?.lineHeight)
+  const readable = layout?.readable !== false
+  const column = readable
+    ? Math.min(SHARE_COLUMN_MAX, Math.max(SHARE_COLUMN_MIN, content !== null ? Math.round(content) : SHARE_COLUMN))
+    : SHARE_COLUMN_MAX
+  return {
+    originX: readOrigin(originX),
+    originY: readOrigin(originY),
+    column,
+    padX: SHARE_PAD_X,
+    padY: SHARE_PAD_Y,
+    fontSize: fontSize !== null ? Math.max(12, Math.min(26, Math.round(fontSize))) : SHARE_FONT_SIZE,
+    lineHeight: lineHeight !== null ? Math.max(1.3, Math.min(2.2, Math.round(lineHeight * 100) / 100)) : SHARE_LINE_HEIGHT,
+  }
+}
+
+const sanitizeTextColumn = (value: unknown): ShareTextColumn | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const raw = value as Partial<ShareTextColumn>
+  return shareTextColumnFor(readOrigin(raw.originX), readOrigin(raw.originY), {
+    contentWidth: raw.column,
+    fontSize: raw.fontSize,
+    lineHeight: raw.lineHeight,
+    readable: true,
+  })
+}
+
+const shareInkFromOpen = (
+  width: number,
+  height: number,
+  strokes: readonly ShareStrokeDraft[],
+  sections: readonly InkSection<ShareStrokeDraft>[],
+): ShareInk | undefined => {
+  const published = publishStrokes(strokes)
+  const bands = publishSections(sections)
+  if (!published.length && !bands.length) return undefined
+  return {
+    width,
+    height: Math.max(200, Math.min(80000, Math.round(height))),
+    strokes: published,
+    ...(bands.length ? { sections: bands } : {}),
+  }
+}
+
+/**
+ * Public ink for one note. A vault drawing is opened so collapsed handwriting
+ * is on the sheet. A page that was already opened stays as it is.
+ */
+export const publicShareInk = (value: unknown): ShareInk | undefined => {
+  const record = drawingRecord(value)
+  if (!record || (!Array.isArray(record.strokes) && !Array.isArray(record.sections))) return undefined
+  const opened = openShareDrawing(record, undefined)
+  return shareInkFromOpen(opened.width, opened.height, opened.strokes, opened.sections)
+}
+
+/** Ink, text fields, and the text column for one companion, on the open sheet. */
+export const sharePageFromCompanion = (
+  inkValue: unknown,
+  fieldsValue: unknown,
+  content: string,
+  layout?: ShareTextLayout,
+): { ink?: ShareInk; textFields: ShareTextField[]; textColumn?: ShareTextColumn } => {
+  const record = drawingRecord(inkValue)
+  if (!record) {
+    const textFields = publicShareTextFields(fieldsValue)
+    return { textFields, ...(textFields.length ? { textColumn: shareTextColumnFor(0, 0, layout) } : {}) }
+  }
+  const opened = openShareDrawing(record, fieldsValue)
+  let { height, fields } = opened
+  const textColumn = shareTextColumnFor(opened.originX, opened.originY, layout)
+  const textBottom = textColumn.originY + textColumn.padY + shareSourceLineCount(content) * textColumn.fontSize * textColumn.lineHeight + SHARE_TEXT_SLACK
+  const needed = Math.ceil(textBottom)
+  if (needed > height && height < 80000) {
+    const grown = growShareSheet(height, Math.min(needed, 80000) - height, opened.strokes, opened.sections, fields)
+    height = grown.height
+    fields = grown.fields
+  }
+  const ink = shareInkFromOpen(opened.width, height, opened.strokes, opened.sections)
+  const textFields = publicShareTextFields(fields)
+  return {
+    ...(ink ? { ink } : {}),
+    textFields,
+    ...((ink || textFields.length) ? { textColumn } : {}),
+  }
 }
 
 export const publicShareTextFields = (value: unknown): ShareTextField[] => {
@@ -236,14 +511,21 @@ export const publicShareTextFields = (value: unknown): ShareTextField[] => {
 }
 
 const shareNoteFrom = (path: string, content: string, entry: ShareEntry): ShareNote => {
-  const ink = publicShareInk(entry.ink)
-  const textFields = publicShareTextFields(entry.textFields)
+  // A companion that loadShareEntries already opened carries its text column.
+  // A raw drawing still opens here, so a direct publish keeps hidden ink.
+  const prepared = entry.textColumn
+    ? null
+    : sharePageFromCompanion(entry.ink, entry.textFields, content)
+  const ink = prepared ? prepared.ink : publicShareInk(entry.ink)
+  const textFields = prepared ? prepared.textFields : publicShareTextFields(entry.textFields)
+  const textColumn = sanitizeTextColumn(entry.textColumn) ?? prepared?.textColumn
   return {
     path,
     title: shareNoteTitle(path, content),
     content,
     ...(ink ? { ink } : {}),
     ...(textFields.length ? { textFields } : {}),
+    ...(textColumn && (ink || textFields.length) ? { textColumn } : {}),
   }
 }
 
@@ -287,6 +569,7 @@ export const loadShareEntries = async (
   nodes: readonly ShareVaultNode[],
   readFile: (path: string) => Promise<string>,
   readCompanion?: (path: string) => Promise<{ ink?: unknown; textFields?: unknown } | null>,
+  layout?: ShareTextLayout,
 ): Promise<ShareEntry[]> => {
   const entries: ShareEntry[] = []
   for (const node of flattenShareVault(nodes)) {
@@ -297,14 +580,14 @@ export const loadShareEntries = async (
     if (!isMarkdownPath(node.path, node.extension)) continue
     const content = await readFile(node.path)
     const companion = readCompanion ? await readCompanion(node.path).catch(() => null) : null
-    const ink = publicShareInk(companion?.ink)
-    const textFields = publicShareTextFields(companion?.textFields)
+    const page = sharePageFromCompanion(companion?.ink, companion?.textFields, content, layout)
     entries.push({
       path: node.path,
       kind: 'file',
       content,
-      ...(ink ? { ink } : {}),
-      ...(textFields.length ? { textFields } : {}),
+      ...(page.ink ? { ink: page.ink } : {}),
+      ...(page.textFields.length ? { textFields: page.textFields } : {}),
+      ...(page.textColumn ? { textColumn: page.textColumn } : {}),
     })
   }
   return entries
@@ -340,12 +623,14 @@ export const parseSharePayload = (body: string): SharePayload | null => {
       if (!note || typeof note.content !== 'string' || typeof note.path !== 'string') return []
       const ink = publicShareInk((note as { ink?: unknown }).ink)
       const textFields = publicShareTextFields((note as { textFields?: unknown }).textFields)
+      const textColumn = sanitizeTextColumn((note as { textColumn?: unknown }).textColumn)
       return [{
         path: note.path,
         title: typeof note.title === 'string' ? note.title : shareNoteTitle(note.path, note.content),
         content: note.content,
         ...(ink ? { ink } : {}),
         ...(textFields.length ? { textFields } : {}),
+        ...(textColumn && (ink || textFields.length) ? { textColumn } : {}),
       }]
     })
     return {
