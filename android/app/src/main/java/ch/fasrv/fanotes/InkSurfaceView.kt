@@ -254,6 +254,15 @@ class InkSurfaceView @JvmOverloads constructor(
         setBackgroundColor(android.graphics.Color.TRANSPARENT)
         invalidate()
     }
+
+    fun applyDeskChrome(theme: String, systemDark: Boolean) {
+        val chrome = ch.fasrv.fanotes.desk.windowChrome(theme, systemDark)
+        desk.color = Color.parseColor(chrome.window)
+        if (workspaceKind == "clean") setBackgroundColor(desk.color)
+        inkPaint.isAntiAlias = ch.fasrv.fanotes.desk.COMMITTED_INK_ANTIALIAS
+        tilePaint.isAntiAlias = ch.fasrv.fanotes.desk.COMMITTED_INK_ANTIALIAS
+        invalidate()
+    }
     var editorFontId: String = "jetbrains"
     var editorTypeface: Typeface = Typeface.MONOSPACE
         private set
@@ -303,7 +312,7 @@ class InkSurfaceView @JvmOverloads constructor(
     /** While the on-page editor is open the preview is hidden so the glyphs are not doubled. */
     var showMarkdown: Boolean = true
 
-    private val desk = Paint().apply { color = Color.parseColor("#E6E1D6") }
+    private val desk = Paint().apply { color = Color.TRANSPARENT }
     private val paper = Paint().apply { color = Color.parseColor("#FBFCFC") }
     private val ruling = Paint().apply { color = Color.parseColor("#5C6B8E"); alpha = 70 }
     private val inkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -434,7 +443,9 @@ class InkSurfaceView @JvmOverloads constructor(
     init {
         isFocusable = true
         isFocusableInTouchMode = true
-        setBackgroundColor(Color.parseColor("#E6E1D6"))
+        setBackgroundColor(Color.TRANSPARENT)
+        inkPaint.isAntiAlias = ch.fasrv.fanotes.desk.COMMITTED_INK_ANTIALIAS
+        tilePaint.isAntiAlias = ch.fasrv.fanotes.desk.COMMITTED_INK_ANTIALIAS
         if (Build.VERSION.SDK_INT >= 35) {
             requestedFrameRate = 120f
         }
@@ -657,12 +668,17 @@ class InkSurfaceView @JvmOverloads constructor(
     }
 
     override fun onHoverEvent(event: MotionEvent): Boolean {
+        trackPenRing(event)
         if (placingSection) {
             sectionGuideY = screenToNorm(event.x, event.y).second.toFloat()
             invalidate()
         }
-        if (event.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) return super.onHoverEvent(event)
-        if (event.actionMasked == MotionEvent.ACTION_HOVER_EXIT) {
+        val stylusIndex = (0 until event.pointerCount).firstOrNull { index ->
+            val tool = event.getToolType(index)
+            tool == MotionEvent.TOOL_TYPE_STYLUS || tool == MotionEvent.TOOL_TYPE_ERASER
+        }
+        if (stylusIndex == null) return super.onHoverEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_HOVER_EXIT || event.actionMasked == MotionEvent.ACTION_CANCEL) {
             hoverX = Float.NaN
             hoverY = Float.NaN
             if (!erasing) {
@@ -670,11 +686,11 @@ class InkSurfaceView @JvmOverloads constructor(
                 nibY = Float.NaN
             }
         } else {
-            hoverX = event.x
-            hoverY = event.y
-            nibX = event.x
-            nibY = event.y
-            palm = touchPalmState(palm, sample(event, 0, PointerAction.HOVER))
+            hoverX = event.getX(stylusIndex)
+            hoverY = event.getY(stylusIndex)
+            nibX = hoverX
+            nibY = hoverY
+            palm = touchPalmState(palm, sample(event, stylusIndex, PointerAction.HOVER))
         }
         invalidate()
         return true
@@ -682,6 +698,7 @@ class InkSurfaceView @JvmOverloads constructor(
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        trackPenRing(event)
         if (placingSection) {
             sectionGuideY = screenToNorm(event.x, event.y).second.toFloat()
             invalidate()
@@ -1289,7 +1306,12 @@ class InkSurfaceView @JvmOverloads constructor(
             return
         }
         val scale = pixelsPerPageUnit()
-        if (cacheScale == 0f) cacheScale = scale.coerceIn(MIN_CACHE_SCALE, MAX_CACHE_SCALE)
+        val nextCache = ch.fasrv.fanotes.desk.nextCacheScale(cacheScale, scale)
+        if (cacheScale <= 0f || nextCache > cacheScale + 0.01f) {
+            val hadTiles = tiles.isNotEmpty()
+            cacheScale = nextCache
+            if (hadTiles && !ch.fasrv.fanotes.desk.inkMoveAllocatesFullPage) invalidateTiles()
+        }
         val placements = currentPlacements(scale)
         worksheetPlacements = placements
         val cover = placements.maxOfOrNull { it.top + it.height + 36.0 } ?: 0.0
@@ -1324,9 +1346,12 @@ class InkSurfaceView @JvmOverloads constructor(
             hoverPaint.style = Paint.Style.STROKE
             hoverPaint.strokeWidth = 1.5f * resources.displayMetrics.density
             canvas.drawCircle(nibX, nibY, eraserRadius().toFloat() * scale, hoverPaint)
-        } else if (!hoverX.isNaN()) {
-            hoverPaint.style = Paint.Style.STROKE
-            canvas.drawCircle(hoverX, hoverY, 8f * resources.displayMetrics.density, hoverPaint)
+        } else {
+            val ring = penRingPoint
+            if (ring != null) {
+                hoverPaint.style = Paint.Style.STROKE
+                canvas.drawCircle(ring.x, ring.y, 8f * resources.displayMetrics.density, hoverPaint)
+            }
         }
         sectionsOf(current.document).forEach { section ->
             val top = pageTop + (section.top * current.document.sourceHeight * scale).toFloat()
@@ -1527,8 +1552,8 @@ class InkSurfaceView @JvmOverloads constructor(
     private fun tileAt(current: InkSession, x: Int, y: Int, tile: Int): Bitmap {
         val key = x.toLong() shl 32 or (y.toLong() and 0xffffffffL)
         tiles[key]?.let { return it }
-        val raster = cacheScale.coerceIn(MIN_CACHE_SCALE, MAX_CACHE_SCALE)
-        val size = (tile * raster).toInt().coerceIn(1, 480)
+        val raster = ch.fasrv.fanotes.desk.committedRasterScale(cacheScale)
+        val size = ch.fasrv.fanotes.desk.tileBitmapSide(tile, raster)
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val tileCanvas = Canvas(bitmap)
         tileCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
@@ -1566,9 +1591,10 @@ class InkSurfaceView @JvmOverloads constructor(
     }
 
     private fun settleZoom() {
-        val scale = pixelsPerPageUnit().coerceIn(MIN_CACHE_SCALE, MAX_CACHE_SCALE)
-        if (cacheScale == 0f || kotlin.math.abs(scale - cacheScale) / cacheScale > 0.45f) {
-            cacheScale = scale
+        val displayed = pixelsPerPageUnit()
+        val next = ch.fasrv.fanotes.desk.nextCacheScale(cacheScale, displayed)
+        if (cacheScale <= 0f || next > cacheScale + 0.01f) {
+            cacheScale = next
             invalidateTiles()
         }
     }
@@ -1763,13 +1789,81 @@ class InkSurfaceView @JvmOverloads constructor(
     }
 
     private fun invalidateTiles(stroke: InkStroke? = null) {
+        if (ch.fasrv.fanotes.desk.inkMoveAllocatesFullPage) return
         if (stroke == null) {
             tiles.values.forEach { it.recycle() }
             tiles.clear()
             return
         }
-        tiles.values.forEach { it.recycle() }
-        tiles.clear()
+        val current = session
+        if (current == null || stroke.points.isEmpty()) {
+            tiles.values.forEach { it.recycle() }
+            tiles.clear()
+            return
+        }
+        val width = current.document.sourceWidth
+        val height = current.document.sourceHeight
+        var left = Float.POSITIVE_INFINITY
+        var top = Float.POSITIVE_INFINITY
+        var right = Float.NEGATIVE_INFINITY
+        var bottom = Float.NEGATIVE_INFINITY
+        for (point in stroke.points) {
+            val x = (point.x * width).toFloat()
+            val y = (point.y * height).toFloat()
+            if (x < left) left = x
+            if (y < top) top = y
+            if (x > right) right = x
+            if (y > bottom) bottom = y
+        }
+        val pad = (stroke.baseWidth + 48.0).toFloat()
+        val rect = ch.fasrv.fanotes.desk.TileRect(left - pad, top - pad, right + pad, bottom + pad)
+        val existing = tiles.keys.map { key ->
+            ch.fasrv.fanotes.desk.PageTile((key shr 32).toInt(), (key and 0xffffffffL).toInt())
+        }
+        val drop = ch.fasrv.fanotes.desk.tilesToRebuild(existing, rect, TILE_PAGE)
+        for (tile in drop) {
+            val key = tile.x.toLong() shl 32 or (tile.y.toLong() and 0xffffffffL)
+            tiles.remove(key)?.recycle()
+        }
+    }
+
+    private var penRingPoint: ch.fasrv.fanotes.desk.PenRing? = null
+
+    private fun trackPenRing(event: MotionEvent) {
+        var ring = penRingPoint
+        val leaving = event.actionMasked == MotionEvent.ACTION_HOVER_EXIT || event.actionMasked == MotionEvent.ACTION_CANCEL
+        if (leaving) {
+            penRingPoint = ch.fasrv.fanotes.desk.nextPenRing(
+                ring,
+                ch.fasrv.fanotes.desk.StylusSample(ch.fasrv.fanotes.desk.StylusPhase.LEAVE, 0f, 0f),
+            )
+            hoverX = Float.NaN
+            hoverY = Float.NaN
+            return
+        }
+        val phase = when (event.actionMasked) {
+            MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE -> ch.fasrv.fanotes.desk.StylusPhase.HOVER
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> ch.fasrv.fanotes.desk.StylusPhase.DOWN
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> ch.fasrv.fanotes.desk.StylusPhase.UP
+            else -> ch.fasrv.fanotes.desk.StylusPhase.MOVE
+        }
+        for (index in 0 until event.pointerCount) {
+            val tool = event.getToolType(index)
+            val stylus = tool == MotionEvent.TOOL_TYPE_STYLUS || tool == MotionEvent.TOOL_TYPE_ERASER
+            if (!stylus) continue
+            val up = event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_POINTER_UP
+            val samplePhase = if (up && event.actionIndex == index) ch.fasrv.fanotes.desk.StylusPhase.UP else phase
+            ring = ch.fasrv.fanotes.desk.nextPenRing(
+                ring,
+                ch.fasrv.fanotes.desk.StylusSample(samplePhase, event.getX(index), event.getY(index)),
+            )
+        }
+        penRingPoint = ring
+        val drawn = penRingPoint
+        if (drawn != null) {
+            hoverX = drawn.x
+            hoverY = drawn.y
+        }
     }
 
     private fun toolOf(event: MotionEvent, index: Int): PointerTool {

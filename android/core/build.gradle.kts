@@ -13,6 +13,12 @@ kotlin {
     }
 }
 
+sourceSets {
+    main {
+        resources.srcDir("../../fanotes/resources/i18n")
+    }
+}
+
 dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     testImplementation(kotlin("test"))

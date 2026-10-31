@@ -235,6 +235,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val noteStandardBusy = MutableStateFlow(false)
     private val glyphImportRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val glyphImports = glyphImportRequests.asSharedFlow()
+    private val oneNoteImportRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val oneNoteImports = oneNoteImportRequests.asSharedFlow()
+    private val addonImportRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val addonImports = addonImportRequests.asSharedFlow()
     private var saveJob: Job? = null
     private var editRevision = 0
     private var dirty = false
@@ -265,6 +269,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 runCatching { decodeGlyphLibrary(graph.readGlyphLibrary()) }.getOrDefault(emptyList())
             }
         }
+
         viewModelScope.launch {
             loadTree()
             if (tree.value.none { it.kind != NoteKind.FOLDER }) {
@@ -443,7 +448,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 recordBug("note", path)
             } catch (error: Exception) {
                 if (generation == openGeneration && fromHistory != null) noteTrail.value = fromHistory
-                message.value = error.message ?: "Die Notiz konnte nicht geöffnet werden."
+                message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Die Notiz konnte nicht geöffnet werden.")
             }
         }
     }
@@ -481,7 +486,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 saveNow()
             } catch (error: Exception) {
-                message.value = error.message ?: "Speichern fehlgeschlagen."
+                message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Speichern fehlgeschlagen.")
             }
         }
     }
@@ -1091,7 +1096,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 val paper = ch.fasrv.fanotes.desk.penSettings(deskSettings.value).paper
                 withContext(Dispatchers.IO) { graph.store.createUniqueMarkdown(folder, paper = paper) }
             } catch (error: Exception) {
-                message.value = error.message ?: "Die Notiz konnte nicht erstellt werden."
+                message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Die Notiz konnte nicht erstellt werden.")
                 return@launch
             }
             openCreatedFolder(folder)
@@ -1107,7 +1112,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 withContext(Dispatchers.IO) { graph.store.createUniqueFolder(folder) }
             } catch (error: Exception) {
-                message.value = error.message ?: "Der Ordner konnte nicht erstellt werden."
+                message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Der Ordner konnte nicht erstellt werden.")
                 return@launch
             }
             openCreatedFolder(folder)
@@ -1146,7 +1151,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             val next = try {
                 withContext(Dispatchers.IO) { graph.store.rename(path, title) }
             } catch (error: Exception) {
-                message.value = error.message ?: "Umbenennen ist fehlgeschlagen."
+                message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Umbenennen ist fehlgeschlagen.")
                 return@launch
             }
             if (next != path) moveReferences(path, next)
@@ -1235,7 +1240,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             val next = try {
                 withContext(Dispatchers.IO) { graph.store.moveEntry(path, destFolder) }
             } catch (error: Exception) {
-                message.value = error.message ?: "Verschieben ist fehlgeschlagen."
+                message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Verschieben ist fehlgeschlagen.")
                 return@launch
             }
             if (next != path) moveReferences(path, next)
@@ -1250,7 +1255,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                     saveNow()
                 } catch (error: Exception) {
                     undoTrash.value = null
-                    message.value = error.message ?: "Verschieben abgebrochen: die letzten Änderungen konnten nicht gespeichert werden."
+                    message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Verschieben abgebrochen: die letzten Änderungen konnten nicht gespeichert werden.")
                     return@launch
                 }
             }
@@ -1259,7 +1264,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                     flushSplitNow()
                 } catch (error: Exception) {
                     undoTrash.value = null
-                    message.value = error.message ?: "Verschieben abgebrochen: die letzten Änderungen konnten nicht gespeichert werden."
+                    message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Verschieben abgebrochen: die letzten Änderungen konnten nicht gespeichert werden.")
                     return@launch
                 }
             }
@@ -1269,7 +1274,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (error: Exception) {
                 undoTrash.value = null
-                message.value = error.message ?: "Der Eintrag konnte nicht in den Papierkorb verschoben werden."
+                message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Der Eintrag konnte nicht in den Papierkorb verschoben werden.")
                 return@launch
             }
             detachTrashed(path)
@@ -1349,7 +1354,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             val restored = try {
                 withContext(Dispatchers.IO) { graph.store.restoreTrash(id) }
             } catch (error: Exception) {
-                message.value = error.message ?: "Wiederherstellen ist fehlgeschlagen."
+                message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Wiederherstellen ist fehlgeschlagen.")
                 return@launch
             }
             undoTrash.value = null
@@ -1407,14 +1412,14 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 try {
                     saveNow()
                 } catch (error: Exception) {
-                    message.value = error.message ?: "Die Kopie konnte nicht erstellt werden."
+                    message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Die Kopie konnte nicht erstellt werden.")
                     return@launch
                 }
             }
             val created = try {
                 withContext(Dispatchers.IO) { graph.store.duplicateNote(path) }
             } catch (error: Exception) {
-                message.value = error.message ?: "Die Kopie konnte nicht erstellt werden."
+                message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Die Kopie konnte nicht erstellt werden.")
                 return@launch
             }
             loadTree()
@@ -1495,7 +1500,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 val stored = try {
                     withContext(Dispatchers.IO) { graph.store.storeImageWorksheet(name, bytes, imageMime) }
                 } catch (error: Exception) {
-                    message.value = error.message ?: "Bild konnte nicht eingefügt werden."
+                    message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Bild konnte nicht eingefügt werden.")
                     return@launch
                 }
                 val next = ch.fasrv.fanotes.famd.attachWorksheet(markdown.value, stored.id)
@@ -1520,7 +1525,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             val path = try {
                 withContext(Dispatchers.IO) { graph.store.importUniquePdf(folder, name, bytes) }
             } catch (error: Exception) {
-                message.value = error.message ?: "Das PDF konnte nicht als Notiz importiert werden."
+                message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Das PDF konnte nicht als Notiz importiert werden.")
                 return@launch
             }
             openCreatedFolder(folder)
@@ -1550,7 +1555,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 val stored = try {
                     withContext(Dispatchers.IO) { graph.store.storeWorksheet(name, bytes, mime) }
                 } catch (error: Exception) {
-                    message.value = error.message ?: "Das Arbeitsblatt konnte nicht importiert werden."
+                    message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Das Arbeitsblatt konnte nicht importiert werden.")
                     return@launch
                 }
                 val next = ch.fasrv.fanotes.famd.attachWorksheet(markdown.value, stored.id)
@@ -1573,7 +1578,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 message.value = "Eine Notiz mit diesem Namen gibt es schon."
                 return@launch
             } catch (error: Exception) {
-                message.value = error.message ?: "Das Arbeitsblatt konnte nicht importiert werden."
+                message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Das Arbeitsblatt konnte nicht importiert werden.")
                 return@launch
             }
             refreshTree()
@@ -1621,7 +1626,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 if (register) graph.engine.register(email, password) else graph.engine.login(email, password)
                 message.value = if (register) ch.fasrv.fanotes.sync.SYNC_ACCOUNT_REGISTERED else ch.fasrv.fanotes.sync.SYNC_ACCOUNT_SIGNED_IN
             } catch (error: Exception) {
-                message.value = error.message ?: ch.fasrv.fanotes.sync.SYNC_ACCOUNT_FAILED
+                message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, ch.fasrv.fanotes.sync.SYNC_ACCOUNT_FAILED)
             } finally {
                 syncAccountBusy.value = false
             }
@@ -1659,7 +1664,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             runCatching { graph.engine.changePassword(current, next) }
                 .onSuccess { message.value = "Passwort geändert. Alle anderen Geräte müssen sich neu anmelden." }
-                .onFailure { error -> message.value = error.message ?: "Das Passwort konnte nicht geändert werden." }
+                .onFailure { error -> message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Das Passwort konnte nicht geändert werden.") }
         }
     }
 
@@ -1667,7 +1672,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             runCatching { graph.engine.deleteAccount(password) }
                 .onSuccess { message.value = "Konto und Serverdaten wurden gelöscht." }
-                .onFailure { error -> message.value = error.message ?: "Das Konto konnte nicht gelöscht werden." }
+                .onFailure { error -> message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Das Konto konnte nicht gelöscht werden.") }
         }
     }
 
@@ -1675,7 +1680,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             runCatching { graph.engine.removeDevice(deviceId) }
                 .onSuccess { message.value = "„$name“ wurde abgemeldet." }
-                .onFailure { error -> message.value = error.message ?: "Das Gerät konnte nicht abgemeldet werden." }
+                .onFailure { error -> message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Das Gerät konnte nicht abgemeldet werden.") }
         }
     }
 
@@ -1877,7 +1882,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             val path = try {
                 withContext(Dispatchers.IO) { graph.store.importUniquePdf(subject, name, bytes) }
             } catch (error: Exception) {
-                message.value = error.message ?: "Das Buch konnte nicht hinzugefügt werden."
+                message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Das Buch konnte nicht hinzugefügt werden.")
                 return@launch
             }
             val next = withContext(Dispatchers.IO) {
@@ -2052,7 +2057,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 refreshTree()
                 message.value = "Verlinkung gesetzt."
             } catch (error: IllegalArgumentException) {
-                message.value = error.message
+                message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Die Verlinkung konnte nicht gesetzt werden.")
             }
         }
     }
@@ -2228,7 +2233,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val next = try {
             ch.fasrv.fanotes.desk.restyleNoteLink(current, style)
         } catch (error: IllegalArgumentException) {
-            message.value = error.message
+            message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Die Verlinkung konnte nicht geändert werden.")
             return
         }
         val links = noteLinks.value.map { if (it.id == id) next else it }
@@ -2250,7 +2255,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val links = try {
             ch.fasrv.fanotes.desk.removeNoteLink(noteLinks.value, id)
         } catch (error: IllegalArgumentException) {
-            message.value = error.message
+            message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Die Verlinkung konnte nicht entfernt werden.")
             return
         }
         val payload = (source.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
@@ -2819,7 +2824,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 saveNow()
             } catch (error: Exception) {
-                message.value = error.message ?: "Speichern fehlgeschlagen."
+                message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Speichern fehlgeschlagen.")
             }
         }
     }
@@ -3240,6 +3245,14 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         glyphImportRequests.tryEmit(Unit)
     }
 
+    fun requestOneNoteImport() {
+        oneNoteImportRequests.tryEmit(Unit)
+    }
+
+    fun requestAddonImport() {
+        addonImportRequests.tryEmit(Unit)
+    }
+
     fun importGlyphBytes(bytes: ByteArray) {
         viewModelScope.launch {
             val outcome = withContext(Dispatchers.IO) {
@@ -3256,7 +3269,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 glyphSamples.value = merged
                 message.value = notice
             }.onFailure { error ->
-                message.value = error.message ?: "Das Training konnte nicht gelesen werden."
+                message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Das Training konnte nicht gelesen werden.")
             }
         }
     }
@@ -3561,7 +3574,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             val note = try {
                 withContext(Dispatchers.IO) { graph.store.readNote(path) }
             } catch (error: Exception) {
-                if (generation == splitGeneration) message.value = error.message ?: "Die Notiz konnte nicht geöffnet werden."
+                if (generation == splitGeneration) message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Die Notiz konnte nicht geöffnet werden.")
                 return@launch
             }
             if (generation != splitGeneration) return@launch
@@ -3792,7 +3805,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             val text = withContext(Dispatchers.IO) {
                 runCatching { formatNoteDiff(readNoteHistory(graph.vault, historyPathFor(note), snapshotId).content, current) }
                     .getOrElse { error ->
-                        message.value = error.message ?: "Der Vergleich ist fehlgeschlagen."
+                        message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Der Vergleich ist fehlgeschlagen.")
                         return@withContext null
                     }
             } ?: return@launch
@@ -4265,6 +4278,189 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
         graph.engine.notifyLocalChange()
         refreshTree()
+    }
+
+    val editorMenu = MutableStateFlow<String?>(null)
+    val uiCatalogEpoch = MutableStateFlow(0)
+    val glyphenWerkOpen = MutableStateFlow(false)
+    val addonStoreOpen = MutableStateFlow(false)
+    val installedAddons = MutableStateFlow<List<ch.fasrv.fanotes.desk.InstalledAddon>>(emptyList())
+    val pendingExport = MutableStateFlow<ch.fasrv.fanotes.desk.DeskExport?>(null)
+
+    fun openEditorMenu(id: String?) {
+        editorMenu.value = id
+    }
+
+    /**
+     * Every desktop command goes through [ch.fasrv.fanotes.desk.applyDesktopCommand].
+     * The returned work is what the activity shares, reveals, or picks a file for.
+     */
+    fun performDesktopCommand(
+        id: String,
+        extras: ch.fasrv.fanotes.desk.CommandExtras = ch.fasrv.fanotes.desk.CommandExtras(),
+    ): ch.fasrv.fanotes.desk.DeskWork {
+        val before = captureDesk()
+        val after = ch.fasrv.fanotes.desk.applyDesktopCommand(before, id, extras)
+        adoptDesktopCommand(ch.fasrv.fanotes.desk.normalizeDesktopCommand(id), before, after, extras)
+        return after
+    }
+
+    private fun captureDesk(): ch.fasrv.fanotes.desk.DeskWork {
+        val openPath = open.value?.path
+        val notes = flatNotes().filter { it.kind != NoteKind.FOLDER }.map { node ->
+            ch.fasrv.fanotes.desk.DeskNote(node.path, if (node.path == openPath) markdown.value else "")
+        }
+        val folders = mutableListOf<String>()
+        fun walk(nodes: List<VaultNode>) {
+            for (node in nodes) {
+                if (node.kind != NoteKind.FOLDER) continue
+                folders += node.path
+                walk(node.children)
+            }
+        }
+        walk(tree.value)
+        return ch.fasrv.fanotes.desk.DeskWork(
+            notes = notes,
+            folders = folders,
+            openPath = openPath,
+            markdown = markdown.value,
+            cursorLine = 0,
+            destination = destination.value,
+            penOpen = !showText.value,
+            bookOpen = bookOpen.value,
+            splitPath = splitPath.value,
+            splitRows = deskSettings.value["split-orientation"] == "rows",
+            focus = deskSettings.value["focus"] == "on",
+            sidebar = sidebarOpen.value,
+            inspector = inspectorOpen.value,
+            clipboard = "",
+            tabs = openTabs.value,
+            closedTabs = closedTabs.value,
+            trail = noteTrail.value,
+            pinned = pinnedTabs.value,
+            dailyFolder = deskSettings.value["daily-folder"].orEmpty().ifBlank { "Tagesnotizen" },
+            glyphLabels = glyphSamples.value.map { it.label },
+            installedAddons = installedAddons.value,
+        )
+    }
+
+    private fun adoptDesktopCommand(
+        id: String,
+        before: ch.fasrv.fanotes.desk.DeskWork,
+        after: ch.fasrv.fanotes.desk.DeskWork,
+        extras: ch.fasrv.fanotes.desk.CommandExtras,
+    ) {
+        when (id) {
+            "new-note" -> createNoteIn(defaultCreateFolder())
+            "new-folder" -> createFolderIn("")
+            "new-subfolder" -> createFolderIn(currentFolder())
+            "note-here" -> createNoteIn(currentFolder())
+            "save" -> saveFromShortcut()
+            "search" -> showDestination("search")
+            "drawing" -> if (showText.value == after.penOpen) togglePen()
+            "note-link" -> requestPlaceLink()
+            "text-field" -> if (after.markdown != markdown.value) updateMarkdown(after.markdown)
+            "subject-book" -> if (bookOpen.value != after.bookOpen) toggleBookView()
+            "onenote-import" -> if (extras.onenoteBytes == null) requestOneNoteImport() else writeImportedNotes(before, after)
+            "ai-assistant" -> openAi()
+            "glyphenwerk" -> {
+                glyphenWerkOpen.value = true
+                val bytes = extras.glyphBytes
+                if (bytes != null) importGlyphBytes(bytes)
+            }
+            "overview" -> showDestination("overview")
+            "study" -> showDestination("study")
+            "flashcards" -> showDestination("cards")
+            "homework" -> showDestination("tasks")
+            "calendar" -> showDestination("calendar")
+            "daily" -> openDaily()
+            "daily-previous" -> openAdjacentDaily(-1)
+            "daily-next" -> openAdjacentDaily(1)
+            "duplicate-note" -> duplicateNote()
+            "insert-date" -> insertDateStamp(false)
+            "insert-date-time" -> insertDateStamp(true)
+            "toggle-task" -> requestToggleTask()
+            "export-latex" -> pendingExport.value = after.exports.lastOrNull()
+            "history" -> openHistory()
+            "quick-open" -> showPalette(notes = true)
+            "nav-back" -> navigateHistory(-1)
+            "nav-forward" -> navigateHistory(1)
+            "reopen-tab" -> reopenClosedTab()
+            "split" -> toggleSplit()
+            "split-swap" -> swapSplit()
+            "split-orientation" -> toggleSplitOrientation()
+            "focus" -> if ((deskSettings.value["focus"] == "on") != after.focus) toggleFocusMode()
+            "sidebar" -> setSidebarOpen(after.sidebar)
+            "inspector" -> if (inspectorOpen.value != after.inspector) toggleInspector()
+            "settings" -> openSettings()
+            "sync-now" -> syncNow()
+            "sync-settings" -> openSettings()
+            "addon-store" -> {
+                addonStoreOpen.value = true
+                after.installedAddons.lastOrNull()?.let { rememberAddon(it) }
+            }
+            "bug-report" -> openBugReport()
+            "trash" -> openTrash()
+            "pin-tab" -> togglePinTab()
+            "close-others" -> closeTabs("others")
+            "close-right" -> closeTabs("right")
+            "cycle-tab" -> cycleTabs(1)
+            "text-hand" -> openTextHand()
+            "notes" -> showDestination("notes")
+            "books" -> showDestination("books")
+            else -> if (id.startsWith("template-")) createFromTemplate(id.removePrefix("template-"))
+        }
+        val toast = ch.fasrv.fanotes.desk.userVisibleToast(after.message)
+        if (toast != null) message.value = toast
+    }
+
+    fun importOneNoteBytes(bytes: ByteArray) {
+        val before = captureDesk()
+        val after = ch.fasrv.fanotes.desk.applyDesktopCommand(
+            before,
+            "onenote-import",
+            ch.fasrv.fanotes.desk.CommandExtras(onenoteBytes = bytes),
+        )
+        writeImportedNotes(before, after)
+        val toast = ch.fasrv.fanotes.desk.userVisibleToast(after.message)
+        if (toast != null) message.value = toast
+    }
+
+    private fun writeImportedNotes(before: ch.fasrv.fanotes.desk.DeskWork, after: ch.fasrv.fanotes.desk.DeskWork) {
+        val created = after.notes.filter { note -> before.notes.none { it.path == note.path } }
+        if (created.isEmpty()) return
+        viewModelScope.launch {
+            val opened = withContext(Dispatchers.IO) {
+                created.map { note ->
+                    val parent = note.path.substringBeforeLast('/', "")
+                    val title = note.path.substringAfterLast('/').removeSuffix(".md")
+                    val path = runCatching { graph.store.createMarkdown(parent, title) }.getOrElse {
+                        graph.store.createUniqueMarkdown(parent, title)
+                    }
+                    val stored = graph.store.readNote(path)
+                    graph.store.save(stored, stored.document, note.markdown)
+                    path
+                }
+            }
+            refreshTree()
+            openPath(opened.first(), force = true)
+            destination.value = "notes"
+        }
+    }
+
+    fun installAddonManifest(json: String) {
+        val addon = ch.fasrv.fanotes.desk.parseAddonInstall(json)
+        if (addon == null) {
+            message.value = "Das Add-on-Manifest ist ungültig."
+            addonStoreOpen.value = true
+            return
+        }
+        rememberAddon(addon)
+        addonStoreOpen.value = true
+    }
+
+    private fun rememberAddon(addon: ch.fasrv.fanotes.desk.InstalledAddon) {
+        installedAddons.value = installedAddons.value.filterNot { it.id == addon.id } + addon
     }
 
     fun syncLabel(): String = when (sync.value.status) {
