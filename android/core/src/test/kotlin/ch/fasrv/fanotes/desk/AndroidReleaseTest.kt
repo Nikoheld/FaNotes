@@ -245,6 +245,20 @@ class AndroidReleaseTest {
         assertEquals(before.notes, broken.notes)
     }
 
+    @Test
+    fun androidArm64OneNoteToolsAreThePinnedBionicBinaries() {
+        val one2html = shippedArmTool("libone2html.so")
+        val sevenZip = shippedArmTool("lib7za.so")
+        assertAndroidArm64Tool(one2html, ONE2HTML_ANDROID_ARM64_SHA256)
+        assertAndroidArm64Tool(sevenZip, SEVENZIP_ANDROID_ARM64_SHA256)
+        assertNotEquals(ONE2HTML_SHA256, sha256Hex(Files.readAllBytes(one2html)))
+        assertNotEquals(SEVENZIP_SHA256, sha256Hex(Files.readAllBytes(sevenZip)))
+        val linuxOne = linuxOneNoteTool("one2html")
+        val linuxZip = linuxOneNoteTool("7za")
+        assertEquals(ONE2HTML_SHA256, sha256Hex(Files.readAllBytes(linuxOne)))
+        assertEquals(SEVENZIP_SHA256, sha256Hex(Files.readAllBytes(linuxZip)))
+    }
+
     private fun desktopCommandsSource(): String {
         val candidates = listOf(
             Path.of("../../fanotes/src/App.tsx"),
@@ -279,5 +293,68 @@ class AndroidReleaseTest {
             zip.closeEntry()
         }
         return buffer.toByteArray()
+    }
+
+    private fun shippedArmTool(name: String): Path {
+        val candidates = listOf(
+            Path.of("../app/src/main/jniLibs/arm64-v8a").resolve(name),
+            Path.of("android/app/src/main/jniLibs/arm64-v8a").resolve(name),
+            Path.of("../../android/app/src/main/jniLibs/arm64-v8a").resolve(name),
+        )
+        return candidates.firstOrNull { Files.isRegularFile(it) }
+            ?: error("$name not found from ${Path.of("").toAbsolutePath()}")
+    }
+
+    private fun linuxOneNoteTool(name: String): Path {
+        val candidates = listOf(
+            Path.of("../../fanotes/resources/onenote/linux").resolve(name),
+            Path.of("fanotes/resources/onenote/linux").resolve(name),
+            Path.of("../fanotes/resources/onenote/linux").resolve(name),
+        )
+        return candidates.firstOrNull { Files.isRegularFile(it) }
+            ?: error("$name not found from ${Path.of("").toAbsolutePath()}")
+    }
+
+    private fun assertAndroidArm64Tool(path: Path, expectedHash: String) {
+        val bytes = Files.readAllBytes(path)
+        assertEquals(expectedHash, sha256Hex(bytes), path.toString())
+        assertEquals(0x7f, bytes[0].toInt() and 0xff)
+        assertEquals('E'.code, bytes[1].toInt() and 0xff)
+        assertEquals('L'.code, bytes[2].toInt() and 0xff)
+        assertEquals('F'.code, bytes[3].toInt() and 0xff)
+        assertEquals(2, bytes[4].toInt() and 0xff)
+        assertEquals(1, bytes[5].toInt() and 0xff)
+        val machine = (bytes[18].toInt() and 0xff) or ((bytes[19].toInt() and 0xff) shl 8)
+        assertEquals(183, machine)
+        val interpreter = elfInterpreter(bytes)
+        assertTrue(interpreter.contains("linker64"), interpreter)
+        assertFalse(interpreter.contains("ld-linux"), interpreter)
+        val text = String(bytes, Charsets.ISO_8859_1)
+        assertFalse(text.contains("ld-linux-x86-64"))
+        assertFalse(text.contains("libc++_shared.so"))
+    }
+
+    private fun elfInterpreter(bytes: ByteArray): String {
+        fun u16(offset: Int): Int =
+            (bytes[offset].toInt() and 0xff) or ((bytes[offset + 1].toInt() and 0xff) shl 8)
+        fun u64(offset: Int): Long {
+            var value = 0L
+            for (index in 0 until 8) {
+                value = value or ((bytes[offset + index].toLong() and 0xff) shl (8 * index))
+            }
+            return value
+        }
+        val phoff = u64(32).toInt()
+        val phentsize = u16(54)
+        val phnum = u16(56)
+        for (index in 0 until phnum) {
+            val offset = phoff + index * phentsize
+            val type = u64(offset).toInt()
+            if (type != 3) continue
+            val fileOffset = u64(offset + 8).toInt()
+            val fileSize = u64(offset + 32).toInt()
+            return bytes.copyOfRange(fileOffset, fileOffset + fileSize).toString(Charsets.UTF_8).trimEnd('\u0000')
+        }
+        error("PT_INTERP missing")
     }
 }

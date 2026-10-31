@@ -13,13 +13,22 @@ import kotlin.io.path.deleteIfExists
 import kotlin.io.path.name
 
 /**
- * Binary OneNote packages go through the same hash-checked `one2html` and `7za`
- * the desktop host runs. A section that cannot be converted reports that
- * failure. It does not pretend the package had no pages.
+ * Binary OneNote packages go through hash-checked `one2html` and `7za`.
+ * The desktop host runs the pinned linux tools. Android runs the pinned
+ * arm64 bionic tools from the app's native library directory. A section
+ * that cannot be converted reports that failure. It does not pretend the
+ * package had no pages.
  */
 
 internal const val ONE2HTML_SHA256 = "140c347e192d8bed8225f01a4c736e04c19bed241589d46cdc8b241b906eadb0"
 internal const val SEVENZIP_SHA256 = "afc9448bd0cc2eeda131cce313ef4994f9656417e0a15c8465fcda9ca859b280"
+internal const val ONE2HTML_ANDROID_ARM64_SHA256 =
+    "d344f8c3306c6f088bd8e7a2499a683f4fc6d68153d444f809912884791be888"
+internal const val SEVENZIP_ANDROID_ARM64_SHA256 =
+    "a942b7ee30fe4ae9ae6f01ce14c3fd0a04e279a580a2a22c24bffd6f9ca1a0ad"
+
+private val ONE2HTML_HASHES = setOf(ONE2HTML_SHA256, ONE2HTML_ANDROID_ARM64_SHA256)
+private val SEVENZIP_HASHES = setOf(SEVENZIP_SHA256, SEVENZIP_ANDROID_ARM64_SHA256)
 
 private const val ONE_NOTE_NO_PAGES =
     "Im OneNote-Export wurden keine lesbaren Seiten gefunden. Verwende einen aktuellen OneDrive-Export oder eine moderne .one-Datei."
@@ -224,8 +233,8 @@ private fun previewIsNav(html: String): Boolean =
 
 private fun prepareTools(one2htmlPath: String?, sevenZipPath: String?, dir: Path): Pair<Path, Path> {
     val located = locateOneNoteTools(one2htmlPath, sevenZipPath) ?: throw OneNoteFailure(ONE_NOTE_UNSUPPORTED)
-    val one2html = executableCopy(verifyTool(located.first, ONE2HTML_SHA256, "one2html"), dir, "one2html")
-    val sevenZip = executableCopy(verifyTool(located.second, SEVENZIP_SHA256, "7za"), dir, "7za")
+    val one2html = executableCopy(verifyTool(located.first, ONE2HTML_HASHES, "one2html"), dir, "one2html")
+    val sevenZip = executableCopy(verifyTool(located.second, SEVENZIP_HASHES, "7za"), dir, "7za")
     return one2html to sevenZip
 }
 
@@ -254,10 +263,10 @@ private fun toolDir(root: Path): Path? {
     return null
 }
 
-private fun verifyTool(path: Path, expected: String, label: String): Path {
+private fun verifyTool(path: Path, expected: Set<String>, label: String): Path {
     if (!Files.isRegularFile(path)) throw OneNoteFailure("Die eingebettete OneNote-Komponente $label ist beschädigt.")
     val actual = sha256File(path)
-    if (!actual.equals(expected, ignoreCase = true)) {
+    if (expected.none { it.equals(actual, ignoreCase = true) }) {
         throw OneNoteFailure("Die eingebettete OneNote-Komponente $label ist beschädigt.")
     }
     return path
