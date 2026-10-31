@@ -1,5 +1,7 @@
 /** Spaced repetition for the Lernfragen an AI preview already produces. */
 
+import { locateEmbeddedJsonComment } from './embeddedJsonComment'
+
 export type FlashCard = {
   id: string
   front: string
@@ -46,12 +48,10 @@ const questionBlocks = (markdown: string) => {
 }
 
 export const parseStoredCards = (markdown: string): FlashCard[] => {
-  const start = markdown.indexOf(MARKER_START)
-  if (start < 0) return []
-  const end = markdown.indexOf(MARKER_END, start + MARKER_START.length)
-  if (end < 0) return []
+  const block = locateEmbeddedJsonComment(markdown, MARKER_START)
+  if (!block) return []
   try {
-    const parsed = JSON.parse(markdown.slice(start + MARKER_START.length, end)) as { cards?: unknown }
+    const parsed = JSON.parse(markdown.slice(block.jsonStart, block.jsonEnd)) as { cards?: unknown }
     if (!Array.isArray(parsed.cards)) return []
     return parsed.cards.flatMap((entry) => {
       if (!entry || typeof entry !== 'object') return []
@@ -154,10 +154,9 @@ export const reviewCard = (card: FlashCard, grade: FlashGrade, now = new Date())
 }
 
 export const embedCards = (markdown: string, cards: readonly FlashCard[]) => {
-  const start = markdown.indexOf(MARKER_START)
-  const end = start >= 0 ? markdown.indexOf(MARKER_END, start) : -1
-  const without = start >= 0 && end >= 0
-    ? `${markdown.slice(0, start)}${markdown.slice(end + MARKER_END.length)}`
+  const existing = locateEmbeddedJsonComment(markdown, MARKER_START)
+  const without = existing
+    ? `${markdown.slice(0, existing.start)}${markdown.slice(existing.end)}`
     : markdown
   const block = `\n${MARKER_START}\n${JSON.stringify({ cards }, null, 2)}\n${MARKER_END}\n`
   return `${without.replace(/\s*$/u, '')}${block}`

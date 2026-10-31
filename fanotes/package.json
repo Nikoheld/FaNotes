@@ -213,6 +213,7 @@
     "check:ink-pointer": "node scripts/check-ink-pointer-session.mjs",
     "check:homework-day": "cross-env TZ=Europe/Zurich node scripts/check-homework-day.mjs",
     "check:flashcards": "node scripts/check-flashcards.mjs",
+    "check:embedded-json-comment": "node scripts/check-embedded-json-comment.mjs",
     "check:markdown-code": "node scripts/check-markdown-code.mjs",
     "check:clipboard-image": "node scripts/check-clipboard-image.mjs",
     "check:search-excerpt": "node scripts/check-search-excerpt.mjs",
