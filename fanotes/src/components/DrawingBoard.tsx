@@ -161,6 +161,7 @@ import {
   overlayHitEnabled,
   overlayInert,
 } from '../lib/overlayInteract'
+import { strokesAfterRemoteJson } from '../lib/sync/shareEdit'
 import {
   type InkLayoutBox,
   type InkLayoutPoint,
@@ -1592,6 +1593,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const initialColorRef = useRef(settings.penColor)
   const drawingIdRef = useRef(drawingId)
   const loadedDrawingIdRef = useRef<string | null | undefined>(undefined)
+  /** Drawing JSON already applied for `loadedDrawingIdRef`, so a later payload can add strokes. */
+  const loadedDrawingJsonRef = useRef<string | null>(null)
   /** The last snapshot this board wrote; the session echoes it back after the save. */
   const authoredSaveRef = useRef<AuthoredInkSave | null>(null)
   const mathSolverHistoryRef = useRef<MathSolverHistoryEntry[]>([])
@@ -2699,15 +2702,31 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   useEffect(() => {
     if (!initialDrawingJson) return
     const sourceId = drawingId ?? null
-    if (loadedDrawingIdRef.current === sourceId) return
     if (inkDocumentIsOwnSave(authoredSaveRef.current, sourceId, initialDrawingJson)) {
       // The first save gives a new page its id; the session then hands that
       // snapshot back. The live strokes are already ahead of it (an erase
       // during the save must not be undone by it), so it is only acknowledged.
       loadedDrawingIdRef.current = sourceId
+      loadedDrawingJsonRef.current = initialDrawingJson
       if (sourceId) drawingIdRef.current = sourceId
       inkHydratingRef.current = false
       inkReadyRef.current = true
+      return
+    }
+    if (loadedDrawingIdRef.current === sourceId) {
+      if (loadedDrawingJsonRef.current !== initialDrawingJson) {
+        const merged = strokesAfterRemoteJson(strokesRef.current, loadedDrawingJsonRef.current, initialDrawingJson)
+        const added = merged.slice(strokesRef.current.length)
+        const normalized = safeInkStrokes(added.map((stroke) => {
+          const raw = stroke as { baseWidth?: number; width?: number }
+          return { ...stroke, baseWidth: raw.baseWidth ?? raw.width }
+        }), initialColorRef.current)
+        if (normalized.length) {
+          strokesRef.current = [...strokesRef.current, ...normalized]
+          bumpInkRevision({ updateTranscript: false })
+        }
+        loadedDrawingJsonRef.current = initialDrawingJson
+      }
       return
     }
     const token = ++inkOpenTokenRef.current
@@ -2715,6 +2734,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const failLoad = () => {
       if (cancelled || token !== inkOpenTokenRef.current) return
       loadedDrawingIdRef.current = sourceId
+      loadedDrawingJsonRef.current = initialDrawingJson
       strokesRef.current = []
       sectionsRef.current = []
       setSections([])
@@ -2783,6 +2803,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       setDirty(false)
       updateHistoryState()
       loadedDrawingIdRef.current = sourceId
+      loadedDrawingJsonRef.current = initialDrawingJson
     }
     if (!packedInk?.columns) {
       try {

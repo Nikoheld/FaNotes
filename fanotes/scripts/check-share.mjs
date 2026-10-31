@@ -97,6 +97,30 @@ assert.match(appSource, /applyRemoteTextFields\(/u)
 assert.match(appSource, /session\.noteInk\(/u)
 assert.match(appSource, /drawingJsonWithRemoteInk\(/u)
 assert.match(appSource, /setDrawingSession\(/u)
+const shareTickAt = appSource.indexOf('await session.pull()')
+const shareTick = appSource.slice(shareTickAt, appSource.indexOf('const timer = window.setInterval', shareTickAt))
+assert.ok(shareTickAt >= 0 && shareTick.length > 0, 'share tick missing')
+assert.match(shareTick, /shareTickDecision\(/u)
+assert.match(shareTick, /basisContent\(/u)
+assert.match(shareTick, /changesPending\(/u)
+assert.doesNotMatch(shareTick, /const dirty\b/u)
+assert.doesNotMatch(shareTick, /const clean\b/u)
+const showAt = shareTick.indexOf("=== 'showRemote'")
+const absorbAt = shareTick.indexOf("=== 'absorb'")
+assert.ok(showAt >= 0 && absorbAt > showAt, 'showRemote must precede absorb')
+assert.doesNotMatch(shareTick.slice(showAt, absorbAt), /absorb\(/u)
+assert.match(shareTick.slice(absorbAt, absorbAt + 240), /session\.absorb\(/u)
+const editorSource = readFileSync(join(appRoot, 'src/components/MarkdownEditor.tsx'), 'utf8')
+const pendingAt = editorSource.indexOf('changesPending: () => ({')
+const pendingBody = editorSource.slice(pendingAt, editorSource.indexOf('getSelection:', pendingAt))
+assert.ok(pendingAt >= 0 && pendingBody.includes('pending()'), 'changesPending must read the coalescer')
+assert.match(pendingBody, /composing/u)
+assert.doesNotMatch(pendingBody, /\.flush\(/u)
+const boardSource = readFileSync(join(appRoot, 'src/components/DrawingBoard.tsx'), 'utf8')
+const boardEffectAt = boardSource.indexOf('if (!initialDrawingJson) return')
+const boardEffect = boardSource.slice(boardEffectAt, boardSource.indexOf('}, [bumpInkRevision', boardEffectAt))
+assert.match(boardEffect, /strokesAfterRemoteJson\(/u)
+assert.doesNotMatch(boardEffect, /if \(loadedDrawingIdRef\.current === sourceId\) return/u)
 assert.match(viewerScript, /FANOTES_SHARE_LINK/u)
 assert.match(viewerScript, /__fanotesShareDownload/u)
 assert.match(viewerLink, /Im Browser ansehen oder in der Desktop-App bearbeiten\?/u)
@@ -686,17 +710,67 @@ try {
   })
   const dirtySaved = await share.readShare({ id: dirtyShare.record.id, port: sharePort, origin })
   const adaDirty = await shareEdit.openShareEditor({ share: dirtySaved, name: 'Ada Beispiel', port: sharePort, origin, clientId: 'ada-dirty' })
-  const beaDirty = await shareEdit.openShareEditor({ share: dirtySaved, name: 'Bea Beispiel', port: sharePort, origin, clientId: 'bea-dirty' })
+  const beaHold = await shareEdit.openShareEditor({ share: dirtySaved, name: 'Bea Beispiel', port: sharePort, origin, clientId: 'bea-hold' })
+  const beaShow = await shareEdit.openShareEditor({ share: dirtySaved, name: 'Bea Beispiel', port: sharePort, origin, clientId: 'bea-show' })
+  const beaAbsorb = await shareEdit.openShareEditor({ share: dirtySaved, name: 'Bea Beispiel', port: sharePort, origin, clientId: 'bea-absorb' })
   await adaDirty.editNote('Zeile.md', { content: 'Zeile\nAda\n' })
-  await beaDirty.pull()
-  assert.match(beaDirty.noteContent('Zeile.md'), /Ada/u)
-  assert.equal(shareEdit.remoteTextForEditor('Zeile\nBea\n', beaDirty.noteContent('Zeile.md'), true), null)
+  await beaHold.pull()
+  await beaShow.pull()
+  await beaAbsorb.pull()
+  assert.equal(beaHold.basisContent('Zeile.md'), 'Zeile\n')
+  assert.equal(beaHold.noteContent('Zeile.md'), 'Zeile\nAda\n')
+  assert.equal(shareEdit.remoteTextForEditor('Zeile\nBea\n', beaHold.noteContent('Zeile.md'), true), null)
   assert.equal(shareEdit.remoteTextForEditor('Zeile\n', '', false), '')
-  assert.equal(shareEdit.remoteTextForEditor('Zeile\n', beaDirty.noteContent('Zeile.md'), false), beaDirty.noteContent('Zeile.md'))
-  beaDirty.absorb('Zeile.md', { content: 'Zeile\nBea\n' })
-  await beaDirty.editNote('Zeile.md', { content: 'Zeile\nBea\n' })
-  assert.match(beaDirty.documentText(), /Ada/u)
-  assert.match(beaDirty.documentText(), /Bea/u)
+  assert.equal(shareEdit.remoteTextForEditor('Zeile\n', beaHold.noteContent('Zeile.md'), false), beaHold.noteContent('Zeile.md'))
+  const decisionHold = shareEdit.shareTickDecision({
+    editorDoc: 'Zeile\nBea\n',
+    coalescerPending: true,
+    composing: false,
+    remoteText: beaHold.noteContent('Zeile.md'),
+    basisText: beaHold.basisContent('Zeile.md'),
+  })
+  const decisionShow = shareEdit.shareTickDecision({
+    editorDoc: 'Zeile\n',
+    coalescerPending: false,
+    composing: false,
+    remoteText: beaShow.noteContent('Zeile.md'),
+    basisText: beaShow.basisContent('Zeile.md'),
+  })
+  const decisionAbsorb = shareEdit.shareTickDecision({
+    editorDoc: beaAbsorb.noteContent('Zeile.md'),
+    coalescerPending: false,
+    composing: false,
+    remoteText: beaAbsorb.noteContent('Zeile.md'),
+    basisText: beaAbsorb.basisContent('Zeile.md'),
+  })
+  assert.equal(decisionHold, 'hold')
+  assert.equal(decisionShow, 'showRemote')
+  assert.equal(decisionAbsorb, 'absorb')
+  assert.equal(shareEdit.shareTickDecision({
+    editorDoc: null,
+    coalescerPending: false,
+    composing: false,
+    remoteText: beaHold.noteContent('Zeile.md'),
+    basisText: beaHold.basisContent('Zeile.md'),
+  }), 'hold')
+  assert.equal(shareEdit.shareTickDecision({
+    editorDoc: 'Zeile\n',
+    coalescerPending: false,
+    composing: true,
+    remoteText: beaShow.noteContent('Zeile.md'),
+    basisText: beaShow.basisContent('Zeile.md'),
+  }), 'hold')
+  const showBasis = beaShow.basisContent('Zeile.md')
+  assert.equal(showBasis, 'Zeile\n')
+  beaAbsorb.absorb('Zeile.md', { content: beaAbsorb.noteContent('Zeile.md') })
+  const absorbedBasis = beaAbsorb.basisContent('Zeile.md')
+  assert.equal(absorbedBasis, 'Zeile\nAda\n')
+  await beaHold.editNote('Zeile.md', { content: 'Zeile\nBea\n' })
+  assert.match(beaHold.documentText(), /Ada/u)
+  assert.match(beaHold.documentText(), /Bea/u)
+  await beaShow.editNote('Zeile.md', { content: 'Zeile\nBea\n' })
+  assert.match(beaShow.documentText(), /Ada/u)
+  assert.match(beaShow.documentText(), /Bea/u)
   const dirtyRead = await share.readShare({ id: dirtyShare.record.id, port: sharePort, origin })
   assert.match(dirtyRead.notes[0].content, /Ada/u)
   assert.match(dirtyRead.notes[0].content, /Bea/u)
@@ -717,18 +791,15 @@ try {
   const beaInkClient = await shareEdit.openShareEditor({ share: inkEditSaved, name: 'Bea Beispiel', port: sharePort, origin, clientId: 'bea-ink' })
   await adaInkClient.editNote('Blatt.md', { ink: { width: 900, height: 1273, strokes: [adaStroke] }, textFields: [adaField] })
   await beaInkClient.pull()
-  const localDrawing = JSON.stringify({
-    schemaVersion: 1,
-    width: 900,
-    height: 1273,
-    strokes: [localStroke],
-  })
-  const paintedJson = shareEdit.drawingJsonWithRemoteInk(localDrawing, beaInkClient.noteInk('Blatt.md'))
-  const painted = JSON.parse(paintedJson)
-  assert.equal(painted.strokes.length, 2)
-  const paintedXs = painted.strokes.flatMap((stroke) => stroke.points.map((point) => point.x))
-  assert.ok(paintedXs.includes(0.1), `painted x ${paintedXs.join(',')}`)
-  assert.ok(paintedXs.includes(0.5), `painted x ${paintedXs.join(',')}`)
+  const previousJson = JSON.stringify({ schemaVersion: 1, width: 900, height: 1273, strokes: [localStroke] })
+  const nextJson = JSON.stringify({ schemaVersion: 1, width: 900, height: 1273, strokes: [adaStroke] })
+  const paintedStrokes = shareEdit.strokesAfterRemoteJson([localStroke], previousJson, nextJson)
+  const paintedXs = paintedStrokes.flatMap((stroke) => (stroke.points ?? []).map((point) => point.x))
+  assert.equal(paintedStrokes.length, 2)
+  assert.ok(paintedXs.includes(0.1), `remote stroke x ${paintedXs.join(',')}`)
+  assert.ok(paintedXs.includes(0.5), `local stroke x ${paintedXs.join(',')}`)
+  const paintedAgain = shareEdit.strokesAfterRemoteJson(paintedStrokes, nextJson, nextJson)
+  assert.equal(paintedAgain.length, 2)
   const prepared = beaInkClient.prepareLocalEdit('Blatt.md', {
     ink: { width: 900, height: 1273, strokes: [localStroke] },
     textFields: [beaField],
@@ -802,8 +873,11 @@ try {
     `clearedInk ${cleared.notes[0].ink === undefined}`,
     `field ${mergedRead.notes[0].textFields[0].text}`,
     `dirtyBoth ${dirtyRead.notes[0].content.includes('Ada') && dirtyRead.notes[0].content.includes('Bea')}`,
-    `absorbKeepsBoth ${dirtyRead.notes[0].content.includes('Ada') && dirtyRead.notes[0].content.includes('Bea')}`,
-    `remoteStrokePainted ${painted.strokes.some((stroke) => stroke.points.some((point) => point.x === 0.1))}`,
+    `hold ${decisionHold}`,
+    `showRemote ${decisionShow}`,
+    `showBasis ${showBasis === 'Zeile\n'}`,
+    `absorbWhenAda ${decisionAbsorb === 'absorb' && absorbedBasis === 'Zeile\nAda\n'}`,
+    `strokesBoth ${paintedXs.includes(0.5) && paintedXs.includes(0.1)}`,
     `remoteClear ${shareEdit.remoteTextForEditor('Zeile\n', '', false) === ''}`,
     `inkBoth ${bothInk.notes[0].ink.strokes.length}`,
     `inkKept ${keptBoth.notes[0].ink.strokes.length}`,

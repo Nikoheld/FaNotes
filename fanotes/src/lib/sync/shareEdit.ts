@@ -194,6 +194,8 @@ export type ShareEditClient = {
   name: string
   documentText: () => string
   noteContent: (sharePath: string) => string
+  /** The basis this client last saved or absorbed. `noteContent` reads the remote copy. */
+  basisContent: (sharePath: string) => string
   noteInk: (sharePath: string) => ShareInk | undefined
   noteFields: (sharePath: string) => ShareTextField[]
   hasNote: (sharePath: string) => boolean
@@ -219,6 +221,27 @@ export const remoteTextForEditor = (editorText: string, remoteText: string, dirt
   if (dirty) return null
   if (editorText === remoteText) return null
   return remoteText
+}
+
+export type ShareTickDecision = 'hold' | 'showRemote' | 'absorb'
+
+/**
+ * The only share-tick branch. Absorb only once the editor document is already
+ * the remote text. A pending coalescer or a buffer that is still the basis
+ * must not move the basis.
+ */
+export const shareTickDecision = (input: {
+  editorDoc: string | null
+  coalescerPending: boolean
+  composing: boolean
+  remoteText: string
+  basisText: string
+}): ShareTickDecision => {
+  if (input.editorDoc === null || input.coalescerPending || input.composing) return 'hold'
+  if (input.editorDoc !== input.basisText && input.editorDoc !== input.remoteText) return 'hold'
+  if (input.editorDoc === input.basisText && input.editorDoc !== input.remoteText) return 'showRemote'
+  if (input.editorDoc === input.remoteText && input.basisText !== input.remoteText) return 'absorb'
+  return 'hold'
 }
 
 /** Fold remote text fields into the open note. Matching positions keep their local id. */
@@ -309,6 +332,55 @@ export const drawingJsonWithRemoteInk = (drawingJson: string | null | undefined,
     height: base.height ?? remoteInk?.height ?? 1273,
     strokes: [...current, ...added],
   })
+}
+
+type ShareJsonStroke = {
+  color?: string
+  width?: number
+  baseWidth?: number
+  opacity?: number
+  points?: { x?: number; y?: number }[]
+}
+
+const strokesInDrawingJson = (drawingJson: string | null | undefined): ShareJsonStroke[] => {
+  if (!drawingJson) return []
+  try {
+    const parsed = JSON.parse(drawingJson) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return []
+    const strokes = (parsed as { strokes?: unknown }).strokes
+    if (!Array.isArray(strokes)) return []
+    return strokes.filter((stroke): stroke is ShareJsonStroke => Boolean(stroke) && typeof stroke === 'object')
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Strokes for a drawing that is already open. Strokes new in `nextJson` are
+ * appended. Strokes already on the page stay, including ones the next payload
+ * does not repeat.
+ */
+export const strokesAfterRemoteJson = <T extends ShareJsonStroke>(
+  currentStrokes: readonly T[],
+  previousJson: string | null | undefined,
+  nextJson: string | null | undefined,
+): Array<T | ShareJsonStroke> => {
+  const previous = new Set(strokesInDrawingJson(previousJson).map((stroke) => strokeSignature(stroke)))
+  const present = new Set(currentStrokes.map((stroke) => strokeSignature(stroke)))
+  const added: ShareJsonStroke[] = []
+  for (const stroke of strokesInDrawingJson(nextJson)) {
+    const key = strokeSignature(stroke)
+    if (previous.has(key) || present.has(key)) continue
+    present.add(key)
+    added.push({
+      color: stroke.color,
+      width: stroke.width,
+      baseWidth: stroke.baseWidth ?? stroke.width,
+      opacity: stroke.opacity,
+      points: (stroke.points ?? []).map((point) => ({ x: point.x, y: point.y })),
+    })
+  }
+  return [...currentStrokes, ...added]
 }
 
 const cloneNotes = (notes: readonly ShareNoteSnapshot[]): ShareNoteSnapshot[] => notes.map((note) => ({
@@ -473,6 +545,7 @@ export async function openShareEditor(input: {
     name,
     documentText: () => remote.map((note) => note.content).join('\n'),
     noteContent: (sharePath: string) => shown(sharePath)?.content ?? '',
+    basisContent: (sharePath: string) => basis.find((note) => note.path === sharePath)?.content ?? '',
     noteInk: (sharePath: string) => shown(sharePath)?.ink,
     noteFields: (sharePath: string) => (shown(sharePath)?.textFields ?? []).map((field) => ({ ...field })),
     hasNote: (sharePath: string) => basis.some((note) => note.path === sharePath) || remote.some((note) => note.path === sharePath),

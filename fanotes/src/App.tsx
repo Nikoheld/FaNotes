@@ -216,7 +216,7 @@ import { drawingSessionFromLoad, INK_OVERLAY_CRASH_TITLE, INK_TOOLBAR_SLOT_ID, o
 import { APP_VERSION } from './lib/appVersion'
 import { defaultSettingsForPlatform } from './defaults'
 import { collectShareNotes, createFetchSharePort, loadShareEntries, parseShareDirectory, publicShareInk, publicShareTextFields, publishShare, queueLiveShareRefresh, readShare, resolveShareOrigin, serializeShareDirectory } from './lib/sync/share'
-import { applyRemoteTextFields, beginDesktopShareOpen, chooseShareFolder, confirmShareIdentity, drawingJsonWithRemoteInk, openShareEditor, parseShareProtocol, remoteTextForEditor, type ShareEditClient, type ShareOpenState } from './lib/sync/shareEdit'
+import { applyRemoteTextFields, beginDesktopShareOpen, chooseShareFolder, confirmShareIdentity, drawingJsonWithRemoteInk, openShareEditor, parseShareProtocol, remoteTextForEditor, shareTickDecision, type ShareEditClient, type ShareOpenState } from './lib/sync/shareEdit'
 import { claimUsername, createFetchProfilePort, createProfileOwnerId, ProfileRequestError } from './lib/sync/profile'
 import { PaperStylePicker } from './components/PaperStylePicker'
 import { PaperView } from './components/PaperView'
@@ -3719,54 +3719,77 @@ export default function App({ startupBootstrap }: AppProps) {
     const session = shareEditRef.current
     if (!session) return undefined
     let stopped = false
+    let shownFieldSignature = ''
+    let shownInkSignature = ''
     const tick = async () => {
       if (stopped || shareEditRef.current !== session) return
       await session.pull().catch(() => undefined)
       if (stopped || shareEditRef.current !== session) return
       setSharePeople({ editors: session.peopleWhoCanEdit(), present: session.peopleEditing() })
-      const tab = tabsRef.current.find((candidate) => session.owns(candidate.path))
+      const owned = tabsRef.current.filter((candidate) => session.owns(candidate.path))
+      const tab = owned.find((candidate) => candidate.path === activePathRef.current)
+        ?? owned.find((candidate) => candidate.path === splitPathRef.current)
+        ?? owned[0]
       if (!tab) return
       const sharePath = session.sharePathFor(tab.path)
       if (!sharePath) return
-      const dirty = tab.content !== tab.savedContent || pendingWrites.current.has(tab.path)
-      const next = remoteTextForEditor(tab.content, session.noteContent(sharePath), dirty)
-      if (next !== null) {
-        const live = tabsRef.current.find((candidate) => candidate.path === tab.path)
-        const clean = Boolean(live && live.content === live.savedContent && !pendingWrites.current.has(tab.path))
-        if (clean) {
-          const updated = tabsRef.current.map((candidate) => (
-            candidate.path === tab.path ? { ...candidate, content: next, savedContent: next } : candidate
-          ))
-          tabsRef.current = updated
-          shareEditApplyingRef.current = true
-          setTabs((current) => current.map((candidate) => (
+      const editorHandle = tab.path === activePathRef.current
+        ? editorRef.current
+        : tab.path === splitPathRef.current
+          ? splitEditorRef.current
+          : null
+      const pending = editorHandle?.changesPending() ?? { coalescer: false, composing: false }
+      const editorDoc = editorHandle?.getText() ?? null
+      const remoteText = session.noteContent(sharePath)
+      const basisText = session.basisContent(sharePath)
+      const decision = shareTickDecision({
+        editorDoc,
+        coalescerPending: pending.coalescer,
+        composing: pending.composing,
+        remoteText,
+        basisText,
+      })
+      if (decision === 'showRemote') {
+        const next = remoteTextForEditor(basisText, remoteText, false)
+        if (next !== null) {
+          const applyShown = <T extends { path: string; content: string; savedContent: string }>(candidate: T): T => (
             candidate.path === tab.path && candidate.content === candidate.savedContent && !pendingWrites.current.has(candidate.path)
               ? { ...candidate, content: next, savedContent: next }
               : candidate
-          )))
-          const open = tabsRef.current.find((candidate) => candidate.path === tab.path)
-          if (open && open.content === next && open.content === session.noteContent(sharePath) && !pendingWrites.current.has(tab.path)) {
-            session.absorb(sharePath, { content: open.content })
-          }
+          )
+          tabsRef.current = tabsRef.current.map(applyShown)
+          shareEditApplyingRef.current = true
+          setTabs((current) => current.map(applyShown))
           window.setTimeout(() => { shareEditApplyingRef.current = false }, 0)
         }
+      } else if (decision === 'absorb' && editorDoc !== null) {
+        session.absorb(sharePath, { content: editorDoc })
       }
       if (!noteTextFieldsEditedRef.current && !textFieldDirtyRef.current && tab.path === activePathRef.current) {
         const remoteFields = session.noteFields(sharePath)
-        const mergedFields = applyRemoteTextFields(noteTextFieldsRef.current, remoteFields)
-        if (JSON.stringify(mergedFields) !== JSON.stringify(noteTextFieldsRef.current)) {
+        const fieldSig = (fields: readonly { page?: number; x?: number; y?: number; width?: number; fontSize?: number; text?: string }[]) => (
+          JSON.stringify(fields.map((field) => [field.page, field.x, field.y, field.width, field.fontSize, field.text]))
+        )
+        const remoteSig = `${sharePath}\n${fieldSig(remoteFields)}`
+        const openSig = `${sharePath}\n${fieldSig(noteTextFieldsRef.current)}`
+        if (openSig !== remoteSig) {
+          const mergedFields = applyRemoteTextFields(noteTextFieldsRef.current, remoteFields)
           noteTextFieldsRef.current = mergedFields
           setNoteTextFields(mergedFields)
+          shownFieldSignature = remoteSig
+        } else if (shownFieldSignature === remoteSig) {
+          session.absorb(sharePath, { textFields: noteTextFieldsRef.current })
+        } else {
+          shownFieldSignature = remoteSig
         }
-        session.absorb(sharePath, { textFields: noteTextFieldsRef.current })
       }
       const remoteInk = session.noteInk(sharePath)
       const openDrawing = drawingSessionRef.current
       if (!drawingDirtyRef.current && openDrawing.path === tab.path && openDrawing.document) {
         const nextJson = drawingJsonWithRemoteInk(openDrawing.document.drawingJson, remoteInk)
-        let painted = openDrawing.document
-        if (nextJson !== openDrawing.document.drawingJson) {
-          painted = { ...openDrawing.document, drawingJson: nextJson }
+        const wroteInk = nextJson !== openDrawing.document.drawingJson
+        const painted = wroteInk ? { ...openDrawing.document, drawingJson: nextJson } : openDrawing.document
+        if (wroteInk) {
           const nextSession = { ...openDrawing, document: painted }
           drawingSessionRef.current = nextSession
           setDrawingSession(nextSession)
@@ -3774,7 +3797,14 @@ export default function App({ startupBootstrap }: AppProps) {
         if (remoteInk) {
           try {
             const shown = publicShareInk(JSON.parse(painted.drawingJson))
-            if (shown) session.absorb(sharePath, { ink: shown })
+            const inkSig = shown ? `${sharePath}\n${JSON.stringify(shown)}` : ''
+            if (wroteInk) {
+              shownInkSignature = inkSig
+            } else if (shown && shownInkSignature === inkSig) {
+              session.absorb(sharePath, { ink: shown })
+            } else {
+              shownInkSignature = inkSig
+            }
           } catch {
             /* The open drawing stays as it is when its ink cannot be read. */
           }

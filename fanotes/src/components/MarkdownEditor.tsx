@@ -192,6 +192,8 @@ export type MarkdownEditorHandle = {
   restoreFolds: (ranges: readonly { from: number; to: number }[]) => void
   /** Programmatic access used by add-ons; every call goes through a normal editor transaction. */
   getText: () => string | null
+  /** Reads the coalescer and IME composition without flushing them. */
+  changesPending: () => { coalescer: boolean; composing: boolean }
   getSelection: () => { from: number; to: number; text: string; line: number } | null
   insertText: (text: string, where: 'cursor' | 'start' | 'end' | 'line-end') => boolean
   replaceSelection: (text: string) => boolean
@@ -1394,6 +1396,10 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       return true
     },
     getText: () => viewRef.current?.state.doc.toString() ?? null,
+    changesPending: () => ({
+      coalescer: changeSchedulerRef.current?.pending() ?? false,
+      composing: viewRef.current?.composing ?? false,
+    }),
     getSelection: () => {
       const view = viewRef.current
       if (!view) return null
