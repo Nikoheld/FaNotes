@@ -2,7 +2,7 @@ import { APP_VERSION } from './appVersion'
 import { DEFAULT_SETTINGS } from '../defaults'
 import { getUiLanguage } from '../i18n'
 import type { AppSettings, BootstrapData, DrawingLibraryDocument, FaNotesApi, PaperStyle, ServerBackupState, UpdateState, VaultEntry, WorksheetDocument } from '../types'
-import { companionNotePath, emptyFamdPayload, parseFamd, serializeFamd } from './famd'
+import { companionNotePath, emptyFamdPayload, famdEncodingForSave, parseFamd, serializeFamd } from './famd'
 import { germanCount, germanIndexOf } from './germanSearch'
 import { inkAnchorForQuery, noteSearchExcerpt, readableTranscript } from './searchInkAnchor'
 import { parseNoteBackups, type NoteBackupSnapshot } from './noteBackup'
@@ -1352,7 +1352,7 @@ export function createBrowserApi(): FaNotesApi {
       }
       const record = {
         path: famdPath,
-        content: serializeFamd(parsed.markdown, payload),
+        content: serializeFamd(parsed.markdown, payload, famdEncodingForSave(existing?.content ?? '')),
         modifiedAt: new Date().toISOString(),
       }
       await write('files', (store) => { store.put(record) })
@@ -1382,7 +1382,7 @@ export function createBrowserApi(): FaNotesApi {
       }
       const record = {
         path: famdPath,
-        content: serializeFamd(parsed.markdown, payload),
+        content: serializeFamd(parsed.markdown, payload, famdEncodingForSave(existing?.content ?? '')),
         modifiedAt: new Date().toISOString(),
       }
       await write('files', (store) => { store.put(record) })
@@ -1404,7 +1404,7 @@ export function createBrowserApi(): FaNotesApi {
       }
       const record = {
         path: famdPath,
-        content: serializeFamd(parsed.markdown, payload),
+        content: serializeFamd(parsed.markdown, payload, famdEncodingForSave(existing?.content ?? '')),
         modifiedAt: new Date().toISOString(),
       }
       await write('files', (store) => { store.put(record) })

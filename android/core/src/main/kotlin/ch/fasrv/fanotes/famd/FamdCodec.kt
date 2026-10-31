@@ -10,12 +10,10 @@ import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.json.stringify
 
 /**
- * `fanotes-famd-v1`, the sidecar written beside every note.
- *
- * The file is the Markdown body, then a marker
- * `<!-- fanotes-famd:v1 chars=N -->`, then exactly N UTF-16 code units of JSON.
- * `chars` is a JavaScript string length, which is the same count as
- * [String.length] on the JVM. See `fanotes/src/lib/famd.ts`.
+ * Sidecar written beside every note. v1 is
+ * `<!-- fanotes-famd:v1 chars=N -->` plus N UTF-16 code units of JSON.
+ * v2 keeps the markdown in front and packs ink; see [FamdV2].
+ * `chars` matches JavaScript `String.length`, which is [String.length] on the JVM.
  */
 const val FAMD_SCHEMA = "fanotes-famd-v1"
 const val FAMD_EXTENSION = ".famd"
@@ -94,7 +92,10 @@ fun stripFamdPayload(source: String): String {
     if (source.isEmpty()) return ""
     var text = source
     val match = HEADER.findAll(text).lastOrNull()
-    if (match != null) text = text.substring(0, match.range.first)
+    var cut = match?.range?.first ?: -1
+    val v2Cut = v2CutIndex(text)
+    if (v2Cut >= 0 && v2Cut > cut) cut = v2Cut
+    if (cut >= 0) text = text.substring(0, cut)
     text = text.trimEnd()
     if (isFamdSidecarJson(text)) return ""
     val trailing = Regex("""\n(\{[\s\S]*\})\s*$""").find(text)
@@ -117,6 +118,7 @@ private fun isFamdSidecarJson(value: String): Boolean {
 fun parseFamd(source: String): FamdDocument {
     val markdown = stripFamdPayload(source)
     if (source.isEmpty()) return FamdDocument("", null)
+    if (isActiveV2(source)) return FamdDocument(markdown, readV2Payload(source))
     val match = HEADER.findAll(source).lastOrNull() ?: return FamdDocument(markdown, null)
     val length = match.groupValues[1].toIntOrNull() ?: return FamdDocument(markdown, null)
     if (length < 2 || length > MAX_JSON_CHARS) return FamdDocument(markdown, null)
@@ -146,11 +148,11 @@ private fun jsonObject(vararg pairs: Pair<String, JsonValue>) = JsonValue.Obj().
 
 /**
  * Rebuilds the payload in the desktop key order: schema, updatedAt, ink,
- * worksheets, then paper style, note links, backups and page stats. Nested
- * objects are copied through, so page statistics the desktop stored are not
- * reduced to a subset.
+ * worksheets, then paper style, note links, backups, page stats and text
+ * fields. Nested objects are copied through. `encoding` defaults to v1 so an
+ * existing file is not migrated by an ordinary save. New notes pass `"v2"`.
  */
-fun serializeFamd(markdown: String, payload: JsonValue.Obj): String {
+fun serializeFamd(markdown: String, payload: JsonValue.Obj, encoding: String = "v1"): String {
     val body = stripFamdPayload(markdown)
     val worksheets = payload.array("worksheets")?.items
         ?.mapNotNull { (it as? JsonValue.Str)?.value }
@@ -173,6 +175,8 @@ fun serializeFamd(markdown: String, payload: JsonValue.Obj): String {
     payload["pageStats"]?.let { stats ->
         if (stats is JsonValue.Obj) next.put("pageStats", stats.deepCopy())
     }
+    copyIfArray(payload, next, "textFields")
+    if (encoding == "v2") return encodeV2Document(body, next)
     val json = next.stringify()
     val marker = "<!-- fanotes-famd:v1 chars=${json.length} -->\n$json\n"
     return if (body.isEmpty()) marker else "$body\n\n$marker"

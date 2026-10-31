@@ -556,6 +556,7 @@ export type FaNotesApi = {
   readRecognitionModel?: () => Promise<string | null>
   writeRecognitionModel?: (content: string) => Promise<{ modifiedAt: string }>
   createNote: (parentPath?: string, preferredName?: string) => Promise<CreateResult>
+  convertFamdNotes?: () => Promise<{ converted: number; skipped: number; failed: number }>
   createFolder: (parentPath?: string, preferredName?: string) => Promise<CreateResult>
   setFolderColor: (relativePath: string, color: string | null) => Promise<{ color: string | null }>
   getFolderLocations: (relativePath: string) => Promise<{ paths: string[] }>

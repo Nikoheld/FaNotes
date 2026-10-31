@@ -1,5 +1,5 @@
 import { INK_MAX_VIEW_QUALITY_ZOOM, INK_MIN_INLINE_QUALITY } from './paperGrow'
-import { emptyFamdPayload, parseFamd, serializeFamd } from './famd'
+import { emptyFamdPayload, famdEncodingForSave, parseFamd, serializeFamd } from './famd'
 import type { PageStats } from './pageStats'
 
 export const CURRENT_NOTE_INK_QUALITY = INK_MIN_INLINE_QUALITY
@@ -109,7 +109,7 @@ export const convertNoteSourceToCurrentStandard = (
     ink: converted.ink,
     worksheets: converted.worksheets,
     ...(converted.pageStats ? { pageStats: converted.pageStats } : {}),
-  })
+  }, famdEncodingForSave(original))
   const roundTrip = parseFamd(nextSource)
   if (roundTrip.markdown !== converted.markdown) {
     throw new Error('convert round-trip dropped markdown')

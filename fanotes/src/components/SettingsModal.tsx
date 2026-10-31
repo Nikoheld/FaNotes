@@ -118,6 +118,7 @@ export type SettingsModalProps = {
   onResetAppData: () => Promise<void>
   onOpenBugReport?: () => void
   onConvertNotes?: () => Promise<{ converted: number; skipped: number; failed: number }>
+  onConvertFamd?: () => Promise<{ converted: number; skipped: number; failed: number }>
   remoteSupportSession?: RemoteSupportSession | null
   onRemoteSupportStart?: () => void
   onRemoteSupportStop?: () => void
@@ -397,6 +398,7 @@ export function SettingsModal({
   onResetAppData,
   onOpenBugReport,
   onConvertNotes,
+  onConvertFamd,
   remoteSupportSession = null,
   onRemoteSupportStart,
   onRemoteSupportStop,
@@ -420,6 +422,8 @@ export function SettingsModal({
   const [deleteBackupConfirmOpen, setDeleteBackupConfirmOpen] = useState(false)
   const [convertBusy, setConvertBusy] = useState(false)
   const [convertStatus, setConvertStatus] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
+  const [famdConvertBusy, setFamdConvertBusy] = useState(false)
+  const [famdConvertStatus, setFamdConvertStatus] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
   const [enhancedMathState, setEnhancedMathState] = useState<EnhancedMathRecognitionState | null>(null)
   const [enhancedMathBusy, setEnhancedMathBusy] = useState(false)
   const [enhancedMathError, setEnhancedMathError] = useState<string | null>(null)
@@ -988,6 +992,44 @@ export function SettingsModal({
                     <div className={`setting-import-status is-${convertStatus.kind}`} role="status">
                       {convertStatus.kind === 'success' ? <Check size={15} /> : <X size={15} />}
                       <span>{convertStatus.text}</span>
+                    </div>
+                  )}
+                  <SettingRow
+                    title="Notizen ins kompakte Format"
+                    description="Speichert vorhandene Notizen im kleineren .famd-Format. Text und Handschrift bleiben gleich. Eine Datei wird erst ersetzt, wenn sie neu gelesen und verglichen wurde."
+                  >
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={famdConvertBusy || !onConvertFamd}
+                      onClick={() => {
+                        if (!onConvertFamd) return
+                        setFamdConvertBusy(true)
+                        setFamdConvertStatus(null)
+                        void onConvertFamd()
+                          .then((result) => {
+                            setFamdConvertStatus({
+                              kind: 'success',
+                              text: `${result.converted} Notizen umgestellt, ${result.skipped} schon kompakt, ${result.failed} unverändert.`,
+                            })
+                          })
+                          .catch((error: unknown) => {
+                            setFamdConvertStatus({
+                              kind: 'error',
+                              text: error instanceof Error ? error.message : 'Die Notizen konnten nicht umgestellt werden.',
+                            })
+                          })
+                          .finally(() => setFamdConvertBusy(false))
+                      }}
+                    >
+                      {famdConvertBusy ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
+                      {famdConvertBusy ? 'Wird geprüft …' : 'Kompakt speichern'}
+                    </button>
+                  </SettingRow>
+                  {famdConvertStatus && (
+                    <div className={`setting-import-status is-${famdConvertStatus.kind}`} role="status">
+                      {famdConvertStatus.kind === 'success' ? <Check size={15} /> : <X size={15} />}
+                      <span>{famdConvertStatus.text}</span>
                     </div>
                   )}
                 </div>

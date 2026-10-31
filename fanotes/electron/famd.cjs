@@ -1,5 +1,10 @@
 'use strict'
 
+const fs = require('node:fs')
+const path = require('node:path')
+const crypto = require('node:crypto')
+const v2codec = require('./famdV2.mjs')
+
 const FAMD_SCHEMA = 'fanotes-famd-v1'
 const FAMD_HEADER = /(?:^|\n)<!--\s*fanotes-famd:v1\s+chars=(\d+)\s*-->\n/u
 const WORKSHEET_MARKER = /<!--\s*fanotes-worksheet:([a-zA-Z0-9_-]{1,96})\s*-->/gu
@@ -200,7 +205,10 @@ function stripFamdPayload(source) {
   if (typeof source !== 'string' || !source) return ''
   let text = source
   const match = [...text.matchAll(new RegExp(FAMD_HEADER.source, 'gu'))].at(-1)
-  if (match && match.index !== undefined) text = text.slice(0, match.index)
+  const v2Cut = v2codec.v2CutIndex(text)
+  let cut = match && match.index !== undefined ? match.index : -1
+  if (v2Cut >= 0 && v2Cut > cut) cut = v2Cut
+  if (cut >= 0) text = text.slice(0, cut)
   text = text.replace(/\s+$/u, '')
   if (isFamdSidecarJson(text)) return ''
   const trailing = text.match(/\n(\{[\s\S]*\})\s*$/u)
@@ -210,9 +218,42 @@ function stripFamdPayload(source) {
   return text
 }
 
+function payloadFromParsed(parsed) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  if (parsed.schema !== FAMD_SCHEMA && parsed.schema !== v2codec.FAMD_V2_SCHEMA) return null
+  const worksheets = Array.isArray(parsed.worksheets)
+    ? parsed.worksheets.filter((id) => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,96}$/u.test(id))
+    : []
+  const ink = parsed.ink && typeof parsed.ink === 'object' && !Array.isArray(parsed.ink) ? parsed.ink : null
+  const updatedAt = typeof parsed.updatedAt === 'string' && Number.isFinite(Date.parse(parsed.updatedAt))
+    ? new Date(parsed.updatedAt).toISOString()
+    : new Date().toISOString()
+  const paperStyle = isPaperStyle(parsed.paperStyle) ? parsed.paperStyle : undefined
+  const noteLinks = parseNoteLinks(parsed.noteLinks)
+  const noteBackups = parseNoteBackups(parsed.noteBackups)
+  const pageStats = parsePageStats(parsed.pageStats)
+  const textFields = parseNoteTextFields(parsed.textFields)
+  return {
+    schema: FAMD_SCHEMA,
+    updatedAt,
+    ink,
+    worksheets,
+    ...(paperStyle ? { paperStyle } : {}),
+    ...(noteLinks.length ? { noteLinks } : {}),
+    ...(noteBackups.length ? { noteBackups } : {}),
+    ...(pageStats ? { pageStats } : {}),
+    ...(textFields.length ? { textFields } : {}),
+  }
+}
+
 function parseFamd(source) {
   const markdown = stripFamdPayload(source)
   if (typeof source !== 'string' || !source) return { markdown: '', payload: null }
+  if (v2codec.isActiveV2(source)) {
+    const payload = payloadFromParsed(v2codec.readV2Payload(source))
+    if (!payload) throw new v2codec.FamdCorruptError('famd v2 payload')
+    return { markdown, payload }
+  }
   const match = [...source.matchAll(new RegExp(FAMD_HEADER.source, 'gu'))].at(-1)
   if (!match || match.index === undefined) return { markdown, payload: null }
   const length = Number(match[1])
@@ -223,36 +264,8 @@ function parseFamd(source) {
   const json = source.slice(start, start + length)
   if (json.length !== length) return { markdown, payload: null }
   try {
-    const parsed = JSON.parse(json)
-    if (!parsed || parsed.schema !== FAMD_SCHEMA || typeof parsed !== 'object') {
-      return { markdown, payload: null }
-    }
-    const worksheets = Array.isArray(parsed.worksheets)
-      ? parsed.worksheets.filter((id) => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,96}$/u.test(id))
-      : []
-    const ink = parsed.ink && typeof parsed.ink === 'object' && !Array.isArray(parsed.ink) ? parsed.ink : null
-    const updatedAt = typeof parsed.updatedAt === 'string' && Number.isFinite(Date.parse(parsed.updatedAt))
-      ? new Date(parsed.updatedAt).toISOString()
-      : new Date().toISOString()
-    const paperStyle = isPaperStyle(parsed.paperStyle) ? parsed.paperStyle : undefined
-    const noteLinks = parseNoteLinks(parsed.noteLinks)
-    const noteBackups = parseNoteBackups(parsed.noteBackups)
-    const pageStats = parsePageStats(parsed.pageStats)
-    const textFields = parseNoteTextFields(parsed.textFields)
-    return {
-      markdown,
-      payload: {
-        schema: FAMD_SCHEMA,
-        updatedAt,
-        ink,
-        worksheets,
-        ...(paperStyle ? { paperStyle } : {}),
-        ...(noteLinks.length ? { noteLinks } : {}),
-        ...(noteBackups.length ? { noteBackups } : {}),
-        ...(pageStats ? { pageStats } : {}),
-        ...(textFields.length ? { textFields } : {}),
-      },
-    }
+    const payload = payloadFromParsed(JSON.parse(json))
+    return { markdown, payload }
   } catch {
     return { markdown, payload: null }
   }
@@ -280,7 +293,7 @@ function readFamdCompanion(source) {
   }
 }
 
-function serializeFamd(markdown, payload) {
+function serializeFamd(markdown, payload, encoding) {
   const body = stripFamdPayload(markdown)
   const next = {
     schema: FAMD_SCHEMA,
@@ -299,8 +312,165 @@ function serializeFamd(markdown, payload) {
   if (pageStats) next.pageStats = pageStats
   const textFields = parseNoteTextFields(payload?.textFields)
   if (textFields.length) next.textFields = textFields
+  if (encoding === 'v2') return v2codec.encodeV2Document(body, next)
   const json = JSON.stringify(next)
   return `${body ? `${body}\n\n` : ''}<!-- fanotes-famd:v1 chars=${json.length} -->\n${json}\n`
+}
+
+/** Bytes for a note that did not exist yet. New notes use the compact encoding. */
+function createNoteCompanion(markdown, updatedAt) {
+  return serializeFamd(markdown, emptyFamdPayload(updatedAt), 'v2')
+}
+
+const POINT_TOLERANCE = 1e-4
+
+function samePoint(left, right) {
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return left === right
+  if (Math.abs(Number(left.x) - Number(right.x)) > POINT_TOLERANCE) return false
+  if (Math.abs(Number(left.y) - Number(right.y)) > POINT_TOLERANCE) return false
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)])
+  for (const key of keys) {
+    if (key === 'x' || key === 'y') continue
+    if (left[key] !== right[key]) return false
+  }
+  return true
+}
+
+function sameStroke(left, right) {
+  if (!left || !right) return left === right
+  const leftPoints = Array.isArray(left.points) ? left.points : []
+  const rightPoints = Array.isArray(right.points) ? right.points : []
+  if (leftPoints.length !== rightPoints.length) return false
+  for (let index = 0; index < leftPoints.length; index += 1) {
+    if (!samePoint(leftPoints[index], rightPoints[index])) return false
+  }
+  const leftKeys = Object.keys(left).filter((key) => key !== 'points').sort()
+  const rightKeys = Object.keys(right).filter((key) => key !== 'points').sort()
+  if (leftKeys.join('\0') !== rightKeys.join('\0')) return false
+  for (const key of leftKeys) {
+    if (JSON.stringify(left[key]) !== JSON.stringify(right[key])) return false
+  }
+  return true
+}
+
+function sameInk(left, right) {
+  if (left == null && right == null) return true
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false
+  const leftKeys = Object.keys(left).filter((key) => key !== 'strokes').sort()
+  const rightKeys = Object.keys(right).filter((key) => key !== 'strokes').sort()
+  if (leftKeys.join('\0') !== rightKeys.join('\0')) return false
+  for (const key of leftKeys) {
+    if (JSON.stringify(left[key]) !== JSON.stringify(right[key])) return false
+  }
+  const leftStrokes = Array.isArray(left.strokes) ? left.strokes : []
+  const rightStrokes = Array.isArray(right.strokes) ? right.strokes : []
+  if (leftStrokes.length !== rightStrokes.length) return false
+  for (let index = 0; index < leftStrokes.length; index += 1) {
+    if (!sameStroke(leftStrokes[index], rightStrokes[index])) return false
+  }
+  return true
+}
+
+function sameFamdPayload(left, right) {
+  if (!left || !right) return false
+  if (left.updatedAt !== right.updatedAt) return false
+  if ((left.paperStyle || undefined) !== (right.paperStyle || undefined)) return false
+  if (JSON.stringify(left.worksheets || []) !== JSON.stringify(right.worksheets || [])) return false
+  if (JSON.stringify(left.noteLinks || []) !== JSON.stringify(right.noteLinks || [])) return false
+  if (JSON.stringify(left.noteBackups || []) !== JSON.stringify(right.noteBackups || [])) return false
+  if (JSON.stringify(left.pageStats || null) !== JSON.stringify(right.pageStats || null)) return false
+  if (JSON.stringify(left.textFields || []) !== JSON.stringify(right.textFields || [])) return false
+  return sameInk(left.ink, right.ink)
+}
+
+/**
+ * Logical conversion of one file's text. A failure returns the original
+ * string so the caller can leave the bytes on disk alone.
+ */
+function convertFamdSource(source) {
+  const original = typeof source === 'string' ? source : ''
+  try {
+    if (v2codec.isActiveV2(original)) {
+      parseFamd(original)
+      return { status: 'skipped', source: original }
+    }
+    if (!original.includes('fanotes-famd:v1')) return { status: 'skipped', source: original }
+    const parsed = parseFamd(original)
+    if (!parsed.payload) return { status: 'failed', source: original }
+    const next = serializeFamd(parsed.markdown, parsed.payload, 'v2')
+    const back = parseFamd(next)
+    if (back.markdown !== parsed.markdown || !sameFamdPayload(parsed.payload, back.payload)) {
+      return { status: 'failed', source: original }
+    }
+    return { status: 'converted', source: next }
+  } catch {
+    return { status: 'failed', source: original }
+  }
+}
+
+const CONVERT_SKIP_DIRS = new Set(['.fanotes', '.git', 'node_modules'])
+
+/**
+ * Replace a note only after the new file reloads to the same markdown and
+ * payload. A note that fails stays byte-identical.
+ */
+function convertFamdDirectory(root) {
+  const counts = { converted: 0, skipped: 0, failed: 0 }
+  const walk = (dir) => {
+    let entries
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      counts.failed += 1
+      return
+    }
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (CONVERT_SKIP_DIRS.has(entry.name)) continue
+        walk(full)
+        continue
+      }
+      if (!entry.isFile()) continue
+      const extension = path.extname(entry.name).toLocaleLowerCase('en-US')
+      if (extension !== '.famd' && extension !== '.md' && extension !== '.markdown') continue
+      let bytes
+      try {
+        bytes = fs.readFileSync(full)
+      } catch {
+        counts.failed += 1
+        continue
+      }
+      const text = bytes.toString('utf8')
+      const result = convertFamdSource(text)
+      if (result.status === 'skipped') {
+        counts.skipped += 1
+        continue
+      }
+      if (result.status !== 'converted') {
+        counts.failed += 1
+        continue
+      }
+      const temp = `${full}.${crypto.randomBytes(6).toString('hex')}.famd-new`
+      try {
+        fs.writeFileSync(temp, result.source, { mode: 0o600 })
+        const readBack = fs.readFileSync(temp, 'utf8')
+        const originalParsed = parseFamd(text)
+        const again = parseFamd(readBack)
+        if (again.markdown !== originalParsed.markdown || !sameFamdPayload(originalParsed.payload, again.payload)) {
+          throw new Error('famd conversion round-trip')
+        }
+        fs.renameSync(temp, full)
+        counts.converted += 1
+      } catch {
+        counts.failed += 1
+        try { fs.rmSync(temp, { force: true }) } catch { /* the original file is still in place */ }
+      }
+    }
+  }
+  walk(root)
+  return counts
 }
 
 module.exports = {
@@ -316,11 +486,17 @@ module.exports = {
   isNoteExtension,
   isPdfNoteExtension,
   noteStem,
+  FamdCorruptError: v2codec.FamdCorruptError,
+  convertFamdDirectory,
+  convertFamdSource,
+  createNoteCompanion,
+  famdEncodingForSave: v2codec.famdEncodingForSave,
   parseFamd,
   readFamdCompanion,
   parseNoteBackups,
   parseNoteLinks,
   parseNoteTextFields,
+  sameFamdPayload,
   serializeFamd,
   stripFamdPayload,
   worksheetIdsFromMarkdown,

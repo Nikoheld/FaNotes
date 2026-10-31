@@ -4,6 +4,16 @@ import { parseNoteTextFields, type NoteTextField } from './noteTextField'
 import { parsePageStats, type PageStats } from './pageStats'
 import { isPaperStyle } from './paperStyles'
 import type { PaperStyle } from '../types'
+import {
+  FAMD_V2_SCHEMA,
+  encodeV2Document,
+  famdEncodingForSave,
+  isActiveV2,
+  readV2Payload,
+  v2CutIndex,
+} from '../../electron/famdV2.mjs'
+
+export { famdEncodingForSave }
 
 export const FAMD_EXTENSION = '.famd'
 export const FAMD_SCHEMA = 'fanotes-famd-v1'
@@ -65,7 +75,10 @@ export const stripFamdPayload = (source: string) => {
   if (typeof source !== 'string' || !source) return ''
   let text = source
   const match = [...text.matchAll(new RegExp(FAMD_HEADER.source, 'gu'))].at(-1)
-  if (match && match.index !== undefined) text = text.slice(0, match.index)
+  const v2Cut = v2CutIndex(text)
+  let cut = match && match.index !== undefined ? match.index : -1
+  if (v2Cut >= 0 && v2Cut > cut) cut = v2Cut
+  if (cut >= 0) text = text.slice(0, cut)
   text = text.replace(/\s+$/u, '')
   if (isFamdSidecarJson(text)) return ''
   const trailing = text.match(/\n(\{[\s\S]*\})\s*$/u)
@@ -75,9 +88,43 @@ export const stripFamdPayload = (source: string) => {
   return text
 }
 
+const payloadFromParsed = (parsed: Partial<FamdPayload> & { schema?: string } | null): FamdPayload | null => {
+  if (!parsed || typeof parsed !== 'object' || parsed.schema !== FAMD_SCHEMA && parsed.schema !== FAMD_V2_SCHEMA) return null
+  const worksheets = Array.isArray(parsed.worksheets)
+    ? parsed.worksheets.filter((id): id is string => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,96}$/u.test(id))
+    : []
+  const ink = parsed.ink && typeof parsed.ink === 'object' && !Array.isArray(parsed.ink)
+    ? parsed.ink as Record<string, unknown>
+    : null
+  const updatedAt = typeof parsed.updatedAt === 'string' && Number.isFinite(Date.parse(parsed.updatedAt))
+    ? new Date(parsed.updatedAt).toISOString()
+    : new Date().toISOString()
+  const paperStyle = isPaperStyle(parsed.paperStyle) ? parsed.paperStyle : undefined
+  const noteLinks = parseNoteLinks(parsed.noteLinks)
+  const noteBackups = parseNoteBackups(parsed.noteBackups)
+  const pageStats = parsed.pageStats ? parsePageStats(parsed.pageStats, Date.parse(updatedAt) || Date.now()) : undefined
+  const textFields = parseNoteTextFields(parsed.textFields)
+  return {
+    schema: FAMD_SCHEMA,
+    updatedAt,
+    ink,
+    worksheets,
+    ...(paperStyle ? { paperStyle } : {}),
+    ...(noteLinks.length ? { noteLinks } : {}),
+    ...(noteBackups.length ? { noteBackups } : {}),
+    ...(pageStats ? { pageStats } : {}),
+    ...(textFields.length ? { textFields } : {}),
+  }
+}
+
 export const parseFamd = (source: string): { markdown: string; payload: FamdPayload | null } => {
   const markdown = stripFamdPayload(source)
   if (typeof source !== 'string' || !source) return { markdown: '', payload: null }
+  if (isActiveV2(source)) {
+    const payload = payloadFromParsed(readV2Payload(source) as Partial<FamdPayload>)
+    if (!payload) throw new Error('famd v2 payload')
+    return { markdown, payload }
+  }
   const match = [...source.matchAll(new RegExp(FAMD_HEADER.source, 'gu'))].at(-1)
   if (!match || match.index === undefined) return { markdown, payload: null }
   const length = Number(match[1])
@@ -88,38 +135,7 @@ export const parseFamd = (source: string): { markdown: string; payload: FamdPayl
   const json = source.slice(start, start + length)
   if (json.length !== length) return { markdown, payload: null }
   try {
-    const parsed = JSON.parse(json) as Partial<FamdPayload>
-    if (parsed?.schema !== FAMD_SCHEMA || !parsed || typeof parsed !== 'object') {
-      return { markdown, payload: null }
-    }
-    const worksheets = Array.isArray(parsed.worksheets)
-      ? parsed.worksheets.filter((id): id is string => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,96}$/u.test(id))
-      : []
-    const ink = parsed.ink && typeof parsed.ink === 'object' && !Array.isArray(parsed.ink)
-      ? parsed.ink as Record<string, unknown>
-      : null
-    const updatedAt = typeof parsed.updatedAt === 'string' && Number.isFinite(Date.parse(parsed.updatedAt))
-      ? new Date(parsed.updatedAt).toISOString()
-      : new Date().toISOString()
-    const paperStyle = isPaperStyle(parsed.paperStyle) ? parsed.paperStyle : undefined
-    const noteLinks = parseNoteLinks(parsed.noteLinks)
-    const noteBackups = parseNoteBackups(parsed.noteBackups)
-    const pageStats = parsed.pageStats ? parsePageStats(parsed.pageStats, Date.parse(updatedAt) || Date.now()) : undefined
-    const textFields = parseNoteTextFields(parsed.textFields)
-    return {
-      markdown,
-      payload: {
-        schema: FAMD_SCHEMA,
-        updatedAt,
-        ink,
-        worksheets,
-        ...(paperStyle ? { paperStyle } : {}),
-        ...(noteLinks.length ? { noteLinks } : {}),
-        ...(noteBackups.length ? { noteBackups } : {}),
-        ...(pageStats ? { pageStats } : {}),
-        ...(textFields.length ? { textFields } : {}),
-      },
-    }
+    return { markdown, payload: payloadFromParsed(JSON.parse(json) as Partial<FamdPayload>) }
   } catch {
     return { markdown, payload: null }
   }
@@ -143,7 +159,7 @@ export const writePageStatsIntoNote = (content: string, stats: PageStats) => {
     // statistics-only save would look like an edit to every other device.
     updatedAt: payload?.updatedAt || stats.modifiedAt,
   }
-  return serializeFamd(markdown, next)
+  return serializeFamd(markdown, next, famdEncodingForSave(content))
 }
 
 const syncTextDecoder = new TextDecoder()
@@ -163,7 +179,7 @@ export const canonicalSyncBytes = (path: string, bytes: Uint8Array): Uint8Array 
   const parsed = parseFamd(text)
   if (!parsed.payload?.pageStats) return bytes
   const { pageStats: _pageStats, ...rest } = parsed.payload
-  return syncTextEncoder.encode(serializeFamd(parsed.markdown, rest))
+  return syncTextEncoder.encode(serializeFamd(parsed.markdown, rest, famdEncodingForSave(text)))
 }
 
 /** Put this device's page statistics back into a note downloaded from sync. */
@@ -176,10 +192,10 @@ export const withLocalPageStats = (downloaded: string, local: string): string =>
     ...remote.payload,
     updatedAt: remote.payload.updatedAt,
     pageStats: stats,
-  })
+  }, famdEncodingForSave(downloaded))
 }
 
-export const serializeFamd = (markdown: string, payload: FamdPayload) => {
+export const serializeFamd = (markdown: string, payload: FamdPayload, encoding?: 'v1' | 'v2') => {
   const body = stripFamdPayload(markdown)
   const next: FamdPayload = {
     schema: FAMD_SCHEMA,
@@ -195,6 +211,7 @@ export const serializeFamd = (markdown: string, payload: FamdPayload) => {
   if (payload.pageStats) next.pageStats = payload.pageStats
   const textFields = parseNoteTextFields(payload.textFields)
   if (textFields.length) next.textFields = textFields
+  if (encoding === 'v2') return encodeV2Document(body, next)
   const json = JSON.stringify(next)
   return `${body ? `${body}\n\n` : ''}<!-- fanotes-famd:v1 chars=${json.length} -->\n${json}\n`
 }

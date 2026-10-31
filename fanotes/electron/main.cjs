@@ -46,6 +46,8 @@ const {
   isPaperStyle,
   isPdfNoteExtension,
   noteStem,
+  convertFamdDirectory,
+  famdEncodingForSave,
   parseFamd,
   readFamdCompanion,
   parseNoteBackups,
@@ -169,6 +171,7 @@ const IPC = Object.freeze({
   readRecognitionModel: 'fanotes:read-recognition-model',
   writeRecognitionModel: 'fanotes:write-recognition-model',
   createNote: 'fanotes:create-note',
+  convertFamdNotes: 'fanotes:convert-famd-notes',
   createFolder: 'fanotes:create-folder',
   setFolderColor: 'fanotes:set-folder-color',
   getFolderLocations: 'fanotes:get-folder-locations',
@@ -1711,7 +1714,7 @@ async function mutateFamdCompanion(notePath, mutate) {
       updatedAt: new Date().toISOString(),
       worksheets: worksheetIdsFromMarkdown(nextBody),
     }
-    await atomicWrite(target, serializeFamd(nextBody, nextPayload), { encoding: 'utf8', mode: 0o600 })
+    await atomicWrite(target, serializeFamd(nextBody, nextPayload, famdEncodingForSave(existingSource)), { encoding: 'utf8', mode: 0o600 })
     return next.result
   })
 }
@@ -1738,7 +1741,7 @@ async function writeFamdCompanionNow(markdownRelativePath, famdRelativePath, tar
     paperStyle: existingPayload.paperStyle || incoming.payload?.paperStyle || paperFromInk || (isPaperStyle(currentSettings.paperStyle) ? currentSettings.paperStyle : undefined),
     ...(incoming.payload?.pageStats ? { pageStats: incoming.payload.pageStats } : {}),
   }
-  await atomicWrite(target, serializeFamd(body, payload), { encoding: 'utf8', mode: 0o600 })
+  await atomicWrite(target, serializeFamd(body, payload, famdEncodingForSave(existingSource)), { encoding: 'utf8', mode: 0o600 })
   if (extension === '.famd') {
     const mdTarget = (await resolveVaultPath(mdRelativePath, { allowMissing: true, expected: 'file' })).target
     const mdExists = await fsp.lstat(mdTarget).then((info) => info.isFile() && !info.isSymbolicLink()).catch(() => false)
@@ -3237,12 +3240,14 @@ function registerIpcHandlers() {
               console.warn('FaNotes: Verlauf konnte nicht gesichert werden:', error?.message ?? error)
             }
           }
-          const written = path.extname(normalizedRelativePath).toLocaleLowerCase('en-US') === '.famd'
+          const isFamdFile = path.extname(normalizedRelativePath).toLocaleLowerCase('en-US') === '.famd'
+          const existingFamdSource = isFamdFile ? await readOptionalNoteFile(normalizedRelativePath) : null
+          const written = isFamdFile
             ? serializeFamd(markdownBody, {
-              ...(parseFamd((await readOptionalNoteFile(normalizedRelativePath)) ?? '')).payload || emptyFamdPayload(),
+              ...(parseFamd(existingFamdSource ?? '')).payload || emptyFamdPayload(),
               updatedAt: new Date().toISOString(),
               worksheets: worksheetIdsFromMarkdown(markdownBody),
-            })
+            }, famdEncodingForSave(existingFamdSource))
             : (markdownBody.endsWith('\n') ? markdownBody : `${markdownBody}\n`)
           await atomicWrite(target, written, { encoding: 'utf8', mode: 0o600 })
           // A failed companion write has to fail the save. The markdown is
@@ -3259,6 +3264,12 @@ function registerIpcHandlers() {
         })
       },
     )
+  })
+
+  handle(IPC.convertFamdNotes, async () => {
+    await ensureBootstrap()
+    const root = await assertCurrentVaultRoot()
+    return convertFamdDirectory(root)
   })
 
   handle(IPC.createNote, async (_event, rawParentPath, rawPreferredName) => {
