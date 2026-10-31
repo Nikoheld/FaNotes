@@ -54,11 +54,9 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
-    }
-
-    sourceSets {
-        getByName("main") {
-            assets.directories.add("../../fanotes/resources/onenote/linux")
+        jniLibs {
+            // Extract libone2html.so and lib7za.so so the importer can exec them.
+            useLegacyPackaging = true
         }
     }
 }
