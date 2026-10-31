@@ -52,6 +52,12 @@ export type InkPaintOptions = {
    * segments, then applies each pass alpha once.
    */
   flatPass?: number
+  /**
+   * Curve a partial range toward points past its last segment. A live bake
+   * passes the stroke length so the newest final segment fillets the same way
+   * as one full path, instead of ending on a butt at the sample.
+   */
+  curvePointCount?: number
 }
 
 /** Segments actually stroked by `drawInkStroke` since the last consume. */
@@ -700,8 +706,12 @@ export const drawInkStroke = (
       if (stub < lineWidth * .3) end -= 1
     }
     target.beginPath()
+    // A partial range still has to fillet toward the next known sample. Using
+    // `end` made that last segment a line to the point, so a highlighter
+    // corner grew a disk the full path never paints.
+    const curveCount = Math.max(end, options?.curvePointCount ?? end)
     for (let index = firstSegment; index < end; index += 1) {
-      segmentCurve(index, 0, 0, target, index > firstSegment, end)
+      segmentCurve(index, 0, 0, target, index > firstSegment, curveCount)
     }
     target.stroke()
     noteInkSegments(end - firstSegment)
