@@ -182,10 +182,11 @@ export type ShareEditPatch = {
   textFields?: ShareTextField[] | null
 }
 
-export type ShareEditLayers = {
-  content?: boolean
-  ink?: boolean
-  textFields?: boolean
+/** Layers the open editor already shows. A layer is absorbed only when it equals the remote copy. */
+export type ShareEditApplied = {
+  content?: string
+  textFields?: readonly ShareTextField[]
+  ink?: ShareInk | null
 }
 
 export type ShareEditClient = {
@@ -200,7 +201,7 @@ export type ShareEditClient = {
   peopleWhoCanEdit: () => string[]
   prepareLocalEdit: (sharePath: string, patch: ShareEditPatch) => ShareNoteSnapshot
   editNote: (sharePath: string, patch: ShareEditPatch) => Promise<void>
-  absorb: (sharePath: string, layers: ShareEditLayers) => void
+  absorb: (sharePath: string, applied: ShareEditApplied) => void
   pull: () => Promise<void>
   leave: () => Promise<void>
   owns: (path: string) => boolean
@@ -239,6 +240,74 @@ export const applyRemoteTextFields = (
       fontSize: field.fontSize,
       text: field.text,
     }
+  })
+}
+
+const fieldSignature = (field: { page?: number; x?: number; y?: number; width?: number; fontSize?: number; text?: string }) => JSON.stringify([
+  field.page ?? 1,
+  Math.round((Number(field.x) || 0) * 1000),
+  Math.round((Number(field.y) || 0) * 1000),
+  Math.round((Number(field.width) || 0) * 1000),
+  field.fontSize ?? 16,
+  field.text ?? '',
+])
+
+const sameFieldList = (
+  left: readonly { page?: number; x?: number; y?: number; width?: number; fontSize?: number; text?: string }[],
+  right: readonly { page?: number; x?: number; y?: number; width?: number; fontSize?: number; text?: string }[],
+) => {
+  const applied = left.map(fieldSignature).sort()
+  const remoteFields = right.map(fieldSignature).sort()
+  return applied.length === remoteFields.length && applied.every((item, index) => item === remoteFields[index])
+}
+
+const strokeSignature = (stroke: { color?: string; width?: number; baseWidth?: number; opacity?: number; points?: { x?: number; y?: number }[] }) => JSON.stringify([
+  stroke?.color ?? '',
+  stroke?.width ?? stroke?.baseWidth ?? 0,
+  stroke?.opacity ?? 1,
+  (stroke?.points ?? []).map((point) => [point?.x, point?.y]),
+])
+
+const sameInk = (applied: ShareInk | null | undefined, remoteInk: ShareInk | undefined) => {
+  const left = (applied?.strokes ?? []).map(strokeSignature).sort()
+  const right = (remoteInk?.strokes ?? []).map(strokeSignature).sort()
+  return left.length === right.length && left.every((item, index) => item === right[index])
+}
+
+/**
+ * Drawing JSON for the open page, with the other person's strokes added.
+ * Local strokes stay. The note is not reloaded.
+ */
+export const drawingJsonWithRemoteInk = (drawingJson: string | null | undefined, remoteInk: ShareInk | null | undefined): string => {
+  let base: Record<string, unknown> = { schemaVersion: 1, strokes: [] }
+  if (drawingJson) {
+    try {
+      const parsed = JSON.parse(drawingJson) as unknown
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) base = parsed as Record<string, unknown>
+    } catch {
+      base = { schemaVersion: 1, strokes: [] }
+    }
+  }
+  const current = Array.isArray(base.strokes) ? base.strokes : []
+  const seen = new Set(current.map((stroke) => strokeSignature(stroke as { color?: string; width?: number; opacity?: number; points?: { x?: number; y?: number }[] })))
+  const added = []
+  for (const stroke of remoteInk?.strokes ?? []) {
+    const key = strokeSignature(stroke)
+    if (seen.has(key)) continue
+    seen.add(key)
+    added.push({
+      color: stroke.color,
+      width: stroke.width,
+      opacity: stroke.opacity,
+      points: stroke.points.map((point) => ({ x: point.x, y: point.y })),
+    })
+  }
+  if (!added.length) return drawingJson && drawingJson.trim() ? drawingJson : JSON.stringify(base)
+  return JSON.stringify({
+    ...base,
+    width: base.width ?? remoteInk?.width ?? 900,
+    height: base.height ?? remoteInk?.height ?? 1273,
+    strokes: [...current, ...added],
   })
 }
 
@@ -349,7 +418,7 @@ export async function openShareEditor(input: {
     return run
   }
 
-  const absorb = (sharePath: string, layers: ShareEditLayers) => {
+  const absorb = (sharePath: string, applied: ShareEditApplied) => {
     const remoteNote = remote.find((note) => note.path === sharePath)
     if (!remoteNote) return
     const existing = basis.find((note) => note.path === sharePath)
@@ -358,18 +427,23 @@ export async function openShareEditor(input: {
       title: remoteNote.title,
       content: remoteNote.content,
     }
-    if (layers.content) {
+    let moved = false
+    if (typeof applied.content === 'string' && applied.content === remoteNote.content) {
       next.title = remoteNote.title
       next.content = remoteNote.content
+      moved = true
     }
-    if (layers.ink) {
-      if (remoteNote.ink) next.ink = remoteNote.ink
-      else delete next.ink
-    }
-    if (layers.textFields) {
+    if (applied.textFields && sameFieldList(applied.textFields, remoteNote.textFields ?? [])) {
       if (remoteNote.textFields?.length) next.textFields = remoteNote.textFields
       else delete next.textFields
+      moved = true
     }
+    if (applied.ink !== undefined && sameInk(applied.ink, remoteNote.ink)) {
+      if (remoteNote.ink) next.ink = remoteNote.ink
+      else delete next.ink
+      moved = true
+    }
+    if (!moved) return
     basis = basis.some((note) => note.path === sharePath)
       ? basis.map((note) => note.path === sharePath ? next : note)
       : [...basis, next]

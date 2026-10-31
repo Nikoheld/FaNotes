@@ -94,6 +94,9 @@ assert.match(appSource, /confirmShareIdentity\(/u)
 assert.match(appSource, /claimUsername\(/u)
 assert.match(appSource, /remoteTextForEditor\(/u)
 assert.match(appSource, /applyRemoteTextFields\(/u)
+assert.match(appSource, /session\.noteInk\(/u)
+assert.match(appSource, /drawingJsonWithRemoteInk\(/u)
+assert.match(appSource, /setDrawingSession\(/u)
 assert.match(viewerScript, /FANOTES_SHARE_LINK/u)
 assert.match(viewerScript, /__fanotesShareDownload/u)
 assert.match(viewerLink, /Im Browser ansehen oder in der Desktop-App bearbeiten\?/u)
@@ -690,6 +693,7 @@ try {
   assert.equal(shareEdit.remoteTextForEditor('Zeile\nBea\n', beaDirty.noteContent('Zeile.md'), true), null)
   assert.equal(shareEdit.remoteTextForEditor('Zeile\n', '', false), '')
   assert.equal(shareEdit.remoteTextForEditor('Zeile\n', beaDirty.noteContent('Zeile.md'), false), beaDirty.noteContent('Zeile.md'))
+  beaDirty.absorb('Zeile.md', { content: 'Zeile\nBea\n' })
   await beaDirty.editNote('Zeile.md', { content: 'Zeile\nBea\n' })
   assert.match(beaDirty.documentText(), /Ada/u)
   assert.match(beaDirty.documentText(), /Bea/u)
@@ -713,6 +717,18 @@ try {
   const beaInkClient = await shareEdit.openShareEditor({ share: inkEditSaved, name: 'Bea Beispiel', port: sharePort, origin, clientId: 'bea-ink' })
   await adaInkClient.editNote('Blatt.md', { ink: { width: 900, height: 1273, strokes: [adaStroke] }, textFields: [adaField] })
   await beaInkClient.pull()
+  const localDrawing = JSON.stringify({
+    schemaVersion: 1,
+    width: 900,
+    height: 1273,
+    strokes: [localStroke],
+  })
+  const paintedJson = shareEdit.drawingJsonWithRemoteInk(localDrawing, beaInkClient.noteInk('Blatt.md'))
+  const painted = JSON.parse(paintedJson)
+  assert.equal(painted.strokes.length, 2)
+  const paintedXs = painted.strokes.flatMap((stroke) => stroke.points.map((point) => point.x))
+  assert.ok(paintedXs.includes(0.1), `painted x ${paintedXs.join(',')}`)
+  assert.ok(paintedXs.includes(0.5), `painted x ${paintedXs.join(',')}`)
   const prepared = beaInkClient.prepareLocalEdit('Blatt.md', {
     ink: { width: 900, height: 1273, strokes: [localStroke] },
     textFields: [beaField],
@@ -786,6 +802,8 @@ try {
     `clearedInk ${cleared.notes[0].ink === undefined}`,
     `field ${mergedRead.notes[0].textFields[0].text}`,
     `dirtyBoth ${dirtyRead.notes[0].content.includes('Ada') && dirtyRead.notes[0].content.includes('Bea')}`,
+    `absorbKeepsBoth ${dirtyRead.notes[0].content.includes('Ada') && dirtyRead.notes[0].content.includes('Bea')}`,
+    `remoteStrokePainted ${painted.strokes.some((stroke) => stroke.points.some((point) => point.x === 0.1))}`,
     `remoteClear ${shareEdit.remoteTextForEditor('Zeile\n', '', false) === ''}`,
     `inkBoth ${bothInk.notes[0].ink.strokes.length}`,
     `inkKept ${keptBoth.notes[0].ink.strokes.length}`,
