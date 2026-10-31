@@ -6,6 +6,7 @@ import ch.fasrv.fanotes.famd.safeWorksheetSource
 import ch.fasrv.fanotes.famd.worksheetRecordPath
 import ch.fasrv.fanotes.famd.companionPath
 import ch.fasrv.fanotes.famd.emptyFamdPayload
+import ch.fasrv.fanotes.famd.famdEncodingForSave
 import ch.fasrv.fanotes.famd.isoNow
 import ch.fasrv.fanotes.famd.noteInkId
 import ch.fasrv.fanotes.famd.parseFamd
@@ -134,7 +135,8 @@ class NoteStore(private val io: VaultIo) {
         if (previous != null) {
             runCatching { recordNoteHistory(io, historyPath, previous) }
         }
-        io.write(famdPath, serializeFamd(withMarker, payload).encodeToByteArray())
+        val previousFamd = if (historyPath == famdPath) previous else io.read(famdPath)?.decodeToString()
+        io.write(famdPath, serializeFamd(withMarker, payload, famdEncodingForSave(previousFamd)).encodeToByteArray())
         if (note.kind == NoteKind.MARKDOWN && !note.path.endsWith(FAMD_EXTENSION)) {
             val body = stripFamdPayload(withMarker)
             val text = if (body.endsWith("\n") || body.isEmpty()) body else "$body\n"

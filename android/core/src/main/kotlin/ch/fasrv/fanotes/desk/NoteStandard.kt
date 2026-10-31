@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes.desk
 
+import ch.fasrv.fanotes.famd.famdEncodingForSave
 import ch.fasrv.fanotes.famd.parseFamd
 import ch.fasrv.fanotes.famd.serializeFamd
 import ch.fasrv.fanotes.ink.OVERLAY_QUALITY
@@ -53,7 +54,7 @@ fun convertFamdToCurrentStandard(source: String): NoteStandardConversion {
     }
     val nextPayload = payload.deepCopy() as JsonValue.Obj
     nextPayload.put("ink", upgradedInk)
-    val nextSource = serializeFamd(parsed.markdown, nextPayload)
+    val nextSource = serializeFamd(parsed.markdown, nextPayload, famdEncodingForSave(original))
     val roundTrip = parseFamd(nextSource)
     if (roundTrip.markdown != parsed.markdown) throw IllegalStateException("convert round-trip dropped markdown")
     if (strokeJson(roundTrip.payload?.obj("ink")) != strokeJson(upgradedInk)) {

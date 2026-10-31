@@ -986,7 +986,7 @@ fun wordCount(markdown: String) = markdown.replace(Regex("""<!--[\s\S]*?-->"""),
 private val INSPECTOR_MARKERS = Regex("""<!--\s*fanotes-(?:ink|worksheet):[a-zA-Z0-9_-]{1,96}\s*-->""")
 private val STATUS_INK_MARKER = Regex("""<!--\s*fanotes-ink:[a-zA-Z0-9_-]{1,96}\s*-->""")
 private val STATUS_WORKSHEET_MARKER = Regex("""<!--\s*fanotes-worksheet:[a-zA-Z0-9_-]{1,96}\s*-->""")
-private val FAMD_TAIL = Regex("""(?:^|\n)<!--\s*fanotes-famd:v1[\s\S]*$""")
+private val FAMD_TAIL = Regex("""(?:^|\n)<!--\s*fanotes-famd:v[12][\s\S]*$""")
 private val INSPECTOR_PUNCTUATION = Regex("""[`#>*_~\[\]()-]""")
 
 /** Status-bar count: trimmed visible note text, split on whitespace. */

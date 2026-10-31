@@ -1,4 +1,4 @@
-import { companionNotePath, emptyFamdPayload, isPdfNotePath, parseFamd, serializeFamd } from './famd'
+import { companionNotePath, emptyFamdPayload, famdEncodingForSave, isPdfNotePath, parseFamd, serializeFamd } from './famd'
 
 export const SUBJECT_BOOK_PLACEMENTS = ['links', 'rechts', 'oben', 'unten', 'popout'] as const
 export type SubjectBookPlacement = (typeof SUBJECT_BOOK_PLACEMENTS)[number]
@@ -276,7 +276,7 @@ export const persistSubjectBookNotes = (
     ink: input.ink === undefined ? parsed.payload?.ink ?? null : input.ink,
   }
   const body = input.text === undefined ? parsed.markdown : input.text
-  return serializeFamd(body, payload)
+  return serializeFamd(body, payload, famdEncodingForSave(typeof existingSource === 'string' ? existingSource : ''))
 }
 
 export const readSubjectBookNotes = (source: string) => {
