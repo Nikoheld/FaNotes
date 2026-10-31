@@ -132,8 +132,9 @@ class NoteStore(private val io: VaultIo) {
         val famdPath = if (note.path.endsWith(FAMD_EXTENSION)) note.path else companionPath(note.path, FAMD_EXTENSION)
         val historyPath = if (note.kind == NoteKind.PDF || note.path.endsWith(FAMD_EXTENSION)) famdPath else note.path
         val previous = io.read(historyPath)?.decodeToString()
-        if (previous != null) {
-            runCatching { recordNoteHistory(io, historyPath, previous) }
+        val historyCompanion = if (historyPath == famdPath) null else io.read(famdPath)?.decodeToString()
+        if (previous != null || !historyCompanion.isNullOrBlank()) {
+            runCatching { recordNoteHistory(io, historyPath, previous.orEmpty(), companion = historyCompanion) }
         }
         val previousFamd = if (historyPath == famdPath) previous else io.read(famdPath)?.decodeToString()
         io.write(famdPath, serializeFamd(withMarker, payload, famdEncodingForSave(previousFamd)).encodeToByteArray())

@@ -3804,7 +3804,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val note = open.value ?: return
         viewModelScope.launch {
             val file = withContext(Dispatchers.IO) { readNoteHistory(graph.vault, historyPathFor(note), snapshotId) }
-            val payload = runCatching { parseFamd(file.content) }.getOrNull()?.payload
+            val inkSource = file.companion?.takeIf { it.isNotEmpty() } ?: file.content
+            val payload = runCatching { parseFamd(inkSource) }.getOrNull()?.payload
             val ink = payload?.obj("ink")
             if (payload != null && ink != null) {
                 session.replace(parseInkDocument(ink, note.title, payload.string("paperStyle") ?: note.document.paperStyle, isoNow()))

@@ -3,6 +3,7 @@ import { DEFAULT_SETTINGS } from '../defaults'
 import { getUiLanguage } from '../i18n'
 import type { AppSettings, BootstrapData, DrawingLibraryDocument, FaNotesApi, PaperStyle, ServerBackupState, UpdateState, VaultEntry, WorksheetDocument } from '../types'
 import { companionNotePath, emptyFamdPayload, famdEncodingForSave, parseFamd, serializeFamd } from './famd'
+import { nextSnapshotTier, retainSnapshots, snapshotExtension } from '../../electron/noteHistoryPolicy.mjs'
 import { germanCount, germanIndexOf } from './germanSearch'
 import { inkAnchorForQuery, noteSearchExcerpt, readableTranscript } from './searchInkAnchor'
 import { parseNoteBackups, type NoteBackupSnapshot } from './noteBackup'
@@ -242,7 +243,7 @@ export function createBrowserApi(): FaNotesApi {
   const notePaper = new Map<string, PaperStyle>()
   let subjectBooks: SubjectBookRecord[] = []
   let folderLocations: FolderLocationMap = {}
-  const noteHistory = new Map<string, Array<{ id: string; createdAt: string; content: string; bytes: number }>>()
+  const noteHistory = new Map<string, Array<{ id: string; createdAt: string; content: string; bytes: number; tier?: 'week' | 'short'; ext?: string; companion?: string }>>()
   let cachedTree: VaultEntry[] | null = null
   let updateState: UpdateState = {
     status: 'up-to-date', supported: false, currentVersion: WEB_VERSION, latestVersion: WEB_VERSION,
@@ -796,12 +797,30 @@ export function createBrowserApi(): FaNotesApi {
       const previous = files.get(path)
       if (!previous && !/\.famd$/iu.test(path)) throw new Error('Die Notiz wurde im Browser-Vault nicht gefunden.')
       if (typeof content !== 'string' || textBytes(content) > MAX_NOTE_BYTES) throw new Error('Die Notiz ist zu groß.')
-      if (previous && previous.content !== content) {
-        const createdAt = new Date().toISOString()
-        const entry = { id: `${createdAt}-${Math.random().toString(36).slice(2, 8)}`, createdAt, content: previous.content, bytes: textBytes(previous.content) }
-        const list = noteHistory.get(logical) ?? []
-        list.push(entry)
-        noteHistory.set(logical, list.slice(-30))
+      if (previous) {
+        const nowMs = Date.now()
+        const kept = retainSnapshots(noteHistory.get(logical) ?? [], nowMs)
+        let next = kept
+        if (previous.content !== content) {
+          const isFamd = snapshotExtension(logical) === '.famd'
+          const companion = isFamd ? '' : (files.get(companionNotePath(logical, '.famd'))?.content ?? '')
+          const last = kept.at(-1)
+          const same = Boolean(last && last.content === previous.content && (last.companion ?? '') === companion)
+          const tier = same ? null : nextSnapshotTier(kept, nowMs)
+          if (!same && tier) {
+            const createdAt = new Date(nowMs).toISOString()
+            next = [...kept, {
+              id: `${createdAt}-${Math.random().toString(36).slice(2, 8)}`,
+              createdAt,
+              content: previous.content,
+              bytes: textBytes(previous.content),
+              tier,
+              ext: isFamd ? '.famd' : '.md',
+              ...(companion ? { companion } : {}),
+            }]
+          }
+        }
+        noteHistory.set(logical, next)
       }
       const record = { path, content, modifiedAt: new Date().toISOString() }
       await write('files', (store) => { store.put(record) })
@@ -811,13 +830,16 @@ export function createBrowserApi(): FaNotesApi {
     },
     listNoteHistory: async (rawPath) => {
       await ready
-      return [...(noteHistory.get(normalizePath(rawPath)) ?? [])].reverse().map(({ id, createdAt, bytes }) => ({ id, createdAt, bytes }))
+      const key = normalizePath(rawPath)
+      const kept = retainSnapshots(noteHistory.get(key) ?? [], Date.now())
+      noteHistory.set(key, kept)
+      return [...kept].reverse().map(({ id, createdAt, bytes }) => ({ id, createdAt, bytes }))
     },
     readNoteHistory: async (rawPath, snapshotId) => {
       await ready
       const entry = (noteHistory.get(normalizePath(rawPath)) ?? []).find((item) => item.id === snapshotId)
       if (!entry) throw new Error('Dieser Verlaufseintrag existiert nicht mehr.')
-      return { id: entry.id, createdAt: entry.createdAt, content: entry.content }
+      return { id: entry.id, createdAt: entry.createdAt, content: entry.content, ...(entry.companion ? { companion: entry.companion } : {}) }
     },
     exportNotePdf: async () => {
       document.documentElement.classList.add('is-printing')
