@@ -539,6 +539,7 @@ let closeWarningDialogAbortController = null
 let closeWarningCycle = 0
 let currentVaultPath = null
 let currentVaultGeneration = 0
+let historyPrunedGeneration = -1
 let validatedVaultGeneration = -1
 let validatedVaultAt = 0
 let welcomeNoteUpgradeGeneration = -1
@@ -1340,6 +1341,7 @@ async function ensureBootstrap({ allowOnboarding = false } = {}) {
     Date.now() - validatedVaultAt < VAULT_REVALIDATION_INTERVAL_MS
   ) {
     assertOnboardingComplete(allowOnboarding)
+    await pruneHistoryOnce()
     return bootstrapData()
   }
 
@@ -1357,7 +1359,22 @@ async function ensureBootstrap({ allowOnboarding = false } = {}) {
     markCurrentVaultValidated()
   }
   assertOnboardingComplete(allowOnboarding)
+  await pruneHistoryOnce()
   return bootstrapData()
+}
+
+async function pruneHistoryOnce() {
+  if (!currentVaultPath || historyPrunedGeneration === currentVaultGeneration) return
+  const generation = currentVaultGeneration
+  const vaultPath = currentVaultPath
+  historyPrunedGeneration = generation
+  try {
+    const { pruneVaultHistory } = require('./note-history.cjs')
+    await pruneVaultHistory(vaultPath)
+  } catch (error) {
+    if (historyPrunedGeneration === generation) historyPrunedGeneration = -1
+    console.warn('FaNotes: Verlauf konnte nicht aufgeräumt werden:', error?.message ?? error)
+  }
 }
 
 async function ensureQuickBootstrap() {
@@ -1676,6 +1693,33 @@ function readCompanionInkDocument(loaded, famdRelative, markerHint) {
  * other's stale half (old ink under new text, or old text under new ink). A
  * caller that already holds that queue slot passes it as `heldQueueTarget`.
  */
+async function snapshotNoteHistory(relativePath) {
+  if (!currentVaultPath || typeof relativePath !== 'string' || !relativePath) return
+  const { recordNoteHistorySnapshot } = require('./note-history.cjs')
+  const extension = path.extname(relativePath).toLocaleLowerCase('en-US')
+  try {
+    if (extension === '.famd') {
+      const previous = await readOptionalNoteFile(relativePath)
+      if (typeof previous !== 'string') return
+      await recordNoteHistorySnapshot(currentVaultPath, relativePath, previous)
+      return
+    }
+    const previous = await readOptionalNoteFile(relativePath)
+    const companion = await readOptionalNoteFile(companionNotePath(relativePath, '.famd'))
+    if (typeof previous !== 'string' && typeof companion !== 'string') return
+    await recordNoteHistorySnapshot(
+      currentVaultPath,
+      relativePath,
+      typeof previous === 'string' ? previous : '',
+      { companion },
+    )
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      console.warn('FaNotes: Verlauf konnte nicht gesichert werden:', error?.message ?? error)
+    }
+  }
+}
+
 async function writeFamdCompanion(markdownRelativePath, markdown, ink = undefined, options = {}) {
   const extension = path.extname(markdownRelativePath).toLocaleLowerCase('en-US')
   if (!isNoteExtension(extension)) return
@@ -1697,6 +1741,7 @@ async function mutateFamdCompanion(notePath, mutate) {
   const { target } = await resolveVaultPath(famdRelative, { allowMissing: true, expected: 'file' })
   return queueFileWrite(target, async () => {
     invalidateFamdCompanion(famdRelative)
+    await snapshotNoteHistory(markdownPath)
     const markdown = (await readOptionalNoteFile(markdownPath, noteByteLimit(markdownPath))) ?? ''
     const existingSource = await readOptionalNoteFile(famdRelative)
     const existing = existingSource ? parseFamd(existingSource) : { markdown: stripFamdPayload(markdown), payload: emptyFamdPayload() }
@@ -1723,6 +1768,7 @@ async function writeFamdCompanionNow(markdownRelativePath, famdRelativePath, tar
   invalidateFamdCompanion(famdRelativePath)
   const extension = path.extname(markdownRelativePath).toLocaleLowerCase('en-US')
   const mdRelativePath = companionNotePath(markdownRelativePath, '.md')
+  await snapshotNoteHistory(extension === '.famd' ? famdRelativePath : mdRelativePath)
   const existingSource = await readOptionalNoteFile(famdRelativePath)
   const existing = existingSource ? parseFamd(existingSource) : { markdown: '', payload: emptyFamdPayload() }
   const incoming = parseFamd(typeof markdown === 'string' ? markdown : '')
@@ -3233,8 +3279,12 @@ function registerIpcHandlers() {
           }
           try {
             const previous = await readRegularFileNoFollow(target, noteByteLimit(normalizedRelativePath))
+            const extension = path.extname(normalizedRelativePath).toLocaleLowerCase('en-US')
+            const companion = extension === '.famd'
+              ? undefined
+              : await readOptionalNoteFile(companionNotePath(normalizedRelativePath, '.famd'))
             const { recordNoteHistorySnapshot } = require('./note-history.cjs')
-            await recordNoteHistorySnapshot(requestedVaultPath, normalizedRelativePath, previous.toString('utf8'))
+            await recordNoteHistorySnapshot(requestedVaultPath, normalizedRelativePath, previous.toString('utf8'), { companion })
           } catch (error) {
             if (error?.code !== 'ENOENT') {
               console.warn('FaNotes: Verlauf konnte nicht gesichert werden:', error?.message ?? error)

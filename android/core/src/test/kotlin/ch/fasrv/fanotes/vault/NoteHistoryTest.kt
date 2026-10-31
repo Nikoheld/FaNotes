@@ -4,6 +4,7 @@ import ch.fasrv.fanotes.desk.confirmDialogShadow
 import ch.fasrv.fanotes.desk.confirmShadowFavorsDown
 import ch.fasrv.fanotes.desk.confirmShadowFrame
 import java.nio.file.Files
+import java.time.Instant
 import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -12,35 +13,64 @@ import kotlin.test.assertTrue
 
 class NoteHistoryTest {
     @Test
-    fun snapshotsUseTheDesktopSha1FolderAndKeepThirty() {
+    fun snapshotsUseTheDesktopSha1FolderAndTheTwelveHourCadence() {
         val vault = DirectoryVault(Files.createTempDirectory("fanotes-history"))
         assertEquals("bfb8d1331084ef9b03ef8565520777f39e519f99", sha1Hex("Note.md"))
         assertEquals(".fanotes/history/bfb8d1331084ef9b03ef8565520777f39e519f99", historyDirectory("Note.md"))
-        recordNoteHistory(vault, "Note.md", "first revision\n", "2026-10-14T12:00:00.000Z", "aa0001")
+        val start = "2026-10-14T12:00:00.000Z"
+        val halfDay = "2026-10-15T00:00:00.000Z"
+        recordNoteHistory(vault, "Note.md", "first revision\n", start, "aa0001")
         recordNoteHistory(vault, "Note.md", "first revision\n", "2026-10-14T12:00:01.000Z", "aa0002")
-        assertEquals(1, listNoteHistory(vault, "Note.md").size)
+        assertEquals(1, listNoteHistory(vault, "Note.md", Instant.parse("2026-10-14T12:00:01.000Z").toEpochMilli()).size)
         recordNoteHistory(vault, "Note.md", "second revision\n", "2026-10-14T12:00:02.000Z", "aa0003")
-        val listed = listNoteHistory(vault, "Note.md")
-        assertEquals("second revision\n", readNoteHistory(vault, "Note.md", listed.first().id).content)
+        assertEquals(1, listNoteHistory(vault, "Note.md", Instant.parse("2026-10-14T12:00:02.000Z").toEpochMilli()).size)
+        recordNoteHistory(vault, "Note.md", "half day\n", halfDay, "aa0004")
+        val listed = listNoteHistory(vault, "Note.md", Instant.parse(halfDay).toEpochMilli())
+        assertEquals(2, listed.size)
+        assertEquals("half day\n", readNoteHistory(vault, "Note.md", listed.first().id).content)
         assertEquals("first revision\n", readNoteHistory(vault, "Note.md", listed.last().id).content)
         assertTrue(vault.read("${historyDirectory("Note.md")}/index.json")!!.decodeToString().contains("\"format\": \"fanotes-history-v1\""))
         assertFailsWith<IllegalArgumentException> { readNoteHistory(vault, "Note.md", "../secret") }
     }
 
     @Test
-    fun theOldestSnapshotIsDroppedAfterTheLimit() {
+    fun aTwelveHourSnapshotExpiresAfterTwoDaysAndAWeeklySnapshotStays() {
         val vault = DirectoryVault(Files.createTempDirectory("fanotes-history-limit"))
-        for (revision in 0..HISTORY_LIMIT) {
-            val stamp = "2026-10-14T12:00:%02d.000Z".format(revision)
-            recordNoteHistory(vault, "Long.md", "revision $revision\n", stamp, "bb%04d".format(revision))
-        }
-        val history = listNoteHistory(vault, "Long.md")
-        assertEquals(HISTORY_LIMIT, history.size)
-        assertEquals("revision $HISTORY_LIMIT\n", readNoteHistory(vault, "Long.md", history.first().id).content)
-        val retained = history.map { readNoteHistory(vault, "Long.md", it.id).content }.toSet()
-        assertTrue("revision 0\n" !in retained)
-        val files = vault.list(historyDirectory("Long.md")).count { it.path.endsWith(".md") }
-        assertEquals(HISTORY_LIMIT, files)
+        recordNoteHistory(vault, "Long.md", "week\n", "2026-03-01T00:00:00.000Z", "bb0000")
+        recordNoteHistory(vault, "Long.md", "too soon\n", "2026-03-01T00:01:00.000Z", "bb0001")
+        val halfDay = "2026-03-01T12:00:00.000Z"
+        recordNoteHistory(vault, "Long.md", "half day\n", halfDay, "bb0002")
+        val during = listNoteHistory(vault, "Long.md", Instant.parse(halfDay).toEpochMilli())
+        assertEquals(2, during.size)
+        assertEquals("half day\n", readNoteHistory(vault, "Long.md", during.first().id).content)
+        val expiredAt = Instant.parse(halfDay).toEpochMilli() + HISTORY_SHORT_RETENTION_MS
+        val expired = listNoteHistory(vault, "Long.md", expiredAt)
+        assertEquals(1, expired.size)
+        assertEquals("week\n", readNoteHistory(vault, "Long.md", expired.single().id).content)
+        assertEquals(1, vault.list(historyDirectory("Long.md")).count { it.path.endsWith(".md") })
+        recordNoteHistory(vault, "Long.md", "next week\n", "2026-03-08T00:00:00.000Z", "bb0003")
+        val weeks = listNoteHistory(vault, "Long.md", Instant.parse("2026-03-08T00:00:00.000Z").toEpochMilli())
+        assertEquals(2, weeks.size)
+        assertEquals(listOf("week", "week"), weeks.asReversed().map { it.tier })
+    }
+
+    @Test
+    fun famdSnapshotsKeepTheFamdExtensionAndMarkdownSnapshotsKeepTheCompanion() {
+        val vault = DirectoryVault(Files.createTempDirectory("fanotes-history-famd"))
+        val stamp = "2026-03-01T00:00:00.000Z"
+        val now = Instant.parse(stamp).toEpochMilli()
+        recordNoteHistory(vault, "Ink.famd", "handwriting-bytes", stamp, "cc0001")
+        val famdFiles = vault.list(historyDirectory("Ink.famd"))
+        assertEquals(1, famdFiles.count { it.path.endsWith(".famd") })
+        assertEquals(0, famdFiles.count { it.path.endsWith(".md") })
+        assertEquals("handwriting-bytes", readNoteHistory(vault, "Ink.famd", listNoteHistory(vault, "Ink.famd", now).single().id).content)
+        recordNoteHistory(vault, "Both.md", "# Text\n", stamp, "dd0001", companion = "companion-famd")
+        val loaded = readNoteHistory(vault, "Both.md", listNoteHistory(vault, "Both.md", now).single().id)
+        assertEquals("# Text\n", loaded.content)
+        assertEquals("companion-famd", loaded.companion)
+        val bothFiles = vault.list(historyDirectory("Both.md"))
+        assertEquals(1, bothFiles.count { it.path.endsWith(".md") && !it.path.endsWith("index.json") })
+        assertEquals(1, bothFiles.count { it.path.endsWith(".famd") })
     }
 
     @Test
@@ -117,6 +147,8 @@ class NoteHistoryTest {
         store.save(note, note.document, "Zweite Fassung\n")
         val history = listNoteHistory(vault, path)
         assertEquals(1, history.size)
-        assertTrue(readNoteHistory(vault, path, history.single().id).content.contains("Lecture"))
+        val restored = readNoteHistory(vault, path, history.single().id)
+        assertTrue(restored.content.contains("Lecture"))
+        assertTrue(restored.companion?.contains("fanotes-famd") == true)
     }
 }

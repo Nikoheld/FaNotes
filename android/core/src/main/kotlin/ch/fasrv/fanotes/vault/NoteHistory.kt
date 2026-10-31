@@ -18,18 +18,28 @@ import kotlin.math.roundToInt
 
 /**
  * Local note history in the desktop layout from `electron/note-history.cjs`.
- * Each note keeps at most [HISTORY_LIMIT] snapshots under
- * `.fanotes/history/<sha1(path)>`. The index is written before an old file is
- * deleted, so a crash cannot drop the newest revision.
+ * A note gains one weekly snapshot and one snapshot every 12 hours. The
+ * 12-hour snapshot is removed after two days. Markdown snapshots also keep
+ * the `.famd` companion. The index is written before an old file is deleted,
+ * so a crash cannot drop the newest revision.
  */
-const val HISTORY_LIMIT = 30
+const val HISTORY_SHORT_INTERVAL_MS = 12L * 60L * 60L * 1000L
+const val HISTORY_SHORT_RETENTION_MS = 2L * 24L * 60L * 60L * 1000L
+const val HISTORY_WEEK_INTERVAL_MS = 7L * 24L * 60L * 60L * 1000L
 const val HISTORY_MAX_BYTES = 16 * 1024 * 1024
 private const val HISTORY_FORMAT = "fanotes-history-v1"
 private val SNAPSHOT_ID = Regex("^[A-Za-z0-9._-]+$")
 private val HISTORY_CLOCK: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSX").withZone(ZoneOffset.UTC)
 
-data class HistorySnapshot(val id: String, val createdAt: String, val bytes: Int)
+data class HistorySnapshot(
+    val id: String,
+    val createdAt: String,
+    val bytes: Int,
+    val tier: String? = null,
+    val ext: String? = null,
+    val companion: Boolean = false,
+)
 
 fun historyDirectory(notePath: String): String {
     val normalized = notePath.replace('\\', '/')
@@ -42,55 +52,92 @@ fun recordNoteHistory(
     content: String,
     createdAt: String = historyTimestamp(System.currentTimeMillis()),
     idSuffix: String = randomHistorySuffix(),
+    companion: String? = null,
 ) {
-    if (content.isBlank()) return
-    val bytes = content.encodeToByteArray()
-    if (bytes.isEmpty() || bytes.size > HISTORY_MAX_BYTES) return
+    val companionText = companion?.takeIf { it.isNotBlank() }.orEmpty()
+    val nowMs = snapshotMillis(createdAt) ?: return
     val directory = historyDirectory(notePath)
     val index = readHistoryIndex(io, directory)
-    val last = index.snapshots.lastOrNull()
+    if (content.isBlank() && companionText.isEmpty()) {
+        if (io.read("$directory/index.json") == null) return
+        val retained = retainHistory(index.snapshots, nowMs)
+        commitHistory(io, directory, index, retained.kept, retained.removed)
+        return
+    }
+    val bytes = content.encodeToByteArray()
+    val companionBytes = companionText.encodeToByteArray()
+    if (bytes.size > HISTORY_MAX_BYTES) return
+    val retained = retainHistory(index.snapshots, nowMs)
+    val ext = snapshotExtension(notePath)
+    val last = retained.kept.lastOrNull()
+    var changed = true
     if (last != null) {
-        val previous = io.read("$directory/${last.id}.md")?.decodeToString()
-        if (previous == content) return
+        val previous = io.read(snapshotFile(directory, last))?.decodeToString()
+        val previousCompanion = if (last.companion && last.ext != ".famd") {
+            io.read("$directory/${last.id}.famd")?.decodeToString().orEmpty()
+        } else {
+            ""
+        }
+        changed = previous == null || previous != content || previousCompanion != companionText
+    }
+    val tier = if (changed) nextHistoryTier(retained.kept, nowMs) else null
+    val storeCompanion = ext != ".famd" && companionText.isNotEmpty() && companionBytes.size <= HISTORY_MAX_BYTES
+    if (!changed || tier == null || (bytes.isEmpty() && !storeCompanion)) {
+        if (index.path == null) index.path = notePath.replace('\\', '/')
+        commitHistory(io, directory, index, retained.kept, retained.removed)
+        return
     }
     if (!SNAPSHOT_ID.matches(idSuffix)) throw IllegalArgumentException("Ungültiger Verlaufseintrag.")
     val id = "${createdAt.replace(':', '-').replace('.', '-')}-$idSuffix"
     if (!SNAPSHOT_ID.matches(id)) throw IllegalArgumentException("Ungültiger Verlaufseintrag.")
-    val snapshot = HistorySnapshot(id, createdAt, bytes.size)
-    io.write("$directory/$id.md", bytes)
+    val entry = HistorySnapshot(id, createdAt, bytes.size, tier, ext, storeCompanion)
+    val primary = "$directory/$id$ext"
+    io.write(primary, bytes)
+    if (storeCompanion) {
+        try {
+            io.write("$directory/$id.famd", companionBytes)
+        } catch (error: Exception) {
+            io.delete(primary)
+            throw error
+        }
+    }
     index.path = notePath.replace('\\', '/')
-    index.snapshots += snapshot
     try {
-        writeHistoryIndex(io, directory, index)
+        commitHistory(io, directory, index, retained.kept + entry, retained.removed)
     } catch (error: Exception) {
-        io.delete("$directory/$id.md")
+        io.delete(primary)
+        if (storeCompanion) io.delete("$directory/$id.famd")
         throw error
     }
-    if (index.snapshots.size <= HISTORY_LIMIT) return
-    val removed = index.snapshots.take(index.snapshots.size - HISTORY_LIMIT)
-    index.snapshots.subList(0, index.snapshots.size - HISTORY_LIMIT).clear()
-    try {
-        writeHistoryIndex(io, directory, index)
-    } catch (_: Exception) {
-        return
-    }
-    for (entry in removed) io.delete("$directory/${entry.id}.md")
 }
 
-fun listNoteHistory(io: VaultIo, notePath: String): List<HistorySnapshot> =
-    readHistoryIndex(io, historyDirectory(notePath)).snapshots.asReversed()
+fun listNoteHistory(io: VaultIo, notePath: String, nowMs: Long = System.currentTimeMillis()): List<HistorySnapshot> {
+    val directory = historyDirectory(notePath)
+    val index = readHistoryIndex(io, directory)
+    val retained = retainHistory(index.snapshots, nowMs)
+    if (retained.removed.isNotEmpty() || index.snapshots != retained.kept) {
+        commitHistory(io, directory, index, retained.kept, retained.removed)
+    }
+    return retained.kept.asReversed()
+}
 
 fun readNoteHistory(io: VaultIo, notePath: String, snapshotId: String): HistorySnapshotFile {
     if (!SNAPSHOT_ID.matches(snapshotId)) throw IllegalArgumentException("Ungültiger Verlaufseintrag.")
     val directory = historyDirectory(notePath)
     val entry = readHistoryIndex(io, directory).snapshots.find { it.id == snapshotId }
         ?: throw IllegalArgumentException("Dieser Verlaufseintrag existiert nicht mehr.")
-    val content = io.read("$directory/${entry.id}.md")?.decodeToString()
+    val content = io.read(snapshotFile(directory, entry))?.decodeToString()
         ?: throw IllegalArgumentException("Dieser Verlaufseintrag existiert nicht mehr.")
-    return HistorySnapshotFile(entry.id, entry.createdAt, content)
+    val companion = if (entry.companion && entry.ext != ".famd") {
+        io.read("$directory/${entry.id}.famd")?.decodeToString()
+            ?: throw IllegalArgumentException("Dieser Verlaufseintrag existiert nicht mehr.")
+    } else {
+        null
+    }
+    return HistorySnapshotFile(entry.id, entry.createdAt, content, companion)
 }
 
-data class HistorySnapshotFile(val id: String, val createdAt: String, val content: String)
+data class HistorySnapshotFile(val id: String, val createdAt: String, val content: String, val companion: String? = null)
 
 fun historyTimestamp(epochMs: Long): String = HISTORY_CLOCK.format(Instant.ofEpochMilli(epochMs))
 
@@ -170,6 +217,104 @@ fun sha1Hex(value: String): String {
     return digest.joinToString("") { "%02x".format(it) }
 }
 
+private fun snapshotMillis(createdAt: String): Long? =
+    runCatching { Instant.parse(createdAt).toEpochMilli() }.getOrNull()
+
+private fun snapshotExtension(notePath: String): String {
+    val normalized = notePath.replace('\\', '/')
+    val slash = normalized.lastIndexOf('/')
+    val dot = normalized.lastIndexOf('.')
+    val ext = if (dot > slash) normalized.substring(dot).lowercase() else ""
+    return if (ext == ".famd") ".famd" else ".md"
+}
+
+private fun storedExtension(snapshot: HistorySnapshot): String =
+    if (snapshot.ext == ".famd") ".famd" else ".md"
+
+private fun snapshotFile(directory: String, snapshot: HistorySnapshot): String =
+    "$directory/${snapshot.id}${storedExtension(snapshot)}"
+
+private data class RetainedHistory(val kept: List<HistorySnapshot>, val removed: List<HistorySnapshot>)
+
+private fun retainHistory(snapshots: List<HistorySnapshot>, nowMs: Long): RetainedHistory {
+    val sorted = snapshots.sortedBy { snapshotMillis(it.createdAt) ?: 0L }
+    val kept = mutableListOf<HistorySnapshot>()
+    var lastWeek: Long? = null
+    var lastAny: Long? = null
+    for (snapshot in sorted) {
+        val at = snapshotMillis(snapshot.createdAt)
+        val ext = storedExtension(snapshot)
+        if (at == null) {
+            kept += snapshot.copy(tier = if (snapshot.tier == "short") "short" else "week", ext = ext)
+            continue
+        }
+        if (snapshot.tier == "week") {
+            kept += snapshot.copy(tier = "week", ext = ext)
+            lastWeek = at
+            lastAny = at
+            continue
+        }
+        if (snapshot.tier == "short") {
+            if (nowMs - at < HISTORY_SHORT_RETENTION_MS) {
+                kept += snapshot.copy(tier = "short", ext = ext)
+                lastAny = at
+            }
+            continue
+        }
+        if (lastWeek == null || at - lastWeek >= HISTORY_WEEK_INTERVAL_MS) {
+            kept += snapshot.copy(tier = "week", ext = ext)
+            lastWeek = at
+            lastAny = at
+            continue
+        }
+        if (nowMs - at < HISTORY_SHORT_RETENTION_MS && (lastAny == null || at - lastAny >= HISTORY_SHORT_INTERVAL_MS)) {
+            kept += snapshot.copy(tier = "short", ext = ext)
+            lastAny = at
+        }
+    }
+    val keptIds = kept.map { it.id }.toSet()
+    return RetainedHistory(kept, snapshots.filter { it.id !in keptIds })
+}
+
+private fun nextHistoryTier(snapshots: List<HistorySnapshot>, nowMs: Long): String? {
+    var lastWeek: Long? = null
+    var lastAny: Long? = null
+    for (snapshot in snapshots) {
+        val at = snapshotMillis(snapshot.createdAt) ?: continue
+        if (snapshot.tier == "week") lastWeek = if (lastWeek == null) at else maxOf(lastWeek, at)
+        if (snapshot.tier == "week" || snapshot.tier == "short") lastAny = if (lastAny == null) at else maxOf(lastAny, at)
+    }
+    if (lastWeek == null || nowMs - lastWeek >= HISTORY_WEEK_INTERVAL_MS) return "week"
+    if (lastAny == null || nowMs - lastAny >= HISTORY_SHORT_INTERVAL_MS) return "short"
+    return null
+}
+
+private fun deleteSnapshotFiles(io: VaultIo, directory: String, snapshot: HistorySnapshot) {
+    io.delete("$directory/${snapshot.id}.md")
+    io.delete("$directory/${snapshot.id}.famd")
+}
+
+private fun commitHistory(
+    io: VaultIo,
+    directory: String,
+    index: HistoryIndex,
+    kept: List<HistorySnapshot>,
+    removed: List<HistorySnapshot>,
+) {
+    if (removed.isEmpty() && index.snapshots == kept) return
+    val previous = index.snapshots.toList()
+    index.snapshots.clear()
+    index.snapshots.addAll(kept)
+    try {
+        writeHistoryIndex(io, directory, index)
+    } catch (error: Exception) {
+        index.snapshots.clear()
+        index.snapshots.addAll(previous)
+        throw error
+    }
+    for (entry in removed) deleteSnapshotFiles(io, directory, entry)
+}
+
 private class HistoryIndex(var path: String?, val snapshots: MutableList<HistorySnapshot>)
 
 private fun readHistoryIndex(io: VaultIo, directory: String): HistoryIndex {
@@ -181,7 +326,14 @@ private fun readHistoryIndex(io: VaultIo, directory: String): HistoryIndex {
             val obj = item as? JsonValue.Obj ?: return@mapNotNull null
             val id = obj.string("id") ?: return@mapNotNull null
             if (!SNAPSHOT_ID.matches(id)) return@mapNotNull null
-            HistorySnapshot(id, obj.string("createdAt").orEmpty(), obj.double("bytes")?.toInt() ?: 0)
+            HistorySnapshot(
+                id,
+                obj.string("createdAt").orEmpty(),
+                obj.double("bytes")?.toInt() ?: 0,
+                obj.string("tier"),
+                obj.string("ext"),
+                obj.bool("companion") == true,
+            )
         }
         HistoryIndex(parsed.string("path"), snapshots.toMutableList())
     } catch (_: Exception) {
@@ -191,11 +343,14 @@ private fun readHistoryIndex(io: VaultIo, directory: String): HistoryIndex {
 
 private fun writeHistoryIndex(io: VaultIo, directory: String, index: HistoryIndex) {
     val snapshots = index.snapshots.joinToString(",\n") { snapshot ->
+        val companion = if (snapshot.companion) ",\n      \"companion\": true" else ""
         """
         |    {
         |      "id": ${escapeJson(snapshot.id)},
         |      "createdAt": ${escapeJson(snapshot.createdAt)},
-        |      "bytes": ${snapshot.bytes}
+        |      "bytes": ${snapshot.bytes},
+        |      "tier": ${escapeJson(snapshot.tier ?: "week")},
+        |      "ext": ${escapeJson(snapshot.ext ?: ".md")}$companion
         |    }
         """.trimMargin()
     }

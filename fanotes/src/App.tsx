@@ -4466,31 +4466,31 @@ export default function App({ startupBootstrap }: AppProps) {
     try {
       const snapshot = await window.fanotes.readNoteHistory(historyPathFor(activePath), snapshotId)
       const raw = typeof snapshot.content === 'string' ? snapshot.content : ''
-      // PDF history stores the .famd file. The editor shows the note text;
-      // the payload's handwriting is written back with the next save.
+      const companion = typeof snapshot.companion === 'string' ? snapshot.companion : ''
+      // A markdown snapshot stores the text. Its .famd companion, or a PDF
+      // snapshot that is the .famd file itself, carries the handwriting.
       const restored = stripFamdPayload(raw)
-      if (isPdfNotePath(activePath)) {
-        const ink = parseFamd(raw).payload?.ink
-        if (ink && typeof ink === 'object' && !Array.isArray(ink)) {
-          pendingHistoryInkRef.current.set(activePath, ink)
-          const markerId = noteInkId(restored)
-          const id = markerId || (typeof ink.id === 'string' ? ink.id : 'famd-ink')
-          setDrawingSession({
-            key: drawingSessionKeyRef.current + 1,
-            document: {
-              id,
-              title: typeof ink.title === 'string' ? ink.title : 'Handschrift',
-              updatedAt: new Date().toISOString(),
-              imageRelativePath: '',
-              dataRelativePath: companionNotePath(activePath, '.famd'),
-              drawingJson: JSON.stringify({ ...ink, id }),
-            },
-            path: activePath,
-          })
-          drawingSessionKeyRef.current += 1
-        } else {
-          pendingHistoryInkRef.current.delete(activePath)
-        }
+      const inkSource = companion || raw
+      const ink = parseFamd(inkSource).payload?.ink
+      if (ink && typeof ink === 'object' && !Array.isArray(ink)) {
+        pendingHistoryInkRef.current.set(activePath, ink)
+        const markerId = noteInkId(restored)
+        const id = markerId || (typeof ink.id === 'string' ? ink.id : 'famd-ink')
+        setDrawingSession({
+          key: drawingSessionKeyRef.current + 1,
+          document: {
+            id,
+            title: typeof ink.title === 'string' ? ink.title : 'Handschrift',
+            updatedAt: new Date().toISOString(),
+            imageRelativePath: '',
+            dataRelativePath: companionNotePath(activePath, '.famd'),
+            drawingJson: JSON.stringify({ ...ink, id }),
+          },
+          path: activePath,
+        })
+        drawingSessionKeyRef.current += 1
+      } else {
+        pendingHistoryInkRef.current.delete(activePath)
       }
       updateContent(restored)
       setHistoryOpen(false)

@@ -601,7 +601,7 @@ export type FaNotesApi = {
   saveWorksheet: (document: WorksheetDocument) => Promise<WorksheetDocument>
   deleteWorksheet: (id: string) => Promise<{ id: string }>
   listNoteHistory?: (relativePath: string) => Promise<NoteHistorySnapshot[]>
-  readNoteHistory?: (relativePath: string, snapshotId: string) => Promise<{ id: string; createdAt: string; content: string }>
+  readNoteHistory?: (relativePath: string, snapshotId: string) => Promise<{ id: string; createdAt: string; content: string; companion?: string }>
   exportNotePdf?: () => Promise<{ filePath: string } | null>
   lmStudioListModels: (baseUrl: string, apiToken?: string) => Promise<LmStudioModel[]>
   lmStudioTransform: (payload: {
