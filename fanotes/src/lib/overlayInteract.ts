@@ -125,6 +125,31 @@ export const inkDocumentIsOwnSave = (
   && (authored.drawingJson === drawingJson || (authored.id !== null && authored.id === sourceId))
 )
 
+export type DrawingLoadStep = 'mergeRemote' | 'acknowledge' | 'unchanged' | 'reload'
+
+/**
+ * The open page's next payload. A changed document for this drawing is merged
+ * even when the save made `inkDocumentIsOwnSave` true. The exact snapshot the
+ * board just wrote is only acknowledged, so an erase during that save stays erased.
+ */
+export const drawingLoadStep = (input: {
+  loadedId: string | null | undefined
+  loadedJson: string | null
+  sourceId: string | null
+  nextJson: string
+  authored: AuthoredInkSave | null
+}): DrawingLoadStep => {
+  const sameDocument = input.loadedId === input.sourceId
+  const jsonChanged = input.loadedJson !== input.nextJson
+  const exactEcho = input.authored !== null && input.authored.drawingJson === input.nextJson
+  const savedId = input.authored !== null && input.authored.id !== null && input.authored.id === input.sourceId
+  if (jsonChanged && !exactEcho && (sameDocument || savedId)) return 'mergeRemote'
+  if (exactEcho) return 'acknowledge'
+  if (sameDocument) return 'unchanged'
+  if (inkDocumentIsOwnSave(input.authored, input.sourceId, input.nextJson)) return 'acknowledge'
+  return 'reload'
+}
+
 export type InteractState = {
   drawingOpen: boolean
   sessionKey: number

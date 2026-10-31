@@ -154,6 +154,7 @@ import {
 import {
   type AuthoredInkSave,
   drawingChromeFromHit,
+  drawingLoadStep,
   inkDocumentIsOwnSave,
   inkPagePersists,
   isDrawingInkSurfaceTarget,
@@ -2702,32 +2703,38 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   useEffect(() => {
     if (!initialDrawingJson) return
     const openId = drawingId ?? null
-    if (loadedDrawingIdRef.current === openId && loadedDrawingJsonRef.current !== initialDrawingJson) {
-      const authored = authoredSaveRef.current
-      if (authored !== null && authored.drawingJson === initialDrawingJson) {
-        loadedDrawingJsonRef.current = initialDrawingJson
-      } else {
-        const merged = strokesAfterRemoteJson(strokesRef.current, loadedDrawingJsonRef.current, initialDrawingJson)
-        const added = merged.slice(strokesRef.current.length)
-        const normalized = safeInkStrokes(added.map((stroke) => {
-          const raw = stroke as { baseWidth?: number; width?: number }
-          return { ...stroke, baseWidth: raw.baseWidth ?? raw.width }
-        }), initialColorRef.current)
-        if (normalized.length) {
-          strokesRef.current = [...strokesRef.current, ...normalized]
-          bumpInkRevision({ updateTranscript: false })
-        }
-        loadedDrawingJsonRef.current = initialDrawingJson
-        return
+    const step = drawingLoadStep({
+      loadedId: loadedDrawingIdRef.current,
+      loadedJson: loadedDrawingJsonRef.current,
+      sourceId: openId,
+      nextJson: initialDrawingJson,
+      authored: authoredSaveRef.current,
+    })
+    if (step === 'mergeRemote') {
+      const merged = strokesAfterRemoteJson(strokesRef.current, loadedDrawingJsonRef.current, initialDrawingJson)
+      const added = merged.slice(strokesRef.current.length)
+      const normalized = safeInkStrokes(added.map((stroke) => {
+        const raw = stroke as { baseWidth?: number; width?: number }
+        return { ...stroke, baseWidth: raw.baseWidth ?? raw.width }
+      }), initialColorRef.current)
+      if (normalized.length) {
+        strokesRef.current = [...strokesRef.current, ...normalized]
+        bumpInkRevision({ updateTranscript: false })
       }
+      loadedDrawingJsonRef.current = initialDrawingJson
+      if (loadedDrawingIdRef.current !== openId) {
+        loadedDrawingIdRef.current = openId
+        if (openId) drawingIdRef.current = openId
+      }
+      return
     }
+    if (step === 'acknowledge') loadedDrawingJsonRef.current = initialDrawingJson
     const sourceId = drawingId ?? null
     if (loadedDrawingIdRef.current === sourceId) return
     if (inkDocumentIsOwnSave(authoredSaveRef.current, sourceId, initialDrawingJson)) {
       // The first save gives a new page its id; the session then hands that
       // snapshot back. The live strokes are already ahead of it (an erase
       // during the save must not be undone by it), so it is only acknowledged.
-      loadedDrawingJsonRef.current = initialDrawingJson
       inkHydratingRef.current = false
       inkReadyRef.current = true
       loadedDrawingIdRef.current = sourceId

@@ -119,12 +119,12 @@ assert.doesNotMatch(pendingBody, /\.flush\(/u)
 const boardSource = readFileSync(join(appRoot, 'src/components/DrawingBoard.tsx'), 'utf8')
 const boardEffectAt = boardSource.indexOf('if (!initialDrawingJson) return')
 const boardEffect = boardSource.slice(boardEffectAt, boardSource.indexOf('}, [bumpInkRevision', boardEffectAt))
+assert.match(boardEffect, /drawingLoadStep\(/u)
 assert.match(boardEffect, /strokesAfterRemoteJson\(/u)
+const mergeStepAt = boardEffect.indexOf("step === 'mergeRemote'")
 const remoteStrokeAt = boardEffect.indexOf('strokesAfterRemoteJson(')
 const sameIdGuardAt = boardEffect.indexOf('if (loadedDrawingIdRef.current === sourceId) return')
-assert.ok(remoteStrokeAt >= 0 && sameIdGuardAt > remoteStrokeAt, 'a changed drawing JSON is merged before the same-id load guard')
-assert.match(boardEffect.slice(0, sameIdGuardAt), /loadedDrawingJsonRef\.current !== initialDrawingJson/u)
-assert.match(boardEffect.slice(0, sameIdGuardAt), /authored\.drawingJson === initialDrawingJson/u)
+assert.ok(mergeStepAt >= 0 && remoteStrokeAt > mergeStepAt && sameIdGuardAt > remoteStrokeAt, 'a changed drawing JSON is merged before the same-id load guard')
 assert.match(viewerScript, /FANOTES_SHARE_LINK/u)
 assert.match(viewerScript, /__fanotesShareDownload/u)
 assert.match(viewerLink, /Im Browser ansehen oder in der Desktop-App bearbeiten\?/u)
@@ -191,6 +191,7 @@ try {
   await waitForSite()
   const share = await vite.ssrLoadModule('/src/lib/sync/share.ts')
   const shareEdit = await vite.ssrLoadModule('/src/lib/sync/shareEdit.ts')
+  const overlay = await vite.ssrLoadModule('/src/lib/overlayInteract.ts')
   const api = await vite.ssrLoadModule('/src/lib/sync/api.ts')
   const page = await vite.ssrLoadModule('/src/components/ShareSettingsPage.tsx')
   const settingsModule = await vite.ssrLoadModule('/src/components/SettingsModal.tsx')
@@ -797,7 +798,27 @@ try {
   await beaInkClient.pull()
   const previousJson = JSON.stringify({ schemaVersion: 1, width: 900, height: 1273, strokes: [localStroke] })
   const nextJson = JSON.stringify({ schemaVersion: 1, width: 900, height: 1273, strokes: [adaStroke] })
-  const paintedStrokes = shareEdit.strokesAfterRemoteJson([localStroke], previousJson, nextJson)
+  const afterSave = { id: 'sheet-1', drawingJson: previousJson }
+  assert.equal(overlay.inkDocumentIsOwnSave(afterSave, 'sheet-1', nextJson), true)
+  const loadStep = overlay.drawingLoadStep({
+    loadedId: 'sheet-1',
+    loadedJson: previousJson,
+    sourceId: 'sheet-1',
+    nextJson,
+    authored: afterSave,
+  })
+  assert.equal(loadStep, 'mergeRemote')
+  const echoStep = overlay.drawingLoadStep({
+    loadedId: 'sheet-1',
+    loadedJson: '{"strokes":[]}',
+    sourceId: 'sheet-1',
+    nextJson: previousJson,
+    authored: afterSave,
+  })
+  assert.equal(echoStep, 'acknowledge')
+  const paintedStrokes = loadStep === 'mergeRemote'
+    ? shareEdit.strokesAfterRemoteJson([localStroke], previousJson, nextJson)
+    : [localStroke]
   const paintedXs = paintedStrokes.flatMap((stroke) => (stroke.points ?? []).map((point) => point.x))
   assert.equal(paintedStrokes.length, 2)
   assert.ok(paintedXs.includes(0.1), `remote stroke x ${paintedXs.join(',')}`)
@@ -882,6 +903,7 @@ try {
     `showBasis ${showBasis === 'Zeile\n'}`,
     `absorbWhenAda ${decisionAbsorb === 'absorb' && absorbedBasis === 'Zeile\nAda\n'}`,
     `strokesBoth ${paintedXs.includes(0.5) && paintedXs.includes(0.1)}`,
+    `mergeRemote ${loadStep === 'mergeRemote' && echoStep === 'acknowledge'}`,
     `remoteClear ${shareEdit.remoteTextForEditor('Zeile\n', '', false) === ''}`,
     `inkBoth ${bothInk.notes[0].ink.strokes.length}`,
     `inkKept ${keptBoth.notes[0].ink.strokes.length}`,

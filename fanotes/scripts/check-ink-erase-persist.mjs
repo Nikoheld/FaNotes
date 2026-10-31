@@ -22,7 +22,7 @@ const server = await createServer({
   optimizeDeps: { noDiscovery: true },
   server: { middlewareMode: true },
 })
-const { inkDocumentIsOwnSave, inkPagePersists } = await server.ssrLoadModule('/src/lib/overlayInteract.ts')
+const { drawingLoadStep, inkDocumentIsOwnSave, inkPagePersists } = await server.ssrLoadModule('/src/lib/overlayInteract.ts')
 await server.close()
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -62,6 +62,25 @@ assert.deepEqual(strokes, ['a'], 'the erased stroke does not come back when the 
 // …and the follow-up save carries the erased state even when it emptied the page.
 strokes = []
 assert.equal(inkPagePersists(strokes.length, echoed.id !== ''), true)
+assert.equal(drawingLoadStep({
+  loadedId: null,
+  loadedJson: null,
+  sourceId: echoed.id,
+  nextJson: echoed.drawingJson,
+  authored,
+}), 'acknowledge', 'the first save echo is acknowledged and the erased stroke is not reloaded')
+const savedJson = JSON.stringify({ strokes: [{ color: '#112233', width: 2, opacity: 1, points: [{ x: 0.5, y: 0.2 }] }] })
+const remoteJson = JSON.stringify({ strokes: [{ color: '#112233', width: 2, opacity: 1, points: [{ x: 0.1, y: 0.2 }] }] })
+const afterSave = { id: 'x1', drawingJson: savedJson }
+assert.equal(inkDocumentIsOwnSave(afterSave, 'x1', remoteJson), true, 'a later payload for the saved id still counts as the same record')
+const remoteAfterSave = drawingLoadStep({
+  loadedId: 'x1',
+  loadedJson: savedJson,
+  sourceId: 'x1',
+  nextJson: remoteJson,
+  authored: afterSave,
+})
+assert.equal(remoteAfterSave, 'mergeRemote', 'a remote stroke on the saved drawing is merged before the own-save return')
 
 // Source: the load effect acknowledges the board's own save instead of loading it.
 const load = section(board, '    const sourceId = drawingId ?? null\n    if (loadedDrawingIdRef.current === sourceId) return', 'const document: unknown = JSON.parse(initialDrawingJson)', 'document load guard')
@@ -98,4 +117,5 @@ console.log(JSON.stringify({
   ownSaveNotReloaded: true,
   emptyPagePersists: true,
   undoSurvivesFirstSave: true,
+  remoteAfterSave,
 }))
