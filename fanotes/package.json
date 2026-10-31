@@ -75,6 +75,7 @@
     "check:ink-turn": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/check-ink-turn.mjs",
     "check:ink-visible": "node scripts/check-ink-visible.mjs",
     "check:marker": "node scripts/check-marker.mjs",
+    "check:live-translucent-ink": "node scripts/check-live-translucent-ink.mjs",
     "check:shape-snap": "node scripts/check-shape-snap-hold.mjs",
     "check:menus": "node scripts/check-menu-ux.cjs",
     "check:keyboard-toolbar": "node scripts/check-keyboard-toolbar.mjs",

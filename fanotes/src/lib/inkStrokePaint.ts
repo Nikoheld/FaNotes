@@ -46,6 +46,26 @@ export type InkPaintOptions = {
   stamp?: boolean
   /** Device pixels from this canvas's origin to the coverage bitmap's origin. */
   coverageOrigin?: { x: number; y: number }
+  /**
+   * Paint only this brush pass, fully opaque, and skip the per-stroke alpha
+   * composite. The live layer uses it to extend a coverage bitmap by the new
+   * segments, then applies each pass alpha once.
+   */
+  flatPass?: number
+}
+
+/** Segments actually stroked by `drawInkStroke` since the last consume. */
+let inkSegmentPaintCount = 0
+
+const noteInkSegments = (count: number) => {
+  if (count > 0) inkSegmentPaintCount += count
+}
+
+/** Read and clear the segment-paint counter. */
+export const consumeInkSegmentPaints = () => {
+  const count = inkSegmentPaintCount
+  inkSegmentPaintCount = 0
+  return count
 }
 
 export const createMarkerCoverage = (width: number, height: number): MarkerCoverage => {
@@ -282,11 +302,12 @@ const inkOpacityOf = (stroke: Pick<InkPaintStroke, 'purpose' | 'opacity'>) => (
  * painted one by one on the visible bitmap: every place two segments meet
  * (round caps, a bend of a butt-capped highlighter) is covered twice and shows
  * as a dark band — the "lines inside the marker". The whole stroke is painted
- * opaque on a scratch layer and composited once instead, so the live layer
- * repaints it whole rather than appending a tail.
+ * opaque on a scratch layer and composited once. The live layer keeps that
+ * coverage and appends only the new segments, then applies the pass alpha once
+ * per pixel instead of stroking the whole mark again.
  */
 export const inkStrokeIsTranslucent = (
-  stroke: Pick<InkPaintStroke, 'purpose' | 'brush' | 'opacity' | 'symbolPaths' | 'points'>,
+  stroke: Pick<InkPaintStroke, 'purpose' | 'brush' | 'opacity' | 'symbolPaths'>,
 ) => {
   if (stroke.purpose !== 'art') return false
   if (stroke.symbolPaths?.length) return false
@@ -295,6 +316,15 @@ export const inkStrokeIsTranslucent = (
   const opacity = inkOpacityOf(stroke)
   if (opacity < .999) return true
   return brushPasses(brush).some((pass) => pass.alpha < .999)
+}
+
+/** Per-pass alpha of a see-through stroke. Null when the stroke is opaque. */
+export const translucentPassAlphas = (
+  stroke: Pick<InkPaintStroke, 'purpose' | 'brush' | 'opacity' | 'symbolPaths'>,
+): readonly number[] | null => {
+  if (!inkStrokeIsTranslucent(stroke)) return null
+  const opacity = inkOpacityOf(stroke)
+  return brushPasses(inkBrushOf(stroke)).map((pass) => opacity * pass.alpha)
 }
 
 type InkScratchCanvas = { width: number; height: number; getContext: (kind: '2d') => InkPaintContext | null }
@@ -472,7 +502,8 @@ export const drawInkStroke = (
   context.fillStyle = paint
   context.lineCap = 'round'
   context.lineJoin = 'round'
-  if (brush === 'highlighter') context.globalCompositeOperation = 'multiply'
+  if (options?.flatPass != null) context.globalCompositeOperation = 'source-over'
+  else if (brush === 'highlighter') context.globalCompositeOperation = 'multiply'
   if (stroke.colorEffect === 'neon') {
     context.shadowColor = stroke.color
     context.shadowBlur = Math.max(4, stroke.baseWidth * scale * .85)
@@ -548,7 +579,9 @@ export const drawInkStroke = (
       context.ellipse(first.x * width, first.y * height, nibWidth / 2, Math.max(.5, nibWidth * .16), -Math.PI * .22, 0, Math.PI * 2)
       context.fill()
     } else {
-      context.globalAlpha = brush === 'highlighter' ? opacity * .32 : opacity
+      context.globalAlpha = options?.flatPass != null
+        ? 1
+        : (brush === 'highlighter' ? opacity * .32 : opacity)
       context.beginPath()
       context.arc(
         first.x * width,
@@ -558,6 +591,7 @@ export const drawInkStroke = (
         Math.PI * 2,
       )
       context.fill()
+      noteInkSegments(1)
     }
     context.restore()
     return
@@ -648,6 +682,7 @@ export const drawInkStroke = (
       segmentCurve(index, offsetX, offsetY, target, false)
       target.lineWidth = segmentWidth(index, pass.widthFactor)
       target.stroke()
+      noteInkSegments(1)
     }
   }
   /** Constant width: the whole range is one path, so bends are joins, not seams. */
@@ -669,6 +704,7 @@ export const drawInkStroke = (
       segmentCurve(index, 0, 0, target, index > firstSegment, end)
     }
     target.stroke()
+    noteInkSegments(end - firstSegment)
   }
 
   /**
@@ -690,6 +726,7 @@ export const drawInkStroke = (
     target.moveTo(px(from), py(from))
     if (to === from) {
       target.stroke()
+      noteInkSegments(1)
       return
     }
     const radius = target.lineWidth / 2
@@ -697,6 +734,7 @@ export const drawInkStroke = (
     if (smooth <= 0 || to - from < 2) {
       for (let index = from + 1; index <= to; index += 1) target.lineTo(px(index), py(index))
       target.stroke()
+      noteInkSegments(to - from)
       return
     }
     let cursorX = px(from)
@@ -748,13 +786,14 @@ export const drawInkStroke = (
     }
     target.lineTo(px(to), py(to))
     target.stroke()
+    noteInkSegments(to - from)
   }
 
   const passes = brush === 'calligraphy' ? OPAQUE_PASS : brushPasses(brush)
   const constantWidth = !stroke.pressureEnabled
   const translucent = inkStrokeIsTranslucent(stroke)
   let compositeBox: { x: number; y: number; w: number; h: number; ex: number; ey: number } | null = null
-  if (translucent && canComposite(context)) {
+  if (translucent && options?.flatPass == null && canComposite(context)) {
     // Device-pixel box of this range — the samples and one neighbour on
     // each side, since the curve stays inside them — clipped to the bitmap.
     const margin = inkStrokePaintMargin(stroke, scale)
@@ -788,8 +827,11 @@ export const drawInkStroke = (
   }
 
   passes.forEach((pass, passIndex) => {
-    const alpha = opacity * pass.alpha
-    const scratch = compositeBox && alpha < .999 ? acquireScratch(compositeBox.w, compositeBox.h) : null
+    if (options?.flatPass != null && passIndex !== options.flatPass) return
+    const alpha = options?.flatPass != null ? 1 : opacity * pass.alpha
+    const scratch = options?.flatPass == null && compositeBox && alpha < .999
+      ? acquireScratch(compositeBox.w, compositeBox.h)
+      : null
     if (scratch && compositeBox) {
       const box = compositeBox
       const source = (scratch as unknown as { canvas: CanvasImageSource }).canvas
@@ -839,6 +881,12 @@ export const drawInkStroke = (
       return
     }
     if (brush === 'highlighter') context.lineCap = 'butt'
+    // A flat coverage pass is one path, same as the scratch composite, so a
+    // constant-width highlighter does not seam while the alpha is still 1.
+    if (options?.flatPass != null && constantWidth) {
+      paintPassPath(context, pass, alpha)
+      return
+    }
     paintPassSegments(context, pass, passIndex, alpha)
   })
   context.restore()
@@ -1136,7 +1184,95 @@ export const createInkReadbackContext = (width: number, height: number): InkRead
     setTransform: (a: number, b: number, c: number, d: number, e: number, f: number) => { style.transform = [a, b, c, d, e, f] },
     createLinearGradient: () => ({ addColorStop: () => {} }),
     setMarkerGuard: (value: MarkerGuard | null) => { guard = value },
+    clearRect: (x: number, y: number, rectW: number, rectH: number) => {
+      const x0 = Math.max(0, Math.floor(x))
+      const y0 = Math.max(0, Math.floor(y))
+      const x1 = Math.min(w, Math.ceil(x + rectW))
+      const y1 = Math.min(h, Math.ceil(y + rectH))
+      for (let row = y0; row < y1; row += 1) {
+        data.fill(0, (row * w + x0) * 4, (row * w + x1) * 4)
+      }
+    },
+    getImageData: (x = 0, y = 0, sliceW = w, sliceH = h) => {
+      const out = new Uint8ClampedArray(sliceW * sliceH * 4)
+      for (let row = 0; row < sliceH; row += 1) {
+        const src = ((y + row) * w + x) * 4
+        out.set(data.subarray(src, src + sliceW * 4), row * sliceW * 4)
+      }
+      return { width: sliceW, height: sliceH, data: out, colorSpace: 'srgb' } as ImageData
+    },
+    putImageData: (image: ImageData, x: number, y: number) => {
+      for (let row = 0; row < image.height; row += 1) {
+        const dy = y + row
+        if (dy < 0 || dy >= h) continue
+        for (let col = 0; col < image.width; col += 1) {
+          const dx = x + col
+          if (dx < 0 || dx >= w) continue
+          const si = (row * image.width + col) * 4
+          const di = (dy * w + dx) * 4
+          data[di] = image.data[si]
+          data[di + 1] = image.data[si + 1]
+          data[di + 2] = image.data[si + 2]
+          data[di + 3] = image.data[si + 3]
+        }
+      }
+    },
+    drawImage: (
+      source: { width?: number; height?: number; pixels?: Uint8ClampedArray },
+      sx?: number,
+      sy?: number,
+      sw?: number,
+      sh?: number,
+      dx?: number,
+      dy?: number,
+      dw?: number,
+      dh?: number,
+    ) => {
+      const pixels = source?.pixels
+      const srcW = source?.width ?? 0
+      const srcH = source?.height ?? 0
+      if (!pixels || !(srcW > 0) || !(srcH > 0)) return
+      const sourceX = sx ?? 0
+      const sourceY = sy ?? 0
+      const copyW = sw ?? srcW
+      const copyH = sh ?? srcH
+      const destX = dx ?? sourceX
+      const destY = dy ?? sourceY
+      const destW = dw ?? copyW
+      const destH = dh ?? copyH
+      if (!(copyW > 0) || !(copyH > 0) || destW !== copyW || destH !== copyH) return
+      const alphaScale = style.globalAlpha
+      for (let row = 0; row < copyH; row += 1) {
+        const srcRow = sourceY + row
+        const destRow = destY + row
+        if (srcRow < 0 || srcRow >= srcH || destRow < 0 || destRow >= h) continue
+        for (let col = 0; col < copyW; col += 1) {
+          const srcCol = sourceX + col
+          const destCol = destX + col
+          if (srcCol < 0 || srcCol >= srcW || destCol < 0 || destCol >= w) continue
+          const si = (srcRow * srcW + srcCol) * 4
+          const sa = (pixels[si + 3] / 255) * alphaScale
+          if (sa <= 0) continue
+          const di = (destRow * w + destCol) * 4
+          const da = data[di + 3] / 255
+          const outA = sa + da * (1 - sa)
+          if (outA <= 0) continue
+          data[di] = Math.round((pixels[si] * sa + data[di] * da * (1 - sa)) / outA)
+          data[di + 1] = Math.round((pixels[si + 1] * sa + data[di + 1] * da * (1 - sa)) / outA)
+          data[di + 2] = Math.round((pixels[si + 2] * sa + data[di + 2] * da * (1 - sa)) / outA)
+          data[di + 3] = Math.round(outA * 255)
+        }
+      }
+    },
   }
+
+  const softwareCanvas = {
+    width: w,
+    height: h,
+    pixels: data,
+    getContext: () => context,
+  }
+  ;(context as unknown as { canvas: typeof softwareCanvas }).canvas = softwareCanvas
 
   void pathAt
   return {
