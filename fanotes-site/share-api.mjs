@@ -468,9 +468,14 @@ export const handleShareRequest = async (request, response, url) => {
         if (!editorRecords(record.editors).some((person) => person.name === name)) fail(403, 'Diese Freigabe kann nicht bearbeitet werden.')
         const revision = Number.isInteger(record.revision) ? record.revision : 1
         const history = Array.isArray(record.history) ? record.history : []
-        const baseNotes = baseRevision === revision
-          ? record.notes
-          : history.find((item) => item && item.revision === baseRevision)?.notes || record.notes
+        const supplied = Array.isArray(body.baseNotes) ? body.baseNotes : null
+        if (supplied && supplied.length > MAX_NOTES) fail(400, 'Ungültige Freigabe.')
+        const historic = history.find((item) => item && item.revision === baseRevision)?.notes
+        // A base the history no longer stores must not be replaced by the current notes.
+        // That made a stale snapshot look unchanged and wiped newer edits.
+        const baseNotes = supplied
+          ?? (baseRevision === revision ? record.notes : historic)
+        if (!baseNotes) fail(409, 'Diese Freigabe kann nicht bearbeitet werden.')
         const merged = mergeShareNotes(baseNotes, record.notes, body.notes)
         const sanitized = sanitizeSharePayload({
           schemaVersion: 1,

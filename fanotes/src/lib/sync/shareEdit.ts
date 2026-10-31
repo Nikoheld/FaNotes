@@ -3,6 +3,7 @@
 // The website paints the browser questions from public/share/share-link.js.
 // This module is what FaNotes runs after fanotes://share/<id>.
 
+import type { NoteTextField } from '../noteTextField'
 import {
   shareApiUrl,
   type ShareInk,
@@ -10,6 +11,7 @@ import {
   type SharePort,
   type ShareTextField,
 } from './share'
+import { mergeShareNotes } from './shareMerge.mjs'
 
 export const SHARE_DESKTOP_PROMPTS = {
   folder: 'In welchem Ordner soll die geteilte Datei liegen?',
@@ -174,18 +176,70 @@ export async function confirmShareIdentity(input: {
 
 type ShareNoteSnapshot = SharePayload['notes'][number]
 
+export type ShareEditPatch = {
+  content?: string
+  ink?: ShareInk | null
+  textFields?: ShareTextField[] | null
+}
+
+export type ShareEditLayers = {
+  content?: boolean
+  ink?: boolean
+  textFields?: boolean
+}
+
 export type ShareEditClient = {
   id: string
   name: string
   documentText: () => string
   noteContent: (sharePath: string) => string
+  noteInk: (sharePath: string) => ShareInk | undefined
+  noteFields: (sharePath: string) => ShareTextField[]
+  hasNote: (sharePath: string) => boolean
   peopleEditing: () => string[]
   peopleWhoCanEdit: () => string[]
-  editNote: (sharePath: string, patch: { content?: string; ink?: ShareInk | null; textFields?: ShareTextField[] | null }) => Promise<void>
+  prepareLocalEdit: (sharePath: string, patch: ShareEditPatch) => ShareNoteSnapshot
+  editNote: (sharePath: string, patch: ShareEditPatch) => Promise<void>
+  absorb: (sharePath: string, layers: ShareEditLayers) => void
   pull: () => Promise<void>
   leave: () => Promise<void>
   owns: (path: string) => boolean
   sharePathFor: (path: string) => string
+}
+
+const shareFieldKey = (field: { page?: number; x?: number; y?: number }) => [
+  field.page ?? 1,
+  Math.round((Number(field.x) || 0) * 1000),
+  Math.round((Number(field.y) || 0) * 1000),
+].join('-')
+
+/** Remote markdown for a clean editor. A dirty buffer stays local so the save can merge it. */
+export const remoteTextForEditor = (editorText: string, remoteText: string, dirty: boolean): string | null => {
+  if (dirty) return null
+  if (editorText === remoteText) return null
+  return remoteText
+}
+
+/** Fold remote text fields into the open note. Matching positions keep their local id. */
+export const applyRemoteTextFields = (
+  local: readonly NoteTextField[],
+  remote: readonly ShareTextField[],
+): NoteTextField[] => {
+  const localByKey = new Map<string, NoteTextField>()
+  for (const field of local) localByKey.set(shareFieldKey(field), field)
+  return remote.slice(0, 200).map((field) => {
+    const key = shareFieldKey(field)
+    const existing = localByKey.get(key)
+    return {
+      id: existing?.id ?? `tf-remote-${key}`,
+      page: field.page,
+      x: field.x,
+      y: field.y,
+      width: field.width,
+      fontSize: field.fontSize,
+      text: field.text,
+    }
+  })
 }
 
 const cloneNotes = (notes: readonly ShareNoteSnapshot[]): ShareNoteSnapshot[] => notes.map((note) => ({
@@ -212,34 +266,114 @@ export async function openShareEditor(input: {
   const clientId = input.clientId || `c${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`
   const joined = await input.port.exchange(postShare(input.share.id, 'join', { name }, input.origin))
   if (joined.status < 200 || joined.status >= 300) throw new Error(`Die Freigabe konnte nicht bearbeitet werden (${joined.status}).`)
-  let notes = cloneNotes(input.share.notes)
-  let revision = Number.isInteger(input.share.revision) ? input.share.revision as number : 1
+  let basis = cloneNotes(input.share.notes)
+  let remote = cloneNotes(input.share.notes)
+  let basisRevision = Number.isInteger(input.share.revision) ? input.share.revision as number : 1
+  let remoteRevision = basisRevision
   let editors = editorNames(readJson(joined.body)?.editors)
   let present: string[] = []
   let left = false
+  let editChain: Promise<unknown> = Promise.resolve()
   const vaultPaths = input.vaultPaths ?? {}
 
-  const adopt = (body: Record<string, unknown> | null) => {
+  const adoptRemote = (body: Record<string, unknown> | null) => {
     if (!body) return
-    if (Array.isArray(body.notes)) notes = cloneNotes(body.notes as ShareNoteSnapshot[])
-    if (Number.isInteger(body.revision)) revision = body.revision as number
+    if (Array.isArray(body.notes)) remote = cloneNotes(body.notes as ShareNoteSnapshot[])
+    if (Number.isInteger(body.revision)) remoteRevision = body.revision as number
     if (body.editors) editors = editorNames(body.editors)
     if (Array.isArray(body.present)) present = editorNames(body.present.map((item) => (
       item && typeof item === 'object' ? (item as { name?: string }).name ?? '' : item
     )))
   }
 
-  const push = async () => {
+  const syncBasisRevision = () => {
+    if (JSON.stringify(basis) === JSON.stringify(remote)) basisRevision = remoteRevision
+  }
+
+  const shown = (sharePath: string) => (
+    remote.find((note) => note.path === sharePath) ?? basis.find((note) => note.path === sharePath)
+  )
+
+  const applyPatch = (notes: readonly ShareNoteSnapshot[], sharePath: string, patch: ShareEditPatch) => {
+    if (!notes.some((note) => note.path === sharePath)) throw new Error('Diese Notiz ist nicht in der Freigabe.')
+    return notes.map((note) => {
+      if (note.path !== sharePath) return note
+      const next: ShareNoteSnapshot = {
+        ...note,
+        ...(patch.content !== undefined ? { content: patch.content } : {}),
+      }
+      if (patch.ink !== undefined) {
+        if (patch.ink) next.ink = patch.ink
+        else delete next.ink
+      }
+      if (patch.textFields !== undefined) {
+        if (patch.textFields?.length) next.textFields = patch.textFields
+        else delete next.textFields
+      }
+      return next
+    })
+  }
+
+  const mergedNote = (sharePath: string, patch: ShareEditPatch) => {
+    const baseSnapshot = cloneNotes(basis)
+    const local = applyPatch(baseSnapshot, sharePath, patch)
+    const merged = mergeShareNotes(baseSnapshot, remote, local)
+    const note = merged.find((item) => item.path === sharePath)
+    if (!note) throw new Error('Diese Notiz ist nicht in der Freigabe.')
+    return { baseSnapshot, local, merged, note }
+  }
+
+  const commitEdit = async (sharePath: string, patch: ShareEditPatch) => {
+    if (left) return
+    const { baseSnapshot, local, merged } = mergedNote(sharePath, patch)
     const response = await input.port.exchange(postShare(input.share.id, 'edit', {
       clientId,
       name,
-      baseRevision: revision,
-      notes,
+      baseRevision: basisRevision,
+      baseNotes: baseSnapshot,
+      notes: merged,
     }, input.origin))
     if (response.status < 200 || response.status >= 300) {
       throw new Error(`Die Änderung wurde nicht übernommen (${response.status}).`)
     }
-    adopt(readJson(response.body))
+    adoptRemote(readJson(response.body))
+    basis = local
+    syncBasisRevision()
+  }
+
+  const prepareLocalEdit = (sharePath: string, patch: ShareEditPatch) => mergedNote(sharePath, patch).note
+
+  const editNote = (sharePath: string, patch: ShareEditPatch) => {
+    const run = editChain.then(() => commitEdit(sharePath, patch))
+    editChain = run.then(() => undefined, () => undefined)
+    return run
+  }
+
+  const absorb = (sharePath: string, layers: ShareEditLayers) => {
+    const remoteNote = remote.find((note) => note.path === sharePath)
+    if (!remoteNote) return
+    const existing = basis.find((note) => note.path === sharePath)
+    const next: ShareNoteSnapshot = existing ? { ...existing } : {
+      path: remoteNote.path,
+      title: remoteNote.title,
+      content: remoteNote.content,
+    }
+    if (layers.content) {
+      next.title = remoteNote.title
+      next.content = remoteNote.content
+    }
+    if (layers.ink) {
+      if (remoteNote.ink) next.ink = remoteNote.ink
+      else delete next.ink
+    }
+    if (layers.textFields) {
+      if (remoteNote.textFields?.length) next.textFields = remoteNote.textFields
+      else delete next.textFields
+    }
+    basis = basis.some((note) => note.path === sharePath)
+      ? basis.map((note) => note.path === sharePath ? next : note)
+      : [...basis, next]
+    syncBasisRevision()
   }
 
   const pull = async () => {
@@ -252,21 +386,9 @@ export async function openShareEditor(input: {
     })
     if (response.status < 200 || response.status >= 300) return
     const body = readJson(response.body)
-    const remoteRevision = Number(body?.revision)
-    if (!body || !Number.isInteger(remoteRevision)) return
-    if (remoteRevision === revision) {
-      adopt(body)
-      return
-    }
-    const local = JSON.stringify(notes)
-    const remote = JSON.stringify(body.notes ?? [])
-    if (local === remote) {
-      adopt(body)
-      return
-    }
-    // Local notes differ. Send them against the revision we last had.
-    // The server merges that base with the copy it has now.
-    await push()
+    const seen = Number(body?.revision)
+    if (!body || !Number.isInteger(seen) || seen < remoteRevision) return
+    adoptRemote(body)
   }
 
   await input.port.exchange(postShare(input.share.id, 'presence', { clientId, name, present: true }, input.origin))
@@ -275,32 +397,16 @@ export async function openShareEditor(input: {
   return {
     id: clientId,
     name,
-    documentText: () => notes.map((note) => note.content).join('\n'),
-    noteContent: (sharePath: string) => notes.find((note) => note.path === sharePath)?.content ?? '',
+    documentText: () => remote.map((note) => note.content).join('\n'),
+    noteContent: (sharePath: string) => shown(sharePath)?.content ?? '',
+    noteInk: (sharePath: string) => shown(sharePath)?.ink,
+    noteFields: (sharePath: string) => (shown(sharePath)?.textFields ?? []).map((field) => ({ ...field })),
+    hasNote: (sharePath: string) => basis.some((note) => note.path === sharePath) || remote.some((note) => note.path === sharePath),
     peopleEditing: () => present.filter((person) => !left || person !== name),
     peopleWhoCanEdit: () => editors.slice(),
-    editNote: async (sharePath, patch) => {
-      if (left) return
-      const current = notes.find((note) => note.path === sharePath)
-      if (!current) throw new Error('Diese Notiz ist nicht in der Freigabe.')
-      notes = notes.map((note) => {
-        if (note.path !== sharePath) return note
-        const next = {
-          ...note,
-          ...(patch.content !== undefined ? { content: patch.content } : {}),
-        }
-        if (patch.ink !== undefined) {
-          if (patch.ink) next.ink = patch.ink
-          else delete next.ink
-        }
-        if (patch.textFields !== undefined) {
-          if (patch.textFields?.length) next.textFields = patch.textFields
-          else delete next.textFields
-        }
-        return next
-      })
-      await push()
-    },
+    prepareLocalEdit,
+    editNote,
+    absorb,
     pull,
     leave: async () => {
       left = true
@@ -308,9 +414,9 @@ export async function openShareEditor(input: {
       await input.port.exchange(postShare(input.share.id, 'presence', { clientId, name, present: false }, input.origin))
     },
     sharePathFor: (path: string) => {
-      if (notes.some((note) => note.path === path)) return path
+      if (basis.some((note) => note.path === path) || remote.some((note) => note.path === path)) return path
       return vaultPaths[path] || ''
     },
-    owns: (path: string) => notes.some((note) => note.path === path) || Boolean(vaultPaths[path]),
+    owns: (path: string) => basis.some((note) => note.path === path) || remote.some((note) => note.path === path) || Boolean(vaultPaths[path]),
   }
 }

@@ -216,7 +216,7 @@ import { drawingSessionFromLoad, INK_OVERLAY_CRASH_TITLE, INK_TOOLBAR_SLOT_ID, o
 import { APP_VERSION } from './lib/appVersion'
 import { defaultSettingsForPlatform } from './defaults'
 import { collectShareNotes, createFetchSharePort, loadShareEntries, parseShareDirectory, publicShareInk, publicShareTextFields, publishShare, queueLiveShareRefresh, readShare, resolveShareOrigin, serializeShareDirectory } from './lib/sync/share'
-import { beginDesktopShareOpen, chooseShareFolder, confirmShareIdentity, openShareEditor, parseShareProtocol, type ShareEditClient, type ShareOpenState } from './lib/sync/shareEdit'
+import { applyRemoteTextFields, beginDesktopShareOpen, chooseShareFolder, confirmShareIdentity, openShareEditor, parseShareProtocol, remoteTextForEditor, type ShareEditClient, type ShareOpenState } from './lib/sync/shareEdit'
 import { claimUsername, createFetchProfilePort, createProfileOwnerId, ProfileRequestError } from './lib/sync/profile'
 import { PaperStylePicker } from './components/PaperStylePicker'
 import { PaperView } from './components/PaperView'
@@ -1936,9 +1936,21 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!liveEdit || shareEditApplyingRef.current || !liveEdit.owns(path)) return
     const sharePath = liveEdit.sharePathFor(path)
     if (!sharePath) return
+    const sent = patch.content
     void liveEdit.editNote(sharePath, patch).then(() => {
       if (shareEditRef.current !== liveEdit) return
       setSharePeople({ editors: liveEdit.peopleWhoCanEdit(), present: liveEdit.peopleEditing() })
+      if (sent === undefined) return
+      const tab = tabsRef.current.find((candidate) => candidate.path === path)
+      if (!tab || tab.content !== sent) return
+      const merged = liveEdit.noteContent(sharePath)
+      liveEdit.absorb(sharePath, { content: true })
+      if (merged === tab.content) return
+      shareEditApplyingRef.current = true
+      setTabs((current) => current.map((candidate) => (
+        candidate.path === path ? { ...candidate, content: merged, savedContent: merged } : candidate
+      )))
+      window.setTimeout(() => { shareEditApplyingRef.current = false }, 0)
     }).catch(() => undefined)
   }, [])
 
@@ -3695,16 +3707,29 @@ export default function App({ startupBootstrap }: AppProps) {
       if (stopped || shareEditRef.current !== session) return
       setSharePeople({ editors: session.peopleWhoCanEdit(), present: session.peopleEditing() })
       const tab = tabsRef.current.find((candidate) => session.owns(candidate.path))
-      if (!tab || tab.content !== tab.savedContent || pendingWrites.current.has(tab.path)) return
-      const next = session.noteContent(session.sharePathFor(tab.path))
-      if (!next || next === tab.content) return
-      shareEditApplyingRef.current = true
-      setTabs((current) => current.map((candidate) => (
-        candidate.path === tab.path && candidate.content === candidate.savedContent
-          ? { ...candidate, content: next, savedContent: next }
-          : candidate
-      )))
-      window.setTimeout(() => { shareEditApplyingRef.current = false }, 0)
+      if (!tab) return
+      const sharePath = session.sharePathFor(tab.path)
+      if (!sharePath) return
+      const dirty = tab.content !== tab.savedContent || pendingWrites.current.has(tab.path)
+      const next = remoteTextForEditor(tab.content, session.noteContent(sharePath), dirty)
+      if (next !== null) {
+        shareEditApplyingRef.current = true
+        setTabs((current) => current.map((candidate) => (
+          candidate.path === tab.path && candidate.content === candidate.savedContent && !pendingWrites.current.has(candidate.path)
+            ? { ...candidate, content: next, savedContent: next }
+            : candidate
+        )))
+        session.absorb(sharePath, { content: true })
+        window.setTimeout(() => { shareEditApplyingRef.current = false }, 0)
+      }
+      if (!noteTextFieldsEditedRef.current && tab.path === activePathRef.current) {
+        const mergedFields = applyRemoteTextFields(noteTextFieldsRef.current, session.noteFields(sharePath))
+        if (JSON.stringify(mergedFields) !== JSON.stringify(noteTextFieldsRef.current)) {
+          noteTextFieldsRef.current = mergedFields
+          setNoteTextFields(mergedFields)
+          session.absorb(sharePath, { textFields: true })
+        }
+      }
     }
     const timer = window.setInterval(() => { void tick() }, 1000)
     return () => {

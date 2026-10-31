@@ -92,6 +92,8 @@ assert.match(appSource, /collectShareNotes\(entries, relativePath\)/u)
 assert.match(appSource, /beginDesktopShareOpen\(/u)
 assert.match(appSource, /confirmShareIdentity\(/u)
 assert.match(appSource, /claimUsername\(/u)
+assert.match(appSource, /remoteTextForEditor\(/u)
+assert.match(appSource, /applyRemoteTextFields\(/u)
 assert.match(viewerScript, /FANOTES_SHARE_LINK/u)
 assert.match(viewerScript, /__fanotesShareDownload/u)
 assert.match(viewerLink, /Im Browser ansehen oder in der Desktop-App bearbeiten\?/u)
@@ -671,6 +673,100 @@ try {
   assert.match(cleared.notes[0].content, /Nur Text\./u)
   assert.match(cleared.notes[0].content, /Alpha von Ada/u)
   assert.match(beaTwo.documentText(), /Nur Text\./u)
+
+  const dirtyShare = await share.publishShare({
+    entries: [{ path: 'Zeile.md', kind: 'file', content: 'Zeile\n' }],
+    rootPath: 'Zeile.md',
+    mode: 'edit',
+    port: sharePort,
+    origin,
+  })
+  const dirtySaved = await share.readShare({ id: dirtyShare.record.id, port: sharePort, origin })
+  const adaDirty = await shareEdit.openShareEditor({ share: dirtySaved, name: 'Ada Beispiel', port: sharePort, origin, clientId: 'ada-dirty' })
+  const beaDirty = await shareEdit.openShareEditor({ share: dirtySaved, name: 'Bea Beispiel', port: sharePort, origin, clientId: 'bea-dirty' })
+  await adaDirty.editNote('Zeile.md', { content: 'Zeile\nAda\n' })
+  await beaDirty.pull()
+  assert.match(beaDirty.noteContent('Zeile.md'), /Ada/u)
+  assert.equal(shareEdit.remoteTextForEditor('Zeile\nBea\n', beaDirty.noteContent('Zeile.md'), true), null)
+  assert.equal(shareEdit.remoteTextForEditor('Zeile\n', '', false), '')
+  assert.equal(shareEdit.remoteTextForEditor('Zeile\n', beaDirty.noteContent('Zeile.md'), false), beaDirty.noteContent('Zeile.md'))
+  await beaDirty.editNote('Zeile.md', { content: 'Zeile\nBea\n' })
+  assert.match(beaDirty.documentText(), /Ada/u)
+  assert.match(beaDirty.documentText(), /Bea/u)
+  const dirtyRead = await share.readShare({ id: dirtyShare.record.id, port: sharePort, origin })
+  assert.match(dirtyRead.notes[0].content, /Ada/u)
+  assert.match(dirtyRead.notes[0].content, /Bea/u)
+
+  const adaStroke = { color: '#112233', width: 2, opacity: 1, points: [{ x: 0.1, y: 0.2 }, { x: 0.3, y: 0.6 }] }
+  const localStroke = { color: '#112233', width: 2, opacity: 1, points: [{ x: 0.5, y: 0.2 }, { x: 0.5, y: 0.6 }] }
+  const adaField = { page: 1, x: 0.2, y: 0.3, width: 0.4, fontSize: 16, text: 'Feld von Ada' }
+  const beaField = { page: 1, x: 0.7, y: 0.3, width: 0.4, fontSize: 16, text: 'Feld von Bea' }
+  const inkEditShare = await share.publishShare({
+    entries: [{ path: 'Blatt.md', kind: 'file', content: 'Zeile\n' }],
+    rootPath: 'Blatt.md',
+    mode: 'edit',
+    port: sharePort,
+    origin,
+  })
+  const inkEditSaved = await share.readShare({ id: inkEditShare.record.id, port: sharePort, origin })
+  const adaInkClient = await shareEdit.openShareEditor({ share: inkEditSaved, name: 'Ada Beispiel', port: sharePort, origin, clientId: 'ada-ink' })
+  const beaInkClient = await shareEdit.openShareEditor({ share: inkEditSaved, name: 'Bea Beispiel', port: sharePort, origin, clientId: 'bea-ink' })
+  await adaInkClient.editNote('Blatt.md', { ink: { width: 900, height: 1273, strokes: [adaStroke] }, textFields: [adaField] })
+  await beaInkClient.pull()
+  const prepared = beaInkClient.prepareLocalEdit('Blatt.md', {
+    ink: { width: 900, height: 1273, strokes: [localStroke] },
+    textFields: [beaField],
+  })
+  assert.equal(prepared.ink.strokes.length, 2)
+  assert.equal(prepared.textFields.length, 2)
+  await beaInkClient.editNote('Blatt.md', {
+    ink: { width: 900, height: 1273, strokes: [localStroke] },
+    textFields: [beaField],
+  })
+  const bothInk = await share.readShare({ id: inkEditShare.record.id, port: sharePort, origin })
+  assert.equal(bothInk.notes[0].ink.strokes.length, 2)
+  const inkXs = bothInk.notes[0].ink.strokes.flatMap((stroke) => stroke.points.map((point) => point.x))
+  assert.ok(inkXs.includes(0.1), `ink x ${inkXs.join(',')}`)
+  assert.ok(inkXs.includes(0.5), `ink x ${inkXs.join(',')}`)
+  assert.ok(bothInk.notes[0].textFields.some((field) => field.text === 'Feld von Ada'))
+  assert.ok(bothInk.notes[0].textFields.some((field) => field.text === 'Feld von Bea'))
+  await beaInkClient.editNote('Blatt.md', { ink: { width: 900, height: 1273, strokes: [localStroke] } })
+  const keptBoth = await share.readShare({ id: inkEditShare.record.id, port: sharePort, origin })
+  assert.equal(keptBoth.notes[0].ink.strokes.length, 2)
+
+  const staleShare = await share.publishShare({
+    entries: [{ path: 'Ursprung.md', kind: 'file', content: 'Ursprung\n' }],
+    rootPath: 'Ursprung.md',
+    mode: 'edit',
+    port: sharePort,
+    origin,
+  })
+  const staleSaved = await share.readShare({ id: staleShare.record.id, port: sharePort, origin })
+  const mover = await shareEdit.openShareEditor({ share: staleSaved, name: 'Ada Beispiel', port: sharePort, origin, clientId: 'ada-move' })
+  const staleClient = await shareEdit.openShareEditor({ share: staleSaved, name: 'Bea Beispiel', port: sharePort, origin, clientId: 'bea-stale' })
+  for (let step = 1; step <= 5; step += 1) {
+    await mover.editNote('Ursprung.md', { content: `Stand ${step}\n` })
+  }
+  await staleClient.editNote('Ursprung.md', { content: 'Ursprung\n' })
+  const afterStale = await share.readShare({ id: staleShare.record.id, port: sharePort, origin })
+  assert.match(afterStale.notes[0].content, /Stand 5/u)
+  assert.doesNotMatch(afterStale.notes[0].content, /Ursprung/u)
+  const stalePost = await sharePort.exchange({
+    method: 'POST',
+    url: `${origin}/api/v1/share/${staleShare.record.id}/edit`,
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-FaNotes-Share': '1' },
+    body: JSON.stringify({
+      clientId: 'bea-stale-raw',
+      name: 'Bea Beispiel',
+      baseRevision: 1,
+      notes: staleSaved.notes,
+    }),
+  })
+  assert.equal(stalePost.status, 409)
+  const afterRaw = await share.readShare({ id: staleShare.record.id, port: sharePort, origin })
+  assert.match(afterRaw.notes[0].content, /Stand 5/u)
+  assert.doesNotMatch(afterRaw.notes[0].content, /Ursprung/u)
+
   const refused = await sharePort.exchange({
     method: 'POST',
     url: `${origin}/api/v1/share/${copy.record.id}/edit`,
@@ -689,6 +785,12 @@ try {
     `textKeepsStroke ${keptInk.notes[0].ink.strokes.length}`,
     `clearedInk ${cleared.notes[0].ink === undefined}`,
     `field ${mergedRead.notes[0].textFields[0].text}`,
+    `dirtyBoth ${dirtyRead.notes[0].content.includes('Ada') && dirtyRead.notes[0].content.includes('Bea')}`,
+    `remoteClear ${shareEdit.remoteTextForEditor('Zeile\n', '', false) === ''}`,
+    `inkBoth ${bothInk.notes[0].ink.strokes.length}`,
+    `inkKept ${keptBoth.notes[0].ink.strokes.length}`,
+    `staleKept ${afterRaw.notes[0].content.includes('Stand 5')}`,
+    `staleStatus ${stalePost.status}`,
     `copyEditStatus ${refused.status}`,
   ].join('\n')
   writeScratch('share-collab.log', `${collabLog}\nshare-collab ok\n`)
