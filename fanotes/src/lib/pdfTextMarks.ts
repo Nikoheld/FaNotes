@@ -1,5 +1,7 @@
 /** Highlights anchored to a PDF text quote and page, stored in the note. */
 
+import { locateEmbeddedJsonComment } from './embeddedJsonComment'
+
 export const PDF_MARKS_START = '<!-- fanotes-pdf-marks-v1'
 export const PDF_MARKS_END = '-->'
 
@@ -15,12 +17,10 @@ const QUOTE_MAX = 400
 const cleanQuote = (value: string) => value.replace(/\s+/gu, ' ').trim().slice(0, QUOTE_MAX)
 
 export const readPdfMarks = (markdown: string): PdfTextMark[] => {
-  const start = markdown.indexOf(PDF_MARKS_START)
-  if (start < 0) return []
-  const end = markdown.indexOf(PDF_MARKS_END, start + PDF_MARKS_START.length)
-  if (end < 0) return []
+  const block = locateEmbeddedJsonComment(markdown, PDF_MARKS_START)
+  if (!block) return []
   try {
-    const parsed = JSON.parse(markdown.slice(start + PDF_MARKS_START.length, end)) as { marks?: unknown }
+    const parsed = JSON.parse(markdown.slice(block.jsonStart, block.jsonEnd)) as { marks?: unknown }
     if (!Array.isArray(parsed.marks)) return []
     return parsed.marks.flatMap((entry) => {
       if (!entry || typeof entry !== 'object') return []
@@ -41,10 +41,9 @@ export const readPdfMarks = (markdown: string): PdfTextMark[] => {
 }
 
 export const writePdfMarks = (markdown: string, marks: readonly PdfTextMark[]) => {
-  const start = markdown.indexOf(PDF_MARKS_START)
-  const end = start >= 0 ? markdown.indexOf(PDF_MARKS_END, start) : -1
-  const without = start >= 0 && end >= 0
-    ? `${markdown.slice(0, start)}${markdown.slice(end + PDF_MARKS_END.length)}`
+  const existing = locateEmbeddedJsonComment(markdown, PDF_MARKS_START)
+  const without = existing
+    ? `${markdown.slice(0, existing.start)}${markdown.slice(existing.end)}`
     : markdown
   const payload = {
     marks: marks.map((mark) => ({

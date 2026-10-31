@@ -1,3 +1,5 @@
+import { locateEmbeddedJsonComment } from './embeddedJsonComment'
+
 export type HomeworkKind = 'homework' | 'appointment'
 export type HomeworkPriority = 'normal' | 'high'
 
@@ -105,10 +107,9 @@ export type HomeworkMarkdownLoad =
 /** No marker is a fresh list. A broken marker stays on disk instead of becoming an empty list. */
 export const loadHomeworkMarkdown = (markdown: string): HomeworkMarkdownLoad => {
   if (typeof markdown !== 'string' || !markdown.includes(MARKER_START)) return { ok: true, document: emptyDocument() }
-  const start = markdown.indexOf(MARKER_START)
-  const end = markdown.indexOf(MARKER_END, start + MARKER_START.length)
-  if (end < 0) return { ok: false }
-  const jsonText = markdown.slice(start + MARKER_START.length, end).trim()
+  const block = locateEmbeddedJsonComment(markdown, MARKER_START)
+  if (!block) return { ok: false }
+  const jsonText = markdown.slice(block.jsonStart, block.jsonEnd).trim()
   try {
     const parsed = JSON.parse(jsonText) as Partial<HomeworkDocument>
     const tasks = Array.isArray(parsed.tasks)

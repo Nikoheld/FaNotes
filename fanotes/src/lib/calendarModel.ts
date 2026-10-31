@@ -1,3 +1,5 @@
+import { locateEmbeddedJsonComment } from './embeddedJsonComment'
+
 export const CALENDAR_NOTE_PATH = 'Kalender.md'
 export const CALENDAR_NOTE_TITLE = 'Kalender'
 export const CALENDAR_MARKER_START = '<!-- fanotes-calendar-v1'
@@ -183,13 +185,12 @@ export const loadCalendarMarkdown = (markdown: string): CalendarMarkdownLoad => 
   if (typeof markdown !== 'string' || !markdown.includes(CALENDAR_MARKER_START)) {
     return { ok: true, document: emptyCalendarDocument() }
   }
-  const start = markdown.indexOf(CALENDAR_MARKER_START)
-  const end = markdown.indexOf(CALENDAR_MARKER_END, start + CALENDAR_MARKER_START.length)
-  if (end < 0) return { ok: false }
+  const block = locateEmbeddedJsonComment(markdown, CALENDAR_MARKER_START)
+  if (!block) return { ok: false }
   try {
     return {
       ok: true,
-      document: sanitizeCalendarDocument(JSON.parse(markdown.slice(start + CALENDAR_MARKER_START.length, end))),
+      document: sanitizeCalendarDocument(JSON.parse(markdown.slice(block.jsonStart, block.jsonEnd))),
     }
   } catch {
     return { ok: false }
