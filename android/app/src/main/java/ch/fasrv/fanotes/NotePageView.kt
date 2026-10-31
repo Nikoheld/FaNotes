@@ -1783,7 +1783,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             "reset-view" -> ink.resetView()
             "math" -> onMath()
             "text-hand" -> onTextHand()
-            "text-field" -> ink.armWorksheetText(!ink.placingText)
+            "text-field" -> onDeskShortcut("text-field")
             "highlight" -> ink.armWorksheetHighlight(!ink.placingHighlight)
             "finger" -> onFinger(!builtFinger)
             "clear" -> onClear()

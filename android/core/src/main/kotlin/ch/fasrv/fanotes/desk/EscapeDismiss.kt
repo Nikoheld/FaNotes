@@ -20,6 +20,7 @@ data class EscapeLayer(
     val createFolder: Boolean = false,
     val renaming: Boolean = false,
     val moving: Boolean = false,
+    val placingText: Boolean = false,
     val placingLink: Boolean = false,
     val placingSection: Boolean = false,
     val selectedLink: Boolean = false,
@@ -48,6 +49,7 @@ fun escapeDismisses(layer: EscapeLayer): String? {
     if (layer.createFolder) return "create-folder"
     if (layer.renaming) return "rename"
     if (layer.moving) return "move"
+    if (layer.placingText) return "placing-text"
     if (layer.placingLink) return "placing-link"
     if (layer.placingSection) return "placing-section"
     if (layer.selectedLink) return "selected-link"

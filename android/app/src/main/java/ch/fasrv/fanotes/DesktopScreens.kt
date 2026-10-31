@@ -7775,7 +7775,12 @@ private fun SettingsPage(
     val updateBusy by model.updateBusy.collectAsStateWithLifecycle()
     val settingsContext = androidx.compose.ui.platform.LocalContext.current
     val sections = ch.fasrv.fanotes.desk.SETTINGS_NAV
-    var section by remember { mutableStateOf("appearance") }
+    val requestedSection by model.settingsSection.collectAsStateWithLifecycle()
+    val settingsSectionRequest by model.settingsSectionRequest.collectAsStateWithLifecycle()
+    var section by remember { mutableStateOf(requestedSection) }
+    LaunchedEffect(settingsSectionRequest) {
+        section = ch.fasrv.fanotes.desk.settingsSectionToOpen(model.settingsSection.value)
+    }
     LaunchedEffect(section, sync.account?.accountId) {
         if (section == "sync" && sync.account != null) model.refreshSyncDevices()
     }
