@@ -23,7 +23,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -203,6 +202,16 @@ class MainActivity : ComponentActivity() {
         val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@registerForActivityResult
         model.importGlyphBytes(bytes)
     }
+    private val importOneNote = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@registerForActivityResult
+        model.importOneNoteBytes(bytes)
+    }
+    private val importAddon = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val text = contentResolver.openInputStream(uri)?.use { it.readBytes() }?.toString(Charsets.UTF_8) ?: return@registerForActivityResult
+        model.installAddonManifest(text)
+    }
     private val importIcs = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@registerForActivityResult
         val text = contentResolver.openInputStream(uri)?.use { it.readBytes() }?.toString(Charsets.UTF_8) ?: return@registerForActivityResult
@@ -226,6 +235,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        paintWindowChrome()
         if (Build.VERSION.SDK_INT >= 30) {
             val best = display?.supportedModes?.maxByOrNull { it.refreshRate }
             if (best != null) window.attributes = window.attributes.apply { preferredDisplayModeId = best.modeId }
@@ -239,11 +249,35 @@ class MainActivity : ComponentActivity() {
                     importGlyph.launch(arrayOf("*/*"))
                 }
             }
+            LaunchedEffect(model) {
+                model.oneNoteImports.collect {
+                    importOneNote.launch(arrayOf("*/*", "application/zip", "text/html"))
+                }
+            }
+            LaunchedEffect(model) {
+                model.addonImports.collect {
+                    importAddon.launch(arrayOf("application/json", "text/plain", "*/*"))
+                }
+            }
             val rawDesk by model.deskSettings.collectAsStateWithLifecycle()
             val css by model.customCss.collectAsStateWithLifecycle()
             var sheetDialog by remember { mutableStateOf(false) }
             val openForSheet by model.open.collectAsStateWithLifecycle()
             val desk = ch.fasrv.fanotes.desk.deskWithCustomCss(rawDesk, css)
+            val catalogEpoch by model.uiCatalogEpoch.collectAsStateWithLifecycle()
+            val deviceLanguages = listOf(java.util.Locale.getDefault().toLanguageTag())
+            ch.fasrv.fanotes.desk.ChromeText.language = ch.fasrv.fanotes.desk.resolveUiLanguage(desk["ui-language"], deviceLanguages)
+            LaunchedEffect(catalogEpoch) {
+                if (ch.fasrv.fanotes.desk.ChromeText.catalog.isEmpty()) {
+                    val catalog = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        ch.fasrv.fanotes.desk.loadEnglishCatalogResource()
+                    }
+                    if (catalog.isNotEmpty()) {
+                        ch.fasrv.fanotes.desk.ChromeText.catalog = catalog
+                        model.uiCatalogEpoch.value = model.uiCatalogEpoch.value + 1
+                    }
+                }
+            }
             FaNotesTheme(
                 desk["theme"].orEmpty(),
                 desk["accent"].orEmpty(),
@@ -336,6 +370,19 @@ class MainActivity : ComponentActivity() {
         val bytes = model.readUri(uri) ?: return
         model.importBytes(name, bytes, pdf, contentResolver.getType(uri).orEmpty())
     }
+
+    private fun paintWindowChrome() {
+        val night = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        val systemDark = night == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val chrome = ch.fasrv.fanotes.desk.windowChrome(model.deskSettings.value["theme"], systemDark)
+        window.statusBarColor = android.graphics.Color.parseColor(chrome.statusBar)
+        window.navigationBarColor = android.graphics.Color.parseColor(chrome.navigationBar)
+        window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.parseColor(chrome.window)))
+        androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !chrome.dark
+            isAppearanceLightNavigationBars = !chrome.dark
+        }
+    }
 }
 
 private fun VaultNode.toTreeKey(): ch.fasrv.fanotes.desk.TreeKeyNode =
@@ -402,6 +449,18 @@ fun FaNotesTheme(
         onSurface = chrome.text?.let { Color(android.graphics.Color.parseColor(it)) } ?: baseScheme.onSurface,
         error = danger,
     )
+    val view = androidx.compose.ui.platform.LocalView.current
+    val bars = ch.fasrv.fanotes.desk.windowChrome(themeName, androidx.compose.foundation.isSystemInDarkTheme())
+    androidx.compose.runtime.SideEffect {
+        val window = view.context.findActivity()?.window ?: return@SideEffect
+        window.statusBarColor = android.graphics.Color.parseColor(bars.statusBar)
+        window.navigationBarColor = android.graphics.Color.parseColor(bars.navigationBar)
+        window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.parseColor(bars.window)))
+        androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
+            isAppearanceLightStatusBars = !bars.dark
+            isAppearanceLightNavigationBars = !bars.dark
+        }
+    }
     CompositionLocalProvider(LocalStatusInk provides statusInk, LocalDeskThemeId provides palette.id) {
         MaterialTheme(colorScheme = scheme, typography = chromeTypography(family), content = content)
     }
@@ -563,35 +622,38 @@ fun FaNotesScreen(
         model.requestToggleTask()
     }
 
+    fun revealOpenNote() {
+        val path = open?.path
+        if (path == null) {
+            model.message.value = "Öffne zuerst eine Notiz."
+        } else if (!model.selectedFolderVault()) {
+            model.message.value = "Diese Notiz liegt im Tablet-Vault und hat keinen Ordner im Dateimanager."
+        } else {
+            val uri = model.revealInFolder(path)
+            if (uri == null) {
+                model.message.value = "Der Eintrag wurde nicht gefunden."
+            } else {
+                val intent = Intent(Intent.ACTION_VIEW).setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                runCatching { context.startActivity(intent) }.onFailure {
+                    model.message.value = "Der Dateimanager konnte den Eintrag nicht öffnen."
+                }
+            }
+        }
+    }
+
     fun runDeskShortcut(id: String) {
         when (id) {
             "tab-next" -> model.cycleTabs(1)
             "tab-prev" -> model.cycleTabs(-1)
-            "back" -> model.navigateHistory(-1)
-            "forward" -> model.navigateHistory(1)
-            "reopen-tab" -> model.reopenClosedTab()
-            "quick-open" -> model.showPalette(notes = true)
-            "palette" -> model.showPalette(notes = false)
-            "split" -> model.toggleSplit()
-            "split-swap" -> model.swapSplit()
             "close-tab" -> model.closeCurrentTab()
-            "save" -> model.saveFromShortcut()
-            "vault-search" -> model.showDestination("search")
-            "ai" -> model.showDestination("ai")
-            "text-hand" -> model.openTextHand()
-            "worksheet" -> onImportSheet()
-            "new-note" -> {
-                createParent = model.defaultCreateFolder()
-                createNote = true
+            "palette" -> model.showPalette(notes = false)
+            "back" -> dispatchCommandPlatform(context, model, model.performDesktopCommand("nav-back"), onImportPdf, onImportSheet, onExportPdf, onDownload, ::revealOpenNote)
+            "forward" -> dispatchCommandPlatform(context, model, model.performDesktopCommand("nav-forward"), onImportPdf, onImportSheet, onExportPdf, onDownload, ::revealOpenNote)
+            "stamp" -> dispatchCommandPlatform(context, model, model.performDesktopCommand("insert-date"), onImportPdf, onImportSheet, onExportPdf, onDownload, ::revealOpenNote)
+            else -> {
+                if (id.startsWith("tab-")) id.removePrefix("tab-").toIntOrNull()?.let(model::openTabByDigit)
+                else dispatchCommandPlatform(context, model, model.performDesktopCommand(id), onImportPdf, onImportSheet, onExportPdf, onDownload, ::revealOpenNote)
             }
-            "settings" -> model.showDestination("settings")
-            "focus" -> model.toggleFocusMode()
-            "pen" -> model.togglePen()
-            "stamp", "insert-date" -> model.insertDateStamp(withTime = false)
-            "insert-date-time" -> model.insertDateStamp(withTime = true)
-            "copy-wiki-link" -> copyOpenWikiLink()
-            "toggle-task" -> toggleOpenTask()
-            else -> if (id.startsWith("tab-")) id.removePrefix("tab-").toIntOrNull()?.let(model::openTabByDigit)
         }
     }
     val focus = desk["focus"] == "on"
@@ -984,9 +1046,10 @@ fun FaNotesScreen(
                     .directionalSearchShade(),
             )
         }
-            val toast = message
-            LaunchedEffect(toast) {
-                if (toast != ch.fasrv.fanotes.vault.TRASH_NOTICE) model.undoTrash.value = null
+            val toast = ch.fasrv.fanotes.desk.userVisibleToast(message)
+            LaunchedEffect(message) {
+                if (!message.isNullOrBlank() && toast == null) model.message.value = null
+                if (message != ch.fasrv.fanotes.vault.TRASH_NOTICE) model.undoTrash.value = null
             }
             if (!toast.isNullOrBlank()) {
                 FaNotesToast(
@@ -1013,7 +1076,11 @@ fun FaNotesScreen(
             sync.status.name.lowercase(),
             if (rawDesk["spellcheck"] == "off" || !showText || open == null) "" else {
                 val code = if (spellingLanguage == "unknown") ch.fasrv.fanotes.desk.detectNoteLanguage(markdown) else spellingLanguage
-                ch.fasrv.fanotes.desk.statusLanguageLabel(code)?.let { "Aa $it" }.orEmpty()
+                ch.fasrv.fanotes.desk.statusBarLanguage(
+                    code,
+                    ch.fasrv.fanotes.desk.ChromeText.language,
+                    ch.fasrv.fanotes.desk.ChromeText.catalog,
+                )?.let { "Aa $it" }.orEmpty()
             },
             desk["words"] != "off",
             sync.conflicts.size,
@@ -1076,78 +1143,8 @@ fun FaNotesScreen(
                 penOpen = !showText,
                 bookOpen = model.bookOpen.collectAsStateWithLifecycle().value,
             ) { id ->
-                when (id) {
-                    "quick-open" -> model.showPalette(notes = true)
-                    "new-note" -> {
-                        createParent = model.defaultCreateFolder()
-                        createNote = true
-                    }
-                    "import-pdf" -> onImportPdf()
-                    "new-folder" -> {
-                        createParent = ""
-                        createFolder = true
-                    }
-                    "save" -> model.saveFromShortcut()
-                    "pen" -> model.togglePen()
-                    "note-link" -> model.requestPlaceLink()
-                    "book" -> model.toggleBookView()
-                    "worksheet" -> onImportSheet()
-                    "daily" -> model.openDaily()
-                    "daily-previous" -> model.openAdjacentDaily(-1)
-                    "daily-next" -> model.openAdjacentDaily(1)
-                    "split" -> model.toggleSplit()
-                    "split-orient" -> model.toggleSplitOrientation()
-                    "split-swap" -> model.swapSplit()
-                    "note-here" -> {
-                        createParent = model.currentFolder()
-                        createNote = true
-                    }
-                    "subfolder" -> {
-                        createParent = model.currentFolder()
-                        createFolder = true
-                    }
-                    "focus" -> model.updateDesk("focus", if (desk["focus"] == "on") "off" else "on")
-                    "sidebar" -> model.setSidebarOpen(!(if (wide) sidebarOpen else showList))
-                    "inspector" -> model.toggleInspector()
-                    "sync" -> requestSync()
-                    "sync-settings" -> model.showDestination("settings")
-                    "reveal" -> {
-                        val path = open?.path
-                        if (path == null) {
-                            model.message.value = "Öffne zuerst eine Notiz."
-                        } else if (!model.selectedFolderVault()) {
-                            model.message.value = "Diese Notiz liegt im Tablet-Vault und hat keinen Ordner im Dateimanager."
-                        } else {
-                            val uri = model.revealInFolder(path)
-                            if (uri == null) {
-                                model.message.value = "Der Eintrag wurde nicht gefunden."
-                            } else {
-                                val intent = Intent(Intent.ACTION_VIEW).setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                runCatching { context.startActivity(intent) }.onFailure {
-                                    model.message.value = "Der Dateimanager konnte den Eintrag nicht öffnen."
-                                }
-                            }
-                        }
-                    }
-                    "bug-report" -> model.openBugReport()
-                    "export-pdf" -> onExportPdf()
-                    "download-note" -> onDownload()
-                    "nav-back" -> model.navigateHistory(-1)
-                    "nav-forward" -> model.navigateHistory(1)
-                    "reopen-tab" -> model.reopenClosedTab()
-                    "duplicate" -> model.duplicateNote()
-                    "trash" -> model.openTrash()
-                    "stamp", "insert-date" -> model.insertDateStamp(withTime = false)
-                    "insert-date-time" -> model.insertDateStamp(withTime = true)
-                    "copy-wiki-link" -> copyOpenWikiLink()
-                    "toggle-task" -> toggleOpenTask()
-                    "pin-tab" -> model.togglePinTab()
-                    "close-others" -> model.closeTabs("others")
-                    "close-right" -> model.closeTabs("right")
-                    "cycle-tab" -> model.cycleTabs(1)
-                    "text-hand" -> model.openTextHand()
-                    else -> if (id.startsWith("template-")) model.createFromTemplate(id.removePrefix("template-")) else model.showDestination(id)
-                }
+                val outcome = model.performDesktopCommand(id)
+                dispatchCommandPlatform(context, model, outcome, onImportPdf, onImportSheet, onExportPdf, onDownload, ::revealOpenNote)
             }
             }
             }
@@ -1193,6 +1190,63 @@ fun FaNotesScreen(
             onClear = { model.clearGlyphSamples() },
             onInsert = { model.insertHandwriting(it) },
         )
+    }
+    val glyphOpen by model.glyphenWerkOpen.collectAsStateWithLifecycle()
+    val addonOpen by model.addonStoreOpen.collectAsStateWithLifecycle()
+    val installedAddons by model.installedAddons.collectAsStateWithLifecycle()
+    val pendingExport by model.pendingExport.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingExport) {
+        val export = pendingExport ?: return@LaunchedEffect
+        if (export.mime != "application/x-tex") return@LaunchedEffect
+        shareLatex(context, export)
+        if (model.pendingExport.value == export) model.pendingExport.value = null
+    }
+    if (glyphOpen) {
+        PromptCard(
+            "GlyphenWerk",
+            onDismiss = { model.glyphenWerkOpen.value = false },
+            confirmLabel = ch.fasrv.fanotes.desk.ChromeText.ui("Importieren"),
+            dismissLabel = ch.fasrv.fanotes.desk.ChromeText.ui("Schließen"),
+            onConfirm = { model.requestGlyphImport() },
+        ) {
+            val labels = glyphSamples.map { it.label }.distinct()
+            Text(
+                ch.fasrv.fanotes.desk.ChromeText.ui("Eigene Glyphen trainieren und in die Handschrift übernehmen."),
+                fontSize = 12.sp,
+                color = LocalStatusInk.current.muted,
+                lineHeight = 17.sp,
+            )
+            if (labels.isEmpty()) {
+                Text(ch.fasrv.fanotes.desk.ChromeText.ui("Noch keine Glyphen."), fontSize = 13.sp)
+            } else {
+                labels.forEach { label ->
+                    Text(ch.fasrv.fanotes.desk.presentNoteText(label), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+    if (addonOpen) {
+        PromptCard(
+            "Add-on-Store",
+            onDismiss = { model.addonStoreOpen.value = false },
+            confirmLabel = ch.fasrv.fanotes.desk.ChromeText.ui("Installieren"),
+            dismissLabel = ch.fasrv.fanotes.desk.ChromeText.ui("Schließen"),
+            onConfirm = { model.requestAddonImport() },
+        ) {
+            Text(
+                ch.fasrv.fanotes.desk.ChromeText.ui("Ein Add-on-Manifest installieren."),
+                fontSize = 12.sp,
+                color = LocalStatusInk.current.muted,
+                lineHeight = 17.sp,
+            )
+            if (installedAddons.isEmpty()) {
+                Text(ch.fasrv.fanotes.desk.ChromeText.ui("Noch keine Add-ons installiert."), fontSize = 13.sp)
+            } else {
+                installedAddons.forEach { addon ->
+                    Text("${ch.fasrv.fanotes.desk.presentNoteText(addon.name)} ${addon.version}", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
     }
     if (mathOpen) {
         PromptCard(
@@ -1301,6 +1355,41 @@ fun FaNotesScreen(
             }
         }
     }
+}
+
+private fun dispatchCommandPlatform(
+    context: android.content.Context,
+    model: FaNotesViewModel,
+    outcome: ch.fasrv.fanotes.desk.DeskWork,
+    onImportPdf: () -> Unit,
+    onImportSheet: () -> Unit,
+    onExportPdf: () -> Unit,
+    onDownload: () -> Unit,
+    onReveal: () -> Unit,
+) {
+    when (outcome.platform) {
+        "import-pdf" -> onImportPdf()
+        "worksheet" -> onImportSheet()
+        "reveal" -> onReveal()
+        "export-pdf" -> onExportPdf()
+        "download" -> onDownload()
+        "share-latex" -> shareLatex(context, outcome.exports.lastOrNull())
+        "clipboard" -> {
+            val clipboard = context.getSystemService(ClipboardManager::class.java)
+            clipboard?.setPrimaryClip(ClipData.newPlainText("FaNotes", outcome.clipboard))
+        }
+    }
+    val export = model.pendingExport.value
+    if (outcome.platform == "share-latex" && export != null) model.pendingExport.value = null
+}
+
+private fun shareLatex(context: android.content.Context, export: ch.fasrv.fanotes.desk.DeskExport?) {
+    val body = export?.text ?: return
+    val send = Intent(Intent.ACTION_SEND)
+        .setType("text/plain")
+        .putExtra(Intent.EXTRA_SUBJECT, export.name)
+        .putExtra(Intent.EXTRA_TEXT, body)
+    runCatching { context.startActivity(Intent.createChooser(send, export.name)) }
 }
 
 private fun openFollowedLink(
@@ -2827,40 +2916,79 @@ private fun NotePage(
 ) {
     val noteKind = model.open.collectAsStateWithLifecycle().value?.kind
     val showGoto by model.showGotoLine.collectAsStateWithLifecycle()
-    Column(modifier) {
-            if (path != null) {
-            Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onExportPdf) { Text("Als PDF exportieren") }
-                TextButton(onClick = onDownload) { Text("Herunterladen") }
-                if (noteKind != NoteKind.PDF) {
-                    TextButton(onClick = onImportSheet) { Text("Blatt") }
-                    TextButton(onClick = { model.openGotoLine() }) { Text("Gehe zu Zeile") }
+    val editorMenu by model.editorMenu.collectAsStateWithLifecycle()
+    Box(modifier) {
+        if (path == null) {
+            EmptyEditor(
+                onCreateNote,
+                onImportPdf,
+                onImportSheet,
+                onPalette,
+                recent = model.recentNotePaths().map { recentPath -> recentPath to recentPath.substringAfterLast('/').substringBeforeLast('.') },
+                onOpenRecent = { model.openPath(it) },
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            PageSurface(
+                model = model,
+                tool = tool,
+                style = style,
+                finger = finger,
+                textMode = textMode,
+                markdown = markdown,
+                backdrop = backdrop,
+                token = token,
+                path = path,
+                paper = model.session.document.paperStyle,
+                syncText = syncText,
+                syncBusy = syncBusy,
+                dark = ch.fasrv.fanotes.desk.themePalette(model.effectiveDesk()["theme"], isSystemInDarkTheme()).dark,
+                theme = model.effectiveDesk()["theme"].orEmpty(),
+                systemDark = isSystemInDarkTheme(),
+                onSync = onSync,
+                onToggleRail = onToggleRail,
+                onEditBox = onEditBox,
+                editingBox = editingBox,
+                onCloseBox = onCloseBox,
+                onMath = onMath,
+                onDeskShortcut = onDeskShortcut,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        if (path != null && editorMenu != null) {
+            Column(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        ch.fasrv.fanotes.desk.ChromeText.ui(
+                            when (editorMenu) {
+                                "tags" -> "Tag hinzufügen"
+                                "search" -> "Im Text suchen …"
+                                "more" -> "Mehr"
+                                else -> "Werkzeuge"
+                            },
+                        ),
+                        modifier = Modifier.weight(1f),
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    TextButton(onClick = { model.openEditorMenu(null) }) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Schließen")) }
                 }
-            }
-            val sheets = backdrop.filter { it.worksheetId.isNotEmpty() }.distinctBy { it.worksheetId }
-            if (sheets.isNotEmpty()) {
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    sheets.forEach { slice ->
-                        Text(slice.label.ifBlank { "Arbeitsblatt" }, fontSize = 13.sp, maxLines = 1)
-                        TextButton(onClick = { model.removeWorksheet(slice.worksheetId) }) { Text("Entfernen") }
-                    }
+                when (editorMenu) {
+                    "tags" -> NoteTagBar(model)
+                    "search" -> if (noteKind == NoteKind.PDF) PdfSearchBar(model) else NoteSearchBar(model)
+                    "pdf-search" -> PdfSearchBar(model)
+                    "pdf-thumbs" -> PdfThumbStrip(model)
+                    "pdf-password" -> PdfPasswordPrompt(model)
+                    "more" -> EditorMoreMenu(model, noteKind, backdrop, showRelations, onExportPdf, onDownload, onImportSheet)
+                    else -> Unit
                 }
+                if (noteKind == NoteKind.PDF && editorMenu == "pdf-search") PdfQuoteMarks(model)
             }
-            NoteTagBar(model)
-            MarginTranscript(model)
-            if (noteKind == NoteKind.PDF) {
-                PdfNoteToolbar(model)
-                PdfPasswordPrompt(model)
-                PdfSearchBar(model)
-                PdfThumbStrip(model)
-                PdfQuoteMarks(model)
-            } else {
-                NoteSearchBar(model)
-            }
-            if (showRelations) NoteRelations(model) { model.openPath(it); model.showDestination("notes") }
         }
         if (showGoto) {
             GotoLineDialog { input ->
@@ -2868,44 +2996,38 @@ private fun NotePage(
                 if (input != null) model.requestGotoLine(input)
             }
         }
-        if (path == null) {
-            EmptyEditor(
-                onCreateNote,
-                onImportPdf,
-                onImportSheet,
-                onPalette,
-                recent = model.recentNotePaths().map { path -> path to path.substringAfterLast('/').substringBeforeLast('.') },
-                onOpenRecent = { model.openPath(it) },
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            )
-            return@Column
-        }
-        PageSurface(
-        model = model,
-        tool = tool,
-        style = style,
-        finger = finger,
-        textMode = textMode,
-        markdown = markdown,
-        backdrop = backdrop,
-        token = token,
-        path = path,
-        paper = model.session.document.paperStyle,
-        syncText = syncText,
-        syncBusy = syncBusy,
-        dark = ch.fasrv.fanotes.desk.themePalette(model.effectiveDesk()["theme"], isSystemInDarkTheme()).dark,
-        theme = model.effectiveDesk()["theme"].orEmpty(),
-        systemDark = isSystemInDarkTheme(),
-        onSync = onSync,
-        onToggleRail = onToggleRail,
-        onEditBox = onEditBox,
-        editingBox = editingBox,
-        onCloseBox = onCloseBox,
-        onMath = onMath,
-        onDeskShortcut = onDeskShortcut,
-        modifier = Modifier.weight(1f).fillMaxWidth(),
-    )
     }
+}
+
+@Composable
+private fun EditorMoreMenu(
+    model: FaNotesViewModel,
+    noteKind: NoteKind?,
+    backdrop: List<BackdropSlice>,
+    showRelations: Boolean,
+    onExportPdf: () -> Unit,
+    onDownload: () -> Unit,
+    onImportSheet: () -> Unit,
+) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        TextButton(onClick = onExportPdf) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Als PDF exportieren")) }
+        TextButton(onClick = onDownload) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Herunterladen")) }
+        TextButton(onClick = onImportSheet) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Blatt")) }
+        TextButton(onClick = { model.openGotoLine() }) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Gehe zu Zeile")) }
+        TextButton(onClick = { model.performDesktopCommand("text-field") }) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Textfeld einfügen")) }
+        TextButton(onClick = { model.performDesktopCommand("export-latex") }) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Notiz als LaTeX-Code exportieren")) }
+        TextButton(onClick = { model.performDesktopCommand("glyphenwerk") }) { Text("GlyphenWerk öffnen") }
+        TextButton(onClick = { model.performDesktopCommand("addon-store") }) { Text("Add-on-Store") }
+        TextButton(onClick = { model.performDesktopCommand("onenote-import") }) { Text("Microsoft OneNote importieren") }
+    }
+    val sheets = backdrop.filter { it.worksheetId.isNotEmpty() }.distinctBy { it.worksheetId }
+    sheets.forEach { slice ->
+        TextButton(onClick = { model.removeWorksheet(slice.worksheetId) }) {
+            Text(ch.fasrv.fanotes.desk.presentNoteText(slice.label.ifBlank { "Arbeitsblatt" }) + " entfernen")
+        }
+    }
+    if (noteKind != NoteKind.PDF) MarginTranscript(model)
+    if (showRelations) NoteRelations(model) { model.openPath(it); model.showDestination("notes") }
 }
 
 @Composable
@@ -3003,6 +3125,17 @@ private fun PageSurface(
                 }
             }
             page.onDeskShortcut = onDeskShortcut
+            page.onToolbarAction = { action ->
+                if (!page.handleToolbarAction(action)) {
+                    when (action) {
+                        "backup" -> model.performDesktopCommand("history")
+                        "pdf-prev" -> model.goToPdfPage(model.pdfThumbPage.value - 1)
+                        "pdf-next" -> model.goToPdfPage(model.pdfThumbPage.value + 1)
+                        "tags", "search", "more", "pdf-search", "pdf-thumbs", "pdf-password" -> model.openEditorMenu(action)
+                        else -> model.openEditorMenu(action)
+                    }
+                }
+            }
             if (page.ink.backdrop !== backdrop) page.ink.backdrop = backdrop
             if (page.ink.paperImages !== paperImages) page.ink.paperImages = paperImages
             page.onTool = {

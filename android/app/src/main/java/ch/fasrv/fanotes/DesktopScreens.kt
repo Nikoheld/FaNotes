@@ -108,7 +108,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -262,6 +261,50 @@ private val LocalSettingsRangeFillsWidth = staticCompositionLocalOf { false }
  */
 private val LocalRangeSettingValueFont = staticCompositionLocalOf<FontFamily> { FontFamily.Monospace }
 
+private val StatusLineStyle = TextStyle(
+    platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false),
+)
+
+@Composable
+private fun tabletSideInset(): androidx.compose.ui.unit.Dp {
+    val config = LocalConfiguration.current
+    val density = config.densityDpi / 160f
+    val inset = if (density <= 0f) 0 else ch.fasrv.fanotes.desk.editorSideInsetDp(
+        (config.screenWidthDp * density).toInt(),
+        (config.screenHeightDp * density).toInt(),
+        config.densityDpi,
+    )
+    return inset.dp
+}
+
+@Composable
+private fun StatusLabel(
+    text: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+    fontWeight: FontWeight? = null,
+    maxWidthDp: Int? = null,
+    onClick: (() -> Unit)? = null,
+) {
+    Box(
+        modifier
+            .height(ch.fasrv.fanotes.desk.STATUS_BUTTON_DP.dp)
+            .then(if (maxWidthDp != null) Modifier.widthIn(max = maxWidthDp.dp) else Modifier)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(
+            text,
+            color = color,
+            fontSize = 12.sp,
+            fontWeight = fontWeight,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = StatusLineStyle,
+        )
+    }
+}
+
 @Composable
 fun DeskRibbon(
     destination: String,
@@ -277,12 +320,13 @@ fun DeskRibbon(
     var toolsOpen by remember { mutableStateOf(false) }
     val toolIds = ch.fasrv.fanotes.desk.RIBBON_TOOLS.map { it.id }.toSet()
     LaunchedEffect(destination, aiOpen) { if (aiOpen || destination in toolIds) toolsOpen = true }
+    val mark = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.brandMarkColor(LocalDeskThemeId.current, androidx.compose.foundation.isSystemInDarkTheme())))
     Row(
-        Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.RIBBON_HEIGHT_DP.dp).background(MaterialTheme.colorScheme.surface).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+        Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.RIBBON_HEIGHT_DP.dp).background(MaterialTheme.colorScheme.surface).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp + tabletSideInset()),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("F", modifier = Modifier.padding(end = 8.dp), fontWeight = FontWeight.SemiBold)
-        Text("FaNotes", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(end = 12.dp))
+        Text("F", modifier = Modifier.padding(end = 8.dp), fontWeight = FontWeight.SemiBold, color = mark)
+        Text("FaNotes", fontWeight = FontWeight.SemiBold, color = mark, modifier = Modifier.padding(end = 12.dp))
         if (focus) {
             RibbonButton("Fokus aus", active = false, onClick = onFocus)
             return@Row
@@ -331,6 +375,8 @@ private fun RibbonButton(
     onClickLabel: String = label,
     onClick: () -> Unit,
 ) {
+    val shown = ch.fasrv.fanotes.desk.ChromeText.ui(label)
+    val clickLabel = ch.fasrv.fanotes.desk.ChromeText.ui(onClickLabel)
     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.RIBBON_BUTTON_RADIUS_DP.dp)
     Box(
         Modifier
@@ -338,12 +384,12 @@ private fun RibbonButton(
             .height(ch.fasrv.fanotes.desk.RIBBON_BUTTON_DP.dp)
             .clip(shape)
             .background(if (active) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
-            .clickable(onClickLabel = onClickLabel, onClick = onClick)
+            .clickable(onClickLabel = clickLabel, onClick = onClick)
             .padding(horizontal = ch.fasrv.fanotes.desk.RIBBON_BUTTON_PAD_DP.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            label,
+            shown,
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
@@ -441,6 +487,7 @@ private fun StatusChip(
             color = ink,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            style = StatusLineStyle,
             modifier = if (maxWidthDp != null) Modifier.weight(1f, fill = false) else Modifier,
         )
         if (badge > 0) {
@@ -493,7 +540,7 @@ fun DeskStatusBar(
             Modifier
                 .fillMaxWidth()
                 .height(ch.fasrv.fanotes.desk.STATUS_BAR_DP.dp)
-                .padding(horizontal = ch.fasrv.fanotes.desk.STATUS_PAD_DP.dp),
+                .padding(horizontal = ch.fasrv.fanotes.desk.STATUS_PAD_DP.dp + tabletSideInset()),
             verticalAlignment = Alignment.CenterVertically,
         ) {
         Row(
@@ -502,26 +549,20 @@ fun DeskStatusBar(
         ) {
             if (onToggleSidebar != null) {
                 StatusChip(
-                    label = if (sidebarOpen) "Leiste zu" else "Leiste",
+                    label = ch.fasrv.fanotes.desk.ChromeText.ui(if (sidebarOpen) "Leiste zu" else "Leiste"),
                     idle = ink.muted,
                     onClick = onToggleSidebar,
-                    onClickLabel = if (sidebarOpen) "Seitenleiste einklappen" else "Seitenleiste einblenden",
+                    onClickLabel = ch.fasrv.fanotes.desk.ChromeText.ui(if (sidebarOpen) "Seitenleiste einklappen" else "Seitenleiste einblenden"),
                 )
             }
             if (mode.isNotBlank()) {
-                Text(mode, fontSize = 12.sp, color = ink.muted)
+                StatusLabel(ch.fasrv.fanotes.desk.ChromeText.ui(mode), ink.muted)
             }
             if (!worksheets.isNullOrBlank()) {
-                Text(worksheets, fontSize = 12.sp, color = ink.muted)
+                StatusLabel(ch.fasrv.fanotes.desk.ChromeText.ui(worksheets), ink.muted)
             }
             if (!notice.isNullOrBlank()) {
-                Text(
-                    notice,
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                    color = ink.muted,
-                    modifier = Modifier.clickable(onClick = onDismissNotice),
-                )
+                StatusLabel(ch.fasrv.fanotes.desk.ChromeText.ui(notice), ink.muted, onClick = onDismissNotice)
             }
         }
         if (crumbs.isNotEmpty()) {
@@ -541,22 +582,21 @@ fun DeskStatusBar(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 crumbs.forEachIndexed { index, crumb ->
-                    if (index > 0) Text("›", fontSize = 12.sp, color = ink.muted.copy(alpha = 0.6f))
+                    val crumbLabel = ch.fasrv.fanotes.desk.presentNoteText(crumb.label)
+                    if (index > 0) StatusLabel("›", ink.muted.copy(alpha = 0.6f))
                     if (crumb.isNote) {
-                        Text(
-                            crumb.label,
-                            fontSize = 12.sp,
+                        StatusLabel(
+                            crumbLabel,
+                            ink.soft,
                             fontWeight = FontWeight.SemiBold,
-                            color = ink.soft,
-                            maxLines = 1,
-                            modifier = Modifier.widthIn(max = ch.fasrv.fanotes.desk.STATUS_NOTE_MAX_DP.dp),
+                            maxWidthDp = ch.fasrv.fanotes.desk.STATUS_NOTE_MAX_DP,
                         )
                     } else {
                         StatusChip(
-                            label = crumb.label,
+                            label = crumbLabel,
                             idle = ink.muted,
                             onClick = { onCrumb(crumb.path) },
-                            onClickLabel = "„${crumb.label}“ in der Dateileiste zeigen",
+                            onClickLabel = "„$crumbLabel“ in der Dateileiste zeigen",
                             maxWidthDp = ch.fasrv.fanotes.desk.STATUS_FOLDER_MAX_DP,
                         )
                     }
@@ -566,15 +606,15 @@ fun DeskStatusBar(
             Spacer(Modifier.weight(1f))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.STATUS_GROUP_GAP_DP.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (language.isNotBlank()) Text(language, fontSize = 12.sp, color = ink.muted)
-            if (showWords) Text("$words Wörter", fontSize = 12.sp, color = ink.muted)
+            if (language.isNotBlank()) StatusLabel(language, ink.muted)
+            if (showWords) StatusLabel("$words ${ch.fasrv.fanotes.desk.ChromeText.ui("Wörter")}", ink.muted)
             val syncIdle = when (ch.fasrv.fanotes.desk.statusSyncTone(syncTone)) {
                 "success" -> ink.success
                 "danger" -> MaterialTheme.colorScheme.error
                 else -> ink.muted
             }
             StatusChip(
-                label = syncText,
+                label = ch.fasrv.fanotes.desk.ChromeText.ui(syncText),
                 idle = syncIdle,
                 onClick = onConflicts,
                 onClickLabel = "Synchronisation",
@@ -589,14 +629,14 @@ fun DeskStatusBar(
                     else -> ink.success
                 }
                 StatusChip(
-                    label = saveLabel,
+                    label = ch.fasrv.fanotes.desk.ChromeText.ui(saveLabel),
                     idle = saveColor,
                     onClick = onSave,
                     onClickLabel = "Jetzt speichern",
                     padDp = ch.fasrv.fanotes.desk.STATUS_SAVE_PAD_DP,
                 )
             }
-            Text(ch.fasrv.fanotes.desk.STATUS_LOCAL_PRIVATE, fontSize = 12.sp, color = ink.muted)
+            StatusLabel(ch.fasrv.fanotes.desk.ChromeText.ui(ch.fasrv.fanotes.desk.STATUS_LOCAL_PRIVATE), ink.muted)
         }
         }
     }
@@ -6937,16 +6977,15 @@ private fun SettingSlider(value: Float, min: Float, max: Float, step: Float, suf
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.RANGE_SETTING_GAP_DP.dp),
     ) {
-        Slider(
-            value = value.coerceIn(min, max),
-            onValueChange = { raw ->
-                val steps = kotlin.math.round((raw - min) / step)
-                onChange((min + steps * step).coerceIn(min, max))
-            },
+        StylusSlider(
+            value = value,
+            min = min,
+            max = max,
+            step = step,
+            onChange = onChange,
             modifier = Modifier
                 .weight(1f)
                 .widthIn(min = ch.fasrv.fanotes.desk.RANGE_SETTING_TRACK_MIN_DP.dp),
-            valueRange = min..max,
         )
         Box(
             Modifier
@@ -6979,15 +7018,71 @@ private fun SettingSlider(value: Float, min: Float, max: Float, step: Float, suf
 @Composable
 private fun EditorSlider(title: String, value: Float, min: Float, max: Float, step: Float, suffix: String, onChange: (Float) -> Unit) {
     val shown = if (step < 1f) "%.2f".format(java.util.Locale.US, value) else value.toInt().toString()
-    Text("$title: $shown$suffix")
-    Slider(
-        value = value.coerceIn(min, max),
-        onValueChange = { raw ->
-            val steps = kotlin.math.round((raw - min) / step)
-            onChange((min + steps * step).coerceIn(min, max))
-        },
-        valueRange = min..max,
-    )
+    Text("${ch.fasrv.fanotes.desk.ChromeText.ui(title)}: $shown$suffix")
+    StylusSlider(value, min, max, step, onChange, Modifier.fillMaxWidth())
+}
+
+@Composable
+private fun StylusSlider(
+    value: Float,
+    min: Float,
+    max: Float,
+    step: Float,
+    onChange: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val fraction = if (max <= min) 0f else ((value - min) / (max - min)).coerceIn(0f, 1f)
+    val accent = MaterialTheme.colorScheme.primary
+    val track = LocalStatusInk.current.muted
+    Canvas(
+        modifier
+            .height(40.dp)
+            .pointerInput(min, max, step) {
+                awaitEachGesture {
+                    val active = LinkedHashMap<Long, ch.fasrv.fanotes.desk.SliderPointer>()
+                    fun record(change: androidx.compose.ui.input.pointer.PointerInputChange) {
+                        val kind = if (change.type == PointerType.Stylus || change.type == PointerType.Eraser) {
+                            ch.fasrv.fanotes.desk.PointerKind.STYLUS
+                        } else {
+                            ch.fasrv.fanotes.desk.PointerKind.FINGER
+                        }
+                        val span = size.width.toFloat().coerceAtLeast(1f)
+                        val next = (change.position.x / span).coerceIn(0f, 1f)
+                        if (change.pressed) {
+                            active[change.id.value] = ch.fasrv.fanotes.desk.SliderPointer(
+                                change.id.value.toInt(),
+                                kind,
+                                true,
+                                next,
+                            )
+                        } else {
+                            active.remove(change.id.value)
+                        }
+                        change.consume()
+                    }
+                    fun publish() {
+                        val raw = ch.fasrv.fanotes.desk.sliderValueFromPointers(min, max, active.values.toList()) ?: return
+                        val safeStep = if (step == 0f) 1f else step
+                        val steps = kotlin.math.round((raw - min) / safeStep)
+                        onChange((min + steps * safeStep).coerceIn(min, max))
+                    }
+                    record(awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial))
+                    publish()
+                    while (active.isNotEmpty()) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        event.changes.forEach { record(it) }
+                        publish()
+                    }
+                }
+            },
+    ) {
+        val y = size.height / 2f
+        val stroke = 4.dp.toPx()
+        drawLine(track.copy(alpha = 0.35f), Offset(0f, y), Offset(size.width, y), strokeWidth = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        val x = (fraction * size.width).coerceIn(0f, size.width)
+        drawLine(accent, Offset(0f, y), Offset(x, y), strokeWidth = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        drawCircle(accent, radius = 9.dp.toPx(), center = Offset(x, y))
+    }
 }
 
 @Composable
@@ -7099,7 +7194,7 @@ private fun SettingCard(
         ) {
             Icon(icon, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.SETTING_TITLE_ICON_DP.dp), tint = accent)
             Text(
-                title.uppercase(java.util.Locale.GERMAN),
+                ch.fasrv.fanotes.desk.ChromeText.ui(title).uppercase(if (ch.fasrv.fanotes.desk.ChromeText.language == "en") java.util.Locale.ENGLISH else java.util.Locale.GERMAN),
                 fontSize = 12.sp,
                 fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTING_TITLE_WEIGHT),
                 letterSpacing = ch.fasrv.fanotes.desk.SETTING_TITLE_TRACKING.em,
@@ -7179,9 +7274,11 @@ private fun SettingCopy(
     mark: String? = null,
 ) {
     val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
+    val shownTitle = ch.fasrv.fanotes.desk.ChromeText.ui(title)
+    val shownDescription = description?.let { ch.fasrv.fanotes.desk.ChromeText.ui(it) }
     Column(modifier) {
         if (glyph == null && mark == null) {
-            Text(title, fontSize = 12.sp, fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTING_COPY_WEIGHT), color = MaterialTheme.colorScheme.onSurface)
+            Text(shownTitle, fontSize = 12.sp, fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTING_COPY_WEIGHT), color = MaterialTheme.colorScheme.onSurface)
         } else {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -7197,7 +7294,7 @@ private fun SettingCopy(
                 }
                 Text(
                     buildAnnotatedString {
-                        append(title)
+                        append(shownTitle)
                         if (!mark.isNullOrEmpty()) {
                             withStyle(
                                 SpanStyle(
@@ -7214,8 +7311,8 @@ private fun SettingCopy(
                 )
             }
         }
-        if (!description.isNullOrBlank()) {
-            Text(description, fontSize = 12.sp, color = LocalStatusInk.current.muted, lineHeight = 17.sp, modifier = Modifier.padding(top = 3.dp))
+        if (!shownDescription.isNullOrBlank()) {
+            Text(shownDescription, fontSize = 12.sp, color = LocalStatusInk.current.muted, lineHeight = 17.sp, modifier = Modifier.padding(top = 3.dp))
         }
     }
 }
@@ -7281,8 +7378,8 @@ private fun ThemeChoiceButton(
             )
         }
         Column(Modifier.weight(1f)) {
-            Text(choice.label, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (selected) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft)
-            Text(choice.detail, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = LocalStatusInk.current.muted)
+            Text(ch.fasrv.fanotes.desk.ChromeText.ui(choice.label), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (selected) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft)
+            Text(ch.fasrv.fanotes.desk.ChromeText.ui(choice.detail), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = LocalStatusInk.current.muted)
         }
         if (selected) {
             Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f)))
@@ -7933,6 +8030,25 @@ private fun SettingsPage(
                     ) {
                         SettingRow("Farbschema", "Kann automatisch dem System folgen.") {
                             ThemeChoiceGrid(settings) { model.updateDesk("theme", it) }
+                        }
+                        SettingRow("Sprache", "System, Deutsch oder English.") {
+                            val stored = settings["ui-language"].orEmpty()
+                            val current = if (stored == "de" || stored == "en") stored else "system"
+                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                listOf("system" to "System", "de" to "Deutsch", "en" to "English").forEach { (id, label) ->
+                                    val on = current == id
+                                    Text(
+                                        label,
+                                        fontSize = 12.sp,
+                                        color = if (on) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(if (on) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+                                            .clickable { model.updateDesk("ui-language", id) }
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    )
+                                }
+                            }
                         }
                         SettingRow("Arbeitsflächen-Design", "Dekoriert den Hintergrund dezent, ohne vom Inhalt abzulenken.") {
                             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -9332,7 +9448,7 @@ fun CommandPalette(
                     Box(contentAlignment = Alignment.CenterStart) {
                         if (query.isEmpty()) {
                             Text(
-                                if (notesOnly) "Notiz öffnen …" else "Befehl suchen …",
+                                ch.fasrv.fanotes.desk.ChromeText.ui(if (notesOnly) "Notiz öffnen …" else "Befehl suchen …"),
                                 color = LocalStatusInk.current.muted,
                                 fontSize = ch.fasrv.fanotes.desk.PALETTE_SEARCH_SP.sp,
                             )
@@ -9354,7 +9470,7 @@ fun CommandPalette(
         Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
         if (rows.isEmpty()) {
             Text(
-                if (notesOnly) "Keine passende Notiz" else "Kein passender Befehl",
+                ch.fasrv.fanotes.desk.ChromeText.ui(if (notesOnly) "Keine passende Notiz" else "Kein passender Befehl"),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = ch.fasrv.fanotes.desk.PALETTE_EMPTY_PAD_TOP_DP.dp, bottom = 20.dp),
@@ -9381,7 +9497,7 @@ fun CommandPalette(
                 Column(Modifier.fillMaxWidth()) {
                     if (group != previousGroup) {
                         Text(
-                            group.uppercase(java.util.Locale.GERMAN),
+                            ch.fasrv.fanotes.desk.ChromeText.ui(group).uppercase(if (ch.fasrv.fanotes.desk.ChromeText.language == "en") java.util.Locale.ENGLISH else java.util.Locale.GERMAN),
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp,
                             letterSpacing = ch.fasrv.fanotes.desk.PALETTE_GROUP_TRACKING.em,
@@ -9427,12 +9543,12 @@ fun CommandPalette(
                         }
                         Column(Modifier.weight(1f)) {
                             val title = when (row) {
-                                is PaletteRow.Command -> row.command.label
-                                is PaletteRow.Note -> row.title
+                                is PaletteRow.Command -> ch.fasrv.fanotes.desk.ChromeText.ui(row.command.label)
+                                is PaletteRow.Note -> ch.fasrv.fanotes.desk.presentNoteText(row.title)
                             }
                             val detail = when (row) {
-                                is PaletteRow.Command -> row.command.detail
-                                is PaletteRow.Note -> row.folder
+                                is PaletteRow.Command -> ch.fasrv.fanotes.desk.ChromeText.ui(row.command.detail)
+                                is PaletteRow.Note -> ch.fasrv.fanotes.desk.presentNoteText(row.folder)
                             }
                             Text(
                                 title,
@@ -9474,12 +9590,12 @@ fun CommandPalette(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text("↑ ↓ auswählen", fontSize = 12.sp, color = LocalStatusInk.current.muted)
-            Text("Enter öffnen", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            Text(ch.fasrv.fanotes.desk.ChromeText.ui("↑ ↓ auswählen"), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            Text(ch.fasrv.fanotes.desk.ChromeText.ui("Enter öffnen"), fontSize = 12.sp, color = LocalStatusInk.current.muted)
             if (notesOnly || notes.isNotEmpty()) {
-                Text("⇧ Enter rechts", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                Text(ch.fasrv.fanotes.desk.ChromeText.ui("⇧ Enter rechts"), fontSize = 12.sp, color = LocalStatusInk.current.muted)
             }
-            Text("Esc schließen", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            Text(ch.fasrv.fanotes.desk.ChromeText.ui("Esc schließen"), fontSize = 12.sp, color = LocalStatusInk.current.muted)
         }
     }
 }

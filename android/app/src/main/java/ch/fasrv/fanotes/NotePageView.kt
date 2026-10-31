@@ -710,7 +710,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private var boxRemovePressed = false
     private var boxChromeFocused = false
     private var boxChromeAccent = Int.MIN_VALUE
-    private val toolbar = HorizontalScrollView(context)
+    private val toolbar = EditorToolbarScroll(context)
     private val toolbarRule = View(context)
     private val tools = LinearLayout(context)
     private val handle = TextView(context)
@@ -772,6 +772,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onEditorFold: (String, Int) -> Unit = { _, _ -> }
     var onSearchCommand: (String, String, Int) -> Unit = { _, _, _ -> }
     var onDeskShortcut: (String) -> Unit = {}
+    var onToolbarAction: (String) -> Unit = {}
     private var pendingCursor: Int? = null
     var onPdfPage: (Int) -> Unit = {}
     var onSymbolSize: (Double) -> Unit = {}
@@ -801,7 +802,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
         clipChildren = true
         clipToPadding = true
-        setBackgroundColor(0xFFE8E6E1.toInt())
+        setBackgroundColor(android.graphics.Color.TRANSPARENT)
         ink.setBackgroundColor(android.graphics.Color.TRANSPARENT)
         addView(ink, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         editor.background = null
@@ -1396,7 +1397,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
         if (textMode != text) setTextMode(text)
         syncPill.text = if (syncBusy && !syncLabel.contains('/')) "Startet…" else syncLabel
-        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|${ink.placingSymbol}|${ink.placingSection}|${ink.symbolSize}|${ink.symbolRotation}|${ink.symbolOpacity}|${ink.symbolCategory}|$paper|$fingerDraws|$text|$canUndo|$canRedo|$dark|$themeId|$systemDark|$followPen"
+        val metricsPx = resources.displayMetrics
+        val inset = ch.fasrv.fanotes.desk.editorSideInsetDp(metricsPx.widthPixels, metricsPx.heightPixels, metricsPx.densityDpi)
+        val toolbarPad = ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_PAD_DP + inset
+        toolbar.setPadding(dp(toolbarPad), 0, dp(toolbarPad), 0)
+        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|${ink.placingSymbol}|${ink.placingSection}|${ink.symbolSize}|${ink.symbolRotation}|${ink.symbolOpacity}|${ink.symbolCategory}|$paper|$fingerDraws|$text|$pdfNote|$canUndo|$canRedo|$dark|$themeId|$systemDark|$followPen"
         if (signature != toolSignature) {
             toolSignature = signature
             rebuildTools(tool, style, paper, fingerDraws, canUndo, canRedo)
@@ -1587,7 +1592,34 @@ class NotePageView(context: Context) : FrameLayout(context) {
             }
         }
         tools.removeAllViews()
-        tools.addView(chip("Notizen") { onToggleRail() })
+        tools.addView(modeSwitch())
+        when {
+            pdfNote -> addPdfTools()
+            textMode -> addTextTools(canUndo, canRedo)
+            else -> addInkTools(tool, style, fingerDraws, canUndo, canRedo)
+        }
+        for (slot in ch.fasrv.fanotes.desk.toolbarEndSlots(textMode, pdfNote)) {
+            when (slot) {
+                "paper" -> tools.addView(paperChip(paper))
+                "tags" -> tools.addView(chip("Tag hinzufügen") { onToolbarAction("tags") })
+                "search" -> tools.addView(chip("Im Text suchen …") { onToolbarAction("search") })
+                "backup" -> tools.addView(chip("Sichern") { onToolbarAction("backup") })
+                "links" -> addLinkTools()
+                "more" -> tools.addView(chip("Mehr") { onToolbarAction("more") })
+            }
+        }
+    }
+
+    private fun modeSwitch(): LinearLayout {
+        val row = LinearLayout(context)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.background = rounded(ch.fasrv.fanotes.desk.modeSwitchTrackColor(themeId, systemDark), dp(ch.fasrv.fanotes.desk.MODE_SWITCH_RADIUS_DP))
+        row.addView(seg("Tastatur", textMode) { onTextMode(true) })
+        row.addView(seg("Stift", !textMode) { onTextMode(false) })
+        return row
+    }
+
+    private fun addInkTools(tool: InkTool, style: StrokeStyle, fingerDraws: Boolean, canUndo: Boolean, canRedo: Boolean) {
         tools.addView(segment(tool))
         PenColors.forEach { color ->
             tools.addView(swatch(color, color.equals(style.color, true)) { onColor(color) })
@@ -1598,58 +1630,9 @@ class NotePageView(context: Context) : FrameLayout(context) {
             val index = Brushes.indexOfFirst { it.first == style.brush }.let { if (it < 0) 0 else it }
             onBrush(Brushes[(index + 1) % Brushes.size].first)
         })
-        tools.addView(chip(ch.fasrv.fanotes.ink.inkEffectLabel(style.colorEffect)) {
-            onEffect(ch.fasrv.fanotes.ink.nextInkEffect(style.colorEffect))
-        })
-        val symbolChip = chip(ch.fasrv.fanotes.ink.artSymbol(ink.placingSymbol)?.label ?: "Symbol") {}
-        symbolChip.setOnClickListener {
-            ink.placingSymbol = ch.fasrv.fanotes.ink.nextArtSymbol(ink.placingSymbol, ink.symbolCategory)
-            symbolChip.text = ch.fasrv.fanotes.ink.artSymbol(ink.placingSymbol)?.label ?: "Symbol"
-            onSymbolPose()
-        }
-        tools.addView(chip(ch.fasrv.fanotes.ink.artSymbolCategoryLabel(ink.symbolCategory)) {
-            val next = ch.fasrv.fanotes.ink.nextArtSymbolCategory(ink.symbolCategory)
-            ink.symbolCategory = next
-            onSymbolCategory(next)
-            onSymbolPose()
-        })
-        if (ink.placingSymbol != null) {
-            tools.addView(chip("${ink.symbolSize.toInt()} px") {
-                onSymbolSize(ch.fasrv.fanotes.ink.stepArtSymbolSize(ink.symbolSize, 1))
-            })
-            tools.addView(chip("${ink.symbolRotation.toInt()}°") {
-                onSymbolRotation(ch.fasrv.fanotes.ink.stepArtSymbolRotation(ink.symbolRotation, 1))
-            })
-            tools.addView(chip("${(ink.symbolOpacity * 100).toInt()}%") {
-                onSymbolOpacity(ch.fasrv.fanotes.ink.stepArtSymbolOpacity(ink.symbolOpacity, 1))
-            })
-        }
-        tools.addView(symbolChip)
-        val paperLabel = Papers.firstOrNull { it.first == paper }?.second ?: "Punkte"
-        tools.addView(chip(paperLabel) {
-            val index = Papers.indexOfFirst { it.first == paper }.let { if (it < 0) 0 else it }
-            onPaper(Papers[(index + 1) % Papers.size].first)
-        })
         tools.addView(chip("↶", enabled = canUndo) { onUndo() })
         tools.addView(chip("↷", enabled = canRedo) { onRedo() })
-        tools.addView(chip(if (textMode) "Stift" else "Text") { onTextMode(!textMode) })
-        tools.addView(chip(if (fingerDraws) "Finger schreibt" else "Finger blättert") { onFinger(!fingerDraws) })
-        tools.addView(chip("Auswahl löschen") { onDeleteSelection() })
-        tools.addView(chip(if (followPen) "Leiste folgt" else "Leiste fest") {
-            followPen = !followPen
-            toolSignature = ""
-            if (!followPen) setChromeOpen(true) else applyChromeVisibility()
-        })
-        tools.addView(chip(if (ink.placingSection) "Abschnitt · an" else "Abschnitt") {
-            val next = !ink.placingSection
-            ink.placingSection = next
-            ink.sectionGuideY = Float.NaN
-            ink.onSectionChrome(next)
-            if (next) ink.onInkNotice(ch.fasrv.fanotes.ink.InkNotice("info", ch.fasrv.fanotes.ink.SECTION_PLACE_HINT))
-            ink.invalidate()
-            post { rebuildTools(tool, style, paper, fingerDraws, canUndo, canRedo) }
-        })
-        tools.addView(chip("Lasso") { onTool(ch.fasrv.fanotes.ink.InkTool.LASSO) })
+        tools.addView(chip("Lasso") { onTool(InkTool.LASSO) })
         if (tool == InkTool.LASSO && ink.session?.selection?.isNotEmpty() == true) {
             listOf("move" to "Verschieben", "copy" to "Kopieren", "recolor" to "Färben", "delete" to "Löschen").forEach { (action, label) ->
                 tools.addView(chip(label) {
@@ -1663,83 +1646,54 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 })
             }
         }
-        tools.addView(chip("Verknüpfung") {
+    }
+
+    private fun addTextTools(canUndo: Boolean, canRedo: Boolean) {
+        listOf(
+            "bold" to "Fett",
+            "italic" to "Kursiv",
+            "strike" to "Durchgestrichen",
+            "inlineCode" to "Code",
+            "link" to "Link",
+            "heading1" to "H1",
+            "heading2" to "H2",
+            "bulletList" to "Liste",
+            "checklist" to "Aufgabe",
+            "quote" to "Zitat",
+            "table" to "Tabelle",
+        ).forEach { (action, label) -> tools.addView(chip(label) { format(action) }) }
+        tools.addView(chip("↶", enabled = canUndo) { onUndo() })
+        tools.addView(chip("↷", enabled = canRedo) { onRedo() })
+    }
+
+    private fun addPdfTools() {
+        tools.addView(chip("Vorherige Seite") { onToolbarAction("pdf-prev") })
+        tools.addView(chip("Nächste Seite") { onToolbarAction("pdf-next") })
+        tools.addView(chip("Im PDF suchen") { onToolbarAction("pdf-search") })
+        tools.addView(chip("Seiten") { onToolbarAction("pdf-thumbs") })
+        tools.addView(chip("Passwort") { onToolbarAction("pdf-password") })
+    }
+
+    private fun addLinkTools() {
+        tools.addView(chip("Verlinkung") {
             ink.placingLink = true
             ink.publishLinkChrome()
+            onDeskShortcut("note-link")
         })
-        ch.fasrv.fanotes.desk.NOTE_LINK_STYLES.forEach { linkStyle ->
-            tools.addView(chip(linkStyle.label) {
-                ink.noteLinkStyle = linkStyle.id
-                ink.selectedLinkId?.let { onRestyleLink(it, linkStyle.id) }
-            })
-        }
         tools.addView(chip("Entfernen") {
             val id = ink.selectedLinkId ?: ink.linkMarks.lastOrNull()?.id ?: return@chip
             ink.onRemoveLink(id)
             ink.selectedLinkId = null
             ink.publishLinkChrome()
         })
-        tools.addView(chip("Fett") { format("bold") })
-        tools.addView(chip("Nächstes") { selectNextOccurrence() })
-        tools.addView(chip("Liste") { format("bulletList") })
-        tools.addView(chip("Aufgabe") { format("checklist") })
-        tools.addView(chip("Zitat") { format("quote") })
-        tools.addView(chip("Tabelle") { format("table") })
-        if (textMode) {
-            listOf(
-                "heading1" to "H1",
-                "heading2" to "H2",
-                "italic" to "Kursiv",
-                "strike" to "Durchgestrichen",
-                "inlineCode" to "Code",
-                "link" to "Link",
-                "numberedList" to "Nummer",
-                "mathBlock" to "Matheblock",
-                "codeBlock" to "Codeblock",
-                "details" to "Details",
-                "horizontalRule" to "Linie",
-            ).forEach { (action, label) -> tools.addView(chip(label) { format(action) }) }
-            tools.addView(chip("Einzug") { indentLines(false) })
-            tools.addView(chip("Ausrücken") { indentLines(true) })
-            tools.addView(chip("Zeile hoch") { moveLines(false) })
-            tools.addView(chip("Zeile runter") { moveLines(true) })
-            tools.addView(chip("Kommentar") { commentLines() })
-            tools.addView(chip("Zeile löschen") { deleteCurrentLines() })
-            tools.addView(chip("Leerzeile") { insertBlank() })
-            tools.addView(chip("Umbruch") { insertIndentedNewline() })
-            tools.addView(chip("Ganze Zeile") { selectLine() })
-            tools.addView(chip("Klammer") { jumpBracket() })
+    }
+
+    private fun paperChip(paper: String): TextView {
+        val label = ch.fasrv.fanotes.desk.paperStyleLabel(paper)
+        return chip(label) {
+            val index = Papers.indexOfFirst { it.first == paper }.let { if (it < 0) 0 else it }
+            onPaper(Papers[(index + 1) % Papers.size].first)
         }
-        tools.addView(guideChip("Lineal", DraftingKind.RULER))
-        tools.addView(guideChip("Geodreieck", DraftingKind.SET_SQUARE))
-        tools.addView(guideChip("Zirkel", DraftingKind.COMPASS))
-        tools.addView(chip("Kreis") {
-            if (!ink.guideOn(DraftingKind.COMPASS)) ink.toggleGuide(DraftingKind.COMPASS)
-            ink.drawCompassCircle()
-        })
-        tools.addView(chip("Mathe") { onMath() })
-        tools.addView(chip("Text → Handschrift") { onTextHand() })
-        val textChip = chip(if (ink.placingText) "Auf Seite platzieren" else "Textfeld") {}
-        val mark = chip(if (ink.placingHighlight) "Markieren ●" else "Markieren") {}
-        ink.onWorksheetTool = { text, highlight ->
-            textChip.text = if (text) "Auf Seite platzieren" else "Textfeld"
-            mark.text = if (highlight) "Markieren ●" else "Markieren"
-            val hint = ch.fasrv.fanotes.desk.worksheetPlaceHint(text, highlight)
-            if (hint == null) ink.onDismissInkNotice() else ink.onInkNotice(ch.fasrv.fanotes.ink.InkNotice("info", hint))
-        }
-        textChip.setOnClickListener { ink.armWorksheetText(!ink.placingText) }
-        mark.setOnClickListener { ink.armWorksheetHighlight(!ink.placingHighlight) }
-        tools.addView(textChip)
-        tools.addView(mark)
-        tools.addView(chip("+", description = "Hineinzoomen") { ink.zoomByStep(1) })
-        tools.addView(chip("−", description = "Herauszoomen") { ink.zoomByStep(-1) })
-        tools.addView(chip("↺", description = "Blatt gegen den Uhrzeigersinn drehen") { ink.rotateBy(-1) })
-        tools.addView(chip("↻", description = "Blatt im Uhrzeigersinn drehen") { ink.rotateBy(1) })
-        tools.addView(chip("Ansicht", description = "Ansicht zurücksetzen") { ink.resetView() })
-        tools.addView(chip("Kopieren") { onDuplicate() })
-        tools.addView(chip("Leeren") { onClear() })
-        tools.addView(chip("Einklappen") { setChromeOpen(false) })
-        tools.addView(syncPill)
     }
 
     private fun segment(tool: InkTool): LinearLayout {
@@ -1754,7 +1708,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
 
     private fun seg(label: String, selected: Boolean, click: () -> Unit): TextView {
         val view = TextView(context)
-        view.text = label
+        view.text = ch.fasrv.fanotes.desk.ChromeText.ui(label)
         view.textSize = 12f
         view.gravity = Gravity.CENTER
         view.setPadding(dp(10), 0, dp(10), 0)
@@ -1787,8 +1741,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
 
     private fun chip(label: String, enabled: Boolean = true, description: String = label, click: () -> Unit): TextView {
         val view = TextView(context)
-        view.text = label
-        view.contentDescription = description
+        view.text = ch.fasrv.fanotes.desk.ChromeText.ui(label)
+        view.contentDescription = ch.fasrv.fanotes.desk.ChromeText.ui(description)
         view.textSize = 12f
         view.gravity = Gravity.CENTER
         view.setPadding(dp(10), 0, dp(10), 0)
@@ -1820,17 +1774,44 @@ class NotePageView(context: Context) : FrameLayout(context) {
 
     private fun widthProgress(value: Float) = (((value - 1.2f) / (14f - 1.2f)) * 100f).toInt().coerceIn(0, 100)
 
+    fun handleToolbarAction(action: String): Boolean {
+        when (action) {
+            "zoom-in" -> ink.zoomByStep(1)
+            "zoom-out" -> ink.zoomByStep(-1)
+            "rotate-left" -> ink.rotateBy(-1)
+            "rotate-right" -> ink.rotateBy(1)
+            "reset-view" -> ink.resetView()
+            "math" -> onMath()
+            "text-hand" -> onTextHand()
+            "text-field" -> ink.armWorksheetText(!ink.placingText)
+            "highlight" -> ink.armWorksheetHighlight(!ink.placingHighlight)
+            "finger" -> onFinger(!builtFinger)
+            "clear" -> onClear()
+            "duplicate" -> onDuplicate()
+            "collapse" -> setChromeOpen(false)
+            "notes" -> onToggleRail()
+            else -> return false
+        }
+        return true
+    }
+
     private fun widthSlider(value: Float): SeekBar {
-        val slider = SeekBar(context)
+        val slider = StylusSeekBar(context)
         slider.max = 100
         slider.progress = widthProgress(value)
-        slider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+        val listener = object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) onWidth(1.2f + (14f - 1.2f) * progress / 100f)
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) { widthFromUser = true }
             override fun onStopTrackingTouch(seekBar: SeekBar?) { widthFromUser = false }
-        })
+        }
+        slider.setOnSeekBarChangeListener(listener)
+        slider.onStylus = { progress ->
+            widthFromUser = true
+            listener.onProgressChanged(slider, progress, true)
+            widthFromUser = false
+        }
         widthBar = slider
         val params = LinearLayout.LayoutParams(dp(120), dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_DP))
         params.marginStart = dp(6)
@@ -1839,6 +1820,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     }
 
     private fun applyChromeColors() {
+        ink.applyDeskChrome(themeId, systemDark)
         val bg = ch.fasrv.fanotes.desk.editorToolbarColor(themeId, systemDark)
         toolbarRule.setBackgroundColor(ch.fasrv.fanotes.desk.editorToolbarRule(dark))
         val fg = if (dark) 0xFFEDEDEC.toInt() else 0xFF252630.toInt()
@@ -1860,7 +1842,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
 
     fun setWorkspace(kind: String) {
         val next = ch.fasrv.fanotes.desk.workspaceBackground(kind)
-        setBackgroundColor(if (next == "clean") 0xFFE8E6E1.toInt() else android.graphics.Color.TRANSPARENT)
+        val chrome = ch.fasrv.fanotes.desk.windowChrome(themeId, systemDark)
+        setBackgroundColor(if (next == "clean") android.graphics.Color.parseColor(chrome.window) else android.graphics.Color.TRANSPARENT)
         ink.applyWorkspaceKind(next)
     }
 
@@ -2218,3 +2201,48 @@ class NotePageView(context: Context) : FrameLayout(context) {
 }
 
 private fun android.text.Editable?.orEmpty() = this?.toString().orEmpty()
+
+private class EditorToolbarScroll(context: Context) : HorizontalScrollView(context) {
+    override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
+        if (event.pointerCount > 1) return false
+        for (index in 0 until event.pointerCount) {
+            val tool = event.getToolType(index)
+            if (tool == MotionEvent.TOOL_TYPE_STYLUS || tool == MotionEvent.TOOL_TYPE_ERASER) return false
+        }
+        return super.onInterceptTouchEvent(event)
+    }
+}
+
+private class StylusSeekBar(context: Context) : SeekBar(context) {
+    var onStylus: ((Int) -> Unit)? = null
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        parent?.requestDisallowInterceptTouchEvent(true)
+        val stylus = (0 until event.pointerCount).firstOrNull { index ->
+            val tool = event.getToolType(index)
+            tool == MotionEvent.TOOL_TYPE_STYLUS || tool == MotionEvent.TOOL_TYPE_ERASER
+        }
+        if (stylus != null) {
+            val span = (width - paddingLeft - paddingRight).coerceAtLeast(1)
+            val fraction = ((event.getX(stylus) - paddingLeft) / span).coerceIn(0f, 1f)
+            val fingerDown = (0 until event.pointerCount).any { index ->
+                event.getToolType(index) == MotionEvent.TOOL_TYPE_FINGER
+            }
+            val value = ch.fasrv.fanotes.desk.sliderValueFromPointers(
+                0f,
+                max.toFloat().coerceAtLeast(1f),
+                listOf(
+                    ch.fasrv.fanotes.desk.SliderPointer(0, ch.fasrv.fanotes.desk.PointerKind.FINGER, fingerDown, 0f),
+                    ch.fasrv.fanotes.desk.SliderPointer(1, ch.fasrv.fanotes.desk.PointerKind.STYLUS, true, fraction),
+                ),
+            )
+            if (value != null) {
+                val next = value.toInt().coerceIn(0, max)
+                progress = next
+                onStylus?.invoke(next)
+            }
+            return true
+        }
+        return super.onTouchEvent(event)
+    }
+}

@@ -229,6 +229,21 @@ fun paletteCommands(
         PaletteCommand("sync", "Jetzt synchronisieren", "FaNotes", keywords = "sync synchronisieren cloud server geräte"),
         PaletteCommand("sync-settings", "Sync einrichten", "FaNotes", "Konto erstellen oder anmelden", keywords = "sync konto anmelden cloud geräte"),
         PaletteCommand("bug-report", "Fehler melden", "FaNotes", "Kurz beschreiben; die letzten fünf Minuten werden angehängt", keywords = "bug report fehler logs support"),
+        PaletteCommand("import-pdf-note", "PDF importieren", "Dateien", "PDF wird selbst zur Notiz — mit Handschrift und Viewer", keywords = "pdf import notiz viewer"),
+        PaletteCommand("new-subfolder", "Unterordner anlegen", "Dateien", "Im Ordner der offenen Notiz", keywords = "unterordner ordner verschachteln fach"),
+        PaletteCommand("drawing", if (penOpen) "Zur Tastatur wechseln" else "Mit Stift schreiben", "Werkzeuge", "Eingabeart auf derselben Notizseite wechseln", "Ctrl D", "tablet stift erkennen"),
+        PaletteCommand("text-field", "Textfeld einfügen", "Werkzeuge", "Irgendwo auf der Seite mit der Tastatur schreiben", keywords = "textfeld text tastatur pdf schreiben"),
+        PaletteCommand("subject-book", if (bookOpen) "Buch ausblenden" else "Buch einblenden", "Werkzeuge", "PDF-Buch des Fachs neben der Notiz", keywords = "buch pdf fach"),
+        PaletteCommand("onenote-import", "Microsoft OneNote importieren", "Dateien", "Notizbuch, Abschnitte, Layout, Ink und Anlagen sicher übernehmen", keywords = "one onetoc2 onepkg onedrive migration"),
+        PaletteCommand("ai-assistant", "AI-Assistent", "Werkzeuge", "LM Studio, Ollama, OpenAI, Gemini, Anthropic oder OpenCode nutzen", "Ctrl ⇧ A", "ki ai rechtschreibung fakten"),
+        PaletteCommand("glyphenwerk", "GlyphenWerk öffnen", "Werkzeuge", "Handschrift trainieren, live testen, korrigieren und verwalten", "Ctrl ⇧ G", "training erkennung symbole test datensatz"),
+        PaletteCommand("flashcards", "Karteikarten", "Lernen", "Lernfragen dieser Notiz wiederholen", keywords = "flashcards karten spaced"),
+        PaletteCommand("homework", "Hausaufgaben & Termine", "Navigation", "To-dos, Hausaufgaben und Termine mit Fälligkeit", keywords = "todo hausaufgaben schule termin fällig aufgabe"),
+        PaletteCommand("duplicate-note", "Notiz duplizieren", "Dateien", "Text, Handschrift und Verlinkungen als neue Notiz", keywords = "duplizieren kopie copy duplicate klonen"),
+        PaletteCommand("export-latex", "Notiz als LaTeX-Code exportieren", "Dateien", "LaTeX-Code der Notiz", keywords = "latex tex export formel"),
+        PaletteCommand("split-orientation", if (splitRows) "Nebeneinander anordnen" else "Untereinander anordnen", "Ansicht", keywords = "split zeilen spalten anordnung"),
+        PaletteCommand("sync-now", "Jetzt synchronisieren", "FaNotes", keywords = "sync synchronisieren cloud server geräte"),
+        PaletteCommand("addon-store", "Add-on-Store", "FaNotes", "Add-ons aus GitHub entdecken, installieren und verwalten", keywords = "addon add-on plugin erweiterung store extension"),
     )
     val templates = NOTE_TEMPLATES.map { template ->
         PaletteCommand(
