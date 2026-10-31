@@ -182,6 +182,7 @@ const paintFlat = (
   originY: number,
   passIndex: number,
   options: InkPaintOptions | undefined,
+  curvePointCount?: number,
 ) => {
   layer.context.save()
   layer.context.setTransform(1, 0, 0, 1, originX, originY)
@@ -195,7 +196,7 @@ const paintFlat = (
     sourceWidth,
     layoutWidth,
     endSegment,
-    { ...options, flatPass: passIndex },
+    { ...options, flatPass: passIndex, curvePointCount },
   )
   layer.context.restore()
 }
@@ -289,10 +290,15 @@ export const paintGrowingTranslucentStroke = (input: LiveTranslucentPaintInput) 
   } else if (permanentEnd > session.permanentEnd && count > 1) {
     const start = Math.max(1, session.permanentEnd)
     if (permanentEnd > start) {
+      // One path with the previous segment, so the new corner is a round
+      // join. A segment baked alone is two butt caps and leaves the wedge.
+      const whole = start <= 1 && permanentEnd >= count
+      const joinedStart = whole ? start : Math.max(1, start - 1)
+      const curvePointCount = whole ? undefined : count
       session.layers.forEach(({ layer }, index) => {
-        paintFlat(layer, input.stroke, input.pageWidth, input.pageHeight, input.smoothing, input.sourceWidth, input.layoutWidth, start, permanentEnd, input.originX, input.originY, index, input.options)
+        paintFlat(layer, input.stroke, input.pageWidth, input.pageHeight, input.smoothing, input.sourceWidth, input.layoutWidth, joinedStart, permanentEnd, input.originX, input.originY, index, input.options, curvePointCount)
       })
-      baked = box(input.stroke.points, start - 1, permanentEnd - 1)
+      baked = box(input.stroke.points, joinedStart - 1, Math.max(joinedStart - 1, permanentEnd - 1))
     }
     session.permanentEnd = Math.max(session.permanentEnd, permanentEnd)
   }

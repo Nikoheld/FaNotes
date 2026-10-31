@@ -136,9 +136,75 @@ const assertSettled = (name, build, points) => {
   return grown
 }
 
+// A constant-width highlighter used to bake each new segment as its own
+// butt-capped path. At a 90° turn that disk sits off the centerline, outside
+// the fillet one full path paints. These samples are that outside wedge.
+const assertHighlighterCorner = () => {
+  const cornerWidth = 400
+  const cornerHeight = 400
+  const leg = 16
+  const cornerPoints = []
+  for (let index = 0; index <= leg; index += 1) {
+    cornerPoints.push({ x: (40 + index * 10) / cornerWidth, y: 180 / cornerHeight, pressure: 0.6 })
+  }
+  for (let index = 1; index <= leg; index += 1) {
+    cornerPoints.push({ x: (40 + leg * 10) / cornerWidth, y: (180 + index * 10) / cornerHeight, pressure: 0.6 })
+  }
+  const build = (pts) => highlighter(pts)
+  const args = (stroke) => ({
+    stroke,
+    pageWidth: cornerWidth,
+    pageHeight: cornerHeight,
+    smoothing,
+    sourceWidth: cornerWidth,
+    layoutWidth: cornerWidth,
+    originX: 0,
+    originY: 0,
+  })
+  const target = createInkReadbackContext(cornerWidth, cornerHeight)
+  let session = null
+  let segmentPaints = 0
+  for (let count = 1; count <= cornerPoints.length; count += 1) {
+    const painted = paintGrowingTranslucentStroke({
+      ...args(build(cornerPoints.slice(0, count))),
+      session,
+      target,
+      replace: count === 1,
+      settle: count === cornerPoints.length,
+    })
+    session = painted.session
+    segmentPaints = painted.segmentPaints
+  }
+  const referenceTarget = createInkReadbackContext(cornerWidth, cornerHeight)
+  compositeTranslucentStrokeOnce({ ...args(build(cornerPoints)), target: referenceTarget })
+  const grownImage = target.getImageData()
+  const referenceImage = referenceTarget.getImageData()
+  const cx = cornerPoints[leg].x * cornerWidth
+  const cy = cornerPoints[leg].y * cornerHeight
+  const outside = [[8, -8], [6, -8], [8, -6], [10, -4], [4, -10]]
+  for (const [dx, dy] of outside) {
+    const x = cx + dx
+    const y = cy + dy
+    assert.ok(Math.hypot(dx, dy) > 4, 'corner sample must leave the centerline')
+    const left = pixel(grownImage, x, y)
+    const right = pixel(referenceImage, x, y)
+    const gap = channelGap(left, right)
+    assert.ok(gap <= 3, `highlighter corner off-center ${x.toFixed(1)},${y.toFixed(1)} gap ${gap} grown ${left} once ${right}`)
+  }
+  const legX = cornerPoints[8].x * cornerWidth
+  const legY = cornerPoints[8].y * cornerHeight - 6
+  const legGrown = pixel(grownImage, legX, legY)
+  const legOnce = pixel(referenceImage, legX, legY)
+  assert.ok(channelGap(legGrown, legOnce) <= 3, `highlighter leg off-center gap grown ${legGrown} once ${legOnce}`)
+  assert.ok(legOnce[3] >= 80, `highlighter leg sample missed the stroke alpha ${legOnce[3]}`)
+  assert.ok(segmentPaints <= 4 * cornerPoints.length, `highlighter corner segment paints ${segmentPaints}`)
+  return segmentPaints
+}
+
 try {
   const markerGrown = assertSettled('marker', marker, markerPoints)
   const highlighterGrown = assertSettled('highlighter', highlighter, highlighterPoints)
+  assertHighlighterCorner()
   const line = `points>=${markerGrown.points} segmentPaints<=${markerGrown.segmentPaints} settled=match`
   assert.match(line, /^points>=(\d+) segmentPaints<=(\d+) settled=match$/u)
   const paints = Number(line.match(/segmentPaints<=(\d+)/u)[1])
