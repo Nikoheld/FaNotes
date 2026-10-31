@@ -441,15 +441,19 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     window.addEventListener('pointercancel', releasePointer, { passive: true, capture: true })
     window.addEventListener('touchstart', markInteraction, { passive: true, capture: true })
     window.addEventListener('keydown', markKeyInteraction, true)
-    const applyOpenCamera = () => {
+    const applyOpenCamera = (force = false) => {
       const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
       const paper = scroller.querySelector<HTMLElement>('.unified-paper')
       const room = Number.parseFloat(plane?.style.getPropertyValue('--paper-scroll-room') || '') || SCROLL_ROOM
       const pageWidth = paper?.offsetWidth || Math.max(0, (plane?.offsetWidth || 0) - room * 2)
       const pageHeight = paper?.offsetHeight || Math.max(0, (plane?.offsetHeight || 0) - room * 2)
+      // The scroller element is reused. The previous note's offset is not
+      // this note's camera, and a non-zero scroll makes the helper refuse —
+      // a shorter note stayed clamped to the bottom. The retry still reads
+      // the live offset so a scroll in that frame is kept.
       const camera = pdfOpenCameraFromScroller({
-        scrollLeft: scroller.scrollLeft,
-        scrollTop: scroller.scrollTop,
+        scrollLeft: force ? 0 : scroller.scrollLeft,
+        scrollTop: force ? 0 : scroller.scrollTop,
         scrollWidth: scroller.scrollWidth,
         scrollHeight: scroller.scrollHeight,
         clientWidth: scroller.clientWidth,
@@ -529,20 +533,12 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
         finishRestore()
       }
       restoreTimer = window.setTimeout(considerRestored, PAPER_VIEW_RESTORE_SETTLE_MS)
-    } else {
-      // The scroller element is reused. The previous note's offset is not
-      // this note's camera; a non-zero scroll makes the open camera refuse,
-      // and a shorter note stayed clamped to the bottom.
-      if (scroller.scrollLeft !== 0 || scroller.scrollTop !== 0) {
-        scrollTo({ scrollLeft: 0, scrollTop: 0 })
-      }
-      if (!applyOpenCamera()) {
-        openCameraId = window.requestAnimationFrame(() => {
-          openCameraId = 0
-          applyOpenCamera()
-          clampScroll()
-        })
-      }
+    } else if (!applyOpenCamera(true)) {
+      openCameraId = window.requestAnimationFrame(() => {
+        openCameraId = 0
+        if (!userInteracted) applyOpenCamera(true)
+        clampScroll()
+      })
     }
     clampScroll()
     let lastColumn = { width: scroller.clientWidth, height: scroller.clientHeight }
