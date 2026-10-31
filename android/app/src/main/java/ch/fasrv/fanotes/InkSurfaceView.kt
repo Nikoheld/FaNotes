@@ -198,6 +198,19 @@ class InkSurfaceView @JvmOverloads constructor(
     var placingHighlight = false
     var placingText = false
 
+    var placingNoteText = false
+    var noteTextFields: List<ch.fasrv.fanotes.desk.NoteTextField> = emptyList()
+    var activeNoteTextFieldId: String? = null
+    var onPlaceTextField: (ch.fasrv.fanotes.desk.NoteTextField) -> Unit = {}
+    var onTextFieldMessage: (String) -> Unit = {}
+    var onEditTextField: (String) -> Unit = {}
+
+    /** Note text-field placement. This is not the worksheet text-box tool. */
+    fun armNoteText(enabled: Boolean) {
+        placingNoteText = enabled
+        invalidate()
+    }
+
     fun armWorksheetText(enabled: Boolean) {
         placingText = enabled
         if (enabled) placingHighlight = false
@@ -506,6 +519,57 @@ class InkSurfaceView @JvmOverloads constructor(
             pageBottom = pageTop + pageHeight,
             desktopMinPx = ch.fasrv.fanotes.desk.BOX_FIELD_MIN_DP * density,
         )
+    }
+
+    /** Screen rect of a note text field. Null until the sheet has a size. */
+    fun noteTextFieldScreenRect(id: String, liveText: String? = null): ch.fasrv.fanotes.desk.WorksheetFieldRect? {
+        if (width <= 0 || height <= 0) return null
+        val field = noteTextFields.firstOrNull { it.id == id } ?: return null
+        val scale = pixelsPerPageUnit()
+        val sheetWidth = sessionWidth()
+        val sheetHeight = sessionHeight()
+        val origin = ch.fasrv.fanotes.desk.noteTextFieldOrigin(field, pageFrames, sheetWidth, sheetHeight)
+        val (sx, sy) = normToScreen(origin.first, origin.second)
+        val span = ch.fasrv.fanotes.desk.noteTextFieldWidthFraction(field, pageFrames, sheetWidth)
+        val density = resources.displayMetrics.density
+        val boxWidth = max(96f * density, (span * sheetWidth * scale).toFloat())
+        val fontSize = (field.fontSize * scale).toFloat().coerceAtLeast(12f)
+        val shown = liveText ?: field.text
+        val chars = ch.fasrv.fanotes.desk.worksheetCharsPerLine(boxWidth, fontSize, scale)
+        val lines = ch.fasrv.fanotes.desk.wrapBoxLines(shown.ifEmpty { " " }, chars)
+        val canvasHeight = max(38f * density, lines.size * fontSize * 1.35f + 12f * density)
+        val pageWidth = (sheetWidth * scale).toFloat()
+        val pageHeight = (sheetHeight * scale).toFloat()
+        return ch.fasrv.fanotes.desk.worksheetFieldFrame(
+            anchorX = sx,
+            anchorY = sy,
+            widthPx = boxWidth,
+            canvasHeightPx = canvasHeight,
+            pageLeft = pageLeft,
+            pageTop = pageTop,
+            pageRight = pageLeft + pageWidth,
+            pageBottom = pageTop + pageHeight,
+            desktopMinPx = 38f * density,
+        )
+    }
+
+    private fun noteTextFieldHit(x: Double, y: Double): ch.fasrv.fanotes.desk.NoteTextField? {
+        val sheetWidth = sessionWidth()
+        val sheetHeight = sessionHeight()
+        if (sheetWidth <= 0.0 || sheetHeight <= 0.0) return null
+        val scale = pixelsPerPageUnit().toDouble().coerceAtLeast(0.0001)
+        val density = resources.displayMetrics.density.toDouble()
+        return noteTextFields.asReversed().firstOrNull { field ->
+            val origin = ch.fasrv.fanotes.desk.noteTextFieldOrigin(field, pageFrames, sheetWidth, sheetHeight)
+            val span = ch.fasrv.fanotes.desk.noteTextFieldWidthFraction(field, pageFrames, sheetWidth)
+            val boxWidthPx = max(96.0 * density, span * sheetWidth * scale)
+            val fontPx = field.fontSize * scale
+            val lines = if (field.text.isEmpty()) 1 else field.text.count { it == '\n' } + 1
+            val boxHeightPx = max(38.0 * density, lines * fontPx * 1.35 + 12.0 * density)
+            val normW = boxWidthPx / (sheetWidth * scale)
+            val normH = boxHeightPx / (sheetHeight * scale)
+            x >= origin.first && x <= origin.first + normW && y >= origin.second && y <= origin.second + normH
+        }
     }
 
     fun revealY(y: Double) {
@@ -904,6 +968,28 @@ class InkSurfaceView @JvmOverloads constructor(
             }
             worksheetBoxes.firstOrNull { anchored -> hitWorksheetBox(anchored, x, y) } != null && !eraser -> {
                 onEditBox(worksheetBoxes.first { anchored -> hitWorksheetBox(anchored, x, y) }.box.id)
+                onPenActive(false)
+                inkPointer = MotionEvent.INVALID_POINTER_ID
+            }
+            noteTextFieldHit(x, y) != null && !eraser -> {
+                noteTextFieldHit(x, y)?.let { field -> onEditTextField(field.id) }
+                onPenActive(false)
+                inkPointer = MotionEvent.INVALID_POINTER_ID
+            }
+            placingNoteText && !eraser -> {
+                val result = ch.fasrv.fanotes.desk.commitArmedTextFieldTap(
+                    armed = true,
+                    x = x,
+                    y = y,
+                    frames = pageFrames,
+                    sourceWidth = sessionWidth(),
+                    sourceHeight = sessionHeight(),
+                    existing = noteTextFields,
+                )
+                val placed = result.placed
+                val limit = result.message
+                if (placed != null) onPlaceTextField(placed)
+                else if (!limit.isNullOrEmpty()) onTextFieldMessage(limit)
                 onPenActive(false)
                 inkPointer = MotionEvent.INVALID_POINTER_ID
             }
@@ -1372,6 +1458,38 @@ class InkSurfaceView @JvmOverloads constructor(
             textPaint.color = accentColor
             textPaint.textSize = 14f * resources.displayMetrics.density
             canvas.drawText(ch.fasrv.fanotes.ink.SECTION_GUIDE_LABEL, pageLeft + 12f, guide - 6f, textPaint)
+            textPaint.color = Color.parseColor("#252630")
+        }
+        noteTextFields.forEach { field ->
+            if (field.id == activeNoteTextFieldId) return@forEach
+            val sheetWidth = sessionWidth()
+            val sheetHeight = sessionHeight()
+            val origin = ch.fasrv.fanotes.desk.noteTextFieldOrigin(field, pageFrames, sheetWidth, sheetHeight)
+            val (sx, sy) = normToScreen(origin.first, origin.second)
+            val span = ch.fasrv.fanotes.desk.noteTextFieldWidthFraction(field, pageFrames, sheetWidth)
+            val density = resources.displayMetrics.density
+            val boxWidth = max(96f * density, (span * sheetWidth * scale).toFloat())
+            val fontSize = (field.fontSize * scale).toFloat().coerceAtLeast(12f)
+            val chars = ch.fasrv.fanotes.desk.worksheetCharsPerLine(boxWidth, fontSize, scale)
+            val shown = field.text.ifEmpty { ch.fasrv.fanotes.desk.ChromeText.ui("Text eingeben …") }
+            val lines = ch.fasrv.fanotes.desk.wrapBoxLines(shown, chars)
+            val lineHeight = fontSize * 1.35f
+            val boxHeight = max(38f * density, lines.size * lineHeight + 12f * scale)
+            cardFill.color = Color.argb(224, 255, 255, 255)
+            canvas.drawRoundRect(sx, sy, sx + boxWidth, sy + boxHeight, 6f * density, 6f * density, cardFill)
+            val edgeAlpha = cardEdge.alpha
+            cardEdge.alpha = 120
+            cardEdge.strokeWidth = max(1f, density)
+            canvas.drawRoundRect(sx, sy, sx + boxWidth, sy + boxHeight, 6f * density, 6f * density, cardEdge)
+            cardEdge.alpha = edgeAlpha
+            cardFill.color = Color.WHITE
+            textPaint.color = if (field.text.isEmpty()) Color.parseColor("#747887") else Color.parseColor("#20222B")
+            textPaint.textSize = fontSize
+            var baseline = sy + 6f * scale + fontSize
+            for (line in lines) {
+                canvas.drawText(line, sx + 8f * scale, baseline, textPaint)
+                baseline += lineHeight
+            }
             textPaint.color = Color.parseColor("#252630")
         }
         linkMarks.forEach { link ->
