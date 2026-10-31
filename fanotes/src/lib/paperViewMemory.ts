@@ -301,6 +301,21 @@ export const paperScrollerCanReach = (
 }
 
 /**
+ * A wheel, scrollbar, or finger pan takes the camera immediately, even when
+ * the saved spot does not fit yet. The browser clamps that spot to the bottom
+ * of a short sheet and the next scroll was undone until a pen stroke grew the
+ * page enough to land. The clamp is not the camera the user left, so it is
+ * not saved.
+ */
+export const paperGestureTakesCamera = (input: {
+  fromGesture: boolean
+  spotReachable: boolean
+}): { stopRestore: boolean; saveCamera: boolean } => ({
+  stopRestore: input.fromGesture,
+  saveCamera: input.fromGesture && input.spotReachable,
+})
+
+/**
  * Keep restoring past the short settle window when the page was too short to
  * reach the saved spot (content still loading). Stops once the spot is on
  * screen, the user takes the camera, or the cap is reached.

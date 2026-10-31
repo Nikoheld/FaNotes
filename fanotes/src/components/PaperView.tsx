@@ -51,6 +51,7 @@ import {
   loadPaperViewMemory,
   paperCameraLanded,
   paperCentreFromCamera,
+  paperGestureTakesCamera,
   paperScrollerCanReach,
   paperViewFromMemory,
   paperViewMemoryKey,
@@ -186,12 +187,12 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
   // Layout effects: a note opened after an async read would otherwise paint
   // one frame at 100% / scroll 0 before the remembered camera lands.
   useLayoutEffect(() => {
-    // The plane element survives a note switch. An in-flight pinch must not
-    // commit its CSS zoom onto the note that just opened.
-    cancelZoomGestureRef.current()
     // Only when the note identity changes. Toggling the HUD (pen vs keyboard)
     // must keep the same sheet zoom so ruling, ink and text stay one. A note
     // that was open before comes back at its remembered zoom.
+    // The plane element survives a note switch. An in-flight pinch must not
+    // commit its CSS zoom onto the note that just opened.
+    cancelZoomGestureRef.current()
     const remembered = recallPaperView(loadPaperViewMemory(), paperViewMemoryKey(viewKey))
     setRecalled(remembered !== null)
     storeRef.current.write(paperViewFromMemory(remembered))
@@ -377,9 +378,15 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       // Scrollbar and touch pan: the button is still down on a later frame.
       // The scroll on the pointerdown turn itself is focus or layout, unless
       // it came from the scrollbar (armed in markInteraction).
-      // A short page cannot show the saved spot yet. A wheel there would
-      // record the top and erase the camera the user left.
-      if (fromGesture && rememberedSpotReachable()) claimUserCamera()
+      // A short page cannot show the saved spot yet. Scrolling still has to
+      // stick — the clamp is the bottom, and putting it back trapped the
+      // sheet there until a pen stroke grew the page. Do not store that clamp.
+      const taken = paperGestureTakesCamera({
+        fromGesture,
+        spotReachable: rememberedSpotReachable(),
+      })
+      if (taken.stopRestore) userInteracted = true
+      if (taken.saveCamera) claimUserCamera()
       if (restoring && !userInteracted) {
         // Layout is still settling: the camera is not the user's yet, so it
         // must not overwrite the remembered one. Another scroller (browser
@@ -522,12 +529,20 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
         finishRestore()
       }
       restoreTimer = window.setTimeout(considerRestored, PAPER_VIEW_RESTORE_SETTLE_MS)
-    } else if (!applyOpenCamera()) {
-      openCameraId = window.requestAnimationFrame(() => {
-        openCameraId = 0
-        applyOpenCamera()
-        clampScroll()
-      })
+    } else {
+      // The scroller element is reused. The previous note's offset is not
+      // this note's camera; a non-zero scroll makes the open camera refuse,
+      // and a shorter note stayed clamped to the bottom.
+      if (scroller.scrollLeft !== 0 || scroller.scrollTop !== 0) {
+        scrollTo({ scrollLeft: 0, scrollTop: 0 })
+      }
+      if (!applyOpenCamera()) {
+        openCameraId = window.requestAnimationFrame(() => {
+          openCameraId = 0
+          applyOpenCamera()
+          clampScroll()
+        })
+      }
     }
     clampScroll()
     let lastColumn = { width: scroller.clientWidth, height: scroller.clientHeight }

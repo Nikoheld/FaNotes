@@ -27,6 +27,7 @@ const {
   loadPaperViewMemory,
   paperCameraLanded,
   paperCentreFromCamera,
+  paperGestureTakesCamera,
   paperScrollerCanReach,
   registerPaperViewMemoryFlush,
   paperViewFromMemory,
@@ -185,6 +186,23 @@ assert.equal(paperScrollerCanReach(
   { scrollWidth: 100, scrollHeight: 100, clientWidth: 100, clientHeight: 100 },
   null,
 ), true)
+// A scroll on a sheet that cannot show the saved spot must stick, and must
+// not replace that spot with the clamped bottom.
+assert.deepEqual(
+  paperGestureTakesCamera({ fromGesture: true, spotReachable: false }),
+  { stopRestore: true, saveCamera: false },
+  'a wheel on a short page stops the snap back and does not save the clamp',
+)
+assert.deepEqual(
+  paperGestureTakesCamera({ fromGesture: true, spotReachable: true }),
+  { stopRestore: true, saveCamera: true },
+  'a wheel once the spot fits still becomes the saved camera',
+)
+assert.deepEqual(
+  paperGestureTakesCamera({ fromGesture: false, spotReachable: false }),
+  { stopRestore: false, saveCamera: false },
+  'layout scroll keeps restoring',
+)
 assert.equal(shouldExtendPaperViewRestore({ startedAt: 0, now: 3000, userInteracted: false, landed: false }), true, 'content still loading after the short settle')
 assert.equal(shouldExtendPaperViewRestore({ startedAt: 0, now: 3000, userInteracted: false, landed: true }), false, 'landed camera does not keep fighting')
 assert.equal(shouldExtendPaperViewRestore({ startedAt: 0, now: 3000, userInteracted: true, landed: false }), false)
@@ -211,6 +229,10 @@ assert.match(paperView, /persist\(latestEntry\)/u, 'camera saved when leaving th
 assert.match(paperView, /shouldExtendPaperViewRestore\(\{/u, 'restore waits while the page is still too short')
 assert.match(paperView, /if \(gaveUp && !userOwned\) return/u, 'a failed restore does not overwrite the saved camera')
 assert.match(paperView, /paperScrollerCanReach\(scroller, lastProgrammatic\)/u, 'a gesture on a short page does not replace the saved camera')
+assert.match(paperView, /paperGestureTakesCamera\(\{/u, 'a scroll stops restore without saving an unreachable camera')
+assert.match(paperView, /if \(taken\.stopRestore\) userInteracted = true/u, 'the snap-back loop sees the scroll as the user')
+assert.match(paperView, /if \(taken\.saveCamera\) claimUserCamera\(\)/u, 'only a reachable spot is stored')
+assert.match(paperView, /scrollTo\(\{ scrollLeft: 0, scrollTop: 0 \}\)/u, 'a new note drops the previous note\'s scroll before the open camera')
 assert.match(paperView, /if \(!fromGesture \|\| !userOwned\) return/u, 'a layout scroll after a pan does not become the saved camera')
 assert.match(paperView, /registerPaperViewMemoryFlush\(saveNow\)/u, 'quit saves the camera while the sheet is still laid out')
 const app = readFileSync(join(here, '../src/App.tsx'), 'utf8')
