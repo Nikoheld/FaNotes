@@ -1,5 +1,14 @@
 # Änderungsverlauf
 
+## 2026.10.13-beta.6
+
+- Write new notes in a compact famd encoding.
+- Stop a highlighter tip from curving into the dropped pen-up stub.
+- Fillet a highlighter corner when the next sample arrives.
+- Append a see-through stroke instead of repainting it on every sample.
+- Keep note text that contains a comment closer.
+- Let Grok spend a Grok Build subscription.
+
 ## 2026.10.13-beta.5
 
 - Add Grok as a cloud AI provider.
