@@ -118,6 +118,11 @@ try {
   }
   assert.equal(tree.includes('Alle Ordner einklappen'), true)
   assert.equal(tree.includes('nextExpandedFolders'), true)
+  assert.equal(tree.includes('[activePath, expanded]'), false, 'Ordner aufklappen darf die Liste nicht zur aktiven Notiz ziehen')
+  assert.equal(tree.includes('holdTreeScroll'), true)
+  const css = readFileSync(join(root, 'src/styles.css'), 'utf8')
+  assert.equal(css.includes('.file-tree__item:not(:has(.file-tree__group))'), false, 'content-visibility auf Baumzeilen setzt die Seitenleiste nach oben')
+  assert.match(css, /\.file-tree-wrap \{[^}]*overflow-anchor:\s*none/u)
   console.log('note-qol ok')
 } finally {
   await server.close()

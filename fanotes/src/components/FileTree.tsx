@@ -112,6 +112,16 @@ function parentFolders(relativePath: string) {
   return parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join('/'))
 }
 
+/** Scroll the sidebar list only. Element.scrollIntoView also moves outer scrollers. */
+function revealTreeRow(row: HTMLElement | null | undefined) {
+  const scroller = row?.closest<HTMLElement>('.file-tree-wrap')
+  if (!row || !scroller) return
+  const rowBox = row.getBoundingClientRect()
+  const frame = scroller.getBoundingClientRect()
+  if (rowBox.top < frame.top) scroller.scrollTop += rowBox.top - frame.top
+  else if (rowBox.bottom > frame.bottom) scroller.scrollTop += rowBox.bottom - frame.bottom
+}
+
 function displayName(entry: VaultEntry) {
   return entry.kind === 'file' && /\.(md|markdown|famd|pdf)$/i.test(entry.name)
     ? entry.name.replace(/\.(md|markdown|famd|pdf)$/i, '')
@@ -225,6 +235,7 @@ export const FileTree = memo(function FileTree({
   const [moveBusy, setMoveBusy] = useState(false)
   const renameInputRef = useRef<HTMLInputElement>(null)
   const treeRef = useRef<HTMLElement>(null)
+  const treeScrollTop = useRef<number | null>(null)
   const dragSourceRef = useRef<{ path: string; kind: VaultEntry['kind'] } | null>(null)
   const orderedEntries = useMemo(() => sortedEntries(entries), [entries])
   const folderList = useMemo(() => folderPathsIn(entries), [entries])
@@ -240,24 +251,22 @@ export const FileTree = memo(function FileTree({
   }, [expansionStorageKey])
   useEffect(() => { writeExpandedFolders(expansionStorageKey, expanded) }, [expanded, expansionStorageKey])
 
+  // Reveal the active note when it was opened elsewhere. Folder toggles must not move the list.
   useEffect(() => {
     if (!activePath) return
     setExpanded((current) => {
+      const parents = parentFolders(activePath)
+      if (parents.every((path) => current.has(path))) return current
       const next = new Set(current)
-      parentFolders(activePath).forEach((path) => next.add(path))
+      parents.forEach((path) => next.add(path))
       return next
     })
-  }, [activePath])
-
-  // Keep the active note's row in view when it was activated elsewhere (tabs, history, switcher).
-  useEffect(() => {
-    if (!activePath) return
     const frame = window.requestAnimationFrame(() => {
       const row = treeRef.current?.querySelector<HTMLElement>(`.file-tree__item.is-active > .file-tree__row`)
-      row?.scrollIntoView({ block: 'nearest' })
+      revealTreeRow(row)
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [activePath, expanded])
+  }, [activePath])
 
   useEffect(() => {
     if (!revealPath) return
@@ -295,13 +304,35 @@ export const FileTree = memo(function FileTree({
     input.setSelectionRange(0, extensionIndex > 0 ? extensionIndex : renaming.value.length)
   }, [renaming?.entry.relativePath])
 
+  const rememberTreeScroll = (event: { button: number; currentTarget: EventTarget | null }) => {
+    if (event.button !== 0 || !(event.currentTarget instanceof Element)) return
+    const scroller = event.currentTarget.closest<HTMLElement>('.file-tree-wrap')
+    if (!scroller) return
+    // Record this before the browser focuses the row and pulls the list upward.
+    treeScrollTop.current = scroller.scrollTop
+    window.setTimeout(() => { treeScrollTop.current = null }, 0)
+  }
+
+  const holdTreeScroll = (apply: () => void) => {
+    const scroller = treeRef.current?.closest<HTMLElement>('.file-tree-wrap')
+    const top = treeScrollTop.current ?? scroller?.scrollTop ?? 0
+    treeScrollTop.current = null
+    apply()
+    if (!scroller) return
+    window.requestAnimationFrame(() => {
+      scroller.scrollTop = top
+    })
+  }
+
   const toggleFolder = (path: string, forceOpen?: boolean) => {
-    setExpanded((current) => {
-      const next = new Set(current)
-      const open = forceOpen ?? !next.has(path)
-      if (open) next.add(path)
-      else next.delete(path)
-      return next
+    holdTreeScroll(() => {
+      setExpanded((current) => {
+        const next = new Set(current)
+        const open = forceOpen ?? !next.has(path)
+        if (open) next.add(path)
+        else next.delete(path)
+        return next
+      })
     })
   }
 
@@ -448,8 +479,8 @@ export const FileTree = memo(function FileTree({
     const target = offset === Number.NEGATIVE_INFINITY ? rows[0]
       : offset === Number.POSITIVE_INFINITY ? rows[rows.length - 1]
         : rows[Math.min(rows.length - 1, Math.max(0, index + offset))]
-    target?.focus()
-    target?.scrollIntoView({ block: 'nearest' })
+    target?.focus({ preventScroll: true })
+    revealTreeRow(target)
   }
 
   const handleRowKey = (event: KeyboardEvent, entry: VaultEntry) => {
@@ -598,9 +629,12 @@ export const FileTree = memo(function FileTree({
                 className="file-tree__entry-button"
                 data-path={entry.relativePath}
                 draggable={!isRenaming && !moveBusy}
+                onMouseDown={(event) => { if (isFolder) rememberTreeScroll(event) }}
                 onClick={(event) => {
-                  if (isFolder) toggleFolder(entry.relativePath)
-                  else if (event.shiftKey && onOpenInSplit) void Promise.resolve(onOpenInSplit(entry.relativePath))
+                  if (isFolder) {
+                    toggleFolder(entry.relativePath)
+                    event.currentTarget.focus({ preventScroll: true })
+                  } else if (event.shiftKey && onOpenInSplit) void Promise.resolve(onOpenInSplit(entry.relativePath))
                   else void Promise.resolve(onOpen(entry.relativePath))
                 }}
                 onDragStart={(event) => beginDrag(entry, event)}
@@ -758,7 +792,11 @@ export const FileTree = memo(function FileTree({
             className="file-tree__fold-button"
             aria-label={foldLabel}
             title={foldLabel}
-            onClick={() => setExpanded(nextExpandedFolders(expanded, folderList))}
+            onMouseDown={rememberTreeScroll}
+            onClick={(event) => {
+              holdTreeScroll(() => setExpanded(nextExpandedFolders(expanded, folderList)))
+              event.currentTarget.focus({ preventScroll: true })
+            }}
           >
             {foldersOpen ? <ChevronsDownUp aria-hidden="true" size={14} /> : <ChevronsUpDown aria-hidden="true" size={14} />}
             <span>{foldLabel}</span>
