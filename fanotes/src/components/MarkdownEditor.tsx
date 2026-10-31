@@ -21,6 +21,7 @@ import {
   foldGutter,
   foldKeymap,
   foldable,
+  foldedRanges,
   unfoldEffect,
   indentOnInput,
   syntaxTree,
@@ -186,6 +187,9 @@ export type MarkdownEditorHandle = {
   flushChanges: () => void
   revealLine: (line: number) => boolean
   foldHeading: (line: number, collapsed: boolean) => boolean
+  /** Ranges CodeMirror currently hides. A canvas PDF restores these after the sections open. */
+  captureFolds: () => Array<{ from: number; to: number }>
+  restoreFolds: (ranges: readonly { from: number; to: number }[]) => void
   /** Programmatic access used by add-ons; every call goes through a normal editor transaction. */
   getText: () => string | null
   getSelection: () => { from: number; to: number; text: string; line: number } | null
@@ -1352,6 +1356,30 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       if (!range) return false
       view.dispatch({ effects: collapsed ? foldEffect.of(range) : unfoldEffect.of(range) })
       return true
+    },
+    captureFolds: () => {
+      const view = viewRef.current
+      if (!view) return []
+      const ranges: Array<{ from: number; to: number }> = []
+      foldedRanges(view.state).between(0, view.state.doc.length, (from, to) => {
+        ranges.push({ from, to })
+      })
+      return ranges
+    },
+    restoreFolds: (ranges) => {
+      const view = viewRef.current
+      if (!view) return
+      const effects = []
+      foldedRanges(view.state).between(0, view.state.doc.length, (from, to) => {
+        effects.push(unfoldEffect.of({ from, to }))
+      })
+      const length = view.state.doc.length
+      for (const range of ranges) {
+        if (range.from >= 0 && range.to <= length && range.from < range.to) {
+          effects.push(foldEffect.of({ from: range.from, to: range.to }))
+        }
+      }
+      if (effects.length) view.dispatch({ effects })
     },
     revealLine: (line) => {
       const view = viewRef.current

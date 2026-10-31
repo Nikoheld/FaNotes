@@ -58,6 +58,8 @@ import { PAPER_STYLES, drawPaperBackground } from '../lib/paperStyles'
 import { artStudioOpenForBrush, inkColorForBrush, usesPenStrip } from '../lib/inkOptionSurface'
 import { mountPenPointer } from '../lib/penPointer'
 import { clampPaperSquareMm } from '../lib/paperSquare'
+import { pdfFromRgbaPages, type CanvasPdfPage } from '../lib/canvasPdf'
+import { rasterizePaperLayers, scrollPaperTo, waitForPaperPaint } from '../lib/canvasSnapshot'
 import { strokeDurationMs, strokeLengthMm, summarizeInkStrokes, type InkStrokeActivity, type InkSummary } from '../lib/pageStats'
 import { TextToHandwritingDialog } from './TextToHandwritingDialog'
 import type {
@@ -766,6 +768,10 @@ export type DrawingBoardHandle = {
   refreshTraining: () => Promise<void>
   supportSnapshot?: () => { tool: string; inkMode: string }
   applySupportTool?: (tool: string) => void
+  /** Picture of the open sheet. Null when the page cannot be drawn. */
+  exportOpenCanvas: (pdfTitle?: string) => Promise<Uint8Array | null>
+  /** Paint the restored sheet once heading folds are back. */
+  finishCanvasExport: () => void
 }
 
 export type DrawingBoardProps = {
@@ -1566,6 +1572,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const revisionRef = useRef(0)
   const inkRevisionRef = useRef(0)
   const dirtyRef = useRef(false)
+  /** A canvas PDF is borrowing the live sheet. Saves and the dirty flag wait. */
+  const exportingCanvasRef = useRef(false)
+  /** The model is restored. Page grows wait until the folds are back and we paint. */
+  const restoringCanvasRef = useRef(false)
+  const exportGateRef = useRef<Promise<void>>(Promise.resolve())
+  const exportReleaseRef = useRef<() => void>(() => {})
+  const exportScrollRef = useRef<{ top: number; left: number } | null>(null)
+  const exportPlaneTransformRef = useRef<{ transform: string; origin: string } | null>(null)
   const saveLatestRef = useRef<() => Promise<void>>(async () => {})
   const searchTranscriptRef = useRef('')
   const transcriptUpdatedAtRef = useRef<string | null>(null)
@@ -1925,6 +1939,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [drawingId])
 
   const setDirty = useCallback((dirty: boolean) => {
+    if (exportingCanvasRef.current) return
     dirtyRef.current = dirty
     setIsDirty(dirty)
     // The host guards note switches and the window close with this flag. A
@@ -3211,6 +3226,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   // viewport minimum) the strokes are rescaled so every mark keeps its paper
   // pixel. Returns whether a rescale happened; the caller repaints.
   const catchUpPaintedLayout = useCallback(() => {
+    if (restoringCanvasRef.current) return false
     const paper = resolvePaperElement()
     if (!paper) return false
     const nextW = paper.offsetWidth
@@ -3435,6 +3451,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
    * cannot keep an independent scroll offset.
    */
   const setPageExtent = useCallback((targetHeight: number, targetWidth: number, padX = 0, padY = 0) => {
+    if (restoringCanvasRef.current) return false
     const prevH = sourceHeightRef.current
     const prevW = sourceWidthRef.current
     const haveX = sourceOriginXRef.current
@@ -3504,13 +3521,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       { width: prevPaintW, height: prevPaintH },
       { width: nextPaintW, height: nextPaintH, padX: addX, padY: addY },
     )
-    if (remappedLinks !== noteLinksRef.current) onNoteLinksExtentRef.current?.(remappedLinks)
+    if (remappedLinks !== noteLinksRef.current) {
+      noteLinksRef.current = remappedLinks
+      onNoteLinksExtentRef.current?.(remappedLinks)
+    }
     const remappedFields = noteTextFieldsAfterOriginGrow(
       textFieldsRef.current,
       { width: prevPaintW, height: prevPaintH },
       { width: nextPaintW, height: nextPaintH, padX: addX, padY: addY },
     )
-    if (remappedFields !== textFieldsRef.current) onTextFieldsExtentRef.current?.(remappedFields)
+    if (remappedFields !== textFieldsRef.current) {
+      textFieldsRef.current = remappedFields
+      onTextFieldsExtentRef.current?.(remappedFields)
+    }
     const afterBox = scroller
       ? {
         left: scroller.getBoundingClientRect().left,
@@ -6335,6 +6358,264 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return result
   }, [onSaveDrawing])
 
+  const waitForCanvasExport = useCallback(async () => {
+    while (exportingCanvasRef.current) {
+      const pending = exportGateRef.current
+      await pending
+      if (pending === exportGateRef.current && exportingCanvasRef.current) {
+        await new Promise<void>((resolve) => { window.setTimeout(resolve, 16) })
+      }
+    }
+  }, [])
+
+  const finishCanvasExport = useCallback(() => {
+    if (!exportingCanvasRef.current && !restoringCanvasRef.current) return
+    const paper = resolvePaperElement()
+    const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
+    const plane = paper?.closest('.paper-sheet-plane') as HTMLElement | null
+    const transform = exportPlaneTransformRef.current
+    if (plane && transform) {
+      if (transform.transform) plane.style.transform = transform.transform
+      else plane.style.removeProperty('transform')
+      if (transform.origin) plane.style.transformOrigin = transform.origin
+      else plane.style.removeProperty('transform-origin')
+    }
+    applyInkExtentStyles(sourceHeightRef.current, sourceWidthRef.current)
+    if (paper) void paper.offsetHeight
+    const scroll = exportScrollRef.current
+    if (scroller && scroll && scroller.isConnected) {
+      scroller.scrollTop = scroll.top
+      scroller.scrollLeft = scroll.left
+    }
+    restoringCanvasRef.current = false
+    exportingCanvasRef.current = false
+    exportReleaseRef.current()
+    if (!mountedRef.current) return
+    committedCanvasDirtyRef.current = true
+    canvasQualityKeyRef.current = ''
+    updateHistoryState()
+    redraw(true)
+    syncInkWindow(true)
+  }, [applyInkExtentStyles, redraw, resolvePaperElement, syncInkWindow, updateHistoryState])
+
+  /**
+   * The sheet as it looks on the page, with every section open. The live
+   * model is put back before this resolves. A save waits until
+   * `finishCanvasExport`, after the editor has restored heading folds.
+   */
+  const exportOpenCanvas = useCallback(async (pdfTitle?: string): Promise<Uint8Array | null> => {
+    if (exportingCanvasRef.current) return null
+    const paper = resolvePaperElement()
+    const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
+    if (!paper || !scroller) return null
+    const clone = <T,>(value: T): T => structuredClone(value)
+    const saved = (() => {
+      try {
+        return {
+          strokes: clone(strokesRef.current),
+          sections: clone(sectionsRef.current),
+          undo: clone(undoRef.current),
+          redo: clone(redoRef.current),
+          width: sourceWidthRef.current,
+          height: sourceHeightRef.current,
+          originX: sourceOriginXRef.current,
+          originY: sourceOriginYRef.current,
+          painted: { w: paintedLayoutRef.current.w, h: paintedLayoutRef.current.h },
+          pendingGrow: clone(pendingGrowRemapRef.current),
+          links: clone(noteLinksRef.current),
+          fields: clone(textFieldsRef.current),
+          indexed: indexedStrokeCountRef.current,
+          transcript: searchTranscriptRef.current,
+          transcriptAt: transcriptUpdatedAtRef.current,
+          transcriptFull: transcriptNeedsFullRebuildRef.current,
+          ruler: clone(rulerPoseRef.current),
+          setSquare: clone(setSquarePoseRef.current),
+          compass: clone(compassPoseRef.current),
+          dirty: dirtyRef.current,
+        }
+      } catch {
+        return null
+      }
+    })()
+    if (!saved) return null
+    let released = false
+    exportGateRef.current = new Promise<void>((resolve) => {
+      exportReleaseRef.current = () => {
+        if (released) return
+        released = true
+        resolve()
+      }
+    })
+    exportingCanvasRef.current = true
+    restoringCanvasRef.current = false
+    exportScrollRef.current = { top: scroller.scrollTop, left: scroller.scrollLeft }
+    const plane = paper.closest('.paper-sheet-plane') as HTMLElement | null
+    exportPlaneTransformRef.current = {
+      transform: plane?.style.transform ?? '',
+      origin: plane?.style.transformOrigin ?? '',
+    }
+    const sameJson = (left: unknown, right: unknown) => {
+      try {
+        return JSON.stringify(left) === JSON.stringify(right)
+      } catch {
+        return false
+      }
+    }
+    const restoreModel = () => {
+      if (visualGrowFrameRef.current !== null) {
+        cancelAnimationFrame(visualGrowFrameRef.current)
+        visualGrowFrameRef.current = null
+      }
+      const paintJob = inkPaintJobRef.current
+      if (paintJob?.frame) cancelAnimationFrame(paintJob.frame)
+      inkPaintJobRef.current = null
+      strokesRef.current = saved.strokes
+      sectionsRef.current = saved.sections
+      undoRef.current = saved.undo
+      redoRef.current = saved.redo
+      sourceWidthRef.current = saved.width
+      sourceHeightRef.current = saved.height
+      sourceOriginXRef.current = saved.originX
+      sourceOriginYRef.current = saved.originY
+      paintedLayoutRef.current = saved.painted
+      pendingGrowRemapRef.current = saved.pendingGrow
+      indexedStrokeCountRef.current = saved.indexed
+      searchTranscriptRef.current = saved.transcript
+      transcriptUpdatedAtRef.current = saved.transcriptAt
+      transcriptNeedsFullRebuildRef.current = saved.transcriptFull
+      rulerPoseRef.current = saved.ruler
+      setSquarePoseRef.current = saved.setSquare
+      compassPoseRef.current = saved.compass
+      dirtyRef.current = saved.dirty
+      contextualLearningRunRef.current += 1
+      canvasQualityKeyRef.current = ''
+      committedCanvasDirtyRef.current = true
+      if (!sameJson(noteLinksRef.current, saved.links)) onNoteLinksExtentRef.current?.(saved.links)
+      noteLinksRef.current = saved.links
+      if (!sameJson(textFieldsRef.current, saved.fields)) onTextFieldsExtentRef.current?.(saved.fields)
+      textFieldsRef.current = saved.fields
+      if (!mountedRef.current) return
+      setSourceWidth(saved.width)
+      setSourceHeight(saved.height)
+      setSections(saved.sections)
+      setRulerPose(saved.ruler)
+      setSetSquarePose(saved.setSquare)
+      setCompassPose(saved.compass)
+      setIsDirty(saved.dirty)
+      applyInkExtentStyles(saved.height, saved.width)
+    }
+    try {
+      const deadline = performance.now() + 20_000
+      while (!inkReadyRef.current && performance.now() < deadline) {
+        await new Promise<void>((resolve) => { requestAnimationFrame(() => resolve()) })
+      }
+      if (!inkReadyRef.current || !mountedRef.current) return null
+      if (plane && viewRotationRef.current !== 0) plane.style.transform = 'none'
+      for (let guard = 0; guard < 400; guard += 1) {
+        if (activeStrokeRef.current) break
+        const collapsed = sectionsRef.current.find((section) => section.collapsed)
+        if (!collapsed) break
+        const id = collapsed.id
+        toggleSection(id)
+        if (sectionsRef.current.find((section) => section.id === id)?.collapsed) break
+      }
+      await waitForPaperPaint()
+      const fontsReady = document.fonts?.ready
+      if (fontsReady) await fontsReady.catch(() => undefined)
+      void paper.offsetHeight
+      const cssWidth = Math.max(1, paper.offsetWidth)
+      const cssHeight = Math.max(1, paper.offsetHeight)
+      const scale = cssWidth * 2 <= 4096 ? 2 : 1
+      const pixelCap = Math.max(1, Math.floor(16384 / scale))
+      const tileLimit = Math.max(1, Math.floor(4096 / scale))
+      const viewBand = Math.max(320, scroller.clientHeight - 8)
+      const opaque = (color: string) => {
+        if (!color || color === 'transparent') return false
+        const match = /rgba?\(([^)]+)\)/.exec(color)
+        if (!match) return true
+        const parts = match[1].split(/[,\s/]+/).filter(Boolean)
+        const alpha = parts.length >= 4 ? Number(parts[3]) : 1
+        return Number.isFinite(alpha) && alpha > 0
+      }
+      const paperColor = getComputedStyle(paper).backgroundColor
+      const planeColor = plane ? getComputedStyle(plane).backgroundColor : ''
+      const scrollerColor = getComputedStyle(scroller).backgroundColor
+      const fill = opaque(paperColor) ? paperColor : opaque(planeColor) ? planeColor : opaque(scrollerColor) ? scrollerColor : '#ffffff'
+      const pages: CanvasPdfPage[] = []
+      let y = 0
+      while (y < cssHeight - 0.5 && pages.length < 200) {
+        const regionH = Math.min(cssHeight - y, viewBand, pixelCap)
+        if (!(regionH > 0)) break
+        scrollPaperTo(paper, scroller, y)
+        await waitForPaperPaint()
+        const pixelW = Math.max(1, Math.round(cssWidth * scale))
+        const pixelH = Math.max(1, Math.round(regionH * scale))
+        const canvas = document.createElement('canvas')
+        canvas.width = pixelW
+        canvas.height = pixelH
+        const context = canvas.getContext('2d', { willReadFrequently: true })
+        if (!context) return null
+        context.fillStyle = fill
+        context.fillRect(0, 0, pixelW, pixelH)
+        const overs: Array<{ image: HTMLCanvasElement; dx: number }> = []
+        for (let x = 0; x < cssWidth - 0.5; x += tileLimit) {
+          const tileW = Math.min(tileLimit, cssWidth - x)
+          const layers = await rasterizePaperLayers(paper, { x, y, width: tileW, height: regionH }, scale)
+          const dx = Math.round(x * scale)
+          context.drawImage(layers.under, dx, 0)
+          overs.push({ image: layers.over, dx })
+        }
+        const ink = document.createElement('canvas')
+        ink.width = pixelW
+        ink.height = pixelH
+        renderDocument(
+          ink,
+          strokesRef.current,
+          paperStyle,
+          settings.smoothing,
+          pixelW,
+          pixelH,
+          false,
+          sourceWidthRef.current,
+          { y0: y / cssHeight, y1: (y + regionH) / cssHeight },
+          cssWidth,
+          null,
+          clampPaperSquareMm(settings.paperSquareMm),
+        )
+        context.setTransform(1, 0, 0, 1, 0, 0)
+        context.drawImage(ink, 0, 0)
+        for (const over of overs) context.drawImage(over.image, over.dx, 0)
+        let rgba: Uint8Array | null = null
+        try {
+          rgba = new Uint8Array(context.getImageData(0, 0, pixelW, pixelH).data)
+        } catch {
+          context.setTransform(1, 0, 0, 1, 0, 0)
+          context.fillStyle = fill
+          context.fillRect(0, 0, pixelW, pixelH)
+          context.drawImage(ink, 0, 0)
+          try {
+            rgba = new Uint8Array(context.getImageData(0, 0, pixelW, pixelH).data)
+          } catch {
+            return null
+          }
+        }
+        if (!rgba) return null
+        pages.push({ width: pixelW, height: pixelH, rgba })
+        y += regionH
+      }
+      if (!pages.length) return null
+      return await pdfFromRgbaPages(pages, pdfTitle || title)
+    } catch {
+      return null
+    } finally {
+      restoreModel()
+      restoringCanvasRef.current = true
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => finishCanvasExport())
+      })
+    }
+  }, [applyInkExtentStyles, finishCanvasExport, paperStyle, resolvePaperElement, settings.paperSquareMm, settings.smoothing, title, toggleSection])
+
   const saveDrawing = useCallback((insertAfterSave: boolean, silent = false) => {
     if (!inkPagePersists(strokesRef.current.length, inkRecordExists())) return Promise.resolve()
     if (!silent) {
@@ -6344,6 +6625,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (!silent) setNotice(null)
 
     const run = async () => {
+      await waitForCanvasExport()
       const savedRevision = revisionRef.current
       try {
         const result = await writeInkPage(drawingPayload(insertAfterSave))
@@ -6400,7 +6682,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const queued = saveQueueRef.current.catch(() => {}).then(run)
     saveQueueRef.current = queued
     return queued
-  }, [clear, drawingPayload, inkRecordExists, onDirtyChange, onInsertMarkdown, setDirty, settings.keepDrawingAfterInsert, title, writeInkPage])
+  }, [clear, drawingPayload, inkRecordExists, onDirtyChange, onInsertMarkdown, setDirty, settings.keepDrawingAfterInsert, title, waitForCanvasExport, writeInkPage])
 
   useEffect(() => {
     saveLatestRef.current = () => saveDrawing(false, true)
@@ -6411,11 +6693,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       // A pen still on the sheet while the note switches or the app closes:
       // commit that stroke first so the written page contains it.
       if (activePointerRef.current !== null || activeStrokeRef.current) forceEndActivePointerRef.current('blur')
+      await waitForCanvasExport()
       await saveQueueRef.current.catch(() => {})
       // Strokes drawn while a write is in flight bump the revision; only a
       // write that saw the latest revision may clear the dirty flag.
       for (let attempt = 0; attempt < INK_FLUSH_MAX_ROUNDS; attempt += 1) {
         if (!dirtyRef.current || !inkPagePersists(strokesRef.current.length, inkRecordExists())) return
+        await waitForCanvasExport()
         const savedRevision = revisionRef.current
         await writeInkPage(drawingPayload())
         if (revisionRef.current === savedRevision) {
@@ -6477,7 +6761,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       setTool('pen')
       setGraphPanelOpen(false)
     },
-  }), [drawingPayload, inkMode, inkRecordExists, restoreUnmovedSelection, setDirty, tool, writeInkPage])
+    exportOpenCanvas,
+    finishCanvasExport,
+  }), [drawingPayload, exportOpenCanvas, finishCanvasExport, inkMode, inkRecordExists, restoreUnmovedSelection, setDirty, tool, waitForCanvasExport, writeInkPage])
 
   useEffect(() => () => {
     if (saveRetryTimerRef.current !== null) window.clearTimeout(saveRetryTimerRef.current)
@@ -6870,6 +7156,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [closeMathCorrectionSession, closeMathSolverSelection, settings.experimentalHandwritingToText])
 
   const updateHiddenTranscript = useCallback(async () => {
+    if (exportingCanvasRef.current) return
     if (!settings.experimentalHandwritingToText) return
     const currentHandwriting = handwritingStrokes(strokesRef.current)
     if (!currentHandwriting.length) return

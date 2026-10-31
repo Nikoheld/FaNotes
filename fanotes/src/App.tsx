@@ -4513,20 +4513,34 @@ export default function App({ startupBootstrap }: AppProps) {
     return { note, title: tab?.title || 'FaNotes' }
   }, [])
 
-  const exportCurrentPdf = useCallback(() => {
+  const exportCurrentPdf = useCallback(async () => {
     const current = readExportNote()
     if (!current) {
       toast('Öffne eine Notiz im Editor, um sie zu exportieren.', 'info')
       return
     }
+    // A handwriting note is the sheet on screen, with every section open.
+    // The text PDF stays for notes that have no ink marker.
+    const inkNote = Boolean(noteInkId(current.note))
+    const folds = inkNote ? editorRef.current?.captureFolds() ?? [] : null
     try {
-      const bytes = exportNotePdf(current.note, current.title)
+      let bytes: Uint8Array
+      if (inkNote) {
+        const pictured = await drawingBoardRef.current?.exportOpenCanvas(current.title)
+        if (!pictured) throw new Error('PDF-Export fehlgeschlagen.')
+        bytes = pictured
+      } else {
+        bytes = exportNotePdf(current.note, current.title)
+      }
       const copy = new Uint8Array(bytes.byteLength)
       copy.set(bytes)
       saveExportFile(`${noteExportBaseName(current.title)}.pdf`, new Blob([copy], { type: 'application/pdf' }))
       toast('PDF gespeichert.', 'success')
     } catch (error) {
       toast(error instanceof Error ? error.message : 'PDF-Export fehlgeschlagen.', 'error')
+    } finally {
+      if (folds) editorRef.current?.restoreFolds(folds)
+      if (inkNote) drawingBoardRef.current?.finishCanvasExport()
     }
   }, [readExportNote, toast])
 

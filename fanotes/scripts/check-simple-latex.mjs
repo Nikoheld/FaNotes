@@ -43,6 +43,8 @@ const assertPdf = (bytes) => {
 
 try {
   const simpleLatex = await server.ssrLoadModule('/src/lib/simpleLatex.ts')
+  const canvasPdf = await server.ssrLoadModule('/src/lib/canvasPdf.ts')
+  const { inflateSync } = await import('node:zlib')
   const editor = await server.ssrLoadModule('/src/components/MarkdownEditor.tsx')
   const toolbarModule = await server.ssrLoadModule('/src/components/FormattingToolbar.tsx')
   const exportModule = await server.ssrLoadModule('/src/components/EditorExportControls.tsx')
@@ -58,6 +60,38 @@ try {
     assertPdf(plainPdf)
     assert.ok(Buffer.from(plainPdf).includes(Buffer.from('Heute nur Woerter ohne Formel.')))
     assert.deepEqual(simpleLatex.exportNotePdf(plain, 'Heute'), plainPdf)
+
+    const imageWidth = 2
+    const imageHeight = 2
+    const imageRgba = new Uint8Array([
+      255, 0, 0, 255,
+      0, 255, 0, 255,
+      0, 0, 255, 255,
+      10, 20, 30, 128,
+    ])
+    const expectedRgb = canvasPdf.rgbaToRgb(imageRgba, imageWidth, imageHeight)
+    const inflateImage = (bytes) => {
+      const source = Buffer.from(bytes)
+      const imageAt = source.indexOf('/Subtype /Image')
+      assert.ok(imageAt > 0)
+      const streamAt = source.indexOf('stream\n', imageAt)
+      const endAt = source.indexOf('\nendstream', streamAt)
+      assert.ok(streamAt > imageAt && endAt > streamAt)
+      return inflateSync(source.subarray(streamAt + 'stream\n'.length, endAt))
+    }
+    const imagePdf = await canvasPdf.pdfFromRgbaPages([{ width: imageWidth, height: imageHeight, rgba: imageRgba }], 'FaNotes')
+    const imageAgain = await canvasPdf.pdfFromRgbaPages([{ width: imageWidth, height: imageHeight, rgba: imageRgba }], 'FaNotes')
+    assertPdf(imagePdf)
+    const inflated = inflateImage(imagePdf)
+    assert.deepEqual(inflated, Buffer.from(expectedRgb))
+    assert.deepEqual(inflateImage(imageAgain), inflated)
+    const imageLatin = Buffer.from(imagePdf).toString('latin1')
+    assert.equal(imageLatin.includes('fanotes-ink'), false)
+    assert.equal(imageLatin.includes('# Theorie'), false)
+    const wired = imageLatin.match(/\/Contents (\d+) 0 R \/Resources << \/XObject << \/Im0 (\d+) 0 R/)
+    assert.ok(wired)
+    assert.equal(Number(wired[2]), Number(wired[1]) + 1)
+    assert.match(imageLatin, /\/MediaBox \[0 0 595 595\.00\]/)
 
     let note = plain
     const inserted = []
@@ -126,10 +160,17 @@ try {
     assert.match(appSource, /<EditorExportControls[\s\S]*?onExportPdf=/)
     assert.match(appSource, /onExportLatex=/)
     assert.match(appSource, /exportNotePdf\(/)
+    assert.match(appSource, /exportNotePdf\(current\.note/)
+    assert.match(appSource, /noteInkId\(current\.note\)/)
+    assert.match(appSource, /exportOpenCanvas\(/)
+    assert.match(appSource, /finishCanvasExport\(/)
     assert.match(appSource, /exportNoteLatex\(/)
     assert.equal(drawingSource.includes('simple-latex-tools'), false)
     assert.equal(drawingSource.includes('EditorExportControls'), false)
     assert.equal(drawingSource.includes('onInsertLatex'), false)
+    assert.match(drawingSource, /exportOpenCanvas/)
+    assert.match(drawingSource, /exportingCanvasRef/)
+    assert.match(drawingSource, /finishCanvasExport/)
 
     return {
       buttons: inserted.length,
@@ -137,6 +178,8 @@ try {
       latex: tex.length,
       pdf: pdf.byteLength,
       plainPdf: plainPdf.byteLength,
+      canvasRed: expectedRgb[0],
+      canvasPixels: expectedRgb.length,
       toolbar: toolbar.includes('aria-label="Bruch"'),
       exports: exportsHtml.includes('Als LaTeX-Code exportieren'),
     }
