@@ -552,6 +552,7 @@ fun FaNotesScreen(
     val settingsOpen by model.settingsOpen.collectAsStateWithLifecycle()
     val confirm by model.confirmRequest.collectAsStateWithLifecycle()
     val linkPlacing by model.linkPlacing.collectAsStateWithLifecycle()
+    val textFieldPlacing by model.textFieldPlacing.collectAsStateWithLifecycle()
     val placingSection by model.placingSection.collectAsStateWithLifecycle()
     val linkSelected by model.linkSelected.collectAsStateWithLifecycle()
     val gotoLine by model.gotoLineInput.collectAsStateWithLifecycle()
@@ -715,6 +716,7 @@ fun FaNotesScreen(
                             createFolder = createFolder,
                             renaming = renaming != null,
                             moving = moving != null,
+                            placingText = textFieldPlacing,
                             placingLink = linkPlacing,
                             placingSection = placingSection,
                             selectedLink = linkSelected,
@@ -752,6 +754,7 @@ fun FaNotesScreen(
                         }
                         "rename" -> renaming = null
                         "move" -> moving = null
+                        "placing-text" -> model.cancelTextFieldPlacement()
                         "placing-link", "selected-link" -> model.requestClearLink()
                         "placing-section" -> model.setPlacingSection(false)
                         "worksheet" -> onDismissWorksheet()
@@ -3084,10 +3087,12 @@ private fun PageSurface(
     val foldedHeadings by model.foldedHeadings.collectAsStateWithLifecycle()
     val clearLink by model.clearLinkRequest.collectAsStateWithLifecycle()
     val placeLinkRequest by model.placeLinkRequest.collectAsStateWithLifecycle()
+    val placeTextFieldRequest by model.placeTextFieldRequest.collectAsStateWithLifecycle()
     val pdfCamera by model.pdfCameraCommand.collectAsStateWithLifecycle()
     val sheetReset by model.sheetReset.collectAsStateWithLifecycle()
     var appliedClear by remember { mutableStateOf(0) }
     var appliedPlaceLink by remember { mutableStateOf(0) }
+    var appliedPlaceText by remember { mutableStateOf(0) }
     var appliedPdfCamera by remember { mutableStateOf(0) }
     var appliedSheetReset by remember { mutableStateOf(0) }
     val wasPlacingSection = remember { booleanArrayOf(false) }
@@ -3215,6 +3220,10 @@ private fun PageSurface(
                 page.ink.placingLink = model.linkPlacing.value
                 page.ink.publishLinkChrome()
             }
+            if (placeTextFieldRequest != appliedPlaceText) {
+                appliedPlaceText = placeTextFieldRequest
+                page.ink.armWorksheetText(model.textFieldPlacing.value)
+            }
             if (clearLink != appliedClear) {
                 appliedClear = clearLink
                 page.ink.placingLink = false
@@ -3287,6 +3296,7 @@ private fun PageSurface(
             page.ink.onPlaceHighlight = { worksheetId, mark -> model.addWorksheetHighlight(worksheetId, mark) }
             page.ink.onPlaceBox = { worksheetId, pageNumber, x, y ->
                 model.placeWorksheetBox(worksheetId, pageNumber, x, y, onEditBox)
+                model.textFieldPlacing.value = false
             }
             page.ink.onRemoveHighlight = { model.removeWorksheetHighlight(it) }
             page.onFinger = { model.fingerDraws.value = it }

@@ -71,7 +71,7 @@ data class CommandExtras(
 )
 
 const val ONE_NOTE_EMPTY = "Im OneNote-Export wurden keine lesbaren Seiten gefunden."
-const val TEXT_FIELD_MARKER = "<div class=\"fanotes-text-field\"></div>"
+const val TEXT_FIELD_NEEDS_NOTE = "Öffne zuerst eine Notiz, um ein Textfeld einzufügen."
 
 private val ADDON_ID = Regex("^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 
@@ -127,7 +127,7 @@ private fun dispatch(work: DeskWork, id: String, extras: CommandExtras): DeskWor
     "save" -> work.copy(saveGeneration = work.saveGeneration + 1, message = null)
     "search" -> work.copy(destination = "search", overlays = work.overlays + "search", message = null)
     "drawing" -> work.copy(penOpen = !work.penOpen, message = null)
-    "note-link" -> work.copy(linkPlacing = true, overlays = work.overlays + "link", message = null)
+    "note-link" -> work.copy(linkPlacing = true, textFieldPlacing = false, overlays = work.overlays + "link", message = null)
     "text-field" -> placeTextField(work)
     "subject-book" -> work.copy(bookOpen = !work.bookOpen, message = null)
     "worksheet" -> work.copy(platform = "worksheet", overlays = work.overlays + "worksheet", message = null)
@@ -160,7 +160,7 @@ private fun dispatch(work: DeskWork, id: String, extras: CommandExtras): DeskWor
     "focus" -> work.copy(focus = !work.focus, message = null)
     "sidebar" -> work.copy(sidebar = !work.sidebar, message = null)
     "inspector" -> work.copy(inspector = !work.inspector, message = null)
-    "settings" -> work.copy(overlays = work.overlays + "settings", message = null)
+    "settings" -> work.copy(overlays = work.overlays + "settings", settingsSection = null, message = null)
     "sync-now" -> work.copy(syncGeneration = work.syncGeneration + 1, message = null)
     "sync-settings" -> work.copy(overlays = work.overlays + "settings", settingsSection = "sync", message = null)
     "addon-store" -> installAddon(work, extras)
@@ -226,8 +226,8 @@ private fun importPdf(work: DeskWork, extras: CommandExtras): DeskWork {
 }
 
 private fun placeTextField(work: DeskWork): DeskWork {
-    val markdown = work.markdown + (if (work.markdown.endsWith("\n")) "" else "\n") + TEXT_FIELD_MARKER + "\n"
-    return replaceOpen(work, markdown).copy(textFieldPlacing = true, overlays = work.overlays + "text-field")
+    if (work.openPath.isNullOrBlank()) return work.copy(message = TEXT_FIELD_NEEDS_NOTE)
+    return work.copy(textFieldPlacing = !work.textFieldPlacing, linkPlacing = false, message = null)
 }
 
 private fun replaceOpen(work: DeskWork, markdown: String): DeskWork {

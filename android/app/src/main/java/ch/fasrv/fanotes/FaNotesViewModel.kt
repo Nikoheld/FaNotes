@@ -2628,6 +2628,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         paletteOpen.value = true
     }
     val linkPlacing = MutableStateFlow(false)
+    val textFieldPlacing = MutableStateFlow(false)
+    val placeTextFieldRequest = MutableStateFlow(0)
+    val settingsSection = MutableStateFlow("appearance")
+    val settingsSectionRequest = MutableStateFlow(0)
     val placingSection = MutableStateFlow(false)
     val linkSelected = MutableStateFlow(false)
     val clearLinkRequest = MutableStateFlow(0)
@@ -2648,8 +2652,30 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         destination.value = "notes"
+        if (textFieldPlacing.value) {
+            textFieldPlacing.value = false
+            placeTextFieldRequest.value += 1
+        }
         linkPlacing.value = !linkPlacing.value
         placeLinkRequest.value += 1
+    }
+
+    /** Palette and toolbar both arm the ink placement. The note text stays unchanged. */
+    private fun armTextFieldPlacement(after: ch.fasrv.fanotes.desk.DeskWork) {
+        if (open.value == null) return
+        destination.value = "notes"
+        if (linkPlacing.value) {
+            linkPlacing.value = false
+            placeLinkRequest.value += 1
+        }
+        textFieldPlacing.value = after.textFieldPlacing
+        placeTextFieldRequest.value += 1
+    }
+
+    fun cancelTextFieldPlacement() {
+        if (!textFieldPlacing.value) return
+        textFieldPlacing.value = false
+        placeTextFieldRequest.value += 1
     }
 
     fun requestClearLink() {
@@ -2670,7 +2696,9 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** The settings dialog covers the current screen and leaves that screen in place. */
-    fun openSettings() {
+    fun openSettings(section: String? = null) {
+        settingsSection.value = ch.fasrv.fanotes.desk.settingsSectionToOpen(section)
+        settingsSectionRequest.value += 1
         destination.value = ch.fasrv.fanotes.desk.destinationUnderOverlay(destination.value)
         settingsOpen.value = true
     }
@@ -4334,6 +4362,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             sidebar = sidebarOpen.value,
             inspector = inspectorOpen.value,
             clipboard = "",
+            linkPlacing = linkPlacing.value,
+            textFieldPlacing = textFieldPlacing.value,
             tabs = openTabs.value,
             closedTabs = closedTabs.value,
             trail = noteTrail.value,
@@ -4359,7 +4389,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             "search" -> showDestination("search")
             "drawing" -> if (showText.value == after.penOpen) togglePen()
             "note-link" -> requestPlaceLink()
-            "text-field" -> if (after.markdown != markdown.value) updateMarkdown(after.markdown)
+            "text-field" -> armTextFieldPlacement(after)
             "subject-book" -> if (bookOpen.value != after.bookOpen) toggleBookView()
             "onenote-import" -> if (extras.onenoteBytes == null) requestOneNoteImport() else writeImportedNotes(before, after)
             "ai-assistant" -> openAi()
@@ -4392,9 +4422,9 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             "focus" -> if ((deskSettings.value["focus"] == "on") != after.focus) toggleFocusMode()
             "sidebar" -> setSidebarOpen(after.sidebar)
             "inspector" -> if (inspectorOpen.value != after.inspector) toggleInspector()
-            "settings" -> openSettings()
+            "settings" -> openSettings(after.settingsSection)
             "sync-now" -> syncNow()
-            "sync-settings" -> openSettings()
+            "sync-settings" -> openSettings(after.settingsSection)
             "addon-store" -> {
                 addonStoreOpen.value = true
                 after.installedAddons.lastOrNull()?.let { rememberAddon(it) }

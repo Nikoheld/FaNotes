@@ -84,6 +84,12 @@ val SETTINGS_NAV: List<SettingsNavItem> = listOf(
     SettingsNavItem("advanced", "Erweitert", "Ressourcen, Datenschutz und App-Daten", "FaNotes & System", 10),
 )
 
+/** The settings page the desktop `openSettings` call would show. An unknown id stays on Darstellung. */
+fun settingsSectionToOpen(requested: String?): String {
+    val id = requested?.trim().orEmpty()
+    return if (SETTINGS_NAV.any { it.id == id }) id else "appearance"
+}
+
 /** Eyebrow above the section title: „Anpassung · 12 Optionen“. */
 fun settingsEyebrow(count: Int) = "Anpassung · $count Optionen"
 
