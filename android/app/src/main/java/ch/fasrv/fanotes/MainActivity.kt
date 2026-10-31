@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -205,7 +206,17 @@ class MainActivity : ComponentActivity() {
     private val importOneNote = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@registerForActivityResult
         val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@registerForActivityResult
-        model.importOneNoteBytes(bytes)
+        model.importOneNoteBytes(bytes, documentDisplayName(uri))
+    }
+
+    private fun documentDisplayName(uri: Uri): String? {
+        val queried = runCatching {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        }.getOrNull()
+        return queried?.substringAfterLast('/')?.ifBlank { null }
+            ?: uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { null }
     }
     private val importAddon = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@registerForActivityResult
