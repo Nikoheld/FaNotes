@@ -28,6 +28,7 @@ export function SplitInkEditor({
       settings={settings}
       drawingId={document?.id}
       initialDrawingJson={document?.drawingJson}
+      packedInk={document?.packedInk}
       title={`Handschrift · ${title}`}
       inline
       inputActive

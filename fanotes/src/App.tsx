@@ -77,6 +77,7 @@ import type { WorksheetLayerHandle } from './components/WorksheetLayer'
 import { hasConnectedAiProvider } from './lib/aiProviderConnection'
 import { clipboardImageFile } from './lib/clipboardImage'
 import { companionNotePath, emptyFamdPayload, famdEncodingForSave, isNoteFileName, isPdfNotePath, parseFamd, readPageStatsFromNote, serializeFamd, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
+import { inkJsonForRewrite } from './lib/packedInk'
 import { createAppAddonBridge, safeSettingsView, type AppAddonDeps } from './lib/addons/appBridge'
 import { sanitizeCustomCss } from './lib/customCss'
 import { addonIndexCache } from './lib/addons/indexCache'
@@ -2055,7 +2056,7 @@ export default function App({ startupBootstrap }: AppProps) {
         let source = markdown
         if (embedded?.drawingJson) {
           try {
-            const ink = JSON.parse(embedded.drawingJson) as Record<string, unknown>
+            const ink = JSON.parse(inkJsonForRewrite(embedded)) as Record<string, unknown>
             source = serializeFamd(markdown, { ...emptyFamdPayload(), ink })
           } catch {
             source = markdown
@@ -2671,9 +2672,10 @@ export default function App({ startupBootstrap }: AppProps) {
       let inkCopied = false
       if (ink?.drawingJson) {
         try {
+          const drawingJson = inkJsonForRewrite(ink)
           const asset = await window.fanotes.saveDrawing({
-            title: drawingTitleFromJson(ink.drawingJson, ink.title || stem),
-            drawingJson: ink.drawingJson,
+            title: drawingTitleFromJson(drawingJson, ink.title || stem),
+            drawingJson,
             noteRelativePath: created.relativePath,
           })
           markdown = withInkMarker(markdown, asset.id)
@@ -5743,6 +5745,7 @@ export default function App({ startupBootstrap }: AppProps) {
                         settings={settings}
                         drawingId={noteDrawingSession.document?.id}
                         initialDrawingJson={noteDrawingSession.document?.drawingJson}
+                        packedInk={noteDrawingSession.document?.packedInk}
                         title={`Handschrift · ${activeTab.title}`}
                         inline
                         inputActive={drawingOpen}

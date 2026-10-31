@@ -12,6 +12,8 @@
  * included, is at most half the v1 JSON size.
  * A CRC-32 covers the payload; a short or mismatched file throws instead of
  * looking like an empty note.
+ * A heavy open reads this payload without building one object per point.
+ * Samples stay in columns and the board restores a slice of them per frame.
  */
 
 const FAMD_V2_SCHEMA = 'fanotes-famd-v2'
@@ -34,18 +36,27 @@ class FamdCorruptError extends Error {
   }
 }
 
-const crc32 = (text) => {
-  const bytes = new TextEncoder().encode(text)
+// IEEE CRC-32, the same bits as the previous bit-by-bit loop. A table keeps a
+// multi-megabyte checksum off the slow path when a note is opened.
+const CRC_TABLE = new Uint32Array(256)
+for (let entry = 0; entry < 256; entry += 1) {
+  let value = entry
+  for (let bit = 0; bit < 8; bit += 1) {
+    const mask = -(value & 1)
+    value = (value >>> 1) ^ (0xedb88320 & mask)
+  }
+  CRC_TABLE[entry] = value >>> 0
+}
+
+const crc32Bytes = (bytes) => {
   let crc = 0xffffffff
   for (let index = 0; index < bytes.length; index += 1) {
-    crc ^= bytes[index]
-    for (let bit = 0; bit < 8; bit += 1) {
-      const mask = -(crc & 1)
-      crc = (crc >>> 1) ^ (0xedb88320 & mask)
-    }
+    crc = (CRC_TABLE[(crc ^ bytes[index]) & 0xff] ^ (crc >>> 8)) >>> 0
   }
   return (crc ^ 0xffffffff) >>> 0
 }
+
+const crc32 = (text) => crc32Bytes(new TextEncoder().encode(text))
 
 const crcHex = (text) => crc32(text).toString(16).padStart(8, '0')
 
@@ -69,19 +80,25 @@ const decode85 = (value) => {
     throw new FamdCorruptError('famd v2 point block')
   }
   const bytes = new Uint8Array((value.length / 5) * 4)
+  const alphabet = FAMD85_INDEX
   for (let index = 0, offset = 0; index < value.length; index += 5, offset += 4) {
-    let value32 = 0
-    for (let digit = 0; digit < 5; digit += 1) {
-      const code = value.charCodeAt(index + digit)
-      const decoded = code < 128 ? FAMD85_INDEX[code] : 255
-      if (decoded === 255) throw new FamdCorruptError('famd v2 point block')
-      value32 = value32 * 85 + decoded
-    }
+    const c0 = value.charCodeAt(index)
+    const c1 = value.charCodeAt(index + 1)
+    const c2 = value.charCodeAt(index + 2)
+    const c3 = value.charCodeAt(index + 3)
+    const c4 = value.charCodeAt(index + 4)
+    const d0 = c0 < 128 ? alphabet[c0] : 255
+    const d1 = c1 < 128 ? alphabet[c1] : 255
+    const d2 = c2 < 128 ? alphabet[c2] : 255
+    const d3 = c3 < 128 ? alphabet[c3] : 255
+    const d4 = c4 < 128 ? alphabet[c4] : 255
+    if ((d0 | d1 | d2 | d3 | d4) === 255) throw new FamdCorruptError('famd v2 point block')
+    const value32 = (((d0 * 85 + d1) * 85 + d2) * 85 + d3) * 85 + d4
     if (value32 > 0xffffffff) throw new FamdCorruptError('famd v2 point block')
-    bytes[offset] = Math.floor(value32 / 16777216)
-    bytes[offset + 1] = Math.floor(value32 / 65536) % 256
-    bytes[offset + 2] = Math.floor(value32 / 256) % 256
-    bytes[offset + 3] = value32 % 256
+    bytes[offset] = value32 >>> 24
+    bytes[offset + 1] = (value32 >>> 16) & 255
+    bytes[offset + 2] = (value32 >>> 8) & 255
+    bytes[offset + 3] = value32 & 255
   }
   return bytes
 }
@@ -312,7 +329,7 @@ const v2CutIndex = (source) => {
   }
 }
 
-const readV2Payload = (source) => {
+const readV2Payload = (source, options = {}) => {
   const located = locateV2(source)
   if (!located) throw new FamdCorruptError('missing famd v2 header')
   if (located.jsonStart + located.length > source.length) throw new FamdCorruptError('truncated famd v2 payload')
@@ -330,7 +347,7 @@ const readV2Payload = (source) => {
   }
   return {
     ...parsed,
-    ink: unpackInk(parsed.ink),
+    ink: options.unpack === false ? (parsed.ink ?? null) : unpackInk(parsed.ink),
   }
 }
 
@@ -355,8 +372,10 @@ const encodeV2Document = (body, payload) => {
 export {
   FAMD_V2_SCHEMA,
   FAMD_V2_TOKEN,
+  POINT_STRIDE,
   FamdCorruptError,
   crcHex,
+  decode85,
   encodeV2Document,
   famdEncodingForSave,
   isActiveV2,

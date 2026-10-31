@@ -53,7 +53,7 @@ import type {
   RecognitionToken,
 } from '../../../src/lib/recognition'
 import type { Stroke, StrokePoint } from '../../../src/types'
-import type { AppSettings, DrawingAsset, PaperStyle } from '../types'
+import type { AppSettings, DrawingAsset, PackedInk, PaperStyle } from '../types'
 import { PAPER_STYLES, drawPaperBackground } from '../lib/paperStyles'
 import { artStudioOpenForBrush, inkColorForBrush, usesPenStrip } from '../lib/inkOptionSurface'
 import { mountPenPointer } from '../lib/penPointer'
@@ -64,6 +64,7 @@ import type {
   RecognitionResources,
 } from '../lib/handwritingDb'
 import { decodeInkHistory, encodeInkHistory, type EncodedInkHistory } from '../lib/inkHistory'
+import { expandPackedStroke, frameBudgetOpen, inkPageIsHeavy } from '../lib/packedInk'
 import { inkStrokeAllowsShapeSnap, shapeSnapAllowsLiveSample, shapeSnapProfile, snapStrokeToShape } from '../lib/shapeSnap'
 import {
   VIEW_ROTATE_STEP,
@@ -798,6 +799,8 @@ export type DrawingBoardProps = {
   drawingId?: string
   title?: string
   initialDrawingJson?: string | null
+  /** Columns for a heavy page. The drawing JSON then only names each stroke. */
+  packedInk?: PackedInk | null
   className?: string
   /** Renders the ink as a transparent layer on the normal note page. */
   inline?: boolean
@@ -1186,6 +1189,66 @@ const renderDocument = (
   return active
 }
 
+type InkPaintSlice = {
+  strokes: readonly InkStroke[]
+  inkWindow: InkWindow
+  pixelWidth: number
+  pixelHeight: number
+  sourceWidth: number
+  layoutWidth: number
+  paperStyle: PaperStyle
+  smoothing: number
+  squareMm: number
+  includePaper: boolean
+}
+
+/**
+ * Paints a heavy page a few strokes at a time. The first call clears the
+ * bitmap; later calls only add strokes, so a scroll frame can leave the job
+ * running instead of starting over.
+ */
+const paintInkBudgetSlice = (
+  canvas: HTMLCanvasElement,
+  slice: InkPaintSlice,
+  coverage: MarkerCoverage | null,
+  from: number,
+): { next: number; coverage: MarkerCoverage | null } => {
+  const context = canvas.getContext('2d')
+  const strokes = slice.strokes
+  if (!context) return { next: strokes.length, coverage }
+  const span = inkWindowSpan(slice.inkWindow)
+  const virtualHeight = slice.pixelHeight / span
+  const topPx = slice.inkWindow.y0 * virtualHeight
+  let active = coverage
+  if (from === 0) {
+    context.setTransform(1, 0, 0, 1, 0, 0)
+    context.clearRect(0, 0, canvas.width, canvas.height)
+    if (slice.includePaper) drawPaper(context, slice.pixelWidth, slice.pixelHeight, slice.paperStyle, slice.squareMm)
+    if (!active || active.width !== canvas.width || active.height !== canvas.height) active = createMarkerCoverage(canvas.width, canvas.height)
+    else active.mask.fill(0)
+  }
+  context.save()
+  context.beginPath()
+  context.rect(0, 0, slice.pixelWidth, slice.pixelHeight)
+  context.clip()
+  context.setTransform(1, 0, 0, 1, 0, -topPx)
+  const full = isFullInkWindow(slice.inkWindow)
+  const paintOptions = active ? { coverage: active, stamp: true as const } : undefined
+  const started = performance.now()
+  let index = from
+  let painted = 0
+  while (index < strokes.length && frameBudgetOpen(started, performance.now(), painted)) {
+    const stroke = strokes[index]
+    index += 1
+    painted += 1
+    if (!stroke) continue
+    if (!full && !strokeIntersectsWindow(stroke, slice.inkWindow)) continue
+    drawInkStroke(context, stroke, slice.pixelWidth, virtualHeight, slice.smoothing, 1, slice.sourceWidth, slice.layoutWidth, stroke.points.length, paintOptions)
+  }
+  context.restore()
+  return { next: index, coverage: active }
+}
+
 /**
  * Move the painted slice by whole rows: copy what is still on the sheet,
  * then paint only the exposed band from the model. `copy` compositing
@@ -1325,6 +1388,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   drawingId,
   title = 'Handschrift',
   initialDrawingJson,
+  packedInk = null,
   className = '',
   inline = false,
   inputActive = true,
@@ -1394,6 +1458,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const livePenHintRef = useRef<InkLayoutPoint | null>(null)
   /** What the committed bitmap holds right now, so a slice move can reuse it. */
   const committedBitmapRef = useRef<{ key: string; topPx: number } | null>(null)
+  /** Heavy pages paint across frames. A scroll keeps this job; a new page replaces it. */
+  const inkPaintJobRef = useRef<{
+    key: string
+    strokes: readonly InkStroke[]
+    frame: number
+  } | null>(null)
+  /** False while a packed page is still becoming strokes, and until its first paint finishes. */
+  const inkReadyRef = useRef(true)
+  const inkHydratingRef = useRef(false)
+  const inkOpenTokenRef = useRef(0)
   /** Rust viewport raster: set once the flag is on and the module loaded; null keeps the slice bitmap. */
   const viewportRasterRef = useRef<ViewportRaster | null>(null)
   const viewportPlacementRef = useRef<ViewportRasterPlacement | null>(null)
@@ -2359,7 +2433,27 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const shift = held && !committedCanvasDirtyRef.current && held.key === contentKey
       ? inkWindowShift(held.topPx, topPx, pixelHeight)
       : null
-    if (shift) {
+    const cancelInkPaint = () => {
+      const job = inkPaintJobRef.current
+      if (job?.frame) cancelAnimationFrame(job.frame)
+      inkPaintJobRef.current = null
+    }
+    const markInkPainted = () => {
+      if (!inkHydratingRef.current) inkReadyRef.current = true
+    }
+    const painting = inkPaintJobRef.current
+    const samePaint = Boolean(
+      painting
+      && painting.key === contentKey
+      && painting.strokes === strokesRef.current
+      && !committedCanvasDirtyRef.current
+      && !activeStrokeRef.current,
+    )
+    if (samePaint) {
+      // This page is still filling in across frames. A scroll uses the same
+      // picture, so it must not clear the bitmap and start again.
+    } else if (shift) {
+      cancelInkPaint()
       if (shift.dy !== 0) {
         shiftInkWindowBitmap(committedCanvas, shift.dy)
         const coverage = markerCoverageRef.current
@@ -2385,7 +2479,42 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         )
         committedBitmapRef.current = { key: contentKey, topPx }
       }
+      markInkPainted()
+    } else if (!activeStrokeRef.current && inkPageIsHeavy(strokesRef.current)) {
+      cancelInkPaint()
+      const strokes = strokesRef.current
+      committedCanvasDirtyRef.current = false
+      const slice: InkPaintSlice = {
+        strokes,
+        inkWindow,
+        pixelWidth,
+        pixelHeight,
+        sourceWidth,
+        layoutWidth: paintLayoutWidth || layoutWidth,
+        paperStyle,
+        smoothing: settings.smoothing,
+        squareMm: settings.paperSquareMm,
+        includePaper: !inline,
+      }
+      const job = { key: contentKey, strokes, frame: 0 }
+      inkPaintJobRef.current = job
+      const step = (from: number) => {
+        if (inkPaintJobRef.current !== job || committedCanvasDirtyRef.current) return
+        const painted = paintInkBudgetSlice(committedCanvas, slice, markerCoverageRef.current, from)
+        if (inkPaintJobRef.current !== job || committedCanvasDirtyRef.current) return
+        markerCoverageRef.current = painted.coverage
+        if (painted.next >= strokes.length) {
+          committedBitmapRef.current = { key: contentKey, topPx }
+          inkPaintJobRef.current = null
+          markInkPainted()
+          if (canvasPixelSizeRef.current.topPx !== topPx) requestAnimationFrame(() => redraw())
+          return
+        }
+        job.frame = requestAnimationFrame(() => step(painted.next))
+      }
+      step(0)
     } else {
+      cancelInkPaint()
       markerCoverageRef.current = renderDocument(
         committedCanvas,
         strokesRef.current,
@@ -2403,6 +2532,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       )
       committedBitmapRef.current = { key: contentKey, topPx }
       committedCanvasDirtyRef.current = false
+      markInkPainted()
     }
 
     const context = canvas.getContext('2d', { alpha: true })
@@ -2545,6 +2675,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     redraw()
   }, [redraw, revision])
 
+  useEffect(() => () => {
+    const job = inkPaintJobRef.current
+    if (job?.frame) cancelAnimationFrame(job.frame)
+    inkPaintJobRef.current = null
+  }, [])
+
   useEffect(() => {
     if (!initialDrawingJson) return
     const sourceId = drawingId ?? null
@@ -2555,14 +2691,31 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       // during the save must not be undone by it), so it is only acknowledged.
       loadedDrawingIdRef.current = sourceId
       if (sourceId) drawingIdRef.current = sourceId
+      inkHydratingRef.current = false
+      inkReadyRef.current = true
       return
     }
-    try {
-      const document: unknown = JSON.parse(initialDrawingJson)
-      if (!document || typeof document !== 'object') throw new Error('Kein Zeichnungsobjekt')
-      const raw = document as Partial<DrawingDocument>
-      strokesRef.current = safeInkStrokes(raw.strokes, initialColorRef.current)
-      const loadedSections = deserializeSections<InkStroke>(raw.sections, (value) => safeInkStrokes(value, initialColorRef.current, { clampToSheet: false }))
+    const token = ++inkOpenTokenRef.current
+    let cancelled = false
+    const failLoad = () => {
+      if (cancelled || token !== inkOpenTokenRef.current) return
+      loadedDrawingIdRef.current = sourceId
+      strokesRef.current = []
+      sectionsRef.current = []
+      setSections([])
+      committedCanvasDirtyRef.current = true
+      inkHydratingRef.current = false
+      inkReadyRef.current = true
+      setNotice({ kind: 'error', text: 'Die gespeicherte Zeichnung konnte nicht gelesen werden.' })
+    }
+    const applyLoaded = (
+      raw: Partial<DrawingDocument>,
+      strokes: InkStroke[],
+      loadedSections: ReturnType<typeof deserializeSections<InkStroke>>,
+      history: { undo: InkStroke[][]; redo: InkStroke[][] },
+    ) => {
+      if (cancelled || token !== inkOpenTokenRef.current) return
+      strokesRef.current = strokes
       sectionsRef.current = loadedSections
       setSections(loadedSections)
       setSectionPlacing(null)
@@ -2593,7 +2746,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       searchTranscriptRef.current = typeof raw.searchTranscript === 'string' ? raw.searchTranscript : ''
       setMarginTranscript(searchTranscriptRef.current)
       transcriptUpdatedAtRef.current = typeof raw.transcriptUpdatedAt === 'string' ? raw.transcriptUpdatedAt : null
-      indexedStrokeCountRef.current = handwritingStrokes(strokesRef.current).length
+      indexedStrokeCountRef.current = handwritingStrokes(strokes).length
       transcriptNeedsFullRebuildRef.current = false
       if (raw.detectedRecognitionMode === 'math' || raw.detectedRecognitionMode === 'text') {
         setRecognizedMode(raw.detectedRecognitionMode)
@@ -2606,26 +2759,106 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       setMathSolverSelection(null)
       setMathCorrectionSession(null)
       setMathCorrectorEnabled(false)
-      const loadedHistory = decodeInkHistory(strokesRef.current, raw.inkHistory, (entry) => {
-        const parsed = safeInkStrokes([entry], initialColorRef.current)
-        return parsed.length === 1 ? parsed[0] : null
-      })
-      undoRef.current = loadedHistory.undo
-      redoRef.current = loadedHistory.redo
+      undoRef.current = history.undo
+      redoRef.current = history.redo
+      inkHydratingRef.current = false
+      if (!inkPageIsHeavy(strokes)) inkReadyRef.current = true
       clearRecognitionScope()
       bumpInkRevision({ updateTranscript: false })
       setDirty(false)
       updateHistoryState()
       loadedDrawingIdRef.current = sourceId
-    } catch {
-      loadedDrawingIdRef.current = sourceId
-      strokesRef.current = []
-      sectionsRef.current = []
-      setSections([])
-      committedCanvasDirtyRef.current = true
-      setNotice({ kind: 'error', text: 'Die gespeicherte Zeichnung konnte nicht gelesen werden.' })
     }
-  }, [bumpInkRevision, clearRecognitionScope, drawingId, initialDrawingJson, setDirty, updateHistoryState])
+    if (!packedInk?.columns) {
+      try {
+        const document: unknown = JSON.parse(initialDrawingJson)
+        if (!document || typeof document !== 'object') throw new Error('Kein Zeichnungsobjekt')
+        const raw = document as Partial<DrawingDocument>
+        const strokes = safeInkStrokes(raw.strokes, initialColorRef.current)
+        const loadedSections = deserializeSections<InkStroke>(raw.sections, (value) => safeInkStrokes(value, initialColorRef.current, { clampToSheet: false }))
+        const history = decodeInkHistory(strokes, raw.inkHistory, (entry) => {
+          const parsed = safeInkStrokes([entry], initialColorRef.current)
+          return parsed.length === 1 ? parsed[0] : null
+        })
+        applyLoaded(raw, strokes, loadedSections, history)
+      } catch {
+        failLoad()
+      }
+      return
+    }
+    // A packed page restores a few thousand points per frame. The pen stays
+    // off until that model and its first paint exist, so an eraser cannot
+    // land on a half-loaded stroke.
+    inkReadyRef.current = false
+    inkHydratingRef.current = true
+    const columns = packedInk
+    const yieldFrame = () => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve())
+    })
+    const readChunk = async (list: unknown, clampToSheet: boolean) => {
+      if (!Array.isArray(list)) return [] as InkStroke[]
+      const out: InkStroke[] = []
+      let points = 0
+      let started = performance.now()
+      let finished = 0
+      for (const entry of list) {
+        if (cancelled || token !== inkOpenTokenRef.current) return out
+        const safe = safeInkStrokes([expandPackedStroke(entry, columns)], initialColorRef.current, { clampToSheet })
+        for (const stroke of safe) {
+          out.push(stroke)
+          points += stroke.points.length
+        }
+        finished += 1
+        if (points >= 4000 || !frameBudgetOpen(started, performance.now(), finished)) {
+          await yieldFrame()
+          points = 0
+          started = performance.now()
+          finished = 0
+        }
+      }
+      return out
+    }
+    const expandHidden = async (value: unknown): Promise<void> => {
+      if (!Array.isArray(value)) return
+      for (const entry of value) {
+        if (cancelled || token !== inkOpenTokenRef.current) return
+        if (!entry || typeof entry !== 'object') continue
+        const section = entry as { collapsed?: unknown; hidden?: { strokes?: unknown; sections?: unknown } }
+        if (section.collapsed !== true || !section.hidden || typeof section.hidden !== 'object') continue
+        section.hidden.strokes = await readChunk(section.hidden.strokes, false)
+        await expandHidden(section.hidden.sections)
+      }
+    }
+    void (async () => {
+      try {
+        const document: unknown = JSON.parse(initialDrawingJson)
+        if (!document || typeof document !== 'object') throw new Error('Kein Zeichnungsobjekt')
+        const raw = document as Partial<DrawingDocument>
+        const strokes = await readChunk(raw.strokes, true)
+        if (cancelled || token !== inkOpenTokenRef.current) return
+        await expandHidden(raw.sections)
+        if (cancelled || token !== inkOpenTokenRef.current) return
+        const loadedSections = deserializeSections<InkStroke>(raw.sections, (value) => (
+          Array.isArray(value) ? value as InkStroke[] : []
+        ))
+        const encoded = raw.inkHistory
+        let history = { undo: [] as InkStroke[][], redo: [] as InkStroke[][] }
+        if (encoded && typeof encoded === 'object' && Array.isArray(encoded.extras)) {
+          const extras = await readChunk(encoded.extras, true)
+          if (cancelled || token !== inkOpenTokenRef.current) return
+          history = extras.length === encoded.extras.length
+            ? decodeInkHistory(strokes, { ...encoded, extras }, (entry) => (
+              entry && typeof entry === 'object' ? entry as InkStroke : null
+            ))
+            : history
+        }
+        applyLoaded(raw, strokes, loadedSections, history)
+      } catch {
+        failLoad()
+      }
+    })()
+    return () => { cancelled = true }
+  }, [bumpInkRevision, clearRecognitionScope, drawingId, initialDrawingJson, packedInk, setDirty, updateHistoryState])
 
   useEffect(() => {
     if (!initialDrawingJson && !mathSolverHistoryRef.current.length) {
@@ -4617,6 +4850,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [inline, inputActive, markPenContact, tool])
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    // A packed page is still restoring strokes or painting its first slice.
+    // An eraser on that partial model would delete ink the pointer never touched.
+    if (!inkReadyRef.current) return
     if (overlayInert(inline, inputActive) || !overlayHitEnabled(inputActive)) return
     if (hitTestChrome(event.clientX, event.clientY)) return
     setArtPanelOpen(false)

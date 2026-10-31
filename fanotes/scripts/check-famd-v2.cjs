@@ -316,10 +316,20 @@ const checkCreate = () => {
 
   const main = readSource('electron/main.cjs')
   const writer = functionBody(main, 'writeFamdCompanionNow')
-  assert.match(writer, /parseFamd\(existingSource\)/)
-  const writerSave = writer.indexOf('serializeFamd(body, payload, famdEncodingForSave(existingSource))')
-  assert.ok(writerSave > 0)
-  assert.equal(writer.slice(0, writerSave).includes('catch'), false)
+  // A heavy rewrite is composed off the UI thread. The merge itself still
+  // reads the file that is already there, and a missing file is the only
+  // error that falls through. Anything else, including a torn note, is thrown.
+  assert.match(writer, /composeFamdCompanion\(/)
+  assert.match(writer, /if \(error\?\.code !== 'ENOENT'\) throw error/)
+  const codec = readSource('electron/famd.cjs')
+  const composeStart = codec.indexOf('function composeFamdCompanion')
+  assert.ok(composeStart >= 0)
+  const composeEnd = codec.indexOf('\nfunction ', composeStart + 10)
+  const compose = codec.slice(composeStart, composeEnd === -1 ? codec.length : composeEnd)
+  assert.match(compose, /parseFamd\(existingSource\)/)
+  const composeSave = compose.indexOf('serializeFamd(body, payload, v2codec.famdEncodingForSave(existingSource))')
+  assert.ok(composeSave > 0)
+  assert.equal(compose.slice(0, composeSave).includes('catch'), false)
   const mutator = functionBody(main, 'mutateFamdCompanion')
   const mutatorSave = mutator.indexOf('serializeFamd(nextBody, nextPayload, famdEncodingForSave(existingSource))')
   assert.ok(mutatorSave > 0)

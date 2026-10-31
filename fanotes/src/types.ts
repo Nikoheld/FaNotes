@@ -357,8 +357,18 @@ export type DrawingLibraryItem = {
   dataRelativePath: string
 }
 
+/**
+ * Samples for a heavy page. The drawing JSON only names each stroke;
+ * coordinates live in this column so opening does not build one object per point.
+ */
+export type PackedInk = {
+  stride: number
+  columns: ArrayLike<number>
+}
+
 export type DrawingLibraryDocument = DrawingLibraryItem & {
   drawingJson: string
+  packedInk?: PackedInk | null
 }
 
 export type WorksheetTextBox = {

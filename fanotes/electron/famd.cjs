@@ -4,6 +4,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const crypto = require('node:crypto')
 const v2codec = require('./famdV2.mjs')
+const famdPack = require('./famdPack.mjs')
 
 const FAMD_SCHEMA = 'fanotes-famd-v1'
 const FAMD_HEADER = /(?:^|\n)<!--\s*fanotes-famd:v1\s+chars=(\d+)\s*-->\n/u
@@ -278,6 +279,10 @@ function parseFamd(source) {
  */
 function readFamdCompanion(source) {
   const parsed = parseFamd(source)
+  return companionFromParsed(parsed)
+}
+
+function companionFromParsed(parsed) {
   const payload = parsed.payload
   const ink = payload?.ink ?? null
   const inkStyle = ink && isPaperStyle(ink.paperStyle) ? ink.paperStyle : null
@@ -291,6 +296,51 @@ function readFamdCompanion(source) {
     noteBackups: payload?.noteBackups ?? [],
     textFields: payload?.textFields ?? [],
   }
+}
+
+/**
+ * One companion read for the window.
+ * A heavy page keeps samples in columns and leaves the main thread free.
+ * A short page stays the ordinary unpacked document.
+ */
+function openFamdFile(source) {
+  const markdown = stripFamdPayload(source)
+  if (v2codec.isActiveV2(source)) {
+    const raw = v2codec.readV2Payload(source, { unpack: false })
+    const companion = companionFromParsed({ markdown, payload: payloadFromParsed(raw) })
+    const packed = famdPack.packInk(companion.ink)
+    if (!packed) return { ...readFamdCompanion(source), packedInk: null }
+    return { ...companion, ink: packed.slim, packedInk: packed.packedInk }
+  }
+  const companion = readFamdCompanion(source)
+  const packed = famdPack.packInk(companion.ink)
+  if (!packed) return { ...companion, packedInk: null }
+  return { ...companion, ink: packed.slim, packedInk: packed.packedInk }
+}
+
+/**
+ * The text a companion write stores. `ink === undefined` keeps the ink already
+ * in the file. Callers that already hold a large file run this off the UI thread.
+ */
+function composeFamdCompanion(existingSource, markdown, ink, settingsPaperStyle) {
+  const existing = existingSource ? parseFamd(existingSource) : { markdown: '', payload: emptyFamdPayload() }
+  const incoming = parseFamd(typeof markdown === 'string' ? markdown : '')
+  const body = incoming.markdown || stripFamdPayload(typeof markdown === 'string' ? markdown : '')
+  const existingPayload = existing.payload || emptyFamdPayload()
+  const inkDocument = ink === undefined ? existingPayload.ink : ink
+  const paperFromInk = inkDocument && typeof inkDocument === 'object' && isPaperStyle(inkDocument.paperStyle)
+    ? inkDocument.paperStyle
+    : undefined
+  const payload = {
+    ...existingPayload,
+    ...(incoming.payload || {}),
+    updatedAt: new Date().toISOString(),
+    worksheets: worksheetIdsFromMarkdown(body),
+    ink: inkDocument ?? null,
+    paperStyle: existingPayload.paperStyle || incoming.payload?.paperStyle || paperFromInk || (isPaperStyle(settingsPaperStyle) ? settingsPaperStyle : undefined),
+    ...(incoming.payload?.pageStats ? { pageStats: incoming.payload.pageStats } : {}),
+  }
+  return serializeFamd(body, payload, v2codec.famdEncodingForSave(existingSource))
 }
 
 function serializeFamd(markdown, payload, encoding) {
@@ -490,7 +540,10 @@ module.exports = {
   convertFamdDirectory,
   convertFamdSource,
   createNoteCompanion,
+  FAMD_ASYNC_CHARS: famdPack.FAMD_ASYNC_CHARS,
+  composeFamdCompanion,
   famdEncodingForSave: v2codec.famdEncodingForSave,
+  openFamdFile,
   parseFamd,
   readFamdCompanion,
   parseNoteBackups,

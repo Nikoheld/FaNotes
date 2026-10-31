@@ -46,6 +46,8 @@ const {
   isPaperStyle,
   isPdfNoteExtension,
   noteStem,
+  FAMD_ASYNC_CHARS,
+  composeFamdCompanion,
   convertFamdDirectory,
   famdEncodingForSave,
   parseFamd,
@@ -57,6 +59,7 @@ const {
   stripFamdPayload,
   worksheetIdsFromMarkdown,
 } = require('./famd.cjs')
+const { composeFile: composeFamdOffThread, openFile: openFamdOffThread } = require('./famdOpenPool.cjs')
 const { parseSubjectBooks } = require('./subject-book.cjs')
 const { createAddonStore, registerAddonIpc } = require('./addons.cjs')
 const { createSyncHost, registerSyncIpc } = require('./sync.cjs')
@@ -1635,9 +1638,12 @@ async function loadFamdCompanion(notePath) {
     const cacheKey = `${famdRelative}\0${info.mtimeMs}\0${info.size}`
     const cached = famdCompanionCache.get(cacheKey)
     if (cached && (famdCompanionGeneration.get(famdRelative) || 0) === generation) return cached
-    const source = await readOptionalNoteFile(famdRelative)
-    if (!source) return null
-    const parsed = readFamdCompanion(source)
+    // A medium page and above is parsed on a worker. The window stays usable
+    // while samples are turned into columns instead of one object per point.
+    const parsed = info.size >= FAMD_ASYNC_CHARS
+      ? await openFamdOffThread(target, MAX_FAMD_BYTES)
+      : await readOptionalNoteFile(famdRelative).then((source) => (source ? readFamdCompanion(source) : null))
+    if (!parsed) return null
     if ((famdCompanionGeneration.get(famdRelative) || 0) !== generation) return parsed
     for (const key of [...famdCompanionCache.keys()]) {
       if (key.startsWith(`${famdRelative}\0`) && key !== cacheKey) famdCompanionCache.delete(key)
@@ -1659,9 +1665,22 @@ async function loadFamdCompanion(notePath) {
 }
 
 function readCompanionInkDocument(loaded, famdRelative, markerHint) {
-  const accepted = acceptDrawingDocument(loaded.ink)
-  const document = accepted.value
-  const drawingJson = accepted.drawingJson
+  const packedInk = loaded.packedInk?.columns ? loaded.packedInk : null
+  let document
+  let drawingJson
+  if (packedInk) {
+    // Stroke samples stay in the columns. The JSON only names each stroke,
+    // so this string stays small even when the page has hundreds of thousands of points.
+    drawingJson = JSON.stringify(loaded.ink)
+    if (Buffer.byteLength(drawingJson, 'utf8') > MAX_DRAWING_JSON_BYTES) {
+      throw new Error('Die Zeichnungsdaten sind ungültig oder zu groß.')
+    }
+    document = loaded.ink
+  } else {
+    const accepted = acceptDrawingDocument(loaded.ink)
+    document = accepted.value
+    drawingJson = accepted.drawingJson
+  }
   const parsed = { markdown: loaded.markdown, payload: loaded }
   const markerId = arguments.length >= 3 ? markerHint : noteInkMarkerId(parsed.markdown)
   let metadata
@@ -1676,11 +1695,13 @@ function readCompanionInkDocument(loaded, famdRelative, markerHint) {
       imageRelativePath: '',
       dataRelativePath: famdRelative,
       drawingJson,
+      ...(packedInk ? { packedInk } : {}),
     }
   }
   return {
     ...metadata,
     drawingJson,
+    ...(packedInk ? { packedInk } : {}),
     dataRelativePath: famdRelative,
   }
 }
@@ -1769,25 +1790,26 @@ async function writeFamdCompanionNow(markdownRelativePath, famdRelativePath, tar
   const extension = path.extname(markdownRelativePath).toLocaleLowerCase('en-US')
   const mdRelativePath = companionNotePath(markdownRelativePath, '.md')
   await snapshotNoteHistory(extension === '.famd' ? famdRelativePath : mdRelativePath)
-  const existingSource = await readOptionalNoteFile(famdRelativePath)
-  const existing = existingSource ? parseFamd(existingSource) : { markdown: '', payload: emptyFamdPayload() }
-  const incoming = parseFamd(typeof markdown === 'string' ? markdown : '')
-  const body = incoming.markdown || stripFamdPayload(markdown)
-  const existingPayload = existing.payload || emptyFamdPayload()
-  const inkDocument = ink === undefined ? existingPayload.ink : ink
-  const paperFromInk = inkDocument && typeof inkDocument === 'object' && isPaperStyle(inkDocument.paperStyle)
-    ? inkDocument.paperStyle
-    : undefined
-  const payload = {
-    ...existingPayload,
-    ...(incoming.payload || {}),
-    updatedAt: new Date().toISOString(),
-    worksheets: worksheetIdsFromMarkdown(body),
-    ink: inkDocument ?? null,
-    paperStyle: existingPayload.paperStyle || incoming.payload?.paperStyle || paperFromInk || (isPaperStyle(currentSettings.paperStyle) ? currentSettings.paperStyle : undefined),
-    ...(incoming.payload?.pageStats ? { pageStats: incoming.payload.pageStats } : {}),
+  let text = null
+  // Rewriting a heavy companion (a statistics tick, a text save) used to unpack
+  // every sample on the main thread and freeze the window. The worker reads
+  // the file and returns the next text. An ink save still carries the new
+  // strokes, so it stays here where that object already is.
+  if (ink === undefined) {
+    try {
+      const info = await statRegularFileNoFollow(target, MAX_FAMD_BYTES)
+      if (info.size >= FAMD_ASYNC_CHARS) {
+        text = await composeFamdOffThread(target, typeof markdown === 'string' ? markdown : '', currentSettings.paperStyle, MAX_FAMD_BYTES)
+      }
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+    }
   }
-  await atomicWrite(target, serializeFamd(body, payload, famdEncodingForSave(existingSource)), { encoding: 'utf8', mode: 0o600 })
+  if (text == null) {
+    text = composeFamdCompanion(await readOptionalNoteFile(famdRelativePath), markdown, ink, currentSettings.paperStyle)
+  }
+  const body = stripFamdPayload(text)
+  await atomicWrite(target, text, { encoding: 'utf8', mode: 0o600 })
   if (extension === '.famd') {
     const mdTarget = (await resolveVaultPath(mdRelativePath, { allowMissing: true, expected: 'file' })).target
     const mdExists = await fsp.lstat(mdTarget).then((info) => info.isFile() && !info.isSymbolicLink()).catch(() => false)
