@@ -119,6 +119,7 @@ import {
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
 import { createMarkerCoverage, drawInkStroke as paintInkStroke, inkStrokeIsTranslucent, inkStrokePaintMargin, shiftMarkerCoverage, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
+import { liveTranslucentCanGrow, paintGrowingTranslucentStroke, type LiveTranslucentSession } from '../lib/liveTranslucentInk'
 import { MATH_FIGURES, FIGURE_LINE_MAX, FIGURE_LINE_MIN, FIGURE_LINE_STEP, clampFigureLineWidth, clampFigureParams, defaultFigureParams, figureLineWidthForSize, isMathFigureId, mathFigurePaths, type MathFigureGroup, type MathFigureId, type MathFigureParam } from '../lib/mathFigures'
 import {
   DEFAULT_GRAPH_EXPRESSION,
@@ -1466,6 +1467,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   // Point count and prediction presence of the last live paint: an input
   // event that added nothing (all samples filtered) needs no repaint.
   const liveTailRef = useRef<{ count: number; predicted: boolean }>({ count: 0, predicted: false })
+  // Opaque coverage of the open see-through stroke. New samples append; the
+  // visible layer is not stroked from the first point again.
+  const liveTranslucentRef = useRef<LiveTranslucentSession | null>(null)
   const lastPenContactRef = useRef(0)
   const tabletPanRef = useRef<{
     pointerId: number
@@ -1945,9 +1949,39 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       coverageOrigin: { x: paintLeft, y: paintTop - topPx },
     } : undefined
     if (!stroke.symbolId && !stroke.figureId && inkStrokeIsTranslucent(stroke)) {
-      // A see-through brush is composited once per paint (inkStrokePaint), so
-      // the live layer repaints the whole stroke each frame. Appending a tail
-      // would cover the joint twice and band the marker at every sample.
+      const paintStroke = { ...stroke, symbolPaths: placedSymbolPaths(stroke) }
+      if (liveTranslucentCanGrow(paintStroke)) {
+        // Append the new segments onto one opaque coverage and tint that box
+        // once. Restroke-the-whole-stroke made a long marker hitch, and a
+        // per-segment alpha composite left a dark band at every joint.
+        const grown = paintGrowingTranslucentStroke({
+          session: rendered === 0 ? null : liveTranslucentRef.current,
+          target: { context, width: liveWidth, height: liveHeight },
+          stroke: paintStroke,
+          pageWidth: pixelWidth,
+          pageHeight: virtualHeight,
+          smoothing,
+          sourceWidth: sourceWidthNow,
+          layoutWidth,
+          originX: -paintLeft,
+          originY: -paintTop,
+          replace: rendered === 0 || liveTranslucentRef.current === null,
+          settle: false,
+          previewPoints,
+          options: liveInkOptions,
+        })
+        liveTranslucentRef.current = grown.session
+        liveVolatileRectRef.current = null
+        const shown = previewPoints.length
+          ? [...stroke.points, ...previewPoints]
+          : stroke.points
+        remember(liveInkSegmentBox(shown, 0, shown.length - 1, pixelWidth, virtualHeight, margin))
+        activeRenderedPointCountRef.current = Math.max(1, stroke.points.length)
+        liveCanvasHasInkRef.current = true
+        return true
+      }
+      // Spray and calligraphy have no single coverage pass. Repaint those whole.
+      liveTranslucentRef.current = null
       context.setTransform(1, 0, 0, 1, 0, 0)
       if (liveCanvasHasInkRef.current) {
         const bounds = rendered === 0 ? null : liveInkBoundsRef.current
@@ -2039,6 +2073,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     liveInkBoundsRef.current = null
     liveVolatileRectRef.current = null
     liveCanvasHasInkRef.current = false
+    liveTranslucentRef.current = null
   }, [])
 
   /** Brings the Rust page up to date. Strokes that did not change keep their tiles. */
