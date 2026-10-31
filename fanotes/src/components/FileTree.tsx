@@ -65,8 +65,8 @@ export type FileTreeProps = {
   onDuplicate?: (relativePath: string) => MaybePromise
   onCopyWikiLink?: (relativePath: string) => MaybePromise
   onCopyPath?: (relativePath: string) => MaybePromise
-  /** Upload this note, or every note in this folder, as a frozen copy or a live link. */
-  onShare?: (relativePath: string, mode: 'copy' | 'live') => MaybePromise
+  /** Upload this note, or every note in this folder, as a frozen copy, a live link, or an editable share. */
+  onShare?: (relativePath: string, mode: 'copy' | 'live' | 'edit') => MaybePromise
   confirmTrash?: (message: string) => Promise<boolean>
   className?: string
   rootLabel?: string
@@ -1060,6 +1060,22 @@ export const FileTree = memo(function FileTree({
                 <span>
                   <strong>Live</strong>
                   <small>Eine Live-Freigabe zeigt spätere Änderungen.</small>
+                </span>
+              </button>
+              <button
+                className="file-tree__share-choice"
+                onClick={() => {
+                  const path = contextMenu.entry.relativePath
+                  setContextMenu(null)
+                  void Promise.resolve(onShare(path, 'edit'))
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <Share2 aria-hidden="true" size={15} />
+                <span>
+                  <strong>Gemeinsam</strong>
+                  <small>Andere können diese Freigabe gleichzeitig bearbeiten.</small>
                 </span>
               </button>
               <span className="file-tree__menu-separator" role="separator" />

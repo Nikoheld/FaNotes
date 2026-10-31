@@ -239,6 +239,7 @@ const IPC = Object.freeze({
   revealInFolder: 'fanotes:reveal-in-folder',
   openExternal: 'fanotes:open-external',
   beforeClose: 'fanotes:before-close',
+  shareOpen: 'fanotes:share-open',
   confirmClose: 'fanotes:confirm-close',
   cancelClose: 'fanotes:cancel-close',
   requestClose: 'fanotes:request-close',
@@ -3111,6 +3112,7 @@ function registerIpcHandlers() {
   ipcMain.on(IPC.rendererReady, (event) => {
     if (!isTrustedIpcSender(event)) return
     schedulePostStartupWork()
+    deliverShareOpen()
   })
 
   handle(IPC.completeOnboarding, async (_event, rawSelection) => {
@@ -5092,6 +5094,21 @@ async function createWindow() {
   else await mainWindow.loadURL(pathToFileURL(rendererFilePath()).href)
 }
 
+let pendingShareOpenId = ''
+
+const shareOpenIdFromArgv = (argv) => {
+  const joined = Array.isArray(argv) ? argv.join(' ') : ''
+  const match = /fanotes:\/\/share\/([a-f0-9]{32})/iu.exec(joined)
+  return match ? match[1].toLowerCase() : ''
+}
+
+const deliverShareOpen = () => {
+  if (!pendingShareOpenId || !mainWindow || mainWindow.isDestroyed()) return
+  const id = pendingShareOpenId
+  pendingShareOpenId = ''
+  mainWindow.webContents.send(IPC.shareOpen, id)
+}
+
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
@@ -5102,14 +5119,27 @@ if (!app.requestSingleInstanceLock()) {
     startupPreparationError = error
   })
 
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, argv) => {
+    const id = shareOpenIdFromArgv(argv)
+    if (id) pendingShareOpenId = id
     if (!mainWindow) return
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.show()
     mainWindow.focus()
+    deliverShareOpen()
+  })
+
+  app.on('open-url', (event, url) => {
+    event.preventDefault()
+    const id = shareOpenIdFromArgv([url])
+    if (!id) return
+    pendingShareOpenId = id
+    deliverShareOpen()
   })
 
   app.whenReady().then(async () => {
+    pendingShareOpenId = pendingShareOpenId || shareOpenIdFromArgv(process.argv)
+    try { app.setAsDefaultProtocolClient('fanotes') } catch { /* the installed package registers the protocol on release */ }
     installModelProtocol()
     installSecurityPolicy()
     registerIpcHandlers()

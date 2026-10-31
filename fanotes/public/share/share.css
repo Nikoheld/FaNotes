@@ -113,3 +113,21 @@ h2 { font-size: 1.15rem; margin: 0 0 0.4rem; }
 }
 .share-field { position: absolute; z-index: 4; box-sizing: border-box; padding: 4px 6px; white-space: pre-wrap; color: #20222b; background: rgba(255, 255, 255, .88); border: 1px solid rgba(45, 48, 60, .18); border-radius: 6px; font-family: system-ui, sans-serif; }
 .share-stopped, .share-missing, .share-loading, .share-ink-missing { color: #5c5c5c; font-family: system-ui, sans-serif; }
+.share-choice { display: grid; gap: 0.75rem; max-width: 36rem; font-family: system-ui, sans-serif; }
+.share-choice h1 { font-size: 1.35rem; }
+.share-choice-button, a.share-choice-button {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid rgba(42, 111, 151, .35);
+  border-radius: 10px;
+  background: #fff;
+  color: #1c1c1c;
+  font: 600 1rem/1.35 system-ui, sans-serif;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.share-choice-button:hover, a.share-choice-button:hover { border-color: #2a6f97; }

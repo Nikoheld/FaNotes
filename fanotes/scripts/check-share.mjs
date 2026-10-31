@@ -17,9 +17,11 @@ const appRoot = fileURLToPath(new URL('..', import.meta.url))
 const viewerPath = fileURLToPath(new URL('../public/share/index.html', import.meta.url))
 const viewerScriptPath = fileURLToPath(new URL('../public/share/share.js', import.meta.url))
 const viewerStylePath = fileURLToPath(new URL('../public/share/share.css', import.meta.url))
+const viewerLinkPath = fileURLToPath(new URL('../public/share/share-link.js', import.meta.url))
 const viewerHtml = readFileSync(viewerPath, 'utf8')
 const viewerScript = readFileSync(viewerScriptPath, 'utf8')
 const viewerStyle = readFileSync(viewerStylePath, 'utf8')
+const viewerLink = readFileSync(viewerLinkPath, 'utf8')
 const scratch = process.env.FANOTES_SHARE_SCRATCH || ''
 const writeScratch = (name, text) => {
   if (scratch) writeFileSync(join(scratch, name), text)
@@ -53,9 +55,11 @@ const nginxSource = readFileSync(join(siteRoot, 'deploy', 'fanotes-fasrv.conf'),
 assert.equal(readFileSync(siteViewerPath, 'utf8'), viewerHtml, 'the site must serve the shipped share viewer')
 assert.equal(readFileSync(join(siteRoot, 'public', 'share', 'share.js'), 'utf8'), viewerScript)
 assert.equal(readFileSync(join(siteRoot, 'public', 'share', 'share.css'), 'utf8'), viewerStyle)
+assert.equal(readFileSync(join(siteRoot, 'public', 'share', 'share-link.js'), 'utf8'), viewerLink)
 assert.doesNotMatch(viewerHtml, /<style[\s>]/u)
-assert.match(viewerHtml, /<script src="share\.js\?v=3"><\/script>/u)
-assert.match(viewerHtml, /href="share\.css\?v=3"/u)
+assert.match(viewerHtml, /<script src="share\.js\?v=4"><\/script>/u)
+assert.match(viewerHtml, /href="share\.css\?v=4"/u)
+assert.match(viewerHtml, /<script src="share-link\.js\?v=4"><\/script>/u)
 assert.match(viewerScript, /share-note-title/u)
 assert.match(viewerScript, /share-prose/u)
 assert.match(viewerScript, /share-ink/u)
@@ -73,16 +77,30 @@ const appSource = readFileSync(join(appRoot, 'src/App.tsx'), 'utf8')
 assert.match(treeSource, /file-tree__menu-label">Teilen/u)
 assert.match(treeSource, /onShare\(path, 'copy'\)/u)
 assert.match(treeSource, /onShare\(path, 'live'\)/u)
+assert.match(treeSource, /onShare\(path, 'edit'\)/u)
 assert.match(treeSource, /Eine Kopie bleibt so, wie sie hochgeladen wurde\./u)
 assert.match(treeSource, /Eine Live-Freigabe zeigt spätere Änderungen\./u)
+assert.match(treeSource, /Andere können diese Freigabe gleichzeitig bearbeiten\./u)
 const shareMenu = appSource.slice(appSource.indexOf('const shareVaultEntry'), appSource.indexOf('if (!shareLinkDialog)'))
-assert.match(shareMenu, /mode: 'copy' \| 'live'/u)
-assert.match(shareMenu, /const shareMode = mode === 'live' \? 'live' : 'copy'/u)
+assert.match(shareMenu, /mode: 'copy' \| 'live' \| 'edit'/u)
+assert.match(shareMenu, /const shareMode = mode === 'live' \? 'live' : mode === 'edit' \? 'edit' : 'copy'/u)
 assert.doesNotMatch(shareMenu, /settingsRef\.current\.shareMode/u)
 assert.match(treeSource, /contextMenu\.entry\.kind === 'folder' \|\| !isPdfEntry\(contextMenu\.entry\)/u)
 assert.match(appSource, /onShare=\{shareVaultEntry\}/u)
 assert.match(appSource, /publishShare\(\{/u)
 assert.match(appSource, /collectShareNotes\(entries, relativePath\)/u)
+assert.match(appSource, /beginDesktopShareOpen\(/u)
+assert.match(appSource, /confirmShareIdentity\(/u)
+assert.match(appSource, /claimUsername\(/u)
+assert.match(viewerScript, /FANOTES_SHARE_LINK/u)
+assert.match(viewerScript, /__fanotesShareDownload/u)
+assert.match(viewerLink, /Im Browser ansehen oder in der Desktop-App bearbeiten\?/u)
+assert.match(viewerLink, /Installer herunterladen oder ist FaNotes schon installiert\?/u)
+assert.match(viewerLink, /Öffne die Datei jetzt in FaNotes\./u)
+assert.match(viewerLink, /\/download\/windows-installer/u)
+assert.match(viewerLink, /\/download\/appimage/u)
+const electronMain = readFileSync(join(appRoot, 'electron/main.cjs'), 'utf8')
+assert.match(electronMain, /fanotes:\\\/\\\/share\\\/\(\[a-f0-9\]\{32\}\)/u)
 const shareRoute = serverSource.indexOf('handleShareRequest(request, response, url)')
 const getGuard = serverSource.indexOf('Nur GET und HEAD sind erlaubt.')
 assert.ok(shareRoute >= 0 && getGuard >= 0 && shareRoute < getGuard, 'share route must run before the GET/HEAD guard')
@@ -139,6 +157,7 @@ let chromiumProfile = ''
 try {
   await waitForSite()
   const share = await vite.ssrLoadModule('/src/lib/sync/share.ts')
+  const shareEdit = await vite.ssrLoadModule('/src/lib/sync/shareEdit.ts')
   const api = await vite.ssrLoadModule('/src/lib/sync/api.ts')
   const page = await vite.ssrLoadModule('/src/components/ShareSettingsPage.tsx')
   const settingsModule = await vite.ssrLoadModule('/src/components/SettingsModal.tsx')
@@ -464,6 +483,217 @@ try {
   writeScratch('share-settings.log', `${settingsLog}\nshare-settings ok\n`)
   console.log(settingsLog)
 
+  const editable = await share.publishShare({
+    entries: [{ path: 'Blatt.md', kind: 'file', content: '# Blatt\n\nEDITIERBARE ZEILE' }],
+    rootPath: 'Blatt.md',
+    mode: 'edit',
+    port: sharePort,
+    origin,
+  })
+  assert.equal(editable.payload.mode, 'edit')
+  const editableStored = JSON.parse(readFileSync(join(shareDir, `${editable.record.id}.json`), 'utf8'))
+  assert.equal(editableStored.mode, 'edit')
+  assert.deepEqual(editableStored.editors, [])
+  assert.equal(editableStored.revision, 1)
+  const editablePublic = await (await fetch(`${origin}/api/v1/share/${editable.record.id}`)).json()
+  assert.equal(editablePublic.mode, 'edit')
+  assert.equal(Object.hasOwn(editablePublic, 'history'), false)
+  assert.equal(Object.hasOwn(editablePublic, 'present'), false)
+  assert.match(noteText(editablePublic), /EDITIERBARE ZEILE/)
+  const copyAfterEdit = await share.readShare({ id: copy.record.id, port: sharePort, origin })
+  const liveAfterEdit = await share.readShare({ id: live.record.id, port: sharePort, origin })
+  assert.equal(copyAfterEdit.mode, 'copy')
+  assert.equal(liveAfterEdit.mode, 'live')
+  assert.match(noteText(copyAfterEdit), /Erster Satz/)
+  assert.doesNotMatch(noteText(copyAfterEdit), /EDITIERBARE ZEILE/)
+  assert.match(noteText(liveAfterEdit), /Spaeter geaendert/)
+  assert.equal(Object.hasOwn(copyAfterEdit, 'editors'), false)
+  assert.equal(Object.hasOwn(liveAfterEdit, 'editors'), false)
+  await share.refreshLiveShares({
+    entries: [{ path: 'Blatt.md', kind: 'file', content: '# Blatt\n\nLIVE-DARF-NICHT' }],
+    directory: editable.directory,
+    port: sharePort,
+    origin,
+  })
+  const savedEdit = await share.readShare({ id: editable.record.id, port: sharePort, origin })
+  assert.equal(savedEdit.mode, 'edit')
+  assert.match(noteText(savedEdit), /EDITIERBARE ZEILE/)
+  assert.doesNotMatch(noteText(savedEdit), /LIVE-DARF-NICHT/)
+  const folderChoice = shareEdit.beginDesktopShareOpen(savedEdit, ['Schule', 'Privat'])
+  assert.equal(folderChoice.step, 'folder')
+  assert.equal(folderChoice.prompt, shareEdit.SHARE_DESKTOP_PROMPTS.folder)
+  assert.deepEqual(folderChoice.folders, ['Schule', 'Privat'])
+  assert.throws(() => shareEdit.chooseShareFolder(folderChoice, 'Geheim'), /Dieser Ordner gehört nicht zum Vault/u)
+  const named = shareEdit.chooseShareFolder(folderChoice, 'Schule')
+  assert.equal(named.step, 'identity')
+  assert.equal(named.prompt, shareEdit.SHARE_DESKTOP_PROMPTS.identity)
+  assert.equal(named.files[0].relativePath, 'Schule/Blatt.md')
+  assert.equal(named.files[0].sharePath, 'Blatt.md')
+  let nameClaimed = false
+  const namedPerson = await shareEdit.confirmShareIdentity({
+    state: named,
+    choice: { kind: 'name', name: 'Ada Beispiel' },
+    port: sharePort,
+    origin,
+    claim: async () => { nameClaimed = true; return 'should-not-run' },
+  })
+  assert.equal(nameClaimed, false)
+  assert.deepEqual(namedPerson.editors, ['Ada Beispiel'])
+  assert.equal(namedPerson.account, undefined)
+  const sharerList = await share.readShare({ id: editable.record.id, port: sharePort, origin })
+  assert.deepEqual(shareEdit.editorNames(sharerList.editors), ['Ada Beispiel'])
+  await share.publishShare({
+    entries: [{ path: 'Blatt.md', kind: 'file', content: '# Blatt\n\nUEBERSCHRIEBEN' }],
+    rootPath: 'Blatt.md',
+    mode: 'edit',
+    id: editable.record.id,
+    port: sharePort,
+    origin,
+  })
+  const keptEdit = await share.readShare({ id: editable.record.id, port: sharePort, origin })
+  assert.match(noteText(keptEdit), /EDITIERBARE ZEILE/)
+  assert.doesNotMatch(noteText(keptEdit), /UEBERSCHRIEBEN/)
+  assert.deepEqual(shareEdit.editorNames(keptEdit.editors), ['Ada Beispiel'])
+  const accountShare = await share.publishShare({
+    entries: [{ path: 'Konto.md', kind: 'file', content: '# Konto\n\nKontozeile' }],
+    rootPath: 'Konto.md',
+    mode: 'edit',
+    port: sharePort,
+    origin,
+  })
+  const accountSaved = await share.readShare({ id: accountShare.record.id, port: sharePort, origin })
+  const accountFolder = shareEdit.beginDesktopShareOpen(accountSaved, ['Privat'])
+  const accountIdentity = shareEdit.chooseShareFolder(accountFolder, 'Privat')
+  let claimedInput = ''
+  const accountPerson = await shareEdit.confirmShareIdentity({
+    state: accountIdentity,
+    choice: { kind: 'account', name: 'Ada Beispiel' },
+    port: sharePort,
+    origin,
+    claim: async (value) => { claimedInput = value; return 'ada_notes' },
+  })
+  assert.equal(claimedInput, 'Ada Beispiel')
+  assert.equal(accountPerson.name, 'ada_notes')
+  assert.equal(accountPerson.account, 'ada_notes')
+  assert.deepEqual(accountPerson.editors, ['ada_notes'])
+  const accountListed = await share.readShare({ id: accountShare.record.id, port: sharePort, origin })
+  assert.deepEqual(shareEdit.editorNames(accountListed.editors), ['ada_notes'])
+  assert.equal(accountListed.editors.some((editor) => editor.name === 'Ada Beispiel'), false)
+  const identityLog = [
+    `folderPrompt ${folderChoice.prompt}`,
+    `placed ${named.files[0].relativePath}`,
+    `identityPrompt ${named.prompt}`,
+    `typedName ${namedPerson.name}`,
+    `editors ${namedPerson.editors.join('|')}`,
+    `accountClaimInput ${claimedInput}`,
+    `accountName ${accountPerson.name}`,
+    `accountEditors ${accountPerson.editors.join('|')}`,
+  ].join('\n')
+  writeScratch('share-identity.log', `${identityLog}\nshare-identity ok\n`)
+  console.log(identityLog)
+
+  const baseCollab = '# Blatt\n\nAlpha\n\nOmega\n'
+  const collabShare = await share.publishShare({
+    entries: [{
+      path: 'Blatt.md',
+      kind: 'file',
+      content: baseCollab,
+      textFields: [{ page: 1, x: 0.2, y: 0.3, width: 0.4, fontSize: 16, text: 'Startfeld' }],
+    }],
+    rootPath: 'Blatt.md',
+    mode: 'edit',
+    port: sharePort,
+    origin,
+  })
+  const collabSaved = await share.readShare({ id: collabShare.record.id, port: sharePort, origin })
+  const ada = await shareEdit.openShareEditor({ share: collabSaved, name: 'Ada Beispiel', port: sharePort, origin, clientId: 'ada-client' })
+  const bea = await shareEdit.openShareEditor({ share: collabSaved, name: 'Bea Beispiel', port: sharePort, origin, clientId: 'bea-client' })
+  await ada.pull()
+  assert.deepEqual(ada.peopleWhoCanEdit().sort(), ['Ada Beispiel', 'Bea Beispiel'])
+  assert.ok(ada.peopleEditing().includes('Ada Beispiel') && ada.peopleEditing().includes('Bea Beispiel'), `editing ${ada.peopleEditing().join('|')}`)
+  assert.ok(bea.peopleEditing().includes('Ada Beispiel') && bea.peopleEditing().includes('Bea Beispiel'), `editing ${bea.peopleEditing().join('|')}`)
+  const adaSentence = 'Ada schreibt sofort eine eigene Zeile.'
+  await ada.editNote('Blatt.md', { content: `${ada.documentText().replace(/\n$/u, '')}\n${adaSentence}\n` })
+  await bea.pull()
+  assert.match(bea.documentText(), new RegExp(adaSentence, 'u'))
+  const beaSentence = 'Bea schreibt sofort eine eigene Zeile.'
+  await bea.editNote('Blatt.md', { content: `${bea.documentText().replace(/\n$/u, '')}\n${beaSentence}\n` })
+  await ada.pull()
+  assert.match(ada.documentText(), new RegExp(adaSentence, 'u'))
+  assert.match(ada.documentText(), new RegExp(beaSentence, 'u'))
+  assert.match(bea.documentText(), new RegExp(beaSentence, 'u'))
+  await bea.leave()
+  await ada.pull()
+  assert.equal(ada.peopleEditing().includes('Bea Beispiel'), false)
+  assert.ok(ada.peopleEditing().includes('Ada Beispiel'))
+  const field = { page: 1, x: 0.2, y: 0.3, width: 0.4, fontSize: 16, text: 'Feld von Bea' }
+  const stroke = { color: '#112233', width: 2, opacity: 1, points: [{ x: 0.1, y: 0.2 }, { x: 0.4, y: 0.6 }] }
+  const adaInk = { width: 900, height: 1273, strokes: [stroke] }
+  const fresh = await share.publishShare({
+    entries: [{
+      path: 'Blatt.md',
+      kind: 'file',
+      content: baseCollab,
+      textFields: [{ page: 1, x: 0.2, y: 0.3, width: 0.4, fontSize: 16, text: 'Startfeld' }],
+    }],
+    rootPath: 'Blatt.md',
+    mode: 'edit',
+    port: sharePort,
+    origin,
+  })
+  const freshSaved = await share.readShare({ id: fresh.record.id, port: sharePort, origin })
+  const adaTwo = await shareEdit.openShareEditor({ share: freshSaved, name: 'Ada Beispiel', port: sharePort, origin, clientId: 'ada-two' })
+  const beaTwo = await shareEdit.openShareEditor({ share: freshSaved, name: 'Bea Beispiel', port: sharePort, origin, clientId: 'bea-two' })
+  await Promise.all([
+    adaTwo.editNote('Blatt.md', { content: '# Blatt\n\nAlpha von Ada\n\nOmega\n', ink: adaInk }),
+    beaTwo.editNote('Blatt.md', { content: '# Blatt\n\nAlpha\n\nOmega von Bea\n', textFields: [field] }),
+  ])
+  await adaTwo.pull()
+  await beaTwo.pull()
+  assert.match(adaTwo.documentText(), /Alpha von Ada/u)
+  assert.match(adaTwo.documentText(), /Omega von Bea/u)
+  assert.match(beaTwo.documentText(), /Alpha von Ada/u)
+  assert.match(beaTwo.documentText(), /Omega von Bea/u)
+  const mergedRead = await share.readShare({ id: fresh.record.id, port: sharePort, origin })
+  assert.equal(mergedRead.notes[0].ink.strokes.length, 1)
+  assert.equal(mergedRead.notes[0].textFields[0].text, 'Feld von Bea')
+  assert.match(mergedRead.notes[0].content, /Alpha von Ada/u)
+  assert.match(mergedRead.notes[0].content, /Omega von Bea/u)
+  await adaTwo.editNote('Blatt.md', { content: `${adaTwo.documentText().replace(/\n$/u, '')}\nNur Text.\n` })
+  await beaTwo.pull()
+  assert.match(beaTwo.documentText(), /Nur Text\./u)
+  const keptInk = await share.readShare({ id: fresh.record.id, port: sharePort, origin })
+  assert.equal(keptInk.notes[0].ink.strokes.length, 1)
+  await adaTwo.editNote('Blatt.md', { ink: null })
+  await beaTwo.pull()
+  const cleared = await share.readShare({ id: fresh.record.id, port: sharePort, origin })
+  assert.equal(cleared.notes[0].ink, undefined)
+  assert.match(cleared.notes[0].content, /Nur Text\./u)
+  assert.match(cleared.notes[0].content, /Alpha von Ada/u)
+  assert.match(beaTwo.documentText(), /Nur Text\./u)
+  const refused = await sharePort.exchange({
+    method: 'POST',
+    url: `${origin}/api/v1/share/${copy.record.id}/edit`,
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-FaNotes-Share': '1' },
+    body: JSON.stringify({ clientId: 'copy-client', name: 'Ada Beispiel', baseRevision: 1, notes: copy.payload.notes }),
+  })
+  assert.equal(refused.status, 409)
+  const collabLog = [
+    `adaSentence ${adaSentence}`,
+    `beaSawAda ${bea.documentText().includes(adaSentence)}`,
+    `beaSentence ${beaSentence}`,
+    `adaSawBea ${ada.documentText().includes(beaSentence)}`,
+    `editingAfterLeave ${ada.peopleEditing().join('|')}`,
+    `merged ${adaTwo.documentText().replace(/\n/gu, ' | ')}`,
+    `strokes ${mergedRead.notes[0].ink.strokes.length}`,
+    `textKeepsStroke ${keptInk.notes[0].ink.strokes.length}`,
+    `clearedInk ${cleared.notes[0].ink === undefined}`,
+    `field ${mergedRead.notes[0].textFields[0].text}`,
+    `copyEditStatus ${refused.status}`,
+  ].join('\n')
+  writeScratch('share-collab.log', `${collabLog}\nshare-collab ok\n`)
+  console.log(collabLog)
+
   const viewed = await openViewer(note.record.link, 'Guten Tag aus der Notiz')
   if (viewed.launched) {
     assert.equal(viewed.errors.length, 0, `page errors: ${viewed.errors.join(' | ')}`)
@@ -505,6 +735,55 @@ try {
     assert.match(folderView.text, /Verschachtelte Uebung/)
     assert.doesNotMatch(folderView.text, /NICHT-TEILEN-AUSSEN/)
     assert.doesNotMatch(folderView.text, /AUSSEN-NOTIZ/)
+    viewed.errors.length = 0
+    await viewed.cdp.send('Page.navigate', { url: editable.record.link })
+    const editQuestion = 'Im Browser ansehen oder in der Desktop-App bearbeiten?'
+    let editText = await waitForText(viewed.cdp, editQuestion)
+    assert.equal(viewed.errors.length, 0, `edit page errors: ${viewed.errors.join(' | ')}`)
+    assert.match(editText, /Im Browser ansehen/u)
+    assert.match(editText, /In der Desktop-App bearbeiten/u)
+    assert.doesNotMatch(editText, /EDITIERBARE ZEILE/u)
+    viewed.errors.length = 0
+    await viewed.cdp.send('Page.navigate', { url: editable.record.link })
+    editText = await waitForText(viewed.cdp, editQuestion)
+    assert.equal(viewed.errors.length, 0, `edit reload errors: ${viewed.errors.join(' | ')}`)
+    assert.equal(editText.includes(editQuestion), true)
+    assert.doesNotMatch(editText, /EDITIERBARE ZEILE/u)
+    await viewed.cdp.evaluate(`document.querySelector('[data-share-choice="desktop"]').click()`)
+    const installQuestion = 'Installer herunterladen oder ist FaNotes schon installiert?'
+    editText = await waitForText(viewed.cdp, installQuestion)
+    assert.match(editText, /Installer herunterladen/u)
+    assert.match(editText, /FaNotes ist schon installiert/u)
+    const installedHref = await viewed.cdp.evaluate(`document.querySelector('[data-share-choice="installed"]').getAttribute('href')`)
+    assert.equal(installedHref, `fanotes://share/${editable.record.id}`)
+    assert.equal(shareEdit.parseShareProtocol(installedHref), editable.record.id)
+    const installedPayload = await share.readShare({ id: editable.record.id, port: sharePort, origin })
+    const installedFolder = shareEdit.beginDesktopShareOpen(installedPayload, ['Schule', 'Privat'])
+    assert.equal(installedFolder.step, 'folder')
+    assert.equal(installedFolder.prompt, 'In welchem Ordner soll die geteilte Datei liegen?')
+    assert.equal(installedFolder.share.id, editable.record.id)
+    await viewed.cdp.evaluate(`document.querySelector('[data-share-choice="download"]').click()`)
+    const again = 'Öffne die Datei jetzt in FaNotes.'
+    editText = await waitForText(viewed.cdp, again)
+    const downloadHref = await viewed.cdp.evaluate('window.__fanotesShareDownload')
+    assert.equal(downloadHref, '/download/appimage')
+    const openHref = await viewed.cdp.evaluate(`document.querySelector('[data-share-choice="open"]').getAttribute('href')`)
+    assert.equal(openHref, `fanotes://share/${editable.record.id}`)
+    assert.equal(viewed.errors.length, 0, `edit choice errors: ${viewed.errors.join(' | ')}`)
+    const pageLaunch = [
+      `errors 0`,
+      `question ${editQuestion}`,
+      `reload ${editQuestion}`,
+      `install ${installQuestion}`,
+      `installed ${installedHref}`,
+      `folder ${installedFolder.prompt}`,
+      `download ${downloadHref}`,
+      `again ${again}`,
+    ].join('\n')
+    writeScratch('share-page-launch.log', `${pageLaunch}\nshare-page-launch ok\n`)
+    console.log(pageLaunch)
+  } else {
+    writeScratch('share-page-launch.log', 'launch failed\n')
   }
 
   const stopped = await page.shareStopControl({ id: note.record.id, port: sharePort, origin, directory: note.directory })

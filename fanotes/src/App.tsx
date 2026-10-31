@@ -215,7 +215,9 @@ import { installChromeTextSelect } from './lib/chromeTextSelect'
 import { drawingSessionFromLoad, INK_OVERLAY_CRASH_TITLE, INK_TOOLBAR_SLOT_ID, overlayAfterNoteSwitch, PDF_TOOLBAR_SLOT_ID, penModeToolbarSlot } from './lib/pdfInkHit'
 import { APP_VERSION } from './lib/appVersion'
 import { defaultSettingsForPlatform } from './defaults'
-import { collectShareNotes, createFetchSharePort, loadShareEntries, parseShareDirectory, publishShare, queueLiveShareRefresh, resolveShareOrigin, serializeShareDirectory } from './lib/sync/share'
+import { collectShareNotes, createFetchSharePort, loadShareEntries, parseShareDirectory, publicShareInk, publicShareTextFields, publishShare, queueLiveShareRefresh, readShare, resolveShareOrigin, serializeShareDirectory } from './lib/sync/share'
+import { beginDesktopShareOpen, chooseShareFolder, confirmShareIdentity, openShareEditor, parseShareProtocol, type ShareEditClient, type ShareOpenState } from './lib/sync/shareEdit'
+import { claimUsername, createFetchProfilePort, createProfileOwnerId, ProfileRequestError } from './lib/sync/profile'
 import { PaperStylePicker } from './components/PaperStylePicker'
 import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
@@ -792,9 +794,15 @@ export default function App({ startupBootstrap }: AppProps) {
   const syncState = useSyncExternalStore(syncEngine.subscribe, syncEngine.getState, syncEngine.getState)
   const syncApi = window.fanotes?.sync ?? null
   const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined)
-  const [shareLinkDialog, setShareLinkDialog] = useState<{ link: string; mode: 'copy' | 'live' } | null>(null)
+  const [shareLinkDialog, setShareLinkDialog] = useState<{ link: string; mode: 'copy' | 'live' | 'edit' } | null>(null)
   const shareLinkInputRef = useRef<HTMLInputElement>(null)
   const shareInFlight = useRef(false)
+  const shareEditRef = useRef<ShareEditClient | null>(null)
+  const shareEditApplyingRef = useRef(false)
+  const [sharePeople, setSharePeople] = useState<{ editors: string[]; present: string[] } | null>(null)
+  const [shareJoin, setShareJoin] = useState<ShareOpenState | null>(null)
+  const [shareNameDraft, setShareNameDraft] = useState('')
+  const [shareSessionToken, setShareSessionToken] = useState(0)
   const addonNoteChangedRef = useRef<((path: string, content: string) => void) | null>(null)
   const [confirmRequest, setConfirmRequest] = useState<{
     message: string
@@ -1923,6 +1931,17 @@ export default function App({ startupBootstrap }: AppProps) {
     await restoreWorkspace(data.vaultPath, initialTree)
   }, [openNote, restoreWorkspace])
 
+  const pushEditableShare = useCallback((path: string, patch: Parameters<ShareEditClient['editNote']>[1]) => {
+    const liveEdit = shareEditRef.current
+    if (!liveEdit || shareEditApplyingRef.current || !liveEdit.owns(path)) return
+    const sharePath = liveEdit.sharePathFor(path)
+    if (!sharePath) return
+    void liveEdit.editNote(sharePath, patch).then(() => {
+      if (shareEditRef.current !== liveEdit) return
+      setSharePeople({ editors: liveEdit.peopleWhoCanEdit(), present: liveEdit.peopleEditing() })
+    }).catch(() => undefined)
+  }, [])
+
   const saveContent = useCallback(async (path: string, content: string, options?: { quiet?: boolean }): Promise<boolean> => {
     const timer = saveTimers.current.get(path)
     if (timer) window.clearTimeout(timer)
@@ -1954,6 +1973,7 @@ export default function App({ startupBootstrap }: AppProps) {
       // A statistics-only save must not start a sync. The timer still runs;
       // the engine then sees the same note and skips the upload.
       if (!options?.quiet) syncEngine.notifyLocalChange()
+      if (!options?.quiet) pushEditableShare(path, { content: visibleContent })
       if (!options?.quiet) queueLiveShareRefresh({
         settingsRecent: () => settingsRef.current.shareRecent ?? '',
         loadEntries: () => loadShareEntries(treeRef.current, (notePath) => window.fanotes.readFile(notePath), (notePath) => (
@@ -1990,7 +2010,7 @@ export default function App({ startupBootstrap }: AppProps) {
       toast(error instanceof Error ? error.message : 'Speichern fehlgeschlagen.', 'error')
       return false
     }
-  }, [flushPageStats, toast])
+  }, [flushPageStats, pushEditableShare, toast])
 
   /** Writes statistics that moved on without any typing, without touching the save indicator. */
   const persistPageStatsQuietly = useCallback((path: string, minDwellDeltaMs: number) => {
@@ -2756,13 +2776,14 @@ export default function App({ startupBootstrap }: AppProps) {
     textFieldDirtyRef.current = false
     try {
       await window.fanotes.writeNoteTextFields(path, fields)
+      pushEditableShare(path, { textFields: publicShareTextFields(fields) })
       return true
     } catch (error) {
       if (textFieldSavePathRef.current === path) textFieldDirtyRef.current = true
       toast(error instanceof Error ? error.message : 'Das Textfeld konnte nicht gespeichert werden.', 'error')
       return false
     }
-  }, [toast])
+  }, [pushEditableShare, toast])
   flushNoteTextFieldsRef.current = flushNoteTextFields
 
   const queueNoteTextFields = useCallback((path: string) => {
@@ -3557,7 +3578,7 @@ export default function App({ startupBootstrap }: AppProps) {
     settingsTimer.current = timer
   }, [stopRemoteSupport, syncPublishedHomework, toast])
 
-  const shareVaultEntry = useCallback(async (relativePath: string, mode: 'copy' | 'live') => {
+  const shareVaultEntry = useCallback(async (relativePath: string, mode: 'copy' | 'live' | 'edit') => {
     if (shareInFlight.current || !relativePath || !window.fanotes?.getTree || !window.fanotes.readFile) return
     shareInFlight.current = true
     try {
@@ -3580,7 +3601,7 @@ export default function App({ startupBootstrap }: AppProps) {
         return
       }
       toast('Lädt hoch', 'info')
-      const shareMode = mode === 'live' ? 'live' : 'copy'
+      const shareMode = mode === 'live' ? 'live' : mode === 'edit' ? 'edit' : 'copy'
       const published = await publishShare({
         entries,
         rootPath: relativePath,
@@ -3591,6 +3612,25 @@ export default function App({ startupBootstrap }: AppProps) {
       })
       applySettings({ ...settingsRef.current, shareRecent: serializeShareDirectory(published.directory) })
       setShareLinkDialog({ link: published.record.link, mode: shareMode })
+      if (shareMode === 'edit' && settingsRef.current.profileUsername) {
+        try {
+          const vaultPaths: Record<string, string> = {}
+          for (const note of published.payload.notes) vaultPaths[collected.kind === 'note' ? relativePath : note.path] = note.path
+          await shareEditRef.current?.leave().catch(() => undefined)
+          const client = await openShareEditor({
+            share: published.payload,
+            name: settingsRef.current.profileUsername,
+            port: createFetchSharePort(),
+            origin: resolveShareOrigin(),
+            vaultPaths,
+          })
+          shareEditRef.current = client
+          setSharePeople({ editors: client.peopleWhoCanEdit(), present: client.peopleEditing() })
+          setShareSessionToken((current) => current + 1)
+        } catch {
+          /* The link is already public. This device joins when the note is opened from it. */
+        }
+      }
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Die Freigabe konnte nicht hochgeladen werden.', 'error')
     } finally {
@@ -3610,6 +3650,120 @@ export default function App({ startupBootstrap }: AppProps) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [shareLinkDialog])
+
+  const shareFolders = useCallback(() => {
+    const folders = ['']
+    const walk = (nodes: typeof treeRef.current) => {
+      for (const node of nodes) {
+        if (node.kind !== 'folder') continue
+        folders.push(node.relativePath)
+        if (node.children?.length) walk(node.children)
+      }
+    }
+    walk(treeRef.current)
+    return folders
+  }, [])
+
+  const acceptEditableShare = useCallback(async (rawId: string) => {
+    const id = parseShareProtocol(rawId.includes('://') ? rawId : `fanotes://share/${rawId}`)
+    if (!id) return
+    try {
+      const payload = await readShare({ id, port: createFetchSharePort(), origin: resolveShareOrigin() })
+      if (!payload || payload.mode !== 'edit') {
+        toast('Diese Freigabe kann nicht bearbeitet werden.', 'info')
+        return
+      }
+      setShareNameDraft(settingsRef.current.profileUsername || '')
+      setShareJoin(beginDesktopShareOpen(payload, shareFolders()))
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Die Freigabe konnte nicht geladen werden.', 'error')
+    }
+  }, [shareFolders, toast])
+
+  useEffect(() => {
+    if (!window.fanotes.onShareOpen) return undefined
+    return window.fanotes.onShareOpen((id) => { void acceptEditableShare(id) })
+  }, [acceptEditableShare])
+
+  useEffect(() => {
+    const session = shareEditRef.current
+    if (!session) return undefined
+    let stopped = false
+    const tick = async () => {
+      if (stopped || shareEditRef.current !== session) return
+      await session.pull().catch(() => undefined)
+      if (stopped || shareEditRef.current !== session) return
+      setSharePeople({ editors: session.peopleWhoCanEdit(), present: session.peopleEditing() })
+      const tab = tabsRef.current.find((candidate) => session.owns(candidate.path))
+      if (!tab || tab.content !== tab.savedContent || pendingWrites.current.has(tab.path)) return
+      const next = session.noteContent(session.sharePathFor(tab.path))
+      if (!next || next === tab.content) return
+      shareEditApplyingRef.current = true
+      setTabs((current) => current.map((candidate) => (
+        candidate.path === tab.path && candidate.content === candidate.savedContent
+          ? { ...candidate, content: next, savedContent: next }
+          : candidate
+      )))
+      window.setTimeout(() => { shareEditApplyingRef.current = false }, 0)
+    }
+    const timer = window.setInterval(() => { void tick() }, 1000)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+    }
+  }, [shareSessionToken])
+
+  const finishShareIdentity = useCallback(async (kind: 'account' | 'name') => {
+    if (!shareJoin || shareJoin.step !== 'identity') return
+    const origin = resolveShareOrigin()
+    const port = createFetchSharePort()
+    try {
+      const confirmed = await confirmShareIdentity({
+        state: shareJoin,
+        choice: { kind, name: shareNameDraft },
+        port,
+        origin,
+        claim: kind === 'account' ? async (name) => {
+          const ownerId = settingsRef.current.profileOwnerId || createProfileOwnerId()
+          const claimed = await claimUsername({ username: name, ownerId, port: createFetchProfilePort() })
+          applySettings({ ...settingsRef.current, profileOwnerId: ownerId, profileUsername: claimed.username, profilePublic: claimed.public })
+          return claimed.username
+        } : undefined,
+      })
+      for (const file of shareJoin.files) {
+        await window.fanotes.writeFile(file.relativePath, file.content)
+        if (file.ink && window.fanotes.saveDrawing) {
+          await window.fanotes.saveDrawing({
+            title: file.title || 'Handschrift',
+            drawingJson: JSON.stringify(file.ink),
+            noteRelativePath: file.relativePath,
+          }).catch(() => undefined)
+        }
+      }
+      const vaultPaths: Record<string, string> = {}
+      for (const file of shareJoin.files) vaultPaths[file.relativePath] = file.sharePath
+      await shareEditRef.current?.leave().catch(() => undefined)
+      const client = await openShareEditor({
+        share: shareJoin.share,
+        name: confirmed.name,
+        port,
+        origin,
+        vaultPaths,
+      })
+      shareEditRef.current = client
+      setSharePeople({ editors: confirmed.editors, present: client.peopleEditing() })
+      setShareSessionToken((current) => current + 1)
+      setShareJoin(null)
+      await refreshTree()
+      const first = shareJoin.files[0]
+      if (first) await openNote(first.relativePath)
+    } catch (error) {
+      const text = error instanceof ProfileRequestError && error.taken
+        ? 'Dieser Benutzername ist schon vergeben.'
+        : error instanceof Error ? error.message : 'Die Freigabe konnte nicht bearbeitet werden.'
+      toast(text, 'error')
+    }
+  }, [applySettings, openNote, refreshTree, shareJoin, shareNameDraft, toast])
 
   const resetSettings = useCallback(() => {
     if (settingsTimer.current) window.clearTimeout(settingsTimer.current)
@@ -4257,6 +4411,16 @@ export default function App({ startupBootstrap }: AppProps) {
       ...drawing,
       noteRelativePath: notePath ?? undefined,
     })
+    if (notePath) {
+      try {
+        const parsed = JSON.parse(payload.drawingJson) as unknown
+        if (parsed && typeof parsed === 'object') {
+          pushEditableShare(notePath, { ink: publicShareInk(parsed) ?? null })
+        }
+      } catch {
+        /* A local drawing still saves when the shared ink cannot be read. */
+      }
+    }
     if (notePath && inkSummary) recordInkSnapshotFor(notePath, inkSummary)
     let updatedAt = asset.updatedAt ?? new Date().toISOString()
     try {
@@ -4293,7 +4457,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (activePathRef.current !== notePath) return result
     setDrawingSession((current) => current.path === notePath ? { ...current, document } : current)
     return result
-  }, [activePath, recordInkSnapshotFor, saveContent])
+  }, [activePath, pushEditableShare, recordInkSnapshotFor, saveContent])
 
   const saveWorksheetDocument = useCallback(async (document: WorksheetDocument) => {
     const session = vaultSessionGenerationRef.current
@@ -5984,6 +6148,45 @@ export default function App({ startupBootstrap }: AppProps) {
       {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal syncEngine={syncApi ? syncEngine : undefined} syncState={syncState} initialSection={settingsSection} platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => { setSettingsOpen(false); setSettingsSection(undefined) }} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onOpenAddonStore={() => { setSettingsOpen(false); openAddonStore() }} addonSummary={{ installed: addonState.installed.length, running: addonState.installed.filter((record) => addonState.statuses[record.id]?.state === 'running').length }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} onConvertNotes={convertAllNotesToCurrentStandard} onConvertFamd={convertAllFamdNotes} remoteSupportSession={remoteSupportSession} onRemoteSupportStart={startRemoteSupport} onRemoteSupportStop={stopRemoteSupport} /></SafeBoundary></Suspense>}
       {addonStoreOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Store" fallbackTitle="Der Add-on-Store ist abgestürzt"><AddonStoreModal open onClose={() => setAddonStoreOpen(false)} runtime={addonRuntime} runtimeState={addonState} source={addonSource} fetchText={addonFetchText} onOpenExternal={(url) => { void window.fanotes.openExternal(url).catch(() => toast('Der Link konnte nicht geöffnet werden.', 'error')) }} toast={toast} sourceText={settings.addonSource} onChangeSource={(value) => { addonIndexCache.reset(); applySettings({ ...settingsRef.current, addonSource: value }) }} autoUpdate={settings.addonsAutoUpdate} onChangeAutoUpdate={(value) => applySettings({ ...settingsRef.current, addonsAutoUpdate: value })} /></SafeBoundary></Suspense>}
       {addonPrompt && <Suspense fallback={null}><SafeBoundary name="Add-on-Eingabe" fallbackTitle="Der Add-on-Dialog ist abgestürzt"><AddonPromptDialog request={addonPrompt} /></SafeBoundary></Suspense>}
+      {sharePeople && (
+        <p className="share-edit-presence" role="status">
+          <span>Personen, die bearbeiten können</span>
+          <span data-i18n-ignore>{sharePeople.editors.join(', ') || '—'}</span>
+          <span>Gerade am Bearbeiten</span>
+          <span data-i18n-ignore>{sharePeople.present.join(', ') || '—'}</span>
+        </p>
+      )}
+      {shareJoin && (
+        <div className="modal-backdrop confirm-backdrop" role="presentation">
+          <section className="confirm-dialog share-link-dialog" role="dialog" aria-modal="true" aria-labelledby="fanotes-share-join-title">
+            <header className="confirm-dialog-header">
+              <span className="confirm-dialog-icon"><FolderOpen size={16} /></span>
+              <div><h3 id="fanotes-share-join-title">{shareJoin.step === 'folder' ? 'In welchem Ordner soll die geteilte Datei liegen?' : 'Konto anlegen oder nur einen Namen eintragen?'}</h3></div>
+            </header>
+            <div className="confirm-dialog-body">
+              {shareJoin.step === 'folder' && shareJoin.folders.map((folder) => (
+                <button
+                  key={folder || 'root'}
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setShareJoin(chooseShareFolder(shareJoin, folder))}
+                >
+                  {folder || 'Vault-Wurzel'}
+                </button>
+              ))}
+              {shareJoin.step === 'identity' && (
+                <>
+                  <input aria-label="Name für diese Freigabe" value={shareNameDraft} onChange={(event) => setShareNameDraft(event.target.value)} />
+                  <div className="confirm-dialog-actions">
+                    <button type="button" className="secondary-button" onClick={() => { void finishShareIdentity('account') }}>Konto anlegen</button>
+                    <button type="button" className="primary-button" onClick={() => { void finishShareIdentity('name') }}>Nur einen Namen eintragen</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
       {shareLinkDialog && (
         <div className="modal-backdrop confirm-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) setShareLinkDialog(null) }}>
           <section className="confirm-dialog share-link-dialog" role="dialog" aria-modal="true" aria-labelledby="fanotes-share-link-title" onPointerDown={(event) => event.stopPropagation()}>
@@ -5992,7 +6195,7 @@ export default function App({ startupBootstrap }: AppProps) {
               <div><h3 id="fanotes-share-link-title">Die Freigabe wurde erstellt.</h3></div>
             </header>
             <div className="confirm-dialog-body">
-              <small>{shareLinkDialog.mode === 'live' ? 'Live' : 'Kopie'}</small>
+              <small>{shareLinkDialog.mode === 'live' ? 'Live' : shareLinkDialog.mode === 'edit' ? 'Gemeinsam' : 'Kopie'}</small>
               <input ref={shareLinkInputRef} data-i18n-ignore readOnly value={shareLinkDialog.link} aria-label="Freigabe-Link" onFocus={(event) => event.currentTarget.select()} />
             </div>
             <div className="confirm-dialog-actions">

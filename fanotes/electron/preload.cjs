@@ -100,6 +100,7 @@ const CHANNELS = Object.freeze({
   syncReadSecrets: 'fanotes:sync-read-secrets',
   syncWriteSecrets: 'fanotes:sync-write-secrets',
   beforeClose: 'fanotes:before-close',
+  shareOpen: 'fanotes:share-open',
   confirmClose: 'fanotes:confirm-close',
   cancelClose: 'fanotes:cancel-close',
   requestClose: 'fanotes:request-close',
@@ -199,6 +200,12 @@ const api = Object.freeze({
   },
   revealInFolder: (relativePath) => invoke(CHANNELS.revealInFolder, relativePath),
   openExternal: (url) => invoke(CHANNELS.openExternal, url),
+  onShareOpen: (callback) => {
+    if (typeof callback !== 'function') return () => {}
+    const listener = (_event, id) => callback(id)
+    ipcRenderer.on(CHANNELS.shareOpen, listener)
+    return () => ipcRenderer.removeListener(CHANNELS.shareOpen, listener)
+  },
   onBeforeClose: (callback) => {
     if (typeof callback !== 'function') return () => {}
     const listener = () => callback()

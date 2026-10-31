@@ -114,8 +114,8 @@ export type AppSettings = {
   syncHandwritingModel: boolean
   /** Also synchronise the local note-history folder. */
   syncNoteHistory: boolean
-  /** Public share links. `copy` freezes the upload; `live` follows later edits. */
-  shareMode: 'copy' | 'live'
+  /** Public share links. `copy` freezes the upload; `live` follows later edits; `edit` is a shared document. */
+  shareMode: 'copy' | 'live' | 'edit'
   /** JSON list of recent public shares. Empty until the first link is created. */
   shareRecent: string
   /** Stable id for the public username. Empty until the first claim on this device. */
@@ -678,6 +678,8 @@ export type FaNotesApi = {
   renderPdfPage?: (request: PdfiumRasterRequest) => Promise<PdfiumRasterResult>
   addons?: AddonsHostApi
   sync?: SyncHostApi
+  /** An editable share opened from fanotes://share/<id>. Missing until the desktop build that registers the protocol. */
+  onShareOpen?: (callback: (id: string) => void) => () => void
   platform: string
 }
 

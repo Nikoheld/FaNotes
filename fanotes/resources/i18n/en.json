@@ -3937,5 +3937,18 @@
   "Wichtiges markieren läuft ohne weitere Aktionen.": "Mark important runs on its own, without other actions.",
   "Ein Assistent · sieben Anbieter": "One assistant · seven providers",
   "LM Studio, Ollama, OpenAI, Gemini, Anthropic, Grok oder OpenCode nutzen": "Use LM Studio, Ollama, OpenAI, Gemini, Anthropic, Grok or OpenCode",
-  "Grok hat keine Modellliste geliefert.": "Grok did not provide a model list."
+  "Grok hat keine Modellliste geliefert.": "Grok did not provide a model list.",
+  "Andere können diese Freigabe gleichzeitig bearbeiten.": "Other people can edit this share at the same time.",
+  "Eine gemeinsame Freigabe kann gleichzeitig bearbeitet werden.": "An editable share can be edited at the same time.",
+  "In welchem Ordner soll die geteilte Datei liegen?": "Which folder should the shared file go in?",
+  "Konto anlegen oder nur einen Namen eintragen?": "Create an account or just type a name?",
+  "Nur einen Namen eintragen": "Just type a name",
+  "Konto anlegen": "Create an account",
+  "Personen, die bearbeiten können": "People who can edit",
+  "Gerade am Bearbeiten": "Currently editing",
+  "Name für diese Freigabe": "Name for this share",
+  "Diese Freigabe kann nicht bearbeitet werden.": "This share cannot be edited.",
+  "Dieser Ordner gehört nicht zum Vault.": "This folder is not in the vault.",
+  "Der Name fehlt.": "The name is missing.",
+  "Der Name wurde nicht gespeichert.": "The name was not saved."
 }

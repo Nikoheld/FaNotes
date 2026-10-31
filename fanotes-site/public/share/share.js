@@ -414,8 +414,99 @@
     root.appendChild(article)
   }
 
+  function choiceButton(label, onClick) {
+    var button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'share-choice-button'
+    button.textContent = label
+    button.addEventListener('click', onClick)
+    return button
+  }
+
+  function installerHref() {
+    var link = window.FANOTES_SHARE_LINK
+    var platform = /Win/i.test(navigator.platform || navigator.userAgent || '') ? 'windows' : /Mac/i.test(navigator.platform || navigator.userAgent || '') ? 'mac' : 'linux'
+    return link.installerFor(platform)
+  }
+
+  function showAgainGate(payload) {
+    clear(root)
+    var link = window.FANOTES_SHARE_LINK
+    var id = String(payload.id || '')
+    var box = document.createElement('section')
+    box.className = 'share-choice'
+    var heading = document.createElement('h1')
+    heading.textContent = link.prompts.again
+    box.appendChild(heading)
+    var open = document.createElement('a')
+    open.className = 'share-choice-button'
+    open.href = link.openRequest(id).protocol
+    open.textContent = link.openLabel
+    open.setAttribute('data-share-choice', 'open')
+    box.appendChild(open)
+    root.appendChild(box)
+  }
+
+  function showInstallGate(payload) {
+    clear(root)
+    var link = window.FANOTES_SHARE_LINK
+    var id = String(payload.id || '')
+    var box = document.createElement('section')
+    box.className = 'share-choice'
+    var heading = document.createElement('h1')
+    heading.textContent = link.prompts.downloadOrInstalled
+    box.appendChild(heading)
+    var download = choiceButton(link.prompts.download, function () {
+      var href = installerHref()
+      var anchor = document.createElement('a')
+      anchor.className = 'share-installer'
+      anchor.href = href
+      anchor.rel = 'noopener'
+      anchor.textContent = link.prompts.download
+      document.body.appendChild(anchor)
+      window.__fanotesShareDownload = href
+      fetch(href, { method: 'GET', redirect: 'manual', cache: 'no-store' }).catch(function () { /* the installer route was still requested */ })
+      showAgainGate(payload)
+    })
+    download.setAttribute('data-share-choice', 'download')
+    var installed = document.createElement('a')
+    installed.className = 'share-choice-button'
+    installed.href = link.openRequest(id).protocol
+    installed.textContent = link.prompts.installed
+    installed.setAttribute('data-share-choice', 'installed')
+    box.appendChild(download)
+    box.appendChild(installed)
+    root.appendChild(box)
+  }
+
+  function showEditGate(payload) {
+    clear(root)
+    var link = window.FANOTES_SHARE_LINK
+    var box = document.createElement('section')
+    box.className = 'share-choice'
+    var heading = document.createElement('h1')
+    heading.textContent = link.prompts.viewOrEdit
+    box.appendChild(heading)
+    var view = choiceButton(link.prompts.view, function () {
+      var next = {}
+      Object.keys(payload).forEach(function (key) { next[key] = payload[key] })
+      next.__viewing = true
+      showPayload(next)
+    })
+    view.setAttribute('data-share-choice', 'view')
+    var desktop = choiceButton(link.prompts.desktop, function () { showInstallGate(payload) })
+    desktop.setAttribute('data-share-choice', 'desktop')
+    box.appendChild(view)
+    box.appendChild(desktop)
+    root.appendChild(box)
+  }
+
   function showPayload(payload) {
     clear(root)
+    if (payload && payload.mode === 'edit' && !payload.__viewing && window.FANOTES_SHARE_LINK) {
+      showEditGate(payload)
+      return
+    }
     if (!payload || payload.stopped || !payload.notes || !payload.notes.length) {
       showStopped()
       return

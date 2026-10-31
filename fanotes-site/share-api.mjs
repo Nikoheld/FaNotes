@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { resolve, sep } from 'node:path'
+import { mergeShareNotes, sanitizeSharePersonName } from './share-edit.mjs'
 
 // Public note links. This store is not vault sync (/api/v1/sync).
 // The link id is the capability: the desktop client uploads the readable
@@ -244,7 +245,7 @@ export const sanitizeSharePayload = (raw, id) => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail(400, 'Ungültige Freigabe.')
   if (raw.schemaVersion !== 1) fail(400, 'Ungültige Freigabe.')
   if (raw.id !== id) fail(400, 'Die Freigabe-Kennung stimmt nicht.')
-  if (raw.mode !== 'copy' && raw.mode !== 'live') fail(400, 'Ungültige Freigabeart.')
+  if (raw.mode !== 'copy' && raw.mode !== 'live' && raw.mode !== 'edit') fail(400, 'Ungültige Freigabeart.')
   if (!Array.isArray(raw.notes) || raw.notes.length > MAX_NOTES) fail(400, 'Ungültige Freigabe.')
   const notes = raw.notes.map((note) => {
     if (!note || typeof note !== 'object' || Array.isArray(note)) fail(400, 'Ungültige Notiz.')
@@ -273,10 +274,64 @@ export const sanitizeSharePayload = (raw, id) => {
   }
 }
 
+const PRESENT_MS = 30_000
+
+const freshPresent = (present, now = Date.now()) => {
+  if (!Array.isArray(present)) return []
+  const people = []
+  for (const entry of present) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const name = sanitizeSharePersonName(entry.name)
+    const clientId = typeof entry.clientId === 'string' ? entry.clientId.replace(/[^\w.-]/gu, '').slice(0, 64) : ''
+    const seenAt = finiteNumber(entry.seenAt)
+    if (!name || !clientId || seenAt === null || now - seenAt >= PRESENT_MS) continue
+    if (people.some((person) => person.clientId === clientId)) continue
+    people.push({ name, clientId, seenAt })
+    if (people.length >= 80) break
+  }
+  return people
+}
+
+const editorRecords = (editors) => {
+  if (!Array.isArray(editors)) return []
+  const people = []
+  for (const entry of editors) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const name = sanitizeSharePersonName(entry.name)
+    if (!name || people.some((person) => person.name === name)) continue
+    const account = sanitizeSharePersonName(entry.account)
+    people.push(account ? { name, account } : { name })
+    if (people.length >= 80) break
+  }
+  return people
+}
+
+const publicShareRecord = (record) => {
+  const { history: _history, present: _present, ...rest } = record
+  return {
+    ...rest,
+    ...(record.mode === 'edit' ? { editors: editorRecords(record.editors), revision: Number.isInteger(record.revision) ? record.revision : 1 } : {}),
+  }
+}
+
+const sessionBody = (record) => ({
+  revision: Number.isInteger(record.revision) ? record.revision : 1,
+  notes: record.notes,
+  editors: editorRecords(record.editors),
+  present: freshPresent(record.present),
+})
+
+const requireEditable = (record) => {
+  if (!record) fail(404, 'Nicht gefunden.')
+  if (record.stopped) fail(410, 'Diese Freigabe wurde beendet.')
+  if (record.mode !== 'edit') fail(409, 'Diese Freigabe kann nicht bearbeitet werden.')
+  return record
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'Accept, Content-Type, X-FaNotes-Share',
-  'Access-Control-Allow-Methods': 'GET, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, PUT, POST, DELETE, OPTIONS',
   'Access-Control-Max-Age': '600',
 }
 
@@ -293,9 +348,10 @@ const writeJson = (response, status, value, extraHeaders = {}) => {
   response.end(body)
 }
 
-const shareIdFromPath = (pathname) => {
-  const match = /^\/api\/v1\/share\/([a-f0-9]{32})$/u.exec(pathname)
-  return match && ID_PATTERN.test(match[1]) ? match[1] : ''
+const shareRoute = (pathname) => {
+  const match = /^\/api\/v1\/share\/([a-f0-9]{32})(?:\/(join|edit|presence|session))?$/u.exec(pathname)
+  if (!match || !ID_PATTERN.test(match[1])) return null
+  return { id: match[1], action: match[2] || '' }
 }
 
 export const handleShareRequest = async (request, response, url) => {
@@ -306,22 +362,34 @@ export const handleShareRequest = async (request, response, url) => {
       response.end()
       return true
     }
-    const id = shareIdFromPath(url.pathname)
-    if (!id) fail(400, 'Ungültige Freigabe-Kennung.')
+    const route = shareRoute(url.pathname)
+    if (!route) fail(400, 'Ungültige Freigabe-Kennung.')
+    const { id, action } = route
 
-    if (request.method === 'PUT') {
+    if (request.method === 'PUT' && !action) {
       rateLimit(`share-put:${clientAddress(request)}`, 60, 60_000)
       const payload = sanitizeSharePayload(await readJsonBody(request), id)
       await withShareLock(id, async () => {
         const existing = await readRecord(id)
         if (existing?.stopped) fail(410, 'Diese Freigabe wurde beendet.')
+        if (payload.mode === 'edit') {
+          payload.editors = editorRecords(existing?.editors)
+          payload.present = freshPresent(existing?.present)
+          payload.revision = Number.isInteger(existing?.revision) ? existing.revision : 1
+          payload.history = Array.isArray(existing?.history) ? existing.history.slice(-4) : []
+          if (existing?.mode === 'edit' && Array.isArray(existing.notes)) {
+            payload.notes = existing.notes
+            payload.revision = existing.revision
+            payload.history = payload.history
+          }
+        }
         await writeRecord(id, payload)
       })
       writeJson(response, 200, { ok: true, id })
       return true
     }
 
-    if (request.method === 'GET' || request.method === 'HEAD') {
+    if ((request.method === 'GET' || request.method === 'HEAD') && !action) {
       rateLimit(`share-get:${clientAddress(request)}`, 120, 60_000)
       const record = await readRecord(id)
       if (!record) {
@@ -337,11 +405,101 @@ export const handleShareRequest = async (request, response, url) => {
         response.end()
         return true
       }
-      writeJson(response, 200, record)
+      writeJson(response, 200, publicShareRecord(record))
       return true
     }
 
-    if (request.method === 'DELETE') {
+    if (request.method === 'GET' && action === 'session') {
+      rateLimit(`share-session:${clientAddress(request)}`, 240, 60_000)
+      const record = requireEditable(await readRecord(id))
+      record.present = freshPresent(record.present)
+      writeJson(response, 200, sessionBody(record))
+      return true
+    }
+
+    if (request.method === 'POST' && action === 'join') {
+      rateLimit(`share-join:${clientAddress(request)}`, 60, 60_000)
+      const body = await readJsonBody(request)
+      const name = sanitizeSharePersonName(body?.name)
+      if (!name) fail(400, 'Ungültige Freigabe.')
+      const account = sanitizeSharePersonName(body?.account)
+      const editors = await withShareLock(id, async () => {
+        const record = requireEditable(await readRecord(id))
+        const people = editorRecords(record.editors)
+        if (!people.some((person) => person.name === name)) {
+          people.push(account ? { name, account } : { name })
+        }
+        record.editors = people
+        await writeRecord(id, record)
+        return people
+      })
+      writeJson(response, 200, { editors })
+      return true
+    }
+
+    if (request.method === 'POST' && action === 'presence') {
+      rateLimit(`share-presence:${clientAddress(request)}`, 240, 60_000)
+      const body = await readJsonBody(request)
+      const name = sanitizeSharePersonName(body?.name)
+      const clientId = typeof body?.clientId === 'string' ? body.clientId.replace(/[^\w.-]/gu, '').slice(0, 64) : ''
+      if (!name || !clientId) fail(400, 'Ungültige Freigabe.')
+      const present = await withShareLock(id, async () => {
+        const record = requireEditable(await readRecord(id))
+        if (!editorRecords(record.editors).some((person) => person.name === name)) fail(403, 'Diese Freigabe kann nicht bearbeitet werden.')
+        const people = freshPresent(record.present).filter((person) => person.clientId !== clientId)
+        if (body.present !== false) people.push({ name, clientId, seenAt: Date.now() })
+        record.present = people
+        await writeRecord(id, record)
+        return people
+      })
+      writeJson(response, 200, { present })
+      return true
+    }
+
+    if (request.method === 'POST' && action === 'edit') {
+      rateLimit(`share-edit:${clientAddress(request)}`, 240, 60_000)
+      const body = await readJsonBody(request)
+      const name = sanitizeSharePersonName(body?.name)
+      const clientId = typeof body?.clientId === 'string' ? body.clientId.replace(/[^\w.-]/gu, '').slice(0, 64) : ''
+      const baseRevision = finiteNumber(body?.baseRevision)
+      if (!name || !clientId || baseRevision === null || !Array.isArray(body?.notes)) fail(400, 'Ungültige Freigabe.')
+      const saved = await withShareLock(id, async () => {
+        const record = requireEditable(await readRecord(id))
+        if (!editorRecords(record.editors).some((person) => person.name === name)) fail(403, 'Diese Freigabe kann nicht bearbeitet werden.')
+        const revision = Number.isInteger(record.revision) ? record.revision : 1
+        const history = Array.isArray(record.history) ? record.history : []
+        const baseNotes = baseRevision === revision
+          ? record.notes
+          : history.find((item) => item && item.revision === baseRevision)?.notes || record.notes
+        const merged = mergeShareNotes(baseNotes, record.notes, body.notes)
+        const sanitized = sanitizeSharePayload({
+          schemaVersion: 1,
+          id,
+          mode: 'edit',
+          kind: record.kind,
+          rootPath: record.rootPath,
+          title: record.title,
+          notes: merged,
+          updatedAt: new Date().toISOString(),
+        }, id)
+        const changed = JSON.stringify(sanitized.notes) !== JSON.stringify(record.notes)
+        if (changed) {
+          record.history = [...history, { revision, notes: record.notes }].slice(-4)
+          record.revision = revision + 1
+          record.notes = sanitized.notes
+          record.updatedAt = sanitized.updatedAt
+        }
+        const people = freshPresent(record.present).filter((person) => person.clientId !== clientId)
+        people.push({ name, clientId, seenAt: Date.now() })
+        record.present = people
+        await writeRecord(id, record)
+        return record
+      })
+      writeJson(response, 200, sessionBody(saved))
+      return true
+    }
+
+    if (request.method === 'DELETE' && !action) {
       rateLimit(`share-delete:${clientAddress(request)}`, 60, 60_000)
       await withShareLock(id, async () => {
         const record = await readRecord(id)
@@ -353,7 +511,7 @@ export const handleShareRequest = async (request, response, url) => {
       return true
     }
 
-    writeJson(response, 405, { error: 'Nur GET, PUT und DELETE sind für Freigaben erlaubt.' }, { Allow: 'GET, PUT, DELETE, OPTIONS' })
+    writeJson(response, 405, { error: 'Nur GET, PUT, POST und DELETE sind für Freigaben erlaubt.' }, { Allow: 'GET, PUT, POST, DELETE, OPTIONS' })
     return true
   } catch (error) {
     const status = error instanceof ShareApiError ? error.status : 500

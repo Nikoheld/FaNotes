@@ -552,7 +552,7 @@ export function SettingsModal({
       const published = await publishShare({
         entries,
         rootPath: sharePath,
-        mode: settings.shareMode === 'live' ? 'live' : 'copy',
+        mode: settings.shareMode === 'live' ? 'live' : settings.shareMode === 'edit' ? 'edit' : 'copy',
         port: sharePort,
         origin: shareOrigin,
         directory: parseShareDirectory(settings.shareRecent),
@@ -1257,7 +1257,7 @@ export function SettingsModal({
 
             {active === 'share' && (
               <ShareSettingsPage
-                mode={settings.shareMode === 'live' ? 'live' : 'copy'}
+                mode={settings.shareMode === 'live' ? 'live' : settings.shareMode === 'edit' ? 'edit' : 'copy'}
                 onModeChange={(shareMode) => update('shareMode', shareMode)}
                 directory={parseShareDirectory(settings.shareRecent)}
                 targets={shareTargets}

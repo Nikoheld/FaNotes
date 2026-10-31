@@ -1,6 +1,9 @@
 import { Share2 } from 'lucide-react'
+import { useEffect } from 'react'
+import { editorNames } from '../lib/sync/shareEdit'
 import {
   listRecentShares,
+  readShare,
   stopShare as shareStopControl,
   type ShareDirectory,
   type ShareMode,
@@ -42,6 +45,30 @@ export function ShareSettingsPage({
   origin?: string
 }) {
   const shares = listRecentShares(directory)
+  useEffect(() => {
+    const pending = shares.filter((item) => item.mode === 'edit' && !item.stopped)
+    if (!pending.length) return
+    let cancelled = false
+    void Promise.all(pending.map(async (item) => {
+      const payload = await readShare({ id: item.id, port, origin }).catch(() => null)
+      return { id: item.id, names: editorNames(payload?.editors) }
+    })).then((rows) => {
+      if (cancelled) return
+      let changed = false
+      const next = {
+        shares: directory.shares.map((item) => {
+          const row = rows.find((entry) => entry.id === item.id)
+          if (!row) return item
+          const current = item.editors ?? []
+          if (current.join('\n') === row.names.join('\n')) return item
+          changed = true
+          return { ...item, editors: row.names }
+        }),
+      }
+      if (changed) onDirectory(next)
+    })
+    return () => { cancelled = true }
+  }, [directory, onDirectory, origin, port, shares])
   return (
     <>
       <div id="settings-share" className="setting-card">
@@ -51,12 +78,14 @@ export function ShareSettingsPage({
             <span>Kopie oder Live</span>
             <small>Eine Kopie bleibt so, wie sie hochgeladen wurde.</small>
             <small>Eine Live-Freigabe zeigt spätere Änderungen.</small>
+            <small>Eine gemeinsame Freigabe kann gleichzeitig bearbeitet werden.</small>
             <small>Der private Vault-Sync bleibt verschlüsselt und ist kein öffentlicher Link.</small>
           </div>
           <div className="setting-control">
             <div className="segmented compact" role="group" aria-label="Freigabeart">
               <button type="button" className={mode === 'copy' ? 'active' : ''} onClick={() => onModeChange('copy')}>Kopie</button>
               <button type="button" className={mode === 'live' ? 'active' : ''} onClick={() => onModeChange('live')}>Live</button>
+              <button type="button" className={mode === 'edit' ? 'active' : ''} onClick={() => onModeChange('edit')}>Gemeinsam</button>
             </div>
           </div>
         </div>
@@ -96,7 +125,10 @@ export function ShareSettingsPage({
             <li key={item.id}>
               <span>
                 <b>{item.title}</b>
-                <small>{item.mode === 'live' ? 'Live' : 'Kopie'} · {item.kind === 'folder' ? 'Ordner' : 'Notiz'}{item.stopped ? ' · Beendet' : ''}</small>
+                <small>{item.mode === 'live' ? 'Live' : item.mode === 'edit' ? 'Gemeinsam' : 'Kopie'} · {item.kind === 'folder' ? 'Ordner' : 'Notiz'}{item.stopped ? ' · Beendet' : ''}</small>
+                {item.mode === 'edit' && item.editors && item.editors.length > 0 && (
+                  <small><span>Personen, die bearbeiten können</span>: <span data-i18n-ignore>{item.editors.join(', ')}</span></small>
+                )}
                 {!item.stopped && <small className="share-link" data-i18n-ignore>{item.link}</small>}
               </span>
               {!item.stopped && (

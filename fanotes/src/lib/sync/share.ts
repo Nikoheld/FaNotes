@@ -13,7 +13,7 @@ export const SHARE_ORIGIN = `https://${SHARE_HOST}`
 export const SHARE_API_PATH = '/api/v1/share'
 export const SHARE_VIEW_PATH = '/share/'
 
-export type ShareMode = 'copy' | 'live'
+export type ShareMode = 'copy' | 'live' | 'edit'
 
 export type ShareInkPoint = { x: number; y: number }
 
@@ -113,6 +113,9 @@ export type SharePayload = {
   notes: ShareNote[]
   updatedAt: string
   stopped?: boolean
+  /** People who joined an editable share. Copy and live shares leave this empty. */
+  editors?: { name: string; account?: string }[]
+  revision?: number
 }
 
 export type ShareLinkRecord = {
@@ -124,12 +127,14 @@ export type ShareLinkRecord = {
   kind: 'note' | 'folder'
   createdAt: string
   stopped: boolean
+  /** Names the sharer can see. Empty until someone joins an editable share. */
+  editors?: string[]
 }
 
 export type ShareDirectory = { shares: ShareLinkRecord[] }
 
 export type ShareHttpRequest = {
-  method: 'PUT' | 'GET' | 'DELETE'
+  method: 'PUT' | 'GET' | 'DELETE' | 'POST'
   url: string
   headers: Record<string, string>
   body: string
@@ -618,7 +623,7 @@ export const parseSharePayload = (body: string): SharePayload | null => {
   try {
     const parsed = JSON.parse(body) as Partial<SharePayload>
     if (parsed.schemaVersion !== 1 || typeof parsed.id !== 'string' || !Array.isArray(parsed.notes)) return null
-    if (parsed.mode !== 'copy' && parsed.mode !== 'live') return null
+    if (parsed.mode !== 'copy' && parsed.mode !== 'live' && parsed.mode !== 'edit') return null
     const notes = parsed.notes.flatMap((note) => {
       if (!note || typeof note.content !== 'string' || typeof note.path !== 'string') return []
       const ink = publicShareInk((note as { ink?: unknown }).ink)
@@ -643,6 +648,14 @@ export const parseSharePayload = (body: string): SharePayload | null => {
       notes,
       updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : '',
       stopped: Boolean(parsed.stopped),
+      ...(Number.isInteger(parsed.revision) ? { revision: parsed.revision } : {}),
+      ...(Array.isArray((parsed as { editors?: unknown }).editors) ? { editors: (parsed as { editors: { name?: unknown; account?: unknown }[] }).editors.flatMap((editor) => {
+        if (!editor || typeof editor.name !== 'string' || !editor.name.trim()) return []
+        const name = editor.name.replace(/[\u0000-\u001f\u007f]/gu, '').trim().slice(0, 80)
+        if (!name) return []
+        const account = typeof editor.account === 'string' ? editor.account.replace(/[\u0000-\u001f\u007f]/gu, '').trim().slice(0, 80) : ''
+        return [{ name, ...(account ? { account } : {}) }]
+      }) } : {}),
     }
   } catch {
     return null
@@ -665,7 +678,10 @@ export const parseShareDirectory = (raw: string | null | undefined): ShareDirect
         link: record.link,
         title: typeof record.title === 'string' ? record.title : record.id,
         rootPath: typeof record.rootPath === 'string' ? record.rootPath : '',
-        mode: record.mode === 'live' ? 'live' as const : 'copy' as const,
+        mode: record.mode === 'live' ? 'live' as const : record.mode === 'edit' ? 'edit' as const : 'copy' as const,
+        ...(Array.isArray((record as { editors?: unknown }).editors)
+          ? { editors: (record as { editors: unknown[] }).editors.filter((name): name is string => typeof name === 'string' && name.trim().length > 0).slice(0, 80) }
+          : {}),
         kind: record.kind === 'folder' ? 'folder' as const : 'note' as const,
         createdAt: typeof record.createdAt === 'string' ? record.createdAt : '',
         stopped: Boolean(record.stopped),
