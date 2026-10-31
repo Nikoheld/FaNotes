@@ -4414,16 +4414,27 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         if (toast != null) message.value = toast
     }
 
-    fun importOneNoteBytes(bytes: ByteArray) {
-        val before = captureDesk()
-        val after = ch.fasrv.fanotes.desk.applyDesktopCommand(
-            before,
-            "onenote-import",
-            ch.fasrv.fanotes.desk.CommandExtras(onenoteBytes = bytes),
-        )
-        writeImportedNotes(before, after)
-        val toast = ch.fasrv.fanotes.desk.userVisibleToast(after.message)
-        if (toast != null) message.value = toast
+    fun importOneNoteBytes(bytes: ByteArray, displayName: String? = null) {
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            val tools = withContext(Dispatchers.IO) { OneNoteToolCache.paths(app) }
+            val before = captureDesk()
+            val after = withContext(Dispatchers.IO) {
+                ch.fasrv.fanotes.desk.applyDesktopCommand(
+                    before,
+                    "onenote-import",
+                    ch.fasrv.fanotes.desk.CommandExtras(
+                        onenoteBytes = bytes,
+                        onenoteName = displayName,
+                        one2htmlPath = tools?.first,
+                        sevenZipPath = tools?.second,
+                    ),
+                )
+            }
+            writeImportedNotes(before, after)
+            val toast = ch.fasrv.fanotes.desk.userVisibleToast(after.message)
+            if (toast != null) message.value = toast
+        }
     }
 
     private fun writeImportedNotes(before: ch.fasrv.fanotes.desk.DeskWork, after: ch.fasrv.fanotes.desk.DeskWork) {

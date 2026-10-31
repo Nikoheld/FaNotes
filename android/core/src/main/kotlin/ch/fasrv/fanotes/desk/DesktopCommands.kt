@@ -65,6 +65,9 @@ data class CommandExtras(
     val today: LocalDate = LocalDate.of(2026, 10, 31),
     val stampDate: String = "31.10.2026",
     val stampDateTime: String = "31.10.2026 12:00",
+    val onenoteName: String? = null,
+    val one2htmlPath: String? = null,
+    val sevenZipPath: String? = null,
 )
 
 const val ONE_NOTE_EMPTY = "Im OneNote-Export wurden keine lesbaren Seiten gefunden."
@@ -241,26 +244,42 @@ private fun importOneNote(work: DeskWork, extras: CommandExtras): DeskWork {
         overlays = work.overlays + "onenote-import",
         message = null,
     )
-    val pages = oneNoteNotes(bytes, parentOf(work.openPath).ifBlank { "OneNote" }, taken(work))
-    if (pages.isEmpty()) return work.copy(overlays = work.overlays + "onenote-import", message = ONE_NOTE_EMPTY)
-    val notes = work.notes + pages
-    val open = pages.first()
+    val read = readOneNotePages(
+        bytes,
+        extras.onenoteName,
+        extras.one2htmlPath,
+        extras.sevenZipPath,
+        parentOf(work.openPath).ifBlank { "OneNote" },
+        taken(work),
+    )
+    if (read.notes.isEmpty()) {
+        return work.copy(overlays = work.overlays + "onenote-import", message = read.message ?: ONE_NOTE_EMPTY)
+    }
+    val notes = work.notes + read.notes
+    val open = read.notes.first()
     return work.copy(
         notes = notes,
         openPath = open.path,
         markdown = open.markdown,
         destination = "notes",
-        tabs = work.tabs + pages.map { it.path },
+        tabs = work.tabs + read.notes.map { it.path },
         trail = visitNote(work.trail, open.path),
         overlays = work.overlays + "onenote-import",
         message = null,
     )
 }
 
-fun oneNoteNotes(bytes: ByteArray, folder: String, taken: Set<String> = emptySet()): List<DeskNote> {
-    val pages = htmlPages(bytes)
+fun oneNoteNotes(bytes: ByteArray, folder: String, taken: Set<String> = emptySet()): List<DeskNote> =
+    notesFromPages(htmlPages(bytes), folder, taken, bytes)
+
+internal fun notesFromPages(
+    pages: List<HtmlPage>,
+    folder: String,
+    taken: Set<String>,
+    digestSource: ByteArray,
+): List<DeskNote> {
     if (pages.isEmpty()) return emptyList()
-    val digest = sha256Hex(bytes).take(24)
+    val digest = sha256Hex(digestSource).take(24)
     val used = taken.toMutableSet()
     return pages.mapIndexed { index, page ->
         val title = page.title.ifBlank { "OneNote ${index + 1}" }
@@ -280,9 +299,11 @@ fun oneNoteNotes(bytes: ByteArray, folder: String, taken: Set<String> = emptySet
     }
 }
 
-private data class HtmlPage(val title: String, val html: String)
+internal data class HtmlPage(val title: String, val html: String)
 
 private fun htmlPages(bytes: ByteArray): List<HtmlPage> {
+    // A .one section contains raw '<' bytes. Those are not an HTML export.
+    if (isOneNoteBinary(bytes)) return emptyList()
     if (bytes.size >= 2 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4b.toByte()) {
         val pages = ArrayList<HtmlPage>()
         ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
@@ -304,7 +325,7 @@ private fun htmlPages(bytes: ByteArray): List<HtmlPage> {
     return emptyList()
 }
 
-private fun htmlTitle(html: String, fallbackName: String): String {
+internal fun htmlTitle(html: String, fallbackName: String): String {
     val match = Regex("<title>(.*?)</title>", RegexOption.IGNORE_CASE).find(html)
     val raw = match?.groupValues?.get(1)?.trim().orEmpty()
     if (raw.isNotEmpty()) return raw
@@ -316,7 +337,7 @@ private fun joinPath(folder: String, leaf: String): String {
     return if (dir.isEmpty()) leaf else "$dir/$leaf"
 }
 
-private fun sha256Hex(bytes: ByteArray): String {
+internal fun sha256Hex(bytes: ByteArray): String {
     val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
     return digest.joinToString("") { "%02x".format(it) }
 }

@@ -184,6 +184,67 @@ class AndroidReleaseTest {
         assertTrue(applyDesktopCommand(before, "copy-wiki-link", extras).clipboard.startsWith("[["))
     }
 
+    @Test
+    fun oneNoteSectionUsesTheDesktopConverter() {
+        val fixture = oneNoteSectionBytes()
+        val before = sampleDeskWork()
+        val imported = applyDesktopCommand(
+            before,
+            "onenote-import",
+            CommandExtras(onenoteBytes = fixture, onenoteName = "New Section 1.one"),
+        )
+        val digest = sha256Hex(fixture).take(24)
+        val created = imported.notes.filter { note -> before.notes.none { it.path == note.path } }
+        assertFalse(commandReportsUnavailable(imported.message), imported.message)
+        assertNotEquals(ONE_NOTE_EMPTY, imported.message)
+        assertTrue(
+            created.any { note ->
+                note.path.endsWith("Test Page.md") &&
+                    note.markdown.contains("# Test Page") &&
+                    note.markdown.contains("<!-- fanotes-onenote:$digest -->")
+            },
+            "message=${imported.message} notes=${created.joinToString { it.path }}",
+        )
+        assertTrue(created.none { it.path.endsWith("New Section 1.md") })
+
+        val packed = ByteArrayOutputStream()
+        ZipOutputStream(packed).use { zip ->
+            zip.putNextEntry(ZipEntry("New Section 1.one"))
+            zip.write(fixture)
+            zip.closeEntry()
+        }
+        val zipBytes = packed.toByteArray()
+        val fromZip = applyDesktopCommand(
+            before,
+            "onenote-import",
+            CommandExtras(onenoteBytes = zipBytes, onenoteName = "Notebook.zip"),
+        )
+        val zipDigest = sha256Hex(zipBytes).take(24)
+        val zipNotes = fromZip.notes.filter { note -> before.notes.none { it.path == note.path } }
+        assertNotEquals(ONE_NOTE_EMPTY, fromZip.message)
+        assertFalse(commandReportsUnavailable(fromZip.message), fromZip.message)
+        assertTrue(
+            zipNotes.any { note ->
+                note.path.endsWith("Test Page.md") && note.markdown.contains("<!-- fanotes-onenote:$zipDigest -->")
+            },
+            "message=${fromZip.message} notes=${zipNotes.joinToString { it.path }}",
+        )
+
+        val broken = applyDesktopCommand(
+            before,
+            "onenote-import",
+            CommandExtras(
+                onenoteBytes = fixture,
+                onenoteName = "New Section 1.one",
+                one2htmlPath = "/bin/false",
+                sevenZipPath = "/bin/false",
+            ),
+        )
+        assertNotEquals(ONE_NOTE_EMPTY, broken.message)
+        assertTrue(broken.message?.contains("beschädigt") == true, broken.message)
+        assertEquals(before.notes, broken.notes)
+    }
+
     private fun desktopCommandsSource(): String {
         val candidates = listOf(
             Path.of("../../fanotes/src/App.tsx"),
@@ -197,6 +258,17 @@ class AndroidReleaseTest {
 
     private fun glyphLine(): String =
         """{"label_id":"custom-q","unicode":"q","strokes":[{"points":[{"x":0.2,"y":0.3,"pressure":0.4},{"x":0.6,"y":0.8}],"baseWidth":2.5}],"bbox_normalized":[0.2,0.3,0.4,0.5],"source_canvas":{"width":200,"height":80}}"""
+
+    private fun oneNoteSectionBytes(): ByteArray {
+        val candidates = listOf(
+            Path.of("../../fanotes/scripts/fixtures/onenote/New Section 1.one"),
+            Path.of("fanotes/scripts/fixtures/onenote/New Section 1.one"),
+            Path.of("../fanotes/scripts/fixtures/onenote/New Section 1.one"),
+        )
+        val found = candidates.firstOrNull { Files.exists(it) }
+            ?: error("OneNote fixture not found from ${Path.of("").toAbsolutePath()}")
+        return Files.readAllBytes(found)
+    }
 
     private fun oneNoteZip(): ByteArray {
         val html = "<html><head><title>Vorlesung</title></head><body><p>Seite</p></body></html>"
