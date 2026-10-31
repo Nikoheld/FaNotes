@@ -3035,6 +3035,12 @@ private fun EditorMoreMenu(
         TextButton(onClick = { model.performDesktopCommand("onenote-import") }) { Text("Microsoft OneNote importieren") }
     }
     val sheets = backdrop.filter { it.worksheetId.isNotEmpty() }.distinctBy { it.worksheetId }
+    val placingSheetText by model.worksheetTextPlacing.collectAsStateWithLifecycle()
+    if (sheets.isNotEmpty()) {
+        TextButton(onClick = { model.toggleWorksheetText() }) {
+            Text(ch.fasrv.fanotes.desk.ChromeText.ui(if (placingSheetText) "Auf Seite platzieren" else "Textfeld"))
+        }
+    }
     sheets.forEach { slice ->
         TextButton(onClick = { model.removeWorksheet(slice.worksheetId) }) {
             Text(ch.fasrv.fanotes.desk.presentNoteText(slice.label.ifBlank { "Arbeitsblatt" }) + " entfernen")
@@ -3088,11 +3094,15 @@ private fun PageSurface(
     val clearLink by model.clearLinkRequest.collectAsStateWithLifecycle()
     val placeLinkRequest by model.placeLinkRequest.collectAsStateWithLifecycle()
     val placeTextFieldRequest by model.placeTextFieldRequest.collectAsStateWithLifecycle()
+    val worksheetTextRequest by model.worksheetTextRequest.collectAsStateWithLifecycle()
+    val noteFields by model.noteTextFields.collectAsStateWithLifecycle()
+    val noteFieldFocus by model.noteTextFieldFocus.collectAsStateWithLifecycle()
     val pdfCamera by model.pdfCameraCommand.collectAsStateWithLifecycle()
     val sheetReset by model.sheetReset.collectAsStateWithLifecycle()
     var appliedClear by remember { mutableStateOf(0) }
     var appliedPlaceLink by remember { mutableStateOf(0) }
     var appliedPlaceText by remember { mutableStateOf(0) }
+    var appliedWorksheetText by remember { mutableStateOf(0) }
     var appliedPdfCamera by remember { mutableStateOf(0) }
     var appliedSheetReset by remember { mutableStateOf(0) }
     val wasPlacingSection = remember { booleanArrayOf(false) }
@@ -3222,7 +3232,11 @@ private fun PageSurface(
             }
             if (placeTextFieldRequest != appliedPlaceText) {
                 appliedPlaceText = placeTextFieldRequest
-                page.ink.armWorksheetText(model.textFieldPlacing.value)
+                page.ink.armNoteText(model.textFieldPlacing.value)
+            }
+            if (worksheetTextRequest != appliedWorksheetText) {
+                appliedWorksheetText = worksheetTextRequest
+                page.ink.armWorksheetText(model.worksheetTextPlacing.value)
             }
             if (clearLink != appliedClear) {
                 appliedClear = clearLink
@@ -3232,6 +3246,14 @@ private fun PageSurface(
                 page.ink.invalidate()
             }
             page.ink.onPlaceLink = { linkPage, x, y -> model.placeNoteLink(linkPage, x, y, page.ink.noteLinkStyle) }
+            page.ink.noteTextFields = noteFields
+            page.ink.onPlaceTextField = { model.storePlacedTextField(it) }
+            page.ink.onTextFieldMessage = { model.message.value = it }
+            page.ink.onEditTextField = { model.focusNoteTextField(it) }
+            page.syncNoteTextField(noteFieldFocus)
+            page.onNoteTextFieldText = { id, text -> model.updateNoteTextFieldText(id, text) }
+            page.onNoteTextFieldRemove = { model.removeNoteTextField(it) }
+            page.onNoteTextFieldClosed = { model.focusNoteTextField(null) }
             page.ink.onOpenLink = { model.openPath(it); model.showDestination("notes") }
             page.ink.onRemoveLink = { model.askRemoveNoteLink(it) }
             page.onRestyleLink = { id, linkStyle -> model.restylePlacedNoteLink(id, linkStyle) }
@@ -3297,6 +3319,7 @@ private fun PageSurface(
             page.ink.onPlaceBox = { worksheetId, pageNumber, x, y ->
                 model.placeWorksheetBox(worksheetId, pageNumber, x, y, onEditBox)
                 model.textFieldPlacing.value = false
+                model.worksheetTextPlacing.value = false
             }
             page.ink.onRemoveHighlight = { model.removeWorksheetHighlight(it) }
             page.onFinger = { model.fingerDraws.value = it }

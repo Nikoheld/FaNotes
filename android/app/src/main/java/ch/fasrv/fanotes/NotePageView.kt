@@ -702,6 +702,24 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
     }
     private val boxRemove = TextView(context)
+    private val noteField = object : EditText(context) {
+        override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+            if (keyCode == KeyEvent.KEYCODE_ESCAPE && !event.isCtrlPressed && !event.isAltPressed &&
+                !event.isMetaPressed && !event.isShiftPressed
+            ) {
+                if (event.action == KeyEvent.ACTION_UP) onNoteTextFieldClosed()
+                return true
+            }
+            return super.onKeyPreIme(keyCode, event)
+        }
+    }
+    private val noteRemove = TextView(context)
+    private var requestedNoteFieldId: String? = null
+    private var openNoteFieldId: String? = null
+    private var acceptedNoteText = ""
+    private var writingNoteField = false
+    private var suppressNoteClose = false
+    private var noteRemovePressed = false
     private var requestedBoxId: String? = null
     private var openBoxId: String? = null
     private var acceptedBoxText = ""
@@ -767,6 +785,9 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onWorksheetBoxText: (String, String) -> Unit = { _, _ -> }
     var onWorksheetBoxRemove: (String) -> Unit = {}
     var onWorksheetBoxClosed: () -> Unit = {}
+    var onNoteTextFieldText: (String, String) -> Unit = { _, _ -> }
+    var onNoteTextFieldRemove: (String) -> Unit = {}
+    var onNoteTextFieldClosed: () -> Unit = {}
     var onUnfoldHeading: (Int) -> Unit = {}
     var onToggleHeading: (Int) -> Unit = {}
     var onEditorFold: (String, Int) -> Unit = { _, _ -> }
@@ -998,6 +1019,66 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
         addView(boxField, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         addView(boxRemove, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
+        noteField.setTextColor(0xFF20222B.toInt())
+        noteField.setHintTextColor(0xFF747887.toInt())
+        noteField.hint = ch.fasrv.fanotes.desk.ChromeText.ui("Text eingeben …")
+        noteField.gravity = Gravity.TOP or Gravity.START
+        noteField.setLineSpacing(0f, 1.35f)
+        noteField.minHeight = 0
+        noteField.minimumHeight = 0
+        noteField.isFocusableInTouchMode = true
+        noteField.background = GradientDrawable().apply {
+            cornerRadius = dp(6).toFloat()
+            setColor(android.graphics.Color.argb(224, 255, 255, 255))
+            setStroke(dp(1).coerceAtLeast(1), 0x5920222B)
+        }
+        noteField.setPadding(dp(8), dp(6), dp(8), dp(6))
+        noteField.visibility = GONE
+        noteField.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: android.text.Editable?) {
+                if (writingNoteField) return
+                val id = openNoteFieldId ?: return
+                val next = s?.toString().orEmpty().take(8000)
+                if (next == acceptedNoteText) return
+                acceptedNoteText = next
+                onNoteTextFieldText(id, next)
+                placeNoteTextFieldEditor()
+            }
+        })
+        noteField.setOnFocusChangeListener { _, focused ->
+            if (focused || suppressNoteClose || requestedNoteFieldId == null) return@setOnFocusChangeListener
+            noteField.post {
+                if (suppressNoteClose || requestedNoteFieldId == null || noteRemovePressed) return@post
+                onNoteTextFieldClosed()
+            }
+        }
+        noteRemove.text = "×"
+        noteRemove.contentDescription = ch.fasrv.fanotes.desk.ChromeText.ui("Textfeld entfernen")
+        noteRemove.gravity = Gravity.CENTER
+        noteRemove.textSize = 12f
+        noteRemove.setTextColor(0xFFA33F56.toInt())
+        noteRemove.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(android.graphics.Color.WHITE)
+            setStroke(dp(1).coerceAtLeast(1), 0x2E58222F)
+        }
+        noteRemove.visibility = GONE
+        noteRemove.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> noteRemovePressed = true
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> noteRemovePressed = false
+            }
+            false
+        }
+        noteRemove.setOnClickListener {
+            val id = requestedNoteFieldId ?: return@setOnClickListener
+            noteRemovePressed = false
+            onNoteTextFieldRemove(id)
+        }
+        addView(noteField, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
+        addView(noteRemove, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         editor.setOnScrollChangeListener { _, _, scrollY, _, _ ->
             lineNumbers.scrollTo(0, scrollY)
             foldMarks.scrollTo(0, scrollY)
@@ -1027,6 +1108,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         ink.onCamera = { _, _, _ ->
             placeEditor()
             placeWorksheetField()
+            placeNoteTextFieldEditor()
         }
         ink.onPenActive = { active ->
             penDown = active
@@ -2005,6 +2087,73 @@ class NotePageView(context: Context) : FrameLayout(context) {
         placeWorksheetField()
     }
 
+    /** Shows the keyboard editor on a placed note text field. */
+    fun syncNoteTextField(id: String?) {
+        requestedNoteFieldId = id
+        placeNoteTextFieldEditor()
+    }
+
+    private fun placeNoteTextFieldEditor() {
+        val id = requestedNoteFieldId
+        if (id == null) {
+            dismissNoteTextField()
+            return
+        }
+        if (ink.noteTextFields.none { it.id == id }) {
+            if (openNoteFieldId == id) {
+                openNoteFieldId = null
+                post { onNoteTextFieldClosed() }
+            }
+            return
+        }
+        val live = if (openNoteFieldId == id) noteField.text?.toString() else null
+        val rect = ink.noteTextFieldScreenRect(id, live) ?: return
+        if (openNoteFieldId != id) {
+            val text = ink.noteTextFields.firstOrNull { it.id == id }?.text.orEmpty()
+            openNoteFieldId = id
+            writingNoteField = true
+            noteField.setText(text)
+            noteField.setSelection(noteField.text?.length ?: 0)
+            writingNoteField = false
+            acceptedNoteText = text
+            noteField.hint = ch.fasrv.fanotes.desk.ChromeText.ui("Text eingeben …")
+            noteField.visibility = VISIBLE
+            noteRemove.visibility = VISIBLE
+            noteField.requestFocusFromTouch()
+            val imm = context.getSystemService(InputMethodManager::class.java)
+            imm?.showSoftInput(noteField, InputMethodManager.SHOW_IMPLICIT)
+        }
+        ink.activeNoteTextFieldId = id
+        val field = ink.noteTextFields.firstOrNull { it.id == id }
+        val scale = ink.cameraScale().coerceAtLeast(0.2f)
+        val font = ((field?.fontSize ?: 16) * scale).coerceAtLeast(12f)
+        noteField.setTextSize(TypedValue.COMPLEX_UNIT_PX, font)
+        val left = rect.left.toInt()
+        val top = rect.top.toInt()
+        val right = (rect.left + rect.width).toInt().coerceAtLeast(left + 1)
+        val bottom = (rect.top + rect.height).toInt().coerceAtLeast(top + 1)
+        pinToSheet(noteField, left, top, right, bottom)
+        val size = dp(22).coerceAtLeast(1)
+        pinToSheet(noteRemove, right - size / 2, top - size / 2, right + size / 2, top + size / 2)
+        ink.invalidate()
+    }
+
+    private fun dismissNoteTextField() {
+        val open = openNoteFieldId != null || noteField.visibility == VISIBLE
+        requestedNoteFieldId = null
+        if (!open && ink.activeNoteTextFieldId == null) return
+        suppressNoteClose = true
+        noteField.visibility = GONE
+        noteRemove.visibility = GONE
+        openNoteFieldId = null
+        if (noteField.hasFocus()) noteField.clearFocus()
+        val imm = context.getSystemService(InputMethodManager::class.java)
+        imm?.hideSoftInputFromWindow(noteField.windowToken, 0)
+        if (ink.activeNoteTextFieldId != null) ink.activeNoteTextFieldId = null
+        ink.invalidate()
+        suppressNoteClose = false
+    }
+
     private fun placeWorksheetField() {
         val id = requestedBoxId
         if (id == null) {
@@ -2174,6 +2323,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         super.onLayout(changed, left, top, right, bottom)
         placeEditor()
         placeWorksheetField()
+        placeNoteTextFieldEditor()
     }
 
     private fun rounded(color: Int, radius: Int, stroke: Int = 0, strokeWidth: Int = 0) = GradientDrawable().apply {

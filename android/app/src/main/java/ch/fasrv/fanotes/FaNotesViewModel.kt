@@ -441,6 +441,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 if (fromHistory == null) noteTrail.value = visitNote(noteTrail.value, path)
                 rememberLastOpen(path)
                 revealFolders(path)
+                noteTextFieldFocus.value = null
                 dirty = false
                 unsaved.value = false
                 savePhase.value = "saved"
@@ -457,18 +458,34 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         if (prevWidth == nextWidth && prevHeight == nextHeight && padX == 0.0 && padY == 0.0) return
         if (backdrop.value.isEmpty()) {
             val source = open.value
-            val links = noteLinks.value
-            if (source != null && links.isNotEmpty()) {
-                val moved = links.map { link ->
-                    link.copy(
-                        x = keepMarkOnPage(link.x, prevWidth, nextWidth, padX),
-                        y = keepMarkOnPage(link.y, prevHeight, nextHeight, padY),
-                    )
-                }
+            if (source != null && (noteLinks.value.isNotEmpty() || noteTextFields.value.isNotEmpty())) {
                 val payload = (source.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
-                payload.put("noteLinks", ch.fasrv.fanotes.desk.noteLinksJson(moved))
+                if (noteLinks.value.isNotEmpty()) {
+                    val moved = noteLinks.value.map { link ->
+                        link.copy(
+                            x = keepMarkOnPage(link.x, prevWidth, nextWidth, padX),
+                            y = keepMarkOnPage(link.y, prevHeight, nextHeight, padY),
+                        )
+                    }
+                    payload.put("noteLinks", ch.fasrv.fanotes.desk.noteLinksJson(moved))
+                    noteLinks.value = moved
+                }
+                if (noteTextFields.value.isNotEmpty()) {
+                    val moved = ch.fasrv.fanotes.desk.noteTextFieldsAfterOriginGrow(
+                        noteTextFields.value,
+                        prevWidth,
+                        prevHeight,
+                        nextWidth,
+                        nextHeight,
+                        padX,
+                        padY,
+                    )
+                    if (moved !== noteTextFields.value) {
+                        payload.put("textFields", ch.fasrv.fanotes.desk.noteTextFieldsJson(moved))
+                        noteTextFields.value = moved
+                    }
+                }
                 open.value = source.copy(payload = payload)
-                noteLinks.value = moved
             }
         }
         noteChanged()
@@ -1776,6 +1793,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     val noteLinks = MutableStateFlow<List<ch.fasrv.fanotes.desk.NoteLinkMark>>(emptyList())
+    val noteTextFields = MutableStateFlow<List<ch.fasrv.fanotes.desk.NoteTextField>>(emptyList())
+    val noteTextFieldFocus = MutableStateFlow<String?>(null)
     val worksheetBoxes = MutableStateFlow<List<ch.fasrv.fanotes.desk.AnchoredBox>>(emptyList())
     val worksheetHighlights = MutableStateFlow<List<ch.fasrv.fanotes.desk.AnchoredHighlight>>(emptyList())
     val bookPane = MutableStateFlow<BookPaneState?>(null)
@@ -1796,6 +1815,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 boxes to marks
             }
             noteLinks.value = links
+            noteTextFields.value = ch.fasrv.fanotes.desk.parseNoteTextFields(note?.payload?.array("textFields"))
             worksheetBoxes.value = overlay.first
             worksheetHighlights.value = overlay.second
         }
@@ -2630,6 +2650,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val linkPlacing = MutableStateFlow(false)
     val textFieldPlacing = MutableStateFlow(false)
     val placeTextFieldRequest = MutableStateFlow(0)
+    val worksheetTextPlacing = MutableStateFlow(false)
+    val worksheetTextRequest = MutableStateFlow(0)
     val settingsSection = MutableStateFlow("appearance")
     val settingsSectionRequest = MutableStateFlow(0)
     val placingSection = MutableStateFlow(false)
@@ -2668,8 +2690,64 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             linkPlacing.value = false
             placeLinkRequest.value += 1
         }
+        if (worksheetTextPlacing.value) {
+            worksheetTextPlacing.value = false
+            worksheetTextRequest.value += 1
+        }
         textFieldPlacing.value = after.textFieldPlacing
         placeTextFieldRequest.value += 1
+    }
+
+    /** Worksheet-layer text tool. Separate from a note text field. */
+    fun toggleWorksheetText() {
+        if (open.value?.worksheets.isNullOrEmpty()) return
+        if (textFieldPlacing.value) {
+            textFieldPlacing.value = false
+            placeTextFieldRequest.value += 1
+        }
+        worksheetTextPlacing.value = !worksheetTextPlacing.value
+        worksheetTextRequest.value += 1
+    }
+
+    fun storePlacedTextField(field: ch.fasrv.fanotes.desk.NoteTextField) {
+        val source = open.value ?: return
+        val accepted = ch.fasrv.fanotes.desk.acceptPlacedTextField(noteTextFields.value, field)
+        val placed = accepted.placed
+        if (placed == null) {
+            val toast = ch.fasrv.fanotes.desk.userVisibleToast(accepted.message)
+            if (toast != null) message.value = toast
+            return
+        }
+        val payload = ch.fasrv.fanotes.desk.writeNoteTextFields(source.payload, accepted.fields)
+        open.value = source.copy(payload = payload)
+        noteTextFields.value = accepted.fields
+        textFieldPlacing.value = false
+        placeTextFieldRequest.value += 1
+        noteTextFieldFocus.value = placed.id
+        noteChanged()
+    }
+
+    fun focusNoteTextField(id: String?) {
+        noteTextFieldFocus.value = id
+    }
+
+    fun updateNoteTextFieldText(id: String, text: String) {
+        val source = open.value ?: return
+        val next = ch.fasrv.fanotes.desk.patchNoteTextField(noteTextFields.value, id, text = text)
+        if (next == noteTextFields.value) return
+        open.value = source.copy(payload = ch.fasrv.fanotes.desk.writeNoteTextFields(source.payload, next))
+        noteTextFields.value = next
+        noteChanged()
+    }
+
+    fun removeNoteTextField(id: String) {
+        val source = open.value ?: return
+        val next = ch.fasrv.fanotes.desk.removeNoteTextField(noteTextFields.value, id)
+        if (next.size == noteTextFields.value.size) return
+        open.value = source.copy(payload = ch.fasrv.fanotes.desk.writeNoteTextFields(source.payload, next))
+        noteTextFields.value = next
+        if (noteTextFieldFocus.value == id) noteTextFieldFocus.value = null
+        noteChanged()
     }
 
     fun cancelTextFieldPlacement() {
