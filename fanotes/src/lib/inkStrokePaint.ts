@@ -699,17 +699,21 @@ export const drawInkStroke = (
     // The pen-up sample often sits a pixel or two off the last move; a butt
     // cap on that stub cuts a notch across a wide highlighter. Leave it out.
     let end = lastSegment
+    let trimmedStub = false
     if (end === stroke.points.length && end - 1 > firstSegment) {
       const tail = stroke.points[end - 1]
       const beforeTail = stroke.points[end - 2]
       const stub = Math.hypot((tail.x - beforeTail.x) * width, (tail.y - beforeTail.y) * height)
-      if (stub < lineWidth * .3) end -= 1
+      if (stub < lineWidth * .3) {
+        end -= 1
+        trimmedStub = true
+      }
     }
     target.beginPath()
-    // A partial range still has to fillet toward the next known sample. Using
-    // `end` made that last segment a line to the point, so a highlighter
-    // corner grew a disk the full path never paints.
-    const curveCount = Math.max(end, options?.curvePointCount ?? end)
+    // A partial range still fillets toward the next known sample. A pen-up
+    // stub that this trim just dropped must not stay a curve target, or the
+    // live bake paints a tip the one-shot path leaves empty.
+    const curveCount = trimmedStub ? end : Math.max(end, options?.curvePointCount ?? end)
     for (let index = firstSegment; index < end; index += 1) {
       segmentCurve(index, 0, 0, target, index > firstSegment, curveCount)
     }

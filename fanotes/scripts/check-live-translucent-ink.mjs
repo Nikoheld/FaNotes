@@ -133,6 +133,23 @@ const assertSettled = (name, build, points) => {
     assert.ok(gap <= 3, `${name} settled pixel ${sample.x.toFixed(1)},${sample.y.toFixed(1)} gap ${gap} grown ${left} once ${right}`)
     assert.ok(right[3] >= 80, `${name} sample missed the stroke at ${sample.x.toFixed(1)},${sample.y.toFixed(1)} alpha ${right[3]}`)
   }
+  // Dense ~6px highlighter steps trip the pen-up stub trim. The live curve
+  // must stop at that trimmed end. The tip used to keep curving into the
+  // dropped sample (alpha 87 where one composite is empty).
+  if (name === 'highlighter') {
+    let mismatches = 0
+    let sawInk = false
+    for (let y = 70; y <= 120; y += 1) {
+      for (let x = 740; x < grown.image.width; x += 1) {
+        const left = pixel(grown.image, x, y)
+        const right = pixel(reference, x, y)
+        if (left[3] >= 80 || right[3] >= 80) sawInk = true
+        if (channelGap(left, right) > 3) mismatches += 1
+      }
+    }
+    assert.equal(mismatches, 0, `${name} tip mismatches ${mismatches} around the short final sample`)
+    assert.ok(sawInk, `${name} tip missed the stroke`)
+  }
   return grown
 }
 
