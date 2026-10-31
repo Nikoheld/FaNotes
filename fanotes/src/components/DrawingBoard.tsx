@@ -2701,20 +2701,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   useEffect(() => {
     if (!initialDrawingJson) return
-    const sourceId = drawingId ?? null
-    if (inkDocumentIsOwnSave(authoredSaveRef.current, sourceId, initialDrawingJson)) {
-      // The first save gives a new page its id; the session then hands that
-      // snapshot back. The live strokes are already ahead of it (an erase
-      // during the save must not be undone by it), so it is only acknowledged.
-      loadedDrawingIdRef.current = sourceId
-      loadedDrawingJsonRef.current = initialDrawingJson
-      if (sourceId) drawingIdRef.current = sourceId
-      inkHydratingRef.current = false
-      inkReadyRef.current = true
-      return
-    }
-    if (loadedDrawingIdRef.current === sourceId) {
-      if (loadedDrawingJsonRef.current !== initialDrawingJson) {
+    const openId = drawingId ?? null
+    if (loadedDrawingIdRef.current === openId && loadedDrawingJsonRef.current !== initialDrawingJson) {
+      const authored = authoredSaveRef.current
+      if (authored !== null && authored.drawingJson === initialDrawingJson) {
+        loadedDrawingJsonRef.current = initialDrawingJson
+      } else {
         const merged = strokesAfterRemoteJson(strokesRef.current, loadedDrawingJsonRef.current, initialDrawingJson)
         const added = merged.slice(strokesRef.current.length)
         const normalized = safeInkStrokes(added.map((stroke) => {
@@ -2726,7 +2718,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           bumpInkRevision({ updateTranscript: false })
         }
         loadedDrawingJsonRef.current = initialDrawingJson
+        return
       }
+    }
+    const sourceId = drawingId ?? null
+    if (loadedDrawingIdRef.current === sourceId) return
+    if (inkDocumentIsOwnSave(authoredSaveRef.current, sourceId, initialDrawingJson)) {
+      // The first save gives a new page its id; the session then hands that
+      // snapshot back. The live strokes are already ahead of it (an erase
+      // during the save must not be undone by it), so it is only acknowledged.
+      loadedDrawingJsonRef.current = initialDrawingJson
+      inkHydratingRef.current = false
+      inkReadyRef.current = true
+      loadedDrawingIdRef.current = sourceId
+      if (sourceId) drawingIdRef.current = sourceId
       return
     }
     const token = ++inkOpenTokenRef.current
