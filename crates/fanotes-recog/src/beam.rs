@@ -444,6 +444,31 @@ pub fn beam_decode(
             }
         }
     }
+    // A close reading that only capitalizes a later long word keeps those capitals
+    // (`kaninchen` → `Kaninchen`). A short word, or the first word, stays as it is.
+    {
+        let chosen = tidy(&render(&best));
+        let mut distinct = 0usize;
+        let mut previous = String::new();
+        for (prefix, score) in &finals {
+            if best_score - *score > 0.8 {
+                break;
+            }
+            let polished = polish(prefix, &greedy_ids, &words, dictionary);
+            let text = tidy(&render(&polished));
+            if text != previous {
+                if distinct == options.n_best.max(1) {
+                    break;
+                }
+                distinct += 1;
+                previous = text.clone();
+            }
+            if capitalizes_a_long_later_word(&chosen, &text) {
+                best = polished;
+                break;
+            }
+        }
+    }
     // The language model likes to split a long pen word into two known words (`Jack daws`).
     // If the raw trace has no space there and both pieces are long, join them back.
     let best = drop_spaces_absent_from_trace(&best, &greedy_text, &words, dictionary);
@@ -614,6 +639,47 @@ fn drop_spaces_absent_from_trace(
         .filter(|(index, _)| !drop[*index])
         .map(|(_, symbol)| *symbol)
         .collect()
+}
+
+/// `candidate` differs from `current` only by turning lowercase letters into capitals,
+/// and every such letter sits in a word of at least eight letters that is not the first word.
+fn capitalizes_a_long_later_word(current: &str, candidate: &str) -> bool {
+    let current: Vec<char> = current.chars().collect();
+    let candidate: Vec<char> = candidate.chars().collect();
+    if current.len() != candidate.len() {
+        return false;
+    }
+    let mut changed = false;
+    for index in 0..current.len() {
+        if current[index] == candidate[index] {
+            continue;
+        }
+        if !current[index].is_lowercase()
+            || !candidate[index].is_uppercase()
+            || !same_letter(current[index], candidate[index])
+        {
+            return false;
+        }
+        let start = index
+            - (0..index)
+                .rev()
+                .take_while(|&cursor| current[cursor].is_alphabetic())
+                .count();
+        let end = index
+            + 1
+            + (index + 1..current.len())
+                .take_while(|&cursor| current[cursor].is_alphabetic())
+                .count();
+        if end - start < 8
+            || !current[..start]
+                .iter()
+                .any(|character| character.is_alphabetic())
+        {
+            return false;
+        }
+        changed = true;
+    }
+    changed
 }
 
 /// `candidate` is `current` with exactly one `'` added and every other character unchanged.
@@ -1475,6 +1541,22 @@ mod tests {
             "über Personen",
             "über Paronen",
             &Known
+        ));
+    }
+
+    #[test]
+    fn a_long_later_word_may_take_a_capital_from_a_close_reading() {
+        assert!(capitalizes_a_long_later_word(
+            "Das war ein böses kaninchen.",
+            "Das war ein böses Kaninchen."
+        ));
+        assert!(!capitalizes_a_long_later_word(
+            "Six piqued gnasts!",
+            "Six piqued Gnasts!"
+        ));
+        assert!(!capitalizes_a_long_later_word(
+            "kaninchen bleibt hier",
+            "Kaninchen bleibt hier"
         ));
     }
 
