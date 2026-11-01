@@ -196,3 +196,18 @@ export const charactersWithWordEdits = <T extends { char: string }>(
   }
   return { characters, source }
 }
+
+/** A slightly smaller rendering used when a word mixes capitals into its lowercase letters. */
+export const MIXED_CASE_SCALE = 0.92
+
+/** True when some word has a capital after its first letter and also a lowercase letter (`PEcK`). */
+export const hasMixedInteriorCase = (text: string) => inkWords(text).some((word) => {
+  const letters = [...word]
+  if (letters.length < 3) return false
+  const upper = (character: string) => character !== character.toLowerCase() && character === character.toUpperCase()
+  const lower = (character: string) => character !== character.toUpperCase() && character === character.toLowerCase()
+  return letters.slice(1).some(upper) && letters.some(lower)
+})
+
+/** True when the strings use the same letters and differ only in case. */
+export const differsOnlyInCase = (left: string, right: string) => left !== right && left.toLowerCase() === right.toLowerCase()

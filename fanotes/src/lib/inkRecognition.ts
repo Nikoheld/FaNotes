@@ -30,9 +30,12 @@ import {
   MERGE_SCORE_MARGIN,
   SPLICE_SCORE_MARGIN,
   WIDTH_RETRY_MARGIN,
+  MIXED_CASE_SCALE,
   charactersWithWordEdits,
+  differsOnlyInCase,
   foldInkWord,
   hasLongUnknownWord,
+  hasMixedInteriorCase,
   longUnknownWordEdits,
   textWithWordEdits,
   widthReadingKeepsKnownWords,
@@ -602,6 +605,30 @@ export async function recognizeInk(
           boxes.set(from.subarray(source.index * 4, source.index * 4 + 4), index * 4)
         })
         stitched = { boxes }
+      }
+    }
+    if (
+      defaultPen
+      && hasMixedInteriorCase(decoded.text)
+    ) {
+      const caseImage = renderLine(packed, reference, { ...style, penWidth: activePenWidth, scale: MIXED_CASE_SCALE })
+      if (caseImage) {
+        const caseInferenceStarted = performance.now()
+        const caseRun = await infer(caseImage, threads, usePersonalModel)
+        inferenceMs += performance.now() - caseInferenceStarted
+        if (caseRun.classes === engine.classes) {
+          const caseDecodeStarted = performance.now()
+          const caseDecoded = decodeLine(engine, caseRun.logits, lineLanguage, decoderForLanguage(engine.manifest.decoder, lineLanguage))
+          decodeMs += performance.now() - caseDecodeStarted
+          const caseScore = caseDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+          const currentScore = decoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+          if (caseScore > currentScore && differsOnlyInCase(decoded.text, caseDecoded.text)) {
+            decoded = caseDecoded
+            activeImage = caseImage
+            activeScale = MIXED_CASE_SCALE
+            stitched = null
+          }
+        }
       }
     }
     if (!decoded.text.trim()) continue
