@@ -116,6 +116,7 @@ const main = () => {
     websiteUrl,
   }
   entry(directory, version, `FaNotes-${version}-android.apk`, sums)
+  entry(directory, version, `FaNotes-Companion-${version}-android.apk`, sums)
 
   fs.writeFileSync(path.join(directory, 'SHA256SUMS'), `${sums.sort().join('\n')}\n`)
   fs.writeFileSync(path.join(directory, updateManifestFileName('linux', channel)), `${JSON.stringify(sign(linux, privateKeyPem))}\n`)

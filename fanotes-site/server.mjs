@@ -14,6 +14,7 @@ import { handleSendDataRequest } from './send-data-api.mjs'
 import { handleSyncRequest } from './sync-api.mjs'
 import { handleMcpRequest } from './mcp-api.mjs'
 import { handleAiProxyRequest } from './ai-proxy.mjs'
+import { createSchulnetzRuntime } from './schulnetz-api.mjs'
 import { languageForRequest, localizeExactText, localizeResponse } from './i18n.mjs'
 import { createAnalyticsService } from './analytics.mjs'
 import { loadGithubReleases, pickGithubPackage } from './github-release.mjs'
@@ -52,6 +53,7 @@ const DELTA_MAGIC = Buffer.from('FANOTESDELTA1\0\0\0', 'ascii')
 const MAX_DELTA_HEADER_BYTES = 8 * 1024 * 1024
 
 const analytics = await createAnalyticsService({ directory: ANALYTICS_DIR })
+const schulnetz = createSchulnetzRuntime()
 
 const MIME_TYPES = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -562,6 +564,7 @@ const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost')
     if (await handleBackupRequest(request, response, url)) return
     if (await handleSyncRequest(request, response, url)) return
+    if (await schulnetz.handle(request, response, url)) return
     if (await handleMcpRequest(request, response, url)) return
     if (await handleHomeworkRequest(request, response, url)) return
     if (await handleShareRequest(request, response, url)) return
@@ -666,6 +669,7 @@ server.listen(PORT, HOST, () => {
   console.log(`FaNotes website listening on http://${HOST}:${PORT}`)
   console.log(`Release source: ${RELEASE_DIR}`)
   console.log(`Protected backup store: ${backupService.root}`)
+  schulnetz.start()
 })
 
 const shutdown = () => server.close(() => process.exit(0))

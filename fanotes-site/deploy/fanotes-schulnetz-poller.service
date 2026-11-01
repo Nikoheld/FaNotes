@@ -1,0 +1,28 @@
+[Unit]
+Description=FaNotes Schulnetz poller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/fanotes-site
+Environment=NODE_ENV=production
+Environment=FANOTES_SCHULNETZ_DIR=/var/lib/fanotes-schulnetz
+Environment=FANOTES_SCHULNETZ_TOKEN_KEY_FILE=/etc/fanotes/schulnetz-token.key
+Environment=FANOTES_NTFY_URL=https://ntfy.sh
+Environment=FANOTES_SCHULNETZ_POLL_MS=180000
+ExecStart=/usr/bin/node /opt/fanotes-site/schulnetz-poller.mjs
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+UMask=0077
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/fanotes-schulnetz
+ReadOnlyPaths=/etc/fanotes
+
+[Install]
+WantedBy=multi-user.target

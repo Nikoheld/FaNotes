@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "fanotes-android"
-include(":core", ":app")
+include(":core", ":app", ":companion")

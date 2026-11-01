@@ -33,9 +33,10 @@ export ANDROID_HOME="$HOME/Android/Sdk"
 
 ./gradlew :core:test
 ./gradlew :app:assembleDebug
+./gradlew :companion:assembleDebug
 ```
 
-The debug APK is `android/app/build/outputs/apk/debug/app-debug.apk`. Install it with `adb install -r` that file. Android Studio can open the `android/` directory directly; the Gradle wrapper is 9.6 and the Android Gradle Plugin is 9.4 (built-in Kotlin 2.2.10).
+The debug APK is `android/app/build/outputs/apk/debug/app-debug.apk`. The phone companion is `android/companion/build/outputs/apk/debug/companion-debug.apk`. Install either with `adb install -r`. Android Studio can open the `android/` directory directly; the Gradle wrapper is 9.6 and the Android Gradle Plugin is 9.4 (built-in Kotlin 2.2.10).
 
 `:core:test` does not need a device. It checks the FAMD codec, the ink JSON shape, palm rejection, vault round-trips, the WebCrypto sync vectors, and a two-device sync against an in-memory server.
 
@@ -48,6 +49,9 @@ The app starts in a private vault on the tablet and creates a welcome note. **Va
 ## Project map
 
 ```text
-android/core     Vault codec, ink model, palm policy, sync crypto and engine
-android/app      Tablet UI, ink surface, storage, OkHttp, foreground sync
+android/core        Vault codec, ink model, palm policy, sync crypto and engine, Schulnetz parsers
+android/app         Tablet UI, ink surface, storage, OkHttp, foreground sync
+android/companion   Phone UI: notes, ink, calendar, homework, Schulnetz
 ```
+
+The companion (`ch.fasrv.fanotes.companion`) is a separate phone app. It reuses `:core` for the vault, ink format and sync, and adds a German one-handed layout. Schulnetz login stays read-only. Server deploy steps are in `server-changes/schulnetz-companion/README.md`.
