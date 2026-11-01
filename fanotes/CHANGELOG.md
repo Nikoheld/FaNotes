@@ -1,5 +1,12 @@
 # Änderungsverlauf
 
+## 2026.11.1-beta.2
+
+- Add an optional Snow theme with movable flakes.
+- Read scanned PDF pages with the local OCR model.
+- Show find and replace in the note editor as a FaNotes bar.
+- Move the release workflows off Node.js 20 actions.
+
 ## 2026.11.1-beta.1
 
 - Place a new note's camera even when the scroller still shows the last note.
