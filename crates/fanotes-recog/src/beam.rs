@@ -328,7 +328,7 @@ pub fn beam_decode(
     }
     // The language model likes to split a long pen word into two known words (`Jack daws`).
     // If the raw trace has no space there and both pieces are long, join them back.
-    let best = drop_spaces_absent_from_trace(&best, &greedy_text, &words);
+    let best = drop_spaces_absent_from_trace(&best, &greedy_text, &words, dictionary);
     let characters = align(&log_probs, classes, frames, &best, alphabet);
     let text = render(&best);
     let (known_words, word_count) = count_words(&best, &words);
@@ -362,7 +362,12 @@ fn polish(
     }
 }
 
-fn drop_spaces_absent_from_trace(prefix: &[u8], greedy: &str, words: &Words<'_>) -> Vec<u8> {
+fn drop_spaces_absent_from_trace(
+    prefix: &[u8],
+    greedy: &str,
+    words: &Words<'_>,
+    dictionary: Option<&dyn Lexicon>,
+) -> Vec<u8> {
     if prefix.is_empty() || greedy.is_empty() {
         return prefix.to_vec();
     }
@@ -405,8 +410,18 @@ fn drop_spaces_absent_from_trace(prefix: &[u8], greedy: &str, words: &Words<'_>)
                 let right = (i..n)
                     .take_while(|&index| beam[index].is_alphabetic())
                     .count();
+                // Two known words (`schlafen gehen`) stay split. A join is kept only when
+                // the dictionary has the single word (`jackdaws`) and the trace has no space.
                 if left >= 4 && right >= 4 {
-                    drop[i - 1] = true;
+                    let joined: String = beam[i - 1 - left..i - 1]
+                        .iter()
+                        .chain(beam[i..i + right].iter())
+                        .flat_map(|character| character.to_lowercase())
+                        .collect::<String>()
+                        .replace('ß', "ss");
+                    if dictionary.is_some_and(|known| known.contains(&joined)) {
+                        drop[i - 1] = true;
+                    }
                 }
             }
             i -= 1;
@@ -875,13 +890,29 @@ mod tests {
             (alphabet.iter().position(|&item| item == character).unwrap() + 1) as u8
         };
         let symbols = |text: &str| text.chars().map(index).collect::<Vec<_>>();
+        struct KnownJoin;
+        impl Lexicon for KnownJoin {
+            fn contains(&self, word: &str) -> bool {
+                word == "abcdefgh"
+            }
+        }
         let decoder = words(&alphabet);
         assert_eq!(
-            drop_spaces_absent_from_trace(&symbols("abcd efgh"), "abcdefgh", &decoder),
+            drop_spaces_absent_from_trace(
+                &symbols("abcd efgh"),
+                "abcdefgh",
+                &decoder,
+                Some(&KnownJoin)
+            ),
             symbols("abcdefgh")
         );
         assert_eq!(
-            drop_spaces_absent_from_trace(&symbols("abcd e"), "abcde", &decoder),
+            drop_spaces_absent_from_trace(&symbols("abcd efgh"), "abcdefgh", &decoder, None),
+            symbols("abcd efgh"),
+            "two known pieces are not joined when the word is not in the dictionary"
+        );
+        assert_eq!(
+            drop_spaces_absent_from_trace(&symbols("abcd e"), "abcde", &decoder, Some(&KnownJoin)),
             symbols("abcd e")
         );
     }
