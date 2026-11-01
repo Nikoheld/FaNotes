@@ -211,6 +211,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Surface | Source | Needle |
 | --- | --- | --- |
 | Vault search | `src/components/SearchPanel.tsx` | `SearchPanel` |
+| Editor suchen und ersetzen | `src/lib/editorFindBar.ts` | `export const createEditorFindPanel` |
 | Command palette | `src/components/CommandPalette.tsx` | `CommandPalette` |
 | Palette actions | `src/App.tsx` | `id: 'bug-report'` |
 | Reveal in folder | `src/App.tsx` | `id: 'reveal'` |

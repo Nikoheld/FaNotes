@@ -3950,5 +3950,15 @@
   "Diese Freigabe kann nicht bearbeitet werden.": "This share cannot be edited.",
   "Dieser Ordner gehört nicht zum Vault.": "This folder is not in the vault.",
   "Der Name fehlt.": "The name is missing.",
-  "Der Name wurde nicht gespeichert.": "The name was not saved."
+  "Der Name wurde nicht gespeichert.": "The name was not saved.",
+  "Ersetzen": "Replace",
+  "Alle ersetzen": "Replace all",
+  "Ersatztext": "Replacement",
+  "Suchbegriff": "Search term",
+  "Gross- und Kleinschreibung": "Match case",
+  "Ganzes Wort": "Whole word",
+  "Regulärer Ausdruck": "Regular expression",
+  "Ungültiger Ausdruck": "Invalid expression",
+  "Suchen und ersetzen": "Find and replace",
+  "Vorheriger Treffer": "Previous match"
 }

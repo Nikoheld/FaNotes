@@ -56,6 +56,7 @@ import {
   type ViewUpdate,
 } from '@codemirror/view'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
+import { createEditorFindPanel } from '../lib/editorFindBar'
 import type { AppSettings, DetectedTextLanguage } from '../types'
 import type { EditActivity } from '../lib/pageStats'
 import { createTrailingValueScheduler, type TrailingValueScheduler } from '../lib/trailingValueScheduler'
@@ -1482,7 +1483,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         crosshairCursor(),
         highlightActiveLine(),
         highlightSelectionMatches(),
-        search({ top: true }),
+        search({ top: true, createPanel: createEditorFindPanel }),
         markdown(),
         livePreview,
         EditorView.lineWrapping,
