@@ -215,6 +215,11 @@ fun SchulnetzSnapshot.toNormalizedJson(): String = buildString {
         if (index > 0) append(',')
         append(escapeJson(line))
     }
+    append("],\"readErrors\":[")
+    readErrors.forEachIndexed { index, line ->
+        if (index > 0) append(',')
+        append(escapeJson(line))
+    }
     append("]}")
 }
 
@@ -241,6 +246,7 @@ fun parseNormalizedSnapshot(json: String): SchulnetzSnapshot? {
         vacations = obj.array("vacations")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toVacation() },
         konto = obj.array("konto")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toKonto() },
         startMessages = obj.array("startMessages")?.items.orEmpty().mapNotNull { (it as? JsonValue.Str)?.value },
+        readErrors = obj.array("readErrors")?.items.orEmpty().mapNotNull { (it as? JsonValue.Str)?.value },
     )
 }
 

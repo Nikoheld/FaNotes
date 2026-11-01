@@ -9,10 +9,13 @@ import { authenticateSyncRequest } from './sync-api.mjs'
 import {
   diffSnapshots,
   normalizeSchoolBase,
+  parseKontoauszug,
   parseRawSnapshot,
+  parseStartMessages,
   redactSecrets,
   schulnetzCallAllowed,
 } from './schulnetz-logic.mjs'
+import { establishWebSession, scrapeWithSession } from './schulnetz-web.mjs'
 
 const API_PREFIX = '/api/v1/schulnetz'
 const MAX_BODY = 64 * 1024
@@ -116,6 +119,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       lastError: link.lastError || '',
       revision: link.revision || 0,
       settings: { ...DEFAULT_SETTINGS, ...(link.settings || {}) },
+      mode: link.mode || 'rest',
       push: { topic: link.topic, server, url: `${server}/${link.topic}`, endpoints: (link.pushEndpoints || []).length },
     }
   }
@@ -132,6 +136,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     if (!baseUrl) fail(400, 'Die Schulnetz-Adresse ist nicht erlaubt.')
     const deviceId = String(body?.deviceId || '')
     if (!/^[a-f0-9]{24}$/u.test(deviceId)) fail(400, 'Die Gerätekennung fehlt.')
+    if (body?.mode === 'web') return linkWebAccount(accountId, body, material, baseUrl, deviceId)
     const refreshToken = String(body?.refreshToken || '')
     const accessToken = String(body?.accessToken || '')
     if (refreshToken.length < 20 || refreshToken.length > 4000) fail(400, 'Das Schulnetz-Token ist ungültig.')
@@ -155,6 +160,55 @@ export const createSchulnetzRuntime = (options = {}) => {
     }
     await saveLink(accountId, record)
     return publicStatus(record)
+  }
+
+  const linkWebAccount = async (accountId, body, material, baseUrl, deviceId) => {
+    const cookies = body?.ssoCookies
+    if (!cookies || typeof cookies !== 'object' || Array.isArray(cookies)) fail(400, 'Die Microsoft-Cookies fehlen.')
+    const sealedSource = {}
+    let bytes = 0
+    for (const [host, value] of Object.entries(cookies)) {
+      if (!/^[a-z0-9.-]+$/i.test(host) || typeof value !== 'string') continue
+      if (host.endsWith('schulnetz-ag.ch')) continue
+      bytes += value.length
+      if (bytes > 16_000) fail(413, 'Die Cookie-Daten sind zu gross.')
+      sealedSource[host] = value
+    }
+    if (!Object.keys(sealedSource).length) fail(400, 'Die Microsoft-Cookies fehlen.')
+    const existing = await readLink(accountId)
+    const record = {
+      mode: 'web',
+      baseUrl,
+      deviceId,
+      displayName: String(body?.displayName || existing?.displayName || '').slice(0, 80),
+      userAgent: String(body?.userAgent || '').slice(0, 240),
+      sso: sealToken(material, JSON.stringify(sealedSource)),
+      needsReauth: false,
+      lastError: '',
+      lastPollAt: existing?.lastPollAt || '',
+      topic: existing?.topic || randomBytes(16).toString('hex'),
+      pushEndpoints: Array.isArray(existing?.pushEndpoints) ? existing.pushEndpoints.slice(0, 8) : [],
+      settings: { ...DEFAULT_SETTINGS, ...(existing?.settings || {}) },
+      revision: existing?.revision || 0,
+    }
+    await saveLink(accountId, record)
+    return publicStatus(record)
+  }
+
+  const acceptSnapshot = async (accountId, body) => {
+    const link = await readLink(accountId)
+    if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
+    if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, 'Der Schnappschuss ist ungültig.')
+    const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+    const snapshot = { ...body, revision: (link.revision || 0) + 1, fetchedAt: body.fetchedAt || now().toISOString() }
+    const changes = diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS)
+    link.revision = snapshot.revision
+    link.lastPollAt = snapshot.fetchedAt
+    await writeJson(resolve(accountDir(accountId), 'snapshot.json'), snapshot)
+    await saveLink(accountId, link)
+    await appendChanges(accountId, changes, snapshot.revision)
+    for (const change of changes) await deliver(link, change)
+    return { revision: snapshot.revision, changes: changes.length }
   }
 
   const updateSettings = async (accountId, body) => {
@@ -280,6 +334,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     const material = await key()
     const link = await readLink(accountId)
     if (!material || !link || link.needsReauth) return { skipped: true }
+    if (link.mode === 'web') return pollWeb(accountId, link, material)
     const baseUrl = normalizeSchoolBase(link.baseUrl)
     if (!baseUrl) return { skipped: true }
     let refreshToken = ''
@@ -369,6 +424,61 @@ export const createSchulnetzRuntime = (options = {}) => {
     for (const change of changes) await deliver(link, change)
     return { revision: snapshot.revision, changes: changes.length }
   })
+
+  const pollWeb = async (accountId, link, material) => {
+    let cookies = {}
+    try { cookies = JSON.parse(openToken(material, link.sso)) } catch { cookies = {} }
+    const userAgent = link.userAgent || USER_AGENT
+    let serverSession = null
+    try { serverSession = JSON.parse(openToken(material, link.serverSession)) } catch { serverSession = null }
+    const baseUrl = link.baseUrl
+    const scrape = async (session) => scrapeWithSession(baseUrl, { ...session, userAgent }, fetchImpl)
+    let scraped = serverSession ? await scrape(serverSession) : { problem: 'login' }
+    if (scraped.problem) {
+      const established = await establishWebSession(baseUrl, cookies, fetchImpl, userAgent)
+      if (established.needsInteraction) {
+        link.needsReauth = true
+        link.lastError = established.error || 'reauth'
+        link.serverSession = null
+        await saveLink(accountId, link)
+        await deliver(link, {
+          id: `reauth:${link.revision || 0}`,
+          category: 'event',
+          title: 'Schulnetz erneut anmelden',
+          body: 'Die Microsoft-Anmeldung muss auf dem Telefon einmal bestätigt werden.',
+        })
+        return { needsReauth: true }
+      }
+      link.serverSession = sealToken(material, JSON.stringify({ php: established.php, id: established.id, transid: established.transid }))
+      await saveLink(accountId, link)
+      scraped = await scrape({ php: established.php, id: established.id, transid: established.transid, userAgent })
+    }
+    const snapshot = {
+      revision: (link.revision || 0) + 1,
+      fetchedAt: now().toISOString(),
+      grades: scraped.grades || [],
+      events: scraped.events || [],
+      exams: [],
+      absences: [],
+      homework: [],
+      messages: parseStartMessages(scraped.startHtml || '').map((body, index) => ({ id: `start-${index}`, title: 'Mitteilung', body, at: '' })),
+      vacations: [],
+      konto: parseKontoauszug(scraped.kontoHtml || ''),
+      startMessages: parseStartMessages(scraped.startHtml || ''),
+      readErrors: scraped.problem ? [`Schulnetz: ${scraped.problem}`] : [],
+    }
+    const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+    const changes = diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS)
+    link.revision = snapshot.revision
+    link.lastPollAt = snapshot.fetchedAt
+    link.lastError = ''
+    link.needsReauth = false
+    await writeJson(resolve(accountDir(accountId), 'snapshot.json'), snapshot)
+    await saveLink(accountId, link)
+    await appendChanges(accountId, changes, snapshot.revision)
+    for (const change of changes) await deliver(link, change)
+    return { revision: snapshot.revision, changes: changes.length }
+  }
 
   const listAccounts = async () => {
     try {
@@ -470,6 +580,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       if (route === '/status' && method === 'GET') { send(response, 200, publicStatus(await readLink(accountId))); return true }
       if (route === '/link' && method === 'PUT') { send(response, 200, await linkAccount(accountId, await readBody(request))); return true }
       if (route === '/link' && method === 'DELETE') { await unlink(accountId); send(response, 200, { linked: false }); return true }
+      if (route === '/snapshot' && method === 'PUT') { send(response, 200, await acceptSnapshot(accountId, await readBody(request))); return true }
       if (route === '/snapshot' && method === 'GET') {
         const snapshot = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
         send(response, 200, snapshot || { revision: 0, grades: [], events: [], exams: [], absences: [], homework: [], messages: [], vacations: [], konto: [], startMessages: [] })

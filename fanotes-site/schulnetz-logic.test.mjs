@@ -132,6 +132,57 @@ test('stored refresh tokens are encrypted and only the poller refreshes', async 
   }
 })
 
+test('web session is opened with Microsoft cookies and not the phone PHPSESSID', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-web-'))
+  const key = randomBytes(32)
+  const calls = []
+  const fetch = async (url, options = {}) => {
+    const cookie = options.headers?.Cookie || ''
+    calls.push({ url: String(url), cookie })
+    const response = (status, body, { location = '', cookies = [] } = {}) => ({
+      status,
+      headers: { get: (name) => name.toLowerCase() === 'location' ? location : null },
+      setCookies: cookies,
+      text: async () => body,
+    })
+    const target = String(url)
+    if (target.endsWith('/index.php?pageid=1') && !cookie.includes('PHPSESSID=server-session')) {
+      return response(302, '', { location: 'https://login.microsoftonline.com/tenant/oauth2/v2.0/authorize?redirect_uri=https%3A%2F%2Fwww.schulnetz-ag.ch%2Faksa%2F' })
+    }
+    if (target.includes('login.microsoftonline.com')) {
+      return response(302, '', { location: 'https://www.schulnetz-ag.ch/aksa/?code=abc' })
+    }
+    if (target.includes('/aksa/?code=') || target.includes('/aksa?code=')) {
+      return response(200, '<a href="index.php?pageid=21311&id=abc123&transid=a1b2c3">Noten</a>', { cookies: ['PHPSESSID=server-session; Path=/; HttpOnly'] })
+    }
+    if (target.includes('pageid=21311')) {
+      return response(200, '<table><tr><td></td><td>20.10.2026</td><td>Probe</td><td>5.5</td><td>1</td></tr></table><b>MA-4a-He</b>')
+    }
+    return response(200, '<main>Termin</main>')
+  }
+  const runtime = createSchulnetzRuntime({ root, key, fetch, autostart: false })
+  const accountId = 'b'.repeat(32)
+  const status = await runtime.linkAccount(accountId, {
+    mode: 'web',
+    baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+    deviceId: '0123456789abcdef01234567',
+    userAgent: 'FaNotesTest',
+    ssoCookies: { 'login.microsoftonline.com': 'PHPSESSID=phone-session; ESTSAUTHPERSISTENT=microsoft-cookie-value' },
+  })
+  assert.equal(status.linked, true)
+  assert.equal(status.mode, 'web')
+  const stored = await readFile(join(root, 'accounts', accountId, 'link.json'), 'utf8')
+  assert.equal(stored.includes('microsoft-cookie-value'), false)
+  assert.equal(stored.includes('phone-session'), false)
+  await runtime.pollAccount(accountId)
+  assert.equal(calls.some((call) => call.cookie.includes('phone-session')), false)
+  assert.equal(calls.some((call) => call.url.includes('login.microsoftonline.com') && call.cookie.includes('ESTSAUTHPERSISTENT=microsoft-cookie-value')), true)
+  assert.equal(calls.some((call) => call.url.includes('authorize.php')), false)
+  const snapshot = JSON.parse(await readFile(join(root, 'accounts', accountId, 'snapshot.json'), 'utf8'))
+  assert.equal(snapshot.grades[0].mark, 5.5)
+  assert.equal(snapshot.grades[0].course.includes('MA-4a-He'), true)
+})
+
 test('seal round trip uses aes-256-gcm', () => {
   const key = randomBytes(32)
   const sealed = sealToken(key, 'token-value-which-is-long-enough')

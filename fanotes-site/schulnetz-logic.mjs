@@ -23,7 +23,7 @@ export const REST_GET = new Set([
   '/rest/v1/config/lists/absencenoticestatus',
 ])
 
-const READ_PAGES = new Set(['1', '21311', '21111', '21411', '22202', '22108', '21312', '21200', '22206'])
+const READ_PAGES = new Set(['1', '21311', '21111', '21411', '22202', '22108', '21312', '21200', '22206', '1000', '1001', '1012'])
 const BLOCKED_PAGES = ['23118', '23100', '23104', '23102', '23182', '23150', '23156', '9999']
 
 export const numKey = (value) => {
@@ -453,8 +453,9 @@ export const schulnetzCallAllowed = (method, url, body = '') => {
   const path = parsed.pathname.toLowerCase()
   const query = parsed.search.replace(/^\?/, '').toLowerCase()
   if (blocked(`${path}?${query}`) || blocked(String(body || '').toLowerCase())) return false
+  if (path.endsWith('/authorize.php')) return false
   if (verb === 'POST') return tokenPostAllowed(path, body)
-  if (path.endsWith('/token.php') || path.endsWith('/authorize.php') || path.endsWith('/loginto.php')) return !query.includes('action=')
+  if (path.endsWith('/token.php') || path.endsWith('/loginto.php')) return !query.includes('action=')
   const restIndex = path.indexOf('/rest/v1/')
   if (restIndex >= 0) return REST_GET.has(path.slice(restIndex).replace(/\/+$/, ''))
   if (path.endsWith('/index.php')) {
@@ -492,4 +493,93 @@ export const redactSecrets = (value) => String(value ?? '')
   .replace(/refresh_token=[^&\s]+/gi, 'refresh_token=[redacted]')
   .replace(/access_token=[^&\s]+/gi, 'access_token=[redacted]')
   .replace(/code_verifier=[^&\s]+/gi, 'code_verifier=[redacted]')
+  .replace(/PHPSESSID=[^;\s]+/gi, 'PHPSESSID=[redacted]')
+  .replace(/ESTSAUTH[A-Z]*=[^;\s]+/gi, 'ESTSAUTH=[redacted]')
   .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+
+export const usesWebsiteSession = (baseUrl) => {
+  try { return new URL(baseUrl).hostname.toLowerCase().endsWith('schulnetz-ag.ch') } catch { return false }
+}
+
+export const sessionProblem = (url, html) => {
+  const blob = `${url}\n${html}`.toLowerCase()
+  if (blob.includes('ip-adresse wurde vom system zurückgewiesen') || blob.includes('ip-adresse wurde vom system zurueckgewiesen')) return 'ip'
+  if (blob.includes('inaktivitätslimit') || blob.includes('inaktivitaetslimit') || blob.includes('mode=5')) return 'inactivity'
+  if (String(url).toLowerCase().includes('loginto.php')) return 'login'
+  return ''
+}
+
+export const stripPhpSession = (cookieHeader) => String(cookieHeader || '')
+  .split(';')
+  .map((part) => part.trim())
+  .filter((part) => part && !/^PHPSESSID=/i.test(part))
+  .join('; ')
+
+const clean = (value) => String(value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+
+export const parseGradesHtml = (html) => {
+  const grades = []
+  const rowRe = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi
+  const cellRe = /<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi
+  for (const row of String(html).matchAll(rowRe)) {
+    const cells = [...row[1].matchAll(cellRe)].map((cell) => clean(cell[1]))
+    const date = cells.find((cell) => /^\d{2}\.\d{2}\.\d{4}$/.test(cell))
+    if (!date) continue
+    const dateAt = cells.indexOf(date)
+    const topic = cells[dateAt + 1] || 'Note'
+    const mark = parseMark(cells[dateAt + 2] || '')
+    if (mark == null) continue
+    const courseMatch = String(html).match(/<b>\s*([^<]*-[^<]*-[^<]*)\s*<\/b>/i)
+    const course = clean(courseMatch?.[1] || 'Kurs')
+    grades.push({
+      id: `web:${course}:${date}:${topic}:${numKey(mark)}`,
+      course,
+      courseId: course,
+      subject: course,
+      title: topic,
+      date: `${date.slice(6, 10)}-${date.slice(3, 5)}-${date.slice(0, 2)}`,
+      mark,
+      weight: parseWeight(cells[dateAt + 3] || '1'),
+      confirmed: true,
+      courseGrade: null,
+      comment: '',
+    })
+  }
+  return grades
+}
+
+export const parseSchedulerXml = (xml) => {
+  const events = []
+  for (const block of String(xml).matchAll(/<event\b([^>]*)>([\s\S]*?)<\/event>/gi)) {
+    const id = /id="([^"]+)"/.exec(block[1])?.[1] || ''
+    const field = (name) => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`, 'i').exec(block[2])?.[1]?.trim() || ''
+    const start = field('start_date').replace(' ', 'T')
+    if (!start) continue
+    const end = field('end_date').replace(' ', 'T') || start
+    const comment = field('kommentar')
+    const course = field('kurskuerzel') || field('text')
+    events.push({
+      id: id || `sched:${start}:${course}`,
+      start: start.length === 16 ? `${start}:00` : start,
+      end: end.length === 16 ? `${end}:00` : end,
+      text: field('text'),
+      comment,
+      room: field('zimmerkuerzel') || field('zimmer'),
+      teachers: field('lehrerkuerzelname') ? [field('lehrerkuerzelname')] : [],
+      courseId: field('kursid'),
+      courseName: course,
+      status: /fällt|faellt|aus/i.test(comment) ? 'cancelled' : '',
+      eventType: field('event_type') || 'lesson',
+      color: field('color'),
+      timetableText: field('text'),
+    })
+  }
+  return events
+}
+
+export const extractWebIds = (url, html) => {
+  const blob = `${url}\n${html}`
+  const id = /[?&]id=([a-f0-9]{4,})/i.exec(blob)?.[1] || ''
+  const transid = /[?&]transid=([a-f0-9]{4,})/i.exec(blob)?.[1] || ''
+  return id && transid ? { id, transid } : null
+}

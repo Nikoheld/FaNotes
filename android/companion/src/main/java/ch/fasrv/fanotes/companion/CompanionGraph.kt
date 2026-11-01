@@ -30,11 +30,14 @@ import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
 import ch.fasrv.fanotes.schulnetz.diffSnapshots
 import ch.fasrv.fanotes.schulnetz.localRefreshLease
 import ch.fasrv.fanotes.schulnetz.normalizeSchoolBase
+import ch.fasrv.fanotes.schulnetz.SessionProblem
 import ch.fasrv.fanotes.schulnetz.SchulnetzTokens
+import ch.fasrv.fanotes.schulnetz.WebSession
 import ch.fasrv.fanotes.schulnetz.parseNormalizedSnapshot
 import ch.fasrv.fanotes.schulnetz.parseRawSnapshot
 import ch.fasrv.fanotes.schulnetz.schulnetzDeviceId
 import ch.fasrv.fanotes.schulnetz.toNormalizedJson
+import ch.fasrv.fanotes.schulnetz.usesWebsiteSession
 import ch.fasrv.fanotes.sync.SyncApi
 import ch.fasrv.fanotes.sync.SyncEngine
 import ch.fasrv.fanotes.sync.SyncEngineOptions
@@ -146,6 +149,21 @@ class CompanionGraph(private val context: Context) {
             }
         }
         link.value = remote
+        if (usesWebsiteSession(baseUrl())) {
+            val scraped = refreshWebsite(previous)
+            if (scraped != null) {
+                publishSnapshot(previous, scraped, notifySettings())
+                runCatching { client.uploadSnapshot(session, scraped) }
+            } else if (remote.linked) {
+                val body = runCatching { client.snapshot(session) }.getOrNull()
+                val next = body?.let { parseNormalizedSnapshot(it) }
+                if (next != null) publishSnapshot(previous, next, remote.settings)
+            }
+            if (remote.topic.isNotBlank()) prefs.edit().putString("push-server", remote.pushServer).putString("push-topic", remote.topic).apply()
+            if (instantPush() && remote.topic.isNotBlank()) NtfyListenService.start(context)
+            NextLessonWidget.update(context)
+            return
+        }
         if (remote.linked) {
             deleteLocalToken()
             prefs.edit().putString("push-server", remote.pushServer).putString("push-topic", remote.topic).apply()
@@ -275,6 +293,49 @@ class CompanionGraph(private val context: Context) {
         }
         vault.write(HYPOTHETICAL_PATH, body.encodeToByteArray())
         engine.notifyLocalChange()
+    }
+
+    fun saveWebSession(session: WebSession) {
+        prefs.edit().putString("web-session", """{"base":${escapeJson(session.baseUrl)},"php":${escapeJson(session.phpSessionId)},"id":${escapeJson(session.id)},"transid":${escapeJson(session.transid)}}""").apply()
+    }
+
+    fun debugHtml(): String = File(context.filesDir, "schulnetz-debug.html").takeIf { it.isFile }?.readText().orEmpty()
+
+    private fun rememberDebug(html: String) {
+        if (html.isBlank()) return
+        File(context.filesDir, "schulnetz-debug.html").writeText(html.take(150_000))
+    }
+
+    private fun readWebSession(): WebSession? {
+        val raw = prefs.getString("web-session", null) ?: return null
+        val obj = runCatching { parseJson(raw) as? JsonValue.Obj }.getOrNull() ?: return null
+        val php = obj.string("php").orEmpty()
+        val id = obj.string("id").orEmpty()
+        val transid = obj.string("transid").orEmpty()
+        if (php.isBlank() || id.isBlank() || transid.isBlank()) return null
+        return WebSession(obj.string("base").orEmpty().ifBlank { baseUrl() }, php, id, transid)
+    }
+
+    private suspend fun refreshWebsite(previous: SchulnetzSnapshot): SchulnetzSnapshot? {
+        var current = readWebSession()
+        var bundle = current?.let { runCatching { client.fetchWeb(baseUrl(), it) }.getOrNull() }
+        if (bundle == null || bundle.problem != SessionProblem.NONE) {
+            val landed = SchulnetzSilentLogin(context).await(baseUrl())
+            if (landed == null) {
+                link.value = link.value.copy(needsReauth = true, lastError = "Anmeldung nötig")
+                return bundle?.snapshot
+            }
+            val php = phpSessionCookie(baseUrl())
+            val extracted = ch.fasrv.fanotes.schulnetz.extractWebSession(landed.first, landed.second, baseUrl())
+            if (extracted == null || php.isBlank()) return null
+            current = extracted.copy(phpSessionId = php)
+            saveWebSession(current)
+            bundle = runCatching { client.fetchWeb(baseUrl(), current) }.getOrNull() ?: return null
+        } else {
+            saveWebSession(bundle.session)
+        }
+        if (bundle.debugHtml.isNotBlank()) rememberDebug(bundle.debugHtml)
+        return bundle.snapshot.copy(revision = previous.revision + 1)
     }
 
     private suspend fun refreshLocally(previous: SchulnetzSnapshot) {

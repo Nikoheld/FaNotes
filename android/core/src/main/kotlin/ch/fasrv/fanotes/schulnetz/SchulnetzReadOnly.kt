@@ -25,7 +25,10 @@ private val REST_GET = setOf(
     "/rest/v1/config/lists/absencenoticestatus",
 )
 
-private val READ_PAGE_IDS = setOf("1", "21311", "21111", "21411", "22202", "22108", "21312", "21200", "22206")
+private val READ_PAGE_IDS = setOf(
+    "1", "21311", "21111", "21411", "22202", "22108", "21312", "21200", "22206",
+    "1000", "1001", "1012",
+)
 
 private val BLOCKED_PAGE_IDS = setOf("23118", "23100", "23104", "23102", "23182", "23150", "23156", "9999")
 
@@ -38,10 +41,9 @@ fun schulnetzCallAllowed(method: String, url: String, body: String? = null): Boo
     val query = (parsed.rawQuery ?: "").lowercase()
     val blob = "$path?$query"
     if (containsBlocked(blob) || containsBlocked(body?.lowercase().orEmpty())) return false
-    if (verb == "POST") return tokenPostAllowed(path, body)
-    if (path.endsWith("/token.php") || path.endsWith("/authorize.php") || path.endsWith("/loginto.php")) {
-        return !query.contains("action=")
-    }
+    if (path.endsWith("/authorize.php")) return false
+    if (verb == "POST") return tokenPostAllowed(path, body) || hiddenAuthPostAllowed(parsed.host, path, body)
+    if (path.endsWith("/loginto.php") || path.endsWith("/token.php")) return !query.contains("action=")
     restPath(path)?.let { rest ->
         return rest in REST_GET
     }
@@ -56,14 +58,55 @@ fun loginWebViewAllowed(url: String, schulnetzHost: String): Boolean {
     val parsed = runCatching { URI(url) }.getOrNull() ?: return false
     val scheme = parsed.scheme?.lowercase().orEmpty()
     if (scheme != "https") return false
+    val path = (parsed.rawPath ?: "").lowercase()
+    if (path.endsWith("/authorize.php")) return false
     val host = parsed.host?.lowercase().orEmpty()
     if (isMicrosoftLoginHost(host)) return true
     if (host == "schulnetz.web.app") return true
-    val school = schulnetzHost.lowercase()
+    val school = (if (schulnetzHost.startsWith("http")) runCatching { URI(schulnetzHost).host }.getOrNull() else schulnetzHost)
+        ?.lowercase().orEmpty()
     if (host == school || host.endsWith(".schulnetz-ag.ch")) {
+        val blob = "${path}?${parsed.rawQuery.orEmpty()}".lowercase()
+        if (containsBlocked(blob)) return false
+        val trimmed = path.trimEnd('/')
+        val basePath = if (schulnetzHost.startsWith("http")) {
+            runCatching { URI(schulnetzHost).rawPath }.getOrNull().orEmpty().trimEnd('/').lowercase()
+        } else {
+            ""
+        }
+        if (trimmed == "/aksa" || (basePath.isNotEmpty() && trimmed == basePath)) return true
         return schulnetzCallAllowed("GET", url)
     }
     return false
+}
+
+/** GET of a logged-in page or the bare school landing. Never authorize.php. */
+fun webReadAllowed(url: String): Boolean {
+    val parsed = runCatching { URI(url) }.getOrNull() ?: return false
+    if (!parsed.scheme.equals("https", true)) return false
+    val path = (parsed.rawPath ?: "").lowercase()
+    val blob = "$path?${parsed.rawQuery.orEmpty()}".lowercase()
+    if (containsBlocked(blob) || path.endsWith("/authorize.php")) return false
+    val trimmed = path.trimEnd('/')
+    if (trimmed.endsWith("/aksa") || trimmed == "") return true
+    return schulnetzCallAllowed("GET", url)
+}
+
+/** AKSA's Entra app rejects the mobile client redirect, so the website session is the login. */
+fun usesWebsiteSession(baseUrl: String): Boolean {
+    val host = runCatching { URI(baseUrl.trim()).host }.getOrNull()?.lowercase().orEmpty()
+    return host == "schulnetz-ag.ch" || host.endsWith(".schulnetz-ag.ch")
+}
+
+fun webLoginUrl(baseUrl: String): String = baseUrl.trimEnd('/') + "/index.php?pageid=1"
+
+private fun hiddenAuthPostAllowed(host: String?, path: String, body: String?): Boolean {
+    val form = body?.lowercase().orEmpty()
+    if (form.contains("passwort") || form.contains("password=") || form.contains("passwd")) return false
+    if (!form.contains("code=") && !form.contains("id_token=") && !form.contains("session_state=")) return false
+    val value = host?.lowercase().orEmpty()
+    if (isMicrosoftLoginHost(value)) return true
+    return path.endsWith("/index.php") || path.endsWith("/aksa") || path.endsWith("/")
 }
 
 fun isMicrosoftLoginHost(host: String): Boolean {

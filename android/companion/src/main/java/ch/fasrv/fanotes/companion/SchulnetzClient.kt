@@ -10,11 +10,30 @@ import ch.fasrv.fanotes.schulnetz.SCHULNETZ_CLIENT_ID
 import ch.fasrv.fanotes.schulnetz.SCHULNETZ_REFERER
 import ch.fasrv.fanotes.schulnetz.SCHULNETZ_USER_AGENT
 import ch.fasrv.fanotes.schulnetz.SchulnetzRaw
+import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
 import ch.fasrv.fanotes.schulnetz.SchulnetzTokens
+import ch.fasrv.fanotes.schulnetz.SessionProblem
+import ch.fasrv.fanotes.schulnetz.WebSession
 import ch.fasrv.fanotes.schulnetz.authorizationCodeForm
+import ch.fasrv.fanotes.schulnetz.findIcalUrl
+import ch.fasrv.fanotes.schulnetz.freshTransid
+import ch.fasrv.fanotes.schulnetz.pageUrl
+import ch.fasrv.fanotes.schulnetz.parseIcs
+import ch.fasrv.fanotes.schulnetz.parseKontoauszug
+import ch.fasrv.fanotes.schulnetz.parseSchedulerXml
+import ch.fasrv.fanotes.schulnetz.parseStartMessages
 import ch.fasrv.fanotes.schulnetz.parseTokenJson
+import ch.fasrv.fanotes.schulnetz.readAbsencesPage
+import ch.fasrv.fanotes.schulnetz.readExamsPage
+import ch.fasrv.fanotes.schulnetz.readGradesPage
+import ch.fasrv.fanotes.schulnetz.readTerminliste
 import ch.fasrv.fanotes.schulnetz.refreshTokenForm
+import ch.fasrv.fanotes.schulnetz.schedulerUrl
 import ch.fasrv.fanotes.schulnetz.schulnetzCallAllowed
+import ch.fasrv.fanotes.schulnetz.sessionProblem
+import ch.fasrv.fanotes.schulnetz.sessionProblemText
+import ch.fasrv.fanotes.schulnetz.toNormalizedJson
+import ch.fasrv.fanotes.schulnetz.webReadAllowed
 import ch.fasrv.fanotes.sync.SYNC_ORIGIN
 import ch.fasrv.fanotes.sync.SyncSession
 import okhttp3.MediaType.Companion.toMediaType
@@ -25,6 +44,8 @@ import java.time.LocalDate
 import java.util.concurrent.TimeUnit
 
 class SchulnetzHttpException(val status: Int, message: String) : Exception(message)
+
+data class WebBundle(val snapshot: SchulnetzSnapshot, val problem: SessionProblem, val debugHtml: String, val session: WebSession)
 
 data class SchulnetzLinkState(
     val linked: Boolean = false,
@@ -84,6 +105,92 @@ class SchulnetzClient(
         if (code == 404) return SchulnetzLinkState(reachable = false)
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
         return parseStatus(body)
+    }
+
+    fun linkWeb(session: SyncSession, baseUrl: String, deviceId: String, userAgent: String, ssoCookies: Map<String, String>, displayName: String): SchulnetzLinkState {
+        val cookies = ssoCookies.entries.joinToString(",") { (host, value) -> "${escapeJson(host)}:${escapeJson(value)}" }
+        val payload = buildString {
+            append("{\"mode\":\"web\",\"baseUrl\":").append(escapeJson(baseUrl))
+            append(",\"deviceId\":").append(escapeJson(deviceId))
+            append(",\"userAgent\":").append(escapeJson(userAgent))
+            append(",\"displayName\":").append(escapeJson(displayName))
+            append(",\"ssoCookies\":{").append(cookies).append("}}")
+        }
+        val (code, body) = fanotes("PUT", "/link", session, payload)
+        if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
+        return parseStatus(body)
+    }
+
+    fun uploadSnapshot(session: SyncSession, snapshot: SchulnetzSnapshot) {
+        val (code, body) = fanotes("PUT", "/snapshot", session, snapshot.toNormalizedJson())
+        if (code !in 200..299 && code != 404) throw SchulnetzHttpException(code, errorMessage(body, code))
+    }
+
+    fun fetchWeb(baseUrl: String, session: WebSession): WebBundle {
+        val root = baseUrl.trimEnd('/')
+        var transid = session.transid
+        val errors = mutableListOf<String>()
+        var debug = ""
+        fun get(url: String): String {
+            if (!webReadAllowed(url)) {
+                errors += "Blockiert: $url"
+                return ""
+            }
+            val (status, body) = call(
+                "GET",
+                url,
+                mapOf(
+                    "Accept" to if (url.contains("scheduler_processor")) "text/xml,*/*" else "text/html",
+                    "Cookie" to "PHPSESSID=${session.phpSessionId}",
+                    "User-Agent" to SCHULNETZ_USER_AGENT,
+                    "Referer" to "$root/",
+                ),
+                null,
+            )
+            if (status !in 200..299) return ""
+            val problem = sessionProblem(url, body)
+            if (problem != SessionProblem.NONE) {
+                debug = body
+                errors += sessionProblemText(problem)
+                return ""
+            }
+            transid = freshTransid(body, transid)
+            return body
+        }
+        val order = listOf("1", "21311", "21111", "21411", "21200", "22202", "22108", "21312")
+        val pages = linkedMapOf<String, String>()
+        for (pageId in order) {
+            val body = get(pageUrl(root, pageId, session.id, transid))
+            pages[pageId] = body
+            if (errors.any { it.startsWith("Schulnetz") || it.contains("erneuert") || it.contains("Anmeldung") }) break
+        }
+        val grades = readGradesPage(pages["21311"].orEmpty())
+        val absences = readAbsencesPage(pages["21111"].orEmpty())
+        val exams = readExamsPage(pages["21312"].orEmpty())
+        val termine = readTerminliste(pages["22108"].orEmpty())
+        grades.error?.let { errors += it; debug = grades.html.ifBlank { debug } }
+        absences.error?.let { errors += it; debug = absences.html.ifBlank { debug } }
+        val today = java.time.LocalDate.now()
+        val scheduler = if (pages["22202"].isNullOrBlank()) "" else get(schedulerUrl(root, session.id, transid, today.toString(), today.minusDays(7).toString(), today.plusDays(21).toString()))
+        val icalUrl = findIcalUrl(pages["22202"].orEmpty(), root)
+        val ical = if (icalUrl.isNullOrBlank() || !webReadAllowed(icalUrl)) emptyList() else parseIcs(get(icalUrl))
+        val events = parseSchedulerXml(scheduler).ifEmpty { ical }
+        val snapshot = SchulnetzSnapshot(
+            fetchedAt = java.time.Instant.now().toString(),
+            grades = grades.value,
+            events = events,
+            exams = exams.value,
+            absences = absences.value,
+            messages = parseStartMessages(pages["1"].orEmpty()).mapIndexed { index, text -> ch.fasrv.fanotes.schulnetz.SchoolMessage("start-$index", "Mitteilung", text, "") },
+            konto = parseKontoauszug(pages["21411"].orEmpty()),
+            startMessages = parseStartMessages(pages["1"].orEmpty()),
+            readErrors = errors,
+        )
+        val problem = if (errors.any { it.contains("IP-Adresse") }) SessionProblem.IP_REJECTED
+            else if (errors.any { it.contains("abgelaufen") }) SessionProblem.INACTIVITY
+            else if (errors.any { it.contains("Anmeldung") }) SessionProblem.LOGIN_WALL
+            else SessionProblem.NONE
+        return WebBundle(snapshot, problem, debug, WebSession(root, session.phpSessionId, session.id, transid))
     }
 
     fun link(session: SyncSession, baseUrl: String, deviceId: String, tokens: SchulnetzTokens, displayName: String): SchulnetzLinkState {

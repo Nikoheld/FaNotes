@@ -15,16 +15,20 @@ import ch.fasrv.fanotes.ink.InkDocument
 import ch.fasrv.fanotes.schulnetz.AgendaEvent
 import ch.fasrv.fanotes.schulnetz.HypotheticalGrade
 import ch.fasrv.fanotes.schulnetz.NotifySettings
-import ch.fasrv.fanotes.schulnetz.PkceSession
 import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
-import ch.fasrv.fanotes.schulnetz.createPkceSession
+import ch.fasrv.fanotes.schulnetz.SCHULNETZ_USER_AGENT
+import ch.fasrv.fanotes.schulnetz.SSO_COOKIE_URLS
+import ch.fasrv.fanotes.schulnetz.extractWebSession
 import ch.fasrv.fanotes.schulnetz.normalizeSchoolBase
-import ch.fasrv.fanotes.schulnetz.stateMatches
+import ch.fasrv.fanotes.schulnetz.stripPhpSession
 import ch.fasrv.fanotes.schulnetz.timetableAnchor
+import ch.fasrv.fanotes.schulnetz.usesWebsiteSession
+import ch.fasrv.fanotes.schulnetz.webLoginUrl
 import ch.fasrv.fanotes.vault.VaultNode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import android.webkit.CookieManager
 import java.net.URI
 import java.time.LocalDate
 import java.util.UUID
@@ -51,7 +55,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var settings by mutableStateOf(graph.notifySettings())
     var day by mutableStateOf(timetableAnchor(LocalDate.now()))
     var editorPath by mutableStateOf<String?>(null)
-    private var pending: PkceSession? = null
+    var debugHtml by mutableStateOf("")
 
     init {
         viewModelScope.launch { graph.snapshot.collect { snapshot = it } }
@@ -126,50 +130,60 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         }
         graph.setBaseUrl(base)
         baseUrl = base
-        val session = createPkceSession(base)
-        pending = session
+        if (!usesWebsiteSession(base)) {
+            message = "Diese Schule nutzt die Web-Anmeldung noch nicht."
+            return null
+        }
         val host = runCatching { URI(base).host }.getOrNull() ?: return null
         return Intent(context, SchulnetzLoginActivity::class.java)
-            .putExtra(SchulnetzLoginActivity.EXTRA_URL, session.authorizeUrl)
+            .putExtra(SchulnetzLoginActivity.EXTRA_URL, webLoginUrl(base))
             .putExtra(SchulnetzLoginActivity.EXTRA_HOST, host)
+            .putExtra(SchulnetzLoginActivity.EXTRA_BASE, base)
     }
 
-    fun onSchulnetzResult(code: String?, state: String?) {
-        val session = pending
-        pending = null
-        if (session == null || code.isNullOrBlank() || !stateMatches(session.state, state)) {
+    fun onWebLoginFinished() {
+        val html = SchulnetzLoginBridge.landingHtml
+        val url = SchulnetzLoginBridge.landingUrl
+        SchulnetzLoginBridge.landingHtml = ""
+        SchulnetzLoginBridge.landingUrl = ""
+        val web = extractWebSession(url, html, baseUrl)
+        val php = phpSessionCookie(baseUrl)
+        if (web == null || php.isBlank()) {
             message = "Schulnetz-Anmeldung abgebrochen."
             return
         }
+        graph.saveWebSession(web.copy(phpSessionId = php))
         busy = true
         viewModelScope.launch {
             try {
-                val tokens = graph.client.exchangeCode(session.baseUrl, code, session.verifier, graph.deviceId())
                 val fanotes = graph.engine.currentSession() ?: error("Zuerst bei FaNotes anmelden.")
-                try {
-                    val linked = graph.client.link(fanotes, session.baseUrl, graph.deviceId(), tokens, "Companion")
-                    graph.link.value = linked
-                    message = "Schulnetz ist mit diesem FaNotes-Konto verbunden."
-                } catch (error: SchulnetzHttpException) {
-                    if (error.status != 404 && error.status != 503) throw error
-                    graph.writeLocalToken(
-                        CompanionGraph.LocalToken(
-                            session.baseUrl,
-                            graph.deviceId(),
-                            tokens.refreshToken,
-                            tokens.accessToken,
-                            System.currentTimeMillis() + 500_000,
-                        ),
-                    )
-                    message = "${error.message} Bis der Server bereit ist, aktualisiert dieses Telefon selbst."
+                val cookies = exportSsoCookies()
+                if (cookies.isEmpty()) {
+                    message = "Microsoft-Cookies fehlen. Bitte die Anmeldung wiederholen."
+                } else {
+                    runCatching {
+                        graph.link.value = graph.client.linkWeb(fanotes, baseUrl, graph.deviceId(), SCHULNETZ_USER_AGENT, cookies, "Companion")
+                    }
+                    message = "Schulnetz ist verbunden. Bei einem IP-Wechsel meldet die App sich neu an."
                 }
                 graph.refreshSchulnetz()
+                debugHtml = graph.debugHtml()
             } catch (error: Exception) {
                 message = error.message ?: "Schulnetz-Anmeldung fehlgeschlagen."
             } finally {
                 busy = false
             }
         }
+    }
+
+    fun shareDebug(context: Context) {
+        val text = debugHtml.ifBlank { graph.debugHtml() }
+        if (text.isBlank()) {
+            message = "Keine Seite zum Teilen."
+            return
+        }
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text.take(100_000))
+        context.startActivity(Intent.createChooser(send, "HTML teilen").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     fun unlink() {
@@ -282,4 +296,18 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             override fun <T : ViewModel> create(modelClass: Class<T>): T = CompanionModel(graph) as T
         }
     }
+}
+
+internal fun exportSsoCookies(): Map<String, String> {
+    val manager = CookieManager.getInstance()
+    return SSO_COOKIE_URLS.mapNotNull { url ->
+        val host = runCatching { URI(url).host }.getOrNull() ?: return@mapNotNull null
+        val cleaned = stripPhpSession(manager.getCookie(url).orEmpty())
+        if (cleaned.isBlank()) null else host to cleaned
+    }.toMap()
+}
+
+internal fun phpSessionCookie(baseUrl: String): String {
+    val raw = CookieManager.getInstance().getCookie(baseUrl).orEmpty()
+    return Regex("PHPSESSID=([^;]+)").find(raw)?.groupValues?.get(1).orEmpty()
 }
