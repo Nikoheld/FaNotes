@@ -1,0 +1,180 @@
+// Desktop ink recognition, end to end in Node: the shared Rust (fanotes-recog WASM) groups,
+// renders and decodes exactly as in the app, and the committed native `fanotes-ocr` sidecar runs
+// the model exactly as the Electron host drives it. This is the desktop pipeline without a
+// browser, so it checks the shipped artifacts (WASM, model, language models) and the fixtures.
+//
+//   node scripts/check-ink-recognition.mjs
+//   FANOTES_INK_CASES=/path/cases.json node scripts/check-ink-recognition.mjs   # private sets
+//
+// The bundled cases are the IAM-OnDB example line and held-out ScaDS German lines traced into
+// pen strokes (scripts/fixtures/README-INK-RECOGNITION.md).
+import assert from 'node:assert/strict'
+import crypto from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { createNativeOcrHost } from '../electron/native-ocr.cjs'
+import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
+import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
+
+const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const ocr = path.join(appRoot, 'public', 'ocr')
+const inkDir = path.join(ocr, 'fanotes-ink')
+const casesFile = process.env.FANOTES_INK_CASES || path.join(appRoot, 'scripts/fixtures/ink-recognition-cases.json')
+
+initSync({ module: Buffer.from(RECOG_WASM_BASE64, 'base64') })
+
+const manifest = JSON.parse(fs.readFileSync(path.join(inkDir, 'manifest.json'), 'utf8'))
+assert.equal(manifest.format, 'fanotes-ink-recognizer-v1', 'unexpected ink manifest')
+const digest = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex')
+const verified = (descriptor, directory) => {
+  const bytes = fs.readFileSync(path.join(directory, descriptor.file))
+  assert.equal(bytes.length, descriptor.size, `${descriptor.file} size`)
+  assert.equal(digest(bytes), descriptor.sha256, `${descriptor.file} sha256`)
+  return bytes
+}
+const modelBytes = verified(manifest.models.desktop, inkDir)
+const modelPath = path.join(inkDir, manifest.models.desktop.file)
+
+// Language models + the spelling Bloom filter, loaded into the WASM decoder as in the app.
+for (const language of ['de', 'en']) {
+  setInkLanguageModel(language, verified(manifest.languageModels[language], inkDir))
+}
+const spelling = JSON.parse(fs.readFileSync(path.join(ocr, '..', 'spell', 'manifest.json'), 'utf8'))
+for (const language of ['de', 'en']) {
+  const descriptor = spelling.languages[language]
+  const bloom = fs.readFileSync(path.join(appRoot, 'public', 'spell', descriptor.file))
+  setInkLexicon(language, bloom, descriptor.bitCount)
+}
+
+const host = createNativeOcrHost({
+  executable: path.join(appRoot, 'native-ocr', `${process.platform}-${process.arch}`, process.platform === 'win32' ? 'fanotes-ocr.exe' : 'fanotes-ocr'),
+  runtime: path.join(appRoot, 'node_modules', 'onnxruntime-node', 'bin', 'napi-v3', process.platform, process.arch, process.platform === 'win32' ? 'onnxruntime.dll' : process.platform === 'darwin' ? 'libonnxruntime.1.21.0.dylib' : 'libonnxruntime.so.1'),
+  model: { path: modelPath, size: manifest.models.desktop.size, sha256: manifest.models.desktop.sha256 },
+  modelHeight: 64,
+  inputName: 'image',
+  outputName: 'logits',
+  minWidth: 16,
+})
+
+const editDistance = (first, second) => {
+  const a = Array.from(first)
+  const b = Array.from(second)
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index)
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i]
+    for (let j = 1; j <= b.length; j += 1) current.push(Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + Number(a[i - 1] !== b[j - 1])))
+    previous = current
+  }
+  return previous[b.length]
+}
+const fold = (value) => value.replace(/ß/gu, 'ss')
+const cer = (rows) => 100 * rows.reduce((s, r) => s + editDistance(fold(r.text), fold(r.truth)), 0) / Math.max(1, rows.reduce((s, r) => s + Array.from(r.truth).length, 0))
+const wer = (rows) => 100 * rows.reduce((s, r) => s + editDistance(fold(r.text).split(/\s+/u), fold(r.truth).split(/\s+/u)), 0) / Math.max(1, rows.reduce((s, r) => s + r.truth.split(/\s+/u).length, 0))
+
+const decoderOptions = JSON.stringify({ ...manifest.decoder, nBest: 5 })
+const median = (values) => values.length ? [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] : 0
+
+const packStrokes = (strokes, width, height) => {
+  let count = 0
+  for (const stroke of strokes) count += 1 + stroke.length * 2
+  const packed = new Float64Array(count)
+  let offset = 0
+  for (const stroke of strokes) {
+    packed[offset++] = stroke.length
+    for (const [x, y] of stroke) { packed[offset++] = x * width; packed[offset++] = y * height }
+  }
+  return packed
+}
+
+async function recognize(entry, { strokes = entry.strokes, width = entry.sourceWidth, height = entry.sourceHeight, group = true } = {}) {
+  const usable = strokes.map((_, index) => index)
+  const packed = packStrokes(strokes, width, height)
+  // Single, already-separated lines (the accuracy fixtures) are one render. Page grouping is
+  // exercised separately with real pen strokes; the skeleton-traced fixtures are not pen input.
+  const grouped = group
+    ? JSON.parse(inkGroupLines(packed))
+    : [{ strokes: usable, minX: 0, minY: 0, maxX: width, maxY: height }]
+  const reference = group
+    ? median(grouped.filter((line) => line.strokes.length >= 2).map((line) => line.maxY - line.minY))
+    : 0
+  const lines = []
+  let inferenceMs = 0
+  for (const line of grouped) {
+    const linePacked = packStrokes(line.strokes.map((index) => strokes[usable[index]]), width, height)
+    const raw = inkLineImage(linePacked, reference, manifest.decoder.penWidth ?? 2.6, 0, 1)
+    if (raw.length < 3) continue
+    const image = raw.subarray(2)
+    const t = Date.now()
+    const { probabilities, dims } = await host.recognize({ input: Float32Array.from(image), width: raw[0], height: 64, threads: 4 })
+    inferenceMs += Date.now() - t
+    assert.equal(dims[2], manifest.classes, 'class count')
+    const decoded = JSON.parse(inkDecode(probabilities, dims[2], manifest.alphabet, entry.language, decoderOptions))
+    if (!decoded.text.trim()) continue
+    const spans = new Uint32Array(decoded.characters.flatMap((c) => [c.startFrame, c.endFrame]))
+    const boxes = inkSpanBoxes(linePacked, reference, manifest.decoder.penWidth ?? 2.6, 0, 1, spans)
+    lines.push({ decoded, boxes, characters: decoded.characters.length })
+  }
+  return { text: lines.map((l) => l.decoded.text).join('\n'), lines, inferenceMs }
+}
+
+// Stacks real pen-stroke lines into one page to exercise line grouping end to end. `entry`
+// strokes are normalized to its own box; each copy lands on its own well-separated row.
+const composePage = (entry, rows) => {
+  const lineHeight = 46
+  const rowGap = 92
+  const strokes = []
+  for (let row = 0; row < rows; row += 1) {
+    for (const stroke of entry.strokes) {
+      strokes.push(stroke.map(([x, y]) => [
+        (70 + x * 760) / 900,
+        (90 + row * rowGap + y * lineHeight) / 1273,
+      ]))
+    }
+  }
+  return { strokes, truth: Array.from({ length: rows }, () => entry.truth).join('\n') }
+}
+
+try {
+  const cases = JSON.parse(fs.readFileSync(casesFile, 'utf8'))
+  const rows = []
+  let cold = 0
+  const warm = []
+  for (const entry of cases) {
+    const started = Date.now()
+    const result = await recognize(entry, { group: false })
+    const elapsed = Date.now() - started
+    if (!rows.length) cold = elapsed
+    else warm.push(result.inferenceMs)
+    rows.push({ name: entry.name, language: entry.language, truth: entry.truth, text: result.text, characters: result.lines.reduce((s, l) => s + l.characters, 0), boxes: result.lines.reduce((s, l) => s + l.boxes.filter((v, i) => i % 4 === 0 && Number.isFinite(v)).length, 0) })
+    if (process.env.FANOTES_INK_DEBUG === '1') console.log(`${entry.name}\t${entry.truth}\t→ ${result.text}`)
+  }
+  const report = {}
+  for (const language of ['de', 'en']) {
+    const chosen = rows.filter((r) => r.language === language)
+    if (chosen.length) report[language] = { lines: chosen.length, cer: Number(cer(chosen).toFixed(2)), wer: Number(wer(chosen).toFixed(2)) }
+  }
+  // One real pen line (IAM-OnDB) stacked into a 3-line page checks grouping end to end.
+  const pages = []
+  const penLine = cases.find((entry) => entry.name === 'iam-ondb-a01-001z-01')
+  if (penLine) {
+    const composed = composePage(penLine, 3)
+    const result = await recognize({ language: 'en' }, { strokes: composed.strokes, width: 900, height: 1273, group: true })
+    pages.push({ language: 'en', truth: composed.truth, text: result.text, lines: result.lines.length, expected: 3, cer: Number(cer([{ text: result.text, truth: composed.truth }]).toFixed(2)) })
+  }
+  console.log(JSON.stringify({ model: manifest.version, report, pages: pages.map(({ language, lines, expected, cer }) => ({ language, lines, expected, cer })), coldMs: cold, warmMs: Math.round(warm.reduce((s, v) => s + v, 0) / Math.max(1, warm.length)) }, null, 2))
+
+  if (!process.env.FANOTES_INK_CASES) {
+    const iam = rows.find((r) => r.name === 'iam-ondb-a01-001z-01')
+    assert.ok(iam, 'the IAM-OnDB example line is missing')
+    assert.ok(cer([iam]) <= 8, `the real IAM-OnDB pen line is too inaccurate: ${JSON.stringify(iam)}`)
+    assert.ok(report.de?.cer <= 8, `German handwriting (ScaDS, unseen writers) is too inaccurate: ${JSON.stringify(report.de)}`)
+    assert.ok(rows.every((r) => r.boxes === r.characters), 'every recognized character needs a page position')
+    for (const page of pages) {
+      assert.equal(page.lines, page.expected, `page line splitting is wrong: ${JSON.stringify(page)}`)
+      assert.ok(page.cer <= 8, `a stacked real-pen page is too inaccurate: ${JSON.stringify(page)}`)
+    }
+  }
+} finally {
+  host.stop()
+}
