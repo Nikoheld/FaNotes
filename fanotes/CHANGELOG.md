@@ -1,5 +1,15 @@
 # Änderungsverlauf
 
+## 2026.11.1-beta.3
+
+- Add the FaNotes Companion phone app with Schulnetz.
+- Hide the companion record under a shared note.
+- Show paragraphs and formatting on shared notes.
+- Keep snow that is pushed past the window on the floor.
+- Let snow settle on the shell and be pushed aside.
+- Publish a beta when its tag already exists.
+- Remove the macOS package from the release.
+
 ## 2026.11.1-beta.2
 
 - Remove the macOS package from the release.
