@@ -386,6 +386,23 @@ export const lowercaseShortBeamWord = (
   return null
 }
 
+/**
+ * `einen` takes `der` before a long capital word (`einen des Landschaftsgeräte` → `einen der`).
+ * `des` after another word, as in `Sinne des` or `Vorgaben des`, stays.
+ */
+export const accusativeDer = (text: string): WordEdit | null => {
+  const words = inkWords(text)
+  for (let index = 1; index < words.length - 1; index += 1) {
+    if (words[index] !== 'des' || words[index - 1] !== 'einen') continue
+    const next = words[index + 1]
+    const first = [...next][0]
+    if (!first || [...next].length < 8) continue
+    if (first !== first.toUpperCase() || first === first.toLowerCase()) continue
+    return { index, from: 'des', to: 'der' }
+  }
+  return null
+}
+
 /** A heavier, slightly back-slanted rendering used on one separated group of a long unknown word. */
 export const COMPOUND_PEN = 4.2
 export const COMPOUND_SHEAR = -0.15
