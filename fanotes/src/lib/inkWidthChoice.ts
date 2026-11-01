@@ -348,6 +348,44 @@ export const leadingStrokesAreTicks = (packed: Float64Array) => {
   return pairGap >= 0 && pairGap <= 24 && wordGap > pairGap
 }
 
+/** A later beam reading may lowercase one three-letter word when it is no worse than this. */
+export const SHORT_CASE_MARGIN = 3
+
+const letterSkeleton = (text: string) => text.replace(/[A-Za-zÄÖÜäöüß]+/gu, 'W')
+
+/**
+ * A non-initial three-letter word becomes lowercase when a close beam reading already has it
+ * lowercase and the rest of the line matches (`Job` → `job`).
+ */
+export const lowercaseShortBeamWord = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+): WordEdit | null => {
+  if (readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  for (const reading of readings.slice(1)) {
+    if (top.score - reading.score > SHORT_CASE_MARGIN) continue
+    if (letterSkeleton(top.text) !== letterSkeleton(reading.text)) continue
+    const left = inkWords(top.text)
+    const right = inkWords(reading.text)
+    if (left.length !== right.length || left.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < left.length; index += 1) {
+      if (left[index] !== right[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1 || diffs[0] === 0) continue
+    const index = diffs[0]
+    const from = left[index]
+    const to = right[index]
+    if ([...from].length !== 3 || to !== from.toLowerCase() || from === to) continue
+    if (from.slice(1) !== from.slice(1).toLowerCase()) continue
+    if (words[index] !== from) continue
+    return { index, from, to }
+  }
+  return null
+}
+
 /** A heavier, slightly back-slanted rendering used on one separated group of a long unknown word. */
 export const COMPOUND_PEN = 4.2
 export const COMPOUND_SHEAR = -0.15

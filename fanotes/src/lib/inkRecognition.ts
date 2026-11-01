@@ -79,6 +79,7 @@ import {
   COMPOUND_SCALE,
   dictionaryCompound,
   isolatedWideGroups,
+  lowercaseShortBeamWord,
   inkWords,
   charactersJoiningWords,
   insertedLetterInOneKnownWord,
@@ -1110,6 +1111,15 @@ export async function recognizeInk(
       const characters = [quote, ...decoded.characters.slice(3)]
       decoded = { ...decoded, characters, text: characters.map((character) => character.char).join('') }
       stitched = null
+    }
+    const shortCase = lowercaseShortBeamWord(decoded.text, decoded.readings)
+    if (shortCase) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, shortCase.index, shortCase.to)
+      const nextText = textWithWordEdits(decoded.text, [shortCase])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
     }
     const known = (word: string) => wordIsKnown(lineLanguage, word)
     const unknownCompound = inkWords(decoded.text)
