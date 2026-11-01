@@ -794,6 +794,33 @@ fn greedy_symbols(log_probs: &[f64], classes: usize) -> Vec<u8> {
     out
 }
 
+/// A comma and a period swap only at a sentence boundary. Before a lowercase word, or in
+/// a decimal (`11,7`), the beam's mark is the one that was written (`daran, dass`).
+fn comma_period_inside_a_sentence(
+    best: &[u8],
+    mark: usize,
+    greedy_mark: u8,
+    words: &Words<'_>,
+) -> bool {
+    let beam_mark = words.alphabet[usize::from(best[mark]) - 1];
+    let greedy_mark = words.alphabet[usize::from(greedy_mark) - 1];
+    if !matches!((beam_mark, greedy_mark), (',', '.') | ('.', ',')) {
+        return false;
+    }
+    let mut index = mark + 1;
+    while index < best.len() && !words.is_letter(best[index]) {
+        let character = words.alphabet[usize::from(best[index]) - 1];
+        if character.is_ascii_digit() {
+            return true;
+        }
+        if character != ' ' {
+            return false;
+        }
+        index += 1;
+    }
+    index < best.len() && words.alphabet[usize::from(best[index]) - 1].is_lowercase()
+}
+
 /// Substitutes a sentence mark in `best` with the greedy mark when the two readings align there.
 fn reconcile_sentence_marks(best: &[u8], greedy: &[u8], words: &Words<'_>) -> Vec<u8> {
     let mut result = best.to_vec();
@@ -825,6 +852,7 @@ fn reconcile_sentence_marks(best: &[u8], greedy: &[u8], words: &Words<'_>) -> Ve
             if best[i - 1] != greedy[j - 1]
                 && words.sentence_mark(best[i - 1])
                 && words.sentence_mark(greedy[j - 1])
+                && !comma_period_inside_a_sentence(best, i - 1, greedy[j - 1], words)
             {
                 result[i - 1] = greedy[j - 1];
             }
@@ -1260,15 +1288,25 @@ mod tests {
     }
 
     #[test]
-    fn a_greedy_period_replaces_only_the_beam_comma() {
-        let alphabet: Vec<char> = "abc., ".chars().collect();
+    fn a_greedy_period_replaces_a_comma_only_before_a_capital() {
+        let alphabet: Vec<char> = "abcABC178., ".chars().collect();
         let index = |character: char| {
             (alphabet.iter().position(|&item| item == character).unwrap() + 1) as u8
         };
-        let best = ['a', ',', 'b'].map(index);
-        let greedy = ['a', '.', 'c'].map(index);
-        let corrected = reconcile_sentence_marks(&best, &greedy, &words(&alphabet));
-        assert_eq!(corrected, ['a', '.', 'b'].map(index));
+        let symbols = |text: &str| text.chars().map(index).collect::<Vec<_>>();
+        let decoder = words(&alphabet);
+        assert_eq!(
+            reconcile_sentence_marks(&symbols("a, B"), &symbols("a. C"), &decoder),
+            symbols("a. B")
+        );
+        assert_eq!(
+            reconcile_sentence_marks(&symbols("a, b"), &symbols("a. c"), &decoder),
+            symbols("a, b")
+        );
+        assert_eq!(
+            reconcile_sentence_marks(&symbols("1, 7"), &symbols("1. 8"), &decoder),
+            symbols("1, 7")
+        );
     }
 
     #[test]
