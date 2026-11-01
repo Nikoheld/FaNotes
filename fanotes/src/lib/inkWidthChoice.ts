@@ -2,8 +2,13 @@
 
 const WORD = /[A-Za-zÄÖÜäöüß]+/gu
 
-/** A thinner pen, a slightly thicker pen, and a thick pen around the default 2.6 px. */
-export const INK_RETRY_WIDTHS = [1.8, 3.0, 3.5] as const
+/** Nearby renderings tried when a long word is still unknown. The default 2.6 px reading comes first. */
+export const INK_RETRY_VARIANTS = [
+  { penWidth: 1.8, scale: 1 },
+  { penWidth: 3, scale: 1 },
+  { penWidth: 3.5, scale: 1 },
+  { penWidth: 2.6, scale: 0.92 },
+] as const
 
 /** The unknown word has to be at least this long before a second rendering is worth the time. */
 export const LONG_UNKNOWN_LETTERS = 10
@@ -13,6 +18,11 @@ export const WIDTH_RETRY_MARGIN = 2
 
 /** A two-word merge has to beat the default reading by this many nats. */
 export const MERGE_SCORE_MARGIN = 4
+
+/** Copying one long unknown word out of another rendering requires this much of a lead. */
+export const SPLICE_SCORE_MARGIN = 5
+
+const SPLICE_MIN_LETTERS = 12
 
 export const foldInkWord = (word: string) => word.toLowerCase().replaceAll('ß', 'ss')
 
@@ -85,4 +95,104 @@ export const widthReadingMergesTwoWords = (base: string, alternate: string) => {
   const merged = foldInkWord(right[index])
   if (first.length < 4 || second.length < 4 || merged.length < 12 || !merged.startsWith(first)) return false
   return left.slice(index + 2).join('\0') === right.slice(index + 1).join('\0')
+}
+
+export type WordEdit = { index: number; from: string; to: string }
+
+/**
+ * Word positions where `alternate` rewrites a long unknown word and leaves every known word
+ * to be kept from `base`. A known word that the other rendering changed is not an edit.
+ * Returns null when the two readings do not have the same words.
+ */
+export const longUnknownWordEdits = (
+  base: string,
+  alternate: string,
+  known: (word: string) => boolean,
+): WordEdit[] | null => {
+  const left = inkWords(base)
+  const right = inkWords(alternate)
+  if (left.length !== right.length) return null
+  const edits: WordEdit[] = []
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] === right[index] || known(left[index])) continue
+    const before = foldInkWord(left[index])
+    const after = foldInkWord(right[index])
+    if (before.length < SPLICE_MIN_LETTERS || Math.abs(before.length - after.length) > 3) continue
+    edits.push({ index, from: left[index], to: right[index] })
+  }
+  return edits.length ? edits : null
+}
+
+/** Replaces the edited words inside `base`, including the punctuation around them. */
+export const textWithWordEdits = (base: string, edits: WordEdit[]) => {
+  const spans = [...base.matchAll(WORD)]
+  let result = base
+  for (const edit of [...edits].sort((left, right) => right.index - left.index)) {
+    const span = spans[edit.index]
+    if (!span || span[0] !== edit.from || span.index === undefined) return base
+    result = result.slice(0, span.index) + edit.to + result.slice(span.index + edit.from.length)
+  }
+  return result
+}
+
+const letterRuns = <T extends { char: string }>(characters: T[]) => {
+  const runs: Array<{ start: number; end: number; word: string }> = []
+  let index = 0
+  while (index < characters.length) {
+    if (!/[A-Za-zÄÖÜäöüß]/u.test(characters[index].char)) {
+      index += 1
+      continue
+    }
+    const start = index
+    let word = ''
+    while (index < characters.length && /[A-Za-zÄÖÜäöüß]/u.test(characters[index].char)) {
+      word += characters[index].char
+      index += 1
+    }
+    runs.push({ start, end: index, word })
+  }
+  return runs
+}
+
+/**
+ * Characters of `base`, with each edited word's glyphs taken from `alternate`.
+ * `source` names the rendering and the character index the glyph was taken from.
+ */
+export const charactersWithWordEdits = <T extends { char: string }>(
+  base: T[],
+  alternate: T[],
+  edits: WordEdit[],
+): { characters: T[]; source: Array<{ alt: boolean; index: number }> } | null => {
+  const left = letterRuns(base)
+  const right = letterRuns(alternate)
+  if (left.length !== right.length) return null
+  const replacement = new Map(edits.map((edit) => [edit.index, edit.to]))
+  const characters: T[] = []
+  const source: Array<{ alt: boolean; index: number }> = []
+  let cursor = 0
+  for (let index = 0; index < left.length; index += 1) {
+    for (let from = cursor; from < left[index].start; from += 1) {
+      characters.push(base[from])
+      source.push({ alt: false, index: from })
+    }
+    const next = replacement.get(index)
+    if (next !== undefined) {
+      if (right[index].word !== next) return null
+      for (let from = right[index].start; from < right[index].end; from += 1) {
+        characters.push(alternate[from])
+        source.push({ alt: true, index: from })
+      }
+    } else {
+      for (let from = left[index].start; from < left[index].end; from += 1) {
+        characters.push(base[from])
+        source.push({ alt: false, index: from })
+      }
+    }
+    cursor = left[index].end
+  }
+  for (let from = cursor; from < base.length; from += 1) {
+    characters.push(base[from])
+    source.push({ alt: false, index: from })
+  }
+  return { characters, source }
 }

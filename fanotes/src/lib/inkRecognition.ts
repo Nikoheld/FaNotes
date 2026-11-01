@@ -26,11 +26,15 @@ import {
 import { ensureRecogWasm } from './recogCore'
 import { effectiveOcrThreadCount } from './resourceLimits'
 import {
-  INK_RETRY_WIDTHS,
+  INK_RETRY_VARIANTS,
   MERGE_SCORE_MARGIN,
+  SPLICE_SCORE_MARGIN,
   WIDTH_RETRY_MARGIN,
+  charactersWithWordEdits,
   foldInkWord,
   hasLongUnknownWord,
+  longUnknownWordEdits,
+  textWithWordEdits,
   widthReadingKeepsKnownWords,
   widthReadingMergesTwoWords,
 } from './inkWidthChoice'
@@ -523,20 +527,31 @@ export async function recognizeInk(
     decodeMs += lineDecode
     let activeImage = image
     let activePenWidth = style.penWidth
+    let activeScale = style.scale
+    const baseDecoded = decoded
     const baseText = decoded.text
     const baseScore = decoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
     const defaultPen = style.penWidth === DEFAULT_INK_STYLE.penWidth
       && style.extraShear === DEFAULT_INK_STYLE.extraShear
       && style.scale === DEFAULT_INK_STYLE.scale
       && style.stretchX === DEFAULT_INK_STYLE.stretchX
+    let spliceBest: {
+      score: number
+      decoded: Decoded
+      image: LineImage
+      penWidth: number
+      scale: number
+      edits: ReturnType<typeof longUnknownWordEdits>
+    } | null = null
     if (
       defaultPen
       && exactWords[lineLanguage].size > 0
       && hasLongUnknownWord(baseText, (word) => wordIsKnown(lineLanguage, word))
     ) {
       let bestScore = baseScore
-      for (const penWidth of INK_RETRY_WIDTHS) {
-        const retryImage = renderLine(packed, reference, { ...style, penWidth })
+      const known = (word: string) => wordIsKnown(lineLanguage, word)
+      for (const variant of INK_RETRY_VARIANTS) {
+        const retryImage = renderLine(packed, reference, { ...style, penWidth: variant.penWidth, scale: variant.scale })
         if (!retryImage) continue
         const retryInferenceStarted = performance.now()
         const retryRun = await infer(retryImage, threads, usePersonalModel)
@@ -546,22 +561,52 @@ export async function recognizeInk(
         const retryDecoded = decodeLine(engine, retryRun.logits, lineLanguage, decoderForLanguage(engine.manifest.decoder, lineLanguage))
         decodeMs += performance.now() - retryDecodeStarted
         const retryScore = retryDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
-        if (retryScore <= bestScore) continue
-        const known = (word: string) => wordIsKnown(lineLanguage, word)
         const wordFix = retryScore >= baseScore + WIDTH_RETRY_MARGIN
           && widthReadingKeepsKnownWords(baseText, retryDecoded.text, known)
         const mergeFix = retryScore >= baseScore + MERGE_SCORE_MARGIN
           && widthReadingMergesTwoWords(baseText, retryDecoded.text)
-        if (!wordFix && !mergeFix) continue
-        decoded = retryDecoded
-        activeImage = retryImage
-        activePenWidth = penWidth
-        bestScore = retryScore
+        if ((wordFix || mergeFix) && retryScore > bestScore) {
+          decoded = retryDecoded
+          activeImage = retryImage
+          activePenWidth = variant.penWidth
+          activeScale = variant.scale
+          bestScore = retryScore
+          continue
+        }
+        if (retryScore < baseScore + SPLICE_SCORE_MARGIN) continue
+        const edits = longUnknownWordEdits(baseText, retryDecoded.text, known)
+        if (!edits || (spliceBest && retryScore <= spliceBest.score)) continue
+        spliceBest = { score: retryScore, decoded: retryDecoded, image: retryImage, penWidth: variant.penWidth, scale: variant.scale, edits }
+      }
+    }
+    let stitched: { boxes: Float64Array } | null = null
+    if (decoded.text === baseText && spliceBest?.edits) {
+      const edited = charactersWithWordEdits(baseDecoded.characters, spliceBest.decoded.characters, spliceBest.edits)
+      if (edited) {
+        const splicedText = textWithWordEdits(baseText, spliceBest.edits)
+        decoded = {
+          ...baseDecoded,
+          text: splicedText,
+          characters: edited.characters,
+          confidence: edited.characters.reduce((sum, character) => sum + character.confidence, 0) / Math.max(1, edited.characters.length),
+        }
+        const spanBoxes = (sourceImage: LineImage, penWidth: number, scale: number, characters: Decoded['characters']) => {
+          const spans = new Uint32Array(characters.flatMap((character) => [character.startFrame, character.endFrame]))
+          return inkSpanBoxes(sourceImage.packed, reference, penWidth, style.extraShear, scale, spans)
+        }
+        const baseBoxes = spanBoxes(image, style.penWidth, style.scale, baseDecoded.characters)
+        const altBoxes = spanBoxes(spliceBest.image, spliceBest.penWidth, spliceBest.scale, spliceBest.decoded.characters)
+        const boxes = new Float64Array(edited.characters.length * 4)
+        edited.source.forEach((source, index) => {
+          const from = source.alt ? altBoxes : baseBoxes
+          boxes.set(from.subarray(source.index * 4, source.index * 4 + 4), index * 4)
+        })
+        stitched = { boxes }
       }
     }
     if (!decoded.text.trim()) continue
     const spans = new Uint32Array(decoded.characters.flatMap((character) => [character.startFrame, character.endFrame]))
-    const boxes = inkSpanBoxes(activeImage.packed, reference, activePenWidth, style.extraShear, style.scale, spans)
+    const boxes = stitched?.boxes ?? inkSpanBoxes(activeImage.packed, reference, activePenWidth, style.extraShear, activeScale, spans)
     const unstretch = 1 / style.stretchX
     lines.push({
       text: decoded.text,

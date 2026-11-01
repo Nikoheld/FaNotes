@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { INK_RETRY_WIDTHS, MERGE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, foldInkWord, hasLongUnknownWord, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { INK_RETRY_VARIANTS, MERGE_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, charactersWithWordEdits, foldInkWord, hasLongUnknownWord, longUnknownWordEdits, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -81,6 +81,16 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
     'und Computerspielen sowie über Personen, die daran',
     'und Computerspielen sowie über Personen, die davon',
   ), false)
+  const nuclear = longUnknownWordEdits(
+    'Nuklearenaie ist die Technologie zur großtechnischen Erzeugge',
+    'Nuklearenergie ist die Technologie zur größtechischen Erzeugge',
+    known,
+  )
+  assert.deepEqual(nuclear, [{ index: 0, from: 'Nuklearenaie', to: 'Nuklearenergie' }])
+  assert.equal(
+    textWithWordEdits('Nuklearenaie ist die Technologie zur großtechnischen Erzeugge', nuclear),
+    'Nuklearenergie ist die Technologie zur großtechnischen Erzeugge',
+  )
 }
 
 const host = createNativeOcrHost({
@@ -155,13 +165,17 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
     inferenceMs += Date.now() - t
     assert.equal(dims[2], manifest.classes, 'class count')
     let decoded = JSON.parse(inkDecode(probabilities, dims[2], manifest.alphabet, entry.language, decoderOptionsFor(entry.language)))
+    const baseDecoded = decoded
     let penWidth = manifest.decoder.penWidth ?? 2.6
+    let scale = 1
     const baseText = decoded.text
     const baseScore = decoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+    let spliceBest = null
     if (exactWords[entry.language]?.size && hasLongUnknownWord(baseText, knownWord(entry.language))) {
       let bestScore = baseScore
-      for (const width of INK_RETRY_WIDTHS) {
-        const retryRaw = inkLineImage(linePacked, reference, width, 0, 1)
+      const known = knownWord(entry.language)
+      for (const variant of INK_RETRY_VARIANTS) {
+        const retryRaw = inkLineImage(linePacked, reference, variant.penWidth, 0, variant.scale)
         if (retryRaw.length < 3) continue
         const retryImage = retryRaw.subarray(2)
         const retryStarted = Date.now()
@@ -169,21 +183,46 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
         inferenceMs += Date.now() - retryStarted
         const retryDecoded = JSON.parse(inkDecode(retry.probabilities, retry.dims[2], manifest.alphabet, entry.language, decoderOptionsFor(entry.language)))
         const retryScore = retryDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
-        if (retryScore <= bestScore) continue
-        const known = knownWord(entry.language)
         const wordFix = retryScore >= baseScore + WIDTH_RETRY_MARGIN
           && widthReadingKeepsKnownWords(baseText, retryDecoded.text, known)
         const mergeFix = retryScore >= baseScore + MERGE_SCORE_MARGIN
           && widthReadingMergesTwoWords(baseText, retryDecoded.text)
-        if (!wordFix && !mergeFix) continue
-        decoded = retryDecoded
-        penWidth = width
-        bestScore = retryScore
+        if ((wordFix || mergeFix) && retryScore > bestScore) {
+          decoded = retryDecoded
+          penWidth = variant.penWidth
+          scale = variant.scale
+          bestScore = retryScore
+          continue
+        }
+        if (retryScore < baseScore + SPLICE_SCORE_MARGIN) continue
+        const edits = longUnknownWordEdits(baseText, retryDecoded.text, known)
+        if (!edits || (spliceBest && retryScore <= spliceBest.score)) continue
+        spliceBest = { score: retryScore, decoded: retryDecoded, penWidth: variant.penWidth, scale: variant.scale, edits }
       }
     }
+    let boxes
+    if (decoded.text === baseText && spliceBest) {
+      const edited = charactersWithWordEdits(baseDecoded.characters, spliceBest.decoded.characters, spliceBest.edits)
+      if (edited) {
+        decoded = { ...baseDecoded, text: textWithWordEdits(baseText, spliceBest.edits), characters: edited.characters }
+        const spanBoxes = (width, usedScale, characters) => {
+          const spans = new Uint32Array(characters.flatMap((c) => [c.startFrame, c.endFrame]))
+          return inkSpanBoxes(linePacked, reference, width, 0, usedScale, spans)
+        }
+        const baseBoxes = spanBoxes(manifest.decoder.penWidth ?? 2.6, 1, baseDecoded.characters)
+        const altBoxes = spanBoxes(spliceBest.penWidth, spliceBest.scale, spliceBest.decoded.characters)
+        boxes = new Float64Array(edited.characters.length * 4)
+        edited.source.forEach((source, index) => {
+          const from = source.alt ? altBoxes : baseBoxes
+          boxes.set(from.subarray(source.index * 4, source.index * 4 + 4), index * 4)
+        })
+      }
+    }
+    if (!boxes) {
+      const spans = new Uint32Array(decoded.characters.flatMap((c) => [c.startFrame, c.endFrame]))
+      boxes = inkSpanBoxes(linePacked, reference, penWidth, 0, scale, spans)
+    }
     if (!decoded.text.trim()) continue
-    const spans = new Uint32Array(decoded.characters.flatMap((c) => [c.startFrame, c.endFrame]))
-    const boxes = inkSpanBoxes(linePacked, reference, penWidth, 0, 1, spans)
     lines.push({ decoded, boxes, characters: decoded.characters.length })
   }
   return { text: lines.map((l) => l.decoded.text).join('\n'), lines, inferenceMs }
