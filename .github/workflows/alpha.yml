@@ -43,7 +43,7 @@ jobs:
           node fanotes/scripts/set-version.mjs --version "$version" --notes "$notes"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add fanotes/package.json fanotes/package-lock.json fanotes/src-tauri/tauri.conf.json fanotes/CHANGELOG.md android/app/build.gradle.kts
+          git add fanotes/package.json fanotes/package-lock.json fanotes/src-tauri/tauri.conf.json fanotes/CHANGELOG.md android/app/build.gradle.kts android/companion/build.gradle.kts
           if git diff --cached --quiet; then
             echo "Version files already match ${version}."
           else

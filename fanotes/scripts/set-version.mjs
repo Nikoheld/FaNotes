@@ -71,11 +71,13 @@ replaceJsonVersion(path.join(fanotesRoot, 'package.json'), 1)
 replaceJsonVersion(path.join(fanotesRoot, 'package-lock.json'), 2)
 replaceJsonVersion(path.join(fanotesRoot, 'src-tauri', 'tauri.conf.json'), 1)
 
-const gradlePath = path.join(repoRoot, 'android', 'app', 'build.gradle.kts')
-const gradle = fs.readFileSync(gradlePath, 'utf8')
-  .replace(/orElse\("[^"]+"\)/u, `orElse("${version}")`)
-  .replace(/versionCode = \d+/u, `versionCode = ${versionCode}`)
-write(gradlePath, gradle)
+for (const relative of ['android/app/build.gradle.kts', 'android/companion/build.gradle.kts']) {
+  const gradlePath = path.join(repoRoot, relative)
+  const gradle = fs.readFileSync(gradlePath, 'utf8')
+    .replace(/orElse\("[^"]+"\)/u, `orElse("${version}")`)
+    .replace(/versionCode = \d+/u, `versionCode = ${versionCode}`)
+  write(gradlePath, gradle)
+}
 
 const changelogPath = path.join(fanotesRoot, 'CHANGELOG.md')
 let changelog = fs.readFileSync(changelogPath, 'utf8')

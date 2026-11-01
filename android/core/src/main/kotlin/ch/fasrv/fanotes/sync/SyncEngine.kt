@@ -303,6 +303,9 @@ class SyncEngine(
         }
     }
 
+    /** Bearer session for account-scoped APIs such as the Schulnetz link. Null when signed out. */
+    suspend fun currentSession(): SyncSession? = onEngine { session }
+
     suspend fun removeDevice(deviceId: String) = onEngine {
         val active = session ?: throw IllegalStateException("Not signed in.")
         api.removeDevice(active, deviceId)

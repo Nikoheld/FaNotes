@@ -40,6 +40,10 @@ Die Daten liegen außerhalb des Webroots unter `/var/lib/fanotes-backups`, gehö
 
 ClamAV benötigt für die erlaubte PDF-Größe `StreamMaxLength 100M` in `/etc/clamav/clamd.conf`. Nach einer Änderung wird `clamav-daemon.service` neu gestartet. Der systemd-Dienst darf nur `/var/lib/fanotes-backups` beschreiben; `/etc/fanotes` und das Release-Verzeichnis bleiben schreibgeschützt.
 
+## Schulnetz Companion
+
+`schulnetz-api.mjs` hält unter `/api/v1/schulnetz` genau ein Schulnetz-Konto je FaNotes-Konto. Refresh-Tokens liegen AES-256-GCM-verschlüsselt unter `/var/lib/fanotes-schulnetz` und werden nur vom einen Poller erneuert. Der Server liest Noten, Stundenplan, Prüfungen, Absenzen und Mitteilungen; Einschreiben und Bestätigen sind gesperrt. Push läuft über ntfy oder einen UnifiedPush-Endpunkt, ohne Firebase. Einrichtung, Umgebungsvariablen und systemd: `server-changes/schulnetz-companion/README.md`.
+
 ## Sync-API
 
 `sync-api.mjs` bedient unter `/api/v1/sync` die Ende-zu-Ende-verschlüsselte Synchronisation der Desktop-App, der Web-App und der Android-Tablet-App (Einstellungen → Sync, Plattform `android`). Der Server sieht nie ein Passwort und nie einen Dateinamen oder Inhalt: Der Client leitet aus dem Passwort per PBKDF2 einen Anmeldeschlüssel ab, den der Server zusätzlich mit Scrypt hasht, und einen Einpackschlüssel, der das Gerät nicht verlässt; der eigentliche Tresorschlüssel liegt nur eingepackt auf dem Server. Dateien kommen als AES-256-GCM-Chiffrate unter HMAC-Kennungen an, ihre Metadaten (Pfad, Größe, Änderungszeit) ebenfalls verschlüsselt in einem Header. Ein vergessenes Passwort kann deshalb nicht zurückgesetzt werden.

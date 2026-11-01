@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#191919</color>
+    <color name="widget_background">#202020</color>
+    <color name="widget_text">#EDEDEC</color>
+    <color name="widget_muted">#CFCFCA</color>
+    <color name="widget_accent">#8EC4E0</color>
+</resources>

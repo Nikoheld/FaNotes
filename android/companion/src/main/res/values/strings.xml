@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FaNotes Companion</string>
+    <string name="widget_name">Nächste Lektion</string>
+    <string name="widget_description">Zeigt die nächste Schulnetz-Lektion mit Raum.</string>
+    <string name="channel_alerts">Schulnetz</string>
+    <string name="channel_live">Sofortverbindung</string>
+</resources>
