@@ -14,7 +14,13 @@ Nginx muss nicht angepasst werden. `location /` reicht `/api/v1/schulnetz` berei
 
 ## Was der Server tut
 
-Pro FaNotes-Konto gibt es höchstens ein Schulnetz-Konto. Die App meldet sich einmal bei Microsoft an (PKCE, öffentlicher Client `ppyybShnMerHdtBQ`) und schickt das Refresh-Token an den Server. Danach löscht sie es lokal. Nur der Poller ruft `token.php` auf. Dreht Schulnetz das Refresh-Token, schreibt der Poller das neue Token, bevor er weiterliest. Andere Geräte holen den Schnappschuss und müssen das Token nicht kennen.
+AKSA lässt den mobilen OAuth-Client nicht zu (`AADSTS50011`: `authorize.php` ist in der Entra-App nicht als Redirect eingetragen). Die Anmeldung läuft deshalb über die Website: `index.php?pageid=1`, Microsoft, zurück auf `https://www.schulnetz-ag.ch/aksa/`.
+
+Eine PHPSESSID ist an die IP gebunden. Wechselt das Telefon von WLAN auf Mobilfunk, antwortet Schulnetz mit «Ihre IP-Adresse wurde vom System zurückgewiesen». Dieselbe Seite erscheint nach etwa zehn Minuten Untätigkeit («Inaktivitätslimit»). Beides wird erkannt. Die App lädt dann still `index.php?pageid=1` mit den Microsoft-SSO-Cookies. Nur wenn Microsoft ein Passwort oder MFA verlangt, erscheint wieder die Anmeldung.
+
+Der Server benutzt die PHPSESSID des Telefons nicht. Er speichert die Microsoft-Cookies verschlüsselt und macht von seiner eigenen IP aus denselben stillen Login. Danach liest er die HTML-Seiten. Schlägt das fehl, setzt er `needsReauth` und schickt eine Meldung. Das Telefon lädt zusätzlich seinen eigenen Schnappschuss hoch (`PUT /snapshot`), damit die anderen Geräte Daten sehen, auch wenn der Server-Login gerade nicht klappt.
+
+`authorize.php` wird von der App nicht mehr geöffnet. Die REST-Routen bleiben im Code für andere Schulen, sind für `*.schulnetz-ag.ch` aber abgeschaltet.
 
 Der Poller liest alle 3 Minuten (änderbar) und vergleicht mit dem letzten Schnappschuss. Die erste erfolgreiche Lesung erzeugt keine Meldungen. Danach gehen Änderungen an ntfy und an eingetragene UnifiedPush-Endpunkte. Die App hält zusätzlich eine ntfy-Verbindung und prüft per WorkManager mindestens alle 15 Minuten `/changes`.
 
@@ -25,7 +31,8 @@ Alle Routen hängen unter `/api/v1/schulnetz` und verlangen denselben Sync-Login
 | Methode | Pfad | Bedeutung |
 |---|---|---|
 | GET | `/status` | Verbunden, Anzeigename, `needsReauth`, letzte Lesung, Push-Thema, Schalter. Kein Token. |
-| PUT | `/link` | `{ baseUrl, deviceId, refreshToken, accessToken, expiresIn, displayName }`. Ersetzt die Verknüpfung dieses Kontos. |
+| PUT | `/link` | Website: `{ mode:"web", baseUrl, deviceId, userAgent, displayName, ssoCookies }`. `ssoCookies` sind nur Microsoft-Hosts, ohne `PHPSESSID`. Ältere REST-Verknüpfungen mit `refreshToken` bleiben für Nicht-AKSA möglich. |
+| PUT | `/snapshot` | Normalisierter Schnappschuss vom Telefon. Der Server diff und pusht. Keine Cookies. |
 | DELETE | `/link` | Löscht Token, Schnappschuss und Push-Endpunkte. |
 | GET | `/snapshot` | Normalisierter Schnappschuss (Noten, Stunden, Prüfungen, Absenzen, Aufgaben, Mitteilungen, Ferien, Kontoauszug, Startseite). |
 | GET | `/changes?since=<revision>` | Änderungen seit dieser Revision. |
@@ -151,7 +158,7 @@ node --test fanotes-site/schulnetz-logic.test.mjs
 
 ## Grenzen
 
-Ein echtes AKSA-Login mit Microsoft-MFA kann hier nicht automatisch geprüft werden. Öffentlich geprüft am 1. November 2026: `GET /aksa/rest/v1/me` antwortet `401` mit `Bearer realm='schulNetz'`, und `authorize.php` mit der Client-ID leitet zu `login.microsoftonline.com` um. Ob einzelne JSON-Felder in einer späteren Schulnetz-Version anders heissen, fangen die Parser über Alias-Namen ab; ein Feld, das die Schule gar nicht liefert, bleibt leer.
+Ein echtes AKSA-Login mit Microsoft-MFA kann hier nicht automatisch geprüft werden. Öffentlich geprüft: `authorize.php` leitet auf einen Redirect, den die Entra-App nicht kennt (`AADSTS50011`). `index.php?pageid=1` leitet auf denselben Microsoft-Login mit dem registrierten Redirect `https://www.schulnetz-ag.ch/aksa/`. Parser folgen der schulNetz-5.14-Struktur aus SchulwareAPI (Kurszeile mit verschachtelten Einzelprüfungen, Absenzen-Tabelle «Datum von», Scheduler-XML). Wenn eine Seite anders aussieht, zeigt die App «Seite konnte nicht gelesen werden» und bietet «HTML teilen».
 
 Die Webseiten für Kontoauszug und Startseite akzeptieren den Bearer oft nicht. Dann zeigt die App den Hinweis statt erfundener Buchungen. Es wird dafür keine zweite Sitzung gebaut, weil die Website nach etwa zehn Minuten ausloggt und wir keine schreibenden Formulare abschicken.
 

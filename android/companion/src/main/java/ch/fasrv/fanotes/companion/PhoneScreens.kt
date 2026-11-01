@@ -451,12 +451,8 @@ private fun ExamScreen(model: CompanionModel) {
 private fun SettingsScreen(model: CompanionModel) {
     val context = LocalContext.current
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            model.onSchulnetzResult(
-                result.data?.getStringExtra(SchulnetzLoginActivity.EXTRA_CODE),
-                result.data?.getStringExtra(SchulnetzLoginActivity.EXTRA_STATE),
-            )
-        } else model.onSchulnetzResult(null, null)
+        if (result.resultCode == Activity.RESULT_OK) model.onWebLoginFinished()
+        else model.message = "Schulnetz-Anmeldung abgebrochen."
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         TextButton(onClick = { model.section = PhoneSection.Menu }) { Text("Zurück") }
@@ -471,6 +467,10 @@ private fun SettingsScreen(model: CompanionModel) {
         OutlinedTextField(model.baseUrl, { model.baseUrl = it }, label = { Text("Schulnetz-Adresse") }, modifier = Modifier.fillMaxWidth())
         Button(onClick = { model.schulnetzIntent(context)?.let(launcher::launch) }, modifier = Modifier.fillMaxWidth()) { Text(if (model.link.linked) "Neu verbinden" else "Mit Microsoft anmelden") }
         if (model.link.linked) TextButton(onClick = { model.unlink() }) { Text("Trennen") }
+        model.snapshot.readErrors.forEach { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (model.snapshot.readErrors.isNotEmpty() || model.debugHtml.isNotBlank()) {
+            OutlinedButton(onClick = { model.shareDebug(context) }, modifier = Modifier.fillMaxWidth()) { Text("HTML teilen") }
+        }
         Text("Benachrichtigungen", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
         SettingSwitch("Neue Note", model.settings.grades) { model.toggleSetting("grades") }
         SettingSwitch("Stundenplan", model.settings.timetable) { model.toggleSetting("timetable") }

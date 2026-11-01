@@ -215,6 +215,103 @@ class SchulnetzPolicyTest {
     }
 }
 
+class WebSessionTest {
+    private val start = """
+        <main>
+          <h1>Start</h1>
+          <div class="cls-start-mitteilung">Elternabend am Freitag</div>
+          <a href="index.php?pageid=21311&amp;id=abc123&amp;transid=a1b2c3">Noten</a>
+          <a href="index.php?pageid=21111&amp;id=abc123&amp;transid=a1b2c3">Absenzen</a>
+        </main>
+    """.trimIndent()
+
+    @Test
+    fun aksaLoginUsesTheWebsiteAndNotTheBrokenMobileRedirect() {
+        assertTrue(usesWebsiteSession(AKSA_SCHULNETZ_BASE))
+        assertEquals("https://www.schulnetz-ag.ch/aksa/index.php?pageid=1", webLoginUrl(AKSA_SCHULNETZ_BASE))
+        assertFalse(webLoginUrl(AKSA_SCHULNETZ_BASE).contains("authorize.php"))
+        assertFalse(loginWebViewAllowed("https://www.schulnetz-ag.ch/aksa/authorize.php", "www.schulnetz-ag.ch"))
+        assertTrue(loginWebViewAllowed("https://www.schulnetz-ag.ch/aksa/", "www.schulnetz-ag.ch"))
+        assertTrue(loginWebViewAllowed("https://login.microsoftonline.com/common/oauth2/v2.0/authorize", AKSA_SCHULNETZ_BASE))
+        assertFalse(schulnetzCallAllowed("GET", "https://www.schulnetz-ag.ch/aksa/index.php?pageid=9999"))
+        assertFalse(schulnetzCallAllowed("GET", "https://www.schulnetz-ag.ch/aksa/index.php?pageid=1&action=global_logout"))
+    }
+
+    @Test
+    fun landingSessionAndIpOrInactivityForceAFreshLogin() {
+        assertTrue(isLoggedInLanding("https://www.schulnetz-ag.ch/aksa/", start))
+        val session = extractWebSession("https://www.schulnetz-ag.ch/aksa/", start, AKSA_SCHULNETZ_BASE)
+        assertEquals("abc123", session?.id)
+        assertEquals("a1b2c3", session?.transid)
+        assertEquals(
+            SessionProblem.IP_REJECTED,
+            sessionProblem("https://www.schulnetz-ag.ch/aksa/loginto.php?pageid=1", "Ihre IP-Adresse wurde vom System zurückgewiesen"),
+        )
+        assertEquals(
+            SessionProblem.INACTIVITY,
+            sessionProblem("https://www.schulnetz-ag.ch/aksa/loginto.php?pageid=1&mode=5", "Inaktivitätslimit überschritten"),
+        )
+        assertFalse(isLoggedInLanding("https://www.schulnetz-ag.ch/aksa/loginto.php?pageid=1&mode=5", "Inaktivitätslimit überschritten"))
+        assertEquals("ESTSAUTH=1", stripPhpSession("PHPSESSID=phone; ESTSAUTH=1"))
+    }
+
+    @Test
+    fun gradesAbsencesSchedulerAndIcsMatchSchulnetzMarkup() {
+        val grades = """
+            <main>
+              <table>
+                <tr><td><b>MA-4a-He</b><br>Mathematik</td><td>5.25</td><td>bestätigt</td></tr>
+                <tr><td>
+                  <table>
+                    <tr><td>Einzelprüfungen</td></tr>
+                    <tr><td></td><td>20.10.2026</td><td>Probe</td><td>5.5</td><td>1</td><td>5.0</td></tr>
+                  </table>
+                </td></tr>
+              </table>
+            </main>
+        """.trimIndent()
+        val parsed = readGradesPage(grades)
+        assertEquals(null, parsed.error)
+        assertEquals(5.5, parsed.value.single().mark)
+        assertEquals("Mathematik", parsed.value.single().course)
+        assertEquals("2026-10-20", parsed.value.single().date)
+        val broken = readGradesPage("<html><body>etwas anderes</body></html>")
+        assertEquals("Noten: Seite konnte nicht gelesen werden", broken.error)
+
+        val absences = """
+            <main><table>
+              <tr><th>Datum von</th><th>Datum bis</th><th>Grund</th><th>Info</th><th>Frist</th><th>EAE</th><th>Entschuldigt</th><th>Lektionen</th><th>Kommentar</th><th>Trainer</th><th>Kenntnis</th></tr>
+              <tr><td>01.10.2026</td><td>01.10.2026</td><td>Arzt</td><td></td><td></td><td>offen</td><td>Nein</td><td>1</td><td></td><td></td><td></td></tr>
+            </table></main>
+        """.trimIndent()
+        val absence = readAbsencesPage(absences).value.single()
+        assertEquals("Arzt", absence.reason)
+        assertFalse(absence.excused)
+
+        val xml = """
+            <data>
+              <event id="e9">
+                <start_date>2026-11-02 08:15</start_date>
+                <end_date>2026-11-02 09:00</end_date>
+                <text>Mathematik</text>
+                <zimmerkuerzel>R201</zimmerkuerzel>
+                <lehrerkuerzelname>Schmidt</lehrerkuerzelname>
+                <kurskuerzel>MATH</kurskuerzel>
+                <kommentar>fällt aus</kommentar>
+              </event>
+            </data>
+        """.trimIndent()
+        val lesson = parseSchedulerXml(xml).single()
+        assertEquals("2026-11-02T08:15:00", lesson.start)
+        assertEquals("R201", lesson.room)
+        assertTrue(lesson.isCancelled())
+        val ics = parseIcs("BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:u1\nDTSTART:20261103T101500\nDTEND:20261103T110000\nSUMMARY:Englisch\nLOCATION:A12\nEND:VEVENT\nEND:VCALENDAR")
+        assertEquals("Englisch", ics.single().courseName)
+        assertEquals("A12", ics.single().room)
+        assertEquals("https://www.schulnetz-ag.ch/aksa/abo.ics", findIcalUrl("<script>icalAbo('abo.ics')</script>", AKSA_SCHULNETZ_BASE))
+    }
+}
+
 class WebFallbackTest {
     @Test
     fun kontoauszugAndStartMessagesComeFromTheReadOnlyPages() {

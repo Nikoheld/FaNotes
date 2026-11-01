@@ -129,6 +129,7 @@ data class SchulnetzSnapshot(
     val vacations: List<SchoolVacation> = emptyList(),
     val konto: List<KontoLine> = emptyList(),
     val startMessages: List<String> = emptyList(),
+    val readErrors: List<String> = emptyList(),
 )
 
 data class NotifySettings(
