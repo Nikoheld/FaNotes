@@ -2,6 +2,7 @@
 
 ## 2026.11.1-beta.2
 
+- Remove the macOS package from the release.
 - Add an optional Snow theme with movable flakes.
 - Read scanned PDF pages with the local OCR model.
 - Show find and replace in the note editor as a FaNotes bar.
