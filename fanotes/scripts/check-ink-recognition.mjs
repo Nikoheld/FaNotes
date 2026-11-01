@@ -175,6 +175,7 @@ try {
     const composed = composePage(penLine, 3)
     const result = await recognize({ language: 'en' }, { strokes: composed.strokes, width: 900, height: 1273, group: true })
     pages.push({ language: 'en', truth: composed.truth, text: result.text, lines: result.lines.length, expected: 3, cer: Number(cer([{ text: result.text, truth: composed.truth }]).toFixed(2)) })
+    if (process.env.FANOTES_INK_DEBUG === '1') console.log(`page\t${composed.truth.replaceAll('\n', ' / ')}\t→ ${result.text.replaceAll('\n', ' / ')}`)
   }
   console.log(JSON.stringify({ model: manifest.version, report, pages: pages.map(({ language, lines, expected, cer }) => ({ language, lines, expected, cer })), coldMs: cold, warmMs: Math.round(warm.reduce((s, v) => s + v, 0) / Math.max(1, warm.length)) }, null, 2))
 

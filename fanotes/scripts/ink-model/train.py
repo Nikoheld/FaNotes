@@ -1,5 +1,6 @@
 """Fine-tunes the ink recognizer on rendered pen data."""
 import argparse
+import copy
 import math
 import os
 import random
@@ -190,6 +191,9 @@ def main():
     parser.add_argument('--product-eval', action='store_true',
                         help='after each validation, score the desktop beam decoder and keep the best pen checkpoint that holds the golden lines')
     parser.add_argument('--product-brush', default='')
+    parser.add_argument('--distill-weight', type=float, default=0.0,
+                        help='keep German and IAM scan logits near the init checkpoint while CTC trains the pen')
+    parser.add_argument('--distill-batch', type=int, default=8)
     args = parser.parse_args()
     torch.set_num_threads(args.threads)
     os.makedirs(args.out, exist_ok=True)
@@ -217,6 +221,16 @@ def main():
     if args.init:
         model.load_state_dict(torch.load(args.init, map_location='cpu'))
     model.train()
+    teacher = None
+    anchor_sources = []
+    if args.distill_weight > 0:
+        if not args.init:
+            raise SystemExit('--distill-weight requires --init, the checkpoint whose readings must stay put')
+        teacher = copy.deepcopy(model).eval()
+        for parameter in teacher.parameters():
+            parameter.requires_grad_(False)
+        import sources as extra
+        anchor_sources = [(extra.build('scads', rows), 0.6), (extra.build('iam', rows), 0.4)]
     backbone = [p for n, p in model.named_parameters() if not n.startswith(('rnn', 'head'))]
     top = [p for n, p in model.named_parameters() if n.startswith(('rnn', 'head'))]
     optimizer = torch.optim.AdamW([
@@ -281,8 +295,37 @@ def main():
         remember_product(baseline, 0)
     started = time.time()
     running = []
+    running_kl = []
     pending = []
+    anchor_pending = []
+    anchor_weights = np.array([weight for _, weight in anchor_sources])
+    if len(anchor_weights):
+        anchor_weights = anchor_weights / anchor_weights.sum()
     best = float('inf')
+
+    def take_anchor():
+        nonlocal anchor_pending
+        if not anchor_pending:
+            pool = []
+            attempts = 0
+            while len(pool) < args.distill_batch and attempts < args.distill_batch * 20:
+                attempts += 1
+                source = anchor_sources[int(rng.choice(len(anchor_sources), p=anchor_weights))][0]
+                sampled = source.sample(rng)
+                text, strokes = sampled[0], sampled[1]
+                reference = sampled[2] if len(sampled) > 2 else 0.0
+                ids = encode(text) if text else None
+                if not ids or not strokes:
+                    continue
+                image = make_image(text, strokes, rng, augment=False, reference=reference)
+                if image is None or image.shape[1] // 4 < 2 * len(ids) + 1:
+                    continue
+                pool.append((image, ids))
+            if not pool:
+                return None
+            pool.sort(key=lambda item: item[0].shape[1])
+            anchor_pending = [pool[k:k + args.distill_batch] for k in range(0, len(pool), args.distill_batch)]
+        return anchor_pending.pop()
     for step in range(1, args.steps + 1):
         warm = min(1.0, step / max(1, args.warmup))
         decay = 0.5 * (1 + math.cos(math.pi * step / args.steps))
@@ -310,13 +353,24 @@ def main():
         images, targets, input_lengths, target_lengths = batch_tensors(items)
         log_probs = model(images).log_softmax(-1)
         loss = ctc(log_probs, targets, input_lengths, target_lengths)
+        if teacher is not None:
+            anchored = take_anchor()
+            if anchored:
+                anchor_images = batch_tensors(anchored)[0]
+                student = model(anchor_images).log_softmax(-1)
+                with torch.no_grad():
+                    target = teacher(anchor_images).log_softmax(-1)
+                kl = (target.exp() * (target - student)).sum(-1).mean()
+                loss = loss + args.distill_weight * kl
+                running_kl.append(float(kl.detach()))
         optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
         optimizer.step()
         running.append(loss.item())
         if step % 50 == 0:
-            print(f'step {step} loss {np.mean(running[-50:]):.3f} {(time.time() - started) / step:.2f}s/step', flush=True)
+            kl_note = f' kl {np.mean(running_kl[-50:]):.4f}' if running_kl else ''
+            print(f'step {step} loss {np.mean(running[-50:]):.3f}{kl_note} {(time.time() - started) / step:.2f}s/step', flush=True)
         if step % args.eval_every == 0 or step == args.steps:
             cer = validate(step)
             print(f'step {step} val mean CER {cer:.2f}', flush=True)
