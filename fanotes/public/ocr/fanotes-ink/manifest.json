@@ -18,8 +18,8 @@
   "languageModels": {
     "de": {
       "file": "de.fnlm",
-      "size": 8053897,
-      "sha256": "74a64242e29e795c6fbf252d612ebb5b3d25c55fc179f19638cf3bd90d066ff6"
+      "size": 8897736,
+      "sha256": "1e7353015faa2ad9d8357073458a545a5472a1913676299788e5be782e4dbacb"
     },
     "en": {
       "file": "en.fnlm",
@@ -37,7 +37,7 @@
   "training": {
     "checkpoint": "full1-step3000",
     "goldenCharacterError": {
-      "de": 6.44,
+      "de": 5.45,
       "en": 3.85
     }
   }

@@ -39,7 +39,9 @@ def vector_hash(columns):
 
 
 def normalize_line(sentence):
-    sentence = unicodedata.normalize('NFC', sentence).replace('ß', 'ss').replace('ẞ', 'SS')
+    # ß stays a single letter. It is in the recognizer alphabet; expanding it to
+    # "ss" trained the language model to treat every ß as impossible.
+    sentence = unicodedata.normalize('NFC', sentence)
     sentence = re.sub(r'[„“”«»]', '"', sentence)
     sentence = re.sub(r"[‚‘’´`]", "'", sentence)
     return ' '.join(sentence.split())
