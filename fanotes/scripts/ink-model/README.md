@@ -40,6 +40,12 @@ python build_charlm.py --language en --order 6
 # 2. Train, export, stage.
 python train.py --steps 7000 --validate-scans \
   --sources brush:0.36,iam:0.2,fhswf:0.14,scads:0.14,composed:0.16 --out $FANOTES_INK_HOME/runs/full
+# A shorter pass from a known-good checkpoint. `--product-eval` keeps the weights only when
+# the desktop beam decoder still reads the golden lines and the real-pen error is lower.
+# `--mild-augment` stays close to the pen width and slant the app uses at inference.
+python train.py --init /path/to/a-checkpoint-that-passes-the-golden-check.pt --steps 600 --lr 4e-5 --warmup 40 \
+  --mild-augment --product-eval --product-brush /path/pen-cases.json --validate-scans \
+  --sources brush:0.42,composed:0.22,iam:0.16,scads:0.12,fhswf:0.08 --out $FANOTES_INK_HOME/runs/pen
 python export.py $FANOTES_INK_HOME/runs/full/best.pt --version 2026.11.1 --emit-checkpoint
 python stage.py --model $FANOTES_INK_HOME/export/ink-fp32.onnx \
   --lm-de $FANOTES_INK_HOME/lm/de-6.fnlm --lm-en $FANOTES_INK_HOME/lm/en-6.fnlm --version 2026.11.1

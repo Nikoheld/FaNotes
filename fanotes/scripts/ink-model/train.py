@@ -62,13 +62,14 @@ def displacement_field(rng, amplitude):
     return apply
 
 
-def augment_strokes(strokes, rng, height):
-    sx = rng.uniform(0.82, 1.18)
+def augment_strokes(strokes, rng, height, mild=False):
+    sx = rng.uniform(0.94, 1.06) if mild else rng.uniform(0.82, 1.18)
     points = np.concatenate(strokes).astype(np.float64)
     lo = points[:, 0].min()
     span = (points[:, 0].max() - lo) * sx
-    field = displacement_field(rng, height * rng.uniform(0.0, 0.03))
-    bend = height * rng.uniform(-0.12, 0.12) if rng.random() < 0.15 else 0.0
+    field = displacement_field(rng, height * (rng.uniform(0.0, 0.012) if mild else rng.uniform(0.0, 0.03)))
+    bend = height * rng.uniform(-0.04, 0.04) if mild and rng.random() < 0.1 else (
+        height * rng.uniform(-0.12, 0.12) if not mild and rng.random() < 0.15 else 0.0)
     out = []
     for stroke in strokes:
         s = stroke.astype(np.float64).copy()
@@ -118,13 +119,16 @@ class BrushSource(Source):
         return row['text'], strokes_of(row['drawing']), 0.0
 
 
-def make_image(text, strokes, rng, augment=True, reference=0.0):
+def make_image(text, strokes, rng, augment=True, reference=0.0, mild=False):
     if augment:
         points = np.concatenate(strokes)
         height = max(1.0, points[:, 1].max() - points[:, 1].min())
-        strokes = augment_strokes(strokes, rng, height)
-        image = render(strokes, pen=rng.uniform(1.5, 4.0), extra_shear=rng.uniform(-0.22, 0.22),
-                       extra_rotation=rng.uniform(-0.035, 0.035), scale_jitter=rng.uniform(0.86, 1.06),
+        strokes = augment_strokes(strokes, rng, height, mild=mild)
+        if mild:
+            pen, shear, rotation, scale = rng.uniform(2.1, 3.2), rng.uniform(-0.08, 0.08), rng.uniform(-0.015, 0.015), rng.uniform(0.94, 1.06)
+        else:
+            pen, shear, rotation, scale = rng.uniform(1.5, 4.0), rng.uniform(-0.22, 0.22), rng.uniform(-0.035, 0.035), rng.uniform(0.86, 1.06)
+        image = render(strokes, pen=pen, extra_shear=shear, extra_rotation=rotation, scale_jitter=scale,
                        ref_height=reference)
         if image is not None and rng.random() < 0.25:
             image = np.clip(image + rng.normal(0, 0.04, image.shape).astype(np.float32), 0, 1)
@@ -180,6 +184,12 @@ def main():
     parser.add_argument('--sources', default='brush')
     parser.add_argument('--validate-scans', action='store_true')
     parser.add_argument('--threads', type=int, default=4)
+    parser.add_argument('--warmup', type=int, default=150)
+    parser.add_argument('--mild-augment', action='store_true',
+                        help='keep pen width, slant and stretch near the desktop defaults')
+    parser.add_argument('--product-eval', action='store_true',
+                        help='after each validation, score the desktop beam decoder and keep the best pen checkpoint that holds the golden lines')
+    parser.add_argument('--product-brush', default='')
     args = parser.parse_args()
     torch.set_num_threads(args.threads)
     os.makedirs(args.out, exist_ok=True)
@@ -215,6 +225,44 @@ def main():
     ], weight_decay=1e-4)
     base_lrs = [g['lr'] for g in optimizer.param_groups]
     ctc = torch.nn.CTCLoss(blank=0, zero_infinity=True)
+    product_baseline = None
+
+    def remember_product(checkpoint, step):
+        nonlocal product_baseline
+        if not args.product_eval:
+            return
+        import json as product_json
+        import subprocess as product_subprocess
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'product_eval.py')
+        command = [sys.executable, script, checkpoint]
+        if args.product_brush:
+            command.extend(['--brush', args.product_brush])
+        completed = product_subprocess.run(command, text=True, capture_output=True, check=False)
+        if completed.returncode != 0:
+            print(completed.stderr[-2000:], flush=True)
+            raise SystemExit(completed.returncode)
+        report = product_json.loads([row for row in completed.stdout.splitlines() if row.startswith('{')][-1])
+        print(f'step {step} product {product_json.dumps(report)}', flush=True)
+        # The first call is the init. A later checkpoint is kept only when the golden
+        # English line, the page, and both German error rates hold and the pen error falls.
+        if product_baseline is None:
+            product_baseline = report
+            torch.save(model.state_dict(), os.path.join(args.out, 'best-product.pt'))
+            print(f'step {step} product baseline kept', flush=True)
+            return
+        holds = (
+            report.get('enCharacterError') <= product_baseline.get('enCharacterError')
+            and report.get('pageCharacterError') <= product_baseline.get('pageCharacterError')
+            and report.get('deCharacterError') <= product_baseline.get('deCharacterError')
+            and report.get('deWordError') <= product_baseline.get('deWordError')
+            and report.get('penCharacterError') is not None
+            and report['penCharacterError'] < product_baseline.get('penCharacterError')
+        )
+        if holds:
+            product_baseline = report
+            torch.save(model.state_dict(), os.path.join(args.out, 'best-product.pt'))
+            print(f'step {step} product checkpoint kept', flush=True)
+
     def validate(step):
         scores = {}
         for name, items in validation.items():
@@ -225,12 +273,18 @@ def main():
                 print(f'   {truth!r} -> {prediction!r}', flush=True)
         return sum(scores.values()) / len(scores)
     validate(0)
+    if args.product_eval:
+        baseline = args.init
+        if not baseline:
+            baseline = os.path.join(args.out, 'step0.pt')
+            torch.save(model.state_dict(), baseline)
+        remember_product(baseline, 0)
     started = time.time()
     running = []
     pending = []
     best = float('inf')
     for step in range(1, args.steps + 1):
-        warm = min(1.0, step / 150)
+        warm = min(1.0, step / max(1, args.warmup))
         decay = 0.5 * (1 + math.cos(math.pi * step / args.steps))
         for group, lr in zip(optimizer.param_groups, base_lrs):
             group['lr'] = lr * warm * max(0.05, decay)
@@ -244,7 +298,7 @@ def main():
                 ids = encode(text) if text else None
                 if not ids or not strokes:
                     continue
-                image = make_image(text, strokes, rng, reference=reference)
+                image = make_image(text, strokes, rng, reference=reference, mild=args.mild_augment)
                 if image is None or image.shape[1] // 4 < 2 * len(ids) + 1:
                     continue
                 pool.append((image, ids))
@@ -266,7 +320,10 @@ def main():
         if step % args.eval_every == 0 or step == args.steps:
             cer = validate(step)
             print(f'step {step} val mean CER {cer:.2f}', flush=True)
+            saved = os.path.join(args.out, f'step{step}.pt')
+            torch.save(model.state_dict(), saved)
             torch.save(model.state_dict(), os.path.join(args.out, 'last.pt'))
+            remember_product(saved, step)
             if cer < best:
                 best = cer
                 torch.save(model.state_dict(), os.path.join(args.out, 'best.pt'))

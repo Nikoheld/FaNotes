@@ -5,6 +5,7 @@
 //
 //   node scripts/check-ink-recognition.mjs
 //   FANOTES_INK_CASES=/path/cases.json node scripts/check-ink-recognition.mjs   # private sets
+//   FANOTES_INK_DIR=/path/to/fanotes-ink node scripts/check-ink-recognition.mjs  # another ONNX + manifest
 //
 // The bundled cases are the IAM-OnDB example line and held-out ScaDS German lines traced into
 // pen strokes (scripts/fixtures/README-INK-RECOGNITION.md).
@@ -19,7 +20,7 @@ import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
-const inkDir = path.join(ocr, 'fanotes-ink')
+const inkDir = process.env.FANOTES_INK_DIR || path.join(ocr, 'fanotes-ink')
 const casesFile = process.env.FANOTES_INK_CASES || path.join(appRoot, 'scripts/fixtures/ink-recognition-cases.json')
 
 initSync({ module: Buffer.from(RECOG_WASM_BASE64, 'base64') })
