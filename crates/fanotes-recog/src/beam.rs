@@ -340,6 +340,31 @@ pub fn beam_decode(
             current_text = text;
         }
     }
+    // A sentence that the beam already has, plus a final period within 0.5 nats, keeps the
+    // period (`Bergen` → `Bergen.`). Nothing else in the reading may change.
+    {
+        let with_period = format!("{current_text}.");
+        let mut distinct = 0usize;
+        let mut previous = String::new();
+        for (prefix, score) in &finals {
+            if best_score - *score > 0.5 {
+                break;
+            }
+            let polished = polish(prefix, &greedy_ids, &words, dictionary);
+            let text = tidy(&render(&polished));
+            if text != previous {
+                if distinct == options.n_best.max(1) {
+                    break;
+                }
+                distinct += 1;
+                previous = text.clone();
+            }
+            if text == with_period {
+                best = polished;
+                break;
+            }
+        }
+    }
     // The language model likes to split a long pen word into two known words (`Jack daws`).
     // If the raw trace has no space there and both pieces are long, join them back.
     let best = drop_spaces_absent_from_trace(&best, &greedy_text, &words, dictionary);
