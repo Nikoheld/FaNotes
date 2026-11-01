@@ -44,6 +44,9 @@ export const R_TO_N_MIN = 0.5
 /** A word-final `D` becomes `B` when that alternative is at least this confident. */
 export const D_TO_B_MIN = 0.4
 
+/** A capital `F` becomes `f` when that alternative is at least this confident. */
+export const F_TO_F_MIN = 0.25
+
 const ADJECTIVE_ENDING = /(?:ischen|lichen)$/iu
 
 /** A smaller line that keeps every known word has to beat the default by this many nats. */
@@ -218,6 +221,15 @@ export const longUnknownWordEdits = (
   }
   return edits.length ? edits : null
 }
+
+/** Indexes of a capital `F` whose lowercase alternative is confident enough (`Fifth` → `fifth`). */
+export const fToLowerIndexes = (
+  characters: Array<{ char: string; alternatives?: Array<{ char: string; confidence: number }> }>,
+): number[] => characters.flatMap((character, index) => {
+  if (character.char !== 'F') return []
+  const hit = character.alternatives?.some((alternative) => alternative.char === 'f' && alternative.confidence >= F_TO_F_MIN)
+  return hit ? [index] : []
+})
 
 /** Indexes of a word-final `D` whose `B` alternative is confident enough (`JuDKIND` → `JuDKINB`). */
 export const dToBIndexes = (
