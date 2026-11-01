@@ -82,6 +82,7 @@ import {
   lowercaseShortBeamWord,
   accusativeDer,
   trailingTracedLetter,
+  personalNeighborEdits,
   transposedTraceWord,
   inkWords,
   charactersJoiningWords,
@@ -1114,6 +1115,24 @@ export async function recognizeInk(
       const characters = [quote, ...decoded.characters.slice(3)]
       decoded = { ...decoded, characters, text: characters.map((character) => character.char).join('') }
       stitched = null
+    }
+    const personalEdits = exactWords[lineLanguage].size
+      ? personalNeighborEdits(
+        decoded.text,
+        personalWords[lineLanguage] ?? [],
+        (word) => exactWords[lineLanguage].has(foldInkWord(word)),
+      )
+      : []
+    if (personalEdits.length) {
+      const rewritten = personalEdits.reduce<Decoded['characters'] | null>(
+        (characters, edit) => characters && rewriteWord(characters, edit.index, edit.to),
+        decoded.characters,
+      )
+      const nextText = textWithWordEdits(decoded.text, personalEdits)
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
     }
     const transposed = transposedTraceWord(decoded.text, decoded.greedyText, (word) => wordIsKnown(lineLanguage, word))
     if (transposed) {

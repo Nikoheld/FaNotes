@@ -421,6 +421,42 @@ export const transposedTraceWord = (
 }
 
 /**
+ * An unknown word takes the one confirmed personal spelling within two edits
+ * (`Chudleyh` → `Chudleigh` after that name was confirmed). A dictionary word is left alone.
+ */
+export const personalNeighborEdits = (
+  text: string,
+  personal: readonly string[],
+  baseKnown: (word: string) => boolean,
+): WordEdit[] => {
+  if (!personal.length) return []
+  const edits: WordEdit[] = []
+  const words = inkWords(text)
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]
+    if ([...word].length < 6 || baseKnown(word)) continue
+    const folded = foldInkWord(word)
+    const hits: string[] = []
+    for (const candidate of personal) {
+      const target = foldInkWord(candidate)
+      if ([...target].length < 6) continue
+      const distance = wordEdits(folded, target)
+      if (distance === 0 || distance > 2) continue
+      hits.push(target)
+      if (hits.length > 1) break
+    }
+    if (hits.length !== 1) continue
+    const letters = [...hits[0]]
+    const source = [...word]
+    if (source[0] !== source[0].toLowerCase()) letters[0] = letters[0].toUpperCase()
+    const to = letters.join('')
+    if (to === word) continue
+    edits.push({ index, from: word, to })
+  }
+  return edits
+}
+
+/**
  * An unknown word gains the one final letter the raw trace added (`Chudley` → `Chudleyh`).
  * A known word such as `Soc` does not grow into `Soci`.
  */
