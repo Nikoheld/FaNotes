@@ -326,6 +326,20 @@ pub fn beam_decode(
             best_gap = gap;
         }
     }
+    // Digits are not words. If a close runner-up has the same letters and its digits sit
+    // nearer the raw trace (`19,7` vs `11,7` when the pen reads `117`), take those digits.
+    let mut current_text = tidy(&render(&best));
+    for (prefix, score) in finals.iter().take(options.n_best.max(1)) {
+        if best_score - *score > 0.6 {
+            break;
+        }
+        let polished = polish(prefix, &greedy_ids, &words, dictionary);
+        let text = tidy(&render(&polished));
+        if digit_trace_prefers(&current_text, &text, &greedy_text) {
+            best = polished;
+            current_text = text;
+        }
+    }
     // The language model likes to split a long pen word into two known words (`Jack daws`).
     // If the raw trace has no space there and both pieces are long, join them back.
     let best = drop_spaces_absent_from_trace(&best, &greedy_text, &words, dictionary);
@@ -436,6 +450,26 @@ fn drop_spaces_absent_from_trace(
         .enumerate()
         .filter(|(index, _)| !drop[*index])
         .map(|(_, symbol)| *symbol)
+        .collect()
+}
+
+fn digit_trace_prefers(current: &str, candidate: &str, greedy: &str) -> bool {
+    if without_digits(current) != without_digits(candidate) {
+        return false;
+    }
+    edit_distance(&digits_only(candidate), &digits_only(greedy))
+        < edit_distance(&digits_only(current), &digits_only(greedy))
+}
+
+fn digits_only(text: &str) -> String {
+    text.chars()
+        .filter(|character| character.is_ascii_digit())
+        .collect()
+}
+
+fn without_digits(text: &str) -> String {
+    text.chars()
+        .filter(|character| !character.is_ascii_digit())
         .collect()
 }
 
@@ -915,5 +949,20 @@ mod tests {
             drop_spaces_absent_from_trace(&symbols("abcd e"), "abcde", &decoder, Some(&KnownJoin)),
             symbols("abcd e")
         );
+    }
+
+    #[test]
+    fn closer_digits_require_the_same_letters() {
+        assert!(digit_trace_prefers(
+            "über 19,7 Millionen",
+            "über 11,7 Millionen",
+            "über 117 Millionen"
+        ));
+        assert!(!digit_trace_prefers(
+            "über 19,7 Millionen",
+            "über 117 Millionen",
+            "über 117 Millionen"
+        ));
+        assert!(!digit_trace_prefers("Jack daws", "Jackdaws", "Jackdaws"));
     }
 }
