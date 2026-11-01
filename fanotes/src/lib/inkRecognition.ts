@@ -29,6 +29,7 @@ import {
   INK_RETRY_VARIANTS,
   INK_SHEAR_RETRY,
   MERGE_SCORE_MARGIN,
+  FIRST_LETTER_MARGIN,
   NARROW_LINE_MARGIN,
   NARROW_SCALE,
   NARROW_WORD_MARGIN,
@@ -36,6 +37,7 @@ import {
   SPLICE_SCORE_MARGIN,
   WIDTH_RETRY_MARGIN,
   MIXED_CASE_SCALE,
+  capitalizesOnlyTheFirstLetter,
   charactersWithWordEdits,
   sameLettersAllowingCapsJoin,
   foldInkWord,
@@ -648,6 +650,35 @@ export async function recognizeInk(
             decoded = shearDecoded
             activeImage = shearImage
             activeShear = INK_SHEAR_RETRY
+            stitched = null
+          }
+        }
+      }
+    }
+    const firstLetter = [...decoded.text][0]
+    if (
+      defaultPen
+      && firstLetter
+      && firstLetter !== firstLetter.toUpperCase()
+    ) {
+      const capitalImage = renderLine(packed, reference, { ...style, penWidth: activePenWidth, extraShear: activeShear, scale: NARROW_SCALE })
+      if (capitalImage) {
+        const capitalInferenceStarted = performance.now()
+        const capitalRun = await infer(capitalImage, threads, usePersonalModel)
+        inferenceMs += performance.now() - capitalInferenceStarted
+        if (capitalRun.classes === engine.classes) {
+          const capitalDecodeStarted = performance.now()
+          const capitalDecoded = decodeLine(engine, capitalRun.logits, lineLanguage, decoderForLanguage(engine.manifest.decoder, lineLanguage))
+          decodeMs += performance.now() - capitalDecodeStarted
+          const capitalScore = capitalDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+          const currentScore = decoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+          if (
+            capitalScore >= currentScore + FIRST_LETTER_MARGIN
+            && capitalizesOnlyTheFirstLetter(decoded.text, capitalDecoded.text)
+          ) {
+            decoded = capitalDecoded
+            activeImage = capitalImage
+            activeScale = NARROW_SCALE
             stitched = null
           }
         }

@@ -17,6 +17,9 @@ export const NARROW_SCALE = 0.85
 /** A single unknown word turning into a dictionary word has to beat the default by this many nats. */
 export const NARROW_WORD_MARGIN = 0.5
 
+/** Capitalizing only the first letter has to beat the current reading by this many nats. */
+export const FIRST_LETTER_MARGIN = 0.6
+
 /** A smaller line that keeps every known word has to beat the default by this many nats. */
 export const NARROW_LINE_MARGIN = 5
 
@@ -292,6 +295,15 @@ export const shearReadingRewritesTwoWords = (base: string, alternate: string) =>
   const longEnough = (word: string) => word.length >= 4
   return longEnough(left[diffs[0]]) && longEnough(right[diffs[0]])
     && longEnough(left[diffs[1]]) && longEnough(right[diffs[1]])
+}
+
+/** True when `alternate` capitalizes the first letter and leaves every other character as it was (`dumdum` → `Dumdum`). */
+export const capitalizesOnlyTheFirstLetter = (base: string, alternate: string) => {
+  const left = [...base]
+  const right = [...alternate]
+  if (left.length < 2 || left.length !== right.length || left[0] === right[0]) return false
+  if (left[0] === left[0].toUpperCase() || left[0].toUpperCase() !== right[0]) return false
+  return left.slice(1).every((character, index) => character === right[index + 1])
 }
 
 /** True when the strings use the same letters and differ only in case. */

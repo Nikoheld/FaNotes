@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, charactersWithWordEdits, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, oneUnknownWordBecomesKnown, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, oneUnknownWordBecomesKnown, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -89,6 +89,10 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
     'und Computerspielen sowie über Personen, die davon',
     known,
   ), false)
+  assert.equal(capitalizesOnlyTheFirstLetter('dumdum; GENTLEMAN', 'Dumdum; GENTLEMAN'), true)
+  assert.equal(capitalizesOnlyTheFirstLetter('xxx yyy zzz', 'Xxx yyy zzz'), true)
+  assert.equal(capitalizesOnlyTheFirstLetter('DDD EEE FFF GGG', 'DOD EEE FFF GGG'), false)
+  assert.equal(capitalizesOnlyTheFirstLetter('for Job pen. Jackdaws', 'For job pen. Jackdaws'), false)
   assert.equal(hasMixedInteriorCase('PEcK SNIFF long-lost'), true)
   assert.equal(sameLettersAllowingCapsJoin('PEcK SNIFF long-lost', 'PECKSNIFF long-lost'), true)
   assert.equal(sameLettersAllowingCapsJoin('PEcK SNIFF long-lost', 'PECK SNIFF long-lost'), true)
@@ -277,6 +281,23 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
         if (shearScore >= baseScore + SHEAR_SCORE_MARGIN && shearReadingRewritesTwoWords(baseText, shearDecoded.text)) {
           decoded = shearDecoded
           shear = INK_SHEAR_RETRY
+          boxes = undefined
+        }
+      }
+    }
+    const firstLetter = [...decoded.text][0]
+    if (firstLetter && firstLetter !== firstLetter.toUpperCase()) {
+      const capitalRaw = inkLineImage(linePacked, reference, penWidth, shear, NARROW_SCALE)
+      if (capitalRaw.length >= 3) {
+        const capitalStarted = Date.now()
+        const capitalRun = await host.recognize({ input: Float32Array.from(capitalRaw.subarray(2)), width: capitalRaw[0], height: 64, threads: 4 })
+        inferenceMs += Date.now() - capitalStarted
+        const capitalDecoded = JSON.parse(inkDecode(capitalRun.probabilities, capitalRun.dims[2], manifest.alphabet, entry.language, decoderOptionsFor(entry.language)))
+        const capitalScore = capitalDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+        const currentScore = decoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+        if (capitalScore >= currentScore + FIRST_LETTER_MARGIN && capitalizesOnlyTheFirstLetter(decoded.text, capitalDecoded.text)) {
+          decoded = capitalDecoded
+          scale = NARROW_SCALE
           boxes = undefined
         }
       }
