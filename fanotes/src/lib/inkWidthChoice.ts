@@ -1299,3 +1299,85 @@ export const sameLettersAllowingCapsJoin = (base: string, alternate: string) => 
   }
   return i === left.length && j === right.length
 }
+
+type CorrectedChar = { char: string }
+
+const withWord = <T extends CorrectedChar>(
+  characters: T[],
+  text: string,
+  edit: WordEdit,
+  rewrite: (characters: T[], index: number, to: string) => T[] | null,
+) => {
+  const rewritten = rewrite(characters, edit.index, edit.to)
+  const nextText = textWithWordEdits(text, [edit])
+  if (!rewritten || nextText === text) return null
+  return { characters: rewritten, text: nextText }
+}
+
+/**
+ * Text corrections that follow one decode: character alternatives, trace repairs, and personal
+ * spellings. Style fitting scores this text, the same corrections a finished line keeps.
+ */
+export const finalizeInkLineText = <T extends CorrectedChar>(
+  decoded: {
+    text: string
+    greedyText: string
+    characters: T[]
+    readings: Array<{ text: string; score: number }>
+  },
+  known: (word: string) => boolean,
+  options: { personal?: readonly string[]; baseKnown?: (word: string) => boolean } = {},
+) => {
+  let text = decoded.text
+  let characters = decoded.characters
+  const take = (edit: WordEdit | null, rewrite: (characters: T[], index: number, to: string) => T[] | null) => {
+    if (!edit) return
+    const next = withWord(characters, text, edit, rewrite)
+    if (!next) return
+    text = next.text
+    characters = next.characters
+  }
+  take(oneLetterInALongUnknownWord(text, decoded.readings, known), rewriteSameLengthWord)
+  for (const index of aToAeIndexes(characters)) {
+    characters = characters.map((character, cursor) => cursor === index ? { ...character, char: 'ä' } : character)
+    text = characters.map((character) => character.char).join('')
+  }
+  for (const index of fToLowerIndexes(characters)) {
+    characters = characters.map((character, cursor) => cursor === index ? { ...character, char: 'f' } : character)
+    text = characters.map((character) => character.char).join('')
+  }
+  const separated = separateFinalBIndexes(characters)
+  if (separated.length) {
+    const next = charactersSeparatingFinalB(characters, separated)
+    if (next) {
+      characters = next
+      text = characters.map((character) => character.char).join('')
+    }
+  }
+  for (const index of dToBIndexes(characters)) {
+    characters = characters.map((character, cursor) => cursor === index ? { ...character, char: 'B' } : character)
+    text = characters.map((character) => character.char).join('')
+  }
+  for (const index of rToNIndexes(characters)) {
+    characters = characters.map((character, cursor) => cursor === index ? { ...character, char: 'n' } : character)
+    text = characters.map((character) => character.char).join('')
+  }
+  for (const index of finalLetterApostropheIndexes(characters)) {
+    characters = characters.map((character, cursor) => cursor === index ? { ...character, char: "'" } : character)
+    text = characters.map((character) => character.char).join('')
+  }
+  take(capitalizedSentenceAdverb(text), rewriteSameLengthWord)
+  take(capitalizeLoneLowercase(text), rewriteSameLengthWord)
+  take(lowercaseVerbSein(text), rewriteSameLengthWord)
+  take(interiorCapitalNeighbor(text, known), rewriteSameLengthWord)
+  take(umlautAndOneOtherLetter(text, known), rewriteSameLengthWord)
+  take(capitalizedNounAfterDeterminer(text, known), rewriteSameLengthWord)
+  take(nounAfterAttributiveAdjective(text, known), rewriteWord)
+  const baseKnown = options.baseKnown ?? known
+  for (const edit of personalNeighborEdits(text, options.personal ?? [], baseKnown)) take(edit, rewriteWord)
+  take(transposedTraceWord(text, decoded.greedyText, known), rewriteWord)
+  take(trailingTracedLetter(text, decoded.greedyText, known), rewriteWord)
+  take(accusativeDer(text), rewriteSameLengthWord)
+  take(lowercaseShortBeamWord(text, decoded.readings), rewriteSameLengthWord)
+  return { text, characters }
+}

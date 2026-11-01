@@ -83,6 +83,7 @@ import {
   accusativeDer,
   trailingTracedLetter,
   personalNeighborEdits,
+  finalizeInkLineText,
   transposedTraceWord,
   inkWords,
   charactersJoiningWords,
@@ -1304,7 +1305,13 @@ export const recognizeInkSingleLine = async (
   const image = renderLine(packed, options.referenceHeight ?? 0, options.style ?? DEFAULT_INK_STYLE)
   if (!image) return null
   const run = await infer(image, effectiveOcrThreadCount(4), Boolean(options.personal) && personalModelInstalled)
-  return decodeLine(engine, run.logits, language, decoderForLanguage(engine.manifest.decoder, language))
+  const decoded = decodeLine(engine, run.logits, language, decoderForLanguage(engine.manifest.decoder, language))
+  const known = (word: string) => wordIsKnown(language, word)
+  const finalized = finalizeInkLineText(decoded, known, {
+    personal: personalWords[language] ?? [],
+    baseKnown: (word) => exactWords[language].has(foldInkWord(word)),
+  })
+  return { ...decoded, text: finalized.text, characters: finalized.characters }
 }
 
 const encodeInkLabels = (alphabet: string, text: string) => {

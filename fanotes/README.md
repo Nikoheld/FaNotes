@@ -85,7 +85,7 @@ Die Texterkennung läuft nur in der Desktop-App für Windows und Linux. Stiftstr
 1. Unter **Einstellungen → Experimentell** **Handschrift zu Text** einschalten.
 2. Mit `Strg+D` auf derselben Notizseite zur Stifteingabe wechseln und frei auf der A4-Seite schreiben.
 3. **Seite konvertieren** oder **Bereich konvertieren** wählen. **Automatisch** vergleicht Text und Mathematik; **Text** und **Mathematik** bleiben als manuelle Auswahl verfügbar. Die Textsprache steht unter **Einstellungen → Stift & Erkennung** (Deutsch oder Englisch).
-4. Unsichere Zeichen über ihre Alternativen oder direkt im Korrekturfeld berichtigen. Beim Einfügen speichert FaNotes die bestätigte Zeile lokal: der Wortschatz wächst sofort, und ab acht Zeilen lassen sich Stiftbreite, Neigung und Grösse unter **Persönliche Handschrift** anpassen.
+4. Unsichere Zeichen über ihre Alternativen oder direkt im Korrekturfeld berichtigen. Beim Einfügen speichert FaNotes die bestätigte Zeile lokal: der Wortschatz wächst sofort, eine spätere unbekannte Schreibung innerhalb von zwei Buchstaben übernimmt das bestätigte Wort, und ab acht Zeilen lassen sich Stiftbreite, Neigung und Grösse unter **Persönliche Handschrift** anpassen. Die Anpassung bewertet die korrigierte Lesung, nicht nur die Rohausgabe des Decoders.
 5. Für ein tieferes, weiterhin lokales Modell die Trainingszeilen exportieren, mit `fanotes/scripts/ink-model/personalize.py` ein persönliches Modell erzeugen und `personal-model.onnx` plus `personal-model.json` importieren. Diagnosezeilen in der Entwicklerkonsole schaltet derselbe Bereich ein.
 
 GlyphenWerk bleibt der Weg für persönliche Mathematikzeichen und für Text → Handschrift:
@@ -304,7 +304,7 @@ Text recognition runs only in the desktop app for Windows and Linux. Pen strokes
 1. Under **Settings → Experimental**, turn on **Handwriting to text**.
 2. Press `Ctrl+D` on the same note page to switch to pen input and write freely on the A4 page.
 3. Choose **Convert page** or **Convert region**. **Automatic** compares text and mathematics. **Text** and **Mathematics** remain available as a manual choice. The text language is under **Settings → Pen & recognition** (German or English).
-4. Correct uncertain characters through their alternatives or directly in the correction field. On insert, FaNotes stores the confirmed line locally: the vocabulary grows immediately, and from eight lines you can fit pen width, slant, and size under **Personal handwriting**.
+4. Correct uncertain characters through their alternatives or directly in the correction field. On insert, FaNotes stores the confirmed line locally: the vocabulary grows immediately, a later unknown spelling within two letters takes the confirmed word, and from eight lines you can fit pen width, slant, and size under **Personal handwriting**. The fit scores the corrected reading, not only the decoder's raw text.
 5. For a deeper model that still stays on this machine, export the training lines, build a personal model with `fanotes/scripts/ink-model/personalize.py`, and import `personal-model.onnx` together with `personal-model.json`. The same section turns on diagnostic lines in the developer console.
 
 GlyphenWerk remains the path for personal mathematics characters and for text to handwriting:
