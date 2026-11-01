@@ -37,11 +37,11 @@
   "training": {
     "checkpoint": "full1-step4500",
     "goldenCharacterError": {
-      "de": 5.32,
+      "de": 5.07,
       "en": 0
     },
     "goldenWordError": {
-      "de": 14.81,
+      "de": 12.96,
       "en": 0
     }
   }

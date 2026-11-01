@@ -37,6 +37,8 @@ pub struct BeamOptions {
     pub prune_margin: f64,
     pub max_candidates: usize,
     pub n_best: usize,
+    /// When a runner-up is within this many nats and closer to the raw trace, use it.
+    pub trace_margin: f64,
 }
 
 impl Default for BeamOptions {
@@ -50,6 +52,7 @@ impl Default for BeamOptions {
             prune_margin: 9.0,
             max_candidates: 8,
             n_best: 5,
+            trace_margin: 0.2,
         }
     }
 }
@@ -307,19 +310,22 @@ pub fn beam_decode(
             break;
         }
     }
-    let best = finals
-        .first()
-        .map(|(prefix, _)| prefix.clone())
-        .unwrap_or_default();
-    // The language model prefers a comma. Where the pen trace's own best mark disagrees,
-    // keep the trace: the letters stay the beam's, only `. , ; : ! ?` can change.
-    let best = reconcile_sentence_marks(&best, &greedy_symbols(&log_probs, classes), &words);
-    // An unknown word with exactly one dictionary neighbor at edit distance 1 is a slip
-    // (`Peronen` → `Personen`). Words already in the dictionary, and ambiguous slips, stay.
-    let best = match dictionary {
-        Some(dictionary) => correct_unknown_words(&best, &words, dictionary),
-        None => best,
-    };
+    let greedy_ids = greedy_symbols(&log_probs, classes);
+    let greedy_text = tidy(&greedy(&log_probs, classes, alphabet));
+    let best_score = finals.first().map(|(_, score)| *score).unwrap_or(0.0);
+    let mut best = Vec::new();
+    let mut best_gap = usize::MAX;
+    for (prefix, score) in finals.iter().take(options.n_best.max(1)) {
+        if best_score - *score > options.trace_margin {
+            break;
+        }
+        let polished = polish(prefix, &greedy_ids, &words, dictionary);
+        let gap = edit_distance(&tidy(&render(&polished)), &greedy_text);
+        if gap < best_gap {
+            best = polished;
+            best_gap = gap;
+        }
+    }
     let characters = align(&log_probs, classes, frames, &best, alphabet);
     let text = render(&best);
     let (known_words, word_count) = count_words(&best, &words);
@@ -329,7 +335,7 @@ pub fn beam_decode(
         characters.iter().map(|c| c.confidence).sum::<f32>() / characters.len() as f32
     };
     Some(BeamDecoded {
-        greedy_text: tidy(&greedy(&log_probs, classes, alphabet)),
+        greedy_text,
         text: text.clone(),
         confidence,
         characters,
@@ -338,6 +344,37 @@ pub fn beam_decode(
         known_words,
         words: word_count,
     })
+}
+
+fn polish(
+    prefix: &[u8],
+    greedy_ids: &[u8],
+    words: &Words<'_>,
+    dictionary: Option<&dyn Lexicon>,
+) -> Vec<u8> {
+    let marked = reconcile_sentence_marks(prefix, greedy_ids, words);
+    match dictionary {
+        Some(dictionary) => correct_unknown_words(&marked, words, dictionary),
+        None => marked,
+    }
+}
+
+fn edit_distance(left: &str, right: &str) -> usize {
+    let left: Vec<char> = left.chars().collect();
+    let right: Vec<char> = right.chars().collect();
+    let mut previous: Vec<usize> = (0..=right.len()).collect();
+    for (i, &left_char) in left.iter().enumerate() {
+        let mut current = vec![i + 1];
+        for (j, &right_char) in right.iter().enumerate() {
+            current.push(
+                (previous[j + 1] + 1)
+                    .min(current[j] + 1)
+                    .min(previous[j] + usize::from(left_char != right_char)),
+            );
+        }
+        previous = current;
+    }
+    previous[right.len()]
 }
 
 fn count_words(prefix: &[u8], words: &Words<'_>) -> (u32, u32) {
