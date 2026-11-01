@@ -157,7 +157,8 @@ class TextPool:
         language = language or ('deu' if rng.random() < 0.6 else 'eng')
         pool = self.pools[language]
         sentence = pool[rng.integers(len(pool))]
-        sentence = sentence.replace('ß', 'ss').replace('ẞ', 'SS')
+        # ß stays. The recognizer alphabet and the character model both treat it as one letter;
+        # expanding it to ss taught the network to write "ss" where the pen drew ß.
         words = sentence.split()
         if not words:
             return 'test'
