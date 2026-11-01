@@ -544,6 +544,32 @@ pub fn beam_decode(
             }
         }
     }
+    // A sentence that already ends in a comma keeps a close reading that ends in a period
+    // instead (`Worte,` → `Worte.`). A comma before more words stays a comma.
+    {
+        let chosen = tidy(&render(&best));
+        let mut distinct = 0usize;
+        let mut previous = String::new();
+        for (prefix, score) in &finals {
+            if best_score - *score > 1.5 {
+                break;
+            }
+            // The raw reading, not the polished one: polishing would copy the trace's comma
+            // back onto this period.
+            let text = tidy(&render(prefix));
+            if text != previous {
+                if distinct == options.n_best.max(1) {
+                    break;
+                }
+                distinct += 1;
+                previous = text.clone();
+            }
+            if replaces_a_final_comma_with_a_period(&chosen, &text) {
+                best = prefix.clone();
+                break;
+            }
+        }
+    }
     // The language model likes to split a long pen word into two known words (`Jack daws`).
     // If the raw trace has no space there and both pieces are long, join them back.
     let best = drop_spaces_absent_from_trace(&best, &greedy_text, &words, dictionary);
@@ -817,6 +843,21 @@ fn drop_spaces_absent_from_trace(
         .filter(|(index, _)| !drop[*index])
         .map(|(_, symbol)| *symbol)
         .collect()
+}
+
+/// `candidate` is `current` with a final comma replaced by a period.
+fn replaces_a_final_comma_with_a_period(current: &str, candidate: &str) -> bool {
+    let mut current: Vec<char> = current.chars().collect();
+    let candidate: Vec<char> = candidate.chars().collect();
+    if current.len() < 2 || current.len() != candidate.len() {
+        return false;
+    }
+    let last = current.len() - 1;
+    if current[last] != ',' || candidate[last] != '.' {
+        return false;
+    }
+    current[last] = '.';
+    current == candidate
 }
 
 fn german_closed_class(word: &str) -> bool {
@@ -1870,6 +1911,22 @@ mod tests {
             "über Personen",
             "über Paronen",
             &Known
+        ));
+    }
+
+    #[test]
+    fn a_final_comma_can_become_a_period() {
+        assert!(replaces_a_final_comma_with_a_period(
+            "Ich finde keine Worte,",
+            "Ich finde keine Worte."
+        ));
+        assert!(!replaces_a_final_comma_with_a_period(
+            "Das liegt daran, dass du willst.",
+            "Das liegt daran. dass du willst."
+        ));
+        assert!(!replaces_a_final_comma_with_a_period(
+            "astounded Mirabeau,",
+            "astounded Mirabeau,"
         ));
     }
 
