@@ -413,6 +413,32 @@ export const capitalizedNounAfterDeterminer = (
   return null
 }
 
+const SENTENCE_ADVERBS = new Set([
+  'manchmal', 'häufig', 'leider', 'gestern', 'heute', 'morgen', 'schließlich',
+  'natürlich', 'eigentlich', 'trotzdem', 'dennoch', 'allerdings', 'außerdem',
+  'zunächst', 'immerhin', 'jedenfalls',
+])
+
+/** A sentence adverb at the start of a line takes a capital (`manchmal` → `Manchmal`). */
+export const capitalizedSentenceAdverb = (text: string): WordEdit | null => {
+  const words = inkWords(text)
+  const word = words[0]
+  if (!word || !SENTENCE_ADVERBS.has(word)) return null
+  const head = word[0].toUpperCase()
+  if (head === word[0] || [...head].length !== 1) return null
+  return { index: 0, from: word, to: `${head}${word.slice(1)}` }
+}
+
+/** Mid-sentence `Sein` is the verb, unless an article marks the noun (`das Sein`). */
+export const lowercaseVerbSein = (text: string): WordEdit | null => {
+  const words = inkWords(text)
+  for (let index = 1; index < words.length; index += 1) {
+    if (words[index] !== 'Sein' || DETERMINERS.has(words[index - 1].toLowerCase())) continue
+    return { index, from: 'Sein', to: 'sein' }
+  }
+  return null
+}
+
 /** Replaces the edited words inside `base`, including the punctuation around them. */
 export const textWithWordEdits = (base: string, edits: WordEdit[]) => {
   const spans = [...base.matchAll(WORD)]

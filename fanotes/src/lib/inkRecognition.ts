@@ -58,6 +58,8 @@ import {
   longUnknownWordEdits,
   narrowScaleKeepsKnownWords,
   capitalizedNounAfterDeterminer,
+  capitalizedSentenceAdverb,
+  lowercaseVerbSein,
   umlautAndOneOtherLetter,
   nounAfterAttributiveAdjective,
   capitalCompoundIndex,
@@ -890,6 +892,24 @@ export async function recognizeInk(
       const characters = decoded.characters.map((character, characterIndex) => characterIndex === index ? { ...character, char: "'" } : character)
       decoded = { ...decoded, characters, text: characters.map((character) => character.char).join('') }
       stitched = null
+    }
+    const adverb = capitalizedSentenceAdverb(decoded.text)
+    if (adverb) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, adverb.index, adverb.to)
+      const nextText = textWithWordEdits(decoded.text, [adverb])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
+    }
+    const verbSein = lowercaseVerbSein(decoded.text)
+    if (verbSein) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, verbSein.index, verbSein.to)
+      const nextText = textWithWordEdits(decoded.text, [verbSein])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
     }
     const umlautEdit = umlautAndOneOtherLetter(decoded.text, (word) => wordIsKnown(lineLanguage, word))
     if (umlautEdit) {
