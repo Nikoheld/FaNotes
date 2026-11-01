@@ -162,7 +162,7 @@ Vorausgesetzt werden Node.js 22 oder neuer und npm.
 
 FaNotes hält Zeilengruppierung, GlyphenWerk-Daten, Text-/Mathematikentscheidung und Korrekturlogik im Renderer. Die Texterkennung selbst gibt es nur auf dem Desktop:
 
-- Windows und Linux rendern jede Zeile in `fanotes-recog` (WebAssembly) und führen das FP32-Zeilenmodell im nativen `fanotes-ocr`-Sidecar aus (`crates/fanotes-ort`, ONNX Runtime). Die Decodierung mit Zeichen-Sprachmodell und Wörterbuch läuft wieder in WebAssembly. Der Sidecar startet verzögert und verwendet höchstens vier Threads.
+- Windows und Linux rendern jede Zeile in `fanotes-recog` (WebAssembly) und führen das FP32-Zeilenmodell im nativen `fanotes-ocr`-Sidecar aus (`crates/fanotes-ort`, ONNX Runtime). Die Decodierung mit Zeichen-Sprachmodell und Wörterbuch läuft wieder in WebAssembly. Deutsch nutzt das stärkere Sprachmodellgewicht; Englisch ein leichteres, damit seltene Schreibungen dem Stift folgen. Der Sidecar startet verzögert und verwendet höchstens vier Threads.
 - Web und Android haben keinen Sidecar und führen diese Erkennung nicht aus. Mathematik, GlyphenWerk und Text → Handschrift bleiben dort verfügbar.
 - Ein optionales persönliches Modell ersetzt nur die Textzeilen und liegt im lokalen Profil, nicht im Vault.
 

@@ -76,7 +76,16 @@ const fold = (value) => value.replace(/ß/gu, 'ss')
 const cer = (rows) => 100 * rows.reduce((s, r) => s + editDistance(fold(r.text), fold(r.truth)), 0) / Math.max(1, rows.reduce((s, r) => s + Array.from(r.truth).length, 0))
 const wer = (rows) => 100 * rows.reduce((s, r) => s + editDistance(fold(r.text).split(/\s+/u), fold(r.truth).split(/\s+/u)), 0) / Math.max(1, rows.reduce((s, r) => s + r.truth.split(/\s+/u).length, 0))
 
-const decoderOptions = JSON.stringify({ ...manifest.decoder, nBest: 5 })
+const decoderOptionsFor = (language) => {
+  const { englishLmWeight, englishWordBonus, penWidth: _penWidth, ...shared } = manifest.decoder
+  const english = language === 'en'
+  return JSON.stringify({
+    ...shared,
+    nBest: 5,
+    lmWeight: english ? englishLmWeight ?? shared.lmWeight : shared.lmWeight,
+    wordBonus: english ? englishWordBonus ?? shared.wordBonus : shared.wordBonus,
+  })
+}
 const median = (values) => values.length ? [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] : 0
 
 const packStrokes = (strokes, width, height) => {
@@ -113,7 +122,7 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
     const { probabilities, dims } = await host.recognize({ input: Float32Array.from(image), width: raw[0], height: 64, threads: 4 })
     inferenceMs += Date.now() - t
     assert.equal(dims[2], manifest.classes, 'class count')
-    const decoded = JSON.parse(inkDecode(probabilities, dims[2], manifest.alphabet, entry.language, decoderOptions))
+    const decoded = JSON.parse(inkDecode(probabilities, dims[2], manifest.alphabet, entry.language, decoderOptionsFor(entry.language)))
     if (!decoded.text.trim()) continue
     const spans = new Uint32Array(decoded.characters.flatMap((c) => [c.startFrame, c.endFrame]))
     const boxes = inkSpanBoxes(linePacked, reference, manifest.decoder.penWidth ?? 2.6, 0, 1, spans)

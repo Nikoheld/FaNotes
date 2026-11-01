@@ -47,7 +47,19 @@ export type InkDecoderSettings = {
   unknownWordPenalty: number
   insertionBonus: number
   beamWidth: number
+  /** English lines follow the pen more closely than German lines. */
+  englishLmWeight?: number
+  englishWordBonus?: number
 }
+
+/** German keeps the manifest weights. English uses the lighter language-model settings when present. */
+export const decoderForLanguage = (decoder: InkDecoderSettings, language: InkLanguage): InkDecoderSettings => ({
+  beamWidth: decoder.beamWidth,
+  unknownWordPenalty: decoder.unknownWordPenalty,
+  insertionBonus: decoder.insertionBonus,
+  lmWeight: language === 'en' ? decoder.englishLmWeight ?? decoder.lmWeight : decoder.lmWeight,
+  wordBonus: language === 'en' ? decoder.englishWordBonus ?? decoder.wordBonus : decoder.wordBonus,
+})
 
 export type InkManifest = {
   format: typeof INK_MANIFEST_FORMAT
@@ -218,6 +230,8 @@ export const isInkManifest = (value: unknown): value is InkManifest => {
     && !!decoder
     && ['lmWeight', 'wordBonus', 'unknownWordPenalty', 'insertionBonus', 'beamWidth']
       .every((key) => Number.isFinite(decoder[key as keyof InkDecoderSettings]))
+    && (decoder.englishLmWeight === undefined || Number.isFinite(decoder.englishLmWeight))
+    && (decoder.englishWordBonus === undefined || Number.isFinite(decoder.englishWordBonus))
 }
 
 const hex = (bytes: ArrayBuffer) => Array.from(new Uint8Array(bytes), (value) => value.toString(16).padStart(2, '0')).join('')
@@ -467,7 +481,7 @@ export async function recognizeInk(
     inferenceMs += lineInference
     if (run.classes !== engine.classes) throw new Error('Das Handschriftmodell passt nicht zu seinem Manifest.')
     const decodeStarted = performance.now()
-    let decoded = decodeLine(engine, run.logits, language, engine.manifest.decoder)
+    let decoded = decodeLine(engine, run.logits, language, decoderForLanguage(engine.manifest.decoder, language))
     let lineLanguage = language
     let secondary: InkLineDebug['secondaryLanguage']
     if (
@@ -476,7 +490,7 @@ export async function recognizeInk(
       && decoded.words >= 1
       && decoded.knownWords / Math.max(1, decoded.words) < 0.5
     ) {
-      const alternative = decodeLine(engine, run.logits, other, engine.manifest.decoder)
+      const alternative = decodeLine(engine, run.logits, other, decoderForLanguage(engine.manifest.decoder, other))
       secondary = { language: other, text: alternative.text, score: alternative.readings[0]?.score ?? Number.NEGATIVE_INFINITY }
       if (
         alternative.knownWords > decoded.knownWords
@@ -588,7 +602,7 @@ export const recognizeInkSingleLine = async (
   const image = renderLine(packed, options.referenceHeight ?? 0, options.style ?? DEFAULT_INK_STYLE)
   if (!image) return null
   const run = await infer(image, effectiveOcrThreadCount(4), Boolean(options.personal) && personalModelInstalled)
-  return decodeLine(engine, run.logits, language, engine.manifest.decoder)
+  return decodeLine(engine, run.logits, language, decoderForLanguage(engine.manifest.decoder, language))
 }
 
 const encodeInkLabels = (alphabet: string, text: string) => {

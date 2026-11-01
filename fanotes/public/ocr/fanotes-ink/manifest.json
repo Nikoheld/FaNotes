@@ -32,7 +32,9 @@
     "wordBonus": 1.2,
     "unknownWordPenalty": -0.4,
     "insertionBonus": 0.6,
-    "beamWidth": 16
+    "beamWidth": 16,
+    "englishLmWeight": 0.25,
+    "englishWordBonus": 0.6
   },
   "training": {
     "checkpoint": "full1-step4500",
