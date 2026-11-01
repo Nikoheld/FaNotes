@@ -58,6 +58,7 @@ import {
   narrowScaleKeepsKnownWords,
   nounAfterAttributiveAdjective,
   capitalCompoundIndex,
+  kraftPluralFromReading,
   charactersJoiningWords,
   insertedLetterInOneKnownWord,
   oneLetterInALongUnknownWord,
@@ -804,6 +805,19 @@ export async function recognizeInk(
       const nextText = characters?.map((character) => character.char).join('')
       if (characters && nextText && nextText !== decoded.text) {
         decoded = { ...decoded, text: nextText, characters }
+        stitched = null
+      }
+    }
+    const pluralEdit = kraftPluralFromReading(
+      decoded.text,
+      decoded.readings,
+      (word) => wordIsKnown(lineLanguage, word),
+    )
+    if (pluralEdit) {
+      const rewritten = rewriteWord(decoded.characters, pluralEdit.index, pluralEdit.to)
+      const nextText = textWithWordEdits(decoded.text, [pluralEdit])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null
       }
     }

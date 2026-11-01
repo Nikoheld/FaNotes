@@ -56,6 +56,12 @@ export const A_TO_AE_MIN = 0.9
  */
 export const KNOWN_INSERT_MARGIN = 1
 
+/**
+ * An unknown word ending in `kraft` may take the dictionary plural `kräfte` when a reading
+ * within this many nats already added the final e (`luftstreitkrafte` is not a word).
+ */
+export const KRAFT_PLURAL_MARGIN = 2.9
+
 const ADJECTIVE_ENDING = /(?:ischen|lichen)$/iu
 
 /** A smaller line that keeps every known word has to beat the default by this many nats. */
@@ -529,6 +535,48 @@ export const capitalCompoundIndex = (
     return index
   }
   return null
+}
+
+const KRAFT = 'kraft'
+const KRAEFTE = 'kräfte'
+
+/**
+ * When a close reading adds a final e to an unknown word ending in `kraft`, spell that plural
+ * as `kräfte`. The e may sit on the word alone or on a compound that absorbed it
+ * (`Marineluftstreitkraft` → `Marineluftstreitkräfte`). A dictionary word stays singular.
+ */
+export const kraftPluralFromReading = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const top = readings[0]
+  if (!top) return null
+  const topWords = inkWords(top.text)
+  const current = inkWords(text)
+  let best: { gap: number; edit: WordEdit } | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > KRAFT_PLURAL_MARGIN) continue
+    const alternate = inkWords(reading.text)
+    if (alternate.length !== topWords.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < topWords.length; index += 1) {
+      if (topWords[index] !== alternate[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const stem = topWords[diffs[0]]
+    if ([...stem].length < 8 || !stem.endsWith(KRAFT) || known(stem) || alternate[diffs[0]] !== `${stem}e`) continue
+    const hits: WordEdit[] = []
+    for (let index = 0; index < current.length; index += 1) {
+      const word = current[index]
+      if (known(word) || !word.endsWith(stem)) continue
+      hits.push({ index, from: word, to: `${word.slice(0, -KRAFT.length)}${KRAEFTE}` })
+    }
+    if (hits.length !== 1) continue
+    if (!best || gap < best.gap) best = { gap, edit: hits[0] }
+  }
+  return best?.edit ?? null
 }
 
 /** Drops the single space between word `index` and the next word. */

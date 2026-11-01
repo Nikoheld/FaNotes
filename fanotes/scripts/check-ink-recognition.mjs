@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, dToBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, dToBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -113,6 +113,28 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
   assert.equal(capitalCompoundIndex('Kaiserlich Japanischen Marine luftstreitkraft in Friedenszeiten auf die in', known), 2)
   assert.equal(capitalCompoundIndex('der österreichischen Fußballnationalmannschaft statt', known), null)
   assert.equal(capitalCompoundIndex('Die Ausbildung in dieser Welt entlauscht mich.', known), null)
+  const kraftReadings = [
+    { text: 'Kaiserlich Japanischen Marie luftstreitkraft in Friedenszeiten auf die in', score: 0 },
+    { text: 'Kaiserlich Japanischen Marie luftstreitkrafte in Friedenszeiten auf die in', score: -2.84 },
+  ]
+  assert.equal(kraftPluralFromReading(
+    'Kaiserlich Japanischen Marineluftstreitkraft in Friedenszeiten auf die in',
+    kraftReadings,
+    known,
+  )?.to, 'Marineluftstreitkräfte')
+  assert.equal(kraftPluralFromReading(
+    'Kaiserlich Japanischen Marineluftstreitkraft in Friedenszeiten auf die in',
+    [kraftReadings[0], { text: kraftReadings[1].text, score: -3.1 }],
+    known,
+  ), null)
+  assert.equal(kraftPluralFromReading(
+    'Die Fliehkraft bleibt.',
+    [
+      { text: 'Die Fliehkraft bleibt.', score: 0 },
+      { text: 'Die Fliehkrafte bleibt.', score: -2 },
+    ],
+    known,
+  ), null)
   assert.equal(charactersJoiningWords([... 'Marine luftstreitkraft'].map((char) => ({ char })), 0).map((character) => character.char).join(''), 'Marineluftstreitkraft')
   assert.equal(insertedLetterInOneKnownWord(marineBase, marineBase, marineReadings, known), null)
   assert.equal(insertedLetterInOneKnownWord(
@@ -487,6 +509,15 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
       const nextText = characters?.map((character) => character.char).join('')
       if (characters && nextText && nextText !== decoded.text) {
         decoded = { ...decoded, text: nextText, characters }
+        boxes = undefined
+      }
+    }
+    const pluralEdit = kraftPluralFromReading(decoded.text, decoded.readings ?? [], knownWord(entry.language))
+    if (pluralEdit) {
+      const rewritten = rewriteWord(decoded.characters, pluralEdit.index, pluralEdit.to)
+      const nextText = textWithWordEdits(decoded.text, [pluralEdit])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
         boxes = undefined
       }
     }
