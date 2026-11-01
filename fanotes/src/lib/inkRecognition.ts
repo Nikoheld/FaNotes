@@ -29,6 +29,8 @@ import {
   INK_RETRY_VARIANTS,
   INK_SHEAR_RETRY,
   MERGE_SCORE_MARGIN,
+  BRACKET_COMMA_MARGIN,
+  BRACKET_STRETCH,
   FIRST_LETTER_MARGIN,
   NARROW_LINE_MARGIN,
   NARROW_SCALE,
@@ -38,6 +40,7 @@ import {
   WIDTH_RETRY_MARGIN,
   MIXED_CASE_SCALE,
   capitalizesOnlyTheFirstLetter,
+  replacesBracketPeriodWithComma,
   charactersWithWordEdits,
   sameLettersAllowingCapsJoin,
   foldInkWord,
@@ -542,6 +545,7 @@ export async function recognizeInk(
     let activePenWidth = style.penWidth
     let activeScale = style.scale
     let activeShear = style.extraShear
+    let activeStretch = style.stretchX
     const baseDecoded = decoded
     const baseText = decoded.text
     const baseScore = decoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
@@ -708,10 +712,40 @@ export async function recognizeInk(
         }
       }
     }
+    if (defaultPen && decoded.text.includes('.]')) {
+      const bracketImage = renderLine(packed, reference, {
+        ...style,
+        penWidth: activePenWidth,
+        extraShear: activeShear,
+        scale: activeScale,
+        stretchX: BRACKET_STRETCH,
+      })
+      if (bracketImage) {
+        const bracketInferenceStarted = performance.now()
+        const bracketRun = await infer(bracketImage, threads, usePersonalModel)
+        inferenceMs += performance.now() - bracketInferenceStarted
+        if (bracketRun.classes === engine.classes) {
+          const bracketDecodeStarted = performance.now()
+          const bracketDecoded = decodeLine(engine, bracketRun.logits, lineLanguage, decoderForLanguage(engine.manifest.decoder, lineLanguage))
+          decodeMs += performance.now() - bracketDecodeStarted
+          const bracketScore = bracketDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+          const currentScore = decoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+          if (
+            bracketScore >= currentScore + BRACKET_COMMA_MARGIN
+            && replacesBracketPeriodWithComma(decoded.text, bracketDecoded.text)
+          ) {
+            decoded = bracketDecoded
+            activeImage = bracketImage
+            activeStretch = BRACKET_STRETCH
+            stitched = null
+          }
+        }
+      }
+    }
     if (!decoded.text.trim()) continue
     const spans = new Uint32Array(decoded.characters.flatMap((character) => [character.startFrame, character.endFrame]))
     const boxes = stitched?.boxes ?? inkSpanBoxes(activeImage.packed, reference, activePenWidth, activeShear, activeScale, spans)
-    const unstretch = 1 / style.stretchX
+    const unstretch = 1 / activeStretch
     lines.push({
       text: decoded.text,
       greedyText: decoded.greedyText,

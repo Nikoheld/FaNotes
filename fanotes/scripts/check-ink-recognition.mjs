@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, oneUnknownWordBecomesKnown, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -89,6 +89,8 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
     'und Computerspielen sowie über Personen, die davon',
     known,
   ), false)
+  assert.equal(replacesBracketPeriodWithComma('[Kidney.] JuDKIND?', '[Kidney,] JuDKIND?'), true)
+  assert.equal(replacesBracketPeriodWithComma('By Trevor Williams. A move', 'By Trevor Williams, A move'), false)
   assert.equal(capitalizesOnlyTheFirstLetter('dumdum; GENTLEMAN', 'Dumdum; GENTLEMAN'), true)
   assert.equal(capitalizesOnlyTheFirstLetter('xxx yyy zzz', 'Xxx yyy zzz'), true)
   assert.equal(capitalizesOnlyTheFirstLetter('DDD EEE FFF GGG', 'DOD EEE FFF GGG'), false)
@@ -318,9 +320,32 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
         }
       }
     }
+    let boxedPacked = linePacked
+    if (decoded.text.includes('.]')) {
+      const stretched = Float64Array.from(linePacked)
+      for (let offset = 0; offset < stretched.length;) {
+        const count = stretched[offset]
+        for (let index = 0; index < count; index += 1) stretched[offset + 1 + index * 2] *= BRACKET_STRETCH
+        offset += 1 + count * 2
+      }
+      const bracketRaw = inkLineImage(stretched, reference, penWidth, shear, scale)
+      if (bracketRaw.length >= 3) {
+        const bracketStarted = Date.now()
+        const bracketRun = await host.recognize({ input: Float32Array.from(bracketRaw.subarray(2)), width: bracketRaw[0], height: 64, threads: 4 })
+        inferenceMs += Date.now() - bracketStarted
+        const bracketDecoded = JSON.parse(inkDecode(bracketRun.probabilities, bracketRun.dims[2], manifest.alphabet, entry.language, decoderOptionsFor(entry.language)))
+        const bracketScore = bracketDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+        const currentScore = decoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+        if (bracketScore >= currentScore + BRACKET_COMMA_MARGIN && replacesBracketPeriodWithComma(decoded.text, bracketDecoded.text)) {
+          decoded = bracketDecoded
+          boxedPacked = stretched
+          boxes = undefined
+        }
+      }
+    }
     if (!boxes) {
       const spans = new Uint32Array(decoded.characters.flatMap((c) => [c.startFrame, c.endFrame]))
-      boxes = inkSpanBoxes(linePacked, reference, penWidth, shear, scale, spans)
+      boxes = inkSpanBoxes(boxedPacked, reference, penWidth, shear, scale, spans)
     }
     if (!decoded.text.trim()) continue
     lines.push({ decoded, boxes, characters: decoded.characters.length })

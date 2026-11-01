@@ -20,6 +20,12 @@ export const NARROW_WORD_MARGIN = 0.5
 /** Capitalizing only the first letter has to beat the current reading by this many nats. */
 export const FIRST_LETTER_MARGIN = 0.6
 
+/** Horizontal stretch tried when a period sits just before a closing bracket. */
+export const BRACKET_STRETCH = 0.94
+
+/** That stretch has to beat the current reading by this many nats to turn the period into a comma. */
+export const BRACKET_COMMA_MARGIN = 0.5
+
 /** A smaller line that keeps every known word has to beat the default by this many nats. */
 export const NARROW_LINE_MARGIN = 5
 
@@ -295,6 +301,23 @@ export const shearReadingRewritesTwoWords = (base: string, alternate: string) =>
   const longEnough = (word: string) => word.length >= 4
   return longEnough(left[diffs[0]]) && longEnough(right[diffs[0]])
     && longEnough(left[diffs[1]]) && longEnough(right[diffs[1]])
+}
+
+/** True when `alternate` turns a period directly before `]` into a comma and changes nothing else (`[Kidney.]` → `[Kidney,]`). */
+export const replacesBracketPeriodWithComma = (base: string, alternate: string) => {
+  const left = [...base]
+  const right = [...alternate]
+  if (left.length < 2 || left.length !== right.length) return false
+  let changed = false
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] === right[index]) continue
+    if (left[index] === '.' && right[index] === ',' && left[index + 1] === ']') {
+      changed = true
+      continue
+    }
+    return false
+  }
+  return changed
 }
 
 /** True when `alternate` capitalizes the first letter and leaves every other character as it was (`dumdum` → `Dumdum`). */
