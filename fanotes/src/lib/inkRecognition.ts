@@ -79,6 +79,7 @@ import {
   COMPOUND_SCALE,
   dictionaryCompound,
   isolatedWideGroups,
+  lowercaseInitialFromBeam,
   lowercaseShortBeamWord,
   accusativeDer,
   trailingTracedLetter,
@@ -1171,6 +1172,15 @@ export async function recognizeInk(
         stitched = null
       }
     }
+    const initialCase = lowercaseInitialFromBeam(decoded.text, decoded.readings, lineLanguage)
+    if (initialCase) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, initialCase.index, initialCase.to)
+      const nextText = textWithWordEdits(decoded.text, [initialCase])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
+    }
     const known = (word: string) => wordIsKnown(lineLanguage, word)
     const unknownCompound = inkWords(decoded.text)
       .map((word, index) => ({ word, index }))
@@ -1310,6 +1320,7 @@ export const recognizeInkSingleLine = async (
   const finalized = finalizeInkLineText(decoded, known, {
     personal: personalWords[language] ?? [],
     baseKnown: (word) => exactWords[language].has(foldInkWord(word)),
+    language,
   })
   return { ...decoded, text: finalized.text, characters: finalized.characters }
 }

@@ -387,6 +387,44 @@ export const lowercaseShortBeamWord = (
 }
 
 /**
+ * An English line may lowercase its first letter when a beam reading of the same line
+ * is no worse than this. `Upward` sits 2.46 nats away, so the margin stays below that.
+ */
+export const INITIAL_CASE_MARGIN = 1.5
+
+/**
+ * Lowercase the first letter when the beam's top reading still starts with that capital
+ * and a close reading is the same line already lowercase (`Wretched` → `wretched`).
+ * German is excluded: `Ich` has the same kind of close reading. A one-letter word and an
+ * all-capital word stay as written.
+ */
+export const lowercaseInitialFromBeam = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  language: string,
+): WordEdit | null => {
+  if (language !== 'en' || readings.length < 2) return null
+  const best = readings[0]
+  if (!best?.text) return null
+  const line = [...text]
+  const beam = [...best.text]
+  if (!line.length || !beam.length || line[0] !== beam[0]) return null
+  const first = beam[0]
+  const lower = first.toLowerCase()
+  if (lower === first || [...lower].length !== 1) return null
+  const lowered = lower + beam.slice(1).join('')
+  const close = readings.some((reading) => reading.text === lowered && best.score - reading.score <= INITIAL_CASE_MARGIN)
+  if (!close) return null
+  const from = inkWords(text)[0]
+  if (!from || from[0] !== first) return null
+  const letters = [...from]
+  if (letters.length < 2 || letters.slice(1).some((letter) => letter !== letter.toLowerCase())) return null
+  const to = lower + letters.slice(1).join('')
+  if (to === from) return null
+  return { index: 0, from, to }
+}
+
+/**
  * A raw trace that is the chosen word plus one letter becomes the dictionary word formed by
  * swapping one adjacent pair (`in` with trace `ien` → `ein`).
  */
@@ -1326,7 +1364,7 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
     readings: Array<{ text: string; score: number }>
   },
   known: (word: string) => boolean,
-  options: { personal?: readonly string[]; baseKnown?: (word: string) => boolean } = {},
+  options: { personal?: readonly string[]; baseKnown?: (word: string) => boolean; language?: string } = {},
 ) => {
   let text = decoded.text
   let characters = decoded.characters
@@ -1379,5 +1417,6 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   take(trailingTracedLetter(text, decoded.greedyText, known), rewriteWord)
   take(accusativeDer(text), rewriteSameLengthWord)
   take(lowercaseShortBeamWord(text, decoded.readings), rewriteSameLengthWord)
+  take(lowercaseInitialFromBeam(text, decoded.readings, options.language ?? ''), rewriteSameLengthWord)
   return { text, characters }
 }
