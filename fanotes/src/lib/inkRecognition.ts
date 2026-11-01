@@ -63,6 +63,7 @@ import {
   capitalizedSentenceAdverb,
   capitalizeLoneLowercase,
   lowercaseVerbSein,
+  interiorCapitalNeighbor,
   umlautAndOneOtherLetter,
   nounAfterAttributiveAdjective,
   capitalCompoundIndex,
@@ -924,6 +925,15 @@ export async function recognizeInk(
     if (verbSein) {
       const rewritten = rewriteSameLengthWord(decoded.characters, verbSein.index, verbSein.to)
       const nextText = textWithWordEdits(decoded.text, [verbSein])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
+    }
+    const interior = interiorCapitalNeighbor(decoded.text, (word) => wordIsKnown(lineLanguage, word))
+    if (interior) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, interior.index, interior.to)
+      const nextText = textWithWordEdits(decoded.text, [interior])
       if (rewritten && nextText !== decoded.text) {
         decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null

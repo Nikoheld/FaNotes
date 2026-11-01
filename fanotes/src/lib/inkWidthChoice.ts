@@ -413,6 +413,62 @@ const UMLAUTS: Record<string, string> = { a: 'ä', o: 'ö', u: 'ü', A: 'Ä', O:
 const SUBSTITUTES = 'abcdefghijklmnopqrstuvwxyzäöü'
 
 /**
+ * An unknown word with a capital after its first letter takes its one same-length dictionary
+ * neighbor of two substitutions, keeping the case of every unchanged letter
+ * (`EwtopEan` → `EuropEan`).
+ */
+export const interiorCapitalNeighbor = (
+  text: string,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const words = inkWords(text)
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]
+    const letters = [...word]
+    if (letters.length < 5 || known(word)) continue
+    if (!letters.slice(1).some((letter) => letter === letter.toUpperCase() && letter !== letter.toLowerCase())) continue
+    if (!letters.some((letter) => letter === letter.toLowerCase() && letter !== letter.toUpperCase())) continue
+    const folded = [...foldInkWord(word)]
+    if (folded.length !== letters.length) continue
+    const hits: string[] = []
+    let ambiguous = false
+    scan: for (let left = 0; left < folded.length; left += 1) {
+      for (let right = left + 1; right < folded.length; right += 1) {
+        for (const first of SUBSTITUTES) {
+          if (first === folded[left]) continue
+          for (const second of SUBSTITUTES) {
+            if (second === folded[right]) continue
+            const candidate = folded.slice()
+            candidate[left] = first
+            candidate[right] = second
+            const spelling = candidate.join('')
+            if (!known(spelling)) continue
+            hits.push(spelling)
+            if (hits.length > 1) {
+              ambiguous = true
+              break scan
+            }
+          }
+        }
+      }
+    }
+    if (ambiguous || hits.length !== 1) continue
+    const target = [...hits[0]]
+    const next = letters.slice()
+    for (let cursor = 0; cursor < folded.length; cursor += 1) {
+      if (folded[cursor] === target[cursor]) continue
+      const replacement = target[cursor]
+      const capital = letters[cursor] === letters[cursor].toUpperCase() && letters[cursor] !== letters[cursor].toLowerCase()
+      next[cursor] = capital ? replacement.toUpperCase() : replacement
+    }
+    const rewritten = next.join('')
+    if ([...rewritten].length !== letters.length) continue
+    return { index, from: word, to: rewritten }
+  }
+  return null
+}
+
+/**
  * An unknown word becomes the one dictionary spelling that adds an umlaut and changes one
  * other letter (`entlauscht` → `enttäuscht`). Any other pair of substitutions is left alone.
  */
