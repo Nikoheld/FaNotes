@@ -80,14 +80,19 @@ Unter **Einstellungen → Erweitert → App-Daten zurücksetzen** kann das kompl
 
 ## Handschrift einrichten
 
-Die Erkennung ist absichtlich persönlich: Sie wird mit den Beispielen trainiert, die zur eigenen Handschrift passen.
+Die Texterkennung läuft nur in der Desktop-App für Windows und Linux. Stiftstriche werden in Zeilen gruppiert, als festes Zeilenbild gezeichnet und lokal vom `fanotes-ocr`-Sidecar gelesen. Gruppierung, Darstellung und die sprachmodellgestützte Decodierung bleiben in der App. Web und Android führen diese Erkennung nicht aus. Mathematik bleibt der bisherige GlyphenWerk-Pfad.
+
+1. Unter **Einstellungen → Experimentell** **Handschrift zu Text** einschalten.
+2. Mit `Strg+D` auf derselben Notizseite zur Stifteingabe wechseln und frei auf der A4-Seite schreiben.
+3. **Seite konvertieren** oder **Bereich konvertieren** wählen. **Automatisch** vergleicht Text und Mathematik; **Text** und **Mathematik** bleiben als manuelle Auswahl verfügbar. Die Textsprache steht unter **Einstellungen → Stift & Erkennung** (Deutsch oder Englisch).
+4. Unsichere Zeichen über ihre Alternativen oder direkt im Korrekturfeld berichtigen. Beim Einfügen speichert FaNotes die bestätigte Zeile lokal: der Wortschatz wächst sofort, und ab acht Zeilen lassen sich Stiftbreite, Neigung und Grösse unter **Persönliche Handschrift** anpassen.
+5. Für ein tieferes, weiterhin lokales Modell die Trainingszeilen exportieren, mit `fanotes/scripts/ink-model/personalize.py` ein persönliches Modell erzeugen und `personal-model.onnx` plus `personal-model.json` importieren. Diagnosezeilen in der Entwicklerkonsole schaltet derselbe Bereich ein.
+
+GlyphenWerk bleibt der Weg für persönliche Mathematikzeichen und für Text → Handschrift:
 
 1. In FaNotes links **GlyphenWerk** wählen oder `Strg+Umschalt+G` drücken.
 2. Unter **Erfassen** ausreichend Beispiele für Buchstaben, Zahlen und Symbole schreiben. Für Hoch-/Tiefstellungen oder Grenzen von Integralen und Summen im mathematischen Test die erkannte räumliche Zuordnung bestätigen.
-3. Unter **Erkennung testen** vollständige Gleichungen, Terme oder normale Sätze schreiben und unsichere Ergebnisse korrigieren. Bestätigte Beispiele und Layouts werden sofort in FaNotes aktiv; ein ZIP-Export ist nur noch für Backup oder Übertragung nötig.
-4. Mit `Strg+D` auf derselben Notizseite zur Stifteingabe wechseln und frei auf der A4-Seite schreiben.
-5. Nur wenn sichtbarer Text oder LaTeX gewünscht ist, **Seite konvertieren** oder **Bereich konvertieren** wählen. **Automatisch** vergleicht Text und Mathematik anhand der Zeichen und ihrer räumlichen Anordnung; **Text** und **Mathematik** bleiben als manuelle Auswahl verfügbar.
-6. Unsichere Zeichen über ihre Alternativen oder direkt im Korrekturfeld berichtigen. Beim Einfügen lernt das lokale Modell aus bestätigten Korrekturen weiter.
+3. Unter **Erkennung testen** vollständige Gleichungen oder Terme schreiben und unsichere Ergebnisse korrigieren. Bestätigte Beispiele und Layouts werden sofort für Mathematik und Text → Handschrift aktiv; ein ZIP-Export ist nur noch für Backup oder Übertragung nötig. Normale Sätze liest die Desktop-Stifterkennung oben, nicht GlyphenWerk.
 
 Für den umgekehrten Weg im Stiftmodus **Text → Handschrift** wählen, Text einfügen und die Live-Vorschau anpassen. FaNotes wählt für jedes Zeichen eine persönliche Trainingsvorlage, variiert sie kontrolliert und verbindet geeignete Buchstaben innerhalb eines Wortes. Fehlende Trainingszeichen und Platzmangel werden vor dem Einfügen angezeigt. Das Ergebnis bleibt normale Stifttinte und kann deshalb radiert, ergänzt sowie rückgängig gemacht werden.
 
@@ -155,13 +160,13 @@ Vorausgesetzt werden Node.js 22 oder neuer und npm.
 
 ### Gemeinsame Erkennung, passende Laufzeit
 
-FaNotes hält Segmentierung, persönliche GlyphenWerk-Daten, Text-/Mathematikentscheidung und Korrekturlogik in einem gemeinsamen Renderer-Pfad. Nur die lokale neuronale Inferenz ist plattformspezifisch:
+FaNotes hält Zeilengruppierung, GlyphenWerk-Daten, Text-/Mathematikentscheidung und Korrekturlogik im Renderer. Die Texterkennung selbst gibt es nur auf dem Desktop:
 
-- Die Web-App verwendet ein dynamisch quantisiertes Q8-Zeilenmodell und einen Q8-Encoder/Q8-Decoder über ONNX Runtime WASM. Sie nutzt höchstens zwei OCR-Threads und gibt die Worker nach der konfigurierten Inaktivitätszeit frei.
-- Linux und Windows verwenden dasselbe FP32-Zeilenmodell über ONNX Runtime Node in einem verzögert gestarteten CPU-Worker. Die Runtime wählt die passenden SIMD-Instruktionen des Intel- oder AMD-Prozessors und verwendet höchstens vier Threads.
-- Im Desktop-Modus kann optional das größere Kontextmodell ergänzt werden. Der kompakte Modus spart RAM; beide Modi greifen auf dieselben Trainingsbeispiele und anschließenden Korrekturen zu.
+- Windows und Linux rendern jede Zeile in `fanotes-recog` (WebAssembly) und führen das FP32-Zeilenmodell im nativen `fanotes-ocr`-Sidecar aus (`crates/fanotes-ort`, ONNX Runtime). Die Decodierung mit Zeichen-Sprachmodell und Wörterbuch läuft wieder in WebAssembly. Der Sidecar startet verzögert und verwendet höchstens vier Threads.
+- Web und Android haben keinen Sidecar und führen diese Erkennung nicht aus. Mathematik, GlyphenWerk und Text → Handschrift bleiben dort verfügbar.
+- Ein optionales persönliches Modell ersetzt nur die Textzeilen und liegt im lokalen Profil, nicht im Vault.
 
-Die nativen Pakete enthalten ausschließlich die jeweilige x64-CPU-Bibliothek. Alle Modell- und Laufzeitdateien werden vor der Verwendung gegen ihre im Manifest hinterlegte Größe und SHA-256-Prüfsumme geprüft.
+Alle Modelldateien werden vor der Verwendung gegen die im Manifest hinterlegte Größe und SHA-256-Prüfsumme geprüft. Der Nachbau des Zeilenmodells steht in `fanotes/scripts/ink-model/README.md`; `npm run check:ink-recognition` prüft die Desktop-Pipeline an den Gold-Zeilen.
 
 ```bash
 cd fanotes
@@ -178,6 +183,7 @@ npm run check:startup
 npm run check:themes
 npm run check:scribble-erase
 npm run check:glyphenwerk
+npm run check:ink-recognition
 npm run check:math-corrector
 npm run check:updater
 npm run build
@@ -293,14 +299,19 @@ Under **Settings → Advanced → Reset app data**, the whole local profile can 
 
 ## Set up handwriting
 
-Recognition is deliberately personal: it is trained on the samples that match your own handwriting.
+Text recognition runs only in the desktop app for Windows and Linux. Pen strokes are grouped into lines, drawn as a fixed-height line image, and read locally by the `fanotes-ocr` sidecar. Grouping, rendering, and language-model decoding stay in the app. Web and Android do not run this recognition. Mathematics stays on the existing GlyphenWerk path.
+
+1. Under **Settings → Experimental**, turn on **Handwriting to text**.
+2. Press `Ctrl+D` on the same note page to switch to pen input and write freely on the A4 page.
+3. Choose **Convert page** or **Convert region**. **Automatic** compares text and mathematics. **Text** and **Mathematics** remain available as a manual choice. The text language is under **Settings → Pen & recognition** (German or English).
+4. Correct uncertain characters through their alternatives or directly in the correction field. On insert, FaNotes stores the confirmed line locally: the vocabulary grows immediately, and from eight lines you can fit pen width, slant, and size under **Personal handwriting**.
+5. For a deeper model that still stays on this machine, export the training lines, build a personal model with `fanotes/scripts/ink-model/personalize.py`, and import `personal-model.onnx` together with `personal-model.json`. The same section turns on diagnostic lines in the developer console.
+
+GlyphenWerk remains the path for personal mathematics characters and for text to handwriting:
 
 1. In FaNotes, choose **GlyphenWerk** on the left or press `Ctrl+Shift+G`.
 2. Under **Capture**, write enough samples for letters, digits, and symbols. For superscripts, subscripts, or the limits of integrals and sums, confirm the recognized spatial assignment in the mathematics test.
-3. Under **Test recognition**, write complete equations, terms, or ordinary sentences and correct uncertain results. Confirmed samples and layouts become active in FaNotes immediately. A ZIP export is only needed for backup or transfer.
-4. Press `Ctrl+D` on the same note page to switch to pen input and write freely on the A4 page.
-5. Only when you want visible text or LaTeX, choose **Convert page** or **Convert region**. **Automatic** compares text and mathematics from the characters and their spatial arrangement. **Text** and **Mathematics** remain available as a manual choice.
-6. Correct uncertain characters through their alternatives or directly in the correction field. On insert, the local model keeps learning from confirmed corrections.
+3. Under **Test recognition**, write complete equations or terms and correct uncertain results. Confirmed samples and layouts become active immediately for mathematics and text to handwriting. A ZIP export is only needed for backup or transfer. Ordinary sentences are read by the desktop ink recognizer above, not by GlyphenWerk.
 
 For the reverse direction, in pen mode choose **Text → Handwriting**, paste text, and adjust the live preview. FaNotes picks a personal training template for each character, varies it in a controlled way, and connects suitable letters inside a word. Missing training characters and lack of space are shown before insert. The result stays ordinary pen ink, so it can be erased, extended, and undone.
 
@@ -365,13 +376,13 @@ Node.js 22 or newer and npm are required.
 
 ### Shared recognition, matching runtime
 
-FaNotes keeps segmentation, personal GlyphenWerk data, the text/mathematics decision, and the correction logic on one shared renderer path. Only the local neural inference is platform-specific:
+FaNotes keeps line grouping, GlyphenWerk data, the text/mathematics decision, and the correction logic in the renderer. Text recognition itself exists only on the desktop:
 
-- The web app uses a dynamically quantized Q8 line model and a Q8 encoder/Q8 decoder through ONNX Runtime WASM. It uses at most two OCR threads and releases the workers after the configured idle time.
-- Linux and Windows use the same FP32 line model through ONNX Runtime Node in a CPU worker that starts on demand. The runtime picks the matching SIMD instructions of the Intel or AMD processor and uses at most four threads.
-- In desktop mode, the larger context model can optionally be added. Compact mode saves RAM. Both modes use the same training samples and the corrections that follow.
+- Windows and Linux render each line in `fanotes-recog` (WebAssembly) and run the FP32 line model in the native `fanotes-ocr` sidecar (`crates/fanotes-ort`, ONNX Runtime). Decoding with the character language model and the dictionary runs in WebAssembly again. The sidecar starts on demand and uses at most four threads.
+- Web and Android have no sidecar and do not run this recognition. Mathematics, GlyphenWerk, and text to handwriting stay available there.
+- An optional personal model replaces only the text lines and lives in the local profile, not in the vault.
 
-The native packages contain only the matching x64 CPU library. Every model and runtime file is checked against the size and SHA-256 checksum stored in the manifest before it is used.
+Every model file is checked against the size and SHA-256 checksum stored in the manifest before it is used. Rebuilding the line model is described in `fanotes/scripts/ink-model/README.md`. `npm run check:ink-recognition` checks the desktop pipeline on the golden lines.
 
 ```bash
 cd fanotes
@@ -388,6 +399,7 @@ npm run check:startup
 npm run check:themes
 npm run check:scribble-erase
 npm run check:glyphenwerk
+npm run check:ink-recognition
 npm run check:math-corrector
 npm run check:updater
 npm run build
