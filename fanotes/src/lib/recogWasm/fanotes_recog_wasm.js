@@ -213,6 +213,20 @@ export function lineTensor(min_x, min_y, max_x, max_y, source_width, source_heig
 }
 
 /**
+ * Exact dictionary for one-edit correction (`de.words` / `en.words`), not the Bloom filter.
+ * Personal words already stored for `language` stay known, so a writer's own word is not rewritten.
+ * @param {string} language
+ * @param {string[]} words
+ */
+export function setInkExactWords(language, words) {
+    const ptr0 = passStringToWasm0(language, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArrayJsValueToWasm0(words, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    wasm.setInkExactWords(ptr0, len0, ptr1, len1);
+}
+
+/**
  * @param {string} language
  * @param {Uint8Array} bytes
  */

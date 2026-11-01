@@ -42,6 +42,12 @@ export function inkSpanBoxes(packed: Float64Array, ref_height: number, pen_width
  */
 export function lineTensor(min_x: number, min_y: number, max_x: number, max_y: number, source_width: number, source_height: number, margin_x_ratio: number, margin_y_ratio: number, ink_scale: number, packed: Float64Array): Float32Array;
 
+/**
+ * Exact dictionary for one-edit correction (`de.words` / `en.words`), not the Bloom filter.
+ * Personal words already stored for `language` stay known, so a writer's own word is not rewritten.
+ */
+export function setInkExactWords(language: string, words: string[]): void;
+
 export function setInkLanguageModel(language: string, bytes: Uint8Array): void;
 
 /**
@@ -72,6 +78,7 @@ export interface InitOutput {
     readonly inkLineImage: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly inkSpanBoxes: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly lineTensor: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number, number, number];
+    readonly setInkExactWords: (a: number, b: number, c: number, d: number) => void;
     readonly setInkLanguageModel: (a: number, b: number, c: number, d: number) => [number, number];
     readonly setInkLexicon: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly setInkPersonalWords: (a: number, b: number, c: number, d: number) => void;

@@ -20,6 +20,17 @@ thread_local! {
     static EXTRA_WORDS: RefCell<HashMap<String, HashSet<String>>> = RefCell::new(HashMap::new());
     static INK_LANGUAGE_MODELS: RefCell<HashMap<String, CharLm>> = RefCell::new(HashMap::new());
     static INK_LEXICONS: RefCell<HashMap<String, InkLexicon>> = RefCell::new(HashMap::new());
+    /// Exact spelling lists. The Bloom filter is not safe for one-edit correction: a false
+    /// positive becomes a "unique" neighbor and rewrites a real word.
+    static INK_EXACT_WORDS: RefCell<HashMap<String, ExactWords>> = RefCell::new(HashMap::new());
+}
+
+struct ExactWords(HashSet<String>);
+
+impl Lexicon for ExactWords {
+    fn contains(&self, word: &str) -> bool {
+        self.0.contains(word)
+    }
 }
 
 /// The FaNotes spelling Bloom filter (`fanotes-spelling-bloom-v2`) plus personal words.
@@ -189,13 +200,39 @@ pub fn set_ink_lexicon(language: &str, bloom: &[u8], bit_count: u32) -> Result<(
     Ok(())
 }
 
+/// Exact dictionary for one-edit correction (`de.words` / `en.words`), not the Bloom filter.
+/// Personal words already stored for `language` stay known, so a writer's own word is not rewritten.
+#[wasm_bindgen(js_name = setInkExactWords)]
+pub fn set_ink_exact_words(language: &str, words: Vec<String>) {
+    let mut folded: HashSet<String> = words
+        .into_iter()
+        .map(|word| word.to_lowercase().replace('ß', "ss"))
+        .collect();
+    INK_LEXICONS.with(|lexicons| {
+        if let Some(entry) = lexicons.borrow().get(language) {
+            folded.extend(entry.personal.iter().cloned());
+        }
+    });
+    INK_EXACT_WORDS.with(|exact| {
+        exact
+            .borrow_mut()
+            .insert(language.to_owned(), ExactWords(folded));
+    });
+}
+
 /// Replaces the personal vocabulary (lower-case words) of `language`.
 #[wasm_bindgen(js_name = setInkPersonalWords)]
 pub fn set_ink_personal_words(language: &str, words: Vec<String>) {
+    let personal: HashSet<String> = words.into_iter().map(|word| word.to_lowercase()).collect();
     INK_LEXICONS.with(|lexicons| {
         let mut lexicons = lexicons.borrow_mut();
         let entry = lexicons.entry(language.to_owned()).or_default();
-        entry.personal = words.into_iter().map(|word| word.to_lowercase()).collect();
+        entry.personal = personal.clone();
+    });
+    INK_EXACT_WORDS.with(|exact| {
+        if let Some(known) = exact.borrow_mut().get_mut(language) {
+            known.0.extend(personal);
+        }
     });
 }
 
@@ -238,18 +275,30 @@ pub fn ink_decode_js(
         ..defaults
     };
     let alphabet: Vec<char> = alphabet.chars().collect();
-    let decoded = INK_LANGUAGE_MODELS.with(|models| {
-        INK_LEXICONS.with(|lexicons| {
-            let models = models.borrow();
-            let lexicons = lexicons.borrow();
-            let lm = if input.use_language_model == Some(false) {
-                None
-            } else {
-                models.get(language)
-            };
-            let empty = InkLexicon::default();
-            let lexicon = lexicons.get(language).unwrap_or(&empty);
-            beam_decode(logits, classes as usize, &alphabet, lm, lexicon, &options)
+    let decoded = INK_EXACT_WORDS.with(|exact| {
+        INK_LANGUAGE_MODELS.with(|models| {
+            INK_LEXICONS.with(|lexicons| {
+                let exact = exact.borrow();
+                let models = models.borrow();
+                let lexicons = lexicons.borrow();
+                let lm = if input.use_language_model == Some(false) {
+                    None
+                } else {
+                    models.get(language)
+                };
+                let empty = InkLexicon::default();
+                let lexicon = lexicons.get(language).unwrap_or(&empty);
+                let dictionary = exact.get(language).map(|words| words as &dyn Lexicon);
+                beam_decode(
+                    logits,
+                    classes as usize,
+                    &alphabet,
+                    lm,
+                    lexicon,
+                    dictionary,
+                    &options,
+                )
+            })
         })
     });
     let decoded =

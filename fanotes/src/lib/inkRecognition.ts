@@ -19,6 +19,7 @@ import {
   inkLineImage,
   inkSpanBoxes,
   setInkLanguageModel,
+  setInkExactWords,
   setInkLexicon,
   setInkPersonalWords,
 } from './recogWasm/fanotes_recog_wasm.js'
@@ -273,6 +274,11 @@ const ensureLanguage = (engine: Engine, language: InkLanguage) => {
       ])
       setInkLanguageModel(language, bytes)
       if (spelling) setInkLexicon(language, spelling[language], spelling.manifest.languages[language].bitCount)
+      const candidates = await window.fanotes.loadSpellingWordCandidates(language).catch(() => null)
+      if (candidates?.bytes?.byteLength) {
+        const text = new TextDecoder().decode(candidates.bytes)
+        setInkExactWords(language, text.split('\n').filter((word) => word.length > 0))
+      }
       setInkPersonalWords(language, personalWords[language] ?? [])
     })().catch((error) => {
       engine.languages.delete(language)

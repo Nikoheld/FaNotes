@@ -36,6 +36,7 @@ fn clear_path_decodes_with_spans() {
         &ALPHABET,
         None,
         &(),
+        None,
         &BeamOptions::default(),
     )
     .unwrap();
@@ -62,6 +63,7 @@ fn lexicon_breaks_a_visual_tie_towards_a_known_word() {
         &ALPHABET,
         None,
         &(),
+        None,
         &BeamOptions::default(),
     )
     .unwrap();
@@ -72,6 +74,7 @@ fn lexicon_breaks_a_visual_tie_towards_a_known_word() {
         &ALPHABET,
         None,
         &words,
+        None,
         &BeamOptions::default(),
     )
     .unwrap();

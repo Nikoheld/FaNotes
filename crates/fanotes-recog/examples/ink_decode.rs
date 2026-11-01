@@ -69,8 +69,16 @@ fn main() {
         let offset = line["offset"].as_u64().unwrap() as usize;
         let frames = line["frames"].as_u64().unwrap() as usize;
         let slice = &logits[offset..offset + frames * classes];
-        let decoded =
-            beam_decode(slice, classes, &alphabet, lm.as_ref(), &words, &options).expect("decode");
+        let decoded = beam_decode(
+            slice,
+            classes,
+            &alphabet,
+            lm.as_ref(),
+            &words,
+            None,
+            &options,
+        )
+        .expect("decode");
         println!("{}", serde_json::to_string(&decoded).unwrap());
     }
 }

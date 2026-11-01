@@ -14,7 +14,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
-import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
+import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -45,6 +45,10 @@ for (const language of ['de', 'en']) {
   const descriptor = spelling.languages[language]
   const bloom = fs.readFileSync(path.join(appRoot, 'public', 'spell', descriptor.file))
   setInkLexicon(language, bloom, descriptor.bitCount)
+  const words = fs.readFileSync(path.join(appRoot, 'public', 'spell', `${language}.words`), 'utf8')
+    .split('\n')
+    .filter((word) => word.length > 0)
+  setInkExactWords(language, words)
 }
 
 const host = createNativeOcrHost({

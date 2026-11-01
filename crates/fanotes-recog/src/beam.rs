@@ -185,6 +185,7 @@ pub fn beam_decode(
     alphabet: &[char],
     lm: Option<&CharLm>,
     lexicon: &dyn Lexicon,
+    dictionary: Option<&dyn Lexicon>,
     options: &BeamOptions,
 ) -> Option<BeamDecoded> {
     if classes != alphabet.len() + 1
@@ -313,6 +314,12 @@ pub fn beam_decode(
     // The language model prefers a comma. Where the pen trace's own best mark disagrees,
     // keep the trace: the letters stay the beam's, only `. , ; : ! ?` can change.
     let best = reconcile_sentence_marks(&best, &greedy_symbols(&log_probs, classes), &words);
+    // An unknown word with exactly one dictionary neighbor at edit distance 1 is a slip
+    // (`Peronen` → `Personen`). Words already in the dictionary, and ambiguous slips, stay.
+    let best = match dictionary {
+        Some(dictionary) => correct_unknown_words(&best, &words, dictionary),
+        None => best,
+    };
     let characters = align(&log_probs, classes, frames, &best, alphabet);
     let text = render(&best);
     let (known_words, word_count) = count_words(&best, &words);
@@ -428,6 +435,110 @@ fn reconcile_sentence_marks(best: &[u8], greedy: &[u8], words: &Words<'_>) -> Ve
         }
     }
     result
+}
+
+fn correct_unknown_words(prefix: &[u8], words: &Words<'_>, dictionary: &dyn Lexicon) -> Vec<u8> {
+    let mut out = Vec::with_capacity(prefix.len());
+    let mut index = 0;
+    while index < prefix.len() {
+        if !words.is_letter(prefix[index]) {
+            out.push(prefix[index]);
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < prefix.len() && words.is_letter(prefix[index]) {
+            index += 1;
+        }
+        out.extend(corrected_run(&prefix[start..index], words, dictionary));
+    }
+    out
+}
+
+fn corrected_run(run: &[u8], words: &Words<'_>, dictionary: &dyn Lexicon) -> Vec<u8> {
+    if run.len() < 5 {
+        return run.to_vec();
+    }
+    let original: String = run
+        .iter()
+        .map(|&symbol| words.alphabet[usize::from(symbol) - 1])
+        .collect();
+    let folded = original.to_lowercase().replace('ß', "ss");
+    if dictionary.contains(&folded) {
+        return run.to_vec();
+    }
+    let mut known = Vec::new();
+    for candidate in edit_neighbors(&folded) {
+        if dictionary.contains(&candidate) {
+            known.push(candidate);
+        }
+    }
+    known.sort();
+    known.dedup();
+    if known.len() != 1 {
+        return run.to_vec();
+    }
+    let capitalized = words.alphabet[usize::from(run[0]) - 1].is_uppercase();
+    let mut symbols = Vec::with_capacity(known[0].len());
+    for (offset, character) in known[0].chars().enumerate() {
+        let character = if offset == 0 && capitalized {
+            let mut upper = character.to_uppercase();
+            match (upper.next(), upper.next()) {
+                (Some(single), None) => single,
+                _ => return run.to_vec(),
+            }
+        } else {
+            character
+        };
+        let Some(symbol) = words
+            .alphabet
+            .iter()
+            .position(|&item| item == character)
+            .map(|index| (index + 1) as u8)
+        else {
+            return run.to_vec();
+        };
+        symbols.push(symbol);
+    }
+    symbols
+}
+
+fn edit_neighbors(word: &str) -> Vec<String> {
+    let letters = [
+        'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r',
+        's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'ä', 'ö', 'ü',
+    ];
+    let chars: Vec<char> = word.chars().collect();
+    let mut out = Vec::new();
+    for index in 0..chars.len() {
+        let mut deleted = String::with_capacity(word.len());
+        deleted.extend(chars[..index].iter());
+        deleted.extend(chars[index + 1..].iter());
+        if deleted.chars().count() >= 2 {
+            out.push(deleted);
+        }
+        for &letter in &letters {
+            if letter != chars[index] {
+                let mut substituted = String::with_capacity(word.len());
+                substituted.extend(chars[..index].iter());
+                substituted.push(letter);
+                substituted.extend(chars[index + 1..].iter());
+                out.push(substituted);
+            }
+            let mut inserted = String::with_capacity(word.len() + 1);
+            inserted.extend(chars[..index].iter());
+            inserted.push(letter);
+            inserted.extend(chars[index..].iter());
+            out.push(inserted);
+        }
+    }
+    for &letter in &letters {
+        let mut inserted = String::with_capacity(word.len() + 1);
+        inserted.extend(chars.iter());
+        inserted.push(letter);
+        out.push(inserted);
+    }
+    out
 }
 
 fn greedy(log_probs: &[f64], classes: usize, alphabet: &[char]) -> String {
@@ -628,5 +739,30 @@ mod tests {
         let greedy = ['a', '.', 'c'].map(index);
         let corrected = reconcile_sentence_marks(&best, &greedy, &words(&alphabet));
         assert_eq!(corrected, ['a', '.', 'b'].map(index));
+    }
+
+    #[test]
+    fn an_unknown_word_takes_its_only_dictionary_neighbor() {
+        let alphabet: Vec<char> = "abcdex".chars().collect();
+        let index = |character: char| {
+            (alphabet.iter().position(|&item| item == character).unwrap() + 1) as u8
+        };
+        struct Known;
+        impl Lexicon for Known {
+            fn contains(&self, word: &str) -> bool {
+                word == "abcde"
+            }
+        }
+        let decoder = Words {
+            alphabet: &alphabet,
+            lexicon: &Known,
+        };
+        let slip = ['a', 'b', 'x', 'd', 'e'].map(index);
+        assert_eq!(
+            corrected_run(&slip, &decoder, &Known),
+            ['a', 'b', 'c', 'd', 'e'].map(index)
+        );
+        let known = ['a', 'b', 'c', 'd', 'e'].map(index);
+        assert_eq!(corrected_run(&known, &decoder, &Known), known);
     }
 }
