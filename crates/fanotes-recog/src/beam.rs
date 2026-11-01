@@ -391,6 +391,34 @@ pub fn beam_decode(
             }
         }
     }
+    // Three copies of one letter written as separate words (`y y y`) join when a close
+    // reading already has them together (`yyy`). Real words are longer than one letter.
+    {
+        let chosen = tidy(&render(&best));
+        let collapsed = collapse_repeated_letters(&chosen);
+        if collapsed != chosen {
+            let mut distinct = 0usize;
+            let mut previous = String::new();
+            for (prefix, score) in &finals {
+                if best_score - *score > 0.9 {
+                    break;
+                }
+                let polished = polish(prefix, &greedy_ids, &words, dictionary);
+                let text = tidy(&render(&polished));
+                if text != previous {
+                    if distinct == options.n_best.max(1) {
+                        break;
+                    }
+                    distinct += 1;
+                    previous = text.clone();
+                }
+                if text == collapsed {
+                    best = polished;
+                    break;
+                }
+            }
+        }
+    }
     // The language model likes to split a long pen word into two known words (`Jack daws`).
     // If the raw trace has no space there and both pieces are long, join them back.
     let best = drop_spaces_absent_from_trace(&best, &greedy_text, &words, dictionary);
@@ -561,6 +589,29 @@ fn drop_spaces_absent_from_trace(
         .filter(|(index, _)| !drop[*index])
         .map(|(_, symbol)| *symbol)
         .collect()
+}
+
+fn collapse_repeated_letters(text: &str) -> String {
+    let parts: Vec<&str> = text.split(' ').filter(|part| !part.is_empty()).collect();
+    let mut out: Vec<String> = Vec::new();
+    let mut index = 0;
+    while index < parts.len() {
+        let letter = parts[index];
+        if letter.chars().count() == 1 {
+            let mut end = index + 1;
+            while end < parts.len() && parts[end] == letter {
+                end += 1;
+            }
+            if end - index >= 3 {
+                out.push(letter.repeat(end - index));
+                index = end;
+                continue;
+            }
+        }
+        out.push(letter.to_owned());
+        index += 1;
+    }
+    out.join(" ")
 }
 
 fn dict_key(word: &str) -> String {
@@ -1341,5 +1392,19 @@ mod tests {
             "über Paronen",
             &Known
         ));
+    }
+
+    #[test]
+    fn three_copies_of_one_letter_join_and_real_words_stay_split() {
+        assert_eq!(collapse_repeated_letters("xxx y y y zzz"), "xxx yyy zzz");
+        assert_eq!(collapse_repeated_letters("a a"), "a a");
+        assert_eq!(
+            collapse_repeated_letters("schlafen gehen"),
+            "schlafen gehen"
+        );
+        assert_eq!(
+            collapse_repeated_letters("DDD EEE FFF GGG"),
+            "DDD EEE FFF GGG"
+        );
     }
 }
