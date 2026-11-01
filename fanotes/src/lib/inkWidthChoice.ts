@@ -26,6 +26,12 @@ export const BRACKET_STRETCH = 0.94
 /** That stretch has to beat the current reading by this many nats to turn the period into a comma. */
 export const BRACKET_COMMA_MARGIN = 0.5
 
+/** Narrower line tried when a long word is still unknown. */
+export const NARROW_STRETCH = 0.82
+
+/** That narrower line has to beat the default reading by this many nats. */
+export const NARROW_STRETCH_MARGIN = 7
+
 /** A smaller line that keeps every known word has to beat the default by this many nats. */
 export const NARROW_LINE_MARGIN = 5
 
@@ -301,6 +307,25 @@ export const shearReadingRewritesTwoWords = (base: string, alternate: string) =>
   const longEnough = (word: string) => word.length >= 4
   return longEnough(left[diffs[0]]) && longEnough(right[diffs[0]])
     && longEnough(left[diffs[1]]) && longEnough(right[diffs[1]])
+}
+
+/**
+ * True when a known word changes only in case and every other change is an unknown word
+ * (`Man` → `man`, `Landstatisters` → `Landschottenstrasse`).
+ */
+export const stretchedReadingKeepsKnownWords = (
+  base: string,
+  alternate: string,
+  known: (word: string) => boolean,
+) => {
+  const left = inkWords(base)
+  const right = inkWords(alternate)
+  if (left.length !== right.length || left.join('\0') === right.join('\0')) return false
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] === right[index]) continue
+    if (known(left[index]) && foldInkWord(left[index]) !== foldInkWord(right[index])) return false
+  }
+  return true
 }
 
 /** True when `alternate` turns a period directly before `]` into a comma and changes nothing else (`[Kidney.]` → `[Kidney,]`). */

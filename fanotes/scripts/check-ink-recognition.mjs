@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -85,6 +85,16 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
     known,
   ), true)
   assert.equal(narrowScaleKeepsKnownWords(
+    'und Computerspielen sowie über Personen, die daran',
+    'und Computerspielen sowie über Personen, die davon',
+    known,
+  ), false)
+  assert.equal(stretchedReadingKeepsKnownWords(
+    'bezeichnet Man einen des Landstatisters.',
+    'bezeichnet man einen des Landschottenstrasse.',
+    known,
+  ), true)
+  assert.equal(stretchedReadingKeepsKnownWords(
     'und Computerspielen sowie über Personen, die daran',
     'und Computerspielen sowie über Personen, die davon',
     known,
@@ -202,6 +212,7 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
   let inferenceMs = 0
   for (const line of grouped) {
     const linePacked = packStrokes(line.strokes.map((index) => strokes[usable[index]]), width, height)
+    let linePackedForBoxes = linePacked
     const raw = inkLineImage(linePacked, reference, manifest.decoder.penWidth ?? 2.6, 0, 1)
     if (raw.length < 3) continue
     const image = raw.subarray(2)
@@ -252,6 +263,32 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
         const edits = longUnknownWordEdits(baseText, retryDecoded.text, known)
         if (!edits || (spliceBest && retryScore <= spliceBest.score)) continue
         spliceBest = { score: retryScore, decoded: retryDecoded, penWidth: variant.penWidth, scale: variant.scale, edits }
+      }
+      const narrowPacked = Float64Array.from(linePacked)
+      for (let offset = 0; offset < narrowPacked.length;) {
+        const count = narrowPacked[offset]
+        for (let index = 0; index < count; index += 1) narrowPacked[offset + 1 + index * 2] *= NARROW_STRETCH
+        offset += 1 + count * 2
+      }
+      const narrowRaw = inkLineImage(narrowPacked, reference, 2.6, 0, 1)
+      if (narrowRaw.length >= 3) {
+        const narrowStarted = Date.now()
+        const narrowRun = await host.recognize({ input: Float32Array.from(narrowRaw.subarray(2)), width: narrowRaw[0], height: 64, threads: 4 })
+        inferenceMs += Date.now() - narrowStarted
+        const narrowDecoded = JSON.parse(inkDecode(narrowRun.probabilities, narrowRun.dims[2], manifest.alphabet, entry.language, decoderOptionsFor(entry.language)))
+        const narrowScore = narrowDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+        if (
+          narrowScore >= baseScore + NARROW_STRETCH_MARGIN
+          && narrowScore > bestScore
+          && stretchedReadingKeepsKnownWords(baseText, narrowDecoded.text, known)
+        ) {
+          decoded = narrowDecoded
+          penWidth = 2.6
+          scale = 1
+          shear = 0
+          bestScore = narrowScore
+          linePackedForBoxes = narrowPacked
+        }
       }
     }
     let boxes
@@ -320,7 +357,7 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
         }
       }
     }
-    let boxedPacked = linePacked
+    let boxedPacked = linePackedForBoxes
     if (decoded.text.includes('.]')) {
       const stretched = Float64Array.from(linePacked)
       for (let offset = 0; offset < stretched.length;) {

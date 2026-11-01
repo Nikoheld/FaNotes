@@ -34,6 +34,8 @@ import {
   FIRST_LETTER_MARGIN,
   NARROW_LINE_MARGIN,
   NARROW_SCALE,
+  NARROW_STRETCH,
+  NARROW_STRETCH_MARGIN,
   NARROW_WORD_MARGIN,
   SHEAR_SCORE_MARGIN,
   SPLICE_SCORE_MARGIN,
@@ -50,6 +52,7 @@ import {
   narrowScaleKeepsKnownWords,
   oneUnknownWordBecomesKnown,
   shearReadingRewritesTwoWords,
+  stretchedReadingKeepsKnownWords,
   textWithWordEdits,
   widthReadingKeepsKnownWords,
   widthReadingMergesTwoWords,
@@ -605,6 +608,31 @@ export async function recognizeInk(
         const edits = longUnknownWordEdits(baseText, retryDecoded.text, known)
         if (!edits || (spliceBest && retryScore <= spliceBest.score)) continue
         spliceBest = { score: retryScore, decoded: retryDecoded, image: retryImage, penWidth: variant.penWidth, scale: variant.scale, edits }
+      }
+      const narrowImage = renderLine(packed, reference, { ...style, penWidth: DEFAULT_INK_STYLE.penWidth, extraShear: 0, scale: 1, stretchX: NARROW_STRETCH })
+      if (narrowImage) {
+        const narrowInferenceStarted = performance.now()
+        const narrowRun = await infer(narrowImage, threads, usePersonalModel)
+        inferenceMs += performance.now() - narrowInferenceStarted
+        if (narrowRun.classes === engine.classes) {
+          const narrowDecodeStarted = performance.now()
+          const narrowDecoded = decodeLine(engine, narrowRun.logits, lineLanguage, decoderForLanguage(engine.manifest.decoder, lineLanguage))
+          decodeMs += performance.now() - narrowDecodeStarted
+          const narrowScore = narrowDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+          if (
+            narrowScore >= baseScore + NARROW_STRETCH_MARGIN
+            && narrowScore > bestScore
+            && stretchedReadingKeepsKnownWords(baseText, narrowDecoded.text, known)
+          ) {
+            decoded = narrowDecoded
+            activeImage = narrowImage
+            activePenWidth = DEFAULT_INK_STYLE.penWidth
+            activeScale = 1
+            activeShear = 0
+            activeStretch = NARROW_STRETCH
+            bestScore = narrowScore
+          }
+        }
       }
     }
     let stitched: { boxes: Float64Array } | null = null
