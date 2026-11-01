@@ -19,7 +19,7 @@ export type VaultEntry = {
   children?: VaultEntry[]
 }
 
-export type ThemeMode = 'dark' | 'light' | 'system' | 'midnight' | 'forest' | 'aurora' | 'sepia'
+export type ThemeMode = 'dark' | 'light' | 'system' | 'midnight' | 'forest' | 'aurora' | 'sepia' | 'snow'
 export type WorkspaceBackground = 'clean' | 'gradient' | 'mesh' | 'paper'
 export type PaperStyle = 'blank' | 'dots' | 'squares' | 'grid' | 'lines' | 'millimeter'
 export type UiLanguagePreference = 'system' | 'de' | 'en'

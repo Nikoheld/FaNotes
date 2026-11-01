@@ -47,6 +47,7 @@ import {
   homeworkApiSecretReady,
 } from '../lib/homeworkApi'
 import { bestContrastText } from '../lib/colorContrast'
+import { applyThemeChoice } from '../lib/snowTheme'
 import { clampPaperSquareMm, paperSquareSizeLabel } from '../lib/paperSquare'
 import type { RemoteSupportSession } from '../lib/remoteSupport'
 import {
@@ -202,7 +203,7 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Sync-Konto löschen', detail: 'Sync', section: 'sync', target: 'settings-sync-delete', keywords: 'sync konto löschen account delete server' },
   { label: 'Freigaben', detail: 'Teilen', section: 'share', target: 'settings-share', keywords: 'teilen freigabe link kopie live ordner notiz öffentlich stoppen beenden' },
   { label: 'App-Sprache', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'sprache language system deutsch englisch english' },
-  { label: 'Farbschema & Themes', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'theme dunkel hell system graphit klar mitternacht wald aurora sepia farbe' },
+  { label: 'Farbschema & Themes', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'theme dunkel hell system graphit klar mitternacht wald aurora sepia schnee farbe' },
   { label: 'Arbeitsflächen-Design', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'hintergrund verlauf mesh papier clean' },
   { label: 'Akzentfarben', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'farbe primär sekundär eigene accent' },
   { label: 'Kompakte Oberfläche', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'dichte platz klein kompakt' },
@@ -269,6 +270,7 @@ const THEMES: Array<{
   { id: 'forest', label: 'Wald', detail: 'Stein', background: '#171a18', surface: '#1e221f', accent: '#2a6f97', secondary: '#6b7280' },
   { id: 'aurora', label: 'Aurora', detail: 'Nebel', background: '#18181c', surface: '#1f1f24', accent: '#2a6f97', secondary: '#6b7280' },
   { id: 'sepia', label: 'Studierzimmer', detail: 'Warm', background: '#fbfaf7', surface: '#f4f1ea', accent: '#2a6f97', secondary: '#6b7280' },
+  { id: 'snow', label: 'Schnee', detail: 'Bewegliche Flocken', background: '#f4f7fb', surface: '#e7eef6', accent: '#2a6f97', secondary: '#6b7280' },
 ]
 
 const BACKGROUNDS: Array<{ id: AppSettings['workspaceBackground']; label: string }> = [
@@ -776,14 +778,7 @@ export function SettingsModal({
                           type="button"
                           key={theme.id}
                           className={`theme-choice ${settings.theme === theme.id ? 'active' : ''}`}
-                          onClick={() => onChange({
-                            ...settings,
-                            theme: theme.id,
-                            ...(theme.id === 'system' ? {} : {
-                              accent: theme.accent,
-                              accentSecondary: theme.secondary,
-                            }),
-                          })}
+                          onClick={() => onChange(applyThemeChoice(settings, theme))}
                         >
                           <span className="theme-choice-preview" style={{ background: theme.background }}>
                             <i style={{ background: theme.surface }} />

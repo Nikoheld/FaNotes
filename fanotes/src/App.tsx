@@ -270,6 +270,8 @@ import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from 
 import { applyRendererResourceLimits } from './lib/resourceLimits'
 import { getUiLanguage, getUiLocale, setUiLanguage, translateUiText } from './i18n'
 import { bestContrastText, ensureReadableColor } from './lib/colorContrast'
+import { snowLayerActive } from './lib/snowTheme'
+import { SnowLayer } from './components/SnowLayer'
 import type { AppSettings, BootstrapData, CreateResult, DrawingLibraryDocument, NoteHistorySnapshot, NoteTab, OneNoteImportResult, PaperStyle, SearchHit, UpdateState, VaultEntry, WorksheetDocument } from './types'
 
 const DrawingBoard = lazy(() => import('./components/DrawingBoard').then((module) => ({ default: module.DrawingBoard })))
@@ -705,6 +707,7 @@ const THEME_CONTRAST_SURFACES: Record<string, string[]> = {
   forest: ['#171a18', '#1e221f', '#1e221f', '#2a2f2c'],
   aurora: ['#18181c', '#1f1f24', '#1f1f24', '#2c2c33'],
   sepia: ['#fbfaf7', '#f4f1ea', '#f4f1ea', '#fffdf8'],
+  snow: ['#f4f7fb', '#e7eef6', '#e7eef6', '#fbfcfe'],
 }
 
 const saveExportFile = (filename: string, blob: Blob) => {
@@ -5480,6 +5483,7 @@ export default function App({ startupBootstrap }: AppProps) {
   }
   if (bootstrap.onboardingRequired) return (
     <div className={`app-shell first-run-shell theme-${theme} background-${settings.workspaceBackground} ${settings.reduceMotion ? 'no-motion' : ''}`} style={cssVars}>
+      {snowLayerActive(theme) ? <SnowLayer reduceMotion={settings.reduceMotion} /> : null}
       {sanitizeCustomCss(settings.customCss) && <style>{sanitizeCustomCss(settings.customCss)}</style>}
       <Suspense fallback={<div className="fatal-screen"><section className="fatal-card"><LoaderCircle className="spin" color="var(--accent)" /><h1>Fächerauswahl wird geladen …</h1></section></div>}>
         <FirstRunOnboarding subjects={bootstrap.starterSubjects} onComplete={completeOnboarding} />
@@ -5490,6 +5494,7 @@ export default function App({ startupBootstrap }: AppProps) {
 
   return (
     <div className={`app-shell theme-${theme} background-${settings.workspaceBackground} ${focusMode ? 'focus-mode' : ''} ${settings.compactMode ? 'compact' : ''} ${settings.reduceMotion ? 'no-motion' : ''} ${settings.glassEffects ? 'with-glass' : 'no-glass'}`} style={cssVars}>
+      {snowLayerActive(theme) ? <SnowLayer reduceMotion={settings.reduceMotion} /> : null}
       {sanitizeCustomCss(settings.customCss) && <style>{sanitizeCustomCss(settings.customCss)}</style>}
       <nav className="ribbon" aria-label="Hauptnavigation">
         <div className="ribbon-brand"><span aria-hidden="true">F</span><strong>FaNotes</strong></div>

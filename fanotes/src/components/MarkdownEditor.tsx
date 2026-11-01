@@ -1325,7 +1325,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   autocorrectEnabledRef.current = autocorrectEnabled
   const systemDark = useSystemDarkMode()
   const resolvedTheme = settings.theme === 'system' ? (systemDark ? 'dark' : 'light') : settings.theme
-  const dark = !paperMode && resolvedTheme !== 'light' && resolvedTheme !== 'sepia'
+  const dark = !paperMode && resolvedTheme !== 'light' && resolvedTheme !== 'sepia' && resolvedTheme !== 'snow'
 
   const compartments = useMemo(
     () => ({

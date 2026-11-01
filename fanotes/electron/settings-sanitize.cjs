@@ -9,7 +9,7 @@ const DANGEROUS_CUSTOM_CSS = /(?:@import|@charset|@namespace|@font-face|expressi
 
 const SETTINGS_SCHEMA = Object.freeze({
   uiLanguage: { type: 'enum', values: ['system', 'de', 'en'] },
-  theme: { type: 'enum', values: ['dark', 'light', 'system', 'midnight', 'forest', 'aurora', 'sepia'] },
+  theme: { type: 'enum', values: ['dark', 'light', 'system', 'midnight', 'forest', 'aurora', 'sepia', 'snow'] },
   workspaceBackground: { type: 'enum', values: ['clean', 'gradient', 'mesh', 'paper'] },
   accent: { type: 'color' },
   accentSecondary: { type: 'color' },

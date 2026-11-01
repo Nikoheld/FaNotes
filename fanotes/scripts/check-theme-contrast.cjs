@@ -4,7 +4,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const css = fs.readFileSync(path.join(__dirname, '..', 'src', 'styles.css'), 'utf8')
-const themeNames = ['dark', 'light', 'midnight', 'forest', 'aurora', 'sepia']
+const themeNames = ['dark', 'light', 'midnight', 'forest', 'aurora', 'sepia', 'snow']
 const foregrounds = ['text', 'text-soft', 'text-muted', 'danger', 'success', 'warning']
 const backgrounds = ['bg', 'bg-elevated', 'panel', 'panel-strong']
 

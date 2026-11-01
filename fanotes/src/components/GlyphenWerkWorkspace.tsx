@@ -95,7 +95,7 @@ const APPEARANCE_VARIABLES = [
 ] as const
 
 export type GlyphenWerkAppearance = {
-  theme: 'dark' | 'light' | 'midnight' | 'forest' | 'aurora' | 'sepia'
+  theme: 'dark' | 'light' | 'midnight' | 'forest' | 'aurora' | 'sepia' | 'snow'
   reduceMotion: boolean
 }
 

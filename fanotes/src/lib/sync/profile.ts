@@ -47,7 +47,7 @@ export type ProfileNoteSource = {
   pageStats?: Pick<PageStats, 'createdAt' | 'firstOpenedAt' | 'lastOpenedAt' | 'modifiedAt' | 'lastSavedAt' | 'dwellMs' | 'activeDays'> | null
 }
 
-export const PROFILE_THEMES = ['dark', 'light', 'midnight', 'forest', 'aurora', 'sepia'] as const
+export const PROFILE_THEMES = ['dark', 'light', 'midnight', 'forest', 'aurora', 'sepia', 'snow'] as const
 export type ProfileTheme = (typeof PROFILE_THEMES)[number]
 
 export type ProfileAppearance = {
