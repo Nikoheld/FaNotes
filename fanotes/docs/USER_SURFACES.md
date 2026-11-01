@@ -201,6 +201,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | PDF chrome in top bar | `src/lib/pdfInkHit.ts` | `PDF_TOOLBAR_SLOT_ID` |
 | Last opened note | `src/lib/lastOpenNote.ts` | `chooseRestoredNote` |
 | PDF document loader | `src/lib/pdfDocument.ts` | `openPdfDocument` |
+| PDF text recognition | `src/lib/pdfOcr.ts` | `export const pageNeedsLocalOcr` |
 | PDF open camera centers the page | `src/lib/pdfOpenCamera.ts` | `export const pdfOpenCamera` |
 | PDF open camera on tall pages | `src/lib/pdfOpenCamera.ts` | `export const pdfOpenCameraFromScroller` |
 | Worksheet layer | `src/components/WorksheetLayer.tsx` | `WorksheetLayer` |

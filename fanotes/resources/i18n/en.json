@@ -3960,5 +3960,6 @@
   "Regulärer Ausdruck": "Regular expression",
   "Ungültiger Ausdruck": "Invalid expression",
   "Suchen und ersetzen": "Find and replace",
-  "Vorheriger Treffer": "Previous match"
+  "Vorheriger Treffer": "Previous match",
+  "Text wird erkannt …": "Reading text locally …"
 }

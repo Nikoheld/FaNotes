@@ -59,6 +59,7 @@ const {
   stripFamdPayload,
   worksheetIdsFromMarkdown,
 } = require('./famd.cjs')
+const pdfOcrStore = require('./pdf-ocr.cjs')
 const { composeFile: composeFamdOffThread, openFile: openFamdOffThread } = require('./famdOpenPool.cjs')
 const { parseSubjectBooks } = require('./subject-book.cjs')
 const { createAddonStore, registerAddonIpc } = require('./addons.cjs')
@@ -173,6 +174,8 @@ const IPC = Object.freeze({
   writeFile: 'fanotes:write-file',
   readRecognitionModel: 'fanotes:read-recognition-model',
   writeRecognitionModel: 'fanotes:write-recognition-model',
+  readPdfOcr: 'fanotes:read-pdf-ocr',
+  writePdfOcr: 'fanotes:write-pdf-ocr',
   createNote: 'fanotes:create-note',
   convertFamdNotes: 'fanotes:convert-famd-notes',
   createFolder: 'fanotes:create-folder',
@@ -2369,6 +2372,97 @@ async function ensureInternalAssetsDirectory() {
   return { root, assetsDirectory: cursor }
 }
 
+async function ensurePdfOcrDirectory(root) {
+  let cursor = await ensureInternalVaultDirectory(root)
+  cursor = path.join(cursor, 'pdf-ocr')
+  try {
+    const info = await fsp.lstat(cursor)
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Der interne PDF-Ordner ist unsicher.')
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+    await fsp.mkdir(cursor, { mode: 0o700 }).catch((mkdirError) => {
+      if (mkdirError?.code !== 'EEXIST') throw mkdirError
+    })
+    const created = await fsp.lstat(cursor)
+    if (!created.isDirectory() || created.isSymbolicLink()) throw new Error('Der interne PDF-Ordner ist unsicher.')
+  }
+  const realCursor = await fsp.realpath(cursor)
+  if (!isInsideRoot(root, realCursor)) throw new Error('Der interne PDF-Ordner verlässt den Vault.')
+  return cursor
+}
+
+async function readPdfOcrTranscript(relativePath, info) {
+  if (!info || !Number.isFinite(info.size) || !Number.isFinite(info.mtimeMs)) return ''
+  const normalized = normalizeRelativePath(relativePath).split(path.sep).join('/')
+  let target
+  try {
+    target = (await resolveVaultPath(pdfOcrStore.sidecarRelative(normalized), {
+      allowInternal: true,
+      expected: 'file',
+    })).target
+  } catch {
+    return ''
+  }
+  try {
+    const raw = (await readRegularFileNoFollow(target, pdfOcrStore.MAX_BYTES)).toString('utf8')
+    return pdfOcrStore.transcriptForFile(raw, {
+      path: normalized,
+      size: info.size,
+      mtimeMs: Math.round(info.mtimeMs),
+    })
+  } catch {
+    return ''
+  }
+}
+
+/** Keep the internal transcript beside a renamed, moved, or deleted PDF. The PDF itself is not rewritten. */
+async function rewritePdfOcrSidecars(root, fromPath, toPath) {
+  const directory = path.join(root, INTERNAL_VAULT_DIRECTORY, 'pdf-ocr')
+  let names
+  try {
+    const info = await fsp.lstat(directory)
+    if (!info.isDirectory() || info.isSymbolicLink()) return
+    names = await fsp.readdir(directory)
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      console.warn('FaNotes: PDF-Texterkennung konnte nicht gelesen werden:', error?.message ?? error)
+    }
+    return
+  }
+  for (const name of names) {
+    if (!/^[a-f0-9]{32}\.json$/u.test(name)) continue
+    const filePath = path.join(directory, name)
+    try {
+      const raw = (await readRegularFileNoFollow(filePath, pdfOcrStore.MAX_BYTES)).toString('utf8')
+      const doc = pdfOcrStore.sanitize(JSON.parse(raw))
+      if (!doc) continue
+      const exact = doc.path === fromPath
+      const nested = doc.path.startsWith(`${fromPath}/`)
+      if (!exact && !nested) continue
+      if (toPath === null) {
+        await fsp.rm(filePath, { force: true })
+        continue
+      }
+      const nextPath = exact ? toPath : `${toPath}${doc.path.slice(fromPath.length)}`
+      let next = { ...doc, path: nextPath }
+      try {
+        const pdf = await resolveVaultPath(nextPath, { expected: 'file' })
+        const pdfInfo = await fsp.lstat(pdf.target)
+        if (!pdfInfo.isFile() || pdfInfo.isSymbolicLink()) throw new Error('missing')
+        next = { ...next, size: pdfInfo.size, mtimeMs: Math.round(pdfInfo.mtimeMs) }
+      } catch {
+        await fsp.rm(filePath, { force: true })
+        continue
+      }
+      const destination = path.join(directory, pdfOcrStore.sidecarName(nextPath))
+      await atomicWrite(destination, `${JSON.stringify(next)}\n`, { encoding: 'utf8', mode: 0o600 })
+      if (destination !== filePath) await fsp.rm(filePath, { force: true })
+    } catch (error) {
+      console.warn('FaNotes: PDF-Texterkennung konnte nicht mitgezogen werden:', error?.message ?? error)
+    }
+  }
+}
+
 function assertWorksheetId(value) {
   if (typeof value !== 'string' || !/^[a-zA-Z0-9_-]{1,96}$/.test(value)) {
     throw new Error('Ungültige Arbeitsblatt-ID.')
@@ -3564,6 +3658,9 @@ function registerIpcHandlers() {
       } catch (error) {
         console.warn('Ordnerfarben konnten nach dem Umbenennen nicht verschoben werden:', error?.message ?? error)
       }
+      await rewritePdfOcrSidecars(root, oldRelativePath, nextRelativePath).catch((error) => {
+        console.warn('FaNotes: PDF-Texterkennung konnte nicht mit umbenannt werden:', error?.message ?? error)
+      })
       return nextRelativePath
     } finally {
       mutationBarrier.release()
@@ -3663,6 +3760,9 @@ function registerIpcHandlers() {
       } catch (error) {
         console.warn('Ordnerfarben konnten nach dem Verschieben nicht mitgezogen werden:', error?.message ?? error)
       }
+      await rewritePdfOcrSidecars(root, oldRelativePath, nextRelativePath).catch((error) => {
+        console.warn('FaNotes: PDF-Texterkennung konnte nicht mit verschoben werden:', error?.message ?? error)
+      })
       return nextRelativePath
     } finally {
       mutationBarrier.release()
@@ -3714,6 +3814,9 @@ function registerIpcHandlers() {
       } catch (error) {
         console.warn('Ordnerfarben konnten nach dem Löschen nicht bereinigt werden:', error?.message ?? error)
       }
+      await rewritePdfOcrSidecars(root, trashedRelativePath, null).catch((error) => {
+        console.warn('FaNotes: PDF-Texterkennung konnte nicht gelöscht werden:', error?.message ?? error)
+      })
     } finally {
       mutationBarrier.release()
     }
@@ -3743,6 +3846,56 @@ function registerIpcHandlers() {
     await atomicWrite(target, content, { encoding: 'utf8', mode: 0o600 })
     const info = await fsp.stat(target)
     return { modifiedAt: info.mtime.toISOString() }
+  })
+
+  const pdfOcrFileIdentity = async (relativePath) => {
+    const normalized = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    if (!isPdfNoteExtension(path.extname(normalized).toLocaleLowerCase('en-US'))) return null
+    const { root, target } = await resolveVaultPath(normalized, { expected: 'file' })
+    const info = await fsp.lstat(target)
+    if (!info.isFile() || info.isSymbolicLink()) return null
+    return { root, normalized, size: info.size, mtimeMs: Math.round(info.mtimeMs) }
+  }
+
+  handle(IPC.readPdfOcr, async (_event, relativePath) => {
+    await ensureBootstrap()
+    if (typeof relativePath !== 'string') return null
+    try {
+      const identity = await pdfOcrFileIdentity(relativePath)
+      if (!identity) return null
+      const target = (await resolveVaultPath(pdfOcrStore.sidecarRelative(identity.normalized), {
+        allowInternal: true,
+        allowMissing: true,
+        expected: 'file',
+      })).target
+      const raw = (await readRegularFileNoFollow(target, pdfOcrStore.MAX_BYTES)).toString('utf8')
+      return pdfOcrStore.currentDocument(raw, {
+        path: identity.normalized,
+        size: identity.size,
+        mtimeMs: identity.mtimeMs,
+      })
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null
+      return null
+    }
+  })
+
+  handle(IPC.writePdfOcr, async (_event, payload) => {
+    await ensureBootstrap()
+    if (!isPlainObject(payload) || typeof payload.path !== 'string') {
+      throw new Error('Die lokale PDF-Texterkennung ist ungültig.')
+    }
+    const identity = await pdfOcrFileIdentity(payload.path)
+    if (!identity) throw new Error('Nur PDF-Notizen werden lokal gelesen.')
+    const document = pdfOcrStore.buildDocument(
+      { path: identity.normalized, size: payload.size, stamp: payload.stamp, pages: payload.pages },
+      { path: identity.normalized, size: identity.size, mtimeMs: identity.mtimeMs },
+    )
+    if (!document) return null
+    const directory = await ensurePdfOcrDirectory(identity.root)
+    const destination = path.join(directory, pdfOcrStore.sidecarName(identity.normalized))
+    await atomicWrite(destination, `${JSON.stringify(document)}\n`, { encoding: 'utf8', mode: 0o600 })
+    return document
   })
 
   handle(IPC.search, async (_event, rawQuery) => {
@@ -3801,6 +3954,11 @@ function registerIpcHandlers() {
         }
       }
       rememberDrawingOwner(drawingOwners, relativePath, content, ownerInk)
+      let ocrText = ''
+      if (file.kind === 'pdf') {
+        ocrText = await readPdfOcrTranscript(relativePath, file.info)
+        if (ocrText) content = content ? `${content}\n${ocrText}` : ocrText
+      }
       const haystack = `${relativePath}\n${content}\n${readableTranscript(inkTranscript)}`.toLocaleLowerCase('de-DE')
       const firstIndex = germanIndexOf(haystack, needle)
       if (firstIndex < 0) continue

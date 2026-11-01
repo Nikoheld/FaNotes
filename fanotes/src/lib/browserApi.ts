@@ -3,6 +3,13 @@ import { DEFAULT_SETTINGS } from '../defaults'
 import { getUiLanguage } from '../i18n'
 import type { AppSettings, BootstrapData, DrawingLibraryDocument, FaNotesApi, PaperStyle, ServerBackupState, UpdateState, VaultEntry, WorksheetDocument } from '../types'
 import { companionNotePath, emptyFamdPayload, famdEncodingForSave, parseFamd, serializeFamd } from './famd'
+import {
+  PDF_OCR_FORMAT,
+  sanitizePdfOcrCache,
+  sanitizePdfOcrPages,
+  type PdfOcrCache,
+  type PdfOcrWrite,
+} from './pdfOcr'
 import { nextSnapshotTier, retainSnapshots, snapshotExtension } from '../../electron/noteHistoryPolicy.mjs'
 import { germanCount, germanIndexOf } from './germanSearch'
 import { inkAnchorForQuery, noteSearchExcerpt, readableTranscript } from './searchInkAnchor'
@@ -240,6 +247,7 @@ export function createBrowserApi(): FaNotesApi {
   const assetUrls = new Map<string, string>()
   const drawings = new Map<string, DrawingLibraryDocument>()
   const worksheets = new Map<string, WorksheetDocument>()
+  const pdfOcr = new Map<string, PdfOcrCache>()
   const notePaper = new Map<string, PaperStyle>()
   let subjectBooks: SubjectBookRecord[] = []
   let folderLocations: FolderLocationMap = {}
@@ -294,6 +302,30 @@ export function createBrowserApi(): FaNotesApi {
   }
 
   const setMeta = (key: string, value: unknown, queueBackup = true) => write('meta', (store) => { store.put({ key, value } satisfies MetaRecord) }, queueBackup)
+
+  const retargetPdfOcr = async (from: string, to: string | null) => {
+    const moves: Array<{ from: string; doc: PdfOcrCache | null }> = []
+    for (const [stored, doc] of pdfOcr) {
+      const exact = stored === from
+      const nested = stored.startsWith(`${from}/`)
+      if (!exact && !nested) continue
+      moves.push({
+        from: stored,
+        doc: to === null ? null : { ...doc, path: exact ? to : `${to}${stored.slice(from.length)}` },
+      })
+    }
+    if (!moves.length) return
+    await write('meta', (store) => {
+      for (const move of moves) {
+        store.delete(`pdf-ocr:${move.from}`)
+        if (move.doc) store.put({ key: `pdf-ocr:${move.doc.path}`, value: move.doc } satisfies MetaRecord)
+      }
+    })
+    for (const move of moves) {
+      pdfOcr.delete(move.from)
+      if (move.doc) pdfOcr.set(move.doc.path, move.doc)
+    }
+  }
 
   const initialize = async () => {
     database = await openDatabase()
@@ -360,6 +392,13 @@ export function createBrowserApi(): FaNotesApi {
     assetRows.forEach((row) => assets.set(row.path, row.value))
     drawingRows.forEach((row) => drawings.set(row.id, row))
     worksheetRows.forEach((row) => worksheets.set(row.id, row))
+    for (const [key, value] of meta) {
+      if (!key.startsWith('pdf-ocr:')) continue
+      const parsed = sanitizePdfOcrCache(value)
+      const storedPath = key.slice('pdf-ocr:'.length)
+      if (!parsed || parsed.path !== storedPath) continue
+      pdfOcr.set(storedPath, parsed)
+    }
     if (serverBackup?.automatic) window.setTimeout(scheduleServerBackup, 5_000)
   }
 
@@ -790,6 +829,34 @@ export function createBrowserApi(): FaNotesApi {
       cachedTree = null
       return { modifiedAt: record.modifiedAt }
     },
+    readPdfOcr: async (rawPath) => {
+      await ready
+      const path = resolveStored(normalizePath(rawPath), false)
+      const doc = pdfOcr.get(path) ?? null
+      const blob = assets.get(path)
+      if (!doc || !blob || doc.size !== blob.size) return null
+      return doc
+    },
+    writePdfOcr: async (payload: PdfOcrWrite) => {
+      await ready
+      const path = resolveStored(normalizePath(payload.path), false)
+      const blob = assets.get(path)
+      if (!blob || !/\.pdf$/iu.test(path)) throw new Error('Die PDF-Notiz wurde nicht gefunden.')
+      if (payload.size !== blob.size) return null
+      const pages = sanitizePdfOcrPages(payload.pages)
+      if (!pages || !/^[a-f0-9]{8}$/u.test(payload.stamp)) throw new Error('Die lokale PDF-Texterkennung ist ungültig.')
+      const doc: PdfOcrCache = {
+        format: PDF_OCR_FORMAT,
+        path,
+        size: blob.size,
+        mtimeMs: 0,
+        stamp: payload.stamp,
+        pages,
+      }
+      await setMeta(`pdf-ocr:${path}`, doc)
+      pdfOcr.set(path, doc)
+      return doc
+    },
     writeFile: async (rawPath, content) => {
       await ready
       const logical = normalizePath(rawPath)
@@ -1005,6 +1072,7 @@ export function createBrowserApi(): FaNotesApi {
           }
         }
         if (shown !== next) await remapNotePaper(logical, shown)
+        if (next !== path) await retargetPdfOcr(path, next)
         return shown
       }
       const displayTaken = (candidate: string) => contentRoots(folderLocations, parentPath(logical)).some((root) => {
@@ -1090,6 +1158,7 @@ export function createBrowserApi(): FaNotesApi {
           }
         }
         if (shown !== next) await remapNotePaper(logical, shown)
+        if (next !== path) await retargetPdfOcr(path, next)
         return shown
       }
       if (currentParent === dest) return logicalResult(logical, path)
@@ -1220,6 +1289,7 @@ export function createBrowserApi(): FaNotesApi {
       cachedTree = null
       await remapNotePaper(path, null)
       if (logical !== path) await remapNotePaper(logical, null)
+      await retargetPdfOcr(path, null)
     },
     search: async (query) => {
       await ready
@@ -1277,9 +1347,19 @@ export function createBrowserApi(): FaNotesApi {
         const visiblePath = logicalPathForStored(folderLocations, path)
         if (visiblePath !== path && resolveStored(visiblePath, false) !== path) return []
         if (isPlaceholderDescendant(path, folderLocations) && visiblePath === path) return []
-        const haystack = `${visiblePath}\n${path}`.toLocaleLowerCase('de')
-        if (!haystack.includes(needle)) return []
-        return [{ relativePath: visiblePath, title: stem(fileName(path)), excerpt: `PDF · ${visiblePath}`, matches: haystack.split(needle).length - 1, kind: 'note' as const }]
+        const storedOcr = pdfOcr.get(path)
+        const blob = assets.get(path)
+        const ocrText = storedOcr && blob && storedOcr.size === blob.size
+          ? storedOcr.pages.map((page) => page.text).join('\n')
+          : ''
+        const haystack = `${visiblePath}\n${path}\n${ocrText}`.toLocaleLowerCase('de')
+        if (germanIndexOf(haystack, needle) < 0) return []
+        const source = `${visiblePath}\n${ocrText}`
+        const at = germanIndexOf(source.toLocaleLowerCase('de'), needle)
+        const excerpt = at >= 0
+          ? source.slice(Math.max(0, at - 40), at + needle.length + 80).replace(/\s+/gu, ' ').trim()
+          : `PDF · ${visiblePath}`
+        return [{ relativePath: visiblePath, title: stem(fileName(path)), excerpt, matches: germanCount(haystack, needle), kind: 'note' as const }]
       })
       return [...noteHits, ...pdfHits, ...drawingHits].slice(0, 250)
     },

@@ -49,6 +49,8 @@ import {
 } from '../lib/pdfCamera'
 import { pdfPageScrollIntoViewBlock } from '../lib/pdfOpenCamera'
 import { PDF_INKING_CLASS, PDF_TOOLBAR_SLOT_ID } from '../lib/pdfInkHit'
+import { pageNeedsLocalOcr, pdfByteStamp, pdfPagePlainText, pdfTextSearchHits } from '../lib/pdfOcr'
+import { runLocalPdfOcr } from '../lib/pdfOcrRun'
 import { VIEW_ZOOM_MIN, readSharedZoomMax, resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
 import { loadPaperViewMemory, recallPaperView } from '../lib/paperViewMemory'
 import { bindHandGestures, pinchFactorFromWheel, shouldTakeSheetZoom } from '../../../src/lib/handGestures'
@@ -535,6 +537,8 @@ export function PdfNoteView({
   const [searchHits, setSearchHits] = useState<SearchHit[]>([])
   const [searchIndex, setSearchIndex] = useState(0)
   const [searching, setSearching] = useState(false)
+  const [ocrRunning, setOcrRunning] = useState(false)
+  const [ocrPages, setOcrPages] = useState<ReadonlyMap<number, string>>(() => new Map())
   const [pageRatio, setPageRatio] = useState(DEFAULT_PDF_PAGE_RATIO)
   const [fitPageScale, setFitPageScale] = useState(1)
   const pagesRef = useRef<HTMLDivElement>(null)
@@ -547,6 +551,7 @@ export function PdfNoteView({
   const searchTokenRef = useRef(0)
   const pdfTaskRef = useRef<PDFDocumentLoadingTask | null>(null)
   const loadedPathRef = useRef('')
+  const pdfIdentityRef = useRef<{ path: string; size: number; stamp: string } | null>(null)
 
   // Inside a PaperView the toolbar zoom is the sheet camera: the page column
   // keeps its layout width (ink is 0–1 of the paper) and the camera scales it.
@@ -624,6 +629,9 @@ export function PdfNoteView({
     setSearchHits([])
     setSearchQuery('')
     setSearchOpen(false)
+    setOcrPages(new Map())
+    setOcrRunning(false)
+    pdfIdentityRef.current = null
     setSidebar('none')
     setRotation(0)
     setZoomMode('fit-width')
@@ -637,6 +645,7 @@ export function PdfNoteView({
       .then(async (bytes) => {
         if (!alive) return
         if (!bytes.length) throw new Error('Die PDF-Datei ist leer.')
+        pdfIdentityRef.current = { path, size: bytes.byteLength, stamp: pdfByteStamp(bytes) }
         try {
           const { pdf: loaded, task } = await openPdfDocument(bytes, password || undefined)
           if (!alive) {
@@ -690,6 +699,30 @@ export function PdfNoteView({
       void task?.destroy().catch(() => undefined)
     }
   }, [notifyLayout, password, path, setCameraMode])
+
+  useEffect(() => {
+    if (!pdf) return undefined
+    const identity = pdfIdentityRef.current
+    if (!identity || identity.path !== path) return undefined
+    const signal = { cancelled: false }
+    void runLocalPdfOcr({
+      path,
+      pdf,
+      size: identity.size,
+      stamp: identity.stamp,
+      signal: { cancelled: () => signal.cancelled },
+      onPages: (pages) => {
+        if (!signal.cancelled) setOcrPages(pages)
+      },
+      onState: (running) => {
+        if (!signal.cancelled) setOcrRunning(running)
+      },
+    })
+    return () => {
+      signal.cancelled = true
+      setOcrRunning(false)
+    }
+  }, [path, pdf])
 
   useEffect(() => {
     if (!onPageChange || pageCount < 1) return
@@ -888,29 +921,16 @@ export function PdfNoteView({
     const token = ++searchTokenRef.current
     setSearching(true)
     const hits: SearchHit[] = []
-    const lower = needle.toLocaleLowerCase('de-DE')
     for (let page = 1; page <= pdf.numPages; page += 1) {
       if (token !== searchTokenRef.current) return
+      if (hits.length >= 400) break
       try {
         const pdfPage = await pdf.getPage(page)
         const content = await pdfPage.getTextContent()
-        const text = content.items
-          .map((item) => ('str' in item && typeof item.str === 'string' ? item.str : ''))
-          .join(' ')
-        const haystack = text.toLocaleLowerCase('de-DE')
-        let cursor = 0
-        let local = 0
-        while (cursor < haystack.length && hits.length < 400) {
-          const index = haystack.indexOf(lower, cursor)
-          if (index < 0) break
-          hits.push({
-            page,
-            index: local,
-            excerpt: text.slice(Math.max(0, index - 28), Math.min(text.length, index + needle.length + 42)).replace(/\s+/gu, ' ').trim(),
-          })
-          local += 1
-          cursor = index + Math.max(needle.length, 1)
-        }
+        const extracted = pdfPagePlainText(content.items)
+        const recognized = ocrPages.get(page) ?? ''
+        const text = pageNeedsLocalOcr(extracted) && recognized.trim() ? recognized : extracted
+        hits.push(...pdfTextSearchHits(page, text, needle, 400 - hits.length))
       } catch {
         // A damaged page must not abort in-document search.
       }
@@ -920,7 +940,7 @@ export function PdfNoteView({
     setSearchIndex(0)
     setSearching(false)
     if (hits[0]) scrollToPage(hits[0].page)
-  }, [pdf, scrollToPage])
+  }, [ocrPages, pdf, scrollToPage])
 
   useEffect(() => {
     if (!searchOpen) return
@@ -1036,6 +1056,7 @@ export function PdfNoteView({
           <FileText size={15} />
           <strong>{title}</strong>
           <small>{pageCount ? `${pageCount} ${pageCount === 1 ? 'Seite' : 'Seiten'}` : '…'}</small>
+          {ocrRunning ? <small>Text wird erkannt …</small> : null}
         </span>
         <span className="pdf-note-pager">
           <button type="button" aria-label="Vorherige Seite" disabled={!pdf || currentPage <= 1} onClick={() => scrollToPage(currentPage - 1)}><ChevronUp size={14} /></button>
