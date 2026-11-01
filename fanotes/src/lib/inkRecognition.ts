@@ -42,6 +42,7 @@ import {
   WIDTH_RETRY_MARGIN,
   MIXED_CASE_SCALE,
   capitalizesOnlyTheFirstLetter,
+  aToAeIndexes,
   dToBIndexes,
   fToLowerIndexes,
   finalLetterApostropheIndexes,
@@ -790,6 +791,11 @@ export async function recognizeInk(
         decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null
       }
+    }
+    for (const index of aToAeIndexes(decoded.characters)) {
+      const characters = decoded.characters.map((character, characterIndex) => characterIndex === index ? { ...character, char: 'ä' } : character)
+      decoded = { ...decoded, characters, text: characters.map((character) => character.char).join('') }
+      stitched = null
     }
     for (const index of fToLowerIndexes(decoded.characters)) {
       const characters = decoded.characters.map((character, characterIndex) => characterIndex === index ? { ...character, char: 'f' } : character)

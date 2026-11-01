@@ -47,6 +47,9 @@ export const D_TO_B_MIN = 0.4
 /** A capital `F` becomes `f` when that alternative is at least this confident. */
 export const F_TO_F_MIN = 0.25
 
+/** An `a` becomes `ä` when that alternative is at least this confident. */
+export const A_TO_AE_MIN = 0.9
+
 const ADJECTIVE_ENDING = /(?:ischen|lichen)$/iu
 
 /** A smaller line that keeps every known word has to beat the default by this many nats. */
@@ -221,6 +224,15 @@ export const longUnknownWordEdits = (
   }
   return edits.length ? edits : null
 }
+
+/** Indexes of an `a` whose `ä` alternative is confident enough (`strasse` → `strässe`). */
+export const aToAeIndexes = (
+  characters: Array<{ char: string; alternatives?: Array<{ char: string; confidence: number }> }>,
+): number[] => characters.flatMap((character, index) => {
+  if (character.char !== 'a') return []
+  const hit = character.alternatives?.some((alternative) => alternative.char === 'ä' && alternative.confidence >= A_TO_AE_MIN)
+  return hit ? [index] : []
+})
 
 /** Indexes of a capital `F` whose lowercase alternative is confident enough (`Fifth` → `fifth`). */
 export const fToLowerIndexes = (
