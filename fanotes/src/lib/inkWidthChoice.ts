@@ -387,6 +387,32 @@ export const lowercaseShortBeamWord = (
 }
 
 /**
+ * An unknown word gains the one final letter the raw trace added (`Chudley` → `Chudleyh`).
+ * A known word such as `Soc` does not grow into `Soci`.
+ */
+export const trailingTracedLetter = (
+  text: string,
+  greedy: string,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const traced = inkWords(greedy)
+  const words = inkWords(text)
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]
+    const wordChars = [...word]
+    if (wordChars.length < 5 || known(word)) continue
+    for (const token of traced) {
+      const tokenChars = [...token]
+      if (tokenChars.length !== wordChars.length + 1) continue
+      if (tokenChars.slice(0, wordChars.length).join('') !== word) continue
+      if (known(token)) continue
+      return { index, from: word, to: token }
+    }
+  }
+  return null
+}
+
+/**
  * `einen` takes `der` before a long capital word (`einen des Landschaftsgeräte` → `einen der`).
  * `des` after another word, as in `Sinne des` or `Vorgaben des`, stays.
  */

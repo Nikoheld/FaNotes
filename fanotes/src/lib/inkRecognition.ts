@@ -81,6 +81,7 @@ import {
   isolatedWideGroups,
   lowercaseShortBeamWord,
   accusativeDer,
+  trailingTracedLetter,
   inkWords,
   charactersJoiningWords,
   insertedLetterInOneKnownWord,
@@ -1112,6 +1113,15 @@ export async function recognizeInk(
       const characters = [quote, ...decoded.characters.slice(3)]
       decoded = { ...decoded, characters, text: characters.map((character) => character.char).join('') }
       stitched = null
+    }
+    const tracedTail = trailingTracedLetter(decoded.text, decoded.greedyText, (word) => wordIsKnown(lineLanguage, word))
+    if (tracedTail) {
+      const rewritten = rewriteWord(decoded.characters, tracedTail.index, tracedTail.to)
+      const nextText = textWithWordEdits(decoded.text, [tracedTail])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
     }
     const article = accusativeDer(decoded.text)
     if (article) {
