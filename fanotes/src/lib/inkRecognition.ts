@@ -43,6 +43,7 @@ import {
   MIXED_CASE_SCALE,
   capitalizesOnlyTheFirstLetter,
   replacesBracketPeriodWithComma,
+  rewriteWord,
   charactersWithWordEdits,
   sameLettersAllowingCapsJoin,
   foldInkWord,
@@ -50,6 +51,7 @@ import {
   hasMixedInteriorCase,
   longUnknownWordEdits,
   narrowScaleKeepsKnownWords,
+  nounAfterAttributiveAdjective,
   oneLetterInALongUnknownWord,
   oneUnknownWordBecomesKnown,
   rewriteSameLengthWord,
@@ -780,6 +782,15 @@ export async function recognizeInk(
     if (letterEdit) {
       const rewritten = rewriteSameLengthWord(decoded.characters, letterEdit.index, letterEdit.to)
       const nextText = textWithWordEdits(decoded.text, [letterEdit])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
+    }
+    const nounEdit = nounAfterAttributiveAdjective(decoded.text, (word) => wordIsKnown(lineLanguage, word))
+    if (nounEdit) {
+      const rewritten = rewriteWord(decoded.characters, nounEdit.index, nounEdit.to)
+      const nextText = textWithWordEdits(decoded.text, [nounEdit])
       if (rewritten && nextText !== decoded.text) {
         decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null

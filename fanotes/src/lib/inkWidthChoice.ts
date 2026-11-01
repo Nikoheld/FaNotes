@@ -35,6 +35,8 @@ export const NARROW_STRETCH_MARGIN = 7
 /** A one-letter change to a long unknown word has to sit within this many nats of the top reading. */
 export const LONG_LETTER_MARGIN = 0.8
 
+const ADJECTIVE_ENDING = /(?:ischen|lichen)$/iu
+
 /** A smaller line that keeps every known word has to beat the default by this many nats. */
 export const NARROW_LINE_MARGIN = 5
 
@@ -208,6 +210,26 @@ export const longUnknownWordEdits = (
   return edits.length ? edits : null
 }
 
+/**
+ * After an attributive adjective in `-ischen` or `-lichen`, an infinitive becomes the
+ * `-ung` noun when both forms are in the dictionary (`großtechnischen Erzeugen` → `Erzeugung`).
+ */
+export const nounAfterAttributiveAdjective = (
+  text: string,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const words = inkWords(text)
+  for (let index = 1; index < words.length; index += 1) {
+    if (!ADJECTIVE_ENDING.test(words[index - 1])) continue
+    const word = words[index]
+    if (word.length < 6 || !word.toLowerCase().endsWith('en')) continue
+    const noun = `${word.slice(0, -2)}ung`
+    if (!known(word) || !known(noun)) continue
+    return { index, from: word, to: noun }
+  }
+  return null
+}
+
 /** Replaces the edited words inside `base`, including the punctuation around them. */
 export const textWithWordEdits = (base: string, edits: WordEdit[]) => {
   const spans = [...base.matchAll(WORD)]
@@ -363,6 +385,35 @@ export const oneLetterInALongUnknownWord = (
     if (!best || gap < best.gap) best = { gap, edit: hits[0] }
   }
   return best?.edit ?? null
+}
+
+/** Replaces one word inside `characters`. Extra letters reuse the last glyph of that word. */
+export const rewriteWord = <T extends { char: string }>(
+  characters: T[],
+  index: number,
+  to: string,
+): T[] | null => {
+  const runs: Array<{ start: number; end: number }> = []
+  let cursor = 0
+  while (cursor < characters.length) {
+    if (!/[A-Za-zÄÖÜäöüß]/u.test(characters[cursor].char)) {
+      cursor += 1
+      continue
+    }
+    const start = cursor
+    while (cursor < characters.length && /[A-Za-zÄÖÜäöüß]/u.test(characters[cursor].char)) cursor += 1
+    runs.push({ start, end: cursor })
+  }
+  const run = runs[index]
+  if (!run || run.end === run.start) return null
+  const letters = [...to]
+  const next = characters.slice(0, run.start)
+  letters.forEach((char, offset) => {
+    const source = characters[Math.min(run.start + offset, run.end - 1)]
+    next.push({ ...source, char })
+  })
+  next.push(...characters.slice(run.end))
+  return next
 }
 
 /** Replaces one same-length word inside `characters`, leaving every other glyph as it was. */
