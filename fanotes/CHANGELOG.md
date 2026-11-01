@@ -1,5 +1,26 @@
 # Änderungsverlauf
 
+## 2026.11.1-beta.1
+
+- Place a new note's camera even when the scroller still shows the last note.
+- Stop a short note from snapping back to the bottom.
+- Store a note text field when a tap lands on a normal page.
+- Arm text-field placement and open the Sync settings page.
+- Merge a remote stroke into an open drawing after that drawing has been saved.
+- Apply remote strokes on an open page after that drawing has been saved.
+- Absorb a shared edit only after the open editor already shows it.
+- Keep a shared edit's basis until the open note shows the remote text.
+- Keep simultaneous share edits when one buffer is still based on an older revision.
+- Add an editable share that several people can change at the same time.
+- Show shared handwriting in the editor column with every section open.
+- Run OneNote import with pinned Android arm64 tools.
+- Export the open handwriting page as the PDF.
+- Import OneNote sections with the desktop one2html tools.
+- Bring the Android tablet editor in line with the desktop app.
+- Keep large famd notes from freezing the window.
+- Keep the sidebar in place when a folder opens.
+- Keep a weekly note snapshot and a 12-hour snapshot for two days.
+
 ## 2026.10.13-beta.6
 
 - Write new notes in a compact famd encoding.
