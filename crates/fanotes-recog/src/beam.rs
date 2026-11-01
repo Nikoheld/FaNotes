@@ -469,6 +469,31 @@ pub fn beam_decode(
             }
         }
     }
+    // A short word grows by one or two letters when a close reading already has the
+    // dictionary word (`der` → `jeder`). The rest of the line stays put.
+    if let Some(dictionary) = dictionary {
+        let chosen = tidy(&render(&best));
+        let mut distinct = 0usize;
+        let mut previous = String::new();
+        for (prefix, score) in &finals {
+            if best_score - *score > 1.2 {
+                break;
+            }
+            let polished = polish(prefix, &greedy_ids, &words, Some(dictionary));
+            let text = tidy(&render(&polished));
+            if text != previous {
+                if distinct == options.n_best.max(1) {
+                    break;
+                }
+                distinct += 1;
+                previous = text.clone();
+            }
+            if inserts_into_a_short_word(&chosen, &text, dictionary) {
+                best = polished;
+                break;
+            }
+        }
+    }
     // The language model likes to split a long pen word into two known words (`Jack daws`).
     // If the raw trace has no space there and both pieces are long, join them back.
     let best = drop_spaces_absent_from_trace(&best, &greedy_text, &words, dictionary);
@@ -639,6 +664,73 @@ fn drop_spaces_absent_from_trace(
         .filter(|(index, _)| !drop[*index])
         .map(|(_, symbol)| *symbol)
         .collect()
+}
+
+/// `candidate` is `current` with one word of two or three letters growing by one or two
+/// inserted letters, and that longer word is in the dictionary.
+fn inserts_into_a_short_word(current: &str, candidate: &str, dictionary: &dyn Lexicon) -> bool {
+    let current: Vec<char> = current.chars().collect();
+    let candidate: Vec<char> = candidate.chars().collect();
+    let current_words = word_spans(&current);
+    let candidate_words = word_spans(&candidate);
+    if current_words.len() != candidate_words.len() || current_words.is_empty() {
+        return false;
+    }
+    let mut found = false;
+    let mut current_from = 0;
+    let mut candidate_from = 0;
+    for index in 0..current_words.len() {
+        let (current_start, current_end) = current_words[index];
+        let (candidate_start, candidate_end) = candidate_words[index];
+        if current[current_from..current_start] != candidate[candidate_from..candidate_start] {
+            return false;
+        }
+        let short = &current[current_start..current_end];
+        let long = &candidate[candidate_start..candidate_end];
+        if short != long {
+            if found || !(2..=3).contains(&short.len()) || !is_short_insertion(short, long) {
+                return false;
+            }
+            let word: String = long.iter().collect();
+            if !dictionary.contains(&dict_key(&word)) {
+                return false;
+            }
+            found = true;
+        }
+        current_from = current_end;
+        candidate_from = candidate_end;
+    }
+    found && current[current_from..] == candidate[candidate_from..]
+}
+
+fn word_spans(text: &[char]) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut index = 0;
+    while index < text.len() {
+        if !text[index].is_alphabetic() {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < text.len() && text[index].is_alphabetic() {
+            index += 1;
+        }
+        spans.push((start, index));
+    }
+    spans
+}
+
+fn is_short_insertion(short: &[char], long: &[char]) -> bool {
+    if long.len() <= short.len() || long.len() > short.len() + 2 {
+        return false;
+    }
+    let mut index = 0;
+    for &character in long {
+        if index < short.len() && character == short[index] {
+            index += 1;
+        }
+    }
+    index == short.len()
 }
 
 /// `candidate` differs from `current` only by turning lowercase letters into capitals,
@@ -1540,6 +1632,31 @@ mod tests {
         assert!(!promotes_one_unknown_letter(
             "über Personen",
             "über Paronen",
+            &Known
+        ));
+    }
+
+    #[test]
+    fn a_short_word_grows_only_into_a_dictionary_word() {
+        struct Known;
+        impl Lexicon for Known {
+            fn contains(&self, word: &str) -> bool {
+                word == "jeder"
+            }
+        }
+        assert!(inserts_into_a_short_word(
+            "muss der selbst lernen.",
+            "muss jeder selbst lernen.",
+            &Known
+        ));
+        assert!(!inserts_into_a_short_word(
+            "Marie luft statut",
+            "Marine luft statut",
+            &Known
+        ));
+        assert!(!inserts_into_a_short_word(
+            "muss der selbst.",
+            "muss jeder selbst,",
             &Known
         ));
     }
