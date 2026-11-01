@@ -57,8 +57,8 @@ assert.equal(readFileSync(join(siteRoot, 'public', 'share', 'share.js'), 'utf8')
 assert.equal(readFileSync(join(siteRoot, 'public', 'share', 'share.css'), 'utf8'), viewerStyle)
 assert.equal(readFileSync(join(siteRoot, 'public', 'share', 'share-link.js'), 'utf8'), viewerLink)
 assert.doesNotMatch(viewerHtml, /<style[\s>]/u)
-assert.match(viewerHtml, /<script src="share\.js\?v=5"><\/script>/u)
-assert.match(viewerHtml, /href="share\.css\?v=5"/u)
+assert.match(viewerHtml, /<script src="share\.js\?v=6"><\/script>/u)
+assert.match(viewerHtml, /href="share\.css\?v=6"/u)
 assert.match(viewerHtml, /<script src="share-link\.js\?v=4"><\/script>/u)
 assert.match(viewerScript, /share-note-title/u)
 assert.match(viewerScript, /share-prose/u)
@@ -67,6 +67,8 @@ assert.match(viewerScript, /share-section/u)
 assert.match(viewerScript, /share-column/u)
 assert.match(viewerScript, /is-heading/u)
 assert.match(viewerScript, /is-blank/u)
+assert.match(viewerScript, /visibleShareText/u)
+assert.match(viewerScript, /fanotes-famd:v2/u)
 assert.match(viewerScript, /createElement\('br'\)/u)
 assert.match(viewerStyle, /share-column/u)
 assert.doesNotMatch(viewerStyle, /left:\s*8%/u)
@@ -950,6 +952,40 @@ try {
     assert.equal(paragraphShape.text[1], 'Dritter Absatz.')
     assert.equal(paragraphShape.strong, 1)
     assert.equal(paragraphShape.em, 1)
+    const famdRecord = { schema: 'fanotes-famd-v1', updatedAt: '2026-11-01T00:00:00.000Z', ink: null, worksheets: [], pageStats: { words: 12, note: 'NICHT-ZEIGEN-FAMD' } }
+    const famdJson = JSON.stringify(famdRecord)
+    const famdPayload = encodeURIComponent(JSON.stringify({
+      mode: 'copy',
+      notes: [{ content: `# Sichtbar\n\nAbsatz bleibt.\n\n<!-- fanotes-famd:v1 chars=${famdJson.length} -->\n${famdJson}\n` }],
+    }))
+    viewed.errors.length = 0
+    await viewed.cdp.send('Page.navigate', { url: `${origin}/share/?payload=${famdPayload}` })
+    await waitForText(viewed.cdp, 'Absatz bleibt')
+    assert.equal(viewed.errors.length, 0, `famd page errors: ${viewed.errors.join(' | ')}`)
+    const famdText = await viewed.cdp.evaluate('document.body.innerText')
+    assert.match(famdText, /Sichtbar/)
+    assert.match(famdText, /Absatz bleibt/)
+    assert.doesNotMatch(famdText, /NICHT-ZEIGEN-FAMD/)
+    assert.doesNotMatch(famdText, /fanotes-famd/)
+    const famdHeight = await viewed.cdp.evaluate('document.documentElement.scrollHeight')
+    assert.ok(famdHeight < 900, `famd page is ${famdHeight}px tall`)
+    const famdV2 = JSON.stringify({ schema: 'fanotes-famd-v2', updatedAt: '2026-11-01T00:00:00.000Z', ink: null, worksheets: [], pageStats: { secret: 'NICHT-ZEIGEN-V2' } })
+    const columnFamdPayload = encodeURIComponent(JSON.stringify({
+      mode: 'copy',
+      notes: [{
+        content: `# Spalte\n\nZeile bleibt.\n\n<!-- fanotes-famd:v2 chars=${famdV2.length} crc=00000000 -->\n${famdV2}\n`,
+        ink: { width: 900, height: 1273, strokes: [{ color: '#222222', width: 2, points: [{ x: 0.1, y: 0.2 }, { x: 0.2, y: 0.22 }] }] },
+      }],
+    }))
+    viewed.errors.length = 0
+    await viewed.cdp.send('Page.navigate', { url: `${origin}/share/?payload=${columnFamdPayload}` })
+    await waitForText(viewed.cdp, 'Zeile bleibt')
+    assert.equal(viewed.errors.length, 0, `column famd errors: ${viewed.errors.join(' | ')}`)
+    const columnFamdText = await viewed.cdp.evaluate('document.body.innerText')
+    assert.doesNotMatch(columnFamdText, /NICHT-ZEIGEN-V2/)
+    assert.doesNotMatch(columnFamdText, /fanotes-famd/)
+    const columnFamdLines = await viewed.cdp.evaluate('[...document.querySelectorAll(".share-line")].map((line) => line.textContent).filter((line) => line.trim())')
+    assert.deepEqual(columnFamdLines, ['Spalte', 'Zeile bleibt.'])
     const inkView = await reloadViewer({ ...viewed, link: inkShare.record.link }, 'Neben der Linie')
     assert.equal(inkView.errors.length, 0, `ink page errors: ${inkView.errors.join(' | ')}`)
     assert.match(inkView.text, /Skizze/)

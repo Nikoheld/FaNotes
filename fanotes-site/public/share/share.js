@@ -99,8 +99,28 @@
     }
   }
 
+  // The saved note ends with a fanotes-famd companion. That JSON is not part of
+  // the document, and rendering it makes a huge block under the last paragraph.
+  function visibleShareText(source) {
+    var text = String(source || '').replace(/\r\n/g, '\n')
+    var v1 = text.lastIndexOf('fanotes-famd:v1')
+    var v2 = text.lastIndexOf('fanotes-famd:v2')
+    var tokenAt = v1 > v2 ? v1 : v2
+    if (tokenAt >= 0) {
+      var start = text.lastIndexOf('<!--', tokenAt)
+      if (start < 0) start = tokenAt
+      var cut = start > 0 && text.charAt(start - 1) === '\n' ? start - 1 : start
+      return text.slice(0, cut).replace(/\s+$/g, '')
+    }
+    var tail = /\n(\{[\s\S]*\})\s*$/u.exec(text)
+    if (tail && /"schema"\s*:\s*"fanotes-famd-v[12]"/u.test(tail[1])) {
+      return text.slice(0, tail.index).replace(/\s+$/g, '')
+    }
+    return text
+  }
+
   function renderMarkdown(parent, source) {
-    var text = String(source || '').replace(/<!--[\s\S]*?-->/g, '').replace(/\r\n/g, '\n')
+    var text = visibleShareText(source).replace(/<!--[\s\S]*?-->/g, '')
     var lines = text.split('\n')
     var index = 0
     var emitted = false
@@ -219,7 +239,7 @@
   }
 
   function sourceLines(source) {
-    var text = String(source || '').replace(/\r\n/g, '\n')
+    var text = visibleShareText(source)
     var marker = /<!--\s*fanotes-ink:[a-zA-Z0-9_-]{1,96}\s*-->/gu
     return text.split('\n').map(function (line) { return line.replace(marker, '') })
   }
