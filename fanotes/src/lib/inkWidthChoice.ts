@@ -19,6 +19,12 @@ export const WIDTH_RETRY_MARGIN = 2
 /** A two-word merge has to beat the default reading by this many nats. */
 export const MERGE_SCORE_MARGIN = 4
 
+/** A small back-slant tried when the upright pen leaves two neighboring words wrong. */
+export const INK_SHEAR_RETRY = -0.08
+
+/** That slanted rendering has to beat the upright reading by this many nats. */
+export const SHEAR_SCORE_MARGIN = 0.4
+
 /** Copying one long unknown word out of another rendering requires this much of a lead. */
 export const SPLICE_SCORE_MARGIN = 5
 
@@ -208,6 +214,24 @@ export const hasMixedInteriorCase = (text: string) => inkWords(text).some((word)
   const lower = (character: string) => character !== character.toUpperCase() && character === character.toLowerCase()
   return letters.slice(1).some(upper) && letters.some(lower)
 })
+
+/**
+ * True when `alternate` rewrites exactly two neighboring words of at least four letters
+ * and leaves every other word as it was (`Waten tauscht` → `Welt entlauscht`).
+ */
+export const shearReadingRewritesTwoWords = (base: string, alternate: string) => {
+  const left = inkWords(base)
+  const right = inkWords(alternate)
+  if (left.length !== right.length || left.length < 2) return false
+  const diffs: number[] = []
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) diffs.push(index)
+  }
+  if (diffs.length !== 2 || diffs[1] !== diffs[0] + 1) return false
+  const longEnough = (word: string) => word.length >= 4
+  return longEnough(left[diffs[0]]) && longEnough(right[diffs[0]])
+    && longEnough(left[diffs[1]]) && longEnough(right[diffs[1]])
+}
 
 /** True when the strings use the same letters and differ only in case. */
 export const differsOnlyInCase = (left: string, right: string) => left !== right && left.toLowerCase() === right.toLowerCase()

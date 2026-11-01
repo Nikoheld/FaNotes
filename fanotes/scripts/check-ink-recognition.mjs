@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { INK_RETRY_VARIANTS, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, charactersWithWordEdits, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, sameLettersAllowingCapsJoin, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, charactersWithWordEdits, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -57,6 +57,18 @@ for (const language of ['de', 'en']) {
 const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(word))
 {
   const known = knownWord('de')
+  assert.equal(shearReadingRewritesTwoWords(
+    'Die Ausbildung in dieser Waten tauscht mich.',
+    'Die Ausbildung in dieser Welt entlauscht mich.',
+  ), true)
+  assert.equal(shearReadingRewritesTwoWords(
+    'und Computerspielen sowie über Personen, die daran',
+    'und Computerspielen sowie über Personen, die Paronen',
+  ), false)
+  assert.equal(shearReadingRewritesTwoWords(
+    'Das wird nie enden.',
+    'Das wird sie enden.',
+  ), false)
   assert.equal(hasMixedInteriorCase('PEcK SNIFF long-lost'), true)
   assert.equal(sameLettersAllowingCapsJoin('PEcK SNIFF long-lost', 'PECKSNIFF long-lost'), true)
   assert.equal(sameLettersAllowingCapsJoin('PEcK SNIFF long-lost', 'PECK SNIFF long-lost'), true)
@@ -175,6 +187,7 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
     const baseDecoded = decoded
     let penWidth = manifest.decoder.penWidth ?? 2.6
     let scale = 1
+    let shear = 0
     const baseText = decoded.text
     const baseScore = decoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
     let spliceBest = null
@@ -225,8 +238,23 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
         })
       }
     }
+    if (decoded.text === baseText && exactWords[entry.language]?.size) {
+      const shearRaw = inkLineImage(linePacked, reference, penWidth, INK_SHEAR_RETRY, scale)
+      if (shearRaw.length >= 3) {
+        const shearStarted = Date.now()
+        const shearRun = await host.recognize({ input: Float32Array.from(shearRaw.subarray(2)), width: shearRaw[0], height: 64, threads: 4 })
+        inferenceMs += Date.now() - shearStarted
+        const shearDecoded = JSON.parse(inkDecode(shearRun.probabilities, shearRun.dims[2], manifest.alphabet, entry.language, decoderOptionsFor(entry.language)))
+        const shearScore = shearDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+        if (shearScore >= baseScore + SHEAR_SCORE_MARGIN && shearReadingRewritesTwoWords(baseText, shearDecoded.text)) {
+          decoded = shearDecoded
+          shear = INK_SHEAR_RETRY
+          boxes = undefined
+        }
+      }
+    }
     if (hasMixedInteriorCase(decoded.text)) {
-      const caseRaw = inkLineImage(linePacked, reference, penWidth, 0, MIXED_CASE_SCALE)
+      const caseRaw = inkLineImage(linePacked, reference, penWidth, shear, MIXED_CASE_SCALE)
       if (caseRaw.length >= 3) {
         const caseStarted = Date.now()
         const caseRun = await host.recognize({ input: Float32Array.from(caseRaw.subarray(2)), width: caseRaw[0], height: 64, threads: 4 })
@@ -243,7 +271,7 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
     }
     if (!boxes) {
       const spans = new Uint32Array(decoded.characters.flatMap((c) => [c.startFrame, c.endFrame]))
-      boxes = inkSpanBoxes(linePacked, reference, penWidth, 0, scale, spans)
+      boxes = inkSpanBoxes(linePacked, reference, penWidth, shear, scale, spans)
     }
     if (!decoded.text.trim()) continue
     lines.push({ decoded, boxes, characters: decoded.characters.length })

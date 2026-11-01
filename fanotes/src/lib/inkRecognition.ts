@@ -27,7 +27,9 @@ import { ensureRecogWasm } from './recogCore'
 import { effectiveOcrThreadCount } from './resourceLimits'
 import {
   INK_RETRY_VARIANTS,
+  INK_SHEAR_RETRY,
   MERGE_SCORE_MARGIN,
+  SHEAR_SCORE_MARGIN,
   SPLICE_SCORE_MARGIN,
   WIDTH_RETRY_MARGIN,
   MIXED_CASE_SCALE,
@@ -37,6 +39,7 @@ import {
   hasLongUnknownWord,
   hasMixedInteriorCase,
   longUnknownWordEdits,
+  shearReadingRewritesTwoWords,
   textWithWordEdits,
   widthReadingKeepsKnownWords,
   widthReadingMergesTwoWords,
@@ -531,6 +534,7 @@ export async function recognizeInk(
     let activeImage = image
     let activePenWidth = style.penWidth
     let activeScale = style.scale
+    let activeShear = style.extraShear
     const baseDecoded = decoded
     const baseText = decoded.text
     const baseScore = decoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
@@ -609,9 +613,36 @@ export async function recognizeInk(
     }
     if (
       defaultPen
+      && decoded.text === baseText
+      && exactWords[lineLanguage].size > 0
+    ) {
+      const shearImage = renderLine(packed, reference, { ...style, extraShear: INK_SHEAR_RETRY })
+      if (shearImage) {
+        const shearInferenceStarted = performance.now()
+        const shearRun = await infer(shearImage, threads, usePersonalModel)
+        inferenceMs += performance.now() - shearInferenceStarted
+        if (shearRun.classes === engine.classes) {
+          const shearDecodeStarted = performance.now()
+          const shearDecoded = decodeLine(engine, shearRun.logits, lineLanguage, decoderForLanguage(engine.manifest.decoder, lineLanguage))
+          decodeMs += performance.now() - shearDecodeStarted
+          const shearScore = shearDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+          if (
+            shearScore >= baseScore + SHEAR_SCORE_MARGIN
+            && shearReadingRewritesTwoWords(baseText, shearDecoded.text)
+          ) {
+            decoded = shearDecoded
+            activeImage = shearImage
+            activeShear = INK_SHEAR_RETRY
+            stitched = null
+          }
+        }
+      }
+    }
+    if (
+      defaultPen
       && hasMixedInteriorCase(decoded.text)
     ) {
-      const caseImage = renderLine(packed, reference, { ...style, penWidth: activePenWidth, scale: MIXED_CASE_SCALE })
+      const caseImage = renderLine(packed, reference, { ...style, penWidth: activePenWidth, extraShear: activeShear, scale: MIXED_CASE_SCALE })
       if (caseImage) {
         const caseInferenceStarted = performance.now()
         const caseRun = await infer(caseImage, threads, usePersonalModel)
@@ -633,7 +664,7 @@ export async function recognizeInk(
     }
     if (!decoded.text.trim()) continue
     const spans = new Uint32Array(decoded.characters.flatMap((character) => [character.startFrame, character.endFrame]))
-    const boxes = stitched?.boxes ?? inkSpanBoxes(activeImage.packed, reference, activePenWidth, style.extraShear, activeScale, spans)
+    const boxes = stitched?.boxes ?? inkSpanBoxes(activeImage.packed, reference, activePenWidth, activeShear, activeScale, spans)
     const unstretch = 1 / style.stretchX
     lines.push({
       text: decoded.text,
