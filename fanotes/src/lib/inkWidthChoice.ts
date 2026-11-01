@@ -505,6 +505,46 @@ export const insertedLetterInOneKnownWord = (
   return best?.edit ?? null
 }
 
+/**
+ * A capital dictionary word absorbs the next long lowercase unknown word
+ * (`Marine luftstreitkraft` → `Marineluftstreitkraft`). A following capital stays
+ * apart (`österreichischen Fußballnationalmannschaft`), and a shorter lowercase
+ * word stays apart (`Welt entlauscht`).
+ */
+export const capitalCompoundIndex = (
+  text: string,
+  known: (word: string) => boolean,
+): number | null => {
+  const spans = [...text.matchAll(WORD)]
+  for (let index = 0; index < spans.length - 1; index += 1) {
+    const left = spans[index]
+    const right = spans[index + 1]
+    if (left.index === undefined || right.index === undefined) continue
+    if (text.slice(left.index + left[0].length, right.index) !== ' ') continue
+    const head = left[0]
+    const tail = right[0]
+    if (head[0] === head[0].toLowerCase() || tail[0] !== tail[0].toLowerCase()) continue
+    if ([...head].length < 4 || [...tail].length < SPLICE_MIN_LETTERS) continue
+    if (!known(head) || known(tail)) continue
+    return index
+  }
+  return null
+}
+
+/** Drops the single space between word `index` and the next word. */
+export const charactersJoiningWords = <T extends { char: string }>(
+  characters: T[],
+  index: number,
+): T[] | null => {
+  const runs = letterRuns(characters)
+  const left = runs[index]
+  const right = runs[index + 1]
+  if (!left || !right) return null
+  const between = characters.slice(left.end, right.start)
+  if (between.length !== 1 || between[0].char !== ' ') return null
+  return [...characters.slice(0, left.end), ...characters.slice(right.start)]
+}
+
 /** Replaces one word inside `characters`. Extra letters reuse the last glyph of that word. */
 export const rewriteWord = <T extends { char: string }>(
   characters: T[],

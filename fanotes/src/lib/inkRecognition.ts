@@ -57,6 +57,8 @@ import {
   longUnknownWordEdits,
   narrowScaleKeepsKnownWords,
   nounAfterAttributiveAdjective,
+  capitalCompoundIndex,
+  charactersJoiningWords,
   insertedLetterInOneKnownWord,
   oneLetterInALongUnknownWord,
   oneUnknownWordBecomesKnown,
@@ -794,6 +796,15 @@ export async function recognizeInk(
           decoded = { ...decoded, text: nextText, characters: rewritten }
           stitched = null
         }
+      }
+    }
+    const compoundIndex = capitalCompoundIndex(decoded.text, (word) => wordIsKnown(lineLanguage, word))
+    if (compoundIndex !== null) {
+      const characters = charactersJoiningWords(decoded.characters, compoundIndex)
+      const nextText = characters?.map((character) => character.char).join('')
+      if (characters && nextText && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters }
+        stitched = null
       }
     }
     const letterEdit = oneLetterInALongUnknownWord(
