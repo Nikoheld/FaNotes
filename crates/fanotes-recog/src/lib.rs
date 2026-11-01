@@ -27,8 +27,8 @@ pub use charlm::{context_hash, CharLm, CharLmError};
 pub use ctc::{decode_ctc, CtcDecoded, CtcRun, DecodeError};
 pub use fusion::{fuse_recognition_model, FusionEntry, FusionModel};
 pub use ink::{
-    ink_image, ink_transform, InkImage, InkOptions, InkTransform, INK_FRAME_STRIDE, INK_HEIGHT,
-    INK_MARGIN_X, INK_MARGIN_Y, INK_MAX_WIDTH, INK_MIN_WIDTH, INK_PEN_WIDTH,
+    ink_image, ink_span_boxes, ink_transform, InkImage, InkOptions, InkTransform, INK_FRAME_STRIDE,
+    INK_HEIGHT, INK_MARGIN_X, INK_MARGIN_Y, INK_MAX_WIDTH, INK_MIN_WIDTH, INK_PEN_WIDTH,
 };
 pub use language::Language;
 pub use line::{

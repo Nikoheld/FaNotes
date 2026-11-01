@@ -1,6 +1,9 @@
 //! The model image must match the Python reference that renders the training data.
 
-use fanotes_recog::{group_ink_lines, ink_image, InkOptions, INK_HEIGHT};
+use fanotes_recog::{
+    group_ink_lines, ink_image, ink_span_boxes, ink_transform, InkOptions, INK_FRAME_STRIDE,
+    INK_HEIGHT,
+};
 
 fn decode_base64(text: &str) -> Vec<u8> {
     let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -118,6 +121,42 @@ fn line_grouping_keeps_rows_and_dots_together() {
         );
         assert_eq!(line.strokes.len(), 6);
     }
+}
+
+#[test]
+fn a_span_without_ink_sits_between_its_neighbours() {
+    let strokes = vec![
+        vec![(0.0, 0.0), (0.0, 20.0), (12.0, 20.0)],
+        vec![(90.0, 0.0), (90.0, 20.0), (102.0, 20.0)],
+    ];
+    let options = InkOptions::default();
+    let (transform, _) = ink_transform(&strokes, &options).unwrap();
+    let frame = |x: f64, y: f64| transform.apply(x, y).0 / f64::from(INK_FRAME_STRIDE);
+    let left_end = frame(12.0, 20.0).ceil() as u32 + 1;
+    let right_start = frame(90.0, 0.0).floor() as u32;
+    assert!(right_start > left_end + 1, "the gap must cover a frame");
+    let spans = [
+        [0, left_end],
+        [left_end, right_start],
+        [right_start, right_start + 8],
+    ];
+    let boxes = ink_span_boxes(&strokes, &options, &spans);
+    assert!(boxes.iter().all(|region| region[0].is_finite()));
+    assert!(
+        boxes[1][0] >= 12.0 && boxes[1][2] <= 90.0 && boxes[1][2] > boxes[1][0],
+        "{:?}",
+        boxes[1]
+    );
+    assert!(
+        boxes[0][2] <= 12.0 + 1e-6,
+        "left ink stays on the left letter: {:?}",
+        boxes[0]
+    );
+    assert!(
+        boxes[2][0] >= 90.0 - 1e-6,
+        "right ink stays on the right letter: {:?}",
+        boxes[2]
+    );
 }
 
 #[test]

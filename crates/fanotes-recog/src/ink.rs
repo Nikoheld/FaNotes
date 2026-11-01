@@ -212,6 +212,111 @@ pub fn ink_transform(
     ))
 }
 
+/// Page-space boxes `[min_x, min_y, max_x, max_y]` of the ink under each frame span.
+/// A span with no ink of its own (a space, or punctuation the pen skipped) is placed
+/// between the neighbouring ink boxes so it still has a position on the page.
+pub fn ink_span_boxes(
+    strokes: &[Vec<(f64, f64)>],
+    options: &InkOptions,
+    spans: &[[u32; 2]],
+) -> Vec<[f64; 4]> {
+    let mut boxes = vec![[f64::NAN; 4]; spans.len()];
+    let Some((transform, _)) = ink_transform(strokes, options) else {
+        return boxes;
+    };
+    let points: Vec<(f64, f64)> = strokes.iter().flatten().copied().collect();
+    let stride = f64::from(INK_FRAME_STRIDE);
+    for &(x, y) in &points {
+        let frame = transform.apply(x, y).0 / stride;
+        for (index, span) in spans.iter().enumerate() {
+            if frame >= f64::from(span[0]) && frame < f64::from(span[1]) {
+                let target = &mut boxes[index];
+                if target[0].is_nan() {
+                    *target = [x, y, x, y];
+                } else {
+                    target[0] = target[0].min(x);
+                    target[1] = target[1].min(y);
+                    target[2] = target[2].max(x);
+                    target[3] = target[3].max(y);
+                }
+            }
+        }
+    }
+    fill_empty_spans(
+        &mut boxes,
+        spans,
+        &points,
+        stride / transform.scale().max(1e-6),
+    );
+    boxes
+}
+
+fn fill_empty_spans(
+    boxes: &mut [[f64; 4]],
+    spans: &[[u32; 2]],
+    points: &[(f64, f64)],
+    page_per_frame: f64,
+) {
+    if points.is_empty() {
+        return;
+    }
+    let finite: Vec<usize> = boxes
+        .iter()
+        .enumerate()
+        .filter(|(_, region)| region[0].is_finite())
+        .map(|(index, _)| index)
+        .collect();
+    let (min_x, min_y, max_x, max_y) = bounds(&[points.to_vec()]);
+    for index in 0..boxes.len() {
+        if boxes[index][0].is_finite() {
+            continue;
+        }
+        let previous = finite.iter().copied().rev().find(|&other| other < index);
+        let next = finite.iter().copied().find(|&other| other > index);
+        let frames = f64::from(spans[index][1].saturating_sub(spans[index][0]).max(1));
+        let width = (frames * page_per_frame).max(page_per_frame);
+        let (mut x0, mut x1, mut y0, mut y1) = match (previous, next) {
+            (Some(previous), Some(next)) => {
+                let left = boxes[previous][2];
+                let right = boxes[next][0];
+                let from = f64::from(spans[previous][1]);
+                let to = f64::from(spans[next][0]).max(from + 1.0);
+                let start = f64::from(spans[index][0]);
+                let end = f64::from(spans[index][1].max(spans[index][0] + 1));
+                let x0 = left + (right - left) * ((start - from) / (to - from));
+                let x1 = left + (right - left) * ((end - from) / (to - from));
+                let y0 = boxes[previous][1].min(boxes[next][1]);
+                let y1 = boxes[previous][3].max(boxes[next][3]);
+                (x0.min(x1), x0.max(x1), y0, y1)
+            }
+            (Some(previous), None) => {
+                let x0 = boxes[previous][2];
+                (x0, x0 + width, boxes[previous][1], boxes[previous][3])
+            }
+            (None, Some(next)) => {
+                let x1 = boxes[next][0];
+                (x1 - width, x1, boxes[next][1], boxes[next][3])
+            }
+            (None, None) => {
+                let count = boxes.len().max(1) as f64;
+                let x0 = min_x + (max_x - min_x) * (index as f64 / count);
+                let x1 = min_x + (max_x - min_x) * ((index as f64 + 1.0) / count);
+                (x0, x1, min_y, max_y)
+            }
+        };
+        if !x0.is_finite() || !x1.is_finite() {
+            x0 = min_x;
+            x1 = max_x;
+            y0 = min_y;
+            y1 = max_y;
+        }
+        if x1 < x0 {
+            std::mem::swap(&mut x0, &mut x1);
+        }
+        boxes[index] = [x0, y0.min(y1), x1, y0.max(y1)];
+    }
+}
+
 /// Draws `strokes` (page units) into the model image.
 pub fn ink_image(strokes: &[Vec<(f64, f64)>], options: &InkOptions) -> Option<InkImage> {
     let (transform, width) = ink_transform(strokes, options)?;

@@ -1,8 +1,8 @@
 //! Browser and Electron entry for the shared handwriting recognition code.
 //!
-//! Loaded with the handwriting recognizer, not at application startup. Model inference stays in
-//! `onnxruntime-web`; this module groups and renders the ink, decodes the model output with the
-//! language model and fits the personal classifier update.
+//! Loaded with the handwriting recognizer, not at application startup. The desktop sidecar runs
+//! the model; this module groups and renders the ink, decodes the model output with the language
+//! model and fits the personal classifier update.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -10,8 +10,8 @@ use std::sync::OnceLock;
 
 use fanotes_recog::{
     beam_decode, ctc_loss_and_gradient, decode_ctc, fuse_recognition_model, group_ink_lines,
-    ink_image, ink_transform, line_tensor, BeamOptions, CharLm, FusionEntry, InkOptions, Language,
-    Lexicon, LineBounds, LineOptions, LineStroke, INK_FRAME_STRIDE,
+    ink_image, ink_span_boxes, line_tensor, BeamOptions, CharLm, FusionEntry, InkOptions, Language,
+    Lexicon, LineBounds, LineOptions, LineStroke,
 };
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
@@ -150,27 +150,10 @@ pub fn ink_span_boxes_js(
 ) -> Result<Vec<f64>, JsError> {
     let strokes = unpack_ink(packed)?;
     let options = ink_options(ref_height, pen_width, extra_shear, scale);
-    let mut out = vec![f64::NAN; spans.len() / 2 * 4];
-    let Some((transform, _)) = ink_transform(&strokes, &options) else {
-        return Ok(out);
-    };
-    let stride = f64::from(INK_FRAME_STRIDE);
-    for &(x, y) in strokes.iter().flatten() {
-        let (image_x, _) = transform.apply(x, y);
-        let frame = image_x / stride;
-        for (span, pair) in spans.as_chunks::<2>().0.iter().enumerate() {
-            if frame >= f64::from(pair[0]) && frame < f64::from(pair[1]) {
-                let target = &mut out[span * 4..span * 4 + 4];
-                if target[0].is_nan() {
-                    target.copy_from_slice(&[x, y, x, y]);
-                } else {
-                    target[0] = target[0].min(x);
-                    target[1] = target[1].min(y);
-                    target[2] = target[2].max(x);
-                    target[3] = target[3].max(y);
-                }
-            }
-        }
+    let spans: Vec<[u32; 2]> = spans.as_chunks::<2>().0.to_vec();
+    let mut out = Vec::with_capacity(spans.len() * 4);
+    for region in ink_span_boxes(&strokes, &options, &spans) {
+        out.extend(region);
     }
     Ok(out)
 }
