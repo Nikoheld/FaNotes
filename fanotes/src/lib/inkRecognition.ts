@@ -27,10 +27,12 @@ import { ensureRecogWasm } from './recogCore'
 import { effectiveOcrThreadCount } from './resourceLimits'
 import {
   INK_RETRY_WIDTHS,
+  MERGE_SCORE_MARGIN,
   WIDTH_RETRY_MARGIN,
   foldInkWord,
   hasLongUnknownWord,
   widthReadingKeepsKnownWords,
+  widthReadingMergesTwoWords,
 } from './inkWidthChoice'
 
 export const INK_MANIFEST_FORMAT = 'fanotes-ink-recognizer-v1'
@@ -544,8 +546,13 @@ export async function recognizeInk(
         const retryDecoded = decodeLine(engine, retryRun.logits, lineLanguage, decoderForLanguage(engine.manifest.decoder, lineLanguage))
         decodeMs += performance.now() - retryDecodeStarted
         const retryScore = retryDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
-        if (retryScore < baseScore + WIDTH_RETRY_MARGIN || retryScore <= bestScore) continue
-        if (!widthReadingKeepsKnownWords(baseText, retryDecoded.text, (word) => wordIsKnown(lineLanguage, word))) continue
+        if (retryScore <= bestScore) continue
+        const known = (word: string) => wordIsKnown(lineLanguage, word)
+        const wordFix = retryScore >= baseScore + WIDTH_RETRY_MARGIN
+          && widthReadingKeepsKnownWords(baseText, retryDecoded.text, known)
+        const mergeFix = retryScore >= baseScore + MERGE_SCORE_MARGIN
+          && widthReadingMergesTwoWords(baseText, retryDecoded.text)
+        if (!wordFix && !mergeFix) continue
         decoded = retryDecoded
         activeImage = retryImage
         activePenWidth = penWidth

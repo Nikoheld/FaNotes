@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { INK_RETRY_WIDTHS, WIDTH_RETRY_MARGIN, foldInkWord, hasLongUnknownWord, widthReadingKeepsKnownWords } from '../src/lib/inkWidthChoice.ts'
+import { INK_RETRY_WIDTHS, MERGE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, foldInkWord, hasLongUnknownWord, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -72,6 +72,14 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
     'Nuklearenaie ist die Technologie',
     'Nuklearen sie ist die Technologie',
     known,
+  ), false)
+  assert.equal(widthReadingMergesTwoWords(
+    'Kaiserlich Japanischen Marie luft statut in Friedenszeiten auf die in',
+    'Kaiserlich Japanischen Marie luftstreitkraft in Friedenszeiten auf die in',
+  ), true)
+  assert.equal(widthReadingMergesTwoWords(
+    'und Computerspielen sowie über Personen, die daran',
+    'und Computerspielen sowie über Personen, die davon',
   ), false)
 }
 
@@ -161,8 +169,13 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
         inferenceMs += Date.now() - retryStarted
         const retryDecoded = JSON.parse(inkDecode(retry.probabilities, retry.dims[2], manifest.alphabet, entry.language, decoderOptionsFor(entry.language)))
         const retryScore = retryDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
-        if (retryScore < baseScore + WIDTH_RETRY_MARGIN || retryScore <= bestScore) continue
-        if (!widthReadingKeepsKnownWords(baseText, retryDecoded.text, knownWord(entry.language))) continue
+        if (retryScore <= bestScore) continue
+        const known = knownWord(entry.language)
+        const wordFix = retryScore >= baseScore + WIDTH_RETRY_MARGIN
+          && widthReadingKeepsKnownWords(baseText, retryDecoded.text, known)
+        const mergeFix = retryScore >= baseScore + MERGE_SCORE_MARGIN
+          && widthReadingMergesTwoWords(baseText, retryDecoded.text)
+        if (!wordFix && !mergeFix) continue
         decoded = retryDecoded
         penWidth = width
         bestScore = retryScore

@@ -2,14 +2,17 @@
 
 const WORD = /[A-Za-zÄÖÜäöüß]+/gu
 
-/** A thinner pen and a thicker pen around the default 2.6 px. The default reading comes first. */
-export const INK_RETRY_WIDTHS = [1.8, 3.5] as const
+/** A thinner pen, a slightly thicker pen, and a thick pen around the default 2.6 px. */
+export const INK_RETRY_WIDTHS = [1.8, 3.0, 3.5] as const
 
 /** The unknown word has to be at least this long before a second rendering is worth the time. */
 export const LONG_UNKNOWN_LETTERS = 10
 
 /** The other rendering has to beat the default reading by this many nats. */
 export const WIDTH_RETRY_MARGIN = 2
+
+/** A two-word merge has to beat the default reading by this many nats. */
+export const MERGE_SCORE_MARGIN = 4
 
 export const foldInkWord = (word: string) => word.toLowerCase().replaceAll('ß', 'ss')
 
@@ -63,4 +66,23 @@ export const widthReadingKeepsKnownWords = (
     return false
   }
   return replaced
+}
+
+/**
+ * True when `alternate` replaces exactly two adjacent words with one longer word, that word
+ * starts with the first of the two, and every other word is unchanged
+ * (`luft statut` → `luftstreitkraft`).
+ */
+export const widthReadingMergesTwoWords = (base: string, alternate: string) => {
+  const left = inkWords(base)
+  const right = inkWords(alternate)
+  if (left.length !== right.length + 1) return false
+  let index = 0
+  while (index < right.length && left[index] === right[index]) index += 1
+  if (index >= right.length) return false
+  const first = foldInkWord(left[index])
+  const second = foldInkWord(left[index + 1] ?? '')
+  const merged = foldInkWord(right[index])
+  if (first.length < 4 || second.length < 4 || merged.length < 12 || !merged.startsWith(first)) return false
+  return left.slice(index + 2).join('\0') === right.slice(index + 1).join('\0')
 }
