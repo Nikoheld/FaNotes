@@ -544,6 +544,30 @@ pub fn beam_decode(
             }
         }
     }
+    // Two German function words of three letters, one letter apart (`sie` → `nie`).
+    {
+        let chosen = tidy(&render(&best));
+        let mut distinct = 0usize;
+        let mut previous = String::new();
+        for (prefix, score) in &finals {
+            if best_score - *score > 0.9 {
+                break;
+            }
+            let polished = polish(prefix, &greedy_ids, &words, dictionary);
+            let text = tidy(&render(&polished));
+            if text != previous {
+                if distinct == options.n_best.max(1) {
+                    break;
+                }
+                distinct += 1;
+                previous = text.clone();
+            }
+            if swaps_short_function_words(&chosen, &text) {
+                best = polished;
+                break;
+            }
+        }
+    }
     // A sentence that already ends in a comma keeps a close reading that ends in a period
     // instead (`Worte,` → `Worte.`). A comma before more words stays a comma.
     {
@@ -893,6 +917,74 @@ fn replaces_a_final_comma_with_a_period(current: &str, candidate: &str) -> bool 
     }
     current[last] = '.';
     current == candidate
+}
+
+fn short_function_word(word: &str) -> bool {
+    matches!(
+        dict_key(word).as_str(),
+        "auf"
+            | "aus"
+            | "bei"
+            | "das"
+            | "dem"
+            | "den"
+            | "der"
+            | "des"
+            | "die"
+            | "dir"
+            | "ein"
+            | "hat"
+            | "ist"
+            | "mir"
+            | "mit"
+            | "nie"
+            | "nur"
+            | "sie"
+            | "und"
+            | "von"
+            | "wir"
+            | "zum"
+            | "zur"
+    )
+}
+
+/// `candidate` changes one letter inside one three-letter function word, into another.
+fn swaps_short_function_words(current: &str, candidate: &str) -> bool {
+    let current: Vec<char> = current.chars().collect();
+    let candidate: Vec<char> = candidate.chars().collect();
+    if current.len() != candidate.len() {
+        return false;
+    }
+    let diffs: Vec<usize> = (0..current.len())
+        .filter(|&index| current[index] != candidate[index])
+        .collect();
+    let &[index] = diffs.as_slice() else {
+        return false;
+    };
+    if current[index]
+        .to_lowercase()
+        .eq(candidate[index].to_lowercase())
+        || !current[index].is_alphabetic()
+        || !candidate[index].is_alphabetic()
+    {
+        return false;
+    }
+    let start = index
+        - (0..index)
+            .rev()
+            .take_while(|&cursor| current[cursor].is_alphabetic())
+            .count();
+    let end = index
+        + 1
+        + (index + 1..current.len())
+            .take_while(|&cursor| current[cursor].is_alphabetic())
+            .count();
+    if end - start != 3 {
+        return false;
+    }
+    let before: String = current[start..end].iter().collect();
+    let after: String = candidate[start..end].iter().collect();
+    short_function_word(&before) && short_function_word(&after)
 }
 
 fn german_closed_class(word: &str) -> bool {
@@ -1970,6 +2062,22 @@ mod tests {
         assert!(!replaces_a_quoted_final_comma_with_a_period(
             "astounded Mirabeau,",
             "astounded Mirabeau."
+        ));
+    }
+
+    #[test]
+    fn short_function_words_swap_one_real_letter() {
+        assert!(swaps_short_function_words(
+            "Das wird sie enden.",
+            "Das wird nie enden."
+        ));
+        assert!(!swaps_short_function_words(
+            "Ich war in den Bergen.",
+            "ich war in den Bergen."
+        ));
+        assert!(!swaps_short_function_words(
+            "Ich finde heine Worte,",
+            "Ich finde keine Worte,"
         ));
     }
 
