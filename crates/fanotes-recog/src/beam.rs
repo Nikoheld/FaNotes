@@ -614,15 +614,23 @@ fn corrected_run(run: &[u8], words: &Words<'_>, dictionary: &dyn Lexicon) -> Vec
         .iter()
         .map(|&symbol| words.alphabet[usize::from(symbol) - 1])
         .collect();
-    let folded = original.to_lowercase().replace('ß', "ss");
+    // The word list stores ß as ss. Search neighbors on that folded form, then
+    // replay the edit on the original so a written ß is not replaced by ss
+    // (`größtechnischen` → `großtechnischen`, not `grosstechnischen`).
+    let lower = original.to_lowercase();
+    let (folded, origin) = fold_eszett(&lower);
     if dictionary.contains(&folded) {
         return run.to_vec();
     }
     let mut known = Vec::new();
     for candidate in edit_neighbors(&folded) {
-        if dictionary.contains(&candidate) {
-            known.push(candidate);
+        if !dictionary.contains(&candidate) {
+            continue;
         }
+        let Some(spelling) = apply_folded_edit(&lower, &folded, &origin, &candidate) else {
+            continue;
+        };
+        known.push(spelling);
     }
     known.sort();
     known.dedup();
@@ -652,6 +660,88 @@ fn corrected_run(run: &[u8], words: &Words<'_>, dictionary: &dyn Lexicon) -> Vec
         symbols.push(symbol);
     }
     symbols
+}
+
+/// Expands each ß to ss. `origin[i]` is the source character index of folded character `i`.
+fn fold_eszett(word: &str) -> (String, Vec<usize>) {
+    let mut folded = String::with_capacity(word.len() + 4);
+    let mut origin = Vec::with_capacity(word.len() + 4);
+    for (index, character) in word.chars().enumerate() {
+        if character == 'ß' {
+            folded.push('s');
+            folded.push('s');
+            origin.push(index);
+            origin.push(index);
+        } else {
+            folded.push(character);
+            origin.push(index);
+        }
+    }
+    (folded, origin)
+}
+
+/// Applies the single edit from `folded` to `neighbor` onto `original`.
+/// An edit that lands inside a ß (one half of its ss) is refused.
+fn apply_folded_edit(
+    original: &str,
+    folded: &str,
+    origin: &[usize],
+    neighbor: &str,
+) -> Option<String> {
+    let original: Vec<char> = original.chars().collect();
+    let folded: Vec<char> = folded.chars().collect();
+    let neighbor: Vec<char> = neighbor.chars().collect();
+    let mut result = original.clone();
+    if neighbor.len() == folded.len() {
+        let mut changed = None;
+        for index in 0..folded.len() {
+            if folded[index] != neighbor[index] {
+                if changed.is_some() {
+                    return None;
+                }
+                changed = Some(index);
+            }
+        }
+        let index = changed?;
+        let source = origin[index];
+        if original[source] == 'ß' {
+            return None;
+        }
+        result[source] = neighbor[index];
+    } else if neighbor.len() + 1 == folded.len() {
+        let mut index = 0;
+        while index < neighbor.len() && folded[index] == neighbor[index] {
+            index += 1;
+        }
+        if folded.get(index + 1..)? != neighbor.get(index..)? {
+            return None;
+        }
+        let source = origin[index];
+        if original[source] == 'ß' {
+            return None;
+        }
+        result.remove(source);
+    } else if neighbor.len() == folded.len() + 1 {
+        let mut index = 0;
+        while index < folded.len() && folded[index] == neighbor[index] {
+            index += 1;
+        }
+        if folded.get(index..)? != neighbor.get(index + 1..)? {
+            return None;
+        }
+        if index > 0 && index < folded.len() && origin[index] == origin[index - 1] {
+            return None;
+        }
+        let at = if index == folded.len() {
+            original.len()
+        } else {
+            origin[index]
+        };
+        result.insert(at, neighbor[index]);
+    } else {
+        return None;
+    }
+    Some(result.into_iter().collect())
 }
 
 fn edit_neighbors(word: &str) -> Vec<String> {
@@ -915,6 +1005,42 @@ mod tests {
         );
         let known = ['a', 'b', 'c', 'd', 'e'].map(index);
         assert_eq!(corrected_run(&known, &decoder, &Known), known);
+    }
+
+    #[test]
+    fn a_dictionary_correction_keeps_a_written_eszett() {
+        let mut alphabet: Vec<char> = "abcdeghinorstx".chars().collect();
+        alphabet.push('ö');
+        alphabet.push('ß');
+        let index = |character: char| {
+            (alphabet.iter().position(|&item| item == character).unwrap() + 1) as u8
+        };
+        let symbols = |text: &str| text.chars().map(index).collect::<Vec<_>>();
+        struct German;
+        impl Lexicon for German {
+            fn contains(&self, word: &str) -> bool {
+                matches!(word, "grosstechnischen" | "strasse" | "grosxxxx")
+            }
+        }
+        let decoder = Words {
+            alphabet: &alphabet,
+            lexicon: &German,
+        };
+        assert_eq!(
+            corrected_run(&symbols("größtechnischen"), &decoder, &German),
+            symbols("großtechnischen"),
+            "the ö→o edit is applied and ß stays"
+        );
+        assert_eq!(
+            corrected_run(&symbols("straße"), &decoder, &German),
+            symbols("straße"),
+            "a folded dictionary hit keeps the written ß"
+        );
+        assert_eq!(
+            corrected_run(&symbols("großxxxx"), &decoder, &German),
+            symbols("großxxxx"),
+            "an edit inside the ss expansion of ß is refused"
+        );
     }
 
     #[test]
