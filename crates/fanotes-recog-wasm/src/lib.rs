@@ -9,10 +9,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use fanotes_recog::{
-    adapt_head, beam_decode, decode_ctc, fuse_recognition_model, group_ink_lines, ink_image,
-    ink_transform, line_tensor, AdaptOptions, AdaptSample, BeamOptions, CharLm, FusionEntry,
-    HeadUpdate, InkOptions, Language, Lexicon, LineBounds, LineOptions, LineStroke,
-    INK_FRAME_STRIDE,
+    beam_decode, ctc_loss_and_gradient, decode_ctc, fuse_recognition_model, group_ink_lines,
+    ink_image, ink_transform, line_tensor, BeamOptions, CharLm, FusionEntry, InkOptions, Language,
+    Lexicon, LineBounds, LineOptions, LineStroke, INK_FRAME_STRIDE,
 };
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
@@ -21,7 +20,6 @@ thread_local! {
     static EXTRA_WORDS: RefCell<HashMap<String, HashSet<String>>> = RefCell::new(HashMap::new());
     static INK_LANGUAGE_MODELS: RefCell<HashMap<String, CharLm>> = RefCell::new(HashMap::new());
     static INK_LEXICONS: RefCell<HashMap<String, InkLexicon>> = RefCell::new(HashMap::new());
-    static INK_PERSONAL_HEAD: RefCell<Option<HeadUpdate>> = const { RefCell::new(None) };
 }
 
 /// The FaNotes spelling Bloom filter (`fanotes-spelling-bloom-v2`) plus personal words.
@@ -90,18 +88,45 @@ pub fn ink_group_lines_js(packed: &[f64]) -> Result<String, JsError> {
         .map_err(|error| JsError::new(&error.to_string()))
 }
 
-/// `[width, height, …pixels]` of the model image (`1` paper, `0` ink), or empty without ink.
-#[wasm_bindgen(js_name = inkLineImage)]
-pub fn ink_line_image_js(packed: &[f64], ref_height: f64) -> Result<Vec<f32>, JsError> {
-    let strokes = unpack_ink(packed)?;
-    let options = InkOptions {
+/// Writer-specific rendering: `NaN` keeps the default for a field.
+fn ink_options(ref_height: f64, pen_width: f64, extra_shear: f64, scale: f64) -> InkOptions {
+    let defaults = InkOptions::default();
+    InkOptions {
         ref_height: if ref_height.is_finite() {
             ref_height.max(0.0)
         } else {
             0.0
         },
-        ..InkOptions::default()
-    };
+        pen_width: if pen_width.is_finite() {
+            pen_width.clamp(1.0, 6.0)
+        } else {
+            defaults.pen_width
+        },
+        extra_shear: if extra_shear.is_finite() {
+            extra_shear.clamp(-0.5, 0.5)
+        } else {
+            0.0
+        },
+        scale_jitter: if scale.is_finite() {
+            scale.clamp(0.6, 1.2)
+        } else {
+            1.0
+        },
+        ..defaults
+    }
+}
+
+/// `[width, height, …pixels]` of the model image (`1` paper, `0` ink), or empty without ink.
+#[wasm_bindgen(js_name = inkLineImage)]
+pub fn ink_line_image_js(
+    packed: &[f64],
+    ref_height: f64,
+    pen_width: f64,
+    extra_shear: f64,
+    scale: f64,
+) -> Result<Vec<f32>, JsError> {
+    let strokes = unpack_ink(packed)?;
+    let options = ink_options(ref_height, pen_width, extra_shear, scale);
     let Some(image) = ink_image(&strokes, &options) else {
         return Ok(Vec::new());
     };
@@ -118,17 +143,13 @@ pub fn ink_line_image_js(packed: &[f64], ref_height: f64) -> Result<Vec<f32>, Js
 pub fn ink_span_boxes_js(
     packed: &[f64],
     ref_height: f64,
+    pen_width: f64,
+    extra_shear: f64,
+    scale: f64,
     spans: &[u32],
 ) -> Result<Vec<f64>, JsError> {
     let strokes = unpack_ink(packed)?;
-    let options = InkOptions {
-        ref_height: if ref_height.is_finite() {
-            ref_height.max(0.0)
-        } else {
-            0.0
-        },
-        ..InkOptions::default()
-    };
+    let options = ink_options(ref_height, pen_width, extra_shear, scale);
     let mut out = vec![f64::NAN; spans.len() / 2 * 4];
     let Some((transform, _)) = ink_transform(&strokes, &options) else {
         return Ok(out);
@@ -152,6 +173,15 @@ pub fn ink_span_boxes_js(
         }
     }
     Ok(out)
+}
+
+/// CTC loss (nats) of `labels` under `[frames, classes]` logits; `+∞` when the line is too short.
+#[wasm_bindgen(js_name = inkCtcLoss)]
+pub fn ink_ctc_loss_js(logits: &[f32], classes: u32, labels: &[u32]) -> f64 {
+    if classes == 0 || labels.is_empty() {
+        return f64::INFINITY;
+    }
+    ctc_loss_and_gradient(logits, classes as usize, labels).map_or(f64::INFINITY, |(loss, _)| loss)
 }
 
 #[wasm_bindgen(js_name = setInkLanguageModel)]
@@ -198,12 +228,10 @@ struct DecodeOptionsInput {
     use_language_model: Option<bool>,
 }
 
-/// Decodes `[frames, classes]` logits. With `features` (`[frames, dim]`) and an installed
-/// personal head, the personal update is added first.
+/// Decodes `[frames, classes]` logits with the language model and lexicon of `language`.
 #[wasm_bindgen(js_name = inkDecode)]
 pub fn ink_decode_js(
     logits: &[f32],
-    features: &[f32],
     classes: u32,
     alphabet: &str,
     language: &str,
@@ -227,18 +255,6 @@ pub fn ink_decode_js(
         ..defaults
     };
     let alphabet: Vec<char> = alphabet.chars().collect();
-    let mut adjusted = logits.to_vec();
-    INK_PERSONAL_HEAD.with(|head| {
-        if let Some(update) = head.borrow().as_ref() {
-            if !features.is_empty()
-                && update.classes == classes as usize
-                && features.len().is_multiple_of(update.dim)
-                && features.len() / update.dim == logits.len() / classes.max(1) as usize
-            {
-                update.apply(features, &mut adjusted);
-            }
-        }
-    });
     let decoded = INK_LANGUAGE_MODELS.with(|models| {
         INK_LEXICONS.with(|lexicons| {
             let models = models.borrow();
@@ -250,88 +266,12 @@ pub fn ink_decode_js(
             };
             let empty = InkLexicon::default();
             let lexicon = lexicons.get(language).unwrap_or(&empty);
-            beam_decode(
-                &adjusted,
-                classes as usize,
-                &alphabet,
-                lm,
-                lexicon,
-                &options,
-            )
+            beam_decode(logits, classes as usize, &alphabet, lm, lexicon, &options)
         })
     });
     let decoded =
         decoded.ok_or_else(|| JsError::new("Die Modellausgabe passt nicht zum Zeichensatz."))?;
     serde_json::to_string(&decoded).map_err(|error| JsError::new(&error.to_string()))
-}
-
-/// Installs (`json` from [`ink_adapt_head_js`]) or clears (empty string) the personal head.
-#[wasm_bindgen(js_name = setInkPersonalHead)]
-pub fn set_ink_personal_head(json: &str) -> Result<(), JsError> {
-    let head = if json.is_empty() {
-        None
-    } else {
-        Some(
-            serde_json::from_str::<HeadUpdate>(json)
-                .map_err(|error| JsError::new(&error.to_string()))?,
-        )
-    };
-    if let Some(update) = &head {
-        if update.a.len() != update.classes * update.rank
-            || update.b.len() != update.rank * update.dim
-            || update.bias.len() != update.classes
-        {
-            return Err(JsError::new("Das persönliche Modell ist beschädigt."));
-        }
-    }
-    INK_PERSONAL_HEAD.with(|slot| *slot.borrow_mut() = head);
-    Ok(())
-}
-
-/// Fits the personal head. `features` concatenates `[frames_i, dim]` per sample, `labels`
-/// concatenates class indexes per sample.
-#[allow(clippy::too_many_arguments)]
-#[wasm_bindgen(js_name = inkAdaptHead)]
-pub fn ink_adapt_head_js(
-    features: &[f32],
-    frame_counts: &[u32],
-    labels: &[u32],
-    label_counts: &[u32],
-    weight: &[f32],
-    bias: &[f32],
-    classes: u32,
-    dim: u32,
-    options_json: &str,
-) -> Result<String, JsError> {
-    if frame_counts.len() != label_counts.len() {
-        return Err(JsError::new("Ungültige Trainingsdaten."));
-    }
-    let options: AdaptOptions = if options_json.is_empty() {
-        AdaptOptions::default()
-    } else {
-        serde_json::from_str(options_json).map_err(|error| JsError::new(&error.to_string()))?
-    };
-    let dim = dim as usize;
-    let mut samples = Vec::with_capacity(frame_counts.len());
-    let (mut feature_offset, mut label_offset) = (0usize, 0usize);
-    for (&frames, &count) in frame_counts.iter().zip(label_counts) {
-        let feature_end = feature_offset + frames as usize * dim;
-        let label_end = label_offset + count as usize;
-        if feature_end > features.len() || label_end > labels.len() {
-            return Err(JsError::new("Ungültige Trainingsdaten."));
-        }
-        samples.push(AdaptSample {
-            features: &features[feature_offset..feature_end],
-            labels: &labels[label_offset..label_end],
-        });
-        feature_offset = feature_end;
-        label_offset = label_end;
-    }
-    let update =
-        adapt_head(&samples, weight, bias, classes as usize, dim, &options).ok_or_else(|| {
-            JsError::new("Zu wenige verwendbare Beispiele für das persönliche Modell.")
-        })?;
-    serde_json::to_string(&update).map_err(|error| JsError::new(&error.to_string()))
 }
 
 fn empty_words() -> &'static HashSet<String> {

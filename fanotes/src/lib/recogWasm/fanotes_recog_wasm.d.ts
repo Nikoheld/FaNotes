@@ -10,16 +10,14 @@ export function decodeCtc(probabilities: Float32Array, time_steps: number, class
 export function fuseRecognitionModel(payload: string): string;
 
 /**
- * Fits the personal head. `features` concatenates `[frames_i, dim]` per sample, `labels`
- * concatenates class indexes per sample.
+ * CTC loss (nats) of `labels` under `[frames, classes]` logits; `+∞` when the line is too short.
  */
-export function inkAdaptHead(features: Float32Array, frame_counts: Uint32Array, labels: Uint32Array, label_counts: Uint32Array, weight: Float32Array, bias: Float32Array, classes: number, dim: number, options_json: string): string;
+export function inkCtcLoss(logits: Float32Array, classes: number, labels: Uint32Array): number;
 
 /**
- * Decodes `[frames, classes]` logits. With `features` (`[frames, dim]`) and an installed
- * personal head, the personal update is added first.
+ * Decodes `[frames, classes]` logits with the language model and lexicon of `language`.
  */
-export function inkDecode(logits: Float32Array, features: Float32Array, classes: number, alphabet: string, language: string, options_json: string): string;
+export function inkDecode(logits: Float32Array, classes: number, alphabet: string, language: string, options_json: string): string;
 
 /**
  * Packed strokes are `pointCount, x, y, x, y, …` per stroke in page pixels. Returns the lines
@@ -30,13 +28,13 @@ export function inkGroupLines(packed: Float64Array): string;
 /**
  * `[width, height, …pixels]` of the model image (`1` paper, `0` ink), or empty without ink.
  */
-export function inkLineImage(packed: Float64Array, ref_height: number): Float32Array;
+export function inkLineImage(packed: Float64Array, ref_height: number, pen_width: number, extra_shear: number, scale: number): Float32Array;
 
 /**
  * Page-space boxes `[minX, minY, maxX, maxY]` of the ink under each frame span
  * (`start, end` pairs). A span without ink gets `NaN`s.
  */
-export function inkSpanBoxes(packed: Float64Array, ref_height: number, spans: Uint32Array): Float64Array;
+export function inkSpanBoxes(packed: Float64Array, ref_height: number, pen_width: number, extra_shear: number, scale: number, spans: Uint32Array): Float64Array;
 
 /**
  * Packed strokes: for each stroke, `baseWidth`, `pointCount`, then that many `x, y` page coordinates.
@@ -50,11 +48,6 @@ export function setInkLanguageModel(language: string, bytes: Uint8Array): void;
  * Installs the spelling Bloom filter of `language` as the decoder's word lexicon.
  */
 export function setInkLexicon(language: string, bloom: Uint8Array, bit_count: number): void;
-
-/**
- * Installs (`json` from [`ink_adapt_head_js`]) or clears (empty string) the personal head.
- */
-export function setInkPersonalHead(json: string): void;
 
 /**
  * Replaces the personal vocabulary (lower-case words) of `language`.
@@ -73,15 +66,14 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly decodeCtc: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly fuseRecognitionModel: (a: number, b: number) => [number, number, number, number];
-    readonly inkAdaptHead: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number) => [number, number, number, number];
-    readonly inkDecode: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number, number, number];
+    readonly inkCtcLoss: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly inkDecode: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
     readonly inkGroupLines: (a: number, b: number) => [number, number, number, number];
-    readonly inkLineImage: (a: number, b: number, c: number) => [number, number, number, number];
-    readonly inkSpanBoxes: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly inkLineImage: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly inkSpanBoxes: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly lineTensor: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number, number, number];
     readonly setInkLanguageModel: (a: number, b: number, c: number, d: number) => [number, number];
     readonly setInkLexicon: (a: number, b: number, c: number, d: number, e: number) => [number, number];
-    readonly setInkPersonalHead: (a: number, b: number) => [number, number];
     readonly setInkPersonalWords: (a: number, b: number, c: number, d: number) => void;
     readonly setLexicon: (a: number, b: number, c: number, d: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;

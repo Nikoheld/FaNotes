@@ -61,89 +61,54 @@ export function fuseRecognitionModel(payload) {
 }
 
 /**
- * Fits the personal head. `features` concatenates `[frames_i, dim]` per sample, `labels`
- * concatenates class indexes per sample.
- * @param {Float32Array} features
- * @param {Uint32Array} frame_counts
- * @param {Uint32Array} labels
- * @param {Uint32Array} label_counts
- * @param {Float32Array} weight
- * @param {Float32Array} bias
+ * CTC loss (nats) of `labels` under `[frames, classes]` logits; `+∞` when the line is too short.
+ * @param {Float32Array} logits
  * @param {number} classes
- * @param {number} dim
- * @param {string} options_json
- * @returns {string}
+ * @param {Uint32Array} labels
+ * @returns {number}
  */
-export function inkAdaptHead(features, frame_counts, labels, label_counts, weight, bias, classes, dim, options_json) {
-    let deferred9_0;
-    let deferred9_1;
-    try {
-        const ptr0 = passArrayF32ToWasm0(features, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArray32ToWasm0(frame_counts, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passArray32ToWasm0(labels, wasm.__wbindgen_malloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passArray32ToWasm0(label_counts, wasm.__wbindgen_malloc);
-        const len3 = WASM_VECTOR_LEN;
-        const ptr4 = passArrayF32ToWasm0(weight, wasm.__wbindgen_malloc);
-        const len4 = WASM_VECTOR_LEN;
-        const ptr5 = passArrayF32ToWasm0(bias, wasm.__wbindgen_malloc);
-        const len5 = WASM_VECTOR_LEN;
-        const ptr6 = passStringToWasm0(options_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len6 = WASM_VECTOR_LEN;
-        const ret = wasm.inkAdaptHead(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, classes, dim, ptr6, len6);
-        var ptr8 = ret[0];
-        var len8 = ret[1];
-        if (ret[3]) {
-            ptr8 = 0; len8 = 0;
-            throw takeFromExternrefTable0(ret[2]);
-        }
-        deferred9_0 = ptr8;
-        deferred9_1 = len8;
-        return getStringFromWasm0(ptr8, len8);
-    } finally {
-        wasm.__wbindgen_free(deferred9_0, deferred9_1, 1);
-    }
+export function inkCtcLoss(logits, classes, labels) {
+    const ptr0 = passArrayF32ToWasm0(logits, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray32ToWasm0(labels, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.inkCtcLoss(ptr0, len0, classes, ptr1, len1);
+    return ret;
 }
 
 /**
- * Decodes `[frames, classes]` logits. With `features` (`[frames, dim]`) and an installed
- * personal head, the personal update is added first.
+ * Decodes `[frames, classes]` logits with the language model and lexicon of `language`.
  * @param {Float32Array} logits
- * @param {Float32Array} features
  * @param {number} classes
  * @param {string} alphabet
  * @param {string} language
  * @param {string} options_json
  * @returns {string}
  */
-export function inkDecode(logits, features, classes, alphabet, language, options_json) {
-    let deferred7_0;
-    let deferred7_1;
+export function inkDecode(logits, classes, alphabet, language, options_json) {
+    let deferred6_0;
+    let deferred6_1;
     try {
         const ptr0 = passArrayF32ToWasm0(logits, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayF32ToWasm0(features, wasm.__wbindgen_malloc);
+        const ptr1 = passStringToWasm0(alphabet, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(alphabet, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr2 = passStringToWasm0(language, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passStringToWasm0(language, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr3 = passStringToWasm0(options_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len3 = WASM_VECTOR_LEN;
-        const ptr4 = passStringToWasm0(options_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len4 = WASM_VECTOR_LEN;
-        const ret = wasm.inkDecode(ptr0, len0, ptr1, len1, classes, ptr2, len2, ptr3, len3, ptr4, len4);
-        var ptr6 = ret[0];
-        var len6 = ret[1];
+        const ret = wasm.inkDecode(ptr0, len0, classes, ptr1, len1, ptr2, len2, ptr3, len3);
+        var ptr5 = ret[0];
+        var len5 = ret[1];
         if (ret[3]) {
-            ptr6 = 0; len6 = 0;
+            ptr5 = 0; len5 = 0;
             throw takeFromExternrefTable0(ret[2]);
         }
-        deferred7_0 = ptr6;
-        deferred7_1 = len6;
-        return getStringFromWasm0(ptr6, len6);
+        deferred6_0 = ptr5;
+        deferred6_1 = len5;
+        return getStringFromWasm0(ptr5, len5);
     } finally {
-        wasm.__wbindgen_free(deferred7_0, deferred7_1, 1);
+        wasm.__wbindgen_free(deferred6_0, deferred6_1, 1);
     }
 }
 
@@ -178,12 +143,15 @@ export function inkGroupLines(packed) {
  * `[width, height, …pixels]` of the model image (`1` paper, `0` ink), or empty without ink.
  * @param {Float64Array} packed
  * @param {number} ref_height
+ * @param {number} pen_width
+ * @param {number} extra_shear
+ * @param {number} scale
  * @returns {Float32Array}
  */
-export function inkLineImage(packed, ref_height) {
+export function inkLineImage(packed, ref_height, pen_width, extra_shear, scale) {
     const ptr0 = passArrayF64ToWasm0(packed, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.inkLineImage(ptr0, len0, ref_height);
+    const ret = wasm.inkLineImage(ptr0, len0, ref_height, pen_width, extra_shear, scale);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }
@@ -197,15 +165,18 @@ export function inkLineImage(packed, ref_height) {
  * (`start, end` pairs). A span without ink gets `NaN`s.
  * @param {Float64Array} packed
  * @param {number} ref_height
+ * @param {number} pen_width
+ * @param {number} extra_shear
+ * @param {number} scale
  * @param {Uint32Array} spans
  * @returns {Float64Array}
  */
-export function inkSpanBoxes(packed, ref_height, spans) {
+export function inkSpanBoxes(packed, ref_height, pen_width, extra_shear, scale, spans) {
     const ptr0 = passArrayF64ToWasm0(packed, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray32ToWasm0(spans, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.inkSpanBoxes(ptr0, len0, ref_height, ptr1, len1);
+    const ret = wasm.inkSpanBoxes(ptr0, len0, ref_height, pen_width, extra_shear, scale, ptr1, len1);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }
@@ -268,19 +239,6 @@ export function setInkLexicon(language, bloom, bit_count) {
     const ptr1 = passArray8ToWasm0(bloom, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
     const ret = wasm.setInkLexicon(ptr0, len0, ptr1, len1, bit_count);
-    if (ret[1]) {
-        throw takeFromExternrefTable0(ret[0]);
-    }
-}
-
-/**
- * Installs (`json` from [`ink_adapt_head_js`]) or clears (empty string) the personal head.
- * @param {string} json
- */
-export function setInkPersonalHead(json) {
-    const ptr0 = passStringToWasm0(json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.setInkPersonalHead(ptr0, len0);
     if (ret[1]) {
         throw takeFromExternrefTable0(ret[0]);
     }
