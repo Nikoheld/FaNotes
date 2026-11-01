@@ -43,6 +43,7 @@ import {
   MIXED_CASE_SCALE,
   capitalizesOnlyTheFirstLetter,
   finalLetterApostropheIndexes,
+  rToNIndexes,
   replacesBracketPeriodWithComma,
   rewriteWord,
   charactersWithWordEdits,
@@ -787,6 +788,11 @@ export async function recognizeInk(
         decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null
       }
+    }
+    for (const index of rToNIndexes(decoded.characters)) {
+      const characters = decoded.characters.map((character, characterIndex) => characterIndex === index ? { ...character, char: 'n' } : character)
+      decoded = { ...decoded, characters, text: characters.map((character) => character.char).join('') }
+      stitched = null
     }
     for (const index of finalLetterApostropheIndexes(decoded.characters)) {
       const characters = decoded.characters.map((character, characterIndex) => characterIndex === index ? { ...character, char: "'" } : character)

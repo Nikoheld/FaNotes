@@ -38,6 +38,9 @@ export const LONG_LETTER_MARGIN = 0.8
 /** A final letter becomes an apostrophe when that alternative is at least this confident. */
 export const APOSTROPHE_ALT_MIN = 0.35
 
+/** An `r` becomes `n` when that alternative is at least this confident. */
+export const R_TO_N_MIN = 0.5
+
 const ADJECTIVE_ENDING = /(?:ischen|lichen)$/iu
 
 /** A smaller line that keeps every known word has to beat the default by this many nats. */
@@ -212,6 +215,15 @@ export const longUnknownWordEdits = (
   }
   return edits.length ? edits : null
 }
+
+/** Indexes of an `r` whose `n` alternative is confident enough (`Perdyce` → `Pendyce`). */
+export const rToNIndexes = (
+  characters: Array<{ char: string; alternatives?: Array<{ char: string; confidence: number }> }>,
+): number[] => characters.flatMap((character, index) => {
+  if (character.char !== 'r') return []
+  const hit = character.alternatives?.some((alternative) => alternative.char === 'n' && alternative.confidence >= R_TO_N_MIN)
+  return hit ? [index] : []
+})
 
 /**
  * Indexes of a word-final letter whose apostrophe alternative is confident enough
