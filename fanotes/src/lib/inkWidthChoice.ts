@@ -50,6 +50,12 @@ export const F_TO_F_MIN = 0.25
 /** An `a` becomes `ä` when that alternative is at least this confident. */
 export const A_TO_AE_MIN = 0.9
 
+/**
+ * A dictionary word may grow by one letter from the upright reading when another rendering
+ * was kept (`Marie` → `Marine`). Farther than this, the shorter word stands.
+ */
+export const KNOWN_INSERT_MARGIN = 1
+
 const ADJECTIVE_ENDING = /(?:ischen|lichen)$/iu
 
 /** A smaller line that keeps every known word has to beat the default by this many nats. */
@@ -447,6 +453,51 @@ export const oneLetterInALongUnknownWord = (
       let diffs = 0
       for (let cursor = 0; cursor < left.length; cursor += 1) if (left[cursor] !== right[cursor]) diffs += 1
       if (diffs === 1) hits.push({ index, from: left, to: right })
+    }
+    if (hits.length !== 1) continue
+    if (!best || gap < best.gap) best = { gap, edit: hits[0] }
+  }
+  return best?.edit ?? null
+}
+
+const oneInsertedLetter = (shorter: string, longer: string) => {
+  const left = [...shorter]
+  const right = [...longer]
+  if (right.length !== left.length + 1) return false
+  let index = 0
+  while (index < left.length && left[index] === right[index]) index += 1
+  return right.slice(index + 1).join('') === left.slice(index).join('')
+}
+
+/**
+ * When a later rendering replaced the upright line, keep a one-letter dictionary insertion
+ * from a close upright reading (`Marie luft statut` kept beside `luftstreitkraft` → `Marine`).
+ * The shorter word stays when the line did not change, or when either spelling is unknown.
+ */
+export const insertedLetterInOneKnownWord = (
+  base: string,
+  current: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (current === base) return null
+  const baseWords = inkWords(base)
+  const currentWords = inkWords(current)
+  const top = readings[0]?.score
+  if (top === undefined || !baseWords.length) return null
+  let best: { gap: number; edit: WordEdit } | null = null
+  for (const reading of readings) {
+    const gap = top - reading.score
+    if (gap <= 0 || gap > KNOWN_INSERT_MARGIN) continue
+    const alternate = inkWords(reading.text)
+    if (alternate.length !== baseWords.length) continue
+    const hits: WordEdit[] = []
+    for (let index = 0; index < baseWords.length; index += 1) {
+      const from = baseWords[index]
+      const to = alternate[index]
+      if (!oneInsertedLetter(from, to) || !known(from) || !known(to)) continue
+      if (currentWords[index] !== from) continue
+      hits.push({ index, from, to })
     }
     if (hits.length !== 1) continue
     if (!best || gap < best.gap) best = { gap, edit: hits[0] }

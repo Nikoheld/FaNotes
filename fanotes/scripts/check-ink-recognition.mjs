@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, dToBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, dToBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, insertedLetterInOneKnownWord, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -103,6 +103,38 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
   )?.to, 'Erzeugung')
   assert.equal(nounAfterAttributiveAdjective('rund 2400 Wohnungen verfügen. Die Straßen und Garagen', known), null)
   assert.equal(nounAfterAttributiveAdjective('Ich war in den Bergen.', known), null)
+  const marineBase = 'Kaiserlich Japanischen Marie luft statut in Friedenszeiten auf die in'
+  const marineMerged = 'Kaiserlich Japanischen Marie luftstreitkraft in Friedenszeiten auf die in'
+  const marineReadings = [
+    { text: marineBase, score: 0 },
+    { text: 'Kaiserlich Japanischen Marine luft statut in Friedenszeiten auf die in', score: -0.92 },
+  ]
+  assert.equal(insertedLetterInOneKnownWord(marineBase, marineMerged, marineReadings, known)?.to, 'Marine')
+  assert.equal(insertedLetterInOneKnownWord(marineBase, marineBase, marineReadings, known), null)
+  assert.equal(insertedLetterInOneKnownWord(
+    marineBase,
+    marineMerged,
+    [marineReadings[0], { text: marineReadings[1].text, score: -1.05 }],
+    known,
+  ), null)
+  assert.equal(insertedLetterInOneKnownWord(
+    'By Trevor Williams. A move',
+    'By Trevor Williams. A moved',
+    [
+      { text: 'By Trevor Williams. A move', score: 0 },
+      { text: 'By Trevor Williams. A mace', score: -0.12 },
+    ],
+    knownWord('en'),
+  ), null)
+  assert.equal(insertedLetterInOneKnownWord(
+    'CHARACTERS Trelawny',
+    'CHARACTERS Trelawny.',
+    [
+      { text: 'CHARACTERS Trelawny', score: 0 },
+      { text: 'CHARACTERS Trelawnyt', score: -0.9 },
+    ],
+    knownWord('en'),
+  ), null)
   assert.equal(oneLetterInALongUnknownWord(
     'und Computerspielen sowie über Personen, die daran',
     [
@@ -430,6 +462,17 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
         if (bracketScore >= currentScore + BRACKET_COMMA_MARGIN && replacesBracketPeriodWithComma(decoded.text, bracketDecoded.text)) {
           decoded = bracketDecoded
           boxedPacked = stretched
+          boxes = undefined
+        }
+      }
+    }
+    if (decoded.text !== baseText) {
+      const inserted = insertedLetterInOneKnownWord(baseText, decoded.text, baseDecoded.readings ?? [], knownWord(entry.language))
+      if (inserted) {
+        const rewritten = rewriteWord(decoded.characters, inserted.index, inserted.to)
+        const nextText = textWithWordEdits(decoded.text, [inserted])
+        if (rewritten && nextText !== decoded.text) {
+          decoded = { ...decoded, text: nextText, characters: rewritten }
           boxes = undefined
         }
       }
