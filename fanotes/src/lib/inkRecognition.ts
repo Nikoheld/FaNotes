@@ -74,6 +74,11 @@ import {
   longerKnownCropWord,
   quotedWordAfterDoubleSix,
   leadingStrokesAreTicks,
+  COMPOUND_PEN,
+  COMPOUND_SHEAR,
+  COMPOUND_SCALE,
+  dictionaryCompound,
+  isolatedWideGroups,
   inkWords,
   charactersJoiningWords,
   insertedLetterInOneKnownWord,
@@ -1105,6 +1110,40 @@ export async function recognizeInk(
       const characters = [quote, ...decoded.characters.slice(3)]
       decoded = { ...decoded, characters, text: characters.map((character) => character.char).join('') }
       stitched = null
+    }
+    const known = (word: string) => wordIsKnown(lineLanguage, word)
+    const unknownCompound = inkWords(decoded.text)
+      .map((word, index) => ({ word, index }))
+      .filter(({ word }) => [...word].length >= 12 && !known(word) && !dictionaryCompound(word, known))
+    if (unknownCompound.length === 1) {
+      const compounds: string[] = []
+      for (const group of isolatedWideGroups(packed)) {
+        const compoundImage = renderLine(group, reference, {
+          penWidth: COMPOUND_PEN,
+          extraShear: COMPOUND_SHEAR,
+          scale: COMPOUND_SCALE,
+          stretchX: 1,
+        })
+        if (!compoundImage) continue
+        const compoundInferenceStarted = performance.now()
+        const compoundRun = await infer(compoundImage, threads, usePersonalModel)
+        inferenceMs += performance.now() - compoundInferenceStarted
+        if (compoundRun.classes !== engine.classes) continue
+        const compoundDecodeStarted = performance.now()
+        const compoundDecoded = decodeLine(engine, compoundRun.logits, lineLanguage, decoderForLanguage(engine.manifest.decoder, lineLanguage))
+        decodeMs += performance.now() - compoundDecodeStarted
+        const tokens = inkWords(compoundDecoded.text)
+        if (tokens.length === 1 && dictionaryCompound(tokens[0], known)) compounds.push(tokens[0])
+      }
+      const target = unknownCompound[0]
+      if (compounds.length === 1 && compounds[0] !== target.word) {
+        const rewritten = rewriteWord(decoded.characters, target.index, compounds[0])
+        const nextText = textWithWordEdits(decoded.text, [{ index: target.index, from: target.word, to: compounds[0] }])
+        if (rewritten && nextText !== decoded.text) {
+          decoded = { ...decoded, text: nextText, characters: rewritten }
+          stitched = null
+        }
+      }
     }
     if (!decoded.text.trim()) continue
     const spans = new Uint32Array(decoded.characters.flatMap((character) => [character.startFrame, character.endFrame]))

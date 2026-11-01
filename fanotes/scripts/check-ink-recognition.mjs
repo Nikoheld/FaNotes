@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, longerKnownCropWord, quotedWordAfterDoubleSix, leadingStrokesAreTicks, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, longerKnownCropWord, quotedWordAfterDoubleSix, leadingStrokesAreTicks, COMPOUND_PEN, COMPOUND_SHEAR, COMPOUND_SCALE, dictionaryCompound, isolatedWideGroups, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -148,6 +148,10 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
     ...tickStroke([[20, 0], [32, 18]]),
     ...tickStroke([[50, 0], [60, 20]]),
   ])), false)
+  assert.equal(dictionaryCompound('Landschaftsgeräte', known)?.left, 'landschafts')
+  assert.equal(dictionaryCompound('Landschaftsgeräte', known)?.right, 'geräte')
+  assert.equal(dictionaryCompound('Landschottensträsse', known), null)
+  assert.equal(dictionaryCompound('Kolbenringspannung', known), null)
   assert.equal(capitalizedSentenceAdverb('manchmal kann er in seltsamer Junge Sein.')?.to, 'Manchmal')
   assert.equal(capitalizedSentenceAdverb('bleiben wegen der Kolbenringspannung in der inneren'), null)
   assert.equal(capitalizedSentenceAdverb('Auch heute bleibt das so.'), null)
@@ -818,6 +822,33 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
       const characters = [quote, ...decoded.characters.slice(3)]
       decoded = { ...decoded, characters, text: characters.map((character) => character.char).join('') }
       boxes = undefined
+    }
+    const compoundKnown = knownWord(entry.language)
+    const unknownCompound = [...decoded.text.matchAll(/[A-Za-zÄÖÜäöüß]+/gu)]
+      .map((match) => match[0])
+      .map((word, index) => ({ word, index }))
+      .filter(({ word }) => [...word].length >= 12 && !compoundKnown(word) && !dictionaryCompound(word, compoundKnown))
+    if (unknownCompound.length === 1) {
+      const compounds = []
+      for (const group of isolatedWideGroups(linePacked)) {
+        const compoundRaw = inkLineImage(group, reference, COMPOUND_PEN, COMPOUND_SHEAR, COMPOUND_SCALE)
+        if (compoundRaw.length < 3) continue
+        const compoundStarted = Date.now()
+        const compoundRun = await host.recognize({ input: Float32Array.from(compoundRaw.subarray(2)), width: compoundRaw[0], height: 64, threads: 4 })
+        inferenceMs += Date.now() - compoundStarted
+        const compoundDecoded = JSON.parse(inkDecode(compoundRun.probabilities, compoundRun.dims[2], manifest.alphabet, entry.language, decoderOptionsFor(entry.language)))
+        const tokens = [...compoundDecoded.text.matchAll(/[A-Za-zÄÖÜäöüß]+/gu)].map((match) => match[0])
+        if (tokens.length === 1 && dictionaryCompound(tokens[0], compoundKnown)) compounds.push(tokens[0])
+      }
+      const target = unknownCompound[0]
+      if (compounds.length === 1 && compounds[0] !== target.word) {
+        const rewritten = rewriteWord(decoded.characters, target.index, compounds[0])
+        const nextText = textWithWordEdits(decoded.text, [{ index: target.index, from: target.word, to: compounds[0] }])
+        if (rewritten && nextText !== decoded.text) {
+          decoded = { ...decoded, text: nextText, characters: rewritten }
+          boxes = undefined
+        }
+      }
     }
     if (!boxes) {
       const spans = new Uint32Array(decoded.characters.flatMap((c) => [c.startFrame, c.endFrame]))

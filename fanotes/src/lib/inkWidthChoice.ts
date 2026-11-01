@@ -348,6 +348,82 @@ export const leadingStrokesAreTicks = (packed: Float64Array) => {
   return pairGap >= 0 && pairGap <= 24 && wordGap > pairGap
 }
 
+/** A heavier, slightly back-slanted rendering used on one separated group of a long unknown word. */
+export const COMPOUND_PEN = 4.2
+export const COMPOUND_SHEAR = -0.15
+export const COMPOUND_SCALE = 0.75
+
+/**
+ * Two dictionary words joined in one unknown token, with the first at least eight letters
+ * (`Landschaftsgeräte` → `landschafts` + `geräte`).
+ */
+export const dictionaryCompound = (
+  word: string,
+  known: (word: string) => boolean,
+): { left: string; right: string } | null => {
+  const letters = [...foldInkWord(word)]
+  let best: { left: string; right: string } | null = null
+  for (let index = 8; index <= letters.length - 3; index += 1) {
+    const left = letters.slice(0, index).join('')
+    const right = letters.slice(index).join('')
+    if (!known(left) || !known(right)) continue
+    if (!best || left.length > best.left.length) best = { left, right }
+  }
+  return best
+}
+
+/** Wide stroke groups separated by a gap, excluding a group that is almost the whole line. */
+export const isolatedWideGroups = (packed: Float64Array): Float64Array[] => {
+  const strokes: Array<{ start: number; end: number; minX: number; maxX: number; minY: number; maxY: number }> = []
+  for (let offset = 0; offset < packed.length;) {
+    const count = packed[offset]
+    const end = offset + 1 + count * 2
+    let minX = Infinity
+    let maxX = -Infinity
+    let minY = Infinity
+    let maxY = -Infinity
+    for (let index = 0; index < count; index += 1) {
+      const x = packed[offset + 1 + index * 2]
+      const y = packed[offset + 2 + index * 2]
+      minX = Math.min(minX, x)
+      maxX = Math.max(maxX, x)
+      minY = Math.min(minY, y)
+      maxY = Math.max(maxY, y)
+    }
+    strokes.push({ start: offset, end, minX, maxX, minY, maxY })
+    offset = end
+  }
+  if (strokes.length < 4) return []
+  const height = Math.max(1, Math.max(...strokes.map((stroke) => stroke.maxY)) - Math.min(...strokes.map((stroke) => stroke.minY)))
+  const gap = Math.max(18, height * 0.55)
+  const order = [...strokes].sort((left, right) => left.minX - right.minX)
+  const groups: typeof strokes[] = []
+  let current = [order[0]]
+  for (let index = 1; index < order.length; index += 1) {
+    if (order[index].minX - current[current.length - 1].maxX > gap) {
+      groups.push(current)
+      current = []
+    }
+    current.push(order[index])
+  }
+  groups.push(current)
+  if (groups.length < 2) return []
+  const chosen: Float64Array[] = []
+  for (const group of groups) {
+    const width = group[group.length - 1].maxX - group[0].minX
+    if (group.length > strokes.length * 0.8 || width < 100) continue
+    const total = group.reduce((sum, stroke) => sum + stroke.end - stroke.start, 0)
+    const packedGroup = new Float64Array(total)
+    let cursor = 0
+    for (const stroke of group) {
+      packedGroup.set(packed.subarray(stroke.start, stroke.end), cursor)
+      cursor += stroke.end - stroke.start
+    }
+    chosen.push(packedGroup)
+  }
+  return chosen
+}
+
 /**
  * Word positions where `alternate` rewrites a long unknown word and leaves every known word
  * to be kept from `base`. A known word that the other rendering changed is not an edit.
