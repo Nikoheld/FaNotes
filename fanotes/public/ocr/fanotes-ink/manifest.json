@@ -1,7 +1,7 @@
 {
   "format": "fanotes-ink-recognizer-v1",
   "name": "FaNotes_Ink_DE_EN",
-  "version": "2026.11.1-step3000",
+  "version": "2026.11.1-step4500",
   "alphabet": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZäöüÄÖÜß0123456789 .,;:!?\"'()[]{}<>-–—_/\\@#%&*+=|€§°²³→←↑↓×÷",
   "height": 64,
   "frameStride": 4,
@@ -11,7 +11,7 @@
     "desktop": {
       "file": "ink.onnx",
       "size": 40257814,
-      "sha256": "062375bd183dc69321b5b8711239d5c0a5dae2a36f336bd2494c8259a859ccdf",
+      "sha256": "bc4423fa61c0da450ee00ae007aae3efb929d72eb0ba8c73555db4d81d08f0d9",
       "precision": "fp32"
     }
   },
@@ -35,9 +35,13 @@
     "beamWidth": 16
   },
   "training": {
-    "checkpoint": "full1-step3000",
+    "checkpoint": "full1-step4500",
     "goldenCharacterError": {
-      "de": 5.07,
+      "de": 5.32,
+      "en": 0
+    },
+    "goldenWordError": {
+      "de": 14.81,
       "en": 0
     }
   }
