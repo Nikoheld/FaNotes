@@ -94,6 +94,32 @@ import {
 } from '../lib/recognitionModeSelection'
 import type { MathSolverAction, MathSolverResult } from '../lib/mathSolver'
 import { polishRecognizedText } from '../lib/recognitionPolish'
+import type { InkRecognitionResult } from '../lib/inkRecognition'
+import { correctInkToken, inkRecognitionTokens, isInkLabelId, isInkToken } from '../lib/inkTokens'
+
+/** Recognition test mode: set `localStorage.fanotesInkDebug = '1'` to log per-line diagnostics. */
+const inkRecognitionDebugEnabled = () => {
+  try {
+    return globalThis.localStorage?.getItem('fanotesInkDebug') === '1'
+  } catch {
+    return false
+  }
+}
+
+const logInkRecognitionDiagnostics = (result: InkRecognitionResult) => {
+  if (!inkRecognitionDebugEnabled()) return
+  console.groupCollapsed(`FaNotes-Stifterkennung · ${result.engine} ${result.modelVersion}${result.personalized ? ' · personalisiert' : ''} · ${Math.round(result.timings.totalMs)} ms`)
+  result.lines.forEach((line, index) => {
+    console.log(`Zeile ${index + 1} [${line.language}, ${line.confidence}%]: ${JSON.stringify(line.text)}`, {
+      greedy: line.greedyText,
+      alternatives: line.alternatives,
+      knownWords: `${line.knownWords}/${line.words}`,
+      inferenceMs: line.debug?.inferenceMs,
+      decodeMs: line.debug?.decodeMs,
+    })
+  })
+  console.groupEnd()
+}
 import { appendLoopPoint, applyLasso, loopIsDrawable, strokesInsideLasso, strokesTouchingLasso, type LassoPoint } from '../lib/inkLasso'
 import { MarginTranscript } from './MarginTranscript'
 import { addPersonalWord } from '../lib/spellingSuggest'
@@ -1678,6 +1704,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [tokens, setTokens] = useState<RecognitionToken[]>([])
   const [correction, setCorrection] = useState('')
   const [wholeFormulaResult, setWholeFormulaResult] = useState(false)
+  /** The ink reading behind the current conversion: its lines and strokes become training lines on insert. */
+  const inkConversionRef = useRef<{ result: InkRecognitionResult; strokes: Stroke[] } | null>(null)
   const [conversionOpen, setConversionOpen] = useState(false)
   const [textToHandwritingOpen, setTextToHandwritingOpen] = useState(false)
   const [mathSolverEnabled, setMathSolverEnabled] = useState(false)
@@ -6953,66 +6981,55 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         }
       }
 
+      inkConversionRef.current = null
       if (requestedMode !== 'math' && !qwenVisionUsed) {
         try {
-          const { recognizeNeuralText } = await import('../lib/neuralTextRecognition')
-          const neural = await recognizeNeuralText(
+          const [{ recognizeInk }, { activateInkPersonalization }] = await Promise.all([
+            import('../lib/inkRecognition'),
+            import('../lib/inkPersonalization'),
+          ])
+          await activateInkPersonalization(recognitionLanguage).catch(() => null)
+          const ink = await recognizeInk(
             engineStrokes,
             recognitionLanguage,
             sourceWidth,
             sourceHeight,
+            { debug: inkRecognitionDebugEnabled() },
           )
           if (runId !== recognitionRunRef.current) return
-          const compact = neural.text.replace(/\s/gu, '')
-          const neuralModeAssessment = assessNeuralTextModeCandidate(
-            neural.text,
+          logInkRecognitionDiagnostics(ink)
+          const compact = ink.text.replace(/\s/gu, '')
+          const inkModeAssessment = assessNeuralTextModeCandidate(
+            ink.text,
             recognitionLanguage,
-            neural,
+            ink,
             automaticDetection,
           )
-          const letters = neuralModeAssessment.letters
-          const hasPersonalTextEvidence = recognized.some((token) => (
-            (token.personalSupport ?? 0) > 0 ||
-            token.alternatives.some((alternative) => (alternative.personalSupport ?? 0) > 0)
-          ))
-          const strongAutomaticText = neuralModeAssessment.shouldUseText
-          const usableExplicitText = requestedMode === 'text'
-            && (hasPersonalTextEvidence || neural.confidence >= 32)
-            && (compact.length >= 2 || letters >= 1)
-          if (neural.text && (usableExplicitText || automaticDetection?.mode === 'text' || strongAutomaticText)) {
-            const { recognizePersonalizedTextLine } = await import('../lib/personalizedLineRecognition')
-            const personalized = await recognizePersonalizedTextLine(
-              engineStrokes,
-              loaded,
-              neural,
-              recognitionLanguage,
-              false,
-              sourceWidth,
-              sourceHeight,
-            )
-            const fused = personalized.fusion
-            recognized = personalized.tokens
+          const letters = inkModeAssessment.letters
+          const usableExplicitText = requestedMode === 'text' && (compact.length >= 1 || letters >= 1)
+          if (ink.text && (usableExplicitText || automaticDetection?.mode === 'text' || inkModeAssessment.shouldUseText)) {
+            recognized = inkRecognitionTokens(ink)
             resolvedMode = 'text'
-            value = fused.text
+            value = ink.text
+            inkConversionRef.current = { result: ink, strokes: engineStrokes }
             if (automaticDetection) {
-              const neuralTextScore = 1.1 + fused.confidence / 45 + Math.min(1.4, letters * 0.08)
+              const inkTextScore = 1.1 + ink.confidence / 45 + Math.min(1.4, letters * 0.08)
               automaticDetection = {
                 ...automaticDetection,
                 mode: 'text',
                 tokens: recognized,
                 value,
-                confidence: fused.confidence,
-                reason: fused.source === 'personalized'
-                  ? 'personalisierte Stiftverlaufs-Erkennung'
-                  : fused.source === 'hybrid'
-                    ? 'Fusion aus persönlicher Handschrift und Zeilenmodell'
-                    : 'zeilenbasierte lokale Handschrifterkennung',
-                textScore: Math.max(automaticDetection.textScore, neuralTextScore),
+                confidence: ink.confidence,
+                reason: ink.personalized
+                  ? 'lokale Stifterkennung mit persönlicher Anpassung'
+                  : 'lokale Stifterkennung (Zeilenmodell mit Sprachmodell)',
+                textScore: Math.max(automaticDetection.textScore, inkTextScore),
               }
             }
           }
-        } catch {
-          // Optional line model failed; the classic text result stays.
+        } catch (error) {
+          // The classic glyph result stays; the diagnostics panel shows why.
+          console.warn('Die Stifterkennung ist fehlgeschlagen.', error)
         }
       }
 
@@ -7233,7 +7250,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         const decisiveAutomaticMath = Boolean(automatic && hasDecisiveMathLayout(automatic.mathValue))
         const couldBeMisclassifiedText = Boolean(automatic && mode === 'auto' && !decisiveAutomaticMath)
         if (backgroundMode === 'text' || ambiguousAutomaticMode || couldBeMisclassifiedText) {
-          let chunkTextTokens = automatic?.mode === 'text'
+          const chunkTextTokens = automatic?.mode === 'text'
             ? automatic.tokens
             : recognitionEngine.recognizeExpression(
                 chunk,
@@ -7249,48 +7266,40 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           ))
           let neuralValue = ''
           try {
-            const { recognizeNeuralText } = await import('../lib/neuralTextRecognition')
-            const neural = await recognizeNeuralText(
+            const [{ recognizeInk }, { activateInkPersonalization }] = await Promise.all([
+              import('../lib/inkRecognition'),
+              import('../lib/inkPersonalization'),
+            ])
+            await activateInkPersonalization(recognitionLanguage).catch(() => null)
+            const ink = await recognizeInk(
               chunk,
               recognitionLanguage,
               sourceWidth,
               sourceHeight,
             )
-            const neuralModeAssessment = assessNeuralTextModeCandidate(
-              neural.text,
+            const inkModeAssessment = assessNeuralTextModeCandidate(
+              ink.text,
               recognitionLanguage,
-              neural,
+              ink,
               automatic,
             )
-            const letters = neuralModeAssessment.letters
+            const letters = inkModeAssessment.letters
             const minimumConfidence = backgroundMode === 'text'
               ? hasPersonalTextEvidence ? 0 : 32
               : 54
             if (
-              neural.confidence >= minimumConfidence
+              ink.confidence >= minimumConfidence
               && letters >= (backgroundMode === 'text' ? 1 : 3)
-              && neuralModeAssessment.wordLike
-              && !neuralModeAssessment.explicitFormulaSyntax
-              && (backgroundMode === 'text' || neuralModeAssessment.shouldUseText)
+              && inkModeAssessment.wordLike
+              && !inkModeAssessment.explicitFormulaSyntax
+              && (backgroundMode === 'text' || inkModeAssessment.shouldUseText)
             ) {
-              const { recognizePersonalizedTextLine } = await import('../lib/personalizedLineRecognition')
-              const personalized = await recognizePersonalizedTextLine(
-                chunk,
-                loaded,
-                neural,
-                recognitionLanguage,
-                false,
-                sourceWidth,
-                sourceHeight,
-              )
-              chunkTextTokens = personalized.tokens
-              neuralValue = personalized.fusion.text.trim()
+              neuralValue = ink.text.trim()
             }
           } catch {
             // The classic local recognizer remains a bounded offline fallback.
           }
           if (neuralValue) {
-            textTokens.push(...chunkTextTokens)
             textValues.push(neuralValue)
           } else if (automatic?.mode === 'math') {
             const mathValue = automatic.value.trim()
@@ -7421,6 +7430,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const updateToken = useCallback((tokenId: string, labelId: string) => {
     const activeResources = resourcesRef.current
     const recognitionEngine = loadedRecognitionModule
+    if (isInkLabelId(labelId)) {
+      // Ink readings learn on insert, from whole corrected lines, not from single glyphs.
+      setTokens((current) => {
+        const next = current.map((token) => token.id === tokenId ? correctInkToken(token, labelId) ?? token : token)
+        setCorrection(recognitionEngine?.recognizedSentence(next)
+          ?? next.filter((token) => !token.isLayout).map((token) => token.char).join(''))
+        return next
+      })
+      return
+    }
     const label = activeResources?.labels.find((entry) => entry.id === labelId) ?? BASE_CATALOG.find((entry) => entry.id === labelId)
     if (!label) return
     const sourceToken = tokens.find((token) => token.id === tokenId)
@@ -7497,7 +7516,22 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
 
       const loaded = resourcesRef.current
-      if (loaded && tokens.length && !wholeFormulaResult) {
+      const inkConversion = inkConversionRef.current
+      if (inkConversion && activeMode === 'text') {
+        inkConversionRef.current = null
+        void import('../lib/inkPersonalization').then(({ recordInkConversion }) => recordInkConversion(
+          inkConversion.result,
+          inkConversion.strokes,
+          cleaned,
+          recognitionLanguage,
+          sourceWidth,
+          sourceHeight,
+        )).then((recorded) => {
+          if (recorded && mountedRef.current) onTrainingChanged?.(resourcesRef.current?.sampleCount ?? 0)
+        }).catch(() => {
+          // Recording training lines is optional; the inserted text is already saved.
+        })
+      } else if (loaded && tokens.length && !wholeFormulaResult && !tokens.some(isInkToken)) {
         try {
           const learningResult = await learnFromRecognitionCorrection(
             tokens,
@@ -7531,7 +7565,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         setNotice({ kind: 'error', text: error instanceof Error ? error.message : 'Konvertierung konnte nicht eingefügt werden.' })
       }
     }
-  }, [activeMode, clear, correction, onInsertMarkdown, onTrainingChanged, saveDrawing, settings.keepDrawingAfterInsert, tokens, wholeFormulaResult])
+  }, [activeMode, clear, correction, onInsertMarkdown, onTrainingChanged, recognitionLanguage, saveDrawing, settings.keepDrawingAfterInsert, sourceHeight, sourceWidth, tokens, wholeFormulaResult])
 
   const importTraining = useCallback(async (file: File) => {
     setIsImporting(true)
