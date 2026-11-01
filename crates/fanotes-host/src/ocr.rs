@@ -53,7 +53,10 @@ fn recognize_loaded(width: usize, threads: usize, input: Vec<f32>) -> Result<Val
     let frame = Request {
         id: id.clone(),
         width,
+        height: MODEL_HEIGHT,
         threads,
+        input_name: "x".to_owned(),
+        output_name: "probabilities".to_owned(),
         input,
     }
     .encode();
@@ -210,10 +213,7 @@ pub(crate) fn ocr_thread_count(
 /// `"2"` and `[2]` are two threads. `2.5` and `[1, 2]` are not safe integers.
 fn integer_threads(value: Option<&Value>) -> Option<i64> {
     let number = fanotes_famd::js_number(value);
-    if number.is_finite()
-        && number.fract() == 0.0
-        && number.abs() <= 9_007_199_254_740_991.0
-    {
+    if number.is_finite() && number.fract() == 0.0 && number.abs() <= 9_007_199_254_740_991.0 {
         Some(number as i64)
     } else {
         None

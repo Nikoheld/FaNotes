@@ -273,7 +273,8 @@
     "artifactName": "FaNotes-${version}-x86_64.${ext}",
     "asar": true,
     "asarUnpack": [
-      "dist/ocr/pylaia-iam.onnx"
+      "dist/ocr/pylaia-iam.onnx",
+      "dist/ocr/fanotes-ink/ink.onnx"
     ],
     "electronLanguages": [
       "de",
