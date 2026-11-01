@@ -387,6 +387,40 @@ export const lowercaseShortBeamWord = (
 }
 
 /**
+ * A raw trace that is the chosen word plus one letter becomes the dictionary word formed by
+ * swapping one adjacent pair (`in` with trace `ien` → `ein`).
+ */
+export const transposedTraceWord = (
+  text: string,
+  greedy: string,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  if (words.length !== traced.length) return null
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]
+    const token = traced[index]
+    if (known(word) || !oneInsertedLetter(word, token)) continue
+    const letters = [...token]
+    const found = new Set<string>()
+    for (let cursor = 0; cursor < letters.length - 1; cursor += 1) {
+      const swapped = letters.slice()
+      const temporary = swapped[cursor]
+      swapped[cursor] = swapped[cursor + 1]
+      swapped[cursor + 1] = temporary
+      const spelling = swapped.join('')
+      if (spelling !== word && known(spelling)) found.add(spelling)
+    }
+    if (found.size !== 1) continue
+    const to = [...found][0]
+    if (to.toLowerCase() === word.toLowerCase()) continue
+    return { index, from: word, to }
+  }
+  return null
+}
+
+/**
  * An unknown word gains the one final letter the raw trace added (`Chudley` → `Chudleyh`).
  * A known word such as `Soc` does not grow into `Soci`.
  */
