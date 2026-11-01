@@ -371,9 +371,68 @@ fn polish(
 ) -> Vec<u8> {
     let marked = reconcile_sentence_marks(prefix, greedy_ids, words);
     match dictionary {
-        Some(dictionary) => correct_unknown_words(&marked, words, dictionary),
+        Some(dictionary) => {
+            let support = matched_to_greedy(&marked, greedy_ids, words);
+            correct_unknown_words(&marked, words, dictionary, &support)
+        }
         None => marked,
     }
+}
+
+/// True where the beam character is the same letter the raw trace chose.
+fn matched_to_greedy(beam: &[u8], greedy: &[u8], words: &Words<'_>) -> Vec<bool> {
+    let beam_chars: Vec<char> = beam
+        .iter()
+        .map(|&symbol| words.alphabet[usize::from(symbol) - 1])
+        .collect();
+    let greedy_chars: Vec<char> = greedy
+        .iter()
+        .map(|&symbol| words.alphabet[usize::from(symbol) - 1])
+        .collect();
+    let (n, m) = (beam_chars.len(), greedy_chars.len());
+    let mut distance = vec![vec![0u16; m + 1]; n + 1];
+    for (index, cell) in distance.iter_mut().enumerate() {
+        cell[0] = index as u16;
+    }
+    for (index, cell) in distance[0].iter_mut().enumerate() {
+        *cell = index as u16;
+    }
+    for i in 1..=n {
+        for j in 1..=m {
+            let substitute = distance[i - 1][j - 1]
+                + u16::from(!same_letter(beam_chars[i - 1], greedy_chars[j - 1]));
+            distance[i][j] = substitute
+                .min(distance[i - 1][j] + 1)
+                .min(distance[i][j - 1] + 1);
+        }
+    }
+    let mut support = vec![false; n];
+    let (mut i, mut j) = (n, m);
+    while i > 0 || j > 0 {
+        if i > 0
+            && j > 0
+            && distance[i][j]
+                == distance[i - 1][j - 1]
+                    + u16::from(!same_letter(beam_chars[i - 1], greedy_chars[j - 1]))
+        {
+            support[i - 1] = same_letter(beam_chars[i - 1], greedy_chars[j - 1]);
+            i -= 1;
+            j -= 1;
+        } else if i > 0 && distance[i][j] == distance[i - 1][j] + 1 {
+            i -= 1;
+        } else if j > 0 {
+            j -= 1;
+        } else {
+            break;
+        }
+    }
+    support
+}
+
+fn same_letter(left: char, right: char) -> bool {
+    let left: String = left.to_lowercase().collect();
+    let right: String = right.to_lowercase().collect();
+    left == right
 }
 
 fn drop_spaces_absent_from_trace(
@@ -588,7 +647,12 @@ fn reconcile_sentence_marks(best: &[u8], greedy: &[u8], words: &Words<'_>) -> Ve
     result
 }
 
-fn correct_unknown_words(prefix: &[u8], words: &Words<'_>, dictionary: &dyn Lexicon) -> Vec<u8> {
+fn correct_unknown_words(
+    prefix: &[u8],
+    words: &Words<'_>,
+    dictionary: &dyn Lexicon,
+    support: &[bool],
+) -> Vec<u8> {
     let mut out = Vec::with_capacity(prefix.len());
     let mut index = 0;
     while index < prefix.len() {
@@ -601,12 +665,23 @@ fn correct_unknown_words(prefix: &[u8], words: &Words<'_>, dictionary: &dyn Lexi
         while index < prefix.len() && words.is_letter(prefix[index]) {
             index += 1;
         }
-        out.extend(corrected_run(&prefix[start..index], words, dictionary));
+        let word_support = support.get(start..index).unwrap_or(&[]);
+        out.extend(corrected_run(
+            &prefix[start..index],
+            words,
+            dictionary,
+            word_support,
+        ));
     }
     out
 }
 
-fn corrected_run(run: &[u8], words: &Words<'_>, dictionary: &dyn Lexicon) -> Vec<u8> {
+fn corrected_run(
+    run: &[u8],
+    words: &Words<'_>,
+    dictionary: &dyn Lexicon,
+    support: &[bool],
+) -> Vec<u8> {
     if run.len() < 5 {
         return run.to_vec();
     }
@@ -637,6 +712,11 @@ fn corrected_run(run: &[u8], words: &Words<'_>, dictionary: &dyn Lexicon) -> Vec
     if known.len() != 1 {
         return run.to_vec();
     }
+    // `gnasts` is one deletion from the word `gnats`, but the pen also drew that s
+    // (`gmnasts`). Dropping a letter the trace agrees with is not a correction.
+    if deletes_supported_character(&lower, &known[0], support) {
+        return run.to_vec();
+    }
     let capitalized = words.alphabet[usize::from(run[0]) - 1].is_uppercase();
     let mut symbols = Vec::with_capacity(known[0].len());
     for (offset, character) in known[0].chars().enumerate() {
@@ -660,6 +740,23 @@ fn corrected_run(run: &[u8], words: &Words<'_>, dictionary: &dyn Lexicon) -> Vec
         symbols.push(symbol);
     }
     symbols
+}
+
+/// A one-character deletion of a letter the raw trace also chose.
+fn deletes_supported_character(before: &str, after: &str, support: &[bool]) -> bool {
+    let before: Vec<char> = before.chars().collect();
+    let after: Vec<char> = after.chars().collect();
+    if support.len() != before.len() || after.len() + 1 != before.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < after.len() && before[index] == after[index] {
+        index += 1;
+    }
+    if before.get(index + 1..) != Some(&after[index..]) {
+        return false;
+    }
+    support[index]
 }
 
 /// Expands each ß to ss. `origin[i]` is the source character index of folded character `i`.
@@ -1000,11 +1097,11 @@ mod tests {
         };
         let slip = ['a', 'b', 'x', 'd', 'e'].map(index);
         assert_eq!(
-            corrected_run(&slip, &decoder, &Known),
+            corrected_run(&slip, &decoder, &Known, &[]),
             ['a', 'b', 'c', 'd', 'e'].map(index)
         );
         let known = ['a', 'b', 'c', 'd', 'e'].map(index);
-        assert_eq!(corrected_run(&known, &decoder, &Known), known);
+        assert_eq!(corrected_run(&known, &decoder, &Known, &[]), known);
     }
 
     #[test]
@@ -1027,19 +1124,48 @@ mod tests {
             lexicon: &German,
         };
         assert_eq!(
-            corrected_run(&symbols("größtechnischen"), &decoder, &German),
+            corrected_run(&symbols("größtechnischen"), &decoder, &German, &[]),
             symbols("großtechnischen"),
             "the ö→o edit is applied and ß stays"
         );
         assert_eq!(
-            corrected_run(&symbols("straße"), &decoder, &German),
+            corrected_run(&symbols("straße"), &decoder, &German, &[]),
             symbols("straße"),
             "a folded dictionary hit keeps the written ß"
         );
         assert_eq!(
-            corrected_run(&symbols("großxxxx"), &decoder, &German),
+            corrected_run(&symbols("großxxxx"), &decoder, &German, &[]),
             symbols("großxxxx"),
             "an edit inside the ss expansion of ß is refused"
+        );
+    }
+
+    #[test]
+    fn a_letter_the_pen_also_drew_is_not_deleted_for_the_dictionary() {
+        let alphabet: Vec<char> = "agnst".chars().collect();
+        let index = |character: char| {
+            (alphabet.iter().position(|&item| item == character).unwrap() + 1) as u8
+        };
+        let symbols = |text: &str| text.chars().map(index).collect::<Vec<_>>();
+        struct Gnats;
+        impl Lexicon for Gnats {
+            fn contains(&self, word: &str) -> bool {
+                word == "gnats"
+            }
+        }
+        let decoder = Words {
+            alphabet: &alphabet,
+            lexicon: &Gnats,
+        };
+        assert_eq!(
+            corrected_run(&symbols("gnasts"), &decoder, &Gnats, &[]),
+            symbols("gnats")
+        );
+        // g n a s t s — the first s is the one a deletion would drop, and the pen drew it.
+        let support = [false, false, false, true, false, false];
+        assert_eq!(
+            corrected_run(&symbols("gnasts"), &decoder, &Gnats, &support),
+            symbols("gnasts")
         );
     }
 
