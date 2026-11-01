@@ -289,7 +289,7 @@ One `PenSample` type for every host: phase, position in client px, pressure, til
 | Pointer Events | PWA, and the Electron/Tauri webview until milestone 8. Pressure is whatever the webview delivers. `DrawingBoard.tsx` already expands `getCoalescedEvents`; the wasm and native backends have to consume that full sample list |
 | Wayland `zwp_tablet_manager_v2` | Native paper surface. Hyprland's tablet protocol. This is the seat-sharing replacement for `--ozone-platform=x11` |
 | Win32 `WM_POINTER` / `POINTER_PEN_INFO` | Native paper surface on Windows. The `windows` crate |
-| AppKit tablet events | Later. `dist:mac` exists; pen policy is the same trait |
+| AppKit tablet events | Later. FaNotes does not ship a macOS package; pen policy is the same trait |
 
 `winit` pointer events are not a complete pen backend on Wayland. The native surface should bind tablet-v2 itself (or a small crate that does) rather than assume `winit` exposes pressure. Button mapping already lives in `src/lib/tabletButtons.ts` and should be data on the sample, not a browser switch.
 

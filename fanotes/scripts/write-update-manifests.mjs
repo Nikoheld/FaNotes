@@ -115,13 +115,7 @@ const main = () => {
     delta: null,
     websiteUrl,
   }
-  for (const fileName of [
-    `FaNotes-${version}-android.apk`,
-    `FaNotes-${version}-arm64.dmg`,
-    `FaNotes-${version}-arm64.zip`,
-    `FaNotes-${version}-x64.dmg`,
-    `FaNotes-${version}-x64.zip`,
-  ]) entry(directory, version, fileName, sums)
+  entry(directory, version, `FaNotes-${version}-android.apk`, sums)
 
   fs.writeFileSync(path.join(directory, 'SHA256SUMS'), `${sums.sort().join('\n')}\n`)
   fs.writeFileSync(path.join(directory, updateManifestFileName('linux', channel)), `${JSON.stringify(sign(linux, privateKeyPem))}\n`)

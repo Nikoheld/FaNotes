@@ -28,22 +28,21 @@ The maintainer decides when a beta cohort is promoted after reviewing the change
 
 ## Required publication
 
-GitHub Actions builds every app when the version tag is pushed. The server does not package Linux, Windows, macOS, or Android. Desktop auto-update reads the signed manifest and the packages from that GitHub release. Vault sync stays on `fanotes.fasrv.ch`.
+GitHub Actions builds every app when the version tag is pushed. The server does not package Linux, Windows, or Android. Desktop auto-update reads the signed manifest and the packages from that GitHub release. Vault sync stays on `fanotes.fasrv.ch`. There is no macOS package.
 
 ## Updating the version
 
 Run **Update version** from the Actions tab. Give it a calendar version such as `2026.10.7` and one changelog line per change. The workflow writes that version into `fanotes/package.json`, the lockfile, the Tauri config, and the Android app, commits it on `main`, tags `v<version>`, and builds the GitHub release. Leave “Publish the release” off to only update the files.
 
-Run **Alpha** from the Actions tab, on `main`, when the merged branch should become the next beta. Alpha asks for no inputs. It reads every non-merge commit since the previous tag, chooses the next `YYYY.M.N-beta.B` for this month, commits that version on `main`, and builds the same Linux, Windows, macOS, and Android packages as a stable release. The GitHub release is a prerelease, so it does not replace Latest. Desktop beta manifests are named `FaNotes-update-linux-x64-beta.json` and `FaNotes-update-windows-x64-beta.json`. The Stable channel keeps reading the latest stable release. Android is signed with the stable FaNotes key. Alpha does nothing when `main` has no commits after the previous tag.
+Run **Alpha** from the Actions tab, on `main`, when the merged branch should become the next beta. Alpha asks for no inputs. It reads every non-merge commit since the previous tag, chooses the next `YYYY.M.N-beta.B` for this month, commits that version on `main`, and builds the same Linux, Windows, and Android packages as a stable release. The GitHub release is a prerelease, so it does not replace Latest. Desktop beta manifests are named `FaNotes-update-linux-x64-beta.json` and `FaNotes-update-windows-x64-beta.json`. The Stable channel keeps reading the latest stable release. Android is signed with the stable FaNotes key. Alpha does nothing when `main` has no commits after the previous tag.
 
 Every release must include:
 
 1. Linux AppImage and portable tar archive.
 2. Windows installer and portable executable.
-3. macOS disk images and zip archives for Apple Silicon and Intel.
-4. The Android APK.
-5. `SHA256SUMS` and the signed Linux and Windows update manifests, attached to the GitHub release.
-6. A GitHub tag and release; beta releases are GitHub prereleases.
+3. The Android APK.
+4. `SHA256SUMS` and the signed Linux and Windows update manifests, attached to the GitHub release.
+5. A GitHub tag and release; beta releases are GitHub prereleases.
 
 Differential packages are optional. When the manifest has no delta, the app downloads the full package from GitHub and checks its SHA-256 and signature. Copies older than 2026.10.6 still ask the server feed, so that one release is also published there and later updates come from GitHub.
 

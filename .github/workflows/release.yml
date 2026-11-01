@@ -81,35 +81,6 @@ jobs:
             fanotes/release/FaNotes-Setup-*-x64.exe
             fanotes/release/FaNotes-Portable-*-x64.exe
 
-  macos:
-    name: macOS
-    runs-on: macos-14
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ inputs.sha || github.sha }}
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: fanotes/package-lock.json
-      - name: Install dependencies
-        working-directory: fanotes
-        run: npm ci
-      - name: Build macOS packages
-        working-directory: fanotes
-        run: npm run dist:mac:ci
-      - uses: actions/upload-artifact@v6
-        with:
-          name: macos
-          if-no-files-found: error
-          path: |
-            fanotes/release/FaNotes-*-arm64.dmg
-            fanotes/release/FaNotes-*-arm64.zip
-            fanotes/release/FaNotes-*-x64.dmg
-            fanotes/release/FaNotes-*-x64.zip
-
   android:
     name: Android
     runs-on: ubuntu-24.04
@@ -171,7 +142,7 @@ jobs:
 
   publish:
     name: Publish GitHub release
-    needs: [linux, windows, macos, android]
+    needs: [linux, windows, android]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:

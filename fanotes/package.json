@@ -122,8 +122,6 @@
     "dist:linux:ci": "npm run build:web && cross-env FANOTES_NATIVE_MATH_REUSE=1 npm run stage:enhanced-math-runtime && electron-builder --linux AppImage --x64 --publish never && npm run check:packaged-i18n -- release/linux-unpacked/resources/app.asar && npm run dist:harden-appimage && npm run dist:portable",
     "dist:windows": "npm run build:web && cross-env FANOTES_NATIVE_TARGET_PLATFORM=win32 node scripts/stage-enhanced-math-runtime.cjs && electron-builder --win --x64 --publish never && npm run check:packaged-i18n -- release/win-unpacked/resources/app.asar",
     "dist:windows:ci": "npm run build:web && cross-env FANOTES_NATIVE_MATH_REUSE=1 node scripts/stage-enhanced-math-runtime.cjs && electron-builder --win --x64 --publish never && npm run check:packaged-i18n -- release/win-unpacked/resources/app.asar",
-    "dist:mac": "npm run build:web && electron-builder --mac --arm64 --x64 --publish never",
-    "dist:mac:ci": "npm run build:web && electron-builder --mac --arm64 --x64 --publish never",
     "check:recommendations": "node scripts/check-recommendations.mjs",
     "dist:harden-appimage": "node scripts/harden-appimage.cjs",
     "dist:portable": "node scripts/pack-linux-portable.cjs",
@@ -294,15 +292,6 @@
       "resources/onenote/**/*",
       "package.json"
     ],
-    "mac": {
-      "category": "public.app-category.education",
-      "icon": "build/icon.png",
-      "target": [
-        { "target": "dmg", "arch": ["arm64", "x64"] },
-        { "target": "zip", "arch": ["arm64", "x64"] }
-      ],
-      "artifactName": "FaNotes-${version}-${arch}.${ext}"
-    },
     "linux": {
       "target": [
         "AppImage"
