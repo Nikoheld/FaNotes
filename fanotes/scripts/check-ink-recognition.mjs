@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, dToBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, dToBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, largerScaleGrowsOneWord, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -68,6 +68,18 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
   assert.equal(shearReadingRewritesTwoWords(
     'Das wird nie enden.',
     'Das wird sie enden.',
+  ), false)
+  assert.equal(largerScaleGrowsOneWord(
+    'Aus irgendeinem Grad hat das mikrofon gerade nicht funktioniert.',
+    'Aus irgendeinem Grund hat das mikrofon gerade nicht funktioniert.',
+    known,
+  ), true)
+  assert.equal(largerScaleGrowsOneWord('Das wird nie enden.', 'Das wird sie enden.', known), false)
+  assert.equal(largerScaleGrowsOneWord('Das war ein böses Kaninchen.', 'Das war ein böses kaninchen.', known), false)
+  assert.equal(largerScaleGrowsOneWord(
+    'Zudem sind über 11,7 Millionen Film- und',
+    'Zudem sind über 19,7 Millionen Film- und',
+    known,
   ), false)
   assert.equal(oneUnknownWordBecomesKnown(
     'bleiben wegen der Kolbenningspannung in der Aneren',
@@ -432,6 +444,22 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
         if (shearScore >= baseScore + SHEAR_SCORE_MARGIN && shearReadingRewritesTwoWords(baseText, shearDecoded.text)) {
           decoded = shearDecoded
           shear = INK_SHEAR_RETRY
+          boxes = undefined
+        }
+      }
+    }
+    if (decoded.text === baseText && exactWords[entry.language]?.size) {
+      const grownRaw = inkLineImage(linePacked, reference, penWidth, 0, LARGER_SCALE)
+      if (grownRaw.length >= 3) {
+        const grownStarted = Date.now()
+        const grownRun = await host.recognize({ input: Float32Array.from(grownRaw.subarray(2)), width: grownRaw[0], height: 64, threads: 4 })
+        inferenceMs += Date.now() - grownStarted
+        const grownDecoded = JSON.parse(inkDecode(grownRun.probabilities, grownRun.dims[2], manifest.alphabet, entry.language, decoderOptionsFor(entry.language)))
+        const grownScore = grownDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+        if (grownScore > baseScore && largerScaleGrowsOneWord(baseText, grownDecoded.text, knownWord(entry.language))) {
+          decoded = grownDecoded
+          scale = LARGER_SCALE
+          shear = 0
           boxes = undefined
         }
       }

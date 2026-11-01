@@ -28,6 +28,7 @@ import { effectiveOcrThreadCount } from './resourceLimits'
 import {
   INK_RETRY_VARIANTS,
   INK_SHEAR_RETRY,
+  LARGER_SCALE,
   MERGE_SCORE_MARGIN,
   BRACKET_COMMA_MARGIN,
   BRACKET_STRETCH,
@@ -59,6 +60,7 @@ import {
   nounAfterAttributiveAdjective,
   capitalCompoundIndex,
   kraftPluralFromReading,
+  largerScaleGrowsOneWord,
   charactersJoiningWords,
   insertedLetterInOneKnownWord,
   oneLetterInALongUnknownWord,
@@ -695,6 +697,34 @@ export async function recognizeInk(
             decoded = shearDecoded
             activeImage = shearImage
             activeShear = INK_SHEAR_RETRY
+            stitched = null
+          }
+        }
+      }
+    }
+    if (
+      defaultPen
+      && decoded.text === baseText
+      && exactWords[lineLanguage].size > 0
+    ) {
+      const grownImage = renderLine(packed, reference, { ...style, extraShear: 0, scale: LARGER_SCALE })
+      if (grownImage) {
+        const grownInferenceStarted = performance.now()
+        const grownRun = await infer(grownImage, threads, usePersonalModel)
+        inferenceMs += performance.now() - grownInferenceStarted
+        if (grownRun.classes === engine.classes) {
+          const grownDecodeStarted = performance.now()
+          const grownDecoded = decodeLine(engine, grownRun.logits, lineLanguage, decoderForLanguage(engine.manifest.decoder, lineLanguage))
+          decodeMs += performance.now() - grownDecodeStarted
+          const grownScore = grownDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+          if (
+            grownScore > baseScore
+            && largerScaleGrowsOneWord(baseText, grownDecoded.text, (word) => wordIsKnown(lineLanguage, word))
+          ) {
+            decoded = grownDecoded
+            activeImage = grownImage
+            activeScale = LARGER_SCALE
+            activeShear = 0
             stitched = null
           }
         }

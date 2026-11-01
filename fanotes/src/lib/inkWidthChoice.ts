@@ -62,6 +62,9 @@ export const KNOWN_INSERT_MARGIN = 1
  */
 export const KRAFT_PLURAL_MARGIN = 2.9
 
+/** A larger rendering that can turn one short dictionary word into a longer one (`Grad` → `Grund`). */
+export const LARGER_SCALE = 1.15
+
 const ADJECTIVE_ENDING = /(?:ischen|lichen)$/iu
 
 /** A smaller line that keeps every known word has to beat the default by this many nats. */
@@ -90,6 +93,46 @@ const SPLICE_MIN_LETTERS = 12
 export const foldInkWord = (word: string) => word.toLowerCase().replaceAll('ß', 'ss')
 
 export const inkWords = (text: string) => text.match(WORD) ?? []
+
+const wordEdits = (left: string, right: string) => {
+  const a = [...left]
+  const b = [...right]
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index)
+  for (let i = 1; i <= a.length; i += 1) {
+    let corner = previous[0]
+    previous[0] = i
+    for (let j = 1; j <= b.length; j += 1) {
+      const next = previous[j]
+      previous[j] = a[i - 1] === b[j - 1] ? corner : Math.min(previous[j] + 1, previous[j - 1] + 1, corner + 1)
+      corner = next
+    }
+  }
+  return previous[b.length]
+}
+
+/**
+ * True when `alternate` rewrites exactly one dictionary word into a dictionary word one letter
+ * longer, at edit distance 2, and changes nothing else (`Grad` → `Grund`).
+ */
+export const largerScaleGrowsOneWord = (
+  base: string,
+  alternate: string,
+  known: (word: string) => boolean,
+) => {
+  const left = inkWords(base)
+  const right = inkWords(alternate)
+  if (left.length !== right.length || !left.length) return false
+  const diffs: number[] = []
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) diffs.push(index)
+  }
+  if (diffs.length !== 1) return false
+  const from = left[diffs[0]]
+  const to = right[diffs[0]]
+  if ([...to].length !== [...from].length + 1 || wordEdits(from, to) !== 2) return false
+  if (!known(from) || !known(to) || from.toLowerCase() === to.toLowerCase()) return false
+  return textWithWordEdits(base, [{ index: diffs[0], from, to }]) === alternate
+}
 
 const editDistance = (left: string, right: string) => {
   const a = Array.from(left)
