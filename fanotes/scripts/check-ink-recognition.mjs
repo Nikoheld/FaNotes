@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
+import { INK_RETRY_WIDTHS, WIDTH_RETRY_MARGIN, foldInkWord, hasLongUnknownWord, widthReadingKeepsKnownWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -42,6 +43,7 @@ for (const language of ['de', 'en']) {
   setInkLanguageModel(language, verified(manifest.languageModels[language], inkDir))
 }
 const spelling = JSON.parse(fs.readFileSync(path.join(ocr, '..', 'spell', 'manifest.json'), 'utf8'))
+const exactWords = { de: new Set(), en: new Set() }
 for (const language of ['de', 'en']) {
   const descriptor = spelling.languages[language]
   const bloom = fs.readFileSync(path.join(appRoot, 'public', 'spell', descriptor.file))
@@ -50,6 +52,27 @@ for (const language of ['de', 'en']) {
     .split('\n')
     .filter((word) => word.length > 0)
   setInkExactWords(language, words)
+  exactWords[language] = new Set(words.map((word) => foldInkWord(word)))
+}
+const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(word))
+{
+  const known = knownWord('de')
+  assert.equal(hasLongUnknownWord('Herzlichen Glückensisch zum Geburtstag', known), true)
+  assert.equal(widthReadingKeepsKnownWords(
+    'Herzlichen Glückensisch zum Geburtstag, Weiriell',
+    'Herzlichen Glückwunsch zum Geburtstag, Muiriell',
+    known,
+  ), true)
+  assert.equal(widthReadingKeepsKnownWords(
+    'sowie über Personen, die daran',
+    'sowie über Personen, die davon',
+    known,
+  ), false)
+  assert.equal(widthReadingKeepsKnownWords(
+    'Nuklearenaie ist die Technologie',
+    'Nuklearen sie ist die Technologie',
+    known,
+  ), false)
 }
 
 const host = createNativeOcrHost({
@@ -123,10 +146,31 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
     const { probabilities, dims } = await host.recognize({ input: Float32Array.from(image), width: raw[0], height: 64, threads: 4 })
     inferenceMs += Date.now() - t
     assert.equal(dims[2], manifest.classes, 'class count')
-    const decoded = JSON.parse(inkDecode(probabilities, dims[2], manifest.alphabet, entry.language, decoderOptionsFor(entry.language)))
+    let decoded = JSON.parse(inkDecode(probabilities, dims[2], manifest.alphabet, entry.language, decoderOptionsFor(entry.language)))
+    let penWidth = manifest.decoder.penWidth ?? 2.6
+    const baseText = decoded.text
+    const baseScore = decoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+    if (exactWords[entry.language]?.size && hasLongUnknownWord(baseText, knownWord(entry.language))) {
+      let bestScore = baseScore
+      for (const width of INK_RETRY_WIDTHS) {
+        const retryRaw = inkLineImage(linePacked, reference, width, 0, 1)
+        if (retryRaw.length < 3) continue
+        const retryImage = retryRaw.subarray(2)
+        const retryStarted = Date.now()
+        const retry = await host.recognize({ input: Float32Array.from(retryImage), width: retryRaw[0], height: 64, threads: 4 })
+        inferenceMs += Date.now() - retryStarted
+        const retryDecoded = JSON.parse(inkDecode(retry.probabilities, retry.dims[2], manifest.alphabet, entry.language, decoderOptionsFor(entry.language)))
+        const retryScore = retryDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+        if (retryScore < baseScore + WIDTH_RETRY_MARGIN || retryScore <= bestScore) continue
+        if (!widthReadingKeepsKnownWords(baseText, retryDecoded.text, knownWord(entry.language))) continue
+        decoded = retryDecoded
+        penWidth = width
+        bestScore = retryScore
+      }
+    }
     if (!decoded.text.trim()) continue
     const spans = new Uint32Array(decoded.characters.flatMap((c) => [c.startFrame, c.endFrame]))
-    const boxes = inkSpanBoxes(linePacked, reference, manifest.decoder.penWidth ?? 2.6, 0, 1, spans)
+    const boxes = inkSpanBoxes(linePacked, reference, penWidth, 0, 1, spans)
     lines.push({ decoded, boxes, characters: decoded.characters.length })
   }
   return { text: lines.map((l) => l.decoded.text).join('\n'), lines, inferenceMs }

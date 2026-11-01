@@ -25,6 +25,13 @@ import {
 } from './recogWasm/fanotes_recog_wasm.js'
 import { ensureRecogWasm } from './recogCore'
 import { effectiveOcrThreadCount } from './resourceLimits'
+import {
+  INK_RETRY_WIDTHS,
+  WIDTH_RETRY_MARGIN,
+  foldInkWord,
+  hasLongUnknownWord,
+  widthReadingKeepsKnownWords,
+} from './inkWidthChoice'
 
 export const INK_MANIFEST_FORMAT = 'fanotes-ink-recognizer-v1'
 export type InkLanguage = 'de' | 'en'
@@ -175,6 +182,14 @@ type Engine = {
   languages: Map<InkLanguage, Promise<void>>
 }
 
+const exactWords: Record<InkLanguage, Set<string>> = { de: new Set(), en: new Set() }
+
+const wordIsKnown = (language: InkLanguage, word: string) => {
+  const folded = foldInkWord(word)
+  if (exactWords[language].has(folded)) return true
+  return (personalWords[language] ?? []).some((item) => foldInkWord(item) === folded)
+}
+
 const MAX_MANIFEST_BYTES = 64 * 1024
 const MAX_LM_BYTES = 24 * 1024 * 1024
 const MAX_STROKES = 6_000
@@ -291,7 +306,9 @@ const ensureLanguage = (engine: Engine, language: InkLanguage) => {
       const candidates = await window.fanotes.loadSpellingWordCandidates(language).catch(() => null)
       if (candidates?.bytes?.byteLength) {
         const text = new TextDecoder().decode(candidates.bytes)
-        setInkExactWords(language, text.split('\n').filter((word) => word.length > 0))
+        const words = text.split('\n').filter((word) => word.length > 0)
+        exactWords[language] = new Set(words.map((word) => foldInkWord(word)))
+        setInkExactWords(language, words)
       }
       setInkPersonalWords(language, personalWords[language] ?? [])
     })().catch((error) => {
@@ -502,9 +519,42 @@ export async function recognizeInk(
     }
     const lineDecode = performance.now() - decodeStarted
     decodeMs += lineDecode
+    let activeImage = image
+    let activePenWidth = style.penWidth
+    const baseText = decoded.text
+    const baseScore = decoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+    const defaultPen = style.penWidth === DEFAULT_INK_STYLE.penWidth
+      && style.extraShear === DEFAULT_INK_STYLE.extraShear
+      && style.scale === DEFAULT_INK_STYLE.scale
+      && style.stretchX === DEFAULT_INK_STYLE.stretchX
+    if (
+      defaultPen
+      && exactWords[lineLanguage].size > 0
+      && hasLongUnknownWord(baseText, (word) => wordIsKnown(lineLanguage, word))
+    ) {
+      let bestScore = baseScore
+      for (const penWidth of INK_RETRY_WIDTHS) {
+        const retryImage = renderLine(packed, reference, { ...style, penWidth })
+        if (!retryImage) continue
+        const retryInferenceStarted = performance.now()
+        const retryRun = await infer(retryImage, threads, usePersonalModel)
+        inferenceMs += performance.now() - retryInferenceStarted
+        if (retryRun.classes !== engine.classes) continue
+        const retryDecodeStarted = performance.now()
+        const retryDecoded = decodeLine(engine, retryRun.logits, lineLanguage, decoderForLanguage(engine.manifest.decoder, lineLanguage))
+        decodeMs += performance.now() - retryDecodeStarted
+        const retryScore = retryDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
+        if (retryScore < baseScore + WIDTH_RETRY_MARGIN || retryScore <= bestScore) continue
+        if (!widthReadingKeepsKnownWords(baseText, retryDecoded.text, (word) => wordIsKnown(lineLanguage, word))) continue
+        decoded = retryDecoded
+        activeImage = retryImage
+        activePenWidth = penWidth
+        bestScore = retryScore
+      }
+    }
     if (!decoded.text.trim()) continue
     const spans = new Uint32Array(decoded.characters.flatMap((character) => [character.startFrame, character.endFrame]))
-    const boxes = inkSpanBoxes(image.packed, reference, style.penWidth, style.extraShear, style.scale, spans)
+    const boxes = inkSpanBoxes(activeImage.packed, reference, activePenWidth, style.extraShear, style.scale, spans)
     const unstretch = 1 / style.stretchX
     lines.push({
       text: decoded.text,
@@ -534,7 +584,7 @@ export async function recognizeInk(
       language: lineLanguage,
       ...(options.debug ? {
         debug: {
-          image: { width: image.width, height: HEIGHT, pixels: image.image.slice() },
+          image: { width: activeImage.width, height: HEIGHT, pixels: activeImage.image.slice() },
           greedyText: decoded.greedyText,
           readings: decoded.readings,
           inferenceMs: lineInference,
@@ -623,4 +673,6 @@ export const resetInkRecognitionForTests = () => {
   personalWords = {}
   personalStyle = null
   personalModelInstalled = false
+  exactWords.de = new Set()
+  exactWords.en = new Set()
 }
