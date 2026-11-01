@@ -3,8 +3,9 @@
 Input is the training bundle FaNotes exports (Einstellungen → Handschrift → Training
 exportieren): JSON `{ "format": "fanotes-ink-personal-v1", "lines": [...] }`, each line carrying
 its confirmed text and the pen strokes. The backbone and recurrent encoder stay close to the
-base; the writer's lines mostly move the classifier. Held-out lines measure the change, and the
-result is written as `personal-model.onnx` plus a `personal-model.json` report the app imports.
+base; the writer's lines mostly move the classifier. Held-out lines are scored after every epoch. The exported model is the epoch with the
+lowest held-out error, so a long run cannot overwrite an earlier improvement. The result is
+`personal-model.onnx` plus a `personal-model.json` report the app imports.
 
     python personalize.py --base <base-checkpoint.pt> --bundle writer.json --out ./personal
 
@@ -48,12 +49,13 @@ def bundle_lines(path):
     return lines
 
 
-def loss_and_cer(model, lines, augment_rng=None):
-    ctc = torch.nn.CTCLoss(blank=0, zero_infinity=True)
+def loss_and_cer(model, lines):
     total_edits = total_chars = 0
     with torch.no_grad():
         for line in lines:
             image = render(line['strokes'], ref_height=line['reference'])
+            if image is None:
+                continue
             logits = model(torch.from_numpy(image)[None, None])[:, 0]
             prediction = decode(logits.argmax(-1).tolist())
             total_edits += _distance(prediction, line['text'])
@@ -94,9 +96,12 @@ def main():
     cut = max(2, int(len(lines) * args.holdout))
     holdout, train_lines = lines[:cut], lines[cut:]
     error_before = loss_and_cer(model, holdout)
+    print(f'held-out CER before {error_before:.2f}% on {len(holdout)} lines', flush=True)
 
     tuned = copy.deepcopy(model)
     base_state = {name: tensor.detach().clone() for name, tensor in tuned.named_parameters()}
+    best_state = copy.deepcopy(tuned.state_dict())
+    best_error = error_before
     # Encoder stays close to the base; the classifier and the top recurrent layer move most.
     for name, parameter in tuned.named_parameters():
         parameter.requires_grad = name.startswith(('head', 'rnn')) or 'layer3' in name
@@ -110,6 +115,8 @@ def main():
             line = train_lines[index]
             image = render(line['strokes'], ref_height=line['reference'],
                            pen=rng.uniform(1.8, 3.6), extra_shear=rng.uniform(-0.1, 0.1), scale_jitter=rng.uniform(0.92, 1.05))
+            if image is None:
+                continue
             ids = encode(line['text'])
             frames = image.shape[1] // 4
             if frames < 2 * len(ids) + 1:
@@ -121,8 +128,16 @@ def main():
             (loss + 5e-3 * anchor).backward()
             torch.nn.utils.clip_grad_norm_(tuned.parameters(), 5.0)
             optimizer.step()
+        tuned.eval()
+        error = loss_and_cer(tuned, holdout)
+        print(f'epoch {epoch + 1} held-out CER {error:.2f}%', flush=True)
+        if error < best_error:
+            best_error = error
+            best_state = copy.deepcopy(tuned.state_dict())
+        tuned.train()
+    tuned.load_state_dict(best_state)
     tuned.eval()
-    error_after = loss_and_cer(tuned, holdout)
+    error_after = best_error
     print(f'held-out CER {error_before:.2f}% -> {error_after:.2f}% on {len(holdout)} lines')
 
     onnx_path = os.path.join(args.out, 'personal-model.onnx')
