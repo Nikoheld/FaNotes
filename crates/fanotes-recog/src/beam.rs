@@ -326,6 +326,9 @@ pub fn beam_decode(
             best_gap = gap;
         }
     }
+    // The language model likes to split a long pen word into two known words (`Jack daws`).
+    // If the raw trace has no space there and both pieces are long, join them back.
+    let best = drop_spaces_absent_from_trace(&best, &greedy_text, &words);
     let characters = align(&log_probs, classes, frames, &best, alphabet);
     let text = render(&best);
     let (known_words, word_count) = count_words(&best, &words);
@@ -357,6 +360,68 @@ fn polish(
         Some(dictionary) => correct_unknown_words(&marked, words, dictionary),
         None => marked,
     }
+}
+
+fn drop_spaces_absent_from_trace(prefix: &[u8], greedy: &str, words: &Words<'_>) -> Vec<u8> {
+    if prefix.is_empty() || greedy.is_empty() {
+        return prefix.to_vec();
+    }
+    let beam: Vec<char> = prefix
+        .iter()
+        .map(|&symbol| words.alphabet[usize::from(symbol) - 1])
+        .collect();
+    let greedy: Vec<char> = greedy.chars().collect();
+    let (n, m) = (beam.len(), greedy.len());
+    let mut distance = vec![vec![0u16; m + 1]; n + 1];
+    for (index, cell) in distance.iter_mut().enumerate() {
+        cell[0] = index as u16;
+    }
+    for (index, cell) in distance[0].iter_mut().enumerate() {
+        *cell = index as u16;
+    }
+    for i in 1..=n {
+        for j in 1..=m {
+            let substitute = distance[i - 1][j - 1] + u16::from(beam[i - 1] != greedy[j - 1]);
+            distance[i][j] = substitute
+                .min(distance[i - 1][j] + 1)
+                .min(distance[i][j - 1] + 1);
+        }
+    }
+    let mut drop = vec![false; n];
+    let (mut i, mut j) = (n, m);
+    while i > 0 || j > 0 {
+        if i > 0
+            && j > 0
+            && distance[i][j] == distance[i - 1][j - 1] + u16::from(beam[i - 1] != greedy[j - 1])
+        {
+            i -= 1;
+            j -= 1;
+        } else if i > 0 && distance[i][j] == distance[i - 1][j] + 1 {
+            if beam[i - 1] == ' ' {
+                let left = (0..i - 1)
+                    .rev()
+                    .take_while(|&index| beam[index].is_alphabetic())
+                    .count();
+                let right = (i..n)
+                    .take_while(|&index| beam[index].is_alphabetic())
+                    .count();
+                if left >= 4 && right >= 4 {
+                    drop[i - 1] = true;
+                }
+            }
+            i -= 1;
+        } else if j > 0 {
+            j -= 1;
+        } else {
+            break;
+        }
+    }
+    prefix
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !drop[*index])
+        .map(|(_, symbol)| *symbol)
+        .collect()
 }
 
 fn edit_distance(left: &str, right: &str) -> usize {
@@ -801,5 +866,23 @@ mod tests {
         );
         let known = ['a', 'b', 'c', 'd', 'e'].map(index);
         assert_eq!(corrected_run(&known, &decoder, &Known), known);
+    }
+
+    #[test]
+    fn a_space_the_trace_does_not_have_joins_long_pieces_only() {
+        let alphabet: Vec<char> = "abcdefghijklmnopqrstuvwxyz ".chars().collect();
+        let index = |character: char| {
+            (alphabet.iter().position(|&item| item == character).unwrap() + 1) as u8
+        };
+        let symbols = |text: &str| text.chars().map(index).collect::<Vec<_>>();
+        let decoder = words(&alphabet);
+        assert_eq!(
+            drop_spaces_absent_from_trace(&symbols("abcd efgh"), "abcdefgh", &decoder),
+            symbols("abcdefgh")
+        );
+        assert_eq!(
+            drop_spaces_absent_from_trace(&symbols("abcd e"), "abcde", &decoder),
+            symbols("abcd e")
+        );
     }
 }
