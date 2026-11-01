@@ -365,6 +365,32 @@ pub fn beam_decode(
             }
         }
     }
+    // One unknown word, one letter away from a dictionary word, within 0.6 nats
+    // (`SNAFF` → `SNIFF`, `Veds` → `Veda`). The new letter keeps the old letter's case,
+    // and the rest of the line stays put.
+    if let Some(dictionary) = dictionary {
+        let chosen = tidy(&render(&best));
+        let mut distinct = 0usize;
+        let mut previous = String::new();
+        for (prefix, score) in &finals {
+            if best_score - *score > 0.6 {
+                break;
+            }
+            let polished = polish(prefix, &greedy_ids, &words, Some(dictionary));
+            let text = tidy(&render(&polished));
+            if text != previous {
+                if distinct == options.n_best.max(1) {
+                    break;
+                }
+                distinct += 1;
+                previous = text.clone();
+            }
+            if promotes_one_unknown_letter(&chosen, &text, dictionary) {
+                best = polished;
+                break;
+            }
+        }
+    }
     // The language model likes to split a long pen word into two known words (`Jack daws`).
     // If the raw trace has no space there and both pieces are long, join them back.
     let best = drop_spaces_absent_from_trace(&best, &greedy_text, &words, dictionary);
@@ -535,6 +561,50 @@ fn drop_spaces_absent_from_trace(
         .filter(|(index, _)| !drop[*index])
         .map(|(_, symbol)| *symbol)
         .collect()
+}
+
+fn dict_key(word: &str) -> String {
+    word.to_lowercase().replace('ß', "ss")
+}
+
+/// `candidate` is `current` with one letter changed, that letter keeps its case,
+/// the old word is unknown, and the new word is in the dictionary.
+fn promotes_one_unknown_letter(current: &str, candidate: &str, dictionary: &dyn Lexicon) -> bool {
+    let current: Vec<char> = current.chars().collect();
+    let candidate: Vec<char> = candidate.chars().collect();
+    if current.len() != candidate.len() {
+        return false;
+    }
+    let diffs: Vec<usize> = (0..current.len())
+        .filter(|&index| current[index] != candidate[index])
+        .collect();
+    if diffs.len() != 1 {
+        return false;
+    }
+    let index = diffs[0];
+    let (before_char, after_char) = (current[index], candidate[index]);
+    if !before_char.is_alphabetic()
+        || !after_char.is_alphabetic()
+        || before_char.is_uppercase() != after_char.is_uppercase()
+    {
+        return false;
+    }
+    let word_start = (0..index)
+        .rev()
+        .take_while(|&cursor| current[cursor].is_alphabetic())
+        .count();
+    let word_start = index - word_start;
+    let word_end = index
+        + 1
+        + (index + 1..current.len())
+            .take_while(|&cursor| current[cursor].is_alphabetic())
+            .count();
+    let before: String = current[word_start..word_end].iter().collect();
+    let after: String = candidate[word_start..word_end].iter().collect();
+    if before.chars().count() < 4 {
+        return false;
+    }
+    !dictionary.contains(&dict_key(&before)) && dictionary.contains(&dict_key(&after))
 }
 
 fn digit_trace_prefers(current: &str, candidate: &str, greedy: &str) -> bool {
@@ -1241,5 +1311,35 @@ mod tests {
             "über 117 Millionen"
         ));
         assert!(!digit_trace_prefers("Jack daws", "Jackdaws", "Jackdaws"));
+    }
+
+    #[test]
+    fn one_unknown_letter_promotes_only_a_dictionary_word_of_the_same_case() {
+        struct Known;
+        impl Lexicon for Known {
+            fn contains(&self, word: &str) -> bool {
+                word == "sniff" || word == "veda" || word == "personen"
+            }
+        }
+        assert!(promotes_one_unknown_letter(
+            "PEcK SNAFF long-lost",
+            "PEcK SNIFF long-lost",
+            &Known
+        ));
+        assert!(promotes_one_unknown_letter(
+            "Rig-Veds\".",
+            "Rig-Veda\".",
+            &Known
+        ));
+        assert!(!promotes_one_unknown_letter(
+            "Rig-Veds\".",
+            "Rig-VedA\".",
+            &Known
+        ));
+        assert!(!promotes_one_unknown_letter(
+            "über Personen",
+            "über Paronen",
+            &Known
+        ));
     }
 }
