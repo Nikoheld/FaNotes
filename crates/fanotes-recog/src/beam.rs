@@ -568,6 +568,31 @@ pub fn beam_decode(
             }
         }
     }
+    // One letter the pen drew and the top reading dropped (`gnasts` → `gmnasts` when the
+    // trace says `gmnasts`). The raw reading is kept so the dictionary does not turn it
+    // into `gymnasts`.
+    {
+        let chosen = tidy(&render(&best));
+        let mut distinct = 0usize;
+        let mut previous = String::new();
+        for (prefix, score) in &finals {
+            if best_score - *score > 1.0 {
+                break;
+            }
+            let text = tidy(&render(prefix));
+            if text != previous {
+                if distinct == options.n_best.max(1) {
+                    break;
+                }
+                distinct += 1;
+                previous = text.clone();
+            }
+            if inserts_one_traced_letter(&chosen, &text, &greedy_text) {
+                best = prefix.clone();
+                break;
+            }
+        }
+    }
     // A sentence that already ends in a comma keeps a close reading that ends in a period
     // instead (`Worte,` → `Worte.`). A comma before more words stays a comma.
     {
@@ -917,6 +942,52 @@ fn replaces_a_final_comma_with_a_period(current: &str, candidate: &str) -> bool 
     }
     current[last] = '.';
     current == candidate
+}
+
+/// `candidate` is `current` plus one letter, and that letter's word is a whole word in the trace.
+fn inserts_one_traced_letter(current: &str, candidate: &str, greedy: &str) -> bool {
+    let current: Vec<char> = current.chars().collect();
+    let candidate: Vec<char> = candidate.chars().collect();
+    if candidate.len() != current.len() + 1 {
+        return false;
+    }
+    let mut current_index = 0;
+    let mut inserted = None;
+    for (index, &character) in candidate.iter().enumerate() {
+        if current_index < current.len() && character == current[current_index] {
+            current_index += 1;
+        } else if inserted.is_none() && character.is_alphabetic() {
+            inserted = Some(index);
+        } else {
+            return false;
+        }
+    }
+    let Some(inserted) = inserted else {
+        return false;
+    };
+    if current_index != current.len() {
+        return false;
+    }
+    let start = inserted
+        - (0..inserted)
+            .rev()
+            .take_while(|&cursor| candidate[cursor].is_alphabetic())
+            .count();
+    let end = inserted
+        + 1
+        + (inserted + 1..candidate.len())
+            .take_while(|&cursor| candidate[cursor].is_alphabetic())
+            .count();
+    if end - start < 6 {
+        return false;
+    }
+    let word: String = candidate[start..end]
+        .iter()
+        .flat_map(|c| c.to_lowercase())
+        .collect();
+    greedy
+        .split(|character: char| !character.is_alphabetic())
+        .any(|token| token.to_lowercase() == word)
 }
 
 fn short_function_word(word: &str) -> bool {
@@ -2062,6 +2133,25 @@ mod tests {
         assert!(!replaces_a_quoted_final_comma_with_a_period(
             "astounded Mirabeau,",
             "astounded Mirabeau."
+        ));
+    }
+
+    #[test]
+    fn one_traced_letter_is_put_back_when_the_word_is_long() {
+        assert!(inserts_one_traced_letter(
+            "Six piqued gnasts!",
+            "Six piqued gmnasts!",
+            "Six piqued gmnasts!"
+        ));
+        assert!(!inserts_one_traced_letter(
+            "Six piqued gnasts!",
+            "Six piqued gymnasts!",
+            "Six piqued gmnasts!"
+        ));
+        assert!(!inserts_one_traced_letter(
+            "Six piqued gnasts!",
+            "Six piqued gmnasts!",
+            "Six piqued gnasts!"
         ));
     }
 
