@@ -39,6 +39,16 @@
           continue
         }
       }
+      if (text.startsWith('~~', i)) {
+        var endStrike = text.indexOf('~~', i + 2)
+        if (endStrike > i + 2) {
+          var del = document.createElement('del')
+          appendInline(del, text.slice(i + 2, endStrike))
+          parent.appendChild(del)
+          i = endStrike + 2
+          continue
+        }
+      }
       if (text.charAt(i) === '`') {
         var endCode = text.indexOf('`', i + 1)
         if (endCode > i + 1) {
@@ -79,7 +89,7 @@
         }
       }
       var next = text.length
-      var tokens = ['**', '__', '`', '[', '*', '_']
+      var tokens = ['**', '__', '~~', '`', '[', '*', '_']
       for (var token = 0; token < tokens.length; token += 1) {
         var at = text.indexOf(tokens[token], i + 1)
         if (at !== -1 && at < next) next = at
@@ -98,6 +108,15 @@
     function addBlock(tag, line) {
       var element = document.createElement(tag)
       appendInline(element, line)
+      parent.appendChild(element)
+      emitted = true
+    }
+    function addPieces(tag, parts) {
+      var element = document.createElement(tag)
+      parts.forEach(function (part, piece) {
+        if (piece) element.appendChild(document.createElement('br'))
+        appendInline(element, part)
+      })
       parent.appendChild(element)
       emitted = true
     }
@@ -138,10 +157,7 @@
           quote.push(lines[index].replace(/^>\s?/u, ''))
           index += 1
         }
-        var blockquote = document.createElement('blockquote')
-        appendInline(blockquote, quote.join(' '))
-        parent.appendChild(blockquote)
-        emitted = true
+        addPieces('blockquote', quote)
         continue
       }
       var item = /^(\s*)(?:[-*+]|\d+[.)])\s+(\S.*)$/u.exec(line)
@@ -172,7 +188,7 @@
         paragraphLines.push(lines[index].trim())
         index += 1
       }
-      if (paragraphLines.length) addBlock('p', paragraphLines.join(' '))
+      if (paragraphLines.length) addPieces('p', paragraphLines)
     }
     return emitted
   }
@@ -342,6 +358,64 @@
     })
   }
 
+  // One source line stays one row. Handwriting is placed on that same grid,
+  // so a paragraph break is the blank line and a heading cannot grow the row.
+  function paintSourceLine(row, line, fence) {
+    row.className = 'share-line'
+    if (fence) {
+      if (line.indexOf('```') === 0) {
+        row.className += ' is-fence'
+        return false
+      }
+      row.className += ' is-code'
+      row.textContent = line
+      return true
+    }
+    if (line.indexOf('```') === 0) {
+      row.className += ' is-fence'
+      return true
+    }
+    if (!line.trim()) {
+      row.className += ' is-blank'
+      return false
+    }
+    var heading = /^(\s*)(#{1,6})\s+(\S.*)$/u.exec(line)
+    if (heading) {
+      row.className += ' is-heading is-h' + heading[2].length
+      appendInline(row, heading[3].trim())
+      return false
+    }
+    if (/^(-{3,}|\*{3,}|_{3,})\s*$/u.test(line)) {
+      row.className += ' is-rule'
+      return false
+    }
+    var quote = /^(\s*)>\s?(.*)$/u.exec(line)
+    if (quote) {
+      row.className += ' is-quote'
+      appendInline(row, quote[2])
+      return false
+    }
+    var task = /^(\s*)(?:[-*+]|\d+[.)])\s+\[( |x|X)\]\s+(\S.*)$/u.exec(line)
+    if (task) {
+      row.className += ' is-task'
+      row.appendChild(document.createTextNode(task[2] === ' ' ? '☐ ' : '☑ '))
+      appendInline(row, task[3])
+      return false
+    }
+    var item = /^(\s*)([-*+]|\d+[.)])\s+(\S.*)$/u.exec(line)
+    if (item) {
+      var ordered = /^\d/u.test(item[2])
+      row.className += ordered ? ' is-ordered' : ' is-item'
+      if (item[1]) row.appendChild(document.createTextNode(item[1]))
+      row.appendChild(document.createTextNode(ordered ? item[2].replace(/[.)]$/u, '') + '. ' : '• '))
+      appendInline(row, item[3])
+      return false
+    }
+    row.className += ' is-text'
+    appendInline(row, line)
+    return false
+  }
+
   function showNote(note, showTitle) {
     var article = document.createElement('article')
     article.className = 'share-note'
@@ -386,11 +460,14 @@
       proseHost.style.width = columnWidth + 'px'
       proseHost.style.fontSize = metrics.fontSize + 'px'
       proseHost.style.lineHeight = String(metrics.lineHeight)
+      var fence = false
+      var lineBox = metrics.fontSize * metrics.lineHeight
       lines.forEach(function (line) {
         var row = document.createElement('div')
-        row.className = 'share-line'
-        row.textContent = line
-        if (line.trim()) wrote = true
+        fence = paintSourceLine(row, line, fence)
+        row.style.minHeight = lineBox + 'px'
+        if (!row.textContent) row.style.height = lineBox + 'px'
+        if (row.textContent.trim() || row.className.indexOf('is-rule') !== -1) wrote = true
         proseHost.appendChild(row)
       })
       page.appendChild(proseHost)

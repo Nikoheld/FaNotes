@@ -57,14 +57,17 @@ assert.equal(readFileSync(join(siteRoot, 'public', 'share', 'share.js'), 'utf8')
 assert.equal(readFileSync(join(siteRoot, 'public', 'share', 'share.css'), 'utf8'), viewerStyle)
 assert.equal(readFileSync(join(siteRoot, 'public', 'share', 'share-link.js'), 'utf8'), viewerLink)
 assert.doesNotMatch(viewerHtml, /<style[\s>]/u)
-assert.match(viewerHtml, /<script src="share\.js\?v=4"><\/script>/u)
-assert.match(viewerHtml, /href="share\.css\?v=4"/u)
+assert.match(viewerHtml, /<script src="share\.js\?v=5"><\/script>/u)
+assert.match(viewerHtml, /href="share\.css\?v=5"/u)
 assert.match(viewerHtml, /<script src="share-link\.js\?v=4"><\/script>/u)
 assert.match(viewerScript, /share-note-title/u)
 assert.match(viewerScript, /share-prose/u)
 assert.match(viewerScript, /share-ink/u)
 assert.match(viewerScript, /share-section/u)
 assert.match(viewerScript, /share-column/u)
+assert.match(viewerScript, /is-heading/u)
+assert.match(viewerScript, /is-blank/u)
+assert.match(viewerScript, /createElement\('br'\)/u)
 assert.match(viewerStyle, /share-column/u)
 assert.doesNotMatch(viewerStyle, /left:\s*8%/u)
 assert.doesNotMatch(viewerScript, /innerHTML/u)
@@ -920,6 +923,33 @@ try {
     assert.match(viewed.text, /Hallo/)
     assert.match(viewed.text, /Guten Tag aus der Notiz/)
     assert.doesNotMatch(viewed.text, /# Hallo/)
+    const halloBlocks = await viewed.cdp.evaluate('({ h1: document.querySelectorAll(".share-prose h1").length, p: document.querySelectorAll(".share-prose p").length })')
+    assert.equal(halloBlocks.h1, 1)
+    assert.equal(halloBlocks.p, 1)
+    const paragraphPayload = encodeURIComponent(JSON.stringify({
+      mode: 'copy',
+      notes: [{ content: 'Erster Satz.\nZweiter Satz.\n\nDritter Absatz.\n\n**Fett** und *kursiv*.' }],
+    }))
+    viewed.errors.length = 0
+    await viewed.cdp.send('Page.navigate', { url: `${origin}/share/?payload=${paragraphPayload}` })
+    await waitForText(viewed.cdp, 'Dritter Absatz')
+    assert.equal(viewed.errors.length, 0, `paragraph page errors: ${viewed.errors.join(' | ')}`)
+    const paragraphShape = await viewed.cdp.evaluate(`(() => {
+      const paras = [...document.querySelectorAll('.share-prose p')]
+      return {
+        count: paras.length,
+        breaks: paras.map((node) => node.querySelectorAll('br').length),
+        text: paras.map((node) => node.innerText),
+        strong: document.querySelectorAll('.share-prose strong').length,
+        em: document.querySelectorAll('.share-prose em').length,
+      }
+    })()`)
+    assert.equal(paragraphShape.count, 3)
+    assert.deepEqual(paragraphShape.breaks, [1, 0, 0])
+    assert.equal(paragraphShape.text[0], 'Erster Satz.\nZweiter Satz.')
+    assert.equal(paragraphShape.text[1], 'Dritter Absatz.')
+    assert.equal(paragraphShape.strong, 1)
+    assert.equal(paragraphShape.em, 1)
     const inkView = await reloadViewer({ ...viewed, link: inkShare.record.link }, 'Neben der Linie')
     assert.equal(inkView.errors.length, 0, `ink page errors: ${inkView.errors.join(' | ')}`)
     assert.match(inkView.text, /Skizze/)
@@ -933,8 +963,38 @@ try {
     const columnTop = await viewed.cdp.evaluate('document.querySelector(".share-column").style.top')
     assert.equal(columnTop, '78px')
     const lineText = await viewed.cdp.evaluate('[...document.querySelectorAll(".share-line")].map((line) => line.textContent).join("\\n")')
-    assert.match(lineText, /# Skizze/)
+    assert.match(lineText, /Skizze/)
+    assert.doesNotMatch(lineText, /# Skizze/)
     assert.doesNotMatch(lineText, /fanotes-ink/)
+    const headingText = await viewed.cdp.evaluate('document.querySelector(".share-line.is-heading") ? document.querySelector(".share-line.is-heading").textContent : ""')
+    assert.equal(headingText, 'Skizze')
+    const blankHeight = await viewed.cdp.evaluate('(() => { const blank = document.querySelector(".share-line.is-blank"); return blank ? Math.round(blank.getBoundingClientRect().height) : 0 })()')
+    assert.ok(blankHeight >= 16, `blank paragraph line is ${blankHeight}px`)
+    const columnPayload = encodeURIComponent(JSON.stringify({
+      mode: 'copy',
+      notes: [{
+        content: '# Titel\n\nErster Absatz.\nZweite Zeile.\n\n- Punkt\n',
+        ink: { width: 900, height: 1273, strokes: [{ color: '#222222', width: 2, points: [{ x: 0.1, y: 0.2 }, { x: 0.2, y: 0.22 }] }] },
+      }],
+    }))
+    viewed.errors.length = 0
+    await viewed.cdp.send('Page.navigate', { url: `${origin}/share/?payload=${columnPayload}` })
+    await waitForText(viewed.cdp, 'Erster Absatz')
+    assert.equal(viewed.errors.length, 0, `column page errors: ${viewed.errors.join(' | ')}`)
+    const columnShape = await viewed.cdp.evaluate(`(() => {
+      const lines = [...document.querySelectorAll('.share-line')]
+      return {
+        text: lines.map((line) => line.textContent),
+        classes: lines.map((line) => line.className),
+        rawHeading: document.body.innerText.includes('# Titel'),
+      }
+    })()`)
+    assert.deepEqual(columnShape.text.slice(0, 6), ['Titel', '', 'Erster Absatz.', 'Zweite Zeile.', '', '• Punkt'])
+    assert.match(columnShape.classes[0], /is-heading/)
+    assert.match(columnShape.classes[1], /is-blank/)
+    assert.match(columnShape.classes[4], /is-blank/)
+    assert.match(columnShape.classes[5], /is-item/)
+    assert.equal(columnShape.rawHeading, false)
     const sectionView = await reloadViewer({ ...viewed, link: sectionShare.record.link }, 'Strahlensatz')
     assert.equal(sectionView.errors.length, 0, `section page errors: ${sectionView.errors.join(' | ')}`)
     assert.match(sectionView.text, /Strahlensatz/)
