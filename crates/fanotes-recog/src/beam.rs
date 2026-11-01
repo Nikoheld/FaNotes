@@ -570,6 +570,30 @@ pub fn beam_decode(
             }
         }
     }
+    // A comma after a closing quote can be a period farther down the beam
+    // (`"Muiriel",` → `"Muiriel".`). A comma after a word stays inside the tighter margin.
+    {
+        let chosen = tidy(&render(&best));
+        let mut distinct = 0usize;
+        let mut previous = String::new();
+        for (prefix, score) in &finals {
+            if best_score - *score > 2.5 {
+                break;
+            }
+            let text = tidy(&render(prefix));
+            if text != previous {
+                if distinct == options.n_best.max(1) {
+                    break;
+                }
+                distinct += 1;
+                previous = text.clone();
+            }
+            if replaces_a_quoted_final_comma_with_a_period(&chosen, &text) {
+                best = prefix.clone();
+                break;
+            }
+        }
+    }
     // The language model likes to split a long pen word into two known words (`Jack daws`).
     // If the raw trace has no space there and both pieces are long, join them back.
     let best = drop_spaces_absent_from_trace(&best, &greedy_text, &words, dictionary);
@@ -843,6 +867,17 @@ fn drop_spaces_absent_from_trace(
         .filter(|(index, _)| !drop[*index])
         .map(|(_, symbol)| *symbol)
         .collect()
+}
+
+/// `candidate` is `current` with a final comma replaced by a period, and that comma
+/// follows a closing quote.
+fn replaces_a_quoted_final_comma_with_a_period(current: &str, candidate: &str) -> bool {
+    let chars: Vec<char> = current.chars().collect();
+    if chars.len() < 3 {
+        return false;
+    }
+    let quote = chars[chars.len() - 2];
+    (quote == '"' || quote == '\'') && replaces_a_final_comma_with_a_period(current, candidate)
 }
 
 /// `candidate` is `current` with a final comma replaced by a period.
@@ -1927,6 +1962,14 @@ mod tests {
         assert!(!replaces_a_final_comma_with_a_period(
             "astounded Mirabeau,",
             "astounded Mirabeau,"
+        ));
+        assert!(replaces_a_quoted_final_comma_with_a_period(
+            "Das Passwort ist \"Muiriel\",",
+            "Das Passwort ist \"Muiriel\"."
+        ));
+        assert!(!replaces_a_quoted_final_comma_with_a_period(
+            "astounded Mirabeau,",
+            "astounded Mirabeau."
         ));
     }
 
