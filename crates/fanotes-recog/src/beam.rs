@@ -679,7 +679,10 @@ fn restore_trace_hyphens(prefix: &[u8], greedy: &str, words: &Words<'_>) -> Vec<
         .iter()
         .map(|&symbol| words.alphabet[usize::from(symbol) - 1])
         .collect();
-    let restored = restore_parenthesis_string(&restore_hyphen_string(&beam, greedy), greedy);
+    let restored = restore_quote_string(
+        &restore_parenthesis_string(&restore_hyphen_string(&beam, greedy), greedy),
+        greedy,
+    );
     if restored == beam {
         return prefix.to_vec();
     }
@@ -691,6 +694,41 @@ fn restore_trace_hyphens(prefix: &[u8], greedy: &str, words: &Words<'_>) -> Vec<
         symbols.push((index + 1) as u8);
     }
     symbols
+}
+
+/// A period standing where the pen drew a closing quote becomes that quote when the next
+/// character matches (`Erdkunde. Fairfax` → `Erdkunde" Fairfax`).
+fn restore_quote_string(text: &str, greedy: &str) -> String {
+    let text: Vec<char> = text.chars().collect();
+    let greedy: Vec<char> = greedy.chars().collect();
+    let mut out = Vec::with_capacity(text.len());
+    let mut text_index = 0;
+    let mut greedy_index = 0;
+    while text_index < text.len() && greedy_index < greedy.len() {
+        if greedy[greedy_index] == '"' && text[text_index] == '.' {
+            let text_next = text_index + 1;
+            let greedy_next = greedy_index + 1;
+            let follows = (text_next >= text.len() && greedy_next >= greedy.len())
+                || (text_next < text.len()
+                    && greedy_next < greedy.len()
+                    && letters_match(text[text_next], greedy[greedy_next]));
+            if follows {
+                out.push('"');
+                text_index += 1;
+                greedy_index += 1;
+                continue;
+            }
+        }
+        if letters_match(text[text_index], greedy[greedy_index]) {
+            out.push(text[text_index]);
+            text_index += 1;
+            greedy_index += 1;
+            continue;
+        }
+        break;
+    }
+    out.extend_from_slice(&text[text_index..]);
+    out.into_iter().collect()
 }
 
 fn restore_hyphen_string(text: &str, greedy: &str) -> String {
@@ -2251,6 +2289,29 @@ mod tests {
             ),
             symbols("Ich werde bald sein."),
             "a space in the trace stays"
+        );
+    }
+
+    #[test]
+    fn a_traced_quote_replaces_a_period_when_the_next_character_matches() {
+        assert_eq!(
+            restore_quote_string("66 Erdkunde. Fairfax", "66 Erdkunde\" Fairfax"),
+            "66 Erdkunde\" Fairfax"
+        );
+        assert_eq!(
+            restore_quote_string("Rig-Veda\". Wadjih;", "Rig-Veds\". Wodjih;"),
+            "Rig-Veda\". Wadjih;"
+        );
+        assert_eq!(
+            restore_quote_string("By Trevor Williams. A move", "By Trevor Williams. A move"),
+            "By Trevor Williams. A move"
+        );
+        assert_eq!(
+            restore_quote_string(
+                "Das Passwort ist \"Muiriel\".",
+                "Dus Passwort ist \"Muiriel\","
+            ),
+            "Das Passwort ist \"Muiriel\"."
         );
     }
 
