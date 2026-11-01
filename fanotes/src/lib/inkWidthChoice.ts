@@ -352,6 +352,29 @@ export const nounAfterAttributiveAdjective = (
   return null
 }
 
+const DETERMINERS = new Set(['das', 'der', 'die', 'den', 'dem', 'des', 'ein', 'eine', 'einem', 'einen', 'einer'])
+const NOUN_SUFFIX = /(?:fon|ung|heit|keit|schaft|tum|nis|ion)$/iu
+
+/**
+ * A lowercase dictionary noun after a determiner takes a capital (`das mikrofon` → `Mikrofon`).
+ * The ending has to be a noun suffix, so an adjective such as `das folgende` stays lowercase.
+ */
+export const capitalizedNounAfterDeterminer = (
+  text: string,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const words = inkWords(text)
+  for (let index = 1; index < words.length; index += 1) {
+    if (!DETERMINERS.has(words[index - 1].toLowerCase())) continue
+    const word = words[index]
+    if ([...word].length < 6 || word !== word.toLowerCase() || !NOUN_SUFFIX.test(word) || !known(word)) continue
+    const head = word[0].toUpperCase()
+    if (head === word[0] || [...head].length !== 1) continue
+    return { index, from: word, to: `${head}${word.slice(1)}` }
+  }
+  return null
+}
+
 /** Replaces the edited words inside `base`, including the punctuation around them. */
 export const textWithWordEdits = (base: string, edits: WordEdit[]) => {
   const spans = [...base.matchAll(WORD)]

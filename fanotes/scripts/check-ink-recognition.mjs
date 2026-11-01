@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, dToBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, largerScaleGrowsOneWord, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, dToBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, largerScaleGrowsOneWord, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -115,6 +115,12 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
   )?.to, 'Erzeugung')
   assert.equal(nounAfterAttributiveAdjective('rund 2400 Wohnungen verfügen. Die Straßen und Garagen', known), null)
   assert.equal(nounAfterAttributiveAdjective('Ich war in den Bergen.', known), null)
+  assert.equal(capitalizedNounAfterDeterminer(
+    'Aus irgendeinem Grund hat das mikrofon gerade nicht funktioniert.',
+    known,
+  )?.to, 'Mikrofon')
+  assert.equal(capitalizedNounAfterDeterminer('das folgende Beispiel bleibt.', known), null)
+  assert.equal(capitalizedNounAfterDeterminer('Staat im Sinne des Völkerrechts anerkannt. Auch heute', known), null)
   const marineBase = 'Kaiserlich Japanischen Marie luft statut in Friedenszeiten auf die in'
   const marineMerged = 'Kaiserlich Japanischen Marie luftstreitkraft in Friedenszeiten auf die in'
   const marineReadings = [
@@ -587,6 +593,15 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
       const characters = decoded.characters.map((character, index) => apostropheIndexes.includes(index) ? { ...character, char: "'" } : character)
       decoded = { ...decoded, characters, text: characters.map((character) => character.char).join('') }
       boxes = undefined
+    }
+    const capitalNoun = capitalizedNounAfterDeterminer(decoded.text, knownWord(entry.language))
+    if (capitalNoun) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, capitalNoun.index, capitalNoun.to)
+      const nextText = textWithWordEdits(decoded.text, [capitalNoun])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        boxes = undefined
+      }
     }
     const nounEdit = nounAfterAttributiveAdjective(decoded.text, knownWord(entry.language))
     if (nounEdit) {

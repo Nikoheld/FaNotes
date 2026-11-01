@@ -57,6 +57,7 @@ import {
   hasMixedInteriorCase,
   longUnknownWordEdits,
   narrowScaleKeepsKnownWords,
+  capitalizedNounAfterDeterminer,
   nounAfterAttributiveAdjective,
   capitalCompoundIndex,
   kraftPluralFromReading,
@@ -888,6 +889,15 @@ export async function recognizeInk(
       const characters = decoded.characters.map((character, characterIndex) => characterIndex === index ? { ...character, char: "'" } : character)
       decoded = { ...decoded, characters, text: characters.map((character) => character.char).join('') }
       stitched = null
+    }
+    const capitalNoun = capitalizedNounAfterDeterminer(decoded.text, (word) => wordIsKnown(lineLanguage, word))
+    if (capitalNoun) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, capitalNoun.index, capitalNoun.to)
+      const nextText = textWithWordEdits(decoded.text, [capitalNoun])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
     }
     const nounEdit = nounAfterAttributiveAdjective(decoded.text, (word) => wordIsKnown(lineLanguage, word))
     if (nounEdit) {
