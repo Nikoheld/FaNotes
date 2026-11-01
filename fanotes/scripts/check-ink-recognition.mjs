@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -124,6 +124,11 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
   assert.equal(umlautAndOneOtherLetter('Die Ausbildung in dieser Welt entlauscht mich.', known)?.to, 'enttäuscht')
   assert.equal(interiorCapitalNeighbor('Watched. EwtopEan.', knownWord('en'))?.to, 'EuropEan')
   assert.equal(interiorCapitalNeighbor("Guy's Pendyce 'My!", knownWord('en')), null)
+  assert.equal(tripleLetterFromNarrowGreedy('TAF UUU VVV WWW', 'TTT UUU VVV WWW')?.to, 'TTT')
+  assert.equal(tripleLetterFromNarrowGreedy('TAF UUU VVV WWW', 'TAT UUU VVV WWW'), null)
+  assert.equal(tripleLetterFromNarrowGreedy('DDD EEE FFF GGG', 'DOD EEE FFF GGG'), null)
+  assert.equal(hasOneOddLetterGroup('HHH III JJJ KKK'), false)
+  assert.equal(hasOneOddLetterGroup('Six piqued gmnasts!'), false)
   assert.equal(capitalizedSentenceAdverb('manchmal kann er in seltsamer Junge Sein.')?.to, 'Manchmal')
   assert.equal(capitalizedSentenceAdverb('bleiben wegen der Kolbenringspannung in der inneren'), null)
   assert.equal(capitalizedSentenceAdverb('Auch heute bleibt das so.'), null)
@@ -488,6 +493,26 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
           scale = LARGER_SCALE
           shear = 0
           boxes = undefined
+        }
+      }
+    }
+    if (decoded.text === baseText && penWidth === (manifest.decoder.penWidth ?? 2.6) && shear === 0 && scale === 1 && hasOneOddLetterGroup(decoded.text)) {
+      const groupRaw = inkLineImage(linePacked, reference, penWidth, 0, NARROW_SCALE)
+      if (groupRaw.length >= 3) {
+        const groupStarted = Date.now()
+        const groupRun = await host.recognize({ input: Float32Array.from(groupRaw.subarray(2)), width: groupRaw[0], height: 64, threads: 4 })
+        inferenceMs += Date.now() - groupStarted
+        const groupDecoded = JSON.parse(inkDecode(groupRun.probabilities, groupRun.dims[2], manifest.alphabet, entry.language, decoderOptionsFor(entry.language)))
+        const grouped = tripleLetterFromNarrowGreedy(decoded.text, groupDecoded.greedyText)
+        if (grouped) {
+          const rewritten = rewriteSameLengthWord(decoded.characters, grouped.index, grouped.to)
+          const nextText = textWithWordEdits(decoded.text, [grouped])
+          if (rewritten && nextText !== decoded.text) {
+            decoded = { ...decoded, text: nextText, characters: rewritten }
+            scale = NARROW_SCALE
+            shear = 0
+            boxes = undefined
+          }
         }
       }
     }

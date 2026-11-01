@@ -256,6 +256,41 @@ export const widthReadingMergesTwoWords = (base: string, alternate: string) => {
 
 export type WordEdit = { index: number; from: string; to: string }
 
+const sameLetterThreeTimes = (word: string) => {
+  const letters = [...word]
+  return letters.length === 3 && letters[0] === letters[1] && letters[1] === letters[2]
+}
+
+/**
+ * On a line of three-letter groups with one group that is not a repeated letter, the raw trace of
+ * a smaller rendering replaces that group when it is three copies of one letter (`TAF` → `TTT`).
+ * Groups that are already repeated must stay as they are.
+ */
+export const tripleLetterFromNarrowGreedy = (text: string, greedy: string): WordEdit | null => {
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  if (words.length < 3 || words.length !== traced.length) return null
+  if (!words.every((word) => [...word].length === 3)) return null
+  const odd: number[] = []
+  for (let index = 0; index < words.length; index += 1) {
+    if (!sameLetterThreeTimes(words[index])) odd.push(index)
+  }
+  if (odd.length !== 1) return null
+  const index = odd[0]
+  if (!sameLetterThreeTimes(traced[index]) || words[index] === traced[index]) return null
+  for (let cursor = 0; cursor < words.length; cursor += 1) {
+    if (cursor !== index && words[cursor] !== traced[cursor]) return null
+  }
+  return { index, from: words[index], to: traced[index] }
+}
+
+/** A line of three-letter groups with exactly one group that is not three copies of one letter. */
+export const hasOneOddLetterGroup = (text: string) => {
+  const words = inkWords(text)
+  if (words.length < 3 || !words.every((word) => [...word].length === 3)) return false
+  return words.filter((word) => !sameLetterThreeTimes(word)).length === 1
+}
+
 /**
  * Word positions where `alternate` rewrites a long unknown word and leaves every known word
  * to be kept from `base`. A known word that the other rendering changed is not an edit.

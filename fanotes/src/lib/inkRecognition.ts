@@ -69,6 +69,8 @@ import {
   capitalCompoundIndex,
   kraftPluralFromReading,
   largerScaleGrowsOneWord,
+  tripleLetterFromNarrowGreedy,
+  hasOneOddLetterGroup,
   charactersJoiningWords,
   insertedLetterInOneKnownWord,
   oneLetterInALongUnknownWord,
@@ -734,6 +736,28 @@ export async function recognizeInk(
             activeScale = LARGER_SCALE
             activeShear = 0
             stitched = null
+          }
+        }
+      }
+    }
+    if (defaultPen && decoded.text === baseText && hasOneOddLetterGroup(decoded.text)) {
+      const groupImage = renderLine(packed, reference, { ...style, penWidth: DEFAULT_INK_STYLE.penWidth, extraShear: 0, scale: NARROW_SCALE, stretchX: 1 })
+      if (groupImage) {
+        const groupInferenceStarted = performance.now()
+        const groupRun = await infer(groupImage, threads, usePersonalModel)
+        inferenceMs += performance.now() - groupInferenceStarted
+        if (groupRun.classes === engine.classes) {
+          const groupDecodeStarted = performance.now()
+          const groupDecoded = decodeLine(engine, groupRun.logits, lineLanguage, decoderForLanguage(engine.manifest.decoder, lineLanguage))
+          decodeMs += performance.now() - groupDecodeStarted
+          const grouped = tripleLetterFromNarrowGreedy(decoded.text, groupDecoded.greedyText)
+          if (grouped) {
+            const rewritten = rewriteSameLengthWord(decoded.characters, grouped.index, grouped.to)
+            const nextText = textWithWordEdits(decoded.text, [grouped])
+            if (rewritten && nextText !== decoded.text) {
+              decoded = { ...decoded, text: nextText, characters: rewritten }
+              stitched = null
+            }
           }
         }
       }
