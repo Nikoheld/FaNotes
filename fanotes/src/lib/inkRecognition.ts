@@ -71,6 +71,8 @@ import {
   largerScaleGrowsOneWord,
   tripleLetterFromNarrowGreedy,
   hasOneOddLetterGroup,
+  longerKnownCropWord,
+  inkWords,
   charactersJoiningWords,
   insertedLetterInOneKnownWord,
   oneLetterInALongUnknownWord,
@@ -504,6 +506,66 @@ export const normalizeInkText = (value: string) => value
   .replace(/[‚‘’´`]/gu, "'")
   .replace(/\s+/gu, ' ')
   .trim()
+
+const cropPacked = (packed: Float64Array, minX: number, maxX: number): Float64Array | null => {
+  const chunks: Float64Array[] = []
+  let total = 0
+  for (let offset = 0; offset < packed.length;) {
+    const count = packed[offset]
+    const end = offset + 1 + count * 2
+    let lo = Infinity
+    let hi = -Infinity
+    for (let index = 0; index < count; index += 1) {
+      const x = packed[offset + 1 + index * 2]
+      lo = Math.min(lo, x)
+      hi = Math.max(hi, x)
+    }
+    const center = (lo + hi) / 2
+    if (center >= minX - 3 && center <= maxX + 3) {
+      chunks.push(packed.subarray(offset, end))
+      total += end - offset
+    }
+    offset = end
+  }
+  if (chunks.length < 2) return null
+  const out = new Float64Array(total)
+  let cursor = 0
+  for (const chunk of chunks) {
+    out.set(chunk, cursor)
+    cursor += chunk.length
+  }
+  return out
+}
+
+const wordSpan = (
+  characters: Array<{ char: string }>,
+  index: number,
+  boxes: Float64Array,
+): { minX: number; maxX: number } | null => {
+  const runs: Array<{ start: number; end: number }> = []
+  let cursor = 0
+  while (cursor < characters.length) {
+    if (!/[A-Za-zÄÖÜäöüß]/u.test(characters[cursor].char)) {
+      cursor += 1
+      continue
+    }
+    const start = cursor
+    while (cursor < characters.length && /[A-Za-zÄÖÜäöüß]/u.test(characters[cursor].char)) cursor += 1
+    runs.push({ start, end: cursor })
+  }
+  const run = runs[index]
+  if (!run) return null
+  let minX = Infinity
+  let maxX = -Infinity
+  for (let glyph = run.start; glyph < run.end; glyph += 1) {
+    const left = boxes[glyph * 4]
+    const right = boxes[glyph * 4 + 2]
+    if (!Number.isFinite(left) || !Number.isFinite(right)) continue
+    minX = Math.min(minX, left)
+    maxX = Math.max(maxX, right)
+  }
+  return Number.isFinite(minX) ? { minX, maxX } : null
+}
 
 const lineBox = (line: GroupedLine, sourceWidth: number, sourceHeight: number): [number, number, number, number] => [
   Math.max(0, line.minX / sourceWidth),
@@ -988,6 +1050,43 @@ export async function recognizeInk(
       if (rewritten && nextText !== decoded.text) {
         decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null
+      }
+    }
+    const defaultStyle = activePenWidth === DEFAULT_INK_STYLE.penWidth
+      && activeShear === 0
+      && activeScale === 1
+      && activeStretch === 1
+    if (defaultPen && defaultStyle) {
+      const known = (word: string) => wordIsKnown(lineLanguage, word)
+      const runs = inkWords(decoded.text)
+        .map((word, index) => ({ word, index }))
+        .filter(({ word }) => [...word].length >= 6 && known(word))
+      if (runs.length) {
+        const spans = new Uint32Array(decoded.characters.flatMap((character) => [character.startFrame, character.endFrame]))
+        const wordBoxes = inkSpanBoxes(packed, reference, DEFAULT_INK_STYLE.penWidth, 0, 1, spans)
+        for (const run of runs) {
+          const range = wordSpan(decoded.characters, run.index, wordBoxes)
+          if (!range) continue
+          const cropped = cropPacked(packed, range.minX, range.maxX)
+          if (!cropped) continue
+          const cropImage = renderLine(cropped, reference, { ...DEFAULT_INK_STYLE })
+          if (!cropImage) continue
+          const cropInferenceStarted = performance.now()
+          const cropRun = await infer(cropImage, threads, usePersonalModel)
+          inferenceMs += performance.now() - cropInferenceStarted
+          if (cropRun.classes !== engine.classes) continue
+          const cropDecodeStarted = performance.now()
+          const cropDecoded = decodeLine(engine, cropRun.logits, lineLanguage, decoderForLanguage(engine.manifest.decoder, lineLanguage))
+          decodeMs += performance.now() - cropDecodeStarted
+          const replacement = longerKnownCropWord(run.word, cropDecoded.text, known)
+          if (!replacement) continue
+          const rewritten = rewriteWord(decoded.characters, run.index, replacement)
+          const nextText = textWithWordEdits(decoded.text, [{ index: run.index, from: run.word, to: replacement }])
+          if (!rewritten || nextText === decoded.text) continue
+          decoded = { ...decoded, text: nextText, characters: rewritten }
+          stitched = null
+          break
+        }
       }
     }
     if (!decoded.text.trim()) continue

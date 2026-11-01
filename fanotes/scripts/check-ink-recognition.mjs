@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, longerKnownCropWord, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -129,6 +129,11 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
   assert.equal(tripleLetterFromNarrowGreedy('DDD EEE FFF GGG', 'DOD EEE FFF GGG'), null)
   assert.equal(hasOneOddLetterGroup('HHH III JJJ KKK'), false)
   assert.equal(hasOneOddLetterGroup('Six piqued gmnasts!'), false)
+  assert.equal(longerKnownCropWord('Watched', 'Wretched', knownWord('en')), 'Wretched')
+  assert.equal(longerKnownCropWord('Watched', 'Wretched.', knownWord('en')), 'Wretched')
+  assert.equal(longerKnownCropWord('bleiben', 'blon', known), null)
+  assert.equal(longerKnownCropWord('Vorgaben', 'vorgeben', known), null)
+  assert.equal(longerKnownCropWord('EuropEan', 'EwtopEa', knownWord('en')), null)
   assert.equal(capitalizedSentenceAdverb('manchmal kann er in seltsamer Junge Sein.')?.to, 'Manchmal')
   assert.equal(capitalizedSentenceAdverb('bleiben wegen der Kolbenringspannung in der inneren'), null)
   assert.equal(capitalizedSentenceAdverb('Auch heute bleibt das so.'), null)
@@ -340,6 +345,32 @@ const decoderOptionsFor = (language) => {
   })
 }
 const median = (values) => values.length ? [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] : 0
+
+const cropPacked = (packed, minX, maxX) => {
+  const chunks = []
+  for (let offset = 0; offset < packed.length;) {
+    const count = packed[offset]
+    const end = offset + 1 + count * 2
+    let lo = Infinity
+    let hi = -Infinity
+    for (let index = 0; index < count; index += 1) {
+      const x = packed[offset + 1 + index * 2]
+      lo = Math.min(lo, x)
+      hi = Math.max(hi, x)
+    }
+    const center = (lo + hi) / 2
+    if (center >= minX - 3 && center <= maxX + 3) chunks.push(packed.subarray(offset, end))
+    offset = end
+  }
+  if (chunks.length < 2) return null
+  const out = new Float64Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0))
+  let cursor = 0
+  for (const chunk of chunks) {
+    out.set(chunk, cursor)
+    cursor += chunk.length
+  }
+  return out
+}
 
 const packStrokes = (strokes, width, height) => {
   let count = 0
@@ -707,6 +738,54 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
       if (rewritten && nextText !== decoded.text) {
         decoded = { ...decoded, text: nextText, characters: rewritten }
         boxes = undefined
+      }
+    }
+    if (penWidth === (manifest.decoder.penWidth ?? 2.6) && shear === 0 && scale === 1 && linePackedForBoxes === linePacked) {
+      const known = knownWord(entry.language)
+      const letter = /[A-Za-zÄÖÜäöüß]/u
+      const words = [...decoded.text.matchAll(/[A-Za-zÄÖÜäöüß]+/gu)].map((match) => match[0])
+      const eligible = words.map((word, index) => ({ word, index })).filter(({ word }) => [...word].length >= 6 && known(word))
+      if (eligible.length) {
+        const spans = new Uint32Array(decoded.characters.flatMap((character) => [character.startFrame, character.endFrame]))
+        const wordBoxes = inkSpanBoxes(linePacked, reference, penWidth, 0, 1, spans)
+        const glyphRuns = []
+        let glyph = 0
+        while (glyph < decoded.characters.length) {
+          if (!letter.test(decoded.characters[glyph].char)) { glyph += 1; continue }
+          const start = glyph
+          while (glyph < decoded.characters.length && letter.test(decoded.characters[glyph].char)) glyph += 1
+          glyphRuns.push({ start, end: glyph })
+        }
+        for (const run of eligible) {
+          const glyphs = glyphRuns[run.index]
+          if (!glyphs) continue
+          let minX = Infinity
+          let maxX = -Infinity
+          for (let index = glyphs.start; index < glyphs.end; index += 1) {
+            const left = wordBoxes[index * 4]
+            const right = wordBoxes[index * 4 + 2]
+            if (!Number.isFinite(left) || !Number.isFinite(right)) continue
+            minX = Math.min(minX, left)
+            maxX = Math.max(maxX, right)
+          }
+          if (!Number.isFinite(minX)) continue
+          const cropped = cropPacked(linePacked, minX, maxX)
+          if (!cropped) continue
+          const cropRaw = inkLineImage(cropped, reference, penWidth, 0, 1)
+          if (cropRaw.length < 3) continue
+          const cropStarted = Date.now()
+          const cropRun = await host.recognize({ input: Float32Array.from(cropRaw.subarray(2)), width: cropRaw[0], height: 64, threads: 4 })
+          inferenceMs += Date.now() - cropStarted
+          const cropDecoded = JSON.parse(inkDecode(cropRun.probabilities, cropRun.dims[2], manifest.alphabet, entry.language, decoderOptionsFor(entry.language)))
+          const replacement = longerKnownCropWord(run.word, cropDecoded.text, known)
+          if (!replacement) continue
+          const rewritten = rewriteWord(decoded.characters, run.index, replacement)
+          const nextText = textWithWordEdits(decoded.text, [{ index: run.index, from: run.word, to: replacement }])
+          if (!rewritten || nextText === decoded.text) continue
+          decoded = { ...decoded, text: nextText, characters: rewritten }
+          boxes = undefined
+          break
+        }
       }
     }
     if (!boxes) {

@@ -292,6 +292,24 @@ export const hasOneOddLetterGroup = (text: string) => {
 }
 
 /**
+ * The ink of one dictionary word, read on its own, replaces that word when the isolated reading
+ * is a dictionary word exactly one letter longer (`Watched` → `Wretched`).
+ */
+export const longerKnownCropWord = (
+  word: string,
+  cropText: string,
+  known: (word: string) => boolean,
+): string | null => {
+  const found = inkWords(cropText)
+  if (found.length !== 1) return null
+  const crop = found[0]
+  if (!known(word) || !known(crop)) return null
+  if ([...crop].length !== [...word].length + 1) return null
+  if (wordEdits(word, crop) !== 2) return null
+  return crop
+}
+
+/**
  * Word positions where `alternate` rewrites a long unknown word and leaves every known word
  * to be kept from `base`. A known word that the other rendering changed is not an edit.
  * Returns null when the two readings do not have the same words.
