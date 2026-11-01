@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, dToBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, largerScaleGrowsOneWord, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, dToBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -126,6 +126,9 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
   assert.equal(capitalizedSentenceAdverb('bleiben wegen der Kolbenringspannung in der inneren'), null)
   assert.equal(capitalizedSentenceAdverb('Auch heute bleibt das so.'), null)
   assert.equal(lowercaseVerbSein('manchmal kann er in seltsamer Junge Sein.')?.to, 'sein')
+  assert.equal(capitalizeLoneLowercase('[Kidney,] JuDKINB?')?.to, 'JUDKINB')
+  assert.equal(capitalizeLoneLowercase('bleiben wegen der Kolbenringspannung in der inneren'), null)
+  assert.equal(capitalizeLoneLowercase('PECKSNIFF long-lost'), null)
   assert.equal(lowercaseVerbSein('das Sein bleibt.'), null)
   assert.equal(lowercaseVerbSein('Sein Vater wartet.'), null)
   assert.equal(umlautAndOneOtherLetter('Das Passwort ist "Muiriel".', known), null)
@@ -607,6 +610,15 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
     if (adverb) {
       const rewritten = rewriteSameLengthWord(decoded.characters, adverb.index, adverb.to)
       const nextText = textWithWordEdits(decoded.text, [adverb])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        boxes = undefined
+      }
+    }
+    const loneCap = capitalizeLoneLowercase(decoded.text)
+    if (loneCap) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, loneCap.index, loneCap.to)
+      const nextText = textWithWordEdits(decoded.text, [loneCap])
       if (rewritten && nextText !== decoded.text) {
         decoded = { ...decoded, text: nextText, characters: rewritten }
         boxes = undefined

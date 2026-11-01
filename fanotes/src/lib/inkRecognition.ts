@@ -59,6 +59,7 @@ import {
   narrowScaleKeepsKnownWords,
   capitalizedNounAfterDeterminer,
   capitalizedSentenceAdverb,
+  capitalizeLoneLowercase,
   lowercaseVerbSein,
   umlautAndOneOtherLetter,
   nounAfterAttributiveAdjective,
@@ -897,6 +898,15 @@ export async function recognizeInk(
     if (adverb) {
       const rewritten = rewriteSameLengthWord(decoded.characters, adverb.index, adverb.to)
       const nextText = textWithWordEdits(decoded.text, [adverb])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
+    }
+    const loneCap = capitalizeLoneLowercase(decoded.text)
+    if (loneCap) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, loneCap.index, loneCap.to)
+      const nextText = textWithWordEdits(decoded.text, [loneCap])
       if (rewritten && nextText !== decoded.text) {
         decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null

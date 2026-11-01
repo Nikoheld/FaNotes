@@ -429,6 +429,30 @@ export const capitalizedSentenceAdverb = (text: string): WordEdit | null => {
   return { index: 0, from: word, to: `${head}${word.slice(1)}` }
 }
 
+/**
+ * A word that is already almost all capitals loses its one lowercase letter
+ * (`JuDKINB` → `JUDKINB`). A normal mixed-case word keeps its lowercase letters.
+ */
+export const capitalizeLoneLowercase = (text: string): WordEdit | null => {
+  const words = inkWords(text)
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]
+    const letters = [...word]
+    if (letters.length < 6 || letters[0] === letters[0].toLowerCase()) continue
+    let lower = 0
+    let upper = 0
+    for (const letter of letters) {
+      if (letter !== letter.toUpperCase() && letter === letter.toLowerCase()) lower += 1
+      else if (letter === letter.toUpperCase() && letter !== letter.toLowerCase()) upper += 1
+    }
+    if (lower !== 1 || upper < 4) continue
+    const changed = letters.map((letter) => letter.toUpperCase()).join('')
+    if ([...changed].length !== letters.length) continue
+    return { index, from: word, to: changed }
+  }
+  return null
+}
+
 /** Mid-sentence `Sein` is the verb, unless an article marks the noun (`das Sein`). */
 export const lowercaseVerbSein = (text: string): WordEdit | null => {
   const words = inkWords(text)
