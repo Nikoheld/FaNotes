@@ -550,7 +550,7 @@ fn restore_trace_hyphens(prefix: &[u8], greedy: &str, words: &Words<'_>) -> Vec<
         .iter()
         .map(|&symbol| words.alphabet[usize::from(symbol) - 1])
         .collect();
-    let restored = restore_hyphen_string(&beam, greedy);
+    let restored = restore_parenthesis_string(&restore_hyphen_string(&beam, greedy), greedy);
     if restored == beam {
         return prefix.to_vec();
     }
@@ -588,6 +588,56 @@ fn restore_hyphen_string(text: &str, greedy: &str) -> String {
         break;
     }
     out.extend_from_slice(&text[text_index..]);
+    out.into_iter().collect()
+}
+
+/// Inserts a `)` the pen drew when that mark sits between the same two characters in the
+/// beam (`dann heißen` → `dann) heißen` beside a trace of `dauen) heißen`).
+fn restore_parenthesis_string(text: &str, greedy: &str) -> String {
+    let text: Vec<char> = text.chars().collect();
+    let greedy: Vec<char> = greedy.chars().collect();
+    let mut sites = Vec::new();
+    for (index, &character) in greedy.iter().enumerate() {
+        if character != ')' || index == 0 {
+            continue;
+        }
+        let before = greedy[index - 1];
+        let after = greedy.get(index + 1).copied();
+        let mut found = None;
+        let mut count = 0;
+        for place in 0..text.len() {
+            if text[place] != before {
+                continue;
+            }
+            let next = text.get(place + 1).copied();
+            if next == Some(')') {
+                continue;
+            }
+            let boundary = match after {
+                Some(expected) => next == Some(expected),
+                None => next.is_none(),
+            };
+            if !boundary {
+                continue;
+            }
+            count += 1;
+            found = Some(place + 1);
+        }
+        if count == 1 {
+            if let Some(place) = found {
+                sites.push(place);
+            }
+        }
+    }
+    if sites.is_empty() {
+        return text.into_iter().collect();
+    }
+    sites.sort_unstable();
+    sites.dedup();
+    let mut out = text;
+    for place in sites.into_iter().rev() {
+        out.insert(place, ')');
+    }
     out.into_iter().collect()
 }
 
@@ -1752,6 +1802,15 @@ mod tests {
             restore_hyphen_string("already-there", "already-there"),
             "already-there"
         );
+        assert_eq!(
+            restore_parenthesis_string("2023 dann heißen.", "2023 dauen) heißen."),
+            "2023 dann) heißen."
+        );
+        assert_eq!(
+            restore_parenthesis_string("hello there", "hello) there"),
+            "hello) there"
+        );
+        assert_eq!(restore_parenthesis_string("an an ", "an) an "), "an an ");
     }
 
     #[test]
