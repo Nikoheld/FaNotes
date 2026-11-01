@@ -494,6 +494,31 @@ pub fn beam_decode(
             }
         }
     }
+    // A doubled final letter becomes that letter plus an exclamation when a close reading
+    // already has it (`Muiriell` → `Muiriel!`).
+    {
+        let chosen = tidy(&render(&best));
+        let mut distinct = 0usize;
+        let mut previous = String::new();
+        for (prefix, score) in &finals {
+            if best_score - *score > 2.3 {
+                break;
+            }
+            let polished = polish(prefix, &greedy_ids, &words, dictionary);
+            let text = tidy(&render(&polished));
+            if text != previous {
+                if distinct == options.n_best.max(1) {
+                    break;
+                }
+                distinct += 1;
+                previous = text.clone();
+            }
+            if finishes_a_doubled_letter_with_a_bang(&chosen, &text) {
+                best = polished;
+                break;
+            }
+        }
+    }
     // The language model likes to split a long pen word into two known words (`Jack daws`).
     // If the raw trace has no space there and both pieces are long, join them back.
     let best = drop_spaces_absent_from_trace(&best, &greedy_text, &words, dictionary);
@@ -717,6 +742,20 @@ fn drop_spaces_absent_from_trace(
         .filter(|(index, _)| !drop[*index])
         .map(|(_, symbol)| *symbol)
         .collect()
+}
+
+/// `candidate` is `current` with a repeated final letter replaced by that letter and `!`.
+fn finishes_a_doubled_letter_with_a_bang(current: &str, candidate: &str) -> bool {
+    let current: Vec<char> = current.chars().collect();
+    let candidate: Vec<char> = candidate.chars().collect();
+    if current.len() < 2 || current.len() != candidate.len() {
+        return false;
+    }
+    let last = current.len() - 1;
+    current[last] == current[last - 1]
+        && current[last].is_alphabetic()
+        && candidate[last] == '!'
+        && current[..last] == candidate[..last]
 }
 
 /// `candidate` is `current` with one word of two or three letters growing by one or two
@@ -1687,6 +1726,19 @@ mod tests {
             "über Paronen",
             &Known
         ));
+    }
+
+    #[test]
+    fn a_doubled_final_letter_can_become_an_exclamation() {
+        assert!(finishes_a_doubled_letter_with_a_bang(
+            "zum Geburtstag, Muiriell",
+            "zum Geburtstag, Muiriel!"
+        ));
+        assert!(!finishes_a_doubled_letter_with_a_bang(
+            "zum Geburtstag, Muiriel",
+            "zum Geburtstag, Muiriel!"
+        ));
+        assert!(!finishes_a_doubled_letter_with_a_bang("hello", "hell!"));
     }
 
     #[test]
