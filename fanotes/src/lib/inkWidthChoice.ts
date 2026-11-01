@@ -35,6 +35,9 @@ export const NARROW_STRETCH_MARGIN = 7
 /** A one-letter change to a long unknown word has to sit within this many nats of the top reading. */
 export const LONG_LETTER_MARGIN = 0.8
 
+/** A final letter becomes an apostrophe when that alternative is at least this confident. */
+export const APOSTROPHE_ALT_MIN = 0.35
+
 const ADJECTIVE_ENDING = /(?:ischen|lichen)$/iu
 
 /** A smaller line that keeps every known word has to beat the default by this many nats. */
@@ -209,6 +212,20 @@ export const longUnknownWordEdits = (
   }
   return edits.length ? edits : null
 }
+
+/**
+ * Indexes of a word-final letter whose apostrophe alternative is confident enough
+ * (`Soci` → `Soc'`).
+ */
+export const finalLetterApostropheIndexes = (
+  characters: Array<{ char: string; alternatives?: Array<{ char: string; confidence: number }> }>,
+): number[] => characters.flatMap((character, index) => {
+  const next = characters[index + 1]?.char
+  if (next && /[A-Za-zÄÖÜäöüß]/u.test(next)) return []
+  if (!/[A-Za-zÄÖÜäöüß]/u.test(character.char)) return []
+  const quote = character.alternatives?.some((alternative) => alternative.char === "'" && alternative.confidence >= APOSTROPHE_ALT_MIN)
+  return quote ? [index] : []
+})
 
 /**
  * After an attributive adjective in `-ischen` or `-lichen`, an infinitive becomes the

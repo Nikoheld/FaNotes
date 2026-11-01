@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, finalLetterApostropheIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -123,6 +123,13 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
   ), false)
   assert.equal(replacesBracketPeriodWithComma('[Kidney.] JuDKIND?', '[Kidney,] JuDKIND?'), true)
   assert.equal(replacesBracketPeriodWithComma('By Trevor Williams. A move', 'By Trevor Williams, A move'), false)
+  assert.deepEqual(finalLetterApostropheIndexes([
+    { char: 'i', alternatives: [{ char: "'", confidence: 0.38 }] },
+  ]), [0])
+  assert.deepEqual(finalLetterApostropheIndexes([
+    { char: 'i', alternatives: [{ char: "'", confidence: 0.2 }] },
+    { char: 'e', alternatives: [] },
+  ]), [])
   assert.equal(capitalizesOnlyTheFirstLetter('dumdum; GENTLEMAN', 'Dumdum; GENTLEMAN'), true)
   assert.equal(capitalizesOnlyTheFirstLetter('xxx yyy zzz', 'Xxx yyy zzz'), true)
   assert.equal(capitalizesOnlyTheFirstLetter('DDD EEE FFF GGG', 'DOD EEE FFF GGG'), false)
@@ -410,6 +417,12 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
         decoded = { ...decoded, text: nextText, characters: rewritten }
         boxes = undefined
       }
+    }
+    const apostropheIndexes = finalLetterApostropheIndexes(decoded.characters ?? [])
+    if (apostropheIndexes.length) {
+      const characters = decoded.characters.map((character, index) => apostropheIndexes.includes(index) ? { ...character, char: "'" } : character)
+      decoded = { ...decoded, characters, text: characters.map((character) => character.char).join('') }
+      boxes = undefined
     }
     const nounEdit = nounAfterAttributiveAdjective(decoded.text, knownWord(entry.language))
     if (nounEdit) {
