@@ -648,6 +648,9 @@ pub fn beam_decode(
     // the dictionary has the one word, or when both pieces are written in capitals
     // (`PECK SNIFF`). Ordinary words such as `schlafen gehen` stay split.
     let best = drop_spaces_absent_from_trace(&best, &greedy_text, &words, dictionary);
+    // `Natur denk` joins when one greedy token is those letters plus at most one extra
+    // (`Natuerdenk`). `schlafen gehen` stays split: the trace spells a different letter.
+    let best = join_words_spelled_in_the_trace(&best, &greedy_text, &words);
     // A hyphen the pen drew and the beam skipped is put back when the next letter matches
     // (`Fifth-` → `-Fifth-`).
     let best = restore_trace_hyphens(&best, &greedy_text, &words);
@@ -925,6 +928,107 @@ fn drop_spaces_absent_from_trace(
         .filter(|(index, _)| !drop[*index])
         .map(|(_, symbol)| *symbol)
         .collect()
+}
+
+fn join_words_spelled_in_the_trace(prefix: &[u8], greedy: &str, words: &Words<'_>) -> Vec<u8> {
+    let beam: String = prefix
+        .iter()
+        .map(|&symbol| words.alphabet[usize::from(symbol) - 1])
+        .collect();
+    let joined = join_spelled_string(&beam, greedy);
+    if joined == beam {
+        return prefix.to_vec();
+    }
+    let mut symbols = Vec::with_capacity(joined.chars().count());
+    for character in joined.chars() {
+        let Some(index) = words.alphabet.iter().position(|&item| item == character) else {
+            return prefix.to_vec();
+        };
+        symbols.push((index + 1) as u8);
+    }
+    symbols
+}
+
+fn join_spelled_string(text: &str, greedy: &str) -> String {
+    let tokens: Vec<String> = greedy
+        .split(|character: char| !character.is_alphabetic())
+        .filter(|token| !token.is_empty())
+        .map(fold_token)
+        .filter(|token| token.chars().count() >= 8)
+        .collect();
+    let chars: Vec<char> = text.chars().collect();
+    let mut spans = Vec::new();
+    let mut index = 0;
+    while index < chars.len() {
+        if !chars[index].is_alphabetic() {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        index += 1;
+        while index < chars.len() && chars[index].is_alphabetic() {
+            index += 1;
+        }
+        spans.push((start, index));
+    }
+    let mut drop_at = Vec::new();
+    for pair in spans.windows(2) {
+        let (left_start, left_end) = pair[0];
+        let (right_start, right_end) = pair[1];
+        if left_end - left_start < 4 || right_end - right_start < 4 {
+            continue;
+        }
+        if !chars[left_end..right_start]
+            .iter()
+            .all(|character| character.is_whitespace())
+        {
+            continue;
+        }
+        let needle = fold_token(
+            &chars[left_start..left_end]
+                .iter()
+                .chain(chars[right_start..right_end].iter())
+                .collect::<String>(),
+        );
+        if tokens.iter().any(|token| token_covers_word(&needle, token)) {
+            drop_at.extend(left_end..right_start);
+        }
+    }
+    chars
+        .into_iter()
+        .enumerate()
+        .filter(|(index, _)| !drop_at.contains(index))
+        .map(|(_, character)| character)
+        .collect()
+}
+
+fn fold_token(text: &str) -> String {
+    text.chars()
+        .flat_map(|character| character.to_lowercase())
+        .collect::<String>()
+        .replace('ß', "ss")
+}
+
+/// `token` is `needle` with at most one extra letter and no substituted letter.
+fn token_covers_word(needle: &str, token: &str) -> bool {
+    let needle: Vec<char> = needle.chars().collect();
+    let token: Vec<char> = token.chars().collect();
+    if token.len() < needle.len() || token.len() > needle.len() + 1 {
+        return false;
+    }
+    let mut index = 0;
+    let mut skips = 0;
+    for &character in &token {
+        if index < needle.len() && needle[index] == character {
+            index += 1;
+        } else {
+            skips += 1;
+            if skips > 1 {
+                return false;
+            }
+        }
+    }
+    index == needle.len()
 }
 
 /// `candidate` is `current` with a final comma replaced by a period, and that comma
@@ -2113,6 +2217,40 @@ mod tests {
         assert_eq!(
             drop_spaces_absent_from_trace(&symbols("abcd efgh"), "abcdefgh", &decoder, None),
             symbols("abcd efgh")
+        );
+    }
+
+    #[test]
+    fn a_word_the_trace_spells_joins_its_pieces() {
+        let alphabet: Vec<char> = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz -."
+            .chars()
+            .collect();
+        let index = |character: char| {
+            (alphabet.iter().position(|&item| item == character).unwrap() + 1) as u8
+        };
+        let symbols = |text: &str| text.chars().map(index).collect::<Vec<_>>();
+        let decoder = words(&alphabet);
+        assert_eq!(
+            join_words_spelled_in_the_trace(&symbols("Natur denk-"), "Natuerdenk-", &decoder),
+            symbols("Naturdenk-")
+        );
+        assert_eq!(
+            join_words_spelled_in_the_trace(
+                &symbols("Ich muss schlafen gehen."),
+                "Ich muss schlufengehen.",
+                &decoder
+            ),
+            symbols("Ich muss schlafen gehen."),
+            "a different letter in the trace keeps the space"
+        );
+        assert_eq!(
+            join_words_spelled_in_the_trace(
+                &symbols("Ich werde bald sein."),
+                "Ich werde bald sein.",
+                &decoder
+            ),
+            symbols("Ich werde bald sein."),
+            "a space in the trace stays"
         );
     }
 
