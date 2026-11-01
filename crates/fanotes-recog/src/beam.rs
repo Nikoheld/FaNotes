@@ -654,7 +654,17 @@ pub fn beam_decode(
     // A hyphen the pen drew and the beam skipped is put back when the next letter matches
     // (`Fifth-` → `-Fifth-`).
     let best = restore_trace_hyphens(&best, &greedy_text, &words);
-    let characters = align(&log_probs, classes, frames, &best, alphabet);
+    // `dauen` is one inserted letter from three dictionary words. The character model
+    // prefers `dauern` in this sentence, and the shorter beam word `dann` loses.
+    let (best, protected) = prefer_traced_completion(&best, &greedy_text, &words, dictionary, lm);
+    let mut characters = align(&log_probs, classes, frames, &best, alphabet);
+    // The inserted letters were not the pen's choice, so a later visual swap
+    // (`r` → `n`) must not undo them.
+    if let Some((start, end)) = protected {
+        for character in characters.iter_mut().take(end).skip(start) {
+            character.alternatives.clear();
+        }
+    }
     let text = render(&best);
     let (known_words, word_count) = count_words(&best, &words);
     let confidence = if characters.is_empty() {
@@ -672,6 +682,207 @@ pub fn beam_decode(
         known_words,
         words: word_count,
     })
+}
+
+fn word_edits(left: &str, right: &str) -> usize {
+    let left: Vec<char> = left.chars().collect();
+    let right: Vec<char> = right.chars().collect();
+    let mut previous: Vec<usize> = (0..=right.len()).collect();
+    for (i, left_char) in left.iter().enumerate() {
+        let mut corner = previous[0];
+        previous[0] = i + 1;
+        for (j, right_char) in right.iter().enumerate() {
+            let next = previous[j + 1];
+            previous[j + 1] = if left_char == right_char {
+                corner
+            } else {
+                (previous[j + 1] + 1).min(previous[j] + 1).min(corner + 1)
+            };
+            corner = next;
+        }
+    }
+    previous[right.len()]
+}
+
+fn fold_dict(word: &str) -> String {
+    word.to_lowercase().replace('ß', "ss")
+}
+
+fn letter_spans(prefix: &[u8], words: &Words<'_>) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut index = 0;
+    while index < prefix.len() {
+        if !words.is_letter(prefix[index]) {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < prefix.len() && words.is_letter(prefix[index]) {
+            index += 1;
+        }
+        spans.push((start, index));
+    }
+    spans
+}
+
+fn letter_tokens(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    for character in text.chars() {
+        if character.is_alphabetic() {
+            current.push(character);
+        } else if !current.is_empty() {
+            tokens.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+fn lm_cost(lm: &CharLm, alphabet: &[char], text: &str) -> f32 {
+    let mut history = vec![0u8];
+    let mut total = 0.0f32;
+    for character in text.chars() {
+        let Some(index) = alphabet.iter().position(|item| *item == character) else {
+            continue;
+        };
+        let symbol = (index + 1) as u8;
+        total += lm.cost(&history, symbol);
+        history.push(symbol);
+    }
+    total
+}
+
+fn cased_like(selected: &str, candidate: &str) -> String {
+    let mut chars = candidate.chars();
+    let Some(first) = chars.next() else {
+        return candidate.to_string();
+    };
+    let capital = selected
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_uppercase());
+    if !capital {
+        return candidate.to_string();
+    }
+    let head: String = first.to_uppercase().collect();
+    if head.chars().count() != 1 {
+        return candidate.to_string();
+    }
+    let mut out = head;
+    out.extend(chars);
+    out
+}
+
+/// When the pen token is one inserted letter away from several dictionary words, keep the
+/// completion the character model prefers over the beam's shorter word (`dauen` → `dauern`).
+fn prefer_traced_completion(
+    prefix: &[u8],
+    greedy: &str,
+    words: &Words<'_>,
+    dictionary: Option<&dyn Lexicon>,
+    lm: Option<&CharLm>,
+) -> (Vec<u8>, Option<(usize, usize)>) {
+    let (Some(dictionary), Some(lm)) = (dictionary, lm) else {
+        return (prefix.to_vec(), None);
+    };
+    let spans = letter_spans(prefix, words);
+    let traced = letter_tokens(greedy);
+    if spans.len() != traced.len() {
+        return (prefix.to_vec(), None);
+    }
+    let rendered: String = prefix
+        .iter()
+        .map(|&symbol| words.alphabet[usize::from(symbol) - 1])
+        .collect();
+    let selected_cost = lm_cost(lm, words.alphabet, &rendered);
+    let insertable: Vec<char> = "abcdefghijklmnopqrstuvwxyzäöü"
+        .chars()
+        .filter(|character| words.alphabet.contains(character))
+        .collect();
+    let mut chosen: Option<(usize, usize, Vec<u8>)> = None;
+    let mut best_gain = 0.0f32;
+    for (index, &(start, end)) in spans.iter().enumerate() {
+        let selected: String = prefix[start..end]
+            .iter()
+            .map(|&symbol| words.alphabet[usize::from(symbol) - 1])
+            .collect();
+        let trace = &traced[index];
+        if fold_dict(&selected) == fold_dict(trace)
+            || !dictionary.contains(&selected)
+            || dictionary.contains(trace)
+            || trace.chars().count() < 4
+            || word_edits(&selected, trace) < 2
+        {
+            continue;
+        }
+        let trace_chars: Vec<char> = trace.chars().collect();
+        let mut candidates = Vec::new();
+        for at in 0..=trace_chars.len() {
+            for &letter in &insertable {
+                let mut next: String = trace_chars[..at].iter().collect();
+                next.push(letter);
+                next.extend(trace_chars[at..].iter());
+                if dictionary.contains(&next) {
+                    candidates.push(fold_dict(&next));
+                }
+            }
+        }
+        candidates.sort();
+        candidates.dedup();
+        if candidates.len() < 2 {
+            continue;
+        }
+        let mut ranked = Vec::new();
+        for candidate in candidates {
+            let spelling = cased_like(&selected, &candidate);
+            let Some(symbols) = encode_word(words.alphabet, &spelling) else {
+                continue;
+            };
+            let prefix_text: String = prefix[..start]
+                .iter()
+                .map(|&symbol| words.alphabet[usize::from(symbol) - 1])
+                .collect();
+            let suffix_text: String = prefix[end..]
+                .iter()
+                .map(|&symbol| words.alphabet[usize::from(symbol) - 1])
+                .collect();
+            let text = format!("{prefix_text}{spelling}{suffix_text}");
+            ranked.push((lm_cost(lm, words.alphabet, &text), symbols));
+        }
+        ranked.sort_by(|left, right| left.0.total_cmp(&right.0));
+        let Some((best_cost, best_symbols)) = ranked.first() else {
+            continue;
+        };
+        let second = ranked.get(1).map(|item| item.0).unwrap_or(f32::MAX);
+        if *best_cost + 2.0 >= selected_cost || *best_cost + 1.0 >= second {
+            continue;
+        }
+        let gain = selected_cost - *best_cost;
+        if gain > best_gain {
+            best_gain = gain;
+            chosen = Some((start, end, best_symbols.clone()));
+        }
+    }
+    let Some((start, end, symbols)) = chosen else {
+        return (prefix.to_vec(), None);
+    };
+    let mut out = prefix[..start].to_vec();
+    let protected = (start, start + symbols.len());
+    out.extend(symbols);
+    out.extend_from_slice(&prefix[end..]);
+    (out, Some(protected))
+}
+
+fn encode_word(alphabet: &[char], word: &str) -> Option<Vec<u8>> {
+    let mut symbols = Vec::new();
+    for character in word.chars() {
+        let index = alphabet.iter().position(|item| *item == character)?;
+        symbols.push((index + 1) as u8);
+    }
+    Some(symbols)
 }
 
 fn restore_trace_hyphens(prefix: &[u8], greedy: &str, words: &Words<'_>) -> Vec<u8> {
@@ -2538,5 +2749,93 @@ mod tests {
             collapse_repeated_letters("DDD EEE FFF GGG"),
             "DDD EEE FFF GGG"
         );
+    }
+
+    #[test]
+    fn a_traced_completion_prefers_dauern_when_the_model_agrees() {
+        let lm = CharLm::parse(
+            &std::fs::read("/workspace/fanotes/public/ocr/fanotes-ink/de.fnlm")
+                .expect("language model"),
+        )
+        .expect("language model");
+        let words_file =
+            std::fs::read_to_string("/workspace/fanotes/public/spell/de.words").expect("words");
+        let known: std::collections::HashSet<String> = words_file
+            .lines()
+            .filter(|word| !word.is_empty())
+            .map(|word| word.to_string())
+            .collect();
+        struct Listed(std::collections::HashSet<String>);
+        impl Lexicon for Listed {
+            fn contains(&self, word: &str) -> bool {
+                self.0.contains(&fold_dict(word))
+            }
+        }
+        let alphabet = lm.alphabet().to_vec();
+        let dictionary = Listed(known);
+        let words = Words {
+            alphabet: &alphabet,
+            lexicon: &(),
+        };
+        let encode = |text: &str| encode_word(&alphabet, text).expect(text);
+        let sentence = encode("und wird bis 31. Dezember 2023 dann) heißen. Die Olympischen");
+        let (completed, _) = prefer_traced_completion(
+            &sentence,
+            "und wird bis 31. Dezorbr 2023 dauen) heißen. Die Olgmpislen",
+            &words,
+            Some(&dictionary),
+            Some(&lm),
+        );
+        let rendered: String = completed
+            .iter()
+            .map(|&symbol| alphabet[usize::from(symbol) - 1])
+            .collect();
+        assert_eq!(
+            rendered,
+            "und wird bis 31. Dezember 2023 dauern) heißen. Die Olympischen"
+        );
+        let (kept, _) = prefer_traced_completion(
+            &encode("Das wird nie enden."),
+            "Das wird nixe enden.",
+            &words,
+            Some(&dictionary),
+            Some(&lm),
+        );
+        let kept_text: String = kept
+            .iter()
+            .map(|&symbol| alphabet[usize::from(symbol) - 1])
+            .collect();
+        assert_eq!(kept_text, "Das wird nie enden.");
+        let english_lm = CharLm::parse(
+            &std::fs::read("/workspace/fanotes/public/ocr/fanotes-ink/en.fnlm")
+                .expect("english model"),
+        )
+        .expect("english model");
+        let english_words = std::fs::read_to_string("/workspace/fanotes/public/spell/en.words")
+            .expect("english words");
+        let english_known: std::collections::HashSet<String> = english_words
+            .lines()
+            .filter(|word| !word.is_empty())
+            .map(|word| word.to_string())
+            .collect();
+        let english_dictionary = Listed(english_known);
+        let english_alphabet = english_lm.alphabet().to_vec();
+        let english = Words {
+            alphabet: &english_alphabet,
+            lexicon: &(),
+        };
+        let veda = encode_word(&english_alphabet, "Rig-Veda\". Wadjih;").expect("veda");
+        let (kept_veda, _) = prefer_traced_completion(
+            &veda,
+            "Rig-Veds\". Wodjih;",
+            &english,
+            Some(&english_dictionary),
+            Some(&english_lm),
+        );
+        let veda_text: String = kept_veda
+            .iter()
+            .map(|&symbol| english_alphabet[usize::from(symbol) - 1])
+            .collect();
+        assert_eq!(veda_text, "Rig-Veda\". Wadjih;");
     }
 }
