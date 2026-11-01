@@ -28,13 +28,20 @@ pub fn runtime() -> PathBuf {
         .join(platform)
         .join(arch)
         .join(default_runtime_file());
-    assert!(path.is_file(), "ONNX Runtime missing at {}; run `npm ci` in fanotes/", path.display());
+    assert!(
+        path.is_file(),
+        "ONNX Runtime missing at {}; run `npm ci` in fanotes/",
+        path.display()
+    );
     path
 }
 
 pub fn model() -> (PathBuf, ModelDescriptor) {
     let directory = repo().join("fanotes/public/ocr");
-    let descriptor = ModelDescriptor::from_manifest(&fs::read_to_string(directory.join("manifest.json")).unwrap()).unwrap();
+    let descriptor = ModelDescriptor::from_manifest(
+        &fs::read_to_string(directory.join("manifest.json")).unwrap(),
+    )
+    .unwrap();
     (directory.join(descriptor.file()), descriptor)
 }
 
@@ -43,12 +50,20 @@ pub fn line(width: usize) -> Vec<f32> {
     (0..128 * width)
         .map(|index| {
             let (y, x) = (index / width, index % width);
-            if (40..88).contains(&y) && (x / 6) % 3 == 0 { 1.0 } else { 0.0 }
+            if (40..88).contains(&y) && (x / 6) % 3 == 0 {
+                1.0
+            } else {
+                0.0
+            }
         })
         .collect()
 }
 
 pub fn max_difference(a: &Prediction, b: &Prediction) -> f32 {
     assert_eq!(a.dims, b.dims);
-    a.probabilities.iter().zip(&b.probabilities).map(|(x, y)| (x - y).abs()).fold(0.0, f32::max)
+    a.probabilities
+        .iter()
+        .zip(&b.probabilities)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0, f32::max)
 }

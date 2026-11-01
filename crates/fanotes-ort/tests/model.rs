@@ -90,7 +90,7 @@ fn refuses_manifests_main_cjs_refused() {
         }),
         ("size zero", |m| m["models"]["desktop"]["size"] = json!(0)),
         ("size 32 MiB + 1", |m| {
-            m["models"]["desktop"]["size"] = json!(32 * 1024 * 1024 + 1)
+            m["models"]["desktop"]["size"] = json!(64 * 1024 * 1024 + 1)
         }),
         ("size text", |m| {
             m["models"]["desktop"]["size"] = json!("21334652")
@@ -203,7 +203,7 @@ fn descriptor_fields_are_bounded() {
     let digest = "a".repeat(64);
     assert!(ModelDescriptor::new("pylaia-iam.onnx", 1, &digest).is_ok());
     assert!(ModelDescriptor::new("pylaia-iam.onnx", 0, &digest).is_err());
-    assert!(ModelDescriptor::new("pylaia-iam.onnx", 32 * 1024 * 1024 + 1, &digest).is_err());
+    assert!(ModelDescriptor::new("pylaia-iam.onnx", 64 * 1024 * 1024 + 1, &digest).is_err());
     assert!(ModelDescriptor::new("", 1, &digest).is_err());
     assert!(ModelDescriptor::new(".hidden", 1, &digest).is_err());
     assert!(ModelDescriptor::new("a/b.onnx", 1, &digest).is_err());

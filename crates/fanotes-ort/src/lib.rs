@@ -23,11 +23,15 @@ pub use session::{Prediction, PylaiaSession};
 pub const ENGINE: &str = "fanotes-ort-cpu";
 /// ONNX Runtime version the build is pinned to (`onnxruntime-node@1.21.0` in `fanotes/package.json`).
 pub const ONNXRUNTIME_VERSION: &str = "1.21.0";
+/// PyLaia line height. The ink recognizer uses 64; the sidecar takes the height from the request.
 pub const MODEL_HEIGHT: usize = 128;
-pub const MIN_WIDTH: usize = 32;
+pub const MIN_HEIGHT: usize = 16;
+pub const MAX_HEIGHT: usize = 256;
+pub const MIN_WIDTH: usize = 16;
 pub const MAX_WIDTH: usize = 4096;
 pub const MIN_THREADS: usize = 1;
 pub const MAX_THREADS: usize = 4;
+/// Default input tensor name (PyLaia). The ink model uses `image`; the request carries the name.
 pub const INPUT_NAME: &str = "x";
 pub const OUTPUT_NAME: &str = "probabilities";
 
@@ -64,4 +68,18 @@ pub fn valid_threads(threads: usize) -> bool {
 /// True when `width` is a line width the worker accepted.
 pub fn valid_width(width: usize) -> bool {
     (MIN_WIDTH..=MAX_WIDTH).contains(&width)
+}
+
+/// True when `height` is a model input height the sidecar serves (PyLaia 128, ink 64).
+pub fn valid_height(height: usize) -> bool {
+    (MIN_HEIGHT..=MAX_HEIGHT).contains(&height) && height.is_multiple_of(8)
+}
+
+/// True when `name` is a safe ONNX tensor name the request may carry.
+pub fn valid_tensor_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-' | b'/'))
 }

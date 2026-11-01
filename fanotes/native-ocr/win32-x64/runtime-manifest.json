@@ -7,8 +7,8 @@
   "rustTarget": "x86_64-pc-windows-gnu",
   "executable": {
     "file": "fanotes-ocr.exe",
-    "size": 1339392,
-    "sha256": "8c9128eb69562761ede425abc0651abf9740ba6aaeed6c6736409837a27655d6"
+    "size": 1345536,
+    "sha256": "59e57f011d75d3bd1400943c8eaf28129b03dc96608fdc83ede313c9b392e977"
   },
   "onnxruntime": {
     "version": "1.21.0",
