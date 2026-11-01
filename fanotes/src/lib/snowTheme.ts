@@ -165,6 +165,11 @@ export const stepSnowField = (
       if (!overlapsX(x, span, other.x, other.x + spanOf(other))) continue
       consider(other.y)
     }
+    // A downward push can start the flake already past the floor. That surface
+    // is still the support, or the flake falls without ever settling.
+    if ((oldBottom >= field.height - 0.25 || newBottom >= field.height - 0.25) && (support === null || support > field.height)) {
+      support = field.height
+    }
     let settled = false
     if (support !== null) {
       y = support - span

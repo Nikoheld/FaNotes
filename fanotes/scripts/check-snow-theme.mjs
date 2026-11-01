@@ -131,6 +131,20 @@ try {
   }
   assert.equal(stepSnowField(moving, 48, false, [obstacle]), moving)
   assert.ok(moving.flakes.every((flake) => flake.settled))
+  const floorIndex = settled.flakes.findIndex((flake) => Math.abs(bottomOf(flake) - field.height) < 0.01)
+  assert.ok(floorIndex >= 0)
+  const floorFlake = settled.flakes[floorIndex]
+  const pushedDown = dragSnowField(settled, floorFlake.x + floorFlake.radius, floorFlake.y + floorFlake.radius, 20, 2)
+  assert.ok(bottomOf(pushedDown.flakes[floorIndex]) > field.height)
+  let recovered = pushedDown
+  for (let frame = 0; frame < 300; frame += 1) {
+    const next = stepSnowField(recovered, 16, false, [obstacle])
+    if (next === recovered) break
+    recovered = next
+  }
+  assert.equal(recovered.flakes[floorIndex].settled, true)
+  assert.ok(Math.abs(bottomOf(recovered.flakes[floorIndex]) - field.height) < 0.01)
+  assert.ok(recovered.flakes.every((flake) => bottomOf(flake) <= field.height + 0.01))
   assert.deepEqual(field.flakes.map((flake) => [flake.x, flake.y]), before)
 } finally {
   await vite.close()
