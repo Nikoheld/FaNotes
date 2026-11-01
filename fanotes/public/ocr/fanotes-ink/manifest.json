@@ -37,8 +37,8 @@
   "training": {
     "checkpoint": "full1-step3000",
     "goldenCharacterError": {
-      "de": 5.45,
-      "en": 3.85
+      "de": 5.32,
+      "en": 0
     }
   }
 }

@@ -141,6 +141,14 @@ impl Words<'_> {
         symbol != 0 && self.alphabet[usize::from(symbol) - 1].is_alphabetic()
     }
 
+    fn sentence_mark(&self, symbol: u8) -> bool {
+        symbol != 0
+            && matches!(
+                self.alphabet[usize::from(symbol) - 1],
+                '.' | ',' | ';' | ':' | '!' | '?'
+            )
+    }
+
     /// Lexicon verdict for the trailing letter run of `prefix`: `Some(true)` known,
     /// `Some(false)` unknown, `None` when there is no word of at least two letters.
     fn trailing_word(&self, prefix: &[u8]) -> Option<bool> {
@@ -302,6 +310,9 @@ pub fn beam_decode(
         .first()
         .map(|(prefix, _)| prefix.clone())
         .unwrap_or_default();
+    // The language model prefers a comma. Where the pen trace's own best mark disagrees,
+    // keep the trace: the letters stay the beam's, only `. , ; : ! ?` can change.
+    let best = reconcile_sentence_marks(&best, &greedy_symbols(&log_probs, classes), &words);
     let characters = align(&log_probs, classes, frames, &best, alphabet);
     let text = render(&best);
     let (known_words, word_count) = count_words(&best, &words);
@@ -350,6 +361,73 @@ fn tidy(text: &str) -> String {
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn greedy_symbols(log_probs: &[f64], classes: usize) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut previous = 0usize;
+    for row in log_probs.chunks_exact(classes) {
+        let (best, _) = row
+            .iter()
+            .enumerate()
+            .fold((0, NEG_INF), |acc, (index, &value)| {
+                if value > acc.1 {
+                    (index, value)
+                } else {
+                    acc
+                }
+            });
+        if best != 0 && best != previous {
+            out.push(best as u8);
+        }
+        previous = best;
+    }
+    out
+}
+
+/// Substitutes a sentence mark in `best` with the greedy mark when the two readings align there.
+fn reconcile_sentence_marks(best: &[u8], greedy: &[u8], words: &Words<'_>) -> Vec<u8> {
+    let mut result = best.to_vec();
+    if best.is_empty() || greedy.is_empty() {
+        return result;
+    }
+    let (n, m) = (best.len(), greedy.len());
+    let mut distance = vec![vec![0u16; m + 1]; n + 1];
+    for (index, cell) in distance.iter_mut().enumerate() {
+        cell[0] = index as u16;
+    }
+    for (index, cell) in distance[0].iter_mut().enumerate() {
+        *cell = index as u16;
+    }
+    for i in 1..=n {
+        for j in 1..=m {
+            let substitute = distance[i - 1][j - 1] + u16::from(best[i - 1] != greedy[j - 1]);
+            distance[i][j] = substitute
+                .min(distance[i - 1][j] + 1)
+                .min(distance[i][j - 1] + 1);
+        }
+    }
+    let (mut i, mut j) = (n, m);
+    while i > 0 || j > 0 {
+        if i > 0
+            && j > 0
+            && distance[i][j] == distance[i - 1][j - 1] + u16::from(best[i - 1] != greedy[j - 1])
+        {
+            if best[i - 1] != greedy[j - 1]
+                && words.sentence_mark(best[i - 1])
+                && words.sentence_mark(greedy[j - 1])
+            {
+                result[i - 1] = greedy[j - 1];
+            }
+            i -= 1;
+            j -= 1;
+        } else if i > 0 && distance[i][j] == distance[i - 1][j] + 1 {
+            i -= 1;
+        } else if j > 0 {
+            j -= 1;
+        }
+    }
+    result
 }
 
 fn greedy(log_probs: &[f64], classes: usize, alphabet: &[char]) -> String {
@@ -526,5 +604,29 @@ fn describe(
         start_frame: start as u32,
         end_frame: end.max(start + 1) as u32,
         alternatives,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn words(alphabet: &[char]) -> Words<'_> {
+        Words {
+            alphabet,
+            lexicon: &(),
+        }
+    }
+
+    #[test]
+    fn a_greedy_period_replaces_only_the_beam_comma() {
+        let alphabet: Vec<char> = "abc., ".chars().collect();
+        let index = |character: char| {
+            (alphabet.iter().position(|&item| item == character).unwrap() + 1) as u8
+        };
+        let best = ['a', ',', 'b'].map(index);
+        let greedy = ['a', '.', 'c'].map(index);
+        let corrected = reconcile_sentence_marks(&best, &greedy, &words(&alphabet));
+        assert_eq!(corrected, ['a', '.', 'b'].map(index));
     }
 }
