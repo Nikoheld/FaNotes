@@ -46,8 +46,8 @@ python train.py --steps 7000 --validate-scans \
 python train.py --init /path/to/a-checkpoint-that-passes-the-golden-check.pt --steps 600 --lr 4e-5 --warmup 40 \
   --mild-augment --distill-weight 8 --product-eval --product-brush /path/pen-cases.json \
   --validate-scans --sources brush:0.62,composed:0.38 --out $FANOTES_INK_HOME/runs/pen
-# `--distill-weight` keeps unaugmented German and IAM scan logits near the init checkpoint,
-# so a pen update is discarded when it moves the golden lines.
+# `--distill-weight` keeps unaugmented German and IAM scan logits near the init checkpoint.
+# `--distill-decisions` anchors only the character the init model actually chose on confident frames.
 python export.py $FANOTES_INK_HOME/runs/full/best.pt --version 2026.11.1 --emit-checkpoint
 python stage.py --model $FANOTES_INK_HOME/export/ink-fp32.onnx \
   --lm-de $FANOTES_INK_HOME/lm/de-6.fnlm --lm-en $FANOTES_INK_HOME/lm/en-6.fnlm --version 2026.11.1

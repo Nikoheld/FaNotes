@@ -97,7 +97,9 @@ def score(checkpoint, brush):
         report = {
             'deCharacterError': golden['report'].get('de', {}).get('cer'),
             'deWordError': golden['report'].get('de', {}).get('wer'),
+            'deExact': golden['report'].get('de', {}).get('exact'),
             'enCharacterError': golden['report'].get('en', {}).get('cer'),
+            'enExact': golden['report'].get('en', {}).get('exact'),
             'pageCharacterError': golden['pages'][0]['cer'] if golden.get('pages') else None,
         }
         if brush:

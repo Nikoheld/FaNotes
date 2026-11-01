@@ -193,6 +193,8 @@ def main():
     parser.add_argument('--product-brush', default='')
     parser.add_argument('--distill-weight', type=float, default=0.0,
                         help='keep German and IAM scan logits near the init checkpoint while CTC trains the pen')
+    parser.add_argument('--distill-decisions', action='store_true',
+                        help='anchor the init model\'s chosen character on confident frames instead of the full distribution')
     parser.add_argument('--distill-batch', type=int, default=8)
     args = parser.parse_args()
     torch.set_num_threads(args.threads)
@@ -257,8 +259,8 @@ def main():
             raise SystemExit(completed.returncode)
         report = product_json.loads([row for row in completed.stdout.splitlines() if row.startswith('{')][-1])
         print(f'step {step} product {product_json.dumps(report)}', flush=True)
-        # The first call is the init. A later checkpoint is kept only when the golden
-        # English line, the page, and both German error rates hold and the pen error falls.
+        # The first call is the init. A later checkpoint is kept only when every exact
+        # golden line remains exact, the error rates do not rise, and the pen error falls.
         if product_baseline is None:
             product_baseline = report
             torch.save(model.state_dict(), os.path.join(args.out, 'best-product.pt'))
@@ -267,8 +269,10 @@ def main():
         holds = (
             report.get('enCharacterError') <= product_baseline.get('enCharacterError')
             and report.get('pageCharacterError') <= product_baseline.get('pageCharacterError')
-            and report.get('deCharacterError') <= product_baseline.get('deCharacterError')
+            and             report.get('deCharacterError') <= product_baseline.get('deCharacterError')
             and report.get('deWordError') <= product_baseline.get('deWordError')
+            and (report.get('deExact') or 0) >= (product_baseline.get('deExact') or 0)
+            and (report.get('enExact') or 0) >= (product_baseline.get('enExact') or 0)
             and report.get('penCharacterError') is not None
             and report['penCharacterError'] < product_baseline.get('penCharacterError')
         )
@@ -357,12 +361,28 @@ def main():
             anchored = take_anchor()
             if anchored:
                 anchor_images = batch_tensors(anchored)[0]
-                student = model(anchor_images).log_softmax(-1)
+                student_logits = model(anchor_images)
                 with torch.no_grad():
-                    target = teacher(anchor_images).log_softmax(-1)
-                kl = (target.exp() * (target - student)).sum(-1).mean()
-                loss = loss + args.distill_weight * kl
-                running_kl.append(float(kl.detach()))
+                    teacher_logits = teacher(anchor_images)
+                if args.distill_decisions:
+                    top = teacher_logits.argmax(-1, keepdim=True)
+                    student_log = student_logits.log_softmax(-1)
+                    chosen = student_log.gather(-1, top).squeeze(-1)
+                    rival = student_log.scatter(-1, top, -1e9).amax(-1)
+                    with torch.no_grad():
+                        teacher_log = teacher_logits.log_softmax(-1)
+                        teacher_chosen = teacher_log.gather(-1, top).squeeze(-1)
+                        teacher_rival = teacher_log.scatter(-1, top, -1e9).amax(-1)
+                        target_margin = (teacher_chosen - teacher_rival).clamp(0, 2)
+                        confident = target_margin > 0.4
+                    shortfall = torch.relu(target_margin - (chosen - rival))
+                    anchor_loss = shortfall[confident].mean() if bool(confident.any()) else shortfall.new_zeros(())
+                else:
+                    student = student_logits.log_softmax(-1)
+                    target = teacher_logits.log_softmax(-1)
+                    anchor_loss = (target.exp() * (target - student)).sum(-1).mean()
+                loss = loss + args.distill_weight * anchor_loss
+                running_kl.append(float(anchor_loss.detach()))
         optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)

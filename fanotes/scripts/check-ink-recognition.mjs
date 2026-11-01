@@ -166,7 +166,7 @@ try {
   const report = {}
   for (const language of ['de', 'en']) {
     const chosen = rows.filter((r) => r.language === language)
-    if (chosen.length) report[language] = { lines: chosen.length, cer: Number(cer(chosen).toFixed(2)), wer: Number(wer(chosen).toFixed(2)) }
+    if (chosen.length) report[language] = { lines: chosen.length, exact: chosen.filter((row) => row.text === row.truth).length, cer: Number(cer(chosen).toFixed(2)), wer: Number(wer(chosen).toFixed(2)) }
   }
   // One real pen line (IAM-OnDB) stacked into a 3-line page checks grouping end to end.
   const pages = []
