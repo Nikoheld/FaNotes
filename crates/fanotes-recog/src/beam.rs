@@ -519,6 +519,31 @@ pub fn beam_decode(
             }
         }
     }
+    // One letter that turns a content word into a German function word is kept
+    // (`heine` → `keine`) when that reading is very close.
+    {
+        let chosen = tidy(&render(&best));
+        let mut distinct = 0usize;
+        let mut previous = String::new();
+        for (prefix, score) in &finals {
+            if best_score - *score > 0.4 {
+                break;
+            }
+            let polished = polish(prefix, &greedy_ids, &words, dictionary);
+            let text = tidy(&render(&polished));
+            if text != previous {
+                if distinct == options.n_best.max(1) {
+                    break;
+                }
+                distinct += 1;
+                previous = text.clone();
+            }
+            if prefers_a_closed_class_word(&chosen, &text) {
+                best = polished;
+                break;
+            }
+        }
+    }
     // The language model likes to split a long pen word into two known words (`Jack daws`).
     // If the raw trace has no space there and both pieces are long, join them back.
     let best = drop_spaces_absent_from_trace(&best, &greedy_text, &words, dictionary);
@@ -792,6 +817,76 @@ fn drop_spaces_absent_from_trace(
         .filter(|(index, _)| !drop[*index])
         .map(|(_, symbol)| *symbol)
         .collect()
+}
+
+fn german_closed_class(word: &str) -> bool {
+    matches!(
+        dict_key(word).as_str(),
+        "keine"
+            | "keiner"
+            | "keinem"
+            | "keinen"
+            | "keines"
+            | "kein"
+            | "nicht"
+            | "nichts"
+            | "nie"
+            | "dass"
+            | "weil"
+            | "und"
+            | "oder"
+            | "aber"
+            | "ist"
+            | "sind"
+            | "wird"
+            | "auch"
+            | "schon"
+            | "noch"
+            | "diese"
+            | "dieser"
+            | "diesem"
+            | "diesen"
+            | "eine"
+            | "einer"
+            | "einem"
+            | "einen"
+    )
+}
+
+/// `candidate` differs by one letter, and that letter turns a non-function word into a
+/// German function word (`heine` → `keine`).
+fn prefers_a_closed_class_word(current: &str, candidate: &str) -> bool {
+    let current: Vec<char> = current.chars().collect();
+    let candidate: Vec<char> = candidate.chars().collect();
+    if current.len() != candidate.len() {
+        return false;
+    }
+    let diffs: Vec<usize> = (0..current.len())
+        .filter(|&index| current[index] != candidate[index])
+        .collect();
+    if diffs.len() != 1
+        || !current[diffs[0]].is_alphabetic()
+        || !candidate[diffs[0]].is_alphabetic()
+    {
+        return false;
+    }
+    let index = diffs[0];
+    let start = index
+        - (0..index)
+            .rev()
+            .take_while(|&cursor| current[cursor].is_alphabetic())
+            .count();
+    let end = index
+        + 1
+        + (index + 1..current.len())
+            .take_while(|&cursor| current[cursor].is_alphabetic())
+            .count();
+    if end - start < 4 {
+        return false;
+    }
+    let before: String = current[start..end].iter().collect();
+    let after: String = candidate[start..end].iter().collect();
+    !german_closed_class(&before) && german_closed_class(&after)
 }
 
 /// `candidate` is `current` with a repeated final letter replaced by that letter and `!`.
@@ -1776,6 +1871,19 @@ mod tests {
             "über Paronen",
             &Known
         ));
+    }
+
+    #[test]
+    fn a_content_word_yields_to_a_closed_class_word() {
+        assert!(prefers_a_closed_class_word(
+            "Ich finde heine Worte,",
+            "Ich finde keine Worte,"
+        ));
+        assert!(!prefers_a_closed_class_word(
+            "Das wird sie enden.",
+            "Das wird nie enden."
+        ));
+        assert!(!prefers_a_closed_class_word("A move", "A mace"));
     }
 
     #[test]
