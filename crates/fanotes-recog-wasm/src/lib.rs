@@ -25,11 +25,22 @@ thread_local! {
     static INK_EXACT_WORDS: RefCell<HashMap<String, ExactWords>> = RefCell::new(HashMap::new());
 }
 
-struct ExactWords(HashSet<String>);
+struct ExactWords {
+    /// The shipped word list, ß stored as ss.
+    base: HashSet<String>,
+    /// The writer's own words. Replaced as a whole, never merged into `base`, so a removed
+    /// word stops counting and a word with ß matches the folded lookup.
+    personal: HashSet<String>,
+}
+
+fn fold_word(word: &str) -> String {
+    word.to_lowercase().replace('ß', "ss")
+}
 
 impl Lexicon for ExactWords {
     fn contains(&self, word: &str) -> bool {
-        self.0.contains(word)
+        let folded = fold_word(word);
+        self.base.contains(&folded) || self.personal.contains(&folded)
     }
 }
 
@@ -204,26 +215,25 @@ pub fn set_ink_lexicon(language: &str, bloom: &[u8], bit_count: u32) -> Result<(
 /// Personal words already stored for `language` stay known, so a writer's own word is not rewritten.
 #[wasm_bindgen(js_name = setInkExactWords)]
 pub fn set_ink_exact_words(language: &str, words: Vec<String>) {
-    let mut folded: HashSet<String> = words
-        .into_iter()
-        .map(|word| word.to_lowercase().replace('ß', "ss"))
-        .collect();
-    INK_LEXICONS.with(|lexicons| {
-        if let Some(entry) = lexicons.borrow().get(language) {
-            folded.extend(entry.personal.iter().cloned());
-        }
+    let base: HashSet<String> = words.into_iter().map(|word| fold_word(&word)).collect();
+    let personal = INK_LEXICONS.with(|lexicons| {
+        lexicons
+            .borrow()
+            .get(language)
+            .map(|entry| entry.personal.clone())
+            .unwrap_or_default()
     });
     INK_EXACT_WORDS.with(|exact| {
         exact
             .borrow_mut()
-            .insert(language.to_owned(), ExactWords(folded));
+            .insert(language.to_owned(), ExactWords { base, personal });
     });
 }
 
 /// Replaces the personal vocabulary (lower-case words) of `language`.
 #[wasm_bindgen(js_name = setInkPersonalWords)]
 pub fn set_ink_personal_words(language: &str, words: Vec<String>) {
-    let personal: HashSet<String> = words.into_iter().map(|word| word.to_lowercase()).collect();
+    let personal: HashSet<String> = words.into_iter().map(|word| fold_word(&word)).collect();
     INK_LEXICONS.with(|lexicons| {
         let mut lexicons = lexicons.borrow_mut();
         let entry = lexicons.entry(language.to_owned()).or_default();
@@ -231,7 +241,7 @@ pub fn set_ink_personal_words(language: &str, words: Vec<String>) {
     });
     INK_EXACT_WORDS.with(|exact| {
         if let Some(known) = exact.borrow_mut().get_mut(language) {
-            known.0.extend(personal);
+            known.personal = personal;
         }
     });
 }
@@ -421,4 +431,27 @@ fn unpack_strokes(packed: &[f64]) -> Result<Vec<LineStroke>, &'static str> {
         strokes.push(LineStroke { base_width, points });
     }
     Ok(strokes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{fold_word, ExactWords, Lexicon};
+
+    #[test]
+    fn a_personal_word_with_eszett_is_known_and_a_removed_word_is_not() {
+        let mut known = ExactWords {
+            base: ["personen".to_owned()].into_iter().collect(),
+            personal: [fold_word("Straße"), fold_word("Chudleigh")]
+                .into_iter()
+                .collect(),
+        };
+        assert!(known.contains("strasse"));
+        assert!(known.contains("Straße"));
+        assert!(known.contains("chudleigh"));
+        assert!(known.contains("personen"));
+        known.personal = [fold_word("Chudleigh")].into_iter().collect();
+        assert!(!known.contains("straße"));
+        assert!(known.contains("chudleigh"));
+        assert!(known.contains("personen"));
+    }
 }
