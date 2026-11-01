@@ -44,7 +44,9 @@ import {
   MIXED_CASE_SCALE,
   capitalizesOnlyTheFirstLetter,
   aToAeIndexes,
+  charactersSeparatingFinalB,
   dToBIndexes,
+  separateFinalBIndexes,
   fToLowerIndexes,
   finalLetterApostropheIndexes,
   rToNIndexes,
@@ -876,6 +878,12 @@ export async function recognizeInk(
     }
     for (const index of fToLowerIndexes(decoded.characters)) {
       const characters = decoded.characters.map((character, characterIndex) => characterIndex === index ? { ...character, char: 'f' } : character)
+      decoded = { ...decoded, characters, text: characters.map((character) => character.char).join('') }
+      stitched = null
+    }
+    const separatedB = separateFinalBIndexes(decoded.characters)
+    if (separatedB.length) {
+      const characters = charactersSeparatingFinalB(decoded.characters, separatedB)
       decoded = { ...decoded, characters, text: characters.map((character) => character.char).join('') }
       stitched = null
     }

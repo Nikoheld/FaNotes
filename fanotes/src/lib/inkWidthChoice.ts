@@ -298,16 +298,73 @@ export const fToLowerIndexes = (
   return hit ? [index] : []
 })
 
-/** Indexes of a word-final `D` whose `B` alternative is confident enough (`JuDKIND` → `JuDKINB`). */
-export const dToBIndexes = (
+const hasConfidentB = (
+  character: { alternatives?: Array<{ char: string; confidence: number }> },
+) => character.alternatives?.some((alternative) => alternative.char === 'B' && alternative.confidence >= D_TO_B_MIN) ?? false
+
+const wordEndingAt = (
+  characters: Array<{ char: string }>,
+  index: number,
+) => {
+  let start = index
+  while (start > 0 && /[A-Za-zÄÖÜäöüß]/u.test(characters[start - 1].char)) start -= 1
+  return characters.slice(start, index + 1).map((character) => character.char).join('')
+}
+
+const mostlyCapitals = (word: string) => {
+  const letters = [...word]
+  if (letters.length < 6 || letters[0] === letters[0].toLowerCase()) return false
+  let upper = 0
+  for (const letter of letters) {
+    if (letter === letter.toUpperCase() && letter !== letter.toLowerCase()) upper += 1
+  }
+  return upper >= 4
+}
+
+/**
+ * A word-final `D` on a mostly capital word is a separate `B` (`JuDKIND` → `JuDKIN B`).
+ */
+export const separateFinalBIndexes = (
   characters: Array<{ char: string; alternatives?: Array<{ char: string; confidence: number }> }>,
 ): number[] => characters.flatMap((character, index) => {
   const next = characters[index + 1]?.char
   if (next && /[A-Za-zÄÖÜäöüß]/u.test(next)) return []
-  if (character.char !== 'D') return []
-  const hit = character.alternatives?.some((alternative) => alternative.char === 'B' && alternative.confidence >= D_TO_B_MIN)
-  return hit ? [index] : []
+  if (character.char !== 'D' || !hasConfidentB(character)) return []
+  return mostlyCapitals(wordEndingAt(characters, index)) ? [index] : []
 })
+
+/** Inserts a space and turns the chosen final `D` into `B`. Later indexes are applied first. */
+export const charactersSeparatingFinalB = <T extends { char: string }>(
+  characters: T[],
+  indexes: number[],
+): T[] => {
+  let next = characters
+  for (const index of [...indexes].sort((left, right) => right - left)) {
+    const source = next[index]
+    if (!source) continue
+    next = [
+      ...next.slice(0, index),
+      { ...source, char: ' ' },
+      { ...source, char: 'B' },
+      ...next.slice(index + 1),
+    ]
+  }
+  return next
+}
+
+/** Indexes of a word-final `D` whose `B` alternative is confident enough, outside a capital word. */
+export const dToBIndexes = (
+  characters: Array<{ char: string; alternatives?: Array<{ char: string; confidence: number }> }>,
+): number[] => {
+  const separated = new Set(separateFinalBIndexes(characters))
+  return characters.flatMap((character, index) => {
+    if (separated.has(index)) return []
+    const next = characters[index + 1]?.char
+    if (next && /[A-Za-zÄÖÜäöüß]/u.test(next)) return []
+    if (character.char !== 'D' || !hasConfidentB(character)) return []
+    return [index]
+  })
+}
 
 /** Indexes of an `r` whose `n` alternative is confident enough (`Perdyce` → `Pendyce`). */
 export const rToNIndexes = (
