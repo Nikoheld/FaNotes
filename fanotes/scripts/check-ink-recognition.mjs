@@ -164,30 +164,32 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
     { text: 'dog Cozy lummox gives', score: 0 },
     { text: 'dog cozy lummox gives', score: -1 },
   ]), null)
+  const englishKnown = knownWord('en')
+  const capital = (letter, alternative, confidence) => [{ char: letter, alternatives: [{ char: alternative, confidence }] }]
   assert.equal(lowercaseInitialFromBeam('Wretched. EuropEan.', [
     { text: 'Watched. EwtopEan.', score: 0 },
     { text: 'watched. EwtopEan.', score: -1.14 },
-  ], 'en')?.to, 'wretched')
-  assert.equal(lowercaseInitialFromBeam('Upward! mummy "Me?', [
-    { text: 'Upward! mummy "Me?', score: 0 },
-    { text: 'upward! mummy "Me?', score: -2.46 },
-  ], 'en'), null)
+  ], 'en', capital('W', 'w', 0.24), englishKnown)?.to, 'wretched')
+  assert.equal(lowercaseInitialFromBeam('Upward mummy "me', [
+    { text: 'Upward mummy "me', score: 0 },
+    { text: 'upward mummy "me', score: -1.31 },
+  ], 'en', capital('U', 'u', 0.21), englishKnown), null)
+  assert.equal(lowercaseInitialFromBeam('Chudleigh rejected;', [
+    { text: 'Chudleigh rejected;', score: 0 },
+    { text: 'chudleigh rejected;', score: -0.24 },
+  ], 'en', capital('C', 'c', 0.44), englishKnown), null)
+  assert.equal(lowercaseInitialFromBeam('Obscure investment', [
+    { text: 'Obscure investment', score: 0 },
+    { text: 'obscure investment', score: -0.12 },
+  ], 'en', capital('O', 'o', 0.46), englishKnown)?.to, 'obscure')
   assert.equal(lowercaseInitialFromBeam('Manifestly enjoying', [
     { text: 'Manifestly enjoying', score: 0 },
     { text: 'manifestly enjoying', score: -6.88 },
-  ], 'en'), null)
-  assert.equal(lowercaseInitialFromBeam('Six piqued gmnasts!', [
-    { text: 'Six piqued gmnasts!', score: 0 },
-    { text: 'Six piqued gmnasts!', score: -0.93 },
-  ], 'en'), null)
+  ], 'en', capital('M', 'm', 0.4), englishKnown), null)
   assert.equal(lowercaseInitialFromBeam('Ich war in den Bergen.', [
     { text: 'Ich war in den Bergen.', score: 0 },
     { text: 'ich war in den Bergen.', score: -0.2 },
-  ], 'de'), null)
-  assert.equal(lowercaseInitialFromBeam('WADSWORTH "Help!', [
-    { text: 'WADSWORTH "Help!', score: 0 },
-    { text: 'wADSWORTH "Help!', score: -0.2 },
-  ], 'en'), null)
+  ], 'de', capital('I', 'i', 0.4), knownWord('de')), null)
   assert.equal(accusativeDer('bezeichnet man einen des Landschaftsgeräte.')?.to, 'der')
   assert.equal(accusativeDer('und setzt die Vorgaben des Bundesnaturschutzgesetzes'), null)
   assert.equal(accusativeDer('Staat im Sinne des Völkerrechts anerkannt. Auch heute'), null)
@@ -924,7 +926,13 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
         boxes = undefined
       }
     }
-    const initialCase = lowercaseInitialFromBeam(decoded.text, decoded.readings ?? [], entry.language)
+    const initialCase = lowercaseInitialFromBeam(
+      decoded.text,
+      decoded.readings ?? [],
+      entry.language,
+      decoded.characters,
+      knownWord(entry.language),
+    )
     if (initialCase) {
       const rewritten = rewriteSameLengthWord(decoded.characters, initialCase.index, initialCase.to)
       const nextText = textWithWordEdits(decoded.text, [initialCase])

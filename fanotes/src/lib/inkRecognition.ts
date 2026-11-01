@@ -1172,7 +1172,13 @@ export async function recognizeInk(
         stitched = null
       }
     }
-    const initialCase = lowercaseInitialFromBeam(decoded.text, decoded.readings, lineLanguage)
+    const initialCase = lowercaseInitialFromBeam(
+      decoded.text,
+      decoded.readings,
+      lineLanguage,
+      decoded.characters,
+      (word) => exactWords[lineLanguage].has(foldInkWord(word)),
+    )
     if (initialCase) {
       const rewritten = rewriteSameLengthWord(decoded.characters, initialCase.index, initialCase.to)
       const nextText = textWithWordEdits(decoded.text, [initialCase])

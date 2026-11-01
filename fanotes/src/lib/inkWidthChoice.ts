@@ -388,20 +388,29 @@ export const lowercaseShortBeamWord = (
 
 /**
  * An English line may lowercase its first letter when a beam reading of the same line
- * is no worse than this. `Upward` sits 2.46 nats away, so the margin stays below that.
+ * is no worse than this. `Upward!` sits 2.46 nats away, so the margin stays below that.
  */
 export const INITIAL_CASE_MARGIN = 1.5
 
 /**
- * Lowercase the first letter when the beam's top reading still starts with that capital
- * and a close reading is the same line already lowercase (`Wretched` → `wretched`).
- * German is excluded: `Ich` has the same kind of close reading. A one-letter word and an
+ * The lowercase letter has to be this visible in the first character. `wretched` is 0.24;
+ * the capital `Upward` line that the beam also nearly lowercases is 0.21.
+ */
+export const INITIAL_CASE_ALT = 0.23
+
+/**
+ * Lowercase the first letter when the beam's top reading still starts with that capital,
+ * a close reading is the same line already lowercase, that lowercase letter is visible,
+ * and the word is in the dictionary (`Wretched` → `wretched`). German is excluded.
+ * A name the dictionary does not contain stays (`Chudleigh`). A one-letter word and an
  * all-capital word stay as written.
  */
 export const lowercaseInitialFromBeam = (
   text: string,
   readings: Array<{ text: string; score: number }>,
   language: string,
+  characters: ReadonlyArray<{ char: string; alternatives?: ReadonlyArray<{ char: string; confidence: number }> }>,
+  known: (word: string) => boolean,
 ): WordEdit | null => {
   if (language !== 'en' || readings.length < 2) return null
   const best = readings[0]
@@ -416,9 +425,12 @@ export const lowercaseInitialFromBeam = (
   const close = readings.some((reading) => reading.text === lowered && best.score - reading.score <= INITIAL_CASE_MARGIN)
   if (!close) return null
   const from = inkWords(text)[0]
-  if (!from || from[0] !== first) return null
+  if (!from || from[0] !== first || !known(from)) return null
   const letters = [...from]
   if (letters.length < 2 || letters.slice(1).some((letter) => letter !== letter.toLowerCase())) return null
+  const head = characters[0]
+  const visible = head?.char === first && head.alternatives?.some((alternative) => alternative.char === lower && alternative.confidence >= INITIAL_CASE_ALT)
+  if (!visible) return null
   const to = lower + letters.slice(1).join('')
   if (to === from) return null
   return { index: 0, from, to }
@@ -1417,6 +1429,6 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   take(trailingTracedLetter(text, decoded.greedyText, known), rewriteWord)
   take(accusativeDer(text), rewriteSameLengthWord)
   take(lowercaseShortBeamWord(text, decoded.readings), rewriteSameLengthWord)
-  take(lowercaseInitialFromBeam(text, decoded.readings, options.language ?? ''), rewriteSameLengthWord)
+  take(lowercaseInitialFromBeam(text, decoded.readings, options.language ?? '', characters, baseKnown), rewriteSameLengthWord)
   return { text, characters }
 }
