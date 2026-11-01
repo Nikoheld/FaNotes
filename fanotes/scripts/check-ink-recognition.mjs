@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -89,6 +89,22 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
     'und Computerspielen sowie über Personen, die davon',
     known,
   ), false)
+  assert.equal(oneLetterInALongUnknownWord(
+    'bleiben wegen der Kolbenningspannung in der inneren',
+    [
+      { text: 'bleiben wegen der Kolbenningspannung in der inneren', score: 0 },
+      { text: 'bleiben wegen der Kolbenringspannung in der ineren', score: -0.78 },
+    ],
+    known,
+  )?.to, 'Kolbenringspannung')
+  assert.equal(oneLetterInALongUnknownWord(
+    'und Computerspielen sowie über Personen, die daran',
+    [
+      { text: 'und Computerspielen sowie über Personen, die daran', score: 0 },
+      { text: 'und Computerspielen sowie über Personen, die davon', score: -0.5 },
+    ],
+    known,
+  ), null)
   assert.equal(stretchedReadingKeepsKnownWords(
     'bezeichnet Man einen des Landstatisters.',
     'bezeichnet man einen des Landschottenstrasse.',
@@ -378,6 +394,15 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
           boxedPacked = stretched
           boxes = undefined
         }
+      }
+    }
+    const letterEdit = oneLetterInALongUnknownWord(decoded.text, decoded.readings ?? [], knownWord(entry.language))
+    if (letterEdit) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, letterEdit.index, letterEdit.to)
+      const nextText = textWithWordEdits(decoded.text, [letterEdit])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        boxes = undefined
       }
     }
     if (!boxes) {

@@ -50,7 +50,9 @@ import {
   hasMixedInteriorCase,
   longUnknownWordEdits,
   narrowScaleKeepsKnownWords,
+  oneLetterInALongUnknownWord,
   oneUnknownWordBecomesKnown,
+  rewriteSameLengthWord,
   shearReadingRewritesTwoWords,
   stretchedReadingKeepsKnownWords,
   textWithWordEdits,
@@ -768,6 +770,19 @@ export async function recognizeInk(
             stitched = null
           }
         }
+      }
+    }
+    const letterEdit = oneLetterInALongUnknownWord(
+      decoded.text,
+      decoded.readings,
+      (word) => wordIsKnown(lineLanguage, word),
+    )
+    if (letterEdit) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, letterEdit.index, letterEdit.to)
+      const nextText = textWithWordEdits(decoded.text, [letterEdit])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
       }
     }
     if (!decoded.text.trim()) continue

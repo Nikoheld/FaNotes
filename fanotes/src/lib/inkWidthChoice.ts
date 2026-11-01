@@ -32,6 +32,9 @@ export const NARROW_STRETCH = 0.82
 /** That narrower line has to beat the default reading by this many nats. */
 export const NARROW_STRETCH_MARGIN = 7
 
+/** A one-letter change to a long unknown word has to sit within this many nats of the top reading. */
+export const LONG_LETTER_MARGIN = 0.8
+
 /** A smaller line that keeps every known word has to beat the default by this many nats. */
 export const NARROW_LINE_MARGIN = 5
 
@@ -326,6 +329,66 @@ export const stretchedReadingKeepsKnownWords = (
     if (known(left[index]) && foldInkWord(left[index]) !== foldInkWord(right[index])) return false
   }
   return true
+}
+
+/**
+ * The closest reading within {@link LONG_LETTER_MARGIN} that changes one letter of one
+ * unknown word of at least 12 letters (`Kolbenningspannung` → `Kolbenringspannung`).
+ * Other words in that reading are left as the chosen line has them.
+ */
+export const oneLetterInALongUnknownWord = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const selected = inkWords(text)
+  const top = readings[0]?.score
+  if (top === undefined || !selected.length) return null
+  let best: { gap: number; edit: WordEdit } | null = null
+  for (const reading of readings) {
+    const gap = top - reading.score
+    if (gap <= 0 || gap > LONG_LETTER_MARGIN) continue
+    const alternate = inkWords(reading.text)
+    if (alternate.length !== selected.length) continue
+    const hits: WordEdit[] = []
+    for (let index = 0; index < selected.length; index += 1) {
+      const left = selected[index]
+      const right = alternate[index]
+      if (left === right || left.length < 12 || left.length !== right.length || known(left)) continue
+      let diffs = 0
+      for (let cursor = 0; cursor < left.length; cursor += 1) if (left[cursor] !== right[cursor]) diffs += 1
+      if (diffs === 1) hits.push({ index, from: left, to: right })
+    }
+    if (hits.length !== 1) continue
+    if (!best || gap < best.gap) best = { gap, edit: hits[0] }
+  }
+  return best?.edit ?? null
+}
+
+/** Replaces one same-length word inside `characters`, leaving every other glyph as it was. */
+export const rewriteSameLengthWord = <T extends { char: string }>(
+  characters: T[],
+  index: number,
+  to: string,
+): T[] | null => {
+  const runs: Array<{ start: number; end: number }> = []
+  let cursor = 0
+  while (cursor < characters.length) {
+    if (!/[A-Za-zÄÖÜäöüß]/u.test(characters[cursor].char)) {
+      cursor += 1
+      continue
+    }
+    const start = cursor
+    while (cursor < characters.length && /[A-Za-zÄÖÜäöüß]/u.test(characters[cursor].char)) cursor += 1
+    runs.push({ start, end: cursor })
+  }
+  const run = runs[index]
+  if (!run || run.end - run.start !== [...to].length) return null
+  const next = characters.slice()
+  ;[...to].forEach((char, offset) => {
+    next[run.start + offset] = { ...next[run.start + offset], char }
+  })
+  return next
 }
 
 /** True when `alternate` turns a period directly before `]` into a comma and changes nothing else (`[Kidney.]` → `[Kidney,]`). */
