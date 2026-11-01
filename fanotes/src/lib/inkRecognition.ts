@@ -58,6 +58,7 @@ import {
   longUnknownWordEdits,
   narrowScaleKeepsKnownWords,
   capitalizedNounAfterDeterminer,
+  umlautAndOneOtherLetter,
   nounAfterAttributiveAdjective,
   capitalCompoundIndex,
   kraftPluralFromReading,
@@ -889,6 +890,15 @@ export async function recognizeInk(
       const characters = decoded.characters.map((character, characterIndex) => characterIndex === index ? { ...character, char: "'" } : character)
       decoded = { ...decoded, characters, text: characters.map((character) => character.char).join('') }
       stitched = null
+    }
+    const umlautEdit = umlautAndOneOtherLetter(decoded.text, (word) => wordIsKnown(lineLanguage, word))
+    if (umlautEdit) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, umlautEdit.index, umlautEdit.to)
+      const nextText = textWithWordEdits(decoded.text, [umlautEdit])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
     }
     const capitalNoun = capitalizedNounAfterDeterminer(decoded.text, (word) => wordIsKnown(lineLanguage, word))
     if (capitalNoun) {

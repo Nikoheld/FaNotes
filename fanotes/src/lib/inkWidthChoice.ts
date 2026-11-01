@@ -352,6 +352,44 @@ export const nounAfterAttributiveAdjective = (
   return null
 }
 
+const UMLAUTS: Record<string, string> = { a: 'ä', o: 'ö', u: 'ü', A: 'Ä', O: 'Ö', U: 'Ü' }
+const SUBSTITUTES = 'abcdefghijklmnopqrstuvwxyzäöü'
+
+/**
+ * An unknown word becomes the one dictionary spelling that adds an umlaut and changes one
+ * other letter (`entlauscht` → `enttäuscht`). Any other pair of substitutions is left alone.
+ */
+export const umlautAndOneOtherLetter = (
+  text: string,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const words = inkWords(text)
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]
+    const chars = [...word]
+    if (chars.length < 6 || known(word)) continue
+    const hits = new Set<string>()
+    for (let vowel = 0; vowel < chars.length; vowel += 1) {
+      const umlaut = UMLAUTS[chars[vowel]]
+      if (!umlaut) continue
+      for (let other = 0; other < chars.length; other += 1) {
+        if (other === vowel) continue
+        for (const letter of SUBSTITUTES) {
+          if (letter === chars[other]) continue
+          const next = chars.slice()
+          next[vowel] = umlaut
+          next[other] = letter
+          const candidate = next.join('')
+          if (known(candidate)) hits.add(candidate)
+        }
+      }
+    }
+    if (hits.size !== 1) continue
+    return { index, from: word, to: [...hits][0] }
+  }
+  return null
+}
+
 const DETERMINERS = new Set(['das', 'der', 'die', 'den', 'dem', 'des', 'ein', 'eine', 'einem', 'einen', 'einer'])
 const NOUN_SUFFIX = /(?:fon|ung|heit|keit|schaft|tum|nis|ion)$/iu
 
