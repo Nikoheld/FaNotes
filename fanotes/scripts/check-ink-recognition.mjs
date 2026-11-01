@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { INK_RETRY_VARIANTS, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, charactersWithWordEdits, differsOnlyInCase, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { INK_RETRY_VARIANTS, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, charactersWithWordEdits, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, sameLettersAllowingCapsJoin, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -58,6 +58,11 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
 {
   const known = knownWord('de')
   assert.equal(hasMixedInteriorCase('PEcK SNIFF long-lost'), true)
+  assert.equal(sameLettersAllowingCapsJoin('PEcK SNIFF long-lost', 'PECKSNIFF long-lost'), true)
+  assert.equal(sameLettersAllowingCapsJoin('PEcK SNIFF long-lost', 'PECK SNIFF long-lost'), true)
+  assert.equal(sameLettersAllowingCapsJoin('PEcK SNIFF long-lost', 'PECKSNAFF long-lost'), false)
+  assert.equal(sameLettersAllowingCapsJoin('Ich muss schlafen gehen.', 'Ich muss schlafengehen.'), false)
+  assert.equal(sameLettersAllowingCapsJoin('DDD EEE FFF GGG', 'DDDEEEFFFGGG'), false)
   assert.equal(hasMixedInteriorCase('Das war ein böses Kaninchen.'), false)
   assert.equal(hasLongUnknownWord('Herzlichen Glückensisch zum Geburtstag', known), true)
   assert.equal(widthReadingKeepsKnownWords(
@@ -229,7 +234,7 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
         const caseDecoded = JSON.parse(inkDecode(caseRun.probabilities, caseRun.dims[2], manifest.alphabet, entry.language, decoderOptionsFor(entry.language)))
         const caseScore = caseDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
         const currentScore = decoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
-        if (caseScore > currentScore && differsOnlyInCase(decoded.text, caseDecoded.text)) {
+        if (caseScore > currentScore && sameLettersAllowingCapsJoin(decoded.text, caseDecoded.text)) {
           decoded = caseDecoded
           scale = MIXED_CASE_SCALE
           boxes = undefined

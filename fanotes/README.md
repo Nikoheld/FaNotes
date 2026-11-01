@@ -162,7 +162,7 @@ Vorausgesetzt werden Node.js 22 oder neuer und npm.
 
 FaNotes hält Zeilengruppierung, GlyphenWerk-Daten, Text-/Mathematikentscheidung und Korrekturlogik im Renderer. Die Texterkennung selbst gibt es nur auf dem Desktop:
 
-- Windows und Linux rendern jede Zeile in `fanotes-recog` (WebAssembly) und führen das FP32-Zeilenmodell im nativen `fanotes-ocr`-Sidecar aus (`crates/fanotes-ort`, ONNX Runtime). Die Decodierung mit Zeichen-Sprachmodell und Wörterbuch läuft wieder in WebAssembly. Deutsch nutzt das stärkere Sprachmodellgewicht; Englisch ein leichteres, damit seltene Schreibungen dem Stift folgen. Der Sidecar startet verzögert und verwendet höchstens vier Threads.
+- Windows und Linux rendern jede Zeile in `fanotes-recog` (WebAssembly) und führen das FP32-Zeilenmodell im nativen `fanotes-ocr`-Sidecar aus (`crates/fanotes-ort`, ONNX Runtime). Die Decodierung mit Zeichen-Sprachmodell und Wörterbuch läuft wieder in WebAssembly. Deutsch nutzt das stärkere Sprachmodellgewicht; Englisch ein leichteres, damit seltene Schreibungen dem Stift folgen. Zwei in Großbuchstaben geschriebene Wörter werden verbunden, wenn der Stift dazwischen keine Lücke gezeichnet hat. Der Sidecar startet verzögert und verwendet höchstens vier Threads.
 - Web und Android haben keinen Sidecar und führen diese Erkennung nicht aus. Mathematik, GlyphenWerk und Text → Handschrift bleiben dort verfügbar.
 - Ein optionales persönliches Modell ersetzt nur die Textzeilen und liegt im lokalen Profil, nicht im Vault.
 
@@ -378,7 +378,7 @@ Node.js 22 or newer and npm are required.
 
 FaNotes keeps line grouping, GlyphenWerk data, the text/mathematics decision, and the correction logic in the renderer. Text recognition itself exists only on the desktop:
 
-- Windows and Linux render each line in `fanotes-recog` (WebAssembly) and run the FP32 line model in the native `fanotes-ocr` sidecar (`crates/fanotes-ort`, ONNX Runtime). Decoding with the character language model and the dictionary runs in WebAssembly again. The sidecar starts on demand and uses at most four threads. When a line still contains a word of ten or more letters that the dictionary does not know, the line is rendered again at nearby pen widths and at a slightly smaller size. A new reading is kept when that word becomes a dictionary word and every known word stays, when two words join into one longer word, or when one long unknown word is copied from the other rendering and every known word stays.
+- Windows and Linux render each line in `fanotes-recog` (WebAssembly) and run the FP32 line model in the native `fanotes-ocr` sidecar (`crates/fanotes-ort`, ONNX Runtime). Decoding with the character language model and the dictionary runs in WebAssembly again. The sidecar starts on demand and uses at most four threads. Two words written in capitals are joined when the pen trace has no space between them. When a line still contains a word of ten or more letters that the dictionary does not know, the line is rendered again at nearby pen widths and at a slightly smaller size. A new reading is kept when that word becomes a dictionary word and every known word stays, when two words join into one longer word, or when one long unknown word is copied from the other rendering and every known word stays.
 - Web and Android have no sidecar and do not run this recognition. Mathematics, GlyphenWerk, and text to handwriting stay available there.
 - An optional personal model replaces only the text lines and lives in the local profile, not in the vault.
 

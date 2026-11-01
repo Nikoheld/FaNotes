@@ -211,3 +211,40 @@ export const hasMixedInteriorCase = (text: string) => inkWords(text).some((word)
 
 /** True when the strings use the same letters and differ only in case. */
 export const differsOnlyInCase = (left: string, right: string) => left !== right && left.toLowerCase() === right.toLowerCase()
+
+const asciiUpperRun = (chars: string[], start: number, step: 1 | -1) => {
+  let length = 0
+  for (let index = start; index >= 0 && index < chars.length; index += step) {
+    const character = chars[index]
+    if (character < 'A' || character > 'Z') break
+    length += 1
+  }
+  return length
+}
+
+/**
+ * True when `alternate` uses the same letters as `base` and differs only in case,
+ * apart from spaces that closed up between capital words of at least four letters
+ * (`PEcK SNIFF` → `PECKSNIFF`). Ordinary spaces (`schlafen gehen`) stay put.
+ */
+export const sameLettersAllowingCapsJoin = (base: string, alternate: string) => {
+  if (base === alternate) return false
+  if (differsOnlyInCase(base, alternate)) return true
+  const left = [...base]
+  const right = [...alternate]
+  let i = 0
+  let j = 0
+  while (i < left.length && j < right.length) {
+    if (left[i].toLowerCase() === right[j].toLowerCase()) {
+      i += 1
+      j += 1
+      continue
+    }
+    if (left[i] === ' ' && asciiUpperRun(right, j - 1, -1) >= 4 && asciiUpperRun(right, j, 1) >= 4) {
+      i += 1
+      continue
+    }
+    return false
+  }
+  return i === left.length && j === right.length
+}

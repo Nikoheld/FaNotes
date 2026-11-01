@@ -644,7 +644,9 @@ pub fn beam_decode(
         }
     }
     // The language model likes to split a long pen word into two known words (`Jack daws`).
-    // If the raw trace has no space there and both pieces are long, join them back.
+    // If the raw trace has no space there and both pieces are long, join them back when
+    // the dictionary has the one word, or when both pieces are written in capitals
+    // (`PECK SNIFF`). Ordinary words such as `schlafen gehen` stay split.
     let best = drop_spaces_absent_from_trace(&best, &greedy_text, &words, dictionary);
     // A hyphen the pen drew and the beam skipped is put back when the next letter matches
     // (`Fifth-` → `-Fifth-`).
@@ -889,16 +891,23 @@ fn drop_spaces_absent_from_trace(
                 let right = (i..n)
                     .take_while(|&index| beam[index].is_alphabetic())
                     .count();
-                // Two known words (`schlafen gehen`) stay split. A join is kept only when
-                // the dictionary has the single word (`jackdaws`) and the trace has no space.
+                // Two ordinary words (`schlafen gehen`) stay split. A join is kept when
+                // the dictionary has the single word (`jackdaws`), or when both pieces
+                // are capitals (`PECK SNIFF`). The trace has no space in either case.
                 if left >= 4 && right >= 4 {
-                    let joined: String = beam[i - 1 - left..i - 1]
+                    let left_chars = &beam[i - 1 - left..i - 1];
+                    let right_chars = &beam[i..i + right];
+                    let joined: String = left_chars
                         .iter()
-                        .chain(beam[i..i + right].iter())
+                        .chain(right_chars.iter())
                         .flat_map(|character| character.to_lowercase())
                         .collect::<String>()
                         .replace('ß', "ss");
-                    if dictionary.is_some_and(|known| known.contains(&joined)) {
+                    let all_caps = left_chars
+                        .iter()
+                        .chain(right_chars.iter())
+                        .all(|character| character.is_ascii_uppercase());
+                    if all_caps || dictionary.is_some_and(|known| known.contains(&joined)) {
                         drop[i - 1] = true;
                     }
                 }
@@ -2064,6 +2073,46 @@ mod tests {
         assert_eq!(
             drop_spaces_absent_from_trace(&symbols("abcd e"), "abcde", &decoder, Some(&KnownJoin)),
             symbols("abcd e")
+        );
+    }
+
+    #[test]
+    fn capitals_join_when_the_trace_has_no_space() {
+        let alphabet: Vec<char> = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz -"
+            .chars()
+            .collect();
+        let index = |character: char| {
+            (alphabet.iter().position(|&item| item == character).unwrap() + 1) as u8
+        };
+        let symbols = |text: &str| text.chars().map(index).collect::<Vec<_>>();
+        let decoder = words(&alphabet);
+        assert_eq!(
+            drop_spaces_absent_from_trace(
+                &symbols("PECK SNIFF long-lost"),
+                "PECKSNAFF hong-lost",
+                &decoder,
+                None
+            ),
+            symbols("PECKSNIFF long-lost")
+        );
+        assert_eq!(
+            drop_spaces_absent_from_trace(
+                &symbols("DDD EEE FFF GGG"),
+                "DDD EEE FFF GGG",
+                &decoder,
+                None
+            ),
+            symbols("DDD EEE FFF GGG"),
+            "spaces the pen drew between capitals stay"
+        );
+        assert_eq!(
+            drop_spaces_absent_from_trace(&symbols("PEcK SNIFF"), "PEcKSNIFF", &decoder, None),
+            symbols("PEcK SNIFF"),
+            "mixed case still needs a dictionary word"
+        );
+        assert_eq!(
+            drop_spaces_absent_from_trace(&symbols("abcd efgh"), "abcdefgh", &decoder, None),
+            symbols("abcd efgh")
         );
     }
 

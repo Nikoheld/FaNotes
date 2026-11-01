@@ -32,7 +32,7 @@ import {
   WIDTH_RETRY_MARGIN,
   MIXED_CASE_SCALE,
   charactersWithWordEdits,
-  differsOnlyInCase,
+  sameLettersAllowingCapsJoin,
   foldInkWord,
   hasLongUnknownWord,
   hasMixedInteriorCase,
@@ -622,7 +622,7 @@ export async function recognizeInk(
           decodeMs += performance.now() - caseDecodeStarted
           const caseScore = caseDecoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
           const currentScore = decoded.readings[0]?.score ?? Number.NEGATIVE_INFINITY
-          if (caseScore > currentScore && differsOnlyInCase(decoded.text, caseDecoded.text)) {
+          if (caseScore > currentScore && sameLettersAllowingCapsJoin(decoded.text, caseDecoded.text)) {
             decoded = caseDecoded
             activeImage = caseImage
             activeScale = MIXED_CASE_SCALE
