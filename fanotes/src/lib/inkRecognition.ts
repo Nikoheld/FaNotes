@@ -72,6 +72,8 @@ import {
   tripleLetterFromNarrowGreedy,
   hasOneOddLetterGroup,
   longerKnownCropWord,
+  quotedWordAfterDoubleSix,
+  leadingStrokesAreTicks,
   inkWords,
   charactersJoiningWords,
   insertedLetterInOneKnownWord,
@@ -1088,6 +1090,21 @@ export async function recognizeInk(
           break
         }
       }
+    }
+    if (
+      defaultPen
+      && defaultStyle
+      && decoded.characters.length >= 3
+      && decoded.characters[0].char === '6'
+      && decoded.characters[1].char === '6'
+      && decoded.characters[2].char === ' '
+      && quotedWordAfterDoubleSix(decoded.text)
+      && leadingStrokesAreTicks(packed)
+    ) {
+      const quote = { ...decoded.characters[0], char: '"', endFrame: decoded.characters[1].endFrame }
+      const characters = [quote, ...decoded.characters.slice(3)]
+      decoded = { ...decoded, characters, text: characters.map((character) => character.char).join('') }
+      stitched = null
     }
     if (!decoded.text.trim()) continue
     const spans = new Uint32Array(decoded.characters.flatMap((character) => [character.startFrame, character.endFrame]))

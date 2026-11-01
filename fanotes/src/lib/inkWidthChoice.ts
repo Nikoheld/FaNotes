@@ -309,6 +309,45 @@ export const longerKnownCropWord = (
   return crop
 }
 
+/** `66 Erdkunde"` is the shape of two ticks read as digits in front of a word that already closes a quote. */
+export const quotedWordAfterDoubleSix = (text: string) => /^66 [A-Za-zÄÖÜäöüß]+"/.test(text)
+
+/**
+ * The first two strokes are narrow tall ticks, with a wider gap before the next stroke.
+ * A written 6 is wider than these ticks.
+ */
+export const leadingStrokesAreTicks = (packed: Float64Array) => {
+  const strokes: Array<{ minX: number; maxX: number; minY: number; maxY: number }> = []
+  for (let offset = 0; offset < packed.length;) {
+    const count = packed[offset]
+    let minX = Infinity
+    let maxX = -Infinity
+    let minY = Infinity
+    let maxY = -Infinity
+    for (let index = 0; index < count; index += 1) {
+      const x = packed[offset + 1 + index * 2]
+      const y = packed[offset + 2 + index * 2]
+      minX = Math.min(minX, x)
+      maxX = Math.max(maxX, x)
+      minY = Math.min(minY, y)
+      maxY = Math.max(maxY, y)
+    }
+    strokes.push({ minX, maxX, minY, maxY })
+    offset += 1 + count * 2
+  }
+  strokes.sort((left, right) => left.minX - right.minX)
+  if (strokes.length < 3) return false
+  const tick = (stroke: { minX: number; maxX: number; minY: number; maxY: number }) => {
+    const width = stroke.maxX - stroke.minX
+    const height = stroke.maxY - stroke.minY
+    return height >= 12 && width / Math.max(height, 1) <= 0.4
+  }
+  if (!tick(strokes[0]) || !tick(strokes[1])) return false
+  const pairGap = strokes[1].minX - strokes[0].maxX
+  const wordGap = strokes[2].minX - strokes[1].maxX
+  return pairGap >= 0 && pairGap <= 24 && wordGap > pairGap
+}
+
 /**
  * Word positions where `alternate` rewrites a long unknown word and leaves every known word
  * to be kept from `base`. A known word that the other rendering changed is not an edit.

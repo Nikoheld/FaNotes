@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, longerKnownCropWord, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, longerKnownCropWord, quotedWordAfterDoubleSix, leadingStrokesAreTicks, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -134,6 +134,20 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
   assert.equal(longerKnownCropWord('bleiben', 'blon', known), null)
   assert.equal(longerKnownCropWord('Vorgaben', 'vorgeben', known), null)
   assert.equal(longerKnownCropWord('EuropEan', 'EwtopEa', knownWord('en')), null)
+  assert.equal(quotedWordAfterDoubleSix('66 Erdkunde" Fairfax'), true)
+  assert.equal(quotedWordAfterDoubleSix('"Erdkunde" Fairfax'), false)
+  assert.equal(quotedWordAfterDoubleSix('66 Erdkunde Fairfax'), false)
+  const tickStroke = (points) => [points.length, ...points.flat()]
+  assert.equal(leadingStrokesAreTicks(new Float64Array([
+    ...tickStroke([[0, 0], [5, 20]]),
+    ...tickStroke([[15, 2], [20, 17]]),
+    ...tickStroke([[50, 0], [51, 36]]),
+  ])), true)
+  assert.equal(leadingStrokesAreTicks(new Float64Array([
+    ...tickStroke([[0, 0], [12, 18]]),
+    ...tickStroke([[20, 0], [32, 18]]),
+    ...tickStroke([[50, 0], [60, 20]]),
+  ])), false)
   assert.equal(capitalizedSentenceAdverb('manchmal kann er in seltsamer Junge Sein.')?.to, 'Manchmal')
   assert.equal(capitalizedSentenceAdverb('bleiben wegen der Kolbenringspannung in der inneren'), null)
   assert.equal(capitalizedSentenceAdverb('Auch heute bleibt das so.'), null)
@@ -787,6 +801,23 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
           break
         }
       }
+    }
+    if (
+      penWidth === (manifest.decoder.penWidth ?? 2.6)
+      && shear === 0
+      && scale === 1
+      && linePackedForBoxes === linePacked
+      && decoded.characters.length >= 3
+      && decoded.characters[0].char === '6'
+      && decoded.characters[1].char === '6'
+      && decoded.characters[2].char === ' '
+      && quotedWordAfterDoubleSix(decoded.text)
+      && leadingStrokesAreTicks(linePacked)
+    ) {
+      const quote = { ...decoded.characters[0], char: '"', endFrame: decoded.characters[1].endFrame }
+      const characters = [quote, ...decoded.characters.slice(3)]
+      decoded = { ...decoded, characters, text: characters.map((character) => character.char).join('') }
+      boxes = undefined
     }
     if (!boxes) {
       const spans = new Uint32Array(decoded.characters.flatMap((c) => [c.startFrame, c.endFrame]))
