@@ -419,6 +419,31 @@ pub fn beam_decode(
             }
         }
     }
+    // A close reading that is this line plus one apostrophe keeps it (`My!` → `'My!`).
+    // The rest of the line has to stay as it is.
+    {
+        let chosen = tidy(&render(&best));
+        let mut distinct = 0usize;
+        let mut previous = String::new();
+        for (prefix, score) in &finals {
+            if best_score - *score > 0.3 {
+                break;
+            }
+            let polished = polish(prefix, &greedy_ids, &words, dictionary);
+            let text = tidy(&render(&polished));
+            if text != previous {
+                if distinct == options.n_best.max(1) {
+                    break;
+                }
+                distinct += 1;
+                previous = text.clone();
+            }
+            if inserts_one_apostrophe(&chosen, &text) {
+                best = polished;
+                break;
+            }
+        }
+    }
     // The language model likes to split a long pen word into two known words (`Jack daws`).
     // If the raw trace has no space there and both pieces are long, join them back.
     let best = drop_spaces_absent_from_trace(&best, &greedy_text, &words, dictionary);
@@ -589,6 +614,27 @@ fn drop_spaces_absent_from_trace(
         .filter(|(index, _)| !drop[*index])
         .map(|(_, symbol)| *symbol)
         .collect()
+}
+
+/// `candidate` is `current` with exactly one `'` added and every other character unchanged.
+fn inserts_one_apostrophe(current: &str, candidate: &str) -> bool {
+    let current: Vec<char> = current.chars().collect();
+    let candidate: Vec<char> = candidate.chars().collect();
+    if candidate.len() != current.len() + 1 {
+        return false;
+    }
+    let mut matched = 0;
+    let mut inserted = false;
+    for &character in &candidate {
+        if matched < current.len() && character == current[matched] {
+            matched += 1;
+        } else if !inserted && character == '\'' {
+            inserted = true;
+        } else {
+            return false;
+        }
+    }
+    inserted && matched == current.len()
 }
 
 fn collapse_repeated_letters(text: &str) -> String {
@@ -1392,6 +1438,24 @@ mod tests {
             "über Paronen",
             &Known
         ));
+    }
+
+    #[test]
+    fn one_apostrophe_is_kept_only_when_the_rest_of_the_line_matches() {
+        assert!(inserts_one_apostrophe(
+            "Guy's Perdyce My!",
+            "Guy's Perdyce 'My!"
+        ));
+        assert!(inserts_one_apostrophe("My!", "'My!"));
+        assert!(!inserts_one_apostrophe(
+            "Guy's Perdyce My!",
+            "Guy's Pendyce 'My!"
+        ));
+        assert!(!inserts_one_apostrophe(
+            "Guy's Perdyce My!",
+            "Guy's Perdyce My"
+        ));
+        assert!(!inserts_one_apostrophe("'My!", "My!"));
     }
 
     #[test]
