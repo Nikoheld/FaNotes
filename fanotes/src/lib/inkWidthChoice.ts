@@ -41,6 +41,9 @@ export const APOSTROPHE_ALT_MIN = 0.35
 /** An `r` becomes `n` when that alternative is at least this confident. */
 export const R_TO_N_MIN = 0.5
 
+/** A word-final `D` becomes `B` when that alternative is at least this confident. */
+export const D_TO_B_MIN = 0.4
+
 const ADJECTIVE_ENDING = /(?:ischen|lichen)$/iu
 
 /** A smaller line that keeps every known word has to beat the default by this many nats. */
@@ -215,6 +218,17 @@ export const longUnknownWordEdits = (
   }
   return edits.length ? edits : null
 }
+
+/** Indexes of a word-final `D` whose `B` alternative is confident enough (`JuDKIND` → `JuDKINB`). */
+export const dToBIndexes = (
+  characters: Array<{ char: string; alternatives?: Array<{ char: string; confidence: number }> }>,
+): number[] => characters.flatMap((character, index) => {
+  const next = characters[index + 1]?.char
+  if (next && /[A-Za-zÄÖÜäöüß]/u.test(next)) return []
+  if (character.char !== 'D') return []
+  const hit = character.alternatives?.some((alternative) => alternative.char === 'B' && alternative.confidence >= D_TO_B_MIN)
+  return hit ? [index] : []
+})
 
 /** Indexes of an `r` whose `n` alternative is confident enough (`Perdyce` → `Pendyce`). */
 export const rToNIndexes = (

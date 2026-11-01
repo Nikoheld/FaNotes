@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, dToBIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -123,6 +123,13 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
   ), false)
   assert.equal(replacesBracketPeriodWithComma('[Kidney.] JuDKIND?', '[Kidney,] JuDKIND?'), true)
   assert.equal(replacesBracketPeriodWithComma('By Trevor Williams. A move', 'By Trevor Williams, A move'), false)
+  assert.deepEqual(dToBIndexes([
+    { char: 'D', alternatives: [{ char: 'B', confidence: 0.64 }] },
+  ]), [0])
+  assert.deepEqual(dToBIndexes([
+    { char: 'D', alternatives: [{ char: 'B', confidence: 0.64 }] },
+    { char: 'e', alternatives: [] },
+  ]), [])
   assert.deepEqual(rToNIndexes([
     { char: 'r', alternatives: [{ char: 'n', confidence: 0.63 }] },
   ]), [0])
@@ -423,6 +430,12 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
         decoded = { ...decoded, text: nextText, characters: rewritten }
         boxes = undefined
       }
+    }
+    const bIndexes = dToBIndexes(decoded.characters ?? [])
+    if (bIndexes.length) {
+      const characters = decoded.characters.map((character, index) => bIndexes.includes(index) ? { ...character, char: 'B' } : character)
+      decoded = { ...decoded, characters, text: characters.map((character) => character.char).join('') }
+      boxes = undefined
     }
     const nIndexes = rToNIndexes(decoded.characters ?? [])
     if (nIndexes.length) {
