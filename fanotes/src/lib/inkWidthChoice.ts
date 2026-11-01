@@ -8,7 +8,17 @@ export const INK_RETRY_VARIANTS = [
   { penWidth: 3, scale: 1 },
   { penWidth: 3.5, scale: 1 },
   { penWidth: 2.6, scale: 0.92 },
+  { penWidth: 2.6, scale: 0.85 },
 ] as const
+
+/** Smaller rendering that can repair one short word or a whole line of known words. */
+export const NARROW_SCALE = 0.85
+
+/** A single unknown word turning into a dictionary word has to beat the default by this many nats. */
+export const NARROW_WORD_MARGIN = 0.5
+
+/** A smaller line that keeps every known word has to beat the default by this many nats. */
+export const NARROW_LINE_MARGIN = 5
 
 /** The unknown word has to be at least this long before a second rendering is worth the time. */
 export const LONG_UNKNOWN_LETTERS = 10
@@ -82,6 +92,57 @@ export const widthReadingKeepsKnownWords = (
     return false
   }
   return replaced
+}
+
+/**
+ * True when `alternate` changes exactly one unknown word into a dictionary word
+ * of nearly the same length (`Aneren` → `inneren`).
+ */
+export const oneUnknownWordBecomesKnown = (
+  base: string,
+  alternate: string,
+  known: (word: string) => boolean,
+) => {
+  const left = inkWords(base)
+  const right = inkWords(alternate)
+  if (left.length !== right.length) return false
+  const diffs: number[] = []
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) diffs.push(index)
+  }
+  if (diffs.length !== 1) return false
+  const before = foldInkWord(left[diffs[0]])
+  const after = foldInkWord(right[diffs[0]])
+  return before.length >= 4 && !known(left[diffs[0]]) && known(right[diffs[0]]) && Math.abs(before.length - after.length) <= 3
+}
+
+/**
+ * True when a smaller rendering keeps every known word, changes a long unknown word,
+ * and moves any other unknown word by at most two letters
+ * (`Nuklearenaie` → `Nuklearenergie`, `Erzeugge` → `Erzeugen`).
+ */
+export const narrowScaleKeepsKnownWords = (
+  base: string,
+  alternate: string,
+  known: (word: string) => boolean,
+) => {
+  const left = inkWords(base)
+  const right = inkWords(alternate)
+  if (left.length !== right.length) return false
+  let movedLong = false
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] === right[index]) continue
+    if (known(left[index])) return false
+    const before = foldInkWord(left[index])
+    const after = foldInkWord(right[index])
+    if (before.length >= LONG_UNKNOWN_LETTERS && Math.abs(before.length - after.length) <= 3) {
+      movedLong = true
+      continue
+    }
+    if (editDistance(before, after) <= 2) continue
+    return false
+  }
+  return movedLong
 }
 
 /**

@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, charactersWithWordEdits, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { INK_RETRY_VARIANTS, INK_SHEAR_RETRY, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, charactersWithWordEdits, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, oneUnknownWordBecomesKnown, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -68,6 +68,26 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
   assert.equal(shearReadingRewritesTwoWords(
     'Das wird nie enden.',
     'Das wird sie enden.',
+  ), false)
+  assert.equal(oneUnknownWordBecomesKnown(
+    'bleiben wegen der Kolbenningspannung in der Aneren',
+    'bleiben wegen der Kolbenningspannung in der inneren',
+    known,
+  ), true)
+  assert.equal(oneUnknownWordBecomesKnown(
+    'und Computerspielen sowie über Personen, die daran',
+    'und Computerspielen sowie über Personen, die davon',
+    known,
+  ), false)
+  assert.equal(narrowScaleKeepsKnownWords(
+    'Nuklearenaie ist die Technologie zur großtechnischen Erzeugge',
+    'Nuklearenergie ist die Technologie zur großtechnischen Erzeugen',
+    known,
+  ), true)
+  assert.equal(narrowScaleKeepsKnownWords(
+    'und Computerspielen sowie über Personen, die daran',
+    'und Computerspielen sowie über Personen, die davon',
+    known,
   ), false)
   assert.equal(hasMixedInteriorCase('PEcK SNIFF long-lost'), true)
   assert.equal(sameLettersAllowingCapsJoin('PEcK SNIFF long-lost', 'PECKSNIFF long-lost'), true)
@@ -207,13 +227,21 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
           && widthReadingKeepsKnownWords(baseText, retryDecoded.text, known)
         const mergeFix = retryScore >= baseScore + MERGE_SCORE_MARGIN
           && widthReadingMergesTwoWords(baseText, retryDecoded.text)
-        if ((wordFix || mergeFix) && retryScore > bestScore) {
+        const narrow = variant.scale === NARROW_SCALE
+        const shortFix = narrow
+          && retryScore >= baseScore + NARROW_WORD_MARGIN
+          && oneUnknownWordBecomesKnown(baseText, retryDecoded.text, known)
+        const lineFix = narrow
+          && retryScore >= baseScore + NARROW_LINE_MARGIN
+          && narrowScaleKeepsKnownWords(baseText, retryDecoded.text, known)
+        if ((wordFix || mergeFix || shortFix || lineFix) && retryScore > bestScore) {
           decoded = retryDecoded
           penWidth = variant.penWidth
           scale = variant.scale
           bestScore = retryScore
           continue
         }
+        if (narrow) continue
         if (retryScore < baseScore + SPLICE_SCORE_MARGIN) continue
         const edits = longUnknownWordEdits(baseText, retryDecoded.text, known)
         if (!edits || (spliceBest && retryScore <= spliceBest.score)) continue

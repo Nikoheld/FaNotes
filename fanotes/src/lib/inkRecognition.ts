@@ -29,6 +29,9 @@ import {
   INK_RETRY_VARIANTS,
   INK_SHEAR_RETRY,
   MERGE_SCORE_MARGIN,
+  NARROW_LINE_MARGIN,
+  NARROW_SCALE,
+  NARROW_WORD_MARGIN,
   SHEAR_SCORE_MARGIN,
   SPLICE_SCORE_MARGIN,
   WIDTH_RETRY_MARGIN,
@@ -39,6 +42,8 @@ import {
   hasLongUnknownWord,
   hasMixedInteriorCase,
   longUnknownWordEdits,
+  narrowScaleKeepsKnownWords,
+  oneUnknownWordBecomesKnown,
   shearReadingRewritesTwoWords,
   textWithWordEdits,
   widthReadingKeepsKnownWords,
@@ -572,7 +577,14 @@ export async function recognizeInk(
           && widthReadingKeepsKnownWords(baseText, retryDecoded.text, known)
         const mergeFix = retryScore >= baseScore + MERGE_SCORE_MARGIN
           && widthReadingMergesTwoWords(baseText, retryDecoded.text)
-        if ((wordFix || mergeFix) && retryScore > bestScore) {
+        const narrow = variant.scale === NARROW_SCALE
+        const shortFix = narrow
+          && retryScore >= baseScore + NARROW_WORD_MARGIN
+          && oneUnknownWordBecomesKnown(baseText, retryDecoded.text, known)
+        const lineFix = narrow
+          && retryScore >= baseScore + NARROW_LINE_MARGIN
+          && narrowScaleKeepsKnownWords(baseText, retryDecoded.text, known)
+        if ((wordFix || mergeFix || shortFix || lineFix) && retryScore > bestScore) {
           decoded = retryDecoded
           activeImage = retryImage
           activePenWidth = variant.penWidth
@@ -580,6 +592,9 @@ export async function recognizeInk(
           bestScore = retryScore
           continue
         }
+        // The narrow scale is taken only as a whole line. Copying one long word out of it
+        // can replace a word with a worse one (`Landstatisters` → `Landstatisesse`).
+        if (narrow) continue
         if (retryScore < baseScore + SPLICE_SCORE_MARGIN) continue
         const edits = longUnknownWordEdits(baseText, retryDecoded.text, known)
         if (!edits || (spliceBest && retryScore <= spliceBest.score)) continue
