@@ -497,6 +497,9 @@ pub fn beam_decode(
     // The language model likes to split a long pen word into two known words (`Jack daws`).
     // If the raw trace has no space there and both pieces are long, join them back.
     let best = drop_spaces_absent_from_trace(&best, &greedy_text, &words, dictionary);
+    // A hyphen the pen drew and the beam skipped is put back when the next letter matches
+    // (`Fifth-` → `-Fifth-`).
+    let best = restore_trace_hyphens(&best, &greedy_text, &words);
     let characters = align(&log_probs, classes, frames, &best, alphabet);
     let text = render(&best);
     let (known_words, word_count) = count_words(&best, &words);
@@ -515,6 +518,56 @@ pub fn beam_decode(
         known_words,
         words: word_count,
     })
+}
+
+fn restore_trace_hyphens(prefix: &[u8], greedy: &str, words: &Words<'_>) -> Vec<u8> {
+    let beam: String = prefix
+        .iter()
+        .map(|&symbol| words.alphabet[usize::from(symbol) - 1])
+        .collect();
+    let restored = restore_hyphen_string(&beam, greedy);
+    if restored == beam {
+        return prefix.to_vec();
+    }
+    let mut symbols = Vec::with_capacity(restored.chars().count());
+    for character in restored.chars() {
+        let Some(index) = words.alphabet.iter().position(|&item| item == character) else {
+            return prefix.to_vec();
+        };
+        symbols.push((index + 1) as u8);
+    }
+    symbols
+}
+
+fn restore_hyphen_string(text: &str, greedy: &str) -> String {
+    let text: Vec<char> = text.chars().collect();
+    let greedy: Vec<char> = greedy.chars().collect();
+    let mut out = Vec::with_capacity(text.len() + 2);
+    let mut text_index = 0;
+    let mut greedy_index = 0;
+    while text_index < text.len() && greedy_index < greedy.len() {
+        if greedy[greedy_index] == '-' && text[text_index] != '-' {
+            let next = greedy_index + 1;
+            if next < greedy.len() && letters_match(text[text_index], greedy[next]) {
+                out.push('-');
+                greedy_index += 1;
+                continue;
+            }
+        }
+        if letters_match(text[text_index], greedy[greedy_index]) {
+            out.push(text[text_index]);
+            text_index += 1;
+            greedy_index += 1;
+            continue;
+        }
+        break;
+    }
+    out.extend_from_slice(&text[text_index..]);
+    out.into_iter().collect()
+}
+
+fn letters_match(left: char, right: char) -> bool {
+    left == right || (left.is_alphabetic() && right.is_alphabetic() && same_letter(left, right))
 }
 
 fn polish(
@@ -1634,6 +1687,19 @@ mod tests {
             "über Paronen",
             &Known
         ));
+    }
+
+    #[test]
+    fn a_trace_hyphen_is_restored_when_the_next_letter_matches() {
+        assert_eq!(
+            restore_hyphen_string("vocabulary Fifth-", "vocabulary -Fifth-"),
+            "vocabulary -Fifth-"
+        );
+        assert_eq!(restore_hyphen_string("foobar", "foo-xyz"), "foobar");
+        assert_eq!(
+            restore_hyphen_string("already-there", "already-there"),
+            "already-there"
+        );
     }
 
     #[test]
