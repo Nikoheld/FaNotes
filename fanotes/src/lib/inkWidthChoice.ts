@@ -310,16 +310,20 @@ export const repeatedLetterGroup = (text: string): WordEdit | null => {
 
 /**
  * On a line of three-letter repeats, the one group that is a single letter away from a repeat
- * becomes that repeat (`ZQQ` → `QQQ`). Any other word shape leaves the line alone.
+ * becomes that repeat (`ZQQ` → `QQQ`, `qqt` beside `ppp rrr sss` → `qqq`). A shorter token
+ * may sit beside the groups. Two different near-repeats leave the line alone.
  */
 export const nearTripleLetterGroup = (text: string): WordEdit | null => {
   const words = inkWords(text)
-  if (words.length < 4) return null
+  let triples = 0
   let odd: WordEdit | null = null
   for (let index = 0; index < words.length; index += 1) {
     const letters = [...words[index]]
-    if (letters.length === 3 && letters.every((letter) => letter === letters[0])) continue
-    if (letters.length !== 3) return null
+    if (letters.length !== 3) continue
+    if (letters.every((letter) => letter === letters[0])) {
+      triples += 1
+      continue
+    }
     const counts = new Map<string, number>()
     for (const letter of letters) counts.set(letter, (counts.get(letter) ?? 0) + 1)
     const majority = [...counts.entries()].filter(([, count]) => count === 2)
@@ -327,6 +331,7 @@ export const nearTripleLetterGroup = (text: string): WordEdit | null => {
     if (odd) return null
     odd = { index, from: words[index], to: majority[0][0].repeat(3) }
   }
+  if (!odd || triples < 3) return null
   return odd
 }
 
