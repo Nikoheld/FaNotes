@@ -284,6 +284,30 @@ export const tripleLetterFromNarrowGreedy = (text: string, greedy: string): Word
   return { index, from: words[index], to: traced[index] }
 }
 
+/**
+ * A line made of three-letter repeats grows the one group that is only two copies
+ * (`HHH III JJ KKK` → `HHH III JJJ KKK`). Any other word shape leaves the line alone.
+ */
+export const repeatedLetterGroup = (text: string): WordEdit | null => {
+  const words = inkWords(text)
+  if (words.length < 3) return null
+  let odd: number | null = null
+  for (let index = 0; index < words.length; index += 1) {
+    const letters = [...words[index]]
+    const repeated = letters.every((letter) => letter === letters[0])
+    if (letters.length === 3 && repeated) continue
+    if (letters.length === 2 && repeated) {
+      if (odd !== null) return null
+      odd = index
+      continue
+    }
+    return null
+  }
+  if (odd === null) return null
+  const word = words[odd]
+  return { index: odd, from: word, to: `${[...word][0]}${word}` }
+}
+
 /** A line of three-letter groups with exactly one group that is not three copies of one letter. */
 export const hasOneOddLetterGroup = (text: string) => {
   const words = inkWords(text)
@@ -399,6 +423,12 @@ export const INITIAL_CASE_MARGIN = 1.5
 export const INITIAL_CASE_ALT = 0.23
 
 /**
+ * A later dictionary word may take the case a beam reading already has, when that reading
+ * is no worse than this. `Stand` is 0.28 nats down. `Oral` at 0.65 stays.
+ */
+export const LATER_CASE_MARGIN = 0.35
+
+/**
  * Lowercase the first letter when the beam's top reading still starts with that capital,
  * a close reading is the same line already lowercase, that lowercase letter is visible,
  * and the word is in the dictionary (`Wretched` → `wretched`). German is excluded.
@@ -434,6 +464,49 @@ export const lowercaseInitialFromBeam = (
   const to = lower + letters.slice(1).join('')
   if (to === from) return null
   return { index: 0, from, to }
+}
+
+/**
+ * A later English dictionary word takes the capital or lowercase spelling a close beam
+ * reading already has (`Piecemeal` → `piecemeal`, `symbol` → `Symbol`). German stays.
+ * A word written against a quote stays (`'Pumpkin`).
+ */
+export const laterDictionaryCaseFromBeam = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  language: string,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (language !== 'en' || readings.length < 2) return null
+  const top = readings[0]
+  const located = [...text.matchAll(/[A-Za-zÄÖÜäöüß]+/gu)]
+  let found: WordEdit | null = null
+  for (let index = 1; index < located.length; index += 1) {
+    const match = located[index]
+    const word = match[0]
+    const letters = [...word]
+    if (letters.length < 4 || !known(word)) continue
+    const start = match.index ?? 0
+    let cursor = start - 1
+    while (cursor >= 0 && text[cursor] === ' ') cursor -= 1
+    if (text[cursor] === "'" || text[cursor] === '"') continue
+    const lower = word.toLowerCase()
+    const head = letters[0].toUpperCase()
+    if ([...head].length !== 1) continue
+    const title = `${head}${letters.slice(1).join('').toLowerCase()}`
+    const to = word === title && word !== lower ? lower : word === lower ? title : null
+    if (!to || to === word) continue
+    if (word === title && letters.slice(1).some((letter) => letter !== letter.toLowerCase())) continue
+    const candidate = `${text.slice(0, start)}${to}${text.slice(start + word.length)}`
+    const close = readings.some((reading) => {
+      const gap = top.score - reading.score
+      return reading.text === candidate && gap > 0 && gap <= LATER_CASE_MARGIN
+    })
+    if (!close) continue
+    if (found) return null
+    found = { index, from: word, to }
+  }
+  return found
 }
 
 /**
@@ -645,8 +718,11 @@ export const splitFunctionWordJoin = <T extends { char: string }>(
   return next
 }
 
-/** A reading this close may add the one letter the chosen line dropped. */
-export const ONE_LETTER_READING_MARGIN = 0.11
+/**
+ * A reading this close may add the one letter the chosen line dropped.
+ * `Jahre im` is 0.08 nats down and `Bucht` is 0.45.
+ */
+export const ONE_LETTER_READING_MARGIN = 0.5
 
 const oneExtraLetter = (shorter: string, longer: string) => {
   const left = [...shorter]
@@ -1718,6 +1794,7 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   take(accusativeDer(text), rewriteSameLengthWord)
   take(lowercaseShortBeamWord(text, decoded.readings), rewriteSameLengthWord)
   take(lowercaseInitialFromBeam(text, decoded.readings, options.language ?? '', characters, baseKnown), rewriteSameLengthWord)
+  take(laterDictionaryCaseFromBeam(text, decoded.readings, options.language ?? '', baseKnown), rewriteSameLengthWord)
   take(capitalizeEnglishPronoun(text, options.language ?? ''), rewriteSameLengthWord)
   const movedQuote = quoteAfterParenthesis(characters)
   if (movedQuote) {
@@ -1764,6 +1841,7 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
     characters = splitJoin
     text = characters.map((character) => character.char).join('')
   }
+  take(repeatedLetterGroup(text), rewriteWord)
   const extraLetter = oneLetterFromCloseReading(characters, decoded.readings)
   if (extraLetter) {
     characters = extraLetter

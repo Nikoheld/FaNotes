@@ -85,6 +85,8 @@ import {
   closeBracketAfterLetter,
   openingBracketFromTrace,
   oneLetterFromCloseReading,
+  laterDictionaryCaseFromBeam,
+  repeatedLetterGroup,
   splitFunctionWordJoin,
   tracedFinalComma,
   spaceBetweenDifferentQuotes,
@@ -1198,6 +1200,20 @@ export async function recognizeInk(
         stitched = null
       }
     }
+    const laterCase = laterDictionaryCaseFromBeam(
+      decoded.text,
+      decoded.readings,
+      lineLanguage,
+      (word) => exactWords[lineLanguage].has(foldInkWord(word)),
+    )
+    if (laterCase) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, laterCase.index, laterCase.to)
+      const nextText = textWithWordEdits(decoded.text, [laterCase])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
+    }
     const pronoun = capitalizeEnglishPronoun(decoded.text, lineLanguage)
     if (pronoun) {
       const rewritten = rewriteSameLengthWord(decoded.characters, pronoun.index, pronoun.to)
@@ -1251,6 +1267,15 @@ export async function recognizeInk(
     if (splitJoin) {
       decoded = { ...decoded, characters: splitJoin, text: splitJoin.map((character) => character.char).join('') }
       stitched = null
+    }
+    const repeatedGroup = repeatedLetterGroup(decoded.text)
+    if (repeatedGroup) {
+      const rewritten = rewriteWord(decoded.characters, repeatedGroup.index, repeatedGroup.to)
+      const nextText = textWithWordEdits(decoded.text, [repeatedGroup])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
     }
     const extraLetter = oneLetterFromCloseReading(decoded.characters, decoded.readings)
     if (extraLetter) {
