@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.11.1-beta.5
+
+- Reserve a step of paper ahead of typed lines.
+
 ## 2026.11.1-beta.4
 
 - Sign in to Schulnetz through the website session.
