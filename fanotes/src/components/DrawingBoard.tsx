@@ -121,7 +121,7 @@ import {
   mapClientToPaperPoint,
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
-import { createMarkerCoverage, drawInkStroke as paintInkStroke, inkStrokeIsTranslucent, inkStrokePaintMargin, shiftMarkerCoverage, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
+import { bitmapPatchesTouch, clearMarkerCoverageRect, createMarkerCoverage, drawInkStroke as paintInkStroke, inkStrokeIsTranslucent, inkStrokePaintMargin, removedStrokeBitmapPatch, shiftMarkerCoverage, strokeBitmapPatch, unionBitmapPatch, type BitmapPatch, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
 import { liveTranslucentCanGrow, paintGrowingTranslucentStroke, type LiveTranslucentSession } from '../lib/liveTranslucentInk'
 import { MATH_FIGURES, FIGURE_LINE_MAX, FIGURE_LINE_MIN, FIGURE_LINE_STEP, clampFigureLineWidth, clampFigureParams, defaultFigureParams, figureLineWidthForSize, isMathFigureId, mathFigurePaths, type MathFigureGroup, type MathFigureId, type MathFigureParam } from '../lib/mathFigures'
 import {
@@ -1169,6 +1169,7 @@ const renderDocument = (
   band: { y: number; height: number } | null = null,
   squareMm = 0,
   coverage: MarkerCoverage | null = null,
+  patch: { x: number; y: number; width: number; height: number } | null = null,
 ): MarkerCoverage | null => {
   const context = canvas.getContext('2d')
   if (!context) return null
@@ -1176,20 +1177,60 @@ const renderDocument = (
   const virtualHeight = height / span
   const topPx = inkWindow.y0 * virtualHeight
   // A band paints only the rows a slice move exposed; the rest was copied.
-  const clip = band ?? { y: 0, height }
+  // A patch is the ink an erase removed. Clearing the whole bitmap would
+  // damage the text under every tile of this overlay.
+  const hole = patch && patch.width > 0 && patch.height > 0 ? patch : null
+  const rowClip = band ?? { y: 0, height }
+  const area = hole
+    ? { x: hole.x, y: hole.y, width: hole.width, height: hole.height }
+    : { x: 0, y: rowClip.y, width, height: rowClip.height }
   context.setTransform(1, 0, 0, 1, 0, 0)
-  if (band) context.clearRect(0, band.y, width, band.height)
+  if (hole) context.clearRect(hole.x, hole.y, hole.width, hole.height)
+  else if (band) context.clearRect(0, band.y, width, band.height)
   else context.clearRect(0, 0, canvas.width, canvas.height)
-  if (includePaper && !band) drawPaper(context, width, height, paperStyle, squareMm)
+  if (includePaper && !band) {
+    if (hole) {
+      context.save()
+      context.beginPath()
+      context.rect(hole.x, hole.y, hole.width, hole.height)
+      context.clip()
+      drawPaper(context, width, height, paperStyle, squareMm)
+      context.restore()
+    } else {
+      drawPaper(context, width, height, paperStyle, squareMm)
+    }
+  }
   context.save()
   context.beginPath()
-  context.rect(0, clip.y, width, clip.height)
+  context.rect(area.x, area.y, area.width, area.height)
   context.clip()
   context.setTransform(1, 0, 0, 1, 0, -topPx)
   const filter = band ? inkBandWindow(Math.round(topPx), band, virtualHeight) : inkWindow
-  const visible = !band && isFullInkWindow(inkWindow) ? strokes : strokes.filter((stroke) => strokeIntersectsWindow(stroke, filter))
+  const pagePatch = hole
+    ? { x0: hole.x, y0: hole.y + topPx, x1: hole.x + hole.width, y1: hole.y + hole.height + topPx }
+    : null
+  const paintScale = inkStrokePaintScale(width, layoutWidth > 1 ? layoutWidth : sourceWidth)
+  const hitsPagePatch = (stroke: InkStroke) => {
+    if (!pagePatch) return true
+    const box = strokeBitmapPatch(
+      stroke.points,
+      width,
+      virtualHeight,
+      inkStrokePaintMargin({ ...stroke, symbolPaths: placedSymbolPaths(stroke) }, paintScale),
+    )
+    return Boolean(box && bitmapPatchesTouch(box, pagePatch))
+  }
+  const visible = !pagePatch && !band && isFullInkWindow(inkWindow)
+    ? strokes
+    : strokes.filter((stroke) => strokeIntersectsWindow(stroke, filter) && hitsPagePatch(stroke))
   let active = coverage
-  if (!band) {
+  if (hole) {
+    if (active && active.width === canvas.width && active.height === canvas.height) {
+      clearMarkerCoverageRect(active, hole.x, hole.y, hole.width, hole.height)
+    } else {
+      active = null
+    }
+  } else if (!band) {
     if (!active || active.width !== canvas.width || active.height !== canvas.height) active = createMarkerCoverage(canvas.width, canvas.height)
     else active.mask.fill(0)
   }
@@ -1454,6 +1495,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const committedCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const markerCoverageRef = useRef<MarkerCoverage | null>(null)
   const committedCanvasDirtyRef = useRef(true)
+  /** Hole the next committed paint may clear, if the stroke list is still the one that was erased. */
+  const committedPatchRef = useRef<{ rect: BitmapPatch; strokes: readonly InkStroke[] } | null>(null)
+  const noteErasedInkRef = useRef<(before: readonly InkStroke[], after: readonly InkStroke[]) => void>(() => {})
   const canvasPixelSizeRef = useRef({ width: 0, height: 0, virtualHeight: 0, layoutWidth: 0, layoutHeight: 0, topPx: 0 })
   /** Paint-time slice as paper fractions; derived from inkWindowLayoutRef in redraw. */
   const inkWindowRef = useRef<InkWindow>(FULL_INK_WINDOW)
@@ -2344,6 +2388,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // the grown one, and the ink slid down until the observer put it back.
     if (paper && !activeStrokeRef.current) catchUpPaintedLayoutRef.current()
     if (inline && viewportRasterRef.current) {
+      committedPatchRef.current = null
       redrawViewportRaster(layoutWidth, layoutHeight, measureLayout)
       return
     }
@@ -2470,6 +2515,30 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       && !committedCanvasDirtyRef.current
       && !activeStrokeRef.current,
     )
+    const pendingErase = committedPatchRef.current
+    committedPatchRef.current = null
+    const coverageNow = markerCoverageRef.current
+    const eraseBitmapReady = Boolean(
+      pendingErase
+      && pendingErase.strokes === strokesRef.current
+      && held
+      && held.key === contentKey
+      && held.topPx === topPx
+      && !committedResized
+      && !activeStrokeRef.current
+      && !painting
+      && (!coverageNow || (coverageNow.width === committedCanvas.width && coverageNow.height === committedCanvas.height))
+    )
+    let erasePatch: { x: number; y: number; width: number; height: number } | null = null
+    let eraseOutside = false
+    if (eraseBitmapReady && pendingErase) {
+      const x0 = Math.max(0, pendingErase.rect.x0 - 1)
+      const y0 = Math.max(0, pendingErase.rect.y0 - topPx - 1)
+      const x1 = Math.min(pixelWidth, pendingErase.rect.x1 + 1)
+      const y1 = Math.min(pixelHeight, pendingErase.rect.y1 - topPx + 1)
+      if (x1 - x0 >= 1 && y1 - y0 >= 1) erasePatch = { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
+      else eraseOutside = true
+    }
     if (samePaint) {
       // This page is still filling in across frames. A scroll uses the same
       // picture, so it must not clear the bitmap and start again.
@@ -2500,6 +2569,32 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         )
         committedBitmapRef.current = { key: contentKey, topPx }
       }
+      markInkPainted()
+    } else if (erasePatch) {
+      cancelInkPaint()
+      markerCoverageRef.current = renderDocument(
+        committedCanvas,
+        strokesRef.current,
+        paperStyle,
+        settings.smoothing,
+        pixelWidth,
+        pixelHeight,
+        !inline,
+        sourceWidth,
+        inkWindow,
+        paintLayoutWidth || layoutWidth,
+        null,
+        settings.paperSquareMm,
+        markerCoverageRef.current,
+        erasePatch,
+      )
+      committedBitmapRef.current = { key: contentKey, topPx }
+      committedCanvasDirtyRef.current = false
+      markInkPainted()
+    } else if (eraseOutside) {
+      cancelInkPaint()
+      committedBitmapRef.current = { key: contentKey, topPx }
+      committedCanvasDirtyRef.current = false
       markInkPainted()
     } else if (!activeStrokeRef.current && inkPageIsHeavy(strokesRef.current)) {
       cancelInkPaint()
@@ -3972,10 +4067,33 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
   }, [inline, inputActive, paperView, resetView, wipeLiveInk])
 
+  noteErasedInkRef.current = (before, after) => {
+    if (before === after) return
+    const size = canvasPixelSizeRef.current
+    const pageWidth = size.width
+    const pageHeight = size.virtualHeight
+    if (!(pageWidth > 0) || !(pageHeight > 0)) {
+      committedPatchRef.current = null
+      return
+    }
+    const scale = inkStrokePaintScale(pageWidth, size.layoutWidth > 1 ? size.layoutWidth : sourceWidthRef.current)
+    const rect = removedStrokeBitmapPatch(before, after, pageWidth, pageHeight, (stroke) => (
+      inkStrokePaintMargin({ ...stroke, symbolPaths: placedSymbolPaths(stroke) }, scale)
+    ))
+    const previous = committedPatchRef.current
+    if (!rect || (previous && previous.strokes !== before)) {
+      committedPatchRef.current = null
+      return
+    }
+    const chained = previous ? unionBitmapPatch(previous.rect, rect) : rect
+    committedPatchRef.current = chained ? { rect: chained, strokes: after } : null
+  }
+
   const eraseAt = useCallback((value: StrokePoint | StrokePoint[]) => {
     const points = Array.isArray(value) ? value : [value]
     const anchor = eraserAnchorRef.current
     const samples = anchor ? [anchor, ...points] : points
+    const before = strokesRef.current
     const next = applyToolErase(
       strokesRef.current,
       samples,
@@ -3985,8 +4103,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     )
     const last = points.at(-1)
     if (last) eraserAnchorRef.current = last
-    if (next === strokesRef.current) return
-    noteStrokesErased(Math.max(1, strokesRef.current.length - next.length))
+    if (next === before) return
+    noteErasedInkRef.current(before, next)
+    noteStrokesErased(Math.max(1, before.length - next.length))
     strokesRef.current = next
     gestureChangedRef.current = true
     committedCanvasDirtyRef.current = true
@@ -5561,8 +5680,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       ) : null
       if (scribble) {
         const deleted = new Set(scribble.indexes.map((index) => handwritingEntries[index]?.index).filter((index): index is number => index !== undefined))
-        strokesRef.current = beforeGestureRef.current.filter((_, index) => !deleted.has(index))
-        scribbleDeleted = beforeGestureRef.current.length - strokesRef.current.length
+        const before = beforeGestureRef.current
+        const next = before.filter((_, index) => !deleted.has(index))
+        noteErasedInkRef.current(before, next)
+        strokesRef.current = next
+        scribbleDeleted = before.length - next.length
         noteStrokesErased(scribbleDeleted)
         gestureChangedRef.current = scribbleDeleted > 0
       } else {
@@ -5593,7 +5715,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       setCorrection('')
       setAutomaticResult(null)
       bumpInkRevision({
-        redrawCommitted: scribbleDeleted > 0,
+        // The drag already punched the bitmap. Marking it dirty here clears
+        // the whole overlay once more when the pen lifts.
+        redrawCommitted: gestureToolRef.current === 'eraser' ? false : scribbleDeleted > 0,
         appendOnly: scribbleDeleted === 0 && gestureToolRef.current === 'pen',
         updateTranscript: gestureToolRef.current !== 'pen' || activeStroke?.purpose !== 'art',
       })
@@ -7196,9 +7320,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     redoRef.current = []
     selectionOriginRef.current = null
     selectionMovedRef.current = true
-    const before = strokesRef.current.length
-    strokesRef.current = strokesRef.current.filter((_, index) => !indexes.has(index))
-    noteStrokesErased(before - strokesRef.current.length)
+    const before = strokesRef.current
+    const next = before.filter((_, index) => !indexes.has(index))
+    noteErasedInkRef.current(before, next)
+    strokesRef.current = next
+    noteStrokesErased(before.length - next.length)
     selectedStrokeIndexesRef.current = []
     setSelectionRect(null)
     committedCanvasDirtyRef.current = true

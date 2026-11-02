@@ -261,6 +261,113 @@ export const inkStrokePaintMargin = (
   return widest / 2 + glow + 2
 }
 
+/** Page-bitmap box, inclusive of the outer painted pixel. */
+export type BitmapPatch = { x0: number; y0: number; x1: number; y1: number }
+
+export const unionBitmapPatch = (a: BitmapPatch | null, b: BitmapPatch | null): BitmapPatch | null => {
+  if (!a) return b
+  if (!b) return a
+  return {
+    x0: Math.min(a.x0, b.x0),
+    y0: Math.min(a.y0, b.y0),
+    x1: Math.max(a.x1, b.x1),
+    y1: Math.max(a.y1, b.y1),
+  }
+}
+
+export const bitmapPatchesTouch = (a: BitmapPatch, b: BitmapPatch) => (
+  a.x0 <= b.x1 && b.x0 <= a.x1 && a.y0 <= b.y1 && b.y0 <= a.y1
+)
+
+export const strokeBitmapPatch = (
+  points: ReadonlyArray<{ x: number; y: number }>,
+  pageWidth: number,
+  pageHeight: number,
+  margin: number,
+): BitmapPatch | null => {
+  if (!points.length || !(pageWidth > 0) || !(pageHeight > 0)) return null
+  let x0 = Number.POSITIVE_INFINITY
+  let y0 = Number.POSITIVE_INFINITY
+  let x1 = Number.NEGATIVE_INFINITY
+  let y1 = Number.NEGATIVE_INFINITY
+  for (const point of points) {
+    const px = point.x * pageWidth
+    const py = point.y * pageHeight
+    if (px < x0) x0 = px
+    if (py < y0) y0 = py
+    if (px > x1) x1 = px
+    if (py > y1) y1 = py
+  }
+  if (!Number.isFinite(x0)) return null
+  const pad = Number.isFinite(margin) && margin > 0 ? margin : 0
+  return {
+    x0: Math.floor(x0 - pad),
+    y0: Math.floor(y0 - pad),
+    x1: Math.ceil(x1 + pad),
+    y1: Math.ceil(y1 + pad),
+  }
+}
+
+/**
+ * Page-bitmap box of ink that `before` drew and `after` does not.
+ * A split stroke keeps its surviving points, so a long mark dirties the gap
+ * rather than its whole length. Untouched strokes stay out of the box.
+ */
+export const removedStrokeBitmapPatch = <T extends { points: ReadonlyArray<{ x: number; y: number }> }>(
+  before: readonly T[],
+  after: readonly T[],
+  pageWidth: number,
+  pageHeight: number,
+  marginOf: (stroke: T) => number,
+): BitmapPatch | null => {
+  if (before === after) return null
+  const keptStroke = new Set<T>(after)
+  const beforeStroke = new Set<T>(before)
+  const surviving = new Set<(typeof before)[number]['points'][number]>()
+  for (const stroke of after) {
+    if (beforeStroke.has(stroke)) continue
+    for (const point of stroke.points) surviving.add(point)
+  }
+  let patch: BitmapPatch | null = null
+  for (const stroke of before) {
+    if (keptStroke.has(stroke) || !stroke.points.length) continue
+    const dropped: number[] = []
+    stroke.points.forEach((point, index) => {
+      if (!surviving.has(point)) dropped.push(index)
+    })
+    const indexes = new Set<number>(dropped)
+    if (!indexes.size) {
+      stroke.points.forEach((_, index) => indexes.add(index))
+    } else {
+      for (const index of dropped) {
+        if (index > 0) indexes.add(index - 1)
+        if (index + 1 < stroke.points.length) indexes.add(index + 1)
+      }
+    }
+    const points = [...indexes].map((index) => stroke.points[index])
+    patch = unionBitmapPatch(patch, strokeBitmapPatch(points, pageWidth, pageHeight, marginOf(stroke)))
+  }
+  return patch
+}
+
+/** Clears one device-pixel rectangle of a marker mask and leaves the rest. */
+export const clearMarkerCoverageRect = (
+  coverage: MarkerCoverage,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+) => {
+  const x0 = Math.max(0, Math.floor(x))
+  const y0 = Math.max(0, Math.floor(y))
+  const x1 = Math.min(coverage.width, Math.ceil(x + width))
+  const y1 = Math.min(coverage.height, Math.ceil(y + height))
+  if (x1 <= x0 || y1 <= y0) return
+  for (let row = y0; row < y1; row += 1) {
+    coverage.mask.fill(0, row * coverage.width + x0, row * coverage.width + x1)
+  }
+}
+
 type InkPaintPass = {
   widthFactor: number
   alpha: number

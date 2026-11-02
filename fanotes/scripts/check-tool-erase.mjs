@@ -10,6 +10,13 @@ const server = await createServer({
 })
 
 const { applyToolErase, strokeTouchesEraser } = await server.ssrLoadModule('/src/lib/toolErase.ts')
+const {
+  clearMarkerCoverageRect,
+  createMarkerCoverage,
+  inkStrokePaintMargin,
+  removedStrokeBitmapPatch,
+  unionBitmapPatch,
+} = await server.ssrLoadModule('/src/lib/inkStrokePaint.ts')
 const { readSavedInkStrokes } = await server.ssrLoadModule('/src/lib/inkDocument.ts')
 const { savedInkPage, keepMarkOnPage } = await server.ssrLoadModule('/src/lib/noteCanvas.ts')
 const {
@@ -166,6 +173,36 @@ try {
   assert.equal(lineParts.some((stroke) => hasPointNear(stroke, 200, 420, 2)), false, 'the underline loses only the touched span')
   assert.equal(lineParts.some((stroke) => hasPointNear(stroke, 40, 420, 2)), true, 'the underline keeps its untouched start')
   assert.equal(lineParts.some((stroke) => hasPointNear(stroke, 360, 420, 2)), true, 'the underline keeps its untouched end')
+
+  const paintMargin = (stroke) => inkStrokePaintMargin(stroke, 1)
+  const underlinePatch = removedStrokeBitmapPatch([underline], erasedLine, SOURCE_WIDTH, SOURCE_HEIGHT, paintMargin)
+  assert.ok(underlinePatch, 'erasing the middle of a line dirties a box')
+  assert.ok(underlinePatch.x0 > 40, 'the kept start of the line is outside the cleared box')
+  assert.ok(underlinePatch.x1 < 360, 'the kept end of the line is outside the cleared box')
+  assert.ok(underlinePatch.x0 < 200 && underlinePatch.x1 > 200, 'the erased span is inside the cleared box')
+  assert.ok(underlinePatch.x1 - underlinePatch.x0 < SOURCE_WIDTH / 2, 'the cleared box is the gap, not the page')
+  const letterPatch = removedStrokeBitmapPatch(pair, erasedLeft, SOURCE_WIDTH, SOURCE_HEIGHT, paintMargin)
+  assert.ok(letterPatch, 'a removed letter dirties its own box')
+  assert.ok(letterPatch.x1 < 280, 'the untouched letter stays outside the cleared box')
+  assert.equal(removedStrokeBitmapPatch(start, start, SOURCE_WIDTH, SOURCE_HEIGHT, paintMargin), null, 'a miss does not dirty the page')
+  assert.equal(
+    removedStrokeBitmapPatch(start, start.slice(), SOURCE_WIDTH, SOURCE_HEIGHT, paintMargin),
+    null,
+    'strokes that stayed are not part of the hole',
+  )
+  assert.deepEqual(
+    unionBitmapPatch({ x0: 1, y0: 2, x1: 3, y1: 4 }, { x0: 10, y0: 0, x1: 12, y1: 5 }),
+    { x0: 1, y0: 0, x1: 12, y1: 5 },
+  )
+  const coverage = createMarkerCoverage(8, 4)
+  coverage.mask.fill(1)
+  clearMarkerCoverageRect(coverage, 2, 1, 3, 2)
+  assert.equal(coverage.mask[0], 1, 'rows above the hole stay claimed')
+  assert.equal(coverage.mask[8 + 1], 1, 'the column before the hole stays claimed')
+  assert.equal(coverage.mask[8 + 2], 0, 'the hole clears the marker mask')
+  assert.equal(coverage.mask[16 + 4], 0, 'the hole clears its full rectangle')
+  assert.equal(coverage.mask[16 + 5], 1, 'the column after the hole stays claimed')
+  assert.equal(coverage.mask[24], 1, 'rows below the hole stay claimed')
 
   assert.equal(wordParts.some((stroke) => hasPointNear(stroke, 120, 220, 8)), false, 'the stem of the touched letter goes with the letter')
 
@@ -498,6 +535,15 @@ try {
   assert.match(catchUp, /applyInkExtentStylesRef\.current\(room, sourceW\)/, 'the reserved height is the sheet min-height')
   assert.match(catchUp, /keyboard: inline && !inputActive/, 'only keyboard typing reserves the room')
   assert.match(boardSource, /textAbsorbTargetHeight\(paintedH, sourceHeightRef\.current, reserveTypingRoom\)/)
+  assert.match(boardSource, /noteErasedInkRef\.current\(before, next\)/, 'an erase remembers the ink it removed')
+  assert.match(boardSource, /pendingErase\.strokes === strokesRef\.current/, 'a patch is dropped when the stroke list changed')
+  assert.match(boardSource, /if \(hole\) context\.clearRect\(hole\.x, hole\.y, hole\.width, hole\.height\)/, 'an erase clears the hole, not the bitmap')
+  assert.match(boardSource, /context\.clearRect\(0, 0, canvas\.width, canvas\.height\)/, 'other paints can still clear the bitmap')
+  assert.match(
+    boardSource,
+    /redrawCommitted: gestureToolRef\.current === 'eraser' \? false : scribbleDeleted > 0/,
+    'lifting the eraser does not mark the bitmap dirty again',
+  )
 
   console.log(JSON.stringify({
     lineRemnants: remnants.length,
