@@ -305,6 +305,11 @@ impl Host {
                     self.settings.get("ocrModelKeepAliveSeconds"),
                 )
             }
+            "fanotes:recognize-ink-line" | "fanotes:ink-personal-model" => {
+                // The ink recognizer runs through the native `fanotes-ocr` sidecar, which the
+                // Electron desktop host drives. The Tauri rewrite does not ship it yet.
+                Err("Die Stifterkennung ist in dieser Ausgabe nicht verfügbar.".to_owned())
+            }
             "fanotes:enhanced-math-get-state" => Ok(enhanced_math_state()),
             "fanotes:enhanced-math-install" | "fanotes:enhanced-math-recognize" => {
                 Err("PosFormer ist nicht installiert.".to_owned())
@@ -3265,6 +3270,8 @@ fn onboarding_open(channel: &str) -> bool {
             | "fanotes:load-spelling-word-candidates"
             | "fanotes:load-handwriting-recognition-resources"
             | "fanotes:recognize-native-handwriting-line"
+            | "fanotes:recognize-ink-line"
+            | "fanotes:ink-personal-model"
             | "fanotes:enhanced-math-get-state"
             | "fanotes:enhanced-math-install"
             | "fanotes:enhanced-math-recognize"

@@ -1,0 +1,50 @@
+{
+  "format": "fanotes-ink-recognizer-v1",
+  "name": "FaNotes_Ink_DE_EN",
+  "version": "2026.11.1-step4500",
+  "alphabet": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZäöüÄÖÜß0123456789 .,;:!?\"'()[]{}<>-–—_/\\@#%&*+=|€§°²³→←↑↓×÷",
+  "height": 64,
+  "frameStride": 4,
+  "featureDim": 512,
+  "classes": 112,
+  "models": {
+    "desktop": {
+      "file": "ink.onnx",
+      "size": 40257814,
+      "sha256": "bc4423fa61c0da450ee00ae007aae3efb929d72eb0ba8c73555db4d81d08f0d9",
+      "precision": "fp32"
+    }
+  },
+  "languageModels": {
+    "de": {
+      "file": "de.fnlm",
+      "size": 8897736,
+      "sha256": "1e7353015faa2ad9d8357073458a545a5472a1913676299788e5be782e4dbacb"
+    },
+    "en": {
+      "file": "en.fnlm",
+      "size": 7469752,
+      "sha256": "f3fc1c52740c0e40793947425bf8dbe6e70690ca33535ccc66412c7d906ec4cc"
+    }
+  },
+  "decoder": {
+    "lmWeight": 0.55,
+    "wordBonus": 1.2,
+    "unknownWordPenalty": -0.4,
+    "insertionBonus": 0.6,
+    "beamWidth": 16,
+    "englishLmWeight": 0.25,
+    "englishWordBonus": 0.6
+  },
+  "training": {
+    "checkpoint": "full1-step4500",
+    "goldenCharacterError": {
+      "de": 4.95,
+      "en": 0
+    },
+    "goldenWordError": {
+      "de": 12.04,
+      "en": 0
+    }
+  }
+}

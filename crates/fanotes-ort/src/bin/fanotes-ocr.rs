@@ -21,7 +21,8 @@ use fanotes_ort::{
     verify_model_file, Error, ModelDescriptor, PylaiaSession, ENGINE, ONNXRUNTIME_VERSION,
 };
 
-const USAGE: &str = "usage: fanotes-ocr --model <path> --size <bytes> --sha256 <hex> [--runtime <library>]";
+const USAGE: &str =
+    "usage: fanotes-ocr --model <path> --size <bytes> --sha256 <hex> [--runtime <library>]";
 
 struct Options {
     model: PathBuf,
@@ -35,16 +36,30 @@ fn parse_options(mut args: impl Iterator<Item = String>) -> Result<Options, Stri
         let value = args.next().ok_or_else(|| format!("{flag} needs a value"))?;
         match flag.as_str() {
             "--model" => model = Some(PathBuf::from(value)),
-            "--size" => size = Some(value.parse::<u64>().map_err(|_| "--size must be a byte count".to_owned())?),
+            "--size" => {
+                size = Some(
+                    value
+                        .parse::<u64>()
+                        .map_err(|_| "--size must be a byte count".to_owned())?,
+                )
+            }
             "--sha256" => sha256 = Some(value),
             "--runtime" => runtime = Some(PathBuf::from(value)),
             _ => return Err(format!("unknown option {flag}")),
         }
     }
     let model = model.ok_or("--model is required")?;
-    let file = model.file_name().and_then(|name| name.to_str()).ok_or("--model must name a file")?.to_owned();
-    let descriptor = ModelDescriptor::new(&file, size.ok_or("--size is required")?, &sha256.ok_or("--sha256 is required")?)
-        .map_err(|error| error.to_string())?;
+    let file = model
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("--model must name a file")?
+        .to_owned();
+    let descriptor = ModelDescriptor::new(
+        &file,
+        size.ok_or("--size is required")?,
+        &sha256.ok_or("--sha256 is required")?,
+    )
+    .map_err(|error| error.to_string())?;
     let runtime = match runtime {
         Some(runtime) => runtime,
         None => env::current_exe()
@@ -52,7 +67,11 @@ fn parse_options(mut args: impl Iterator<Item = String>) -> Result<Options, Stri
             .and_then(|executable| Some(executable.parent()?.join(default_runtime_file())))
             .ok_or("cannot locate the ONNX Runtime library next to fanotes-ocr")?,
     };
-    Ok(Options { model, descriptor, runtime })
+    Ok(Options {
+        model,
+        descriptor,
+        runtime,
+    })
 }
 
 struct Recognizer {
@@ -64,7 +83,11 @@ impl Recognizer {
     /// The first line checks the weights against the manifest digest, then loads the runtime and builds
     /// the session from the checked bytes. A different thread count rebuilds it, as the worker did.
     fn session(&mut self, threads: usize) -> Result<&mut PylaiaSession, Error> {
-        if self.session.as_ref().is_some_and(|session| session.threads() != threads) {
+        if self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.threads() != threads)
+        {
             self.session = None;
         }
         if self.session.is_none() {
@@ -80,7 +103,16 @@ impl Recognizer {
             Ok(request) => request,
             Err((id, error)) => return Reply::error(&id, &error),
         };
-        match self.session(request.threads).and_then(|session| session.run(request.width, &request.input)) {
+        let outcome = self.session(request.threads).and_then(|session| {
+            session.run(
+                request.width,
+                request.height,
+                &request.input_name,
+                &request.output_name,
+                &request.input,
+            )
+        });
+        match outcome {
             Ok(prediction) => Reply::prediction(&request.id, &prediction),
             Err(error) => Reply::error(&request.id, &error),
         }
@@ -90,7 +122,10 @@ impl Recognizer {
 fn main() -> ExitCode {
     let mut args = env::args().skip(1).peekable();
     if args.peek().map(String::as_str) == Some("--version") {
-        println!("fanotes-ocr {} ({ENGINE}, ONNX Runtime {ONNXRUNTIME_VERSION})", env!("CARGO_PKG_VERSION"));
+        println!(
+            "fanotes-ocr {} ({ENGINE}, ONNX Runtime {ONNXRUNTIME_VERSION})",
+            env!("CARGO_PKG_VERSION")
+        );
         return ExitCode::SUCCESS;
     }
     let options = match parse_options(args) {
@@ -100,7 +135,10 @@ fn main() -> ExitCode {
             return ExitCode::from(64);
         }
     };
-    let mut recognizer = Recognizer { options, session: None };
+    let mut recognizer = Recognizer {
+        options,
+        session: None,
+    };
     let code = serve(&mut recognizer);
     drop(recognizer);
     exit_process(code)

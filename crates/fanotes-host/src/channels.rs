@@ -78,6 +78,8 @@ pub const CHANNELS: &[Channel] = &[
         "fanotes:recognize-native-handwriting-line",
         ChannelKind::Command,
     ),
+    channel("fanotes:recognize-ink-line", ChannelKind::Command),
+    channel("fanotes:ink-personal-model", ChannelKind::Command),
     channel("fanotes:enhanced-math-get-state", ChannelKind::Command),
     channel("fanotes:enhanced-math-install", ChannelKind::Command),
     channel("fanotes:enhanced-math-recognize", ChannelKind::Command),

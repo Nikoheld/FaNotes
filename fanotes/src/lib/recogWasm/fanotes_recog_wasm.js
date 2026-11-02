@@ -61,6 +61,131 @@ export function fuseRecognitionModel(payload) {
 }
 
 /**
+ * CTC loss (nats) of `labels` under `[frames, classes]` logits; `+∞` when the line is too short.
+ * @param {Float32Array} logits
+ * @param {number} classes
+ * @param {Uint32Array} labels
+ * @returns {number}
+ */
+export function inkCtcLoss(logits, classes, labels) {
+    const ptr0 = passArrayF32ToWasm0(logits, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray32ToWasm0(labels, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.inkCtcLoss(ptr0, len0, classes, ptr1, len1);
+    return ret;
+}
+
+/**
+ * Decodes `[frames, classes]` logits with the language model and lexicon of `language`.
+ * @param {Float32Array} logits
+ * @param {number} classes
+ * @param {string} alphabet
+ * @param {string} language
+ * @param {string} options_json
+ * @returns {string}
+ */
+export function inkDecode(logits, classes, alphabet, language, options_json) {
+    let deferred6_0;
+    let deferred6_1;
+    try {
+        const ptr0 = passArrayF32ToWasm0(logits, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(alphabet, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(language, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(options_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ret = wasm.inkDecode(ptr0, len0, classes, ptr1, len1, ptr2, len2, ptr3, len3);
+        var ptr5 = ret[0];
+        var len5 = ret[1];
+        if (ret[3]) {
+            ptr5 = 0; len5 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred6_0 = ptr5;
+        deferred6_1 = len5;
+        return getStringFromWasm0(ptr5, len5);
+    } finally {
+        wasm.__wbindgen_free(deferred6_0, deferred6_1, 1);
+    }
+}
+
+/**
+ * Packed strokes are `pointCount, x, y, x, y, …` per stroke in page pixels. Returns the lines
+ * as JSON, top to bottom.
+ * @param {Float64Array} packed
+ * @returns {string}
+ */
+export function inkGroupLines(packed) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passArrayF64ToWasm0(packed, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.inkGroupLines(ptr0, len0);
+        var ptr2 = ret[0];
+        var len2 = ret[1];
+        if (ret[3]) {
+            ptr2 = 0; len2 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
+ * `[width, height, …pixels]` of the model image (`1` paper, `0` ink), or empty without ink.
+ * @param {Float64Array} packed
+ * @param {number} ref_height
+ * @param {number} pen_width
+ * @param {number} extra_shear
+ * @param {number} scale
+ * @returns {Float32Array}
+ */
+export function inkLineImage(packed, ref_height, pen_width, extra_shear, scale) {
+    const ptr0 = passArrayF64ToWasm0(packed, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.inkLineImage(ptr0, len0, ref_height, pen_width, extra_shear, scale);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v2;
+}
+
+/**
+ * Page-space boxes `[minX, minY, maxX, maxY]` of the ink under each frame span
+ * (`start, end` pairs). A span without ink gets `NaN`s.
+ * @param {Float64Array} packed
+ * @param {number} ref_height
+ * @param {number} pen_width
+ * @param {number} extra_shear
+ * @param {number} scale
+ * @param {Uint32Array} spans
+ * @returns {Float64Array}
+ */
+export function inkSpanBoxes(packed, ref_height, pen_width, extra_shear, scale, spans) {
+    const ptr0 = passArrayF64ToWasm0(packed, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray32ToWasm0(spans, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.inkSpanBoxes(ptr0, len0, ref_height, pen_width, extra_shear, scale, ptr1, len1);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v3 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+    return v3;
+}
+
+/**
  * Packed strokes: for each stroke, `baseWidth`, `pointCount`, then that many `x, y` page coordinates.
  * Ratios are `NaN` when the caller wants the default crop.
  * @param {number} min_x
@@ -85,6 +210,65 @@ export function lineTensor(min_x, min_y, max_x, max_y, source_width, source_heig
     var v2 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
     return v2;
+}
+
+/**
+ * Exact dictionary for one-edit correction (`de.words` / `en.words`), not the Bloom filter.
+ * Personal words already stored for `language` stay known, so a writer's own word is not rewritten.
+ * @param {string} language
+ * @param {string[]} words
+ */
+export function setInkExactWords(language, words) {
+    const ptr0 = passStringToWasm0(language, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArrayJsValueToWasm0(words, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    wasm.setInkExactWords(ptr0, len0, ptr1, len1);
+}
+
+/**
+ * @param {string} language
+ * @param {Uint8Array} bytes
+ */
+export function setInkLanguageModel(language, bytes) {
+    const ptr0 = passStringToWasm0(language, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.setInkLanguageModel(ptr0, len0, ptr1, len1);
+    if (ret[1]) {
+        throw takeFromExternrefTable0(ret[0]);
+    }
+}
+
+/**
+ * Installs the spelling Bloom filter of `language` as the decoder's word lexicon.
+ * @param {string} language
+ * @param {Uint8Array} bloom
+ * @param {number} bit_count
+ */
+export function setInkLexicon(language, bloom, bit_count) {
+    const ptr0 = passStringToWasm0(language, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(bloom, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.setInkLexicon(ptr0, len0, ptr1, len1, bit_count);
+    if (ret[1]) {
+        throw takeFromExternrefTable0(ret[0]);
+    }
+}
+
+/**
+ * Replaces the personal vocabulary (lower-case words) of `language`.
+ * @param {string} language
+ * @param {string[]} words
+ */
+export function setInkPersonalWords(language, words) {
+    const ptr0 = passStringToWasm0(language, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArrayJsValueToWasm0(words, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    wasm.setInkPersonalWords(ptr0, len0, ptr1, len1);
 }
 
 /**
@@ -145,6 +329,11 @@ function getArrayF32FromWasm0(ptr, len) {
     return getFloat32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
 }
 
+function getArrayF64FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getFloat64ArrayMemory0().subarray(ptr / 8, ptr / 8 + len);
+}
+
 let cachedDataViewMemory0 = null;
 function getDataViewMemory0() {
     if (cachedDataViewMemory0 === null || cachedDataViewMemory0.buffer.detached === true || (cachedDataViewMemory0.buffer.detached === undefined && cachedDataViewMemory0.buffer !== wasm.memory.buffer)) {
@@ -173,6 +362,14 @@ function getStringFromWasm0(ptr, len) {
     return decodeText(ptr >>> 0, len);
 }
 
+let cachedUint32ArrayMemory0 = null;
+function getUint32ArrayMemory0() {
+    if (cachedUint32ArrayMemory0 === null || cachedUint32ArrayMemory0.byteLength === 0) {
+        cachedUint32ArrayMemory0 = new Uint32Array(wasm.memory.buffer);
+    }
+    return cachedUint32ArrayMemory0;
+}
+
 let cachedUint8ArrayMemory0 = null;
 function getUint8ArrayMemory0() {
     if (cachedUint8ArrayMemory0 === null || cachedUint8ArrayMemory0.byteLength === 0) {
@@ -183,6 +380,20 @@ function getUint8ArrayMemory0() {
 
 function isLikeNone(x) {
     return x === undefined || x === null;
+}
+
+function passArray32ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 4, 4) >>> 0;
+    getUint32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1, 1) >>> 0;
+    getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
 }
 
 function passArrayF32ToWasm0(arg, malloc) {
@@ -289,6 +500,7 @@ function __wbg_finalize_init(instance, module) {
     cachedDataViewMemory0 = null;
     cachedFloat32ArrayMemory0 = null;
     cachedFloat64ArrayMemory0 = null;
+    cachedUint32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;

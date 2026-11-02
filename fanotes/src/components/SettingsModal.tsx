@@ -63,6 +63,7 @@ import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
 import { SyncSettingsSection } from './SyncSettingsSection'
 import { ShareSettingsPage, type ShareTarget } from './ShareSettingsPage'
 import { ProfileSettingsCard } from './ProfileSettingsCard'
+import { InkPersonalizationCard } from './InkPersonalizationCard'
 import {
   createFetchSharePort,
   loadShareEntries,
@@ -222,7 +223,8 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Stifte- und Tablett-Tasten', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet-buttons', keywords: 'wacom tablett taste barrel radierer expresskey stift knopf mapping' },
   { label: 'Durchkritzel-Empfindlichkeit', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'löschen radierer scribble sensitivity' },
   { label: 'Form-Erkennung', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'form zirkel kreis linie rechteck dreieck glätten snap stillhalten empfindlichkeit' },
-  { label: 'Handschrifterkennung', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-recognition', keywords: 'ocr text mathematik automatisch sprache konvertieren suchindex' },
+  { label: 'Handschrifterkennung', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-recognition', keywords: 'ocr text mathematik automatisch sprache konvertieren suchindex desktop zeilenmodell' },
+  { label: 'Persönliche Handschrift', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-ink-personal', keywords: 'handschrift stil wortschatz training export import persönliches modell desktop' },
   { label: 'Handschrift zu Text', detail: 'Experimentell', section: 'experimental', target: 'settings-experimental', keywords: 'experimentell ocr konvertieren mathe korrigierer löser suchindex qwen vision handschrift text' },
   { label: 'Hausaufgaben API', detail: 'Experimentell', section: 'experimental', target: 'settings-homework-api', keywords: 'hausaufgaben api fasrv passwort auth termine liste erledigt patch post delete' },
   { label: 'Remote Support', detail: 'Experimentell', section: 'experimental', target: 'settings-remote-support', keywords: 'remote support sitzung debug test code token fernwartung' },
@@ -1043,7 +1045,7 @@ export function SettingsModal({
                   <SettingRow title="Erkennungsmodus" description="Automatisch vergleicht Text- und Mathematikerkennung und merkt sich unklare Fälle.">
                     <div className="segmented compact"><button type="button" className={settings.recognitionMode === 'auto' ? 'active' : ''} onClick={() => update('recognitionMode', 'auto')}>Automatisch</button><button type="button" className={settings.recognitionMode === 'text' ? 'active' : ''} onClick={() => onChange({ ...settings, recognitionMode: 'text', lastRecognitionMode: 'text' })}>Text</button><button type="button" className={settings.recognitionMode === 'math' ? 'active' : ''} onClick={() => onChange({ ...settings, recognitionMode: 'math', lastRecognitionMode: 'math' })}>Mathematik</button></div>
                   </SettingRow>
-                  <SettingRow title="Textsprache" description="Steuert Wörter und Buchstabenfolgen bei der Texterkennung.">
+                  <SettingRow title="Textsprache" description="Steuert Wörter und Buchstabenfolgen. Die Desktop-Stifterkennung liest Deutsch und Englisch; Französisch nutzt das englische Sprachmodell.">
                     <div className="segmented compact">
                       <button type="button" className={settings.recognitionLanguage === 'de' ? 'active' : ''} onClick={() => update('recognitionLanguage', 'de')}>Deutsch</button>
                       <button type="button" className={settings.recognitionLanguage === 'en' ? 'active' : ''} onClick={() => update('recognitionLanguage', 'en')}>Englisch</button>
@@ -1053,7 +1055,8 @@ export function SettingsModal({
                   <SettingRow title="Randtranskript" description="Nach dem Schreiben steht die unsichtbare Erkennung am Rand. Ein Wort antippen korrigiert es, die Tinte bleibt.">
                     <button type="button" className={`toggle ${settings.marginTranscript ? 'is-on' : ''}`} role="switch" aria-checked={settings.marginTranscript} aria-label="Randtranskript" onClick={() => update('marginTranscript', !settings.marginTranscript)}><span /></button>
                   </SettingRow>
-                  <SettingRow title="Lokales Kontextlernen" description="Löst unsichere Buchstaben anhand plausibler Wörter auf und übernimmt ausschließlich sichere Entscheidungen als begrenzte persönliche Trainingsbeispiele."><span>Automatisch aktiv</span></SettingRow>
+                  <SettingRow title="Lokales Kontextlernen" description="Bestätigte Konvertierungen erweitern lokal den Wortschatz. Ab acht Zeilen passt die Desktop-App Stiftbreite, Neigung und Grösse an die eigene Schrift an."><span>Automatisch aktiv</span></SettingRow>
+                  {!isWeb && <div id="settings-ink-personal"><InkPersonalizationCard /></div>}
                   <SettingRow title="Unsichtbarer Suchindex" description="Nur aktiv, wenn „Handschrift zu Text“ unter Experimentell eingeschaltet ist. Die Seite bleibt Handschrift; die Vault-Suche nutzt dann im Hintergrund eine lokale Transkription."><span>{settings.experimentalHandwritingToText ? 'Lokal aktiv' : 'Experimentell aus'}</span></SettingRow>
                   <SettingRow title="Zeichnung nach Einfügen behalten"><Toggle label="Zeichnung behalten" checked={settings.keepDrawingAfterInsert} onChange={(value) => update('keepDrawingAfterInsert', value)} /></SettingRow>
                   {!isWeb && <div id="settings-enhanced-math">
@@ -1432,7 +1435,7 @@ export function SettingsModal({
                 <div className="settings-resource-note">
                   <TriangleAlert size={14} />
                   <span>
-                    Unfertige Erkennung: Ergebnisse können falsch sein. GlyphenWerk-Training und Text → Handschrift bleiben unabhängig von diesem Schalter nutzbar.
+                    Ergebnisse können falsch sein und bleiben vor dem Einfügen korrigierbar. Die Desktop-Stifterkennung liest Deutsch und Englisch lokal. GlyphenWerk und Text → Handschrift bleiben unabhängig von diesem Schalter nutzbar.
                     {settings.experimentalHandwritingToText ? ' Qwen3-VL nutzt deine GlyphenWerk-Buchstaben als Legende, wenn das NPU-Modell geladen ist.' : ''}
                   </span>
                 </div>

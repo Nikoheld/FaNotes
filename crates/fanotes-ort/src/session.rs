@@ -6,9 +6,10 @@ use ort::{
     value::TensorRef,
 };
 
-use crate::{valid_threads, valid_width, Error, INPUT_NAME, MODEL_HEIGHT, OUTPUT_NAME};
+use crate::{valid_height, valid_threads, valid_width, Error};
 
-/// One line's CTC probabilities, `[1, T, 81]` for PyLaia IAM.
+/// One line's CTC output: PyLaia `probabilities` `[1, T, 81]`, or the ink recognizer's `logits`
+/// `[1, T, 112]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Prediction {
     pub probabilities: Vec<f32>,
@@ -58,24 +59,41 @@ impl PylaiaSession {
         self.threads
     }
 
-    /// Runs one grayscale line, `input` row-major `128 × width`.
-    pub fn run(&mut self, width: usize, input: &[f32]) -> Result<Prediction, Error> {
-        if !valid_width(width) || input.len() != MODEL_HEIGHT * width {
+    /// Runs one grayscale line, `input` row-major `height × width`, feeding the tensor named
+    /// `input_name`. The result is `output_name` when present, otherwise the first output.
+    pub fn run(
+        &mut self,
+        width: usize,
+        height: usize,
+        input_name: &str,
+        output_name: &str,
+        input: &[f32],
+    ) -> Result<Prediction, Error> {
+        if !valid_width(width) || !valid_height(height) || input.len() != height * width {
             return Err(Error::InvalidInput);
         }
-        let fallback = self.session.outputs().first().map(|outlet| outlet.name().to_owned());
-        let tensor = TensorRef::from_array_view(([1usize, 1, MODEL_HEIGHT, width], input))?;
-        let outputs = self.session.run(ort::inputs![INPUT_NAME => tensor])?;
+        let fallback = self
+            .session
+            .outputs()
+            .first()
+            .map(|outlet| outlet.name().to_owned());
+        let tensor = TensorRef::from_array_view(([1usize, 1, height, width], input))?;
+        let outputs = self.session.run(ort::inputs![input_name => tensor])?;
         let value = outputs
-            .get(OUTPUT_NAME)
+            .get(output_name)
             .or_else(|| fallback.and_then(|name| outputs.get(name)))
             .ok_or(Error::UnreadableOutput)?;
-        let (shape, data) = value.try_extract_tensor::<f32>().map_err(|_| Error::UnreadableOutput)?;
+        let (shape, data) = value
+            .try_extract_tensor::<f32>()
+            .map_err(|_| Error::UnreadableOutput)?;
         let dims: Vec<i64> = shape.iter().copied().collect();
         if dims.len() != 3 || data.is_empty() {
             return Err(Error::UnreadableOutput);
         }
-        Ok(Prediction { probabilities: data.to_vec(), dims })
+        Ok(Prediction {
+            probabilities: data.to_vec(),
+            dims,
+        })
     }
 }
 

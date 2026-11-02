@@ -526,6 +526,31 @@ export type FaNotesApi = {
     height: number
     threads: number
   }) => Promise<{ probabilities: Float32Array; dims: number[]; characters: string[]; engine: 'fanotes-ort-cpu' }>
+  /** Desktop only: runs the ink line model in the native sidecar and returns the CTC logits. */
+  recognizeInkLine?: (request: {
+    input: Float32Array
+    width: number
+    height: number
+    threads: number
+    model?: 'base' | 'personal'
+  }) => Promise<{ logits: Float32Array; dims: number[]; engine: 'fanotes-ink' }>
+  /** Desktop only: reads, installs or removes the natively-stored fine-tuned personal model. */
+  inkPersonalModel?: (request: {
+    action: 'state' | 'install' | 'remove'
+    bytes?: Uint8Array
+    report?: Record<string, unknown>
+  }) => Promise<{
+    installed: boolean
+    baseVersion: string | null
+    currentBaseVersion: string | null
+    compatible: boolean
+    size: number | null
+    name: string | null
+    importedAt: string | null
+    sampleCount: number | null
+    errorBefore: number | null
+    errorAfter: number | null
+  }>
   getEnhancedMathRecognitionState?: () => Promise<EnhancedMathRecognitionState>
   installEnhancedMathRecognitionModel?: (request: { acceptLicense: true }) => Promise<EnhancedMathRecognitionState>
   recognizeEnhancedMath?: (request: {
