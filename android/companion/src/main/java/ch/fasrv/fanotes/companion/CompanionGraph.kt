@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes.companion
 
+import android.content.Intent
 import android.content.Context
 import ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH
 import ch.fasrv.fanotes.desk.CalendarDef
@@ -26,12 +27,15 @@ import ch.fasrv.fanotes.schulnetz.HypotheticalGrade
 import ch.fasrv.fanotes.schulnetz.NotifySettings
 import ch.fasrv.fanotes.schulnetz.RefreshLease
 import ch.fasrv.fanotes.schulnetz.SchulnetzChange
+import ch.fasrv.fanotes.schulnetz.SchulnetzGate
 import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
 import ch.fasrv.fanotes.schulnetz.diffSnapshots
 import ch.fasrv.fanotes.schulnetz.localRefreshLease
 import ch.fasrv.fanotes.schulnetz.classifySchulnetzPage
 import ch.fasrv.fanotes.schulnetz.extractWebSession
 import ch.fasrv.fanotes.schulnetz.normalizeSchoolBase
+import ch.fasrv.fanotes.schulnetz.pageUrl
+import ch.fasrv.fanotes.schulnetz.sessionIdsFromPage
 import ch.fasrv.fanotes.schulnetz.redactSchulnetzSecrets
 import ch.fasrv.fanotes.schulnetz.SessionProblem
 import ch.fasrv.fanotes.schulnetz.SchulnetzTokens
@@ -53,14 +57,16 @@ import ch.fasrv.fanotes.vault.NoteKind
 import ch.fasrv.fanotes.vault.NoteStore
 import ch.fasrv.fanotes.vault.VaultIo
 import ch.fasrv.fanotes.vault.VaultNode
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.security.MessageDigest
 import java.util.zip.ZipEntry
@@ -80,7 +86,13 @@ class CompanionGraph(private val context: Context) {
     val client = SchulnetzClient()
     val schulnetzLog = SchulnetzLog(File(context.filesDir, "schulnetz"))
     val browser = SchulnetzBrowser(context, schulnetzLog)
-    private val refreshMutex = Mutex()
+    val gate = SchulnetzGate()
+    val loginRequests = MutableSharedFlow<Intent>(extraBufferCapacity = 1)
+    @Volatile var signedOut: Boolean = false
+    @Volatile var oauthPermitted: Boolean = false
+    private var oauthConsumed = false
+    private var loginResult: CompletableDeferred<Boolean>? = null
+    private var lastRefreshAt = 0L
     private val stateDir = File(context.filesDir, "sync-state").apply { mkdirs() }
 
     val engine: SyncEngine = SyncEngine(
@@ -148,9 +160,19 @@ class CompanionGraph(private val context: Context) {
         }
     }
 
-    suspend fun refreshSchulnetz() {
-        withContext(Dispatchers.IO) { refreshMutex.withLock {
-        val session = engine.currentSession() ?: return@withLock
+    suspend fun refreshSchulnetz(caller: String = "unspecified") {
+        schulnetzLog.info("refresh queued caller=$caller lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()}")
+        withContext(Dispatchers.IO) {
+            gate.exclusive("refresh:$caller") {
+                schulnetzLog.info("refresh running caller=$caller lockHeld=true holder=${gate.holder.orEmpty()}")
+                refreshLocked(caller)
+                lastRefreshAt = System.currentTimeMillis()
+            }
+        }
+    }
+
+    private suspend fun refreshLocked(caller: String) {
+        val session = engine.currentSession() ?: return
         val previous = snapshot.value
         val remote = runCatching { client.status(session) }.getOrElse { error ->
             if (error is SchulnetzHttpException && (error.status == 404 || error.status == 503)) {
@@ -159,7 +181,7 @@ class CompanionGraph(private val context: Context) {
                 link.value.copy(lastError = error.message ?: "Schulnetz nicht erreichbar")
             }
         }
-        link.value = remote
+        link.value = remote.copy(needsReauth = false)
         if (usesWebsiteSession(baseUrl())) {
             val scraped = refreshWebsite(previous)
             if (scraped != null) {
@@ -175,7 +197,7 @@ class CompanionGraph(private val context: Context) {
             if (remote.topic.isNotBlank()) prefs.edit().putString("push-server", remote.pushServer).putString("push-topic", remote.topic).apply()
             if (instantPush() && remote.topic.isNotBlank()) NtfyListenService.start(context)
             NextLessonWidget.update(context)
-            return@withLock
+            return
         }
         if (remote.linked) {
             deleteLocalToken()
@@ -187,11 +209,10 @@ class CompanionGraph(private val context: Context) {
             if (changes != null) applyServerChanges(changes)
             if (instantPush() && remote.topic.isNotBlank()) NtfyListenService.start(context)
             NextLessonWidget.update(context)
-            return@withLock
+            return
         }
         refreshLocally(previous)
         NextLessonWidget.update(context)
-    } }
     }
 
     suspend fun registerPushEndpoint(endpoint: String) {
@@ -366,59 +387,188 @@ class CompanionGraph(private val context: Context) {
     }
 
     private suspend fun refreshWebsite(previous: SchulnetzSnapshot): SchulnetzSnapshot? {
-        schulnetzLog.info("refresh start family=${SchulnetzBrowser.localAddressFamily()} microsoftCookies=${microsoftCookieNames()}")
+        schulnetzLog.info("refresh pages family=${SchulnetzBrowser.localAddressFamily()} signedOut=$signedOut lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()} microsoftCookies=${microsoftCookieNames()}")
         var current = readWebSession() ?: WebSession(baseUrl(), phpSessionCookie(baseUrl()), "", "")
-        var bundle = runCatching { client.fetchWeb(baseUrl(), current, browser::load, schulnetzLog::info) }.onFailure { schulnetzLog.error(it) }.getOrNull()
+        var bundle = runCatching { client.fetchWeb(baseUrl(), current, browser::load, signedOut, schulnetzLog::info) }.onFailure { schulnetzLog.error(it) }.getOrNull()
+        if (bundle != null && bundle.oauthPage != null && bundle.okPages > 0) {
+            val kept = recoverOauth(previous, bundle)
+            signedOut = false
+            link.value = link.value.copy(needsReauth = false, lastError = "")
+            return kept
+        }
         if (bundle?.problem == SessionProblem.INTERACTIVE) {
-            schulnetzLog.info("interactive login required")
+            schulnetzLog.info("interactive login required lockHeld=true holder=${gate.holder.orEmpty()}")
             keepDebug(bundle.debugHtml)
             markLoginRequired()
             return null
         }
         if (bundle == null || bundle.problem != SessionProblem.NONE) {
-            schulnetzLog.info("session problem=${bundle?.problem ?: "load-failed"}")
+            schulnetzLog.info("session problem=${bundle?.problem ?: "load-failed"} lockHeld=true holder=${gate.holder.orEmpty()}")
             keepDebug(bundle?.debugHtml.orEmpty())
-            if (!silentLoginAllowed()) {
-                schulnetzLog.info("silent login suppressed by backoff")
+            val silent = silentLogin("session-problem")
+            if (silent == null) {
                 markLoginRequired()
                 return null
             }
-            if (!hasMicrosoftCookies()) {
-                schulnetzLog.info("silent login skipped, no microsoft cookies")
-                markLoginRequired()
-                return null
+            current = silent
+            bundle = runCatching { client.fetchWeb(baseUrl(), current, browser::load, signedOut = false, schulnetzLog::info) }.onFailure { schulnetzLog.error(it) }.getOrNull()
+            if (bundle != null && bundle.oauthPage != null && bundle.okPages > 0) {
+                signedOut = false
+                link.value = link.value.copy(needsReauth = false, lastError = "")
+                return keepLoaded(previous, bundle.snapshot)
             }
-            prefs.edit().putLong(SILENT_AT, System.currentTimeMillis()).apply()
-            schulnetzLog.info("silent login attempt")
-            val landed = runCatching { browser.load(webLoginUrl(baseUrl())) }.onFailure { schulnetzLog.error(it) }.getOrNull()
-            val html = landed?.body.orEmpty()
-            val url = landed?.finalUrl.orEmpty()
-            val classified = classifySchulnetzPage(url, html)
-            schulnetzLog.info("silent login finished rule=${classified.rule} final=${redactSchulnetzSecrets(url)}")
-            keepDebug(html)
-            if (landed == null || classified.problem == SessionProblem.INTERACTIVE || !isLoggedInLanding(url, html)) {
-                markLoginRequired()
-                return null
-            }
-            val extracted = extractWebSession(url, html, baseUrl())
-            if (extracted == null) {
-                markLoginRequired()
-                return null
-            }
-            current = extracted.copy(phpSessionId = phpSessionCookie(baseUrl()))
-            saveWebSession(current)
-            bundle = runCatching { client.fetchWeb(baseUrl(), current, browser::load, schulnetzLog::info) }.onFailure { schulnetzLog.error(it) }.getOrNull()
             if (bundle == null || bundle.problem != SessionProblem.NONE) {
                 keepDebug(bundle?.debugHtml.orEmpty())
                 markLoginRequired()
                 return null
             }
         }
-        saveWebSession(bundle.session)
+        if (bundle.session.id.isNotBlank()) saveWebSession(bundle.session.copy(phpSessionId = phpSessionCookie(baseUrl())))
         keepDebug(bundle.debugHtml)
+        signedOut = false
         link.value = link.value.copy(needsReauth = false, lastError = "")
-        return bundle.snapshot.copy(readErrors = bundle.snapshot.readErrors.filter { it != "Bei Schulnetz neu anmelden" }, revision = previous.revision + 1)
+        return keepLoaded(previous, bundle.snapshot).copy(readErrors = bundle.snapshot.readErrors.filter { it != "Bei Schulnetz neu anmelden" })
     }
+
+    private suspend fun recoverOauth(previous: SchulnetzSnapshot, bundle: WebBundle): SchulnetzSnapshot {
+        schulnetzLog.info("oauth handshake page=${bundle.oauthPage} okPages=${bundle.okPages} lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()}")
+        keepDebug(bundle.debugHtml)
+        val partial = keepLoaded(previous, bundle.snapshot)
+        delay(2_000)
+        val fresh = silentLogin("oauth-retry") ?: return partial
+        val pageId = bundle.oauthPage ?: return partial
+        if (pageId == "1" || pageId == "scheduler" || pageId == "ical") return partial
+        val html = debugHtml()
+        val retryUrl = ch.fasrv.fanotes.schulnetz.linkedPageUrl(html, pageId, baseUrl(), fresh.id)
+            ?: pageUrl(baseUrl(), pageId, fresh.id, fresh.transid)
+        schulnetzLog.info("oauth retry page=$pageId lockHeld=true holder=${gate.holder.orEmpty()} url=${redactSchulnetzSecrets(retryUrl)}")
+        val page = runCatching { browser.load(retryUrl) }.onFailure { schulnetzLog.error(it) }.getOrNull() ?: return partial
+        val classified = classifySchulnetzPage(page.finalUrl, page.body)
+        schulnetzLog.info("oauth retry result rule=${classified.rule} class=${classified.problem} bytes=${page.body.length} lockHeld=true")
+        if (classified.problem != SessionProblem.NONE) return partial
+        sessionIdsFromPage(page.finalUrl, page.body)?.let { ids ->
+            saveWebSession(fresh.copy(id = ids.id, transid = ids.transid))
+        }
+        return keepLoaded(previous, client.mergePage(partial, pageId, page.body))
+    }
+
+    private suspend fun silentLogin(caller: String): WebSession? {
+        if (!silentLoginAllowed()) {
+            schulnetzLog.info("silent login suppressed caller=$caller lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()} reason=backoff")
+            return null
+        }
+        if (!hasMicrosoftCookies()) {
+            schulnetzLog.info("silent login skipped caller=$caller lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()} reason=no-microsoft-cookies")
+            return null
+        }
+        prefs.edit().putLong(SILENT_AT, System.currentTimeMillis()).apply()
+        schulnetzLog.info("silent login attempt caller=$caller lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()} url=${webLoginUrl(baseUrl())}")
+        val landed = runCatching { browser.load(webLoginUrl(baseUrl())) }.onFailure { schulnetzLog.error(it) }.getOrNull()
+        val html = landed?.body.orEmpty()
+        val url = landed?.finalUrl.orEmpty()
+        val classified = classifySchulnetzPage(url, html)
+        schulnetzLog.info("silent login finished caller=$caller rule=${classified.rule} lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()} final=${redactSchulnetzSecrets(url)}")
+        keepDebug(html)
+        if (landed == null || classified.problem == SessionProblem.INTERACTIVE || classified.problem == SessionProblem.OAUTH_FAILED || !isLoggedInLanding(url, html)) {
+            return null
+        }
+        val ids = sessionIdsFromPage(url, html) ?: extractWebSession(url, html, baseUrl())?.let {
+            ch.fasrv.fanotes.schulnetz.PageSessionIds(it.id, it.transid, "extract")
+        } ?: return null
+        val previousId = readWebSession()?.id.orEmpty()
+        val fresh = WebSession(baseUrl(), phpSessionCookie(baseUrl()), ids.id, ids.transid)
+        saveWebSession(fresh)
+        signedOut = false
+        schulnetzLog.info("discarded previous session previousId=$previousId newId=${ids.id} source=${ids.source} caller=$caller")
+        return fresh
+    }
+
+    suspend fun runVisibleLogin(caller: String) {
+        schulnetzLog.info("visible login queued caller=$caller lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()}")
+        gate.exclusive("visible-login:$caller") {
+            schulnetzLog.info("visible login acquired caller=$caller lockHeld=true holder=${gate.holder.orEmpty()}")
+            var openOauth = signedOut || readWebSession() == null
+            if (!openOauth) {
+                if (System.currentTimeMillis() - lastRefreshAt < 15_000) {
+                    schulnetzLog.info("visible login skipped caller=$caller lockHeld=true reason=session-id-present")
+                } else {
+                    schulnetzLog.info("visible login redirected caller=$caller lockHeld=true reason=session-id-present")
+                    withContext(Dispatchers.IO) { refreshLocked("button:$caller") }
+                    openOauth = signedOut
+                    if (!openOauth) schulnetzLog.info("visible login skipped caller=$caller lockHeld=true reason=session-ok")
+                }
+            }
+            val intent = if (openOauth) loginIntent() else null
+            if (intent != null) {
+                oauthPermitted = true
+                oauthConsumed = false
+                val done = CompletableDeferred<Boolean>()
+                loginResult = done
+                schulnetzLog.info("visible login start caller=$caller lockHeld=true holder=${gate.holder.orEmpty()} url=${webLoginUrl(baseUrl())}")
+                try {
+                    if (!loginRequests.tryEmit(intent)) {
+                        schulnetzLog.info("visible login not shown caller=$caller reason=no-subscriber")
+                    } else if (withTimeoutOrNull(300_000) { done.await() } == true) {
+                        withContext(Dispatchers.IO) {
+                            val fanotes = engine.currentSession()
+                            if (fanotes != null) {
+                                runCatching { client.linkWeb(fanotes, baseUrl(), deviceId(), ch.fasrv.fanotes.schulnetz.SCHULNETZ_USER_AGENT, exportSsoCookies(), "Companion") }
+                                    .onSuccess { link.value = it }
+                                    .onFailure { schulnetzLog.error(it) }
+                            }
+                            refreshLocked("after-visible-login")
+                        }
+                    } else {
+                        schulnetzLog.info("visible login cancelled caller=$caller lockHeld=true")
+                    }
+                } finally {
+                    oauthPermitted = false
+                    loginResult = null
+                }
+            }
+        }
+    }
+
+    fun consumeOauthPermit(): Boolean {
+        if (!oauthPermitted || oauthConsumed) return false
+        oauthConsumed = true
+        return true
+    }
+
+    fun finishVisibleLogin(session: WebSession?) {
+        if (session == null) {
+            schulnetzLog.info("visible login finished caller=activity lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()} result=cancelled")
+            loginResult?.complete(false)
+            return
+        }
+        val previousId = readWebSession()?.id.orEmpty()
+        saveWebSession(session)
+        signedOut = false
+        schulnetzLog.info("visible login finished caller=activity lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()} previousId=$previousId newId=${session.id}")
+        loginResult?.complete(true)
+    }
+
+    private fun loginIntent(): Intent? {
+        val base = baseUrl()
+        val host = runCatching { java.net.URI(base).host }.getOrNull() ?: return null
+        return Intent(context, SchulnetzLoginActivity::class.java)
+            .putExtra(SchulnetzLoginActivity.EXTRA_URL, webLoginUrl(base))
+            .putExtra(SchulnetzLoginActivity.EXTRA_HOST, host)
+            .putExtra(SchulnetzLoginActivity.EXTRA_BASE, base)
+    }
+
+    private fun keepLoaded(previous: SchulnetzSnapshot, next: SchulnetzSnapshot): SchulnetzSnapshot = next.copy(
+        grades = next.grades.ifEmpty { previous.grades },
+        absences = next.absences.ifEmpty { previous.absences },
+        events = next.events.ifEmpty { previous.events },
+        exams = next.exams.ifEmpty { previous.exams },
+        homework = next.homework.ifEmpty { previous.homework },
+        messages = next.messages.ifEmpty { previous.messages },
+        vacations = next.vacations.ifEmpty { previous.vacations },
+        konto = next.konto.ifEmpty { previous.konto },
+        startMessages = next.startMessages.ifEmpty { previous.startMessages },
+        revision = previous.revision + 1,
+    )
 
     private fun silentLoginAllowed(): Boolean {
         val last = prefs.getLong(SILENT_AT, 0L)
@@ -433,7 +583,8 @@ class CompanionGraph(private val context: Context) {
     private fun markLoginRequired() {
         val already = link.value.needsReauth
         link.value = link.value.copy(needsReauth = true, lastError = "Bei Schulnetz neu anmelden")
-        schulnetzLog.info("login required shown")
+        signedOut = true
+        schulnetzLog.info("login required shown lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()}")
         if (!already) {
             CompanionAlerts.show(
                 context,

@@ -17,13 +17,12 @@ import ch.fasrv.fanotes.schulnetz.WebSession
 import ch.fasrv.fanotes.schulnetz.authorizationCodeForm
 import ch.fasrv.fanotes.schulnetz.findIcalUrl
 import ch.fasrv.fanotes.schulnetz.classifySchulnetzPage
-import ch.fasrv.fanotes.schulnetz.extractWebSession
-import ch.fasrv.fanotes.schulnetz.freshTransid
 import ch.fasrv.fanotes.schulnetz.isForcedLogoutUrl
 import ch.fasrv.fanotes.schulnetz.linkedPageUrl
 import ch.fasrv.fanotes.schulnetz.pageUrl
 import ch.fasrv.fanotes.schulnetz.redactSchulnetzSecrets
-import ch.fasrv.fanotes.schulnetz.webLoginUrl
+import ch.fasrv.fanotes.schulnetz.sessionIdsFromPage
+import ch.fasrv.fanotes.schulnetz.startPageUrl
 import ch.fasrv.fanotes.schulnetz.parseIcs
 import ch.fasrv.fanotes.schulnetz.parseKontoauszug
 import ch.fasrv.fanotes.schulnetz.parseSchedulerXml
@@ -50,7 +49,14 @@ import java.util.concurrent.TimeUnit
 
 class SchulnetzHttpException(val status: Int, message: String) : Exception(message)
 
-data class WebBundle(val snapshot: SchulnetzSnapshot, val problem: SessionProblem, val debugHtml: String, val session: WebSession)
+data class WebBundle(
+    val snapshot: SchulnetzSnapshot,
+    val problem: SessionProblem,
+    val debugHtml: String,
+    val session: WebSession,
+    val okPages: Int = 0,
+    val oauthPage: String? = null,
+)
 
 data class SchulnetzLinkState(
     val linked: Boolean = false,
@@ -131,18 +137,26 @@ class SchulnetzClient(
         if (code !in 200..299 && code != 404) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
 
-    fun fetchWeb(baseUrl: String, session: WebSession, loader: (String) -> LoadedPage, trace: (String) -> Unit = {}): WebBundle {
+    fun fetchWeb(baseUrl: String, session: WebSession, loader: (String) -> LoadedPage, signedOut: Boolean = false, trace: (String) -> Unit = {}): WebBundle {
         val root = baseUrl.trimEnd('/')
         var id = session.id
         var transid = session.transid
         val errors = mutableListOf<String>()
         var debug = ""
         var sawSessionProblem = false
+        var oauthPage: String? = null
+        var okPages = 0
         fun remember(name: String, page: LoadedPage) {
             if (page.body.isNotBlank()) debug = page.body
             trace("page $name")
         }
-        fun get(url: String, label: String): String {
+        fun adopt(page: LoadedPage) {
+            val found = sessionIdsFromPage(page.finalUrl, page.body) ?: return
+            trace("session ids source=${found.source} id=${found.id} transid=${found.transid}")
+            id = found.id
+            transid = found.transid
+        }
+        fun get(url: String, label: String, pageId: String): String {
             if (isForcedLogoutUrl(url) || !webReadAllowed(url)) {
                 trace("blocked $label url=${redactSchulnetzSecrets(url)}")
                 errors += "Blockiert: ${redactSchulnetzSecrets(url)}"
@@ -159,23 +173,22 @@ class SchulnetzClient(
             val classified = classifySchulnetzPage(page.finalUrl.ifBlank { url }, page.body)
             trace("result $label status=${page.status} rule=${classified.rule} class=${classified.problem} bytes=${page.body.length} final=${redactSchulnetzSecrets(page.finalUrl)}")
             remember(label, page)
+            if (classified.problem == SessionProblem.OAUTH_FAILED) {
+                oauthPage = pageId
+                errors += sessionProblemText(classified.problem)
+                return ""
+            }
             if (classified.problem != SessionProblem.NONE) {
                 sawSessionProblem = true
                 errors += sessionProblemText(classified.problem)
                 return ""
             }
-            extractWebSession(page.finalUrl, page.body, root)?.let { found ->
-                if (found.id.isNotBlank()) id = found.id
-                if (found.transid.isNotBlank()) transid = found.transid
-            }
-            transid = freshTransid(page.body, transid)
+            okPages += 1
+            adopt(page)
             return page.body
         }
         val pages = linkedMapOf<String, String>()
-        val startUrl = if (id.isBlank() || transid.isBlank()) webLoginUrl(root) else {
-            pageUrl(root, "1", id, transid)
-        }
-        pages["1"] = get(startUrl, "start")
+        pages["1"] = get(startPageUrl(root, id, transid, signedOut), "start", "1")
         val order = listOf(
             "21311" to "noten",
             "21111" to "absenzen",
@@ -186,12 +199,12 @@ class SchulnetzClient(
             "21312" to "pruefungen",
         )
         for ((pageId, label) in order) {
-            if (sawSessionProblem) break
+            if (sawSessionProblem || oauthPage != null) break
             val parents = when (pageId) {
                 "22202", "22108", "21312" -> listOf("21200", "1")
                 else -> listOf("1")
             }
-            val fromLink = parents.firstNotNullOfOrNull { linkedPageUrl(pages[it].orEmpty(), pageId, root) }
+            val fromLink = parents.firstNotNullOfOrNull { linkedPageUrl(pages[it].orEmpty(), pageId, root, id) }
             val url = fromLink ?: if (id.isBlank() || transid.isBlank()) "" else pageUrl(root, pageId, id, transid)
             if (url.isBlank()) {
                 trace("stop $label, no session id to build a url")
@@ -199,7 +212,7 @@ class SchulnetzClient(
                 errors += sessionProblemText(SessionProblem.LOGIN_WALL)
                 break
             }
-            pages[pageId] = get(url, label)
+            pages[pageId] = get(url, label, pageId)
         }
         val grades = readGradesPage(pages["21311"].orEmpty())
         val absences = readAbsencesPage(pages["21111"].orEmpty())
@@ -208,13 +221,13 @@ class SchulnetzClient(
         grades.error?.let { errors += it }
         absences.error?.let { errors += it }
         val today = java.time.LocalDate.now()
-        val scheduler = if (sawSessionProblem || pages["22202"].isNullOrBlank()) "" else {
-            get(schedulerUrl(root, id, transid, today.toString(), today.minusDays(7).toString(), today.plusDays(21).toString()), "scheduler")
+        val scheduler = if (oauthPage != null || sawSessionProblem || pages["22202"].isNullOrBlank()) "" else {
+            get(schedulerUrl(root, id, transid, today.toString(), today.minusDays(7).toString(), today.plusDays(21).toString()), "scheduler", "scheduler")
         }
         val icalUrl = findIcalUrl(pages["22202"].orEmpty(), root)
-        val ical = if (sawSessionProblem || icalUrl.isNullOrBlank() || !webReadAllowed(icalUrl)) emptyList() else parseIcs(get(icalUrl, "ical"))
+        val ical = if (oauthPage != null || sawSessionProblem || icalUrl.isNullOrBlank() || !webReadAllowed(icalUrl)) emptyList() else parseIcs(get(icalUrl, "ical", "ical"))
         val events = parseSchedulerXml(scheduler).ifEmpty { ical }
-        trace("parsed grades=${grades.value.size} absences=${absences.value.size} exams=${exams.value.size} events=${events.size} termine=${termine.value.size} errors=${errors.size}")
+        trace("parsed grades=${grades.value.size} absences=${absences.value.size} exams=${exams.value.size} events=${events.size} termine=${termine.value.size} okPages=$okPages oauth=${oauthPage.orEmpty()} errors=${errors.size}")
         val snapshot = SchulnetzSnapshot(
             fetchedAt = java.time.Instant.now().toString(),
             grades = grades.value,
@@ -227,6 +240,7 @@ class SchulnetzClient(
             readErrors = errors,
         )
         val problem = when {
+            oauthPage != null -> SessionProblem.OAUTH_FAILED
             errors.any { it == "Bei Schulnetz neu anmelden" } -> SessionProblem.INTERACTIVE
             errors.any { it.contains("IP-Adresse") } -> SessionProblem.IP_REJECTED
             errors.any { it.contains("abgelaufen") } -> SessionProblem.INACTIVITY
@@ -234,7 +248,17 @@ class SchulnetzClient(
             else -> SessionProblem.NONE
         }
         val reported = if (problem == SessionProblem.INTERACTIVE) snapshot.copy(readErrors = listOf("Bei Schulnetz neu anmelden")) else snapshot
-        return WebBundle(reported, problem, debug, WebSession(root, session.phpSessionId, id, transid))
+        return WebBundle(reported, problem, debug, WebSession(root, "", id, transid), okPages, oauthPage)
+    }
+
+    fun mergePage(snapshot: SchulnetzSnapshot, pageId: String, html: String): SchulnetzSnapshot = when (pageId) {
+        "21311" -> snapshot.copy(grades = readGradesPage(html).value.ifEmpty { snapshot.grades })
+        "21111" -> snapshot.copy(absences = readAbsencesPage(html).value.ifEmpty { snapshot.absences })
+        "21312" -> snapshot.copy(exams = readExamsPage(html).value.ifEmpty { snapshot.exams })
+        "22108" -> snapshot.copy(events = (snapshot.events + readTerminliste(html).value).distinctBy { it.id })
+        "21411" -> snapshot.copy(konto = parseKontoauszug(html).ifEmpty { snapshot.konto })
+        "1" -> snapshot.copy(startMessages = parseStartMessages(html).ifEmpty { snapshot.startMessages })
+        else -> snapshot
     }
 
     fun link(session: SyncSession, baseUrl: String, deviceId: String, tokens: SchulnetzTokens, displayName: String): SchulnetzLinkState {

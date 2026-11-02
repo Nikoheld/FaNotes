@@ -2,7 +2,7 @@ package ch.fasrv.fanotes.schulnetz
 
 import java.net.URI
 
-enum class SessionProblem { NONE, INACTIVITY, IP_REJECTED, LOGIN_WALL, INTERACTIVE }
+enum class SessionProblem { NONE, INACTIVITY, IP_REJECTED, LOGIN_WALL, INTERACTIVE, OAUTH_FAILED }
 
 data class PageClassification(val problem: SessionProblem, val rule: String)
 
@@ -13,6 +13,7 @@ data class WebSession(
     val transid: String,
 )
 
+private val HEX_VALUE = Regex("""(?i)[a-f0-9]{4,}""")
 private val HEX_ID = Regex("""(?i)(?:^|[?&])id=([a-f0-9]{4,})""")
 private val HEX_TRANS = Regex("""(?i)(?:^|[?&])transid=([a-f0-9]{4,})""")
 private val PAGE_ID_QUERY = Regex("""(?i)(?:^|&)pageid=(\d+)""")
@@ -43,6 +44,12 @@ fun classifySchulnetzPage(finalUrl: String, html: String): PageClassification {
     if (INACTIVITY_TEXT.any { lowerHtml.contains(it) }) return PageClassification(SessionProblem.INACTIVITY, "inactivity-message")
     val uri = runCatching { URI(finalUrl) }.getOrNull()
     val path = uri?.path?.lowercase().orEmpty()
+    if (path.contains("loginto.php") && queryValue(uri?.rawQuery, "mode") == "17") {
+        return PageClassification(SessionProblem.OAUTH_FAILED, "url-mode-17")
+    }
+    if (path.contains("loginto.php") && lowerHtml.contains("login nicht erfolgreich")) {
+        return PageClassification(SessionProblem.OAUTH_FAILED, "login-nicht-erfolgreich")
+    }
     if (path.contains("loginto.php") && queryValue(uri?.rawQuery, "mode") == "5") {
         return PageClassification(SessionProblem.INACTIVITY, "url-mode-5")
     }
@@ -68,6 +75,46 @@ fun sessionProblemText(problem: SessionProblem): String = when (problem) {
     SessionProblem.INACTIVITY -> "Schulnetz-Sitzung abgelaufen. Anmeldung wird erneuert."
     SessionProblem.LOGIN_WALL -> "Schulnetz braucht eine Anmeldung."
     SessionProblem.INTERACTIVE -> "Bei Schulnetz neu anmelden"
+    SessionProblem.OAUTH_FAILED -> "OAuth-Handshake fehlgeschlagen."
+}
+
+/** A new Microsoft flow (page 1 without id) is allowed only after a confirmed sign-out, or when no session id exists. */
+fun bareOauthAllowed(hasSessionId: Boolean, signedOut: Boolean): Boolean = !hasSessionId || signedOut
+
+fun startPageUrl(baseUrl: String, id: String, transid: String, signedOut: Boolean): String {
+    if (bareOauthAllowed(id.isNotBlank() && transid.isNotBlank(), signedOut)) return webLoginUrl(baseUrl)
+    return pageUrl(baseUrl, "1", id, transid)
+}
+
+data class PageSessionIds(val id: String, val transid: String, val source: String)
+
+data class NavTarget(val pageId: String, val id: String, val transid: String, val href: String)
+
+/** id and transid from the page that just loaded. The final URL wins; otherwise the id used by the most links. */
+fun sessionIdsFromPage(finalUrl: String, html: String): PageSessionIds? {
+    val uri = runCatching { URI(finalUrl) }.getOrNull()
+    val urlId = queryValue(uri?.rawQuery, "id")?.takeIf { HEX_VALUE.matches(it) }
+    val urlTrans = queryValue(uri?.rawQuery, "transid")?.takeIf { HEX_VALUE.matches(it) }
+    if (urlId != null && urlTrans != null) return PageSessionIds(urlId, urlTrans, "final-url")
+    val links = navigationTargets(html)
+    if (links.isEmpty()) return null
+    val best = links.groupBy { it.id.lowercase() }.maxWithOrNull(
+        compareBy<Map.Entry<String, List<NavTarget>>> { entry -> entry.value.map { it.pageId }.distinct().size }.thenBy { it.value.size },
+    ) ?: return null
+    val sample = best.value.last()
+    return PageSessionIds(sample.id, sample.transid, "page-links:${best.value.size}")
+}
+
+fun navigationTargets(html: String): List<NavTarget> {
+    val text = html.replace("&amp;", "&").replace("&#38;", "&")
+    return Regex("""(?i)href\s*=\s*["']([^"']+)["']""").findAll(text).mapNotNull { match ->
+        val href = match.groupValues[1]
+        if (isForcedLogoutUrl(href)) return@mapNotNull null
+        val pageId = Regex("""(?i)(?:^|[?&])pageid=(\d+)""").find(href)?.groupValues?.get(1) ?: return@mapNotNull null
+        val id = Regex("""(?i)(?:^|[?&])id=([a-f0-9]{4,})""").find(href)?.groupValues?.get(1) ?: return@mapNotNull null
+        val transid = Regex("""(?i)(?:^|[?&])transid=([a-f0-9]{4,})""").find(href)?.groupValues?.get(1) ?: return@mapNotNull null
+        NavTarget(pageId, id, transid, href)
+    }.toList()
 }
 
 /** Logged-in Start: school landing or page 1, with a session id, and not a login wall. */
@@ -114,11 +161,10 @@ fun stripPhpSession(cookieHeader: String): String =
     cookieHeader.split(';').map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("PHPSESSID=", ignoreCase = true) }.joinToString("; ")
 
 /** Href for [pageId] taken from a page that is already open. Logout links are ignored. */
-fun linkedPageUrl(html: String, pageId: String, baseUrl: String): String? {
+fun linkedPageUrl(html: String, pageId: String, baseUrl: String, sessionId: String = ""): String? {
     if (!pageId.matches(Regex("""\d+"""))) return null
-    val text = html.replace("&amp;", "&").replace("&#38;", "&")
-    val href = Regex("""(?i)href\s*=\s*["']([^"']*?pageid=$pageId(?:&[^"']*)?)["']""").find(text)?.groupValues?.get(1) ?: return null
-    if (isForcedLogoutUrl(href)) return null
+    val links = navigationTargets(html).filter { it.pageId == pageId && (sessionId.isBlank() || it.id.equals(sessionId, true)) }
+    val href = links.lastOrNull()?.href ?: return null
     val absolute = absoluteSchoolUrl(baseUrl, href)
     return absolute.takeIf { webReadAllowed(it) }
 }

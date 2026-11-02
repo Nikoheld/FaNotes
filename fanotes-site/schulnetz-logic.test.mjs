@@ -200,6 +200,9 @@ test('a logged-in schulNetz page with menu logout links stays ok', () => {
   assert.equal(sessionProblem(url, html), '')
   assert.equal(microsoftLoginRequired(url, html), false)
   assert.equal(sessionProblem('https://www.schulnetz-ag.ch/aksa/', '<html><body>Bitte warten</body></html>'), 'login')
+  const withHandshakeLink = html.replace('Abmelden', 'Abmelden mode=17 Login nicht erfolgreich')
+  assert.equal(sessionProblem(url, withHandshakeLink), '')
+  assert.equal(sessionProblem('https://www.schulnetz-ag.ch/aksa/loginto.php?mode=17&lang=', 'Login nicht erfolgreich.'), 'oauth')
 })
 
 test('a Microsoft sign-in page is login required, not a scraped grade page', () => {
