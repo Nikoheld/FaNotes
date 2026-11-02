@@ -26,11 +26,9 @@ class SchulnetzLog(directory: File) {
     fun rememberPage(name: String, finalUrl: String, html: String) {
         if (html.isBlank()) return
         val safeName = name.lowercase().replace(Regex("[^a-z0-9_-]"), "").ifBlank { "page" }.take(24)
-        val body = "<!-- ${redactSchulnetzSecrets(finalUrl)} -->\n" + redactSchulnetzSecrets(html).take(200_000)
+        val body = "<!-- ${redactSchulnetzSecrets(finalUrl)} -->\n" + redactSchulnetzSecrets(html).take(2_000_000)
         synchronized(lock) {
             File(captures, "$safeName.html").writeText(body)
-            val files = captures.listFiles()?.sortedBy { it.lastModified() }.orEmpty()
-            if (files.size > 4) files.dropLast(4).forEach { it.delete() }
         }
     }
 

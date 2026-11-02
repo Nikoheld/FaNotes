@@ -1,5 +1,7 @@
 package ch.fasrv.fanotes.schulnetz
 
+import ch.fasrv.fanotes.json.JsonValue
+import ch.fasrv.fanotes.json.parseJson
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.w3c.dom.Element as XmlElement
@@ -19,10 +21,10 @@ fun readGradesPage(html: String): PageRead<List<SchoolGrade>> {
     val problem = sessionProblem("", html)
     if (problem == SessionProblem.INTERACTIVE) return PageRead(emptyList(), sessionProblemText(problem))
     if (problem != SessionProblem.NONE) return PageRead(emptyList(), "Noten: ${sessionProblemText(problem)}", html)
-    val grades = parseGradesPage(html)
-    val recognized = grades.isNotEmpty() || html.contains("Notendurchschnitt") || html.contains("Einzelprüfungen")
-    if (!recognized) return PageRead(emptyList(), "Noten: Seite konnte nicht gelesen werden", html)
-    return PageRead(grades, null)
+    val grades = parseGradesPage(html).ifEmpty { parseGradesByHeader(html) }
+    if (grades.isNotEmpty()) return PageRead(grades, null)
+    if (html.isNotBlank()) return PageRead(emptyList(), "Noten: Seite geladen, aber nicht lesbar", html)
+    return PageRead(emptyList(), null)
 }
 
 fun parseGradesPage(html: String): List<SchoolGrade> {
@@ -88,10 +90,10 @@ fun readAbsencesPage(html: String): PageRead<List<SchoolAbsence>> {
     val problem = sessionProblem("", html)
     if (problem == SessionProblem.INTERACTIVE) return PageRead(emptyList(), sessionProblemText(problem))
     if (problem != SessionProblem.NONE) return PageRead(emptyList(), "Absenzen: ${sessionProblemText(problem)}", html)
-    val rows = parseAbsencesPage(html)
-    val recognized = rows.isNotEmpty() || html.contains("Datum von")
-    if (!recognized) return PageRead(emptyList(), "Absenzen: Seite konnte nicht gelesen werden", html)
-    return PageRead(rows, null)
+    val rows = parseAbsencesPage(html).ifEmpty { parseAbsencesByHeader(html) }
+    if (rows.isNotEmpty() || html.contains("Datum von")) return PageRead(rows, null)
+    if (html.isNotBlank()) return PageRead(emptyList(), "Absenzen: Seite geladen, aber nicht lesbar", html)
+    return PageRead(emptyList(), null)
 }
 
 fun parseAbsencesPage(html: String): List<SchoolAbsence> {
@@ -139,9 +141,9 @@ fun readTerminliste(html: String): PageRead<List<AgendaEvent>> {
     if (problem == SessionProblem.INTERACTIVE) return PageRead(emptyList(), sessionProblemText(problem))
     if (problem != SessionProblem.NONE) return PageRead(emptyList(), "Termine: ${sessionProblemText(problem)}", html)
     val events = parseTerminliste(html)
-    val recognized = events.isNotEmpty() || html.contains("tblTerminliste") || html.contains("Termin")
-    if (!recognized) return PageRead(emptyList(), "Termine: Seite konnte nicht gelesen werden", html)
-    return PageRead(events, null)
+    if (events.isNotEmpty() || html.contains("tblTerminliste")) return PageRead(events, null)
+    if (html.isNotBlank()) return PageRead(emptyList(), "Termine: Seite geladen, aber nicht lesbar", html)
+    return PageRead(emptyList(), null)
 }
 
 fun parseTerminliste(html: String): List<AgendaEvent> {
@@ -186,10 +188,196 @@ fun readExamsPage(html: String): PageRead<List<AgendaEvent>> {
     val problem = sessionProblem("", html)
     if (problem == SessionProblem.INTERACTIVE) return PageRead(emptyList(), sessionProblemText(problem))
     if (problem != SessionProblem.NONE) return PageRead(emptyList(), "Prüfungen: ${sessionProblemText(problem)}", html)
-    val exams = parseTerminliste(html).map { it.copy(eventType = "exam") }
-    val recognized = exams.isNotEmpty() || html.contains("Prüfungsplan") || html.contains("Pruefungsplan")
-    if (!recognized) return PageRead(emptyList(), "Prüfungen: Seite konnte nicht gelesen werden", html)
-    return PageRead(exams, null)
+    val exams = parseExamsByHeader(html).ifEmpty { parseTerminliste(html) }.map { it.copy(eventType = "exam") }
+    if (exams.isNotEmpty()) return PageRead(exams, null)
+    if (html.isNotBlank()) return PageRead(emptyList(), "Prüfungen: Seite geladen, aber nicht lesbar", html)
+    return PageRead(emptyList(), null)
+}
+
+/** Header texts and row counts for the Schulnetz log when a parser finds nothing. */
+fun describeTables(html: String): String {
+    if (html.isBlank()) return "tables=0"
+    val doc = Jsoup.parse(html)
+    val tables = doc.select("table")
+    val sketches = tables.take(6).map { table ->
+        val rows = table.select("tr").filter { it.closestTable() == table }
+        val header = rows.firstOrNull()?.let { ownTexts(it, table).joinToString("/") { cell -> cell.take(24) } }.orEmpty()
+        "rows=${rows.size}[${header.take(140)}]"
+    }
+    return "tables=${tables.size} " + sketches.joinToString(" | ")
+}
+
+fun parseGradesByHeader(html: String): List<SchoolGrade> = rowsByHeader(html) { header, cells ->
+    val markAt = headerIndex(header, "note", "punkte")
+    val dateAt = headerIndex(header, "datum")
+    val courseAt = headerIndex(header, "fach", "kurs", "fachname")
+    if (markAt < 0 || (dateAt < 0 && courseAt < 0)) return@rowsByHeader null
+    val mark = number(cellAt(cells, markAt)) ?: return@rowsByHeader null
+    val course = cellAt(cells, courseAt).ifBlank { "Kurs" }
+    val date = cellAt(cells, dateAt)
+    val title = cellAt(cells, headerIndex(header, "thema", "pruefung", "titel", "bezeichnung")).ifBlank { "Note" }
+    val weight = number(cellAt(cells, headerIndex(header, "gewicht"))) ?: 1.0
+    SchoolGrade(
+        id = stableId("grade", course, date, title, numKey(mark)),
+        course = course,
+        courseId = course,
+        subject = course,
+        title = title,
+        date = if (DATE.containsMatchIn(date)) isoDate(date) else "",
+        mark = mark,
+        weight = weight,
+        confirmed = true,
+        courseGrade = null,
+        comment = "",
+    )
+}
+
+fun parseAbsencesByHeader(html: String): List<SchoolAbsence> {
+    val found = mutableListOf<SchoolAbsence>()
+    eachHeaderTable(html) { header, rows ->
+        val dateAt = headerIndex(header, "datum")
+        val reasonAt = headerIndex(header, "grund", "bemerkung")
+        val statusAt = headerIndex(header, "status", "entschuldigt")
+        val subjectAt = headerIndex(header, "lektion", "fach", "kurs")
+        val timeAt = headerIndex(header, "zeit", "stunde")
+        if (dateAt < 0 || (reasonAt < 0 && statusAt < 0 && subjectAt < 0)) return@eachHeaderTable
+        for (cells in rows) {
+            val date = cellAt(cells, dateAt)
+            if (!DATE.containsMatchIn(date)) continue
+            val status = cellAt(cells, statusAt)
+            found += SchoolAbsence(
+                id = stableId("abs", date, cellAt(cells, reasonAt), cellAt(cells, subjectAt)),
+                dateFrom = date,
+                dateTo = date,
+                hourFrom = cellAt(cells, timeAt),
+                hourTo = "",
+                subject = cellAt(cells, subjectAt),
+                reason = cellAt(cells, reasonAt),
+                excused = status.lowercase().startsWith("ja") || status.lowercase().contains("entschuldigt"),
+                acknowledged = false,
+                status = status,
+            )
+        }
+    }
+    return found
+}
+
+fun parseExamsByHeader(html: String): List<AgendaEvent> {
+    val found = mutableListOf<AgendaEvent>()
+    eachHeaderTable(html) { header, rows ->
+        val dateAt = headerIndex(header, "datum")
+        val courseAt = headerIndex(header, "kurs", "fach", "fachname")
+        val topicAt = headerIndex(header, "thema", "pruefung", "titel", "bezeichnung")
+        if (dateAt < 0 || (courseAt < 0 && topicAt < 0)) return@eachHeaderTable
+        if (headerIndex(header, "note", "punkte") >= 0 && courseAt < 0) return@eachHeaderTable
+        for (cells in rows) {
+            val date = cellAt(cells, dateAt)
+            if (!DATE.containsMatchIn(date)) continue
+            val title = cellAt(cells, topicAt).ifBlank { cellAt(cells, courseAt).ifBlank { "Prüfung" } }
+            val course = cellAt(cells, courseAt).ifBlank { title }
+            found += AgendaEvent(
+                id = stableId("exam", date, course, title),
+                start = isoDate(date),
+                end = isoDate(date),
+                text = title,
+                comment = "",
+                room = "",
+                teachers = emptyList(),
+                courseId = course,
+                courseName = course,
+                status = "",
+                eventType = "exam",
+                color = "",
+                timetableText = title,
+            )
+        }
+    }
+    return found
+}
+
+/** Events the Schülerplan page already drew, or a Zeit/Fach/Raum table. */
+fun parseTimetableHtml(html: String): List<AgendaEvent> {
+    if (html.isBlank()) return emptyList()
+    val doc = Jsoup.parse(html)
+    val drawn = doc.select(".dhx_cal_event").mapNotNull { event ->
+        val title = clean(event.selectFirst(".dhx_title")?.text().orEmpty())
+        val body = clean(event.selectFirst(".dhx_body")?.text().orEmpty())
+        val label = body.ifBlank { title }
+        if (label.isBlank()) return@mapNotNull null
+        AgendaEvent(
+            id = event.attr("event_id").ifBlank { stableId("dhx", title, label) },
+            start = title,
+            end = title,
+            text = label,
+            comment = "",
+            room = "",
+            teachers = emptyList(),
+            courseId = "",
+            courseName = label,
+            status = "",
+            eventType = "lesson",
+            color = "",
+            timetableText = label,
+        )
+    }
+    if (drawn.isNotEmpty()) return drawn
+    val found = mutableListOf<AgendaEvent>()
+    eachHeaderTable(html) { header, rows ->
+        val timeAt = headerIndex(header, "zeit", "von", "stunde")
+        val courseAt = headerIndex(header, "fach", "kurs", "lektion")
+        val roomAt = headerIndex(header, "raum", "zimmer")
+        if (timeAt < 0 || courseAt < 0) return@eachHeaderTable
+        for (cells in rows) {
+            val course = cellAt(cells, courseAt)
+            if (course.isBlank()) continue
+            val time = cellAt(cells, timeAt)
+            found += AgendaEvent(
+                id = stableId("plan", time, course, cellAt(cells, roomAt)),
+                start = time,
+                end = time,
+                text = course,
+                comment = "",
+                room = cellAt(cells, roomAt),
+                teachers = emptyList(),
+                courseId = course,
+                courseName = course,
+                status = "",
+                eventType = "lesson",
+                color = "",
+                timetableText = course,
+            )
+        }
+    }
+    return found
+}
+
+/** `{url, events}` note captured from the live Schülerplan scheduler. */
+fun parseSchedulerNote(note: String): Pair<String, List<AgendaEvent>> {
+    if (note.isBlank()) return "" to emptyList()
+    val obj = runCatching { parseJson(note) as? JsonValue.Obj }.getOrNull() ?: return "" to emptyList()
+    val url = obj.string("url").orEmpty()
+    val events = obj.array("events")?.items.orEmpty().mapNotNull { item ->
+        val event = item as? JsonValue.Obj ?: return@mapNotNull null
+        val text = event.string("text").orEmpty()
+        val start = event.string("start").orEmpty()
+        if (text.isBlank() && start.isBlank()) return@mapNotNull null
+        AgendaEvent(
+            id = event.string("id").orEmpty().ifBlank { stableId("sched", start, text) },
+            start = schedulerTime(start),
+            end = schedulerTime(event.string("end").orEmpty().ifBlank { start }),
+            text = text,
+            comment = "",
+            room = event.string("room").orEmpty(),
+            teachers = listOf(event.string("teacher").orEmpty()).filter { it.isNotBlank() },
+            courseId = "",
+            courseName = text,
+            status = "",
+            eventType = "lesson",
+            color = "",
+            timetableText = text,
+        )
+    }
+    return url to events
 }
 
 fun parseSchedulerXml(xml: String): List<AgendaEvent> {
@@ -270,6 +458,52 @@ fun findIcalUrl(html: String, baseUrl: String): String? {
     if (raw.startsWith("//")) return "https:$raw"
     return baseUrl.trimEnd('/') + "/" + raw.trimStart('/')
 }
+
+private fun cellAt(cells: List<String>, index: Int): String =
+    if (index < 0 || index >= cells.size) "" else cells[index]
+
+private fun <T> rowsByHeader(html: String, read: (List<String>, List<String>) -> T?): List<T> {
+    val found = mutableListOf<T>()
+    eachHeaderTable(html) { header, rows ->
+        for (cells in rows) {
+            val item = read(header, cells) ?: continue
+            found += item
+        }
+    }
+    return found
+}
+
+private fun eachHeaderTable(html: String, block: (List<String>, List<List<String>>) -> Unit) {
+    if (html.isBlank()) return
+    val doc = Jsoup.parse(html)
+    for (table in doc.select("table")) {
+        val rows = table.select("tr").filter { it.closestTable() == table }
+        if (rows.size < 2) continue
+        val header = ownTexts(rows[0], table).map { foldLabel(it) }
+        if (header.all { it.isBlank() }) continue
+        val body = rows.drop(1).map { ownTexts(it, table) }.filter { cells -> cells.any { it.isNotBlank() } }
+        block(header, body)
+    }
+}
+
+private fun headerIndex(header: List<String>, vararg keys: String): Int =
+    header.indexOfFirst { cell ->
+        cell.split(' ').any { word ->
+            keys.any { key ->
+                if (key == "note" && (word.startsWith("notendurch") || word.startsWith("notenschnitt"))) false
+                else word == key || word.startsWith(key)
+            }
+        }
+    }
+
+private fun foldLabel(raw: String): String =
+    raw.lowercase()
+        .replace("ä", "ae")
+        .replace("ö", "oe")
+        .replace("ü", "ue")
+        .replace("ß", "ss")
+        .replace(Regex("[^a-z0-9]+"), " ")
+        .trim()
 
 private fun examsFrom(detail: Element, course: String, courseId: String, average: Double?): List<SchoolGrade> {
     val exams = mutableListOf<SchoolGrade>()

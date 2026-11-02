@@ -27,7 +27,9 @@ class SchulnetzLoginActivity : Activity() {
             return
         }
         val graph = (application as CompanionApplication).graph
-        if (!graph.consumeOauthPermit()) {
+        val viewOnly = intent.getBooleanExtra(EXTRA_VIEW, false)
+        val explicit = intent.getStringExtra(EXTRA_URL).orEmpty()
+        if (!viewOnly && !graph.consumeOauthPermit()) {
             graph.schulnetzLog.info("visible login activity refused caller=activity lockHeld=${graph.gate.isLocked} holder=${graph.gate.holder.orEmpty()} reason=oauth-not-permitted")
             finish()
             return
@@ -46,7 +48,7 @@ class SchulnetzLoginActivity : Activity() {
             override fun onPageFinished(view: WebView, url: String) {
                 view.evaluateJavascript(HTML_JS) { raw ->
                     val html = decodeJsString(raw)
-                    if (isLoggedInLanding(url, html)) {
+                    if (!viewOnly && isLoggedInLanding(url, html)) {
                         SchulnetzLoginBridge.landingUrl = url
                         SchulnetzLoginBridge.landingHtml = html
                         CookieManager.getInstance().flush()
@@ -58,13 +60,14 @@ class SchulnetzLoginActivity : Activity() {
         }
         root.addView(web, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
         setContentView(root)
-        web.loadUrl(webLoginUrl(base))
+        web.loadUrl(if (viewOnly && explicit.isNotBlank()) explicit else webLoginUrl(base))
     }
 
     companion object {
         const val EXTRA_BASE = "base"
         const val EXTRA_HOST = "host"
         const val EXTRA_URL = "url"
+        const val EXTRA_VIEW = "view"
         private const val HTML_JS = "(function(){return document.documentElement?document.documentElement.outerHTML:''})()"
     }
 }

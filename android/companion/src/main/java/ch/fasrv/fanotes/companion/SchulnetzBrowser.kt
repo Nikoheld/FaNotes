@@ -34,6 +34,7 @@ data class LoadedPage(
     val status: Int,
     val body: String,
     val error: String? = null,
+    val note: String = "",
 )
 
 /**
@@ -153,10 +154,11 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
             if (slot.generation != generation.get() || slot.done.get()) return
             slot.finalUrl = finished
             val token = slot.bumps.incrementAndGet()
+            val pause = if (slot.requested.contains("pageid=22202")) 1600L else 350L
             main.postDelayed({
                 if (slot.generation != generation.get() || slot.bumps.get() != token || slot.done.get()) return@postDelayed
                 view.evaluateJavascript(CAPTURE_JS.replace("GEN", slot.generation.toString()), null)
-            }, 350)
+            }, pause)
         }
     }
 
@@ -203,10 +205,16 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
         }
 
         @JavascriptInterface
+        fun note(gen: String, value: String) {
+            if (!same(gen)) return
+            pending?.note = value
+        }
+
+        @JavascriptInterface
         fun endHtml(gen: String) {
             val slot = pending ?: return
             if (!same(gen)) return
-            finish(slot, LoadedPage(slot.requested, slot.finalUrl.ifBlank { slot.requested }, slot.status, buffer.toString(), slot.error))
+            finish(slot, LoadedPage(slot.requested, slot.finalUrl.ifBlank { slot.requested }, slot.status, buffer.toString(), slot.error, slot.note))
         }
 
         @JavascriptInterface
@@ -234,6 +242,7 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
         @Volatile var status: Int = 200
         @Volatile var finalUrl: String = ""
         @Volatile var error: String? = null
+        @Volatile var note: String = ""
         @Volatile var page: LoadedPage? = null
     }
 
@@ -242,6 +251,31 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
             (function(){
               try {
                 var html = document.documentElement ? document.documentElement.outerHTML : '';
+                var note = '';
+                try {
+                  function z(n){ return (n < 10 ? '0' : '') + n; }
+                  function fmt(d){
+                    if (!d || !d.getFullYear) return String(d || '');
+                    return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + ' ' + z(d.getHours()) + ':' + z(d.getMinutes());
+                  }
+                  var found = '';
+                  var scripts = document.getElementsByTagName('script');
+                  for (var s = 0; s < scripts.length; s++) {
+                    var source = scripts[s].text || '';
+                    var match = source.match(/scheduler_processor\.php\?[^"'\\\s<]+/);
+                    if (match) { found = match[0]; break; }
+                  }
+                  var events = [];
+                  if (window.scheduler && scheduler.getEvents) {
+                    var list = scheduler.getEvents();
+                    for (var j = 0; j < list.length; j++) {
+                      var ev = list[j];
+                      events.push({id:String(ev.id || ''), start:fmt(ev.start_date), end:fmt(ev.end_date), text:String(ev.text || ''), room:String(ev.zimmerkuerzel || ev.room || ''), teacher:String(ev.lehrerkuerzelname || '')});
+                    }
+                  }
+                  note = JSON.stringify({url: found, events: events});
+                } catch (ignore) { note = ''; }
+                window.FanotesHtml.note('GEN', note);
                 var size = 80000;
                 var n = Math.max(1, Math.ceil(html.length / size));
                 window.FanotesHtml.begin('GEN');

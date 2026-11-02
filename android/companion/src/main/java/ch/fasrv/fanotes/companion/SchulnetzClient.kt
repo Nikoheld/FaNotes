@@ -15,7 +15,9 @@ import ch.fasrv.fanotes.schulnetz.SchulnetzTokens
 import ch.fasrv.fanotes.schulnetz.SessionProblem
 import ch.fasrv.fanotes.schulnetz.WebSession
 import ch.fasrv.fanotes.schulnetz.authorizationCodeForm
+import ch.fasrv.fanotes.schulnetz.describeTables
 import ch.fasrv.fanotes.schulnetz.findIcalUrl
+import ch.fasrv.fanotes.schulnetz.findSchedulerUrl
 import ch.fasrv.fanotes.schulnetz.classifySchulnetzPage
 import ch.fasrv.fanotes.schulnetz.isForcedLogoutUrl
 import ch.fasrv.fanotes.schulnetz.linkedPageUrl
@@ -24,6 +26,8 @@ import ch.fasrv.fanotes.schulnetz.redactSchulnetzSecrets
 import ch.fasrv.fanotes.schulnetz.sessionIdsFromPage
 import ch.fasrv.fanotes.schulnetz.startPageUrl
 import ch.fasrv.fanotes.schulnetz.parseIcs
+import ch.fasrv.fanotes.schulnetz.parseSchedulerNote
+import ch.fasrv.fanotes.schulnetz.parseTimetableHtml
 import ch.fasrv.fanotes.schulnetz.parseKontoauszug
 import ch.fasrv.fanotes.schulnetz.parseSchedulerXml
 import ch.fasrv.fanotes.schulnetz.parseStartMessages
@@ -56,6 +60,7 @@ data class WebBundle(
     val session: WebSession,
     val okPages: Int = 0,
     val oauthPage: String? = null,
+    val captures: Map<String, String> = emptyMap(),
 )
 
 data class SchulnetzLinkState(
@@ -146,8 +151,15 @@ class SchulnetzClient(
         var sawSessionProblem = false
         var oauthPage: String? = null
         var okPages = 0
+        var planNote = ""
+        val captured = linkedMapOf<String, String>()
         fun remember(name: String, page: LoadedPage) {
-            if (page.body.isNotBlank()) debug = page.body
+            if (name == "stundenplan") planNote = page.note
+            if (page.body.isNotBlank()) {
+                debug = page.body
+                captured[name] = page.body
+                if (!page.body.trimStart().startsWith("<?xml")) trace("markup $name ${describeTables(page.body)}")
+            }
             trace("page $name")
         }
         fun adopt(page: LoadedPage) {
@@ -220,13 +232,27 @@ class SchulnetzClient(
         val termine = readTerminliste(pages["22108"].orEmpty())
         grades.error?.let { errors += it }
         absences.error?.let { errors += it }
+        exams.error?.let { errors += it }
+        termine.error?.let { errors += it }
         val today = java.time.LocalDate.now()
+        val minDate = today.minusDays(7).toString()
+        val maxDate = today.plusDays(21).toString()
+        val fromPlan = parseSchedulerNote(planNote)
+        val discovered = findSchedulerUrl(pages["22202"].orEmpty(), root, id, transid, "$minDate 00:00", "$maxDate 23:59")
+            ?: fromPlan.first.takeIf { it.contains("scheduler_processor") }?.let {
+                findSchedulerUrl("<script>${it}</script>", root, id, transid, "$minDate 00:00", "$maxDate 23:59")
+            }
+        trace("scheduler source=${if (discovered != null) "page" else "default"} domEvents=${fromPlan.second.size}")
         val scheduler = if (oauthPage != null || sawSessionProblem || pages["22202"].isNullOrBlank()) "" else {
-            get(schedulerUrl(root, id, transid, today.toString(), today.minusDays(7).toString(), today.plusDays(21).toString()), "scheduler", "scheduler")
+            get(discovered ?: schedulerUrl(root, id, transid, today.toString(), minDate, maxDate), "scheduler", "scheduler")
         }
         val icalUrl = findIcalUrl(pages["22202"].orEmpty(), root)
         val ical = if (oauthPage != null || sawSessionProblem || icalUrl.isNullOrBlank() || !webReadAllowed(icalUrl)) emptyList() else parseIcs(get(icalUrl, "ical", "ical"))
-        val events = parseSchedulerXml(scheduler).ifEmpty { ical }
+        val events = when {
+            fromPlan.second.isNotEmpty() -> fromPlan.second
+            else -> parseSchedulerXml(scheduler).ifEmpty { ical }.ifEmpty { parseTimetableHtml(pages["22202"].orEmpty()) }
+        }
+        if (events.isEmpty() && pages["22202"].orEmpty().length > 1000) errors += "Stundenplan: Seite geladen, aber nicht lesbar"
         trace("parsed grades=${grades.value.size} absences=${absences.value.size} exams=${exams.value.size} events=${events.size} termine=${termine.value.size} okPages=$okPages oauth=${oauthPage.orEmpty()} errors=${errors.size}")
         val snapshot = SchulnetzSnapshot(
             fetchedAt = java.time.Instant.now().toString(),
@@ -248,7 +274,7 @@ class SchulnetzClient(
             else -> SessionProblem.NONE
         }
         val reported = if (problem == SessionProblem.INTERACTIVE) snapshot.copy(readErrors = listOf("Bei Schulnetz neu anmelden")) else snapshot
-        return WebBundle(reported, problem, debug, WebSession(root, "", id, transid), okPages, oauthPage)
+        return WebBundle(reported, problem, debug, WebSession(root, "", id, transid), okPages, oauthPage, captured)
     }
 
     fun mergePage(snapshot: SchulnetzSnapshot, pageId: String, html: String): SchulnetzSnapshot = when (pageId) {
