@@ -335,6 +335,32 @@ export const nearTripleLetterGroup = (text: string): WordEdit | null => {
   return odd
 }
 
+/**
+ * A single letter beside at least three three-letter repeats grows into that repeat
+ * (`ppp qqq rrr sss t` → `ppp qqq rrr sss ttt`). Any other word shape leaves the line alone.
+ */
+export const loneLetterBesideTriples = (text: string): WordEdit | null => {
+  const words = inkWords(text)
+  let triples = 0
+  let single: number | null = null
+  for (let index = 0; index < words.length; index += 1) {
+    const letters = [...words[index]]
+    if (letters.length === 3 && letters.every((letter) => letter === letters[0])) {
+      triples += 1
+      continue
+    }
+    if (letters.length === 1) {
+      if (single !== null) return null
+      single = index
+      continue
+    }
+    return null
+  }
+  if (single === null || triples < 3) return null
+  const word = words[single]
+  return { index: single, from: word, to: word.repeat(3) }
+}
+
 /** A line of three-letter groups with exactly one group that is not three copies of one letter. */
 export const hasOneOddLetterGroup = (text: string) => {
   const words = inkWords(text)
@@ -2080,6 +2106,7 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   }
   take(repeatedLetterGroup(text), rewriteWord)
   take(nearTripleLetterGroup(text), rewriteSameLengthWord)
+  take(loneLetterBesideTriples(text), rewriteWord)
   take(capitalizeWordAfterInitial(text), rewriteSameLengthWord)
   const compoundJoin = dictionaryJoinFromReading(characters, decoded.readings, known)
   if (compoundJoin) {

@@ -90,6 +90,7 @@ import {
   unknownWordFromReading,
   repeatedLetterGroup,
   nearTripleLetterGroup,
+  loneLetterBesideTriples,
   capitalizeWordAfterInitial,
   shorterTraceBeforePeriod,
   dictionaryJoinFromReading,
@@ -1296,6 +1297,15 @@ export async function recognizeInk(
     if (nearTriple) {
       const rewritten = rewriteSameLengthWord(decoded.characters, nearTriple.index, nearTriple.to)
       const nextText = textWithWordEdits(decoded.text, [nearTriple])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
+    }
+    const loneTriple = loneLetterBesideTriples(decoded.text)
+    if (loneTriple) {
+      const rewritten = rewriteWord(decoded.characters, loneTriple.index, loneTriple.to)
+      const nextText = textWithWordEdits(decoded.text, [loneTriple])
       if (rewritten && nextText !== decoded.text) {
         decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null
