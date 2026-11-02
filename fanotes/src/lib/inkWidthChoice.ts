@@ -2593,6 +2593,57 @@ export const greedyFunctionTailJoin = <T extends { char: string }>(
   return characters.filter((_, index) => index !== found)
 }
 
+/**
+ * One word may follow a reading within half a nat even when the rest of that reading
+ * differs. A dictionary word grows by one final letter (`graduate` → `graduated`,
+ * `require` → `required`). A three-letter dictionary word changes its final consonant
+ * (`ant` → `and`). Two readings that disagree about the same word stay put.
+ */
+export const PARTIAL_WORD_MARGIN = 0.5
+
+const growsByOneFinalLetter = (from: string, to: string) => {
+  const longer = [...to]
+  return [...from].length >= 4 && longer.length === [...from].length + 1 && longer.slice(0, -1).join('') === from
+}
+
+const swapsFinalConsonant = (from: string, to: string) => {
+  const left = [...from]
+  const right = [...to]
+  if (left.length !== 3 || right.length !== 3 || from.toLowerCase() === to.toLowerCase()) return false
+  if (left.slice(0, -1).join('') !== right.slice(0, -1).join('')) return false
+  return !VOWEL.test(left[2]) && !VOWEL.test(right[2])
+}
+
+export const partialReadingWordEdits = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit[] => {
+  if (readings.length < 2) return []
+  const words = inkWords(text)
+  const top = readings[0]
+  const proposals = new Map<number, string>()
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > PARTIAL_WORD_MARGIN) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    for (let index = 0; index < words.length; index += 1) {
+      const from = words[index]
+      const to = other[index]
+      if (from === to) continue
+      if (!(growsByOneFinalLetter(from, to) || swapsFinalConsonant(from, to))) continue
+      if (!known(from) || !known(to)) continue
+      const previous = proposals.get(index)
+      if (previous && previous !== to) return []
+      proposals.set(index, to)
+    }
+  }
+  return [...proposals.entries()]
+    .sort((left, right) => right[0] - left[0])
+    .map(([index, to]) => ({ index, from: words[index], to }))
+}
+
 const SENTENCE_ADVERBS = new Set([
   'manchmal', 'häufig', 'leider', 'gestern', 'heute', 'morgen', 'schließlich',
   'natürlich', 'eigentlich', 'trotzdem', 'dennoch', 'allerdings', 'außerdem',
@@ -3281,5 +3332,6 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
     characters = functionTail
     text = characters.map((character) => character.char).join('')
   }
+  for (const edit of partialReadingWordEdits(text, decoded.readings, known)) take(edit, rewriteWord)
   return { text, characters }
 }

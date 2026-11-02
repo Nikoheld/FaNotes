@@ -115,6 +115,7 @@ import {
   capitalizedNounAfterAdjective,
   unlistedEndingFromReading,
   greedyFunctionTailJoin,
+  partialReadingWordEdits,
   dictionaryJoinFromReading,
   splitFunctionWordJoin,
   tracedFinalComma,
@@ -1617,6 +1618,14 @@ export async function recognizeInk(
     if (functionTail) {
       decoded = { ...decoded, characters: functionTail, text: functionTail.map((character) => character.char).join('') }
       stitched = null
+    }
+    for (const edit of partialReadingWordEdits(decoded.text, decoded.readings, (word) => wordIsKnown(lineLanguage, word))) {
+      const rewritten = rewriteWord(decoded.characters, edit.index, edit.to)
+      const nextText = textWithWordEdits(decoded.text, [edit])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
     }
     if (!decoded.text.trim()) continue
     const spans = new Uint32Array(decoded.characters.flatMap((character) => [character.startFrame, character.endFrame]))

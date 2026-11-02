@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, longerKnownCropWord, quotedWordAfterDoubleSix, leadingStrokesAreTicks, COMPOUND_PEN, COMPOUND_SHEAR, COMPOUND_SCALE, dictionaryCompound, isolatedWideGroups, lowercaseShortBeamWord, lowercaseInitialFromBeam, capitalizeEnglishPronoun, periodBeforeCapitals, quoteAfterParenthesis, closeBracketAfterLetter, openingBracketFromTrace, spaceBetweenDifferentQuotes, spaceBetweenSymbolRuns, oneLetterFromCloseReading, laterDictionaryCaseFromBeam, lowercaseMidSentenceAdverb, unknownWordFromReading, repeatedLetterGroup, nearTripleLetterGroup, loneLetterBesideTriples, capitalizeWordAfterInitial, shorterTraceBeforePeriod, trailingTraceDeletion, restoreMitFromTopReading, restoreAllCapsTraceWord, joinReadingWithoutSpace, traceAgreedUnknownWord, unlistedWordFromReading, knownEndingFromReading, tracedShorterKnownWord, tracedUnlistedWord, knownSuffixFromReading, joinedReadingFromClose, knownVowelFromReading, camelSplitFromReading, shortKnownWordFromReading, functionWordBeforeStem, knownConsonantFromReading, splitAndFinalLetterFromReading, greedyDigitFromTrace, endingAndDigitFromReading, capitalizedNounAfterAdjective, unlistedEndingFromReading, greedyFunctionTailJoin, dictionaryJoinFromReading, splitFunctionWordJoin, strayParenBeforeCapital, tracedFinalComma, accusativeDer, trailingTracedLetter, transposedTraceWord, personalNeighborEdits, finalizeInkLineText, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, longerKnownCropWord, quotedWordAfterDoubleSix, leadingStrokesAreTicks, COMPOUND_PEN, COMPOUND_SHEAR, COMPOUND_SCALE, dictionaryCompound, isolatedWideGroups, lowercaseShortBeamWord, lowercaseInitialFromBeam, capitalizeEnglishPronoun, periodBeforeCapitals, quoteAfterParenthesis, closeBracketAfterLetter, openingBracketFromTrace, spaceBetweenDifferentQuotes, spaceBetweenSymbolRuns, oneLetterFromCloseReading, laterDictionaryCaseFromBeam, lowercaseMidSentenceAdverb, unknownWordFromReading, repeatedLetterGroup, nearTripleLetterGroup, loneLetterBesideTriples, capitalizeWordAfterInitial, shorterTraceBeforePeriod, trailingTraceDeletion, restoreMitFromTopReading, restoreAllCapsTraceWord, joinReadingWithoutSpace, traceAgreedUnknownWord, unlistedWordFromReading, knownEndingFromReading, tracedShorterKnownWord, tracedUnlistedWord, knownSuffixFromReading, joinedReadingFromClose, knownVowelFromReading, camelSplitFromReading, shortKnownWordFromReading, functionWordBeforeStem, knownConsonantFromReading, splitAndFinalLetterFromReading, greedyDigitFromTrace, endingAndDigitFromReading, capitalizedNounAfterAdjective, unlistedEndingFromReading, greedyFunctionTailJoin, partialReadingWordEdits, dictionaryJoinFromReading, splitFunctionWordJoin, strayParenBeforeCapital, tracedFinalComma, accusativeDer, trailingTracedLetter, transposedTraceWord, personalNeighborEdits, finalizeInkLineText, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -941,6 +941,20 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
     'de',
     () => true,
   ), null)
+  const knowsGraduated = (word) => ['ant', 'and', 'graduate', 'graduated', 'require', 'required', 'mit', 'mir'].includes(word.toLowerCase())
+  assert.deepEqual(partialReadingWordEdits('ant between these two extremes a graduate', [
+    { text: 'ant between these two oxtremes a graduate', score: 0 },
+    { text: 'ant between these two oxtremes a graduated', score: -0.35 },
+    { text: 'and between these two oxtremes a graduate', score: -0.43 },
+  ], knowsGraduated).map((edit) => edit.to).sort(), ['and', 'graduated'])
+  assert.equal(partialReadingWordEdits('When the try and his Connall require addition', [
+    { text: 'When the try and his Connall require addition', score: 0 },
+    { text: 'When the try and his Connal required additio', score: -0.28 },
+  ], knowsGraduated)[0]?.to, 'required')
+  assert.deepEqual(partialReadingWordEdits('keine Lawinengefahr besteht. Mit zunehmender', [
+    { text: 'keine Lawinengefahr besteht. Mit zunehmender', score: 0 },
+    { text: 'keine Lawinengefahr besteht. Mir zunehmender', score: -0.54 },
+  ], knowsGraduated), [])
   assert.equal(restoreMitFromTopReading(
     [...'keine Lawinengefahr besteht. Mir zunehmender'].map((char) => ({ char })),
     [{ text: 'keine Lawinengefahr besteht. Mit zunehmender' }],
@@ -1927,6 +1941,14 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
     if (functionTail) {
       decoded = { ...decoded, characters: functionTail, text: functionTail.map((character) => character.char).join('') }
       boxes = undefined
+    }
+    for (const edit of partialReadingWordEdits(decoded.text, decoded.readings ?? [], knownWord(entry.language))) {
+      const rewritten = rewriteWord(decoded.characters, edit.index, edit.to)
+      const nextText = textWithWordEdits(decoded.text, [edit])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        boxes = undefined
+      }
     }
     if (!boxes) {
       const spans = new Uint32Array(decoded.characters.flatMap((c) => [c.startFrame, c.endFrame]))
