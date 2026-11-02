@@ -501,7 +501,22 @@ export const usesWebsiteSession = (baseUrl) => {
   try { return new URL(baseUrl).hostname.toLowerCase().endsWith('schulnetz-ag.ch') } catch { return false }
 }
 
+export const microsoftLoginRequired = (url, html) => {
+  try {
+    const host = new URL(String(url || 'https://invalid.local')).hostname.toLowerCase()
+    if (host === 'login.microsoftonline.com' || host === 'login.microsoft.com' || host === 'login.live.com' || host.endsWith('.login.microsoftonline.com')) return true
+  } catch { /* not a url */ }
+  const text = String(html || '')
+  if (text.includes('ConvergedSignIn')) return true
+  if (text.includes('AADSTS50058')) return true
+  if (/"sErrorCode"\s*:\s*"50058"/.test(text) || /sErrorCode\\?"?\s*:\s*\\?"?50058/.test(text)) return true
+  if (text.includes('stsErrorCode') && text.includes('50058')) return true
+  if (text.includes('$Config=') && (text.includes('sErrorCode') || text.includes('urlPost'))) return true
+  return false
+}
+
 export const sessionProblem = (url, html) => {
+  if (microsoftLoginRequired(url, html)) return 'microsoft'
   const blob = `${url}\n${html}`.toLowerCase()
   if (blob.includes('ip-adresse wurde vom system zurückgewiesen') || blob.includes('ip-adresse wurde vom system zurueckgewiesen')) return 'ip'
   if (blob.includes('inaktivitätslimit') || blob.includes('inaktivitaetslimit') || blob.includes('mode=5')) return 'inactivity'

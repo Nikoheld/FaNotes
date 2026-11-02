@@ -15,7 +15,9 @@ fun <T> PageRead<T>.ok(): Boolean = error == null
 
 /** Grades page 21311. Course rows plus nested Einzelprüfungen. */
 fun readGradesPage(html: String): PageRead<List<SchoolGrade>> {
+    if (html.isBlank()) return PageRead(emptyList(), null)
     val problem = sessionProblem("", html)
+    if (problem == SessionProblem.INTERACTIVE) return PageRead(emptyList(), sessionProblemText(problem))
     if (problem != SessionProblem.NONE) return PageRead(emptyList(), "Noten: ${sessionProblemText(problem)}", html)
     val grades = parseGradesPage(html)
     val recognized = grades.isNotEmpty() || html.contains("Notendurchschnitt") || html.contains("Einzelprüfungen")
@@ -82,7 +84,9 @@ fun parseGradesPage(html: String): List<SchoolGrade> {
 }
 
 fun readAbsencesPage(html: String): PageRead<List<SchoolAbsence>> {
+    if (html.isBlank()) return PageRead(emptyList(), null)
     val problem = sessionProblem("", html)
+    if (problem == SessionProblem.INTERACTIVE) return PageRead(emptyList(), sessionProblemText(problem))
     if (problem != SessionProblem.NONE) return PageRead(emptyList(), "Absenzen: ${sessionProblemText(problem)}", html)
     val rows = parseAbsencesPage(html)
     val recognized = rows.isNotEmpty() || html.contains("Datum von")
@@ -130,7 +134,9 @@ fun parseAbsencesPage(html: String): List<SchoolAbsence> {
 }
 
 fun readTerminliste(html: String): PageRead<List<AgendaEvent>> {
+    if (html.isBlank()) return PageRead(emptyList(), null)
     val problem = sessionProblem("", html)
+    if (problem == SessionProblem.INTERACTIVE) return PageRead(emptyList(), sessionProblemText(problem))
     if (problem != SessionProblem.NONE) return PageRead(emptyList(), "Termine: ${sessionProblemText(problem)}", html)
     val events = parseTerminliste(html)
     val recognized = events.isNotEmpty() || html.contains("tblTerminliste") || html.contains("Termin")
@@ -176,7 +182,9 @@ fun parseTerminliste(html: String): List<AgendaEvent> {
 }
 
 fun readExamsPage(html: String): PageRead<List<AgendaEvent>> {
+    if (html.isBlank()) return PageRead(emptyList(), null)
     val problem = sessionProblem("", html)
+    if (problem == SessionProblem.INTERACTIVE) return PageRead(emptyList(), sessionProblemText(problem))
     if (problem != SessionProblem.NONE) return PageRead(emptyList(), "Prüfungen: ${sessionProblemText(problem)}", html)
     val exams = parseTerminliste(html).map { it.copy(eventType = "exam") }
     val recognized = exams.isNotEmpty() || html.contains("Prüfungsplan") || html.contains("Pruefungsplan")

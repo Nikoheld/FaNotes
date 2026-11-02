@@ -319,23 +319,64 @@ class CompanionGraph(private val context: Context) {
     private suspend fun refreshWebsite(previous: SchulnetzSnapshot): SchulnetzSnapshot? {
         var current = readWebSession()
         var bundle = current?.let { runCatching { client.fetchWeb(baseUrl(), it) }.getOrNull() }
+        if (bundle?.problem == SessionProblem.INTERACTIVE || link.value.needsReauth) {
+            markLoginRequired()
+            return null
+        }
         if (bundle == null || bundle.problem != SessionProblem.NONE) {
-            val landed = SchulnetzSilentLogin(context).await(baseUrl())
-            if (landed == null) {
-                link.value = link.value.copy(needsReauth = true, lastError = "Anmeldung nötig")
-                return bundle?.snapshot
+            if (!hasMicrosoftCookies()) {
+                markLoginRequired()
+                return null
             }
-            val php = phpSessionCookie(baseUrl())
-            val extracted = ch.fasrv.fanotes.schulnetz.extractWebSession(landed.first, landed.second, baseUrl())
-            if (extracted == null || php.isBlank()) return null
-            current = extracted.copy(phpSessionId = php)
-            saveWebSession(current)
-            bundle = runCatching { client.fetchWeb(baseUrl(), current) }.getOrNull() ?: return null
+            when (val landed = SchulnetzSilentLogin(context).await(baseUrl())) {
+                SilentLoginResult.NeedsUser -> {
+                    markLoginRequired()
+                    return null
+                }
+                is SilentLoginResult.Ready -> {
+                    val php = phpSessionCookie(baseUrl())
+                    val extracted = ch.fasrv.fanotes.schulnetz.extractWebSession(landed.url, landed.html, baseUrl())
+                    if (extracted == null || php.isBlank()) {
+                        markLoginRequired()
+                        return null
+                    }
+                    current = extracted.copy(phpSessionId = php)
+                    saveWebSession(current)
+                    bundle = runCatching { client.fetchWeb(baseUrl(), current) }.getOrNull()
+                    if (bundle == null || bundle.problem == SessionProblem.INTERACTIVE) {
+                        markLoginRequired()
+                        return null
+                    }
+                }
+            }
         } else {
             saveWebSession(bundle.session)
         }
         if (bundle.debugHtml.isNotBlank()) rememberDebug(bundle.debugHtml)
-        return bundle.snapshot.copy(revision = previous.revision + 1)
+        link.value = link.value.copy(needsReauth = false, lastError = "")
+        return bundle.snapshot.copy(readErrors = bundle.snapshot.readErrors.filter { it != "Bei Schulnetz neu anmelden" }, revision = previous.revision + 1)
+    }
+
+    fun clearLoginPrompt() {
+        CompanionAlerts.forget(context, "schulnetz-login-required")
+        link.value = link.value.copy(needsReauth = false, lastError = "")
+    }
+
+    private fun markLoginRequired() {
+        val already = link.value.needsReauth
+        link.value = link.value.copy(needsReauth = true, lastError = "Bei Schulnetz neu anmelden")
+        File(context.filesDir, "schulnetz-debug.html").delete()
+        if (!already) {
+            CompanionAlerts.show(
+                context,
+                ch.fasrv.fanotes.schulnetz.SchulnetzChange(
+                    "schulnetz-login-required",
+                    "event",
+                    "Bei Schulnetz neu anmelden",
+                    "Die Microsoft-Anmeldung ist abgelaufen.",
+                ),
+            )
+        }
     }
 
     private suspend fun refreshLocally(previous: SchulnetzSnapshot) {

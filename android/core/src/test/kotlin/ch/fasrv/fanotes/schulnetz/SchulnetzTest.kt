@@ -256,6 +256,25 @@ class WebSessionTest {
     }
 
     @Test
+    fun microsoftSignInPageIsLoginRequiredNotAParseError() {
+        val html = """
+            <html><head><title>Sign in to your account</title></head><body>
+            <script>
+            ${'$'}Config={"sCompanyDisplayName":"Alte Kantonsschule Aarau","sErrorCode":"50058","urlPost":"https://login.microsoftonline.com/common/login","pgid":"ConvergedSignIn"};
+            </script>
+            </body></html>
+        """.trimIndent()
+        val url = "https://login.microsoftonline.com/8c2df54b-02dc-4a78-809d-8a025372e6c4/oauth2/v2.0/authorize?redirect_uri=https%3A%2F%2Fwww.schulnetz-ag.ch%2Faksa%2F"
+        assertTrue(microsoftLoginRequired(url, html))
+        assertEquals(SessionProblem.INTERACTIVE, sessionProblem(url, html))
+        assertEquals(SessionProblem.INTERACTIVE, sessionProblem("https://www.schulnetz-ag.ch/aksa/index.php?pageid=21111", html))
+        val read = readAbsencesPage(html)
+        assertEquals("Bei Schulnetz neu anmelden", read.error)
+        assertFalse(read.error!!.contains("nicht gelesen"))
+        assertTrue(read.html.isEmpty())
+    }
+
+    @Test
     fun gradesAbsencesSchedulerAndIcsMatchSchulnetzMarkup() {
         val grades = """
             <main>

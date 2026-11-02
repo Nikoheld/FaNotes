@@ -166,6 +166,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                     }
                     message = "Schulnetz ist verbunden. Bei einem IP-Wechsel meldet die App sich neu an."
                 }
+                graph.clearLoginPrompt()
                 graph.refreshSchulnetz()
                 debugHtml = graph.debugHtml()
             } catch (error: Exception) {
@@ -306,6 +307,9 @@ internal fun exportSsoCookies(): Map<String, String> {
         if (cleaned.isBlank()) null else host to cleaned
     }.toMap()
 }
+
+internal fun hasMicrosoftCookies(): Boolean =
+    SSO_COOKIE_URLS.any { url -> CookieManager.getInstance().getCookie(url)?.isNotBlank() == true }
 
 internal fun phpSessionCookie(baseUrl: String): String {
     val raw = CookieManager.getInstance().getCookie(baseUrl).orEmpty()

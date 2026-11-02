@@ -16,6 +16,7 @@ import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.schulnetz.SCHULNETZ_USER_AGENT
 import ch.fasrv.fanotes.schulnetz.isLoggedInLanding
 import ch.fasrv.fanotes.schulnetz.loginWebViewAllowed
+import ch.fasrv.fanotes.schulnetz.microsoftLoginRequired
 import ch.fasrv.fanotes.schulnetz.webLoginUrl
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -72,21 +73,26 @@ object SchulnetzLoginBridge {
     var landingHtml: String = ""
 }
 
+sealed class SilentLoginResult {
+    data class Ready(val url: String, val html: String) : SilentLoginResult()
+    data object NeedsUser : SilentLoginResult()
+}
+
 class SchulnetzSilentLogin(private val context: android.content.Context) {
-    suspend fun await(baseUrl: String): Pair<String, String>? = suspendCancellableCoroutine { continuation ->
+    suspend fun await(baseUrl: String): SilentLoginResult = suspendCancellableCoroutine { continuation ->
         val main = Handler(Looper.getMainLooper())
         main.post {
             val web = WebView(context.applicationContext)
             prepareWebView(web)
             var done = false
-            fun finish(value: Pair<String, String>?) {
+            fun finish(value: SilentLoginResult) {
                 if (done) return
                 done = true
                 web.stopLoading()
                 web.destroy()
                 if (continuation.isActive) continuation.resume(value)
             }
-            continuation.invokeOnCancellation { main.post { finish(null) } }
+            continuation.invokeOnCancellation { main.post { if (!done) finish(SilentLoginResult.NeedsUser) } }
             web.webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
                     !loginWebViewAllowed(request.url.toString(), baseUrl)
@@ -96,15 +102,15 @@ class SchulnetzSilentLogin(private val context: android.content.Context) {
                         val html = decodeJsString(raw)
                         if (isLoggedInLanding(url, html)) {
                             CookieManager.getInstance().flush()
-                            finish(url to html)
-                        } else if (html.contains("type=\"password\"") || html.contains("type='password'")) {
-                            finish(null)
+                            finish(SilentLoginResult.Ready(url, html))
+                        } else if (microsoftLoginRequired(url, html)) {
+                            finish(SilentLoginResult.NeedsUser)
                         }
                     }
                 }
             }
             web.loadUrl(webLoginUrl(baseUrl))
-            main.postDelayed({ finish(null) }, 25_000)
+            main.postDelayed({ finish(SilentLoginResult.NeedsUser) }, 25_000)
         }
     }
 }

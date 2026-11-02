@@ -161,6 +161,9 @@ private fun TodayScreen(model: CompanionModel) {
     val openTasks = model.tasks.filter { !it.done }.take(5)
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
         item { Spacer(Modifier.height(12.dp)) }
+        if (model.link.needsReauth) {
+            item { LoginAgain(model) }
+        }
         item {
             CardBlock {
                 Text(if (next?.isExamLike() == true) "Nächste Prüfung" else "Nächste Lektion", color = MaterialTheme.colorScheme.primary)
@@ -465,10 +468,16 @@ private fun SettingsScreen(model: CompanionModel) {
         Text("Schulnetz", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
         Text(if (model.link.linked) "Verbunden${if (model.link.needsReauth) " · bitte neu anmelden" else ""}" else "Nicht verbunden")
         OutlinedTextField(model.baseUrl, { model.baseUrl = it }, label = { Text("Schulnetz-Adresse") }, modifier = Modifier.fillMaxWidth())
-        Button(onClick = { model.schulnetzIntent(context)?.let(launcher::launch) }, modifier = Modifier.fillMaxWidth()) { Text(if (model.link.linked) "Neu verbinden" else "Mit Microsoft anmelden") }
+        Button(onClick = { model.schulnetzIntent(context)?.let(launcher::launch) }, modifier = Modifier.fillMaxWidth()) {
+            Text(when {
+                model.link.needsReauth -> "Bei Schulnetz neu anmelden"
+                model.link.linked -> "Neu verbinden"
+                else -> "Mit Microsoft anmelden"
+            })
+        }
         if (model.link.linked) TextButton(onClick = { model.unlink() }) { Text("Trennen") }
-        model.snapshot.readErrors.forEach { Text(it, color = MaterialTheme.colorScheme.error) }
-        if (model.snapshot.readErrors.isNotEmpty() || model.debugHtml.isNotBlank()) {
+        model.snapshot.readErrors.filter { it.contains("nicht gelesen") }.forEach { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (model.snapshot.readErrors.any { it.contains("nicht gelesen") } || model.debugHtml.isNotBlank()) {
             OutlinedButton(onClick = { model.shareDebug(context) }, modifier = Modifier.fillMaxWidth()) { Text("HTML teilen") }
         }
         Text("Benachrichtigungen", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
@@ -504,6 +513,20 @@ private fun SimpleList(title: String, lines: List<String>, onBack: () -> Unit) {
         LazyColumn {
             items(lines) { line -> Text(line, modifier = Modifier.padding(vertical = 8.dp)) }
         }
+    }
+}
+
+@Composable
+private fun LoginAgain(model: CompanionModel) {
+    val context = LocalContext.current
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) model.onWebLoginFinished()
+        else model.message = "Schulnetz-Anmeldung abgebrochen."
+    }
+    CardBlock {
+        Text("Bei Schulnetz neu anmelden", fontWeight = FontWeight.SemiBold)
+        Text("Die Microsoft-Anmeldung ist abgelaufen. Schulnetz selbst wurde nicht gelesen.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Button(onClick = { model.schulnetzIntent(context)?.let(launcher::launch) }, modifier = Modifier.fillMaxWidth()) { Text("Bei Schulnetz neu anmelden") }
     }
 }
 

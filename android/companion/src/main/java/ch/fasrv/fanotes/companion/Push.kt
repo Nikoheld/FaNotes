@@ -87,6 +87,13 @@ object CompanionAlerts {
         show(context, SchulnetzChange(id, source.string("category") ?: "event", title, body))
     }
 
+    fun forget(context: Context, id: String) {
+        val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
+        val seen = prefs.getStringSet(SEEN, emptySet()).orEmpty().toMutableSet()
+        if (!seen.remove(id)) return
+        prefs.edit().putStringSet(SEEN, seen).apply()
+    }
+
     private fun remember(context: Context, id: String): Boolean {
         val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
         val seen = prefs.getStringSet(SEEN, emptySet()).orEmpty().toMutableSet()
