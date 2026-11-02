@@ -8,7 +8,7 @@ use crate::Error;
 const MANIFEST_FORMAT: &str = "fanotes-neural-handwriting-v3";
 const MODEL_NAME: &str = "PyLaia_IAM_CTC";
 const MODEL_PRECISION: &str = "fp32";
-const MAX_MODEL_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_MODEL_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_CHARACTERS_BYTES: u64 = 256 * 1024;
 
 /// The desktop model entry of `public/ocr/manifest.json`: file name, byte size and SHA-256.
@@ -109,10 +109,7 @@ fn json_safe_u64(value: Option<&Value>) -> Option<u64> {
 /// `Number.isSafeInteger`, including a negative character count.
 fn json_safe_i64(value: Option<&Value>) -> Option<i64> {
     let number = value?.as_f64()?;
-    if number.is_finite()
-        && number.fract() == 0.0
-        && number.abs() <= 9_007_199_254_740_991.0
-    {
+    if number.is_finite() && number.fract() == 0.0 && number.abs() <= 9_007_199_254_740_991.0 {
         Some(number as i64)
     } else {
         None

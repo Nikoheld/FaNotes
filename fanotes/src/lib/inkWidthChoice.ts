@@ -1,0 +1,3388 @@
+/** When the default pen leaves a long word unknown, another width may read it as a dictionary word. */
+
+const WORD = /[A-Za-zÄÖÜäöüß]+/gu
+
+/** Nearby renderings tried when a long word is still unknown. The default 2.6 px reading comes first. */
+export const INK_RETRY_VARIANTS = [
+  { penWidth: 1.8, scale: 1 },
+  { penWidth: 3, scale: 1 },
+  { penWidth: 3.5, scale: 1 },
+  { penWidth: 2.6, scale: 0.92 },
+  { penWidth: 2.6, scale: 0.85 },
+] as const
+
+/** Smaller rendering that can repair one short word or a whole line of known words. */
+export const NARROW_SCALE = 0.85
+
+/** A single unknown word turning into a dictionary word has to beat the default by this many nats. */
+export const NARROW_WORD_MARGIN = 0.5
+
+/** Capitalizing only the first letter has to beat the current reading by this many nats. */
+export const FIRST_LETTER_MARGIN = 0.6
+
+/** Horizontal stretch tried when a period sits just before a closing bracket. */
+export const BRACKET_STRETCH = 0.94
+
+/** That stretch has to beat the current reading by this many nats to turn the period into a comma. */
+export const BRACKET_COMMA_MARGIN = 0.5
+
+/** Narrower line tried when a long word is still unknown. */
+export const NARROW_STRETCH = 0.82
+
+/** That narrower line has to beat the default reading by this many nats. */
+export const NARROW_STRETCH_MARGIN = 7
+
+/** A one-letter change to a long unknown word has to sit within this many nats of the top reading. */
+export const LONG_LETTER_MARGIN = 0.8
+
+/** A final letter becomes an apostrophe when that alternative is at least this confident. */
+export const APOSTROPHE_ALT_MIN = 0.35
+
+/** An `r` becomes `n` when that alternative is at least this confident. */
+export const R_TO_N_MIN = 0.5
+
+/** A word-final `D` becomes `B` when that alternative is at least this confident. */
+export const D_TO_B_MIN = 0.4
+
+/** A capital `F` becomes `f` when that alternative is at least this confident. */
+export const F_TO_F_MIN = 0.25
+
+/** An `a` becomes `ä` when that alternative is at least this confident. */
+export const A_TO_AE_MIN = 0.9
+
+/**
+ * A dictionary word may grow by one letter from the upright reading when another rendering
+ * was kept (`Marie` → `Marine`). Farther than this, the shorter word stands.
+ */
+export const KNOWN_INSERT_MARGIN = 1
+
+/**
+ * An unknown word ending in `kraft` may take the dictionary plural `kräfte` when a reading
+ * within this many nats already added the final e (`luftstreitkrafte` is not a word).
+ */
+export const KRAFT_PLURAL_MARGIN = 2.9
+
+/** A larger rendering that can turn one short dictionary word into a longer one (`Grad` → `Grund`). */
+export const LARGER_SCALE = 1.15
+
+const ADJECTIVE_ENDING = /(?:ischen|lichen)$/iu
+
+/** A smaller line that keeps every known word has to beat the default by this many nats. */
+export const NARROW_LINE_MARGIN = 5
+
+/** The unknown word has to be at least this long before a second rendering is worth the time. */
+export const LONG_UNKNOWN_LETTERS = 10
+
+/** The other rendering has to beat the default reading by this many nats. */
+export const WIDTH_RETRY_MARGIN = 2
+
+/** A two-word merge has to beat the default reading by this many nats. */
+export const MERGE_SCORE_MARGIN = 4
+
+/** A small back-slant tried when the upright pen leaves two neighboring words wrong. */
+export const INK_SHEAR_RETRY = -0.08
+
+/** That slanted rendering has to beat the upright reading by this many nats. */
+export const SHEAR_SCORE_MARGIN = 0.4
+
+/** Copying one long unknown word out of another rendering requires this much of a lead. */
+export const SPLICE_SCORE_MARGIN = 5
+
+const SPLICE_MIN_LETTERS = 12
+
+export const foldInkWord = (word: string) => word.toLowerCase().replaceAll('ß', 'ss')
+
+export const inkWords = (text: string) => text.match(WORD) ?? []
+
+const wordEdits = (left: string, right: string) => {
+  const a = [...left]
+  const b = [...right]
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index)
+  for (let i = 1; i <= a.length; i += 1) {
+    let corner = previous[0]
+    previous[0] = i
+    for (let j = 1; j <= b.length; j += 1) {
+      const next = previous[j]
+      previous[j] = a[i - 1] === b[j - 1] ? corner : Math.min(previous[j] + 1, previous[j - 1] + 1, corner + 1)
+      corner = next
+    }
+  }
+  return previous[b.length]
+}
+
+/**
+ * True when `alternate` rewrites exactly one dictionary word into a dictionary word one letter
+ * longer, at edit distance 2, and changes nothing else (`Grad` → `Grund`).
+ */
+export const largerScaleGrowsOneWord = (
+  base: string,
+  alternate: string,
+  known: (word: string) => boolean,
+) => {
+  const left = inkWords(base)
+  const right = inkWords(alternate)
+  if (left.length !== right.length || !left.length) return false
+  const diffs: number[] = []
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) diffs.push(index)
+  }
+  if (diffs.length !== 1) return false
+  const from = left[diffs[0]]
+  const to = right[diffs[0]]
+  if ([...to].length !== [...from].length + 1 || wordEdits(from, to) !== 2) return false
+  if (!known(from) || !known(to) || from.toLowerCase() === to.toLowerCase()) return false
+  return textWithWordEdits(base, [{ index: diffs[0], from, to }]) === alternate
+}
+
+const editDistance = (left: string, right: string) => {
+  const a = Array.from(left)
+  const b = Array.from(right)
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index)
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i]
+    for (let j = 1; j <= b.length; j += 1) {
+      current.push(Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + Number(a[i - 1] !== b[j - 1])))
+    }
+    previous = current
+  }
+  return previous[b.length]
+}
+
+export const hasLongUnknownWord = (
+  text: string,
+  known: (word: string) => boolean,
+  minLength = LONG_UNKNOWN_LETTERS,
+) => inkWords(text).some((word) => foldInkWord(word).length >= minLength && !known(word))
+
+/**
+ * True when `alternate` turns one long unknown word into a dictionary word of nearly the same
+ * length, leaves every known word as it was, and moves any other unknown word by at most two
+ * letters (`Glückensisch` → `Glückwunsch`, while `Weiriell` may become `Muiriell`).
+ */
+export const widthReadingKeepsKnownWords = (
+  base: string,
+  alternate: string,
+  known: (word: string) => boolean,
+  minLength = LONG_UNKNOWN_LETTERS,
+) => {
+  const left = inkWords(base)
+  const right = inkWords(alternate)
+  if (left.length !== right.length) return false
+  let replaced = false
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] === right[index]) continue
+    if (known(left[index])) return false
+    const before = foldInkWord(left[index])
+    const after = foldInkWord(right[index])
+    if (before.length >= minLength && known(right[index]) && Math.abs(before.length - after.length) <= 3) {
+      replaced = true
+      continue
+    }
+    if (editDistance(before, after) <= 2) continue
+    return false
+  }
+  return replaced
+}
+
+/**
+ * True when `alternate` changes exactly one unknown word into a dictionary word
+ * of nearly the same length (`Aneren` → `inneren`).
+ */
+export const oneUnknownWordBecomesKnown = (
+  base: string,
+  alternate: string,
+  known: (word: string) => boolean,
+) => {
+  const left = inkWords(base)
+  const right = inkWords(alternate)
+  if (left.length !== right.length) return false
+  const diffs: number[] = []
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) diffs.push(index)
+  }
+  if (diffs.length !== 1) return false
+  const before = foldInkWord(left[diffs[0]])
+  const after = foldInkWord(right[diffs[0]])
+  return before.length >= 4 && !known(left[diffs[0]]) && known(right[diffs[0]]) && Math.abs(before.length - after.length) <= 3
+}
+
+/**
+ * True when a smaller rendering keeps every known word, changes a long unknown word,
+ * and moves any other unknown word by at most two letters
+ * (`Nuklearenaie` → `Nuklearenergie`, `Erzeugge` → `Erzeugen`).
+ */
+export const narrowScaleKeepsKnownWords = (
+  base: string,
+  alternate: string,
+  known: (word: string) => boolean,
+) => {
+  const left = inkWords(base)
+  const right = inkWords(alternate)
+  if (left.length !== right.length) return false
+  let movedLong = false
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] === right[index]) continue
+    if (known(left[index])) return false
+    const before = foldInkWord(left[index])
+    const after = foldInkWord(right[index])
+    if (before.length >= LONG_UNKNOWN_LETTERS && Math.abs(before.length - after.length) <= 3) {
+      movedLong = true
+      continue
+    }
+    if (editDistance(before, after) <= 2) continue
+    return false
+  }
+  return movedLong
+}
+
+/**
+ * True when `alternate` replaces exactly two adjacent words with one longer word, that word
+ * starts with the first of the two, and every other word is unchanged
+ * (`luft statut` → `luftstreitkraft`).
+ */
+export const widthReadingMergesTwoWords = (base: string, alternate: string) => {
+  const left = inkWords(base)
+  const right = inkWords(alternate)
+  if (left.length !== right.length + 1) return false
+  let index = 0
+  while (index < right.length && left[index] === right[index]) index += 1
+  if (index >= right.length) return false
+  const first = foldInkWord(left[index])
+  const second = foldInkWord(left[index + 1] ?? '')
+  const merged = foldInkWord(right[index])
+  if (first.length < 4 || second.length < 4 || merged.length < 12 || !merged.startsWith(first)) return false
+  return left.slice(index + 2).join('\0') === right.slice(index + 1).join('\0')
+}
+
+export type WordEdit = { index: number; from: string; to: string }
+
+const sameLetterThreeTimes = (word: string) => {
+  const letters = [...word]
+  return letters.length === 3 && letters[0] === letters[1] && letters[1] === letters[2]
+}
+
+/**
+ * On a line of three-letter groups with one group that is not a repeated letter, the raw trace of
+ * a smaller rendering replaces that group when it is three copies of one letter (`TAF` → `TTT`).
+ * Groups that are already repeated must stay as they are.
+ */
+export const tripleLetterFromNarrowGreedy = (text: string, greedy: string): WordEdit | null => {
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  if (words.length < 3 || words.length !== traced.length) return null
+  if (!words.every((word) => [...word].length === 3)) return null
+  const odd: number[] = []
+  for (let index = 0; index < words.length; index += 1) {
+    if (!sameLetterThreeTimes(words[index])) odd.push(index)
+  }
+  if (odd.length !== 1) return null
+  const index = odd[0]
+  if (!sameLetterThreeTimes(traced[index]) || words[index] === traced[index]) return null
+  for (let cursor = 0; cursor < words.length; cursor += 1) {
+    if (cursor !== index && words[cursor] !== traced[cursor]) return null
+  }
+  return { index, from: words[index], to: traced[index] }
+}
+
+/**
+ * A line made of three-letter repeats grows the one group that is only two copies
+ * (`HHH III JJ KKK` → `HHH III JJJ KKK`). Any other word shape leaves the line alone.
+ */
+export const repeatedLetterGroup = (text: string): WordEdit | null => {
+  const words = inkWords(text)
+  if (words.length < 3) return null
+  let odd: number | null = null
+  for (let index = 0; index < words.length; index += 1) {
+    const letters = [...words[index]]
+    const repeated = letters.every((letter) => letter === letters[0])
+    if (letters.length === 3 && repeated) continue
+    if (letters.length === 2 && repeated) {
+      if (odd !== null) return null
+      odd = index
+      continue
+    }
+    return null
+  }
+  if (odd === null) return null
+  const word = words[odd]
+  return { index: odd, from: word, to: `${[...word][0]}${word}` }
+}
+
+/**
+ * On a line of three-letter repeats, the one group that is a single letter away from a repeat
+ * becomes that repeat (`ZQQ` → `QQQ`, `qqt` beside `ppp rrr sss` → `qqq`). A shorter token
+ * may sit beside the groups. Two different near-repeats leave the line alone.
+ */
+export const nearTripleLetterGroup = (text: string): WordEdit | null => {
+  const words = inkWords(text)
+  let triples = 0
+  let odd: WordEdit | null = null
+  for (let index = 0; index < words.length; index += 1) {
+    const letters = [...words[index]]
+    if (letters.length !== 3) continue
+    if (letters.every((letter) => letter === letters[0])) {
+      triples += 1
+      continue
+    }
+    const counts = new Map<string, number>()
+    for (const letter of letters) counts.set(letter, (counts.get(letter) ?? 0) + 1)
+    const majority = [...counts.entries()].filter(([, count]) => count === 2)
+    if (majority.length !== 1) return null
+    if (odd) return null
+    odd = { index, from: words[index], to: majority[0][0].repeat(3) }
+  }
+  if (!odd || triples < 3) return null
+  return odd
+}
+
+/**
+ * A single letter beside at least three three-letter repeats grows into that repeat
+ * (`ppp qqq rrr sss t` → `ppp qqq rrr sss ttt`). Any other word shape leaves the line alone.
+ */
+export const loneLetterBesideTriples = (text: string): WordEdit | null => {
+  const words = inkWords(text)
+  let triples = 0
+  let single: number | null = null
+  for (let index = 0; index < words.length; index += 1) {
+    const letters = [...words[index]]
+    if (letters.length === 3 && letters.every((letter) => letter === letters[0])) {
+      triples += 1
+      continue
+    }
+    if (letters.length === 1) {
+      if (single !== null) return null
+      single = index
+      continue
+    }
+    return null
+  }
+  if (single === null || triples < 3) return null
+  const word = words[single]
+  return { index: single, from: word, to: word.repeat(3) }
+}
+
+/** A line of three-letter groups with exactly one group that is not three copies of one letter. */
+export const hasOneOddLetterGroup = (text: string) => {
+  const words = inkWords(text)
+  if (words.length < 3 || !words.every((word) => [...word].length === 3)) return false
+  return words.filter((word) => !sameLetterThreeTimes(word)).length === 1
+}
+
+/**
+ * The ink of one dictionary word, read on its own, replaces that word when the isolated reading
+ * is a dictionary word exactly one letter longer (`Watched` → `Wretched`).
+ */
+export const longerKnownCropWord = (
+  word: string,
+  cropText: string,
+  known: (word: string) => boolean,
+): string | null => {
+  const found = inkWords(cropText)
+  if (found.length !== 1) return null
+  const crop = found[0]
+  if (!known(word) || !known(crop)) return null
+  if ([...crop].length !== [...word].length + 1) return null
+  if (wordEdits(word, crop) !== 2) return null
+  return crop
+}
+
+/** `66 Erdkunde"` is the shape of two ticks read as digits in front of a word that already closes a quote. */
+export const quotedWordAfterDoubleSix = (text: string) => /^66 [A-Za-zÄÖÜäöüß]+"/.test(text)
+
+/**
+ * The first two strokes are narrow tall ticks, with a wider gap before the next stroke.
+ * A written 6 is wider than these ticks.
+ */
+export const leadingStrokesAreTicks = (packed: Float64Array) => {
+  const strokes: Array<{ minX: number; maxX: number; minY: number; maxY: number }> = []
+  for (let offset = 0; offset < packed.length;) {
+    const count = packed[offset]
+    let minX = Infinity
+    let maxX = -Infinity
+    let minY = Infinity
+    let maxY = -Infinity
+    for (let index = 0; index < count; index += 1) {
+      const x = packed[offset + 1 + index * 2]
+      const y = packed[offset + 2 + index * 2]
+      minX = Math.min(minX, x)
+      maxX = Math.max(maxX, x)
+      minY = Math.min(minY, y)
+      maxY = Math.max(maxY, y)
+    }
+    strokes.push({ minX, maxX, minY, maxY })
+    offset += 1 + count * 2
+  }
+  strokes.sort((left, right) => left.minX - right.minX)
+  if (strokes.length < 3) return false
+  const tick = (stroke: { minX: number; maxX: number; minY: number; maxY: number }) => {
+    const width = stroke.maxX - stroke.minX
+    const height = stroke.maxY - stroke.minY
+    return height >= 12 && width / Math.max(height, 1) <= 0.4
+  }
+  if (!tick(strokes[0]) || !tick(strokes[1])) return false
+  const pairGap = strokes[1].minX - strokes[0].maxX
+  const wordGap = strokes[2].minX - strokes[1].maxX
+  return pairGap >= 0 && pairGap <= 24 && wordGap > pairGap
+}
+
+/** A later beam reading may lowercase one three-letter word when it is no worse than this. */
+export const SHORT_CASE_MARGIN = 3
+
+const letterSkeleton = (text: string) => text.replace(/[A-Za-zÄÖÜäöüß]+/gu, 'W')
+
+/**
+ * A non-initial three-letter word becomes lowercase when a close beam reading already has it
+ * lowercase and the rest of the line matches (`Job` → `job`).
+ */
+export const lowercaseShortBeamWord = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+): WordEdit | null => {
+  if (readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  for (const reading of readings.slice(1)) {
+    if (top.score - reading.score > SHORT_CASE_MARGIN) continue
+    if (letterSkeleton(top.text) !== letterSkeleton(reading.text)) continue
+    const left = inkWords(top.text)
+    const right = inkWords(reading.text)
+    if (left.length !== right.length || left.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < left.length; index += 1) {
+      if (left[index] !== right[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1 || diffs[0] === 0) continue
+    const index = diffs[0]
+    const from = left[index]
+    const to = right[index]
+    if ([...from].length !== 3 || to !== from.toLowerCase() || from === to) continue
+    if (from.slice(1) !== from.slice(1).toLowerCase()) continue
+    if (words[index] !== from) continue
+    return { index, from, to }
+  }
+  return null
+}
+
+/**
+ * An English line may lowercase its first letter when a beam reading of the same line
+ * is no worse than this. `Upward!` sits 2.46 nats away, so the margin stays below that.
+ */
+export const INITIAL_CASE_MARGIN = 1.5
+
+/**
+ * The lowercase letter has to be this visible in the first character. `wretched` is 0.24;
+ * the capital `Upward` line that the beam also nearly lowercases is 0.21.
+ */
+export const INITIAL_CASE_ALT = 0.23
+
+/**
+ * A later dictionary word may take the case a beam reading already has, when that reading
+ * is no worse than this. `Stand` is 0.28 nats down. `Oral` at 0.65 stays.
+ */
+export const LATER_CASE_MARGIN = 0.35
+
+/**
+ * Lowercase the first letter when the beam's top reading still starts with that capital,
+ * a close reading is the same line already lowercase, that lowercase letter is visible,
+ * and the word is in the dictionary (`Wretched` → `wretched`). German is excluded.
+ * A name the dictionary does not contain stays (`Chudleigh`). A one-letter word and an
+ * all-capital word stay as written.
+ */
+export const lowercaseInitialFromBeam = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  language: string,
+  characters: ReadonlyArray<{ char: string; alternatives?: ReadonlyArray<{ char: string; confidence: number }> }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (language !== 'en' || readings.length < 2) return null
+  const best = readings[0]
+  if (!best?.text) return null
+  const line = [...text]
+  const beam = [...best.text]
+  if (!line.length || !beam.length || line[0] !== beam[0]) return null
+  const first = beam[0]
+  const lower = first.toLowerCase()
+  if (lower === first || [...lower].length !== 1) return null
+  const lowered = lower + beam.slice(1).join('')
+  const close = readings.some((reading) => reading.text === lowered && best.score - reading.score <= INITIAL_CASE_MARGIN)
+  if (!close) return null
+  const from = inkWords(text)[0]
+  if (!from || from[0] !== first || !known(from)) return null
+  const letters = [...from]
+  if (letters.length < 2 || letters.slice(1).some((letter) => letter !== letter.toLowerCase())) return null
+  const head = characters[0]
+  const visible = head?.char === first && head.alternatives?.some((alternative) => alternative.char === lower && alternative.confidence >= INITIAL_CASE_ALT)
+  if (!visible) return null
+  const to = lower + letters.slice(1).join('')
+  if (to === from) return null
+  return { index: 0, from, to }
+}
+
+/**
+ * A later English dictionary word takes the capital or lowercase spelling a close beam
+ * reading already has (`Piecemeal` → `piecemeal`, `symbol` → `Symbol`). German stays.
+ * A word written against a quote stays (`'Pumpkin`).
+ */
+export const laterDictionaryCaseFromBeam = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  language: string,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (language !== 'en' || readings.length < 2) return null
+  const top = readings[0]
+  const located = [...text.matchAll(/[A-Za-zÄÖÜäöüß]+/gu)]
+  let found: WordEdit | null = null
+  for (let index = 1; index < located.length; index += 1) {
+    const match = located[index]
+    const word = match[0]
+    const letters = [...word]
+    if (letters.length < 4 || !known(word)) continue
+    const start = match.index ?? 0
+    let cursor = start - 1
+    while (cursor >= 0 && text[cursor] === ' ') cursor -= 1
+    if (text[cursor] === "'" || text[cursor] === '"') continue
+    const lower = word.toLowerCase()
+    const head = letters[0].toUpperCase()
+    if ([...head].length !== 1) continue
+    const title = `${head}${letters.slice(1).join('').toLowerCase()}`
+    const to = word === title && word !== lower ? lower : word === lower ? title : null
+    if (!to || to === word) continue
+    if (word === title && letters.slice(1).some((letter) => letter !== letter.toLowerCase())) continue
+    const candidate = `${text.slice(0, start)}${to}${text.slice(start + word.length)}`
+    const close = readings.some((reading) => {
+      const gap = top.score - reading.score
+      return reading.text === candidate && gap > 0 && gap <= LATER_CASE_MARGIN
+    })
+    if (!close) continue
+    if (found) return null
+    found = { index, from: word, to }
+  }
+  return found
+}
+
+/**
+ * An unknown word may take the one dictionary spelling a beam reading already has,
+ * when that reading is no worse than this. `one` is 0.22 nats down. A different word
+ * about one nat down stays.
+ */
+export const UNKNOWN_WORD_MARGIN = 0.5
+
+/**
+ * An unknown word takes the dictionary spelling a close reading already has when the
+ * two words differ by one letter (`ane` → `one`). A word of one repeated letter stays (`DDD`).
+ */
+export const unknownWordFromReading = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > UNKNOWN_WORD_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    const letters = [...from]
+    if (letters.length < 3 || letters.length !== [...to].length) continue
+    if (letters.every((letter) => letter === letters[0])) continue
+    if (from.toLowerCase() === to.toLowerCase()) continue
+    if (known(from) || !known(to)) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
+ * Another unlisted spelling a close reading already has. An interior letter has to be
+ * very close (`Topman` → `Tupman`, 0.09 nats). The first letter of a longer word may
+ * be a little farther (`nichtbild` → `Lichtbild`, 0.46 nats). A dictionary word stays.
+ */
+export const UNLISTED_LETTER_MARGIN = 0.12
+export const UNLISTED_INITIAL_MARGIN = 0.5
+
+export const unlistedWordFromReading = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > UNLISTED_INITIAL_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    const letters = [...from]
+    const next = [...to]
+    if (letters.length < 6 || letters.length !== next.length) continue
+    if (letters.every((letter) => letter.toLowerCase() === letters[0].toLowerCase())) continue
+    if (from.toLowerCase() === to.toLowerCase()) continue
+    let substitutions = 0
+    let first = false
+    for (let cursor = 0; cursor < letters.length; cursor += 1) {
+      if (letters[cursor] === next[cursor]) continue
+      substitutions += 1
+      if (cursor === 0) first = true
+    }
+    if (substitutions !== 1) continue
+    const allowed = first
+      ? letters.length >= 8 && gap <= UNLISTED_INITIAL_MARGIN
+      : gap <= UNLISTED_LETTER_MARGIN
+    if (!allowed) continue
+    if (known(from) || known(to)) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
+ * A dictionary word of at least eight letters drops its final letter when a close reading
+ * already has that shorter dictionary word (`agierenden` → `agierende`). `time` → `tim`
+ * is much farther down the beam, and a short word stays (`beet`).
+ */
+export const KNOWN_ENDING_MARGIN = 1.4
+
+export const knownEndingFromReading = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > KNOWN_ENDING_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    if ([...from].length < 8) continue
+    const extra = oneExtraLetter(to, from)
+    if (!extra || extra.index !== [...to].length) continue
+    if (!known(from) || !known(to)) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
+ * A dictionary word takes the shorter dictionary word a tied reading already has when
+ * the raw trace is that shorter word plus one final letter (`Hour` with trace `Howr`
+ * → `How`). Dropping the last letter of the trace itself stays (`time` → `tim`).
+ */
+export const TRACED_SHORT_MARGIN = 0.5
+
+export const tracedShorterKnownWord = (
+  text: string,
+  greedy: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const top = readings[0]
+  if (!top) return null
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  if (!words.length || words.length !== traced.length) return null
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap < 0 || gap > TRACED_SHORT_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    const trace = traced[index]
+    if ([...to].length < 3 || trace === from) continue
+    const extra = oneExtraLetter(to, trace)
+    if (!extra || extra.index !== [...to].length) continue
+    if (!known(from) || !known(to)) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
+ * An unlisted word takes the unlisted spelling the pen and a close reading already share
+ * when the two spellings are two edits apart (`Sitzplatten` → `Stützplatten`). A one-letter
+ * difference stays with the narrower rule. A dictionary word stays.
+ */
+export const TRACED_UNLISTED_MARGIN = 0.7
+
+export const tracedUnlistedWord = (
+  text: string,
+  greedy: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const top = readings[0]
+  if (!top) return null
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  if (!words.length || words.length !== traced.length) return null
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > TRACED_UNLISTED_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    if (traced[index] !== to) continue
+    if ([...from].length < 6 || [...to].length < 6) continue
+    if (wordEdits(from, to) !== 2) continue
+    if (known(from) || known(to)) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
+ * A dictionary word grows by a two-letter ending when a close reading already has that
+ * longer dictionary word (`Ins` → `Insel`). One added letter stays with the narrower rule.
+ */
+export const KNOWN_SUFFIX_MARGIN = 1.2
+
+export const knownSuffixFromReading = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > KNOWN_SUFFIX_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    const fromLetters = [...from]
+    const toLetters = [...to]
+    if (fromLetters.length < 3 || toLetters.length !== fromLetters.length + 2) continue
+    if (!to.startsWith(from)) continue
+    if (!known(from) || !known(to)) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
+ * Spaces between words of at least five letters go away when a close reading already
+ * wrote those words as one. The reading that joins the most such words wins
+ * (`Druck ausgleich kolbenschieber` → `Druckausgleichkolbenschieber`).
+ */
+export const JOINED_READING_MARGIN = 0.8
+
+export const joinedReadingFromClose = <T extends { char: string }>(
+  characters: T[],
+  readings: Array<{ text: string; score: number }>,
+): T[] | null => {
+  const text = characters.map((character) => character.char).join('')
+  const top = readings[0]
+  if (!top || !text) return null
+  const letter = /[A-Za-zÄÖÜäöüß]/u
+  const allowed = new Set<number>()
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] !== ' ') continue
+    let start = index - 1
+    while (start >= 0 && letter.test(text[start])) start -= 1
+    let end = index + 1
+    while (end < text.length && letter.test(text[end])) end += 1
+    if (index - start - 1 < 5 || end - index - 1 < 5) continue
+    allowed.add(index)
+  }
+  let best: { count: number; text: string; removed: number[] } | null = null
+  let conflict = false
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > JOINED_READING_MARGIN) continue
+    const other = reading.text
+    if (other.length >= text.length) continue
+    let left = 0
+    let right = 0
+    const removed: number[] = []
+    let matches = true
+    while (left < text.length && right < other.length) {
+      if (text[left] === other[right]) {
+        left += 1
+        right += 1
+      } else if (text[left] === ' ') {
+        removed.push(left)
+        left += 1
+      } else {
+        matches = false
+        break
+      }
+    }
+    if (!matches || right !== other.length || left !== text.length || !removed.length) continue
+    if (removed.some((index) => !allowed.has(index))) continue
+    if (best && best.count === removed.length && best.text !== other) conflict = true
+    if (!best || removed.length > best.count) {
+      best = { count: removed.length, text: other, removed }
+      conflict = false
+    }
+  }
+  if (!best || conflict) return null
+  const drop = new Set(best.removed)
+  return characters.filter((_, index) => !drop.has(index))
+}
+
+/**
+ * A dictionary word takes the one different vowel a close reading already has when the
+ * pen did not draw that vowel (`Regal` → `Regel`, `ling` → `long`). A four-letter word
+ * may take that vowel in its second letter from a little farther down (`lost` → `last`).
+ * A change of case stays. The pen's own vowel stays (`husbandman`).
+ */
+export const KNOWN_VOWEL_MARGIN = 0.7
+
+/** Second vowel of a four-letter word. `were` → `ware` is farther down than this. */
+export const KNOWN_VOWEL_SHORT_MARGIN = 1.5
+
+const VOWEL = /[aeiouäöü]/iu
+
+export const knownVowelFromReading = (
+  text: string,
+  greedy: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > KNOWN_VOWEL_SHORT_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    const fromLetters = [...from]
+    const toLetters = [...to]
+    if (fromLetters.length < 4 || fromLetters.length !== toLetters.length) continue
+    let substitutions = 0
+    let vowelAt = -1
+    for (let cursor = 0; cursor < fromLetters.length; cursor += 1) {
+      if (fromLetters[cursor] === toLetters[cursor]) continue
+      substitutions += 1
+      const left = fromLetters[cursor]
+      const right = toLetters[cursor]
+      if (left.toLowerCase() === right.toLowerCase()) continue
+      if (VOWEL.test(left) && VOWEL.test(right)) vowelAt = cursor
+    }
+    const shortSecond = fromLetters.length === 4 && vowelAt === 1
+    if (substitutions !== 1 || vowelAt < 0) continue
+    if (!shortSecond && gap > KNOWN_VOWEL_MARGIN) continue
+    if (traced.length === words.length && traced[index] === to) continue
+    if (!known(from) || !known(to)) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
+ * A word with one interior capital splits there when a close reading and the pen already
+ * wrote the two pieces (`OperationAl` → `Operation Ai`). The second piece may differ by
+ * one letter. A word that is already all capitals stays together.
+ */
+export const CAMEL_SPLIT_MARGIN = 1
+
+const interiorCapitalAt = (word: string) => {
+  const letters = [...word]
+  let at = -1
+  for (let index = 1; index < letters.length; index += 1) {
+    const previous = letters[index - 1]
+    const letter = letters[index]
+    const lowerThenUpper = previous === previous.toLowerCase() && previous !== previous.toUpperCase()
+      && letter !== letter.toLowerCase()
+    if (!lowerThenUpper) continue
+    if (at !== -1) return -1
+    at = index
+  }
+  return at
+}
+
+export const camelSplitFromReading = <T extends { char: string }>(
+  characters: T[],
+  greedy: string,
+  readings: Array<{ text: string; score: number }>,
+): T[] | null => {
+  const text = characters.map((character) => character.char).join('')
+  const top = readings[0]
+  if (!top || !text) return null
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  let found: { index: number; left: string; right: string } | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > CAMEL_SPLIT_MARGIN) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length + 1) continue
+    let left = 0
+    let right = 0
+    let split: { index: number; left: string; right: string } | null = null
+    let matches = true
+    while (left < words.length && right < other.length) {
+      if (words[left] === other[right]) {
+        left += 1
+        right += 1
+        continue
+      }
+      if (split || right + 1 >= other.length) {
+        matches = false
+        break
+      }
+      const bound = interiorCapitalAt(words[left])
+      const pieces = [...words[left]]
+      if (bound < 1) {
+        matches = false
+        break
+      }
+      const head = pieces.slice(0, bound).join('')
+      const tail = pieces.slice(bound).join('')
+      const second = other[right + 1]
+      const sameLength = [...second].length === [...tail].length
+      const oneLetter = sameLength && [...tail].filter((letter, index) => letter !== [...second][index]).length === 1
+      if (other[right] !== head || (!oneLetter && second !== tail)) {
+        matches = false
+        break
+      }
+      split = { index: left, left: head, right: second }
+      left += 1
+      right += 2
+    }
+    if (!matches || !split || left !== words.length || right !== other.length) continue
+    const tracedPair = traced.some((word, index) => word === split.left && traced[index + 1] === split.right)
+    if (!tracedPair) continue
+    if (found && (found.index !== split.index || found.left !== split.left || found.right !== split.right)) return null
+    found = split
+  }
+  if (!found) return null
+  const spans = [...text.matchAll(/[A-Za-zÄÖÜäöüß]+/gu)]
+  const span = spans[found.index]
+  if (!span || span[0] !== `${found.left}${[...span[0]].slice([...found.left].length).join('')}` || span.index === undefined) return null
+  const bound = [...found.left].length
+  const tail = [...span[0]].slice(bound).join('')
+  const next = characters.slice()
+  const capital = span.index + bound
+  next.splice(capital, 0, { ...next[capital], char: ' ' })
+  const tailLetters = [...found.right]
+  for (let index = 0; index < tailLetters.length; index += 1) {
+    const at = capital + 1 + index
+    if (next[at]?.char === tail[index]) next[at] = { ...next[at], char: tailLetters[index] }
+  }
+  return next
+}
+
+/**
+ * A four-letter unknown word takes the three-letter dictionary word a close reading
+ * already has when the two spellings are two edits apart (`eine` → `one`).
+ */
+export const SHORT_KNOWN_MARGIN = 1.2
+
+export const shortKnownWordFromReading = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > SHORT_KNOWN_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    if ([...from].length !== 4 || [...to].length !== 3) continue
+    if (wordEdits(from, to) !== 2) continue
+    if (known(from) || !known(to)) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
+ * A two-letter English function word becomes the function word a close reading already
+ * has when the next word starts with it (`to being` → `be being`).
+ */
+export const FUNCTION_BEFORE_STEM_MARGIN = 1.5
+
+const TWO_LETTER_FUNCTION = new Set([
+  'to', 'be', 'of', 'in', 'on', 'at', 'by', 'or', 'as', 'is', 'it', 'we', 'he', 'my', 'so', 'do', 'no', 'if', 'up', 'an', 'am', 'us', 'me',
+])
+
+export const functionWordBeforeStem = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  language: string,
+): WordEdit | null => {
+  if (language !== 'en' || readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > FUNCTION_BEFORE_STEM_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    const next = words[index + 1]
+    if ([...from].length !== 2 || [...to].length !== 2 || !next || [...next].length < 4) continue
+    if (!TWO_LETTER_FUNCTION.has(from.toLowerCase()) || !TWO_LETTER_FUNCTION.has(to.toLowerCase())) continue
+    if (from.toLowerCase() === to.toLowerCase()) continue
+    if (!next.toLowerCase().startsWith(to.toLowerCase())) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
+ * A four-letter dictionary word that is not the first word takes a different first or
+ * second consonant from a close reading (`orly` → `only`, `wind` → `mind`). A vowel stays
+ * with the vowel rule. A later consonant stays (`life`, `five`). When the pen's token is
+ * also four letters, that token still has the current consonant; a token that already is
+ * the other word stays.
+ */
+export const KNOWN_CONSONANT_MARGIN = 1.2
+
+const consonantLetter = (letter: string) => /\p{L}/u.test(letter) && !VOWEL.test(letter)
+
+export const knownConsonantFromReading = (
+  text: string,
+  greedy: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > KNOWN_CONSONANT_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    if (index === 0 || from.toLowerCase() === to.toLowerCase()) continue
+    const fromLetters = [...from]
+    const toLetters = [...to]
+    if (fromLetters.length !== 4 || toLetters.length !== 4) continue
+    let substitutions = 0
+    let at = -1
+    for (let cursor = 0; cursor < fromLetters.length; cursor += 1) {
+      if (fromLetters[cursor] === toLetters[cursor]) continue
+      substitutions += 1
+      at = cursor
+    }
+    if (substitutions !== 1 || at > 1) continue
+    const left = fromLetters[at]
+    const right = toLetters[at]
+    if (left.toLowerCase() === right.toLowerCase()) continue
+    if (!consonantLetter(left) || !consonantLetter(right)) continue
+    if (!known(from) || !known(to)) continue
+    if (traced.length === words.length) {
+      const trace = traced[index]
+      if (trace === to) continue
+      const traceLetters = [...trace]
+      if (traceLetters.length === fromLetters.length && traceLetters[at] !== left) continue
+    }
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
+ * An unknown word splits into the two dictionary words a close reading already wrote when
+ * that same reading also changes the final letter of one other dictionary word
+ * (`wirdseit` … `großen` → `wird seit` … `großem`). A split by itself stays joined
+ * (`Hauptarten`). A change of case stays (`vier`).
+ */
+export const SPLIT_ENDING_MARGIN = 0.8
+
+const finalLetterSubstitution = (from: string, to: string) => {
+  const left = [...from]
+  const right = [...to]
+  if (left.length < 2 || left.length !== right.length || from.toLowerCase() === to.toLowerCase()) return false
+  let count = 0
+  let at = -1
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] === right[index]) continue
+    count += 1
+    at = index
+  }
+  return count === 1 && at === left.length - 1
+}
+
+export const splitAndFinalLetterFromReading = <T extends { char: string }>(
+  characters: T[],
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): T[] | null => {
+  if (readings.length < 2 || !characters.length) return null
+  const text = characters.map((character) => character.char).join('')
+  const words = inkWords(text)
+  const top = readings[0]
+  let found: { split: number; left: string; right: string; sub: number; to: string } | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > SPLIT_ENDING_MARGIN) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length + 1) continue
+    let left = 0
+    let right = 0
+    let split: { index: number; left: string; right: string } | null = null
+    let sub: { index: number; to: string } | null = null
+    let matches = true
+    while (left < words.length && right < other.length) {
+      if (words[left] === other[right]) {
+        left += 1
+        right += 1
+        continue
+      }
+      const head = other[right]
+      const tail = other[right + 1]
+      if (!split && tail && words[left] === `${head}${tail}`) {
+        const longEnough = [...head].length >= 3 && [...tail].length >= 3
+        if (longEnough && known(head) && known(tail) && !known(words[left])) {
+          split = { index: left, left: head, right: tail }
+          left += 1
+          right += 2
+          continue
+        }
+      }
+      if (!sub && finalLetterSubstitution(words[left], other[right]) && known(words[left]) && known(other[right])) {
+        sub = { index: left, to: other[right] }
+        left += 1
+        right += 1
+        continue
+      }
+      matches = false
+      break
+    }
+    if (!matches || !split || !sub || left !== words.length || right !== other.length) continue
+    const spans = [...text.matchAll(/[A-Za-zÄÖÜäöüß]+/gu)]
+    let expected = text
+    const edits = [
+      { index: split.index, to: `${split.left} ${split.right}` },
+      { index: sub.index, to: sub.to },
+    ].sort((first, second) => second.index - first.index)
+    for (const edit of edits) {
+      const span = spans[edit.index]
+      if (!span || span.index === undefined) {
+        matches = false
+        break
+      }
+      expected = expected.slice(0, span.index) + edit.to + expected.slice(span.index + span[0].length)
+    }
+    if (!matches || expected !== reading.text) continue
+    const proposal = { split: split.index, left: split.left, right: split.right, sub: sub.index, to: sub.to }
+    if (found && (found.split !== proposal.split || found.left !== proposal.left || found.right !== proposal.right || found.sub !== proposal.sub || found.to !== proposal.to)) return null
+    found = proposal
+  }
+  if (!found) return null
+  const rewritten = rewriteSameLengthWord(characters, found.sub, found.to)
+  if (!rewritten) return null
+  const run = letterRuns(rewritten)[found.split]
+  const cut = run ? run.start + [...found.left].length : -1
+  if (!run || run.word !== `${found.left}${found.right}` || cut <= run.start || cut >= run.end) return null
+  const next = rewritten.slice()
+  next.splice(cut, 0, { ...next[cut], char: ' ' })
+  return next
+}
+
+/**
+ * A number keeps the one different digit the pen already wrote (`200.000` with trace
+ * `260.000` → `260.000`). An added digit stays out (`13.000` with trace `613.000`).
+ * Two numbers that disagree with the pen stay as the beam wrote them.
+ */
+export const greedyDigitFromTrace = <T extends { char: string }>(
+  characters: T[],
+  greedy: string,
+): T[] | null => {
+  if (!characters.length || !greedy) return null
+  const text = characters.map((character) => character.char).join('')
+  const number = /\d[\d.,]*\d|\d/gu
+  const hyp = [...text.matchAll(number)]
+  const traced = [...greedy.matchAll(number)]
+  if (!hyp.length || hyp.length !== traced.length) return null
+  const separators = (value: string) => value.replace(/\d/gu, '')
+  const diffs: number[] = []
+  for (let index = 0; index < hyp.length; index += 1) {
+    const from = hyp[index][0]
+    const to = traced[index][0]
+    if (from === to) continue
+    if (separators(from) !== separators(to) || from.length !== to.length) return null
+    let digitDiffs = 0
+    for (let cursor = 0; cursor < from.length; cursor += 1) {
+      if (from[cursor] !== to[cursor]) digitDiffs += 1
+    }
+    if (digitDiffs !== 1) return null
+    diffs.push(index)
+  }
+  if (diffs.length !== 1) return null
+  const index = diffs[0]
+  const from = hyp[index][0]
+  const to = traced[index][0]
+  const start = hyp[index].index
+  if (start === undefined) return null
+  let offset = 0
+  for (let cursor = 0; cursor < from.length; cursor += 1) {
+    if (from[cursor] !== to[cursor]) offset = cursor
+  }
+  const at = start + offset
+  if (characters[at]?.char !== from[offset]) return null
+  const next = characters.slice()
+  next[at] = { ...next[at], char: to[offset] }
+  return next
+}
+
+/**
+ * A dictionary word takes the final letter a close reading already has when that same
+ * reading also puts one digit back into a number (`anderer` … `13.000` → `anderem` …
+ * `613.000`). Either change alone stays.
+ */
+export const ENDING_DIGIT_MARGIN = 2
+
+const numberTokens = (value: string) => [...value.matchAll(/\d[\d.,]*\d|\d/gu)]
+
+const gainsOneDigit = (shorter: string, longer: string) => {
+  const from = shorter.replace(/\D/gu, '')
+  const to = longer.replace(/\D/gu, '')
+  if (!from || to.length !== from.length + 1) return false
+  return [...to].some((_, index) => `${to.slice(0, index)}${to.slice(index + 1)}` === from)
+}
+
+export const endingAndDigitFromReading = <T extends { char: string }>(
+  characters: T[],
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): T[] | null => {
+  if (readings.length < 2 || !characters.length) return null
+  const text = characters.map((character) => character.char).join('')
+  const words = inkWords(text)
+  const numbers = numberTokens(text)
+  const top = readings[0]
+  let found: { word: number; to: string; number: number; digits: string } | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > ENDING_DIGIT_MARGIN) continue
+    const other = inkWords(reading.text)
+    const otherNumbers = numberTokens(reading.text)
+    if (other.length !== words.length || !numbers.length || otherNumbers.length !== numbers.length) continue
+    const wordDiffs = words.flatMap((word, index) => word === other[index] ? [] : [index])
+    const numberDiffs = numbers.flatMap((token, index) => token[0] === otherNumbers[index][0] ? [] : [index])
+    if (wordDiffs.length !== 1 || numberDiffs.length !== 1) continue
+    const wordIndex = wordDiffs[0]
+    const numberIndex = numberDiffs[0]
+    const from = words[wordIndex]
+    const to = other[wordIndex]
+    const fromNumber = numbers[numberIndex][0]
+    const toNumber = otherNumbers[numberIndex][0]
+    if (!finalLetterSubstitution(from, to) || !known(from) || !known(to)) continue
+    if (!gainsOneDigit(fromNumber, toNumber)) continue
+    const spans = [...text.matchAll(/[A-Za-zÄÖÜäöüß]+/gu)]
+    const wordSpan = spans[wordIndex]
+    const numberSpan = numbers[numberIndex]
+    if (!wordSpan || wordSpan.index === undefined || numberSpan.index === undefined) continue
+    const pieces = [
+      { at: wordSpan.index, length: wordSpan[0].length, value: to },
+      { at: numberSpan.index, length: numberSpan[0].length, value: toNumber },
+    ].sort((left, right) => right.at - left.at)
+    let expected = text
+    for (const piece of pieces) {
+      expected = expected.slice(0, piece.at) + piece.value + expected.slice(piece.at + piece.length)
+    }
+    if (expected !== reading.text) continue
+    const proposal = { word: wordIndex, to, number: numberIndex, digits: toNumber }
+    if (found && (found.word !== proposal.word || found.to !== proposal.to || found.number !== proposal.number || found.digits !== proposal.digits)) return null
+    found = proposal
+  }
+  if (!found) return null
+  const rewritten = rewriteSameLengthWord(characters, found.word, found.to)
+  const numberSpan = numbers[found.number]
+  const start = numberSpan.index
+  if (!rewritten || start === undefined) return null
+  const fromNumber = numberSpan[0]
+  if (rewritten.slice(start, start + fromNumber.length).map((character) => character.char).join('') !== fromNumber) return null
+  const glyph = rewritten[start]
+  return [
+    ...rewritten.slice(0, start),
+    ...[...found.digits].map((char) => ({ ...glyph, char })),
+    ...rewritten.slice(start + fromNumber.length),
+  ]
+}
+
+/**
+ * A quote stuck to a closing parenthesis moves in front of the following lowercase word
+ * (`(Tanis 6a)" if` → `(Tanis 6a) "if`).
+ */
+export const quoteAfterParenthesis = <T extends { char: string }>(characters: T[]): T[] | null => {
+  const next = characters.slice()
+  let changed = false
+  for (let index = 0; index < next.length - 3; index += 1) {
+    const quote = next[index + 1].char
+    if (next[index].char !== ')' || (quote !== '"' && quote !== "'") || next[index + 2].char !== ' ') continue
+    if (!/[a-zäöüß]/u.test(next[index + 3].char)) continue
+    const quoteChar = next[index + 1]
+    next[index + 1] = next[index + 2]
+    next[index + 2] = quoteChar
+    changed = true
+    index += 2
+  }
+  return changed ? next : null
+}
+
+/**
+ * A German number before a short run of capitals takes the ordinal period (`1 FC` → `1. FC`).
+ */
+export const periodBeforeCapitals = <T extends { char: string }>(
+  characters: T[],
+  language: string,
+): T[] | null => {
+  if (language !== 'de') return null
+  const next = characters.slice()
+  let changed = false
+  for (let index = 0; index < next.length - 3; index += 1) {
+    if (!/\d/u.test(next[index].char) || next[index + 1].char !== ' ') continue
+    let cursor = index + 2
+    let count = 0
+    while (cursor < next.length && /[A-ZÄÖÜ]/u.test(next[cursor].char)) {
+      count += 1
+      cursor += 1
+    }
+    if (count < 2 || count > 4) continue
+    if (cursor < next.length && /[A-Za-zÄÖÜäöüß]/u.test(next[cursor].char)) continue
+    next.splice(index + 1, 0, { ...next[index], char: '.' })
+    changed = true
+    index = cursor
+  }
+  return changed ? next : null
+}
+
+/**
+ * A closing parenthesis with no opening one, sitting before a capital, is a period
+ * (`genannt) Die` → `genannt. Die`).
+ */
+export const strayParenBeforeCapital = <T extends { char: string }>(characters: T[]): T[] | null => {
+  if (characters.some((character) => character.char === '(')) return null
+  const next = characters.slice()
+  let changed = false
+  for (let index = 0; index < next.length - 2; index += 1) {
+    if (next[index].char !== ')' || next[index + 1].char !== ' ') continue
+    if (!/[A-ZÄÖÜ]/u.test(next[index + 2].char)) continue
+    next[index] = { ...next[index], char: '.' }
+    changed = true
+  }
+  return changed ? next : null
+}
+
+/**
+ * A closing quote jammed against a different opening quote takes a space
+ * (`'Garz'"Such` → `'Garz' "Such`). Repeated marks such as `'''` stay together.
+ */
+export const spaceBetweenDifferentQuotes = <T extends { char: string }>(characters: T[]): T[] | null => {
+  const quote = (char: string) => char === '"' || char === "'"
+  const next = characters.slice()
+  let changed = false
+  for (let index = 0; index < next.length - 1; index += 1) {
+    const left = next[index].char
+    const right = next[index + 1].char
+    if (!quote(left) || !quote(right) || left === right) continue
+    next.splice(index + 1, 0, { ...next[index], char: ' ' })
+    changed = true
+    index += 2
+  }
+  return changed ? next : null
+}
+
+/** A letter or digit keeps a closing bracket against it (`up ]` → `up]`). */
+export const closeBracketAfterLetter = <T extends { char: string }>(characters: T[]): T[] | null => {
+  const next = characters.slice()
+  let changed = false
+  for (let index = 0; index < next.length - 2; index += 1) {
+    if (next[index + 1].char !== ' ' || next[index + 2].char !== ']') continue
+    if (!/[A-Za-z0-9ÄÖÜäöüß]/u.test(next[index].char)) continue
+    next.splice(index + 1, 1)
+    changed = true
+  }
+  return changed ? next : null
+}
+
+/** A run of three identical marks takes a space before a different mark (`***` then slashes). */
+export const spaceBetweenSymbolRuns = <T extends { char: string }>(characters: T[]): T[] | null => {
+  const symbol = (char: string) => char !== ' ' && !/[A-Za-z0-9ÄÖÜäöüß]/u.test(char)
+  const next = characters.slice()
+  let changed = false
+  for (let index = 0; index < next.length;) {
+    const mark = next[index].char
+    if (!symbol(mark)) { index += 1; continue }
+    let end = index + 1
+    while (end < next.length && next[end].char === mark) end += 1
+    if (end - index >= 3 && end < next.length && symbol(next[end].char) && next[end].char !== mark) {
+      next.splice(end, 0, { ...next[end], char: ' ' })
+      changed = true
+      index = end + 1
+      continue
+    }
+    index = end
+  }
+  return changed ? next : null
+}
+
+/**
+ * A word ending in `]` takes the one opening bracket the raw trace still has
+ * (`Queen]` with trace `Qu[een]` → `Qu[een]`).
+ */
+export const openingBracketFromTrace = <T extends { char: string }>(
+  characters: T[],
+  greedy: string,
+): T[] | null => {
+  const next = characters.slice()
+  let changed = false
+  let index = 0
+  while (index < next.length) {
+    if (next[index].char !== ']') { index += 1; continue }
+    let start = index - 1
+    while (start >= 0 && /[A-Za-zÄÖÜäöüß]/u.test(next[start].char)) start -= 1
+    start += 1
+    const letters = next.slice(start, index).map((character) => character.char).join('')
+    if (letters.length < 2) { index += 1; continue }
+    const places: number[] = []
+    for (let at = 0; at <= letters.length; at += 1) {
+      const guess = `${letters.slice(0, at)}[${letters.slice(at)}]`
+      if (greedy.includes(guess)) places.push(at)
+    }
+    if (places.length !== 1) { index += 1; continue }
+    const at = places[0]
+    next.splice(start + at, 0, { ...next[Math.min(start + at, index)], char: '[' })
+    changed = true
+    index += 2
+  }
+  return changed ? next : null
+}
+
+const FUNCTION_WORD = new Set([
+  'with', 'from', 'that', 'this', 'have', 'been', 'your', 'were', 'they', 'them', 'into', 'over', 'upon', 'than', 'then',
+  'eine', 'einen', 'einem', 'einer', 'dass', 'wenn', 'weil', 'ohne', 'nach', 'oder', 'aber', 'auch', 'sich', 'sind', 'kann',
+])
+
+/**
+ * An unknown join of a function word and another dictionary word splits again when the top
+ * reading already has the space (`withfive` → `with five`). A compound such as `Naturdenk` stays one word.
+ */
+export const splitFunctionWordJoin = <T extends { char: string }>(
+  characters: T[],
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): T[] | null => {
+  const text = characters.map((character) => character.char).join('')
+  const top = readings[0]?.text ?? ''
+  const beam = inkWords(text)
+  const read = inkWords(top)
+  let beamIndex = 0
+  let readIndex = 0
+  let split: { index: number; cut: number } | null = null
+  while (beamIndex < beam.length && readIndex < read.length) {
+    if (foldInkWord(beam[beamIndex]) === foldInkWord(read[readIndex])) {
+      beamIndex += 1
+      readIndex += 1
+      continue
+    }
+    const left = read[readIndex]
+    const right = read[readIndex + 1]
+    const joined = beam[beamIndex]
+    if (
+      right
+      && left
+      && joined
+      && foldInkWord(joined) === foldInkWord(left + right)
+      && [...left].length >= 4
+      && [...right].length >= 4
+      && [...left].length + [...right].length === [...joined].length
+      && FUNCTION_WORD.has(foldInkWord(left))
+      && !known(joined)
+      && known(left)
+      && known(right)
+    ) {
+      if (split) return null
+      split = { index: beamIndex, cut: [...left].length }
+      beamIndex += 1
+      readIndex += 2
+      continue
+    }
+    return null
+  }
+  if (!split || beamIndex !== beam.length || readIndex !== read.length) return null
+  const run = letterRuns(characters)[split.index]
+  if (!run) return null
+  const at = run.start + split.cut
+  const next = characters.slice()
+  next.splice(at, 0, { ...characters[at - 1], char: ' ' })
+  return next
+}
+
+/** A close reading may join two dictionary words when the compound is no worse than this. `einfließen` is 0.74 nats down. */
+export const DICTIONARY_JOIN_MARGIN = 0.8
+
+/**
+ * Two dictionary words become the compound a close reading already wrote, when that compound
+ * is itself a dictionary word (`ein fließen` → `einfließen`).
+ */
+export const dictionaryJoinFromReading = <T extends { char: string }>(
+  characters: T[],
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): T[] | null => {
+  const text = characters.map((character) => character.char).join('')
+  const top = readings[0]
+  if (!top) return null
+  const beam = inkWords(text)
+  let found: { index: number } | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > DICTIONARY_JOIN_MARGIN) continue
+    const read = inkWords(reading.text)
+    if (read.length !== beam.length - 1) continue
+    let beamIndex = 0
+    let readIndex = 0
+    let join: { index: number } | null = null
+    let aligned = true
+    while (beamIndex < beam.length && readIndex < read.length) {
+      if (beam[beamIndex] === read[readIndex]) {
+        beamIndex += 1
+        readIndex += 1
+        continue
+      }
+      const left = beam[beamIndex]
+      const right = beam[beamIndex + 1]
+      const joined = read[readIndex]
+      if (
+        right
+        && joined
+        && left + right === joined
+        && known(left)
+        && known(right)
+        && known(joined)
+      ) {
+        if (join) return null
+        join = { index: beamIndex }
+        beamIndex += 2
+        readIndex += 1
+        continue
+      }
+      aligned = false
+      break
+    }
+    if (!aligned || !join || beamIndex !== beam.length || readIndex !== read.length) continue
+    if (found && found.index !== join.index) return null
+    found = join
+  }
+  if (!found) return null
+  const runs = letterRuns(characters)
+  const left = runs[found.index]
+  const right = runs[found.index + 1]
+  if (!left || !right) return null
+  const between = characters.slice(left.end, right.start)
+  if (between.length !== 1 || between[0].char !== ' ') return null
+  return [...characters.slice(0, left.end), ...characters.slice(right.start)]
+}
+
+const INITIAL_STOP = new Set([
+  'the', 'and', 'for', 'of', 'to', 'in', 'a', 'an', 'on', 'at', 'by', 'or',
+  'der', 'die', 'das', 'den', 'dem', 'des', 'und', 'von', 'mit', 'auf', 'ist', 'ein',
+])
+
+/**
+ * A lowercase word after a single capital initial takes a capital (`J. fox` → `J. Fox`).
+ * A function word in that place stays lowercase.
+ */
+export const capitalizeWordAfterInitial = (text: string): WordEdit | null => {
+  const located = [...text.matchAll(/[A-Za-zÄÖÜäöüß]+/gu)]
+  let found: WordEdit | null = null
+  for (let index = 1; index < located.length; index += 1) {
+    const prev = located[index - 1]
+    const match = located[index]
+    const word = match[0]
+    const initial = prev[0]
+    if ([...initial].length !== 1 || initial === initial.toLowerCase()) continue
+    const start = match.index ?? 0
+    const prevEnd = (prev.index ?? 0) + initial.length
+    const mid = text.slice(prevEnd, start)
+    if (mid !== '. ' && mid !== '.  ') continue
+    if (word !== word.toLowerCase() || [...word].length < 3) continue
+    if (INITIAL_STOP.has(word.toLowerCase())) continue
+    const head = word[0].toUpperCase()
+    if ([...head].length !== 1) continue
+    if (found) return null
+    found = { index, from: word, to: `${head}${word.slice(1)}` }
+  }
+  return found
+}
+
+/**
+ * A dictionary word keeps the shorter ending the raw trace has when that ending is
+ * not itself a dictionary word (`Africa` with trace `Afric` → `Afric`). The dropped
+ * letter is the last one, and the trace word is at least five letters.
+ */
+export const trailingTraceDeletion = (
+  text: string,
+  greedy: string,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  if (!words.length || words.length !== traced.length) return null
+  let found: WordEdit | null = null
+  for (let index = 0; index < words.length; index += 1) {
+    if (words[index] === traced[index]) continue
+    const extra = oneExtraLetter(traced[index], words[index])
+    if (!extra || extra.index !== [...traced[index]].length) return null
+    if ([...traced[index]].length < 5) return null
+    if (!known(words[index]) || known(traced[index])) return null
+    if (found) return null
+    found = { index, from: words[index], to: traced[index] }
+  }
+  return found
+}
+
+/**
+ * A word written against a period keeps the shorter spelling the raw trace has
+ * (`engel.` with trace `engl.` → `engl.`).
+ */
+export const shorterTraceBeforePeriod = (text: string, greedy: string): WordEdit | null => {
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  if (!words.length || words.length !== traced.length) return null
+  const spans = [...text.matchAll(/[A-Za-zÄÖÜäöüß]+/gu)]
+  let found: WordEdit | null = null
+  for (let index = 0; index < words.length; index += 1) {
+    if (words[index] === traced[index]) continue
+    const span = spans[index]
+    if (!span || span.index === undefined) return null
+    if (text[span.index + span[0].length] !== '.') return null
+    if (!oneExtraLetter(traced[index], words[index])) return null
+    if (found) return null
+    found = { index, from: words[index], to: traced[index] }
+  }
+  return found
+}
+
+/**
+ * A reading this close may add the one letter the chosen line dropped.
+ * `Jahre im` is 0.08 nats down and `Bucht` is 0.45.
+ */
+export const ONE_LETTER_READING_MARGIN = 0.5
+
+const oneExtraLetter = (shorter: string, longer: string) => {
+  const left = [...shorter]
+  const right = [...longer]
+  if (right.length !== left.length + 1) return null
+  let index = 0
+  while (index < left.length && left[index] === right[index]) index += 1
+  if (left.slice(index).join('') !== right.slice(index + 1).join('')) return null
+  const char = right[index]
+  if (!char || !/[A-Za-zÄÖÜäöüß]/u.test(char)) return null
+  return { index, char }
+}
+
+/**
+ * A close beam reading that is the chosen line plus one letter keeps that letter
+ * (`Jahre i` → `Jahre im`, `wurde` → `wurden`).
+ */
+export const oneLetterFromCloseReading = <T extends { char: string }>(
+  characters: T[],
+  readings: Array<{ text: string; score: number }>,
+  known?: (word: string) => boolean,
+): T[] | null => {
+  const text = characters.map((character) => character.char).join('')
+  const top = readings[0]
+  if (!top) return null
+  let found: { index: number; char: string } | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > ONE_LETTER_READING_MARGIN) continue
+    const extra = oneExtraLetter(text, reading.text)
+    if (!extra) continue
+    if (found) return null
+    found = extra
+  }
+  if (!found || found.index > characters.length) return null
+  const source = characters[Math.min(found.index, characters.length - 1)]
+  if (!source) return null
+  const next = characters.slice()
+  next.splice(found.index, 0, { ...source, char: found.char })
+  if (known) {
+    let start = found.index
+    while (start > 0 && /[A-Za-zÄÖÜäöüß]/u.test(next[start - 1].char)) start -= 1
+    let end = found.index
+    while (end < next.length && /[A-Za-zÄÖÜäöüß]/u.test(next[end].char)) end += 1
+    const word = next.slice(start, end).map((character) => character.char).join('')
+    if ([...word].length > 3 && !known(word)) return null
+  }
+  return next
+}
+
+/**
+ * A final period that the top reading and the raw trace both still have as a comma
+ * goes back to that comma (`Mirabeau.` → `Mirabeau,`).
+ */
+export const tracedFinalComma = <T extends { char: string }>(
+  characters: T[],
+  readings: Array<{ text: string; score: number }>,
+  greedy: string,
+): T[] | null => {
+  const text = characters.map((character) => character.char).join('')
+  const top = readings[0]?.text ?? ''
+  const trimmed = text.trimEnd()
+  const topTrimmed = top.trimEnd()
+  if (!trimmed.endsWith('.') || !topTrimmed.endsWith(',')) return null
+  if (trimmed.slice(0, -1) !== topTrimmed.slice(0, -1)) return null
+  if (!greedy.trimEnd().endsWith(',')) return null
+  let index = characters.length - 1
+  while (index >= 0 && characters[index].char === ' ') index -= 1
+  if (index < 0 || characters[index].char !== '.') return null
+  const before = characters[index - 1]?.char
+  if (before === '"' || before === "'") return null
+  const next = characters.slice()
+  next[index] = { ...next[index], char: ',' }
+  return next
+}
+
+/** A lone English `i`, including `i'm`, is the pronoun (`i know` → `I know`). */
+export const capitalizeEnglishPronoun = (text: string, language: string): WordEdit | null => {
+  if (language !== 'en') return null
+  const words = inkWords(text)
+  for (let index = 0; index < words.length; index += 1) {
+    if (words[index] === 'i') return { index, from: 'i', to: 'I' }
+  }
+  return null
+}
+
+/**
+ * A raw trace that is the chosen word plus one letter becomes the dictionary word formed by
+ * swapping one adjacent pair (`in` with trace `ien` → `ein`).
+ */
+export const transposedTraceWord = (
+  text: string,
+  greedy: string,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  if (words.length !== traced.length) return null
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]
+    const token = traced[index]
+    if (known(word) || !oneInsertedLetter(word, token)) continue
+    const letters = [...token]
+    const found = new Set<string>()
+    for (let cursor = 0; cursor < letters.length - 1; cursor += 1) {
+      const swapped = letters.slice()
+      const temporary = swapped[cursor]
+      swapped[cursor] = swapped[cursor + 1]
+      swapped[cursor + 1] = temporary
+      const spelling = swapped.join('')
+      if (spelling !== word && known(spelling)) found.add(spelling)
+    }
+    if (found.size !== 1) continue
+    const to = [...found][0]
+    if (to.toLowerCase() === word.toLowerCase()) continue
+    return { index, from: word, to }
+  }
+  return null
+}
+
+/**
+ * An unknown word takes the one confirmed personal spelling within two edits
+ * (`Chudleyh` → `Chudleigh` after that name was confirmed). A dictionary word is left alone.
+ */
+export const personalNeighborEdits = (
+  text: string,
+  personal: readonly string[],
+  baseKnown: (word: string) => boolean,
+): WordEdit[] => {
+  if (!personal.length) return []
+  const edits: WordEdit[] = []
+  const words = inkWords(text)
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]
+    if ([...word].length < 6 || baseKnown(word)) continue
+    const folded = foldInkWord(word)
+    const hits: string[] = []
+    for (const candidate of personal) {
+      const target = foldInkWord(candidate)
+      if ([...target].length < 6) continue
+      const distance = wordEdits(folded, target)
+      if (distance === 0 || distance > 2) continue
+      hits.push(target)
+      if (hits.length > 1) break
+    }
+    if (hits.length !== 1) continue
+    const letters = [...hits[0]]
+    const source = [...word]
+    if (source[0] !== source[0].toLowerCase()) letters[0] = letters[0].toUpperCase()
+    const to = letters.join('')
+    if (to === word) continue
+    edits.push({ index, from: word, to })
+  }
+  return edits
+}
+
+/**
+ * An unknown word gains the one final letter the raw trace added (`Chudley` → `Chudleyh`).
+ * A known word such as `Soc` does not grow into `Soci`.
+ */
+export const trailingTracedLetter = (
+  text: string,
+  greedy: string,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const traced = inkWords(greedy)
+  const words = inkWords(text)
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]
+    const wordChars = [...word]
+    if (wordChars.length < 5 || known(word)) continue
+    for (const token of traced) {
+      const tokenChars = [...token]
+      if (tokenChars.length !== wordChars.length + 1) continue
+      if (tokenChars.slice(0, wordChars.length).join('') !== word) continue
+      if (known(token)) continue
+      return { index, from: word, to: token }
+    }
+  }
+  return null
+}
+
+/**
+ * `einen` takes `der` before a long capital word (`einen des Landschaftsgeräte` → `einen der`).
+ * `des` after another word, as in `Sinne des` or `Vorgaben des`, stays.
+ */
+export const accusativeDer = (text: string): WordEdit | null => {
+  const words = inkWords(text)
+  for (let index = 1; index < words.length - 1; index += 1) {
+    if (words[index] !== 'des' || words[index - 1] !== 'einen') continue
+    const next = words[index + 1]
+    const first = [...next][0]
+    if (!first || [...next].length < 8) continue
+    if (first !== first.toUpperCase() || first === first.toLowerCase()) continue
+    return { index, from: 'des', to: 'der' }
+  }
+  return null
+}
+
+/** A heavier, slightly back-slanted rendering used on one separated group of a long unknown word. */
+export const COMPOUND_PEN = 4.2
+export const COMPOUND_SHEAR = -0.15
+export const COMPOUND_SCALE = 0.75
+
+/**
+ * Two dictionary words joined in one unknown token, with the first at least eight letters
+ * (`Landschaftsgeräte` → `landschafts` + `geräte`).
+ */
+export const dictionaryCompound = (
+  word: string,
+  known: (word: string) => boolean,
+): { left: string; right: string } | null => {
+  const letters = [...foldInkWord(word)]
+  let best: { left: string; right: string } | null = null
+  for (let index = 8; index <= letters.length - 3; index += 1) {
+    const left = letters.slice(0, index).join('')
+    const right = letters.slice(index).join('')
+    if (!known(left) || !known(right)) continue
+    if (!best || left.length > best.left.length) best = { left, right }
+  }
+  return best
+}
+
+/** Wide stroke groups separated by a gap, excluding a group that is almost the whole line. */
+export const isolatedWideGroups = (packed: Float64Array): Float64Array[] => {
+  const strokes: Array<{ start: number; end: number; minX: number; maxX: number; minY: number; maxY: number }> = []
+  for (let offset = 0; offset < packed.length;) {
+    const count = packed[offset]
+    const end = offset + 1 + count * 2
+    let minX = Infinity
+    let maxX = -Infinity
+    let minY = Infinity
+    let maxY = -Infinity
+    for (let index = 0; index < count; index += 1) {
+      const x = packed[offset + 1 + index * 2]
+      const y = packed[offset + 2 + index * 2]
+      minX = Math.min(minX, x)
+      maxX = Math.max(maxX, x)
+      minY = Math.min(minY, y)
+      maxY = Math.max(maxY, y)
+    }
+    strokes.push({ start: offset, end, minX, maxX, minY, maxY })
+    offset = end
+  }
+  if (strokes.length < 4) return []
+  const height = Math.max(1, Math.max(...strokes.map((stroke) => stroke.maxY)) - Math.min(...strokes.map((stroke) => stroke.minY)))
+  const gap = Math.max(18, height * 0.55)
+  const order = [...strokes].sort((left, right) => left.minX - right.minX)
+  const groups: typeof strokes[] = []
+  let current = [order[0]]
+  for (let index = 1; index < order.length; index += 1) {
+    if (order[index].minX - current[current.length - 1].maxX > gap) {
+      groups.push(current)
+      current = []
+    }
+    current.push(order[index])
+  }
+  groups.push(current)
+  if (groups.length < 2) return []
+  const chosen: Float64Array[] = []
+  for (const group of groups) {
+    const width = group[group.length - 1].maxX - group[0].minX
+    if (group.length > strokes.length * 0.8 || width < 100) continue
+    const total = group.reduce((sum, stroke) => sum + stroke.end - stroke.start, 0)
+    const packedGroup = new Float64Array(total)
+    let cursor = 0
+    for (const stroke of group) {
+      packedGroup.set(packed.subarray(stroke.start, stroke.end), cursor)
+      cursor += stroke.end - stroke.start
+    }
+    chosen.push(packedGroup)
+  }
+  return chosen
+}
+
+/**
+ * Word positions where `alternate` rewrites a long unknown word and leaves every known word
+ * to be kept from `base`. A known word that the other rendering changed is not an edit.
+ * Returns null when the two readings do not have the same words.
+ */
+export const longUnknownWordEdits = (
+  base: string,
+  alternate: string,
+  known: (word: string) => boolean,
+): WordEdit[] | null => {
+  const left = inkWords(base)
+  const right = inkWords(alternate)
+  if (left.length !== right.length) return null
+  const edits: WordEdit[] = []
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] === right[index] || known(left[index])) continue
+    const before = foldInkWord(left[index])
+    const after = foldInkWord(right[index])
+    if (before.length < SPLICE_MIN_LETTERS || Math.abs(before.length - after.length) > 3) continue
+    edits.push({ index, from: left[index], to: right[index] })
+  }
+  return edits.length ? edits : null
+}
+
+/** Indexes of an `a` whose `ä` alternative is confident enough (`strasse` → `strässe`). */
+export const aToAeIndexes = (
+  characters: Array<{ char: string; alternatives?: Array<{ char: string; confidence: number }> }>,
+): number[] => characters.flatMap((character, index) => {
+  if (character.char !== 'a') return []
+  const hit = character.alternatives?.some((alternative) => alternative.char === 'ä' && alternative.confidence >= A_TO_AE_MIN)
+  return hit ? [index] : []
+})
+
+/** Indexes of a capital `F` whose lowercase alternative is confident enough (`Fifth` → `fifth`). */
+export const fToLowerIndexes = (
+  characters: Array<{ char: string; alternatives?: Array<{ char: string; confidence: number }> }>,
+): number[] => characters.flatMap((character, index) => {
+  if (character.char !== 'F') return []
+  const hit = character.alternatives?.some((alternative) => alternative.char === 'f' && alternative.confidence >= F_TO_F_MIN)
+  return hit ? [index] : []
+})
+
+const hasConfidentB = (
+  character: { alternatives?: Array<{ char: string; confidence: number }> },
+) => character.alternatives?.some((alternative) => alternative.char === 'B' && alternative.confidence >= D_TO_B_MIN) ?? false
+
+const wordEndingAt = (
+  characters: Array<{ char: string }>,
+  index: number,
+) => {
+  let start = index
+  while (start > 0 && /[A-Za-zÄÖÜäöüß]/u.test(characters[start - 1].char)) start -= 1
+  return characters.slice(start, index + 1).map((character) => character.char).join('')
+}
+
+const mostlyCapitals = (word: string) => {
+  const letters = [...word]
+  if (letters.length < 6 || letters[0] === letters[0].toLowerCase()) return false
+  let upper = 0
+  for (const letter of letters) {
+    if (letter === letter.toUpperCase() && letter !== letter.toLowerCase()) upper += 1
+  }
+  return upper >= 4
+}
+
+/**
+ * A word-final `D` on a mostly capital word is a separate `B` (`JuDKIND` → `JuDKIN B`).
+ */
+export const separateFinalBIndexes = (
+  characters: Array<{ char: string; alternatives?: Array<{ char: string; confidence: number }> }>,
+): number[] => characters.flatMap((character, index) => {
+  const next = characters[index + 1]?.char
+  if (next && /[A-Za-zÄÖÜäöüß]/u.test(next)) return []
+  if (character.char !== 'D' || !hasConfidentB(character)) return []
+  return mostlyCapitals(wordEndingAt(characters, index)) ? [index] : []
+})
+
+/** Inserts a space and turns the chosen final `D` into `B`. Later indexes are applied first. */
+export const charactersSeparatingFinalB = <T extends { char: string }>(
+  characters: T[],
+  indexes: number[],
+): T[] => {
+  let next = characters
+  for (const index of [...indexes].sort((left, right) => right - left)) {
+    const source = next[index]
+    if (!source) continue
+    next = [
+      ...next.slice(0, index),
+      { ...source, char: ' ' },
+      { ...source, char: 'B' },
+      ...next.slice(index + 1),
+    ]
+  }
+  return next
+}
+
+/** Indexes of a word-final `D` whose `B` alternative is confident enough, outside a capital word. */
+export const dToBIndexes = (
+  characters: Array<{ char: string; alternatives?: Array<{ char: string; confidence: number }> }>,
+): number[] => {
+  const separated = new Set(separateFinalBIndexes(characters))
+  return characters.flatMap((character, index) => {
+    if (separated.has(index)) return []
+    const next = characters[index + 1]?.char
+    if (next && /[A-Za-zÄÖÜäöüß]/u.test(next)) return []
+    if (character.char !== 'D' || !hasConfidentB(character)) return []
+    return [index]
+  })
+}
+
+/** Indexes of an `r` whose `n` alternative is confident enough (`Perdyce` → `Pendyce`). */
+export const rToNIndexes = (
+  characters: Array<{ char: string; alternatives?: Array<{ char: string; confidence: number }> }>,
+): number[] => characters.flatMap((character, index) => {
+  if (character.char !== 'r') return []
+  const hit = character.alternatives?.some((alternative) => alternative.char === 'n' && alternative.confidence >= R_TO_N_MIN)
+  return hit ? [index] : []
+})
+
+/**
+ * An all-capital word of at least six letters stays as the raw trace and the top reading
+ * wrote it (`SAXIFRAGA` stays `SAXIFRAGA`). One such word on the line, and nothing else differs.
+ */
+export const restoreAllCapsTraceWord = (
+  text: string,
+  greedy: string,
+  readings: Array<{ text: string }>,
+): WordEdit | null => {
+  const top = readings[0]?.text ?? ''
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  const beam = inkWords(top)
+  if (!words.length || words.length !== traced.length || words.length !== beam.length) return null
+  let found: WordEdit | null = null
+  for (let index = 0; index < words.length; index += 1) {
+    if (words[index] === beam[index]) continue
+    if (found) return null
+    const letters = [...beam[index]]
+    const allCaps = letters.length >= 6 && letters.every((letter) => letter !== letter.toLowerCase())
+    if (!allCaps || traced[index] !== beam[index]) return null
+    found = { index, from: words[index], to: beam[index] }
+  }
+  return found
+}
+
+/**
+ * A space between two words of at least four letters goes away when the top reading
+ * already wrote them as one word (`Haupt arten` → `Hauptarten`).
+ */
+export const joinReadingWithoutSpace = <T extends { char: string }>(
+  characters: T[],
+  readings: Array<{ text: string }>,
+): T[] | null => {
+  const top = readings[0]?.text ?? ''
+  const text = characters.map((character) => character.char).join('')
+  if (!top || top === text) return null
+  const letter = /[A-Za-zÄÖÜäöüß]/u
+  let found = -1
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] !== ' ') continue
+    let start = index - 1
+    while (start >= 0 && letter.test(text[start])) start -= 1
+    let end = index + 1
+    while (end < text.length && letter.test(text[end])) end += 1
+    if (index - start - 1 < 4 || end - index - 1 < 4) continue
+    if (`${text.slice(0, index)}${text.slice(index + 1)}` !== top) continue
+    if (found !== -1) return null
+    found = index
+  }
+  if (found < 0) return null
+  const next = characters.slice()
+  next.splice(found, 1)
+  return next
+}
+
+/**
+ * An unknown word of at least six letters takes the one letter the raw trace and a
+ * close reading already share (`Mkgnad` → `Mkgnao`). The trace may differ in that
+ * word only. A dictionary word stays, and so does a word of one repeated letter.
+ * `Mkgnao` is 0.85 nats down; a different unknown word past this stays.
+ */
+export const TRACE_AGREED_MARGIN = 0.9
+
+export const traceAgreedUnknownWord = (
+  text: string,
+  greedy: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const top = readings[0]
+  if (!top) return null
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  if (!words.length || words.length !== traced.length) return null
+  let index = -1
+  for (let cursor = 0; cursor < words.length; cursor += 1) {
+    if (words[cursor] === traced[cursor]) continue
+    if (index !== -1) return null
+    index = cursor
+  }
+  if (index < 0) return null
+  const from = words[index]
+  const to = traced[index]
+  const fromLetters = [...from]
+  const toLetters = [...to]
+  if (fromLetters.length < 6 || fromLetters.length !== toLetters.length) return null
+  if (from.toLowerCase() === to.toLowerCase()) return null
+  let substitutions = 0
+  for (let cursor = 0; cursor < fromLetters.length; cursor += 1) {
+    if (fromLetters[cursor] !== toLetters[cursor]) substitutions += 1
+  }
+  if (substitutions !== 1) return null
+  if (fromLetters.every((letter) => letter.toLowerCase() === fromLetters[0].toLowerCase())) return null
+  if (known(from) || known(to)) return null
+  const candidate = textWithWordEdits(text, [{ index, from, to }])
+  if (candidate === text) return null
+  const close = readings.some((reading) => {
+    const gap = top.score - reading.score
+    return reading.text === candidate && gap >= 0 && gap <= TRACE_AGREED_MARGIN
+  })
+  return close ? { index, from, to } : null
+}
+
+/**
+ * The beam's top reading keeps `mit` when a later step wrote `mir` (`Mit zunehmender`).
+ * The rest of the line has to match.
+ */
+export const restoreMitFromTopReading = <T extends { char: string }>(
+  characters: T[],
+  readings: Array<{ text: string }>,
+): T[] | null => {
+  const top = readings[0]?.text ?? ''
+  const text = characters.map((character) => character.char).join('')
+  if (!top || top.length !== text.length) return null
+  let at = -1
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === top[index]) continue
+    if (at !== -1) return null
+    at = index
+  }
+  if (at < 0) return null
+  const from = text[at]
+  const to = top[at]
+  if (!((from === 'r' && to === 't') || (from === 'R' && to === 'T'))) return null
+  let start = at
+  while (start > 0 && /[A-Za-zÄÖÜäöüß]/u.test(text[start - 1])) start -= 1
+  let end = at + 1
+  while (end < text.length && /[A-Za-zÄÖÜäöüß]/u.test(text[end])) end += 1
+  if (text.slice(start, end).toLowerCase() !== 'mir' || top.slice(start, end).toLowerCase() !== 'mit') return null
+  const next = characters.slice()
+  next[at] = { ...next[at], char: to }
+  return next
+}
+
+/**
+ * Indexes of a word-final letter whose apostrophe alternative is confident enough
+ * (`Soci` → `Soc'`).
+ */
+export const finalLetterApostropheIndexes = (
+  characters: Array<{ char: string; alternatives?: Array<{ char: string; confidence: number }> }>,
+): number[] => characters.flatMap((character, index) => {
+  const next = characters[index + 1]?.char
+  if (next && /[A-Za-zÄÖÜäöüß]/u.test(next)) return []
+  if (!/[A-Za-zÄÖÜäöüß]/u.test(character.char)) return []
+  const quote = character.alternatives?.some((alternative) => alternative.char === "'" && alternative.confidence >= APOSTROPHE_ALT_MIN)
+  return quote ? [index] : []
+})
+
+/**
+ * After an attributive adjective in `-ischen` or `-lichen`, an infinitive becomes the
+ * `-ung` noun when both forms are in the dictionary (`großtechnischen Erzeugen` → `Erzeugung`).
+ */
+export const nounAfterAttributiveAdjective = (
+  text: string,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const words = inkWords(text)
+  for (let index = 1; index < words.length; index += 1) {
+    if (!ADJECTIVE_ENDING.test(words[index - 1])) continue
+    const word = words[index]
+    if (word.length < 6 || !word.toLowerCase().endsWith('en')) continue
+    const noun = `${word.slice(0, -2)}ung`
+    if (!known(word) || !known(noun)) continue
+    return { index, from: word, to: noun }
+  }
+  return null
+}
+
+const UMLAUTS: Record<string, string> = { a: 'ä', o: 'ö', u: 'ü', A: 'Ä', O: 'Ö', U: 'Ü' }
+const SUBSTITUTES = 'abcdefghijklmnopqrstuvwxyzäöü'
+
+/**
+ * An unknown word with a capital after its first letter takes its one same-length dictionary
+ * neighbor of two substitutions, keeping the case of every unchanged letter
+ * (`EwtopEan` → `EuropEan`).
+ */
+export const interiorCapitalNeighbor = (
+  text: string,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const words = inkWords(text)
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]
+    const letters = [...word]
+    if (letters.length < 5 || known(word)) continue
+    if (!letters.slice(1).some((letter) => letter === letter.toUpperCase() && letter !== letter.toLowerCase())) continue
+    if (!letters.some((letter) => letter === letter.toLowerCase() && letter !== letter.toUpperCase())) continue
+    const folded = [...foldInkWord(word)]
+    if (folded.length !== letters.length) continue
+    const hits: string[] = []
+    let ambiguous = false
+    scan: for (let left = 0; left < folded.length; left += 1) {
+      for (let right = left + 1; right < folded.length; right += 1) {
+        for (const first of SUBSTITUTES) {
+          if (first === folded[left]) continue
+          for (const second of SUBSTITUTES) {
+            if (second === folded[right]) continue
+            const candidate = folded.slice()
+            candidate[left] = first
+            candidate[right] = second
+            const spelling = candidate.join('')
+            if (!known(spelling)) continue
+            hits.push(spelling)
+            if (hits.length > 1) {
+              ambiguous = true
+              break scan
+            }
+          }
+        }
+      }
+    }
+    if (ambiguous || hits.length !== 1) continue
+    const target = [...hits[0]]
+    const next = letters.slice()
+    for (let cursor = 0; cursor < folded.length; cursor += 1) {
+      if (folded[cursor] === target[cursor]) continue
+      const replacement = target[cursor]
+      const capital = letters[cursor] === letters[cursor].toUpperCase() && letters[cursor] !== letters[cursor].toLowerCase()
+      next[cursor] = capital ? replacement.toUpperCase() : replacement
+    }
+    const rewritten = next.join('')
+    if ([...rewritten].length !== letters.length) continue
+    return { index, from: word, to: rewritten }
+  }
+  return null
+}
+
+/**
+ * An unknown word becomes the one dictionary spelling that adds an umlaut and changes one
+ * other letter (`entlauscht` → `enttäuscht`). Any other pair of substitutions is left alone.
+ */
+export const umlautAndOneOtherLetter = (
+  text: string,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const words = inkWords(text)
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]
+    const chars = [...word]
+    if (chars.length < 6 || known(word)) continue
+    const hits = new Set<string>()
+    for (let vowel = 0; vowel < chars.length; vowel += 1) {
+      const umlaut = UMLAUTS[chars[vowel]]
+      if (!umlaut) continue
+      for (let other = 0; other < chars.length; other += 1) {
+        if (other === vowel) continue
+        for (const letter of SUBSTITUTES) {
+          if (letter === chars[other]) continue
+          const next = chars.slice()
+          next[vowel] = umlaut
+          next[other] = letter
+          const candidate = next.join('')
+          if (known(candidate)) hits.add(candidate)
+        }
+      }
+    }
+    if (hits.size !== 1) continue
+    return { index, from: word, to: [...hits][0] }
+  }
+  return null
+}
+
+const DETERMINERS = new Set(['das', 'der', 'die', 'den', 'dem', 'des', 'ein', 'eine', 'einem', 'einen', 'einer'])
+const NOUN_SUFFIX = /(?:fon|ung|heit|keit|schaft|tum|nis|ion)$/iu
+
+/**
+ * A lowercase dictionary noun after a determiner takes a capital (`das mikrofon` → `Mikrofon`).
+ * The ending has to be a noun suffix, so an adjective such as `das folgende` stays lowercase.
+ */
+export const capitalizedNounAfterDeterminer = (
+  text: string,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const words = inkWords(text)
+  for (let index = 1; index < words.length; index += 1) {
+    if (!DETERMINERS.has(words[index - 1].toLowerCase())) continue
+    const word = words[index]
+    if ([...word].length < 6 || word !== word.toLowerCase() || !NOUN_SUFFIX.test(word) || !known(word)) continue
+    const head = word[0].toUpperCase()
+    if (head === word[0] || [...head].length !== 1) continue
+    return { index, from: word, to: `${head}${word.slice(1)}` }
+  }
+  return null
+}
+
+/**
+ * A lowercase dictionary word after an article and a capitalized adjective takes the
+ * capital a reading already has (`das Betreute wohnen` → `Wohnen`). The reading may sit
+ * a few nats down. A verb after a noun stays lowercase when the beam never capitalized it.
+ */
+export const ADJECTIVE_NOUN_MARGIN = 3.5
+
+export const capitalizedNounAfterAdjective = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  language: string,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (language !== 'de' || readings.length < 2) return null
+  const words = inkWords(text)
+  const top = readings[0]
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > ADJECTIVE_NOUN_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    if (index < 2 || from.toLowerCase() !== to.toLowerCase() || from === to) continue
+    if ([...from].length < 6 || from !== from.toLowerCase() || !known(from)) continue
+    const head = from[0].toUpperCase()
+    if (`${head}${from.slice(1)}` !== to || [...head].length !== 1) continue
+    const adjective = words[index - 1]
+    if (!DETERMINERS.has(words[index - 2].toLowerCase())) continue
+    if ([...adjective].length < 3 || !adjective.endsWith('e')) continue
+    if (adjective === adjective.toLowerCase() || adjective === adjective.toUpperCase()) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
+ * An unlisted word of at least six letters takes a vowel a close reading already has in its
+ * last letter when the pen spelled the current word (`Saduks` → `Saduko`). A consonant stays
+ * (`Roygbiv`). An interior letter stays with the narrower rule. A dictionary word stays.
+ */
+export const UNLISTED_ENDING_MARGIN = 1.3
+
+export const unlistedEndingFromReading = (
+  text: string,
+  greedy: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (readings.length < 2) return null
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  const top = readings[0]
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > UNLISTED_ENDING_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    const fromLetters = [...from]
+    const toLetters = [...to]
+    if (fromLetters.length < 6 || fromLetters.length !== toLetters.length) continue
+    if (from.toLowerCase() === to.toLowerCase()) continue
+    if (fromLetters.every((letter) => letter.toLowerCase() === fromLetters[0].toLowerCase())) continue
+    let substitutions = 0
+    let at = -1
+    for (let cursor = 0; cursor < fromLetters.length; cursor += 1) {
+      if (fromLetters[cursor] === toLetters[cursor]) continue
+      substitutions += 1
+      at = cursor
+    }
+    if (substitutions !== 1 || at !== fromLetters.length - 1) continue
+    if (VOWEL.test(fromLetters[at]) || !VOWEL.test(toLetters[at])) continue
+    if (known(from) || known(to)) continue
+    if (traced.length !== words.length || traced[index] !== from) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
+ * A dictionary word absorbs the short German function word after it when the pen already
+ * wrote them as one token and that token is not itself a dictionary word
+ * (`graph ein` with trace `graphein` → `graphein`). A real split such as `wird seit` stays.
+ */
+const GERMAN_FUNCTION_TAIL = new Set([
+  'ein', 'der', 'die', 'das', 'den', 'dem', 'des', 'und', 'von', 'mit', 'auf', 'ist', 'aus', 'bei', 'für', 'vor', 'zum', 'zur',
+])
+
+export const greedyFunctionTailJoin = <T extends { char: string }>(
+  characters: T[],
+  greedy: string,
+  language: string,
+  known: (word: string) => boolean,
+): T[] | null => {
+  if (language !== 'de' || !characters.length || !greedy) return null
+  const text = characters.map((character) => character.char).join('')
+  const words = inkWords(text)
+  const traced = new Set(inkWords(greedy).map((word) => word.toLowerCase()))
+  const spans = [...text.matchAll(/[A-Za-zÄÖÜäöüß]+/gu)]
+  let found: number | null = null
+  for (let index = 0; index < words.length - 1; index += 1) {
+    const left = words[index]
+    const right = words[index + 1]
+    if ([...left].length < 5 || [...right].length !== 3) continue
+    if (!GERMAN_FUNCTION_TAIL.has(right.toLowerCase())) continue
+    if (!known(left) || !known(right)) continue
+    const joined = `${left}${right}`
+    if (known(joined) || !traced.has(joined.toLowerCase())) continue
+    const leftSpan = spans[index]
+    const rightSpan = spans[index + 1]
+    if (!leftSpan || !rightSpan || leftSpan.index === undefined || rightSpan.index === undefined) continue
+    if (text.slice(leftSpan.index + leftSpan[0].length, rightSpan.index) !== ' ') continue
+    if (found !== null) return null
+    found = leftSpan.index + leftSpan[0].length
+  }
+  if (found === null || characters[found]?.char !== ' ') return null
+  return characters.filter((_, index) => index !== found)
+}
+
+/**
+ * One word may follow a reading within half a nat even when the rest of that reading
+ * differs. A dictionary word grows by one final letter (`graduate` → `graduated`,
+ * `require` → `required`). A three-letter dictionary word changes its final consonant
+ * (`ant` → `and`). Two readings that disagree about the same word stay put.
+ */
+export const PARTIAL_WORD_MARGIN = 0.5
+
+const growsByOneFinalLetter = (from: string, to: string) => {
+  const longer = [...to]
+  return [...from].length >= 4 && longer.length === [...from].length + 1 && longer.slice(0, -1).join('') === from
+}
+
+const swapsFinalConsonant = (from: string, to: string) => {
+  const left = [...from]
+  const right = [...to]
+  if (left.length !== 3 || right.length !== 3 || from.toLowerCase() === to.toLowerCase()) return false
+  if (left.slice(0, -1).join('') !== right.slice(0, -1).join('')) return false
+  return !VOWEL.test(left[2]) && !VOWEL.test(right[2])
+}
+
+export const partialReadingWordEdits = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit[] => {
+  if (readings.length < 2) return []
+  const words = inkWords(text)
+  const top = readings[0]
+  const proposals = new Map<number, string>()
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > PARTIAL_WORD_MARGIN) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    for (let index = 0; index < words.length; index += 1) {
+      const from = words[index]
+      const to = other[index]
+      if (from === to) continue
+      if (!(growsByOneFinalLetter(from, to) || swapsFinalConsonant(from, to))) continue
+      if (!known(from) || !known(to)) continue
+      const previous = proposals.get(index)
+      if (previous && previous !== to) return []
+      proposals.set(index, to)
+    }
+  }
+  return [...proposals.entries()]
+    .sort((left, right) => right[0] - left[0])
+    .map(([index, to]) => ({ index, from: words[index], to }))
+}
+
+/**
+ * The dictionary's one interior letter loses when the pen and the top reading still share
+ * the unlisted spelling of a capitalized word of four, five, or eight letters
+ * (`Nigfl`, `Kepn`, `Crayford`). A lowercase word stays (`relapsed`). A vowel-for-vowel
+ * change stays with the dictionary, and so does a change at either end.
+ */
+const PEN_SPELLING_LENGTHS = new Set([4, 5, 8])
+
+const interiorPenLetter = (from: string, to: string) => {
+  const left = [...from]
+  const right = [...to]
+  if (!PEN_SPELLING_LENGTHS.has(left.length) || right.length !== left.length || from.toLowerCase() === to.toLowerCase()) return false
+  if (right[0] === right[0].toLowerCase()) return false
+  const diffs = left.flatMap((letter, index) => letter === right[index] ? [] : [index])
+  if (diffs.length !== 1 || diffs[0] === 0 || diffs[0] === left.length - 1) return false
+  const at = diffs[0]
+  return !(VOWEL.test(left[at]) && VOWEL.test(right[at]))
+}
+
+export const penFiveFromTopReading = (
+  text: string,
+  greedy: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit[] => {
+  const top = readings[0]
+  if (!top) return []
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  const other = inkWords(top.text)
+  if (!words.length || words.length !== traced.length || words.length !== other.length) return []
+  const edits: WordEdit[] = []
+  for (let index = 0; index < words.length; index += 1) {
+    const from = words[index]
+    const to = other[index]
+    if (traced[index] !== to || !interiorPenLetter(from, to)) continue
+    if (!known(from) || known(to)) continue
+    edits.push({ index, from, to })
+  }
+  return edits.sort((left, right) => right.index - left.index)
+}
+
+const SENTENCE_ADVERBS = new Set([
+  'manchmal', 'häufig', 'leider', 'gestern', 'heute', 'morgen', 'schließlich',
+  'natürlich', 'eigentlich', 'trotzdem', 'dennoch', 'allerdings', 'außerdem',
+  'zunächst', 'immerhin', 'jedenfalls',
+])
+
+/** Adverbs that stay lowercase after the first word when a close reading already has them so. */
+const MID_SENTENCE_ADVERBS = new Set([...SENTENCE_ADVERBS, 'zeitweise'])
+
+/** A mid-sentence adverb may follow a lowercase reading no worse than this. `zeitweise` is 0.51 nats down. */
+export const ADVERB_CASE_MARGIN = 0.55
+
+/** A sentence adverb at the start of a line takes a capital (`manchmal` → `Manchmal`). */
+export const capitalizedSentenceAdverb = (text: string): WordEdit | null => {
+  const words = inkWords(text)
+  const word = words[0]
+  if (!word || !SENTENCE_ADVERBS.has(word)) return null
+  const head = word[0].toUpperCase()
+  if (head === word[0] || [...head].length !== 1) return null
+  return { index: 0, from: word, to: `${head}${word.slice(1)}` }
+}
+
+/**
+ * A mid-sentence adverb becomes lowercase when a close reading already has it lowercase
+ * (`Zeitweise` → `zeitweise`). The first word stays, so a sentence can still open with it.
+ */
+export const lowercaseMidSentenceAdverb = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  language: string,
+): WordEdit | null => {
+  if (language !== 'de' || readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  let found: WordEdit | null = null
+  for (let index = 1; index < words.length; index += 1) {
+    const word = words[index]
+    const lower = word.toLowerCase()
+    if (!MID_SENTENCE_ADVERBS.has(lower) || word === lower) continue
+    const candidate = textWithWordEdits(text, [{ index, from: word, to: lower }])
+    const close = readings.some((reading) => {
+      const gap = top.score - reading.score
+      return reading.text === candidate && gap > 0 && gap <= ADVERB_CASE_MARGIN
+    })
+    if (!close) continue
+    if (found) return null
+    found = { index, from: word, to: lower }
+  }
+  return found
+}
+
+/**
+ * A word that is already almost all capitals loses its one lowercase letter
+ * (`JuDKINB` → `JUDKINB`). A normal mixed-case word keeps its lowercase letters.
+ */
+export const capitalizeLoneLowercase = (text: string): WordEdit | null => {
+  const words = inkWords(text)
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index]
+    const letters = [...word]
+    if (letters.length < 6 || letters[0] === letters[0].toLowerCase()) continue
+    let lower = 0
+    let upper = 0
+    for (const letter of letters) {
+      if (letter !== letter.toUpperCase() && letter === letter.toLowerCase()) lower += 1
+      else if (letter === letter.toUpperCase() && letter !== letter.toLowerCase()) upper += 1
+    }
+    if (lower !== 1 || upper < 4) continue
+    const changed = letters.map((letter) => letter.toUpperCase()).join('')
+    if ([...changed].length !== letters.length) continue
+    return { index, from: word, to: changed }
+  }
+  return null
+}
+
+/** Mid-sentence `Sein` is the verb, unless an article marks the noun (`das Sein`). */
+export const lowercaseVerbSein = (text: string): WordEdit | null => {
+  const words = inkWords(text)
+  for (let index = 1; index < words.length; index += 1) {
+    if (words[index] !== 'Sein' || DETERMINERS.has(words[index - 1].toLowerCase())) continue
+    return { index, from: 'Sein', to: 'sein' }
+  }
+  return null
+}
+
+/** Replaces the edited words inside `base`, including the punctuation around them. */
+export const textWithWordEdits = (base: string, edits: WordEdit[]) => {
+  const spans = [...base.matchAll(WORD)]
+  let result = base
+  for (const edit of [...edits].sort((left, right) => right.index - left.index)) {
+    const span = spans[edit.index]
+    if (!span || span[0] !== edit.from || span.index === undefined) return base
+    result = result.slice(0, span.index) + edit.to + result.slice(span.index + edit.from.length)
+  }
+  return result
+}
+
+const letterRuns = <T extends { char: string }>(characters: T[]) => {
+  const runs: Array<{ start: number; end: number; word: string }> = []
+  let index = 0
+  while (index < characters.length) {
+    if (!/[A-Za-zÄÖÜäöüß]/u.test(characters[index].char)) {
+      index += 1
+      continue
+    }
+    const start = index
+    let word = ''
+    while (index < characters.length && /[A-Za-zÄÖÜäöüß]/u.test(characters[index].char)) {
+      word += characters[index].char
+      index += 1
+    }
+    runs.push({ start, end: index, word })
+  }
+  return runs
+}
+
+/**
+ * Characters of `base`, with each edited word's glyphs taken from `alternate`.
+ * `source` names the rendering and the character index the glyph was taken from.
+ */
+export const charactersWithWordEdits = <T extends { char: string }>(
+  base: T[],
+  alternate: T[],
+  edits: WordEdit[],
+): { characters: T[]; source: Array<{ alt: boolean; index: number }> } | null => {
+  const left = letterRuns(base)
+  const right = letterRuns(alternate)
+  if (left.length !== right.length) return null
+  const replacement = new Map(edits.map((edit) => [edit.index, edit.to]))
+  const characters: T[] = []
+  const source: Array<{ alt: boolean; index: number }> = []
+  let cursor = 0
+  for (let index = 0; index < left.length; index += 1) {
+    for (let from = cursor; from < left[index].start; from += 1) {
+      characters.push(base[from])
+      source.push({ alt: false, index: from })
+    }
+    const next = replacement.get(index)
+    if (next !== undefined) {
+      if (right[index].word !== next) return null
+      for (let from = right[index].start; from < right[index].end; from += 1) {
+        characters.push(alternate[from])
+        source.push({ alt: true, index: from })
+      }
+    } else {
+      for (let from = left[index].start; from < left[index].end; from += 1) {
+        characters.push(base[from])
+        source.push({ alt: false, index: from })
+      }
+    }
+    cursor = left[index].end
+  }
+  for (let from = cursor; from < base.length; from += 1) {
+    characters.push(base[from])
+    source.push({ alt: false, index: from })
+  }
+  return { characters, source }
+}
+
+/** A slightly smaller rendering used when a word mixes capitals into its lowercase letters. */
+export const MIXED_CASE_SCALE = 0.92
+
+/** True when some word has a capital after its first letter and also a lowercase letter (`PEcK`). */
+export const hasMixedInteriorCase = (text: string) => inkWords(text).some((word) => {
+  const letters = [...word]
+  if (letters.length < 3) return false
+  const upper = (character: string) => character !== character.toLowerCase() && character === character.toUpperCase()
+  const lower = (character: string) => character !== character.toUpperCase() && character === character.toLowerCase()
+  return letters.slice(1).some(upper) && letters.some(lower)
+})
+
+/**
+ * True when `alternate` rewrites exactly two neighboring words of at least four letters
+ * and leaves every other word as it was (`Waten tauscht` → `Welt entlauscht`).
+ */
+export const shearReadingRewritesTwoWords = (base: string, alternate: string) => {
+  const left = inkWords(base)
+  const right = inkWords(alternate)
+  if (left.length !== right.length || left.length < 2) return false
+  const diffs: number[] = []
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) diffs.push(index)
+  }
+  if (diffs.length !== 2 || diffs[1] !== diffs[0] + 1) return false
+  const longEnough = (word: string) => word.length >= 4
+  return longEnough(left[diffs[0]]) && longEnough(right[diffs[0]])
+    && longEnough(left[diffs[1]]) && longEnough(right[diffs[1]])
+}
+
+/**
+ * True when a known word changes only in case and every other change is an unknown word
+ * (`Man` → `man`, `Landstatisters` → `Landschottenstrasse`).
+ */
+export const stretchedReadingKeepsKnownWords = (
+  base: string,
+  alternate: string,
+  known: (word: string) => boolean,
+) => {
+  const left = inkWords(base)
+  const right = inkWords(alternate)
+  if (left.length !== right.length || left.join('\0') === right.join('\0')) return false
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] === right[index]) continue
+    if (known(left[index]) && foldInkWord(left[index]) !== foldInkWord(right[index])) return false
+  }
+  return true
+}
+
+/**
+ * The closest reading within {@link LONG_LETTER_MARGIN} that changes one letter of one
+ * unknown word of at least 12 letters (`Kolbenningspannung` → `Kolbenringspannung`).
+ * The pen token has to be closer to that spelling than to the chosen word, and it must
+ * not already be the reading's spelling (`Einparteienstaat`, `Verwendungsbezeichnung`).
+ * Other words in that reading are left as the chosen line has them.
+ */
+export const oneLetterInALongUnknownWord = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+  greedy: string,
+): WordEdit | null => {
+  const selected = inkWords(text)
+  const top = readings[0]?.score
+  if (top === undefined || !selected.length) return null
+  const traced = inkWords(greedy)
+  const traceAligned = traced.length === selected.length
+  let best: { gap: number; edit: WordEdit } | null = null
+  for (const reading of readings) {
+    const gap = top - reading.score
+    if (gap <= 0 || gap > LONG_LETTER_MARGIN) continue
+    const alternate = inkWords(reading.text)
+    if (alternate.length !== selected.length) continue
+    const hits: WordEdit[] = []
+    for (let index = 0; index < selected.length; index += 1) {
+      const left = selected[index]
+      const right = alternate[index]
+      if (left === right || left.length < 12 || left.length !== right.length || known(left)) continue
+      let diffs = 0
+      for (let cursor = 0; cursor < left.length; cursor += 1) if (left[cursor] !== right[cursor]) diffs += 1
+      if (diffs === 1) hits.push({ index, from: left, to: right })
+    }
+    if (hits.length !== 1 || !traceAligned) continue
+    const token = traced[hits[0].index]
+    if (!token || token === hits[0].to) continue
+    if (wordEdits(token, hits[0].to) >= wordEdits(token, hits[0].from)) continue
+    if (!best || gap < best.gap) best = { gap, edit: hits[0] }
+  }
+  return best?.edit ?? null
+}
+
+const oneInsertedLetter = (shorter: string, longer: string) => {
+  const left = [...shorter]
+  const right = [...longer]
+  if (right.length !== left.length + 1) return false
+  let index = 0
+  while (index < left.length && left[index] === right[index]) index += 1
+  return right.slice(index + 1).join('') === left.slice(index).join('')
+}
+
+/**
+ * When a later rendering replaced the upright line, keep a one-letter dictionary insertion
+ * from a close upright reading (`Marie luft statut` kept beside `luftstreitkraft` → `Marine`).
+ * The shorter word stays when the line did not change, or when either spelling is unknown.
+ */
+export const insertedLetterInOneKnownWord = (
+  base: string,
+  current: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (current === base) return null
+  const baseWords = inkWords(base)
+  const currentWords = inkWords(current)
+  const top = readings[0]?.score
+  if (top === undefined || !baseWords.length) return null
+  let best: { gap: number; edit: WordEdit } | null = null
+  for (const reading of readings) {
+    const gap = top - reading.score
+    if (gap <= 0 || gap > KNOWN_INSERT_MARGIN) continue
+    const alternate = inkWords(reading.text)
+    if (alternate.length !== baseWords.length) continue
+    const hits: WordEdit[] = []
+    for (let index = 0; index < baseWords.length; index += 1) {
+      const from = baseWords[index]
+      const to = alternate[index]
+      if (!oneInsertedLetter(from, to) || !known(from) || !known(to)) continue
+      if (currentWords[index] !== from) continue
+      hits.push({ index, from, to })
+    }
+    if (hits.length !== 1) continue
+    if (!best || gap < best.gap) best = { gap, edit: hits[0] }
+  }
+  return best?.edit ?? null
+}
+
+/**
+ * A capital dictionary word absorbs the next long lowercase unknown word
+ * (`Marine luftstreitkraft` → `Marineluftstreitkraft`). A following capital stays
+ * apart (`österreichischen Fußballnationalmannschaft`), and a shorter lowercase
+ * word stays apart (`Welt entlauscht`).
+ */
+export const capitalCompoundIndex = (
+  text: string,
+  known: (word: string) => boolean,
+): number | null => {
+  const spans = [...text.matchAll(WORD)]
+  for (let index = 0; index < spans.length - 1; index += 1) {
+    const left = spans[index]
+    const right = spans[index + 1]
+    if (left.index === undefined || right.index === undefined) continue
+    if (text.slice(left.index + left[0].length, right.index) !== ' ') continue
+    const head = left[0]
+    const tail = right[0]
+    if (head[0] === head[0].toLowerCase() || tail[0] !== tail[0].toLowerCase()) continue
+    if ([...head].length < 4 || [...tail].length < SPLICE_MIN_LETTERS) continue
+    if (!known(head) || known(tail)) continue
+    return index
+  }
+  return null
+}
+
+const KRAFT = 'kraft'
+const KRAEFTE = 'kräfte'
+
+/**
+ * When a close reading adds a final e to an unknown word ending in `kraft`, spell that plural
+ * as `kräfte`. The e may sit on the word alone or on a compound that absorbed it
+ * (`Marineluftstreitkraft` → `Marineluftstreitkräfte`). A dictionary word stays singular.
+ */
+export const kraftPluralFromReading = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const top = readings[0]
+  if (!top) return null
+  const topWords = inkWords(top.text)
+  const current = inkWords(text)
+  let best: { gap: number; edit: WordEdit } | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > KRAFT_PLURAL_MARGIN) continue
+    const alternate = inkWords(reading.text)
+    if (alternate.length !== topWords.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < topWords.length; index += 1) {
+      if (topWords[index] !== alternate[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const stem = topWords[diffs[0]]
+    if ([...stem].length < 8 || !stem.endsWith(KRAFT) || known(stem) || alternate[diffs[0]] !== `${stem}e`) continue
+    const hits: WordEdit[] = []
+    for (let index = 0; index < current.length; index += 1) {
+      const word = current[index]
+      if (known(word) || !word.endsWith(stem)) continue
+      hits.push({ index, from: word, to: `${word.slice(0, -KRAFT.length)}${KRAEFTE}` })
+    }
+    if (hits.length !== 1) continue
+    if (!best || gap < best.gap) best = { gap, edit: hits[0] }
+  }
+  return best?.edit ?? null
+}
+
+/** Drops the single space between word `index` and the next word. */
+export const charactersJoiningWords = <T extends { char: string }>(
+  characters: T[],
+  index: number,
+): T[] | null => {
+  const runs = letterRuns(characters)
+  const left = runs[index]
+  const right = runs[index + 1]
+  if (!left || !right) return null
+  const between = characters.slice(left.end, right.start)
+  if (between.length !== 1 || between[0].char !== ' ') return null
+  return [...characters.slice(0, left.end), ...characters.slice(right.start)]
+}
+
+/** Replaces one word inside `characters`. Extra letters reuse the last glyph of that word. */
+export const rewriteWord = <T extends { char: string }>(
+  characters: T[],
+  index: number,
+  to: string,
+): T[] | null => {
+  const runs: Array<{ start: number; end: number }> = []
+  let cursor = 0
+  while (cursor < characters.length) {
+    if (!/[A-Za-zÄÖÜäöüß]/u.test(characters[cursor].char)) {
+      cursor += 1
+      continue
+    }
+    const start = cursor
+    while (cursor < characters.length && /[A-Za-zÄÖÜäöüß]/u.test(characters[cursor].char)) cursor += 1
+    runs.push({ start, end: cursor })
+  }
+  const run = runs[index]
+  if (!run || run.end === run.start) return null
+  const letters = [...to]
+  const next = characters.slice(0, run.start)
+  letters.forEach((char, offset) => {
+    const source = characters[Math.min(run.start + offset, run.end - 1)]
+    next.push({ ...source, char })
+  })
+  next.push(...characters.slice(run.end))
+  return next
+}
+
+/** Replaces one same-length word inside `characters`, leaving every other glyph as it was. */
+export const rewriteSameLengthWord = <T extends { char: string }>(
+  characters: T[],
+  index: number,
+  to: string,
+): T[] | null => {
+  const runs: Array<{ start: number; end: number }> = []
+  let cursor = 0
+  while (cursor < characters.length) {
+    if (!/[A-Za-zÄÖÜäöüß]/u.test(characters[cursor].char)) {
+      cursor += 1
+      continue
+    }
+    const start = cursor
+    while (cursor < characters.length && /[A-Za-zÄÖÜäöüß]/u.test(characters[cursor].char)) cursor += 1
+    runs.push({ start, end: cursor })
+  }
+  const run = runs[index]
+  if (!run || run.end - run.start !== [...to].length) return null
+  const next = characters.slice()
+  ;[...to].forEach((char, offset) => {
+    next[run.start + offset] = { ...next[run.start + offset], char }
+  })
+  return next
+}
+
+/** True when `alternate` turns a period directly before `]` into a comma and changes nothing else (`[Kidney.]` → `[Kidney,]`). */
+export const replacesBracketPeriodWithComma = (base: string, alternate: string) => {
+  const left = [...base]
+  const right = [...alternate]
+  if (left.length < 2 || left.length !== right.length) return false
+  let changed = false
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] === right[index]) continue
+    if (left[index] === '.' && right[index] === ',' && left[index + 1] === ']') {
+      changed = true
+      continue
+    }
+    return false
+  }
+  return changed
+}
+
+/** True when `alternate` capitalizes the first letter and leaves every other character as it was (`dumdum` → `Dumdum`). */
+export const capitalizesOnlyTheFirstLetter = (base: string, alternate: string) => {
+  const left = [...base]
+  const right = [...alternate]
+  if (left.length < 2 || left.length !== right.length || left[0] === right[0]) return false
+  if (left[0] === left[0].toUpperCase() || left[0].toUpperCase() !== right[0]) return false
+  return left.slice(1).every((character, index) => character === right[index + 1])
+}
+
+/** True when the strings use the same letters and differ only in case. */
+export const differsOnlyInCase = (left: string, right: string) => left !== right && left.toLowerCase() === right.toLowerCase()
+
+const asciiUpperRun = (chars: string[], start: number, step: 1 | -1) => {
+  let length = 0
+  for (let index = start; index >= 0 && index < chars.length; index += step) {
+    const character = chars[index]
+    if (character < 'A' || character > 'Z') break
+    length += 1
+  }
+  return length
+}
+
+/**
+ * True when `alternate` uses the same letters as `base` and differs only in case,
+ * apart from spaces that closed up between capital words of at least four letters
+ * (`PEcK SNIFF` → `PECKSNIFF`). Ordinary spaces (`schlafen gehen`) stay put.
+ */
+export const sameLettersAllowingCapsJoin = (base: string, alternate: string) => {
+  if (base === alternate) return false
+  if (differsOnlyInCase(base, alternate)) return true
+  const left = [...base]
+  const right = [...alternate]
+  let i = 0
+  let j = 0
+  while (i < left.length && j < right.length) {
+    if (left[i].toLowerCase() === right[j].toLowerCase()) {
+      i += 1
+      j += 1
+      continue
+    }
+    if (left[i] === ' ' && asciiUpperRun(right, j - 1, -1) >= 4 && asciiUpperRun(right, j, 1) >= 4) {
+      i += 1
+      continue
+    }
+    return false
+  }
+  return i === left.length && j === right.length
+}
+
+type CorrectedChar = { char: string }
+
+const withWord = <T extends CorrectedChar>(
+  characters: T[],
+  text: string,
+  edit: WordEdit,
+  rewrite: (characters: T[], index: number, to: string) => T[] | null,
+) => {
+  const rewritten = rewrite(characters, edit.index, edit.to)
+  const nextText = textWithWordEdits(text, [edit])
+  if (!rewritten || nextText === text) return null
+  return { characters: rewritten, text: nextText }
+}
+
+/**
+ * Text corrections that follow one decode: character alternatives, trace repairs, and personal
+ * spellings. Style fitting scores this text, the same corrections a finished line keeps.
+ */
+export const finalizeInkLineText = <T extends CorrectedChar>(
+  decoded: {
+    text: string
+    greedyText: string
+    characters: T[]
+    readings: Array<{ text: string; score: number }>
+  },
+  known: (word: string) => boolean,
+  options: { personal?: readonly string[]; baseKnown?: (word: string) => boolean; language?: string } = {},
+) => {
+  let text = decoded.text
+  let characters = decoded.characters
+  const take = (edit: WordEdit | null, rewrite: (characters: T[], index: number, to: string) => T[] | null) => {
+    if (!edit) return
+    const next = withWord(characters, text, edit, rewrite)
+    if (!next) return
+    text = next.text
+    characters = next.characters
+  }
+  take(oneLetterInALongUnknownWord(text, decoded.readings, known, decoded.greedyText), rewriteSameLengthWord)
+  for (const index of aToAeIndexes(characters)) {
+    characters = characters.map((character, cursor) => cursor === index ? { ...character, char: 'ä' } : character)
+    text = characters.map((character) => character.char).join('')
+  }
+  for (const index of fToLowerIndexes(characters)) {
+    characters = characters.map((character, cursor) => cursor === index ? { ...character, char: 'f' } : character)
+    text = characters.map((character) => character.char).join('')
+  }
+  const separated = separateFinalBIndexes(characters)
+  if (separated.length) {
+    const next = charactersSeparatingFinalB(characters, separated)
+    if (next) {
+      characters = next
+      text = characters.map((character) => character.char).join('')
+    }
+  }
+  for (const index of dToBIndexes(characters)) {
+    characters = characters.map((character, cursor) => cursor === index ? { ...character, char: 'B' } : character)
+    text = characters.map((character) => character.char).join('')
+  }
+  for (const index of rToNIndexes(characters)) {
+    characters = characters.map((character, cursor) => cursor === index ? { ...character, char: 'n' } : character)
+    text = characters.map((character) => character.char).join('')
+  }
+  for (const index of finalLetterApostropheIndexes(characters)) {
+    characters = characters.map((character, cursor) => cursor === index ? { ...character, char: "'" } : character)
+    text = characters.map((character) => character.char).join('')
+  }
+  take(capitalizedSentenceAdverb(text), rewriteSameLengthWord)
+  take(capitalizeLoneLowercase(text), rewriteSameLengthWord)
+  take(lowercaseVerbSein(text), rewriteSameLengthWord)
+  take(interiorCapitalNeighbor(text, known), rewriteSameLengthWord)
+  take(umlautAndOneOtherLetter(text, known), rewriteSameLengthWord)
+  take(capitalizedNounAfterDeterminer(text, known), rewriteSameLengthWord)
+  take(nounAfterAttributiveAdjective(text, known), rewriteWord)
+  const baseKnown = options.baseKnown ?? known
+  for (const edit of personalNeighborEdits(text, options.personal ?? [], baseKnown)) take(edit, rewriteWord)
+  take(transposedTraceWord(text, decoded.greedyText, known), rewriteWord)
+  take(trailingTracedLetter(text, decoded.greedyText, known), rewriteWord)
+  take(accusativeDer(text), rewriteSameLengthWord)
+  take(lowercaseShortBeamWord(text, decoded.readings), rewriteSameLengthWord)
+  take(lowercaseInitialFromBeam(text, decoded.readings, options.language ?? '', characters, baseKnown), rewriteSameLengthWord)
+  take(laterDictionaryCaseFromBeam(text, decoded.readings, options.language ?? '', baseKnown), rewriteSameLengthWord)
+  take(lowercaseMidSentenceAdverb(text, decoded.readings, options.language ?? ''), rewriteSameLengthWord)
+  take(capitalizeEnglishPronoun(text, options.language ?? ''), rewriteSameLengthWord)
+  const movedQuote = quoteAfterParenthesis(characters)
+  if (movedQuote) {
+    characters = movedQuote
+    text = characters.map((character) => character.char).join('')
+  }
+  const clubPeriod = periodBeforeCapitals(characters, options.language ?? '')
+  if (clubPeriod) {
+    characters = clubPeriod
+    text = characters.map((character) => character.char).join('')
+  }
+  const strayParen = strayParenBeforeCapital(characters)
+  if (strayParen) {
+    characters = strayParen
+    text = characters.map((character) => character.char).join('')
+  }
+  const quoteSpace = spaceBetweenDifferentQuotes(characters)
+  if (quoteSpace) {
+    characters = quoteSpace
+    text = characters.map((character) => character.char).join('')
+  }
+  const closedBracket = closeBracketAfterLetter(characters)
+  if (closedBracket) {
+    characters = closedBracket
+    text = characters.map((character) => character.char).join('')
+  }
+  const symbolSpace = spaceBetweenSymbolRuns(characters)
+  if (symbolSpace) {
+    characters = symbolSpace
+    text = characters.map((character) => character.char).join('')
+  }
+  const tracedBracket = openingBracketFromTrace(characters, decoded.greedyText)
+  if (tracedBracket) {
+    characters = tracedBracket
+    text = characters.map((character) => character.char).join('')
+  }
+  const tracedComma = tracedFinalComma(characters, decoded.readings, decoded.greedyText)
+  if (tracedComma) {
+    characters = tracedComma
+    text = characters.map((character) => character.char).join('')
+  }
+  const splitJoin = splitFunctionWordJoin(characters, decoded.readings, known)
+  if (splitJoin) {
+    characters = splitJoin
+    text = characters.map((character) => character.char).join('')
+  }
+  take(repeatedLetterGroup(text), rewriteWord)
+  take(nearTripleLetterGroup(text), rewriteSameLengthWord)
+  take(loneLetterBesideTriples(text), rewriteWord)
+  take(capitalizeWordAfterInitial(text), rewriteSameLengthWord)
+  const compoundJoin = dictionaryJoinFromReading(characters, decoded.readings, known)
+  if (compoundJoin) {
+    characters = compoundJoin
+    text = characters.map((character) => character.char).join('')
+  }
+  take(unknownWordFromReading(text, decoded.readings, known), rewriteSameLengthWord)
+  const extraLetter = oneLetterFromCloseReading(characters, decoded.readings, known)
+  if (extraLetter) {
+    characters = extraLetter
+    text = characters.map((character) => character.char).join('')
+  }
+  take(shorterTraceBeforePeriod(text, decoded.greedyText), rewriteWord)
+  take(trailingTraceDeletion(text, decoded.greedyText, known), rewriteWord)
+  const restoredMit = restoreMitFromTopReading(characters, decoded.readings)
+  if (restoredMit) {
+    characters = restoredMit
+    text = characters.map((character) => character.char).join('')
+  }
+  take(restoreAllCapsTraceWord(text, decoded.greedyText, decoded.readings), rewriteWord)
+  const joinedReading = joinReadingWithoutSpace(characters, decoded.readings)
+  if (joinedReading) {
+    characters = joinedReading
+    text = characters.map((character) => character.char).join('')
+  }
+  take(traceAgreedUnknownWord(text, decoded.greedyText, decoded.readings, known), rewriteSameLengthWord)
+  take(unlistedWordFromReading(text, decoded.readings, known), rewriteSameLengthWord)
+  take(knownEndingFromReading(text, decoded.readings, known), rewriteWord)
+  take(tracedShorterKnownWord(text, decoded.greedyText, decoded.readings, known), rewriteWord)
+  take(tracedUnlistedWord(text, decoded.greedyText, decoded.readings, known), rewriteWord)
+  take(knownSuffixFromReading(text, decoded.readings, known), rewriteWord)
+  const joinedClose = joinedReadingFromClose(characters, decoded.readings)
+  if (joinedClose) {
+    characters = joinedClose
+    text = characters.map((character) => character.char).join('')
+  }
+  take(knownVowelFromReading(text, decoded.greedyText, decoded.readings, known), rewriteSameLengthWord)
+  const camelSplit = camelSplitFromReading(characters, decoded.greedyText, decoded.readings)
+  if (camelSplit) {
+    characters = camelSplit
+    text = characters.map((character) => character.char).join('')
+  }
+  take(shortKnownWordFromReading(text, decoded.readings, known), rewriteWord)
+  take(functionWordBeforeStem(text, decoded.readings, options.language ?? ''), rewriteSameLengthWord)
+  take(knownConsonantFromReading(text, decoded.greedyText, decoded.readings, known), rewriteSameLengthWord)
+  const splitEnding = splitAndFinalLetterFromReading(characters, decoded.readings, known)
+  if (splitEnding) {
+    characters = splitEnding
+    text = characters.map((character) => character.char).join('')
+  }
+  const greedyDigit = greedyDigitFromTrace(characters, decoded.greedyText)
+  if (greedyDigit) {
+    characters = greedyDigit
+    text = characters.map((character) => character.char).join('')
+  }
+  const endingDigit = endingAndDigitFromReading(characters, decoded.readings, known)
+  if (endingDigit) {
+    characters = endingDigit
+    text = characters.map((character) => character.char).join('')
+  }
+  take(capitalizedNounAfterAdjective(text, decoded.readings, options.language ?? '', known), rewriteSameLengthWord)
+  take(unlistedEndingFromReading(text, decoded.greedyText, decoded.readings, known), rewriteSameLengthWord)
+  const functionTail = greedyFunctionTailJoin(characters, decoded.greedyText, options.language ?? '', known)
+  if (functionTail) {
+    characters = functionTail
+    text = characters.map((character) => character.char).join('')
+  }
+  for (const edit of partialReadingWordEdits(text, decoded.readings, known)) take(edit, rewriteWord)
+  for (const edit of penFiveFromTopReading(text, decoded.greedyText, decoded.readings, known)) take(edit, rewriteSameLengthWord)
+  return { text, characters }
+}

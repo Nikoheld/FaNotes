@@ -32,6 +32,11 @@ const hashWord = (word, seed) => {
   return hash >>> 0
 }
 
+// dictionary-de lists Geburtstags but not the lemma Geburtstag. Without the
+// lemma, the one-edit handwriting corrector rewrites a correct Geburtstag
+// into Geburtstags.
+const germanLemmaSupplements = ['geburtstag']
+
 const dictionaries = {
   de: ['dictionary-de'],
   // The handwriting corpora and real FaNotes notes contain both British and
@@ -63,6 +68,9 @@ const makeFilter = (language) => {
         || (englishFrequencies.get(normalized) ?? 0) >= minimumSupplementalOcrFrequency
       ) ocrWords.add(normalized)
     }
+  }
+  if (language === 'de') {
+    for (const word of germanLemmaSupplements) ocrWords.add(normalizeWord(word, 'de').replaceAll('ß', 'ss'))
   }
   const bitCount = Math.ceil((words.size * bitsPerWord) / 8) * 8
   const bytes = Buffer.alloc(bitCount / 8)

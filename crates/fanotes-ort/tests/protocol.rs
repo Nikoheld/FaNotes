@@ -9,13 +9,19 @@ fn request(width: usize, threads: usize) -> Request {
     Request {
         id: "line-1".to_owned(),
         width,
+        height: 128,
         threads,
+        input_name: "x".to_owned(),
+        output_name: "probabilities".to_owned(),
         input: (0..width * 128).map(|index| index as f32 / 7.0).collect(),
     }
 }
 
 fn header(json: &str, payload: Vec<u8>) -> Frame {
-    Frame { header: json.as_bytes().to_vec(), payload }
+    Frame {
+        header: json.as_bytes().to_vec(),
+        payload,
+    }
 }
 
 #[test]
@@ -37,7 +43,10 @@ fn truncated_or_oversized_frames_are_errors() {
     let mut stream = Vec::new();
     write_frame(&mut stream, &frame.header, &frame.payload).unwrap();
     for cut in [2, 4, 10, stream.len() - 1] {
-        assert!(read_frame(&mut Cursor::new(&stream[..cut])).is_err(), "cut at {cut}");
+        assert!(
+            read_frame(&mut Cursor::new(&stream[..cut])).is_err(),
+            "cut at {cut}"
+        );
     }
     let mut oversized = ((MAX_HEADER_BYTES + 1) as u32).to_le_bytes().to_vec();
     oversized.resize(MAX_HEADER_BYTES + 16, b' ');
@@ -55,16 +64,52 @@ fn a_line_request_round_trips_bit_for_bit() {
 
 #[test]
 fn requests_the_worker_refused_are_refused_with_their_id() {
-    let payload = |width: usize| vec![0u8; width * 128 * 4];
+    let payload = |width: usize, height: usize| vec![0u8; width * height * 4];
     let cases = [
-        (r#"{"id":"a","width":31,"height":128,"threads":1}"#, payload(31)),
-        (r#"{"id":"a","width":4097,"height":128,"threads":1}"#, payload(4097)),
-        (r#"{"id":"a","width":32,"height":64,"threads":1}"#, payload(32)),
-        (r#"{"id":"a","width":32,"height":128,"threads":0}"#, payload(32)),
-        (r#"{"id":"a","width":32,"height":128,"threads":5}"#, payload(32)),
-        (r#"{"id":"a","width":32,"height":128,"threads":1}"#, payload(33)),
-        (r#"{"id":"a","width":32,"height":128,"threads":1,"extra":true}"#, payload(32)),
-        (r#"{"id":"a","width":32.5,"height":128,"threads":1}"#, payload(32)),
+        (
+            r#"{"id":"a","width":15,"height":128,"threads":1}"#,
+            payload(15, 128),
+        ),
+        (
+            r#"{"id":"a","width":4097,"height":128,"threads":1}"#,
+            payload(4097, 128),
+        ),
+        (
+            r#"{"id":"a","width":32,"height":100,"threads":1}"#,
+            payload(32, 100),
+        ),
+        (
+            r#"{"id":"a","width":32,"height":257,"threads":1}"#,
+            payload(32, 257),
+        ),
+        (
+            r#"{"id":"a","width":32,"height":64,"threads":1}"#,
+            payload(32, 128),
+        ),
+        (
+            r#"{"id":"a","width":32,"height":128,"threads":0}"#,
+            payload(32, 128),
+        ),
+        (
+            r#"{"id":"a","width":32,"height":128,"threads":5}"#,
+            payload(32, 128),
+        ),
+        (
+            r#"{"id":"a","width":32,"height":128,"threads":1}"#,
+            payload(33, 128),
+        ),
+        (
+            r#"{"id":"a","width":32,"height":128,"threads":1,"input_name":"a b"}"#,
+            payload(32, 128),
+        ),
+        (
+            r#"{"id":"a","width":32,"height":128,"threads":1,"extra":true}"#,
+            payload(32, 128),
+        ),
+        (
+            r#"{"id":"a","width":32.5,"height":128,"threads":1}"#,
+            payload(32, 128),
+        ),
     ];
     for (json, payload) in cases {
         let (id, error) = Request::parse(&header(json, payload)).unwrap_err();
@@ -72,20 +117,34 @@ fn requests_the_worker_refused_are_refused_with_their_id() {
         assert!(matches!(error, Error::InvalidInput), "{json}");
     }
     let long = "x".repeat(97);
-    let (id, _) = Request::parse(&header(&format!(r#"{{"id":"{long}","width":32,"height":128,"threads":1}}"#), payload(32)))
-        .unwrap_err();
+    let (id, _) = Request::parse(&header(
+        &format!(r#"{{"id":"{long}","width":32,"height":128,"threads":1}}"#),
+        payload(32, 128),
+    ))
+    .unwrap_err();
     assert_eq!(id, long);
     let (id, _) = Request::parse(&header("{not json", Vec::new())).unwrap_err();
     assert_eq!(id, "");
-    let (id, _) = Request::parse(&header(r#"{"id":7,"width":32,"height":128,"threads":1}"#, payload(32))).unwrap_err();
+    let (id, _) = Request::parse(&header(
+        r#"{"id":7,"width":32,"height":128,"threads":1}"#,
+        payload(32, 128),
+    ))
+    .unwrap_err();
     assert_eq!(id, "", "a non-string id is not echoed");
 }
 
 #[test]
 fn replies_round_trip() {
-    let prediction = Prediction { probabilities: vec![0.25, 0.5, 0.25, 1.0, 0.0, 0.0], dims: vec![1, 2, 3] };
+    let prediction = Prediction {
+        probabilities: vec![0.25, 0.5, 0.25, 1.0, 0.0, 0.0],
+        dims: vec![1, 2, 3],
+    };
     match Reply::parse(&Reply::prediction("line-1", &prediction)).unwrap() {
-        Reply::Prediction { id, prediction: decoded, engine } => {
+        Reply::Prediction {
+            id,
+            prediction: decoded,
+            engine,
+        } => {
             assert_eq!((id.as_str(), engine.as_str()), ("line-1", ENGINE));
             assert_eq!(decoded, prediction);
         }

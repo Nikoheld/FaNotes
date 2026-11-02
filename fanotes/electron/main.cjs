@@ -221,6 +221,8 @@ const IPC = Object.freeze({
   loadSpellingWordCandidates: 'fanotes:load-spelling-word-candidates',
   loadHandwritingRecognitionResources: 'fanotes:load-handwriting-recognition-resources',
   recognizeNativeHandwritingLine: 'fanotes:recognize-native-handwriting-line',
+  recognizeInkLine: 'fanotes:recognize-ink-line',
+  inkPersonalModel: 'fanotes:ink-personal-model',
   enhancedMathGetState: 'fanotes:enhanced-math-get-state',
   enhancedMathInstall: 'fanotes:enhanced-math-install',
   enhancedMathRecognize: 'fanotes:enhanced-math-recognize',
@@ -580,6 +582,7 @@ const treeIoWaiters = []
 let nativeOcrHost = null
 let nativeOcrIdleTimer = null
 let nativeOcrModelPromise = null
+let inkOcr = null
 let enhancedMathService = null
 let qwenVisionService = null
 
@@ -705,6 +708,52 @@ async function verifiedNativeOcrModel() {
     throw error
   })
   return nativeOcrModelPromise
+}
+
+function inkOcrThreads(requested) {
+  const logicalCores = Math.max(1, os.cpus().length)
+  const configured = Number(currentSettings.ocrThreadLimit)
+  const automatic = Math.max(1, Math.min(4, Math.floor(logicalCores / 2)))
+  const maximum = Number.isSafeInteger(configured) && configured >= 1 ? configured : automatic
+  const asked = Number.isSafeInteger(requested) ? requested : maximum
+  return Math.max(1, Math.min(4, logicalCores, maximum, asked))
+}
+
+function getInkOcr() {
+  if (inkOcr) return inkOcr
+  const { createInkOcr } = require('./ink-ocr.cjs')
+  inkOcr = createInkOcr({
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+    packaged: app.isPackaged,
+    userDataPath: app.getPath('userData'),
+    threadsFor: inkOcrThreads,
+    keepAliveMs: () => {
+      const configured = Number(currentSettings.ocrModelKeepAliveSeconds)
+      return Number.isSafeInteger(configured) && configured >= 0 && configured <= 600
+        ? Math.max(1, configured * 1_000)
+        : 120_000
+    },
+  })
+  return inkOcr
+}
+
+async function recognizeInkLine(request) {
+  if (!isPlainObject(request)) throw new Error('Die native OCR-Eingabe ist ungültig.')
+  const source = request.input
+  const input = source instanceof Float32Array
+    ? source
+    : source instanceof ArrayBuffer ? new Float32Array(source)
+      : ArrayBuffer.isView(source) ? new Float32Array(source.buffer, source.byteOffset, Math.floor(source.byteLength / 4)) : null
+  if (!input) throw new Error('Die native OCR-Eingabe ist ungültig.')
+  const result = await getInkOcr().recognizeLine({
+    input,
+    width: request.width,
+    height: request.height,
+    threads: request.threads,
+    model: request.model === 'personal' ? 'personal' : 'base',
+  })
+  return { logits: result.logits, dims: result.dims, engine: result.engine }
 }
 
 async function recognizeNativeOcrLine(request) {
@@ -4816,6 +4865,15 @@ function registerIpcHandlers() {
 
   handle(IPC.recognizeNativeHandwritingLine, async (_event, request) => recognizeNativeOcrLine(request))
 
+  handle(IPC.recognizeInkLine, async (_event, request) => recognizeInkLine(request))
+  handle(IPC.inkPersonalModel, async (_event, request) => {
+    const action = isPlainObject(request) ? request.action : null
+    const service = getInkOcr()
+    if (action === 'install') return service.installPersonalModel(request)
+    if (action === 'remove') return service.removePersonalModel()
+    return service.personalState()
+  })
+
   handle(IPC.enhancedMathGetState, async () => getEnhancedMathService().state())
   handle(IPC.enhancedMathInstall, async (_event, request) => getEnhancedMathService().install(request))
   handle(IPC.enhancedMathRecognize, async (_event, request) => {
@@ -5112,7 +5170,7 @@ function installModelProtocol() {
       const relative = decodeURIComponent(url.pathname).replace(/^\/+|\/+$/gu, '')
       if (
         relative.length > 240
-        || !/^(?:fanotes-trocr(?:-web)?|trocr-runtime)\/(?:onnx\/)?[a-z0-9][a-z0-9._-]*$/u.test(relative)
+        || !/^(?:(?:fanotes-trocr(?:-web)?|trocr-runtime|fanotes-ink)\/(?:onnx\/)?[a-z0-9][a-z0-9._-]*|ort-wasm-simd-threaded\.wasm)$/u.test(relative)
       ) return new Response(null, { status: 404 })
       const target = path.join(resourceRoot, ...relative.split('/'))
       const info = await fsp.lstat(target)
@@ -5322,5 +5380,6 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   stopNativeOcr(new Error('FaNotes wird beendet.'))
+  inkOcr?.stop()
   updateManager?.stop()
 })

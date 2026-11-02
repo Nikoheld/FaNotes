@@ -124,9 +124,13 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | GlyphenWerk workspace | `src/components/GlyphenWerkWorkspace.tsx` | `GlyphenWerkWorkspace` |
 | GlyphenWerk bridge | `src/lib/glyphenWerkRecognitionBridge.ts` | `validatedGlyphenWerkTextPrefixHint` |
 | Recognition mode | `src/lib/recognitionModeSelection.ts` | `recognitionModeSelection` |
+| Desktop ink recognition | `src/lib/inkRecognition.ts` | `recognizeInk` |
+| Ink line tokens | `src/lib/inkTokens.ts` | `inkRecognitionTokens` |
+| Ink personalization | `src/lib/inkPersonalization.ts` | `fitInkPersonalStyle` |
+| Ink personalization settings | `src/components/InkPersonalizationCard.tsx` | `InkPersonalizationCard` |
 | Neural text recognition | `src/lib/neuralTextRecognition.ts` | `recognizeNeuralText` |
 | Personalized recognition | `src/lib/personalizedTextRecognition.ts` | `fusePersonalizedTextRecognition` |
-| Native OCR IPC | `electron/preload.cjs` | `recognizeNativeHandwritingLine` |
+| Native OCR IPC | `electron/preload.cjs` | `recognizeInkLine` |
 | Enhanced math model | `src/lib/enhancedMathRecognition.ts` | `renderEnhancedMathImage` |
 | Qwen vision | `src/lib/qwenVisionRecognition.ts` | `renderQwenVisionImage` |
 

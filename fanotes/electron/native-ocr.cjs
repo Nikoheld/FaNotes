@@ -97,7 +97,16 @@ function checkedExecutable(executable) {
  * @param {{ executable: string, model: { path: string, size: number, sha256: string }, runtime?: string | null,
  *   spawnImpl?: typeof spawn }} options
  */
-function createNativeOcrHost({ executable, model, runtime = null, spawnImpl = spawn }) {
+function createNativeOcrHost({
+  executable,
+  model,
+  runtime = null,
+  spawnImpl = spawn,
+  modelHeight = MODEL_HEIGHT,
+  inputName = 'x',
+  outputName = 'probabilities',
+  minWidth = 32,
+}) {
   if (
     !path.isAbsolute(executable)
     || !path.isAbsolute(model?.path ?? '')
@@ -105,6 +114,11 @@ function createNativeOcrHost({ executable, model, runtime = null, spawnImpl = sp
     || model.size <= 0
     || !/^[a-f0-9]{64}$/u.test(model.sha256)
     || (runtime !== null && !path.isAbsolute(runtime))
+    || !Number.isSafeInteger(modelHeight)
+    || modelHeight < 16
+    || modelHeight > 256
+    || !/^[\w.\-/]{1,64}$/u.test(inputName)
+    || !/^[\w.\-/]{1,64}$/u.test(outputName)
   ) throw new Error('Ungültige native OCR-Konfiguration.')
   let child = null
   let stderrTail = ''
@@ -177,9 +191,9 @@ function createNativeOcrHost({ executable, model, runtime = null, spawnImpl = sp
       !(input instanceof Float32Array)
       || !Number.isSafeInteger(width)
       || !Number.isSafeInteger(height)
-      || width < 32
+      || width < minWidth
       || width > 4096
-      || height !== MODEL_HEIGHT
+      || height !== modelHeight
       || input.length !== width * height
       || !Number.isSafeInteger(threads)
       || threads < 1
@@ -192,7 +206,10 @@ function createNativeOcrHost({ executable, model, runtime = null, spawnImpl = sp
       return Promise.reject(error)
     }
     const id = crypto.randomUUID()
-    const frame = encodeFrame({ id, width, height, threads }, Buffer.from(input.buffer, input.byteOffset, input.byteLength))
+    const header = { id, width, height, threads }
+    if (inputName !== 'x') header.input_name = inputName
+    if (outputName !== 'probabilities') header.output_name = outputName
+    const frame = encodeFrame(header, Buffer.from(input.buffer, input.byteOffset, input.byteLength))
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         pending.delete(id)

@@ -440,6 +440,8 @@ fanotes_commands! {
     load_spelling_word_candidates => "fanotes:load-spelling-word-candidates",
     load_handwriting_recognition_resources => "fanotes:load-handwriting-recognition-resources",
     recognize_native_handwriting_line => "fanotes:recognize-native-handwriting-line",
+    recognize_ink_line => "fanotes:recognize-ink-line",
+    ink_personal_model => "fanotes:ink-personal-model",
     enhanced_math_get_state => "fanotes:enhanced-math-get-state",
     enhanced_math_install => "fanotes:enhanced-math-install",
     enhanced_math_recognize => "fanotes:enhanced-math-recognize",

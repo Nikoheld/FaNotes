@@ -167,40 +167,27 @@ export function GlyphenWerkWorkspace({ activeView, appearance, onClose, onViewCh
       ...payload,
     }, '*')
     try {
-      const [{ recognizeNeuralText }, resources] = await Promise.all([
-        import('../lib/neuralTextRecognition'),
-        loadRecognitionResources(),
+      const [{ recognizeInk }, { activateInkPersonalization }] = await Promise.all([
+        import('../lib/inkRecognition'),
+        import('../lib/inkPersonalization'),
       ])
-      const neural = await recognizeNeuralText(strokes, message.language, 900, 560)
-      const { recognizePersonalizedTextLine } = await import('../lib/personalizedLineRecognition')
-      const personalized = await recognizePersonalizedTextLine(
-        strokes,
-        resources,
-        neural,
-        message.language,
-        false,
-        900,
-        560,
-        undefined,
-        undefined,
-        textPrefixHint,
-      )
-      const exactProjectionSafe = glyphenWerkExactProjectionIsIndependent(
-        textPrefixHint,
-        neural.text,
-        personalized.fusion.text,
-      )
+      await activateInkPersonalization(message.language).catch(() => null)
+      const ink = await recognizeInk(strokes, message.language, 900, 560)
       respond({
-        text: personalized.fusion.text.slice(0, 4_000),
-        exactProjectionSafe,
-        confidence: Math.max(neural.confidence, personalized.fusion.confidence),
-        lineCount: neural.lines.length,
-        wordCount: neural.wordCount ?? 0,
-        knownWordRatio: neural.knownWordRatio ?? 0,
-        personalizedCharacters: personalized.fusion.personalizedCharacters,
-        classicalCharacters: personalized.fusion.classicalCharacters,
-        personalizedSource: personalized.fusion.source,
-        personalizedConfidence: personalized.fusion.confidence,
+        text: ink.text.slice(0, 4_000),
+        exactProjectionSafe: glyphenWerkExactProjectionIsIndependent(textPrefixHint, ink.text, ink.text),
+        confidence: ink.confidence,
+        lineCount: ink.lines.length,
+        wordCount: ink.wordCount,
+        knownWordRatio: ink.knownWordRatio,
+        personalizedCharacters: ink.personalized ? ink.lines.reduce((sum, line) => sum + line.characters.length, 0) : 0,
+        classicalCharacters: 0,
+        personalizedSource: ink.personalized ? 'personalized' : 'neural',
+        personalizedConfidence: ink.confidence,
+        alternatives: ink.lines.map((line) => line.alternatives.slice(0, 3)),
+        engine: ink.engine,
+        modelVersion: ink.modelVersion,
+        durationMs: Math.round(ink.timings.totalMs),
       })
     } catch (reason) {
       respond({

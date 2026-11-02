@@ -121,6 +121,8 @@ if (typeof window !== 'undefined') {
     loadSpellingResources: async () => decodeByteFields(await invoke('fanotes:load-spelling-resources')),
     loadSpellingWordCandidates: async (language) => decodeByteFields(await invoke('fanotes:load-spelling-word-candidates', language)),
     loadHandwritingRecognitionResources: async () => decodeByteFields(await invoke('fanotes:load-handwriting-recognition-resources')),
+    recognizeInkLine: async (request) => decodeByteFields(await invoke('fanotes:recognize-ink-line', request)),
+    inkPersonalModel: async (request) => invoke('fanotes:ink-personal-model', request),
     recognizeNativeHandwritingLine: async (request) => {
       const input = request && request.input instanceof Float32Array
         ? request.input
