@@ -1388,6 +1388,36 @@ export const restoreAllCapsTraceWord = (
 }
 
 /**
+ * A space between two words of at least four letters goes away when the top reading
+ * already wrote them as one word (`Haupt arten` → `Hauptarten`).
+ */
+export const joinReadingWithoutSpace = <T extends { char: string }>(
+  characters: T[],
+  readings: Array<{ text: string }>,
+): T[] | null => {
+  const top = readings[0]?.text ?? ''
+  const text = characters.map((character) => character.char).join('')
+  if (!top || top === text) return null
+  const letter = /[A-Za-zÄÖÜäöüß]/u
+  let found = -1
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] !== ' ') continue
+    let start = index - 1
+    while (start >= 0 && letter.test(text[start])) start -= 1
+    let end = index + 1
+    while (end < text.length && letter.test(text[end])) end += 1
+    if (index - start - 1 < 4 || end - index - 1 < 4) continue
+    if (`${text.slice(0, index)}${text.slice(index + 1)}` !== top) continue
+    if (found !== -1) return null
+    found = index
+  }
+  if (found < 0) return null
+  const next = characters.slice()
+  next.splice(found, 1)
+  return next
+}
+
+/**
  * The beam's top reading keeps `mit` when a later step wrote `mir` (`Mit zunehmender`).
  * The rest of the line has to match.
  */
@@ -2210,5 +2240,10 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
     text = characters.map((character) => character.char).join('')
   }
   take(restoreAllCapsTraceWord(text, decoded.greedyText, decoded.readings), rewriteWord)
+  const joinedReading = joinReadingWithoutSpace(characters, decoded.readings)
+  if (joinedReading) {
+    characters = joinedReading
+    text = characters.map((character) => character.char).join('')
+  }
   return { text, characters }
 }
