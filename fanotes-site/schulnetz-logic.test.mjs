@@ -18,6 +18,9 @@ import {
   unseenChanges,
   weightedAverage,
   wunschnote,
+  roundToHalf,
+  isSportCourse,
+  promotionPoints,
 } from './schulnetz-logic.mjs'
 
 const marks = [
@@ -35,6 +38,17 @@ test('grade maths matches the Swiss pass line', () => {
   assert.equal(wunschnote(marks, 4, 1).alreadyMet, true)
 })
 
+test('Aargau pluspunkte round the Zeugnisnote and skip sport', () => {
+  assert.equal(roundToHalf(4.74), 4.5)
+  assert.equal(roundToHalf(4.75), 5)
+  assert.equal(promotionPoints(5.5), 1.5)
+  assert.equal(promotionPoints(4), 0)
+  assert.equal(promotionPoints(3), -2)
+  assert.equal(promotionPoints(3.5), -1)
+  assert.equal(isSportCourse('Sport'), true)
+  assert.equal(isSportCourse('Mathematik'), false)
+})
+
 test('diff ids stay stable and the first snapshot is silent', () => {
   const grade = { id: 'g1', course: 'Mathematik', title: 'Probe', date: '2026-10-20', mark: 5.5, weight: 1 }
   const next = { grades: [grade], events: [], exams: [], absences: [], messages: [] }
@@ -43,6 +57,11 @@ test('diff ids stay stable and the first snapshot is silent', () => {
   assert.equal(change.id, 'grade:g1:5.5|1|Probe|2026-10-20')
   assert.equal(change.category, 'grade')
   assert.equal(change.title, 'Neue Note')
+  const lesson = { id: 'e1', start: '2026-11-02T08:15:00', end: '2026-11-02T09:00:00', text: 'Mathematik', room: 'R201', teachers: [], courseName: 'Mathematik', status: 'confirmed', eventType: 'lesson' }
+  const room = diffSnapshots({ grades: [], events: [lesson], exams: [], absences: [], messages: [] }, { grades: [], events: [{ ...lesson, room: 'R202' }], exams: [], absences: [], messages: [] })
+  assert.equal(room.find((item) => item.category === 'timetable').title, 'Raum geändert')
+  const time = diffSnapshots({ grades: [], events: [lesson], exams: [], absences: [], messages: [] }, { grades: [], events: [{ ...lesson, start: '2026-11-02T09:15:00', end: '2026-11-02T10:00:00' }], exams: [], absences: [], messages: [] })
+  assert.equal(time.find((item) => item.category === 'timetable').title, 'Zeit geändert')
 })
 
 test('an excuse deadline is pushed once and only inside the window', () => {

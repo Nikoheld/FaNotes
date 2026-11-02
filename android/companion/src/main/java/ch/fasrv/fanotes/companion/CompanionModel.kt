@@ -18,9 +18,13 @@ import ch.fasrv.fanotes.desk.HomeworkTask
 import ch.fasrv.fanotes.desk.emptyCalendar
 import ch.fasrv.fanotes.ink.InkDocument
 import ch.fasrv.fanotes.schulnetz.AgendaEvent
+import ch.fasrv.fanotes.schulnetz.DeskPrefs
+import ch.fasrv.fanotes.schulnetz.HiddenLesson
 import ch.fasrv.fanotes.schulnetz.HypotheticalGrade
 import ch.fasrv.fanotes.schulnetz.NotifySettings
 import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
+import ch.fasrv.fanotes.schulnetz.hideOnce
+import ch.fasrv.fanotes.schulnetz.hideSeries
 import ch.fasrv.fanotes.schulnetz.SCHULNETZ_USER_AGENT
 import ch.fasrv.fanotes.schulnetz.SSO_COOKIE_URLS
 import ch.fasrv.fanotes.schulnetz.cookieNames
@@ -45,7 +49,9 @@ enum class PhoneTab { Heute, Plan, Noten, Notizen, Mehr }
 enum class PhoneSection { Menu, Hausaufgaben, Kalender, Absenzen, Pruefungen, Termine, Konto, Einstellungen, Editor }
 
 class CompanionModel(val graph: CompanionGraph) : ViewModel() {
-    var tab by mutableStateOf(PhoneTab.Heute)
+    var desk by mutableStateOf(graph.deskPrefs())
+    var hidden by mutableStateOf(graph.hiddenLessons())
+    var tab by mutableStateOf(startTab(graph.deskPrefs().startTab))
     var section by mutableStateOf(PhoneSection.Menu)
     var message by mutableStateOf<String?>(null)
     var busy by mutableStateOf(false)
@@ -84,6 +90,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             val nextCalendar = runCatching { graph.calendar() }.getOrDefault(emptyCalendar())
             val nextGuess = runCatching { graph.hypothetical() }.getOrDefault(emptyList())
             val counted = runCatching { graph.writtenNoteCount() }.getOrDefault(0)
+            val nextDesk = runCatching { graph.deskPrefs() }.getOrDefault(desk)
+            val nextHidden = runCatching { graph.hiddenLessons() }.getOrDefault(hidden)
             withContext(Dispatchers.Main) {
                 if (!graph.noteFolderExists(noteFolder)) noteFolder = ""
                 notes = nextNotes
@@ -91,6 +99,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 tasks = nextTasks
                 calendar = nextCalendar
                 hypothetical = nextGuess
+                desk = nextDesk
+                hidden = nextHidden
             }
         }
     }
@@ -239,7 +249,40 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
 
     fun chooseTheme(id: String) {
         theme = id
-        graph.setTheme(id)
+        updateDesk(desk.copy(theme = id))
+    }
+
+    fun updateDesk(next: DeskPrefs) {
+        desk = next
+        theme = next.theme
+        graph.saveDeskPrefs(next)
+    }
+
+    fun hideLesson(event: AgendaEvent, series: Boolean) {
+        val next = if (series) hideSeries(event, hidden) else hideOnce(event, hidden)
+        hidden = next
+        graph.saveHiddenLessons(next)
+    }
+
+    fun restoreLesson(id: String) {
+        val next = hidden.filterNot { it.id == id }
+        hidden = next
+        graph.saveHiddenLessons(next)
+    }
+
+    fun saveTaskNotes(id: String, notes: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            graph.setHomeworkNotes(id, notes)
+            reload()
+        }
+    }
+
+    fun renameCourse(key: String, name: String) {
+        val aliases = desk.courseAliases.toMutableMap()
+        val stored = key.trim().lowercase()
+        if (stored.isBlank()) return
+        if (name.isBlank()) aliases.remove(stored) else aliases[stored] = name.trim()
+        updateDesk(desk.copy(courseAliases = aliases))
     }
 
     fun chooseInstant(enabled: Boolean) {
@@ -348,12 +391,23 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         }
     }
 
-    fun testPush() {
+    fun testPush(context: Context) {
+        CompanionAlerts.forget(context, "push-test")
+        CompanionAlerts.show(
+            context,
+            ch.fasrv.fanotes.schulnetz.SchulnetzChange("push-test", "grade", "Testbenachrichtigung", "FaNotes Companion kann Mitteilungen anzeigen."),
+        )
         viewModelScope.launch {
-            val session = graph.engine.currentSession() ?: return@launch
+            val session = graph.engine.currentSession()
+            if (session == null) {
+                message = if (CompanionAlerts.notificationsAllowed(context)) "Lokale Testmeldung gesendet." else "Mitteilungen sind ausgeschaltet. Unter Android 13+ zuerst die Berechtigung erlauben."
+                return@launch
+            }
             runCatching { graph.client.testPush(session) }
                 .onSuccess { message = "Testbenachrichtigung gesendet." }
-                .onFailure { message = it.message }
+                .onFailure { error ->
+                    message = "Lokal gesendet. Server: ${error.message}"
+                }
         }
     }
 
@@ -370,6 +424,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         }
     }
 }
+
+internal fun startTab(raw: String): PhoneTab = PhoneTab.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) } ?: PhoneTab.Heute
 
 internal fun exportSsoCookies(): Map<String, String> {
     val manager = CookieManager.getInstance()

@@ -533,7 +533,7 @@ export const createSchulnetzRuntime = (options = {}) => {
   const start = () => {
     if (options.autostart === false || process.env.FANOTES_SCHULNETZ_POLL === '0' || started) return
     started = true
-    const interval = Number(process.env.FANOTES_SCHULNETZ_POLL_MS || options.intervalMs || 180_000)
+    const interval = Number(process.env.FANOTES_SCHULNETZ_POLL_MS || options.intervalMs || 60_000)
     const loop = async () => {
       const acquired = await acquireLock()
       if (!acquired) {

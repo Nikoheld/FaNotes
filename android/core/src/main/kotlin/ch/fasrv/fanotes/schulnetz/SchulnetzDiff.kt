@@ -115,8 +115,11 @@ private fun diffAgenda(
         val title = when {
             old == null -> if (category == "exam") "Neue Prüfung" else created
             event.isCancelled() && !old.isCancelled() -> if (category == "exam") "Prüfung fällt aus" else "Lektion fällt aus"
-            event.teachers.joinToString() != old.teachers.joinToString() || event.isSubstitution() -> "Vertretung"
+            event.teachers.joinToString() != old.teachers.joinToString() || (event.isSubstitution() && !old.isSubstitution()) -> "Vertretung"
             category == "exam" && (event.start != old.start || event.room != old.room) -> "Prüfung verschoben"
+            event.room != old.room && (event.start != old.start || event.end != old.end) -> if (category == "exam") "Prüfung geändert" else "Stundenplan geändert"
+            event.room != old.room -> "Raum geändert"
+            event.start != old.start || event.end != old.end -> "Zeit geändert"
             else -> if (category == "exam") "Prüfung geändert" else "Stundenplan geändert"
         }
         changes += SchulnetzChange(

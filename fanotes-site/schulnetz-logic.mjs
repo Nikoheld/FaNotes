@@ -448,8 +448,11 @@ const diffAgenda = (previous, next, category, created, removed, changes) => {
     let title
     if (!old) title = category === 'exam' ? 'Neue Prüfung' : created
     else if (isCancelled(event) && !isCancelled(old)) title = category === 'exam' ? 'Prüfung fällt aus' : 'Lektion fällt aus'
-    else if ((event.teachers || []).join() !== (old.teachers || []).join() || isSubstitution(event)) title = 'Vertretung'
+    else if ((event.teachers || []).join() !== (old.teachers || []).join() || (isSubstitution(event) && !isSubstitution(old))) title = 'Vertretung'
     else if (category === 'exam' && (event.start !== old.start || event.room !== old.room)) title = 'Prüfung verschoben'
+    else if (event.room !== old.room && (event.start !== old.start || event.end !== old.end)) title = category === 'exam' ? 'Prüfung geändert' : 'Stundenplan geändert'
+    else if (event.room !== old.room) title = 'Raum geändert'
+    else if (event.start !== old.start || event.end !== old.end) title = 'Zeit geändert'
     else title = category === 'exam' ? 'Prüfung geändert' : 'Stundenplan geändert'
     changes.push({ id: `${category}:${event.id}:${key}`, category, title, body: eventBody(event) })
   }
@@ -469,6 +472,23 @@ export const weightedAverage = (marks) => {
 export const pluspunkte = (marks) => marks
   .filter((mark) => mark.weight > 0 && Number.isFinite(mark.mark))
   .reduce((sum, mark) => sum + (mark.mark - PASS) * mark.weight, 0)
+
+/** Aargau gymnasium promotion: round the course average to 0.5, then Note−4 or twice below 4. */
+export const roundToHalf = (value) => {
+  if (!Number.isFinite(value)) return value
+  return Math.round(value * 2 + Number.EPSILON) / 2
+}
+
+export const isSportCourse = (name) => {
+  const blob = String(name || '').trim().toLowerCase()
+  if (blob.includes('turnen')) return true
+  return blob.split(/[\s_/()+\-]+/u).some((token) => token === 'sport' || token.startsWith('sport'))
+}
+
+export const promotionPoints = (zeugnis) => {
+  if (!Number.isFinite(zeugnis)) return null
+  return zeugnis + 1e-9 >= PASS ? zeugnis - PASS : -2 * (PASS - zeugnis)
+}
 
 export const wunschnote = (current, target, nextWeight) => {
   if (!Number.isFinite(target) || target < 1 || target > 6) return { achievable: false, alreadyMet: false, needed: null }

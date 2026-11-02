@@ -47,6 +47,14 @@ import ch.fasrv.fanotes.schulnetz.parseRawSnapshot
 import ch.fasrv.fanotes.schulnetz.schulnetzDeviceId
 import ch.fasrv.fanotes.schulnetz.toNormalizedJson
 import ch.fasrv.fanotes.schulnetz.usesWebsiteSession
+import ch.fasrv.fanotes.schulnetz.DeskPrefs
+import ch.fasrv.fanotes.schulnetz.HiddenLesson
+import ch.fasrv.fanotes.schulnetz.changeIsHidden
+import ch.fasrv.fanotes.schulnetz.parseDeskPrefs
+import ch.fasrv.fanotes.schulnetz.parseHiddenLessons
+import ch.fasrv.fanotes.schulnetz.serializeDeskPrefs
+import ch.fasrv.fanotes.schulnetz.serializeHiddenLessons
+import ch.fasrv.fanotes.schulnetz.startPageUrl
 import ch.fasrv.fanotes.sync.SyncApi
 import ch.fasrv.fanotes.sync.SyncEngine
 import ch.fasrv.fanotes.sync.SyncEngineOptions
@@ -175,6 +183,7 @@ class CompanionGraph(private val context: Context) {
                 schulnetzLog.info("refresh running caller=$caller lockHeld=true holder=${gate.holder.orEmpty()}")
                 refreshLocked(caller)
                 lastRefreshAt = System.currentTimeMillis()
+                prefs.edit().putLong("last-check", lastRefreshAt).apply()
             }
         }
     }
@@ -182,10 +191,12 @@ class CompanionGraph(private val context: Context) {
     private suspend fun refreshLocked(caller: String) {
         val session = engine.currentSession() ?: return
         val previous = snapshot.value
+        prefs.edit().putLong("last-check", System.currentTimeMillis()).putString("last-check-error", "").apply()
         val remote = runCatching { client.status(session) }.getOrElse { error ->
             if (error is SchulnetzHttpException && (error.status == 404 || error.status == 503)) {
                 SchulnetzLinkState(reachable = false, baseUrl = baseUrl(), lastError = error.message.orEmpty())
             } else {
+                prefs.edit().putString("last-check-error", error.message ?: "Schulnetz nicht erreichbar").apply()
                 link.value.copy(lastError = error.message ?: "Schulnetz nicht erreichbar")
             }
         }
@@ -252,13 +263,21 @@ class CompanionGraph(private val context: Context) {
     }
 
     fun setHomeworkDone(id: String, done: Boolean) {
+        patchHomework(id) { it.copy(done = done) }
+    }
+
+    fun setHomeworkNotes(id: String, notes: String) {
+        patchHomework(id) { it.copy(notes = notes.take(4000)) }
+    }
+
+    private fun patchHomework(id: String, edit: (HomeworkTask) -> HomeworkTask) {
         val existing = vault.read(HOMEWORK_NOTE_PATH)?.decodeToString()
         val loaded = existing?.let(::loadHomeworkMarkdown)
         if (loaded is NoteMarkdownLoad.Unreadable) return
         val document = (loaded as? NoteMarkdownLoad.Ready)?.document ?: HomeworkDocument(emptyList())
         val now = isoNow()
         val tasks = document.tasks.map { task ->
-            if (task.id == id) task.copy(done = done, updatedAt = now) else task
+            if (task.id == id) edit(task).copy(updatedAt = now) else task
         }
         vault.write(HOMEWORK_NOTE_PATH, serializeHomeworkMarkdown(document.copy(tasks = tasks)).encodeToByteArray())
         engine.notifyLocalChange()
@@ -350,6 +369,48 @@ class CompanionGraph(private val context: Context) {
             val color = (value as? JsonValue.Str)?.value ?: return@mapNotNull null
             key to color
         }.toMap()
+    }
+
+    fun deskPrefs(): DeskPrefs {
+        val text = vault.read(DESK_PATH)?.decodeToString() ?: return DeskPrefs(theme = themeId())
+        return parseDeskPrefs(text).let { if (it.theme.isBlank()) it.copy(theme = themeId()) else it }
+    }
+
+    fun saveDeskPrefs(prefs: DeskPrefs) {
+        vault.write(DESK_PATH, serializeDeskPrefs(prefs).encodeToByteArray())
+        setTheme(prefs.theme)
+        engine.notifyLocalChange()
+        NextLessonWidget.update(context)
+    }
+
+    fun hiddenLessons(): List<HiddenLesson> {
+        val text = vault.read(HIDDEN_PATH)?.decodeToString() ?: return emptyList()
+        return parseHiddenLessons(text)
+    }
+
+    fun saveHiddenLessons(rules: List<HiddenLesson>) {
+        vault.write(HIDDEN_PATH, serializeHiddenLessons(rules).encodeToByteArray())
+        engine.notifyLocalChange()
+        NextLessonWidget.update(context)
+    }
+
+    fun lastCheckAt(): Long = prefs.getLong("last-check", 0L)
+
+    fun lastCheckError(): String = prefs.getString("last-check-error", "").orEmpty()
+
+    fun nextCheckAt(): Long {
+        val last = lastCheckAt()
+        if (last <= 0L) return 0L
+        return last + if (instantPush()) PHONE_FALLBACK_MS else 15 * 60_000L
+    }
+
+    suspend fun keepAlive() {
+        if (!usesWebsiteSession(baseUrl())) return
+        val session = readWebSession() ?: return
+        if (session.id.isBlank()) return
+        val url = startPageUrl(baseUrl(), session.id, session.transid, signedOut)
+        runCatching { browser.load(url) }
+        schulnetzLog.info("keepalive start page lockHeld=${gate.isLocked}")
     }
 
     fun setSubjectColor(subject: String, color: String) {
@@ -719,7 +780,9 @@ class CompanionGraph(private val context: Context) {
     }
 
     private fun publishSnapshot(previous: SchulnetzSnapshot?, next: SchulnetzSnapshot, settings: NotifySettings) {
+        val hidden = hiddenLessons()
         val changes = diffSnapshots(previous?.takeIf { it.fetchedAt.isNotBlank() || it.grades.isNotEmpty() || it.events.isNotEmpty() }, next, settings)
+            .filterNot { changeIsHidden(it, hidden) }
         snapshot.value = next
         writeCache(next)
         CompanionAlerts.showAll(context, changes)
@@ -732,7 +795,7 @@ class CompanionGraph(private val context: Context) {
             val id = change.string("id") ?: return@mapNotNull null
             SchulnetzChange(id, change.string("category").orEmpty(), change.string("title").orEmpty(), change.string("body").orEmpty())
         }
-        CompanionAlerts.showAll(context, items)
+        CompanionAlerts.showAll(context, items.filterNot { changeIsHidden(it, hiddenLessons()) })
         val maxRevision = obj.array("changes")?.items.orEmpty().mapNotNull { item ->
             (item as? JsonValue.Obj)?.double("revision")?.toLong()
         }.maxOrNull()
@@ -830,7 +893,11 @@ class CompanionGraph(private val context: Context) {
         const val LEASE_PATH = ".fanotes/schulnetz/lease.json"
         const val HYPOTHETICAL_PATH = ".fanotes/schulnetz/hypothetical.json"
         const val COLORS_PATH = ".fanotes/schulnetz/colors.json"
+        const val DESK_PATH = ".fanotes/schulnetz/desk.json"
+        const val HIDDEN_PATH = ".fanotes/schulnetz/hidden-lessons.json"
         const val SNAPSHOT_VAULT_PATH = ".fanotes/schulnetz/snapshot.json"
+        const val SERVER_POLL_MS = 60_000L
+        const val PHONE_FALLBACK_MS = 3 * 60_000L
         private const val SILENT_AT = "schulnetz-silent-at"
         private const val SILENT_GAP_MS = 3 * 60 * 1000L
         fun snapshotFile(context: Context) = File(context.filesDir, "schulnetz-snapshot.json")

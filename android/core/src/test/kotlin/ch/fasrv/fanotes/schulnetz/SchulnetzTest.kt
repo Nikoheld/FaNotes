@@ -61,12 +61,19 @@ class GradeMathTest {
     )
 
     @Test
-    fun weightedAverageAndPluspunkteUseTheDistanceFromFour() {
+    fun weightedAverageAndAargauPluspunkteRoundTheCourseMark() {
         val average = weightedAverage(marks)
         assertNotNull(average)
         assertEquals(5.179, kotlin.math.round(average * 1000.0) / 1000.0)
-        assertEquals(4.125, pluspunkte(marks))
-        assertEquals("+4,13", formatPluspunkte(pluspunkte(marks)))
+        assertEquals(5.0, roundToHalf(average))
+        assertEquals(1.0, promotionPoints(roundToHalf(average)))
+        assertEquals(4.5, roundToHalf(4.74))
+        assertEquals(5.0, roundToHalf(4.75))
+        assertEquals(1.5, promotionPoints(5.5))
+        assertEquals(0.0, promotionPoints(4.0))
+        assertEquals(-2.0, promotionPoints(3.0))
+        assertEquals(-1.0, promotionPoints(3.5))
+        assertEquals("+1,5", formatPluspunkte(1.5))
     }
 
     @Test
@@ -91,10 +98,23 @@ class GradeMathTest {
         )
         val plain = courseSummaries(grades).single()
         assertEquals(4.0, plain.average)
+        assertEquals(4.0, plain.zeugnis)
         assertEquals(0.0, plain.pluspunkte)
         val withGuess = courseSummaries(grades, listOf(HypotheticalGrade("h", "math", "nächste", 6.0, 1.0))).single()
         assertEquals(5.0, withGuess.average)
-        assertEquals(2.0, withGuess.pluspunkte)
+        assertEquals(5.0, withGuess.zeugnis)
+        assertEquals(1.0, withGuess.pluspunkte)
+        val sport = courseSummaries(
+            listOf(SchoolGrade("s", "Sport", "spo", "Sport", "Test", "2026-10-01", 5.5, 1.0, true, null, "")),
+        ).single()
+        assertFalse(sport.promotion)
+        assertEquals(0.0, sport.pluspunkte)
+        val empty = courseSummaries(listOf(SchoolGrade("e", "Biologie", "bio", "Biologie", "Durchschnitt", "", null, 1.0, true, null, "")))
+        assertTrue(empty.isEmpty())
+        val totals = promotionTotals(listOf(withGuess, sport, courseSummaries(listOf(SchoolGrade("d", "Deutsch", "de", "Deutsch", "Probe", "2026-10-01", 3.0, 1.0, true, null, ""))).single()))
+        assertEquals(1.0, totals.plus)
+        assertEquals(-2.0, totals.minus)
+        assertEquals(-1.0, totals.total)
     }
 }
 
@@ -132,6 +152,11 @@ class SchulnetzDiffTest {
         assertEquals("Lektion entfernt", changes.first { it.id == "timetable:gone:removed" }.title)
         val again = diffSnapshots(next, next)
         assertTrue(again.none { it.category == "timetable" })
+        val moved = diffSnapshots(SchulnetzSnapshot(events = listOf(lesson)), SchulnetzSnapshot(events = listOf(lesson.copy(room = "R202"))))
+        assertEquals("Raum geändert", moved.single { it.category == "timetable" }.title)
+        val shifted = diffSnapshots(SchulnetzSnapshot(events = listOf(lesson)), SchulnetzSnapshot(events = listOf(lesson.copy(start = "2026-11-02T09:15:00", end = "2026-11-02T10:00:00"))))
+        assertEquals("Zeit geändert", shifted.single { it.category == "timetable" }.title)
+        assertEquals("Neue Note", diffSnapshots(SchulnetzSnapshot(), SchulnetzSnapshot(grades = listOf(SchoolGrade("g2", "Chemie", "che", "Chemie", "Test", "2026-11-01", 6.0, 1.0, true, null, "")))).single { it.category == "grade" }.title)
     }
 }
 

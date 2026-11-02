@@ -244,15 +244,17 @@ fun subjectColor(name: String, explicit: String = "", overrides: Map<String, Str
 
 fun AgendaEvent.displayColor(overrides: Map<String, String> = emptyMap()): String = subjectColor(label, color, overrides)
 
-/** Monday–Friday of the school week. Saturday and Sunday move to the next week. */
-fun timetableAnchor(today: LocalDate): LocalDate = when (today.dayOfWeek) {
-    DayOfWeek.SATURDAY, DayOfWeek.SUNDAY -> today.with(TemporalAdjusters.next(DayOfWeek.MONDAY))
-    else -> today
-}
+/** Monday–Friday of the school week. Saturday and Sunday move to the next week unless the weekend is shown. */
+fun timetableAnchor(today: LocalDate, includeWeekend: Boolean = false): LocalDate =
+    if (includeWeekend) today else when (today.dayOfWeek) {
+        DayOfWeek.SATURDAY, DayOfWeek.SUNDAY -> today.with(TemporalAdjusters.next(DayOfWeek.MONDAY))
+        else -> today
+    }
 
-fun schoolWeek(anchor: LocalDate): List<LocalDate> {
+fun schoolWeek(anchor: LocalDate, includeWeekend: Boolean = false): List<LocalDate> {
     val monday = anchor.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-    return (0..4).map { monday.plusDays(it.toLong()) }
+    val last = if (includeWeekend) 6 else 4
+    return (0..last).map { monday.plusDays(it.toLong()) }
 }
 
 fun eventsOn(events: List<AgendaEvent>, day: LocalDate, zone: ZoneId = ZoneId.of("Europe/Zurich")): List<AgendaEvent> =

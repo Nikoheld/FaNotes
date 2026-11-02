@@ -20,13 +20,23 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.parseJson
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.content.ContextCompat
 import ch.fasrv.fanotes.schulnetz.SchulnetzChange
+import ch.fasrv.fanotes.schulnetz.changeIsHidden
 import ch.fasrv.fanotes.schulnetz.endsAt
 import ch.fasrv.fanotes.schulnetz.isCancelled
 import ch.fasrv.fanotes.schulnetz.isSubstitution
 import ch.fasrv.fanotes.schulnetz.nextUp
+import ch.fasrv.fanotes.schulnetz.parseDeskPrefs
+import ch.fasrv.fanotes.schulnetz.parseHiddenLessons
 import ch.fasrv.fanotes.schulnetz.parseNormalizedSnapshot
 import ch.fasrv.fanotes.schulnetz.startsAt
+import ch.fasrv.fanotes.schulnetz.visibleEvents
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import org.unifiedpush.android.connector.FailedReason
@@ -46,7 +56,20 @@ object CompanionAlerts {
     fun ensureChannels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, context.getString(R.string.channel_alerts), NotificationManager.IMPORTANCE_HIGH))
+        manager.createNotificationChannel(NotificationChannel("schulnetz-grade", context.getString(R.string.channel_grade), NotificationManager.IMPORTANCE_HIGH))
+        manager.createNotificationChannel(NotificationChannel("schulnetz-timetable", context.getString(R.string.channel_timetable), NotificationManager.IMPORTANCE_HIGH))
+        manager.createNotificationChannel(NotificationChannel("schulnetz-exam", context.getString(R.string.channel_exam), NotificationManager.IMPORTANCE_DEFAULT))
+        manager.createNotificationChannel(NotificationChannel("schulnetz-absence", context.getString(R.string.channel_absence), NotificationManager.IMPORTANCE_DEFAULT))
+        manager.createNotificationChannel(NotificationChannel("schulnetz-deadline", context.getString(R.string.channel_deadline), NotificationManager.IMPORTANCE_HIGH))
+        manager.createNotificationChannel(NotificationChannel("schulnetz-event", context.getString(R.string.channel_event), NotificationManager.IMPORTANCE_DEFAULT))
         manager.createNotificationChannel(NotificationChannel(NtfyListenService.LIVE, context.getString(R.string.channel_live), NotificationManager.IMPORTANCE_LOW))
+    }
+
+    fun notificationsAllowed(context: Context): Boolean {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        if (!manager.areNotificationsEnabled()) return false
+        if (Build.VERSION.SDK_INT < 33) return true
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     }
 
     fun showAll(context: Context, changes: List<SchulnetzChange>) {
@@ -55,13 +78,28 @@ object CompanionAlerts {
 
     fun show(context: Context, change: SchulnetzChange) {
         if (change.id.isBlank() || !remember(context, change.id)) return
+        val hidden = runCatching {
+            val file = java.io.File(context.filesDir, "vault/${CompanionGraph.HIDDEN_PATH}")
+            if (!file.isFile) emptyList() else parseHiddenLessons(file.readText())
+        }.getOrDefault(emptyList())
+        if (changeIsHidden(change, hidden)) return
+        if (!notificationsAllowed(context)) return
+        val channel = when (change.category) {
+            "grade" -> "schulnetz-grade"
+            "timetable" -> "schulnetz-timetable"
+            "exam" -> "schulnetz-exam"
+            "absence" -> "schulnetz-absence"
+            "deadline" -> "schulnetz-deadline"
+            "event" -> "schulnetz-event"
+            else -> CHANNEL
+        }
         val open = PendingIntent.getActivity(
             context,
             0,
             Intent(context, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val notification = NotificationCompat.Builder(context, CHANNEL)
+        val notification = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_stat)
             .setContentTitle(change.title.ifBlank { "Schulnetz" })
             .setContentText(change.body)
@@ -109,6 +147,7 @@ object CompanionAlerts {
 class SchulnetzWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result = try {
         (applicationContext as CompanionApplication).graph.refreshSchulnetz("worker")
+        scheduleFast(applicationContext)
         Result.success()
     } catch (_: Exception) {
         Result.retry()
@@ -120,6 +159,16 @@ class SchulnetzWorker(context: Context, params: WorkerParameters) : CoroutineWor
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                 .build()
             WorkManager.getInstance(context).enqueueUniquePeriodicWork("schulnetz", ExistingPeriodicWorkPolicy.UPDATE, request)
+            scheduleFast(context)
+        }
+
+        fun scheduleFast(context: Context) {
+            val delay = if ((context.applicationContext as? CompanionApplication)?.graph?.instantPush() == false) 15L else 3L
+            val request = OneTimeWorkRequestBuilder<SchulnetzWorker>()
+                .setInitialDelay(delay, TimeUnit.MINUTES)
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork("schulnetz-fast", ExistingWorkPolicy.REPLACE, request)
         }
     }
 }
@@ -224,8 +273,11 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
         fun update(context: Context, manager: AppWidgetManager, ids: IntArray) {
             val views = RemoteViews(context.packageName, R.layout.widget_next_lesson)
             val snapshot = CompanionGraph.snapshotFile(context).takeIf { it.isFile }?.readText()?.let { parseNormalizedSnapshot(it) }
+            val hidden = java.io.File(context.filesDir, "vault/${CompanionGraph.HIDDEN_PATH}").takeIf { it.isFile }?.readText()?.let { parseHiddenLessons(it) }.orEmpty()
+            val compact = java.io.File(context.filesDir, "vault/${CompanionGraph.DESK_PATH}").takeIf { it.isFile }?.readText()?.let { parseDeskPrefs(it).widgetCompact } == true
             val zone = ZoneId.systemDefault()
-            val next = snapshot?.let { nextUp(it.events, java.time.Instant.now(), zone) }
+            val next = snapshot?.let { nextUp(visibleEvents(it.events, hidden, zone), java.time.Instant.now(), zone) }
+            views.setViewVisibility(R.id.widget_kicker, if (compact) android.view.View.GONE else android.view.View.VISIBLE)
             if (next == null) {
                 views.setTextViewText(R.id.widget_title, "Keine Lektion")
                 views.setTextViewText(R.id.widget_detail, "Schulnetz öffnen")
@@ -236,7 +288,7 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
                 val room = if (next.room.isBlank()) "" else "Raum ${next.room}"
                 val state = if (next.isCancelled()) "fällt aus" else if (next.isSubstitution()) "Vertretung" else ""
                 views.setTextViewText(R.id.widget_title, next.label)
-                views.setTextViewText(R.id.widget_detail, listOf(time, room, state).filter { it.isNotBlank() }.joinToString(" · "))
+                views.setTextViewText(R.id.widget_detail, if (compact) time else listOf(time, room, state).filter { it.isNotBlank() }.joinToString(" · "))
             }
             val open = PendingIntent.getActivity(context, 1, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.widget_root, open)

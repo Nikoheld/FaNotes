@@ -17,14 +17,16 @@ private val Mono = FontFamily(Font(R.font.jetbrains_mono_regular))
 fun paletteColor(hex: String): Color = Color(android.graphics.Color.parseColor(hex))
 
 @Composable
-fun CompanionTheme(palette: ThemePalette, accent: String = "#2a6f97", content: @Composable () -> Unit) {
+fun CompanionTheme(palette: ThemePalette, accent: String = "#2a6f97", amoled: Boolean = false, content: @Composable () -> Unit) {
     val accentColor = paletteColor(accent)
+    val black = if (amoled && palette.dark) "#000000" else palette.background
+    val panel = if (amoled && palette.dark) "#000000" else palette.surface
     val scheme = if (palette.dark) {
         darkColorScheme(
             primary = accentColor,
             onPrimary = paletteColor("#11131a"),
-            background = paletteColor(palette.background),
-            surface = paletteColor(palette.surface),
+            background = paletteColor(black),
+            surface = paletteColor(panel),
             surfaceVariant = paletteColor(palette.surfaceVariant),
             onBackground = paletteColor(palette.text),
             onSurface = paletteColor(palette.text),
