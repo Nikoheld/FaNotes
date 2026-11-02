@@ -116,6 +116,7 @@ import {
   unlistedEndingFromReading,
   greedyFunctionTailJoin,
   partialReadingWordEdits,
+  penFiveFromTopReading,
   dictionaryJoinFromReading,
   splitFunctionWordJoin,
   tracedFinalComma,
@@ -1621,6 +1622,14 @@ export async function recognizeInk(
     }
     for (const edit of partialReadingWordEdits(decoded.text, decoded.readings, (word) => wordIsKnown(lineLanguage, word))) {
       const rewritten = rewriteWord(decoded.characters, edit.index, edit.to)
+      const nextText = textWithWordEdits(decoded.text, [edit])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
+    }
+    for (const edit of penFiveFromTopReading(decoded.text, decoded.greedyText, decoded.readings, (word) => wordIsKnown(lineLanguage, word))) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, edit.index, edit.to)
       const nextText = textWithWordEdits(decoded.text, [edit])
       if (rewritten && nextText !== decoded.text) {
         decoded = { ...decoded, text: nextText, characters: rewritten }

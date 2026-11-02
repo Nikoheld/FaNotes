@@ -2644,6 +2644,44 @@ export const partialReadingWordEdits = (
     .map(([index, to]) => ({ index, from: words[index], to }))
 }
 
+/**
+ * The dictionary's one interior letter loses when the pen and the top reading still share
+ * the unlisted five-letter spelling (`Nigel` with pen and top reading `Nigfl` → `Nigfl`).
+ * A vowel-for-vowel change stays with the dictionary, and so does a change at either end.
+ */
+const interiorPenLetter = (from: string, to: string) => {
+  const left = [...from]
+  const right = [...to]
+  if (left.length !== 5 || right.length !== 5 || from.toLowerCase() === to.toLowerCase()) return false
+  const diffs = left.flatMap((letter, index) => letter === right[index] ? [] : [index])
+  if (diffs.length !== 1 || diffs[0] === 0 || diffs[0] === 4) return false
+  const at = diffs[0]
+  return !(VOWEL.test(left[at]) && VOWEL.test(right[at]))
+}
+
+export const penFiveFromTopReading = (
+  text: string,
+  greedy: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit[] => {
+  const top = readings[0]
+  if (!top) return []
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  const other = inkWords(top.text)
+  if (!words.length || words.length !== traced.length || words.length !== other.length) return []
+  const edits: WordEdit[] = []
+  for (let index = 0; index < words.length; index += 1) {
+    const from = words[index]
+    const to = other[index]
+    if (traced[index] !== to || !interiorPenLetter(from, to)) continue
+    if (!known(from) || known(to)) continue
+    edits.push({ index, from, to })
+  }
+  return edits.sort((left, right) => right.index - left.index)
+}
+
 const SENTENCE_ADVERBS = new Set([
   'manchmal', 'häufig', 'leider', 'gestern', 'heute', 'morgen', 'schließlich',
   'natürlich', 'eigentlich', 'trotzdem', 'dennoch', 'allerdings', 'außerdem',
@@ -3333,5 +3371,6 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
     text = characters.map((character) => character.char).join('')
   }
   for (const edit of partialReadingWordEdits(text, decoded.readings, known)) take(edit, rewriteWord)
+  for (const edit of penFiveFromTopReading(text, decoded.greedyText, decoded.readings, known)) take(edit, rewriteSameLengthWord)
   return { text, characters }
 }
