@@ -947,6 +947,100 @@ export const knownVowelFromReading = (
 }
 
 /**
+ * A word with one interior capital splits there when a close reading and the pen already
+ * wrote the two pieces (`OperationAl` → `Operation Ai`). The second piece may differ by
+ * one letter. A word that is already all capitals stays together.
+ */
+export const CAMEL_SPLIT_MARGIN = 1
+
+const interiorCapitalAt = (word: string) => {
+  const letters = [...word]
+  let at = -1
+  for (let index = 1; index < letters.length; index += 1) {
+    const previous = letters[index - 1]
+    const letter = letters[index]
+    const lowerThenUpper = previous === previous.toLowerCase() && previous !== previous.toUpperCase()
+      && letter !== letter.toLowerCase()
+    if (!lowerThenUpper) continue
+    if (at !== -1) return -1
+    at = index
+  }
+  return at
+}
+
+export const camelSplitFromReading = <T extends { char: string }>(
+  characters: T[],
+  greedy: string,
+  readings: Array<{ text: string; score: number }>,
+): T[] | null => {
+  const text = characters.map((character) => character.char).join('')
+  const top = readings[0]
+  if (!top || !text) return null
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  let found: { index: number; left: string; right: string } | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > CAMEL_SPLIT_MARGIN) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length + 1) continue
+    let left = 0
+    let right = 0
+    let split: { index: number; left: string; right: string } | null = null
+    let matches = true
+    while (left < words.length && right < other.length) {
+      if (words[left] === other[right]) {
+        left += 1
+        right += 1
+        continue
+      }
+      if (split || right + 1 >= other.length) {
+        matches = false
+        break
+      }
+      const bound = interiorCapitalAt(words[left])
+      const pieces = [...words[left]]
+      if (bound < 1) {
+        matches = false
+        break
+      }
+      const head = pieces.slice(0, bound).join('')
+      const tail = pieces.slice(bound).join('')
+      const second = other[right + 1]
+      const sameLength = [...second].length === [...tail].length
+      const oneLetter = sameLength && [...tail].filter((letter, index) => letter !== [...second][index]).length === 1
+      if (other[right] !== head || (!oneLetter && second !== tail)) {
+        matches = false
+        break
+      }
+      split = { index: left, left: head, right: second }
+      left += 1
+      right += 2
+    }
+    if (!matches || !split || left !== words.length || right !== other.length) continue
+    const tracedPair = traced.some((word, index) => word === split.left && traced[index + 1] === split.right)
+    if (!tracedPair) continue
+    if (found && (found.index !== split.index || found.left !== split.left || found.right !== split.right)) return null
+    found = split
+  }
+  if (!found) return null
+  const spans = [...text.matchAll(/[A-Za-zÄÖÜäöüß]+/gu)]
+  const span = spans[found.index]
+  if (!span || span[0] !== `${found.left}${[...span[0]].slice([...found.left].length).join('')}` || span.index === undefined) return null
+  const bound = [...found.left].length
+  const tail = [...span[0]].slice(bound).join('')
+  const next = characters.slice()
+  const capital = span.index + bound
+  next.splice(capital, 0, { ...next[capital], char: ' ' })
+  const tailLetters = [...found.right]
+  for (let index = 0; index < tailLetters.length; index += 1) {
+    const at = capital + 1 + index
+    if (next[at]?.char === tail[index]) next[at] = { ...next[at], char: tailLetters[index] }
+  }
+  return next
+}
+
+/**
  * A quote stuck to a closing parenthesis moves in front of the following lowercase word
  * (`(Tanis 6a)" if` → `(Tanis 6a) "if`).
  */
@@ -2644,5 +2738,10 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
     text = characters.map((character) => character.char).join('')
   }
   take(knownVowelFromReading(text, decoded.greedyText, decoded.readings, known), rewriteSameLengthWord)
+  const camelSplit = camelSplitFromReading(characters, decoded.greedyText, decoded.readings)
+  if (camelSplit) {
+    characters = camelSplit
+    text = characters.map((character) => character.char).join('')
+  }
   return { text, characters }
 }

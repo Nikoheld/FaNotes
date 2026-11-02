@@ -105,6 +105,7 @@ import {
   knownSuffixFromReading,
   joinedReadingFromClose,
   knownVowelFromReading,
+  camelSplitFromReading,
   dictionaryJoinFromReading,
   splitFunctionWordJoin,
   tracedFinalComma,
@@ -1509,6 +1510,11 @@ export async function recognizeInk(
         decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null
       }
+    }
+    const camelSplit = camelSplitFromReading(decoded.characters, decoded.greedyText, decoded.readings)
+    if (camelSplit) {
+      decoded = { ...decoded, characters: camelSplit, text: camelSplit.map((character) => character.char).join('') }
+      stitched = null
     }
     if (!decoded.text.trim()) continue
     const spans = new Uint32Array(decoded.characters.flatMap((character) => [character.startFrame, character.endFrame]))
