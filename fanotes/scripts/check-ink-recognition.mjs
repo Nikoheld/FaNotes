@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, longerKnownCropWord, quotedWordAfterDoubleSix, leadingStrokesAreTicks, COMPOUND_PEN, COMPOUND_SHEAR, COMPOUND_SCALE, dictionaryCompound, isolatedWideGroups, lowercaseShortBeamWord, lowercaseInitialFromBeam, capitalizeEnglishPronoun, periodBeforeCapitals, quoteAfterParenthesis, closeBracketAfterLetter, openingBracketFromTrace, spaceBetweenDifferentQuotes, spaceBetweenSymbolRuns, oneLetterFromCloseReading, laterDictionaryCaseFromBeam, lowercaseMidSentenceAdverb, unknownWordFromReading, repeatedLetterGroup, nearTripleLetterGroup, loneLetterBesideTriples, capitalizeWordAfterInitial, shorterTraceBeforePeriod, trailingTraceDeletion, restoreMitFromTopReading, restoreAllCapsTraceWord, joinReadingWithoutSpace, traceAgreedUnknownWord, dictionaryJoinFromReading, splitFunctionWordJoin, strayParenBeforeCapital, tracedFinalComma, accusativeDer, trailingTracedLetter, transposedTraceWord, personalNeighborEdits, finalizeInkLineText, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, longerKnownCropWord, quotedWordAfterDoubleSix, leadingStrokesAreTicks, COMPOUND_PEN, COMPOUND_SHEAR, COMPOUND_SCALE, dictionaryCompound, isolatedWideGroups, lowercaseShortBeamWord, lowercaseInitialFromBeam, capitalizeEnglishPronoun, periodBeforeCapitals, quoteAfterParenthesis, closeBracketAfterLetter, openingBracketFromTrace, spaceBetweenDifferentQuotes, spaceBetweenSymbolRuns, oneLetterFromCloseReading, laterDictionaryCaseFromBeam, lowercaseMidSentenceAdverb, unknownWordFromReading, repeatedLetterGroup, nearTripleLetterGroup, loneLetterBesideTriples, capitalizeWordAfterInitial, shorterTraceBeforePeriod, trailingTraceDeletion, restoreMitFromTopReading, restoreAllCapsTraceWord, joinReadingWithoutSpace, traceAgreedUnknownWord, unlistedWordFromReading, dictionaryJoinFromReading, splitFunctionWordJoin, strayParenBeforeCapital, tracedFinalComma, accusativeDer, trailingTracedLetter, transposedTraceWord, personalNeighborEdits, finalizeInkLineText, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -508,6 +508,36 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
     'DDDDDD EEE',
     'DDDDDX EEE',
     [{ text: 'DDDDDD EEE', score: 0 }, { text: 'DDDDDX EEE', score: -0.2 }],
+    unknown,
+  ), null)
+  assert.equal(unlistedWordFromReading(
+    'Topman Shelby Naomi',
+    [{ text: 'Topman Shelby Naomi', score: 0 }, { text: 'Tupman Shelby Naomi', score: -0.09 }],
+    unknown,
+  )?.to, 'Tupman')
+  assert.equal(unlistedWordFromReading(
+    'Topman Shelby Naomi',
+    [{ text: 'Topman Shelby Naomi', score: 0 }, { text: 'Tupman Shelby Naomi', score: -0.13 }],
+    unknown,
+  ), null)
+  assert.equal(unlistedWordFromReading(
+    'left-hand Gif. Kepn',
+    [{ text: 'left-hand Gif. Kepn', score: 0 }, { text: 'left-hand Gif. Keon', score: -0.09 }],
+    unknown,
+  ), null)
+  assert.equal(unlistedWordFromReading(
+    'Verfahren ein nichtbild auf',
+    [{ text: 'Verfahren ein nichtbild auf', score: 0 }, { text: 'Verfahren ein Lichtbild auf', score: -0.46 }],
+    unknown,
+  )?.to, 'Lichtbild')
+  assert.equal(unlistedWordFromReading(
+    'Verfahren ein nichtbild auf',
+    [{ text: 'Verfahren ein nichtbild auf', score: 0 }, { text: 'Verfahren ein Lichtbild auf', score: -0.6 }],
+    unknown,
+  ), null)
+  assert.equal(unlistedWordFromReading(
+    'einen vonstgrad als',
+    [{ text: 'einen vonstgrad als', score: 0 }, { text: 'einen vorstgrad als', score: -0.15 }],
     unknown,
   ), null)
   assert.equal(restoreMitFromTopReading(
@@ -1328,6 +1358,15 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
     if (tracedUnknown) {
       const rewritten = rewriteSameLengthWord(decoded.characters, tracedUnknown.index, tracedUnknown.to)
       const nextText = textWithWordEdits(decoded.text, [tracedUnknown])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        boxes = undefined
+      }
+    }
+    const unlisted = unlistedWordFromReading(decoded.text, decoded.readings ?? [], knownWord(entry.language))
+    if (unlisted) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, unlisted.index, unlisted.to)
+      const nextText = textWithWordEdits(decoded.text, [unlisted])
       if (rewritten && nextText !== decoded.text) {
         decoded = { ...decoded, text: nextText, characters: rewritten }
         boxes = undefined

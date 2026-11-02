@@ -608,6 +608,61 @@ export const unknownWordFromReading = (
 }
 
 /**
+ * Another unlisted spelling a close reading already has. An interior letter has to be
+ * very close (`Topman` → `Tupman`, 0.09 nats). The first letter of a longer word may
+ * be a little farther (`nichtbild` → `Lichtbild`, 0.46 nats). A dictionary word stays.
+ */
+export const UNLISTED_LETTER_MARGIN = 0.12
+export const UNLISTED_INITIAL_MARGIN = 0.5
+
+export const unlistedWordFromReading = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > UNLISTED_INITIAL_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    const letters = [...from]
+    const next = [...to]
+    if (letters.length < 6 || letters.length !== next.length) continue
+    if (letters.every((letter) => letter.toLowerCase() === letters[0].toLowerCase())) continue
+    if (from.toLowerCase() === to.toLowerCase()) continue
+    let substitutions = 0
+    let first = false
+    for (let cursor = 0; cursor < letters.length; cursor += 1) {
+      if (letters[cursor] === next[cursor]) continue
+      substitutions += 1
+      if (cursor === 0) first = true
+    }
+    if (substitutions !== 1) continue
+    const allowed = first
+      ? letters.length >= 8 && gap <= UNLISTED_INITIAL_MARGIN
+      : gap <= UNLISTED_LETTER_MARGIN
+    if (!allowed) continue
+    if (known(from) || known(to)) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
  * A quote stuck to a closing parenthesis moves in front of the following lowercase word
  * (`(Tanis 6a)" if` → `(Tanis 6a) "if`).
  */
@@ -2294,5 +2349,6 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
     text = characters.map((character) => character.char).join('')
   }
   take(traceAgreedUnknownWord(text, decoded.greedyText, decoded.readings, known), rewriteSameLengthWord)
+  take(unlistedWordFromReading(text, decoded.readings, known), rewriteSameLengthWord)
   return { text, characters }
 }

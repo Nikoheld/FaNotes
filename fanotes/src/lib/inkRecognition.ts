@@ -98,6 +98,7 @@ import {
   restoreAllCapsTraceWord,
   joinReadingWithoutSpace,
   traceAgreedUnknownWord,
+  unlistedWordFromReading,
   dictionaryJoinFromReading,
   splitFunctionWordJoin,
   tracedFinalComma,
@@ -1424,6 +1425,15 @@ export async function recognizeInk(
     if (tracedUnknown) {
       const rewritten = rewriteSameLengthWord(decoded.characters, tracedUnknown.index, tracedUnknown.to)
       const nextText = textWithWordEdits(decoded.text, [tracedUnknown])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
+    }
+    const unlisted = unlistedWordFromReading(decoded.text, decoded.readings, (word) => wordIsKnown(lineLanguage, word))
+    if (unlisted) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, unlisted.index, unlisted.to)
+      const nextText = textWithWordEdits(decoded.text, [unlisted])
       if (rewritten && nextText !== decoded.text) {
         decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null
