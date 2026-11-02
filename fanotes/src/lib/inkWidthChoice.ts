@@ -645,6 +645,49 @@ export const splitFunctionWordJoin = <T extends { char: string }>(
   return next
 }
 
+/** A reading this close may add the one letter the chosen line dropped. */
+export const ONE_LETTER_READING_MARGIN = 0.11
+
+const oneExtraLetter = (shorter: string, longer: string) => {
+  const left = [...shorter]
+  const right = [...longer]
+  if (right.length !== left.length + 1) return null
+  let index = 0
+  while (index < left.length && left[index] === right[index]) index += 1
+  if (left.slice(index).join('') !== right.slice(index + 1).join('')) return null
+  const char = right[index]
+  if (!char || !/[A-Za-zÄÖÜäöüß]/u.test(char)) return null
+  return { index, char }
+}
+
+/**
+ * A close beam reading that is the chosen line plus one letter keeps that letter
+ * (`Jahre i` → `Jahre im`, `wurde` → `wurden`).
+ */
+export const oneLetterFromCloseReading = <T extends { char: string }>(
+  characters: T[],
+  readings: Array<{ text: string; score: number }>,
+): T[] | null => {
+  const text = characters.map((character) => character.char).join('')
+  const top = readings[0]
+  if (!top) return null
+  let found: { index: number; char: string } | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > ONE_LETTER_READING_MARGIN) continue
+    const extra = oneExtraLetter(text, reading.text)
+    if (!extra) continue
+    if (found) return null
+    found = extra
+  }
+  if (!found || found.index > characters.length) return null
+  const source = characters[Math.min(found.index, characters.length - 1)]
+  if (!source) return null
+  const next = characters.slice()
+  next.splice(found.index, 0, { ...source, char: found.char })
+  return next
+}
+
 /**
  * A final period that the top reading and the raw trace both still have as a comma
  * goes back to that comma (`Mirabeau.` → `Mirabeau,`).
@@ -1719,6 +1762,11 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   const splitJoin = splitFunctionWordJoin(characters, decoded.readings, known)
   if (splitJoin) {
     characters = splitJoin
+    text = characters.map((character) => character.char).join('')
+  }
+  const extraLetter = oneLetterFromCloseReading(characters, decoded.readings)
+  if (extraLetter) {
+    characters = extraLetter
     text = characters.map((character) => character.char).join('')
   }
   return { text, characters }

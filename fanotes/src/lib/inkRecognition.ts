@@ -84,6 +84,7 @@ import {
   quoteAfterParenthesis,
   closeBracketAfterLetter,
   openingBracketFromTrace,
+  oneLetterFromCloseReading,
   splitFunctionWordJoin,
   tracedFinalComma,
   spaceBetweenDifferentQuotes,
@@ -1249,6 +1250,11 @@ export async function recognizeInk(
     const splitJoin = splitFunctionWordJoin(decoded.characters, decoded.readings, (word) => wordIsKnown(lineLanguage, word))
     if (splitJoin) {
       decoded = { ...decoded, characters: splitJoin, text: splitJoin.map((character) => character.char).join('') }
+      stitched = null
+    }
+    const extraLetter = oneLetterFromCloseReading(decoded.characters, decoded.readings)
+    if (extraLetter) {
+      decoded = { ...decoded, characters: extraLetter, text: extraLetter.map((character) => character.char).join('') }
       stitched = null
     }
     const known = (word: string) => wordIsKnown(lineLanguage, word)
