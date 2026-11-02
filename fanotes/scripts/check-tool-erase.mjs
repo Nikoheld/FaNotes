@@ -12,7 +12,14 @@ const server = await createServer({
 const { applyToolErase, strokeTouchesEraser } = await server.ssrLoadModule('/src/lib/toolErase.ts')
 const { readSavedInkStrokes } = await server.ssrLoadModule('/src/lib/inkDocument.ts')
 const { savedInkPage, keepMarkOnPage } = await server.ssrLoadModule('/src/lib/noteCanvas.ts')
-const { adoptPaintedInkPage } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
+const {
+  adoptPaintedInkPage,
+  GROW_STEP_Y,
+  WRITE_CAP_HEIGHT,
+  textGrowPageHeight,
+  textTypingRoomHeight,
+  textAbsorbTargetHeight,
+} = await server.ssrLoadModule('/src/lib/paperGrow.ts')
 
 const SOURCE_WIDTH = 900
 const SOURCE_HEIGHT = 1273
@@ -352,6 +359,145 @@ try {
   assert.equal(afterAbsorb.apply, false, 'a page absorb already grew does not scale again')
   assert.equal(afterAbsorb.scaleY, 1)
   assert.equal(afterAbsorb.pageHeight, sheetHeight)
+
+  // Typing used to resize the sheet on every line, and the catch-up then
+  // rescaled every ink point. One write step of room absorbs the next lines.
+  assert.equal(GROW_STEP_Y, 144)
+  const line = 28
+  const typing = {
+    paintedWidth: 900,
+    prevLayoutWidth: 900,
+    keyboard: true,
+    activeStroke: false,
+    pendingGrow: false,
+    pdfOrWorksheet: false,
+  }
+  assert.equal(textGrowPageHeight(400, 144), 400 + GROW_STEP_Y)
+  assert.equal(textGrowPageHeight(400, 400 + GROW_STEP_Y), 400 + GROW_STEP_Y, 'a full step of room is not grown again')
+  assert.equal(textGrowPageHeight(0, 144), 144)
+  assert.equal(textGrowPageHeight(0, 0), 0)
+  assert.equal(textGrowPageHeight(WRITE_CAP_HEIGHT - 10, WRITE_CAP_HEIGHT - 10), WRITE_CAP_HEIGHT)
+  assert.equal(textGrowPageHeight(WRITE_CAP_HEIGHT, 100), WRITE_CAP_HEIGHT)
+  const firstPainted = 400 + line
+  const room = textTypingRoomHeight({
+    ...typing,
+    paintedHeight: firstPainted,
+    sourceHeight: 400,
+    prevLayoutHeight: 400,
+  })
+  assert.equal(room, firstPainted + GROW_STEP_Y, 'the first line that overflows reserves one write step')
+  const reserved = adoptPaintedInkPage({
+    sourceW: 900,
+    sourceH: 400,
+    prevLayoutW: 900,
+    prevLayoutH: 400,
+    nextLayoutW: 900,
+    nextLayoutH: room,
+  })
+  assert.equal(reserved.apply, true, 'ink scales once onto the reserved sheet')
+  assert.equal(reserved.scaleX, 1)
+  assert.equal(reserved.pageHeight, room, 'the eraser page is that reserved sheet')
+  for (let extra = 1; extra <= 4; extra += 1) {
+    const content = firstPainted + line * extra
+    assert.ok(content < room, `line ${extra} stays inside the reserved sheet`)
+    assert.equal(textTypingRoomHeight({
+      ...typing,
+      paintedHeight: room,
+      sourceHeight: room,
+      prevLayoutHeight: room,
+    }), null, 'a line inside the room does not ask for another scale')
+  }
+  const overflow = room + line
+  const nextRoom = textTypingRoomHeight({
+    ...typing,
+    paintedHeight: overflow,
+    sourceHeight: room,
+    prevLayoutHeight: room,
+  })
+  assert.equal(nextRoom, overflow + GROW_STEP_Y, 'a filled room reserves one more step')
+  const reservedAgain = adoptPaintedInkPage({
+    sourceW: 900,
+    sourceH: room,
+    prevLayoutW: 900,
+    prevLayoutH: room,
+    nextLayoutW: 900,
+    nextLayoutH: nextRoom,
+  })
+  assert.equal(reservedAgain.apply, true)
+  assert.equal(reservedAgain.pageHeight, nextRoom)
+  assert.equal(textTypingRoomHeight({
+    ...typing,
+    paintedHeight: firstPainted,
+    sourceHeight: 400,
+    prevLayoutHeight: 400,
+    keyboard: false,
+  }), null, 'the pen does not reserve typing room')
+  assert.equal(textTypingRoomHeight({
+    ...typing,
+    paintedHeight: firstPainted,
+    sourceHeight: 400,
+    prevLayoutHeight: 400,
+    activeStroke: true,
+  }), null)
+  assert.equal(textTypingRoomHeight({
+    ...typing,
+    paintedHeight: firstPainted,
+    sourceHeight: 400,
+    prevLayoutHeight: 400,
+    pendingGrow: true,
+  }), null)
+  assert.equal(textTypingRoomHeight({
+    ...typing,
+    paintedHeight: firstPainted,
+    sourceHeight: 400,
+    prevLayoutHeight: 400,
+    pdfOrWorksheet: true,
+  }), null)
+  assert.equal(textTypingRoomHeight({
+    ...typing,
+    paintedHeight: firstPainted,
+    sourceHeight: 400,
+    prevLayoutHeight: 400,
+    paintedWidth: 1000,
+  }), null, 'a sideways grow is not a typing line')
+  assert.equal(textTypingRoomHeight({
+    ...typing,
+    paintedHeight: room,
+    sourceHeight: room,
+    prevLayoutHeight: 400,
+  }), null, 'a page that already matches the sheet does not reserve again')
+  let absorbed = 144
+  const contentHeight = 400
+  for (let pass = 0; pass < 3; pass += 1) {
+    const sheet = Math.max(contentHeight, absorbed)
+    if (sheet <= absorbed + 1) break
+    absorbed = textAbsorbTargetHeight(sheet, absorbed, true)
+  }
+  assert.equal(absorbed, contentHeight + GROW_STEP_Y, 'opening a text note leaves one write step, then stops')
+  assert.equal(textAbsorbTargetHeight(absorbed, absorbed, true), absorbed, 'the next absorb does not eat or add room')
+  assert.equal(
+    textAbsorbTargetHeight(contentHeight + line, absorbed, true),
+    absorbed,
+    'a line inside the room is not a new page',
+  )
+  assert.equal(
+    textAbsorbTargetHeight(900, 400, false),
+    900,
+    'the pen absorb stays on the painted sheet',
+  )
+  assert.equal(
+    textAbsorbTargetHeight(400, 400, true),
+    400,
+    'a width-only grow does not add typing room',
+  )
+  const catchUpStart = boardSource.indexOf('const catchUpPaintedLayout = useCallback(')
+  const catchUpEnd = boardSource.indexOf('catchUpPaintedLayoutRef.current = catchUpPaintedLayout')
+  assert.ok(catchUpStart >= 0 && catchUpEnd > catchUpStart, 'catch-up is in the board')
+  const catchUp = boardSource.slice(catchUpStart, catchUpEnd)
+  assert.ok(catchUp.indexOf('textTypingRoomHeight') < catchUp.indexOf('adoptPaintedInkPage'), 'the room is pinned before ink is scaled')
+  assert.match(catchUp, /applyInkExtentStylesRef\.current\(room, sourceW\)/, 'the reserved height is the sheet min-height')
+  assert.match(catchUp, /keyboard: inline && !inputActive/, 'only keyboard typing reserves the room')
+  assert.match(boardSource, /textAbsorbTargetHeight\(paintedH, sourceHeightRef\.current, reserveTypingRoom\)/)
 
   console.log(JSON.stringify({
     lineRemnants: remnants.length,

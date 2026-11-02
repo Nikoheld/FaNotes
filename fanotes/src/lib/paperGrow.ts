@@ -18,6 +18,8 @@ import {
   paperSheetLayoutShift,
   liveWriteStayPut,
   type StayPutState,
+  GROW_STEP_Y,
+  WRITE_CAP_HEIGHT,
   WRITE_SLACK_HEIGHT,
 } from './noteCanvas'
 
@@ -370,6 +372,64 @@ export const adoptPaintedInkPage = (input: {
     pageWidth: page.pageWidth,
     pageHeight: page.pageHeight,
   }
+}
+
+/**
+ * Page height at least one write step under the painted text.
+ * Typing grows the sheet by a line; catching the ink up on that line
+ * rescales every mark. The step is the same chunk the pen already grows by.
+ * A page that already has a full step of room is returned unchanged.
+ */
+export const textGrowPageHeight = (paintedHeight: number, sourceHeight = 0) => {
+  const painted = Number.isFinite(paintedHeight) && paintedHeight > 0 ? paintedHeight : 0
+  const source = Number.isFinite(sourceHeight) && sourceHeight > 0 ? sourceHeight : 0
+  if (!(painted > 0)) return Math.min(WRITE_CAP_HEIGHT, Math.round(source))
+  const floor = Math.max(painted, source)
+  if (floor >= WRITE_CAP_HEIGHT) return WRITE_CAP_HEIGHT
+  if (source >= painted + GROW_STEP_Y - 1) return Math.min(WRITE_CAP_HEIGHT, Math.round(source))
+  return Math.min(WRITE_CAP_HEIGHT, Math.round(floor + GROW_STEP_Y))
+}
+
+export type TextTypingRoomInput = {
+  paintedHeight: number
+  sourceHeight: number
+  paintedWidth: number
+  prevLayoutHeight: number
+  prevLayoutWidth: number
+  keyboard: boolean
+  activeStroke: boolean
+  pendingGrow: boolean
+  pdfOrWorksheet: boolean
+}
+
+/**
+ * Sheet height to pin before a keyboard catch-up scales ink. Null leaves the
+ * measured sheet alone: the pen, a PDF, an active stroke, a sideways grow,
+ * and a page that is already ahead of the previous sheet.
+ */
+export const textTypingRoomHeight = (input: TextTypingRoomInput) => {
+  if (!input.keyboard || input.activeStroke || input.pendingGrow || input.pdfOrWorksheet) return null
+  if (!layoutGrewEnough(input.prevLayoutHeight, input.paintedHeight)) return null
+  if (layoutGrewEnough(input.prevLayoutWidth, input.paintedWidth)) return null
+  if (!(input.sourceHeight + 2 < input.paintedHeight)) return null
+  if (input.sourceHeight > input.prevLayoutHeight + 2) return null
+  const room = textGrowPageHeight(input.paintedHeight, input.sourceHeight)
+  if (!(room > input.paintedHeight + 1)) return null
+  return room
+}
+
+/** Absorb target. Keyboard typing keeps one write step under the text.
+ *  A width-only grow, the pen, and a sheet that already matches the page
+ *  stay on the painted box — extra slack there jumps the page. */
+export const textAbsorbTargetHeight = (
+  paintedHeight: number,
+  sourceHeight: number,
+  reserveRoom: boolean,
+) => {
+  const source = Number.isFinite(sourceHeight) && sourceHeight > 0 ? sourceHeight : 0
+  const painted = Math.round(paintedStayExtent(source, paintedHeight))
+  if (!reserveRoom || !(painted > source + 1)) return Math.max(Math.round(source), painted)
+  return textGrowPageHeight(painted, source)
 }
 
 export type WritePageExtent = {

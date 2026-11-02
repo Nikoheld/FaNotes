@@ -289,6 +289,8 @@ import {
   inkPageForLayoutScale,
   pendingGrowScale,
   resolvePaintedLayoutGrow,
+  textAbsorbTargetHeight,
+  textTypingRoomHeight,
 } from '../lib/paperGrow'
 import { readSavedInkStrokes } from '../lib/inkDocument'
 import { DraftingGuides, type DraftingReadout } from './DraftingGuides'
@@ -3257,19 +3259,47 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   // 0–1 ink follows the painted sheet: when the sheet grew (a text line, a
   // viewport minimum) the strokes are rescaled so every mark keeps its paper
-  // pixel. Returns whether a rescale happened; the caller repaints.
+  // pixel. A keyboard line pins one write step of sheet before that scale,
+  // so the next lines do not resize — and do not rescale — until the room
+  // is full. Returns whether a rescale happened; the caller repaints.
   const catchUpPaintedLayout = useCallback(() => {
     if (restoringCanvasRef.current) return false
     const paper = resolvePaperElement()
     if (!paper) return false
-    const nextW = paper.offsetWidth
-    const nextH = paper.offsetHeight
+    let nextW = paper.offsetWidth
+    let nextH = paper.offsetHeight
     const prevW = paintedLayoutRef.current.w
     const prevH = paintedLayoutRef.current.h
     if (nextW === prevW && nextH === prevH && !pendingGrowRemapRef.current) return false
     const sourceW = sourceWidthRef.current
     const sourceH = sourceHeightRef.current
     const pending = pendingGrowRemapRef.current
+    const measuredW = nextW
+    const measuredH = nextH
+    const room = textTypingRoomHeight({
+      paintedHeight: nextH,
+      sourceHeight: sourceH,
+      paintedWidth: nextW,
+      prevLayoutHeight: prevH,
+      prevLayoutWidth: prevW,
+      keyboard: inline && !inputActive,
+      activeStroke: activeStrokeRef.current !== null,
+      pendingGrow: pending !== null,
+      pdfOrWorksheet: paper.classList.contains('is-pdf-note') || paper.classList.contains('has-worksheet'),
+    })
+    let pinnedRoom = false
+    if (room !== null) {
+      applyInkExtentStylesRef.current(room, sourceW)
+      const grownW = paper.offsetWidth
+      const grownH = paper.offsetHeight
+      if (grownH > measuredH + 1) {
+        nextW = grownW
+        nextH = grownH
+        pinnedRoom = true
+      } else {
+        applyInkExtentStylesRef.current(sourceH, sourceW)
+      }
+    }
     const resolved = pending
       ? resolvePaintedLayoutGrow({
         pending,
@@ -3305,8 +3335,18 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       })
     if (resolved?.discard) pendingGrowRemapRef.current = null
     else if (resolved) pendingGrowRemapRef.current = resolved.pending
+    if (!adopted.apply) {
+      // The pin made the sheet taller, but this box is not a rescale. Put the
+      // page height back so ink stays in the space it was saved in.
+      if (pinnedRoom) {
+        applyInkExtentStylesRef.current(sourceH, sourceW)
+        paintedLayoutRef.current = { w: paper.offsetWidth, h: paper.offsetHeight }
+      } else {
+        paintedLayoutRef.current = { w: measuredW, h: measuredH }
+      }
+      return false
+    }
     paintedLayoutRef.current = { w: nextW, h: nextH }
-    if (!adopted.apply) return false
     scaleNormalizedSpace(adopted.scaleX, adopted.scaleY)
     // Scaled 0–1 coordinates belong to the grown sheet. The eraser multiplies
     // by the page size; keeping the saved page pulls distant marks into one disk.
@@ -3319,7 +3359,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     canvasQualityKeyRef.current = ''
     committedCanvasDirtyRef.current = true
     return true
-  }, [resolvePaperElement, scaleNormalizedSpace])
+  }, [inline, inputActive, resolvePaperElement, scaleNormalizedSpace])
   catchUpPaintedLayoutRef.current = catchUpPaintedLayout
 
   const flushPaintedLayoutGrow = useCallback(() => {
@@ -3660,14 +3700,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const paintedH = paintedStayExtent(sourceHeightRef.current, paper.offsetHeight)
       if (paintedW < 2 || paintedH < 2) break
       if (paintedW <= sourceWidthRef.current + 1 && paintedH <= sourceHeightRef.current + 1) break
+      const reserveTypingRoom = !inputActive && !activeStrokeRef.current
       if (!setPageExtent(
-        Math.max(sourceHeightRef.current, Math.round(paintedH)),
+        textAbsorbTargetHeight(paintedH, sourceHeightRef.current, reserveTypingRoom),
         Math.max(sourceWidthRef.current, Math.round(paintedW)),
       )) break
       grew = true
     }
     return grew
-  }, [inline, resolvePaperElement, setPageExtent])
+  }, [inline, inputActive, resolvePaperElement, setPageExtent])
 
   /** Grow the write page around the pen. Extra paper for pan moves with the page. */
   const ensureWriteRoom = useCallback((normalizedY?: number, normalizedX?: number) => {
