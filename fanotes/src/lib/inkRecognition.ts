@@ -95,6 +95,7 @@ import {
   shorterTraceBeforePeriod,
   trailingTraceDeletion,
   restoreMitFromTopReading,
+  restoreAllCapsTraceWord,
   dictionaryJoinFromReading,
   splitFunctionWordJoin,
   tracedFinalComma,
@@ -1363,6 +1364,15 @@ export async function recognizeInk(
     if (restoredMit) {
       decoded = { ...decoded, characters: restoredMit, text: restoredMit.map((character) => character.char).join('') }
       stitched = null
+    }
+    const allCaps = restoreAllCapsTraceWord(decoded.text, decoded.greedyText, decoded.readings)
+    if (allCaps) {
+      const rewritten = rewriteWord(decoded.characters, allCaps.index, allCaps.to)
+      const nextText = textWithWordEdits(decoded.text, [allCaps])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
     }
     const known = (word: string) => wordIsKnown(lineLanguage, word)
     const unknownCompound = inkWords(decoded.text)

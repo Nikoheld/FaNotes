@@ -1362,6 +1362,32 @@ export const rToNIndexes = (
 })
 
 /**
+ * An all-capital word of at least six letters stays as the raw trace and the top reading
+ * wrote it (`SAXIFRAGA` stays `SAXIFRAGA`). One such word on the line, and nothing else differs.
+ */
+export const restoreAllCapsTraceWord = (
+  text: string,
+  greedy: string,
+  readings: Array<{ text: string }>,
+): WordEdit | null => {
+  const top = readings[0]?.text ?? ''
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  const beam = inkWords(top)
+  if (!words.length || words.length !== traced.length || words.length !== beam.length) return null
+  let found: WordEdit | null = null
+  for (let index = 0; index < words.length; index += 1) {
+    if (words[index] === beam[index]) continue
+    if (found) return null
+    const letters = [...beam[index]]
+    const allCaps = letters.length >= 6 && letters.every((letter) => letter !== letter.toLowerCase())
+    if (!allCaps || traced[index] !== beam[index]) return null
+    found = { index, from: words[index], to: beam[index] }
+  }
+  return found
+}
+
+/**
  * The beam's top reading keeps `mit` when a later step wrote `mir` (`Mit zunehmender`).
  * The rest of the line has to match.
  */
@@ -2183,5 +2209,6 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
     characters = restoredMit
     text = characters.map((character) => character.char).join('')
   }
+  take(restoreAllCapsTraceWord(text, decoded.greedyText, decoded.readings), rewriteWord)
   return { text, characters }
 }
