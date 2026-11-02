@@ -84,6 +84,7 @@ import {
   quoteAfterParenthesis,
   closeBracketAfterLetter,
   openingBracketFromTrace,
+  tracedFinalComma,
   spaceBetweenDifferentQuotes,
   spaceBetweenSymbolRuns,
   strayParenBeforeCapital,
@@ -1237,6 +1238,11 @@ export async function recognizeInk(
     const tracedBracket = openingBracketFromTrace(decoded.characters, decoded.greedyText)
     if (tracedBracket) {
       decoded = { ...decoded, characters: tracedBracket, text: tracedBracket.map((character) => character.char).join('') }
+      stitched = null
+    }
+    const tracedComma = tracedFinalComma(decoded.characters, decoded.readings, decoded.greedyText)
+    if (tracedComma) {
+      decoded = { ...decoded, characters: tracedComma, text: tracedComma.map((character) => character.char).join('') }
       stitched = null
     }
     const known = (word: string) => wordIsKnown(lineLanguage, word)

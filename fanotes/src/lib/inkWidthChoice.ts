@@ -585,6 +585,32 @@ export const openingBracketFromTrace = <T extends { char: string }>(
   return changed ? next : null
 }
 
+/**
+ * A final period that the top reading and the raw trace both still have as a comma
+ * goes back to that comma (`Mirabeau.` → `Mirabeau,`).
+ */
+export const tracedFinalComma = <T extends { char: string }>(
+  characters: T[],
+  readings: Array<{ text: string; score: number }>,
+  greedy: string,
+): T[] | null => {
+  const text = characters.map((character) => character.char).join('')
+  const top = readings[0]?.text ?? ''
+  const trimmed = text.trimEnd()
+  const topTrimmed = top.trimEnd()
+  if (!trimmed.endsWith('.') || !topTrimmed.endsWith(',')) return null
+  if (trimmed.slice(0, -1) !== topTrimmed.slice(0, -1)) return null
+  if (!greedy.trimEnd().endsWith(',')) return null
+  let index = characters.length - 1
+  while (index >= 0 && characters[index].char === ' ') index -= 1
+  if (index < 0 || characters[index].char !== '.') return null
+  const before = characters[index - 1]?.char
+  if (before === '"' || before === "'") return null
+  const next = characters.slice()
+  next[index] = { ...next[index], char: ',' }
+  return next
+}
+
 /** A lone English `i`, including `i'm`, is the pronoun (`i know` → `I know`). */
 export const capitalizeEnglishPronoun = (text: string, language: string): WordEdit | null => {
   if (language !== 'en') return null
@@ -1623,6 +1649,11 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   const tracedBracket = openingBracketFromTrace(characters, decoded.greedyText)
   if (tracedBracket) {
     characters = tracedBracket
+    text = characters.map((character) => character.char).join('')
+  }
+  const tracedComma = tracedFinalComma(characters, decoded.readings, decoded.greedyText)
+  if (tracedComma) {
+    characters = tracedComma
     text = characters.map((character) => character.char).join('')
   }
   return { text, characters }
