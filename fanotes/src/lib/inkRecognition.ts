@@ -80,6 +80,7 @@ import {
   dictionaryCompound,
   isolatedWideGroups,
   capitalizeEnglishPronoun,
+  quoteAfterParenthesis,
   lowercaseInitialFromBeam,
   lowercaseShortBeamWord,
   accusativeDer,
@@ -1196,6 +1197,11 @@ export async function recognizeInk(
         decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null
       }
+    }
+    const movedQuote = quoteAfterParenthesis(decoded.characters)
+    if (movedQuote) {
+      decoded = { ...decoded, characters: movedQuote, text: movedQuote.map((character) => character.char).join('') }
+      stitched = null
     }
     const known = (word: string) => wordIsKnown(lineLanguage, word)
     const unknownCompound = inkWords(decoded.text)

@@ -436,6 +436,26 @@ export const lowercaseInitialFromBeam = (
   return { index: 0, from, to }
 }
 
+/**
+ * A quote stuck to a closing parenthesis moves in front of the following lowercase word
+ * (`(Tanis 6a)" if` → `(Tanis 6a) "if`).
+ */
+export const quoteAfterParenthesis = <T extends { char: string }>(characters: T[]): T[] | null => {
+  const next = characters.slice()
+  let changed = false
+  for (let index = 0; index < next.length - 3; index += 1) {
+    const quote = next[index + 1].char
+    if (next[index].char !== ')' || (quote !== '"' && quote !== "'") || next[index + 2].char !== ' ') continue
+    if (!/[a-zäöüß]/u.test(next[index + 3].char)) continue
+    const quoteChar = next[index + 1]
+    next[index + 1] = next[index + 2]
+    next[index + 2] = quoteChar
+    changed = true
+    index += 2
+  }
+  return changed ? next : null
+}
+
 /** A lone English `i`, including `i'm`, is the pronoun (`i know` → `I know`). */
 export const capitalizeEnglishPronoun = (text: string, language: string): WordEdit | null => {
   if (language !== 'en') return null
@@ -1441,5 +1461,10 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   take(lowercaseShortBeamWord(text, decoded.readings), rewriteSameLengthWord)
   take(lowercaseInitialFromBeam(text, decoded.readings, options.language ?? '', characters, baseKnown), rewriteSameLengthWord)
   take(capitalizeEnglishPronoun(text, options.language ?? ''), rewriteSameLengthWord)
+  const movedQuote = quoteAfterParenthesis(characters)
+  if (movedQuote) {
+    characters = movedQuote
+    text = characters.map((character) => character.char).join('')
+  }
   return { text, characters }
 }
