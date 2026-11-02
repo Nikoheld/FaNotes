@@ -500,6 +500,25 @@ export const strayParenBeforeCapital = <T extends { char: string }>(characters: 
   return changed ? next : null
 }
 
+/**
+ * A closing quote jammed against a different opening quote takes a space
+ * (`'Garz'"Such` → `'Garz' "Such`). Repeated marks such as `'''` stay together.
+ */
+export const spaceBetweenDifferentQuotes = <T extends { char: string }>(characters: T[]): T[] | null => {
+  const quote = (char: string) => char === '"' || char === "'"
+  const next = characters.slice()
+  let changed = false
+  for (let index = 0; index < next.length - 1; index += 1) {
+    const left = next[index].char
+    const right = next[index + 1].char
+    if (!quote(left) || !quote(right) || left === right) continue
+    next.splice(index + 1, 0, { ...next[index], char: ' ' })
+    changed = true
+    index += 2
+  }
+  return changed ? next : null
+}
+
 /** A lone English `i`, including `i'm`, is the pronoun (`i know` → `I know`). */
 export const capitalizeEnglishPronoun = (text: string, language: string): WordEdit | null => {
   if (language !== 'en') return null
@@ -1518,6 +1537,11 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   const strayParen = strayParenBeforeCapital(characters)
   if (strayParen) {
     characters = strayParen
+    text = characters.map((character) => character.char).join('')
+  }
+  const quoteSpace = spaceBetweenDifferentQuotes(characters)
+  if (quoteSpace) {
+    characters = quoteSpace
     text = characters.map((character) => character.char).join('')
   }
   return { text, characters }
