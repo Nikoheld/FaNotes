@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.11.1-beta.8
+
+- Queue Schulnetz login behind an in-progress refresh.
+
 ## 2026.11.1-beta.7
 
 - Let touching snow stick and grow into snowballs.
