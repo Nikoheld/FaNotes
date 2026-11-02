@@ -108,7 +108,44 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
       { text: 'bleiben wegen der Kolbenringspannung in der ineren', score: -0.78 },
     ],
     known,
+    'bleicben wegen der Kolbeuringspannung in der ineren',
   )?.to, 'Kolbenringspannung')
+  assert.equal(oneLetterInALongUnknownWord(
+    'war ein zentralistisch regierter, föderativer Einparteienstaat,',
+    [
+      { text: 'war ein zentralistisch regierter, föderativer Einparteienstaat,', score: 0 },
+      { text: 'war ein zentralistisch regierter, föderativer Einparteienstadt,', score: -0.4 },
+    ],
+    known,
+    'war ein zentralistisch regierter, föderativer Einparternstaat,',
+  ), null)
+  assert.equal(oneLetterInALongUnknownWord(
+    'einen Dienstgrad als Verwendungsbezeichnung, der in einer',
+    [
+      { text: 'einen Dienstgrad als Verwendungsbezeichnung, der in einer', score: 0 },
+      { text: 'einen Dienstgrad als Verwendungsbereichnung, der in einer', score: -0.15 },
+    ],
+    known,
+    'einen Dienstgrad als Verwendungsbereichnung, der in einer',
+  ), null)
+  assert.equal(oneLetterInALongUnknownWord(
+    'Hawley, were also expressing their diosgbintment',
+    [
+      { text: 'Hawley, were also expressing their diosgbintment', score: 0 },
+      { text: 'Hawley, were also expressing their diospbintment', score: -0.64 },
+    ],
+    knownWord('en'),
+    'Hawley, were also expressing their diosgbintmont',
+  ), null)
+  assert.equal(oneLetterInALongUnknownWord(
+    "men's debt, to Corisborough on cheap trips to sing",
+    [
+      { text: "men's debt, to Corisborough on cheap trips to sing", score: 0 },
+      { text: "men's debt, to Conisborough on cheap trips to sing", score: -0.31 },
+    ],
+    knownWord('en'),
+    "men's dheby, do Conisborougt on cheap trips tor sing",
+  )?.to, 'Conisborough')
   assert.equal(nounAfterAttributiveAdjective(
     'Nuklearenergie ist die Technologie zur großtechnischen Erzeugen',
     known,
@@ -414,6 +451,7 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
       { text: 'und Computerspielen sowie über Personen, die davon', score: -0.5 },
     ],
     known,
+    'und Computerspielen sowie über Personen, die daran',
   ), null)
   assert.equal(stretchedReadingKeepsKnownWords(
     'bezeichnet Man einen des Landstatisters.',
@@ -1384,7 +1422,7 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
         boxes = undefined
       }
     }
-    const letterEdit = oneLetterInALongUnknownWord(decoded.text, decoded.readings ?? [], knownWord(entry.language))
+    const letterEdit = oneLetterInALongUnknownWord(decoded.text, decoded.readings ?? [], knownWord(entry.language), decoded.greedyText ?? '')
     if (letterEdit) {
       const rewritten = rewriteSameLengthWord(decoded.characters, letterEdit.index, letterEdit.to)
       const nextText = textWithWordEdits(decoded.text, [letterEdit])

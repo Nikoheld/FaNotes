@@ -2897,16 +2897,21 @@ export const stretchedReadingKeepsKnownWords = (
 /**
  * The closest reading within {@link LONG_LETTER_MARGIN} that changes one letter of one
  * unknown word of at least 12 letters (`Kolbenningspannung` → `Kolbenringspannung`).
+ * The pen token has to be closer to that spelling than to the chosen word, and it must
+ * not already be the reading's spelling (`Einparteienstaat`, `Verwendungsbezeichnung`).
  * Other words in that reading are left as the chosen line has them.
  */
 export const oneLetterInALongUnknownWord = (
   text: string,
   readings: Array<{ text: string; score: number }>,
   known: (word: string) => boolean,
+  greedy: string,
 ): WordEdit | null => {
   const selected = inkWords(text)
   const top = readings[0]?.score
   if (top === undefined || !selected.length) return null
+  const traced = inkWords(greedy)
+  const traceAligned = traced.length === selected.length
   let best: { gap: number; edit: WordEdit } | null = null
   for (const reading of readings) {
     const gap = top - reading.score
@@ -2922,7 +2927,10 @@ export const oneLetterInALongUnknownWord = (
       for (let cursor = 0; cursor < left.length; cursor += 1) if (left[cursor] !== right[cursor]) diffs += 1
       if (diffs === 1) hits.push({ index, from: left, to: right })
     }
-    if (hits.length !== 1) continue
+    if (hits.length !== 1 || !traceAligned) continue
+    const token = traced[hits[0].index]
+    if (!token || token === hits[0].to) continue
+    if (wordEdits(token, hits[0].to) >= wordEdits(token, hits[0].from)) continue
     if (!best || gap < best.gap) best = { gap, edit: hits[0] }
   }
   return best?.edit ?? null
@@ -3213,7 +3221,7 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
     text = next.text
     characters = next.characters
   }
-  take(oneLetterInALongUnknownWord(text, decoded.readings, known), rewriteSameLengthWord)
+  take(oneLetterInALongUnknownWord(text, decoded.readings, known, decoded.greedyText), rewriteSameLengthWord)
   for (const index of aToAeIndexes(characters)) {
     characters = characters.map((character, cursor) => cursor === index ? { ...character, char: 'ä' } : character)
     text = characters.map((character) => character.char).join('')

@@ -1007,6 +1007,7 @@ export async function recognizeInk(
       decoded.text,
       decoded.readings,
       (word) => wordIsKnown(lineLanguage, word),
+      decoded.greedyText,
     )
     if (letterEdit) {
       const rewritten = rewriteSameLengthWord(decoded.characters, letterEdit.index, letterEdit.to)
