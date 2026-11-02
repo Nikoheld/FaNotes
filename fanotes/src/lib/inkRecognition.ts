@@ -89,6 +89,10 @@ import {
   lowercaseMidSentenceAdverb,
   unknownWordFromReading,
   repeatedLetterGroup,
+  nearTripleLetterGroup,
+  capitalizeWordAfterInitial,
+  shorterTraceBeforePeriod,
+  dictionaryJoinFromReading,
   splitFunctionWordJoin,
   tracedFinalComma,
   spaceBetweenDifferentQuotes,
@@ -1288,6 +1292,29 @@ export async function recognizeInk(
         stitched = null
       }
     }
+    const nearTriple = nearTripleLetterGroup(decoded.text)
+    if (nearTriple) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, nearTriple.index, nearTriple.to)
+      const nextText = textWithWordEdits(decoded.text, [nearTriple])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
+    }
+    const afterInitial = capitalizeWordAfterInitial(decoded.text)
+    if (afterInitial) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, afterInitial.index, afterInitial.to)
+      const nextText = textWithWordEdits(decoded.text, [afterInitial])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
+    }
+    const compoundJoin = dictionaryJoinFromReading(decoded.characters, decoded.readings, (word) => wordIsKnown(lineLanguage, word))
+    if (compoundJoin) {
+      decoded = { ...decoded, characters: compoundJoin, text: compoundJoin.map((character) => character.char).join('') }
+      stitched = null
+    }
     const unknownWord = unknownWordFromReading(decoded.text, decoded.readings, (word) => wordIsKnown(lineLanguage, word))
     if (unknownWord) {
       const rewritten = rewriteSameLengthWord(decoded.characters, unknownWord.index, unknownWord.to)
@@ -1301,6 +1328,15 @@ export async function recognizeInk(
     if (extraLetter) {
       decoded = { ...decoded, characters: extraLetter, text: extraLetter.map((character) => character.char).join('') }
       stitched = null
+    }
+    const shortTrace = shorterTraceBeforePeriod(decoded.text, decoded.greedyText)
+    if (shortTrace) {
+      const rewritten = rewriteWord(decoded.characters, shortTrace.index, shortTrace.to)
+      const nextText = textWithWordEdits(decoded.text, [shortTrace])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
     }
     const known = (word: string) => wordIsKnown(lineLanguage, word)
     const unknownCompound = inkWords(decoded.text)

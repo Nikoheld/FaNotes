@@ -308,6 +308,28 @@ export const repeatedLetterGroup = (text: string): WordEdit | null => {
   return { index: odd, from: word, to: `${[...word][0]}${word}` }
 }
 
+/**
+ * On a line of three-letter repeats, the one group that is a single letter away from a repeat
+ * becomes that repeat (`ZQQ` → `QQQ`). Any other word shape leaves the line alone.
+ */
+export const nearTripleLetterGroup = (text: string): WordEdit | null => {
+  const words = inkWords(text)
+  if (words.length < 4) return null
+  let odd: WordEdit | null = null
+  for (let index = 0; index < words.length; index += 1) {
+    const letters = [...words[index]]
+    if (letters.length === 3 && letters.every((letter) => letter === letters[0])) continue
+    if (letters.length !== 3) return null
+    const counts = new Map<string, number>()
+    for (const letter of letters) counts.set(letter, (counts.get(letter) ?? 0) + 1)
+    const majority = [...counts.entries()].filter(([, count]) => count === 2)
+    if (majority.length !== 1) return null
+    if (odd) return null
+    odd = { index, from: words[index], to: majority[0][0].repeat(3) }
+  }
+  return odd
+}
+
 /** A line of three-letter groups with exactly one group that is not three copies of one letter. */
 export const hasOneOddLetterGroup = (text: string) => {
   const words = inkWords(text)
@@ -761,6 +783,126 @@ export const splitFunctionWordJoin = <T extends { char: string }>(
   const next = characters.slice()
   next.splice(at, 0, { ...characters[at - 1], char: ' ' })
   return next
+}
+
+/** A close reading may join two dictionary words when the compound is no worse than this. `einfließen` is 0.74 nats down. */
+export const DICTIONARY_JOIN_MARGIN = 0.8
+
+/**
+ * Two dictionary words become the compound a close reading already wrote, when that compound
+ * is itself a dictionary word (`ein fließen` → `einfließen`).
+ */
+export const dictionaryJoinFromReading = <T extends { char: string }>(
+  characters: T[],
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): T[] | null => {
+  const text = characters.map((character) => character.char).join('')
+  const top = readings[0]
+  if (!top) return null
+  const beam = inkWords(text)
+  let found: { index: number } | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > DICTIONARY_JOIN_MARGIN) continue
+    const read = inkWords(reading.text)
+    if (read.length !== beam.length - 1) continue
+    let beamIndex = 0
+    let readIndex = 0
+    let join: { index: number } | null = null
+    let aligned = true
+    while (beamIndex < beam.length && readIndex < read.length) {
+      if (beam[beamIndex] === read[readIndex]) {
+        beamIndex += 1
+        readIndex += 1
+        continue
+      }
+      const left = beam[beamIndex]
+      const right = beam[beamIndex + 1]
+      const joined = read[readIndex]
+      if (
+        right
+        && joined
+        && left + right === joined
+        && known(left)
+        && known(right)
+        && known(joined)
+      ) {
+        if (join) return null
+        join = { index: beamIndex }
+        beamIndex += 2
+        readIndex += 1
+        continue
+      }
+      aligned = false
+      break
+    }
+    if (!aligned || !join || beamIndex !== beam.length || readIndex !== read.length) continue
+    if (found && found.index !== join.index) return null
+    found = join
+  }
+  if (!found) return null
+  const runs = letterRuns(characters)
+  const left = runs[found.index]
+  const right = runs[found.index + 1]
+  if (!left || !right) return null
+  const between = characters.slice(left.end, right.start)
+  if (between.length !== 1 || between[0].char !== ' ') return null
+  return [...characters.slice(0, left.end), ...characters.slice(right.start)]
+}
+
+const INITIAL_STOP = new Set([
+  'the', 'and', 'for', 'of', 'to', 'in', 'a', 'an', 'on', 'at', 'by', 'or',
+  'der', 'die', 'das', 'den', 'dem', 'des', 'und', 'von', 'mit', 'auf', 'ist', 'ein',
+])
+
+/**
+ * A lowercase word after a single capital initial takes a capital (`J. fox` → `J. Fox`).
+ * A function word in that place stays lowercase.
+ */
+export const capitalizeWordAfterInitial = (text: string): WordEdit | null => {
+  const located = [...text.matchAll(/[A-Za-zÄÖÜäöüß]+/gu)]
+  let found: WordEdit | null = null
+  for (let index = 1; index < located.length; index += 1) {
+    const prev = located[index - 1]
+    const match = located[index]
+    const word = match[0]
+    const initial = prev[0]
+    if ([...initial].length !== 1 || initial === initial.toLowerCase()) continue
+    const start = match.index ?? 0
+    const prevEnd = (prev.index ?? 0) + initial.length
+    const mid = text.slice(prevEnd, start)
+    if (mid !== '. ' && mid !== '.  ') continue
+    if (word !== word.toLowerCase() || [...word].length < 3) continue
+    if (INITIAL_STOP.has(word.toLowerCase())) continue
+    const head = word[0].toUpperCase()
+    if ([...head].length !== 1) continue
+    if (found) return null
+    found = { index, from: word, to: `${head}${word.slice(1)}` }
+  }
+  return found
+}
+
+/**
+ * A word written against a period keeps the shorter spelling the raw trace has
+ * (`engel.` with trace `engl.` → `engl.`).
+ */
+export const shorterTraceBeforePeriod = (text: string, greedy: string): WordEdit | null => {
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  if (!words.length || words.length !== traced.length) return null
+  const spans = [...text.matchAll(/[A-Za-zÄÖÜäöüß]+/gu)]
+  let found: WordEdit | null = null
+  for (let index = 0; index < words.length; index += 1) {
+    if (words[index] === traced[index]) continue
+    const span = spans[index]
+    if (!span || span.index === undefined) return null
+    if (text[span.index + span[0].length] !== '.') return null
+    if (!oneExtraLetter(traced[index], words[index])) return null
+    if (found) return null
+    found = { index, from: words[index], to: traced[index] }
+  }
+  return found
 }
 
 /**
@@ -1932,11 +2074,19 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
     text = characters.map((character) => character.char).join('')
   }
   take(repeatedLetterGroup(text), rewriteWord)
+  take(nearTripleLetterGroup(text), rewriteSameLengthWord)
+  take(capitalizeWordAfterInitial(text), rewriteSameLengthWord)
+  const compoundJoin = dictionaryJoinFromReading(characters, decoded.readings, known)
+  if (compoundJoin) {
+    characters = compoundJoin
+    text = characters.map((character) => character.char).join('')
+  }
   take(unknownWordFromReading(text, decoded.readings, known), rewriteSameLengthWord)
   const extraLetter = oneLetterFromCloseReading(characters, decoded.readings, known)
   if (extraLetter) {
     characters = extraLetter
     text = characters.map((character) => character.char).join('')
   }
+  take(shorterTraceBeforePeriod(text, decoded.greedyText), rewriteWord)
   return { text, characters }
 }
