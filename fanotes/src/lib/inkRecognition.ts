@@ -111,6 +111,7 @@ import {
   knownConsonantFromReading,
   splitAndFinalLetterFromReading,
   greedyDigitFromTrace,
+  endingAndDigitFromReading,
   dictionaryJoinFromReading,
   splitFunctionWordJoin,
   tracedFinalComma,
@@ -1565,6 +1566,15 @@ export async function recognizeInk(
     const greedyDigit = greedyDigitFromTrace(decoded.characters, decoded.greedyText)
     if (greedyDigit) {
       decoded = { ...decoded, characters: greedyDigit, text: greedyDigit.map((character) => character.char).join('') }
+      stitched = null
+    }
+    const endingDigit = endingAndDigitFromReading(
+      decoded.characters,
+      decoded.readings,
+      (word) => wordIsKnown(lineLanguage, word),
+    )
+    if (endingDigit) {
+      decoded = { ...decoded, characters: endingDigit, text: endingDigit.map((character) => character.char).join('') }
       stitched = null
     }
     if (!decoded.text.trim()) continue

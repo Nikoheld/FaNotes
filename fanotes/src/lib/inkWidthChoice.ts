@@ -1339,6 +1339,82 @@ export const greedyDigitFromTrace = <T extends { char: string }>(
 }
 
 /**
+ * A dictionary word takes the final letter a close reading already has when that same
+ * reading also puts one digit back into a number (`anderer` … `13.000` → `anderem` …
+ * `613.000`). Either change alone stays.
+ */
+export const ENDING_DIGIT_MARGIN = 2
+
+const numberTokens = (value: string) => [...value.matchAll(/\d[\d.,]*\d|\d/gu)]
+
+const gainsOneDigit = (shorter: string, longer: string) => {
+  const from = shorter.replace(/\D/gu, '')
+  const to = longer.replace(/\D/gu, '')
+  if (!from || to.length !== from.length + 1) return false
+  return [...to].some((_, index) => `${to.slice(0, index)}${to.slice(index + 1)}` === from)
+}
+
+export const endingAndDigitFromReading = <T extends { char: string }>(
+  characters: T[],
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): T[] | null => {
+  if (readings.length < 2 || !characters.length) return null
+  const text = characters.map((character) => character.char).join('')
+  const words = inkWords(text)
+  const numbers = numberTokens(text)
+  const top = readings[0]
+  let found: { word: number; to: string; number: number; digits: string } | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > ENDING_DIGIT_MARGIN) continue
+    const other = inkWords(reading.text)
+    const otherNumbers = numberTokens(reading.text)
+    if (other.length !== words.length || !numbers.length || otherNumbers.length !== numbers.length) continue
+    const wordDiffs = words.flatMap((word, index) => word === other[index] ? [] : [index])
+    const numberDiffs = numbers.flatMap((token, index) => token[0] === otherNumbers[index][0] ? [] : [index])
+    if (wordDiffs.length !== 1 || numberDiffs.length !== 1) continue
+    const wordIndex = wordDiffs[0]
+    const numberIndex = numberDiffs[0]
+    const from = words[wordIndex]
+    const to = other[wordIndex]
+    const fromNumber = numbers[numberIndex][0]
+    const toNumber = otherNumbers[numberIndex][0]
+    if (!finalLetterSubstitution(from, to) || !known(from) || !known(to)) continue
+    if (!gainsOneDigit(fromNumber, toNumber)) continue
+    const spans = [...text.matchAll(/[A-Za-zÄÖÜäöüß]+/gu)]
+    const wordSpan = spans[wordIndex]
+    const numberSpan = numbers[numberIndex]
+    if (!wordSpan || wordSpan.index === undefined || numberSpan.index === undefined) continue
+    const pieces = [
+      { at: wordSpan.index, length: wordSpan[0].length, value: to },
+      { at: numberSpan.index, length: numberSpan[0].length, value: toNumber },
+    ].sort((left, right) => right.at - left.at)
+    let expected = text
+    for (const piece of pieces) {
+      expected = expected.slice(0, piece.at) + piece.value + expected.slice(piece.at + piece.length)
+    }
+    if (expected !== reading.text) continue
+    const proposal = { word: wordIndex, to, number: numberIndex, digits: toNumber }
+    if (found && (found.word !== proposal.word || found.to !== proposal.to || found.number !== proposal.number || found.digits !== proposal.digits)) return null
+    found = proposal
+  }
+  if (!found) return null
+  const rewritten = rewriteSameLengthWord(characters, found.word, found.to)
+  const numberSpan = numbers[found.number]
+  const start = numberSpan.index
+  if (!rewritten || start === undefined) return null
+  const fromNumber = numberSpan[0]
+  if (rewritten.slice(start, start + fromNumber.length).map((character) => character.char).join('') !== fromNumber) return null
+  const glyph = rewritten[start]
+  return [
+    ...rewritten.slice(0, start),
+    ...[...found.digits].map((char) => ({ ...glyph, char })),
+    ...rewritten.slice(start + fromNumber.length),
+  ]
+}
+
+/**
  * A quote stuck to a closing parenthesis moves in front of the following lowercase word
  * (`(Tanis 6a)" if` → `(Tanis 6a) "if`).
  */
@@ -3052,6 +3128,11 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   const greedyDigit = greedyDigitFromTrace(characters, decoded.greedyText)
   if (greedyDigit) {
     characters = greedyDigit
+    text = characters.map((character) => character.char).join('')
+  }
+  const endingDigit = endingAndDigitFromReading(characters, decoded.readings, known)
+  if (endingDigit) {
+    characters = endingDigit
     text = characters.map((character) => character.char).join('')
   }
   return { text, characters }
