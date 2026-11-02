@@ -10,7 +10,13 @@ import kotlin.math.ceil
  * to a half mark, then Note − 4, or twice that below 4. Sport does not count.
  * A Wunschnote is the mark still needed on a future exam to land on a target average.
  */
-data class WeightedMark(val mark: Double, val weight: Double, val label: String = "", val own: Boolean = false)
+data class WeightedMark(
+    val mark: Double,
+    val weight: Double,
+    val label: String = "",
+    val own: Boolean = false,
+    val targetId: String = "",
+)
 
 data class HypotheticalGrade(
     val id: String,
@@ -92,7 +98,7 @@ fun courseSummaries(grades: List<SchoolGrade>, hypothetical: List<HypotheticalGr
         val key = grade.courseKey
         if (key.isBlank()) continue
         labels.putIfAbsent(key, grade.courseLabel)
-        groups.getOrPut(key) { mutableListOf() } += WeightedMark(mark, grade.weight, grade.title)
+        groups.getOrPut(key) { mutableListOf() } += WeightedMark(mark, grade.weight, grade.title, targetId = gradeTargetId(grade))
     }
     for (extra in hypothetical) {
         if (!extra.mark.isFinite() || extra.weight <= 0.0) continue

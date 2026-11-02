@@ -110,6 +110,7 @@ Ohne Google Play und ohne `google-services.json`.
 3. Die App liest `$FANOTES_NTFY_URL/<thema>/json` in einem Vordergrunddienst, solange «Sofort über ntfy» an ist. Die Meldung erscheint auf dem Kanal «Schulnetz» mit hoher Wichtigkeit.
 4. Ist eine UnifiedPush-App installiert (ntfy, Nextcloud, …), trägt «UnifiedPush aktivieren» deren Endpunkt unter `/push-endpoint` ein. Der Server postet den Rohtext dorthin. Verteiler, die Web-Push-Verschlüsselung erzwingen, bekommen hier den Klartext; ntfy nimmt ihn direkt an.
 5. WorkManager wiederholt den Abruf von `/snapshot` und `/changes` alle 15 Minuten, auch wenn der Dienst nicht läuft.
+6. Jede Meldung trägt Typ und eine stabile Ziel-Id (Hash aus Fach+Datum+Titel bzw. Lektion Datum+Zeit+Fach). Ein Tipp öffnet das Element: Note → Noten mit geöffnetem Fach, Stundenplan → Tag und Lektion, Prüfung → Prüfungsdetail, Termin/Mitteilung → Termine, Absenzfrist → Absenz, Test → Einstellungen. Fehlt das Element, bleibt die passende Liste mit einem kurzen Hinweis. Mehrere neue Noten werden zu einer Meldung mit allen Ziel-Ids zusammengefasst. Dasselbe JSON gilt für ntfy, UnifiedPush und lokale WorkManager-Meldungen; `MainActivity` ist `singleTop`, damit ein Tipp aus dem Hintergrund und ein Kaltstart dieselben Extras lesen.
 
 FCM ist bewusst nicht eingebaut. Es würde Play-Dienste und ein Firebase-Projekt erzwingen. ntfy kann selbst gehostet werden, indem `FANOTES_NTFY_URL` gesetzt wird. Die App übernimmt die Adresse aus `/status`.
 

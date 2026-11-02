@@ -147,7 +147,14 @@ data class SchulnetzChange(
     val category: String,
     val title: String,
     val body: String,
-)
+    val target: String = "",
+    val targetId: String = "",
+    val courseId: String = "",
+    val date: String = "",
+    val targetIds: List<String> = emptyList(),
+) {
+    fun linkIds(): List<String> = targetIds.ifEmpty { listOf(targetId).filter { it.isNotBlank() } }
+}
 
 /** Raw mobile REST payloads before they are normalised. Missing bodies are skipped. */
 data class SchulnetzRaw(

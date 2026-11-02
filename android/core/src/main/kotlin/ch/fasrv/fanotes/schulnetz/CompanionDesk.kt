@@ -36,11 +36,13 @@ fun excuseReminders(absences: List<SchoolAbsence>, today: LocalDate, withinDays:
         val days = ChronoUnit.DAYS.between(today, deadline)
         if (days < 0 || days > withinDays) return@mapNotNull null
         val whenText = if (days == 0L) "heute" else if (days == 1L) "morgen" else "in $days Tagen"
-        SchulnetzChange(
+        linkedChange(
             id = "deadline:${absence.id}:${deadline}",
             category = "deadline",
             title = "Entschuldigung läuft ab",
             body = listOf(absence.subject.ifBlank { "Absenz" }, absence.reason, "Frist $whenText (${deadline.format(DateTimeFormatter.ofPattern("d.M.yyyy"))})").filter { it.isNotBlank() }.joinToString(" · "),
+            targetId = absenceTargetId(absence),
+            date = absence.dateFrom.take(10),
         )
     }
 }

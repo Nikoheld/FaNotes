@@ -26,7 +26,6 @@ import ch.fasrv.fanotes.schulnetz.AgendaEvent
 import ch.fasrv.fanotes.schulnetz.HypotheticalGrade
 import ch.fasrv.fanotes.schulnetz.NotifySettings
 import ch.fasrv.fanotes.schulnetz.RefreshLease
-import ch.fasrv.fanotes.schulnetz.SchulnetzChange
 import ch.fasrv.fanotes.schulnetz.SchulnetzGate
 import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
 import ch.fasrv.fanotes.schulnetz.diffSnapshots
@@ -49,6 +48,7 @@ import ch.fasrv.fanotes.schulnetz.toNormalizedJson
 import ch.fasrv.fanotes.schulnetz.usesWebsiteSession
 import ch.fasrv.fanotes.schulnetz.DeskPrefs
 import ch.fasrv.fanotes.schulnetz.HiddenLesson
+import ch.fasrv.fanotes.schulnetz.changeFromObj
 import ch.fasrv.fanotes.schulnetz.changeIsHidden
 import ch.fasrv.fanotes.schulnetz.parseDeskPrefs
 import ch.fasrv.fanotes.schulnetz.parseHiddenLessons
@@ -746,11 +746,12 @@ class CompanionGraph(private val context: Context) {
         if (!already) {
             CompanionAlerts.show(
                 context,
-                ch.fasrv.fanotes.schulnetz.SchulnetzChange(
+                ch.fasrv.fanotes.schulnetz.linkedChange(
                     "schulnetz-login-required",
                     "event",
                     "Bei Schulnetz neu anmelden",
                     "Die Microsoft-Anmeldung ist abgelaufen.",
+                    targetId = "home",
                 ),
             )
         }
@@ -792,8 +793,7 @@ class CompanionGraph(private val context: Context) {
         val obj = parseJson(json) as? JsonValue.Obj ?: return
         val items = obj.array("changes")?.items.orEmpty().mapNotNull { item ->
             val change = item as? JsonValue.Obj ?: return@mapNotNull null
-            val id = change.string("id") ?: return@mapNotNull null
-            SchulnetzChange(id, change.string("category").orEmpty(), change.string("title").orEmpty(), change.string("body").orEmpty())
+            changeFromObj(change)
         }
         CompanionAlerts.showAll(context, items.filterNot { changeIsHidden(it, hiddenLessons()) })
         val maxRevision = obj.array("changes")?.items.orEmpty().mapNotNull { item ->

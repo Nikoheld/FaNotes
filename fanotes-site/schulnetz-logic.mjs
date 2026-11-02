@@ -359,12 +359,10 @@ export const excuseReminders = (absences, today, withinDays = 2) => {
     const days = daysUntil(today, deadline)
     if (days < 0 || days > withinDays) return []
     const whenText = days === 0 ? 'heute' : days === 1 ? 'morgen' : `in ${days} Tagen`
-    return [{
-      id: `deadline:${absence.id}:${deadline}`,
-      category: 'deadline',
-      title: 'Entschuldigung läuft ab',
-      body: [absence.subject || 'Absenz', absence.reason || '', `Frist ${whenText} (${deadline.split('-').reverse().join('.')})`].filter(Boolean).join(' · '),
-    }]
+    return [linkedChange(`deadline:${absence.id}:${deadline}`, 'deadline', 'Entschuldigung läuft ab', [absence.subject || 'Absenz', absence.reason || '', `Frist ${whenText} (${deadline.split('-').reverse().join('.')})`].filter(Boolean).join(' · '), {
+      targetId: absenceTargetId(absence),
+      date: (absence.dateFrom || '').slice(0, 10),
+    })]
   })
 }
 
@@ -377,6 +375,171 @@ export const unseenChanges = (changes, knownIds) => {
     seen.add(change.id)
     return true
   })
+}
+
+export const notifyHash = (...parts) => {
+  let hash = 2166136261
+  const raw = parts.map((part) => String(part ?? '').trim().toLowerCase()).join('|')
+  for (const char of raw) {
+    hash ^= char.codePointAt(0)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(16)
+}
+
+const courseKeyOf = (grade) => grade.courseId || grade.course || grade.subject || ''
+export const eventLabel = (event) => event.courseName || event.text || event.timetableText || 'Lektion'
+export const eventDay = (event) => (event.start || '').slice(0, 10)
+export const eventClock = (event) => (event.start || '').includes('T') ? (event.start || '').split('T')[1].slice(0, 5) : ''
+export const gradeTargetId = (grade) => notifyHash(courseKeyOf(grade), grade.date || '', grade.title || '')
+export const lessonTargetId = (event) => notifyHash(eventDay(event), eventClock(event), eventLabel(event))
+export const absenceTargetId = (absence) => notifyHash(absence.id || '', absence.dateFrom || '', absence.subject || '', absence.reason || '')
+export const messageTargetId = (message) => notifyHash(message.id || '', message.title || '', message.body || '')
+
+export const defaultTarget = (category) => {
+  if (category === 'grade') return 'grades'
+  if (category === 'timetable') return 'plan'
+  if (category === 'exam') return 'exams'
+  if (category === 'absence' || category === 'deadline') return 'absences'
+  if (category === 'settings') return 'settings'
+  return 'events'
+}
+
+export const linkedChange = (id, category, title, body, extra = {}) => {
+  const targetId = extra.targetId || ''
+  const targetIds = extra.targetIds || (targetId ? [targetId] : [])
+  return {
+    id,
+    category,
+    title,
+    body,
+    target: extra.target || defaultTarget(category),
+    targetId,
+    courseId: extra.courseId || '',
+    date: extra.date || '',
+    targetIds,
+  }
+}
+
+export const notifyKindOf = (category, id = '', title = '') => {
+  if (category === 'settings' || id === 'push-test' || String(title).includes('Testbenachrichtigung')) return 'settings'
+  if (id === 'schulnetz-login-required' || String(id).startsWith('reauth:')) return 'home'
+  if (category === 'deadline') return 'deadline'
+  return category
+}
+
+export const notifyPayload = (change) => JSON.stringify({
+  id: change.id,
+  category: change.category,
+  title: change.title,
+  body: change.body,
+  target: change.target || defaultTarget(change.category),
+  targetId: change.targetId || (change.targetIds || []).join(','),
+  courseId: change.courseId || '',
+  date: change.date || '',
+  targetIds: change.targetIds || (change.targetId ? String(change.targetId).split(',').filter(Boolean) : []),
+})
+
+export const parseNotifyLink = (json) => {
+  let obj
+  try { obj = typeof json === 'string' ? JSON.parse(json) : json } catch { return null }
+  if (!obj || typeof obj !== 'object') return null
+  if (obj.event === 'keepalive' || obj.event === 'open') return null
+  let source = obj
+  if (typeof obj.message === 'string') {
+    try {
+      const nested = JSON.parse(obj.message)
+      if (nested && typeof nested === 'object') source = nested
+    } catch { /* body is plain text */ }
+  }
+  const category = source.category || obj.category || 'event'
+  const title = source.title || obj.title || ''
+  const id = source.id || obj.id || ''
+  const fromArray = Array.isArray(source.targetIds) ? source.targetIds.filter((item) => typeof item === 'string' && item) : []
+  const fromField = String(source.targetId || obj.targetId || '').split(',').map((item) => item.trim()).filter(Boolean)
+  const ids = [...new Set([...fromArray, ...fromField])]
+  return {
+    kind: notifyKindOf(category, id, title),
+    ids: ids.length ? ids : (id ? [id] : []),
+    courseId: source.courseId || obj.courseId || '',
+    date: source.date || obj.date || '',
+  }
+}
+
+export const groupGradeChanges = (changes) => {
+  const grades = (changes || []).filter((change) => change.category === 'grade')
+  if (grades.length <= 1) return changes || []
+  const rest = (changes || []).filter((change) => change.category !== 'grade')
+  const ids = [...new Set(grades.flatMap((change) => change.targetIds || String(change.targetId || '').split(',').filter(Boolean)))]
+  const courses = [...new Set(grades.map((change) => change.courseId).filter(Boolean))]
+  return [linkedChange(`grades:${ids.slice().sort().join(',')}`, 'grade', `${grades.length} neue Noten`, grades.map((change) => change.body).join('\n'), {
+    target: 'grades',
+    targetId: ids.join(','),
+    courseId: courses.length === 1 ? courses[0] : '',
+    targetIds: ids,
+  }), ...rest]
+}
+
+export const routeNotify = (link, snapshot = {}) => {
+  if (link.kind === 'settings') return { tab: 'Mehr', section: 'Einstellungen', found: true, highlightIds: [], hint: '' }
+  if (link.kind === 'home') return { tab: 'Heute', section: 'Menu', found: true, highlightIds: [], hint: '' }
+  if (link.kind === 'grade') {
+    const found = (snapshot.grades || []).filter((grade) => link.ids.includes(gradeTargetId(grade)) || link.ids.includes(grade.id))
+    const courses = [...new Set(found.map((grade) => courseKeyOf(grade)))]
+    return {
+      tab: 'Noten',
+      section: 'Menu',
+      courseId: courses.length === 1 ? courses[0] : link.courseId || '',
+      highlightIds: found.length ? found.map(gradeTargetId) : link.ids,
+      hint: found.length ? '' : 'Die Note ist nicht mehr im letzten Stand.',
+      found: found.length > 0,
+    }
+  }
+  if (link.kind === 'timetable') {
+    const found = (snapshot.events || []).filter((event) => link.ids.includes(lessonTargetId(event)) || link.ids.includes(event.id))
+    const event = found[0]
+    return {
+      tab: 'Plan',
+      section: 'Menu',
+      highlightIds: event ? [lessonTargetId(event)] : link.ids,
+      day: event ? eventDay(event) : link.date || '',
+      hint: event ? '' : 'Die Lektion ist nicht mehr im letzten Stand.',
+      found: Boolean(event),
+    }
+  }
+  if (link.kind === 'exam') {
+    const pool = [...(snapshot.exams || []), ...(snapshot.events || []).filter(isExamLike)]
+    const found = pool.filter((event) => link.ids.includes(lessonTargetId(event)) || link.ids.includes(event.id))
+    const event = found[0]
+    return {
+      tab: 'Mehr',
+      section: 'Pruefungen',
+      highlightIds: event ? [lessonTargetId(event)] : link.ids,
+      day: event ? eventDay(event) : link.date || '',
+      hint: event ? '' : 'Die Prüfung ist nicht mehr im letzten Stand.',
+      found: Boolean(event),
+    }
+  }
+  if (link.kind === 'deadline' || link.kind === 'absence') {
+    const found = (snapshot.absences || []).filter((absence) => link.ids.includes(absenceTargetId(absence)) || link.ids.includes(absence.id))
+    return {
+      tab: 'Mehr',
+      section: 'Absenzen',
+      highlightIds: found.length ? found.map(absenceTargetId) : link.ids,
+      hint: found.length ? '' : 'Die Absenz ist nicht mehr im letzten Stand.',
+      found: found.length > 0,
+    }
+  }
+  const messages = (snapshot.messages || []).filter((message) => link.ids.includes(messageTargetId(message)) || link.ids.includes(message.id))
+  if (messages.length) return { tab: 'Mehr', section: 'Termine', highlightIds: messages.map(messageTargetId), found: true, hint: '' }
+  const events = (snapshot.events || []).filter((event) => !isLesson(event) && (link.ids.includes(lessonTargetId(event)) || link.ids.includes(event.id)))
+  return {
+    tab: 'Mehr',
+    section: 'Termine',
+    highlightIds: events.length ? events.map(lessonTargetId) : link.ids,
+    hint: events.length ? '' : 'Der Termin ist nicht mehr im letzten Stand.',
+    found: events.length > 0,
+  }
 }
 
 export const diffSnapshots = (previous, next, settings = {}, today = zurichToday()) => {
@@ -397,12 +560,11 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
       const key = gradeKey(grade)
       if (old && gradeKey(old) === key) continue
       const course = grade.course || grade.subject || grade.courseId || 'Kurs'
-      changes.push({
-        id: `grade:${grade.id}:${key}`,
-        category: 'grade',
-        title: old ? 'Notenänderung' : 'Neue Note',
-        body: `${course} · ${grade.title || 'Note'} · ${formatMark(grade.mark)} · Gewicht ${formatMark(grade.weight)}`,
-      })
+      changes.push(linkedChange(`grade:${grade.id}:${key}`, 'grade', old ? 'Notenänderung' : 'Neue Note', `${course} · ${grade.title || 'Note'} · ${formatMark(grade.mark)} · Gewicht ${formatMark(grade.weight)}`, {
+        targetId: gradeTargetId(grade),
+        courseId: courseKeyOf(grade),
+        date: grade.date || '',
+      }))
     }
   }
   if (prefs.timetable) {
@@ -414,12 +576,10 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
     for (const absence of next.absences || []) {
       if (before.has(absence.id)) continue
       const whenText = [absence.dateFrom, absence.hourFrom].filter(Boolean).join(' ')
-      changes.push({
-        id: `absence:${absence.id}`,
-        category: 'absence',
-        title: 'Neue Absenz',
-        body: [absence.subject || 'Absenz', whenText, absence.reason, absence.excused ? 'entschuldigt' : 'nicht entschuldigt'].filter(Boolean).join(' · '),
-      })
+      changes.push(linkedChange(`absence:${absence.id}`, 'absence', 'Neue Absenz', [absence.subject || 'Absenz', whenText, absence.reason, absence.excused ? 'entschuldigt' : 'nicht entschuldigt'].filter(Boolean).join(' · '), {
+        targetId: absenceTargetId(absence),
+        date: (absence.dateFrom || '').slice(0, 10),
+      }))
     }
   }
   if (prefs.deadlines) changes.push(...excuseReminders(next.absences || [], today))
@@ -427,12 +587,16 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
     const beforeMessages = new Set((previous.messages || []).map((item) => item.id))
     for (const message of next.messages || []) {
       if (beforeMessages.has(message.id)) continue
-      changes.push({ id: `event:${message.id}`, category: 'event', title: message.title || 'Neue Mitteilung', body: message.body || message.title || '' })
+      changes.push(linkedChange(`event:${message.id}`, 'event', message.title || 'Neue Mitteilung', message.body || message.title || '', { targetId: messageTargetId(message) }))
     }
     const beforeEvents = new Set((previous.events || []).map((item) => item.id))
     for (const event of next.events || []) {
       if (isLesson(event) || isExamLike(event) || beforeEvents.has(event.id)) continue
-      changes.push({ id: `event:${event.id}:${eventKey(event)}`, category: 'event', title: 'Neuer Termin', body: eventBody(event) })
+      changes.push(linkedChange(`event:${event.id}:${eventKey(event)}`, 'event', 'Neuer Termin', eventBody(event), {
+        targetId: lessonTargetId(event),
+        courseId: event.courseId || eventLabel(event),
+        date: eventDay(event),
+      }))
     }
   }
   return changes
@@ -454,11 +618,19 @@ const diffAgenda = (previous, next, category, created, removed, changes) => {
     else if (event.room !== old.room) title = 'Raum geändert'
     else if (event.start !== old.start || event.end !== old.end) title = 'Zeit geändert'
     else title = category === 'exam' ? 'Prüfung geändert' : 'Stundenplan geändert'
-    changes.push({ id: `${category}:${event.id}:${key}`, category, title, body: eventBody(event) })
+    changes.push(linkedChange(`${category}:${event.id}:${key}`, category, title, eventBody(event), {
+      targetId: lessonTargetId(event),
+      courseId: event.courseId || eventLabel(event),
+      date: eventDay(event),
+    }))
   }
   for (const event of previous) {
     if (after.has(event.id)) continue
-    changes.push({ id: `${category}:${event.id}:removed`, category, title: removed, body: eventBody(event) })
+    changes.push(linkedChange(`${category}:${event.id}:removed`, category, removed, eventBody(event), {
+      targetId: lessonTargetId(event),
+      courseId: event.courseId || eventLabel(event),
+      date: eventDay(event),
+    }))
   }
 }
 

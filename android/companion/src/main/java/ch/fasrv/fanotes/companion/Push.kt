@@ -25,7 +25,10 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 import ch.fasrv.fanotes.schulnetz.SchulnetzChange
+import ch.fasrv.fanotes.schulnetz.changeFromPayload
 import ch.fasrv.fanotes.schulnetz.changeIsHidden
+import ch.fasrv.fanotes.schulnetz.groupGradeChanges
+import ch.fasrv.fanotes.schulnetz.notifyPayload
 import ch.fasrv.fanotes.schulnetz.endsAt
 import ch.fasrv.fanotes.schulnetz.isCancelled
 import ch.fasrv.fanotes.schulnetz.isSubstitution
@@ -51,6 +54,12 @@ import java.util.concurrent.TimeUnit
 
 object CompanionAlerts {
     const val CHANNEL = "schulnetz-alerts"
+    const val EXTRA_CATEGORY = "ch.fasrv.fanotes.companion.NOTIFY_CATEGORY"
+    const val EXTRA_TARGET_ID = "ch.fasrv.fanotes.companion.NOTIFY_TARGET_ID"
+    const val EXTRA_TARGET_IDS = "ch.fasrv.fanotes.companion.NOTIFY_TARGET_IDS"
+    const val EXTRA_COURSE_ID = "ch.fasrv.fanotes.companion.NOTIFY_COURSE_ID"
+    const val EXTRA_DATE = "ch.fasrv.fanotes.companion.NOTIFY_DATE"
+    const val EXTRA_PAYLOAD = "ch.fasrv.fanotes.companion.NOTIFY_PAYLOAD"
     private const val SEEN = "seen-changes"
 
     fun ensureChannels(context: Context) {
@@ -73,7 +82,7 @@ object CompanionAlerts {
     }
 
     fun showAll(context: Context, changes: List<SchulnetzChange>) {
-        changes.forEach { show(context, it) }
+        groupGradeChanges(changes).forEach { show(context, it) }
     }
 
     fun show(context: Context, change: SchulnetzChange) {
@@ -95,8 +104,8 @@ object CompanionAlerts {
         }
         val open = PendingIntent.getActivity(
             context,
-            0,
-            Intent(context, MainActivity::class.java),
+            change.id.hashCode(),
+            notifyIntent(context, change),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = NotificationCompat.Builder(context, channel)
@@ -113,18 +122,28 @@ object CompanionAlerts {
     }
 
     fun onPushPayload(context: Context, payload: String) {
-        val obj = runCatching { parseJson(payload) as? JsonValue.Obj }.getOrNull()
-        if (obj == null) {
-            show(context, SchulnetzChange(payload.hashCode().toString(), "event", "Schulnetz", payload.take(180)))
+        val parsed = changeFromPayload(payload)
+        if (parsed != null) {
+            show(context, parsed)
             return
         }
-        val nested = obj.string("message")?.let { runCatching { parseJson(it) as? JsonValue.Obj }.getOrNull() }
-        val source = nested ?: obj
-        val title = source.string("title") ?: obj.string("title") ?: "Schulnetz"
-        val body = source.string("body") ?: obj.string("message") ?: obj.string("body") ?: ""
-        val id = source.string("id") ?: obj.string("id") ?: "$title|$body"
-        if (obj.string("event") == "keepalive" || obj.string("event") == "open") return
-        show(context, SchulnetzChange(id, source.string("category") ?: "event", title, body))
+        val obj = runCatching { parseJson(payload) as? JsonValue.Obj }.getOrNull()
+        if (obj?.string("event") == "keepalive" || obj?.string("event") == "open") return
+        if (payload.isBlank()) return
+        show(context, SchulnetzChange(payload.hashCode().toString(), "event", "Schulnetz", payload.take(180)))
+    }
+
+    fun notifyIntent(context: Context, change: SchulnetzChange): Intent {
+        val ids = ArrayList(change.linkIds())
+        return Intent(context, MainActivity::class.java)
+            .setAction(Intent.ACTION_VIEW)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+            .putExtra(EXTRA_CATEGORY, change.category)
+            .putExtra(EXTRA_TARGET_ID, ids.joinToString(","))
+            .putStringArrayListExtra(EXTRA_TARGET_IDS, ids)
+            .putExtra(EXTRA_COURSE_ID, change.courseId)
+            .putExtra(EXTRA_DATE, change.date)
+            .putExtra(EXTRA_PAYLOAD, notifyPayload(change))
     }
 
     fun forget(context: Context, id: String) {

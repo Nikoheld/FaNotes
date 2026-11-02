@@ -21,6 +21,13 @@ import {
   roundToHalf,
   isSportCourse,
   promotionPoints,
+  notifyHash,
+  gradeTargetId,
+  lessonTargetId,
+  groupGradeChanges,
+  notifyPayload,
+  parseNotifyLink,
+  routeNotify,
 } from './schulnetz-logic.mjs'
 
 const marks = [
@@ -57,6 +64,10 @@ test('diff ids stay stable and the first snapshot is silent', () => {
   assert.equal(change.id, 'grade:g1:5.5|1|Probe|2026-10-20')
   assert.equal(change.category, 'grade')
   assert.equal(change.title, 'Neue Note')
+  assert.equal(change.target, 'grades')
+  assert.equal(change.targetId, gradeTargetId(grade))
+  assert.equal(change.courseId, 'Mathematik')
+  assert.equal(change.date, '2026-10-20')
   const lesson = { id: 'e1', start: '2026-11-02T08:15:00', end: '2026-11-02T09:00:00', text: 'Mathematik', room: 'R201', teachers: [], courseName: 'Mathematik', status: 'confirmed', eventType: 'lesson' }
   const room = diffSnapshots({ grades: [], events: [lesson], exams: [], absences: [], messages: [] }, { grades: [], events: [{ ...lesson, room: 'R202' }], exams: [], absences: [], messages: [] })
   assert.equal(room.find((item) => item.category === 'timetable').title, 'Raum geändert')
@@ -128,7 +139,10 @@ test('stored refresh tokens are encrypted and only the poller refreshes', async 
     if (String(url).includes('pageid=1')) {
       return { status: 200, text: async () => '<div class="cls-start-mitteilung">Willkommen</div>' }
     }
-    if (String(url).startsWith('https://ntfy.example/')) return { status: 200, text: async () => 'ok' }
+    if (String(url).startsWith('https://ntfy.example/')) {
+      calls.push({ url: String(url), method: options.method, body: options.body })
+      return { status: 200, text: async () => 'ok' }
+    }
     return json([])
   }
   const previousNtfy = process.env.FANOTES_NTFY_URL
@@ -163,6 +177,12 @@ test('stored refresh tokens are encrypted and only the poller refreshes', async 
     const changes = await readFile(join(root, 'accounts', accountId, 'changes.jsonl'), 'utf8')
     assert.match(changes, /grade:g2:4\.5\|1\|Essay\|2026-11-01/)
     assert.equal(changes.includes('rotated-refresh'), false)
+    const pushed = calls.filter((call) => String(call.url).startsWith('https://ntfy.example/') && call.body).at(-1)
+    const payload = JSON.parse(pushed.body)
+    assert.equal(payload.category, 'grade')
+    assert.equal(payload.target, 'grades')
+    assert.ok(payload.targetId)
+    assert.ok(Array.isArray(payload.targetIds))
   } finally {
     if (previousNtfy == null) delete process.env.FANOTES_NTFY_URL
     else process.env.FANOTES_NTFY_URL = previousNtfy
@@ -244,6 +264,49 @@ test('a Microsoft sign-in page is login required, not a scraped grade page', () 
   assert.equal(sessionProblem('https://www.schulnetz-ag.ch/aksa/index.php?pageid=21111', html), 'microsoft')
   assert.equal(microsoftLoginRequired('https://login.microsoftonline.com/8c2df54b-02dc-4a78-809d-8a025372e6c4/oauth2/v2.0/authorize', html), true)
   assert.equal(parseGradesHtml(html).length, 0)
+})
+
+test('notify payload hashes stay stable and route to the matching screen', () => {
+  assert.equal(notifyHash('math', '2026-11-01', 'Probe'), notifyHash('MATH', '2026-11-01', ' probe '))
+  const grade = { id: 'g1', courseId: 'math', course: 'Mathematik', title: 'Probe', date: '2026-11-01', mark: 5.5, weight: 1 }
+  const other = { id: 'g2', courseId: 'che', course: 'Chemie', title: 'Test', date: '2026-11-02', mark: 4.5, weight: 1 }
+  const lesson = { id: 'e1', start: '2026-11-02T08:15:00', end: '2026-11-02T09:00:00', text: 'Mathematik', courseName: 'Mathematik', eventType: 'lesson' }
+  const exam = { ...lesson, id: 'x1', eventType: 'exam', text: 'Prüfung' }
+  const absence = { id: 'a1', dateFrom: '2026-10-01', subject: 'Französisch', reason: 'Arzt' }
+  const snapshot = { grades: [grade, other], events: [lesson], exams: [exam], absences: [absence], messages: [{ id: 'm1', title: 'Elternabend', body: 'Freitag' }] }
+  const gradeChange = { id: 'grade:g1', category: 'grade', title: 'Neue Note', body: 'Mathematik · Probe', targetId: gradeTargetId(grade), courseId: 'math', date: '2026-11-01', targetIds: [gradeTargetId(grade)] }
+  const payload = notifyPayload(gradeChange)
+  const parsed = JSON.parse(payload)
+  assert.equal(parsed.target, 'grades')
+  assert.deepEqual(parsed.targetIds, [gradeTargetId(grade)])
+  const nested = parseNotifyLink(JSON.stringify({ event: 'message', message: payload }))
+  assert.equal(nested.kind, 'grade')
+  assert.deepEqual(nested.ids, [gradeTargetId(grade)])
+  const opened = routeNotify(nested, snapshot)
+  assert.equal(opened.tab, 'Noten')
+  assert.equal(opened.courseId, 'math')
+  assert.equal(opened.found, true)
+  const missing = routeNotify({ kind: 'grade', ids: ['gone'], courseId: 'math', date: '2026-11-01' }, snapshot)
+  assert.equal(missing.found, false)
+  assert.match(missing.hint, /Note/)
+  const grouped = groupGradeChanges([
+    { id: 'grade:g1', category: 'grade', title: 'Neue Note', body: 'Mathe', targetId: gradeTargetId(grade), courseId: 'math', targetIds: [gradeTargetId(grade)] },
+    { id: 'grade:g2', category: 'grade', title: 'Neue Note', body: 'Chemie', targetId: gradeTargetId(other), courseId: 'che', targetIds: [gradeTargetId(other)] },
+  ])
+  assert.equal(grouped.length, 1)
+  assert.equal(grouped[0].title, '2 neue Noten')
+  const groupRoute = routeNotify(parseNotifyLink(notifyPayload(grouped[0])), snapshot)
+  assert.equal(groupRoute.tab, 'Noten')
+  assert.equal(groupRoute.courseId, '')
+  assert.equal(groupRoute.highlightIds.length, 2)
+  const lessonRoute = routeNotify({ kind: 'timetable', ids: [lessonTargetId(lesson)], courseId: '', date: '2026-11-02' }, snapshot)
+  assert.equal(lessonRoute.tab, 'Plan')
+  assert.equal(lessonRoute.day, '2026-11-02')
+  const examRoute = routeNotify({ kind: 'exam', ids: [lessonTargetId(exam)], courseId: '', date: '' }, snapshot)
+  assert.equal(examRoute.section, 'Pruefungen')
+  const testRoute = routeNotify(parseNotifyLink(JSON.stringify({ id: 'push-test', category: 'settings', title: 'Testbenachrichtigung', body: 'x' })), snapshot)
+  assert.equal(testRoute.section, 'Einstellungen')
+  assert.equal(parseNotifyLink(JSON.stringify({ event: 'keepalive' })), null)
 })
 
 test('seal round trip uses aes-256-gcm', () => {

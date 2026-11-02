@@ -45,11 +45,13 @@ fun diffSnapshots(
             val whenText = listOf(absence.dateFrom, absence.hourFrom).filter { it.isNotBlank() }.joinToString(" ")
             val subject = absence.subject.ifBlank { "Absenz" }
             val excuse = if (absence.excused) "entschuldigt" else "nicht entschuldigt"
-            changes += SchulnetzChange(
+            changes += linkedChange(
                 id = "absence:${absence.id}",
                 category = "absence",
                 title = "Neue Absenz",
                 body = listOf(subject, whenText, absence.reason, excuse).filter { it.isNotBlank() }.joinToString(" · "),
+                targetId = absenceTargetId(absence),
+                date = absence.dateFrom.take(10),
             )
         }
     }
@@ -58,21 +60,25 @@ fun diffSnapshots(
         val beforeMessages = previous.messages.associateBy { it.id }
         for (message in next.messages) {
             if (beforeMessages[message.id] != null) continue
-            changes += SchulnetzChange(
+            changes += linkedChange(
                 id = "event:${message.id}",
                 category = "event",
                 title = message.title.ifBlank { "Neue Mitteilung" },
                 body = message.body.ifBlank { message.title },
+                targetId = messageTargetId(message),
             )
         }
         val beforeEvents = previous.events.associateBy { it.id }
         for (event in next.events) {
             if (event.isLesson() || event.isExamLike() || beforeEvents[event.id] != null) continue
-            changes += SchulnetzChange(
+            changes += linkedChange(
                 id = "event:${event.id}:${eventKey(event)}",
                 category = "event",
                 title = "Neuer Termin",
                 body = eventBody(event),
+                targetId = lessonTargetId(event),
+                courseId = event.courseId.ifBlank { event.label },
+                date = eventDay(event),
             )
         }
     }
@@ -89,11 +95,14 @@ private fun diffGrades(previous: List<SchoolGrade>, next: List<SchoolGrade>, cha
         val mark = formatMark(grade.mark)
         val course = grade.courseLabel.ifBlank { "Kurs" }
         val name = grade.title.ifBlank { "Note" }
-        changes += SchulnetzChange(
+        changes += linkedChange(
             id = "grade:${grade.id}:$key",
             category = "grade",
             title = title,
             body = "$course · $name · $mark · Gewicht ${formatMark(grade.weight)}",
+            targetId = gradeTargetId(grade),
+            courseId = grade.courseKey,
+            date = grade.date,
         )
     }
 }
@@ -122,20 +131,26 @@ private fun diffAgenda(
             event.start != old.start || event.end != old.end -> "Zeit geändert"
             else -> if (category == "exam") "Prüfung geändert" else "Stundenplan geändert"
         }
-        changes += SchulnetzChange(
+        changes += linkedChange(
             id = "$category:${event.id}:$key",
             category = category,
             title = title,
             body = eventBody(event),
+            targetId = lessonTargetId(event),
+            courseId = event.courseId.ifBlank { event.label },
+            date = eventDay(event),
         )
     }
     for (event in previous) {
         if (after[event.id] != null) continue
-        changes += SchulnetzChange(
+        changes += linkedChange(
             id = "$category:${event.id}:removed",
             category = category,
             title = removed,
             body = eventBody(event),
+            targetId = lessonTargetId(event),
+            courseId = event.courseId.ifBlank { event.label },
+            date = eventDay(event),
         )
     }
 }

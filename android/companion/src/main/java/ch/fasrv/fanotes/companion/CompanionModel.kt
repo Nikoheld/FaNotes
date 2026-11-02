@@ -72,6 +72,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var day by mutableStateOf(timetableAnchor(LocalDate.now()))
     var editorPath by mutableStateOf<String?>(null)
     var debugHtml by mutableStateOf("")
+    var highlightIds by mutableStateOf<Set<String>>(emptySet())
+    var focusCourseId by mutableStateOf("")
 
     init {
         viewModelScope.launch { graph.snapshot.collect { snapshot = it } }
@@ -391,11 +393,51 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         }
     }
 
+    fun openNotify(intent: Intent?) {
+        if (intent == null) return
+        val payload = intent.getStringExtra(CompanionAlerts.EXTRA_PAYLOAD).orEmpty()
+        val fromPayload = payload.takeIf { it.isNotBlank() }?.let { ch.fasrv.fanotes.schulnetz.changeFromPayload(it) }
+        val category = intent.getStringExtra(CompanionAlerts.EXTRA_CATEGORY).orEmpty()
+        val targetId = intent.getStringExtra(CompanionAlerts.EXTRA_TARGET_ID).orEmpty()
+        val extrasIds = intent.getStringArrayListExtra(CompanionAlerts.EXTRA_TARGET_IDS).orEmpty()
+        if (fromPayload == null && category.isBlank() && targetId.isBlank() && extrasIds.isEmpty()) return
+        val change = fromPayload ?: ch.fasrv.fanotes.schulnetz.SchulnetzChange(
+            id = targetId.ifBlank { "notify" },
+            category = category.ifBlank { "event" },
+            title = "",
+            body = "",
+            targetId = targetId,
+            courseId = intent.getStringExtra(CompanionAlerts.EXTRA_COURSE_ID).orEmpty(),
+            date = intent.getStringExtra(CompanionAlerts.EXTRA_DATE).orEmpty(),
+            targetIds = extrasIds.ifEmpty { targetId.split(',').map { it.trim() }.filter { it.isNotBlank() } },
+        )
+        applyNotify(ch.fasrv.fanotes.schulnetz.notifyLinkOf(change))
+    }
+
+    fun applyNotify(link: ch.fasrv.fanotes.schulnetz.NotifyLink) {
+        val route = ch.fasrv.fanotes.schulnetz.routeNotify(link, snapshot)
+        tab = PhoneTab.entries.firstOrNull { it.name.equals(route.tab, ignoreCase = true) } ?: PhoneTab.Heute
+        section = PhoneSection.entries.firstOrNull { it.name.equals(route.section, ignoreCase = true) } ?: PhoneSection.Menu
+        focusCourseId = route.courseId
+        highlightIds = route.highlightIds.toSet()
+        if (route.day.isNotBlank()) {
+            runCatching { day = java.time.LocalDate.parse(route.day.take(10)) }
+            planWeek = false
+        }
+        if (route.hint.isNotBlank()) message = route.hint
+    }
+
     fun testPush(context: Context) {
         CompanionAlerts.forget(context, "push-test")
         CompanionAlerts.show(
             context,
-            ch.fasrv.fanotes.schulnetz.SchulnetzChange("push-test", "grade", "Testbenachrichtigung", "FaNotes Companion kann Mitteilungen anzeigen."),
+            ch.fasrv.fanotes.schulnetz.linkedChange(
+                "push-test",
+                "settings",
+                "Testbenachrichtigung",
+                "FaNotes Companion kann Mitteilungen anzeigen.",
+                targetId = "settings",
+            ),
         )
         viewModelScope.launch {
             val session = graph.engine.currentSession()
