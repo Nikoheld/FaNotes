@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, longerKnownCropWord, quotedWordAfterDoubleSix, leadingStrokesAreTicks, COMPOUND_PEN, COMPOUND_SHEAR, COMPOUND_SCALE, dictionaryCompound, isolatedWideGroups, lowercaseShortBeamWord, lowercaseInitialFromBeam, capitalizeEnglishPronoun, periodBeforeCapitals, quoteAfterParenthesis, closeBracketAfterLetter, openingBracketFromTrace, spaceBetweenDifferentQuotes, spaceBetweenSymbolRuns, oneLetterFromCloseReading, laterDictionaryCaseFromBeam, lowercaseMidSentenceAdverb, unknownWordFromReading, repeatedLetterGroup, nearTripleLetterGroup, loneLetterBesideTriples, capitalizeWordAfterInitial, shorterTraceBeforePeriod, trailingTraceDeletion, restoreMitFromTopReading, restoreAllCapsTraceWord, joinReadingWithoutSpace, traceAgreedUnknownWord, unlistedWordFromReading, knownEndingFromReading, tracedShorterKnownWord, dictionaryJoinFromReading, splitFunctionWordJoin, strayParenBeforeCapital, tracedFinalComma, accusativeDer, trailingTracedLetter, transposedTraceWord, personalNeighborEdits, finalizeInkLineText, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, longerKnownCropWord, quotedWordAfterDoubleSix, leadingStrokesAreTicks, COMPOUND_PEN, COMPOUND_SHEAR, COMPOUND_SCALE, dictionaryCompound, isolatedWideGroups, lowercaseShortBeamWord, lowercaseInitialFromBeam, capitalizeEnglishPronoun, periodBeforeCapitals, quoteAfterParenthesis, closeBracketAfterLetter, openingBracketFromTrace, spaceBetweenDifferentQuotes, spaceBetweenSymbolRuns, oneLetterFromCloseReading, laterDictionaryCaseFromBeam, lowercaseMidSentenceAdverb, unknownWordFromReading, repeatedLetterGroup, nearTripleLetterGroup, loneLetterBesideTriples, capitalizeWordAfterInitial, shorterTraceBeforePeriod, trailingTraceDeletion, restoreMitFromTopReading, restoreAllCapsTraceWord, joinReadingWithoutSpace, traceAgreedUnknownWord, unlistedWordFromReading, knownEndingFromReading, tracedShorterKnownWord, tracedUnlistedWord, dictionaryJoinFromReading, splitFunctionWordJoin, strayParenBeforeCapital, tracedFinalComma, accusativeDer, trailingTracedLetter, transposedTraceWord, personalNeighborEdits, finalizeInkLineText, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -590,6 +590,33 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
       { text: 'borrowed straight from the prehistoric. How', score: 1.1 },
     ],
     always,
+  ), null)
+  assert.equal(tracedUnlistedWord(
+    'auf ihr befestigten Sitzplatten weiter hin',
+    'anf ihr befestigten Stützplatten weiter win',
+    [
+      { text: 'auf ihr befestigten Sitzplatten weiter hin', score: 0 },
+      { text: 'auf ihr befestigten Stützplatten weiter hin', score: -0.61 },
+    ],
+    unknown,
+  )?.to, 'Stützplatten')
+  assert.equal(tracedUnlistedWord(
+    'auf ihr befestigten Sitzplatten weiter hin',
+    'anf ihr befestigten Stützplatten weiter win',
+    [
+      { text: 'auf ihr befestigten Sitzplatten weiter hin', score: 0 },
+      { text: 'auf ihr befestigten Stützplatten weiter hin', score: -0.8 },
+    ],
+    unknown,
+  ), null)
+  assert.equal(tracedUnlistedWord(
+    'auf ihr befestigten Sitzplatten weiter hin',
+    'anf ihr befestigten Stützplatten weiter win',
+    [
+      { text: 'auf ihr befestigten Sitzplatten weiter hin', score: 0 },
+      { text: 'auf ihr befestigten Stützplatten weiter hin', score: -0.61 },
+    ],
+    () => true,
   ), null)
   assert.equal(restoreMitFromTopReading(
     [...'keine Lawinengefahr besteht. Mir zunehmender'].map((char) => ({ char })),
@@ -1441,6 +1468,20 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
     if (tracedShort) {
       const rewritten = rewriteWord(decoded.characters, tracedShort.index, tracedShort.to)
       const nextText = textWithWordEdits(decoded.text, [tracedShort])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        boxes = undefined
+      }
+    }
+    const tracedUnlisted = tracedUnlistedWord(
+      decoded.text,
+      decoded.greedyText ?? '',
+      decoded.readings ?? [],
+      knownWord(entry.language),
+    )
+    if (tracedUnlisted) {
+      const rewritten = rewriteWord(decoded.characters, tracedUnlisted.index, tracedUnlisted.to)
+      const nextText = textWithWordEdits(decoded.text, [tracedUnlisted])
       if (rewritten && nextText !== decoded.text) {
         decoded = { ...decoded, text: nextText, characters: rewritten }
         boxes = undefined

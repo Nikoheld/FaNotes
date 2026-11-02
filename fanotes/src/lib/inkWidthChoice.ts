@@ -747,6 +747,49 @@ export const tracedShorterKnownWord = (
 }
 
 /**
+ * An unlisted word takes the unlisted spelling the pen and a close reading already share
+ * when the two spellings are two edits apart (`Sitzplatten` → `Stützplatten`). A one-letter
+ * difference stays with the narrower rule. A dictionary word stays.
+ */
+export const TRACED_UNLISTED_MARGIN = 0.7
+
+export const tracedUnlistedWord = (
+  text: string,
+  greedy: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const top = readings[0]
+  if (!top) return null
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  if (!words.length || words.length !== traced.length) return null
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > TRACED_UNLISTED_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    if (traced[index] !== to) continue
+    if ([...from].length < 6 || [...to].length < 6) continue
+    if (wordEdits(from, to) !== 2) continue
+    if (known(from) || known(to)) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
  * A quote stuck to a closing parenthesis moves in front of the following lowercase word
  * (`(Tanis 6a)" if` → `(Tanis 6a) "if`).
  */
@@ -2436,5 +2479,6 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   take(unlistedWordFromReading(text, decoded.readings, known), rewriteSameLengthWord)
   take(knownEndingFromReading(text, decoded.readings, known), rewriteWord)
   take(tracedShorterKnownWord(text, decoded.greedyText, decoded.readings, known), rewriteWord)
+  take(tracedUnlistedWord(text, decoded.greedyText, decoded.readings, known), rewriteWord)
   return { text, characters }
 }
