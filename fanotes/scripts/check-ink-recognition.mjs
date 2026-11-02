@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, longerKnownCropWord, quotedWordAfterDoubleSix, leadingStrokesAreTicks, COMPOUND_PEN, COMPOUND_SHEAR, COMPOUND_SCALE, dictionaryCompound, isolatedWideGroups, lowercaseShortBeamWord, lowercaseInitialFromBeam, capitalizeEnglishPronoun, periodBeforeCapitals, quoteAfterParenthesis, closeBracketAfterLetter, openingBracketFromTrace, spaceBetweenDifferentQuotes, spaceBetweenSymbolRuns, oneLetterFromCloseReading, laterDictionaryCaseFromBeam, lowercaseMidSentenceAdverb, unknownWordFromReading, repeatedLetterGroup, nearTripleLetterGroup, loneLetterBesideTriples, capitalizeWordAfterInitial, shorterTraceBeforePeriod, trailingTraceDeletion, restoreMitFromTopReading, restoreAllCapsTraceWord, joinReadingWithoutSpace, traceAgreedUnknownWord, unlistedWordFromReading, knownEndingFromReading, tracedShorterKnownWord, tracedUnlistedWord, knownSuffixFromReading, joinedReadingFromClose, knownVowelFromReading, camelSplitFromReading, shortKnownWordFromReading, functionWordBeforeStem, knownConsonantFromReading, splitAndFinalLetterFromReading, greedyDigitFromTrace, endingAndDigitFromReading, capitalizedNounAfterAdjective, unlistedEndingFromReading, dictionaryJoinFromReading, splitFunctionWordJoin, strayParenBeforeCapital, tracedFinalComma, accusativeDer, trailingTracedLetter, transposedTraceWord, personalNeighborEdits, finalizeInkLineText, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, longerKnownCropWord, quotedWordAfterDoubleSix, leadingStrokesAreTicks, COMPOUND_PEN, COMPOUND_SHEAR, COMPOUND_SCALE, dictionaryCompound, isolatedWideGroups, lowercaseShortBeamWord, lowercaseInitialFromBeam, capitalizeEnglishPronoun, periodBeforeCapitals, quoteAfterParenthesis, closeBracketAfterLetter, openingBracketFromTrace, spaceBetweenDifferentQuotes, spaceBetweenSymbolRuns, oneLetterFromCloseReading, laterDictionaryCaseFromBeam, lowercaseMidSentenceAdverb, unknownWordFromReading, repeatedLetterGroup, nearTripleLetterGroup, loneLetterBesideTriples, capitalizeWordAfterInitial, shorterTraceBeforePeriod, trailingTraceDeletion, restoreMitFromTopReading, restoreAllCapsTraceWord, joinReadingWithoutSpace, traceAgreedUnknownWord, unlistedWordFromReading, knownEndingFromReading, tracedShorterKnownWord, tracedUnlistedWord, knownSuffixFromReading, joinedReadingFromClose, knownVowelFromReading, camelSplitFromReading, shortKnownWordFromReading, functionWordBeforeStem, knownConsonantFromReading, splitAndFinalLetterFromReading, greedyDigitFromTrace, endingAndDigitFromReading, capitalizedNounAfterAdjective, unlistedEndingFromReading, greedyFunctionTailJoin, dictionaryJoinFromReading, splitFunctionWordJoin, strayParenBeforeCapital, tracedFinalComma, accusativeDer, trailingTracedLetter, transposedTraceWord, personalNeighborEdits, finalizeInkLineText, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -915,6 +915,31 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
     'Roygbiv Blackburn',
     [{ text: 'Roygbiv Blackburn', score: 0 }, { text: 'Roygbir Blackburn', score: -0.5 }],
     unknown,
+  ), null)
+  const knowsGraph = (word) => ['graph', 'ein'].includes(word.toLowerCase())
+  assert.equal(greedyFunctionTailJoin(
+    joinChars('graph ein also "zeichnen mit Licht")'),
+    'graphein also "zuihnen mit Licht")',
+    'de',
+    knowsGraph,
+  ).map((character) => character.char).join(''), 'graphein also "zeichnen mit Licht")')
+  assert.equal(greedyFunctionTailJoin(
+    joinChars('graph ein also'),
+    'graphein also',
+    'en',
+    knowsGraph,
+  ), null)
+  assert.equal(greedyFunctionTailJoin(
+    joinChars('wird seit den Jahren'),
+    'wirdseit den Jahren',
+    'de',
+    (word) => ['wird', 'seit'].includes(word.toLowerCase()),
+  ), null)
+  assert.equal(greedyFunctionTailJoin(
+    joinChars('brown fox jumps'),
+    'brownfox jumps',
+    'de',
+    () => true,
   ), null)
   assert.equal(restoreMitFromTopReading(
     [...'keine Lawinengefahr besteht. Mir zunehmender'].map((char) => ({ char })),
@@ -1892,6 +1917,16 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
         decoded = { ...decoded, text: nextText, characters: rewritten }
         boxes = undefined
       }
+    }
+    const functionTail = greedyFunctionTailJoin(
+      decoded.characters,
+      decoded.greedyText ?? '',
+      entry.language,
+      knownWord(entry.language),
+    )
+    if (functionTail) {
+      decoded = { ...decoded, characters: functionTail, text: functionTail.map((character) => character.char).join('') }
+      boxes = undefined
     }
     if (!boxes) {
       const spans = new Uint32Array(decoded.characters.flatMap((c) => [c.startFrame, c.endFrame]))

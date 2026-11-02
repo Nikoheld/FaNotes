@@ -2553,6 +2553,46 @@ export const unlistedEndingFromReading = (
   return found
 }
 
+/**
+ * A dictionary word absorbs the short German function word after it when the pen already
+ * wrote them as one token and that token is not itself a dictionary word
+ * (`graph ein` with trace `graphein` → `graphein`). A real split such as `wird seit` stays.
+ */
+const GERMAN_FUNCTION_TAIL = new Set([
+  'ein', 'der', 'die', 'das', 'den', 'dem', 'des', 'und', 'von', 'mit', 'auf', 'ist', 'aus', 'bei', 'für', 'vor', 'zum', 'zur',
+])
+
+export const greedyFunctionTailJoin = <T extends { char: string }>(
+  characters: T[],
+  greedy: string,
+  language: string,
+  known: (word: string) => boolean,
+): T[] | null => {
+  if (language !== 'de' || !characters.length || !greedy) return null
+  const text = characters.map((character) => character.char).join('')
+  const words = inkWords(text)
+  const traced = new Set(inkWords(greedy).map((word) => word.toLowerCase()))
+  const spans = [...text.matchAll(/[A-Za-zÄÖÜäöüß]+/gu)]
+  let found: number | null = null
+  for (let index = 0; index < words.length - 1; index += 1) {
+    const left = words[index]
+    const right = words[index + 1]
+    if ([...left].length < 5 || [...right].length !== 3) continue
+    if (!GERMAN_FUNCTION_TAIL.has(right.toLowerCase())) continue
+    if (!known(left) || !known(right)) continue
+    const joined = `${left}${right}`
+    if (known(joined) || !traced.has(joined.toLowerCase())) continue
+    const leftSpan = spans[index]
+    const rightSpan = spans[index + 1]
+    if (!leftSpan || !rightSpan || leftSpan.index === undefined || rightSpan.index === undefined) continue
+    if (text.slice(leftSpan.index + leftSpan[0].length, rightSpan.index) !== ' ') continue
+    if (found !== null) return null
+    found = leftSpan.index + leftSpan[0].length
+  }
+  if (found === null || characters[found]?.char !== ' ') return null
+  return characters.filter((_, index) => index !== found)
+}
+
 const SENTENCE_ADVERBS = new Set([
   'manchmal', 'häufig', 'leider', 'gestern', 'heute', 'morgen', 'schließlich',
   'natürlich', 'eigentlich', 'trotzdem', 'dennoch', 'allerdings', 'außerdem',
@@ -3236,5 +3276,10 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   }
   take(capitalizedNounAfterAdjective(text, decoded.readings, options.language ?? '', known), rewriteSameLengthWord)
   take(unlistedEndingFromReading(text, decoded.greedyText, decoded.readings, known), rewriteSameLengthWord)
+  const functionTail = greedyFunctionTailJoin(characters, decoded.greedyText, options.language ?? '', known)
+  if (functionTail) {
+    characters = functionTail
+    text = characters.map((character) => character.char).join('')
+  }
   return { text, characters }
 }
