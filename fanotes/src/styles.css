@@ -200,8 +200,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   top: 0;
   left: 0;
   border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 0 0 1px rgba(28, 42, 58, .38), 0 1px 3px rgba(28, 42, 58, .28);
+  background: radial-gradient(circle at 34% 32%, #ffffff 0 26%, #f4f8fb 48%, #d5e4f0 100%);
+  box-shadow:
+    inset 0 -3px 5px rgba(90, 120, 145, .32),
+    inset 2px 2px 3px rgba(255, 255, 255, .85),
+    0 0 0 1px rgba(28, 42, 58, .32),
+    0 2px 5px rgba(28, 42, 58, .22);
 }
 
 /* The shell background never shows: the ribbon, the sidebar, and the note

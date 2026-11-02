@@ -4,8 +4,10 @@ import {
   dragSnowField,
   obstaclesFromRects,
   snowDragHitsSettled,
+  sprinkleSnow,
   stepSnowField,
   wakeSnowForObstacles,
+  SNOW_FLAKE_COUNT,
   SNOW_OBSTACLE_SELECTOR,
   type SnowField,
   type SnowObstacle,
@@ -83,7 +85,11 @@ export function SnowLayer({ reduceMotion }: { reduceMotion: boolean }) {
       const dt = now - last
       last = now
       setField((current) => {
-        const next = stepSnowField(current, dt, reduceMotionRef.current, obstaclesRef.current)
+        let next = stepSnowField(current, dt, reduceMotionRef.current, obstaclesRef.current)
+        if (!reduceMotionRef.current) {
+          const missing = SNOW_FLAKE_COUNT - next.flakes.length
+          if (missing > 0) next = sprinkleSnow(next, Math.min(2, missing))
+        }
         fieldRef.current = next
         return next
       })
@@ -142,9 +148,9 @@ export function SnowLayer({ reduceMotion }: { reduceMotion: boolean }) {
 
   return (
     <div ref={layerRef} className="snow-layer" aria-hidden="true">
-      {field.flakes.map((flake, index) => (
+      {field.flakes.map((flake) => (
         <span
-          key={index}
+          key={flake.id}
           className="snow-flake"
           data-x={flake.x}
           data-y={flake.y}

@@ -2,6 +2,7 @@ import type { AppSettings, ThemeMode } from '../types'
 
 /** A flake in viewport pixels. `x` and `y` are the top-left of its box. */
 export type SnowFlake = {
+  id: number
   x: number
   y: number
   radius: number
@@ -50,10 +51,10 @@ const GRAVITY = 0.0009
 const MAX_FALL = 0.55
 /** Horizontal speed below this counts as stopped, so a slide can finish. */
 const SLIDE_STOP = 0.004
-/** Overlap that still counts as touching. Less than this does not keep the pile awake. */
-const SIDE_OVERLAP = 0.75
-/** A real stack is about half a span apart in y. Only shallower pairs are side by side. */
-const SIDE_DY = 0.22
+/** A packed flake grows until it is about this big, then extra snow sticks to it. */
+const SNOW_BALL_RADIUS = 28
+/** Circles closer than this fraction of a touch sink into one flake. */
+const MERGE_DEPTH = 0.8
 const SUPPORT_SLACK = 0.75
 const WAKE_FALL = 0.08
 
@@ -74,75 +75,115 @@ const resting = (flake: SnowFlake) => flake.settled && flake.vx === 0 && flake.v
 
 const overlapsX = (x: number, span: number, left: number, right: number) => x < right && x + span > left
 
-/** Positive when two settled-enough flakes occupy the same pixels side by side. Stacks return 0. */
-const shallowOverlap = (a: SnowFlake, b: SnowFlake) => {
-  if (!a.settled && !b.settled) return 0
-  const spanA = spanOf(a)
-  const spanB = spanOf(b)
-  const overlapX = Math.min(a.x + spanA, b.x + spanB) - Math.max(a.x, b.x)
-  const overlapY = Math.min(a.y + spanA, b.y + spanB) - Math.max(a.y, b.y)
-  if (overlapX <= SIDE_OVERLAP || overlapY <= SIDE_OVERLAP) return 0
-  const centerDy = Math.abs((a.y + spanA / 2) - (b.y + spanB / 2))
-  if (centerDy > SIDE_DY * (spanA + spanB)) return 0
-  return overlapX
-}
+const centerOf = (flake: SnowFlake) => ({ x: flake.x + flake.radius, y: flake.y + flake.radius })
 
-const flakesBeside = (flakes: readonly SnowFlake[]) => {
+const canGrow = (a: SnowFlake, b: SnowFlake) => Math.hypot(a.radius, b.radius) <= SNOW_BALL_RADIUS
+
+/** True when two resting flakes still overlap enough to stick into a bigger one. */
+const wantsCompany = (flakes: readonly SnowFlake[]) => {
   for (let index = 0; index < flakes.length; index += 1) {
     for (let otherIndex = index + 1; otherIndex < flakes.length; otherIndex += 1) {
-      if (shallowOverlap(flakes[index], flakes[otherIndex]) > 0) return true
+      const a = flakes[index]
+      const b = flakes[otherIndex]
+      if (!a.settled && !b.settled) continue
+      if (!canGrow(a, b)) continue
+      const touch = a.radius + b.radius
+      const ca = centerOf(a)
+      const cb = centerOf(b)
+      const dist = Math.hypot(ca.x - cb.x, ca.y - cb.y)
+      if (dist > 0 && dist <= touch + 0.6) return true
     }
   }
   return false
 }
 
 /**
- * Push side-by-side flakes apart. Speed is shared only while one flake is
- * moving into the other, so a resting overlap at a wall does not gain speed.
+ * Overlapping snow sticks. Flakes that sink into each other become one larger
+ * flake. A flake that is already as big as a snowball keeps its size and shares
+ * a sideways push with whatever is packed against it.
  */
-const separateBeside = (flakes: SnowFlake[], width: number) => {
+const coalesceSnow = (flakes: SnowFlake[], width: number, height: number) => {
   let moved = false
+  const dead = new Set<number>()
   for (let pass = 0; pass < 4; pass += 1) {
     for (let index = 0; index < flakes.length; index += 1) {
+      if (dead.has(index)) continue
       for (let otherIndex = index + 1; otherIndex < flakes.length; otherIndex += 1) {
-        const overlap = shallowOverlap(flakes[index], flakes[otherIndex])
-        if (overlap <= 0) continue
+        if (dead.has(otherIndex)) continue
         const a = flakes[index]
         const b = flakes[otherIndex]
-        const aOnLeft = a.x + spanOf(a) / 2 <= b.x + spanOf(b) / 2
-        const left = aOnLeft ? a : b
-        const right = aOnLeft ? b : a
-        const push = (overlap - SIDE_OVERLAP) / 2
-        let leftX = left.x - push
-        let rightX = right.x + push
-        const maxLeft = Math.max(0, width - spanOf(left))
-        const maxRight = Math.max(0, width - spanOf(right))
-        if (leftX < 0) {
-          rightX += -leftX
-          leftX = 0
-        }
-        if (rightX > maxRight) {
-          leftX -= rightX - maxRight
-          rightX = maxRight
-        }
-        leftX = Math.min(maxLeft, Math.max(0, leftX))
-        rightX = Math.min(maxRight, Math.max(0, rightX))
-        if (Math.abs(leftX - left.x) >= 0.02) {
-          left.x = leftX
+        if (!a.settled && !b.settled) continue
+        const touch = a.radius + b.radius
+        if (touch <= 0) continue
+        const ca = centerOf(a)
+        const cb = centerOf(b)
+        const dx = cb.x - ca.x
+        const dy = cb.y - ca.y
+        const dist = Math.hypot(dx, dy) || 0.0001
+        if (dist > touch + 0.6) continue
+        const areaA = a.radius * a.radius
+        const areaB = b.radius * b.radius
+        const grow = canGrow(a, b)
+        if (grow && dist < touch * MERGE_DEPTH) {
+          const keep = areaA >= areaB ? a : b
+          const drop = keep === a ? otherIndex : index
+          const radius = Math.sqrt(areaA + areaB)
+          const nx = (ca.x * areaA + cb.x * areaB) / (areaA + areaB)
+          const bottom = Math.min(height, Math.max(a.y + spanOf(a), b.y + spanOf(b)))
+          keep.radius = radius
+          keep.x = Math.min(Math.max(0, nx - radius), Math.max(0, width - radius * 2))
+          keep.y = bottom - radius * 2
+          if (keep.y <= -radius) keep.y = -radius + 0.05
+          const mass = areaA + areaB
+          keep.vx = (a.vx * areaA + b.vx * areaB) / mass
+          keep.settled = a.settled && b.settled
+          keep.vy = keep.settled ? 0 : (a.vy * areaA + b.vy * areaB) / mass
+          dead.add(drop)
           moved = true
+          if (drop === index) break
+          continue
         }
-        if (Math.abs(rightX - right.x) >= 0.02) {
-          right.x = rightX
-          moved = true
+        if (!grow && a.settled && b.settled) {
+          const mid = (a.vx * areaA + b.vx * areaB) / (areaA + areaB)
+          if (Math.abs(a.vx - mid) > SLIDE_STOP || Math.abs(b.vx - mid) > SLIDE_STOP) {
+            a.vx = mid
+            b.vx = mid
+            moved = true
+          }
+          continue
         }
-        if (left.vx > right.vx + SLIDE_STOP) {
-          const mid = (left.vx + right.vx) / 2
-          left.vx = mid
-          right.vx = mid
-          moved = true
+        if (!grow || dist <= touch * MERGE_DEPTH) continue
+        const pull = Math.min(1.2, (dist - touch * MERGE_DEPTH) / 2)
+        if (pull <= 0.02) continue
+        const ux = dx / dist
+        const uy = dy / dist
+        const mass = areaA + areaB
+        a.x += ux * pull * (areaB / mass)
+        a.y += uy * pull * (areaB / mass)
+        b.x -= ux * pull * (areaA / mass)
+        b.y -= uy * pull * (areaA / mass)
+        const clampDown = (flake: SnowFlake) => {
+          const span = spanOf(flake)
+          if (flake.y + span > height) flake.y = height - span
+          if (flake.y <= -flake.radius) flake.y = -flake.radius + 0.05
+          const maxX = Math.max(0, width - span)
+          if (flake.x < 0) flake.x = 0
+          else if (flake.x > maxX) flake.x = maxX
         }
+        clampDown(a)
+        clampDown(b)
+        moved = true
       }
     }
+  }
+  if (dead.size > 0) {
+    let write = 0
+    for (let read = 0; read < flakes.length; read += 1) {
+      if (dead.has(read)) continue
+      flakes[write] = flakes[read]
+      write += 1
+    }
+    flakes.length = write
   }
   return moved
 }
@@ -227,6 +268,7 @@ export const createSnowField = (width: number, height: number, seed = SNOW_SEED)
     const radius = 3 + random() * 4
     const span = radius * 2
     flakes.push({
+      id: index + 1,
       x: random() * Math.max(1, safeWidth - span),
       y: random() * Math.max(1, safeHeight - span),
       radius,
@@ -241,9 +283,9 @@ export const createSnowField = (width: number, height: number, seed = SNOW_SEED)
 /**
  * Advance flakes by `dtMs`. Falling flakes gain downward speed and stop on an
  * obstacle top, on snow that has already settled, or on the shell bottom.
- * Leftover sideways speed slides, then stops. Side-by-side flakes spread so a
- * floor pile can be pushed through; a stack stays a stack. Reduce-motion, or a
- * field already at rest with nothing side by side, returns the same field.
+ * Leftover sideways speed slides, then stops. Overlapping flakes stick and
+ * grow into a larger flake. Reduce-motion, or a field already at rest with
+ * nothing left to absorb, returns the same field.
  */
 export const stepSnowField = (
   field: SnowField,
@@ -252,7 +294,7 @@ export const stepSnowField = (
   obstacles: readonly SnowObstacle[] = [],
 ): SnowField => {
   if (reduceMotion || !Number.isFinite(dtMs) || dtMs <= 0) return field
-  if (field.flakes.every(resting) && !flakesBeside(field.flakes)) return field
+  if (field.flakes.every(resting) && !wantsCompany(field.flakes)) return field
   const dt = Math.min(dtMs, 50)
   const flakes = field.flakes.map((flake) => ({ ...flake }))
   const order = flakes
@@ -313,7 +355,7 @@ export const stepSnowField = (
     if (x !== flake.x || y !== flake.y || vx !== flake.vx || vy !== flake.vy || settled !== flake.settled) moved = true
     flakes[index] = { ...flake, x, y, vx, vy, settled }
   }
-  if (separateBeside(flakes, field.width)) moved = true
+  if (coalesceSnow(flakes, field.width, field.height)) moved = true
   if (releaseUnsupported(flakes, obstacles, field.height)) moved = true
   if (!moved) return field
   return { width: field.width, height: field.height, flakes }
@@ -333,6 +375,35 @@ export const wakeSnowForObstacles = (
   return { width: field.width, height: field.height, flakes }
 }
 
+/**
+ * Drop a few new flakes along the top when a merge has left room.
+ * The field never grows past `SNOW_FLAKE_COUNT`. A full field is returned as-is.
+ */
+export const sprinkleSnow = (field: SnowField, count: number): SnowField => {
+  const room = SNOW_FLAKE_COUNT - field.flakes.length
+  const add = Math.min(room, Math.max(0, Math.floor(count)))
+  if (add <= 0) return field
+  let nextId = 0
+  for (const flake of field.flakes) nextId = Math.max(nextId, flake.id)
+  const random = mix((nextId + 1) ^ SNOW_SEED)
+  const flakes = field.flakes.slice()
+  for (let index = 0; index < add; index += 1) {
+    nextId += 1
+    const radius = 3 + random() * 2.2
+    const span = radius * 2
+    flakes.push({
+      id: nextId,
+      x: random() * Math.max(1, field.width - span),
+      y: -span - random() * 48,
+      radius,
+      vx: (random() - 0.5) * 0.04,
+      vy: 0.08 + random() * 0.14,
+      settled: false,
+    })
+  }
+  return { width: field.width, height: field.height, flakes }
+}
+
 /** True when the pointer is on settled snow, close enough to push that pile. */
 export const snowDragHitsSettled = (field: SnowField, pointerX: number, pointerY: number) => {
   if (!Number.isFinite(pointerX) || !Number.isFinite(pointerY)) return false
@@ -344,8 +415,8 @@ export const snowDragHitsSettled = (field: SnowField, pointerX: number, pointerY
 }
 
 /**
- * Push settled flakes near the pointer and leave them with throw velocity.
- * Flakes outside the reach stay where they are. Reduce-motion does not apply.
+ * Push settled flakes near the pointer and pack them toward it so they stick.
+ * A bigger flake is heavier. Flakes outside the reach stay where they are.
  */
 export const dragSnowField = (
   field: SnowField,
@@ -363,12 +434,15 @@ export const dragSnowField = (
     const reach = SNOW_DRAG_REACH + flake.radius
     if (distance > reach) return flake
     const influence = 1 - distance / reach
+    const shove = influence * (8 / (8 + flake.radius))
+    const cx = flake.x + flake.radius
+    const cy = flake.y + flake.radius
+    const pack = influence * 0.18
     changed = true
-    const shove = influence
     return {
       ...flake,
-      x: flake.x + dx * shove,
-      y: flake.y + dy * shove,
+      x: flake.x + dx * shove + (pointerX - cx) * pack,
+      y: flake.y + dy * shove + (pointerY - cy) * pack,
       vx: dx * shove * 0.012,
       vy: dy * shove * 0.012,
       settled: false,
