@@ -1,5 +1,11 @@
 # Änderungsverlauf
 
+## 2026.11.1-beta.6
+
+- Keep paper scrolling and zooming on the compositor.
+- Repaint only the ink an erase removes.
+- Treat a Microsoft sign-in page as login required.
+
 ## 2026.11.1-beta.5
 
 - Reserve a step of paper ahead of typed lines.
