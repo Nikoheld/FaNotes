@@ -1,5 +1,137 @@
 # Änderungsverlauf
 
+## 2026.11.1-beta.9
+
+- Add the companion desk for timetable, grades, and private badges.
+- Parse Schulnetz pages from the real 5.14 markup.
+- Show the Schulnetz session and the note folders.
+- Keep a long unknown word's letter when the pen is closer to it.
+- Keep a capitalized pen spelling of four or eight letters.
+- Keep a five-letter pen spelling the top reading still has.
+- Take one word from a reading when the rest of that reading differs.
+- Join a short German function word the pen already wrote onto the previous word.
+- Take a vowel ending an unlisted word from a close reading.
+- Capitalize a dictionary word after an article and an adjective.
+- Restore a final letter when the same reading puts one digit back.
+- Keep the one digit the pen already wrote in a number.
+- Split a joined word when the same close reading changes one final letter.
+- Take a four-letter word's first or second consonant from a close reading.
+- Take the second vowel of a four-letter word a close reading already has.
+- Take the function word a close reading already has before its stem.
+- Take a three-letter dictionary word a close reading already has.
+- Split a word at an interior capital the pen and a close reading share.
+- Take a dictionary vowel a close reading already has.
+- Join the words a close reading already wrote as one.
+- Grow a dictionary word by the two-letter ending a close reading already has.
+- Keep a two-edit unlisted spelling the pen and a close reading share.
+- Keep a shorter dictionary word the pen and a tied reading share.
+- Drop a dictionary word's final letter when a close reading already did.
+- Keep an unlisted spelling a close reading already wrote.
+- Keep an unknown letter the pen trace and a close reading share.
+- Join two words when the best reading already wrote them as one.
+- Keep an all-capital word the raw trace and the top reading share.
+- Keep mit when the best reading already has it.
+- Keep a shorter traced ending that is not a dictionary word.
+- Grow a single letter into the repeat beside it.
+- Repair a near letter repeat that sits beside a shorter token.
+- Keep a traced abbreviation and a compound a close reading already wrote.
+- Take a close dictionary spelling and lowercase a mid-sentence adverb.
+- Keep a later dictionary word's case and a letter a close reading already has.
+- Keep one letter a very close beam reading already added.
+- Split a function word the top reading already separated.
+- Restore a final comma when the top reading and the trace both have it.
+- Keep an opening bracket the raw trace still has.
+- Close a bracket against a letter and separate runs of repeated marks.
+- Put a space between a closing quote and a different opening quote.
+- Restore a period before a capital abbreviation and after a stray parenthesis.
+- Move a quote off a closing parenthesis onto the following lowercase word.
+- Capitalize a lone English i as the pronoun.
+- Require a visible dictionary letter before lowercasing an English line's first letter.
+- Lowercase an English line's first letter when a close beam reading already does.
+- Score a fitted pen style on the corrected line, not the raw decode.
+- Replace an unknown spelling with the one confirmed personal word within two edits.
+- Keep the dictionary word made by swapping a traced insertion.
+- Keep the final letter an unknown word's raw trace added.
+- Use der after einen before a long capital word.
+- Lowercase a three-letter word when a close beam reading already does.
+- Replace a long unknown word with a separated group's dictionary compound.
+- Read two narrow ticks in front of a closing quote as an opening quote.
+- Replace a dictionary word when its own ink reads a longer dictionary word.
+- Keep a repeated letter when a smaller rendering's raw trace shows it.
+- Take the one two-substitution dictionary neighbor of a word with an interior capital.
+- Write a final B on a capital word as its own letter.
+- Capitalize the one lowercase letter in an otherwise capital word.
+- Capitalize a leading sentence adverb and lowercase mid-sentence Sein.
+- Correct an unknown word when one umlaut and one other letter match the dictionary.
+- Capitalize a dictionary noun after an article.
+- Prefer the traced completion the character model ranks first.
+- Keep a larger rendering when it lengthens one dictionary word.
+- Spell an unknown kraft plural as kräfte when the beam added e.
+- Join a capital word to the following long lowercase unknown word.
+- Keep a one-letter dictionary insertion from the upright reading.
+- Replace an a with ä when that alternative is confident.
+- Lowercase a capital F when that alternative is confident.
+- Replace a word-final D with B when that alternative is confident.
+- Replace an r with n when that alternative is confident.
+- Replace a word-final letter with an apostrophe when that alternative is confident.
+- Restore a closing quote when the pen drew it in place of a period.
+- Turn an infinitive after an attributive adjective into the -ung noun.
+- Join two pieces when the pen trace spells them as one token.
+- Copy one letter of a long unknown word from a close reading.
+- Keep a narrower line when it scores much higher and known words stay.
+- Turn a period before a closing bracket into a comma when a narrower rendering agrees.
+- Capitalize a line's first letter when a smaller rendering agrees on the rest.
+- Read a slightly smaller line when one unknown word becomes a dictionary word.
+- Keep a slight back-slant when it rewrites exactly two neighboring words.
+- Join capital words when the pen trace has no space between them.
+- Normalize mixed-case words when a smaller rendering agrees on the letters.
+- Put back one traced letter when that whole word is in the pen trace.
+- Swap one letter between short German function words in a close reading.
+- Replace a comma after a closing quote with a period when the beam already has it.
+- Replace a final comma with a period when a close raw reading already has it.
+- Prefer a German function word one letter away in a close reading.
+- Put back a closing parenthesis the pen drew between matching characters.
+- Turn a doubled final letter into an exclamation when the beam already has it.
+- Put back a hyphen the pen drew and the beam skipped.
+- Grow a short word when a close reading has the dictionary word.
+- Capitalize a later long word when a close reading already does.
+- Copy a long unknown word from a smaller rendering.
+- Join two words when a thicker pen already reads them as one.
+- Retry a thinner or thicker pen when a long word is unknown.
+- Keep a comma that sits inside a sentence.
+- Keep one apostrophe when a close reading already has it.
+- Join three copies of the same letter when the beam has them together.
+- Promote one unknown letter to the dictionary word in a close reading.
+- Keep Geburtstag from being rewritten as Geburtstags.
+- Keep a final period when the beam already has that sentence.
+- Match personal words to the dictionary folding, and allow removing them.
+- Keep a letter the pen also drew when the dictionary would delete it.
+- Keep a fine-tune only when every exact golden line stays exact.
+- Record the personal model's held-out gain on the desktop decoder.
+- Anchor scan logits while fine-tuning on real pen lines.
+- Score fine-tunes with the desktop recognizer before keeping them.
+- Use a lighter language model for English handwriting.
+- Keep a written ß when a dictionary neighbor is applied.
+- Prefer beam digits that match the pen when the words stay the same.
+- Join a split word only when the dictionary has it as one word.
+- Join a split word when the pen trace has no space.
+- Keep ß in synthetic German training lines.
+- Keep the personal model epoch that reads held-out lines best.
+- Prefer a close runner-up that matches the pen trace.
+- Stage the step-4500 ink checkpoint.
+- Correct an unknown word when the dictionary has one neighbor.
+- Keep the pen's period when the language model wants a comma.
+- Keep ß in the German character language model.
+- Stage the step-3000 ink checkpoint.
+- Stage the desktop ink model and the rebuild toolchain.
+- Place spaces and punctuation that the pen skipped.
+- Add desktop handwriting personalization controls.
+- Use the ink recognizer for handwriting-to-text and personalize it locally
+- Add the desktop native host for the ink recognizer
+- Generalize the fanotes-ocr sidecar to serve the ink line model
+- Make ink line grouping robust and finalize the WASM decoder facade
+- Add the ink line image, line grouping, LM beam decoder and head adaptation to fanotes-recog.
+
 ## 2026.11.1-beta.8
 
 - Queue Schulnetz login behind an in-progress refresh.
