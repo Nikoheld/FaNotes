@@ -891,6 +891,62 @@ export const joinedReadingFromClose = <T extends { char: string }>(
 }
 
 /**
+ * A dictionary word takes the one different vowel a close reading already has when the
+ * pen did not draw that vowel (`Regal` → `Regel`, `ling` → `long`). A change of case
+ * stays. The pen's own vowel stays (`husbandman`).
+ */
+export const KNOWN_VOWEL_MARGIN = 0.7
+
+const VOWEL = /[aeiouäöü]/iu
+
+export const knownVowelFromReading = (
+  text: string,
+  greedy: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > KNOWN_VOWEL_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    const fromLetters = [...from]
+    const toLetters = [...to]
+    if (fromLetters.length < 4 || fromLetters.length !== toLetters.length) continue
+    let substitutions = 0
+    let vowel = false
+    for (let cursor = 0; cursor < fromLetters.length; cursor += 1) {
+      if (fromLetters[cursor] === toLetters[cursor]) continue
+      substitutions += 1
+      const left = fromLetters[cursor]
+      const right = toLetters[cursor]
+      if (left.toLowerCase() === right.toLowerCase()) continue
+      if (VOWEL.test(left) && VOWEL.test(right)) vowel = true
+    }
+    if (substitutions !== 1 || !vowel) continue
+    if (traced.length === words.length && traced[index] === to) continue
+    if (!known(from) || !known(to)) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
  * A quote stuck to a closing parenthesis moves in front of the following lowercase word
  * (`(Tanis 6a)" if` → `(Tanis 6a) "if`).
  */
@@ -2587,5 +2643,6 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
     characters = joinedClose
     text = characters.map((character) => character.char).join('')
   }
+  take(knownVowelFromReading(text, decoded.greedyText, decoded.readings, known), rewriteSameLengthWord)
   return { text, characters }
 }

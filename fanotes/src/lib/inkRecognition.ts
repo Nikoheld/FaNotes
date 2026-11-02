@@ -104,6 +104,7 @@ import {
   tracedUnlistedWord,
   knownSuffixFromReading,
   joinedReadingFromClose,
+  knownVowelFromReading,
   dictionaryJoinFromReading,
   splitFunctionWordJoin,
   tracedFinalComma,
@@ -1494,6 +1495,20 @@ export async function recognizeInk(
     if (joinedClose) {
       decoded = { ...decoded, characters: joinedClose, text: joinedClose.map((character) => character.char).join('') }
       stitched = null
+    }
+    const knownVowel = knownVowelFromReading(
+      decoded.text,
+      decoded.greedyText,
+      decoded.readings,
+      (word) => wordIsKnown(lineLanguage, word),
+    )
+    if (knownVowel) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, knownVowel.index, knownVowel.to)
+      const nextText = textWithWordEdits(decoded.text, [knownVowel])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
     }
     if (!decoded.text.trim()) continue
     const spans = new Uint32Array(decoded.characters.flatMap((character) => [character.startFrame, character.endFrame]))
