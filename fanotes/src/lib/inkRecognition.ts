@@ -103,6 +103,7 @@ import {
   tracedShorterKnownWord,
   tracedUnlistedWord,
   knownSuffixFromReading,
+  joinedReadingFromClose,
   dictionaryJoinFromReading,
   splitFunctionWordJoin,
   tracedFinalComma,
@@ -1488,6 +1489,11 @@ export async function recognizeInk(
         decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null
       }
+    }
+    const joinedClose = joinedReadingFromClose(decoded.characters, decoded.readings)
+    if (joinedClose) {
+      decoded = { ...decoded, characters: joinedClose, text: joinedClose.map((character) => character.char).join('') }
+      stitched = null
     }
     if (!decoded.text.trim()) continue
     const spans = new Uint32Array(decoded.characters.flatMap((character) => [character.startFrame, character.endFrame]))

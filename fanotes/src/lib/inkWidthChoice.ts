@@ -830,6 +830,67 @@ export const knownSuffixFromReading = (
 }
 
 /**
+ * Spaces between words of at least five letters go away when a close reading already
+ * wrote those words as one. The reading that joins the most such words wins
+ * (`Druck ausgleich kolbenschieber` → `Druckausgleichkolbenschieber`).
+ */
+export const JOINED_READING_MARGIN = 0.8
+
+export const joinedReadingFromClose = <T extends { char: string }>(
+  characters: T[],
+  readings: Array<{ text: string; score: number }>,
+): T[] | null => {
+  const text = characters.map((character) => character.char).join('')
+  const top = readings[0]
+  if (!top || !text) return null
+  const letter = /[A-Za-zÄÖÜäöüß]/u
+  const allowed = new Set<number>()
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] !== ' ') continue
+    let start = index - 1
+    while (start >= 0 && letter.test(text[start])) start -= 1
+    let end = index + 1
+    while (end < text.length && letter.test(text[end])) end += 1
+    if (index - start - 1 < 5 || end - index - 1 < 5) continue
+    allowed.add(index)
+  }
+  let best: { count: number; text: string; removed: number[] } | null = null
+  let conflict = false
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > JOINED_READING_MARGIN) continue
+    const other = reading.text
+    if (other.length >= text.length) continue
+    let left = 0
+    let right = 0
+    const removed: number[] = []
+    let matches = true
+    while (left < text.length && right < other.length) {
+      if (text[left] === other[right]) {
+        left += 1
+        right += 1
+      } else if (text[left] === ' ') {
+        removed.push(left)
+        left += 1
+      } else {
+        matches = false
+        break
+      }
+    }
+    if (!matches || right !== other.length || left !== text.length || !removed.length) continue
+    if (removed.some((index) => !allowed.has(index))) continue
+    if (best && best.count === removed.length && best.text !== other) conflict = true
+    if (!best || removed.length > best.count) {
+      best = { count: removed.length, text: other, removed }
+      conflict = false
+    }
+  }
+  if (!best || conflict) return null
+  const drop = new Set(best.removed)
+  return characters.filter((_, index) => !drop.has(index))
+}
+
+/**
  * A quote stuck to a closing parenthesis moves in front of the following lowercase word
  * (`(Tanis 6a)" if` → `(Tanis 6a) "if`).
  */
@@ -2521,5 +2582,10 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   take(tracedShorterKnownWord(text, decoded.greedyText, decoded.readings, known), rewriteWord)
   take(tracedUnlistedWord(text, decoded.greedyText, decoded.readings, known), rewriteWord)
   take(knownSuffixFromReading(text, decoded.readings, known), rewriteWord)
+  const joinedClose = joinedReadingFromClose(characters, decoded.readings)
+  if (joinedClose) {
+    characters = joinedClose
+    text = characters.map((character) => character.char).join('')
+  }
   return { text, characters }
 }
