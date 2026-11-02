@@ -80,7 +80,9 @@ import {
   dictionaryCompound,
   isolatedWideGroups,
   capitalizeEnglishPronoun,
+  periodBeforeCapitals,
   quoteAfterParenthesis,
+  strayParenBeforeCapital,
   lowercaseInitialFromBeam,
   lowercaseShortBeamWord,
   accusativeDer,
@@ -1201,6 +1203,16 @@ export async function recognizeInk(
     const movedQuote = quoteAfterParenthesis(decoded.characters)
     if (movedQuote) {
       decoded = { ...decoded, characters: movedQuote, text: movedQuote.map((character) => character.char).join('') }
+      stitched = null
+    }
+    const clubPeriod = periodBeforeCapitals(decoded.characters, lineLanguage)
+    if (clubPeriod) {
+      decoded = { ...decoded, characters: clubPeriod, text: clubPeriod.map((character) => character.char).join('') }
+      stitched = null
+    }
+    const strayParen = strayParenBeforeCapital(decoded.characters)
+    if (strayParen) {
+      decoded = { ...decoded, characters: strayParen, text: strayParen.map((character) => character.char).join('') }
       stitched = null
     }
     const known = (word: string) => wordIsKnown(lineLanguage, word)

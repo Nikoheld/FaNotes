@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, longerKnownCropWord, quotedWordAfterDoubleSix, leadingStrokesAreTicks, COMPOUND_PEN, COMPOUND_SHEAR, COMPOUND_SCALE, dictionaryCompound, isolatedWideGroups, lowercaseShortBeamWord, lowercaseInitialFromBeam, capitalizeEnglishPronoun, quoteAfterParenthesis, accusativeDer, trailingTracedLetter, transposedTraceWord, personalNeighborEdits, finalizeInkLineText, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, longerKnownCropWord, quotedWordAfterDoubleSix, leadingStrokesAreTicks, COMPOUND_PEN, COMPOUND_SHEAR, COMPOUND_SCALE, dictionaryCompound, isolatedWideGroups, lowercaseShortBeamWord, lowercaseInitialFromBeam, capitalizeEnglishPronoun, periodBeforeCapitals, quoteAfterParenthesis, strayParenBeforeCapital, accusativeDer, trailingTracedLetter, transposedTraceWord, personalNeighborEdits, finalizeInkLineText, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -198,6 +198,11 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
   assert.equal(quoteAfterParenthesis(quoteChars('(Tanis 6a)" if')).map((character) => character.char).join(''), '(Tanis 6a) "if')
   assert.equal(quoteAfterParenthesis(quoteChars('(Tanis 6a)" If')), null)
   assert.equal(quoteAfterParenthesis(quoteChars('enough." he')), null)
+  assert.equal(periodBeforeCapitals(quoteChars('entsandte 1 FC Lokomotive'), 'de').map((character) => character.char).join(''), 'entsandte 1. FC Lokomotive')
+  assert.equal(periodBeforeCapitals(quoteChars('entsandte 1. FC Lokomotive'), 'de'), null)
+  assert.equal(periodBeforeCapitals(quoteChars('entsandte 1 FC Lokomotive'), 'en'), null)
+  assert.equal(strayParenBeforeCapital(quoteChars('genannt) Die beiden')).map((character) => character.char).join(''), 'genannt. Die beiden')
+  assert.equal(strayParenBeforeCapital(quoteChars('(note) Die beiden')), null)
   assert.equal(accusativeDer('bezeichnet man einen des Landschaftsgeräte.')?.to, 'der')
   assert.equal(accusativeDer('und setzt die Vorgaben des Bundesnaturschutzgesetzes'), null)
   assert.equal(accusativeDer('Staat im Sinne des Völkerrechts anerkannt. Auch heute'), null)
@@ -952,6 +957,16 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
     const movedQuote = quoteAfterParenthesis(decoded.characters)
     if (movedQuote) {
       decoded = { ...decoded, characters: movedQuote, text: movedQuote.map((character) => character.char).join('') }
+      boxes = undefined
+    }
+    const clubPeriod = periodBeforeCapitals(decoded.characters, entry.language)
+    if (clubPeriod) {
+      decoded = { ...decoded, characters: clubPeriod, text: clubPeriod.map((character) => character.char).join('') }
+      boxes = undefined
+    }
+    const strayParen = strayParenBeforeCapital(decoded.characters)
+    if (strayParen) {
+      decoded = { ...decoded, characters: strayParen, text: strayParen.map((character) => character.char).join('') }
       boxes = undefined
     }
     const englishPronoun = capitalizeEnglishPronoun(decoded.text, entry.language)

@@ -456,6 +456,50 @@ export const quoteAfterParenthesis = <T extends { char: string }>(characters: T[
   return changed ? next : null
 }
 
+/**
+ * A German number before a short run of capitals takes the ordinal period (`1 FC` → `1. FC`).
+ */
+export const periodBeforeCapitals = <T extends { char: string }>(
+  characters: T[],
+  language: string,
+): T[] | null => {
+  if (language !== 'de') return null
+  const next = characters.slice()
+  let changed = false
+  for (let index = 0; index < next.length - 3; index += 1) {
+    if (!/\d/u.test(next[index].char) || next[index + 1].char !== ' ') continue
+    let cursor = index + 2
+    let count = 0
+    while (cursor < next.length && /[A-ZÄÖÜ]/u.test(next[cursor].char)) {
+      count += 1
+      cursor += 1
+    }
+    if (count < 2 || count > 4) continue
+    if (cursor < next.length && /[A-Za-zÄÖÜäöüß]/u.test(next[cursor].char)) continue
+    next.splice(index + 1, 0, { ...next[index], char: '.' })
+    changed = true
+    index = cursor
+  }
+  return changed ? next : null
+}
+
+/**
+ * A closing parenthesis with no opening one, sitting before a capital, is a period
+ * (`genannt) Die` → `genannt. Die`).
+ */
+export const strayParenBeforeCapital = <T extends { char: string }>(characters: T[]): T[] | null => {
+  if (characters.some((character) => character.char === '(')) return null
+  const next = characters.slice()
+  let changed = false
+  for (let index = 0; index < next.length - 2; index += 1) {
+    if (next[index].char !== ')' || next[index + 1].char !== ' ') continue
+    if (!/[A-ZÄÖÜ]/u.test(next[index + 2].char)) continue
+    next[index] = { ...next[index], char: '.' }
+    changed = true
+  }
+  return changed ? next : null
+}
+
 /** A lone English `i`, including `i'm`, is the pronoun (`i know` → `I know`). */
 export const capitalizeEnglishPronoun = (text: string, language: string): WordEdit | null => {
   if (language !== 'en') return null
@@ -1464,6 +1508,16 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   const movedQuote = quoteAfterParenthesis(characters)
   if (movedQuote) {
     characters = movedQuote
+    text = characters.map((character) => character.char).join('')
+  }
+  const clubPeriod = periodBeforeCapitals(characters, options.language ?? '')
+  if (clubPeriod) {
+    characters = clubPeriod
+    text = characters.map((character) => character.char).join('')
+  }
+  const strayParen = strayParenBeforeCapital(characters)
+  if (strayParen) {
+    characters = strayParen
     text = characters.map((character) => character.char).join('')
   }
   return { text, characters }
