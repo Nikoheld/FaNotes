@@ -83,6 +83,7 @@ import {
   periodBeforeCapitals,
   quoteAfterParenthesis,
   closeBracketAfterLetter,
+  openingBracketFromTrace,
   spaceBetweenDifferentQuotes,
   spaceBetweenSymbolRuns,
   strayParenBeforeCapital,
@@ -1231,6 +1232,11 @@ export async function recognizeInk(
     const symbolSpace = spaceBetweenSymbolRuns(decoded.characters)
     if (symbolSpace) {
       decoded = { ...decoded, characters: symbolSpace, text: symbolSpace.map((character) => character.char).join('') }
+      stitched = null
+    }
+    const tracedBracket = openingBracketFromTrace(decoded.characters, decoded.greedyText)
+    if (tracedBracket) {
+      decoded = { ...decoded, characters: tracedBracket, text: tracedBracket.map((character) => character.char).join('') }
       stitched = null
     }
     const known = (word: string) => wordIsKnown(lineLanguage, word)

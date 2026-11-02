@@ -553,6 +553,38 @@ export const spaceBetweenSymbolRuns = <T extends { char: string }>(characters: T
   return changed ? next : null
 }
 
+/**
+ * A word ending in `]` takes the one opening bracket the raw trace still has
+ * (`Queen]` with trace `Qu[een]` → `Qu[een]`).
+ */
+export const openingBracketFromTrace = <T extends { char: string }>(
+  characters: T[],
+  greedy: string,
+): T[] | null => {
+  const next = characters.slice()
+  let changed = false
+  let index = 0
+  while (index < next.length) {
+    if (next[index].char !== ']') { index += 1; continue }
+    let start = index - 1
+    while (start >= 0 && /[A-Za-zÄÖÜäöüß]/u.test(next[start].char)) start -= 1
+    start += 1
+    const letters = next.slice(start, index).map((character) => character.char).join('')
+    if (letters.length < 2) { index += 1; continue }
+    const places: number[] = []
+    for (let at = 0; at <= letters.length; at += 1) {
+      const guess = `${letters.slice(0, at)}[${letters.slice(at)}]`
+      if (greedy.includes(guess)) places.push(at)
+    }
+    if (places.length !== 1) { index += 1; continue }
+    const at = places[0]
+    next.splice(start + at, 0, { ...next[Math.min(start + at, index)], char: '[' })
+    changed = true
+    index += 2
+  }
+  return changed ? next : null
+}
+
 /** A lone English `i`, including `i'm`, is the pronoun (`i know` → `I know`). */
 export const capitalizeEnglishPronoun = (text: string, language: string): WordEdit | null => {
   if (language !== 'en') return null
@@ -1586,6 +1618,11 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   const symbolSpace = spaceBetweenSymbolRuns(characters)
   if (symbolSpace) {
     characters = symbolSpace
+    text = characters.map((character) => character.char).join('')
+  }
+  const tracedBracket = openingBracketFromTrace(characters, decoded.greedyText)
+  if (tracedBracket) {
+    characters = tracedBracket
     text = characters.map((character) => character.char).join('')
   }
   return { text, characters }
