@@ -107,6 +107,7 @@ import {
   knownVowelFromReading,
   camelSplitFromReading,
   shortKnownWordFromReading,
+  functionWordBeforeStem,
   dictionaryJoinFromReading,
   splitFunctionWordJoin,
   tracedFinalComma,
@@ -1521,6 +1522,15 @@ export async function recognizeInk(
     if (shortKnown) {
       const rewritten = rewriteWord(decoded.characters, shortKnown.index, shortKnown.to)
       const nextText = textWithWordEdits(decoded.text, [shortKnown])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
+    }
+    const beforeStem = functionWordBeforeStem(decoded.text, decoded.readings, lineLanguage)
+    if (beforeStem) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, beforeStem.index, beforeStem.to)
+      const nextText = textWithWordEdits(decoded.text, [beforeStem])
       if (rewritten && nextText !== decoded.text) {
         decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null

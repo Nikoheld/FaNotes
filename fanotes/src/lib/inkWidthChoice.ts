@@ -1079,6 +1079,50 @@ export const shortKnownWordFromReading = (
 }
 
 /**
+ * A two-letter English function word becomes the function word a close reading already
+ * has when the next word starts with it (`to being` → `be being`).
+ */
+export const FUNCTION_BEFORE_STEM_MARGIN = 1.5
+
+const TWO_LETTER_FUNCTION = new Set([
+  'to', 'be', 'of', 'in', 'on', 'at', 'by', 'or', 'as', 'is', 'it', 'we', 'he', 'my', 'so', 'do', 'no', 'if', 'up', 'an', 'am', 'us', 'me',
+])
+
+export const functionWordBeforeStem = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  language: string,
+): WordEdit | null => {
+  if (language !== 'en' || readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > FUNCTION_BEFORE_STEM_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    const next = words[index + 1]
+    if ([...from].length !== 2 || [...to].length !== 2 || !next || [...next].length < 4) continue
+    if (!TWO_LETTER_FUNCTION.has(from.toLowerCase()) || !TWO_LETTER_FUNCTION.has(to.toLowerCase())) continue
+    if (from.toLowerCase() === to.toLowerCase()) continue
+    if (!next.toLowerCase().startsWith(to.toLowerCase())) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
  * A quote stuck to a closing parenthesis moves in front of the following lowercase word
  * (`(Tanis 6a)" if` → `(Tanis 6a) "if`).
  */
@@ -2782,5 +2826,6 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
     text = characters.map((character) => character.char).join('')
   }
   take(shortKnownWordFromReading(text, decoded.readings, known), rewriteWord)
+  take(functionWordBeforeStem(text, decoded.readings, options.language ?? ''), rewriteSameLengthWord)
   return { text, characters }
 }
