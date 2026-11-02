@@ -2499,6 +2499,60 @@ export const capitalizedNounAfterAdjective = (
   return found
 }
 
+/**
+ * An unlisted word of at least six letters takes a vowel a close reading already has in its
+ * last letter when the pen spelled the current word (`Saduks` → `Saduko`). A consonant stays
+ * (`Roygbiv`). An interior letter stays with the narrower rule. A dictionary word stays.
+ */
+export const UNLISTED_ENDING_MARGIN = 1.3
+
+export const unlistedEndingFromReading = (
+  text: string,
+  greedy: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (readings.length < 2) return null
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  const top = readings[0]
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > UNLISTED_ENDING_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    const fromLetters = [...from]
+    const toLetters = [...to]
+    if (fromLetters.length < 6 || fromLetters.length !== toLetters.length) continue
+    if (from.toLowerCase() === to.toLowerCase()) continue
+    if (fromLetters.every((letter) => letter.toLowerCase() === fromLetters[0].toLowerCase())) continue
+    let substitutions = 0
+    let at = -1
+    for (let cursor = 0; cursor < fromLetters.length; cursor += 1) {
+      if (fromLetters[cursor] === toLetters[cursor]) continue
+      substitutions += 1
+      at = cursor
+    }
+    if (substitutions !== 1 || at !== fromLetters.length - 1) continue
+    if (VOWEL.test(fromLetters[at]) || !VOWEL.test(toLetters[at])) continue
+    if (known(from) || known(to)) continue
+    if (traced.length !== words.length || traced[index] !== from) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
 const SENTENCE_ADVERBS = new Set([
   'manchmal', 'häufig', 'leider', 'gestern', 'heute', 'morgen', 'schließlich',
   'natürlich', 'eigentlich', 'trotzdem', 'dennoch', 'allerdings', 'außerdem',
@@ -3181,5 +3235,6 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
     text = characters.map((character) => character.char).join('')
   }
   take(capitalizedNounAfterAdjective(text, decoded.readings, options.language ?? '', known), rewriteSameLengthWord)
+  take(unlistedEndingFromReading(text, decoded.greedyText, decoded.readings, known), rewriteSameLengthWord)
   return { text, characters }
 }
