@@ -2,8 +2,6 @@ package ch.fasrv.fanotes.companion
 
 import android.app.Activity
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
@@ -16,10 +14,7 @@ import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.schulnetz.SCHULNETZ_USER_AGENT
 import ch.fasrv.fanotes.schulnetz.isLoggedInLanding
 import ch.fasrv.fanotes.schulnetz.loginWebViewAllowed
-import ch.fasrv.fanotes.schulnetz.microsoftLoginRequired
 import ch.fasrv.fanotes.schulnetz.webLoginUrl
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlin.coroutines.resume
 
 /** Website login. The mobile authorize.php redirect is never opened. */
 class SchulnetzLoginActivity : Activity() {
@@ -73,49 +68,7 @@ object SchulnetzLoginBridge {
     var landingHtml: String = ""
 }
 
-sealed class SilentLoginResult {
-    data class Ready(val url: String, val html: String) : SilentLoginResult()
-    data object NeedsUser : SilentLoginResult()
-}
-
-class SchulnetzSilentLogin(private val context: android.content.Context) {
-    suspend fun await(baseUrl: String): SilentLoginResult = suspendCancellableCoroutine { continuation ->
-        val main = Handler(Looper.getMainLooper())
-        main.post {
-            val web = WebView(context.applicationContext)
-            prepareWebView(web)
-            var done = false
-            fun finish(value: SilentLoginResult) {
-                if (done) return
-                done = true
-                web.stopLoading()
-                web.destroy()
-                if (continuation.isActive) continuation.resume(value)
-            }
-            continuation.invokeOnCancellation { main.post { if (!done) finish(SilentLoginResult.NeedsUser) } }
-            web.webViewClient = object : WebViewClient() {
-                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-                    !loginWebViewAllowed(request.url.toString(), baseUrl)
-
-                override fun onPageFinished(view: WebView, url: String) {
-                    view.evaluateJavascript("(function(){return document.documentElement?document.documentElement.outerHTML:''})()") { raw ->
-                        val html = decodeJsString(raw)
-                        if (isLoggedInLanding(url, html)) {
-                            CookieManager.getInstance().flush()
-                            finish(SilentLoginResult.Ready(url, html))
-                        } else if (microsoftLoginRequired(url, html)) {
-                            finish(SilentLoginResult.NeedsUser)
-                        }
-                    }
-                }
-            }
-            web.loadUrl(webLoginUrl(baseUrl))
-            main.postDelayed({ finish(SilentLoginResult.NeedsUser) }, 25_000)
-        }
-    }
-}
-
-private fun prepareWebView(web: WebView) {
+internal fun prepareWebView(web: WebView) {
     CookieManager.getInstance().setAcceptCookie(true)
     CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
     web.settings.javaScriptEnabled = true

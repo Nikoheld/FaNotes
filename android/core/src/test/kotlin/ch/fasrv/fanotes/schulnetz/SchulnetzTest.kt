@@ -272,6 +272,57 @@ class WebSessionTest {
         assertEquals("Bei Schulnetz neu anmelden", read.error)
         assertFalse(read.error!!.contains("nicht gelesen"))
         assertTrue(read.html.isEmpty())
+        assertEquals("converged-sign-in", classifySchulnetzPage("https://www.schulnetz-ag.ch/aksa/index.php?pageid=21111", html).rule)
+    }
+
+    @Test
+    fun loggedInPageWithMenuLogoutLinksStaysOk() {
+        val html = """
+            <html><body>
+              <nav>
+                <a href="index.php?pageid=1">Anmelden</a>
+                <a href="loginto.php?pageid=1&amp;mode=5">Abmelden</a>
+                <a href="index.php?pageid=1&amp;action=global_logout">Logout</a>
+                <span>Sitzung</span>
+                <form><input name="login"><input name="passwort" type="password"></form>
+              </nav>
+              <main>
+                <h1>Noten</h1>
+                <a href="index.php?pageid=21311&amp;id=abc123&amp;transid=a1b2c3">Noten</a>
+                <a href="index.php?pageid=21111&amp;id=abc123&amp;transid=a1b2c3">Absenzen</a>
+                <a href="index.php?pageid=21200&amp;id=abc123&amp;transid=a1b2c3">Agenda</a>
+                <a href="index.php?pageid=22202&amp;id=abc123&amp;transid=a1b2c3">Stundenplan</a>
+              </main>
+              <script>${'$'}Config={"urlPost":"https://example.invalid/login"};</script>
+            </body></html>
+        """.trimIndent()
+        val url = "https://www.schulnetz-ag.ch/aksa/index.php?pageid=21311&id=abc123&transid=a1b2c3"
+        val classified = classifySchulnetzPage(url, html)
+        assertEquals(SessionProblem.NONE, classified.problem)
+        assertEquals("ok", classified.rule)
+        assertEquals(SessionProblem.NONE, sessionProblem(url, html))
+        assertTrue(isLoggedInLanding("https://www.schulnetz-ag.ch/aksa/", html))
+        assertEquals(
+            "https://www.schulnetz-ag.ch/aksa/index.php?pageid=21311&id=abc123&transid=a1b2c3",
+            linkedPageUrl(html, "21311", AKSA_SCHULNETZ_BASE),
+        )
+        assertNull(linkedPageUrl(html, "9999", AKSA_SCHULNETZ_BASE))
+        assertEquals(SessionProblem.LOGIN_WALL, sessionProblem("https://www.schulnetz-ag.ch/aksa/", "<html><body>Bitte warten</body></html>"))
+        assertEquals("missing-page-id", classifySchulnetzPage("https://www.schulnetz-ag.ch/aksa/", "<html><body>Bitte warten</body></html>").rule)
+    }
+
+    @Test
+    fun logRedactionKeepsSessionIdsAndDropsSecrets() {
+        val raw = "https://www.schulnetz-ag.ch/aksa/index.php?pageid=1&id=abc123&transid=a1b2c3&code=secret&flowToken=flow-secret Cookie: PHPSESSID=phone; ESTSAUTHPERSISTENT=persist Authorization: Bearer tok-1"
+        val redacted = redactSchulnetzSecrets(raw)
+        assertTrue(redacted.contains("id=abc123"))
+        assertTrue(redacted.contains("transid=a1b2c3"))
+        assertFalse(redacted.contains("secret"))
+        assertFalse(redacted.contains("phone"))
+        assertFalse(redacted.contains("persist"))
+        assertFalse(redacted.contains("tok-1"))
+        assertTrue(redacted.contains("code=[redacted]"))
+        assertTrue(redacted.contains("names=PHPSESSID,ESTSAUTHPERSISTENT"))
     }
 
     @Test

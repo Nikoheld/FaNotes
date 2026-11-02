@@ -164,6 +164,7 @@ private fun TodayScreen(model: CompanionModel) {
         if (model.link.needsReauth) {
             item { LoginAgain(model) }
         }
+        item { ShareRow(model) }
         item {
             CardBlock {
                 Text(if (next?.isExamLike() == true) "Nächste Prüfung" else "Nächste Lektion", color = MaterialTheme.colorScheme.primary)
@@ -221,6 +222,7 @@ private fun PlanScreen(model: CompanionModel) {
         }
         val lessons = eventsOn(model.snapshot.events, model.day, zone)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
+            item { ShareRow(model) }
             if (lessons.isEmpty()) item { Text("Keine Lektionen.", modifier = Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
             items(lessons) { event ->
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp).background(paletteColor(event.displayColor()).copy(alpha = 0.18f), RoundedCornerShape(10.dp)).padding(12.dp)) {
@@ -246,6 +248,7 @@ private fun GradesScreen(model: CompanionModel) {
         }
         items(courses) { course -> CourseCard(model, course) }
         if (courses.isEmpty()) item { Text("Noch keine Noten. Schulnetz unter Mehr verbinden.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { ShareRow(model) }
     }
 }
 
@@ -394,6 +397,7 @@ private fun MenuScreen(model: CompanionModel) {
     )
     LazyColumn {
         item { Text(syncLine(model), modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { ShareRow(model) }
         items(rows) { (section, label) ->
             Text(label, modifier = Modifier.fillMaxWidth().clickable { model.section = section }.padding(vertical = 16.dp), style = MaterialTheme.typography.titleMedium)
         }
@@ -477,9 +481,7 @@ private fun SettingsScreen(model: CompanionModel) {
         }
         if (model.link.linked) TextButton(onClick = { model.unlink() }) { Text("Trennen") }
         model.snapshot.readErrors.filter { it.contains("nicht gelesen") }.forEach { Text(it, color = MaterialTheme.colorScheme.error) }
-        if (model.snapshot.readErrors.any { it.contains("nicht gelesen") } || model.debugHtml.isNotBlank()) {
-            OutlinedButton(onClick = { model.shareDebug(context) }, modifier = Modifier.fillMaxWidth()) { Text("HTML teilen") }
-        }
+        ShareRow(model)
         Text("Benachrichtigungen", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
         SettingSwitch("Neue Note", model.settings.grades) { model.toggleSetting("grades") }
         SettingSwitch("Stundenplan", model.settings.timetable) { model.toggleSetting("timetable") }
@@ -527,6 +529,16 @@ private fun LoginAgain(model: CompanionModel) {
         Text("Bei Schulnetz neu anmelden", fontWeight = FontWeight.SemiBold)
         Text("Die Microsoft-Anmeldung ist abgelaufen. Schulnetz selbst wurde nicht gelesen.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         Button(onClick = { model.schulnetzIntent(context)?.let(launcher::launch) }, modifier = Modifier.fillMaxWidth()) { Text("Bei Schulnetz neu anmelden") }
+        ShareRow(model)
+    }
+}
+
+@Composable
+private fun ShareRow(model: CompanionModel) {
+    val context = LocalContext.current
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        OutlinedButton(onClick = { model.shareDebug(context) }, modifier = Modifier.weight(1f)) { Text("HTML teilen") }
+        OutlinedButton(onClick = { model.shareLogs(context) }, modifier = Modifier.weight(1f)) { Text("Logs teilen") }
     }
 }
 

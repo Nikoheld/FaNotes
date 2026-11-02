@@ -16,8 +16,14 @@ import ch.fasrv.fanotes.schulnetz.SessionProblem
 import ch.fasrv.fanotes.schulnetz.WebSession
 import ch.fasrv.fanotes.schulnetz.authorizationCodeForm
 import ch.fasrv.fanotes.schulnetz.findIcalUrl
+import ch.fasrv.fanotes.schulnetz.classifySchulnetzPage
+import ch.fasrv.fanotes.schulnetz.extractWebSession
 import ch.fasrv.fanotes.schulnetz.freshTransid
+import ch.fasrv.fanotes.schulnetz.isForcedLogoutUrl
+import ch.fasrv.fanotes.schulnetz.linkedPageUrl
 import ch.fasrv.fanotes.schulnetz.pageUrl
+import ch.fasrv.fanotes.schulnetz.redactSchulnetzSecrets
+import ch.fasrv.fanotes.schulnetz.webLoginUrl
 import ch.fasrv.fanotes.schulnetz.parseIcs
 import ch.fasrv.fanotes.schulnetz.parseKontoauszug
 import ch.fasrv.fanotes.schulnetz.parseSchedulerXml
@@ -30,7 +36,6 @@ import ch.fasrv.fanotes.schulnetz.readTerminliste
 import ch.fasrv.fanotes.schulnetz.refreshTokenForm
 import ch.fasrv.fanotes.schulnetz.schedulerUrl
 import ch.fasrv.fanotes.schulnetz.schulnetzCallAllowed
-import ch.fasrv.fanotes.schulnetz.sessionProblem
 import ch.fasrv.fanotes.schulnetz.sessionProblemText
 import ch.fasrv.fanotes.schulnetz.toNormalizedJson
 import ch.fasrv.fanotes.schulnetz.webReadAllowed
@@ -126,55 +131,90 @@ class SchulnetzClient(
         if (code !in 200..299 && code != 404) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
 
-    fun fetchWeb(baseUrl: String, session: WebSession): WebBundle {
+    fun fetchWeb(baseUrl: String, session: WebSession, loader: (String) -> LoadedPage, trace: (String) -> Unit = {}): WebBundle {
         val root = baseUrl.trimEnd('/')
+        var id = session.id
         var transid = session.transid
         val errors = mutableListOf<String>()
         var debug = ""
-        fun get(url: String): String {
-            if (!webReadAllowed(url)) {
-                errors += "Blockiert: $url"
-                return ""
-            }
-            val (status, body) = call(
-                "GET",
-                url,
-                mapOf(
-                    "Accept" to if (url.contains("scheduler_processor")) "text/xml,*/*" else "text/html",
-                    "Cookie" to "PHPSESSID=${session.phpSessionId}",
-                    "User-Agent" to SCHULNETZ_USER_AGENT,
-                    "Referer" to "$root/",
-                ),
-                null,
-            )
-            if (status !in 200..299) return ""
-            val problem = sessionProblem(url, body)
-            if (problem != SessionProblem.NONE) {
-                if (problem != SessionProblem.INTERACTIVE) debug = body
-                errors += sessionProblemText(problem)
-                return ""
-            }
-            transid = freshTransid(body, transid)
-            return body
+        var sawSessionProblem = false
+        fun remember(name: String, page: LoadedPage) {
+            if (page.body.isNotBlank()) debug = page.body
+            trace("page $name")
         }
-        val order = listOf("1", "21311", "21111", "21411", "21200", "22202", "22108", "21312")
+        fun get(url: String, label: String): String {
+            if (isForcedLogoutUrl(url) || !webReadAllowed(url)) {
+                trace("blocked $label url=${redactSchulnetzSecrets(url)}")
+                errors += "Blockiert: ${redactSchulnetzSecrets(url)}"
+                return ""
+            }
+            trace("request $label url=${redactSchulnetzSecrets(url)}")
+            val page = try {
+                loader(url)
+            } catch (error: Exception) {
+                trace("exception $label ${error.javaClass.simpleName}: ${error.message}")
+                errors += error.message ?: "Laden fehlgeschlagen"
+                return ""
+            }
+            val classified = classifySchulnetzPage(page.finalUrl.ifBlank { url }, page.body)
+            trace("result $label status=${page.status} rule=${classified.rule} class=${classified.problem} bytes=${page.body.length} final=${redactSchulnetzSecrets(page.finalUrl)}")
+            remember(label, page)
+            if (classified.problem != SessionProblem.NONE) {
+                sawSessionProblem = true
+                errors += sessionProblemText(classified.problem)
+                return ""
+            }
+            extractWebSession(page.finalUrl, page.body, root)?.let { found ->
+                if (found.id.isNotBlank()) id = found.id
+                if (found.transid.isNotBlank()) transid = found.transid
+            }
+            transid = freshTransid(page.body, transid)
+            return page.body
+        }
         val pages = linkedMapOf<String, String>()
-        for (pageId in order) {
-            val body = get(pageUrl(root, pageId, session.id, transid))
-            pages[pageId] = body
-            if (errors.any { it.startsWith("Schulnetz") || it.contains("erneuert") || it.contains("Anmeldung") }) break
+        val startUrl = if (id.isBlank() || transid.isBlank()) webLoginUrl(root) else {
+            pageUrl(root, "1", id, transid)
+        }
+        pages["1"] = get(startUrl, "start")
+        val order = listOf(
+            "21311" to "noten",
+            "21111" to "absenzen",
+            "21411" to "konto",
+            "21200" to "agenda",
+            "22202" to "stundenplan",
+            "22108" to "termine",
+            "21312" to "pruefungen",
+        )
+        for ((pageId, label) in order) {
+            if (sawSessionProblem) break
+            val parents = when (pageId) {
+                "22202", "22108", "21312" -> listOf("21200", "1")
+                else -> listOf("1")
+            }
+            val fromLink = parents.firstNotNullOfOrNull { linkedPageUrl(pages[it].orEmpty(), pageId, root) }
+            val url = fromLink ?: if (id.isBlank() || transid.isBlank()) "" else pageUrl(root, pageId, id, transid)
+            if (url.isBlank()) {
+                trace("stop $label, no session id to build a url")
+                sawSessionProblem = true
+                errors += sessionProblemText(SessionProblem.LOGIN_WALL)
+                break
+            }
+            pages[pageId] = get(url, label)
         }
         val grades = readGradesPage(pages["21311"].orEmpty())
         val absences = readAbsencesPage(pages["21111"].orEmpty())
         val exams = readExamsPage(pages["21312"].orEmpty())
         val termine = readTerminliste(pages["22108"].orEmpty())
-        grades.error?.let { errors += it; debug = grades.html.ifBlank { debug } }
-        absences.error?.let { errors += it; debug = absences.html.ifBlank { debug } }
+        grades.error?.let { errors += it }
+        absences.error?.let { errors += it }
         val today = java.time.LocalDate.now()
-        val scheduler = if (pages["22202"].isNullOrBlank()) "" else get(schedulerUrl(root, session.id, transid, today.toString(), today.minusDays(7).toString(), today.plusDays(21).toString()))
+        val scheduler = if (sawSessionProblem || pages["22202"].isNullOrBlank()) "" else {
+            get(schedulerUrl(root, id, transid, today.toString(), today.minusDays(7).toString(), today.plusDays(21).toString()), "scheduler")
+        }
         val icalUrl = findIcalUrl(pages["22202"].orEmpty(), root)
-        val ical = if (icalUrl.isNullOrBlank() || !webReadAllowed(icalUrl)) emptyList() else parseIcs(get(icalUrl))
+        val ical = if (sawSessionProblem || icalUrl.isNullOrBlank() || !webReadAllowed(icalUrl)) emptyList() else parseIcs(get(icalUrl, "ical"))
         val events = parseSchedulerXml(scheduler).ifEmpty { ical }
+        trace("parsed grades=${grades.value.size} absences=${absences.value.size} exams=${exams.value.size} events=${events.size} termine=${termine.value.size} errors=${errors.size}")
         val snapshot = SchulnetzSnapshot(
             fetchedAt = java.time.Instant.now().toString(),
             grades = grades.value,
@@ -193,12 +233,8 @@ class SchulnetzClient(
             errors.any { it.contains("Anmeldung") } -> SessionProblem.LOGIN_WALL
             else -> SessionProblem.NONE
         }
-        val reported = if (problem == SessionProblem.INTERACTIVE) {
-            snapshot.copy(readErrors = listOf("Bei Schulnetz neu anmelden"))
-        } else {
-            snapshot
-        }
-        return WebBundle(reported, problem, if (problem == SessionProblem.INTERACTIVE) "" else debug, WebSession(root, session.phpSessionId, session.id, transid))
+        val reported = if (problem == SessionProblem.INTERACTIVE) snapshot.copy(readErrors = listOf("Bei Schulnetz neu anmelden")) else snapshot
+        return WebBundle(reported, problem, debug, WebSession(root, session.phpSessionId, id, transid))
     }
 
     fun link(session: SyncSession, baseUrl: String, deviceId: String, tokens: SchulnetzTokens, displayName: String): SchulnetzLinkState {

@@ -501,28 +501,44 @@ export const usesWebsiteSession = (baseUrl) => {
   try { return new URL(baseUrl).hostname.toLowerCase().endsWith('schulnetz-ag.ch') } catch { return false }
 }
 
-export const microsoftLoginRequired = (url, html) => {
-  try {
-    const host = new URL(String(url || 'https://invalid.local')).hostname.toLowerCase()
-    if (host === 'login.microsoftonline.com' || host === 'login.microsoft.com' || host === 'login.live.com' || host.endsWith('.login.microsoftonline.com')) return true
-  } catch { /* not a url */ }
-  const text = String(html || '')
-  if (text.includes('ConvergedSignIn')) return true
-  if (text.includes('AADSTS50058')) return true
-  if (/"sErrorCode"\s*:\s*"50058"/.test(text) || /sErrorCode\\?"?\s*:\s*\\?"?50058/.test(text)) return true
-  if (text.includes('stsErrorCode') && text.includes('50058')) return true
-  if (text.includes('$Config=') && (text.includes('sErrorCode') || text.includes('urlPost'))) return true
-  return false
-}
+const IP_REJECTED_TEXT = [
+  'ihre ip-adresse wurde vom system zurückgewiesen',
+  'ihre ip-adresse wurde vom system zurueckgewiesen',
+]
+const INACTIVITY_TEXT = [
+  'inaktivitätslimit überschritten',
+  'inaktivitaetslimit ueberschritten',
+]
 
+const schoolHost = (host) => host === 'schulnetz-ag.ch' || host.endsWith('.schulnetz-ag.ch') || host.endsWith('.schulnetz.ch') || host.endsWith('.schulnetz.com')
+
+/** Final URL, a missing page id, or the exact inactivity / IP sentence. Menu logout links are not a signal. */
 export const sessionProblem = (url, html) => {
-  if (microsoftLoginRequired(url, html)) return 'microsoft'
-  const blob = `${url}\n${html}`.toLowerCase()
-  if (blob.includes('ip-adresse wurde vom system zurückgewiesen') || blob.includes('ip-adresse wurde vom system zurueckgewiesen')) return 'ip'
-  if (blob.includes('inaktivitätslimit') || blob.includes('inaktivitaetslimit') || blob.includes('mode=5')) return 'inactivity'
-  if (String(url).toLowerCase().includes('loginto.php')) return 'login'
+  const text = String(html || '')
+  let parsed = null
+  try { parsed = new URL(String(url || 'https://invalid.local')) } catch { parsed = null }
+  const host = parsed?.hostname?.toLowerCase() || ''
+  if (host === 'login.microsoftonline.com' || host === 'login.microsoft.com' || host === 'login.live.com' || host.endsWith('.login.microsoftonline.com')) return 'microsoft'
+  if (text.includes('ConvergedSignIn')) return 'microsoft'
+  if (text.includes('AADSTS50058')) return 'microsoft'
+  if (/"sErrorCode"\s*:\s*"50058"/.test(text) || /sErrorCode\\?"?\s*:\s*\\?"?50058/.test(text)) return 'microsoft'
+  if (text.includes('stsErrorCode') && text.includes('50058')) return 'microsoft'
+  const lower = text.toLowerCase()
+  if (IP_REJECTED_TEXT.some((phrase) => lower.includes(phrase))) return 'ip'
+  if (INACTIVITY_TEXT.some((phrase) => lower.includes(phrase))) return 'inactivity'
+  const path = (parsed?.pathname || '').toLowerCase()
+  if (path.includes('loginto.php') && parsed?.searchParams.get('mode') === '5') return 'inactivity'
+  if (path.includes('loginto.php')) return 'login'
+  if (parsed && schoolHost(host)) {
+    const query = parsed.search || ''
+    const body = text.replace(/&amp;/g, '&')
+    const htmlPage = /<html|<body|<main/i.test(text)
+    if (!/(?:^|[?&])pageid=\d+/i.test(query) && !/pageid=\d+/i.test(body) && htmlPage) return 'login'
+  }
   return ''
 }
+
+export const microsoftLoginRequired = (url, html) => sessionProblem(url, html) === 'microsoft'
 
 export const stripPhpSession = (cookieHeader) => String(cookieHeader || '')
   .split(';')

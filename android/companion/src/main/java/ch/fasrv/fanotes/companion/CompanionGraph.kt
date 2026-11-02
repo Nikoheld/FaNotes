@@ -29,10 +29,15 @@ import ch.fasrv.fanotes.schulnetz.SchulnetzChange
 import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
 import ch.fasrv.fanotes.schulnetz.diffSnapshots
 import ch.fasrv.fanotes.schulnetz.localRefreshLease
+import ch.fasrv.fanotes.schulnetz.classifySchulnetzPage
+import ch.fasrv.fanotes.schulnetz.extractWebSession
 import ch.fasrv.fanotes.schulnetz.normalizeSchoolBase
+import ch.fasrv.fanotes.schulnetz.redactSchulnetzSecrets
 import ch.fasrv.fanotes.schulnetz.SessionProblem
 import ch.fasrv.fanotes.schulnetz.SchulnetzTokens
 import ch.fasrv.fanotes.schulnetz.WebSession
+import ch.fasrv.fanotes.schulnetz.isLoggedInLanding
+import ch.fasrv.fanotes.schulnetz.webLoginUrl
 import ch.fasrv.fanotes.schulnetz.parseNormalizedSnapshot
 import ch.fasrv.fanotes.schulnetz.parseRawSnapshot
 import ch.fasrv.fanotes.schulnetz.schulnetzDeviceId
@@ -55,8 +60,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.MessageDigest
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 class CompanionGraph(private val context: Context) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -70,6 +78,8 @@ class CompanionGraph(private val context: Context) {
     val snapshot = MutableStateFlow(readCachedSnapshot())
     val link = MutableStateFlow(SchulnetzLinkState())
     val client = SchulnetzClient()
+    val schulnetzLog = SchulnetzLog(File(context.filesDir, "schulnetz"))
+    val browser = SchulnetzBrowser(context, schulnetzLog)
     private val refreshMutex = Mutex()
     private val stateDir = File(context.filesDir, "sync-state").apply { mkdirs() }
 
@@ -138,8 +148,9 @@ class CompanionGraph(private val context: Context) {
         }
     }
 
-    suspend fun refreshSchulnetz() = refreshMutex.withLock {
-        val session = engine.currentSession() ?: return
+    suspend fun refreshSchulnetz() {
+        withContext(Dispatchers.IO) { refreshMutex.withLock {
+        val session = engine.currentSession() ?: return@withLock
         val previous = snapshot.value
         val remote = runCatching { client.status(session) }.getOrElse { error ->
             if (error is SchulnetzHttpException && (error.status == 404 || error.status == 503)) {
@@ -152,9 +163,11 @@ class CompanionGraph(private val context: Context) {
         if (usesWebsiteSession(baseUrl())) {
             val scraped = refreshWebsite(previous)
             if (scraped != null) {
+                link.value = link.value.copy(needsReauth = false, lastError = "")
                 publishSnapshot(previous, scraped, notifySettings())
                 runCatching { client.uploadSnapshot(session, scraped) }
-            } else if (remote.linked) {
+                    .onFailure { schulnetzLog.error(it) }
+            } else if (remote.linked && !link.value.needsReauth) {
                 val body = runCatching { client.snapshot(session) }.getOrNull()
                 val next = body?.let { parseNormalizedSnapshot(it) }
                 if (next != null) publishSnapshot(previous, next, remote.settings)
@@ -162,7 +175,7 @@ class CompanionGraph(private val context: Context) {
             if (remote.topic.isNotBlank()) prefs.edit().putString("push-server", remote.pushServer).putString("push-topic", remote.topic).apply()
             if (instantPush() && remote.topic.isNotBlank()) NtfyListenService.start(context)
             NextLessonWidget.update(context)
-            return
+            return@withLock
         }
         if (remote.linked) {
             deleteLocalToken()
@@ -174,10 +187,11 @@ class CompanionGraph(private val context: Context) {
             if (changes != null) applyServerChanges(changes)
             if (instantPush() && remote.topic.isNotBlank()) NtfyListenService.start(context)
             NextLessonWidget.update(context)
-            return
+            return@withLock
         }
         refreshLocally(previous)
         NextLessonWidget.update(context)
+    } }
     }
 
     suspend fun registerPushEndpoint(endpoint: String) {
@@ -306,55 +320,109 @@ class CompanionGraph(private val context: Context) {
         File(context.filesDir, "schulnetz-debug.html").writeText(html.take(150_000))
     }
 
+    private fun keepDebug(html: String) {
+        rememberDebug(html)
+        if (html.isNotBlank()) schulnetzLog.rememberPage("last", "", html)
+    }
+
+    fun shareMeta(): String {
+        val info = runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()
+        val version = info?.versionName ?: "?"
+        val code = info?.longVersionCode?.toString() ?: "?"
+        return buildString {
+            appendLine("app=$version ($code)")
+            appendLine("package=${context.packageName}")
+            appendLine("device=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+            appendLine("android=${android.os.Build.VERSION.RELEASE} sdk=${android.os.Build.VERSION.SDK_INT}")
+            appendLine("family=${SchulnetzBrowser.localAddressFamily()}")
+        }
+    }
+
+    fun buildShareZip(): File {
+        val dir = File(context.cacheDir, "share").apply { mkdirs() }
+        val zip = File(dir, "schulnetz-logs.zip")
+        ZipOutputStream(zip.outputStream()).use { out ->
+            fun put(name: String, text: String) {
+                out.putNextEntry(ZipEntry(name))
+                out.write(text.toByteArray())
+                out.closeEntry()
+            }
+            put("device.txt", shareMeta())
+            put("schulnetz.log", schulnetzLog.text().ifBlank { "(leer)\n" })
+            schulnetzLog.captureFiles().forEach { file -> put("captures/${file.name}", file.readText()) }
+            val debug = redactSchulnetzSecrets(debugHtml())
+            if (debug.isNotBlank()) put("last-page.html", debug)
+        }
+        return zip
+    }
+
     private fun readWebSession(): WebSession? {
         val raw = prefs.getString("web-session", null) ?: return null
         val obj = runCatching { parseJson(raw) as? JsonValue.Obj }.getOrNull() ?: return null
-        val php = obj.string("php").orEmpty()
         val id = obj.string("id").orEmpty()
         val transid = obj.string("transid").orEmpty()
-        if (php.isBlank() || id.isBlank() || transid.isBlank()) return null
-        return WebSession(obj.string("base").orEmpty().ifBlank { baseUrl() }, php, id, transid)
+        if (id.isBlank() || transid.isBlank()) return null
+        return WebSession(obj.string("base").orEmpty().ifBlank { baseUrl() }, obj.string("php").orEmpty(), id, transid)
     }
 
     private suspend fun refreshWebsite(previous: SchulnetzSnapshot): SchulnetzSnapshot? {
-        var current = readWebSession()
-        var bundle = current?.let { runCatching { client.fetchWeb(baseUrl(), it) }.getOrNull() }
-        if (bundle?.problem == SessionProblem.INTERACTIVE || link.value.needsReauth) {
+        schulnetzLog.info("refresh start family=${SchulnetzBrowser.localAddressFamily()} microsoftCookies=${microsoftCookieNames()}")
+        var current = readWebSession() ?: WebSession(baseUrl(), phpSessionCookie(baseUrl()), "", "")
+        var bundle = runCatching { client.fetchWeb(baseUrl(), current, browser::load, schulnetzLog::info) }.onFailure { schulnetzLog.error(it) }.getOrNull()
+        if (bundle?.problem == SessionProblem.INTERACTIVE) {
+            schulnetzLog.info("interactive login required")
+            keepDebug(bundle.debugHtml)
             markLoginRequired()
             return null
         }
         if (bundle == null || bundle.problem != SessionProblem.NONE) {
-            if (!hasMicrosoftCookies()) {
+            schulnetzLog.info("session problem=${bundle?.problem ?: "load-failed"}")
+            keepDebug(bundle?.debugHtml.orEmpty())
+            if (!silentLoginAllowed()) {
+                schulnetzLog.info("silent login suppressed by backoff")
                 markLoginRequired()
                 return null
             }
-            when (val landed = SchulnetzSilentLogin(context).await(baseUrl())) {
-                SilentLoginResult.NeedsUser -> {
-                    markLoginRequired()
-                    return null
-                }
-                is SilentLoginResult.Ready -> {
-                    val php = phpSessionCookie(baseUrl())
-                    val extracted = ch.fasrv.fanotes.schulnetz.extractWebSession(landed.url, landed.html, baseUrl())
-                    if (extracted == null || php.isBlank()) {
-                        markLoginRequired()
-                        return null
-                    }
-                    current = extracted.copy(phpSessionId = php)
-                    saveWebSession(current)
-                    bundle = runCatching { client.fetchWeb(baseUrl(), current) }.getOrNull()
-                    if (bundle == null || bundle.problem == SessionProblem.INTERACTIVE) {
-                        markLoginRequired()
-                        return null
-                    }
-                }
+            if (!hasMicrosoftCookies()) {
+                schulnetzLog.info("silent login skipped, no microsoft cookies")
+                markLoginRequired()
+                return null
             }
-        } else {
-            saveWebSession(bundle.session)
+            prefs.edit().putLong(SILENT_AT, System.currentTimeMillis()).apply()
+            schulnetzLog.info("silent login attempt")
+            val landed = runCatching { browser.load(webLoginUrl(baseUrl())) }.onFailure { schulnetzLog.error(it) }.getOrNull()
+            val html = landed?.body.orEmpty()
+            val url = landed?.finalUrl.orEmpty()
+            val classified = classifySchulnetzPage(url, html)
+            schulnetzLog.info("silent login finished rule=${classified.rule} final=${redactSchulnetzSecrets(url)}")
+            keepDebug(html)
+            if (landed == null || classified.problem == SessionProblem.INTERACTIVE || !isLoggedInLanding(url, html)) {
+                markLoginRequired()
+                return null
+            }
+            val extracted = extractWebSession(url, html, baseUrl())
+            if (extracted == null) {
+                markLoginRequired()
+                return null
+            }
+            current = extracted.copy(phpSessionId = phpSessionCookie(baseUrl()))
+            saveWebSession(current)
+            bundle = runCatching { client.fetchWeb(baseUrl(), current, browser::load, schulnetzLog::info) }.onFailure { schulnetzLog.error(it) }.getOrNull()
+            if (bundle == null || bundle.problem != SessionProblem.NONE) {
+                keepDebug(bundle?.debugHtml.orEmpty())
+                markLoginRequired()
+                return null
+            }
         }
-        if (bundle.debugHtml.isNotBlank()) rememberDebug(bundle.debugHtml)
+        saveWebSession(bundle.session)
+        keepDebug(bundle.debugHtml)
         link.value = link.value.copy(needsReauth = false, lastError = "")
         return bundle.snapshot.copy(readErrors = bundle.snapshot.readErrors.filter { it != "Bei Schulnetz neu anmelden" }, revision = previous.revision + 1)
+    }
+
+    private fun silentLoginAllowed(): Boolean {
+        val last = prefs.getLong(SILENT_AT, 0L)
+        return System.currentTimeMillis() - last >= SILENT_GAP_MS
     }
 
     fun clearLoginPrompt() {
@@ -365,7 +433,7 @@ class CompanionGraph(private val context: Context) {
     private fun markLoginRequired() {
         val already = link.value.needsReauth
         link.value = link.value.copy(needsReauth = true, lastError = "Bei Schulnetz neu anmelden")
-        File(context.filesDir, "schulnetz-debug.html").delete()
+        schulnetzLog.info("login required shown")
         if (!already) {
             CompanionAlerts.show(
                 context,
@@ -514,6 +582,8 @@ class CompanionGraph(private val context: Context) {
         const val LEASE_PATH = ".fanotes/schulnetz/lease.json"
         const val HYPOTHETICAL_PATH = ".fanotes/schulnetz/hypothetical.json"
         const val SNAPSHOT_VAULT_PATH = ".fanotes/schulnetz/snapshot.json"
+        private const val SILENT_AT = "schulnetz-silent-at"
+        private const val SILENT_GAP_MS = 3 * 60 * 1000L
         fun snapshotFile(context: Context) = File(context.filesDir, "schulnetz-snapshot.json")
     }
 }
