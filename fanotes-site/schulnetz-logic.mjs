@@ -464,7 +464,7 @@ export const schulnetzCallAllowed = (method, url, body = '') => {
     return READ_PAGES.has(pageId || '')
   }
   if (path.endsWith('/scheduler_processor.php')) {
-    return !query.includes('action=') && (query.includes('pageid=22202') || query.includes('ansicht=schueleransicht'))
+    return !query.includes('action=') && (query.includes('pageid=22202') || query.includes('pageid=21312') || query.includes('ansicht=schueleransicht') || query.includes('ansicht=klassenuebersicht'))
   }
   return false
 }

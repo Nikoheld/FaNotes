@@ -146,31 +146,68 @@ fun pageUrl(baseUrl: String, pageId: String, id: String, transid: String, extra:
     return "${baseUrl.trimEnd('/')}/index.php?pageid=$pageId&id=$id&transid=$transid$tail"
 }
 
-fun schedulerUrl(baseUrl: String, id: String, transid: String, today: String, minDate: String, maxDate: String): String {
-    val from = urlEncode("$minDate 00:00")
-    val to = urlEncode("$maxDate 23:59")
-    return "${baseUrl.trimEnd('/')}/scheduler_processor.php?view=week&from=$from&to=$to&curr_date=$today&min_date=$minDate&max_date=$maxDate&ansicht=schueleransicht&id=$id&transid=$transid&pageid=22202&timeshift=-60"
+/**
+ * The Schülerplan data request, in the page's own parameter order.
+ * `minDate`/`maxDate` are the visible week (`max` is the following Monday). `timeshift` is the JS timezone offset.
+ */
+fun schedulerUrl(baseUrl: String, id: String, transid: String, today: String, minDate: String, maxDate: String): String =
+    schedulerDataUrl(baseUrl, "22202", "schueleransicht", id, transid, today, minDate, maxDate, "")
+
+/** Prüfungsplan loads the class overview, not the student week view. */
+fun examSchedulerUrl(baseUrl: String, id: String, transid: String, today: String, minDate: String, maxDate: String): String =
+    schedulerDataUrl(baseUrl, "21312", "klassenuebersicht", id, transid, today, minDate, maxDate, "showOnlyThisClass=-1")
+
+fun schedulerDataUrl(
+    baseUrl: String,
+    pageId: String,
+    ansicht: String,
+    id: String,
+    transid: String,
+    today: String,
+    minDate: String,
+    maxDate: String,
+    extra: String,
+): String {
+    val shift = zurichTimeshift(today)
+    val middle = if (extra.isBlank()) "" else "&$extra"
+    return "${baseUrl.trimEnd('/')}/scheduler_processor.php?view=week&curr_date=$today&min_date=$minDate&max_date=$maxDate&ansicht=$ansicht$middle&id=$id&transid=$transid&pageid=$pageId&timeshift=$shift"
 }
 
-/** The Schülerplan page's own scheduler.load URL, with the range the connector expects. */
-fun findSchedulerUrl(html: String, baseUrl: String, id: String, transid: String, from: String, to: String): String? {
-    val raw = Regex("""scheduler_processor\.php\?[^"'\\\s<>]+""").find(html)?.value ?: return null
+fun weekBounds(day: java.time.LocalDate): Pair<java.time.LocalDate, java.time.LocalDate> {
+    val monday = day.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+    return monday to monday.plusDays(7)
+}
+
+private fun zurichTimeshift(day: String): Int {
+    val date = runCatching { java.time.LocalDate.parse(day) }.getOrNull() ?: return -60
+    val zone = java.time.ZoneId.of("Europe/Zurich")
+    val offsetMinutes = zone.rules.getOffset(date.atStartOfDay(zone).toInstant()).totalSeconds / 60
+    return -offsetMinutes
+}
+
+/** A fully built scheduler data URL from the page. Raster backgrounds (`action=raster`) are not data. */
+fun findSchedulerUrl(html: String, baseUrl: String): String? {
+    val raw = Regex("""scheduler_processor\.php\?[^"'\\\s<>]+""").findAll(html).map { it.value }
+        .firstOrNull { !it.contains("action=raster") && it.contains("view=") && !it.contains("\"+") && !it.contains("'+") }
+        ?: return null
     val absolute = absoluteSchoolUrl(baseUrl, raw)
     if (isForcedLogoutUrl(absolute) || !webReadAllowed(absolute)) return null
-    val extra = buildString {
-        if (!absolute.contains("from=")) append("&from=").append(urlEncode(from)).append("&to=").append(urlEncode(to))
-        if (!absolute.contains("id=") && id.isNotBlank()) append("&id=").append(id)
-        if (!absolute.contains("transid=") && transid.isNotBlank()) append("&transid=").append(transid)
-        if (!absolute.contains("pageid=")) append("&pageid=22202")
-        if (!absolute.contains("ansicht=")) append("&ansicht=schueleransicht")
-        if (!absolute.contains("timeshift=")) append("&timeshift=-60")
-    }
-    val url = absolute + extra
-    return url.takeIf { webReadAllowed(it) }
+    return absolute
 }
 
-private fun urlEncode(value: String): String =
-    java.net.URLEncoder.encode(value, Charsets.UTF_8).replace("+", "%20")
+/** Next Terminliste page (`sRow`), not a filter, sort, or show-all link. */
+fun terminlisteNextUrl(html: String, baseUrl: String): String? {
+    val next = Regex("""href\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE).findAll(html).map { it.groupValues[1].replace("&amp;", "&") }
+        .mapNotNull { href ->
+            if (!href.contains("pageid=22108") || !href.contains("sRow=")) return@mapNotNull null
+            if (href.contains("ff") || href.contains("sort=") || href.contains("action=") || href.contains("numRows=")) return@mapNotNull null
+            val row = Regex("""sRow=(\d+)""").find(href)?.groupValues?.get(1)?.toIntOrNull() ?: return@mapNotNull null
+            if (row <= 0) null else row to href
+        }
+        .minByOrNull { it.first } ?: return null
+    val absolute = absoluteSchoolUrl(baseUrl, next.second)
+    return absolute.takeIf { webReadAllowed(it) }
+}
 
 /** Microsoft hosts whose cookies let a later login skip the password. PHPSESSID is never one of them. */
 val SSO_COOKIE_URLS = listOf(

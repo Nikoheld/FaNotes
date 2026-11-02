@@ -17,6 +17,7 @@ import ch.fasrv.fanotes.schulnetz.WebSession
 import ch.fasrv.fanotes.schulnetz.authorizationCodeForm
 import ch.fasrv.fanotes.schulnetz.describeTables
 import ch.fasrv.fanotes.schulnetz.findIcalUrl
+import ch.fasrv.fanotes.schulnetz.examSchedulerUrl
 import ch.fasrv.fanotes.schulnetz.findSchedulerUrl
 import ch.fasrv.fanotes.schulnetz.classifySchulnetzPage
 import ch.fasrv.fanotes.schulnetz.isForcedLogoutUrl
@@ -27,6 +28,9 @@ import ch.fasrv.fanotes.schulnetz.sessionIdsFromPage
 import ch.fasrv.fanotes.schulnetz.startPageUrl
 import ch.fasrv.fanotes.schulnetz.parseIcs
 import ch.fasrv.fanotes.schulnetz.parseSchedulerNote
+import ch.fasrv.fanotes.schulnetz.parseRenderedTimetable
+import ch.fasrv.fanotes.schulnetz.parseStartAppointments
+import ch.fasrv.fanotes.schulnetz.parseStartRecentGrades
 import ch.fasrv.fanotes.schulnetz.parseTimetableHtml
 import ch.fasrv.fanotes.schulnetz.parseKontoauszug
 import ch.fasrv.fanotes.schulnetz.parseSchedulerXml
@@ -38,6 +42,8 @@ import ch.fasrv.fanotes.schulnetz.readGradesPage
 import ch.fasrv.fanotes.schulnetz.readTerminliste
 import ch.fasrv.fanotes.schulnetz.refreshTokenForm
 import ch.fasrv.fanotes.schulnetz.schedulerUrl
+import ch.fasrv.fanotes.schulnetz.terminlisteNextUrl
+import ch.fasrv.fanotes.schulnetz.weekBounds
 import ch.fasrv.fanotes.schulnetz.schulnetzCallAllowed
 import ch.fasrv.fanotes.schulnetz.sessionProblemText
 import ch.fasrv.fanotes.schulnetz.toNormalizedJson
@@ -226,41 +232,60 @@ class SchulnetzClient(
             }
             pages[pageId] = get(url, label, pageId)
         }
-        val grades = readGradesPage(pages["21311"].orEmpty())
+        val grades = readGradesPage(pages["21311"].orEmpty()).let { read ->
+            if (read.value.isNotEmpty()) read else read.copy(value = parseStartRecentGrades(pages["1"].orEmpty()))
+        }
         val absences = readAbsencesPage(pages["21111"].orEmpty())
         val exams = readExamsPage(pages["21312"].orEmpty())
-        val termine = readTerminliste(pages["22108"].orEmpty())
+        val terminePages = mutableListOf(pages["22108"].orEmpty())
+        if (oauthPage == null && !sawSessionProblem) {
+            var next = terminlisteNextUrl(pages["22108"].orEmpty(), root)
+            var guard = 0
+            while (!next.isNullOrBlank() && guard < 8) {
+                val body = get(next, "termine", "22108")
+                if (body.isBlank()) break
+                terminePages += body
+                next = terminlisteNextUrl(body, root)
+                guard += 1
+            }
+        }
+        val termine = readTerminliste(terminePages.joinToString("\n"))
         grades.error?.let { errors += it }
         absences.error?.let { errors += it }
         exams.error?.let { errors += it }
         termine.error?.let { errors += it }
         val today = java.time.LocalDate.now()
-        val minDate = today.minusDays(7).toString()
-        val maxDate = today.plusDays(21).toString()
+        val (monday, nextMonday) = weekBounds(today)
         val fromPlan = parseSchedulerNote(planNote)
-        val discovered = findSchedulerUrl(pages["22202"].orEmpty(), root, id, transid, "$minDate 00:00", "$maxDate 23:59")
-            ?: fromPlan.first.takeIf { it.contains("scheduler_processor") }?.let {
-                findSchedulerUrl("<script>${it}</script>", root, id, transid, "$minDate 00:00", "$maxDate 23:59")
-            }
-        trace("scheduler source=${if (discovered != null) "page" else "default"} domEvents=${fromPlan.second.size}")
+        val discovered = findSchedulerUrl(pages["22202"].orEmpty(), root)
+        trace("scheduler source=${if (discovered != null) "page" else "built"} domEvents=${fromPlan.second.size}")
         val scheduler = if (oauthPage != null || sawSessionProblem || pages["22202"].isNullOrBlank()) "" else {
-            get(discovered ?: schedulerUrl(root, id, transid, today.toString(), minDate, maxDate), "scheduler", "scheduler")
+            get(discovered ?: schedulerUrl(root, id, transid, today.toString(), monday.toString(), nextMonday.toString()), "scheduler", "scheduler")
+        }
+        val examXml = if (oauthPage != null || sawSessionProblem || pages["21312"].isNullOrBlank()) "" else {
+            get(examSchedulerUrl(root, id, transid, today.toString(), monday.toString(), nextMonday.toString()), "pruefungen-xml", "21312")
         }
         val icalUrl = findIcalUrl(pages["22202"].orEmpty(), root)
         val ical = if (oauthPage != null || sawSessionProblem || icalUrl.isNullOrBlank() || !webReadAllowed(icalUrl)) emptyList() else parseIcs(get(icalUrl, "ical", "ical"))
+        val rendered = parseRenderedTimetable(pages["22202"].orEmpty())
         val events = when {
+            rendered.isNotEmpty() -> rendered
             fromPlan.second.isNotEmpty() -> fromPlan.second
             else -> parseSchedulerXml(scheduler).ifEmpty { ical }.ifEmpty { parseTimetableHtml(pages["22202"].orEmpty()) }
         }
-        if (events.isEmpty() && pages["22202"].orEmpty().length > 1000) errors += "Stundenplan: Seite geladen, aber nicht lesbar"
+        if (events.isEmpty() && pages["22202"].orEmpty().length > 1000 && !pages["22202"].orEmpty().contains("dhx_cal_container")) {
+            errors += "Stundenplan: Seite geladen, aber nicht lesbar"
+        }
+        val examEvents = readExamsPage(pages["21312"].orEmpty()).value.ifEmpty { parseSchedulerXml(examXml).map { it.copy(eventType = "exam") } }
         trace("parsed grades=${grades.value.size} absences=${absences.value.size} exams=${exams.value.size} events=${events.size} termine=${termine.value.size} okPages=$okPages oauth=${oauthPage.orEmpty()} errors=${errors.size}")
         val snapshot = SchulnetzSnapshot(
             fetchedAt = java.time.Instant.now().toString(),
             grades = grades.value,
             events = events,
-            exams = exams.value,
+            exams = examEvents,
             absences = absences.value,
-            messages = parseStartMessages(pages["1"].orEmpty()).mapIndexed { index, text -> ch.fasrv.fanotes.schulnetz.SchoolMessage("start-$index", "Mitteilung", text, "") },
+            messages = (parseStartMessages(pages["1"].orEmpty()).mapIndexed { index, text -> ch.fasrv.fanotes.schulnetz.SchoolMessage("start-$index", "Mitteilung", text, "") }
+                + parseStartAppointments(pages["1"].orEmpty()).map { ch.fasrv.fanotes.schulnetz.SchoolMessage(it.id, "Termin", it.text, it.start) }),
             konto = parseKontoauszug(pages["21411"].orEmpty()),
             startMessages = parseStartMessages(pages["1"].orEmpty()),
             readErrors = errors,

@@ -176,6 +176,8 @@ class SchulnetzPolicyTest {
         assertTrue(schulnetzCallAllowed("GET", "$base/index.php?pageid=21411"))
         assertTrue(schulnetzCallAllowed("GET", "$base/index.php?pageid=1"))
         assertTrue(schulnetzCallAllowed("GET", "$base/scheduler_processor.php?view=week&pageid=22202&ansicht=schueleransicht"))
+        assertTrue(schulnetzCallAllowed("GET", "$base/scheduler_processor.php?view=week&pageid=21312&ansicht=klassenuebersicht&showOnlyThisClass=-1"))
+        assertFalse(schulnetzCallAllowed("GET", "$base/scheduler_processor.php?pageid=22202&action=raster&rasterid=0"))
         assertTrue(schulnetzCallAllowed("POST", "$base/token.php", "grant_type=refresh_token&refresh_token=abc&client_id=x"))
         assertFalse(schulnetzCallAllowed("POST", "$base/rest/v1/me/absences", """{"reason":"x"}"""))
         assertFalse(schulnetzCallAllowed("DELETE", "$base/rest/v1/me/absences/1"))
@@ -415,10 +417,13 @@ class WebSessionTest {
         assertEquals("Vokabeltest", readExamsPage(examTable).value.single().text)
         assertTrue(describeTables(mdl).contains("tables=1"))
         val plan = """<script>scheduler.load("scheduler_processor.php?view=week&ansicht=schueleransicht&id=abc123&transid=a1b2c3&pageid=22202");</script>"""
-        val found = findSchedulerUrl(plan, AKSA_SCHULNETZ_BASE, "abc123", "a1b2c3", "2026-11-02 00:00", "2026-11-08 23:59")
-        assertTrue(found!!.contains("scheduler_processor.php"))
-        assertTrue(found.contains("from=2026-11-02%2000%3A00"))
-        assertTrue(schedulerUrl(AKSA_SCHULNETZ_BASE, "abc", "def", "2026-11-02", "2026-10-26", "2026-11-08").contains("from="))
+        val found = findSchedulerUrl(plan, AKSA_SCHULNETZ_BASE)
+        assertTrue(found!!.contains("view=week"))
+        assertFalse(found.contains("action=raster"))
+        assertEquals(
+            "https://www.schulnetz-ag.ch/aksa/scheduler_processor.php?view=week&curr_date=2026-11-02&min_date=2026-11-02&max_date=2026-11-09&ansicht=schueleransicht&id=abc&transid=def&pageid=22202&timeshift=-60",
+            schedulerUrl(AKSA_SCHULNETZ_BASE, "abc", "def", "2026-11-02", "2026-11-02", "2026-11-09"),
+        )
 
         val absences = """
             <main><table>
