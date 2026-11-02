@@ -1,5 +1,11 @@
 # Änderungsverlauf
 
+## 2026.11.1-beta.7
+
+- Let touching snow stick and grow into snowballs.
+- Keep the Schulnetz session inside the WebView that signed in.
+- Let settled snow slide apart and fall when a ledge moves.
+
 ## 2026.11.1-beta.6
 
 - Keep paper scrolling and zooming on the compositor.
