@@ -1362,6 +1362,37 @@ export const rToNIndexes = (
 })
 
 /**
+ * The beam's top reading keeps `mit` when a later step wrote `mir` (`Mit zunehmender`).
+ * The rest of the line has to match.
+ */
+export const restoreMitFromTopReading = <T extends { char: string }>(
+  characters: T[],
+  readings: Array<{ text: string }>,
+): T[] | null => {
+  const top = readings[0]?.text ?? ''
+  const text = characters.map((character) => character.char).join('')
+  if (!top || top.length !== text.length) return null
+  let at = -1
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === top[index]) continue
+    if (at !== -1) return null
+    at = index
+  }
+  if (at < 0) return null
+  const from = text[at]
+  const to = top[at]
+  if (!((from === 'r' && to === 't') || (from === 'R' && to === 'T'))) return null
+  let start = at
+  while (start > 0 && /[A-Za-zÄÖÜäöüß]/u.test(text[start - 1])) start -= 1
+  let end = at + 1
+  while (end < text.length && /[A-Za-zÄÖÜäöüß]/u.test(text[end])) end += 1
+  if (text.slice(start, end).toLowerCase() !== 'mir' || top.slice(start, end).toLowerCase() !== 'mit') return null
+  const next = characters.slice()
+  next[at] = { ...next[at], char: to }
+  return next
+}
+
+/**
  * Indexes of a word-final letter whose apostrophe alternative is confident enough
  * (`Soci` → `Soc'`).
  */
@@ -2147,5 +2178,10 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   }
   take(shorterTraceBeforePeriod(text, decoded.greedyText), rewriteWord)
   take(trailingTraceDeletion(text, decoded.greedyText, known), rewriteWord)
+  const restoredMit = restoreMitFromTopReading(characters, decoded.readings)
+  if (restoredMit) {
+    characters = restoredMit
+    text = characters.map((character) => character.char).join('')
+  }
   return { text, characters }
 }

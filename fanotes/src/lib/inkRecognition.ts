@@ -94,6 +94,7 @@ import {
   capitalizeWordAfterInitial,
   shorterTraceBeforePeriod,
   trailingTraceDeletion,
+  restoreMitFromTopReading,
   dictionaryJoinFromReading,
   splitFunctionWordJoin,
   tracedFinalComma,
@@ -1357,6 +1358,11 @@ export async function recognizeInk(
         decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null
       }
+    }
+    const restoredMit = restoreMitFromTopReading(decoded.characters, decoded.readings)
+    if (restoredMit) {
+      decoded = { ...decoded, characters: restoredMit, text: restoredMit.map((character) => character.char).join('') }
+      stitched = null
     }
     const known = (word: string) => wordIsKnown(lineLanguage, word)
     const unknownCompound = inkWords(decoded.text)
