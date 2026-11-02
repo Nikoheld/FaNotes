@@ -915,6 +915,32 @@ export const capitalizeWordAfterInitial = (text: string): WordEdit | null => {
 }
 
 /**
+ * A dictionary word keeps the shorter ending the raw trace has when that ending is
+ * not itself a dictionary word (`Africa` with trace `Afric` → `Afric`). The dropped
+ * letter is the last one, and the trace word is at least five letters.
+ */
+export const trailingTraceDeletion = (
+  text: string,
+  greedy: string,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  if (!words.length || words.length !== traced.length) return null
+  let found: WordEdit | null = null
+  for (let index = 0; index < words.length; index += 1) {
+    if (words[index] === traced[index]) continue
+    const extra = oneExtraLetter(traced[index], words[index])
+    if (!extra || extra.index !== [...traced[index]].length) return null
+    if ([...traced[index]].length < 5) return null
+    if (!known(words[index]) || known(traced[index])) return null
+    if (found) return null
+    found = { index, from: words[index], to: traced[index] }
+  }
+  return found
+}
+
+/**
  * A word written against a period keeps the shorter spelling the raw trace has
  * (`engel.` with trace `engl.` → `engl.`).
  */
@@ -2120,5 +2146,6 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
     text = characters.map((character) => character.char).join('')
   }
   take(shorterTraceBeforePeriod(text, decoded.greedyText), rewriteWord)
+  take(trailingTraceDeletion(text, decoded.greedyText, known), rewriteWord)
   return { text, characters }
 }

@@ -93,6 +93,7 @@ import {
   loneLetterBesideTriples,
   capitalizeWordAfterInitial,
   shorterTraceBeforePeriod,
+  trailingTraceDeletion,
   dictionaryJoinFromReading,
   splitFunctionWordJoin,
   tracedFinalComma,
@@ -1343,6 +1344,15 @@ export async function recognizeInk(
     if (shortTrace) {
       const rewritten = rewriteWord(decoded.characters, shortTrace.index, shortTrace.to)
       const nextText = textWithWordEdits(decoded.text, [shortTrace])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
+    }
+    const tracedEnding = trailingTraceDeletion(decoded.text, decoded.greedyText, (word) => wordIsKnown(lineLanguage, word))
+    if (tracedEnding) {
+      const rewritten = rewriteWord(decoded.characters, tracedEnding.index, tracedEnding.to)
+      const nextText = textWithWordEdits(decoded.text, [tracedEnding])
       if (rewritten && nextText !== decoded.text) {
         decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null
