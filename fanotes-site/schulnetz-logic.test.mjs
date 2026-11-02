@@ -186,6 +186,22 @@ test('web session is opened with Microsoft cookies and not the phone PHPSESSID',
   assert.equal(snapshot.grades[0].course.includes('MA-4a-He'), true)
 })
 
+test('a logged-in schulNetz page with menu logout links stays ok', () => {
+  const html = `<html><body>
+    <a href="loginto.php?pageid=1&amp;mode=5">Abmelden</a>
+    <a href="index.php?pageid=1">Anmelden</a>
+    <a href="index.php?pageid=1&amp;action=global_logout">Logout</a>
+    <form><input name="login"><input name="passwort"></form>
+    <span>Sitzung</span>
+    <a href="index.php?pageid=21311&amp;id=abc123&amp;transid=a1b2c3">Noten</a>
+    <script>${'$'}Config={"urlPost":"https://example.invalid/login"};</script>
+  </body></html>`
+  const url = 'https://www.schulnetz-ag.ch/aksa/index.php?pageid=21311&id=abc123&transid=a1b2c3'
+  assert.equal(sessionProblem(url, html), '')
+  assert.equal(microsoftLoginRequired(url, html), false)
+  assert.equal(sessionProblem('https://www.schulnetz-ag.ch/aksa/', '<html><body>Bitte warten</body></html>'), 'login')
+})
+
 test('a Microsoft sign-in page is login required, not a scraped grade page', () => {
   const html = '<html><head><title>Sign in to your account</title></head><body><script>$Config={"sCompanyDisplayName":"Alte Kantonsschule Aarau","sErrorCode":"50058","urlPost":"https://login.microsoftonline.com/common/login","pgid":"ConvergedSignIn"};</script></body></html>'
   assert.equal(sessionProblem('https://www.schulnetz-ag.ch/aksa/index.php?pageid=21111', html), 'microsoft')

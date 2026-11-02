@@ -14,6 +14,7 @@ import {
   parseStartMessages,
   redactSecrets,
   schulnetzCallAllowed,
+  stripPhpSession,
 } from './schulnetz-logic.mjs'
 import { establishWebSession, scrapeWithSession } from './schulnetz-web.mjs'
 
@@ -170,9 +171,11 @@ export const createSchulnetzRuntime = (options = {}) => {
     for (const [host, value] of Object.entries(cookies)) {
       if (!/^[a-z0-9.-]+$/i.test(host) || typeof value !== 'string') continue
       if (host.endsWith('schulnetz-ag.ch')) continue
-      bytes += value.length
+      const cleaned = stripPhpSession(value)
+      if (!cleaned) continue
+      bytes += cleaned.length
       if (bytes > 16_000) fail(413, 'Die Cookie-Daten sind zu gross.')
-      sealedSource[host] = value
+      sealedSource[host] = cleaned
     }
     if (!Object.keys(sealedSource).length) fail(400, 'Die Microsoft-Cookies fehlen.')
     const existing = await readLink(accountId)
@@ -204,6 +207,9 @@ export const createSchulnetzRuntime = (options = {}) => {
     const changes = diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS)
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
+    link.needsReauth = false
+    link.loginPushSent = false
+    link.lastError = ''
     await writeJson(resolve(accountDir(accountId), 'snapshot.json'), snapshot)
     await saveLink(accountId, link)
     await appendChanges(accountId, changes, snapshot.revision)

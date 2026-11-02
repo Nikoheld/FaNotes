@@ -1,7 +1,12 @@
 package ch.fasrv.fanotes.companion
 
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
+import android.widget.Toast
+import androidx.core.content.FileProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -18,8 +23,10 @@ import ch.fasrv.fanotes.schulnetz.NotifySettings
 import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
 import ch.fasrv.fanotes.schulnetz.SCHULNETZ_USER_AGENT
 import ch.fasrv.fanotes.schulnetz.SSO_COOKIE_URLS
+import ch.fasrv.fanotes.schulnetz.cookieNames
 import ch.fasrv.fanotes.schulnetz.extractWebSession
 import ch.fasrv.fanotes.schulnetz.normalizeSchoolBase
+import ch.fasrv.fanotes.schulnetz.redactSchulnetzSecrets
 import ch.fasrv.fanotes.schulnetz.stripPhpSession
 import ch.fasrv.fanotes.schulnetz.timetableAnchor
 import ch.fasrv.fanotes.schulnetz.usesWebsiteSession
@@ -29,6 +36,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.webkit.CookieManager
+import java.io.File
 import java.net.URI
 import java.time.LocalDate
 import java.util.UUID
@@ -135,6 +143,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             return null
         }
         val host = runCatching { URI(base).host }.getOrNull() ?: return null
+        graph.schulnetzLog.info("visible login start url=${webLoginUrl(base)}")
         return Intent(context, SchulnetzLoginActivity::class.java)
             .putExtra(SchulnetzLoginActivity.EXTRA_URL, webLoginUrl(base))
             .putExtra(SchulnetzLoginActivity.EXTRA_HOST, host)
@@ -148,10 +157,12 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         SchulnetzLoginBridge.landingUrl = ""
         val web = extractWebSession(url, html, baseUrl)
         val php = phpSessionCookie(baseUrl)
-        if (web == null || php.isBlank()) {
+        if (web == null) {
+            graph.schulnetzLog.info("visible login finished without session ids url=${redactSchulnetzSecrets(url)}")
             message = "Schulnetz-Anmeldung abgebrochen."
             return
         }
+        graph.schulnetzLog.info("visible login finished url=${redactSchulnetzSecrets(url)} cookieNames=${cookieNames(CookieManager.getInstance().getCookie(baseUrl).orEmpty()).joinToString("|")}")
         graph.saveWebSession(web.copy(phpSessionId = php))
         busy = true
         viewModelScope.launch {
@@ -178,13 +189,42 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
 
     fun shareDebug(context: Context) {
-        val text = debugHtml.ifBlank { graph.debugHtml() }
-        if (text.isBlank()) {
-            message = "Keine Seite zum Teilen."
-            return
+        val app = context.applicationContext
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val raw = debugHtml.ifBlank { graph.debugHtml() }
+                val body = buildString {
+                    if (raw.isBlank()) appendLine("Keine Schulnetz-Seite gespeichert.")
+                    else append(redactSchulnetzSecrets(raw).take(400_000))
+                    appendLine()
+                    append(graph.shareMeta())
+                }
+                val file = File(app.cacheDir, "share").apply { mkdirs() }.resolve("schulnetz-seite.html")
+                file.writeText(body)
+                withContext(Dispatchers.Main) { shareFile(app, "HTML teilen", file, "text/html", body.take(20_000)) }
+            } catch (error: Exception) {
+                graph.schulnetzLog.error(error)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(app, "Teilen fehlgeschlagen: ${error.message ?: "unbekannt"}", Toast.LENGTH_LONG).show()
+                }
+            }
         }
-        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text.take(100_000))
-        context.startActivity(Intent.createChooser(send, "HTML teilen").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    fun shareLogs(context: Context) {
+        val app = context.applicationContext
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                graph.schulnetzLog.info("share logs")
+                val file = graph.buildShareZip()
+                withContext(Dispatchers.Main) { shareFile(app, "Logs teilen", file, "application/zip", "Schulnetz-Logs") }
+            } catch (error: Exception) {
+                graph.schulnetzLog.error(error)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(app, "Teilen fehlgeschlagen: ${error.message ?: "unbekannt"}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     fun unlink() {
@@ -308,8 +348,35 @@ internal fun exportSsoCookies(): Map<String, String> {
     }.toMap()
 }
 
-internal fun hasMicrosoftCookies(): Boolean =
-    SSO_COOKIE_URLS.any { url -> CookieManager.getInstance().getCookie(url)?.isNotBlank() == true }
+internal fun hasMicrosoftCookies(): Boolean = microsoftCookieNames().isNotBlank()
+
+internal fun microsoftCookieNames(): String =
+    SSO_COOKIE_URLS.mapNotNull { url ->
+        val names = cookieNames(CookieManager.getInstance().getCookie(url).orEmpty())
+        val host = runCatching { URI(url).host }.getOrNull() ?: return@mapNotNull null
+        if (names.isEmpty()) null else "$host=${names.joinToString("|")}"
+    }.joinToString(",")
+
+internal fun shareFile(context: Context, title: String, file: File, mime: String, extraText: String?) {
+    val send = Runnable {
+        try {
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+            val intent = Intent(Intent.ACTION_SEND)
+                .setType(mime)
+                .putExtra(Intent.EXTRA_STREAM, uri)
+                .putExtra(Intent.EXTRA_SUBJECT, title)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            if (!extraText.isNullOrBlank()) intent.putExtra(Intent.EXTRA_TEXT, extraText)
+            intent.clipData = ClipData.newRawUri(title, uri)
+            val chooser = Intent.createChooser(intent, title)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            context.startActivity(chooser)
+        } catch (error: Exception) {
+            Toast.makeText(context, "Teilen fehlgeschlagen: ${error.message ?: "unbekannt"}", Toast.LENGTH_LONG).show()
+        }
+    }
+    if (Looper.myLooper() == Looper.getMainLooper()) send.run() else Handler(Looper.getMainLooper()).post(send)
+}
 
 internal fun phpSessionCookie(baseUrl: String): String {
     val raw = CookieManager.getInstance().getCookie(baseUrl).orEmpty()
