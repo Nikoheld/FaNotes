@@ -1041,6 +1041,44 @@ export const camelSplitFromReading = <T extends { char: string }>(
 }
 
 /**
+ * A four-letter unknown word takes the three-letter dictionary word a close reading
+ * already has when the two spellings are two edits apart (`eine` → `one`).
+ */
+export const SHORT_KNOWN_MARGIN = 1.2
+
+export const shortKnownWordFromReading = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > SHORT_KNOWN_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    if ([...from].length !== 4 || [...to].length !== 3) continue
+    if (wordEdits(from, to) !== 2) continue
+    if (known(from) || !known(to)) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
  * A quote stuck to a closing parenthesis moves in front of the following lowercase word
  * (`(Tanis 6a)" if` → `(Tanis 6a) "if`).
  */
@@ -2743,5 +2781,6 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
     characters = camelSplit
     text = characters.map((character) => character.char).join('')
   }
+  take(shortKnownWordFromReading(text, decoded.readings, known), rewriteWord)
   return { text, characters }
 }
