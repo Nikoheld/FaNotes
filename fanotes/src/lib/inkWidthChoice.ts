@@ -519,6 +519,40 @@ export const spaceBetweenDifferentQuotes = <T extends { char: string }>(characte
   return changed ? next : null
 }
 
+/** A letter or digit keeps a closing bracket against it (`up ]` → `up]`). */
+export const closeBracketAfterLetter = <T extends { char: string }>(characters: T[]): T[] | null => {
+  const next = characters.slice()
+  let changed = false
+  for (let index = 0; index < next.length - 2; index += 1) {
+    if (next[index + 1].char !== ' ' || next[index + 2].char !== ']') continue
+    if (!/[A-Za-z0-9ÄÖÜäöüß]/u.test(next[index].char)) continue
+    next.splice(index + 1, 1)
+    changed = true
+  }
+  return changed ? next : null
+}
+
+/** A run of three identical marks takes a space before a different mark (`***` then slashes). */
+export const spaceBetweenSymbolRuns = <T extends { char: string }>(characters: T[]): T[] | null => {
+  const symbol = (char: string) => char !== ' ' && !/[A-Za-z0-9ÄÖÜäöüß]/u.test(char)
+  const next = characters.slice()
+  let changed = false
+  for (let index = 0; index < next.length;) {
+    const mark = next[index].char
+    if (!symbol(mark)) { index += 1; continue }
+    let end = index + 1
+    while (end < next.length && next[end].char === mark) end += 1
+    if (end - index >= 3 && end < next.length && symbol(next[end].char) && next[end].char !== mark) {
+      next.splice(end, 0, { ...next[end], char: ' ' })
+      changed = true
+      index = end + 1
+      continue
+    }
+    index = end
+  }
+  return changed ? next : null
+}
+
 /** A lone English `i`, including `i'm`, is the pronoun (`i know` → `I know`). */
 export const capitalizeEnglishPronoun = (text: string, language: string): WordEdit | null => {
   if (language !== 'en') return null
@@ -1542,6 +1576,16 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   const quoteSpace = spaceBetweenDifferentQuotes(characters)
   if (quoteSpace) {
     characters = quoteSpace
+    text = characters.map((character) => character.char).join('')
+  }
+  const closedBracket = closeBracketAfterLetter(characters)
+  if (closedBracket) {
+    characters = closedBracket
+    text = characters.map((character) => character.char).join('')
+  }
+  const symbolSpace = spaceBetweenSymbolRuns(characters)
+  if (symbolSpace) {
+    characters = symbolSpace
     text = characters.map((character) => character.char).join('')
   }
   return { text, characters }

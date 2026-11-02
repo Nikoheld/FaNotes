@@ -82,7 +82,9 @@ import {
   capitalizeEnglishPronoun,
   periodBeforeCapitals,
   quoteAfterParenthesis,
+  closeBracketAfterLetter,
   spaceBetweenDifferentQuotes,
+  spaceBetweenSymbolRuns,
   strayParenBeforeCapital,
   lowercaseInitialFromBeam,
   lowercaseShortBeamWord,
@@ -1219,6 +1221,16 @@ export async function recognizeInk(
     const quoteSpace = spaceBetweenDifferentQuotes(decoded.characters)
     if (quoteSpace) {
       decoded = { ...decoded, characters: quoteSpace, text: quoteSpace.map((character) => character.char).join('') }
+      stitched = null
+    }
+    const closedBracket = closeBracketAfterLetter(decoded.characters)
+    if (closedBracket) {
+      decoded = { ...decoded, characters: closedBracket, text: closedBracket.map((character) => character.char).join('') }
+      stitched = null
+    }
+    const symbolSpace = spaceBetweenSymbolRuns(decoded.characters)
+    if (symbolSpace) {
+      decoded = { ...decoded, characters: symbolSpace, text: symbolSpace.map((character) => character.char).join('') }
       stitched = null
     }
     const known = (word: string) => wordIsKnown(lineLanguage, word)
