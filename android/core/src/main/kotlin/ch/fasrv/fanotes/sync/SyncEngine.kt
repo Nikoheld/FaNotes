@@ -403,13 +403,16 @@ class SyncEngine(
         val pending = mutableListOf<SyncRemoteEntry>()
         var since = table.cursor
         var pages = 0
-        while (pages < 200) {
+        var more = false
+        while (pages < 2000) {
             val page = api.changes(active, since)
             pending += page.entries
             since = page.nextSince
             pages += 1
-            if (!page.more) break
+            more = page.more
+            if (!more) break
         }
+        if (more) log("warn", "Sync pull stopped after $pages pages; more changes remain.")
         if (pending.isEmpty()) return 0
         publish(state.value.copy(progress = SyncProgress("pull", 0, pending.size)))
         val idIndex = table.files.map { (path, base) -> base.id to path }.toMap(linkedMapOf())

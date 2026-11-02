@@ -146,8 +146,31 @@ fun pageUrl(baseUrl: String, pageId: String, id: String, transid: String, extra:
     return "${baseUrl.trimEnd('/')}/index.php?pageid=$pageId&id=$id&transid=$transid$tail"
 }
 
-fun schedulerUrl(baseUrl: String, id: String, transid: String, today: String, minDate: String, maxDate: String): String =
-    "${baseUrl.trimEnd('/')}/scheduler_processor.php?view=week&curr_date=$today&min_date=$minDate&max_date=$maxDate&ansicht=schueleransicht&id=$id&transid=$transid&pageid=22202&timeshift=-120"
+fun schedulerUrl(baseUrl: String, id: String, transid: String, today: String, minDate: String, maxDate: String): String {
+    val from = urlEncode("$minDate 00:00")
+    val to = urlEncode("$maxDate 23:59")
+    return "${baseUrl.trimEnd('/')}/scheduler_processor.php?view=week&from=$from&to=$to&curr_date=$today&min_date=$minDate&max_date=$maxDate&ansicht=schueleransicht&id=$id&transid=$transid&pageid=22202&timeshift=-60"
+}
+
+/** The Schülerplan page's own scheduler.load URL, with the range the connector expects. */
+fun findSchedulerUrl(html: String, baseUrl: String, id: String, transid: String, from: String, to: String): String? {
+    val raw = Regex("""scheduler_processor\.php\?[^"'\\\s<>]+""").find(html)?.value ?: return null
+    val absolute = absoluteSchoolUrl(baseUrl, raw)
+    if (isForcedLogoutUrl(absolute) || !webReadAllowed(absolute)) return null
+    val extra = buildString {
+        if (!absolute.contains("from=")) append("&from=").append(urlEncode(from)).append("&to=").append(urlEncode(to))
+        if (!absolute.contains("id=") && id.isNotBlank()) append("&id=").append(id)
+        if (!absolute.contains("transid=") && transid.isNotBlank()) append("&transid=").append(transid)
+        if (!absolute.contains("pageid=")) append("&pageid=22202")
+        if (!absolute.contains("ansicht=")) append("&ansicht=schueleransicht")
+        if (!absolute.contains("timeshift=")) append("&timeshift=-60")
+    }
+    val url = absolute + extra
+    return url.takeIf { webReadAllowed(it) }
+}
+
+private fun urlEncode(value: String): String =
+    java.net.URLEncoder.encode(value, Charsets.UTF_8).replace("+", "%20")
 
 /** Microsoft hosts whose cookies let a later login skip the password. PHPSESSID is never one of them. */
 val SSO_COOKIE_URLS = listOf(

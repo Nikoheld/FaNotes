@@ -388,7 +388,37 @@ class WebSessionTest {
         assertEquals("Mathematik", parsed.value.single().course)
         assertEquals("2026-10-20", parsed.value.single().date)
         val broken = readGradesPage("<html><body>etwas anderes</body></html>")
-        assertEquals("Noten: Seite konnte nicht gelesen werden", broken.error)
+        assertEquals("Noten: Seite geladen, aber nicht lesbar", broken.error)
+        val mdl = """
+            <table class="mdl-data-table">
+              <thead><tr><th>Fach</th><th>Datum</th><th>Thema</th><th>Note</th><th>Gewichtung</th></tr></thead>
+              <tbody><tr><td>Mathematik</td><td>20.10.2026</td><td>Probe</td><td>5.5</td><td>1</td></tr></tbody>
+            </table>
+        """.trimIndent()
+        val headerGrade = readGradesPage(mdl)
+        assertEquals(null, headerGrade.error)
+        assertEquals(5.5, headerGrade.value.single().mark)
+        assertEquals("Mathematik", headerGrade.value.single().course)
+        val absenceTable = """
+            <table class="mdl-data-table">
+              <tr><th>Datum</th><th>Zeit</th><th>Lektion</th><th>Grund</th><th>Status</th></tr>
+              <tr><td>01.10.2026</td><td>08:15</td><td>Mathematik</td><td>Arzt</td><td>offen</td></tr>
+            </table>
+        """.trimIndent()
+        val absenceRow = readAbsencesPage(absenceTable).value.single()
+        assertEquals("Arzt", absenceRow.reason)
+        assertEquals("Mathematik", absenceRow.subject)
+        val examTable = """
+            <table><tr><th>Datum</th><th>Kurs</th><th>Thema</th></tr>
+            <tr><td>12.11.2026</td><td>Englisch</td><td>Vokabeltest</td></tr></table>
+        """.trimIndent()
+        assertEquals("Vokabeltest", readExamsPage(examTable).value.single().text)
+        assertTrue(describeTables(mdl).contains("tables=1"))
+        val plan = """<script>scheduler.load("scheduler_processor.php?view=week&ansicht=schueleransicht&id=abc123&transid=a1b2c3&pageid=22202");</script>"""
+        val found = findSchedulerUrl(plan, AKSA_SCHULNETZ_BASE, "abc123", "a1b2c3", "2026-11-02 00:00", "2026-11-08 23:59")
+        assertTrue(found!!.contains("scheduler_processor.php"))
+        assertTrue(found.contains("from=2026-11-02%2000%3A00"))
+        assertTrue(schedulerUrl(AKSA_SCHULNETZ_BASE, "abc", "def", "2026-11-02", "2026-10-26", "2026-11-08").contains("from="))
 
         val absences = """
             <main><table>

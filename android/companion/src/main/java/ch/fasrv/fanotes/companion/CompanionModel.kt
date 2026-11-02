@@ -54,6 +54,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var snapshot by mutableStateOf(graph.snapshot.value)
     var link by mutableStateOf(graph.link.value)
     var notes by mutableStateOf<List<VaultNode>>(emptyList())
+    var noteFolder by mutableStateOf("")
     var tasks by mutableStateOf<List<HomeworkTask>>(emptyList())
     var calendar by mutableStateOf<CalendarDocument>(emptyCalendar())
     var hypothetical by mutableStateOf<List<HypotheticalGrade>>(emptyList())
@@ -73,11 +74,16 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
 
     fun reload() {
         viewModelScope.launch(Dispatchers.IO) {
-            val nextNotes = runCatching { graph.notes() }.getOrDefault(emptyList())
+            val nextNotes = runCatching {
+                graph.logNoteCensus()
+                val folder = if (graph.noteFolderExists(noteFolder)) noteFolder else ""
+                graph.notes(folder)
+            }.getOrDefault(emptyList())
             val nextTasks = runCatching { graph.homework().tasks }.getOrDefault(emptyList())
             val nextCalendar = runCatching { graph.calendar() }.getOrDefault(emptyCalendar())
             val nextGuess = runCatching { graph.hypothetical() }.getOrDefault(emptyList())
             withContext(Dispatchers.Main) {
+                if (!graph.noteFolderExists(noteFolder)) noteFolder = ""
                 notes = nextNotes
                 tasks = nextTasks
                 calendar = nextCalendar
@@ -174,8 +180,9 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
 
     fun onWebLoginCancelled() {
+        val viewing = graph.viewingSession
         graph.finishVisibleLogin(null)
-        message = "Schulnetz-Anmeldung abgebrochen."
+        if (!viewing) message = "Schulnetz-Anmeldung abgebrochen."
     }
 
     fun shareDebug(context: Context) {
@@ -286,7 +293,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
 
     fun createNote(title: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            val path = graph.store.createUniqueMarkdown("", title.ifBlank { "Notiz" })
+            val path = graph.store.createUniqueMarkdown(noteFolder, title.ifBlank { "Notiz" })
             graph.engine.notifyLocalChange()
             withContext(Dispatchers.Main) {
                 editorPath = path

@@ -3,6 +3,7 @@
 package ch.fasrv.fanotes.companion
 
 import android.app.Activity
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -98,6 +99,11 @@ fun CompanionRoot(model: CompanionModel) {
     }
     LaunchedEffect(model) {
         model.graph.loginRequests.collect { intent -> loginLauncher.launch(intent) }
+    }
+    LaunchedEffect(model) {
+        model.graph.notices.collect { text ->
+            Toast.makeText(context, text, Toast.LENGTH_LONG).show()
+        }
     }
     val sync by model.graph.engine.state.collectAsState()
     if (sync.account == null) {
@@ -231,7 +237,9 @@ private fun PlanScreen(model: CompanionModel) {
         val lessons = eventsOn(model.snapshot.events, model.day, zone)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
             item { ShareRow(model) }
-            if (lessons.isEmpty()) item { Text("Keine Lektionen.", modifier = Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            if (lessons.isEmpty()) item {
+                Text(model.snapshot.readErrors.firstOrNull { it.startsWith("Stundenplan:") } ?: "Keine Lektionen.", modifier = Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             items(lessons) { event ->
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp).background(paletteColor(event.displayColor()).copy(alpha = 0.18f), RoundedCornerShape(10.dp)).padding(12.dp)) {
                     Column {
@@ -255,7 +263,9 @@ private fun GradesScreen(model: CompanionModel) {
             Text("Schnitt ${formatMark(overallAverage(courses))} · Pluspunkte ${formatPluspunkte(overallPluspunkte(courses))}", modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.SemiBold)
         }
         items(courses) { course -> CourseCard(model, course) }
-        if (courses.isEmpty()) item { Text("Noch keine Noten. Schulnetz unter Mehr verbinden.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        if (courses.isEmpty()) item {
+            Text(model.snapshot.readErrors.firstOrNull { it.startsWith("Noten:") } ?: "Noch keine Noten.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         item { ShareRow(model) }
     }
 }
@@ -296,18 +306,30 @@ private fun CourseCard(model: CompanionModel, course: ch.fasrv.fanotes.schulnetz
 
 @Composable
 private fun NotesScreen(model: CompanionModel) {
+    val crumbs = model.noteFolder.split('/').filter { it.isNotBlank() }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("Notizen", style = MaterialTheme.typography.titleLarge)
+            Text(if (crumbs.isEmpty()) "Notizen" else crumbs.last(), style = MaterialTheme.typography.titleLarge)
             TextButton(onClick = { model.createNote("Notiz") }) { Text("Neu") }
         }
+        if (crumbs.isNotEmpty()) {
+            TextButton(onClick = { model.noteFolder = model.noteFolder.substringBeforeLast('/', ""); model.reload() }) { Text("Zurück") }
+            Text(crumbs.joinToString(" / "), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (model.notes.isEmpty()) item { Text("Dieser Ordner ist leer.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             items(model.notes) { note ->
+                val folder = note.kind == ch.fasrv.fanotes.vault.NoteKind.FOLDER
                 Text(
-                    note.name,
+                    if (folder) "Ordner · ${note.name}" else note.name,
                     modifier = Modifier.fillMaxWidth().clickable {
-                        model.editorPath = note.path
-                        model.section = PhoneSection.Editor
+                        if (folder) {
+                            model.noteFolder = note.path
+                            model.reload()
+                        } else {
+                            model.editorPath = note.path
+                            model.section = PhoneSection.Editor
+                        }
                     }.padding(vertical = 12.dp),
                     style = MaterialTheme.typography.titleMedium,
                 )
@@ -380,7 +402,12 @@ private fun MoreScreen(model: CompanionModel) {
     when (model.section) {
         PhoneSection.Hausaufgaben -> HomeworkScreen(model)
         PhoneSection.Kalender -> CalendarScreen(model)
-        PhoneSection.Absenzen -> SimpleList("Absenzen", model.snapshot.absences.map { "${it.dateFrom} · ${it.subject.ifBlank { "Absenz" }} · ${it.reason} · ${if (it.excused) "entschuldigt" else "offen"}" }) { model.section = PhoneSection.Menu }
+        PhoneSection.Absenzen -> SimpleList(
+            "Absenzen",
+            listOfNotNull(model.snapshot.readErrors.firstOrNull { it.startsWith("Absenzen:") }).ifEmpty {
+                model.snapshot.absences.map { "${it.dateFrom} · ${it.subject.ifBlank { "Absenz" }} · ${it.reason} · ${if (it.excused) "entschuldigt" else "offen"}" }.ifEmpty { listOf("Keine Absenzen.") }
+            },
+        ) { model.section = PhoneSection.Menu }
         PhoneSection.Pruefungen -> ExamScreen(model)
         PhoneSection.Termine -> SimpleList("Termine", model.snapshot.events.filter { !it.isLesson() }.map { "${it.label} · ${it.start}" } + model.snapshot.vacations.map { "${it.name} · ${it.start}" }) { model.section = PhoneSection.Menu }
         PhoneSection.Konto -> SimpleList(
@@ -451,6 +478,9 @@ private fun ExamScreen(model: CompanionModel) {
     Column(Modifier.fillMaxSize()) {
         TextButton(onClick = { model.section = PhoneSection.Menu }) { Text("Zurück") }
         LazyColumn {
+            if (model.snapshot.exams.isEmpty()) item {
+                Text(model.snapshot.readErrors.firstOrNull { it.startsWith("Prüfungen:") } ?: "Keine Prüfungen.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             items(model.snapshot.exams) { exam ->
                 Column(Modifier.padding(vertical = 8.dp)) {
                     Text(exam.label, fontWeight = FontWeight.Medium)
@@ -484,7 +514,7 @@ private fun SettingsScreen(model: CompanionModel) {
             })
         }
         if (model.link.linked) TextButton(onClick = { model.unlink() }) { Text("Trennen") }
-        model.snapshot.readErrors.filter { it.contains("nicht gelesen") }.forEach { Text(it, color = MaterialTheme.colorScheme.error) }
+        model.snapshot.readErrors.filter { it.contains("nicht gelesen") || it.contains("nicht lesbar") }.forEach { Text(it, color = MaterialTheme.colorScheme.error) }
         ShareRow(model)
         Text("Benachrichtigungen", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
         SettingSwitch("Neue Note", model.settings.grades) { model.toggleSetting("grades") }

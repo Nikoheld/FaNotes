@@ -55,6 +55,9 @@ import ch.fasrv.fanotes.sync.SyncScanEntry
 import ch.fasrv.fanotes.vault.DirectoryVault
 import ch.fasrv.fanotes.vault.NoteKind
 import ch.fasrv.fanotes.vault.NoteStore
+import ch.fasrv.fanotes.vault.censusNotes
+import ch.fasrv.fanotes.vault.folderChildren
+import ch.fasrv.fanotes.vault.folderExists
 import ch.fasrv.fanotes.vault.VaultIo
 import ch.fasrv.fanotes.vault.VaultNode
 import kotlinx.coroutines.CompletableDeferred
@@ -88,11 +91,14 @@ class CompanionGraph(private val context: Context) {
     val browser = SchulnetzBrowser(context, schulnetzLog)
     val gate = SchulnetzGate()
     val loginRequests = MutableSharedFlow<Intent>(extraBufferCapacity = 1)
+    val notices = MutableSharedFlow<String>(extraBufferCapacity = 4)
     @Volatile var signedOut: Boolean = false
     @Volatile var oauthPermitted: Boolean = false
+    @Volatile var viewingSession: Boolean = false
     private var oauthConsumed = false
     private var loginResult: CompletableDeferred<Boolean>? = null
     private var lastRefreshAt = 0L
+    private var lastSessionShownAt = 0L
     private val stateDir = File(context.filesDir, "sync-state").apply { mkdirs() }
 
     val engine: SyncEngine = SyncEngine(
@@ -221,16 +227,19 @@ class CompanionGraph(private val context: Context) {
         runCatching { client.registerEndpoint(session, endpoint) }
     }
 
-    fun notes(): List<VaultNode> {
-        fun walk(nodes: List<VaultNode>): List<VaultNode> = nodes.flatMap { node ->
-            val self = if (node.kind == NoteKind.MARKDOWN && node.path.endsWith(".md") && node.path != HOMEWORK_NOTE_PATH && node.path != CALENDAR_NOTE_PATH) {
-                listOf(node)
-            } else {
-                emptyList()
-            }
-            self + walk(node.children)
+    fun noteFolderExists(folder: String): Boolean = folderExists(store.tree(), folder)
+
+    fun notes(folder: String = ""): List<VaultNode> {
+        val skip = setOf(HOMEWORK_NOTE_PATH, CALENDAR_NOTE_PATH)
+        return folderChildren(store.tree(), folder).filter { node ->
+            node.kind == NoteKind.FOLDER || node.path !in skip
         }
-        return walk(store.tree())
+    }
+
+    fun logNoteCensus() {
+        val census = censusNotes(store.tree(), setOf(HOMEWORK_NOTE_PATH, CALENDAR_NOTE_PATH))
+        val detail = census.perFolder.entries.joinToString(",") { (folder, count) -> "$folder:$count" }
+        schulnetzLog.info("notes fetched=${census.notes} folders=${census.folders} perFolder=$detail")
     }
 
     fun homework(): HomeworkDocument {
@@ -390,6 +399,7 @@ class CompanionGraph(private val context: Context) {
         schulnetzLog.info("refresh pages family=${SchulnetzBrowser.localAddressFamily()} signedOut=$signedOut lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()} microsoftCookies=${microsoftCookieNames()}")
         var current = readWebSession() ?: WebSession(baseUrl(), phpSessionCookie(baseUrl()), "", "")
         var bundle = runCatching { client.fetchWeb(baseUrl(), current, browser::load, signedOut, schulnetzLog::info) }.onFailure { schulnetzLog.error(it) }.getOrNull()
+        storeCaptures(bundle)
         if (bundle != null && bundle.oauthPage != null && bundle.okPages > 0) {
             val kept = recoverOauth(previous, bundle)
             signedOut = false
@@ -412,6 +422,7 @@ class CompanionGraph(private val context: Context) {
             }
             current = silent
             bundle = runCatching { client.fetchWeb(baseUrl(), current, browser::load, signedOut = false, schulnetzLog::info) }.onFailure { schulnetzLog.error(it) }.getOrNull()
+            storeCaptures(bundle)
             if (bundle != null && bundle.oauthPage != null && bundle.okPages > 0) {
                 signedOut = false
                 link.value = link.value.copy(needsReauth = false, lastError = "")
@@ -425,9 +436,16 @@ class CompanionGraph(private val context: Context) {
         }
         if (bundle.session.id.isNotBlank()) saveWebSession(bundle.session.copy(phpSessionId = phpSessionCookie(baseUrl())))
         keepDebug(bundle.debugHtml)
-        signedOut = false
-        link.value = link.value.copy(needsReauth = false, lastError = "")
+        if (bundle.okPages > 0 && bundle.problem != SessionProblem.LOGIN_WALL && bundle.problem != SessionProblem.INTERACTIVE) {
+            signedOut = false
+            link.value = link.value.copy(needsReauth = false, lastError = "")
+            schulnetzLog.info("login required cleared okPages=${bundle.okPages} lockHeld=true")
+        }
         return keepLoaded(previous, bundle.snapshot).copy(readErrors = bundle.snapshot.readErrors.filter { it != "Bei Schulnetz neu anmelden" })
+    }
+
+    private fun storeCaptures(bundle: WebBundle?) {
+        bundle?.captures?.forEach { (name, html) -> schulnetzLog.rememberPage(name, "", html) }
     }
 
     private suspend fun recoverOauth(previous: SchulnetzSnapshot, bundle: WebBundle): SchulnetzSnapshot {
@@ -489,13 +507,15 @@ class CompanionGraph(private val context: Context) {
             schulnetzLog.info("visible login acquired caller=$caller lockHeld=true holder=${gate.holder.orEmpty()}")
             var openOauth = signedOut || readWebSession() == null
             if (!openOauth) {
-                if (System.currentTimeMillis() - lastRefreshAt < 15_000) {
-                    schulnetzLog.info("visible login skipped caller=$caller lockHeld=true reason=session-id-present")
-                } else {
+                if (System.currentTimeMillis() - lastRefreshAt >= 15_000) {
                     schulnetzLog.info("visible login redirected caller=$caller lockHeld=true reason=session-id-present")
                     withContext(Dispatchers.IO) { refreshLocked("button:$caller") }
-                    openOauth = signedOut
-                    if (!openOauth) schulnetzLog.info("visible login skipped caller=$caller lockHeld=true reason=session-ok")
+                }
+                val session = readWebSession()
+                if (session != null && !signedOut) {
+                    showExistingSession(caller, session)
+                } else {
+                    openOauth = true
                 }
             }
             val intent = if (openOauth) loginIntent() else null
@@ -527,6 +547,38 @@ class CompanionGraph(private val context: Context) {
                 }
             }
         }
+    }
+
+    private suspend fun showExistingSession(caller: String, session: WebSession) {
+        notices.tryEmit("Bereits bei Schulnetz angemeldet")
+        link.value = link.value.copy(needsReauth = false, lastError = "")
+        schulnetzLog.info("visible login shows session caller=$caller lockHeld=true id=${session.id} transid=${session.transid}")
+        if (System.currentTimeMillis() - lastSessionShownAt < 30_000) return
+        lastSessionShownAt = System.currentTimeMillis()
+        val intent = sessionViewIntent(session) ?: return
+        val done = CompletableDeferred<Boolean>()
+        loginResult = done
+        viewingSession = true
+        try {
+            if (!loginRequests.tryEmit(intent)) {
+                schulnetzLog.info("visible session not shown caller=$caller reason=no-subscriber")
+            } else {
+                withTimeoutOrNull(300_000) { done.await() }
+            }
+        } finally {
+            viewingSession = false
+            loginResult = null
+        }
+    }
+
+    private fun sessionViewIntent(session: WebSession): Intent? {
+        val host = runCatching { java.net.URI(session.baseUrl.ifBlank { baseUrl() }).host }.getOrNull() ?: return null
+        val url = pageUrl(session.baseUrl.ifBlank { baseUrl() }, "1", session.id, session.transid)
+        return Intent(context, SchulnetzLoginActivity::class.java)
+            .putExtra(SchulnetzLoginActivity.EXTRA_URL, url)
+            .putExtra(SchulnetzLoginActivity.EXTRA_HOST, host)
+            .putExtra(SchulnetzLoginActivity.EXTRA_BASE, session.baseUrl.ifBlank { baseUrl() })
+            .putExtra(SchulnetzLoginActivity.EXTRA_VIEW, true)
     }
 
     fun consumeOauthPermit(): Boolean {

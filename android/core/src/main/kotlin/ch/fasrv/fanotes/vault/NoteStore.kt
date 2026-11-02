@@ -61,6 +61,61 @@ data class VaultNode(
     val children: List<VaultNode> = emptyList(),
 )
 
+data class NoteCensus(val notes: Int, val folders: Int, val perFolder: Map<String, Int>)
+
+fun folderExists(tree: List<VaultNode>, folder: String): Boolean {
+    if (folder.isBlank()) return true
+    fun find(nodes: List<VaultNode>): Boolean {
+        for (node in nodes) {
+            if (node.kind != NoteKind.FOLDER) continue
+            if (node.path == folder) return true
+            if (find(node.children)) return true
+        }
+        return false
+    }
+    return find(tree)
+}
+
+/** Notes and folders directly inside [folder]. An empty folder is the vault root. */
+fun folderChildren(tree: List<VaultNode>, folder: String): List<VaultNode> {
+    if (folder.isBlank()) return tree
+    fun find(nodes: List<VaultNode>): List<VaultNode>? {
+        for (node in nodes) {
+            if (node.kind != NoteKind.FOLDER) continue
+            if (node.path == folder) return node.children
+            val nested = find(node.children)
+            if (nested != null) return nested
+        }
+        return null
+    }
+    return find(tree).orEmpty()
+}
+
+/** Every user note and folder. [skip] hides desk files such as Hausaufgaben.md. */
+fun censusNotes(nodes: List<VaultNode>, skip: Set<String> = emptySet()): NoteCensus {
+    var notes = 0
+    var folders = 0
+    val perFolder = linkedMapOf<String, Int>()
+    fun walk(list: List<VaultNode>, folder: String) {
+        var here = 0
+        for (node in list) {
+            when (node.kind) {
+                NoteKind.FOLDER -> {
+                    folders += 1
+                    walk(node.children, node.path)
+                }
+                NoteKind.MARKDOWN, NoteKind.PDF -> if (node.path !in skip) {
+                    notes += 1
+                    here += 1
+                }
+            }
+        }
+        perFolder[folder.ifBlank { "/" }] = here
+    }
+    walk(nodes, "")
+    return NoteCensus(notes, folders, perFolder)
+}
+
 data class OpenNote(
     val path: String,
     val kind: NoteKind,
