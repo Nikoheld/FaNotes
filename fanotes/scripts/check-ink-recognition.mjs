@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { createNativeOcrHost } from '../electron/native-ocr.cjs'
 import { initSync, inkDecode, inkGroupLines, inkLineImage, inkSpanBoxes, setInkExactWords, setInkLanguageModel, setInkLexicon } from '../src/lib/recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from '../src/lib/recogWasm/bytes.ts'
-import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, longerKnownCropWord, quotedWordAfterDoubleSix, leadingStrokesAreTicks, COMPOUND_PEN, COMPOUND_SHEAR, COMPOUND_SCALE, dictionaryCompound, isolatedWideGroups, lowercaseShortBeamWord, lowercaseInitialFromBeam, capitalizeEnglishPronoun, periodBeforeCapitals, quoteAfterParenthesis, closeBracketAfterLetter, openingBracketFromTrace, spaceBetweenDifferentQuotes, spaceBetweenSymbolRuns, oneLetterFromCloseReading, laterDictionaryCaseFromBeam, repeatedLetterGroup, splitFunctionWordJoin, strayParenBeforeCapital, tracedFinalComma, accusativeDer, trailingTracedLetter, transposedTraceWord, personalNeighborEdits, finalizeInkLineText, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
+import { BRACKET_COMMA_MARGIN, BRACKET_STRETCH, FIRST_LETTER_MARGIN, INK_RETRY_VARIANTS, INK_SHEAR_RETRY, LARGER_SCALE, MERGE_SCORE_MARGIN, MIXED_CASE_SCALE, NARROW_LINE_MARGIN, NARROW_SCALE, NARROW_STRETCH, NARROW_STRETCH_MARGIN, NARROW_WORD_MARGIN, SHEAR_SCORE_MARGIN, SPLICE_SCORE_MARGIN, WIDTH_RETRY_MARGIN, capitalizesOnlyTheFirstLetter, charactersWithWordEdits, aToAeIndexes, charactersSeparatingFinalB, dToBIndexes, separateFinalBIndexes, fToLowerIndexes, finalLetterApostropheIndexes, rToNIndexes, foldInkWord, hasLongUnknownWord, hasMixedInteriorCase, longUnknownWordEdits, narrowScaleKeepsKnownWords, capitalCompoundIndex, charactersJoiningWords, insertedLetterInOneKnownWord, kraftPluralFromReading, capitalizedNounAfterDeterminer, capitalizedSentenceAdverb, capitalizeLoneLowercase, largerScaleGrowsOneWord, tripleLetterFromNarrowGreedy, hasOneOddLetterGroup, longerKnownCropWord, quotedWordAfterDoubleSix, leadingStrokesAreTicks, COMPOUND_PEN, COMPOUND_SHEAR, COMPOUND_SCALE, dictionaryCompound, isolatedWideGroups, lowercaseShortBeamWord, lowercaseInitialFromBeam, capitalizeEnglishPronoun, periodBeforeCapitals, quoteAfterParenthesis, closeBracketAfterLetter, openingBracketFromTrace, spaceBetweenDifferentQuotes, spaceBetweenSymbolRuns, oneLetterFromCloseReading, laterDictionaryCaseFromBeam, lowercaseMidSentenceAdverb, unknownWordFromReading, repeatedLetterGroup, splitFunctionWordJoin, strayParenBeforeCapital, tracedFinalComma, accusativeDer, trailingTracedLetter, transposedTraceWord, personalNeighborEdits, finalizeInkLineText, interiorCapitalNeighbor, lowercaseVerbSein, umlautAndOneOtherLetter, nounAfterAttributiveAdjective, oneLetterInALongUnknownWord, oneUnknownWordBecomesKnown, replacesBracketPeriodWithComma, rewriteSameLengthWord, rewriteWord, sameLettersAllowingCapsJoin, shearReadingRewritesTwoWords, stretchedReadingKeepsKnownWords, textWithWordEdits, widthReadingKeepsKnownWords, widthReadingMergesTwoWords } from '../src/lib/inkWidthChoice.ts'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ocr = path.join(appRoot, 'public', 'ocr')
@@ -238,6 +238,38 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
     { text: 'Westfälische Buch', score: 0 },
     { text: 'Westfälische Bucht', score: -0.6 },
   ]), null)
+  assert.equal(oneLetterFromCloseReading(quoteChars('Jahren i'), [
+    { text: 'Jahren i', score: 0 },
+    { text: 'Jahren im', score: -0.08 },
+  ], () => false).map((character) => character.char).join(''), 'Jahren im')
+  assert.equal(oneLetterFromCloseReading(quoteChars('for reachy'), [
+    { text: 'for reachy', score: 0 },
+    { text: 'for reachiy', score: -0.4 },
+  ], () => false), null)
+  assert.equal(unknownWordFromReading('only ane among thousands who do not.', [
+    { text: 'only are among thousands who do not.', score: 0 },
+    { text: 'only one among thousands who do not.', score: -0.22 },
+  ], knownWord('en'))?.to, 'one')
+  assert.equal(unknownWordFromReading('with five dozen liquor', [
+    { text: 'with five dozen liquor', score: 0 },
+    { text: 'with fine dozen liquor', score: -0.01 },
+  ], knownWord('en')), null)
+  assert.equal(unknownWordFromReading('DDD EEE FFF GGG', [
+    { text: 'DDD EEE FFF GGG', score: 0 },
+    { text: 'DOD EEE FFF GGG', score: -0.2 },
+  ], (word) => word.toLowerCase() === 'dod'), null)
+  assert.equal(lowercaseMidSentenceAdverb('wurden Zeitweise das Finale', [
+    { text: 'wurden Zeitweise das Finale', score: 0 },
+    { text: 'wurden zeitweise das Finale', score: -0.51 },
+  ], 'de')?.to, 'zeitweise')
+  assert.equal(lowercaseMidSentenceAdverb('Zeitweise das Finale', [
+    { text: 'Zeitweise das Finale', score: 0 },
+    { text: 'zeitweise das Finale', score: -0.2 },
+  ], 'de'), null)
+  assert.equal(lowercaseMidSentenceAdverb('because their pots would not Stand fire;', [
+    { text: 'because their pots would not Stand fire;', score: 0 },
+    { text: 'because their pots would not stand fire;', score: -0.28 },
+  ], 'en'), null)
   assert.equal(laterDictionaryCaseFromBeam('childish Piecemeal', [
     { text: 'childish Piecemeal', score: 0 },
     { text: 'childish piecemeal', score: -0.11 },
@@ -1021,6 +1053,15 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
         boxes = undefined
       }
     }
+    const adverbCase = lowercaseMidSentenceAdverb(decoded.text, decoded.readings ?? [], entry.language)
+    if (adverbCase) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, adverbCase.index, adverbCase.to)
+      const nextText = textWithWordEdits(decoded.text, [adverbCase])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        boxes = undefined
+      }
+    }
     const movedQuote = quoteAfterParenthesis(decoded.characters)
     if (movedQuote) {
       decoded = { ...decoded, characters: movedQuote, text: movedQuote.map((character) => character.char).join('') }
@@ -1075,7 +1116,16 @@ async function recognize(entry, { strokes = entry.strokes, width = entry.sourceW
         boxes = undefined
       }
     }
-    const extraLetter = oneLetterFromCloseReading(decoded.characters, decoded.readings ?? [])
+    const unknownWord = unknownWordFromReading(decoded.text, decoded.readings ?? [], knownWord(entry.language))
+    if (unknownWord) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, unknownWord.index, unknownWord.to)
+      const nextText = textWithWordEdits(decoded.text, [unknownWord])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        boxes = undefined
+      }
+    }
+    const extraLetter = oneLetterFromCloseReading(decoded.characters, decoded.readings ?? [], knownWord(entry.language))
     if (extraLetter) {
       decoded = { ...decoded, characters: extraLetter, text: extraLetter.map((character) => character.char).join('') }
       boxes = undefined

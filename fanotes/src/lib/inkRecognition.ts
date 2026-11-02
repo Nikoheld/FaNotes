@@ -86,6 +86,8 @@ import {
   openingBracketFromTrace,
   oneLetterFromCloseReading,
   laterDictionaryCaseFromBeam,
+  lowercaseMidSentenceAdverb,
+  unknownWordFromReading,
   repeatedLetterGroup,
   splitFunctionWordJoin,
   tracedFinalComma,
@@ -1214,6 +1216,15 @@ export async function recognizeInk(
         stitched = null
       }
     }
+    const adverbCase = lowercaseMidSentenceAdverb(decoded.text, decoded.readings, lineLanguage)
+    if (adverbCase) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, adverbCase.index, adverbCase.to)
+      const nextText = textWithWordEdits(decoded.text, [adverbCase])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
+    }
     const pronoun = capitalizeEnglishPronoun(decoded.text, lineLanguage)
     if (pronoun) {
       const rewritten = rewriteSameLengthWord(decoded.characters, pronoun.index, pronoun.to)
@@ -1277,7 +1288,16 @@ export async function recognizeInk(
         stitched = null
       }
     }
-    const extraLetter = oneLetterFromCloseReading(decoded.characters, decoded.readings)
+    const unknownWord = unknownWordFromReading(decoded.text, decoded.readings, (word) => wordIsKnown(lineLanguage, word))
+    if (unknownWord) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, unknownWord.index, unknownWord.to)
+      const nextText = textWithWordEdits(decoded.text, [unknownWord])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
+    }
+    const extraLetter = oneLetterFromCloseReading(decoded.characters, decoded.readings, (word) => wordIsKnown(lineLanguage, word))
     if (extraLetter) {
       decoded = { ...decoded, characters: extraLetter, text: extraLetter.map((character) => character.char).join('') }
       stitched = null

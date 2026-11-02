@@ -510,6 +510,51 @@ export const laterDictionaryCaseFromBeam = (
 }
 
 /**
+ * An unknown word may take the one dictionary spelling a beam reading already has,
+ * when that reading is no worse than this. `one` is 0.22 nats down. A different word
+ * about one nat down stays.
+ */
+export const UNKNOWN_WORD_MARGIN = 0.5
+
+/**
+ * An unknown word takes the dictionary spelling a close reading already has when the
+ * two words differ by one letter (`ane` → `one`). A word of one repeated letter stays (`DDD`).
+ */
+export const unknownWordFromReading = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > UNKNOWN_WORD_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    const letters = [...from]
+    if (letters.length < 3 || letters.length !== [...to].length) continue
+    if (letters.every((letter) => letter === letters[0])) continue
+    if (from.toLowerCase() === to.toLowerCase()) continue
+    if (known(from) || !known(to)) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
  * A quote stuck to a closing parenthesis moves in front of the following lowercase word
  * (`(Tanis 6a)" if` → `(Tanis 6a) "if`).
  */
@@ -743,6 +788,7 @@ const oneExtraLetter = (shorter: string, longer: string) => {
 export const oneLetterFromCloseReading = <T extends { char: string }>(
   characters: T[],
   readings: Array<{ text: string; score: number }>,
+  known?: (word: string) => boolean,
 ): T[] | null => {
   const text = characters.map((character) => character.char).join('')
   const top = readings[0]
@@ -761,6 +807,14 @@ export const oneLetterFromCloseReading = <T extends { char: string }>(
   if (!source) return null
   const next = characters.slice()
   next.splice(found.index, 0, { ...source, char: found.char })
+  if (known) {
+    let start = found.index
+    while (start > 0 && /[A-Za-zÄÖÜäöüß]/u.test(next[start - 1].char)) start -= 1
+    let end = found.index
+    while (end < next.length && /[A-Za-zÄÖÜäöüß]/u.test(next[end].char)) end += 1
+    const word = next.slice(start, end).map((character) => character.char).join('')
+    if ([...word].length > 3 && !known(word)) return null
+  }
   return next
 }
 
@@ -1265,6 +1319,12 @@ const SENTENCE_ADVERBS = new Set([
   'zunächst', 'immerhin', 'jedenfalls',
 ])
 
+/** Adverbs that stay lowercase after the first word when a close reading already has them so. */
+const MID_SENTENCE_ADVERBS = new Set([...SENTENCE_ADVERBS, 'zeitweise'])
+
+/** A mid-sentence adverb may follow a lowercase reading no worse than this. `zeitweise` is 0.51 nats down. */
+export const ADVERB_CASE_MARGIN = 0.55
+
 /** A sentence adverb at the start of a line takes a capital (`manchmal` → `Manchmal`). */
 export const capitalizedSentenceAdverb = (text: string): WordEdit | null => {
   const words = inkWords(text)
@@ -1273,6 +1333,35 @@ export const capitalizedSentenceAdverb = (text: string): WordEdit | null => {
   const head = word[0].toUpperCase()
   if (head === word[0] || [...head].length !== 1) return null
   return { index: 0, from: word, to: `${head}${word.slice(1)}` }
+}
+
+/**
+ * A mid-sentence adverb becomes lowercase when a close reading already has it lowercase
+ * (`Zeitweise` → `zeitweise`). The first word stays, so a sentence can still open with it.
+ */
+export const lowercaseMidSentenceAdverb = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  language: string,
+): WordEdit | null => {
+  if (language !== 'de' || readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  let found: WordEdit | null = null
+  for (let index = 1; index < words.length; index += 1) {
+    const word = words[index]
+    const lower = word.toLowerCase()
+    if (!MID_SENTENCE_ADVERBS.has(lower) || word === lower) continue
+    const candidate = textWithWordEdits(text, [{ index, from: word, to: lower }])
+    const close = readings.some((reading) => {
+      const gap = top.score - reading.score
+      return reading.text === candidate && gap > 0 && gap <= ADVERB_CASE_MARGIN
+    })
+    if (!close) continue
+    if (found) return null
+    found = { index, from: word, to: lower }
+  }
+  return found
 }
 
 /**
@@ -1795,6 +1884,7 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   take(lowercaseShortBeamWord(text, decoded.readings), rewriteSameLengthWord)
   take(lowercaseInitialFromBeam(text, decoded.readings, options.language ?? '', characters, baseKnown), rewriteSameLengthWord)
   take(laterDictionaryCaseFromBeam(text, decoded.readings, options.language ?? '', baseKnown), rewriteSameLengthWord)
+  take(lowercaseMidSentenceAdverb(text, decoded.readings, options.language ?? ''), rewriteSameLengthWord)
   take(capitalizeEnglishPronoun(text, options.language ?? ''), rewriteSameLengthWord)
   const movedQuote = quoteAfterParenthesis(characters)
   if (movedQuote) {
@@ -1842,7 +1932,8 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
     text = characters.map((character) => character.char).join('')
   }
   take(repeatedLetterGroup(text), rewriteWord)
-  const extraLetter = oneLetterFromCloseReading(characters, decoded.readings)
+  take(unknownWordFromReading(text, decoded.readings, known), rewriteSameLengthWord)
+  const extraLetter = oneLetterFromCloseReading(characters, decoded.readings, known)
   if (extraLetter) {
     characters = extraLetter
     text = characters.map((character) => character.char).join('')
