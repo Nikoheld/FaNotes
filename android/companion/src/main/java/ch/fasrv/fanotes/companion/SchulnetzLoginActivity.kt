@@ -26,6 +26,12 @@ class SchulnetzLoginActivity : Activity() {
             finish()
             return
         }
+        val graph = (application as CompanionApplication).graph
+        if (!graph.consumeOauthPermit()) {
+            graph.schulnetzLog.info("visible login activity refused caller=activity lockHeld=${graph.gate.isLocked} holder=${graph.gate.holder.orEmpty()} reason=oauth-not-permitted")
+            finish()
+            return
+        }
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(Button(this).apply {
             text = "Abbrechen"

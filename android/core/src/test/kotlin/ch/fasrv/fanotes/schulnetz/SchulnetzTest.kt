@@ -3,7 +3,13 @@ package ch.fasrv.fanotes.schulnetz
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.Collections
 import kotlin.test.Test
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -282,6 +288,7 @@ class WebSessionTest {
               <nav>
                 <a href="index.php?pageid=1">Anmelden</a>
                 <a href="loginto.php?pageid=1&amp;mode=5">Abmelden</a>
+                <a href="loginto.php?pageid=1&amp;mode=17">Login nicht erfolgreich</a>
                 <a href="index.php?pageid=1&amp;action=global_logout">Logout</a>
                 <span>Sitzung</span>
                 <form><input name="login"><input name="passwort" type="password"></form>
@@ -309,6 +316,41 @@ class WebSessionTest {
         assertNull(linkedPageUrl(html, "9999", AKSA_SCHULNETZ_BASE))
         assertEquals(SessionProblem.LOGIN_WALL, sessionProblem("https://www.schulnetz-ag.ch/aksa/", "<html><body>Bitte warten</body></html>"))
         assertEquals("missing-page-id", classifySchulnetzPage("https://www.schulnetz-ag.ch/aksa/", "<html><body>Bitte warten</body></html>").rule)
+        val handshake = "https://www.schulnetz-ag.ch/aksa/loginto.php?mode=17&lang="
+        assertEquals(SessionProblem.OAUTH_FAILED, sessionProblem(handshake, "Login nicht erfolgreich. Bitte versuchen Sie es erneut."))
+        assertEquals("url-mode-17", classifySchulnetzPage(handshake, "").rule)
+        assertFalse(bareOauthAllowed(hasSessionId = true, signedOut = false))
+        assertTrue(bareOauthAllowed(hasSessionId = true, signedOut = true))
+        assertTrue(bareOauthAllowed(hasSessionId = false, signedOut = false))
+        assertEquals(
+            "https://www.schulnetz-ag.ch/aksa/index.php?pageid=1&id=3cbca9162e104cac&transid=a28e52",
+            startPageUrl(AKSA_SCHULNETZ_BASE, "3cbca9162e104cac", "a28e52", signedOut = false),
+        )
+        assertEquals(webLoginUrl(AKSA_SCHULNETZ_BASE), startPageUrl(AKSA_SCHULNETZ_BASE, "3cbca9162e104cac", "a28e52", signedOut = true))
+    }
+
+    @Test
+    fun sessionIdComesFromTheLoadedPageNotAStrayLink() {
+        val html = """
+            <a href="index.php?pageid=21311&amp;id=bc9a6d042b6b9214&amp;transid=6a0734">alt</a>
+            <a href="index.php?pageid=21311&amp;id=3cbca9162e104cac&amp;transid=a28e52">Noten</a>
+            <a href="index.php?pageid=21111&amp;id=3cbca9162e104cac&amp;transid=a28e52">Absenzen</a>
+            <a href="index.php?pageid=21200&amp;id=3cbca9162e104cac&amp;transid=bcfb2e">Agenda</a>
+        """.trimIndent()
+        val chosen = sessionIdsFromPage("https://www.schulnetz-ag.ch/aksa/", html)
+        assertEquals("3cbca9162e104cac", chosen?.id)
+        assertEquals("bcfb2e", chosen?.transid)
+        assertTrue(chosen!!.source.startsWith("page-links:"))
+        val fromUrl = sessionIdsFromPage(
+            "https://www.schulnetz-ag.ch/aksa/index.php?pageid=1&id=3cbca9162e104cac&transid=a28e52",
+            html,
+        )
+        assertEquals("final-url", fromUrl?.source)
+        assertEquals("a28e52", fromUrl?.transid)
+        assertEquals(
+            "https://www.schulnetz-ag.ch/aksa/index.php?pageid=21311&id=3cbca9162e104cac&transid=a28e52",
+            linkedPageUrl(html, "21311", AKSA_SCHULNETZ_BASE, "3cbca9162e104cac"),
+        )
     }
 
     @Test
@@ -379,6 +421,38 @@ class WebSessionTest {
         assertEquals("Englisch", ics.single().courseName)
         assertEquals("A12", ics.single().room)
         assertEquals("https://www.schulnetz-ag.ch/aksa/abo.ics", findIcalUrl("<script>icalAbo('abo.ics')</script>", AKSA_SCHULNETZ_BASE))
+    }
+}
+
+class SchulnetzGateTest {
+    @Test
+    fun loginTriggeredDuringRefreshIsQueued() = runBlocking {
+        val gate = SchulnetzGate()
+        val order = Collections.synchronizedList(mutableListOf<String>())
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val refresh = async(Dispatchers.Default) {
+            gate.exclusive("refresh:test") {
+                order += "refresh-start"
+                started.complete(Unit)
+                release.await()
+                order += "refresh-end"
+            }
+        }
+        started.await()
+        val login = async(Dispatchers.Default) {
+            gate.exclusive("visible-login:heute-button") {
+                order += "login"
+            }
+        }
+        delay(200)
+        assertFalse(order.contains("login"))
+        assertEquals("refresh:test", gate.holder)
+        assertTrue(gate.isLocked)
+        release.complete(Unit)
+        refresh.await()
+        login.await()
+        assertEquals(listOf("refresh-start", "refresh-end", "login"), order.toList())
     }
 }
 

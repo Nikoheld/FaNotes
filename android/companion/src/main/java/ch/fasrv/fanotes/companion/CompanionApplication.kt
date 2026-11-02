@@ -18,7 +18,7 @@ class CompanionApplication : Application() {
         SchulnetzWorker.schedule(this)
         graph.scope.launch {
             graph.engine.start()
-            runCatching { graph.refreshSchulnetz() }
+            runCatching { graph.refreshSchulnetz("process-start") }
             val topic = getSharedPreferences("fanotes-companion", MODE_PRIVATE).getString("push-topic", null)
             if (graph.instantPush() && !topic.isNullOrBlank()) {
                 runCatching { NtfyListenService.start(this@CompanionApplication) }

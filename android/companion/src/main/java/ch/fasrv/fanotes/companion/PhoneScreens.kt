@@ -91,6 +91,14 @@ import java.util.Locale
 
 @Composable
 fun CompanionRoot(model: CompanionModel) {
+    val context = LocalContext.current
+    val loginLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) model.onWebLoginFinished()
+        else model.onWebLoginCancelled()
+    }
+    LaunchedEffect(model) {
+        model.graph.loginRequests.collect { intent -> loginLauncher.launch(intent) }
+    }
     val sync by model.graph.engine.state.collectAsState()
     if (sync.account == null) {
         LoginScreen(model, busy = model.busy || sync.status == SyncStatus.SYNCING)
@@ -457,10 +465,6 @@ private fun ExamScreen(model: CompanionModel) {
 @Composable
 private fun SettingsScreen(model: CompanionModel) {
     val context = LocalContext.current
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) model.onWebLoginFinished()
-        else model.message = "Schulnetz-Anmeldung abgebrochen."
-    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         TextButton(onClick = { model.section = PhoneSection.Menu }) { Text("Zurück") }
         Text("Erscheinung", fontWeight = FontWeight.SemiBold)
@@ -472,7 +476,7 @@ private fun SettingsScreen(model: CompanionModel) {
         Text("Schulnetz", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
         Text(if (model.link.linked) "Verbunden${if (model.link.needsReauth) " · bitte neu anmelden" else ""}" else "Nicht verbunden")
         OutlinedTextField(model.baseUrl, { model.baseUrl = it }, label = { Text("Schulnetz-Adresse") }, modifier = Modifier.fillMaxWidth())
-        Button(onClick = { model.schulnetzIntent(context)?.let(launcher::launch) }, modifier = Modifier.fillMaxWidth()) {
+        Button(onClick = { model.requestVisibleLogin("settings-button") }, modifier = Modifier.fillMaxWidth()) {
             Text(when {
                 model.link.needsReauth -> "Bei Schulnetz neu anmelden"
                 model.link.linked -> "Neu verbinden"
@@ -520,15 +524,10 @@ private fun SimpleList(title: String, lines: List<String>, onBack: () -> Unit) {
 
 @Composable
 private fun LoginAgain(model: CompanionModel) {
-    val context = LocalContext.current
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) model.onWebLoginFinished()
-        else model.message = "Schulnetz-Anmeldung abgebrochen."
-    }
     CardBlock {
         Text("Bei Schulnetz neu anmelden", fontWeight = FontWeight.SemiBold)
         Text("Die Microsoft-Anmeldung ist abgelaufen. Schulnetz selbst wurde nicht gelesen.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Button(onClick = { model.schulnetzIntent(context)?.let(launcher::launch) }, modifier = Modifier.fillMaxWidth()) { Text("Bei Schulnetz neu anmelden") }
+        Button(onClick = { model.requestVisibleLogin("heute-button") }, modifier = Modifier.fillMaxWidth()) { Text("Bei Schulnetz neu anmelden") }
         ShareRow(model)
     }
 }

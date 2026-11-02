@@ -527,6 +527,8 @@ export const sessionProblem = (url, html) => {
   if (IP_REJECTED_TEXT.some((phrase) => lower.includes(phrase))) return 'ip'
   if (INACTIVITY_TEXT.some((phrase) => lower.includes(phrase))) return 'inactivity'
   const path = (parsed?.pathname || '').toLowerCase()
+  if (path.includes('loginto.php') && parsed?.searchParams.get('mode') === '17') return 'oauth'
+  if (path.includes('loginto.php') && text.toLowerCase().includes('login nicht erfolgreich')) return 'oauth'
   if (path.includes('loginto.php') && parsed?.searchParams.get('mode') === '5') return 'inactivity'
   if (path.includes('loginto.php')) return 'login'
   if (parsed && schoolHost(host)) {

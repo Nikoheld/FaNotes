@@ -96,7 +96,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             try {
                 if (register) graph.engine.register(email.trim(), password) else graph.engine.login(email.trim(), password)
                 graph.engine.syncNow("phone")
-                runCatching { graph.refreshSchulnetz() }
+                runCatching { graph.refreshSchulnetz("fa-notes-login") }
                 reload()
                 message = null
             } catch (error: Exception) {
@@ -112,7 +112,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         viewModelScope.launch {
             try {
                 graph.engine.syncNow("phone")
-                graph.refreshSchulnetz()
+                graph.refreshSchulnetz("sync-button")
                 reload()
                 message = "Synchronisiert."
             } catch (error: Exception) {
@@ -143,11 +143,17 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             return null
         }
         val host = runCatching { URI(base).host }.getOrNull() ?: return null
-        graph.schulnetzLog.info("visible login start url=${webLoginUrl(base)}")
         return Intent(context, SchulnetzLoginActivity::class.java)
             .putExtra(SchulnetzLoginActivity.EXTRA_URL, webLoginUrl(base))
             .putExtra(SchulnetzLoginActivity.EXTRA_HOST, host)
             .putExtra(SchulnetzLoginActivity.EXTRA_BASE, base)
+    }
+
+    fun requestVisibleLogin(caller: String) {
+        viewModelScope.launch {
+            graph.runVisibleLogin(caller)
+            debugHtml = graph.debugHtml()
+        }
     }
 
     fun onWebLoginFinished() {
@@ -158,34 +164,18 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         val web = extractWebSession(url, html, baseUrl)
         val php = phpSessionCookie(baseUrl)
         if (web == null) {
-            graph.schulnetzLog.info("visible login finished without session ids url=${redactSchulnetzSecrets(url)}")
+            graph.schulnetzLog.info("visible login bridge empty url=${redactSchulnetzSecrets(url)} cookieNames=${cookieNames(CookieManager.getInstance().getCookie(baseUrl).orEmpty()).joinToString("|")}")
+            graph.finishVisibleLogin(null)
             message = "Schulnetz-Anmeldung abgebrochen."
             return
         }
-        graph.schulnetzLog.info("visible login finished url=${redactSchulnetzSecrets(url)} cookieNames=${cookieNames(CookieManager.getInstance().getCookie(baseUrl).orEmpty()).joinToString("|")}")
-        graph.saveWebSession(web.copy(phpSessionId = php))
-        busy = true
-        viewModelScope.launch {
-            try {
-                val fanotes = graph.engine.currentSession() ?: error("Zuerst bei FaNotes anmelden.")
-                val cookies = exportSsoCookies()
-                if (cookies.isEmpty()) {
-                    message = "Microsoft-Cookies fehlen. Bitte die Anmeldung wiederholen."
-                } else {
-                    runCatching {
-                        graph.link.value = graph.client.linkWeb(fanotes, baseUrl, graph.deviceId(), SCHULNETZ_USER_AGENT, cookies, "Companion")
-                    }
-                    message = "Schulnetz ist verbunden. Bei einem IP-Wechsel meldet die App sich neu an."
-                }
-                graph.clearLoginPrompt()
-                graph.refreshSchulnetz()
-                debugHtml = graph.debugHtml()
-            } catch (error: Exception) {
-                message = error.message ?: "Schulnetz-Anmeldung fehlgeschlagen."
-            } finally {
-                busy = false
-            }
-        }
+        graph.finishVisibleLogin(web.copy(phpSessionId = php))
+        message = "Schulnetz ist verbunden. Bei einem IP-Wechsel meldet die App sich neu an."
+    }
+
+    fun onWebLoginCancelled() {
+        graph.finishVisibleLogin(null)
+        message = "Schulnetz-Anmeldung abgebrochen."
     }
 
     fun shareDebug(context: Context) {
