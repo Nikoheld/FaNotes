@@ -108,6 +108,7 @@ import {
   camelSplitFromReading,
   shortKnownWordFromReading,
   functionWordBeforeStem,
+  knownConsonantFromReading,
   dictionaryJoinFromReading,
   splitFunctionWordJoin,
   tracedFinalComma,
@@ -1531,6 +1532,20 @@ export async function recognizeInk(
     if (beforeStem) {
       const rewritten = rewriteSameLengthWord(decoded.characters, beforeStem.index, beforeStem.to)
       const nextText = textWithWordEdits(decoded.text, [beforeStem])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
+    }
+    const knownConsonant = knownConsonantFromReading(
+      decoded.text,
+      decoded.greedyText,
+      decoded.readings,
+      (word) => wordIsKnown(lineLanguage, word),
+    )
+    if (knownConsonant) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, knownConsonant.index, knownConsonant.to)
+      const nextText = textWithWordEdits(decoded.text, [knownConsonant])
       if (rewritten && nextText !== decoded.text) {
         decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null

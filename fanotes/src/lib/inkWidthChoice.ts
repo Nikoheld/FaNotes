@@ -1129,6 +1129,71 @@ export const functionWordBeforeStem = (
 }
 
 /**
+ * A four-letter dictionary word that is not the first word takes a different first or
+ * second consonant from a close reading (`orly` → `only`, `wind` → `mind`). A vowel stays
+ * with the vowel rule. A later consonant stays (`life`, `five`). When the pen's token is
+ * also four letters, that token still has the current consonant; a token that already is
+ * the other word stays.
+ */
+export const KNOWN_CONSONANT_MARGIN = 1.2
+
+const consonantLetter = (letter: string) => /\p{L}/u.test(letter) && !VOWEL.test(letter)
+
+export const knownConsonantFromReading = (
+  text: string,
+  greedy: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > KNOWN_CONSONANT_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    if (index === 0 || from.toLowerCase() === to.toLowerCase()) continue
+    const fromLetters = [...from]
+    const toLetters = [...to]
+    if (fromLetters.length !== 4 || toLetters.length !== 4) continue
+    let substitutions = 0
+    let at = -1
+    for (let cursor = 0; cursor < fromLetters.length; cursor += 1) {
+      if (fromLetters[cursor] === toLetters[cursor]) continue
+      substitutions += 1
+      at = cursor
+    }
+    if (substitutions !== 1 || at > 1) continue
+    const left = fromLetters[at]
+    const right = toLetters[at]
+    if (left.toLowerCase() === right.toLowerCase()) continue
+    if (!consonantLetter(left) || !consonantLetter(right)) continue
+    if (!known(from) || !known(to)) continue
+    if (traced.length === words.length) {
+      const trace = traced[index]
+      if (trace === to) continue
+      const traceLetters = [...trace]
+      if (traceLetters.length === fromLetters.length && traceLetters[at] !== left) continue
+    }
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
  * A quote stuck to a closing parenthesis moves in front of the following lowercase word
  * (`(Tanis 6a)" if` → `(Tanis 6a) "if`).
  */
@@ -2833,5 +2898,6 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   }
   take(shortKnownWordFromReading(text, decoded.readings, known), rewriteWord)
   take(functionWordBeforeStem(text, decoded.readings, options.language ?? ''), rewriteSameLengthWord)
+  take(knownConsonantFromReading(text, decoded.greedyText, decoded.readings, known), rewriteSameLengthWord)
   return { text, characters }
 }
