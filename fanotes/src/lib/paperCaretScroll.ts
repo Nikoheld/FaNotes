@@ -22,7 +22,28 @@ export const isWritePageEditor = (element: { closest: (selector: string) => unkn
  * CodeMirror `scrollIntoView` / compositor pulses cannot stick a non-zero
  * scrollTop. Assignment is ignored — this is not a later lock-to-zero.
  */
+const sealedEditorLayers = new WeakSet<object>()
+/** Layers already frozen for a paper scroller. A scroll tick must not walk the DOM again. */
+const sealedEditorSnapshot = new WeakMap<HTMLElement, HTMLElement[]>()
+
+const editorLayerStillSealed = (layer: HTMLElement) => (
+  sealedEditorLayers.has(layer) && layer.isConnected === true
+)
+
+/** True once this paper's editor layers are frozen. Later scroll ticks can skip the walk. */
+export const paperEditorScrollSealed = (paperScroller: HTMLElement | null) => {
+  if (!paperScroller) return false
+  const cached = sealedEditorSnapshot.get(paperScroller)
+  return Boolean(cached && cached.length > 0 && cached.every(editorLayerStillSealed))
+}
+
+/** A doc change can mount a new editor layer. The next lock has to find it. */
+export const invalidatePaperEditorScrollSeal = (paperScroller: HTMLElement | null) => {
+  if (paperScroller) sealedEditorSnapshot.delete(paperScroller)
+}
+
 export const sealNestedEditorScroll = <T extends { scrollTop: number; scrollLeft: number }>(layer: T): T => {
+  if (sealedEditorLayers.has(layer)) return layer
   const freeze = (prop: 'scrollTop' | 'scrollLeft') => {
     try {
       Object.defineProperty(layer, prop, {
@@ -37,6 +58,7 @@ export const sealNestedEditorScroll = <T extends { scrollTop: number; scrollLeft
   }
   freeze('scrollTop')
   freeze('scrollLeft')
+  sealedEditorLayers.add(layer)
   return layer
 }
 
@@ -195,12 +217,17 @@ export const lockPaperViewportEditorScroll = (paperScroller: HTMLElement | null)
   if (!paperScroller.classList.contains('paper-view') && !paperScroller.classList.contains('unified-note-view')) {
     return [] as HTMLElement[]
   }
+  const cached = sealedEditorSnapshot.get(paperScroller)
+  if (cached && cached.length > 0 && cached.every(editorLayerStillSealed)) return cached
   const locked: HTMLElement[] = []
   paperScroller.querySelectorAll<HTMLElement>(EDITOR_LAYER_SCROLLER_SELECTOR).forEach((layer) => {
     if (!isIndependentEditorLayer(layer)) return
     sealNestedEditorScroll(layer)
     locked.push(layer)
   })
+  if (locked.length > 0 && locked.every((layer) => layer.isConnected === true)) {
+    sealedEditorSnapshot.set(paperScroller, locked)
+  }
   return locked
 }
 
@@ -803,6 +830,33 @@ export const captureGhostTextAroundLock = (
   editorRoot: HTMLElement | null,
   glyph: { x: number; y: number } = { x: 0, y: 0 },
 ) => {
+  // Already frozen: editor scroll is a constant 0, so the slip sample is the
+  // paper camera alone. Walking and redefining the layers on every tick is
+  // what took the pan off the compositor.
+  if (paperEditorScrollSealed(paperScroller)) {
+    const camX = paperScroller?.scrollLeft ?? 0
+    const camY = paperScroller?.scrollTop ?? 0
+    const before = sampleGhostTextLayout({
+      paperX: glyph.x,
+      paperY: glyph.y,
+      camX,
+      camY,
+      editorX: 0,
+      editorY: 0,
+    })
+    return {
+      locked: {
+        paperScroller,
+        lockedLayers: sealedEditorSnapshot.get(paperScroller!) ?? [],
+        paperScrollTop: camY,
+        paperScrollLeft: camX,
+      },
+      before,
+      after: before,
+      slip: classifyGhostTextMotion(null, before),
+      back: classifyGhostTextMotion(before, before),
+    }
+  }
   const pad = readTextOriginPad(
     paperScroller?.querySelector?.('.unified-paper') as HTMLElement | null
     ?? paperScroller,

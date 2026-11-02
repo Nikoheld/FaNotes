@@ -53,7 +53,7 @@ export function NoteLinkLayer({
       visualWidth: layoutWidth * zoom,
       visualHeight: layoutHeight * zoom,
     }
-    setLayout(links.map((link) => {
+    const next = links.map((link) => {
       const page = pdf
         ? paper?.querySelector<HTMLElement>(`[data-pdf-page="${link.page}"]`)
         : null
@@ -67,7 +67,15 @@ export function NoteLinkLayer({
         { left: layerRect.left, top: layerRect.top },
       )
       return { id: link.id, left: css.left, top: css.top }
-    }))
+    })
+    // Pins sit on the sheet, so a pan does not move them. Skip the render
+    // when a resize measured the same places.
+    setLayout((current) => (
+      current.length === next.length
+      && current.every((item, index) => item.id === next[index].id && item.left === next[index].left && item.top === next[index].top)
+        ? current
+        : next
+    ))
   }, [links, pdf])
 
   useLayoutEffect(() => {
@@ -78,12 +86,9 @@ export function NoteLinkLayer({
     const observer = new ResizeObserver(() => measure())
     observer.observe(paper)
     paper.querySelectorAll('[data-pdf-page]').forEach((page) => observer.observe(page))
-    const scroller = paper.closest('.unified-note-view')
-    scroller?.addEventListener('scroll', measure, { passive: true })
     window.addEventListener('resize', measure)
     return () => {
       observer.disconnect()
-      scroller?.removeEventListener('scroll', measure)
       window.removeEventListener('resize', measure)
     }
   }, [measure])

@@ -65,7 +65,7 @@ export function NoteTextFieldLayer({
       visualWidth: layoutWidth * zoom,
       visualHeight: layoutHeight * zoom,
     }
-    setLayout(fields.map((field) => {
+    const next = fields.map((field) => {
       const page = pdf
         ? paper?.querySelector<HTMLElement>(`[data-pdf-page="${field.page}"]`)
         : null
@@ -86,7 +86,18 @@ export function NoteTextFieldLayer({
         width: Math.max(96, field.width * pageWidth),
         pageWidth: Math.max(1, pageWidth),
       }
-    }))
+    })
+    setLayout((current) => (
+      current.length === next.length
+      && current.every((item, index) => (
+        item.id === next[index].id
+        && item.left === next[index].left
+        && item.top === next[index].top
+        && item.width === next[index].width
+      ))
+        ? current
+        : next
+    ))
   }, [fields, pdf])
 
   useLayoutEffect(() => {
@@ -97,12 +108,9 @@ export function NoteTextFieldLayer({
     const observer = new ResizeObserver(() => measure())
     observer.observe(paper)
     paper.querySelectorAll('[data-pdf-page]').forEach((page) => observer.observe(page))
-    const scroller = paper.closest('.unified-note-view')
-    scroller?.addEventListener('scroll', measure, { passive: true })
     window.addEventListener('resize', measure)
     return () => {
       observer.disconnect()
-      scroller?.removeEventListener('scroll', measure)
       window.removeEventListener('resize', measure)
     }
   }, [measure])

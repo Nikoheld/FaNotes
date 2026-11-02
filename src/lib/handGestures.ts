@@ -249,8 +249,10 @@ export const bindHandGestures = (element: HTMLElement, handlers: HandGestureHand
         if (event.cancelable) event.preventDefault()
         event.stopPropagation()
       }
-      if (frame && ownsTouch && (frame.panX || frame.panY)) handlers.onPan?.(frame.panX, frame.panY)
+      // Pinch before pan: the camera marks the zoom preview before the pan
+      // writes scroll, so that scroll does not measure the sheet.
       if (frame && frame.pinch !== 1) handlers.onPinch?.(frame.pinch, { x: frame.originX, y: frame.originY })
+      if (frame && ownsTouch && (frame.panX || frame.panY)) handlers.onPan?.(frame.panX, frame.panY)
       if (frame && frame.rotateDeg) handlers.onRotate?.(frame.rotateDeg, { x: frame.originX, y: frame.originY })
       return
     }

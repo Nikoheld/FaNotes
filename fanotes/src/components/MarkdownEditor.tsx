@@ -65,9 +65,11 @@ import {
   ghostTextDiagnosticFields,
   applyPaperArrowNavigation,
   handlePaperEditorScroll,
+  invalidatePaperEditorScrollSeal,
   lockPaperEditorScrollIfNeeded,
   lockPaperViewportScrollStayPut,
   PAPER_EDITOR_FLING_HOLD_FRAMES,
+  paperEditorScrollSealed,
   resolvePaperCaretScroller,
   sealNestedEditorScroll,
   tickPaperViewportEditorScrollHold,
@@ -1255,10 +1257,15 @@ const paperCaretLock = ViewPlugin.fromClass(class {
   }
 
   private onEditorLayerScroll = () => {
-    this.stayPut(resolvePaperCaretScroller(this.view.dom) ?? this.paper)
+    const paper = resolvePaperCaretScroller(this.view.dom) ?? this.paper
+    if (paperEditorScrollSealed(paper)) return
+    this.stayPut(paper)
   }
 
   private onPaperScroll = () => {
+    // The paper view seals the same layers. A second walk on this event,
+    // plus a fresh 16-frame hold, was the scroll hitch.
+    if (paperEditorScrollSealed(this.paper)) return
     this.stayPut(this.paper)
   }
 
@@ -1269,7 +1276,12 @@ const paperCaretLock = ViewPlugin.fromClass(class {
       this.paper = paper
       this.paper.addEventListener('scroll', this.onPaperScroll, { passive: true })
     }
-    this.stayPut(paper)
+    if (update.docChanged || update.geometryChanged) {
+      invalidatePaperEditorScrollSeal(paper)
+      this.stayPut(paper)
+    } else if (!paperEditorScrollSealed(paper)) {
+      this.stayPut(paper)
+    }
     if (!update.docChanged && !update.selectionSet) return
     const followCaret = update.transactions.some((tr) => {
       const user = tr.annotation(Transaction.userEvent) ?? ''

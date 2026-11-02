@@ -251,6 +251,7 @@ const runOnce = () => {
   assert.doesNotMatch(board, /usePaperView\(\)/)
   assert.match(board, /paperView\.subscribe\(\(view\) => \{/)
   assert.match(board, /if \(zoomed\) zoomInFlightUntilRef\.current = performance\.now\(\) \+ ZOOM_SETTLE_MS/)
+  assert.match(board, /plane\?\.classList\.contains\('is-zoom-gesture'\)/, 'the compositor zoom preview must not re-slice ink')
   assert.match(board, /zoomSettleTimerRef\.current = window\.setTimeout\(settle, ZOOM_SETTLE_MS\)/)
   assert.equal((board.match(/if \(zoomInFlight\(\)\) return/g) ?? []).length, 3, 'scroll frame, idle timer and scrollend all skip the re-slice while the zoom is moving')
   const paperViewSource = readFileSync(join(root, 'src', 'components', 'PaperView.tsx'), 'utf8')

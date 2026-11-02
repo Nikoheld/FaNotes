@@ -1539,7 +1539,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   /** Wall-clock until which a zoom gesture counts as still moving. */
   const zoomInFlightUntilRef = useRef(0)
   const zoomSettleTimerRef = useRef<number | null>(null)
-  const zoomInFlight = useCallback(() => performance.now() < zoomInFlightUntilRef.current, [])
+  const zoomInFlight = useCallback(() => {
+    if (performance.now() < zoomInFlightUntilRef.current) return true
+    // The compositor preview is on before the store zoom changes. A pinch pan
+    // in that window must not re-slice the ink on every frame.
+    const paper = surfaceRef.current?.closest('.unified-paper') ?? boardRef.current?.closest('.unified-paper')
+    const plane = paper?.closest('.paper-sheet-plane')
+    return Boolean(plane?.classList.contains('is-zoom-gesture'))
+  }, [])
   const viewRotationRef = useRef(0)
   const viewPanRef = useRef({ x: 0, y: 0 })
   const sourceHeightRef = useRef(WRITE_SLACK_HEIGHT)
@@ -3215,6 +3222,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
    * new box, which is the "ink jumps, then comes back" the user saw on scroll.
    */
   const syncInkWindow = useCallback((force = false) => {
+    // A full-sheet overlay does not move with scroll. Measuring the client
+    // rects here forced a layout on every frame of an ordinary pan.
+    if (
+      !force
+      && !viewportRasterRef.current
+      && inkWindowLayoutRef.current === null
+      && liveWindowLayoutRef.current === null
+      && Math.abs(viewRotationRef.current) % 360 < 0.01
+    ) return false
     if (!planInkWindowNow(force)) return false
     canvasQualityKeyRef.current = ''
     redraw(true)
@@ -3493,7 +3509,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // point under the cursor still. Those scrolls must not re-slice and
     // re-rasterise the ink per step (a full repaint of every stroke into a
     // zoom-sized bitmap); the settle after the gesture does it once.
+    const sliceFollowsScroll = () => (
+      viewportRasterRef.current !== null
+      || inkWindowLayoutRef.current !== null
+      || liveWindowLayoutRef.current !== null
+      || Math.abs(viewRotationRef.current) % 360 > 0.01
+    )
     const followScroll = () => {
+      if (!sliceFollowsScroll()) return
       if (inkScrollFrameRef.current !== null) return
       inkScrollFrameRef.current = window.requestAnimationFrame(() => {
         inkScrollFrameRef.current = null
@@ -3502,6 +3525,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       })
     }
     const settleInkWindow = () => {
+      if (!sliceFollowsScroll()) return
       followScroll()
       if (inkWindowIdleRef.current !== null) window.clearTimeout(inkWindowIdleRef.current)
       inkWindowIdleRef.current = window.setTimeout(() => {

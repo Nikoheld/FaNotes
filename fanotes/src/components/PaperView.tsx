@@ -73,6 +73,7 @@ import {
   lockPaperEditorScrollIfNeeded,
   lockPaperViewportScrollStayPut,
   PAPER_EDITOR_FLING_HOLD_FRAMES,
+  paperEditorScrollSealed,
   pinPaperViewportAfterColumnResize,
   tickPaperViewportEditorScrollHold,
 } from '../lib/paperCaretScroll'
@@ -288,7 +289,9 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       if (gaveUp && !userOwned) return
       if (!userOwned && remembered && !paperCameraLanded(scroller, lastProgrammatic)) return
       if (!userOwned) return
-      persist(latestEntry ?? measureEntry())
+      // Measure when the pan has stopped. Doing it on every scroll event
+      // forced a layout in the middle of the compositor scroll.
+      persist(measureEntry() ?? latestEntry)
     }
     const scheduleSave = () => {
       if (!memoryKey || !alive) return
@@ -336,23 +339,22 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     }
     let flingFrames = 0
     let flingId = 0
+    let scrollLayoutFrame = 0
+    // The plane lives for this note. Reading its class is not a layout.
+    const gesturePlane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
+    let editorMissing = false
     const holdFling = () => {
       const tick = tickPaperViewportEditorScrollHold(scroller, flingFrames)
       flingFrames = tick.remainingFrames
       flingId = flingFrames > 0 ? window.requestAnimationFrame(holdFling) : 0
     }
-    const clampScroll = () => {
-      // A zoom preview does not scroll. Stay-put then writes scroll several
-      // times; measuring the sheet on each write is the hitch at the end of
-      // the gesture. Claiming the camera does not need those rectangles.
-      if (zoomGestureActiveRef.current) {
-        const fromGesture = userAdjustedRef.current || gestureArm > 0 || (pointerHeld && scrollArm)
-        if (userAdjustedRef.current) userAdjustedRef.current = false
-        if (gestureArm > 0) gestureArm = 0
-        if (fromGesture) claimUserCamera()
+    const sealEditorOnce = () => {
+      if (paperEditorScrollSealed(scroller) || editorMissing) return
+      const editor = scroller.querySelector<HTMLElement>('.markdown-editor, .cm-scroller')
+      if (!editor) {
+        editorMissing = true
         return
       }
-      const editor = scroller.querySelector<HTMLElement>('.markdown-editor, .cm-scroller')
       const captured = captureGhostTextAroundLock(scroller, editor)
       const now = Date.now()
       if (captured.slip.slip) {
@@ -367,11 +369,37 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
           ...ghostTextDiagnosticFields(captured.after, captured.back),
         }), now + 1)
       }
+      // The seal freezes nested scroll. Repeating it for 16 frames after
+      // every wheel tick kept the main thread busy for the whole pan.
+      if (paperEditorScrollSealed(scroller)) return
       flingFrames = PAPER_EDITOR_FLING_HOLD_FRAMES
       if (!flingId) flingId = window.requestAnimationFrame(holdFling)
-      const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
+    }
+    const runScrollLayout = () => {
+      scrollLayoutFrame = 0
+      if (zoomGestureActiveRef.current || gesturePlane?.classList.contains('is-zoom-gesture')) return
+      const plane = gesturePlane
         ?? scroller.querySelector<HTMLElement>('.unified-paper')
+      // At 100% the browser's scroll range matches the sheet. A zoomed sheet,
+      // and a PDF page narrower than the window, still get one clamp per frame.
+      if (Math.abs(viewRef.current.zoom - 1) < 0.001 && !scroller.classList.contains('is-pdf-note')) return
       clampPaperScrollerToZoomedSheet(scroller, plane)
+      centrePageInViewportIfFits(scroller, plane)
+    }
+    const clampScroll = () => {
+      // A zoom preview does not scroll. Stay-put then writes scroll several
+      // times; measuring the sheet on each write is the hitch at the end of
+      // the gesture. The preview class is set before the pinch pan, so this
+      // frame does not measure either. Claiming the camera does not need
+      // those rectangles.
+      if (zoomGestureActiveRef.current || gesturePlane?.classList.contains('is-zoom-gesture')) {
+        const fromGesture = userAdjustedRef.current || gestureArm > 0 || (pointerHeld && scrollArm)
+        if (userAdjustedRef.current) userAdjustedRef.current = false
+        if (gestureArm > 0) gestureArm = 0
+        if (fromGesture) claimUserCamera()
+        return
+      }
+      sealEditorOnce()
       const fromGesture = userAdjustedRef.current || gestureArm > 0 || (pointerHeld && scrollArm)
       if (userAdjustedRef.current) userAdjustedRef.current = false
       if (gestureArm > 0) gestureArm = 0
@@ -400,13 +428,11 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
         }
         return
       }
-      // While the PDF sheet is narrower than the window, a pan or a zoom anchor
-      // must not leave white on only one side.
-      centrePageInViewportIfFits(scroller, plane)
+      const zoomedOrPdf = Math.abs(viewRef.current.zoom - 1) >= 0.001 || scroller.classList.contains('is-pdf-note')
+      if (zoomedOrPdf && !scrollLayoutFrame) scrollLayoutFrame = window.requestAnimationFrame(runScrollLayout)
       // Layout and focus scrolls are not the user's camera — not even after
       // a real pan, or the next open would restore the jump.
       if (!fromGesture || !userOwned) return
-      measureEntry()
       scheduleSave()
     }
     scroller.addEventListener('scroll', clampScroll, { passive: true })
@@ -611,6 +637,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       window.removeEventListener('keydown', markKeyInteraction, true)
       columnObserver?.disconnect()
       if (flingId) window.cancelAnimationFrame(flingId)
+      if (scrollLayoutFrame) window.cancelAnimationFrame(scrollLayoutFrame)
       if (openCameraId) window.cancelAnimationFrame(openCameraId)
       if (restoreFrame) window.cancelAnimationFrame(restoreFrame)
       if (saveTimer) window.clearTimeout(saveTimer)
@@ -737,7 +764,13 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     zoomGestureActiveRef.current = false
   }
   pushZoomGestureRef.current = (factor, origin) => {
-    if (!(factor > 0) || Math.abs(factor - 1) < 1e-8) return
+    if (!(factor > 0) || Math.abs(factor - 1) < 1e-8) {
+      if (!zoomGestureRef.current) {
+        const idlePlane = noteViewRef.current?.querySelector<HTMLElement>('.paper-sheet-plane')
+        if (idlePlane && !idlePlane.style.transform) idlePlane.classList.remove('is-zoom-gesture')
+      }
+      return
+    }
     const scroller = noteViewRef.current
     if (!scroller) return
     lastZoomOriginRef.current = origin
@@ -847,7 +880,13 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       const origin = pendingOrigin
       pendingFactor = 1
       pendingOrigin = null
-      if (factor === 1 || !origin) return
+      if (factor === 1 || !origin) {
+        if (!zoomGestureRef.current) {
+          const idlePlane = root.querySelector<HTMLElement>('.paper-sheet-plane')
+          if (idlePlane && !idlePlane.style.transform) idlePlane.classList.remove('is-zoom-gesture')
+        }
+        return
+      }
       // Scale on the compositor for this frame. CSS zoom, which reflows the
       // sheet and resizes the ink bitmap, runs once the burst has paused.
       pushZoomGestureRef.current(factor, origin)
@@ -856,6 +895,9 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       if (isSheetZoomWheel(event)) {
         if (event.cancelable) event.preventDefault()
         event.stopPropagation()
+        // Before the coalesced frame, so a scroll in this same turn does not
+        // measure the sheet or re-slice the ink.
+        root.querySelector<HTMLElement>('.paper-sheet-plane')?.classList.add('is-zoom-gesture')
         pendingFactor *= zoomFactorFromWheel(event.deltaY, event.deltaMode, readSharedZoomSpeed())
         pendingOrigin = { x: event.clientX, y: event.clientY }
         lastZoomOriginRef.current = pendingOrigin
@@ -964,7 +1006,13 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       const origin = pendingOrigin
       pendingFactor = 1
       pendingOrigin = null
-      if (factor === 1 || !origin) return
+      if (factor === 1 || !origin) {
+        if (!zoomGestureRef.current) {
+          const idlePlane = root.querySelector<HTMLElement>('.paper-sheet-plane')
+          if (idlePlane && !idlePlane.style.transform) idlePlane.classList.remove('is-zoom-gesture')
+        }
+        return
+      }
       pushZoomGestureRef.current(factor, origin)
     }
     const unbind = bindHandGestures(root, {
@@ -976,6 +1024,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
         root.scrollTop -= dy
       },
       onPinch: (factor, origin) => {
+        root.querySelector<HTMLElement>('.paper-sheet-plane')?.classList.add('is-zoom-gesture')
         pendingFactor *= factor
         pendingOrigin = origin
         if (!zoomFrame) zoomFrame = window.requestAnimationFrame(flushZoom)
