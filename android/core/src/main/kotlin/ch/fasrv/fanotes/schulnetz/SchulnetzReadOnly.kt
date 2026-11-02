@@ -49,7 +49,8 @@ fun schulnetzCallAllowed(method: String, url: String, body: String? = null): Boo
     }
     if (path.endsWith("/index.php")) return readPage(query)
     if (path.endsWith("/scheduler_processor.php")) {
-        return !query.contains("action=") && (query.contains("pageid=22202") || query.contains("ansicht=schueleransicht"))
+        if (query.contains("action=")) return false
+        return query.contains("pageid=22202") || query.contains("pageid=21312") || query.contains("ansicht=schueleransicht") || query.contains("ansicht=klassenuebersicht")
     }
     return false
 }

@@ -4,6 +4,8 @@ import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.parseJson
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
+import java.time.Instant
+import java.time.ZoneId
 import org.w3c.dom.Element as XmlElement
 import javax.xml.parsers.DocumentBuilderFactory
 
@@ -21,7 +23,7 @@ fun readGradesPage(html: String): PageRead<List<SchoolGrade>> {
     val problem = sessionProblem("", html)
     if (problem == SessionProblem.INTERACTIVE) return PageRead(emptyList(), sessionProblemText(problem))
     if (problem != SessionProblem.NONE) return PageRead(emptyList(), "Noten: ${sessionProblemText(problem)}", html)
-    val grades = parseGradesPage(html).ifEmpty { parseGradesByHeader(html) }
+    val grades = parseGradesPage(html).ifEmpty { parseSchulnetzCourseTable(html) }.ifEmpty { parseGradesByHeader(html) }
     if (grades.isNotEmpty()) return PageRead(grades, null)
     if (html.isNotBlank()) return PageRead(emptyList(), "Noten: Seite geladen, aber nicht lesbar", html)
     return PageRead(emptyList(), null)
@@ -155,14 +157,17 @@ fun parseTerminliste(html: String): List<AgendaEvent> {
         if (rows.size < 2) continue
         val header = ownTexts(rows[0], table).map { it.lowercase() }
         if (header.none { it.contains("datum") || it.contains("termin") || it.contains("bezeichnung") }) continue
-        val dateAt = header.indexOfFirst { it.contains("datum") }.coerceAtLeast(0)
-        val titleAt = header.indexOfFirst { it.contains("bezeichnung") || it.contains("termin") || it.contains("text") }.let { if (it < 0) 1 else it }
+        val dateAt = header.indexOfFirst { it.contains("datum von") }.let { if (it >= 0) it else header.indexOfFirst { it.contains("datum") } }.coerceAtLeast(0)
+        val titleAt = header.indexOfFirst { it.contains("beschreibung") || it.contains("bezeichnung") || it.contains("termin") || it.contains("text") }.let { if (it < 0) 1 else it }
         for (row in rows.drop(1)) {
             val cells = ownTexts(row, table)
             if (cells.size <= dateAt) continue
+            val joined = cells.joinToString(" ")
+            if (joined.contains("Suchtext") || joined.contains("function ")) continue
             val date = cells.getOrNull(dateAt).orEmpty()
             if (!DATE.containsMatchIn(date) && !date.contains('-')) continue
-            val title = cells.getOrNull(titleAt).orEmpty().ifBlank { "Termin" }
+            val title = cells.getOrNull(titleAt).orEmpty()
+            if (title.isBlank()) continue
             events += AgendaEvent(
                 id = stableId("term", date, title),
                 start = date,
@@ -188,11 +193,138 @@ fun readExamsPage(html: String): PageRead<List<AgendaEvent>> {
     val problem = sessionProblem("", html)
     if (problem == SessionProblem.INTERACTIVE) return PageRead(emptyList(), sessionProblemText(problem))
     if (problem != SessionProblem.NONE) return PageRead(emptyList(), "Prüfungen: ${sessionProblemText(problem)}", html)
-    val exams = parseExamsByHeader(html).ifEmpty { parseTerminliste(html) }.map { it.copy(eventType = "exam") }
+    val exams = parseRenderedTimetable(html).map { it.copy(eventType = "exam") }.ifEmpty {
+        parseExamsByHeader(html).ifEmpty { parseTerminliste(html) }.map { it.copy(eventType = "exam") }
+    }
     if (exams.isNotEmpty()) return PageRead(exams, null)
+    if (html.contains("scheduler") || html.contains("Prüfungsplan") || html.contains("Pruefungsplan")) return PageRead(emptyList(), null)
     if (html.isNotBlank()) return PageRead(emptyList(), "Prüfungen: Seite geladen, aber nicht lesbar", html)
     return PageRead(emptyList(), null)
 }
+
+/** Course rows on page 21311: name, average (`--` is empty), then Einzelprüfungen from the nested table. */
+fun parseSchulnetzCourseTable(html: String): List<SchoolGrade> {
+    if (html.isBlank()) return emptyList()
+    val doc = Jsoup.parse(html)
+    val table = doc.select("table").firstOrNull { candidate ->
+        val header = candidate.select("tr").firstOrNull { it.closestTable() == candidate }?.let { ownTexts(it, candidate).map { cell -> foldLabel(cell) } }.orEmpty()
+        header.any { it == "kurs" || it.startsWith("kurs ") } && header.any { it.contains("durchschnitt") }
+    } ?: return emptyList()
+    val grades = mutableListOf<SchoolGrade>()
+    var course = ""
+    var courseId = ""
+    var average: Double? = null
+    for (row in table.select("tr").filter { it.closestTable() == table }) {
+        val nested = row.selectFirst("table")
+        if (nested != null) {
+            if (course.isNotBlank()) grades += examsFrom(nested, course, courseId, average)
+            continue
+        }
+        val cells = ownTexts(row, table)
+        val name = cells.firstOrNull().orEmpty()
+        if (name.isBlank() || foldLabel(name) == "kurs" || name == "--") continue
+        course = name
+        courseId = name.substringBefore(' ').ifBlank { name }
+        val avgText = cells.getOrNull(1).orEmpty()
+        average = if (avgText.isBlank() || avgText == "--") null else number(avgText)
+        grades += SchoolGrade(
+            id = stableId("course", courseId, numKey(average)),
+            course = name,
+            courseId = courseId,
+            subject = name.substringAfter(' ').ifBlank { name },
+            title = "Durchschnitt",
+            date = "",
+            mark = average,
+            weight = 1.0,
+            confirmed = cells.joinToString(" ").lowercase().let { it.contains("bestätigt") && !it.contains("bestätigen") },
+            courseGrade = average,
+            comment = "",
+        )
+    }
+    return grades
+}
+
+/** Rendered dhtmlx events on the Schülerplan or Prüfungsplan page. */
+fun parseRenderedTimetable(html: String): List<AgendaEvent> {
+    if (html.isBlank()) return emptyList()
+    val doc = Jsoup.parse(html)
+    val zone = ZoneId.of("Europe/Zurich")
+    val seen = linkedSetOf<String>()
+    val events = mutableListOf<AgendaEvent>()
+    for (element in doc.select("[event_id]")) {
+        val id = element.attr("event_id")
+        if (id.isBlank() || !seen.add(id)) continue
+        val classes = element.className()
+        if (!classes.contains("dhx_cal_event") && !classes.contains("stpt_event")) continue
+        val text = clean(element.selectFirst(".stpt_event_text")?.text().orEmpty()).ifBlank { clean(element.attr("aria-label")) }
+        if (text.isBlank()) continue
+        val whenLine = clean(element.selectFirst(".stpt_event_date")?.text().orEmpty())
+        val startMs = element.attr("data-bar-start").toLongOrNull()
+        val endMs = element.attr("data-bar-end").toLongOrNull()
+        val start = if (startMs != null) Instant.ofEpochMilli(startMs).atZone(zone).toLocalDateTime().toString() else whenLine
+        val end = if (endMs != null) Instant.ofEpochMilli(endMs).atZone(zone).toLocalDateTime().toString() else start
+        val room = Regex("""/\s*([A-Za-z0-9.-]+)""").find(whenLine)?.groupValues?.get(1).orEmpty()
+        val teacher = Regex("""Lehrperson:\s*([^;<]+)""").find(element.attr("title"))?.groupValues?.get(1)?.trim().orEmpty()
+        events += AgendaEvent(
+            id = id,
+            start = start,
+            end = end,
+            text = text,
+            comment = "",
+            room = room,
+            teachers = listOf(teacher).filter { it.isNotBlank() },
+            courseId = text.substringBefore(' '),
+            courseName = text.substringBefore(" ("),
+            status = "",
+            eventType = if (classes.contains("event_line")) "event" else "lesson",
+            color = "",
+            timetableText = text,
+        )
+    }
+    return events
+}
+
+fun parseStartRecentGrades(html: String): List<SchoolGrade> = sectionRows(html, "letzten noten").mapNotNull { cells ->
+    if (cells.size < 4 || !DATE.containsMatchIn(cells[2])) return@mapNotNull null
+    val mark = number(cells[3]) ?: return@mapNotNull null
+    SchoolGrade(
+        id = stableId("start", cells[0], cells[1], cells[2]),
+        course = cells[0],
+        courseId = cells[0],
+        subject = cells[0],
+        title = cells[1],
+        date = isoDate(cells[2]),
+        mark = mark,
+        weight = 1.0,
+        confirmed = true,
+        courseGrade = null,
+        comment = "",
+    )
+}
+
+fun parseStartAppointments(html: String): List<AgendaEvent> = sectionRows(html, "termine").mapNotNull { cells ->
+    val date = cells.firstOrNull { DATE.containsMatchIn(it) } ?: return@mapNotNull null
+    val title = cells.getOrNull(3).orEmpty().ifBlank { cells.lastOrNull().orEmpty() }
+    if (title.isBlank() || foldLabel(title) == "beschreibung") return@mapNotNull null
+    AgendaEvent(
+        id = stableId("start-term", date, title),
+        start = date,
+        end = cells.getOrNull(1).orEmpty().ifBlank { date },
+        text = title,
+        comment = "",
+        room = cells.getOrNull(2).orEmpty(),
+        teachers = emptyList(),
+        courseId = "",
+        courseName = title,
+        status = "",
+        eventType = "event",
+        color = "",
+        timetableText = title,
+    )
+}
+
+fun terminlisteTotal(html: String): Int? =
+    Regex("""von\s+(\d+)\s*</span>""", RegexOption.IGNORE_CASE).find(html)?.groupValues?.get(1)?.toIntOrNull()
 
 /** Header texts and row counts for the Schulnetz log when a parser finds nothing. */
 fun describeTables(html: String): String {
@@ -457,6 +589,20 @@ fun findIcalUrl(html: String, baseUrl: String): String? {
     if (raw.startsWith("http")) return raw
     if (raw.startsWith("//")) return "https:$raw"
     return baseUrl.trimEnd('/') + "/" + raw.trimStart('/')
+}
+
+private fun sectionRows(html: String, heading: String): List<List<String>> {
+    val doc = Jsoup.parse(html)
+    val head = doc.select("h1, h2, h3, h4").firstOrNull { foldLabel(it.text()).contains(heading) } ?: return emptyList()
+    var node = head.parent()
+    repeat(4) {
+        val table = node?.selectFirst("table")
+        if (table != null) {
+            return table.select("tr").filter { it.closestTable() == table }.map { ownTexts(it, table) }.filter { it.any(String::isNotBlank) }
+        }
+        node = node?.parent()
+    }
+    return emptyList()
 }
 
 private fun cellAt(cells: List<String>, index: Int): String =

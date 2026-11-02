@@ -1,0 +1,617 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="de" xml:lang="de" translate="no" class="mdl-js"><head>
+	<meta http-equiv="content-type" content="text/html; charset=utf-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="robots" content="noindex">
+
+    <link href="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/font-awesome/css/all.min.css" rel="stylesheet">
+        <script defer="" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/material-design-lite/dist/material.min.js" type="text/javascript"></script>
+    <link rel="stylesheet" href="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/material-design-lite/dist/material-schulnetz-blue.min.css">
+
+        <link rel="stylesheet" href="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/dialog/dialog-polyfill.css">
+    <script src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/dialog/dialog-polyfill.js" type="text/javascript"></script>
+
+    <link rel="stylesheet" type="text/css" href="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/material-datepicker-1.0.9/dist/material-datepicker.css">
+    <script type="text/javascript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/material-datepicker-1.0.9/dist/material-datepicker-with-moment-js.min.js"></script>
+
+        <script type="text/javascript" language="JavaScript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/prototype/prototype.js"></script>
+    <script type="text/javascript" language="JavaScript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/prototype/scriptaculous/scriptaculous.js"></script><script type="text/javascript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/prototype/scriptaculous/builder.js"></script><script type="text/javascript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/prototype/scriptaculous/effects.js"></script><script type="text/javascript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/prototype/scriptaculous/controls.js"></script><script type="text/javascript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/prototype/scriptaculous/slider.js"></script><script type="text/javascript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/prototype/scriptaculous/sound.js"></script>
+
+        
+    <script type="text/javascript">eval("var protoAlias = "+$.toString())</script>
+
+    <script src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/JQuery-2.1.1/jquery-2.1.1.min.js" type="text/javascript"></script>
+    <script src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/JQuery-2.1.1/jquery.namespace.js" type="text/javascript"></script>
+    <script src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/JQuery-2.1.1/jquery.textcomplete.min.js" type="text/javascript"></script>
+    <script src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/JQuery-2.1.1/jquery.centerboard_textfunctions.js" type="text/javascript"></script>
+    <script src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/JQuery-2.1.1/jquery.centerboard_textcomplete.js" type="text/javascript"></script>
+
+    <script type="text/javascript">function $(arg){var res;try{var res=protoAlias(arg)}catch(e){res=null}
+if(res!=null){return res}
+try{var res=jQuery(arg)}catch(e){res=null}
+if(res!=null){return res}}</script>
+    
+    <script type="text/javascript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/sortable/Sortable.min.js"></script>
+
+
+        <link rel="stylesheet" href="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/css/flat/get_css.php" type="text/css" media="all">
+                <link rel="stylesheet" href="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/css/flat/customer/nema_anmeldesystem_AKSA_prod.css" type="text/css" media="all">
+        	<link rel="stylesheet" href="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/css/flat/print.css" type="text/css" media="print">
+    	<script type="text/javascript" language="JavaScript" src="get_js.php"></script>
+    	<script type="text/javascript">var xajaxRequestUri="https://www.schulnetz-ag.ch/aksa/xajax_js.php?pageid=1&id=abcdef0123456789&transid=a1b2c3"</script>
+	<script type="text/javascript" language="JavaScript" src="https://www.schulnetz-ag.ch/aksa/xajax_js.php?xajaxjs=xajaxjs&amp;cache_control=https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/"></script>
+    	<script type="text/javascript" language="JavaScript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/toggle.js"></script>
+
+    
+
+        
+        
+        
+        
+        <script src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/tinymce_6.1.1/js/tinymce/tinymce.min.js" type="text/javascript"></script>
+
+        <script type="text/javascript">function loadTinyMCE(){tinymce.init({selector:'.mceEditor',menubar:!1,statusbar:!1,setup:function(editor){editor.on('NodeChange',function(e){const node=e.element;if(node&&node.style.fontSize){const size=parseFloat(node.style.fontSize);node.style.lineHeight=(size*1.4)+'pt'}})},formats:{bold:{inline:'span',styles:{'font-weight':'bold'}},italic:{inline:'span',styles:{'font-style':'italic'}}},plugins:"lists advlist  autoresize",toolbar:"bold italic underline | bullist | cut copy  | undo redo | fontsize | fontfamily",autoresize_bottom_margin:5,min_height:100,font_size_formats:"8pt 9pt 10pt 11pt 12pt 14pt 18pt 24pt 36pt",paste_as_text:!0,font_family_formats:"Verdana=Verdana;Arial=Helvetica;Courier New=Courier;Times New Roman=Times",file_picker_callback:function(cb,value,meta){const input=document.createElement('input');input.setAttribute('type','file');input.setAttribute('accept','image/*');input.addEventListener('change',(e)=>{const file=e.target.files[0];const reader=new FileReader();reader.addEventListener('load',()=>{const id='blobid'+(new Date()).getTime();const blobCache=tinymce.activeEditor.editorUpload.blobCache;const base64=reader.result.split(',')[1];const blobInfo=blobCache.create(id,file,base64);blobCache.add(blobInfo);cb(blobInfo.blobUri(),{title:file.name,alt:file.name})});reader.readAsDataURL(file)});input.click()},init_instance_callback:function(editor){const textarea=document.querySelector('textarea.mceEditor');Object.assign(textarea.style,{display:'block',opacity:'0',position:'absolute',pointerEvents:'none',zIndex:'-1'});editor.on('change',function(){formChanged=!0});editor.on('keyup',debounce(function(){checkForInput(editor)},500,editor.id));textarea.on('invalid',function(){checkForInput(editor)})}})}
+function checkForInput(editor){const content=editor.getContent().replace(/<\/?[^>]+(>|$)|\s+|&nbsp;/g,'').trim();const container=editor.getContainer();const parent=container.parentNode;const label=parent.parentNode;const textarea=editor.getElement();const isInvalid=!content&&textarea.hasAttribute('required');const requiredMsg=document.getElementById(editor.id+'_required');requiredMsg.style.visibility=isInvalid?'visible':'hidden';label.classList.toggle('is-invalid',isInvalid);editor.save();textarea.style.height=editor.editorContainer.offsetHeight+'px'}
+document.addEventListener('mdl-componentupgraded',function(e){if(typeof e.target.MaterialLayout!=='undefined'){loadTinyMCE()}})</script>
+
+    
+        
+        
+        
+    <title>AKSA schulNetz</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <link rel="apple-touch-icon" sizes="180x180" href="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/favicons/sn/apple-touch-icon.png">
+        <link rel="icon" type="image/png" sizes="32x32" href="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/favicons/sn/favicon-32x32.png">
+        <link rel="icon" type="image/png" sizes="16x16" href="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/favicons/sn/favicon-16x16.png">
+        <link rel="manifest" href="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/favicons/sn/site.webmanifest" crossorigin="use-credentials">
+        <link rel="mask-icon" href="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/favicons/sn/safari-pinned-tab.svg" color="#5bbad5">
+        <link rel="shortcut icon" href="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/favicons/sn/favicon.ico">
+        <meta name="msapplication-config" content="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/favicons/sn/browserconfig.php?path=https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/favicons/sn/">
+    
+    <meta name="msapplication-TileColor" content="#5bbad5">
+
+    <meta name="theme-color" content="#ffffff">
+</head>
+
+<body class="layout-md">
+<div id="backgroundBanner"></div>
+<div id="footer"></div>
+<div id="overDiv" style="position:absolute; visibility:hidden; z-index:1000;"></div>
+<div class="mdl-layout__container"><div class="mdl-layout mdl-js-layout mdl-layout--fixed-header is-upgraded" id="global-container" data-upgraded=",MaterialLayout"><script language="JavaScript" type="text/javascript">let duration=900;let loginUrl='https://www.schulnetz-ag.ch/aksa/index.php?pageid=1&id=abcdef0123456789&transid=a1b2c3';let saveScrollPos=!1;let resetScrollPos=!1;let menu_hidden_permissions=!1;let menuScrollOffset=0;let maxScrollRight=0;let navListMainShow=!1;let menuIconsWidth=0;let menuIconsBigWidth=0;let menuIconsSmallWidth=0;let lastShift=-1;let iconIndex=0;let layoutSizeCookie='layout-size';function toggleNavDrawer(){var drawer=$('nav-drawer');if(drawer.hasClassName('is-small-screen')){drawer.addClassName('mdl-layout--fixed-drawer');drawer.MaterialLayout.toggleDrawer()}else{if(drawer.hasClassName('mdl-layout--fixed-drawer')){drawer.removeClassName('mdl-layout--fixed-drawer');setCookie("menuHidden","1",10)}else{drawer.addClassName('mdl-layout--fixed-drawer');setCookie("menuHidden","0",10)}}}
+function showMenuButtonOnSmallScreens(show){var drawer=$('nav-drawer');let menu_toggle_btn=$('menu-toggle-button');if(show&&menu_toggle_btn.style.visibility==='hidden'){menu_toggle_btn.style.visibility='visible'}else if(menu_hidden_permissions&&!show){menu_toggle_btn.style.visibility='hidden';drawer.removeClassName('mdl-layout--fixed-drawer')}}
+function toggleNavListMainList(){let main=document.getElementsByClassName("cls-page--mainnav-small--list");let icon=$('mainnav-small--icon');for(let i=0;i<main.length;i++){navListMainShow?main[i].hide():main[i].show()}
+if(navListMainShow){icon.removeClassName('fa-chevron-up');icon.addClassName('fa-chevron-down')}else{icon.removeClassName('fa-chevron-down');icon.addClassName('fa-chevron-up')}
+navListMainShow=!navListMainShow}
+function toggleScrollBtnDisabled(){$('menu-scroll-left').disabled=(menuScrollOffset)>=0;$('menu-scroll-right').disabled=(menuIconsWidth+menuScrollOffset)<=$('nav-main-menu').offsetWidth}
+function menuScrollIcon(forward){const menuElements=$$('.cls-page--mainmenu-element');let iconWidth=menuElements[iconIndex].offsetWidth;if(forward){let iconWidth=menuElements[iconIndex].offsetWidth;let remainingWidth=menuIconsWidth+menuScrollOffset-$('nav-main-menu').offsetWidth;if(remainingWidth<iconWidth){menuScroll(-remainingWidth);lastShift=remainingWidth}else{menuScroll(-iconWidth);iconIndex++}}else{let iconWidth=menuElements[iconIndex-1].offsetWidth;if(lastShift===-1){menuScroll(iconWidth);iconIndex--}else{menuScroll(lastShift);lastShift=-1}}}
+function menuScroll(scrollOffset){if(scrollOffset>0&&menuScrollOffset>=0){return}
+if(scrollOffset<0&&menuIconsWidth+menuScrollOffset<=$('nav-main-menu').offsetWidth){return}
+menuScrollOffset+=scrollOffset;toggleScrollBtnDisabled();const menuElements=$$('.cls-page--mainmenu-element');for(let i=0;i<menuElements.length;i++){menuElements[i].setStyle({'left':menuScrollOffset+'px'})}}
+function toggleCard(id){let content=$(id+'_card_content');let actions=$(id+'_card_actions');let buttonClass=null;if(content.style.display==="none"){content.show();if(actions){actions.show()}
+buttonClass="fa-chevron-up"}else{content.hide();if(actions){actions.hide()}
+buttonClass="fa-chevron-down"}
+$(id+'_toggle_button').innerHTML="<i class='fas "+buttonClass+" fa-xs'></i>"}
+function getNavMenuWidth(){const totalWidth=$('header-menu').offsetWidth-40;let navMenuWidth=totalWidth-$('logo-span').offsetWidth-$('sn-gradient').offsetWidth-$('sn-main-menu').offsetWidth;let iconssn=['nav-semester','nav-kgfilter','nav-datumsrange','readonly-mode','application-type','sn-timer','sn-anrufdetails','sn-bookmarks','switch-mode','sn-notifications','semid-warning','show-username','sn-userswitch'];let iconstn=['nav-info1month','nav-info1date','nav-info2dates','nav-info1year','nav-info2month','nav-info1month1date','tn-bookmarks','tn-timer','nav-wechselzu','sn-userswitch'];let icons=iconssn.concat(iconstn);for(let i=0;i<icons.length;i++){let icon=document.getElementById(icons[i]);if(icon!=undefined&&icon.offsetWidth!=undefined){navMenuWidth-=icon.offsetWidth}}
+return navMenuWidth}
+function resizeHeaderRow(){let scrollLeft=$('menu-scroll-left');let navMainMenu=$('nav-main-menu');let navSmallMenu=$('mainnav-small');let scrollRight=$('menu-scroll-right');let navMenuWidth=getNavMenuWidth();if(navMenuWidth<300){navMainMenu.hide();scrollLeft.hide();scrollRight.hide();showMenuButtonOnSmallScreens(!0);if(navSmallMenu){navSmallMenu.show()}}else{if(navListMainShow){toggleNavListMainList()}
+showMenuButtonOnSmallScreens(!1);if(navSmallMenu){navSmallMenu.hide()}
+navMainMenu.style.display='flex';navMainMenu.style.width='auto';navMainMenu.classList.remove('cls-page--mainmenu-small');navMainMenu.classList.add('cls-page--mainmenu-large');menuIconsWidth=menuIconsBigWidth;scrollLeft.hide();scrollRight.hide();if(navMainMenu.offsetWidth>navMenuWidth){navMainMenu.classList.add('cls-page--mainmenu-small');navMainMenu.classList.remove('cls-page--mainmenu-large');menuIconsWidth=menuIconsSmallWidth}
+if(navMainMenu.offsetWidth>navMenuWidth){scrollLeft.show();scrollRight.show();navMenuWidth-=scrollLeft.offsetWidth;navMenuWidth-=scrollRight.offsetWidth;maxScrollRight=navMainMenu.offsetWidth-navMenuWidth;toggleScrollBtnDisabled()}else{menuScroll(-menuScrollOffset)}
+navMainMenu.style.width=navMenuWidth+'px';navMainMenu.style.overflow='hidden'}
+setStickyColumnsLeftPos()}
+function scrollToActiveMenu(){menuScroll(-menuScrollOffset);lastShift=-1;iconIndex=0;let activeOffset=0;const menuElements=$$('.cls-page--mainmenu-element');for(let i=0;i<menuElements.length;i++){activeOffset+=menuElements[i].offsetWidth;if(menuElements[i].hasClassName('cls-page--mainmenu-active')){break}}
+while(activeOffset+menuScrollOffset>$('nav-main-menu').offsetWidth){menuScrollIcon(!0)}}
+function setLayoutSize(layoutSize){setCookie(layoutSizeCookie,layoutSize,365);switch(layoutSize){case 'sm':selElement='layout-sel-sm';break;case 'md':selElement='layout-sel-md';break;default:selElement='layout-sel-lg'}
+document.getElementById('layout-sel-sm').classList.remove('cls-menu--selected-layout');document.getElementById('layout-sel-md').classList.remove('cls-menu--selected-layout');document.getElementById('layout-sel-lg').classList.remove('cls-menu--selected-layout');document.getElementById(selElement).classList.add('cls-menu--selected-layout');document.body.classList.remove('layout-sm');document.body.classList.remove('layout-md');document.body.classList.remove('layout-lg');document.body.classList.add('layout-'+layoutSize)}
+function intersectionStickyCallback(records,observer){for(let i=0;i<records.length;i++){let record=records[i];const _target=record.target.parentElement;const _position=record.target.dataset.sentinelPosition;const _stuck=!record.isIntersecting;document.dispatchEvent(new CustomEvent('sticky-change',{detail:{stuck:_stuck,target:_target,position:_position}}))}}
+window.addEventListener('resize',function(event){resizeHeaderRow();toggleScrollBtnDisabled();scrollToActiveMenu()});window.addEventListener('load',function(event){const menuElements=$$('.cls-page--mainmenu-element');for(let i=0;i<menuElements.length;i++){menuIconsBigWidth+=menuElements[i].offsetWidth;menuIconsSmallWidth+=menuElements[i].childNodes[0].offsetWidth+32}
+resizeHeaderRow();toggleScrollBtnDisabled();scrollToActiveMenu();let textareas=document.getElementsByClassName('mdl-textarea');for(let i=0;i<textareas.length;i++){textareas[i].addEventListener('keyup',function(e){const maxlength=parseInt(this.dataset.maxLength);if(isNaN(maxlength)){return}
+if(this.value.length>maxlength){this.parentElement.addClassName('is-invalid');this.setCustomValidity(this.dataset.maxLengthError)}else{this.parentElement.removeClassName('is-invalid');this.setCustomValidity('')}})}});let start=Date.now();let alert_shown=reload_initiated=!1;function init_timer(){alert_shown=!1;start=Date.now();if($('sn-timer-tooltip')){$('sn-timer-tooltip').setStyle({'background-color':'rgba(97, 97, 97, 0.9)'})}
+if($('circle-progress')){$('circle-progress').style.fill="none";$('circle-progress').style.stroke=""}
+timer()}
+function setProgressPercent(percent){if($('circle-progress')){let offset=339.292*(1-(percent/100));$('circle-progress').style.strokeDashoffset=offset}}
+function timer(){let diff=duration-((Date.now()-start)/1000);diff=Math.floor(diff);if(diff<0){if(reload_initiated)
+return;formChanged=!1;setTimeout(function(){window.location=loginUrl},5000);reload_initiated=!0;return}
+if(diff<60&&alert_shown===!1){alert_shown=!0;if($('sn-timer-tooltip')){$('sn-timer-tooltip').setStyle({'background-color':'rgba(197, 78, 78, 0.9)'})}
+if($('circle-progress')){$('circle-progress').style.fill="rgba(197, 78, 78, 0.6)";$('circle-progress').style.stroke="rgb(220, 78, 78)"}
+const txt='Ihre Sitzung läuft in einer Minute ab. Klicken Sie auf Verlängern oder oben rechts auf die Zeitanzeige um die Sitzung zu verlängern.';showSnackbar({message:txt,actionHandler:function(){xajax_reset_timeout();const snackbarContainer=document.querySelector('#mdl-toast');snackbarContainer.MaterialSnackbar.cleanup_()},actionText:'Verlängern',timeout:60000})}
+const days=Math.floor(diff/(24*60*60));let leftSec=diff-days*24*60*60;const hrs=Math.floor(leftSec/(60*60));leftSec=leftSec-hrs*60*60;const min=Math.floor(leftSec/(60));const sec=leftSec-min*60;let time=pad(hrs,2)+":"+pad(min,2)+":"+pad(sec,2);let minTotal=min+(60*hrs);if(minTotal>60){minTotal="60+"}else{minTotal=""+minTotal+"'"}
+if(alert_shown===!0){if($('timer')){$('timer').innerHTML=""+pad(sec,2)+"''"}}else{if($('timer')){$('timer').innerHTML=minTotal}}
+let percent=sec*100/60;setProgressPercent(percent);if($('sn-timer-tooltip')){$('sn-timer-tooltip').innerHTML=time}}
+function pad(n,width){n=n+'';return n.length>=width?n:new Array(width-n.length+1).join('0')+n}
+window.addEventListener('load',function(){timer();setInterval(timer,500)});window.addEventListener('keydown',function(){checkHalfTimeout()});window.addEventListener('mousedown',function(){checkHalfTimeout()});function checkHalfTimeout(){let diff=(Date.now()-start)/1000;if(diff>(duration/2)){console.log(diff+' seconds passed since timer init, half of timeout reached ('+(duration/2)+'), reset_timeout() called');xajax_reset_timeout()}}</script>
+<header class="titelleiste mdl-layout__header cls-page--header mdl-layout__header--seamed"><div id="mdl-toast" class="mdl-js-snackbar mdl-snackbar" data-upgraded=",MaterialSnackbar"><div class="mdl-snackbar__text"></div><button class="mdl-snackbar__action" type="button" aria-hidden="true"></button></div><div class="mdl-layout__header-row cls-page--header-row header-menu mdl-layout__header--seamed" id="header-menu"><span class="cls-page--header-row--logo-span" id="logo-span"><button class="mdl-button mdl-js-button mdl-button--icon mdl-button--icon--large mdl-button--colored" onclick="toggleNavDrawer();" id="menu-toggle-button" data-upgraded=",MaterialButton" tabindex="0"><i class="far fa-bars fa-xs"></i></button><div class="mdl-tooltip mdl-tooltip--right mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width " for="menu-toggle-button" id="mdl_tooltip_menu-toggle-button" data-upgraded=",MaterialTooltip">Menü ein-/ausblenden</div><span class="cls-page--header-row--logo-container"><img class="cls-page--header-row--sn-logo" src="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/css/flat/images/snlogo-192x192.png"></span></span><span class="cls-page--header-row--logo-gradient" id="sn-gradient"></span><button id="menu-scroll-left" class="mdl-button mdl-js-button mdl-button--icon" disabled="" style="display: none;" onclick="menuScrollIcon(false);" data-upgraded=",MaterialButton"><i class="far fa-chevron-left fa-xs"></i></button><nav class="mdl-navigation cls-page--mainmenu cls-page--mainmenu-large" id="nav-main-menu" style="display: flex; width: 1520px; overflow: hidden;"><a href="index.php?pageid=1&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link cls-page--mainmenu-active cls-page--mainmenu-element cls-page--mainmenu-icon" id="menu1" tabindex="0" style="left: 0px;"><i class="fa-home fas fa-lg"></i><div class="cls-page--mainmenu-subtitle no-outline" id="menu_title_1">Start</div></a><div class="mdl-tooltip mdl-tooltip--bottom mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width cls-page--mainmenu-tooltip" for="menu1" id="mdl_tooltip_menu1" data-upgraded=",MaterialTooltip">Start</div><a href="index.php?pageid=21311&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link  cls-page--mainmenu-element cls-page--mainmenu-icon" id="menu21311" tabindex="0" style="left: 0px;"><i class="fa-graduation-cap fas fa-lg"></i><div class="cls-page--mainmenu-subtitle no-outline" id="menu_title_21311">Noten</div></a><div class="mdl-tooltip mdl-tooltip--bottom mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width cls-page--mainmenu-tooltip" for="menu21311" id="mdl_tooltip_menu21311" data-upgraded=",MaterialTooltip">Noten</div><a href="index.php?pageid=21111&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link  cls-page--mainmenu-element cls-page--mainmenu-icon" id="menu21111" tabindex="0" style="left: 0px;"><i class="fa-user-check fas fa-lg"></i><div class="cls-page--mainmenu-subtitle no-outline" id="menu_title_21111">Absenzen</div></a><div class="mdl-tooltip mdl-tooltip--bottom mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width cls-page--mainmenu-tooltip" for="menu21111" id="mdl_tooltip_menu21111" data-upgraded=",MaterialTooltip">Absenzen</div><a href="index.php?pageid=21411&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link  cls-page--mainmenu-element cls-page--mainmenu-icon" id="menu21411" tabindex="0" style="left: 0px;"><i class="fa-balance-scale fas fa-lg"></i><div class="cls-page--mainmenu-subtitle no-outline" id="menu_title_21411">Kontoauszug</div></a><div class="mdl-tooltip mdl-tooltip--bottom mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width cls-page--mainmenu-tooltip" for="menu21411" id="mdl_tooltip_menu21411" data-upgraded=",MaterialTooltip">Kontoauszug</div><a href="index.php?pageid=21200&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link  cls-page--mainmenu-element cls-page--mainmenu-icon" id="menu21200" tabindex="0" style="left: 0px;"><i class="fa-calendar-alt far fa-lg"></i><div class="cls-page--mainmenu-subtitle no-outline" id="menu_title_21200">Agenda</div></a><div class="mdl-tooltip mdl-tooltip--bottom mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width cls-page--mainmenu-tooltip" for="menu21200" id="mdl_tooltip_menu21200" data-upgraded=",MaterialTooltip">Agenda</div><a href="index.php?pageid=22300&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link  cls-page--mainmenu-element cls-page--mainmenu-icon" id="menu22300" tabindex="0" style="left: 0px;"><i class="fa-envelope far fa-lg"></i><div class="cls-page--mainmenu-subtitle no-outline" id="menu_title_22300">Kommunikation</div></a><div class="mdl-tooltip mdl-tooltip--bottom mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width cls-page--mainmenu-tooltip" for="menu22300" id="mdl_tooltip_menu22300" data-upgraded=",MaterialTooltip">Kommunikation</div><a href="index.php?pageid=24030&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link  cls-page--mainmenu-element cls-page--mainmenu-icon" id="menu24030" tabindex="0" style="left: 0px;"><i class="fa-cloud fas fa-lg"></i><div class="cls-page--mainmenu-subtitle no-outline" id="menu_title_24030">Listen&amp;Dokumente</div></a><div class="mdl-tooltip mdl-tooltip--bottom mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width cls-page--mainmenu-tooltip" for="menu24030" id="mdl_tooltip_menu24030" data-upgraded=",MaterialTooltip">Listen&amp;Dokumente</div><a href="index.php?pageid=23118&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link  cls-page--mainmenu-element cls-page--mainmenu-icon" id="menu23118" tabindex="0" style="left: 0px;"><i class="fa-laptop fas fa-lg"></i><div class="cls-page--mainmenu-subtitle no-outline" id="menu_title_23118">eSchool</div></a><div class="mdl-tooltip mdl-tooltip--bottom mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width cls-page--mainmenu-tooltip" for="menu23118" id="mdl_tooltip_menu23118" data-upgraded=",MaterialTooltip">eSchool</div></nav><button id="menu-scroll-right" class="mdl-button mdl-js-button mdl-button--icon" style="display: none;" onclick="menuScrollIcon(true);" disabled="" data-upgraded=",MaterialButton"><i class="far fa-chevron-right fa-xs"></i></button><div class="mdl-layout-spacer"></div><div id="sn-nav-global" style="flex: 0 0 auto; height: 100%; display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; overflow: visible; white-space: nowrap;"><button id="sn-anrufdetails" class="mdl-button mdl-js-button mdl-button--icon mdl-badge--overlap mdl-badge mdl-badge--icon-button" style="--badge-color: #CD4C44; display: none;" onclick="showCallDetails();" data-upgraded=",MaterialButton" tabindex="0">
+    <i class="far fa-phone-alt fa-xs"></i>
+</button>
+<div class="mdl-tooltip mdl-tooltip--right mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width " for="sn-anrufdetails" id="mdl_tooltip_sn-anrufdetails" data-upgraded=",MaterialTooltip">Details zum zuletzt eingegangenen Anruf</div>
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="timer-holder" id="sn-timer" style="position: relative; float: left; margin: 0 5px;" onclick="xajax_reset_timeout(); closeSnackbar();" tabindex="0">
+    <span id="timer" class="timer-value" style="text-align:center; position: absolute; line-height: 24px; width: 100%; font-size: 10px; z-index: 10;">14'</span>
+    <svg width="24" height="24" viewBox="0 0 120 120" style="-webkit-transform: rotate(-90deg); transform: rotate(-90deg);">
+        <circle id="circle-progress" cx="60" cy="60" r="54" fill="none" stroke="#fff" stroke-width="12" stroke-dasharray="339.292" style="stroke-dashoffset: 5.65487;"></circle>
+    </svg>
+</div>
+
+<div class="mdl-tooltip mdl-tooltip--left mdl-tooltip--large" id="sn-timer-tooltip" for="sn-timer" data-upgraded=",MaterialTooltip">00:14:59</div>
+
+
+    <button id="sn-bookmarks" class="mdl-button mdl-js-button mdl-button--icon" data-upgraded=",MaterialButton" tabindex="0">
+        <i class="far fa-bookmark fa-xs"></i>
+    </button>
+    <div class="mdl-tooltip mdl-tooltip--left mdl-tooltip--large" for="sn-bookmarks" data-upgraded=",MaterialTooltip">
+        Ihre Lesezeichen
+    </div>
+        <div class="mdl-menu__container is-upgraded"><div class="mdl-menu__outline mdl-menu--bottom-right"></div><ul class="mdl-menu mdl-menu--bottom-right mdl-js-cascading-menu" for="sn-bookmarks" data-upgraded=",MaterialCascadingMenu">
+                                    
+        
+                    <a href="index.php?pageid=1&amp;id=abcdef0123456789&amp;transid=a1b2c3&amp;action=addbookmark" class="mdl-menu__item" tabindex="-1">Diese Seite hinzufügen</a>
+            </ul></div>
+
+        <button id="sn-notifications" class="mdl-button mdl-js-button mdl-button--icon  mdl-badge--icon-button" data-badge="0" href="index.php?pageid=978&amp;id=abcdef0123456789&amp;transid=a1b2c3" onclick="location.href='index.php?pageid=978&amp;id=abcdef0123456789&amp;transid=a1b2c3'" style="--badge-color: #CD4C44;" data-upgraded=",MaterialButton" tabindex="0">
+        <i class="far fa-bell fa-xs"></i>
+    </button>
+    <div class="mdl-tooltip mdl-tooltip--right mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width " for="sn-notifications" id="mdl_tooltip_sn-notifications" data-upgraded=",MaterialTooltip">Benachrichtigungen</div><dialog class="mdl-dialog" id="anruf_details_dialog" style="max-width: 600px; width: auto;">
+    <b class="mdl-dialog__title">Anruf-Details</b>
+    <div class="mdl-dialog__content">
+        <p id="anruf_details_content">
+            Anruf Details werden geladen...
+        </p>
+        <p id="anruf_warnung_form_changed" style="display: none;">
+            Sie haben im aktuellen Formular Änderungen vorgenommen. Sie können die Daten speichern, und danach über das Telefon-Symbol wieder auf diese Ansicht gelangen.
+        </p>
+    </div>
+    <div class="mdl-dialog__actions">
+        <button type="button" class="mdl-button mdl-js-button mdl-button--small close-btn" data-upgraded=",MaterialButton">Schliessen</button>
+        <a class="mdl-button mdl-js-button mdl-button--small mdl-button--colored mdl-button--light" style="display: none;" id="anruf_quernav" data-upgraded=",MaterialButton">Zur Quernavigation</a>
+    </div>
+</dialog>
+
+
+<script type="application/javascript">const anrufDetailsDialog=document.getElementById('anruf_details_dialog');if(anrufDetailsDialog){anrufDetailsDialog.querySelector('.close-btn').addEventListener('click',function(){anrufDetailsDialog.close()})}
+if(!anrufDetailsDialog.showModal){document.body.appendChild(anrufDetailsDialog);dialogPolyfill.registerDialog(anrufDetailsDialog)}
+function showNewCall(){document.getElementById('sn-anrufdetails').style.display='';document.getElementById('sn-anrufdetails').dataset.badge='';resizeHeaderRow();window.localStorage.removeItem('call_metadata__id');window.localStorage.removeItem('call_metadata__timestamp')}
+function showCallDetails(){anrufDetailsDialog.showModal();xajax_call_metadata_show_details()}
+function sendCallMetadata(){const id=window.localStorage.getItem('call_metadata__id');const timestamp=window.localStorage.getItem('call_metadata__timestamp');if(id!=null){xajax_call_metadata_set_id(id,timestamp)}}
+window.addEventListener('storage',function(e){if(e.key==='call_metadata__id'){sendCallMetadata()}});sendCallMetadata()</script>
+</div><button id="sn-main-menu" class="mdl-button mdl-js-button mdl-button--icon" data-upgraded=",MaterialButton" tabindex="0"><i class="far fa-ellipsis-v fa-xs"></i></button><div class="mdl-tooltip mdl-tooltip--left mdl-tooltip--large" for="sn-main-menu" data-upgraded=",MaterialTooltip">Menü</div><div class="mdl-menu__container is-upgraded"><div class="mdl-menu__outline mdl-menu--bottom-right"></div><ul class="mdl-menu mdl-menu--bottom-right mdl-js-cascading-menu" for="sn-main-menu" data-upgraded=",MaterialCascadingMenu"><li class="supernav__list-item" role="menuitem"><a href="index.php?pageid=9999&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-menu__item" tabindex="-1"><i class="fal fa-sign-out-alt fa-lg sn-menu-icon"></i> Abmelden</a></li><li class="supernav__list-item" role="menuitem"><button type="button" class="mdl-menu__item mdl-menu-cascade__open-sub" id="mein_schulnetz" tabindex="-1"><i class="fal fa-chevron-left fa-lg sn-menu-icon"></i> mein schulNetz</button></li><li class="supernav__list-item" role="menuitem"><button type="button" class="mdl-menu__item mdl-menu-cascade__open-sub" id="change_style" tabindex="-1"><i class="fal fa-chevron-left fa-lg sn-menu-icon"></i> Layout</button></li><li class="supernav__list-item" role="menuitem"><a href="about.php?id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-menu__item" onclick="javascript:openpopup('about.php',350,150); return false;" target="_blank" tabindex="-1"><i class="fal fa-info-circle fa-lg sn-menu-icon"></i> About</a></li></ul></div><div class="mdl-menu__container is-upgraded"><div class="mdl-menu__outline mdl-menu__outline-submenu mdl-menu--bottom-left"></div><ul class="mdl-menu mdl-js-cascading-menu mdl-menu--bottom-left" for="change_style" data-upgraded=",MaterialCascadingMenu"><li><button type="button" class="mdl-menu__item mdl-menu__item-noclose " onclick="setLayoutSize('lg')" id="layout-sel-lg" tabindex="-1">Ausgedehnt</button></li><li><button type="button" class="mdl-menu__item mdl-menu__item-noclose cls-menu--selected-layout" onclick="setLayoutSize('md')" id="layout-sel-md" tabindex="-1">Standard</button></li><li><button type="button" class="mdl-menu__item mdl-menu__item-noclose " onclick="setLayoutSize('sm')" id="layout-sel-sm" tabindex="-1">Kompakt</button></li></ul></div><div class="mdl-menu__container is-upgraded"><div class="mdl-menu__outline mdl-menu__outline-submenu mdl-menu--bottom-left"></div><ul class="mdl-menu mdl-js-cascading-menu mdl-menu--bottom-left" for="mein_schulnetz" data-upgraded=",MaterialCascadingMenu"><li><a href="index.php?pageid=22500&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-menu__item" tabindex="-1">Einstellungen</a></li><li><a href="index.php?pageid=24953&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-menu__item" tabindex="-1">Externe Anbindungen</a></li><li><a href="index.php?pageid=1&amp;id=abcdef0123456789&amp;transid=a1b2c3&amp;action=global_logout" class="mdl-menu__item" tabindex="-1">Alle Sitzungen beenden</a></li></ul></div></div></header>
+
+<main class="mdl-layout__content">
+    <div class="mdl-layout__container"><div class="mdl-layout mdl-js-layout mdl-layout--fixed-drawer has-drawer is-upgraded" id="nav-drawer" data-upgraded=",MaterialLayout">
+        <div class="mdl-layout__drawer cls-page--navdrawer" id="nav-drawer-content" aria-hidden="false">
+            <nav class="mdl-navigation cls-page--navlist" id="navigation-list">
+                                    <div class="mdl-navigation__link cls-page--mainnav-small cls-page--leftmenu-active" style="display: none;" id="mainnav-small" onclick="toggleNavListMainList();"><i class="fa-home fas fa-lg"></i>&nbsp;&nbsp;Startseite<button class="mdl-button mdl-js-button mdl-button--icon cls-page--mainnav-small--button" data-upgraded=",MaterialButton"><i id="mainnav-small--icon" class="fa-chevron-down fas"></i></button>
+                    </div>
+                                                                                                                    <a href="index.php?pageid=21311&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link cls-page--mainnav-small--list" style="display: none;"><i class="fa-graduation-cap fas fa-lg"></i>&nbsp;&nbsp;Noten</a>
+                                                                                                <a href="index.php?pageid=21111&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link cls-page--mainnav-small--list" style="display: none;"><i class="fa-user-check fas fa-lg"></i>&nbsp;&nbsp;Absenzen</a>
+                                                                                                <a href="index.php?pageid=21411&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link cls-page--mainnav-small--list" style="display: none;"><i class="fa-balance-scale fas fa-lg"></i>&nbsp;&nbsp;Kontoauszug</a>
+                                                                                                <a href="index.php?pageid=21200&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link cls-page--mainnav-small--list" style="display: none;"><i class="fa-calendar-alt far fa-lg"></i>&nbsp;&nbsp;Agenda</a>
+                                                                                                <a href="index.php?pageid=22300&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link cls-page--mainnav-small--list" style="display: none;"><i class="fa-envelope far fa-lg"></i>&nbsp;&nbsp;Kommunikation</a>
+                                                                                                <a href="index.php?pageid=24030&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link cls-page--mainnav-small--list" style="display: none;"><i class="fa-cloud fas fa-lg"></i>&nbsp;&nbsp;Listen&amp;Dokumente</a>
+                                                                                                <a href="index.php?pageid=23118&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link cls-page--mainnav-small--list" style="display: none;"><i class="fa-laptop fas fa-lg"></i>&nbsp;&nbsp;eSchool</a>
+                                                                                                                                                                                                                                                                                                    <div class="cls-page--navlist-spacer-bottom">&nbsp;</div>
+            </nav>
+            <div id="clsSublist" class="cls-page--navsublist">
+            </div>
+        </div>
+        <div aria-expanded="false" role="button" tabindex="0" class="mdl-layout__drawer-button"><i class="material-icons"></i></div><main class="mdl-layout__content">
+            <div class="mdl-card mdl-shadow--2dp cls-page--content-card" id="content-card">
+                
+                <dialog class="mdl-dialog" id="xajax_dialog" style="max-width: 90%; width: auto;">
+                    <div class="mdl-dialog__content" id="xajax_dialog_content" style="padding-top: 5px; padding-bottom: 2px;">
+                    </div>
+                </dialog>
+
+                                
+                <script>const xajaxDialog=document.getElementById('xajax_dialog');if(!xajaxDialog.showModal){document.body.appendChild(xajaxDialog);dialogPolyfill.registerDialog(xajaxDialog)}</script>
+<script lang="js">addEventListener('load',autoResizeTable);addEventListener('resize',autoResizeTable);function autoResizeTable(){const smallDivList=Array.from(document.getElementById('startMenu').getElementsByClassName('mdl-cell mdl-cell--6-col'));const smallDivWidth=smallDivList.first().offsetWidth+1;smallDivList.forEach((div)=>{const tableList=div.getElementsByTagName('table');if(tableList.length!==1){return}
+const tableWidth=tableList.item(0).offsetWidth;if(tableWidth>smallDivWidth){div.classList.add('force-expand')}})}</script>
+
+<style lang="css">
+    @media screen and (max-width: 1600px) {
+        .force-expand {
+            width: calc(100% - 16px);
+        }
+    }
+</style>
+
+<div id="startMenu" class="mdl-grid">
+
+    <div class="mdl-cell mdl-cell--12-col">
+        <div class="header-for-page-actions">
+            <h3>Start</h3>
+            <div class="mdl-layout-spacer"></div>
+            <div id="page_actions_container">
+                                            
+                            
+                        <button type="button" id="page_action_0" onclick="reordertartBlocks()" class="mdl-button mdl-js-button mdl-button--icon mdl-button--bulk-action  " data-upgraded=",MaterialButton" tabindex="0">
+                    <i class="far fa-arrows-alt fa-xs"></i>
+            </button>
+                    <div class="mdl-tooltip mdl-tooltip--left mdl-tooltip--large mdl-tooltip--line-wrap" for="page_action_0" id="page_action_0_tooltip" data-upgraded=",MaterialTooltip">
+        Startelemente anordnen
+            </div>
+    </div>
+        </div>
+        <p>Willkommen im schulNetz.<br>
+    </p></div>
+
+        
+
+    
+    
+    
+    
+    
+            <div class="mdl-cell mdl-cell--6-col mdl-cell--8-col-tablet">
+            <div style="max-width: 100%" class=""><div class="mdl-card cls-card mdl-shadow--2dp mdl-card--information " id="6ae8db853eb6a" style=""><div class="mdl-progress mdl-js-progress mdl-progress__indeterminate is-upgraded" style="width: 100%; display: none;" id="6ae8db853eb6a_progress_bar" data-upgraded=",MaterialProgress"><div class="progressbar bar bar1" style="width: 0%;"></div><div class="bufferbar bar bar2" style="width: 100%;"></div><div class="auxbar bar bar3" style="width: 0%;"></div></div><div class="mdl-card__supporting-text" id="6ae8db853eb6a_card_content" style="display: block; max-height: auto;">            <p>Dienstag, 03.11.2026</p>
+<p>---Abwesende Lehrpersonen:</p>
+<p>keine</p>
+<p><br>---Lehrpersonen auf Exkursion:<br>Klink Lil (7.30 - 12.45 Uhr)</p>
+            </div></div></div>        </div>
+    
+    
+
+        
+    <div class="mdl-cell mdl-cell--12-col">
+    </div>
+<div class="mdl-cell mdl-cell--6-col mdl-cell--8-col-tablet">    <h3 class="tabletitle">Termine</h3>
+
+
+<table class="mdl-data-table mdl-js-data-table mdl-shadow--2dp mdl-table--cls-print-table" no-highlight-row="" style="width: 100%;" data-upgraded=",MaterialDataTable">
+    <tbody><tr>
+                                        <th class="mdl-data-table__cell--non-numeric" style=" width:20%; ">Von</th>
+                                                <th class="mdl-data-table__cell--non-numeric" style=" width:20%; ">Bis</th>
+                                                <th class="mdl-data-table__cell--non-numeric" style=" width:10%; ">Ort</th>
+                                                <th class="mdl-data-table__cell--non-numeric" style=" width:40%; ">Beschreibung</th>
+                                                <th class="mdl-data-table__cell--non-numeric" style=" width:10%; ">Info</th>
+                </tr>
+
+                        <tr class="highlight-row">
+                                                                                                    <td class="mdl-data-table__cell--non-numeric">03.11.2026 12:20</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">03.11.2026 </td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">Aula&nbsp;</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">Lunchtimekonzert</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">(*)</td>                                                 </tr>
+                    <tr class="no-highlight-row">
+                                                                                                    <td class="mdl-data-table__cell--non-numeric">03.11.2026 16:45</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">03.11.2026 18:20</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">019</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">Nachprüfungen</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">(*)</td>                                                 </tr>
+                    <tr class="highlight-row">
+                                                                                                    <td class="mdl-data-table__cell--non-numeric">04.11.2026 </td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">04.11.2026 </td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric"></td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">ÜK OVAP</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">(*)</td>                                                 </tr>
+                    <tr class="no-highlight-row">
+                                                                                                    <td class="mdl-data-table__cell--non-numeric">05.11.2026 14:00</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">05.11.2026 17:00</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric"></td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">Debattennachmittag 2. Klasse (Gym, WMS, IMS)</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">(*)</td>                                                 </tr>
+                    <tr class="highlight-row">
+                                                                                                    <td class="mdl-data-table__cell--non-numeric">09.11.2026 </td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">09.11.2026 </td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">BWZ Brugg</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">ÜK D&amp;A</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">(*)</td>                                                 </tr>
+                    <tr class="no-highlight-row">
+                                                                                                    <td class="mdl-data-table__cell--non-numeric">09.11.2026 </td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">27.11.2026 </td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">Wed_C</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">IK1 Umgang mit Informationen 1. Klassen (2 Lektionen pro Abteilung)</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">(*)</td>                                                 </tr>
+                    <tr class="highlight-row">
+                                                                                                    <td class="mdl-data-table__cell--non-numeric">09.11.2026 14:30</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">09.11.2026 17:30</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric"></td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">Schülerinnen und Schüler begegnen Berufsleuten des Rotary Clubs Aarau</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">(*)</td>                                                 </tr>
+        
+                            </tbody></table>
+
+<br>
+<div style="text-align: justify; margin: 5px; margin-top: -10px; font: 11px Arial">(*) Nach dem 15.01.2023 geänderter oder erstellter Eintrag<br><div style="margin-bottom: 2px;"><b>Hinweis:</b> Die angezeigten Terminkategorien können unter '<a href="index.php?pageid=22500&amp;id=abcdef0123456789&amp;transid=a1b2c3">mein schulNetz</a>' eingegrenzt werden</div><a href="index.php?pageid=22108&amp;id=abcdef0123456789&amp;transid=a1b2c3">Zur Terminliste</a><br><br></div></div><div class="mdl-cell mdl-cell--6-col mdl-cell--8-col-tablet"><div style="display: flex;">
+    <h3 class="tabletitle">Persönliche Angaben</h3>
+    <div class="mdl-layout-spacer"></div>
+    <span></span>
+</div>
+<table class="mdl-data-table mdl-js-data-table mdl-shadow--2dp mdl-table--cls-print-table" style="width: 100%;" data-upgraded=",MaterialDataTable">
+                        <tbody><tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Name Vorname</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Muster Max</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Amtlicher Vorname</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Max</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Strasse</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Bahnhofstrasse 1</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">PLZ Ort</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">5000 Musterstadt</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Geburtsdatum</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">01.01.2010</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">AHV-Nr.</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">7560000000000</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Nationalität</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Schweiz</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Profil</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">MAR00-AAA</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Heimatort</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Musterort</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Geburtsort</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;"></td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Telefon privat</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;"></td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Mobiltelefon</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">+41 79 600 27 53</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Private Email-Adresse</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">max.muster@example.com</td>
+                            </tr>
+            </tbody></table>
+ <br>Melden Sie bitte fehlerhafte Einträge Ihrer Klassenlehrperson. Ihre Angaben werden z.B. auf Rundtelefon und Adress-Listen benutzt. Einige Angaben können Sie auch selbständig unter Mein schulNetz ändern.<a href="index.php?pageid=22500&amp;id=abcdef0123456789&amp;transid=a1b2c3" class=" mdl-button mdl-js-button mdl-button--icon mdl-button--colored mdl--link-button mdl-button--icon-x-small" style="margin-top: -4px;" id="6ae8db8558323" data-upgraded=",MaterialButton" tabindex="0"><i class="far fa-edit"></i></a><div class="mdl-tooltip mdl-tooltip--right mdl-tooltip--line-wrap  " for="6ae8db8558323" id="mdl_tooltip_6ae8db8558323" data-upgraded=",MaterialTooltip">Zu Mein schulNetz wechseln</div><br><br></div><div class="mdl-cell mdl-cell--6-col mdl-cell--8-col-tablet">    <h3 class="tabletitle">Absenzen</h3>
+
+
+<table class="mdl-data-table mdl-js-data-table mdl-shadow--2dp mdl-table--cls-print-table" no-highlight-row="" style="width: 100%;" data-upgraded=",MaterialDataTable">
+    <tbody><tr>
+                                        <th class="mdl-data-table__cell--non-numeric" style=" width:20%; ">Abwesend von</th>
+                                                <th class="mdl-data-table__cell--non-numeric" style=" width:20%; ">Abwesend bis</th>
+                                                <th class="mdl-data-table__cell--non-numeric" style=" width:10%; ">Entschuldigen bis</th>
+                </tr>
+
+            <tr class="empty-row">
+            <td colspan="3">
+                <span>Sie haben keine offenen Absenzen.</span>
+            </td>
+        </tr>
+    </tbody></table>
+
+<br>
+<br><br></div><div class="mdl-cell mdl-cell--6-col mdl-cell--8-col-tablet"><div style="display: flex;">
+    <h3 class="tabletitle">Ihre letzten Noten</h3>
+    <div class="mdl-layout-spacer"></div>
+    <span></span>
+</div>
+<table class="mdl-data-table mdl-js-data-table mdl-shadow--2dp mdl-table--cls-print-table" style="width: 100%;" data-upgraded=",MaterialDataTable">
+                        <tbody><tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">DEU_K26A_LehBb</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Lesecheck: Schirach - Terror</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">28.10.2026</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">3.6</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">FRA_K26A</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Vocabulaire 2 &amp; CE</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">28.10.2026</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">4.85</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">WIR_K26A_LehIi</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Rechtskunde Teil 1</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">23.10.2026</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">4.7</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">spm 1.4</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">12' Lauf Standort</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">17.09.2026</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">2</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">CHE_K26A_LehCc</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">1. Prüfung</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">17.09.2026</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">4.3</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Amat 1.2</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Mathematik 1</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">17.09.2026</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">3</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">FRA_K26A</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Grammaire &amp; vocabulaire 1 (Ci2, Unité 1)</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">14.09.2026</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">4.3</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">MAT_K26A_LehAa</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Mathematik 1</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">10.09.2026</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">3</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">DEU_K26A_LehBb</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Standortbestimmung</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">04.09.2026</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">4.85</td>
+                            </tr>
+                    <tr class="mdl-table--row-dense">
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">FRA_K26A</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">Lecture à haute voix</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">25.08.2026</td>
+                                                        <td class="mdl-data-table__cell--non-numeric" style="width: ;">4.35</td>
+                            </tr>
+            </tbody></table>
+ <br>Es erscheinen alle Noten, welche Sie noch nicht bestätigt haben.<br></div><div class="mdl-cell mdl-cell--12-col"><div style="height: 40px;"></div><script type="application/javascript">function load_qr(type){$('sn_mobile_progress_bar').show();xajax_set_qrcode(type)}</script>
+
+<div style="max-width: 100%" class=""><div class="mdl-card cls-card mdl-shadow--2dp mdl-card--neutral " id="sn_mobile" style=""><div class="mdl-progress mdl-js-progress mdl-progress__indeterminate is-upgraded" style="width: 100%; display: none;" id="sn_mobile_progress_bar" data-upgraded=",MaterialProgress"><div class="progressbar bar bar1" style="width: 0%;"></div><div class="bufferbar bar bar2" style="width: 100%;"></div><div class="auxbar bar bar3" style="width: 0%;"></div></div><div class="mdl-card__title mdl-card--cls-form-title mdl-card--title-collapse" id="sn_mobile_title" onclick="toggleCard('sn_mobile')"><span class="mdl-card--cls-form-subtitle" id="sn_mobile_title_text">schulNetz.mobile</span><div class="mdl-layout-spacer"></div><button id="sn_mobile_toggle_button" type="button" class="mdl-button mdl-js-button mdl-button--icon" data-upgraded=",MaterialButton"><i class="fas fa-chevron-up fa-xs"></i></button></div><div class="mdl-card__supporting-text" id="sn_mobile_card_content" style="display: block; max-height: auto;">    <p>
+        Wenn Sie unten auf den Link <i>schulNetz.mobile freigeben</i> klicken, schalten Sie die Funktion schulNetz.mobile frei.
+    </p>
+    <p>
+        Diese erlaubt es Ihnen, über einen individuellen Link direkt von Ihrem Handy auf Ihre unbestätigten Noten in schulNetz zuzugreifen. Ausserdem können Sie Ihren Stundenplan abonnieren. Der Zugriff auf das Notensystem wird über eine 4-stellige PIN gesichert, welche Sie unter <i>Mein schulNetz</i> erfassen können.
+    </p>
+    <p>
+        Diese Dienstleistung ist gratis. Bitte beachten Sie jedoch, dass abhängig von Ihrem Mobile-Abonnement Gebühren für den mobilen Datentransfer anfallen können.
+    </p>
+    <a href="index.php?pageid=1&amp;action=freigeben&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-button mdl-js-button mdl-button--small mdl-button--colored" data-upgraded=",MaterialButton">schulNetz.mobile freigeben</a>
+</div></div></div></div><div class="mdl-cell mdl-cell--6-col mdl-cell--8-col-tablet"><br><br><p>Letzte Anmeldung an schulNetz: 02.11.2026 um 19:47:53 <a href="#" onclick="javascript: $('lastlogins').toggle()">(Mehr)</a></p><div id="lastlogins" style="display: none">    <h3 class="tabletitle">Letzte Anmeldungen an schulNetz</h3>
+
+
+<table class="mdl-data-table mdl-js-data-table mdl-shadow--2dp mdl-table--cls-print-table" no-highlight-row="" style="width: 100%;" data-upgraded=",MaterialDataTable">
+    <tbody><tr>
+                                        <th class="mdl-data-table__cell--non-numeric" style=" width:50%; ">Datum</th>
+                                                <th class="mdl-data-table__cell--non-numeric" style=" width:50%; ">Zeit</th>
+                </tr>
+
+                        <tr class="highlight-row">
+                                                                                                    <td class="mdl-data-table__cell--non-numeric">02.11.2026</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">19:47:53</td>                                                 </tr>
+                    <tr class="no-highlight-row">
+                                                                                                    <td class="mdl-data-table__cell--non-numeric">02.11.2026</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">19:47:43</td>                                                 </tr>
+                    <tr class="highlight-row">
+                                                                                                    <td class="mdl-data-table__cell--non-numeric">02.11.2026</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">19:47:41</td>                                                 </tr>
+                    <tr class="no-highlight-row">
+                                                                                                    <td class="mdl-data-table__cell--non-numeric">02.11.2026</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">19:46:07</td>                                                 </tr>
+                    <tr class="highlight-row">
+                                                                                                    <td class="mdl-data-table__cell--non-numeric">02.11.2026</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">19:39:22</td>                                                 </tr>
+                    <tr class="no-highlight-row">
+                                                                                                    <td class="mdl-data-table__cell--non-numeric">02.11.2026</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">17:16:51</td>                                                 </tr>
+                    <tr class="highlight-row">
+                                                                                                    <td class="mdl-data-table__cell--non-numeric">02.11.2026</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">15:52:57</td>                                                 </tr>
+                    <tr class="no-highlight-row">
+                                                                                                    <td class="mdl-data-table__cell--non-numeric">02.11.2026</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">14:52:46</td>                                                 </tr>
+                    <tr class="highlight-row">
+                                                                                                    <td class="mdl-data-table__cell--non-numeric">02.11.2026</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">14:52:40</td>                                                 </tr>
+                    <tr class="no-highlight-row">
+                                                                                                    <td class="mdl-data-table__cell--non-numeric">02.11.2026</td>                                                                                                                         <td class="mdl-data-table__cell--non-numeric">14:51:40</td>                                                 </tr>
+        
+                            </tbody></table>
+
+<br>
+<div style="text-align: justify; margin: 5px; margin-top: -10px; font: 11px Arial">Gezeigt werden die letzten 10 Logins innerhalb der letzten 30 Tage.<br><br><br></div></div></div></div><dialog class="mdl-dialog" id="reordner_start_blocks" style="max-width: 800px; width: auto;">
+    <b class="mdl-dialog__title">Startelemente anordnen</b>
+    <div class="mdl-dialog__content">
+        <p>
+            Hier können Sie die Reihenfolge der Startelemente über Drag'n'Drop anpassen und die Breite der Elemente einstellen.
+        </p>
+        <div class="mdl-grid" id="reorder_blocks">
+                            <div class="mdl-cell mdl-cell--6-col start-block--reorder-el" id="Direktlinks" data-start-el="Direktlinks" data-start-col="6" style="cursor: all-scroll;">
+                    <div style="max-width: 100%" class=""><div class="mdl-card cls-card mdl-shadow--2dp mdl-card--neutral " id="6ae8db8561b0b" style=""><div class="mdl-progress mdl-js-progress mdl-progress__indeterminate is-upgraded" style="width: 100%; display: none;" id="6ae8db8561b0b_progress_bar" data-upgraded=",MaterialProgress"><div class="progressbar bar bar1" style="width: 0%;"></div><div class="bufferbar bar bar2" style="width: 100%;"></div><div class="auxbar bar bar3" style="width: 0%;"></div></div><div class="mdl-card__supporting-text" id="6ae8db8561b0b_card_content" style="display: block; max-height: auto;">                        Direktlinks                        <button type="button" class="mdl-button mdl-js-button mdl-button--icon mdl-button--colored" onclick="toggleBlock(&quot;Direktlinks&quot;)" style="float: right;" disabled="" data-upgraded=",MaterialButton">
+                        <i id="Direktlinks_toggle" class="far fa-expand-alt fa-xs"></i>
+                        </button>
+                    </div></div></div>                </div>
+                            <div class="mdl-cell mdl-cell--6-col start-block--reorder-el" id="Terminliste" data-start-el="Terminliste" data-start-col="6" style="cursor: all-scroll;">
+                    <div style="max-width: 100%" class=""><div class="mdl-card cls-card mdl-shadow--2dp mdl-card--neutral " id="6ae8db8561b1d" style=""><div class="mdl-progress mdl-js-progress mdl-progress__indeterminate is-upgraded" style="width: 100%; display: none;" id="6ae8db8561b1d_progress_bar" data-upgraded=",MaterialProgress"><div class="progressbar bar bar1" style="width: 0%;"></div><div class="bufferbar bar bar2" style="width: 100%;"></div><div class="auxbar bar bar3" style="width: 0%;"></div></div><div class="mdl-card__supporting-text" id="6ae8db8561b1d_card_content" style="display: block; max-height: auto;">                        Terminliste                        <button type="button" class="mdl-button mdl-js-button mdl-button--icon mdl-button--colored" onclick="toggleBlock(&quot;Terminliste&quot;)" style="float: right;" data-upgraded=",MaterialButton">
+                        <i id="Terminliste_toggle" class="far fa-expand-alt fa-xs"></i>
+                        </button>
+                    </div></div></div>                </div>
+                            <div class="mdl-cell mdl-cell--6-col start-block--reorder-el" id="Personalien" data-start-el="Personalien" data-start-col="6" style="cursor: all-scroll;">
+                    <div style="max-width: 100%" class=""><div class="mdl-card cls-card mdl-shadow--2dp mdl-card--neutral " id="6ae8db8561b27" style=""><div class="mdl-progress mdl-js-progress mdl-progress__indeterminate is-upgraded" style="width: 100%; display: none;" id="6ae8db8561b27_progress_bar" data-upgraded=",MaterialProgress"><div class="progressbar bar bar1" style="width: 0%;"></div><div class="bufferbar bar bar2" style="width: 100%;"></div><div class="auxbar bar bar3" style="width: 0%;"></div></div><div class="mdl-card__supporting-text" id="6ae8db8561b27_card_content" style="display: block; max-height: auto;">                        Personalien                        <button type="button" class="mdl-button mdl-js-button mdl-button--icon mdl-button--colored" onclick="toggleBlock(&quot;Personalien&quot;)" style="float: right;" data-upgraded=",MaterialButton">
+                        <i id="Personalien_toggle" class="far fa-expand-alt fa-xs"></i>
+                        </button>
+                    </div></div></div>                </div>
+                            <div class="mdl-cell mdl-cell--6-col start-block--reorder-el" id="Absenzen" data-start-el="Absenzen" data-start-col="6" style="cursor: all-scroll;">
+                    <div style="max-width: 100%" class=""><div class="mdl-card cls-card mdl-shadow--2dp mdl-card--neutral " id="6ae8db8561b31" style=""><div class="mdl-progress mdl-js-progress mdl-progress__indeterminate is-upgraded" style="width: 100%; display: none;" id="6ae8db8561b31_progress_bar" data-upgraded=",MaterialProgress"><div class="progressbar bar bar1" style="width: 0%;"></div><div class="bufferbar bar bar2" style="width: 100%;"></div><div class="auxbar bar bar3" style="width: 0%;"></div></div><div class="mdl-card__supporting-text" id="6ae8db8561b31_card_content" style="display: block; max-height: auto;">                        Absenzen                        <button type="button" class="mdl-button mdl-js-button mdl-button--icon mdl-button--colored" onclick="toggleBlock(&quot;Absenzen&quot;)" style="float: right;" data-upgraded=",MaterialButton">
+                        <i id="Absenzen_toggle" class="far fa-expand-alt fa-xs"></i>
+                        </button>
+                    </div></div></div>                </div>
+                            <div class="mdl-cell mdl-cell--6-col start-block--reorder-el" id="Noten" data-start-el="Noten" data-start-col="6" style="cursor: all-scroll;">
+                    <div style="max-width: 100%" class=""><div class="mdl-card cls-card mdl-shadow--2dp mdl-card--neutral " id="6ae8db8561b3a" style=""><div class="mdl-progress mdl-js-progress mdl-progress__indeterminate is-upgraded" style="width: 100%; display: none;" id="6ae8db8561b3a_progress_bar" data-upgraded=",MaterialProgress"><div class="progressbar bar bar1" style="width: 0%;"></div><div class="bufferbar bar bar2" style="width: 100%;"></div><div class="auxbar bar bar3" style="width: 0%;"></div></div><div class="mdl-card__supporting-text" id="6ae8db8561b3a_card_content" style="display: block; max-height: auto;">                        Noten                        <button type="button" class="mdl-button mdl-js-button mdl-button--icon mdl-button--colored" onclick="toggleBlock(&quot;Noten&quot;)" style="float: right;" data-upgraded=",MaterialButton">
+                        <i id="Noten_toggle" class="far fa-expand-alt fa-xs"></i>
+                        </button>
+                    </div></div></div>                </div>
+                            <div class="mdl-cell mdl-cell--12-col start-block--reorder-el" id="Mobilefreigabe" data-start-el="Mobilefreigabe" data-start-col="12" style="cursor: all-scroll;">
+                    <div style="max-width: 100%" class=""><div class="mdl-card cls-card mdl-shadow--2dp mdl-card--neutral " id="6ae8db8561b45" style=""><div class="mdl-progress mdl-js-progress mdl-progress__indeterminate is-upgraded" style="width: 100%; display: none;" id="6ae8db8561b45_progress_bar" data-upgraded=",MaterialProgress"><div class="progressbar bar bar1" style="width: 0%;"></div><div class="bufferbar bar bar2" style="width: 100%;"></div><div class="auxbar bar bar3" style="width: 0%;"></div></div><div class="mdl-card__supporting-text" id="6ae8db8561b45_card_content" style="display: block; max-height: auto;">                        Mobilefreigabe                        <button type="button" class="mdl-button mdl-js-button mdl-button--icon mdl-button--colored" onclick="toggleBlock(&quot;Mobilefreigabe&quot;)" style="float: right;" data-upgraded=",MaterialButton">
+                        <i id="Mobilefreigabe_toggle" class="far fa-compress-alt fa-xs"></i>
+                        </button>
+                    </div></div></div>                </div>
+                            <div class="mdl-cell mdl-cell--6-col start-block--reorder-el" id="Letzte Logins" data-start-el="Letzte Logins" data-start-col="6" style="cursor: all-scroll;">
+                    <div style="max-width: 100%" class=""><div class="mdl-card cls-card mdl-shadow--2dp mdl-card--neutral " id="6ae8db8561b4f" style=""><div class="mdl-progress mdl-js-progress mdl-progress__indeterminate is-upgraded" style="width: 100%; display: none;" id="6ae8db8561b4f_progress_bar" data-upgraded=",MaterialProgress"><div class="progressbar bar bar1" style="width: 0%;"></div><div class="bufferbar bar bar2" style="width: 100%;"></div><div class="auxbar bar bar3" style="width: 0%;"></div></div><div class="mdl-card__supporting-text" id="6ae8db8561b4f_card_content" style="display: block; max-height: auto;">                        Letzte Logins                        <button type="button" class="mdl-button mdl-js-button mdl-button--icon mdl-button--colored" onclick="toggleBlock(&quot;Letzte Logins&quot;)" style="float: right;" data-upgraded=",MaterialButton">
+                        <i id="Letzte Logins_toggle" class="far fa-expand-alt fa-xs"></i>
+                        </button>
+                    </div></div></div>                </div>
+                    </div>
+    </div>
+    <div class="mdl-dialog__actions">
+        <button type="button" class="mdl-button mdl-js-button mdl-button--small close-btn" data-upgraded=",MaterialButton">Abbrechen</button>
+        <button type="button" class="mdl-button mdl-js-button mdl-button--small mdl-button--colored save-blocks" data-upgraded=",MaterialButton">Speichern</button>
+    </div>
+</dialog>
+
+<script>function reordertartBlocks(){const dialog=document.getElementById('reordner_start_blocks');if(dialog){dialog.querySelector('.close-btn').addEventListener('click',function(){dialog.close()});dialog.querySelector('.save-blocks').addEventListener('click',function(){saveBlockOrder()})}
+if(!dialog.showModal){document.body.appendChild(dialog);dialogPolyfill.registerDialog(dialog)}
+dialog.showModal();Sortable.create($('reorder_blocks'))}
+function toggleBlock(blockId){const block=document.getElementById(blockId);const toggle=document.getElementById(blockId+'_toggle');if(block.dataset.startCol==='12'){block.dataset.startCol='6';block.classList.add('mdl-cell--6-col');block.classList.remove('mdl-cell--12-col');toggle.classList.remove('fa-compress-alt');toggle.classList.add('fa-expand-alt')}else{block.dataset.startCol='12';block.classList.add('mdl-cell--12-col');block.classList.remove('mdl-cell--6-col');toggle.classList.remove('fa-expand-alt');toggle.classList.add('fa-compress-alt')}}
+function saveBlockOrder(){const els=document.getElementsByClassName('start-block--reorder-el');const orderedEls=[];for(var i=0;i<els.length;i++){orderedEls.push(els[i].dataset.startEl+':'+els[i].dataset.startCol)}
+console.log('ordere elements',orderedEls);xajax_start_page_save_block_order(orderedEls.join(','))}</script></div></main><div class="mdl-layout__obfuscator"></div></div></div></main></div></div><dialog class="mdl-dialog" id="transid-invalid-dialog" style="max-width: 900px; width: auto;background-color: #FAE4C6">
+    <div class="mdl-dialog__title" style="text-align: left;">Transaktions-ID abgelaufen</div>
+    <div class="mdl-dialog__content" style="max-height: 480px;">
+        <p>Ihre Transaktions-ID ist abgelaufen, Sie müssen die Seite neu laden.</p>
+        <p><a id="transid-invalid-reload-link" href="#">Seite neu laden</a></p>
+    </div>
+    <div class="mdl-dialog__actions">
+        <button type="button" class="mdl-button mdl-js-button mdl-button--small close-btn" data-upgraded=",MaterialButton">Schliessen</button>
+    </div>
+</dialog>
+
+<script type="text/javascript">document.addEventListener('visibilitychange',function(ev){if(document.visibilityState=='visible'&&!newPageLoading){xajax_check_transid("1","a1b2c3")}});const invalidDialog=document.getElementById('transid-invalid-dialog');function openInvalidDialog(autoreload,reloadLocation){if(autoreload){showToast('Transaktions ID abgelaufen. Automatischer Seitenreload');location.href=reloadLocation}else{if(!invalidDialog.open){if(invalidDialog){invalidDialog.querySelector('.close-btn').addEventListener('click',function(){invalidDialog.close()})}
+if(!invalidDialog.showModal){document.body.appendChild(invalidDialog);dialogPolyfill.registerDialog(invalidDialog)}
+invalidDialog.showModal()}}}</script>
+
+
+ <!-- Ende MainContent -->
+
+
+
+
+<!-- Global Widgets -->
+
+
+
+<div style="display: none;" id="snPageActions">
+                                            
+                            
+                        <button type="button" id="page_action_0" onclick="reordertartBlocks()" class="mdl-button mdl-js-button mdl-button--icon mdl-button--bulk-action  " data-upgraded=",MaterialButton">
+                    <i class="far fa-arrows-alt fa-xs"></i>
+            </button>
+                    <div class="mdl-tooltip mdl-tooltip--left mdl-tooltip--large mdl-tooltip--line-wrap" for="page_action_0" id="page_action_0_tooltip" data-upgraded=",MaterialTooltip">
+        Startelemente anordnen
+            </div>
+    </div>
+
+<script type="text/javascript">let actionContainer=document.getElementById('page_actions_container');if(!actionContainer){actionContainer=createActionContainer()}
+actionContainer.innerHTML=$('snPageActions').innerHTML;function createActionContainer(){let title=document.querySelector('h1, h2, h3');if(title===null){const container=document.createElement('div');container.id='page_actions_container';container.style.position='absolute';container.style.top='10px';container.style.right='10px';document.getElementById('content-card').appendChild(container);return container}else{const pageActionsHeader=document.createElement('div');pageActionsHeader.classList.add('header-for-page-actions');const newTitle=title.cloneNode(!1);newTitle.innerHTML=title.innerHTML;pageActionsHeader.appendChild(newTitle);const spacer=document.createElement('div');spacer.classList.add('mdl-layout-spacer');pageActionsHeader.appendChild(spacer);const container=document.createElement('div');container.id='page_actions_container';pageActionsHeader.appendChild(container);title.parentNode.replaceChild(pageActionsHeader,title);return container}}
+function showInfoDialog(id){const dialog=document.getElementById(id);if(dialog){dialog.querySelector('.close-btn').addEventListener('click',function(){if(isEventSupported('webkitAnimationEnd')){dockingAnimation(dialog,'webkitAnimationEnd')}else if(isEventSupported('animationend')){dockingAnimation(dialog,'animationend')}else{dialog.close()}})}else{return}
+if(!dialog.showModal){document.body.appendChild(dialog);dialogPolyfill.registerDialog(dialog)}
+dialog.showModal()}
+function dockingAnimation(dialog,eventType){dialog.classList.add('docking-dialog');dialog.addEventListener(eventType,function(){dialog.close();dialog.classList.remove('docking-dialog');dialog.removeEventListener(eventType,arguments.callee,!1)},!1)}</script>
+
+
+
+
+<dialog class="mdl-dialog" id="active_workflow_steps" style="max-width: 800px; width: auto;">
+    <b class="mdl-dialog__title" style="text-align: left;">Pendente Workflow-Schritte zu dieser Seite</b>
+    <div class="mdl-dialog__content" style="max-height: 300px; text-align: left;">
+        Folgende Workflows befinden sich in einem Schritt, welcher eine Aktion auf dieser Seite verlangt:<br><br>
+            </div>
+    <div class="mdl-dialog__actions">
+        <button type="button" class="mdl-button mdl-js-button mdl-button--small close-btn" data-upgraded=",MaterialButton">Schliessen</button>
+    </div>
+</dialog>
+
+<script>function show_active_wfsteps(){const dialog=document.getElementById('active_workflow_steps');if(dialog){dialog.querySelector('.close-btn').addEventListener('click',function(){dialog.close()})}
+if(!dialog.showModal){document.body.appendChild(dialog);dialogPolyfill.registerDialog(dialog)}
+dialog.showModal()}</script>
+<dialog class="mdl-dialog" id="initiate_workflow" style="max-width: 800px; width: auto;">
+    <b class="mdl-dialog__title" id="initiate_workflow--title"></b>
+    <div class="mdl-dialog__content" style="max-height: 300px;">
+        <p id="initiate_workflow--description"></p>
+            </div>
+    <div class="mdl-dialog__actions">
+        <button type="button" id="wfl_dialog_schliessenBtn" class="mdl-button mdl-js-button mdl-button--small close-btn" data-upgraded=",MaterialButton">Schliessen</button>
+    </div>
+</dialog>
+
+<script>function startWfButtonClicked(icol){checkStartRequirements(icol,'initialize_wrapper_'+icol);if(!document.getElementById('initialize_wrapper_'+icol).classList.contains('is-invalid')){xajax_wfl_initiate_workflow(icol,$('wfl_title_'+icol).value,$('wfl_termin_'+icol).value)}}
+function checkStartRequirements(fieldNr,wrapper){let startValid=!0;title_input=document.getElementById('wfl_title_'+fieldNr);if(startValid&&title_input.value.length<=0){title_input.parentElement.classList.add('is-invalid');startValid=!1}else{title_input.parentElement.classList.remove('is-invalid')}
+if(startValid){document.getElementById(wrapper).classList.remove('is-invalid')}else{document.getElementById(wrapper).classList.add('is-invalid')}}
+function show_initiate_wfs(icol,tblName,mode){if(mode==='umfrage'){document.getElementById('initiate_workflow--title').innerHTML='Umfrage starten';document.getElementById('initiate_workflow--description').hide()}else if(mode==='checkliste'){document.getElementById('initiate_workflow--title').innerHTML='Checkliste erstellen';document.getElementById('initiate_workflow--description').hide()}else{document.getElementById('initiate_workflow--title').innerHTML='Workflow starten';document.getElementById('initiate_workflow--description').show()}
+const modeDivs=document.getElementsByClassName('wfl_initiate_mode');for(let i=0;i<modeDivs.length;i++){if(modeDivs[i].id==='wfl_initiate_mode_'+mode){modeDivs[i].style.display='block'}else{modeDivs[i].style.display='none'}}
+const dialog=document.getElementById('initiate_workflow');if(dialog){dialog.querySelector('.close-btn').addEventListener('click',function(){dialog.close()})}
+if(!dialog.showModal){document.body.appendChild(dialog);dialogPolyfill.registerDialog(dialog)}
+document.getElementById("initiate_workflow--description").innerText=mode==="tbl_action"?"Folgende Workflows können Sie bei der ausgeführten Aktion starten:":"Folgende Workflows können Sie von dieser Seite aus starten:";dialog.showModal();xajax_wfl_initiate_workflow_filldialog(icol,tblName,mode)}</script>
+</body></html>

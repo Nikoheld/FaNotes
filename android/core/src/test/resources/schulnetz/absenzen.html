@@ -1,0 +1,731 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="de" xml:lang="de" translate="no" class="mdl-js"><head>
+	<meta http-equiv="content-type" content="text/html; charset=utf-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="robots" content="noindex">
+
+    <link href="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/font-awesome/css/all.min.css" rel="stylesheet">
+        <script defer="" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/material-design-lite/dist/material.min.js" type="text/javascript"></script>
+    <link rel="stylesheet" href="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/material-design-lite/dist/material-schulnetz-blue.min.css">
+
+        <link rel="stylesheet" href="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/dialog/dialog-polyfill.css">
+    <script src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/dialog/dialog-polyfill.js" type="text/javascript"></script>
+
+    <link rel="stylesheet" type="text/css" href="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/material-datepicker-1.0.9/dist/material-datepicker.css">
+    <script type="text/javascript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/material-datepicker-1.0.9/dist/material-datepicker-with-moment-js.min.js"></script>
+
+        <script type="text/javascript" language="JavaScript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/prototype/prototype.js"></script>
+    <script type="text/javascript" language="JavaScript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/prototype/scriptaculous/scriptaculous.js"></script><script type="text/javascript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/prototype/scriptaculous/builder.js"></script><script type="text/javascript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/prototype/scriptaculous/effects.js"></script><script type="text/javascript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/prototype/scriptaculous/controls.js"></script><script type="text/javascript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/prototype/scriptaculous/slider.js"></script><script type="text/javascript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/prototype/scriptaculous/sound.js"></script>
+
+        
+    <script type="text/javascript">eval("var protoAlias = "+$.toString())</script>
+
+    <script src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/JQuery-2.1.1/jquery-2.1.1.min.js" type="text/javascript"></script>
+    <script src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/JQuery-2.1.1/jquery.namespace.js" type="text/javascript"></script>
+    <script src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/JQuery-2.1.1/jquery.textcomplete.min.js" type="text/javascript"></script>
+    <script src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/JQuery-2.1.1/jquery.centerboard_textfunctions.js" type="text/javascript"></script>
+    <script src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/JQuery-2.1.1/jquery.centerboard_textcomplete.js" type="text/javascript"></script>
+
+    <script type="text/javascript">function $(arg){var res;try{var res=protoAlias(arg)}catch(e){res=null}
+if(res!=null){return res}
+try{var res=jQuery(arg)}catch(e){res=null}
+if(res!=null){return res}}</script>
+    
+    <script type="text/javascript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/sortable/Sortable.min.js"></script>
+
+
+        <link rel="stylesheet" href="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/css/flat/get_css.php" type="text/css" media="all">
+                <link rel="stylesheet" href="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/css/flat/customer/nema_anmeldesystem_AKSA_prod.css" type="text/css" media="all">
+        	<link rel="stylesheet" href="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/css/flat/print.css" type="text/css" media="print">
+    	<script type="text/javascript" language="JavaScript" src="get_js.php"></script>
+    	<script type="text/javascript">var xajaxRequestUri="https://www.schulnetz-ag.ch/aksa/xajax_js.php?pageid=21111&id=abcdef0123456789&transid=a1b2c3"</script>
+	<script type="text/javascript" language="JavaScript" src="https://www.schulnetz-ag.ch/aksa/xajax_js.php?xajaxjs=xajaxjs&amp;cache_control=https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/"></script>
+    	<script type="text/javascript" language="JavaScript" src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/toggle.js"></script>
+
+    
+
+        
+                <script src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/Chart.js/2.7.3/Chart.bundle.min.js" type="text/javascript"></script><style type="text/css">/* Chart.js */
+@-webkit-keyframes chartjs-render-animation{from{opacity:0.99}to{opacity:1}}@keyframes chartjs-render-animation{from{opacity:0.99}to{opacity:1}}.chartjs-render-monitor{-webkit-animation:chartjs-render-animation 0.001s;animation:chartjs-render-animation 0.001s;}</style>
+                <script src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/Chart.js/plugins/verticalLines.js" type="text/javascript"></script>
+        <script src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/Chart.js/plugins/horizontalLines.js" type="text/javascript"></script>
+        <script src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/Chart.js/plugins/drawBarLabels.js" type="text/javascript"></script>
+    
+        
+        
+        <script src="https://www.schulnetz-ag.ch/_application/_frameworkWWW_5.14.1/javascript/tinymce_6.1.1/js/tinymce/tinymce.min.js" type="text/javascript"></script>
+
+        <script type="text/javascript">function loadTinyMCE(){tinymce.init({selector:'.mceEditor',menubar:!1,statusbar:!1,setup:function(editor){editor.on('NodeChange',function(e){const node=e.element;if(node&&node.style.fontSize){const size=parseFloat(node.style.fontSize);node.style.lineHeight=(size*1.4)+'pt'}})},formats:{bold:{inline:'span',styles:{'font-weight':'bold'}},italic:{inline:'span',styles:{'font-style':'italic'}}},plugins:"autoresize",toolbar:"bold italic underline",autoresize_bottom_margin:5,min_height:100,file_picker_callback:function(cb,value,meta){const input=document.createElement('input');input.setAttribute('type','file');input.setAttribute('accept','image/*');input.addEventListener('change',(e)=>{const file=e.target.files[0];const reader=new FileReader();reader.addEventListener('load',()=>{const id='blobid'+(new Date()).getTime();const blobCache=tinymce.activeEditor.editorUpload.blobCache;const base64=reader.result.split(',')[1];const blobInfo=blobCache.create(id,file,base64);blobCache.add(blobInfo);cb(blobInfo.blobUri(),{title:file.name,alt:file.name})});reader.readAsDataURL(file)});input.click()},init_instance_callback:function(editor){const textarea=document.querySelector('textarea.mceEditor');Object.assign(textarea.style,{display:'block',opacity:'0',position:'absolute',pointerEvents:'none',zIndex:'-1'});editor.on('change',function(){formChanged=!0});editor.on('keyup',debounce(function(){checkForInput(editor)},500,editor.id));textarea.on('invalid',function(){checkForInput(editor)})}})}
+function checkForInput(editor){const content=editor.getContent().replace(/<\/?[^>]+(>|$)|\s+|&nbsp;/g,'').trim();const container=editor.getContainer();const parent=container.parentNode;const label=parent.parentNode;const textarea=editor.getElement();const isInvalid=!content&&textarea.hasAttribute('required');const requiredMsg=document.getElementById(editor.id+'_required');requiredMsg.style.visibility=isInvalid?'visible':'hidden';label.classList.toggle('is-invalid',isInvalid);editor.save();textarea.style.height=editor.editorContainer.offsetHeight+'px'}
+document.addEventListener('mdl-componentupgraded',function(e){if(typeof e.target.MaterialLayout!=='undefined'){loadTinyMCE()}})</script>
+
+    
+        
+        
+        
+    <title>AKSA schulNetz</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <link rel="apple-touch-icon" sizes="180x180" href="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/favicons/sn/apple-touch-icon.png">
+        <link rel="icon" type="image/png" sizes="32x32" href="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/favicons/sn/favicon-32x32.png">
+        <link rel="icon" type="image/png" sizes="16x16" href="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/favicons/sn/favicon-16x16.png">
+        <link rel="manifest" href="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/favicons/sn/site.webmanifest" crossorigin="use-credentials">
+        <link rel="mask-icon" href="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/favicons/sn/safari-pinned-tab.svg" color="#5bbad5">
+        <link rel="shortcut icon" href="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/favicons/sn/favicon.ico">
+        <meta name="msapplication-config" content="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/favicons/sn/browserconfig.php?path=https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/favicons/sn/">
+    
+    <meta name="msapplication-TileColor" content="#5bbad5">
+
+    <meta name="theme-color" content="#ffffff">
+</head>
+
+<body class="layout-md">
+<div id="backgroundBanner"></div>
+<div id="footer"></div>
+<div id="overDiv" style="position:absolute; visibility:hidden; z-index:1000;"></div>
+<div class="mdl-layout__container"><div class="mdl-layout mdl-js-layout mdl-layout--fixed-header is-upgraded" id="global-container" data-upgraded=",MaterialLayout"><script language="JavaScript" type="text/javascript">let duration=900;let loginUrl='https://www.schulnetz-ag.ch/aksa/index.php?pageid=21111&id=abcdef0123456789&transid=a1b2c3';let saveScrollPos=!1;let resetScrollPos=!1;let menu_hidden_permissions=!1;let menuScrollOffset=0;let maxScrollRight=0;let navListMainShow=!1;let menuIconsWidth=0;let menuIconsBigWidth=0;let menuIconsSmallWidth=0;let lastShift=-1;let iconIndex=0;let layoutSizeCookie='layout-size';function toggleNavDrawer(){var drawer=$('nav-drawer');if(drawer.hasClassName('is-small-screen')){drawer.addClassName('mdl-layout--fixed-drawer');drawer.MaterialLayout.toggleDrawer()}else{if(drawer.hasClassName('mdl-layout--fixed-drawer')){drawer.removeClassName('mdl-layout--fixed-drawer');setCookie("menuHidden","1",10)}else{drawer.addClassName('mdl-layout--fixed-drawer');setCookie("menuHidden","0",10)}}}
+function showMenuButtonOnSmallScreens(show){var drawer=$('nav-drawer');let menu_toggle_btn=$('menu-toggle-button');if(show&&menu_toggle_btn.style.visibility==='hidden'){menu_toggle_btn.style.visibility='visible'}else if(menu_hidden_permissions&&!show){menu_toggle_btn.style.visibility='hidden';drawer.removeClassName('mdl-layout--fixed-drawer')}}
+function toggleNavListMainList(){let main=document.getElementsByClassName("cls-page--mainnav-small--list");let icon=$('mainnav-small--icon');for(let i=0;i<main.length;i++){navListMainShow?main[i].hide():main[i].show()}
+if(navListMainShow){icon.removeClassName('fa-chevron-up');icon.addClassName('fa-chevron-down')}else{icon.removeClassName('fa-chevron-down');icon.addClassName('fa-chevron-up')}
+navListMainShow=!navListMainShow}
+function toggleScrollBtnDisabled(){$('menu-scroll-left').disabled=(menuScrollOffset)>=0;$('menu-scroll-right').disabled=(menuIconsWidth+menuScrollOffset)<=$('nav-main-menu').offsetWidth}
+function menuScrollIcon(forward){const menuElements=$$('.cls-page--mainmenu-element');let iconWidth=menuElements[iconIndex].offsetWidth;if(forward){let iconWidth=menuElements[iconIndex].offsetWidth;let remainingWidth=menuIconsWidth+menuScrollOffset-$('nav-main-menu').offsetWidth;if(remainingWidth<iconWidth){menuScroll(-remainingWidth);lastShift=remainingWidth}else{menuScroll(-iconWidth);iconIndex++}}else{let iconWidth=menuElements[iconIndex-1].offsetWidth;if(lastShift===-1){menuScroll(iconWidth);iconIndex--}else{menuScroll(lastShift);lastShift=-1}}}
+function menuScroll(scrollOffset){if(scrollOffset>0&&menuScrollOffset>=0){return}
+if(scrollOffset<0&&menuIconsWidth+menuScrollOffset<=$('nav-main-menu').offsetWidth){return}
+menuScrollOffset+=scrollOffset;toggleScrollBtnDisabled();const menuElements=$$('.cls-page--mainmenu-element');for(let i=0;i<menuElements.length;i++){menuElements[i].setStyle({'left':menuScrollOffset+'px'})}}
+function toggleCard(id){let content=$(id+'_card_content');let actions=$(id+'_card_actions');let buttonClass=null;if(content.style.display==="none"){content.show();if(actions){actions.show()}
+buttonClass="fa-chevron-up"}else{content.hide();if(actions){actions.hide()}
+buttonClass="fa-chevron-down"}
+$(id+'_toggle_button').innerHTML="<i class='fas "+buttonClass+" fa-xs'></i>"}
+function getNavMenuWidth(){const totalWidth=$('header-menu').offsetWidth-40;let navMenuWidth=totalWidth-$('logo-span').offsetWidth-$('sn-gradient').offsetWidth-$('sn-main-menu').offsetWidth;let iconssn=['nav-semester','nav-kgfilter','nav-datumsrange','readonly-mode','application-type','sn-timer','sn-anrufdetails','sn-bookmarks','switch-mode','sn-notifications','semid-warning','show-username','sn-userswitch'];let iconstn=['nav-info1month','nav-info1date','nav-info2dates','nav-info1year','nav-info2month','nav-info1month1date','tn-bookmarks','tn-timer','nav-wechselzu','sn-userswitch'];let icons=iconssn.concat(iconstn);for(let i=0;i<icons.length;i++){let icon=document.getElementById(icons[i]);if(icon!=undefined&&icon.offsetWidth!=undefined){navMenuWidth-=icon.offsetWidth}}
+return navMenuWidth}
+function resizeHeaderRow(){let scrollLeft=$('menu-scroll-left');let navMainMenu=$('nav-main-menu');let navSmallMenu=$('mainnav-small');let scrollRight=$('menu-scroll-right');let navMenuWidth=getNavMenuWidth();if(navMenuWidth<300){navMainMenu.hide();scrollLeft.hide();scrollRight.hide();showMenuButtonOnSmallScreens(!0);if(navSmallMenu){navSmallMenu.show()}}else{if(navListMainShow){toggleNavListMainList()}
+showMenuButtonOnSmallScreens(!1);if(navSmallMenu){navSmallMenu.hide()}
+navMainMenu.style.display='flex';navMainMenu.style.width='auto';navMainMenu.classList.remove('cls-page--mainmenu-small');navMainMenu.classList.add('cls-page--mainmenu-large');menuIconsWidth=menuIconsBigWidth;scrollLeft.hide();scrollRight.hide();if(navMainMenu.offsetWidth>navMenuWidth){navMainMenu.classList.add('cls-page--mainmenu-small');navMainMenu.classList.remove('cls-page--mainmenu-large');menuIconsWidth=menuIconsSmallWidth}
+if(navMainMenu.offsetWidth>navMenuWidth){scrollLeft.show();scrollRight.show();navMenuWidth-=scrollLeft.offsetWidth;navMenuWidth-=scrollRight.offsetWidth;maxScrollRight=navMainMenu.offsetWidth-navMenuWidth;toggleScrollBtnDisabled()}else{menuScroll(-menuScrollOffset)}
+navMainMenu.style.width=navMenuWidth+'px';navMainMenu.style.overflow='hidden'}
+setStickyColumnsLeftPos()}
+function scrollToActiveMenu(){menuScroll(-menuScrollOffset);lastShift=-1;iconIndex=0;let activeOffset=0;const menuElements=$$('.cls-page--mainmenu-element');for(let i=0;i<menuElements.length;i++){activeOffset+=menuElements[i].offsetWidth;if(menuElements[i].hasClassName('cls-page--mainmenu-active')){break}}
+while(activeOffset+menuScrollOffset>$('nav-main-menu').offsetWidth){menuScrollIcon(!0)}}
+function setLayoutSize(layoutSize){setCookie(layoutSizeCookie,layoutSize,365);switch(layoutSize){case 'sm':selElement='layout-sel-sm';break;case 'md':selElement='layout-sel-md';break;default:selElement='layout-sel-lg'}
+document.getElementById('layout-sel-sm').classList.remove('cls-menu--selected-layout');document.getElementById('layout-sel-md').classList.remove('cls-menu--selected-layout');document.getElementById('layout-sel-lg').classList.remove('cls-menu--selected-layout');document.getElementById(selElement).classList.add('cls-menu--selected-layout');document.body.classList.remove('layout-sm');document.body.classList.remove('layout-md');document.body.classList.remove('layout-lg');document.body.classList.add('layout-'+layoutSize)}
+function intersectionStickyCallback(records,observer){for(let i=0;i<records.length;i++){let record=records[i];const _target=record.target.parentElement;const _position=record.target.dataset.sentinelPosition;const _stuck=!record.isIntersecting;document.dispatchEvent(new CustomEvent('sticky-change',{detail:{stuck:_stuck,target:_target,position:_position}}))}}
+window.addEventListener('resize',function(event){resizeHeaderRow();toggleScrollBtnDisabled();scrollToActiveMenu()});window.addEventListener('load',function(event){const menuElements=$$('.cls-page--mainmenu-element');for(let i=0;i<menuElements.length;i++){menuIconsBigWidth+=menuElements[i].offsetWidth;menuIconsSmallWidth+=menuElements[i].childNodes[0].offsetWidth+32}
+resizeHeaderRow();toggleScrollBtnDisabled();scrollToActiveMenu();let textareas=document.getElementsByClassName('mdl-textarea');for(let i=0;i<textareas.length;i++){textareas[i].addEventListener('keyup',function(e){const maxlength=parseInt(this.dataset.maxLength);if(isNaN(maxlength)){return}
+if(this.value.length>maxlength){this.parentElement.addClassName('is-invalid');this.setCustomValidity(this.dataset.maxLengthError)}else{this.parentElement.removeClassName('is-invalid');this.setCustomValidity('')}})}});let start=Date.now();let alert_shown=reload_initiated=!1;function init_timer(){alert_shown=!1;start=Date.now();if($('sn-timer-tooltip')){$('sn-timer-tooltip').setStyle({'background-color':'rgba(97, 97, 97, 0.9)'})}
+if($('circle-progress')){$('circle-progress').style.fill="none";$('circle-progress').style.stroke=""}
+timer()}
+function setProgressPercent(percent){if($('circle-progress')){let offset=339.292*(1-(percent/100));$('circle-progress').style.strokeDashoffset=offset}}
+function timer(){let diff=duration-((Date.now()-start)/1000);diff=Math.floor(diff);if(diff<0){if(reload_initiated)
+return;formChanged=!1;setTimeout(function(){window.location=loginUrl},5000);reload_initiated=!0;return}
+if(diff<60&&alert_shown===!1){alert_shown=!0;if($('sn-timer-tooltip')){$('sn-timer-tooltip').setStyle({'background-color':'rgba(197, 78, 78, 0.9)'})}
+if($('circle-progress')){$('circle-progress').style.fill="rgba(197, 78, 78, 0.6)";$('circle-progress').style.stroke="rgb(220, 78, 78)"}
+const txt='Ihre Sitzung läuft in einer Minute ab. Klicken Sie auf Verlängern oder oben rechts auf die Zeitanzeige um die Sitzung zu verlängern.';showSnackbar({message:txt,actionHandler:function(){xajax_reset_timeout();const snackbarContainer=document.querySelector('#mdl-toast');snackbarContainer.MaterialSnackbar.cleanup_()},actionText:'Verlängern',timeout:60000})}
+const days=Math.floor(diff/(24*60*60));let leftSec=diff-days*24*60*60;const hrs=Math.floor(leftSec/(60*60));leftSec=leftSec-hrs*60*60;const min=Math.floor(leftSec/(60));const sec=leftSec-min*60;let time=pad(hrs,2)+":"+pad(min,2)+":"+pad(sec,2);let minTotal=min+(60*hrs);if(minTotal>60){minTotal="60+"}else{minTotal=""+minTotal+"'"}
+if(alert_shown===!0){if($('timer')){$('timer').innerHTML=""+pad(sec,2)+"''"}}else{if($('timer')){$('timer').innerHTML=minTotal}}
+let percent=sec*100/60;setProgressPercent(percent);if($('sn-timer-tooltip')){$('sn-timer-tooltip').innerHTML=time}}
+function pad(n,width){n=n+'';return n.length>=width?n:new Array(width-n.length+1).join('0')+n}
+window.addEventListener('load',function(){timer();setInterval(timer,500)});window.addEventListener('keydown',function(){checkHalfTimeout()});window.addEventListener('mousedown',function(){checkHalfTimeout()});function checkHalfTimeout(){let diff=(Date.now()-start)/1000;if(diff>(duration/2)){console.log(diff+' seconds passed since timer init, half of timeout reached ('+(duration/2)+'), reset_timeout() called');xajax_reset_timeout()}}</script>
+<header class="titelleiste mdl-layout__header cls-page--header mdl-layout__header--seamed"><div id="mdl-toast" class="mdl-js-snackbar mdl-snackbar" data-upgraded=",MaterialSnackbar"><div class="mdl-snackbar__text"></div><button class="mdl-snackbar__action" type="button" aria-hidden="true"></button></div><div class="mdl-layout__header-row cls-page--header-row header-menu mdl-layout__header--seamed" id="header-menu"><span class="cls-page--header-row--logo-span" id="logo-span"><button class="mdl-button mdl-js-button mdl-button--icon mdl-button--icon--large mdl-button--colored" onclick="toggleNavDrawer();" id="menu-toggle-button" data-upgraded=",MaterialButton" tabindex="0"><i class="far fa-bars fa-xs"></i></button><div class="mdl-tooltip mdl-tooltip--right mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width " for="menu-toggle-button" id="mdl_tooltip_menu-toggle-button" data-upgraded=",MaterialTooltip">Menü ein-/ausblenden</div><span class="cls-page--header-row--logo-container"><img class="cls-page--header-row--sn-logo" src="https://www.schulnetz-ag.ch/_application/_schulnetzWWW_5.14.1/css/flat/images/snlogo-192x192.png"></span></span><span class="cls-page--header-row--logo-gradient" id="sn-gradient"></span><button id="menu-scroll-left" class="mdl-button mdl-js-button mdl-button--icon" disabled="" style="display: none;" onclick="menuScrollIcon(false);" data-upgraded=",MaterialButton"><i class="far fa-chevron-left fa-xs"></i></button><nav class="mdl-navigation cls-page--mainmenu cls-page--mainmenu-large" id="nav-main-menu" style="display: flex; width: 1385px; overflow: hidden;"><a href="index.php?pageid=1&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link  cls-page--mainmenu-element cls-page--mainmenu-icon" id="menu1" tabindex="0" style="left: 0px;"><i class="fa-home fas fa-lg"></i><div class="cls-page--mainmenu-subtitle no-outline" id="menu_title_1">Start</div></a><div class="mdl-tooltip mdl-tooltip--bottom mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width cls-page--mainmenu-tooltip" for="menu1" id="mdl_tooltip_menu1" data-upgraded=",MaterialTooltip">Start</div><a href="index.php?pageid=21311&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link  cls-page--mainmenu-element cls-page--mainmenu-icon" id="menu21311" tabindex="0" style="left: 0px;"><i class="fa-graduation-cap fas fa-lg"></i><div class="cls-page--mainmenu-subtitle no-outline" id="menu_title_21311">Noten</div></a><div class="mdl-tooltip mdl-tooltip--bottom mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width cls-page--mainmenu-tooltip" for="menu21311" id="mdl_tooltip_menu21311" data-upgraded=",MaterialTooltip">Noten</div><a href="index.php?pageid=21111&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link cls-page--mainmenu-active cls-page--mainmenu-element cls-page--mainmenu-icon" id="menu21111" tabindex="0" style="left: 0px;"><i class="fa-user-check fas fa-lg"></i><div class="cls-page--mainmenu-subtitle no-outline" id="menu_title_21111">Absenzen</div></a><div class="mdl-tooltip mdl-tooltip--bottom mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width cls-page--mainmenu-tooltip" for="menu21111" id="mdl_tooltip_menu21111" data-upgraded=",MaterialTooltip">Absenzen</div><a href="index.php?pageid=21411&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link  cls-page--mainmenu-element cls-page--mainmenu-icon" id="menu21411" tabindex="0" style="left: 0px;"><i class="fa-balance-scale fas fa-lg"></i><div class="cls-page--mainmenu-subtitle no-outline" id="menu_title_21411">Kontoauszug</div></a><div class="mdl-tooltip mdl-tooltip--bottom mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width cls-page--mainmenu-tooltip" for="menu21411" id="mdl_tooltip_menu21411" data-upgraded=",MaterialTooltip">Kontoauszug</div><a href="index.php?pageid=21200&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link  cls-page--mainmenu-element cls-page--mainmenu-icon" id="menu21200" tabindex="0" style="left: 0px;"><i class="fa-calendar-alt far fa-lg"></i><div class="cls-page--mainmenu-subtitle no-outline" id="menu_title_21200">Agenda</div></a><div class="mdl-tooltip mdl-tooltip--bottom mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width cls-page--mainmenu-tooltip" for="menu21200" id="mdl_tooltip_menu21200" data-upgraded=",MaterialTooltip">Agenda</div><a href="index.php?pageid=22300&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link  cls-page--mainmenu-element cls-page--mainmenu-icon" id="menu22300" tabindex="0" style="left: 0px;"><i class="fa-envelope far fa-lg"></i><div class="cls-page--mainmenu-subtitle no-outline" id="menu_title_22300">Kommunikation</div></a><div class="mdl-tooltip mdl-tooltip--bottom mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width cls-page--mainmenu-tooltip" for="menu22300" id="mdl_tooltip_menu22300" data-upgraded=",MaterialTooltip">Kommunikation</div><a href="index.php?pageid=24030&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link  cls-page--mainmenu-element cls-page--mainmenu-icon" id="menu24030" tabindex="0" style="left: 0px;"><i class="fa-cloud fas fa-lg"></i><div class="cls-page--mainmenu-subtitle no-outline" id="menu_title_24030">Listen&amp;Dokumente</div></a><div class="mdl-tooltip mdl-tooltip--bottom mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width cls-page--mainmenu-tooltip" for="menu24030" id="mdl_tooltip_menu24030" data-upgraded=",MaterialTooltip">Listen&amp;Dokumente</div><a href="index.php?pageid=23118&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link  cls-page--mainmenu-element cls-page--mainmenu-icon" id="menu23118" tabindex="0" style="left: 0px;"><i class="fa-laptop fas fa-lg"></i><div class="cls-page--mainmenu-subtitle no-outline" id="menu_title_23118">eSchool</div></a><div class="mdl-tooltip mdl-tooltip--bottom mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width cls-page--mainmenu-tooltip" for="menu23118" id="mdl_tooltip_menu23118" data-upgraded=",MaterialTooltip">eSchool</div></nav><button id="menu-scroll-right" class="mdl-button mdl-js-button mdl-button--icon" style="display: none;" onclick="menuScrollIcon(true);" disabled="" data-upgraded=",MaterialButton"><i class="far fa-chevron-right fa-xs"></i></button><div class="mdl-layout-spacer"></div><div id="sn-nav-global" style="flex: 0 0 auto; height: 100%; display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; overflow: visible; white-space: nowrap;"><button id="sn-anrufdetails" class="mdl-button mdl-js-button mdl-button--icon mdl-badge--overlap mdl-badge mdl-badge--icon-button" style="--badge-color: #CD4C44; display: none;" onclick="showCallDetails();" data-upgraded=",MaterialButton" tabindex="0">
+    <i class="far fa-phone-alt fa-xs"></i>
+</button>
+<div class="mdl-tooltip mdl-tooltip--right mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width " for="sn-anrufdetails" id="mdl_tooltip_sn-anrufdetails" data-upgraded=",MaterialTooltip">Details zum zuletzt eingegangenen Anruf</div>
+
+
+
+
+
+        <nav class="mdl-navigation" id="nav-semester">
+                    <button id="prev-sem" class="mdl-button mdl-js-button mdl-button--icon" onclick="xajax_save_semid(41, 'index.php?pageid=21111&amp;id=abcdef0123456789&amp;transid=a1b2c3');" data-upgraded=",MaterialButton">
+                <i class="fal fa-caret-left fa-xs"></i>
+            </button>
+            <div class="mdl-textfield mdl-js-textfield mdl-textfield--floating-label is-dirty is-upgraded" style="width: auto;" data-upgraded=",MaterialTextfield">
+                <select class="mdl-textfield__input" id="sem" name="sem" style="border-bottom: 0; cursor: pointer; font-size: 14px;  width: unset !important;" onchange="xajax_save_semid(this.value, 'index.php?pageid=21111&amp;id=abcdef0123456789&amp;transid=a1b2c3&amp;listindex_s=');">
+                                            <option value="63" label="2. 36/37" style="color: black;">
+                            2. 36/37
+                        </option>
+                                            <option value="62" label="1. 36/37" style="color: black;">
+                            1. 36/37
+                        </option>
+                                            <option value="61" label="2. 35/36" style="color: black;">
+                            2. 35/36
+                        </option>
+                                            <option value="60" label="1. 35/36" style="color: black;">
+                            1. 35/36
+                        </option>
+                                            <option value="59" label="2. 34/35" style="color: black;">
+                            2. 34/35
+                        </option>
+                                            <option value="58" label="1. 34/35" style="color: black;">
+                            1. 34/35
+                        </option>
+                                            <option value="57" label="2. 33/34" style="color: black;">
+                            2. 33/34
+                        </option>
+                                            <option value="56" label="1. 33/34" style="color: black;">
+                            1. 33/34
+                        </option>
+                                            <option value="55" label="2. 32/33" style="color: black;">
+                            2. 32/33
+                        </option>
+                                            <option value="54" label="1. 32/33" style="color: black;">
+                            1. 32/33
+                        </option>
+                                            <option value="53" label="2. 31/32" style="color: black;">
+                            2. 31/32
+                        </option>
+                                            <option value="52" label="1. 31/32" style="color: black;">
+                            1. 31/32
+                        </option>
+                                            <option value="51" label="2. 30/31" style="color: black;">
+                            2. 30/31
+                        </option>
+                                            <option value="50" label="1. 30/31" style="color: black;">
+                            1. 30/31
+                        </option>
+                                            <option value="49" label="2. 29/30" style="color: black;">
+                            2. 29/30
+                        </option>
+                                            <option value="48" label="1. 29/30" style="color: black;">
+                            1. 29/30
+                        </option>
+                                            <option value="47" label="2. 28/29" style="color: black;">
+                            2. 28/29
+                        </option>
+                                            <option value="46" label="1. 28/29" style="color: black;">
+                            1. 28/29
+                        </option>
+                                            <option value="45" label="2. 27/28" style="color: black;">
+                            2. 27/28
+                        </option>
+                                            <option value="44" label="1. 27/28" style="color: black;">
+                            1. 27/28
+                        </option>
+                                            <option value="43" label="2. 26/27" style="color: black;">
+                            2. 26/27
+                        </option>
+                                            <option value="42" label="1. 26/27" selected="" style="color: black;">
+                            1. 26/27
+                        </option>
+                                            <option value="41" label="2. 25/26" style="color: black;">
+                            2. 25/26
+                        </option>
+                                            <option value="40" label="1. 25/26" style="color: black;">
+                            1. 25/26
+                        </option>
+                                            <option value="39" label="2. 24/25" style="color: black;">
+                            2. 24/25
+                        </option>
+                                            <option value="38" label="1. 24/25" style="color: black;">
+                            1. 24/25
+                        </option>
+                                            <option value="37" label="2. 23/24" style="color: black;">
+                            2. 23/24
+                        </option>
+                                            <option value="36" label="1. 23/24" style="color: black;">
+                            1. 23/24
+                        </option>
+                                            <option value="35" label="2. 22/23" style="color: black;">
+                            2. 22/23
+                        </option>
+                                            <option value="34" label="1. 22/23" style="color: black;">
+                            1. 22/23
+                        </option>
+                                            <option value="33" label="2. 21/22" style="color: black;">
+                            2. 21/22
+                        </option>
+                                            <option value="32" label="1. 21/22" style="color: black;">
+                            1. 21/22
+                        </option>
+                                            <option value="31" label="2. 20/21" style="color: black;">
+                            2. 20/21
+                        </option>
+                                            <option value="30" label="1. 20/21" style="color: black;">
+                            1. 20/21
+                        </option>
+                                            <option value="29" label="2. 19/20" style="color: black;">
+                            2. 19/20
+                        </option>
+                                            <option value="28" label="1. 19/20" style="color: black;">
+                            1. 19/20
+                        </option>
+                                            <option value="27" label="2. 18/19" style="color: black;">
+                            2. 18/19
+                        </option>
+                                            <option value="26" label="1. 18/19" style="color: black;">
+                            1. 18/19
+                        </option>
+                                            <option value="25" label="2. 17/18" style="color: black;">
+                            2. 17/18
+                        </option>
+                                            <option value="24" label="1. 17/18" style="color: black;">
+                            1. 17/18
+                        </option>
+                                            <option value="23" label="2. 16/17" style="color: black;">
+                            2. 16/17
+                        </option>
+                                            <option value="22" label="1. 16/17" style="color: black;">
+                            1. 16/17
+                        </option>
+                                            <option value="21" label="2. 15/16" style="color: black;">
+                            2. 15/16
+                        </option>
+                                            <option value="20" label="1. 15/16" style="color: black;">
+                            1. 15/16
+                        </option>
+                                            <option value="19" label="2. 14/15" style="color: black;">
+                            2. 14/15
+                        </option>
+                                            <option value="18" label="1. 14/15" style="color: black;">
+                            1. 14/15
+                        </option>
+                                            <option value="17" label="2. 13/14" style="color: black;">
+                            2. 13/14
+                        </option>
+                                            <option value="16" label="1. 13/14" style="color: black;">
+                            1. 13/14
+                        </option>
+                                            <option value="15" label="2. 12/13" style="color: black;">
+                            2. 12/13
+                        </option>
+                                            <option value="14" label="1. 12/13" style="color: black;">
+                            1. 12/13
+                        </option>
+                                            <option value="13" label="2. 11/12" style="color: black;">
+                            2. 11/12
+                        </option>
+                                            <option value="12" label="1. 11/12" style="color: black;">
+                            1. 11/12
+                        </option>
+                                            <option value="11" label="2. 10/11" style="color: black;">
+                            2. 10/11
+                        </option>
+                                            <option value="10" label="1. 10/11" style="color: black;">
+                            1. 10/11
+                        </option>
+                                            <option value="9" label="2. 09/10" style="color: black;">
+                            2. 09/10
+                        </option>
+                                            <option value="8" label="1. 09/10" style="color: black;">
+                            1. 09/10
+                        </option>
+                                            <option value="7" label="2. 08/09" style="color: black;">
+                            2. 08/09
+                        </option>
+                                            <option value="6" label="1. 08/09" style="color: black;">
+                            1. 08/09
+                        </option>
+                                            <option value="5" label="2. 07/08" style="color: black;">
+                            2. 07/08
+                        </option>
+                                            <option value="4" label="1. 07/08" style="color: black;">
+                            1. 07/08
+                        </option>
+                                            <option value="3" label="2. 06/07" style="color: black;">
+                            2. 06/07
+                        </option>
+                                            <option value="2" label="1. 06/07" style="color: black;">
+                            1. 06/07
+                        </option>
+                                    </select>
+            </div>
+            <button id="next-sem" class="mdl-button mdl-js-button mdl-button--icon" onclick="xajax_save_semid(43, 'index.php?pageid=21111&amp;id=abcdef0123456789&amp;transid=a1b2c3');" data-upgraded=",MaterialButton">
+                <i class="fal fa-caret-right fa-xs"></i>
+            </button>
+        
+    </nav>
+
+
+
+
+
+
+
+<div class="timer-holder" id="sn-timer" style="position: relative; float: left; margin: 0 5px;" onclick="xajax_reset_timeout(); closeSnackbar();" tabindex="0">
+    <span id="timer" class="timer-value" style="text-align:center; position: absolute; line-height: 24px; width: 100%; font-size: 10px; z-index: 10;">14'</span>
+    <svg width="24" height="24" viewBox="0 0 120 120" style="-webkit-transform: rotate(-90deg); transform: rotate(-90deg);">
+        <circle id="circle-progress" cx="60" cy="60" r="54" fill="none" stroke="#fff" stroke-width="12" stroke-dasharray="339.292" style="stroke-dashoffset: 56.5487;"></circle>
+    </svg>
+</div>
+
+<div class="mdl-tooltip mdl-tooltip--left mdl-tooltip--large" id="sn-timer-tooltip" for="sn-timer" data-upgraded=",MaterialTooltip">00:14:50</div>
+
+
+    <button id="sn-bookmarks" class="mdl-button mdl-js-button mdl-button--icon" data-upgraded=",MaterialButton" tabindex="0">
+        <i class="far fa-bookmark fa-xs"></i>
+    </button>
+    <div class="mdl-tooltip mdl-tooltip--left mdl-tooltip--large" for="sn-bookmarks" data-upgraded=",MaterialTooltip">
+        Ihre Lesezeichen
+    </div>
+        <div class="mdl-menu__container is-upgraded"><div class="mdl-menu__outline mdl-menu--bottom-right"></div><ul class="mdl-menu mdl-menu--bottom-right mdl-js-cascading-menu" for="sn-bookmarks" data-upgraded=",MaterialCascadingMenu">
+                                    
+        
+                    <a href="index.php?pageid=21111&amp;id=abcdef0123456789&amp;transid=a1b2c3&amp;action=addbookmark" class="mdl-menu__item" tabindex="-1">Diese Seite hinzufügen</a>
+            </ul></div>
+
+        <button id="sn-notifications" class="mdl-button mdl-js-button mdl-button--icon  mdl-badge--icon-button" data-badge="0" href="index.php?pageid=978&amp;id=abcdef0123456789&amp;transid=a1b2c3" onclick="location.href='index.php?pageid=978&amp;id=abcdef0123456789&amp;transid=a1b2c3'" style="--badge-color: #CD4C44;" data-upgraded=",MaterialButton" tabindex="0">
+        <i class="far fa-bell fa-xs"></i>
+    </button>
+    <div class="mdl-tooltip mdl-tooltip--right mdl-tooltip--line-wrap mdl-tooltip--large mdl-tooltip--l-width " for="sn-notifications" id="mdl_tooltip_sn-notifications" data-upgraded=",MaterialTooltip">Benachrichtigungen</div><dialog class="mdl-dialog" id="anruf_details_dialog" style="max-width: 600px; width: auto;">
+    <b class="mdl-dialog__title">Anruf-Details</b>
+    <div class="mdl-dialog__content">
+        <p id="anruf_details_content">
+            Anruf Details werden geladen...
+        </p>
+        <p id="anruf_warnung_form_changed" style="display: none;">
+            Sie haben im aktuellen Formular Änderungen vorgenommen. Sie können die Daten speichern, und danach über das Telefon-Symbol wieder auf diese Ansicht gelangen.
+        </p>
+    </div>
+    <div class="mdl-dialog__actions">
+        <button type="button" class="mdl-button mdl-js-button mdl-button--small close-btn" data-upgraded=",MaterialButton">Schliessen</button>
+        <a class="mdl-button mdl-js-button mdl-button--small mdl-button--colored mdl-button--light" style="display: none;" id="anruf_quernav" data-upgraded=",MaterialButton">Zur Quernavigation</a>
+    </div>
+</dialog>
+
+
+<script type="application/javascript">const anrufDetailsDialog=document.getElementById('anruf_details_dialog');if(anrufDetailsDialog){anrufDetailsDialog.querySelector('.close-btn').addEventListener('click',function(){anrufDetailsDialog.close()})}
+if(!anrufDetailsDialog.showModal){document.body.appendChild(anrufDetailsDialog);dialogPolyfill.registerDialog(anrufDetailsDialog)}
+function showNewCall(){document.getElementById('sn-anrufdetails').style.display='';document.getElementById('sn-anrufdetails').dataset.badge='';resizeHeaderRow();window.localStorage.removeItem('call_metadata__id');window.localStorage.removeItem('call_metadata__timestamp')}
+function showCallDetails(){anrufDetailsDialog.showModal();xajax_call_metadata_show_details()}
+function sendCallMetadata(){const id=window.localStorage.getItem('call_metadata__id');const timestamp=window.localStorage.getItem('call_metadata__timestamp');if(id!=null){xajax_call_metadata_set_id(id,timestamp)}}
+window.addEventListener('storage',function(e){if(e.key==='call_metadata__id'){sendCallMetadata()}});sendCallMetadata()</script>
+</div><button id="sn-main-menu" class="mdl-button mdl-js-button mdl-button--icon" data-upgraded=",MaterialButton" tabindex="0"><i class="far fa-ellipsis-v fa-xs"></i></button><div class="mdl-tooltip mdl-tooltip--left mdl-tooltip--large" for="sn-main-menu" data-upgraded=",MaterialTooltip">Menü</div><div class="mdl-menu__container is-upgraded"><div class="mdl-menu__outline mdl-menu--bottom-right"></div><ul class="mdl-menu mdl-menu--bottom-right mdl-js-cascading-menu" for="sn-main-menu" data-upgraded=",MaterialCascadingMenu"><li class="supernav__list-item" role="menuitem"><a href="index.php?pageid=9999&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-menu__item" tabindex="-1"><i class="fal fa-sign-out-alt fa-lg sn-menu-icon"></i> Abmelden</a></li><li class="supernav__list-item" role="menuitem"><button type="button" class="mdl-menu__item mdl-menu-cascade__open-sub" id="mein_schulnetz" tabindex="-1"><i class="fal fa-chevron-left fa-lg sn-menu-icon"></i> mein schulNetz</button></li><li class="supernav__list-item" role="menuitem"><button type="button" class="mdl-menu__item mdl-menu-cascade__open-sub" id="change_style" tabindex="-1"><i class="fal fa-chevron-left fa-lg sn-menu-icon"></i> Layout</button></li><li class="supernav__list-item" role="menuitem"><a href="about.php?id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-menu__item" onclick="javascript:openpopup('about.php',350,150); return false;" target="_blank" tabindex="-1"><i class="fal fa-info-circle fa-lg sn-menu-icon"></i> About</a></li></ul></div><div class="mdl-menu__container is-upgraded"><div class="mdl-menu__outline mdl-menu__outline-submenu mdl-menu--bottom-left"></div><ul class="mdl-menu mdl-js-cascading-menu mdl-menu--bottom-left" for="change_style" data-upgraded=",MaterialCascadingMenu"><li><button type="button" class="mdl-menu__item mdl-menu__item-noclose " onclick="setLayoutSize('lg')" id="layout-sel-lg" tabindex="-1">Ausgedehnt</button></li><li><button type="button" class="mdl-menu__item mdl-menu__item-noclose cls-menu--selected-layout" onclick="setLayoutSize('md')" id="layout-sel-md" tabindex="-1">Standard</button></li><li><button type="button" class="mdl-menu__item mdl-menu__item-noclose " onclick="setLayoutSize('sm')" id="layout-sel-sm" tabindex="-1">Kompakt</button></li></ul></div><div class="mdl-menu__container is-upgraded"><div class="mdl-menu__outline mdl-menu__outline-submenu mdl-menu--bottom-left"></div><ul class="mdl-menu mdl-js-cascading-menu mdl-menu--bottom-left" for="mein_schulnetz" data-upgraded=",MaterialCascadingMenu"><li><a href="index.php?pageid=22500&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-menu__item" tabindex="-1">Einstellungen</a></li><li><a href="index.php?pageid=24953&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-menu__item" tabindex="-1">Externe Anbindungen</a></li><li><a href="index.php?pageid=21111&amp;id=abcdef0123456789&amp;transid=a1b2c3&amp;action=global_logout" class="mdl-menu__item" tabindex="-1">Alle Sitzungen beenden</a></li></ul></div></div></header>
+
+<main class="mdl-layout__content">
+    <div class="mdl-layout__container"><div class="mdl-layout mdl-js-layout mdl-layout--fixed-drawer has-drawer is-upgraded" id="nav-drawer" data-upgraded=",MaterialLayout">
+        <div class="mdl-layout__drawer cls-page--navdrawer" id="nav-drawer-content" aria-hidden="false">
+            <nav class="mdl-navigation cls-page--navlist" id="navigation-list">
+                                    <div class="mdl-navigation__link cls-page--mainnav-small cls-page--leftmenu-active" style="display: none;" id="mainnav-small" onclick="toggleNavListMainList();"><i class="fa-user-check fas fa-lg"></i>&nbsp;&nbsp;Absenzen<button class="mdl-button mdl-js-button mdl-button--icon cls-page--mainnav-small--button" data-upgraded=",MaterialButton"><i id="mainnav-small--icon" class="fa-chevron-down fas"></i></button>
+                    </div>
+                                                                        <a href="index.php?pageid=1&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link cls-page--mainnav-small--list" style="display: none;"><i class="fa-home fas fa-lg"></i>&nbsp;&nbsp;Start</a>
+                                                                                                <a href="index.php?pageid=21311&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link cls-page--mainnav-small--list" style="display: none;"><i class="fa-graduation-cap fas fa-lg"></i>&nbsp;&nbsp;Noten</a>
+                                                                                                                                            <a href="index.php?pageid=21411&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link cls-page--mainnav-small--list" style="display: none;"><i class="fa-balance-scale fas fa-lg"></i>&nbsp;&nbsp;Kontoauszug</a>
+                                                                                                <a href="index.php?pageid=21200&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link cls-page--mainnav-small--list" style="display: none;"><i class="fa-calendar-alt far fa-lg"></i>&nbsp;&nbsp;Agenda</a>
+                                                                                                <a href="index.php?pageid=22300&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link cls-page--mainnav-small--list" style="display: none;"><i class="fa-envelope far fa-lg"></i>&nbsp;&nbsp;Kommunikation</a>
+                                                                                                <a href="index.php?pageid=24030&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link cls-page--mainnav-small--list" style="display: none;"><i class="fa-cloud fas fa-lg"></i>&nbsp;&nbsp;Listen&amp;Dokumente</a>
+                                                                                                <a href="index.php?pageid=23118&amp;id=abcdef0123456789&amp;transid=a1b2c3" class="mdl-navigation__link cls-page--mainnav-small--list" style="display: none;"><i class="fa-laptop fas fa-lg"></i>&nbsp;&nbsp;eSchool</a>
+                                                                                                                                                                                                            <div class="cls-page--navlist-spacer-bottom">&nbsp;</div>
+            </nav>
+            <div id="clsSublist" class="cls-page--navsublist">
+            </div>
+        </div>
+        <div aria-expanded="false" role="button" tabindex="0" class="mdl-layout__drawer-button"><i class="material-icons"></i></div><main class="mdl-layout__content">
+            <div class="mdl-card mdl-shadow--2dp cls-page--content-card" id="content-card">
+                
+                <dialog class="mdl-dialog" id="xajax_dialog" style="max-width: 90%; width: auto;">
+                    <div class="mdl-dialog__content" id="xajax_dialog_content" style="padding-top: 5px; padding-bottom: 2px;">
+                    </div>
+                </dialog>
+
+                                
+                <script>const xajaxDialog=document.getElementById('xajax_dialog');if(!xajaxDialog.showModal){document.body.appendChild(xajaxDialog);dialogPolyfill.registerDialog(xajaxDialog)}</script>
+<style>
+    .sus-uebersicht-file-preview-hidden {
+        display:none;
+    }
+</style>
+
+<script type="text/javascript" language="JavaScript">let display_iframe=!0;let index_old=null;let index_closeAction=null;let table=null;let table_old=null;let kategorie_closeAction=null;function toggle_notendetails(sIdx,kIdx){let idx=sIdx+'_'+kIdx;const notendetail=document.getElementsByClassName(idx+'_detailrow');for(let i=0;i<notendetail.length;i++){notendetail[i].toggle()}}
+function print_iframe_uebersicht(index,tbl){document.getElementById('uebersicht_frame').show();document.getElementById('uebersicht_frame').src='index.php?pageid=10051&id=abcdef0123456789&amp;transid=a1b2c3&tblName='+tbl+'&inline=1&listindex='+index;document.getElementById('uebersicht_frame').removeAttribute('srcdoc');table=tbl}
+function closeFilePreview(){toggle_iframe_uebersicht(index_closeAction,kategorie_closeAction)}
+function toggle_iframe_uebersicht(index,kategorie){kategorie_closeAction=kategorie;index_closeAction=index;let closeAction=document.getElementById('sus-uebersicht-file-preview-action');if(display_iframe||(index_old!==index||table!==table_old)){document.getElementById('uebersicht_bloecke').classList.add('sus-uebersicht--50-50');document.getElementById('iframe_vorschau').show();display_iframe=!1;document.getElementById('eye_id_uebersicht_'+table+index).className='far fa-eye-slash';document.getElementById('mdl_tooltip_span_vorschau_'+table+index).textContent='Vorschau ausblenden';if((index!==index_old&&index_old!==null)||(table!==table_old&&table_old!==null)){document.getElementById('eye_id_uebersicht_'+table_old+index_old).className='far fa-eye';document.getElementById('mdl_tooltip_span_vorschau_'+table_old+index_old).textContent='Vorschau anzeigen';xajax_sus_uebersicht_save_kategorie('null',table_old)}
+if(closeAction){closeAction.classList.remove('sus-uebersicht-file-preview-hidden')}
+xajax_sus_uebersicht_save_kategorie(kategorie,table)}else{document.getElementById('iframe_vorschau').hide();document.getElementById('uebersicht_bloecke').classList.remove('sus-uebersicht--50-50');display_iframe=!0;document.getElementById('eye_id_uebersicht_'+table+index).className='far fa-eye';document.getElementById('mdl_tooltip_span_vorschau_'+table+index_old).textContent='Vorschau anzeigen';if(closeAction){closeAction.classList.add('sus-uebersicht-file-preview-hidden')}
+xajax_sus_uebersicht_save_kategorie('null',table)}
+index_old=index;table_old=table}
+function pdfLoaded(){$('pdf_loading').style.display='none';$('uebersicht_frame').style.display='block'}
+function prepare_print(){$('pdf_loading').style.display='block';$('uebersicht_frame').style.display='none'}
+function getHiddenTabs(){let userHiddenTabs=[];const tabLinkContainer=document.getElementById('tab_link_container');if(tabLinkContainer){tabLinkContainer.querySelectorAll('.tab_user_hidden').forEach((tab_link)=>{let tabKey=tab_link.id.substring(tab_link.id.indexOf('tab_link_')+'tab_link_'.length);userHiddenTabs.push(tabKey)})}else{Array.from(document.getElementsByClassName('user_hidden')).forEach(card=>{card.classList.forEach(className=>{if(className.startsWith('card_')){let cardKey=className.substring(5);userHiddenTabs.push(cardKey)}})})}
+return userHiddenTabs}</script>
+
+<div style="float: right;" id="page_actions_container">
+                                            
+                            
+                        <button type="button" id="page_action_0" onclick="reorderTabsDialog()" class="mdl-button mdl-js-button mdl-button--icon mdl-button--bulk-action  " data-upgraded=",MaterialButton" tabindex="0">
+                    <i class="far fa-sort fa-xs"></i>
+            </button>
+                    <div class="mdl-tooltip mdl-tooltip--left mdl-tooltip--large mdl-tooltip--line-wrap" for="page_action_0" id="page_action_0_tooltip" data-upgraded=",MaterialTooltip">
+        Tabs anordnen
+            </div>
+                                            
+                            
+                        <button type="button" id="page_action_1" onclick="openTabSelectionPDFDialog('index.php?pageid=21111&amp;id=abcdef0123456789&amp;transid=a1b2c3&amp;output=pdf')" class="mdl-button mdl-js-button mdl-button--icon mdl-button--bulk-action mdl-button--red " data-upgraded=",MaterialButton" tabindex="0">
+                    <i class="far fa-file-pdf fa-xs"></i>
+            </button>
+                    <div class="mdl-tooltip mdl-tooltip--left mdl-tooltip--large mdl-tooltip--line-wrap" for="page_action_1" id="page_action_1_tooltip" data-upgraded=",MaterialTooltip">
+        Pdf-Export
+            </div>
+    </div><script type="text/javascript">function xajaxSaveLastTab(tabKey){xajax_sus_uebersicht_save_last_tab(tabKey)}
+function mehrfachAuswahlSetActive(href){let tabPanel='';if(href&&href.indexOf("#tab_")>0){tabPanelClicked=href.substring(href.indexOf("#tab_")+1);let allTabsOfHref=document.getElementsByClassName('mdl-tabs__panel');Array.from(allTabsOfHref).forEach((el)=>{if(el.id===tabPanelClicked){setTimeout(()=>{el.classList.add('is-active')},500)}})}}</script>
+
+<div class="mdl-tabs mdl-js-tabs mdl-js-ripple-effect mdl-js-ripple-effect--ignore-events is-upgraded" data-upgraded=",MaterialTabs,MaterialRipple">
+    <div class="mdl-tabs__tab-bar" id="tab_link_container" style="display:flex;height:auto;flex-wrap: wrap;justify-content: flex-start;">
+                                    <a href="#tab_absenzen_panel" class="mdl-tabs__tab  is-active" id="tab_link_absenzen" onclick="mehrfachAuswahlSetActive(this.href);xajaxSaveLastTab('absenzen');">Absenzen<span class="mdl-tabs__ripple-container mdl-js-ripple-effect" data-upgraded=",MaterialRipple"><span class="mdl-ripple"></span></span></a>
+                        </div>
+    <p>&nbsp;</p> <dialog class="mdl-dialog" id="reordner_tabs_dialog" style="max-width: 800px; width: auto;">
+    <b class="mdl-dialog__title">Tabs anordnen</b>
+    <div class="mdl-dialog__content">
+        <p>
+                            Hier können Sie die Reihenfolge der Tabs über Drag'n'Drop anpassen.
+                    </p>
+        <div class="mdl-grid" id="reorder_tabs">
+                            <div class="mdl-cell mdl-cell--12-col tabs-reorder-element" id="tabs_reorder_cell_absenzen" data-tabkey="absenzen" style="cursor: all-scroll; height:55px; margin: 0;">
+                    <div style="max-width: 100%" class=""><div class="mdl-card cls-card mdl-shadow--2dp mdl-card--neutral " id="6ae8db27e9c2f" style=""><div class="mdl-progress mdl-js-progress mdl-progress__indeterminate is-upgraded" style="width: 100%; display: none;" id="6ae8db27e9c2f_progress_bar" data-upgraded=",MaterialProgress"><div class="progressbar bar bar1" style="width: 0%;"></div><div class="bufferbar bar bar2" style="width: 100%;"></div><div class="auxbar bar bar3" style="width: 0%;"></div></div><div class="mdl-card__supporting-text" id="6ae8db27e9c2f_card_content" style="display: block; max-height: auto;">                        Absenzen
+
+                        <button type="button" class="mdl-button mdl-js-button mdl-button--icon mdl-button--colored" onclick="toggleUserTab('absenzen')" style="float: right;" data-upgraded=",MaterialButton">
+                            <i id="reordner_tabs--icon-btn_toggle_absenzen" class="far fa-eye-slash fa-xs"></i>
+                        </button>
+                    </div></div></div>                </div>
+                    </div>
+        <p>
+                </p>
+    </div>
+    <div class="mdl-dialog__actions">
+        <button type="button" class="mdl-button mdl-js-button mdl-button--small close-btn" data-upgraded=",MaterialButton">Abbrechen</button>
+        <button type="button" class="mdl-button mdl-js-button mdl-button--small mdl-button--colored save-tabs" data-upgraded=",MaterialButton">Speichern</button>
+        <div class="mdl-spinner mdl-spinner--single-color mdl-js-spinner is-upgraded" id="tabs_reorder_save_spinner" data-upgraded=",MaterialSpinner"><div class="mdl-spinner__layer mdl-spinner__layer-1"><div class="mdl-spinner__circle-clipper mdl-spinner__left"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__gap-patch"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__circle-clipper mdl-spinner__right"><div class="mdl-spinner__circle"></div></div></div><div class="mdl-spinner__layer mdl-spinner__layer-2"><div class="mdl-spinner__circle-clipper mdl-spinner__left"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__gap-patch"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__circle-clipper mdl-spinner__right"><div class="mdl-spinner__circle"></div></div></div><div class="mdl-spinner__layer mdl-spinner__layer-3"><div class="mdl-spinner__circle-clipper mdl-spinner__left"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__gap-patch"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__circle-clipper mdl-spinner__right"><div class="mdl-spinner__circle"></div></div></div><div class="mdl-spinner__layer mdl-spinner__layer-4"><div class="mdl-spinner__circle-clipper mdl-spinner__left"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__gap-patch"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__circle-clipper mdl-spinner__right"><div class="mdl-spinner__circle"></div></div></div></div>
+    </div>
+</dialog>
+
+<script>function reorderTabsDialog(){const dialog=document.getElementById('reordner_tabs_dialog');if(dialog){dialog.querySelector('.close-btn').addEventListener('click',function(){dialog.close()});dialog.querySelector('.save-tabs').addEventListener('click',function(event){saveTabs(event)})}
+if(!dialog.showModal){document.body.appendChild(dialog);dialogPolyfill.registerDialog(dialog)}
+dialog.showModal();Sortable.create($('reorder_tabs'))}
+function saveTabs(event){document.getElementById('tabs_reorder_save_spinner').classList.add('is-active');let saveBtn=event.target||event.srcElement;saveBtn.style.display='none';let elements=document.getElementsByClassName('tabs-reorder-element');let orderedElements=[];for(let i=0;i<elements.length;i++){orderedElements.push(elements[i].dataset.tabkey)}
+let userHiddenTabs=getHiddenTabs();xajax_sus_uebersicht_save_tab_to_user_conf(orderedElements.join(','),userHiddenTabs.join(','))}
+function toggleUserTab(tabKey){let tabPanel=document.getElementById('tab_'+tabKey+'_panel');let tabLink=document.getElementById('tab_link_'+tabKey);let toggleIconAction=null;if(tabPanel&&tabLink){if(tabPanel.style.display==='none'){tabLink.style.removeProperty('display');tabLink.classList.remove('tab_user_hidden');tabPanel.style.removeProperty('display');toggleIconAction='hide'}else{tabLink.style.display='none';tabLink.classList.add('tab_user_hidden');tabPanel.style.display='none';toggleIconAction='show'}}else{const cards=Array.from(document.getElementsByClassName('card_'+tabKey));if(cards.length>0){if(cards[0].style.display==='none'){cards.forEach(c=>c.style.removeProperty('display'));cards[0].classList.remove('user_hidden');toggleIconAction='hide'}else{cards.forEach(c=>c.style.display='none');cards[0].classList.add('user_hidden');toggleIconAction='show'}}}
+let toggleIcon=document.getElementById('reordner_tabs--icon-btn_toggle_'+tabKey);if(toggleIconAction){toggleIcon.classList.remove('fa-eye-slash');toggleIcon.classList.remove('fa-eye');toggleIcon.classList.add(toggleIconAction==='show'?'fa-eye':'fa-eye-slash')}}</script>
+<dialog class="mdl-dialog" id="tabs_selection_dialog" style="max-width: 800px; width: auto;">
+    <form action="set_by_js" method="POST" target="_blank" id="tab_selection_form">
+        <b class="mdl-dialog__title" id="tab_selection_title">set_by_js</b>
+        <div class="mdl-dialog__content">
+            <p id="tab_selection_description">set_by_js</p>
+            <p><a href="#" onclick="toggleAllSelectedTabs(true)">[Alle]</a> / <a href="#" onclick="toggleAllSelectedTabs(false)">[Keine]</a> Checkboxen auswählen.</p>
+            <div id="pdf_export_tabs_selection">
+                                                        <label class="mdl-checkbox mdl-js-checkbox mdl-js-ripple-effect export_checkbox_label mdl-js-ripple-effect--ignore-events is-upgraded" data-tab-key="absenzen" data-upgraded=",MaterialCheckbox,MaterialRipple">
+                        <input type="checkbox" class="mdl-checkbox__input tab-pdf-selection" name="tabs_pdf_export_cbox[]" value="absenzen" id="tabs_pdf_export_cbox_absenzen">
+                        <span class="mdl-checkbox__label mdl-checkbox__label--nowrap">Absenzen</span>
+                    <span class="mdl-checkbox__focus-helper"></span><span class="mdl-checkbox__box-outline"><span class="mdl-checkbox__tick-outline"></span></span><span class="mdl-checkbox__ripple-container mdl-js-ripple-effect mdl-ripple--center" data-upgraded=",MaterialRipple"><span class="mdl-ripple"></span></span></label>
+                            </div>
+        </div>
+        <div class="mdl-dialog__actions">
+            <button type="button" class="mdl-button mdl-js-button mdl-button--small close-btn" data-upgraded=",MaterialButton">Abbrechen</button>
+            <button type="button" class="mdl-button mdl-js-button mdl-button--small mdl-button--colored export-tabs" id="tab_selection_btn" data-upgraded=",MaterialButton">set_by_js</button>
+        </div>
+    </form>
+</dialog>
+
+<script>function toggleAllSelectedTabs(doSelectAll){const tabsPDFSelectionCheckboxes=document.getElementsByClassName('tab-pdf-selection');Array.from(tabsPDFSelectionCheckboxes).forEach(c=>{setCheckbox(c,doSelectAll)})}
+function openTabSelectionDossierDialog(href,tab_selection_title,tab_selection_beschreibung,tab_selection_buttontext){let querySelectorItems=document.querySelectorAll(".mdl-tabs__tab:not(.tab_user_hidden)");if(querySelectorItems.length===1){exportPDF(href)}else{openTabSelectionDialog(href,tab_selection_title,tab_selection_beschreibung,tab_selection_buttontext)}}
+function openTabSelectionPDFDialog(href){let querySelectorItems=document.querySelectorAll(".mdl-tabs__tab:not(.tab_user_hidden)");if(querySelectorItems.length===1){exportPDF(href)}else{openTabSelectionDialog(href,'PDF-Export','Hier können Sie die Tabs auswählen, welche als PDF exportiert werden sollen.','PDF exportieren')}}
+function openTabSelectionDialog(href,title,description,btnText){document.getElementById('tab_selection_title').innerHTML=title;document.getElementById('tab_selection_description').innerHTML=description;document.getElementById('tab_selection_btn').innerHTML=btnText;const dialog=document.getElementById('tabs_selection_dialog');if(dialog){resetCBoxes();setCBoxFromActiveTab();dialog.querySelector('.close-btn').addEventListener('click',function(){this.removeEventListener('click',arguments.callee,!1);dialog.close()});dialog.querySelector('.export-tabs').addEventListener('click',function(){exportPDF(href);this.removeEventListener('click',arguments.callee,!1);dialog.close()})}
+let userHiddenTabs=getHiddenTabs();Array.from(document.getElementsByClassName('export_checkbox_label')).forEach(l=>{if(userHiddenTabs.includes(l.dataset.tabKey)){l.style.display='none'}else{l.style.removeProperty('display')}})
+if(!dialog.showModal){document.body.appendChild(dialog);dialogPolyfill.registerDialog(dialog)}
+dialog.showModal()}
+function exportPDF(href){let form=document.getElementById('tab_selection_form');form.action=href;form.submit();resetCBoxes()}
+function resetCBoxes(){document.getElementById('tabs_selection_dialog').querySelectorAll('input[type="checkbox"]:checked').forEach((checkbox)=>{setCheckbox(checkbox,!1)})}
+function setCBoxFromActiveTab(){let activeTab=document.querySelectorAll(".mdl-tabs__tab.is-active");if(activeTab&&activeTab[0]){let tabname=activeTab[0].id.substring(9);document.getElementById('tabs_selection_dialog').querySelectorAll('input[type="checkbox"]').forEach((checkbox)=>{if(checkbox.value===tabname){setCheckbox(checkbox,!0)}},tabname)}}</script>
+<div class="main-content-loader" id="sus-uebersicht-spinner" style="display: none;"><div class="mdl-spinner mdl-spinner--single-color mdl-js-spinner is-active is-upgraded" style="top: calc(50% - 50px); width: 50px; height: 50px; margin-right: 240px;" data-upgraded=",MaterialSpinner"><div class="mdl-spinner__layer mdl-spinner__layer-1"><div class="mdl-spinner__circle-clipper mdl-spinner__left"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__gap-patch"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__circle-clipper mdl-spinner__right"><div class="mdl-spinner__circle"></div></div></div><div class="mdl-spinner__layer mdl-spinner__layer-2"><div class="mdl-spinner__circle-clipper mdl-spinner__left"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__gap-patch"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__circle-clipper mdl-spinner__right"><div class="mdl-spinner__circle"></div></div></div><div class="mdl-spinner__layer mdl-spinner__layer-3"><div class="mdl-spinner__circle-clipper mdl-spinner__left"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__gap-patch"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__circle-clipper mdl-spinner__right"><div class="mdl-spinner__circle"></div></div></div><div class="mdl-spinner__layer mdl-spinner__layer-4"><div class="mdl-spinner__circle-clipper mdl-spinner__left"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__gap-patch"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__circle-clipper mdl-spinner__right"><div class="mdl-spinner__circle"></div></div></div></div></div><div id="uebersicht_bloecke"><page orientation="P" pageset="new" pagegroup="new">
+<div class="mdl-tabs__panel is-active " id="tab_absenzen_panel" style="">
+                
+    
+                
+    
+    <div class="div_absenzen">
+                    <div style="position:relative;">
+                <h3>Absenzen - Muster Max (K26A)</h3>
+                            </div>
+                <div>
+                                
+                    <a class="mdl-button mdl-js-button mdl-button--small mdl-button--colored mdl-button--light" href="index.php?pageid=21111&amp;id=abcdef0123456789&amp;transid=a1b2c3&amp;action=toggle_abs_showall" data-upgraded=",MaterialButton">
+                Einträge aus vergangenen Absenzperioden anzeigen            </a>
+            
+    
+            
+                                    
+<table class="mdl-data-table mdl-js-data-table mdl-table--listtable" style="margin-top: 20px; width: 100%" data-upgraded=",MaterialDataTable">
+    <caption style="padding-bottom: 15px; text-align: left;">
+        <span style="width: 50%; display: inline-block;"><b>Absenzenauszug - MAR00-AAA</b></span><span style="width: 50%; display: inline-block; text-align: right">
+                    </span>
+        <br>
+                    ab 29.06.2026
+            </caption>
+    <tbody><tr>
+        <th style="width: 15%; text-align: left;">Datum von</th>
+        <th style="width: 15%; text-align: left;">Datum bis</th>
+        <th style="width: 50%; text-align: left;" colspan="2">Grund</th>
+                <th style="width: 20%; text-align: left;">Absenzpunkte</th>
+        <th style="width: 10%; text-align: left;" hidden="">
+            Kommentar
+        </th>
+    </tr>
+        <tr><td colspan="7">&nbsp;</td></tr>
+    <tr style="font-weight:bold;">
+        <td colspan="7" style="padding:0; border-top:unset; border-bottom:unset;">
+            <table style="width:100%; border-collapse:collapse;">
+                <tbody><tr style="min-height:48px;">
+                    <td style="padding:12px 24px; box-sizing:border-box; vertical-align:middle; width:55%;">
+                        Anzahl Ereignisse: 0
+                    </td>
+
+                    
+                    <td style="text-align: right; padding:12px 8px; box-sizing:border-box; vertical-align:middle; width:30%;">
+                        Kontingent:<br>
+                        Verbleibendes Kontingent:
+                    </td>
+
+                    <td style="padding:12px 16px; box-sizing:border-box; vertical-align:middle; width:15%;">
+                        30<br>
+                        30<br>
+                    </td>
+                </tr>
+            </tbody></table>
+        </td>
+    </tr>
+        </tbody></table>
+                    
+            
+
+            
+<form action="index.php?pageid=21111&amp;id=abcdef0123456789&amp;transid=a1b2c3&amp;action=" method="post">
+    <input type="hidden" name="sidx" value="0">
+    <table class="mdl-data-table mdl-js-data-table mdl-table--listtable" style="width: max-content; min-width: 100%; table-layout: auto; margin-top: 20px;" id="offeneAbsenzen" data-upgraded=",MaterialDataTable">
+        <caption style="padding-bottom: 15px; text-align: left;">
+            <b>Offene Absenzmeldungen</b><br>
+                            
+                    </caption>
+
+        <tbody><tr>
+            <th style="width:10%; text-align: left;">Datum</th>
+            <th style="width:10%; text-align: left;">Zeit</th>
+            <th style="width:10%; text-align: left;">Kurs</th>
+                                        <th style="width:5%; text-align: left;"></th>
+                                </tr>
+
+                <tr><td colspan="4">&nbsp;</td></tr>
+        <tr style="font-weight:bold;">
+            <td colspan="4" style="padding:0; border-top:unset; border-bottom:unset;">
+                <table style="width:100%; border-collapse:collapse;">
+                    <tbody><tr>
+                        <td style="padding:12px 24px; box-sizing:border-box; vertical-align:middle;">
+                            Anzahl Ereignisse: 0
+                                                    </td>
+
+                        <td style="width: 20%; text-align: right; padding:12px 8px; box-sizing:border-box; vertical-align:middle;">
+                                                    </td>
+
+                        <td style="width:5%; padding:12px 16px; box-sizing:border-box; vertical-align:middle; text-align:right;">
+                                                    </td>
+                    </tr>
+                </tbody></table>
+            </td>
+        </tr>
+            </tbody></table>
+
+    </form>
+<script>function textinputChanged(field){field.style.backgroundColor='orange';document.getElementById('abs_meldungen_save_'+field.dataset.sidx).disabled=!1;document.getElementById('abs_meldungen_save_info_'+field.dataset.sidx).show()}</script>
+
+<script type="text/javascript">function measureBegruendungWidth(field){const style=window.getComputedStyle(field);if(!measureBegruendungWidth._ctx){measureBegruendungWidth._ctx=document.createElement('canvas').getContext('2d')}
+const ctx=measureBegruendungWidth._ctx;ctx.font=style.fontStyle+' '+style.fontWeight+' '+style.fontSize+' '+style.fontFamily;const text=field.value||field.placeholder||'';const extra=parseFloat(style.paddingLeft)+parseFloat(style.paddingRight)+parseFloat(style.borderLeftWidth)+parseFloat(style.borderRightWidth);return Math.ceil(ctx.measureText(text).width+extra)+6}
+function autoWidthBegruendung(){const fields=Array.from(document.getElementsByClassName('abs-begruendung-autowidth'));if(fields.length===0){return}
+let maxWidth=150;fields.forEach(field=>{maxWidth=Math.max(maxWidth,measureBegruendungWidth(field))});fields.forEach(field=>{field.style.width=maxWidth+'px'})}
+function autoWidthAllBegruendungen(){autoWidthBegruendung()}
+onMdlComponentUpgrade(()=>{autoWidthAllBegruendungen();const copyButtonsB=document.getElementsByClassName('copy-begueruendung');Array.from(copyButtonsB).forEach(btn=>{const inputFields=document.getElementsByClassName(btn.dataset.begruendung);if(inputFields.length>1){document.getElementById(btn.id).style.display='inline'}});const copyButtonsK=document.getElementsByClassName('copy-kommentar');Array.from(copyButtonsK).forEach(btn=>{const inputFields=document.getElementsByClassName(btn.dataset.kommentar);if(inputFields.length>1){document.getElementById(btn.id).style.display='inline'}})});function copyDown(inputClass,sourceInput){const source=document.getElementById(sourceInput);const inputs=document.getElementsByClassName(inputClass);for(let i=0;i<inputs.length;i++){if(!inputs[i].disabled){inputs[i].value=source.value;inputs[i].style.backgroundColor='orange';textinputChanged(inputs[i])}}
+autoWidthBegruendung()}</script>
+    
+
+    
+    
+    
+                                                            <div style="max-width: 100%" class=""><div class="mdl-card cls-card mdl-shadow--2dp mdl-card--information " id="6ae8db28169c7" style=""><div class="mdl-progress mdl-js-progress mdl-progress__indeterminate is-upgraded" style="width: 100%; display: none;" id="6ae8db28169c7_progress_bar" data-upgraded=",MaterialProgress"><div class="progressbar bar bar1" style="width: 0%;"></div><div class="bufferbar bar bar2" style="width: 100%;"></div><div class="auxbar bar bar3" style="width: 0%;"></div></div><div class="mdl-card__supporting-text" id="6ae8db28169c7_card_content" style="display: block; max-height: auto;">Der Absenzenauszug wurde von Ihnen bestätigt oder enthält keine Einträge.</div></div></div>                            
+                    </div>
+    </div>
+</div>
+</page></div><div id="iframe_vorschau" class="sus-uebersicht--50-50 sus-uebersicht--iframe-wrapper" style="display:none"><div class="loader-backdrop" id="pdf_loading" style="display: none;">
+                <div class="mdl-spinner mdl-js-spinner is-active is-upgraded" style="top: calc(50% - 25px); width: 50px; height: 50px;" data-upgraded=",MaterialSpinner"><div class="mdl-spinner__layer mdl-spinner__layer-1"><div class="mdl-spinner__circle-clipper mdl-spinner__left"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__gap-patch"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__circle-clipper mdl-spinner__right"><div class="mdl-spinner__circle"></div></div></div><div class="mdl-spinner__layer mdl-spinner__layer-2"><div class="mdl-spinner__circle-clipper mdl-spinner__left"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__gap-patch"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__circle-clipper mdl-spinner__right"><div class="mdl-spinner__circle"></div></div></div><div class="mdl-spinner__layer mdl-spinner__layer-3"><div class="mdl-spinner__circle-clipper mdl-spinner__left"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__gap-patch"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__circle-clipper mdl-spinner__right"><div class="mdl-spinner__circle"></div></div></div><div class="mdl-spinner__layer mdl-spinner__layer-4"><div class="mdl-spinner__circle-clipper mdl-spinner__left"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__gap-patch"><div class="mdl-spinner__circle"></div></div><div class="mdl-spinner__circle-clipper mdl-spinner__right"><div class="mdl-spinner__circle"></div></div></div></div>
+            </div><iframe id="uebersicht_frame" onload="pdfLoaded()" srcdoc="&lt;div style=&quot;text-align:center;&quot;&gt;Klicken Sie auf das Vorschau-Symbol des gewünschten Dokumentes, um hier die Vorschau zu sehen.&lt;/div&gt;" style="display: block;"></iframe></div></div>
+
+<script type="text/javascript">onMdlComponentUpgrade(function(){document.querySelectorAll('.mdl-tabs__panel').forEach((panelDiv)=>{if(!panelDiv.classList.contains('tab_user_hidden')){panelDiv.style.removeProperty('display')}});document.getElementById("sus-uebersicht-spinner").style.display='none'})</script>
+</div></main><div class="mdl-layout__obfuscator"></div></div></div></main></div></div><dialog class="mdl-dialog" id="transid-invalid-dialog" style="max-width: 900px; width: auto;background-color: #FAE4C6">
+    <div class="mdl-dialog__title" style="text-align: left;">Transaktions-ID abgelaufen</div>
+    <div class="mdl-dialog__content" style="max-height: 480px;">
+        <p>Ihre Transaktions-ID ist abgelaufen, Sie müssen die Seite neu laden.</p>
+        <p><a id="transid-invalid-reload-link" href="#">Seite neu laden</a></p>
+    </div>
+    <div class="mdl-dialog__actions">
+        <button type="button" class="mdl-button mdl-js-button mdl-button--small close-btn" data-upgraded=",MaterialButton">Schliessen</button>
+    </div>
+</dialog>
+
+<script type="text/javascript">document.addEventListener('visibilitychange',function(ev){if(document.visibilityState=='visible'&&!newPageLoading){xajax_check_transid("21111","a1b2c3")}});const invalidDialog=document.getElementById('transid-invalid-dialog');function openInvalidDialog(autoreload,reloadLocation){if(autoreload){showToast('Transaktions ID abgelaufen. Automatischer Seitenreload');location.href=reloadLocation}else{if(!invalidDialog.open){if(invalidDialog){invalidDialog.querySelector('.close-btn').addEventListener('click',function(){invalidDialog.close()})}
+if(!invalidDialog.showModal){document.body.appendChild(invalidDialog);dialogPolyfill.registerDialog(invalidDialog)}
+invalidDialog.showModal()}}}</script>
+
+
+ <!-- Ende MainContent -->
+
+
+
+
+<!-- Global Widgets -->
+
+
+
+<div style="display: none;" id="snPageActions">
+                                            
+                            
+                        <button type="button" id="page_action_0" onclick="reorderTabsDialog()" class="mdl-button mdl-js-button mdl-button--icon mdl-button--bulk-action  " data-upgraded=",MaterialButton">
+                    <i class="far fa-sort fa-xs"></i>
+            </button>
+                    <div class="mdl-tooltip mdl-tooltip--left mdl-tooltip--large mdl-tooltip--line-wrap" for="page_action_0" id="page_action_0_tooltip" data-upgraded=",MaterialTooltip">
+        Tabs anordnen
+            </div>
+                                            
+                            
+                        <button type="button" id="page_action_1" onclick="openTabSelectionPDFDialog('index.php?pageid=21111&amp;id=abcdef0123456789&amp;transid=a1b2c3&amp;output=pdf')" class="mdl-button mdl-js-button mdl-button--icon mdl-button--bulk-action mdl-button--red " data-upgraded=",MaterialButton">
+                    <i class="far fa-file-pdf fa-xs"></i>
+            </button>
+                    <div class="mdl-tooltip mdl-tooltip--left mdl-tooltip--large mdl-tooltip--line-wrap" for="page_action_1" id="page_action_1_tooltip" data-upgraded=",MaterialTooltip">
+        Pdf-Export
+            </div>
+    </div>
+
+<script type="text/javascript">let actionContainer=document.getElementById('page_actions_container');if(!actionContainer){actionContainer=createActionContainer()}
+actionContainer.innerHTML=$('snPageActions').innerHTML;function createActionContainer(){let title=document.querySelector('h1, h2, h3');if(title===null){const container=document.createElement('div');container.id='page_actions_container';container.style.position='absolute';container.style.top='10px';container.style.right='10px';document.getElementById('content-card').appendChild(container);return container}else{const pageActionsHeader=document.createElement('div');pageActionsHeader.classList.add('header-for-page-actions');const newTitle=title.cloneNode(!1);newTitle.innerHTML=title.innerHTML;pageActionsHeader.appendChild(newTitle);const spacer=document.createElement('div');spacer.classList.add('mdl-layout-spacer');pageActionsHeader.appendChild(spacer);const container=document.createElement('div');container.id='page_actions_container';pageActionsHeader.appendChild(container);title.parentNode.replaceChild(pageActionsHeader,title);return container}}
+function showInfoDialog(id){const dialog=document.getElementById(id);if(dialog){dialog.querySelector('.close-btn').addEventListener('click',function(){if(isEventSupported('webkitAnimationEnd')){dockingAnimation(dialog,'webkitAnimationEnd')}else if(isEventSupported('animationend')){dockingAnimation(dialog,'animationend')}else{dialog.close()}})}else{return}
+if(!dialog.showModal){document.body.appendChild(dialog);dialogPolyfill.registerDialog(dialog)}
+dialog.showModal()}
+function dockingAnimation(dialog,eventType){dialog.classList.add('docking-dialog');dialog.addEventListener(eventType,function(){dialog.close();dialog.classList.remove('docking-dialog');dialog.removeEventListener(eventType,arguments.callee,!1)},!1)}</script>
+
+
+
+
+<dialog class="mdl-dialog" id="active_workflow_steps" style="max-width: 800px; width: auto;">
+    <b class="mdl-dialog__title" style="text-align: left;">Pendente Workflow-Schritte zu dieser Seite</b>
+    <div class="mdl-dialog__content" style="max-height: 300px; text-align: left;">
+        Folgende Workflows befinden sich in einem Schritt, welcher eine Aktion auf dieser Seite verlangt:<br><br>
+            </div>
+    <div class="mdl-dialog__actions">
+        <button type="button" class="mdl-button mdl-js-button mdl-button--small close-btn" data-upgraded=",MaterialButton">Schliessen</button>
+    </div>
+</dialog>
+
+<script>function show_active_wfsteps(){const dialog=document.getElementById('active_workflow_steps');if(dialog){dialog.querySelector('.close-btn').addEventListener('click',function(){dialog.close()})}
+if(!dialog.showModal){document.body.appendChild(dialog);dialogPolyfill.registerDialog(dialog)}
+dialog.showModal()}</script>
+<dialog class="mdl-dialog" id="initiate_workflow" style="max-width: 800px; width: auto;">
+    <b class="mdl-dialog__title" id="initiate_workflow--title"></b>
+    <div class="mdl-dialog__content" style="max-height: 300px;">
+        <p id="initiate_workflow--description"></p>
+            </div>
+    <div class="mdl-dialog__actions">
+        <button type="button" id="wfl_dialog_schliessenBtn" class="mdl-button mdl-js-button mdl-button--small close-btn" data-upgraded=",MaterialButton">Schliessen</button>
+    </div>
+</dialog>
+
+<script>function startWfButtonClicked(icol){checkStartRequirements(icol,'initialize_wrapper_'+icol);if(!document.getElementById('initialize_wrapper_'+icol).classList.contains('is-invalid')){xajax_wfl_initiate_workflow(icol,$('wfl_title_'+icol).value,$('wfl_termin_'+icol).value)}}
+function checkStartRequirements(fieldNr,wrapper){let startValid=!0;title_input=document.getElementById('wfl_title_'+fieldNr);if(startValid&&title_input.value.length<=0){title_input.parentElement.classList.add('is-invalid');startValid=!1}else{title_input.parentElement.classList.remove('is-invalid')}
+if(startValid){document.getElementById(wrapper).classList.remove('is-invalid')}else{document.getElementById(wrapper).classList.add('is-invalid')}}
+function show_initiate_wfs(icol,tblName,mode){if(mode==='umfrage'){document.getElementById('initiate_workflow--title').innerHTML='Umfrage starten';document.getElementById('initiate_workflow--description').hide()}else if(mode==='checkliste'){document.getElementById('initiate_workflow--title').innerHTML='Checkliste erstellen';document.getElementById('initiate_workflow--description').hide()}else{document.getElementById('initiate_workflow--title').innerHTML='Workflow starten';document.getElementById('initiate_workflow--description').show()}
+const modeDivs=document.getElementsByClassName('wfl_initiate_mode');for(let i=0;i<modeDivs.length;i++){if(modeDivs[i].id==='wfl_initiate_mode_'+mode){modeDivs[i].style.display='block'}else{modeDivs[i].style.display='none'}}
+const dialog=document.getElementById('initiate_workflow');if(dialog){dialog.querySelector('.close-btn').addEventListener('click',function(){dialog.close()})}
+if(!dialog.showModal){document.body.appendChild(dialog);dialogPolyfill.registerDialog(dialog)}
+document.getElementById("initiate_workflow--description").innerText=mode==="tbl_action"?"Folgende Workflows können Sie bei der ausgeführten Aktion starten:":"Folgende Workflows können Sie von dieser Seite aus starten:";dialog.showModal();xajax_wfl_initiate_workflow_filldialog(icol,tblName,mode)}</script>
+</body></html>
