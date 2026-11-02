@@ -1194,6 +1194,105 @@ export const knownConsonantFromReading = (
 }
 
 /**
+ * An unknown word splits into the two dictionary words a close reading already wrote when
+ * that same reading also changes the final letter of one other dictionary word
+ * (`wirdseit` … `großen` → `wird seit` … `großem`). A split by itself stays joined
+ * (`Hauptarten`). A change of case stays (`vier`).
+ */
+export const SPLIT_ENDING_MARGIN = 0.8
+
+const finalLetterSubstitution = (from: string, to: string) => {
+  const left = [...from]
+  const right = [...to]
+  if (left.length < 2 || left.length !== right.length || from.toLowerCase() === to.toLowerCase()) return false
+  let count = 0
+  let at = -1
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] === right[index]) continue
+    count += 1
+    at = index
+  }
+  return count === 1 && at === left.length - 1
+}
+
+export const splitAndFinalLetterFromReading = <T extends { char: string }>(
+  characters: T[],
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): T[] | null => {
+  if (readings.length < 2 || !characters.length) return null
+  const text = characters.map((character) => character.char).join('')
+  const words = inkWords(text)
+  const top = readings[0]
+  let found: { split: number; left: string; right: string; sub: number; to: string } | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > SPLIT_ENDING_MARGIN) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length + 1) continue
+    let left = 0
+    let right = 0
+    let split: { index: number; left: string; right: string } | null = null
+    let sub: { index: number; to: string } | null = null
+    let matches = true
+    while (left < words.length && right < other.length) {
+      if (words[left] === other[right]) {
+        left += 1
+        right += 1
+        continue
+      }
+      const head = other[right]
+      const tail = other[right + 1]
+      if (!split && tail && words[left] === `${head}${tail}`) {
+        const longEnough = [...head].length >= 3 && [...tail].length >= 3
+        if (longEnough && known(head) && known(tail) && !known(words[left])) {
+          split = { index: left, left: head, right: tail }
+          left += 1
+          right += 2
+          continue
+        }
+      }
+      if (!sub && finalLetterSubstitution(words[left], other[right]) && known(words[left]) && known(other[right])) {
+        sub = { index: left, to: other[right] }
+        left += 1
+        right += 1
+        continue
+      }
+      matches = false
+      break
+    }
+    if (!matches || !split || !sub || left !== words.length || right !== other.length) continue
+    const spans = [...text.matchAll(/[A-Za-zÄÖÜäöüß]+/gu)]
+    let expected = text
+    const edits = [
+      { index: split.index, to: `${split.left} ${split.right}` },
+      { index: sub.index, to: sub.to },
+    ].sort((first, second) => second.index - first.index)
+    for (const edit of edits) {
+      const span = spans[edit.index]
+      if (!span || span.index === undefined) {
+        matches = false
+        break
+      }
+      expected = expected.slice(0, span.index) + edit.to + expected.slice(span.index + span[0].length)
+    }
+    if (!matches || expected !== reading.text) continue
+    const proposal = { split: split.index, left: split.left, right: split.right, sub: sub.index, to: sub.to }
+    if (found && (found.split !== proposal.split || found.left !== proposal.left || found.right !== proposal.right || found.sub !== proposal.sub || found.to !== proposal.to)) return null
+    found = proposal
+  }
+  if (!found) return null
+  const rewritten = rewriteSameLengthWord(characters, found.sub, found.to)
+  if (!rewritten) return null
+  const run = letterRuns(rewritten)[found.split]
+  const cut = run ? run.start + [...found.left].length : -1
+  if (!run || run.word !== `${found.left}${found.right}` || cut <= run.start || cut >= run.end) return null
+  const next = rewritten.slice()
+  next.splice(cut, 0, { ...next[cut], char: ' ' })
+  return next
+}
+
+/**
  * A quote stuck to a closing parenthesis moves in front of the following lowercase word
  * (`(Tanis 6a)" if` → `(Tanis 6a) "if`).
  */
@@ -2899,5 +2998,10 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   take(shortKnownWordFromReading(text, decoded.readings, known), rewriteWord)
   take(functionWordBeforeStem(text, decoded.readings, options.language ?? ''), rewriteSameLengthWord)
   take(knownConsonantFromReading(text, decoded.greedyText, decoded.readings, known), rewriteSameLengthWord)
+  const splitEnding = splitAndFinalLetterFromReading(characters, decoded.readings, known)
+  if (splitEnding) {
+    characters = splitEnding
+    text = characters.map((character) => character.char).join('')
+  }
   return { text, characters }
 }

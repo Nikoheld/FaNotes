@@ -109,6 +109,7 @@ import {
   shortKnownWordFromReading,
   functionWordBeforeStem,
   knownConsonantFromReading,
+  splitAndFinalLetterFromReading,
   dictionaryJoinFromReading,
   splitFunctionWordJoin,
   tracedFinalComma,
@@ -1550,6 +1551,15 @@ export async function recognizeInk(
         decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null
       }
+    }
+    const splitEnding = splitAndFinalLetterFromReading(
+      decoded.characters,
+      decoded.readings,
+      (word) => wordIsKnown(lineLanguage, word),
+    )
+    if (splitEnding) {
+      decoded = { ...decoded, characters: splitEnding, text: splitEnding.map((character) => character.char).join('') }
+      stitched = null
     }
     if (!decoded.text.trim()) continue
     const spans = new Uint32Array(decoded.characters.flatMap((character) => [character.startFrame, character.endFrame]))
