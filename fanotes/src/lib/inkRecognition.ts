@@ -79,6 +79,7 @@ import {
   COMPOUND_SCALE,
   dictionaryCompound,
   isolatedWideGroups,
+  capitalizeEnglishPronoun,
   lowercaseInitialFromBeam,
   lowercaseShortBeamWord,
   accusativeDer,
@@ -1182,6 +1183,15 @@ export async function recognizeInk(
     if (initialCase) {
       const rewritten = rewriteSameLengthWord(decoded.characters, initialCase.index, initialCase.to)
       const nextText = textWithWordEdits(decoded.text, [initialCase])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
+    }
+    const pronoun = capitalizeEnglishPronoun(decoded.text, lineLanguage)
+    if (pronoun) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, pronoun.index, pronoun.to)
+      const nextText = textWithWordEdits(decoded.text, [pronoun])
       if (rewritten && nextText !== decoded.text) {
         decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null

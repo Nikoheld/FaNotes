@@ -436,6 +436,16 @@ export const lowercaseInitialFromBeam = (
   return { index: 0, from, to }
 }
 
+/** A lone English `i`, including `i'm`, is the pronoun (`i know` → `I know`). */
+export const capitalizeEnglishPronoun = (text: string, language: string): WordEdit | null => {
+  if (language !== 'en') return null
+  const words = inkWords(text)
+  for (let index = 0; index < words.length; index += 1) {
+    if (words[index] === 'i') return { index, from: 'i', to: 'I' }
+  }
+  return null
+}
+
 /**
  * A raw trace that is the chosen word plus one letter becomes the dictionary word formed by
  * swapping one adjacent pair (`in` with trace `ien` → `ein`).
@@ -1430,5 +1440,6 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   take(accusativeDer(text), rewriteSameLengthWord)
   take(lowercaseShortBeamWord(text, decoded.readings), rewriteSameLengthWord)
   take(lowercaseInitialFromBeam(text, decoded.readings, options.language ?? '', characters, baseKnown), rewriteSameLengthWord)
+  take(capitalizeEnglishPronoun(text, options.language ?? ''), rewriteSameLengthWord)
   return { text, characters }
 }
