@@ -2454,6 +2454,51 @@ export const capitalizedNounAfterDeterminer = (
   return null
 }
 
+/**
+ * A lowercase dictionary word after an article and a capitalized adjective takes the
+ * capital a reading already has (`das Betreute wohnen` → `Wohnen`). The reading may sit
+ * a few nats down. A verb after a noun stays lowercase when the beam never capitalized it.
+ */
+export const ADJECTIVE_NOUN_MARGIN = 3.5
+
+export const capitalizedNounAfterAdjective = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  language: string,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (language !== 'de' || readings.length < 2) return null
+  const words = inkWords(text)
+  const top = readings[0]
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > ADJECTIVE_NOUN_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    if (index < 2 || from.toLowerCase() !== to.toLowerCase() || from === to) continue
+    if ([...from].length < 6 || from !== from.toLowerCase() || !known(from)) continue
+    const head = from[0].toUpperCase()
+    if (`${head}${from.slice(1)}` !== to || [...head].length !== 1) continue
+    const adjective = words[index - 1]
+    if (!DETERMINERS.has(words[index - 2].toLowerCase())) continue
+    if ([...adjective].length < 3 || !adjective.endsWith('e')) continue
+    if (adjective === adjective.toLowerCase() || adjective === adjective.toUpperCase()) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
 const SENTENCE_ADVERBS = new Set([
   'manchmal', 'häufig', 'leider', 'gestern', 'heute', 'morgen', 'schließlich',
   'natürlich', 'eigentlich', 'trotzdem', 'dennoch', 'allerdings', 'außerdem',
@@ -3135,5 +3180,6 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
     characters = endingDigit
     text = characters.map((character) => character.char).join('')
   }
+  take(capitalizedNounAfterAdjective(text, decoded.readings, options.language ?? '', known), rewriteSameLengthWord)
   return { text, characters }
 }
