@@ -1293,6 +1293,52 @@ export const splitAndFinalLetterFromReading = <T extends { char: string }>(
 }
 
 /**
+ * A number keeps the one different digit the pen already wrote (`200.000` with trace
+ * `260.000` → `260.000`). An added digit stays out (`13.000` with trace `613.000`).
+ * Two numbers that disagree with the pen stay as the beam wrote them.
+ */
+export const greedyDigitFromTrace = <T extends { char: string }>(
+  characters: T[],
+  greedy: string,
+): T[] | null => {
+  if (!characters.length || !greedy) return null
+  const text = characters.map((character) => character.char).join('')
+  const number = /\d[\d.,]*\d|\d/gu
+  const hyp = [...text.matchAll(number)]
+  const traced = [...greedy.matchAll(number)]
+  if (!hyp.length || hyp.length !== traced.length) return null
+  const separators = (value: string) => value.replace(/\d/gu, '')
+  const diffs: number[] = []
+  for (let index = 0; index < hyp.length; index += 1) {
+    const from = hyp[index][0]
+    const to = traced[index][0]
+    if (from === to) continue
+    if (separators(from) !== separators(to) || from.length !== to.length) return null
+    let digitDiffs = 0
+    for (let cursor = 0; cursor < from.length; cursor += 1) {
+      if (from[cursor] !== to[cursor]) digitDiffs += 1
+    }
+    if (digitDiffs !== 1) return null
+    diffs.push(index)
+  }
+  if (diffs.length !== 1) return null
+  const index = diffs[0]
+  const from = hyp[index][0]
+  const to = traced[index][0]
+  const start = hyp[index].index
+  if (start === undefined) return null
+  let offset = 0
+  for (let cursor = 0; cursor < from.length; cursor += 1) {
+    if (from[cursor] !== to[cursor]) offset = cursor
+  }
+  const at = start + offset
+  if (characters[at]?.char !== from[offset]) return null
+  const next = characters.slice()
+  next[at] = { ...next[at], char: to[offset] }
+  return next
+}
+
+/**
  * A quote stuck to a closing parenthesis moves in front of the following lowercase word
  * (`(Tanis 6a)" if` → `(Tanis 6a) "if`).
  */
@@ -3001,6 +3047,11 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   const splitEnding = splitAndFinalLetterFromReading(characters, decoded.readings, known)
   if (splitEnding) {
     characters = splitEnding
+    text = characters.map((character) => character.char).join('')
+  }
+  const greedyDigit = greedyDigitFromTrace(characters, decoded.greedyText)
+  if (greedyDigit) {
+    characters = greedyDigit
     text = characters.map((character) => character.char).join('')
   }
   return { text, characters }
