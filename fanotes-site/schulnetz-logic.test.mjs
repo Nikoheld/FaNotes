@@ -15,6 +15,7 @@ import {
   microsoftLoginRequired,
   schulnetzCallAllowed,
   sessionProblem,
+  unseenChanges,
   weightedAverage,
   wunschnote,
 } from './schulnetz-logic.mjs'
@@ -42,6 +43,20 @@ test('diff ids stay stable and the first snapshot is silent', () => {
   assert.equal(change.id, 'grade:g1:5.5|1|Probe|2026-10-20')
   assert.equal(change.category, 'grade')
   assert.equal(change.title, 'Neue Note')
+})
+
+test('an excuse deadline is pushed once and only inside the window', () => {
+  const open = { id: 'a', dateFrom: '2026-11-01', subject: 'Deutsch', reason: 'Arzt', excused: false, excuseUntil: '04.11.2026' }
+  const previous = { grades: [], events: [], exams: [], absences: [], messages: [] }
+  const next = { grades: [], events: [], exams: [], absences: [open], messages: [] }
+  const settings = { grades: false, timetable: false, exams: false, absences: false, events: false, deadlines: true }
+  const changes = diffSnapshots(previous, next, settings, '2026-11-02')
+  assert.equal(changes.length, 1)
+  assert.equal(changes[0].category, 'deadline')
+  assert.equal(changes[0].id, 'deadline:a:2026-11-04')
+  assert.deepEqual(diffSnapshots(previous, next, settings, '2026-11-07'), [])
+  assert.deepEqual(diffSnapshots(previous, { ...next, absences: [{ ...open, excused: true }] }, settings, '2026-11-02'), [])
+  assert.deepEqual(unseenChanges(changes, [changes[0].id]), [])
 })
 
 test('read-only policy blocks enrolment, confirmation and absence writes', () => {

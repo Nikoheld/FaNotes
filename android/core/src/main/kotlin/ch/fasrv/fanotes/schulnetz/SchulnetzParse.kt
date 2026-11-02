@@ -294,6 +294,7 @@ private fun JsonValue.Obj.toAbsence(): SchoolAbsence? {
     return SchoolAbsence(
         id, flexString("dateFrom"), flexString("dateTo"), flexString("hourFrom"), flexString("hourTo"),
         flexString("subject"), flexString("reason"), flexBool("excused"), flexBool("acknowledged"), flexString("status"),
+        flexString("excuseUntil"),
     )
 }
 
@@ -383,6 +384,7 @@ private fun StringBuilder.appendAbsences(items: List<SchoolAbsence>) {
         append(",\"excused\":").append(item.excused)
         append(",\"acknowledged\":").append(item.acknowledged)
         append(",\"status\":").append(escapeJson(item.status))
+        append(",\"excuseUntil\":").append(escapeJson(item.excuseUntil))
         append('}')
     }
     append(']')
