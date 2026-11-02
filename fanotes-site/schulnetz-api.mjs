@@ -8,6 +8,8 @@ import { resolve, sep } from 'node:path'
 import { authenticateSyncRequest } from './sync-api.mjs'
 import {
   diffSnapshots,
+  groupGradeChanges,
+  notifyPayload,
   unseenChanges,
   normalizeSchoolBase,
   parseKontoauszug,
@@ -306,7 +308,7 @@ export const createSchulnetzRuntime = (options = {}) => {
   const deliver = async (link, change) => {
     const server = (process.env.FANOTES_NTFY_URL || 'https://ntfy.sh').replace(/\/+$/u, '')
     const targets = [`${server}/${link.topic}`, ...(link.pushEndpoints || [])]
-    const payload = JSON.stringify({ id: change.id, category: change.category, title: change.title, body: change.body })
+    const payload = notifyPayload(change)
     for (const target of targets) {
       try {
         const parsed = new URL(target)
@@ -347,7 +349,7 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 
   const publishChanges = async (accountId, link, changes, revision) => {
-    const fresh = unseenChanges(changes, await knownChangeIds(accountId))
+    const fresh = groupGradeChanges(unseenChanges(changes, await knownChangeIds(accountId)))
     await appendChanges(accountId, fresh, revision)
     for (const change of fresh) await deliver(link, change)
     return fresh
@@ -533,7 +535,7 @@ export const createSchulnetzRuntime = (options = {}) => {
   const start = () => {
     if (options.autostart === false || process.env.FANOTES_SCHULNETZ_POLL === '0' || started) return
     started = true
-    const interval = Number(process.env.FANOTES_SCHULNETZ_POLL_MS || options.intervalMs || 180_000)
+    const interval = Number(process.env.FANOTES_SCHULNETZ_POLL_MS || options.intervalMs || 60_000)
     const loop = async () => {
       const acquired = await acquireLock()
       if (!acquired) {
@@ -644,7 +646,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       if (route === '/push/test' && method === 'POST') {
         const link = await readLink(accountId)
         if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
-        await deliver(link, { id: `test:${now().getTime()}`, category: 'event', title: 'FaNotes Companion', body: 'Testbenachrichtigung von Schulnetz.' })
+        await deliver(link, { id: `test:${now().getTime()}`, category: 'settings', title: 'Testbenachrichtigung', body: 'Testbenachrichtigung von Schulnetz.', target: 'settings' })
         send(response, 200, { ok: true })
         return true
       }

@@ -4,5 +4,11 @@
     <string name="widget_name">Nächste Lektion</string>
     <string name="widget_description">Zeigt die nächste Schulnetz-Lektion mit Raum.</string>
     <string name="channel_alerts">Schulnetz</string>
+    <string name="channel_grade">Neue Note</string>
+    <string name="channel_timetable">Stundenplan</string>
+    <string name="channel_exam">Prüfung</string>
+    <string name="channel_absence">Absenz</string>
+    <string name="channel_deadline">Absenzfrist</string>
+    <string name="channel_event">Termin</string>
     <string name="channel_live">Sofortverbindung</string>
 </resources>

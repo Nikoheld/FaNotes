@@ -24,6 +24,10 @@ class CompanionApplication : Application() {
             if (graph.instantPush() && !topic.isNullOrBlank()) {
                 runCatching { NtfyListenService.start(this@CompanionApplication) }
             }
+            while (true) {
+                kotlinx.coroutines.delay(CompanionGraph.PHONE_FALLBACK_MS)
+                runCatching { graph.keepAlive() }
+            }
         }
     }
 }

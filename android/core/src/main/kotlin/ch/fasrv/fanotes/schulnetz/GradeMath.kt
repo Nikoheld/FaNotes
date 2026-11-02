@@ -6,10 +6,17 @@ import kotlin.math.ceil
 
 /**
  * Swiss upper-secondary marks are 1 to 6. 4 is the pass line.
- * Pluspunkte are the weighted distance from that line: Σ (Note − 4) × Gewicht.
+ * Pluspunkte follow the Aargau gymnasium promotion: round the course average
+ * to a half mark, then Note − 4, or twice that below 4. Sport does not count.
  * A Wunschnote is the mark still needed on a future exam to land on a target average.
  */
-data class WeightedMark(val mark: Double, val weight: Double, val label: String = "", val own: Boolean = false)
+data class WeightedMark(
+    val mark: Double,
+    val weight: Double,
+    val label: String = "",
+    val own: Boolean = false,
+    val targetId: String = "",
+)
 
 data class HypotheticalGrade(
     val id: String,
@@ -23,7 +30,9 @@ data class CourseSummary(
     val courseId: String,
     val label: String,
     val average: Double?,
+    val zeugnis: Double?,
     val pluspunkte: Double,
+    val promotion: Boolean,
     val weight: Double,
     val marks: List<WeightedMark>,
 )
@@ -34,7 +43,11 @@ data class WishResult(
     val achievable: Boolean,
     val alreadyMet: Boolean,
     val reason: String,
+    val pluspunkteBefore: Double? = null,
+    val pluspunkteAfter: Double? = null,
 )
+
+data class PromotionTotals(val plus: Double, val minus: Double, val total: Double)
 
 private const val PASS_MARK = 4.0
 private const val MIN_MARK = 1.0
@@ -47,8 +60,35 @@ fun weightedAverage(marks: List<WeightedMark>): Double? {
     return usable.sumOf { it.mark * it.weight } / weight
 }
 
-fun pluspunkte(marks: List<WeightedMark>): Double =
-    marks.filter { it.weight > 0.0 && it.mark.isFinite() }.sumOf { (it.mark - PASS_MARK) * it.weight }
+/**
+ * Kanton Aargau, gymnasiale Promotion: Zeugnisnote auf 0.5 (HALF_UP).
+ * 4.74 → 4.5, 4.75 → 5.0. Note ≥ 4: Pluspunkte = Note − 4. Note < 4: Minus doppelt.
+ */
+fun roundToHalf(value: Double): Double {
+    if (!value.isFinite()) return value
+    return BigDecimal.valueOf(value)
+        .multiply(BigDecimal.valueOf(2.0))
+        .setScale(0, RoundingMode.HALF_UP)
+        .divide(BigDecimal.valueOf(2.0))
+        .toDouble()
+}
+
+fun isSportCourse(name: String): Boolean {
+    val blob = name.trim().lowercase()
+    if (blob.contains("turnen")) return true
+    return blob.split(Regex("""[\s_/()+\-]+""")).any { it == "sport" || it.startsWith("sport") }
+}
+
+fun promotionPoints(zeugnis: Double?): Double? {
+    if (zeugnis == null || !zeugnis.isFinite()) return null
+    return if (zeugnis + 1e-9 >= PASS_MARK) zeugnis - PASS_MARK else -2.0 * (PASS_MARK - zeugnis)
+}
+
+fun coursePromotion(label: String, average: Double?): Pair<Double?, Double> {
+    if (average == null || !average.isFinite() || isSportCourse(label)) return null to 0.0
+    val zeugnis = roundToHalf(average)
+    return zeugnis to (promotionPoints(zeugnis) ?: 0.0)
+}
 
 fun courseSummaries(grades: List<SchoolGrade>, hypothetical: List<HypotheticalGrade> = emptyList()): List<CourseSummary> {
     val groups = linkedMapOf<String, MutableList<WeightedMark>>()
@@ -58,7 +98,7 @@ fun courseSummaries(grades: List<SchoolGrade>, hypothetical: List<HypotheticalGr
         val key = grade.courseKey
         if (key.isBlank()) continue
         labels.putIfAbsent(key, grade.courseLabel)
-        groups.getOrPut(key) { mutableListOf() } += WeightedMark(mark, grade.weight, grade.title)
+        groups.getOrPut(key) { mutableListOf() } += WeightedMark(mark, grade.weight, grade.title, targetId = gradeTargetId(grade))
     }
     for (extra in hypothetical) {
         if (!extra.mark.isFinite() || extra.weight <= 0.0) continue
@@ -68,18 +108,32 @@ fun courseSummaries(grades: List<SchoolGrade>, hypothetical: List<HypotheticalGr
         groups.getOrPut(key) { mutableListOf() } += WeightedMark(extra.mark, extra.weight, extra.title.ifBlank { "Eigene Note" }, own = true)
     }
     return groups.map { (key, marks) ->
+        val label = labels[key] ?: key
+        val average = weightedAverage(marks)
+        val sport = isSportCourse(label)
+        val zeugnis = average?.let(::roundToHalf)
+        val counts = zeugnis != null && !sport
         CourseSummary(
             courseId = key,
-            label = labels[key] ?: key,
-            average = weightedAverage(marks),
-            pluspunkte = pluspunkte(marks),
+            label = label,
+            average = average,
+            zeugnis = zeugnis,
+            pluspunkte = if (counts) promotionPoints(zeugnis) ?: 0.0 else 0.0,
+            promotion = counts,
             weight = marks.sumOf { it.weight },
             marks = marks,
         )
     }.sortedBy { it.label.lowercase() }
 }
 
-fun overallPluspunkte(courses: List<CourseSummary>): Double = courses.sumOf { it.pluspunkte }
+fun overallPluspunkte(courses: List<CourseSummary>): Double = courses.filter { it.promotion }.sumOf { it.pluspunkte }
+
+fun promotionTotals(courses: List<CourseSummary>): PromotionTotals {
+    val counted = courses.filter { it.promotion }
+    val plus = counted.sumOf { it.pluspunkte.coerceAtLeast(0.0) }
+    val minus = counted.sumOf { it.pluspunkte.coerceAtMost(0.0) }
+    return PromotionTotals(plus, minus, plus + minus)
+}
 
 fun overallAverage(courses: List<CourseSummary>): Double? {
     val marks = courses.flatMap { it.marks }
@@ -105,19 +159,26 @@ fun wunschnote(current: List<WeightedMark>, target: Double, nextWeight: Double):
     if (!needed.isFinite()) {
         return WishResult(null, null, achievable = false, alreadyMet = false, reason = "Die Wunschnote lässt sich daraus nicht rechnen.")
     }
+    val before = promotionPoints(weightedAverage(usable)?.let(::roundToHalf))
+    fun withMark(mark: Double): Double? {
+        val next = usable + WeightedMark(mark, nextWeight, "Wunschnote")
+        return promotionPoints(weightedAverage(next)?.let(::roundToHalf))
+    }
     if (needed > MAX_MARK) {
-        return WishResult(needed, null, achievable = false, alreadyMet = false, reason = "Auch eine 6 reicht für diesen Schnitt nicht.")
+        return WishResult(needed, null, achievable = false, alreadyMet = false, reason = "Auch eine 6 reicht für diesen Schnitt nicht.", pluspunkteBefore = before, pluspunkteAfter = withMark(MAX_MARK))
     }
     if (needed <= MIN_MARK) {
-        return WishResult(MIN_MARK, MIN_MARK, achievable = true, alreadyMet = true, reason = "Der Schnitt ist schon gesichert. Eine 1 genügt.")
+        return WishResult(MIN_MARK, MIN_MARK, achievable = true, alreadyMet = true, reason = "Der Schnitt ist schon gesichert. Eine 1 genügt.", pluspunkteBefore = before, pluspunkteAfter = withMark(MIN_MARK))
     }
     val half = ceil(needed * 2.0 - 1e-9) / 2.0
-    return WishResult(needed, half.coerceIn(MIN_MARK, MAX_MARK), achievable = true, alreadyMet = false, reason = "")
+    val shown = half.coerceIn(MIN_MARK, MAX_MARK)
+    return WishResult(needed, shown, achievable = true, alreadyMet = false, reason = "", pluspunkteBefore = before, pluspunkteAfter = withMark(shown))
 }
 
-fun formatMark(value: Double?): String {
+fun formatMark(value: Double?, decimals: Int = 2): String {
     if (value == null || !value.isFinite()) return "–"
-    return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString().replace('.', ',')
+    val places = decimals.coerceIn(0, 3)
+    return BigDecimal.valueOf(value).setScale(places, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString().replace('.', ',')
 }
 
 fun formatPluspunkte(value: Double): String {

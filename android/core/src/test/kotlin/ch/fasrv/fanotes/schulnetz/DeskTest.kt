@@ -20,6 +20,10 @@ class DeskTest {
         val wish = wunschnote(summary.marks.filter { !it.own }, 5.0, 2.0)
         assertTrue(wish.achievable)
         assertEquals(6.0, wish.needed)
+        assertEquals(0.0, wish.pluspunkteBefore)
+        assertEquals(1.0, wish.pluspunkteAfter)
+        assertEquals(0.5, summary.pluspunkte)
+        assertEquals(4.5, summary.zeugnis)
     }
 
     @Test
@@ -50,5 +54,52 @@ class DeskTest {
         assertEquals(2, openingStreak(setOf("2026-11-01", "2026-11-02"), LocalDate.of(2026, 11, 2)))
         assertEquals("#112233", subjectColor("Mathematik", "", mapOf("mathematik" to "#112233")))
         assertEquals("#112233", subjectColor("MAT_K26A_LehAa", "", mapOf("mat_k26a_lehaa mathematik" to "#112233")))
+    }
+
+    @Test
+    fun aargauRoundingExcludesSportAndEmptyCourses() {
+        assertEquals(4.5, roundToHalf(4.74))
+        assertEquals(5.0, roundToHalf(4.75))
+        assertEquals(1.5, promotionPoints(5.5))
+        assertEquals(0.0, promotionPoints(4.0))
+        assertEquals(-2.0, promotionPoints(3.0))
+        assertEquals(-1.0, promotionPoints(3.5))
+        assertTrue(isSportCourse("Sport"))
+        assertTrue(isSportCourse("SPO Sport"))
+        assertFalse(isSportCourse("Mathematik"))
+        val sport = SchoolGrade("s", "Sport", "spo", "Sport", "Test", "2026-09-01", 6.0, 1.0, true, null, "")
+        val math = SchoolGrade("m", "Mathematik", "math", "Mathematik", "Probe", "2026-09-01", 5.5, 1.0, true, null, "")
+        val empty = SchoolGrade("b", "Biologie", "bio", "Biologie", "Durchschnitt", "", null, 1.0, true, null, "")
+        val courses = courseSummaries(listOf(sport, math, empty))
+        assertEquals(2, courses.size)
+        assertEquals(1.5, courses.single { it.promotion }.pluspunkte)
+        assertEquals(0.0, courses.single { !it.promotion }.pluspunkte)
+        val totals = promotionTotals(courses)
+        assertEquals(1.5, totals.plus)
+        assertEquals(0.0, totals.minus)
+        assertEquals(1.5, totals.total)
+    }
+
+    @Test
+    fun hiddenLessonsSkipTheWidgetAndThePush() {
+        val zone = java.time.ZoneId.of("Europe/Zurich")
+        val lesson = AgendaEvent(
+            "e1", "2026-11-02T07:45:00", "2026-11-02T08:30:00", "Freifach Chor", "", "A1",
+            emptyList(), "chor", "Freifach Chor", "confirmed", "lesson", "", "",
+        )
+        val later = lesson.copy(id = "e2", start = "2026-11-09T07:45:00", end = "2026-11-09T08:30:00")
+        val once = hideOnce(lesson, emptyList())
+        assertTrue(lessonHidden(lesson, once, zone))
+        assertFalse(lessonHidden(later, once, zone))
+        val series = hideSeries(lesson, emptyList())
+        assertTrue(lessonHidden(later, series, zone))
+        assertEquals(emptyList(), visibleEvents(listOf(lesson, later), series, zone))
+        val change = SchulnetzChange("timetable:e1:x", "timetable", "Stundenplan geändert", "Freifach Chor · 07:45 · Raum A1")
+        assertTrue(changeIsHidden(change, series))
+        assertFalse(changeIsHidden(change.copy(category = "grade"), series))
+        val prefs = parseDeskPrefs(serializeDeskPrefs(DeskPrefs(hiddenCards = listOf("tasks"), showPluspunkte = false, startTab = "Noten")))
+        assertEquals(listOf("pluspunkte", "lessons", "exam", "grades", "events"), shownTodayCards(prefs))
+        assertEquals("Noten", prefs.startTab)
+        assertFalse(prefs.showPluspunkte)
     }
 }
