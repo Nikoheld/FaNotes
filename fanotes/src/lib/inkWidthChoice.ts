@@ -663,6 +663,46 @@ export const unlistedWordFromReading = (
 }
 
 /**
+ * A dictionary word of at least eight letters drops its final letter when a close reading
+ * already has that shorter dictionary word (`agierenden` → `agierende`). `time` → `tim`
+ * is much farther down the beam, and a short word stays (`beet`).
+ */
+export const KNOWN_ENDING_MARGIN = 1.4
+
+export const knownEndingFromReading = (
+  text: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  if (readings.length < 2) return null
+  const top = readings[0]
+  const words = inkWords(text)
+  let found: WordEdit | null = null
+  for (const reading of readings) {
+    const gap = top.score - reading.score
+    if (gap <= 0 || gap > KNOWN_ENDING_MARGIN) continue
+    if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
+    const other = inkWords(reading.text)
+    if (other.length !== words.length) continue
+    const diffs: number[] = []
+    for (let index = 0; index < words.length; index += 1) {
+      if (words[index] !== other[index]) diffs.push(index)
+    }
+    if (diffs.length !== 1) continue
+    const index = diffs[0]
+    const from = words[index]
+    const to = other[index]
+    if ([...from].length < 8) continue
+    const extra = oneExtraLetter(to, from)
+    if (!extra || extra.index !== [...to].length) continue
+    if (!known(from) || !known(to)) continue
+    if (found && (found.index !== index || found.to !== to)) return null
+    found = { index, from, to }
+  }
+  return found
+}
+
+/**
  * A quote stuck to a closing parenthesis moves in front of the following lowercase word
  * (`(Tanis 6a)" if` → `(Tanis 6a) "if`).
  */
@@ -2350,5 +2390,6 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   }
   take(traceAgreedUnknownWord(text, decoded.greedyText, decoded.readings, known), rewriteSameLengthWord)
   take(unlistedWordFromReading(text, decoded.readings, known), rewriteSameLengthWord)
+  take(knownEndingFromReading(text, decoded.readings, known), rewriteWord)
   return { text, characters }
 }

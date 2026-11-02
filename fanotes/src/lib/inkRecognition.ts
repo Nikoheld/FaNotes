@@ -99,6 +99,7 @@ import {
   joinReadingWithoutSpace,
   traceAgreedUnknownWord,
   unlistedWordFromReading,
+  knownEndingFromReading,
   dictionaryJoinFromReading,
   splitFunctionWordJoin,
   tracedFinalComma,
@@ -1434,6 +1435,15 @@ export async function recognizeInk(
     if (unlisted) {
       const rewritten = rewriteSameLengthWord(decoded.characters, unlisted.index, unlisted.to)
       const nextText = textWithWordEdits(decoded.text, [unlisted])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
+      }
+    }
+    const knownEnding = knownEndingFromReading(decoded.text, decoded.readings, (word) => wordIsKnown(lineLanguage, word))
+    if (knownEnding) {
+      const rewritten = rewriteWord(decoded.characters, knownEnding.index, knownEnding.to)
+      const nextText = textWithWordEdits(decoded.text, [knownEnding])
       if (rewritten && nextText !== decoded.text) {
         decoded = { ...decoded, text: nextText, characters: rewritten }
         stitched = null
