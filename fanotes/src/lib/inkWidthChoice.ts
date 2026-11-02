@@ -892,10 +892,14 @@ export const joinedReadingFromClose = <T extends { char: string }>(
 
 /**
  * A dictionary word takes the one different vowel a close reading already has when the
- * pen did not draw that vowel (`Regal` → `Regel`, `ling` → `long`). A change of case
- * stays. The pen's own vowel stays (`husbandman`).
+ * pen did not draw that vowel (`Regal` → `Regel`, `ling` → `long`). A four-letter word
+ * may take that vowel in its second letter from a little farther down (`lost` → `last`).
+ * A change of case stays. The pen's own vowel stays (`husbandman`).
  */
 export const KNOWN_VOWEL_MARGIN = 0.7
+
+/** Second vowel of a four-letter word. `were` → `ware` is farther down than this. */
+export const KNOWN_VOWEL_SHORT_MARGIN = 1.5
 
 const VOWEL = /[aeiouäöü]/iu
 
@@ -912,7 +916,7 @@ export const knownVowelFromReading = (
   let found: WordEdit | null = null
   for (const reading of readings) {
     const gap = top.score - reading.score
-    if (gap <= 0 || gap > KNOWN_VOWEL_MARGIN) continue
+    if (gap <= 0 || gap > KNOWN_VOWEL_SHORT_MARGIN) continue
     if (letterSkeleton(text) !== letterSkeleton(reading.text)) continue
     const other = inkWords(reading.text)
     if (other.length !== words.length) continue
@@ -928,16 +932,18 @@ export const knownVowelFromReading = (
     const toLetters = [...to]
     if (fromLetters.length < 4 || fromLetters.length !== toLetters.length) continue
     let substitutions = 0
-    let vowel = false
+    let vowelAt = -1
     for (let cursor = 0; cursor < fromLetters.length; cursor += 1) {
       if (fromLetters[cursor] === toLetters[cursor]) continue
       substitutions += 1
       const left = fromLetters[cursor]
       const right = toLetters[cursor]
       if (left.toLowerCase() === right.toLowerCase()) continue
-      if (VOWEL.test(left) && VOWEL.test(right)) vowel = true
+      if (VOWEL.test(left) && VOWEL.test(right)) vowelAt = cursor
     }
-    if (substitutions !== 1 || !vowel) continue
+    const shortSecond = fromLetters.length === 4 && vowelAt === 1
+    if (substitutions !== 1 || vowelAt < 0) continue
+    if (!shortSecond && gap > KNOWN_VOWEL_MARGIN) continue
     if (traced.length === words.length && traced[index] === to) continue
     if (!known(from) || !known(to)) continue
     if (found && (found.index !== index || found.to !== to)) return null

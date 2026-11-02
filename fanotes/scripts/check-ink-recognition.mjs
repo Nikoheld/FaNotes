@@ -681,6 +681,18 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
     [{ text: 'aller Regal die Küsten', score: 0 }, { text: 'aller Regel die Küsten', score: -0.85 }],
     always,
   ), null)
+  assert.equal(knownVowelFromReading(
+    'at lost, Gaunt',
+    'at lost, Gaunt',
+    [{ text: 'at lost, Gaunt', score: 0 }, { text: 'at last, Gaunt', score: -1.28 }],
+    always,
+  )?.to, 'last')
+  assert.equal(knownVowelFromReading(
+    'tears were.',
+    'tears were.',
+    [{ text: 'tears were.', score: 0 }, { text: 'tears ware.', score: -1.71 }],
+    always,
+  ), null)
   assert.equal(camelSplitFromReading(
     joinChars('als OperationAl, war'),
     'als Operation Ai, war',
