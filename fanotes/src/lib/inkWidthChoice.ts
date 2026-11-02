@@ -585,6 +585,66 @@ export const openingBracketFromTrace = <T extends { char: string }>(
   return changed ? next : null
 }
 
+const FUNCTION_WORD = new Set([
+  'with', 'from', 'that', 'this', 'have', 'been', 'your', 'were', 'they', 'them', 'into', 'over', 'upon', 'than', 'then',
+  'eine', 'einen', 'einem', 'einer', 'dass', 'wenn', 'weil', 'ohne', 'nach', 'oder', 'aber', 'auch', 'sich', 'sind', 'kann',
+])
+
+/**
+ * An unknown join of a function word and another dictionary word splits again when the top
+ * reading already has the space (`withfive` → `with five`). A compound such as `Naturdenk` stays one word.
+ */
+export const splitFunctionWordJoin = <T extends { char: string }>(
+  characters: T[],
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): T[] | null => {
+  const text = characters.map((character) => character.char).join('')
+  const top = readings[0]?.text ?? ''
+  const beam = inkWords(text)
+  const read = inkWords(top)
+  let beamIndex = 0
+  let readIndex = 0
+  let split: { index: number; cut: number } | null = null
+  while (beamIndex < beam.length && readIndex < read.length) {
+    if (foldInkWord(beam[beamIndex]) === foldInkWord(read[readIndex])) {
+      beamIndex += 1
+      readIndex += 1
+      continue
+    }
+    const left = read[readIndex]
+    const right = read[readIndex + 1]
+    const joined = beam[beamIndex]
+    if (
+      right
+      && left
+      && joined
+      && foldInkWord(joined) === foldInkWord(left + right)
+      && [...left].length >= 4
+      && [...right].length >= 4
+      && [...left].length + [...right].length === [...joined].length
+      && FUNCTION_WORD.has(foldInkWord(left))
+      && !known(joined)
+      && known(left)
+      && known(right)
+    ) {
+      if (split) return null
+      split = { index: beamIndex, cut: [...left].length }
+      beamIndex += 1
+      readIndex += 2
+      continue
+    }
+    return null
+  }
+  if (!split || beamIndex !== beam.length || readIndex !== read.length) return null
+  const run = letterRuns(characters)[split.index]
+  if (!run) return null
+  const at = run.start + split.cut
+  const next = characters.slice()
+  next.splice(at, 0, { ...characters[at - 1], char: ' ' })
+  return next
+}
+
 /**
  * A final period that the top reading and the raw trace both still have as a comma
  * goes back to that comma (`Mirabeau.` → `Mirabeau,`).
@@ -1654,6 +1714,11 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
   const tracedComma = tracedFinalComma(characters, decoded.readings, decoded.greedyText)
   if (tracedComma) {
     characters = tracedComma
+    text = characters.map((character) => character.char).join('')
+  }
+  const splitJoin = splitFunctionWordJoin(characters, decoded.readings, known)
+  if (splitJoin) {
+    characters = splitJoin
     text = characters.map((character) => character.char).join('')
   }
   return { text, characters }
