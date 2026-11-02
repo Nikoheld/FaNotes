@@ -2646,15 +2646,19 @@ export const partialReadingWordEdits = (
 
 /**
  * The dictionary's one interior letter loses when the pen and the top reading still share
- * the unlisted five-letter spelling (`Nigel` with pen and top reading `Nigfl` → `Nigfl`).
- * A vowel-for-vowel change stays with the dictionary, and so does a change at either end.
+ * the unlisted spelling of a capitalized word of four, five, or eight letters
+ * (`Nigfl`, `Kepn`, `Crayford`). A lowercase word stays (`relapsed`). A vowel-for-vowel
+ * change stays with the dictionary, and so does a change at either end.
  */
+const PEN_SPELLING_LENGTHS = new Set([4, 5, 8])
+
 const interiorPenLetter = (from: string, to: string) => {
   const left = [...from]
   const right = [...to]
-  if (left.length !== 5 || right.length !== 5 || from.toLowerCase() === to.toLowerCase()) return false
+  if (!PEN_SPELLING_LENGTHS.has(left.length) || right.length !== left.length || from.toLowerCase() === to.toLowerCase()) return false
+  if (right[0] === right[0].toLowerCase()) return false
   const diffs = left.flatMap((letter, index) => letter === right[index] ? [] : [index])
-  if (diffs.length !== 1 || diffs[0] === 0 || diffs[0] === 4) return false
+  if (diffs.length !== 1 || diffs[0] === 0 || diffs[0] === left.length - 1) return false
   const at = diffs[0]
   return !(VOWEL.test(left[at]) && VOWEL.test(right[at]))
 }

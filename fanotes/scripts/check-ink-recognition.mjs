@@ -974,6 +974,31 @@ const knownWord = (language) => (word) => exactWords[language].has(foldInkWord(w
     [{ text: 'one-sided Nigfl', score: 0 }],
     knowsNigel,
   ), [])
+  const knowsPen = (word) => ['nigel', 'keen', 'crawford', 'house', 'marked'].includes(word.toLowerCase())
+  assert.equal(penFiveFromTopReading(
+    'left-hand Gif. Keen',
+    'left-hand Gif. Kepn',
+    [{ text: 'left-hand Gif. Kepn', score: 0 }],
+    knowsPen,
+  ).at(-1)?.to, 'Kepn')
+  assert.equal(penFiveFromTopReading(
+    'Crawford Ahhkk! orb',
+    'Crayford Ahkkk! orb',
+    [{ text: 'Crayford Ahhkk! orb', score: 0 }],
+    knowsPen,
+  )[0]?.to, 'Crayford')
+  assert.deepEqual(penFiveFromTopReading(
+    'the marked page',
+    'the markid page',
+    [{ text: 'the markid page', score: 0 }],
+    knowsPen,
+  ), [])
+  assert.deepEqual(penFiveFromTopReading(
+    'servants relapsed, knowing',
+    'servants relassed, knawing',
+    [{ text: 'servants relassed, knowing', score: 0 }],
+    (word) => word.toLowerCase() === 'relapsed',
+  ), [])
   assert.equal(restoreMitFromTopReading(
     [...'keine Lawinengefahr besteht. Mir zunehmender'].map((char) => ({ char })),
     [{ text: 'keine Lawinengefahr besteht. Mit zunehmender' }],
