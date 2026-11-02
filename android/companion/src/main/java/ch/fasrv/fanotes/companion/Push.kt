@@ -22,6 +22,8 @@ import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.schulnetz.SchulnetzChange
 import ch.fasrv.fanotes.schulnetz.endsAt
+import ch.fasrv.fanotes.schulnetz.isCancelled
+import ch.fasrv.fanotes.schulnetz.isSubstitution
 import ch.fasrv.fanotes.schulnetz.nextUp
 import ch.fasrv.fanotes.schulnetz.parseNormalizedSnapshot
 import ch.fasrv.fanotes.schulnetz.startsAt
@@ -232,8 +234,9 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
                 val end = next.endsAt(zone)?.atZone(zone)?.toLocalTime()?.format(CLOCK).orEmpty()
                 val time = if (end.isBlank() || end == start) start else "$start–$end"
                 val room = if (next.room.isBlank()) "" else "Raum ${next.room}"
+                val state = if (next.isCancelled()) "fällt aus" else if (next.isSubstitution()) "Vertretung" else ""
                 views.setTextViewText(R.id.widget_title, next.label)
-                views.setTextViewText(R.id.widget_detail, listOf(time, room).filter { it.isNotBlank() }.joinToString(" · "))
+                views.setTextViewText(R.id.widget_detail, listOf(time, room, state).filter { it.isNotBlank() }.joinToString(" · "))
             }
             val open = PendingIntent.getActivity(context, 1, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.widget_root, open)

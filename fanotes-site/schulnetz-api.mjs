@@ -8,6 +8,7 @@ import { resolve, sep } from 'node:path'
 import { authenticateSyncRequest } from './sync-api.mjs'
 import {
   diffSnapshots,
+  unseenChanges,
   normalizeSchoolBase,
   parseKontoauszug,
   parseRawSnapshot,
@@ -22,7 +23,7 @@ const API_PREFIX = '/api/v1/schulnetz'
 const MAX_BODY = 64 * 1024
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 const REFERER = 'https://schulnetz.web.app/'
-const DEFAULT_SETTINGS = Object.freeze({ grades: true, timetable: true, exams: true, absences: true, events: true })
+const DEFAULT_SETTINGS = Object.freeze({ grades: true, timetable: true, exams: true, absences: true, events: true, deadlines: true })
 
 const readKeyMaterial = () => {
   const inline = process.env.FANOTES_SCHULNETZ_TOKEN_KEY
@@ -204,7 +205,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, 'Der Schnappschuss ist ungültig.')
     const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
     const snapshot = { ...body, revision: (link.revision || 0) + 1, fetchedAt: body.fetchedAt || now().toISOString() }
-    const changes = diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS)
+    const changes = await publishChanges(accountId, link, diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision)
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
     link.needsReauth = false
@@ -212,8 +213,6 @@ export const createSchulnetzRuntime = (options = {}) => {
     link.lastError = ''
     await writeJson(resolve(accountDir(accountId), 'snapshot.json'), snapshot)
     await saveLink(accountId, link)
-    await appendChanges(accountId, changes, snapshot.revision)
-    for (const change of changes) await deliver(link, change)
     return { revision: snapshot.revision, changes: changes.length }
   }
 
@@ -336,6 +335,24 @@ export const createSchulnetzRuntime = (options = {}) => {
     await fs.writeFile(file, `${kept.join('\n')}\n`, { mode: 0o600 })
   }
 
+  const knownChangeIds = async (accountId) => {
+    try {
+      const text = await fs.readFile(resolve(accountDir(accountId), 'changes.jsonl'), 'utf8')
+      return text.trim().split('\n').map((line) => {
+        try { return JSON.parse(line).id } catch { return '' }
+      }).filter(Boolean)
+    } catch {
+      return []
+    }
+  }
+
+  const publishChanges = async (accountId, link, changes, revision) => {
+    const fresh = unseenChanges(changes, await knownChangeIds(accountId))
+    await appendChanges(accountId, fresh, revision)
+    for (const change of fresh) await deliver(link, change)
+    return fresh
+  }
+
   const pollAccount = async (accountId) => withAccount(accountId, async () => {
     const material = await key()
     const link = await readLink(accountId)
@@ -419,15 +436,13 @@ export const createSchulnetzRuntime = (options = {}) => {
     const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
     const snapshot = parseRawSnapshot(raw, now().toISOString())
     snapshot.revision = (link.revision || 0) + 1
-    const changes = diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS)
+    const changes = await publishChanges(accountId, link, diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision)
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
     link.lastError = ''
     link.needsReauth = false
     await writeJson(resolve(accountDir(accountId), 'snapshot.json'), snapshot)
     await saveLink(accountId, link)
-    await appendChanges(accountId, changes, snapshot.revision)
-    for (const change of changes) await deliver(link, change)
     return { revision: snapshot.revision, changes: changes.length }
   })
 
@@ -479,30 +494,28 @@ export const createSchulnetzRuntime = (options = {}) => {
         return { needsReauth: true }
       }
     }
+    const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
     const snapshot = {
       revision: (link.revision || 0) + 1,
       fetchedAt: now().toISOString(),
       grades: scraped.grades || [],
       events: scraped.events || [],
-      exams: [],
-      absences: [],
-      homework: [],
+      exams: previous?.exams || [],
+      absences: previous?.absences || [],
+      homework: previous?.homework || [],
       messages: parseStartMessages(scraped.startHtml || '').map((body, index) => ({ id: `start-${index}`, title: 'Mitteilung', body, at: '' })),
-      vacations: [],
+      vacations: previous?.vacations || [],
       konto: parseKontoauszug(scraped.kontoHtml || ''),
       startMessages: parseStartMessages(scraped.startHtml || ''),
       readErrors: scraped.problem ? [`Schulnetz: ${scraped.problem}`] : [],
     }
-    const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
-    const changes = diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS)
+    const changes = await publishChanges(accountId, link, diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision)
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
     link.lastError = ''
     link.needsReauth = false
     await writeJson(resolve(accountDir(accountId), 'snapshot.json'), snapshot)
     await saveLink(accountId, link)
-    await appendChanges(accountId, changes, snapshot.revision)
-    for (const change of changes) await deliver(link, change)
     return { revision: snapshot.revision, changes: changes.length }
   }
 

@@ -9,7 +9,7 @@ import kotlin.math.ceil
  * Pluspunkte are the weighted distance from that line: Σ (Note − 4) × Gewicht.
  * A Wunschnote is the mark still needed on a future exam to land on a target average.
  */
-data class WeightedMark(val mark: Double, val weight: Double, val label: String = "")
+data class WeightedMark(val mark: Double, val weight: Double, val label: String = "", val own: Boolean = false)
 
 data class HypotheticalGrade(
     val id: String,
@@ -65,7 +65,7 @@ fun courseSummaries(grades: List<SchoolGrade>, hypothetical: List<HypotheticalGr
         val key = extra.courseId
         if (key.isBlank()) continue
         labels.putIfAbsent(key, key)
-        groups.getOrPut(key) { mutableListOf() } += WeightedMark(extra.mark, extra.weight, extra.title.ifBlank { "Hypothetisch" })
+        groups.getOrPut(key) { mutableListOf() } += WeightedMark(extra.mark, extra.weight, extra.title.ifBlank { "Eigene Note" }, own = true)
     }
     return groups.map { (key, marks) ->
         CourseSummary(

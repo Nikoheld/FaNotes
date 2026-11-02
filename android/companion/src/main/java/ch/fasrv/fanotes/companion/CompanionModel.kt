@@ -55,6 +55,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var link by mutableStateOf(graph.link.value)
     var notes by mutableStateOf<List<VaultNode>>(emptyList())
     var noteFolder by mutableStateOf("")
+    var writtenNotes by mutableStateOf(0)
     var tasks by mutableStateOf<List<HomeworkTask>>(emptyList())
     var calendar by mutableStateOf<CalendarDocument>(emptyCalendar())
     var hypothetical by mutableStateOf<List<HypotheticalGrade>>(emptyList())
@@ -82,9 +83,11 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             val nextTasks = runCatching { graph.homework().tasks }.getOrDefault(emptyList())
             val nextCalendar = runCatching { graph.calendar() }.getOrDefault(emptyCalendar())
             val nextGuess = runCatching { graph.hypothetical() }.getOrDefault(emptyList())
+            val counted = runCatching { graph.writtenNoteCount() }.getOrDefault(0)
             withContext(Dispatchers.Main) {
                 if (!graph.noteFolderExists(noteFolder)) noteFolder = ""
                 notes = nextNotes
+                writtenNotes = counted
                 tasks = nextTasks
                 calendar = nextCalendar
                 hypothetical = nextGuess
@@ -250,6 +253,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             "timetable" -> settings.copy(timetable = !settings.timetable)
             "exams" -> settings.copy(exams = !settings.exams)
             "absences" -> settings.copy(absences = !settings.absences)
+            "deadlines" -> settings.copy(deadlines = !settings.deadlines)
             else -> settings.copy(events = !settings.events)
         }
         settings = next
@@ -279,6 +283,31 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         }
     }
 
+    var planWeek by mutableStateOf(false)
+    var iconChoice by mutableStateOf(graph.iconChoice())
+    var colors by mutableStateOf(graph.subjectColors())
+
+    fun chooseIcon(context: Context, id: String) {
+        val choice = if (id == "schule" || id == "notiz") id else "standard"
+        iconChoice = choice
+        graph.setIconChoice(choice)
+        val packageName = context.packageName
+        val manager = context.packageManager
+        listOf("standard" to "LauncherDefault", "schule" to "LauncherSchule", "notiz" to "LauncherNotiz").forEach { (key, alias) ->
+            val enabled = if (choice == key) android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED else android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+            manager.setComponentEnabledSetting(
+                android.content.ComponentName(packageName, "$packageName.$alias"),
+                enabled,
+                android.content.pm.PackageManager.DONT_KILL_APP,
+            )
+        }
+    }
+
+    fun paintSubject(subject: String, color: String) {
+        graph.setSubjectColor(subject, color)
+        colors = graph.subjectColors()
+    }
+
     fun addHypothetical(courseId: String, title: String, mark: Double, weight: Double) {
         val next = hypothetical + HypotheticalGrade(UUID.randomUUID().toString(), courseId, title.ifBlank { "Hypothetisch" }, mark, weight)
         hypothetical = next
@@ -287,6 +316,12 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
 
     fun clearHypothetical(courseId: String) {
         val next = hypothetical.filter { it.courseId != courseId }
+        hypothetical = next
+        viewModelScope.launch(Dispatchers.IO) { graph.saveHypothetical(next) }
+    }
+
+    fun removeHypothetical(id: String) {
+        val next = hypothetical.filter { it.id != id }
         hypothetical = next
         viewModelScope.launch(Dispatchers.IO) { graph.saveHypothetical(next) }
     }

@@ -333,7 +333,7 @@ class SchulnetzClient(
     }
 
     fun saveSettings(session: SyncSession, settings: NotifySettings) {
-        val payload = """{"grades":${settings.grades},"timetable":${settings.timetable},"exams":${settings.exams},"absences":${settings.absences},"events":${settings.events}}"""
+        val payload = """{"grades":${settings.grades},"timetable":${settings.timetable},"exams":${settings.exams},"absences":${settings.absences},"events":${settings.events},"deadlines":${settings.deadlines}}"""
         val (code, body) = fanotes("PUT", "/settings", session, payload)
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
@@ -447,6 +447,7 @@ class SchulnetzClient(
                 exams = settings?.bool("exams") != false,
                 absences = settings?.bool("absences") != false,
                 events = settings?.bool("events") != false,
+                deadlines = settings?.bool("deadlines") != false,
             ),
         )
     }

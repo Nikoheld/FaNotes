@@ -377,6 +377,7 @@ fun parseAbsencesByHeader(html: String): List<SchoolAbsence> {
             val date = cellAt(cells, dateAt)
             if (!DATE.containsMatchIn(date)) continue
             val status = cellAt(cells, statusAt)
+            val deadlineAt = headerIndex(header, "entschuldig", "frist")
             found += SchoolAbsence(
                 id = stableId("abs", date, cellAt(cells, reasonAt), cellAt(cells, subjectAt)),
                 dateFrom = date,
@@ -388,6 +389,7 @@ fun parseAbsencesByHeader(html: String): List<SchoolAbsence> {
                 excused = status.lowercase().startsWith("ja") || status.lowercase().contains("entschuldigt"),
                 acknowledged = false,
                 status = status,
+                excuseUntil = cellAt(cells, deadlineAt),
             )
         }
     }

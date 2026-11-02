@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes.schulnetz
 
+import java.time.LocalDate
 import kotlin.math.round
 
 /**
@@ -12,6 +13,7 @@ fun diffSnapshots(
     previous: SchulnetzSnapshot?,
     next: SchulnetzSnapshot,
     settings: NotifySettings = NotifySettings(),
+    today: LocalDate = LocalDate.now(),
 ): List<SchulnetzChange> {
     if (previous == null) return emptyList()
     val changes = mutableListOf<SchulnetzChange>()
@@ -51,6 +53,7 @@ fun diffSnapshots(
             )
         }
     }
+    if (settings.deadlines) changes += excuseReminders(next.absences, today)
     if (settings.events) {
         val beforeMessages = previous.messages.associateBy { it.id }
         for (message in next.messages) {

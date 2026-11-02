@@ -179,13 +179,36 @@ private fun TodayScreen(model: CompanionModel) {
             item { LoginAgain(model) }
         }
         item { ShareRow(model) }
+        item { Text(standLine(model.snapshot.fetchedAt), color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item {
             CardBlock {
-                Text(if (next?.isExamLike() == true) "Nächste Prüfung" else "Nächste Lektion", color = MaterialTheme.colorScheme.primary)
+                Text("Nächste Lektion", color = MaterialTheme.colorScheme.primary)
                 Text(next?.label ?: "Nichts weiter heute", style = MaterialTheme.typography.headlineSmall)
                 Text(next?.let { lessonLine(it, zone) } ?: "Stundenplan öffnen, sobald Schulnetz verbunden ist.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        val nextExam = nextUp(model.snapshot.exams + model.snapshot.events.filter { it.isExamLike() }, now, zone)
+        item {
+            CardBlock {
+                Text("Nächste Prüfung", color = MaterialTheme.colorScheme.primary)
+                Text(nextExam?.label ?: "Keine Prüfung im letzten Stand", style = MaterialTheme.typography.titleMedium)
+                if (nextExam != null) Text(lessonLine(nextExam, zone), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        item { Text("Heute", fontWeight = FontWeight.SemiBold) }
+        val todayLessons = eventsOn(model.snapshot.events, LocalDate.now(zone), zone).filter { it.isLesson() }
+        if (todayLessons.isEmpty()) item { Text("Keine Lektionen heute.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        items(todayLessons) { event ->
+            Text(listOf(event.label, lessonLine(event, zone), if (event.isCancelled()) "fällt aus" else if (event.isSubstitution()) "Vertretung" else "").filter { it.isNotBlank() }.joinToString(" · "))
+        }
+        item { Text("Neue Noten", fontWeight = FontWeight.SemiBold) }
+        val recent = model.snapshot.grades.filter { it.mark != null && it.title != "Durchschnitt" }.take(5)
+        if (recent.isEmpty()) item { Text("Keine einzelnen Noten im letzten Stand.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        items(recent) { grade -> Text("${grade.courseLabel} · ${grade.title} · ${formatMark(grade.mark)}") }
+        item { Text("Termine", fontWeight = FontWeight.SemiBold) }
+        val upcoming = model.snapshot.events.filter { !it.isLesson() }.take(5)
+        if (upcoming.isEmpty()) item { Text("Keine Termine im letzten Stand.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        items(upcoming) { event -> Text("${event.label} · ${event.start}") }
         if (changes.isNotEmpty()) {
             item { Text("Änderungen heute", fontWeight = FontWeight.SemiBold) }
             items(changes) { event ->
@@ -220,6 +243,10 @@ private fun PlanScreen(model: CompanionModel) {
     val zone = ZoneId.systemDefault()
     val days = schoolWeek(model.day)
     Column(Modifier.fillMaxSize()) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+            FilterChip(selected = !model.planWeek, onClick = { model.planWeek = false }, label = { Text("Tag") })
+            FilterChip(selected = model.planWeek, onClick = { model.planWeek = true }, label = { Text("Woche") })
+        }
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { model.day = model.day.minusWeeks(1) }) { Text("Zurück") }
             Text(days.first().format(DateTimeFormatter.ofPattern("d. MMM", Locale.GERMAN)) + " – " + days.last().format(DateTimeFormatter.ofPattern("d. MMM", Locale.GERMAN)))
@@ -234,20 +261,24 @@ private fun PlanScreen(model: CompanionModel) {
                 )
             }
         }
-        val lessons = eventsOn(model.snapshot.events, model.day, zone)
+        val daysShown = if (model.planWeek) days else listOf(model.day)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
             item { ShareRow(model) }
-            if (lessons.isEmpty()) item {
-                Text(model.snapshot.readErrors.firstOrNull { it.startsWith("Stundenplan:") } ?: "Keine Lektionen.", modifier = Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            items(lessons) { event ->
-                Row(Modifier.fillMaxWidth().padding(top = 8.dp).background(paletteColor(event.displayColor()).copy(alpha = 0.18f), RoundedCornerShape(10.dp)).padding(12.dp)) {
-                    Column {
-                        Text(event.label, fontWeight = FontWeight.SemiBold)
-                        Text(lessonLine(event, zone))
-                        if (event.isCancelled()) Text("fällt aus", color = MaterialTheme.colorScheme.error)
-                        if (event.isSubstitution()) Text("Vertretung")
-                        if (event.comment.isNotBlank()) Text(event.comment, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            daysShown.forEach { date ->
+                val lessons = eventsOn(model.snapshot.events, date, zone)
+                item { Text(date.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.GERMAN) + " " + date.dayOfMonth + ".", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp)) }
+                if (lessons.isEmpty()) item {
+                    Text(model.snapshot.readErrors.firstOrNull { it.startsWith("Stundenplan:") } ?: "Keine Lektionen.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                items(lessons) { event ->
+                    Row(Modifier.fillMaxWidth().background(paletteColor(event.displayColor(model.colors)).copy(alpha = 0.18f), RoundedCornerShape(10.dp)).padding(12.dp)) {
+                        Column {
+                            Text(event.label, fontWeight = FontWeight.SemiBold)
+                            Text(lessonLine(event, zone))
+                            if (event.isCancelled()) Text("fällt aus", color = MaterialTheme.colorScheme.error)
+                            if (event.isSubstitution()) Text("Vertretung")
+                            if (event.comment.isNotBlank()) Text(event.comment, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
             }
@@ -280,17 +311,24 @@ private fun CourseCard(model: CompanionModel, course: ch.fasrv.fanotes.schulnetz
         Text(course.label, fontWeight = FontWeight.SemiBold)
         Text("Schnitt ${formatMark(course.average)} · Pluspunkte ${formatPluspunkte(course.pluspunkte)}")
         course.marks.forEach { mark ->
-            Text("${mark.label.ifBlank { "Note" }} · ${formatMark(mark.mark)} · Gewicht ${formatMark(mark.weight)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("${if (mark.own) "Eigene Note" else mark.label.ifBlank { "Note" }} · ${formatMark(mark.mark)} · Gewicht ${formatMark(mark.weight)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        Text("Offizielle Noten bleiben unverändert.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(guess, { guess = it }, label = { Text("Hypothese") }, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+            OutlinedTextField(guess, { guess = it }, label = { Text("Eigene Note") }, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
             OutlinedButton(onClick = {
                 val mark = guess.replace(',', '.').toDoubleOrNull()
-                if (mark != null && mark in 1.0..6.0) model.addHypothetical(course.courseId, "Hypothese", mark, 1.0)
+                val extraWeight = weight.replace(',', '.').toDoubleOrNull() ?: 1.0
+                if (mark != null && mark in 1.0..6.0) model.addHypothetical(course.courseId, "Eigene Note", mark, extraWeight)
             }) { Text("Dazu") }
         }
-        if (model.hypothetical.any { it.courseId == course.courseId }) {
-            TextButton(onClick = { model.clearHypothetical(course.courseId) }) { Text("Hypothesen löschen") }
+        model.hypothetical.filter { it.courseId == course.courseId }.forEach { extra ->
+            TextButton(onClick = { model.removeHypothetical(extra.id) }) { Text("Eigene Note ${formatMark(extra.mark)} löschen") }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("#7f6df2", "#3d8bfd", "#2f9e6b", "#e0ac39", "#e15b64").forEach { swatch ->
+                Spacer(Modifier.width(28.dp).height(28.dp).background(paletteColor(swatch), RoundedCornerShape(8.dp)).clickable { model.paintSubject(course.label, swatch) })
+            }
         }
         Text(when {
             !wish.achievable -> wish.reason
@@ -405,7 +443,10 @@ private fun MoreScreen(model: CompanionModel) {
         PhoneSection.Absenzen -> SimpleList(
             "Absenzen",
             listOfNotNull(model.snapshot.readErrors.firstOrNull { it.startsWith("Absenzen:") }).ifEmpty {
-                model.snapshot.absences.map { "${it.dateFrom} · ${it.subject.ifBlank { "Absenz" }} · ${it.reason} · ${if (it.excused) "entschuldigt" else "offen"}" }.ifEmpty { listOf("Keine Absenzen.") }
+                model.snapshot.absences.map {
+                    val deadline = if (it.excuseUntil.isBlank()) "" else "Frist ${it.excuseUntil}"
+                    listOf(it.dateFrom, it.subject.ifBlank { "Absenz" }, it.reason, if (it.excused) "entschuldigt" else "offen", deadline).filter { part -> part.isNotBlank() }.joinToString(" · ")
+                }.ifEmpty { listOf("Keine Absenzen.") }
             },
         ) { model.section = PhoneSection.Menu }
         PhoneSection.Pruefungen -> ExamScreen(model)
@@ -518,10 +559,26 @@ private fun SettingsScreen(model: CompanionModel) {
         ShareRow(model)
         Text("Benachrichtigungen", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
         SettingSwitch("Neue Note", model.settings.grades) { model.toggleSetting("grades") }
-        SettingSwitch("Stundenplan", model.settings.timetable) { model.toggleSetting("timetable") }
-        SettingSwitch("Prüfungen", model.settings.exams) { model.toggleSetting("exams") }
+        SettingSwitch("Stundenplan und Ausfall", model.settings.timetable) { model.toggleSetting("timetable") }
+        SettingSwitch("Prüfung und Termin", model.settings.exams) { model.toggleSetting("exams") }
         SettingSwitch("Absenzen", model.settings.absences) { model.toggleSetting("absences") }
+        SettingSwitch("Absenzfrist", model.settings.deadlines) { model.toggleSetting("deadlines") }
         SettingSwitch("Termine und Mitteilungen", model.settings.events) { model.toggleSetting("events") }
+        Text("Profil", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
+        Text("${model.writtenNotes} Notizen · ${model.graph.streakDays()} Tage in Folge", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        ch.fasrv.fanotes.schulnetz.companionBadges(
+            model.writtenNotes,
+            model.graph.streakDays(),
+            model.snapshot.grades.mapNotNull { it.mark }.maxOrNull(),
+        ).forEach { badge ->
+            Text("${if (badge.earned) "●" else "○"} ${badge.title} · ${badge.detail}", color = if (badge.earned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text("App-Symbol", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("standard" to "Standard", "schule" to "Schule", "notiz" to "Notiz").forEach { (id, label) ->
+                FilterChip(selected = model.iconChoice == id, onClick = { model.chooseIcon(context, id) }, label = { Text(label) })
+            }
+        }
         SettingSwitch("Sofort über ntfy", model.instant) { model.chooseInstant(it) }
         OutlinedButton(onClick = { model.enablePush(context) }, modifier = Modifier.fillMaxWidth()) { Text("UnifiedPush aktivieren") }
         OutlinedButton(onClick = { model.testPush() }, modifier = Modifier.fillMaxWidth()) { Text("Testbenachrichtigung") }
@@ -586,6 +643,12 @@ private fun syncLine(model: CompanionModel): String {
         else -> "Schulnetz-Server noch nicht eingerichtet"
     }
     return "${sync.account?.email.orEmpty()} · ${syncStatusLabel(sync)} · $schul"
+}
+
+private fun standLine(fetchedAt: String): String {
+    if (fetchedAt.isBlank()) return "Stand: noch nicht geladen"
+    val shown = fetchedAt.take(16).replace('T', ' ')
+    return "Stand $shown · offline aus dem letzten Abruf"
 }
 
 private fun lessonLine(event: ch.fasrv.fanotes.schulnetz.AgendaEvent, zone: ZoneId): String {

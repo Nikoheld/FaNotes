@@ -84,6 +84,7 @@ data class SchoolAbsence(
     val excused: Boolean,
     val acknowledged: Boolean,
     val status: String,
+    val excuseUntil: String = "",
 )
 
 data class SchoolHomework(
@@ -138,6 +139,7 @@ data class NotifySettings(
     val exams: Boolean = true,
     val absences: Boolean = true,
     val events: Boolean = true,
+    val deadlines: Boolean = true,
 )
 
 data class SchulnetzChange(
@@ -202,9 +204,35 @@ fun AgendaEvent.isLesson(): Boolean {
     return kind.contains("lesson") || kind.contains("unterricht") || kind.contains("timetable") || kind == "period" || kind == "stunde"
 }
 
-fun subjectColor(name: String, explicit: String = ""): String {
-    val given = explicit.trim().lowercase()
-    if (Regex("^#[0-9a-f]{6}$").matches(given)) return given
+/** Full label plus the leading course code, so a grade row and a timetable block share one colour. */
+fun colorKeys(name: String): List<String> {
+    val full = name.trim().lowercase()
+    if (full.isEmpty()) return emptyList()
+    val token = full.substringBefore(' ').substringBefore('(').trim()
+    return listOf(full, token).filter { it.isNotEmpty() }.distinct()
+}
+
+private fun hexColor(value: String): String? {
+    val color = value.trim().lowercase()
+    return color.takeIf { Regex("^#[0-9a-f]{6}$").matches(it) }
+}
+
+fun overrideColor(name: String, overrides: Map<String, String>): String? {
+    val keys = colorKeys(name)
+    for (key in keys) hexColor(overrides[key].orEmpty())?.let { return it }
+    val code = keys.getOrNull(1) ?: keys.firstOrNull() ?: return null
+    if (code.length < 3) return null
+    return overrides.entries.mapNotNull { (stored, value) ->
+        val color = hexColor(value) ?: return@mapNotNull null
+        val storedCode = stored.substringBefore(' ').substringBefore('(').trim()
+        if (storedCode.length < 3) return@mapNotNull null
+        if (storedCode.startsWith(code) || code.startsWith(storedCode)) storedCode.length to color else null
+    }.maxByOrNull { it.first }?.second
+}
+
+fun subjectColor(name: String, explicit: String = "", overrides: Map<String, String> = emptyMap()): String {
+    overrideColor(name, overrides)?.let { return it }
+    hexColor(explicit)?.let { return it }
     val basis = name.trim().lowercase().ifBlank { "fach" }
     var hash = 2166136261u
     for (char in basis) {
@@ -214,7 +242,7 @@ fun subjectColor(name: String, explicit: String = ""): String {
     return SUBJECT_PALETTE[(hash % SUBJECT_PALETTE.size.toUInt()).toInt()]
 }
 
-fun AgendaEvent.displayColor(): String = subjectColor(label, color)
+fun AgendaEvent.displayColor(overrides: Map<String, String> = emptyMap()): String = subjectColor(label, color, overrides)
 
 /** Monday–Friday of the school week. Saturday and Sunday move to the next week. */
 fun timetableAnchor(today: LocalDate): LocalDate = when (today.dayOfWeek) {

@@ -201,6 +201,7 @@ const parseAbsence = (obj) => {
     excused: flag(obj, 'isExcused', 'excused'),
     acknowledged: flag(obj, 'isAcknowledged', 'acknowledged'),
     status: text(obj, 'statusEAE', 'status') || text(obj, 'statusEAB'),
+    excuseUntil: text(obj, 'excuseUntil', 'excuseDeadline', 'deadline', 'entschuldigenBis'),
   }
 }
 
@@ -219,6 +220,7 @@ const parseLate = (obj) => {
     excused,
     acknowledged: excused,
     status: excused ? 'entschuldigt' : 'offen',
+    excuseUntil: text(obj, 'excuseUntil', 'excuseDeadline', 'deadline'),
   }
 }
 
@@ -331,7 +333,53 @@ const eventBody = (event) => {
     .join(' · ')
 }
 
-export const diffSnapshots = (previous, next, settings = {}) => {
+export const parseSchoolDate = (raw) => {
+  const match = String(raw || '').match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/u)
+  if (!match) return null
+  const iso = `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`
+  const parsed = new Date(`${iso}T00:00:00Z`)
+  if (Number.isNaN(parsed.getTime())) return null
+  if (parsed.getUTCFullYear() !== Number(match[3]) || parsed.getUTCMonth() + 1 !== Number(match[2]) || parsed.getUTCDate() !== Number(match[1])) return null
+  return iso
+}
+
+export const zurichToday = (now = new Date()) => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Europe/Zurich', year: 'numeric', month: '2-digit', day: '2-digit',
+}).format(now)
+
+const daysUntil = (today, deadline) => Math.round((Date.parse(`${deadline}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000)
+
+/** One reminder per open absence while the excuse deadline is inside the window. Excused rows and missing dates produce nothing. */
+export const excuseReminders = (absences, today, withinDays = 2) => {
+  if (!Number.isFinite(withinDays) || withinDays < 0) return []
+  return (absences || []).flatMap((absence) => {
+    if (!absence || absence.excused) return []
+    const deadline = parseSchoolDate(absence.excuseUntil)
+    if (!deadline) return []
+    const days = daysUntil(today, deadline)
+    if (days < 0 || days > withinDays) return []
+    const whenText = days === 0 ? 'heute' : days === 1 ? 'morgen' : `in ${days} Tagen`
+    return [{
+      id: `deadline:${absence.id}:${deadline}`,
+      category: 'deadline',
+      title: 'Entschuldigung läuft ab',
+      body: [absence.subject || 'Absenz', absence.reason || '', `Frist ${whenText} (${deadline.split('-').reverse().join('.')})`].filter(Boolean).join(' · '),
+    }]
+  })
+}
+
+/** Drops change ids that were already stored, so a deadline inside the window is pushed once. */
+export const unseenChanges = (changes, knownIds) => {
+  const known = knownIds instanceof Set ? knownIds : new Set(knownIds || [])
+  const seen = new Set()
+  return (changes || []).filter((change) => {
+    if (!change?.id || known.has(change.id) || seen.has(change.id)) return false
+    seen.add(change.id)
+    return true
+  })
+}
+
+export const diffSnapshots = (previous, next, settings = {}, today = zurichToday()) => {
   if (!previous) return []
   const prefs = {
     grades: settings.grades !== false,
@@ -339,6 +387,7 @@ export const diffSnapshots = (previous, next, settings = {}) => {
     exams: settings.exams !== false,
     absences: settings.absences !== false,
     events: settings.events !== false,
+    deadlines: settings.deadlines !== false,
   }
   const changes = []
   if (prefs.grades) {
@@ -373,6 +422,7 @@ export const diffSnapshots = (previous, next, settings = {}) => {
       })
     }
   }
+  if (prefs.deadlines) changes.push(...excuseReminders(next.absences || [], today))
   if (prefs.events) {
     const beforeMessages = new Set((previous.messages || []).map((item) => item.id))
     for (const message of next.messages || []) {

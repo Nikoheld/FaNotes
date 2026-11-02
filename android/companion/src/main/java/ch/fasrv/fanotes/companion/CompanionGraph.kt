@@ -150,6 +150,7 @@ class CompanionGraph(private val context: Context) {
         exams = prefs.getBoolean("notify-exams", true),
         absences = prefs.getBoolean("notify-absences", true),
         events = prefs.getBoolean("notify-events", true),
+        deadlines = prefs.getBoolean("notify-deadlines", true),
     )
 
     fun setNotifySettings(settings: NotifySettings) {
@@ -159,6 +160,7 @@ class CompanionGraph(private val context: Context) {
             .putBoolean("notify-exams", settings.exams)
             .putBoolean("notify-absences", settings.absences)
             .putBoolean("notify-events", settings.events)
+            .putBoolean("notify-deadlines", settings.deadlines)
             .apply()
         scope.launch {
             val session = engine.currentSession() ?: return@launch
@@ -235,6 +237,8 @@ class CompanionGraph(private val context: Context) {
             node.kind == NoteKind.FOLDER || node.path !in skip
         }
     }
+
+    fun writtenNoteCount(): Int = censusNotes(store.tree(), setOf(HOMEWORK_NOTE_PATH, CALENDAR_NOTE_PATH)).notes
 
     fun logNoteCensus() {
         val census = censusNotes(store.tree(), setOf(HOMEWORK_NOTE_PATH, CALENDAR_NOTE_PATH))
@@ -338,6 +342,47 @@ class CompanionGraph(private val context: Context) {
         vault.write(HYPOTHETICAL_PATH, body.encodeToByteArray())
         engine.notifyLocalChange()
     }
+
+    fun subjectColors(): Map<String, String> {
+        val text = vault.read(COLORS_PATH)?.decodeToString() ?: return emptyMap()
+        val obj = runCatching { parseJson(text) as? JsonValue.Obj }.getOrNull() ?: return emptyMap()
+        return obj.fields.mapNotNull { (key, value) ->
+            val color = (value as? JsonValue.Str)?.value ?: return@mapNotNull null
+            key to color
+        }.toMap()
+    }
+
+    fun setSubjectColor(subject: String, color: String) {
+        val keys = ch.fasrv.fanotes.schulnetz.colorKeys(subject)
+        if (keys.isEmpty()) return
+        val next = subjectColors().toMutableMap()
+        if (color.isBlank()) keys.forEach { next.remove(it) } else keys.forEach { next[it] = color }
+        val body = buildString {
+            append('{')
+            next.entries.forEachIndexed { index, (name, value) ->
+                if (index > 0) append(',')
+                append(escapeJson(name)).append(':').append(escapeJson(value))
+            }
+            append('}')
+        }
+        vault.write(COLORS_PATH, body.encodeToByteArray())
+        engine.notifyLocalChange()
+    }
+
+    fun iconChoice(): String = prefs.getString("launcher-icon", "standard").orEmpty().ifBlank { "standard" }
+
+    fun setIconChoice(id: String) {
+        prefs.edit().putString("launcher-icon", id).apply()
+    }
+
+    fun recordOpenToday() {
+        val today = java.time.LocalDate.now().toString()
+        val kept = prefs.getStringSet("open-days", emptySet()).orEmpty().filter { it >= java.time.LocalDate.now().minusDays(40).toString() }.toMutableSet()
+        kept += today
+        prefs.edit().putStringSet("open-days", kept).apply()
+    }
+
+    fun streakDays(): Int = ch.fasrv.fanotes.schulnetz.openingStreak(prefs.getStringSet("open-days", emptySet()).orEmpty(), java.time.LocalDate.now())
 
     fun saveWebSession(session: WebSession) {
         prefs.edit().putString("web-session", """{"base":${escapeJson(session.baseUrl)},"php":${escapeJson(session.phpSessionId)},"id":${escapeJson(session.id)},"transid":${escapeJson(session.transid)}}""").apply()
@@ -784,6 +829,7 @@ class CompanionGraph(private val context: Context) {
         const val LOCAL_TOKEN_PATH = ".fanotes/schulnetz/link.json"
         const val LEASE_PATH = ".fanotes/schulnetz/lease.json"
         const val HYPOTHETICAL_PATH = ".fanotes/schulnetz/hypothetical.json"
+        const val COLORS_PATH = ".fanotes/schulnetz/colors.json"
         const val SNAPSHOT_VAULT_PATH = ".fanotes/schulnetz/snapshot.json"
         private const val SILENT_AT = "schulnetz-silent-at"
         private const val SILENT_GAP_MS = 3 * 60 * 1000L
