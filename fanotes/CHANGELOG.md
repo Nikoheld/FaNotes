@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## 2026.11.1-beta.10
+
+- Open the matching Schulnetz item from a notification tap.
+- Add Aargau pluspunkte, faster pushes, and companion desk prefs.
+
 ## 2026.11.1-beta.9
 
 - Add the companion desk for timetable, grades, and private badges.
