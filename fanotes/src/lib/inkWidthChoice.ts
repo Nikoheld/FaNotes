@@ -1418,6 +1418,54 @@ export const joinReadingWithoutSpace = <T extends { char: string }>(
 }
 
 /**
+ * An unknown word of at least six letters takes the one letter the raw trace and a
+ * close reading already share (`Mkgnad` → `Mkgnao`). The trace may differ in that
+ * word only. A dictionary word stays, and so does a word of one repeated letter.
+ * `Mkgnao` is 0.85 nats down; a different unknown word past this stays.
+ */
+export const TRACE_AGREED_MARGIN = 0.9
+
+export const traceAgreedUnknownWord = (
+  text: string,
+  greedy: string,
+  readings: Array<{ text: string; score: number }>,
+  known: (word: string) => boolean,
+): WordEdit | null => {
+  const top = readings[0]
+  if (!top) return null
+  const words = inkWords(text)
+  const traced = inkWords(greedy)
+  if (!words.length || words.length !== traced.length) return null
+  let index = -1
+  for (let cursor = 0; cursor < words.length; cursor += 1) {
+    if (words[cursor] === traced[cursor]) continue
+    if (index !== -1) return null
+    index = cursor
+  }
+  if (index < 0) return null
+  const from = words[index]
+  const to = traced[index]
+  const fromLetters = [...from]
+  const toLetters = [...to]
+  if (fromLetters.length < 6 || fromLetters.length !== toLetters.length) return null
+  if (from.toLowerCase() === to.toLowerCase()) return null
+  let substitutions = 0
+  for (let cursor = 0; cursor < fromLetters.length; cursor += 1) {
+    if (fromLetters[cursor] !== toLetters[cursor]) substitutions += 1
+  }
+  if (substitutions !== 1) return null
+  if (fromLetters.every((letter) => letter.toLowerCase() === fromLetters[0].toLowerCase())) return null
+  if (known(from) || known(to)) return null
+  const candidate = textWithWordEdits(text, [{ index, from, to }])
+  if (candidate === text) return null
+  const close = readings.some((reading) => {
+    const gap = top.score - reading.score
+    return reading.text === candidate && gap >= 0 && gap <= TRACE_AGREED_MARGIN
+  })
+  return close ? { index, from, to } : null
+}
+
+/**
  * The beam's top reading keeps `mit` when a later step wrote `mir` (`Mit zunehmender`).
  * The rest of the line has to match.
  */
@@ -2245,5 +2293,6 @@ export const finalizeInkLineText = <T extends CorrectedChar>(
     characters = joinedReading
     text = characters.map((character) => character.char).join('')
   }
+  take(traceAgreedUnknownWord(text, decoded.greedyText, decoded.readings, known), rewriteSameLengthWord)
   return { text, characters }
 }

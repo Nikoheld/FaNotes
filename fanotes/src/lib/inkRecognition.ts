@@ -97,6 +97,7 @@ import {
   restoreMitFromTopReading,
   restoreAllCapsTraceWord,
   joinReadingWithoutSpace,
+  traceAgreedUnknownWord,
   dictionaryJoinFromReading,
   splitFunctionWordJoin,
   tracedFinalComma,
@@ -1412,6 +1413,20 @@ export async function recognizeInk(
           decoded = { ...decoded, text: nextText, characters: rewritten }
           stitched = null
         }
+      }
+    }
+    const tracedUnknown = traceAgreedUnknownWord(
+      decoded.text,
+      decoded.greedyText,
+      decoded.readings,
+      (word) => wordIsKnown(lineLanguage, word),
+    )
+    if (tracedUnknown) {
+      const rewritten = rewriteSameLengthWord(decoded.characters, tracedUnknown.index, tracedUnknown.to)
+      const nextText = textWithWordEdits(decoded.text, [tracedUnknown])
+      if (rewritten && nextText !== decoded.text) {
+        decoded = { ...decoded, text: nextText, characters: rewritten }
+        stitched = null
       }
     }
     if (!decoded.text.trim()) continue
