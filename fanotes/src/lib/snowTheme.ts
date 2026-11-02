@@ -43,11 +43,19 @@ export const SNOW_FLAKE_COUNT = 84
 export const SNOW_DRAG_REACH = 56
 
 /** Surfaces whose top edge can hold snow. A full-width bar at the ceiling is ignored. */
-export const SNOW_OBSTACLE_SELECTOR = '.sidebar, .sidebar-header, .sidebar-search, .sidebar-footer, .editor-toolbar, button, [role="dialog"]'
+export const SNOW_OBSTACLE_SELECTOR = '.sidebar, .sidebar-header, .sidebar-search, .sidebar-footer, .editor-toolbar, button, [role="dialog"], [role="menu"], .file-tree__context-menu, .command-palette, .note-tags-popover, .editor-more-menu, .note-backup-menu'
 
 const SNOW_SEED = 0x5e0
 const GRAVITY = 0.0009
 const MAX_FALL = 0.55
+/** Horizontal speed below this counts as stopped, so a slide can finish. */
+const SLIDE_STOP = 0.004
+/** Overlap that still counts as touching. Less than this does not keep the pile awake. */
+const SIDE_OVERLAP = 0.75
+/** A real stack is about half a span apart in y. Only shallower pairs are side by side. */
+const SIDE_DY = 0.22
+const SUPPORT_SLACK = 0.75
+const WAKE_FALL = 0.08
 
 const mix = (seed: number) => {
   let state = seed >>> 0
@@ -65,6 +73,127 @@ const spanOf = (flake: SnowFlake) => flake.radius * 2
 const resting = (flake: SnowFlake) => flake.settled && flake.vx === 0 && flake.vy === 0
 
 const overlapsX = (x: number, span: number, left: number, right: number) => x < right && x + span > left
+
+/** Positive when two settled-enough flakes occupy the same pixels side by side. Stacks return 0. */
+const shallowOverlap = (a: SnowFlake, b: SnowFlake) => {
+  if (!a.settled && !b.settled) return 0
+  const spanA = spanOf(a)
+  const spanB = spanOf(b)
+  const overlapX = Math.min(a.x + spanA, b.x + spanB) - Math.max(a.x, b.x)
+  const overlapY = Math.min(a.y + spanA, b.y + spanB) - Math.max(a.y, b.y)
+  if (overlapX <= SIDE_OVERLAP || overlapY <= SIDE_OVERLAP) return 0
+  const centerDy = Math.abs((a.y + spanA / 2) - (b.y + spanB / 2))
+  if (centerDy > SIDE_DY * (spanA + spanB)) return 0
+  return overlapX
+}
+
+const flakesBeside = (flakes: readonly SnowFlake[]) => {
+  for (let index = 0; index < flakes.length; index += 1) {
+    for (let otherIndex = index + 1; otherIndex < flakes.length; otherIndex += 1) {
+      if (shallowOverlap(flakes[index], flakes[otherIndex]) > 0) return true
+    }
+  }
+  return false
+}
+
+/**
+ * Push side-by-side flakes apart. Speed is shared only while one flake is
+ * moving into the other, so a resting overlap at a wall does not gain speed.
+ */
+const separateBeside = (flakes: SnowFlake[], width: number) => {
+  let moved = false
+  for (let pass = 0; pass < 4; pass += 1) {
+    for (let index = 0; index < flakes.length; index += 1) {
+      for (let otherIndex = index + 1; otherIndex < flakes.length; otherIndex += 1) {
+        const overlap = shallowOverlap(flakes[index], flakes[otherIndex])
+        if (overlap <= 0) continue
+        const a = flakes[index]
+        const b = flakes[otherIndex]
+        const aOnLeft = a.x + spanOf(a) / 2 <= b.x + spanOf(b) / 2
+        const left = aOnLeft ? a : b
+        const right = aOnLeft ? b : a
+        const push = (overlap - SIDE_OVERLAP) / 2
+        let leftX = left.x - push
+        let rightX = right.x + push
+        const maxLeft = Math.max(0, width - spanOf(left))
+        const maxRight = Math.max(0, width - spanOf(right))
+        if (leftX < 0) {
+          rightX += -leftX
+          leftX = 0
+        }
+        if (rightX > maxRight) {
+          leftX -= rightX - maxRight
+          rightX = maxRight
+        }
+        leftX = Math.min(maxLeft, Math.max(0, leftX))
+        rightX = Math.min(maxRight, Math.max(0, rightX))
+        if (Math.abs(leftX - left.x) >= 0.02) {
+          left.x = leftX
+          moved = true
+        }
+        if (Math.abs(rightX - right.x) >= 0.02) {
+          right.x = rightX
+          moved = true
+        }
+        if (left.vx > right.vx + SLIDE_STOP) {
+          const mid = (left.vx + right.vx) / 2
+          left.vx = mid
+          right.vx = mid
+          moved = true
+        }
+      }
+    }
+  }
+  return moved
+}
+
+const isSupported = (
+  flake: SnowFlake,
+  index: number,
+  flakes: readonly SnowFlake[],
+  obstacles: readonly SnowObstacle[],
+  height: number,
+) => {
+  const span = spanOf(flake)
+  const bottom = flake.y + span
+  if (bottom >= height - SUPPORT_SLACK) return true
+  for (const obstacle of obstacles) {
+    if (Math.abs(bottom - obstacle.top) > SUPPORT_SLACK) continue
+    if (overlapsX(flake.x, span, obstacle.left, obstacle.right)) return true
+  }
+  for (let otherIndex = 0; otherIndex < flakes.length; otherIndex += 1) {
+    if (otherIndex === index) continue
+    const other = flakes[otherIndex]
+    if (!other.settled) continue
+    if (Math.abs(bottom - other.y) > SUPPORT_SLACK) continue
+    if (overlapsX(flake.x, span, other.x, other.x + spanOf(other))) return true
+  }
+  return false
+}
+
+/** Wake settled flakes whose ledge is gone, from the bottom of a pile upward. */
+const releaseUnsupported = (
+  flakes: SnowFlake[],
+  obstacles: readonly SnowObstacle[],
+  height: number,
+) => {
+  let released = false
+  let changed = true
+  let guard = 0
+  while (changed && guard <= flakes.length) {
+    changed = false
+    guard += 1
+    for (let index = 0; index < flakes.length; index += 1) {
+      const flake = flakes[index]
+      if (!flake.settled) continue
+      if (isSupported(flake, index, flakes, obstacles, height)) continue
+      flakes[index] = { ...flake, settled: false, vy: Math.max(flake.vy, WAKE_FALL) }
+      released = true
+      changed = true
+    }
+  }
+  return released
+}
 
 /**
  * Ledges from visible shell rectangles. A full-width strip flush with the
@@ -112,7 +241,9 @@ export const createSnowField = (width: number, height: number, seed = SNOW_SEED)
 /**
  * Advance flakes by `dtMs`. Falling flakes gain downward speed and stop on an
  * obstacle top, on snow that has already settled, or on the shell bottom.
- * Reduce-motion, or a field that is already at rest, returns the same field.
+ * Leftover sideways speed slides, then stops. Side-by-side flakes spread so a
+ * floor pile can be pushed through; a stack stays a stack. Reduce-motion, or a
+ * field already at rest with nothing side by side, returns the same field.
  */
 export const stepSnowField = (
   field: SnowField,
@@ -121,7 +252,7 @@ export const stepSnowField = (
   obstacles: readonly SnowObstacle[] = [],
 ): SnowField => {
   if (reduceMotion || !Number.isFinite(dtMs) || dtMs <= 0) return field
-  if (field.flakes.every(resting)) return field
+  if (field.flakes.every(resting) && !flakesBeside(field.flakes)) return field
   const dt = Math.min(dtMs, 50)
   const flakes = field.flakes.map((flake) => ({ ...flake }))
   const order = flakes
@@ -173,14 +304,32 @@ export const stepSnowField = (
     let settled = false
     if (support !== null) {
       y = support - span
-      vx = 0
       vy = 0
+      const slide = vx * 0.86
+      if (Math.abs(slide) < SLIDE_STOP) vx = 0
+      else vx = slide
       settled = true
     }
     if (x !== flake.x || y !== flake.y || vx !== flake.vx || vy !== flake.vy || settled !== flake.settled) moved = true
     flakes[index] = { ...flake, x, y, vx, vy, settled }
   }
+  if (separateBeside(flakes, field.width)) moved = true
+  if (releaseUnsupported(flakes, obstacles, field.height)) moved = true
   if (!moved) return field
+  return { width: field.width, height: field.height, flakes }
+}
+
+/**
+ * Let settled snow fall again when a ledge it was resting on is gone.
+ * A pile wakes from the supporting flake upward. An unchanged pile returns
+ * the same field.
+ */
+export const wakeSnowForObstacles = (
+  field: SnowField,
+  obstacles: readonly SnowObstacle[],
+): SnowField => {
+  const flakes = field.flakes.map((flake) => ({ ...flake }))
+  if (!releaseUnsupported(flakes, obstacles, field.height)) return field
   return { width: field.width, height: field.height, flakes }
 }
 

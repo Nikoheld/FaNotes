@@ -5,6 +5,7 @@ import {
   obstaclesFromRects,
   snowDragHitsSettled,
   stepSnowField,
+  wakeSnowForObstacles,
   SNOW_OBSTACLE_SELECTOR,
   type SnowField,
   type SnowObstacle,
@@ -19,6 +20,11 @@ const viewportField = (): SnowField => createSnowField(
 
 const controlTarget = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest(CONTROL_SELECTOR))
 
+const obstacleKey = (obstacles: readonly SnowObstacle[]) => obstacles
+  .map((obstacle) => `${Math.round(obstacle.left)}:${Math.round(obstacle.right)}:${Math.round(obstacle.top)}`)
+  .sort()
+  .join('|')
+
 /** Full-shell snow. Hits pass through; a drag that starts on settled snow pushes that pile. */
 export function SnowLayer({ reduceMotion }: { reduceMotion: boolean }) {
   const layerRef = useRef<HTMLDivElement>(null)
@@ -28,28 +34,45 @@ export function SnowLayer({ reduceMotion }: { reduceMotion: boolean }) {
   const reduceMotionRef = useRef(reduceMotion)
   reduceMotionRef.current = reduceMotion
   const obstaclesRef = useRef<SnowObstacle[]>([])
+  const obstaclesKeyRef = useRef('')
 
   useEffect(() => {
+    let frame = 0
     const measure = () => {
-      const shell = layerRef.current?.closest('.app-shell')
-      if (!shell) {
-        obstaclesRef.current = []
-        return
-      }
-      const rects = [...shell.querySelectorAll(SNOW_OBSTACLE_SELECTOR)]
+      const rects = [...document.body.querySelectorAll(SNOW_OBSTACLE_SELECTOR)]
         .filter((node) => !node.closest('.snow-layer'))
         .map((node) => {
           const rect = node.getBoundingClientRect()
           return { left: rect.left, top: rect.top, right: rect.right, width: rect.width, height: rect.height }
         })
-      obstaclesRef.current = obstaclesFromRects(rects, window.innerWidth, window.innerHeight)
+      const next = obstaclesFromRects(rects, window.innerWidth, window.innerHeight)
+      const key = obstacleKey(next)
+      if (key === obstaclesKeyRef.current) return
+      obstaclesKeyRef.current = key
+      obstaclesRef.current = next
+      setField((current) => {
+        const woken = wakeSnowForObstacles(current, next)
+        fieldRef.current = woken
+        return woken
+      })
+    }
+    const schedule = () => {
+      if (frame) return
+      frame = window.requestAnimationFrame(() => {
+        frame = 0
+        measure()
+      })
     }
     measure()
-    const timer = window.setInterval(measure, 200)
-    window.addEventListener('resize', measure)
+    const timer = window.setInterval(schedule, 200)
+    window.addEventListener('resize', schedule)
+    const observer = new MutationObserver(schedule)
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] })
     return () => {
       window.clearInterval(timer)
-      window.removeEventListener('resize', measure)
+      window.removeEventListener('resize', schedule)
+      observer.disconnect()
+      if (frame) window.cancelAnimationFrame(frame)
     }
   }, [])
 

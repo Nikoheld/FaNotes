@@ -11,6 +11,7 @@ import {
   snowDragHitsSettled,
   snowLayerActive,
   stepSnowField,
+  wakeSnowForObstacles,
   SNOW_DRAG_REACH,
 } from '../src/lib/snowTheme.ts'
 
@@ -145,6 +146,74 @@ try {
   assert.equal(recovered.flakes[floorIndex].settled, true)
   assert.ok(Math.abs(bottomOf(recovered.flakes[floorIndex]) - field.height) < 0.01)
   assert.ok(recovered.flakes.every((flake) => bottomOf(flake) <= field.height + 0.01))
+
+  const chain = {
+    width: 1000,
+    height: 800,
+    flakes: Array.from({ length: 14 }, (_, index) => ({
+      x: 100 + index * 8,
+      y: 788,
+      radius: 6,
+      vx: 0,
+      vy: 0,
+      settled: true,
+    })),
+  }
+  const farIndex = chain.flakes.length - 1
+  const farX = chain.flakes[farIndex].x
+  const chainPointerX = chain.flakes[0].x + chain.flakes[0].radius
+  const chainPointerY = chain.flakes[0].y + chain.flakes[0].radius
+  const chainReach = SNOW_DRAG_REACH + chain.flakes[farIndex].radius
+  assert.ok(Math.hypot(chainPointerX - (farX + 6), chainPointerY - (chain.flakes[farIndex].y + 6)) > chainReach)
+  const chainDrag = dragSnowField(chain, chainPointerX, chainPointerY, 18, 0)
+  assert.equal(chainDrag.flakes[farIndex].x, farX)
+  assert.ok(chainDrag.flakes[0].x > chain.flakes[0].x)
+  let chainMoved = chainDrag
+  let farMoved = false
+  for (let frame = 0; frame < 120; frame += 1) {
+    const next = stepSnowField(chainMoved, 16, false, [])
+    if (next.flakes[farIndex].x > farX + 0.5) farMoved = true
+    if (next === chainMoved) break
+    chainMoved = next
+  }
+  assert.equal(farMoved, true)
+  assert.equal(stepSnowField(chainMoved, 16, false, []), chainMoved)
+  assert.ok(chainMoved.flakes.every((flake) => flake.settled))
+  assert.ok(chainMoved.flakes.every((flake) => bottomOf(flake) <= chain.height + 0.01))
+
+  const menu = { left: 100, right: 400, top: 200 }
+  const pile = {
+    width: 1000,
+    height: 800,
+    flakes: [
+      { x: 150, y: 190, radius: 5, vx: 0, vy: 0, settled: true },
+      { x: 150, y: 180, radius: 5, vx: 0, vy: 0, settled: true },
+      { x: 800, y: 790, radius: 5, vx: 0, vy: 0, settled: true },
+    ],
+  }
+  assert.equal(wakeSnowForObstacles(pile, [menu]), pile)
+  const woken = wakeSnowForObstacles(pile, [])
+  assert.notEqual(woken, pile)
+  assert.equal(pile.flakes[0].settled, true)
+  assert.equal(pile.flakes[1].settled, true)
+  assert.equal(woken.flakes[0].settled, false)
+  assert.equal(woken.flakes[1].settled, false)
+  assert.ok(woken.flakes[0].vy >= 0.08)
+  assert.ok(woken.flakes[1].vy >= 0.08)
+  assert.equal(woken.flakes[2].settled, true)
+  assert.equal(woken.flakes[2].x, pile.flakes[2].x)
+  let fallen = woken
+  for (let frame = 0; frame < 800; frame += 1) {
+    const next = stepSnowField(fallen, 16, false, [])
+    if (next === fallen) break
+    fallen = next
+  }
+  assert.equal(stepSnowField(fallen, 16, false, []), fallen)
+  assert.ok(fallen.flakes[0].settled)
+  assert.ok(fallen.flakes[1].settled)
+  assert.ok(bottomOf(fallen.flakes[0]) > 400)
+  assert.ok(bottomOf(fallen.flakes[1]) > 400)
+  assert.equal(fallen.flakes[2].settled, true)
   assert.deepEqual(field.flakes.map((flake) => [flake.x, flake.y]), before)
 } finally {
   await vite.close()
@@ -187,9 +256,13 @@ assert.match(blockFor('.snow-layer'), /pointer-events:\s*none/)
 const snowLayer = read('src/components/SnowLayer.tsx')
 assert.match(snowLayer, /obstaclesFromRects/)
 assert.match(snowLayer, /stepSnowField\([\s\S]*obstaclesRef/)
+assert.match(snowLayer, /wakeSnowForObstacles/)
 assert.match(snowLayer, /snowDragHitsSettled/)
 assert.match(snowLayer, /controlTarget\(event\.target\)/)
 assert.match(snowLayer, /button, a, input, textarea/)
+assert.match(snowLayer, /MutationObserver/)
+assert.match(snowLayer, /attributeFilter:\s*\['class', 'hidden'\]/)
+assert.match(snowLayer, /setInterval\(schedule, 200\)/)
 
 const app = read('src/App.tsx')
 const layerUses = app.match(/<SnowLayer\b/g) ?? []
