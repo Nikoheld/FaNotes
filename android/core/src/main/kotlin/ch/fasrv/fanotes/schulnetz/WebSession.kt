@@ -2,7 +2,7 @@ package ch.fasrv.fanotes.schulnetz
 
 import java.net.URI
 
-enum class SessionProblem { NONE, INACTIVITY, IP_REJECTED, LOGIN_WALL }
+enum class SessionProblem { NONE, INACTIVITY, IP_REJECTED, LOGIN_WALL, INTERACTIVE }
 
 data class WebSession(
     val baseUrl: String,
@@ -14,7 +14,22 @@ data class WebSession(
 private val HEX_ID = Regex("""(?i)(?:^|[?&])id=([a-f0-9]{4,})""")
 private val HEX_TRANS = Regex("""(?i)(?:^|[?&])transid=([a-f0-9]{4,})""")
 
+/** Microsoft Entra sign-in, including silent-login failure AADSTS50058. Not a Schulnetz page. */
+fun microsoftLoginRequired(url: String, html: String): Boolean {
+    val host = runCatching { URI(url).host }.getOrNull()?.lowercase().orEmpty()
+    if (host == "login.microsoftonline.com" || host == "login.microsoft.com" || host == "login.live.com" || host.endsWith(".login.microsoftonline.com")) {
+        return true
+    }
+    if (html.contains("ConvergedSignIn")) return true
+    if (html.contains("AADSTS50058")) return true
+    if (Regex("""sErrorCode\\?"?\s*:\s*\\?"?50058""").containsMatchIn(html)) return true
+    if (html.contains("stsErrorCode") && html.contains("50058")) return true
+    if (html.contains("\$Config=") && (html.contains("sErrorCode") || html.contains("urlPost"))) return true
+    return false
+}
+
 fun sessionProblem(url: String, html: String): SessionProblem {
+    if (microsoftLoginRequired(url, html)) return SessionProblem.INTERACTIVE
     val blob = "${url}\n$html".lowercase()
     if (blob.contains("ip-adresse wurde vom system zurückgewiesen") || blob.contains("ip-adresse wurde vom system zurueckgewiesen")) {
         return SessionProblem.IP_REJECTED
@@ -34,6 +49,7 @@ fun sessionProblemText(problem: SessionProblem): String = when (problem) {
     SessionProblem.IP_REJECTED -> "Schulnetz hat die IP-Adresse abgelehnt. Anmeldung wird erneuert."
     SessionProblem.INACTIVITY -> "Schulnetz-Sitzung abgelaufen. Anmeldung wird erneuert."
     SessionProblem.LOGIN_WALL -> "Schulnetz braucht eine Anmeldung."
+    SessionProblem.INTERACTIVE -> "Bei Schulnetz neu anmelden"
 }
 
 /** Logged-in Start: school landing or page 1, with a session id, and not a login wall. */

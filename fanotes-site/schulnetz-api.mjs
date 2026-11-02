@@ -441,17 +441,37 @@ export const createSchulnetzRuntime = (options = {}) => {
         link.lastError = established.error || 'reauth'
         link.serverSession = null
         await saveLink(accountId, link)
-        await deliver(link, {
-          id: `reauth:${link.revision || 0}`,
-          category: 'event',
-          title: 'Schulnetz erneut anmelden',
-          body: 'Die Microsoft-Anmeldung muss auf dem Telefon einmal bestätigt werden.',
-        })
+        if (link.loginPushSent !== true) {
+          await deliver(link, {
+            id: 'schulnetz-login-required',
+            category: 'event',
+            title: 'Bei Schulnetz neu anmelden',
+            body: 'Die Microsoft-Anmeldung ist abgelaufen. In FaNotes Companion neu anmelden.',
+          })
+          link.loginPushSent = true
+          await saveLink(accountId, link)
+        }
         return { needsReauth: true }
       }
       link.serverSession = sealToken(material, JSON.stringify({ php: established.php, id: established.id, transid: established.transid }))
       await saveLink(accountId, link)
       scraped = await scrape({ php: established.php, id: established.id, transid: established.transid, userAgent })
+      if (scraped.problem === 'microsoft') {
+        link.needsReauth = true
+        link.lastError = 'microsoft'
+        link.serverSession = null
+        if (link.loginPushSent !== true) {
+          await deliver(link, {
+            id: 'schulnetz-login-required',
+            category: 'event',
+            title: 'Bei Schulnetz neu anmelden',
+            body: 'Die Microsoft-Anmeldung ist abgelaufen. In FaNotes Companion neu anmelden.',
+          })
+          link.loginPushSent = true
+        }
+        await saveLink(accountId, link)
+        return { needsReauth: true }
+      }
     }
     const snapshot = {
       revision: (link.revision || 0) + 1,

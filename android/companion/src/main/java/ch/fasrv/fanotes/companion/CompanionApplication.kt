@@ -9,6 +9,10 @@ class CompanionApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            android.webkit.WebView.setDataDirectorySuffix("schulnetz")
+        }
+        android.webkit.CookieManager.getInstance().setAcceptCookie(true)
         graph = CompanionGraph(this)
         CompanionAlerts.ensureChannels(this)
         SchulnetzWorker.schedule(this)

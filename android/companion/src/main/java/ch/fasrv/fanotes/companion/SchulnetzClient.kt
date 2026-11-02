@@ -150,7 +150,7 @@ class SchulnetzClient(
             if (status !in 200..299) return ""
             val problem = sessionProblem(url, body)
             if (problem != SessionProblem.NONE) {
-                debug = body
+                if (problem != SessionProblem.INTERACTIVE) debug = body
                 errors += sessionProblemText(problem)
                 return ""
             }
@@ -186,11 +186,19 @@ class SchulnetzClient(
             startMessages = parseStartMessages(pages["1"].orEmpty()),
             readErrors = errors,
         )
-        val problem = if (errors.any { it.contains("IP-Adresse") }) SessionProblem.IP_REJECTED
-            else if (errors.any { it.contains("abgelaufen") }) SessionProblem.INACTIVITY
-            else if (errors.any { it.contains("Anmeldung") }) SessionProblem.LOGIN_WALL
-            else SessionProblem.NONE
-        return WebBundle(snapshot, problem, debug, WebSession(root, session.phpSessionId, session.id, transid))
+        val problem = when {
+            errors.any { it == "Bei Schulnetz neu anmelden" } -> SessionProblem.INTERACTIVE
+            errors.any { it.contains("IP-Adresse") } -> SessionProblem.IP_REJECTED
+            errors.any { it.contains("abgelaufen") } -> SessionProblem.INACTIVITY
+            errors.any { it.contains("Anmeldung") } -> SessionProblem.LOGIN_WALL
+            else -> SessionProblem.NONE
+        }
+        val reported = if (problem == SessionProblem.INTERACTIVE) {
+            snapshot.copy(readErrors = listOf("Bei Schulnetz neu anmelden"))
+        } else {
+            snapshot
+        }
+        return WebBundle(reported, problem, if (problem == SessionProblem.INTERACTIVE) "" else debug, WebSession(root, session.phpSessionId, session.id, transid))
     }
 
     fun link(session: SyncSession, baseUrl: String, deviceId: String, tokens: SchulnetzTokens, displayName: String): SchulnetzLinkState {

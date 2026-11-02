@@ -2,7 +2,7 @@
 // A PHPSESSID is bound to the client IP, so this module always opens its own
 // session with the stored Microsoft SSO cookies and never replays a phone cookie.
 
-import { extractWebIds, parseGradesHtml, parseSchedulerXml, schulnetzCallAllowed, sessionProblem, stripPhpSession } from './schulnetz-logic.mjs'
+import { extractWebIds, microsoftLoginRequired, parseGradesHtml, parseSchedulerXml, schulnetzCallAllowed, sessionProblem, stripPhpSession } from './schulnetz-logic.mjs'
 
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 
@@ -57,6 +57,7 @@ export const establishWebSession = async (baseUrl, ssoCookies, fetchImpl, userAg
     }
     html = await response.text()
     const problem = sessionProblem(url, html)
+    if (problem === 'microsoft') return { needsInteraction: true, error: 'microsoft' }
     if (problem === 'ip' || problem === 'inactivity' || problem === 'login') {
       if (hop === 0) {
         url = `${baseUrl.replace(/\/+$/u, '')}/index.php?pageid=1`
@@ -94,6 +95,11 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl) => {
       },
       redirect: 'manual',
     })
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers?.get?.('location') || ''
+      pages.problem = microsoftLoginRequired(location, '') ? 'microsoft' : 'login'
+      return ''
+    }
     const body = await response.text()
     const problem = sessionProblem(url, body)
     if (problem) {

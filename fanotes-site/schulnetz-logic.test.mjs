@@ -8,10 +8,13 @@ import { createSchulnetzRuntime, openToken, sealToken } from './schulnetz-api.mj
 import {
   diffSnapshots,
   normalizeSchoolBase,
+  parseGradesHtml,
   parseRawSnapshot,
   pluspunkte,
   redactSecrets,
+  microsoftLoginRequired,
   schulnetzCallAllowed,
+  sessionProblem,
   weightedAverage,
   wunschnote,
 } from './schulnetz-logic.mjs'
@@ -181,6 +184,13 @@ test('web session is opened with Microsoft cookies and not the phone PHPSESSID',
   const snapshot = JSON.parse(await readFile(join(root, 'accounts', accountId, 'snapshot.json'), 'utf8'))
   assert.equal(snapshot.grades[0].mark, 5.5)
   assert.equal(snapshot.grades[0].course.includes('MA-4a-He'), true)
+})
+
+test('a Microsoft sign-in page is login required, not a scraped grade page', () => {
+  const html = '<html><head><title>Sign in to your account</title></head><body><script>$Config={"sCompanyDisplayName":"Alte Kantonsschule Aarau","sErrorCode":"50058","urlPost":"https://login.microsoftonline.com/common/login","pgid":"ConvergedSignIn"};</script></body></html>'
+  assert.equal(sessionProblem('https://www.schulnetz-ag.ch/aksa/index.php?pageid=21111', html), 'microsoft')
+  assert.equal(microsoftLoginRequired('https://login.microsoftonline.com/8c2df54b-02dc-4a78-809d-8a025372e6c4/oauth2/v2.0/authorize', html), true)
+  assert.equal(parseGradesHtml(html).length, 0)
 })
 
 test('seal round trip uses aes-256-gcm', () => {
