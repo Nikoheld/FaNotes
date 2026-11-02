@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.11.1-beta.4
+
+- Sign in to Schulnetz through the website session.
+
 ## 2026.11.1-beta.3
 
 - Add the FaNotes Companion phone app with Schulnetz.
