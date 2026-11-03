@@ -26,7 +26,7 @@ const structural = () => {
   assert.match(dialogSource, /data-tth-control="line-spacing"/)
   assert.match(dialogSource, /data-tth-control="variation"/)
   assert.match(dialogSource, /onPaste=\{/)
-  assert.match(boardSource, /keyTarget\.closest\('\.lw-tth-dialog, \.lw-tth-backdrop'\)/)
+  assert.ok(boardSource.includes("keyTarget.closest('.lw-tth-dialog, .lw-tth-backdrop"), 'dialog keyboard input must be excluded from ink shortcuts')
   return { chrome: true, paste: true, sliders: true }
 }
 
@@ -43,7 +43,7 @@ const runDialog = async () => {
       root: appRoot,
       logLevel: 'error',
       configFile: path.join(appRoot, 'vite.config.ts'),
-      define: { 'process.env.NODE_ENV': JSON.stringify('production') },
+      define: { 'process.env.NODE_ENV': JSON.stringify('production'), __FANOTES_TEST_LINUX__: JSON.stringify(process.env.FANOTES_TTH_LINUX === '1') },
       build: {
         outDir: output,
         emptyOutDir: true,
@@ -105,6 +105,7 @@ const runDialog = async () => {
       return response.result.value
     }
     await call('Runtime.enable')
+    if (process.env.FANOTES_TTH_LINUX === '1') await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false })
     let ready = false
     for (let attempt = 0; attempt < 80; attempt += 1) {
       ready = await evaluate(`Boolean(document.querySelector('#ready') && document.querySelector('.lw-tth-dialog'))`)
@@ -160,6 +161,27 @@ const runDialog = async () => {
     })()`)
     assert.equal(pasted, 'Pasted handwritten line')
 
+    if (process.env.FANOTES_TTH_LINUX === '1') {
+      let generated = false
+      for (let attempt = 0; attempt < 100; attempt++) {
+        generated = await evaluate(`(() => { const data = JSON.parse(document.querySelector('[data-tth-preview-options]').getAttribute('data-tth-preview-options')); return data.glyphCount > 0 && !document.querySelector('.lw-tth-insert').disabled })()`)
+        if (generated) break
+        await wait(50)
+      }
+      assert(generated, 'Linux worker must generate an insertable offline preview without imported samples')
+      const state = await evaluate(`(() => { const box = document.querySelector('.lw-tth-message input[type="checkbox"]'); const before = box.checked; box.click(); return before })()`)
+      assert.equal(state, true, 'automatic learning defaults on')
+      await wait(100)
+      assert.equal(await evaluate(`document.querySelector('.lw-tth-message input[type="checkbox"]').checked`), false)
+      for (let attempt = 0; attempt < 100; attempt++) {
+        if (await evaluate(`!document.querySelector('.lw-tth-insert').disabled`)) break
+        await wait(50)
+      }
+      const inserted = await evaluate(`(() => { document.querySelector('.lw-tth-insert').click(); return window.__tthInserted })()`)
+      assert.equal(inserted.text, 'Pasted handwritten line')
+      assert(inserted.count > 0)
+      assert.equal(inserted.engine, 2)
+    }
     const pointer = await evaluate(`(() => {
       const hits = ['font-size', 'line-spacing', 'variation', 'text'].map((name) => {
         const node = document.querySelector('[data-tth-control="' + name + '"]')

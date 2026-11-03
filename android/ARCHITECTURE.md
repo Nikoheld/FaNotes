@@ -115,7 +115,7 @@ Skip rules match the desktop: dot paths other than `.fanotes/` children, `.fanot
 
 ## Recognition, math, sections
 
-GlyphenWerk recognition is a Rust/WASM engine in the desktop build. It is not linked into this APK. `HandwritingRecognizer` is the seam: a later NDK build can implement it without changing the stroke JSON. Text → Handschrift does not need that engine: it places stored glyph strokes, from an imported GlyphenWerk `manifest.jsonl` when one exists and from the built-in school script otherwise. Sections, math checking, and worksheet text boxes are preserved when they already exist in the JSON; this version does not edit those three.
+GlyphenWerk recognition is a Rust/WASM engine in the desktop build. It is not linked into this APK. `HandwritingRecognizer` is the seam: a later NDK build can implement it without changing the stroke JSON. Text → Handschrift uses the local hybrid trajectory engine: ordinary-page style learning, unlabeled joining-motion exemplars, conservative local shape matching, and word/context reuse with a school-script fallback. WorkManager and app-private per-page checkpoints handle incremental updates. See `fanotes/docs/PERSONAL_HANDWRITING.md` for the implemented architecture, validation, and recognition limits. Sections, math checking, and worksheet text boxes are preserved when they already exist in the JSON; this version does not edit those three.
 
 ## Decisions that are easy to trip over
 

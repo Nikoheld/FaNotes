@@ -49,12 +49,21 @@ const sample = (char: string, variant = 1): Sample => ({
 const samples = [...new Set('Test einer langen Zeile')].filter((char) => char !== ' ')
   .flatMap((char) => [sample(char, 1), sample(char, 2)])
 
+declare const __FANOTES_TEST_LINUX__: boolean
+const linux = typeof __FANOTES_TEST_LINUX__ !== 'undefined' && __FANOTES_TEST_LINUX__
+if (linux) {
+  let enabled = true
+  window.fanotes = { platform: 'linux', handwritingLearning: async (op?: string, value?: unknown) => {
+    if (op === 'enabled') enabled = value === true
+    return { model: { version: 2, revision: 0, pages: {} }, pageCount: 0, observationCount: 0, unitCount: 0, busy: false, enabled, error: null }
+  } } as typeof window.fanotes
+}
 const Harness = () => (
   <section className="lw-drawing-board is-inline is-input-active" data-tth-board="inline">
     <div className="lw-canvas-surface" style={{ width: 320, height: 240, background: '#eee' }} />
     <TextToHandwritingDialog
       open
-      samples={samples}
+      samples={linux ? [] : samples}
       pageWidth={400}
       pageHeight={420}
       suggestedStartY={96}
@@ -63,7 +72,9 @@ const Harness = () => (
       pressureEnabled
       paperStyle="blank"
       onClose={() => undefined}
-      onInsert={() => undefined}
+      onInsert={(strokes, result) => {
+        (window as unknown as { __tthInserted?: unknown }).__tthInserted = { text: result.normalizedText, count: strokes.length, engine: strokes[0]?.synthesis?.engine }
+      }}
       onRequestTraining={() => undefined}
     />
   </section>

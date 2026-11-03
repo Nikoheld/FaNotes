@@ -6496,7 +6496,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     redoRef.current = []
     strokesRef.current = [
       ...strokesRef.current,
-      ...generatedStrokes,
+      ...generatedStrokes.map(stroke => ({ ...stroke, points: stroke.points.map(point => ({ ...point, x: point.x * result.pageWidth / nextWidth, y: point.y * result.pageHeight / nextHeight })) })),
     ]
     setTokens([])
     setCorrection('')

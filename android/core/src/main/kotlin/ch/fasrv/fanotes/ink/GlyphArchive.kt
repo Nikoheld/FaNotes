@@ -37,6 +37,8 @@ fun encodeGlyphLibrary(samples: List<GlyphSample>): String {
             "label" to jsonString(sample.label),
             "labelId" to jsonString(sample.labelId),
             "sessionId" to jsonString(sample.sessionId),
+            "baseline" to sample.baseline?.let { jsonNumber(it) },
+            "context" to sample.context?.let { jsonString(it) },
             "bbox" to jsonArray(*sample.bbox.map { jsonNumber(it) }.toTypedArray()),
             "sourceWidth" to jsonNumber(sample.sourceWidth),
             "sourceHeight" to jsonNumber(sample.sourceHeight),
@@ -136,7 +138,6 @@ private fun parseManifest(text: String): GlyphImportResult {
 private fun sampleFromManifest(record: JsonValue.Obj, index: Int): GlyphSample? {
     val labelId = limited(record.string("label_id") ?: record.string("labelId")) ?: return null
     val label = limited(record.string("unicode") ?: record.string("label")) ?: return null
-    if (Regex("sharp[_-]?s", RegexOption.IGNORE_CASE).containsMatchIn(labelId)) return null
     val strokes = strokesOf(record.array("strokes")) ?: return null
     val bbox = bboxOf(record.array("bbox_normalized") ?: record.array("bbox"), strokes)
     val canvas = record.obj("source_canvas") ?: record.obj("sourceCanvas")
@@ -149,6 +150,8 @@ private fun sampleFromManifest(record: JsonValue.Obj, index: Int): GlyphSample? 
         sourceWidth = canvas?.double("width")?.takeIf { it > 0.0 } ?: 100.0,
         sourceHeight = canvas?.double("height")?.takeIf { it > 0.0 } ?: 100.0,
         strokes = strokes,
+        baseline = record.double("baseline"),
+        context = record.string("context"),
     )
 }
 
@@ -164,6 +167,8 @@ private fun sampleFromStored(record: JsonValue.Obj): GlyphSample? {
         sourceWidth = record.double("sourceWidth")?.takeIf { it > 0.0 } ?: 100.0,
         sourceHeight = record.double("sourceHeight")?.takeIf { it > 0.0 } ?: 100.0,
         strokes = strokes,
+        baseline = record.double("baseline"),
+        context = record.string("context"),
     )
 }
 

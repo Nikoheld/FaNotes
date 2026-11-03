@@ -25,6 +25,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -56,6 +60,8 @@ import kotlin.math.max
 @Composable
 fun TextToHandwritingDialog(
     personal: List<GlyphSample>,
+    learning: HandwritingLearningState,
+    onLearningEnabled: (Boolean) -> Unit,
     pageWidth: Double,
     pageHeight: Double,
     startY: Double,
@@ -87,14 +93,30 @@ fun TextToHandwritingDialog(
         pressureEnabled = pressure,
         seed = seed,
         startY = if (atStart) null else startY,
+        model = learning.model,
     )
     val page = HandwritingPage(pageWidth, pageHeight)
-    val result = remember(text, options, samples, page, fit) {
-        if (text.isBlank()) synthesizeHandwriting("", samples, options, page)
-        else if (fit) synthesizeHandwritingToFit(text, samples, options, page)
-        else synthesizeHandwriting(text, samples, options, page)
+    var result by remember { mutableStateOf(synthesizeHandwriting("", samples, options, page)) }
+    var generating by remember { mutableStateOf(false) }
+    val previewRequest = remember(text, options, samples, page, fit) { Any() }
+    var completedRequest by remember { mutableStateOf<Any?>(null) }
+    var previewError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(previewRequest) {
+        generating = true
+        delay(100)
+        try {
+            val next = withContext(Dispatchers.Default) {
+                if (fit) synthesizeHandwritingToFit(text, samples, options, page)
+                else synthesizeHandwriting(text, samples, options, page)
+            }
+            result = next
+            completedRequest = previewRequest
+            previewError = null
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { previewError = "The handwriting preview could not be generated." }
+        finally { generating = false }
     }
-    val canInsert = result.strokes.isNotEmpty() && result.missingCharacters.isEmpty() && !result.overflow
+    val canInsert = completedRequest === previewRequest && !generating && previewError == null && result.normalizedText == ch.fasrv.fanotes.ink.normalizeHandwritingText(text) && result.strokes.isNotEmpty() && result.missingCharacters.isEmpty() && !result.overflow
     val wide = LocalConfiguration.current.screenWidthDp >= 800
     val context = LocalContext.current
     val scrim = remember { MutableInteractionSource() }
@@ -123,13 +145,23 @@ fun TextToHandwritingDialog(
                 Column(Modifier.weight(1f)) {
                     Text("Text in deine Handschrift", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "FaNotes setzt jedes Zeichen aus deinen GlyphenWerk-Strichen. Fehlende Buchstaben kommen aus der Schulschrift.",
+                        "Learns locally from your everyday handwritten notes. Known words retain their original pen movements.",
                         fontSize = 12.sp,
                         color = LocalStatusInk.current.muted,
                     )
                 }
                 Text("Schließen", modifier = Modifier.clickable(onClick = onDismiss), fontSize = 12.sp)
             }
+            val status = when {
+                learning.error != null -> learning.error
+                learning.busy -> "Learning from your handwritten notes…"
+                learning.model.observations.isNotEmpty() -> "${learning.model.pageCount} handwritten pages · ${if (learning.model.units.isEmpty()) "Personal style available; letter shapes use available samples" else "Personal trajectories and style available"}"
+                else -> "Write notes as usual. Missing letter shapes use the school script."
+            }
+            Text(status.orEmpty(), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            Choice("Learn automatically from notes", learning.enabled) { onLearningEnabled(!learning.enabled) }
+            if (generating) Text("Preparing preview…", fontSize = 12.sp)
+            previewError?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.error) }
             if (wide) {
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     HandwritingControls(
@@ -151,7 +183,7 @@ fun TextToHandwritingDialog(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Jede Erzeugung variiert Form, Neigung, Grundlinie und Druck.",
+                    "Variation follows observed handwriting; unknown shapes use the school script.",
                     fontSize = 12.sp,
                     color = LocalStatusInk.current.muted,
                     modifier = Modifier.weight(1f),
@@ -233,7 +265,7 @@ private fun HandwritingControls(
         }
         if (schoolOnly) {
             Text(
-                "Deine Schrift fehlt noch. Importiere ein GlyphenWerk-Training, sonst bleibt es die Schulschrift.",
+                "Letter shapes without reliable local labels use the school script. Your ordinary notes teach style automatically.",
                 fontSize = 12.sp,
                 color = Color(0xFFB8860B),
             )
@@ -253,7 +285,7 @@ private fun HandwritingControls(
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Training importieren", fontSize = 12.sp, modifier = Modifier.clickable(onClick = onImport))
+            Text("Optional: Training importieren", fontSize = 12.sp, modifier = Modifier.clickable(onClick = onImport))
             if (!schoolOnly) Text("Training entfernen", fontSize = 12.sp, modifier = Modifier.clickable(onClick = onClear))
         }
     }

@@ -13,7 +13,8 @@ import kotlin.math.hypot
  * that produced them. Connectors and umlaut dots are skipped. A straight line
  * or a snapped figure yields no words.
  */
-fun recognizeSchoolScript(strokes: List<InkStroke>): String {
+fun recognizeSchoolScript(input: List<InkStroke>): String {
+    val strokes = expandSynthesisTrajectories(input)
     if (strokes.isEmpty()) return ""
     if (strokes.any { stroke -> stroke.points.any { point -> !point.x.isFinite() || !point.y.isFinite() } }) return ""
     if (isNonTextFigure(strokes)) return ""
@@ -284,4 +285,33 @@ private fun resample(points: List<Pair<Double, Double>>, count: Int): List<Pair<
             (start.first + (end.first - start.first) * t) to (start.second + (end.second - start.second) * t)
         }
     }
+}
+
+/** Geometry-only source boundaries allow the school matcher to inspect a continuous word.
+ * No character labels or transcript are used; erased/edited invalid ranges are ignored.
+ */
+private fun expandSynthesisTrajectories(input: List<InkStroke>): List<InkStroke> {
+    val output = mutableListOf<InkStroke>()
+    var index = 0
+    while (index < input.size) {
+        val group = input[index].extras.obj("synthesis")?.string("group")
+        if (group == null) { output += input[index++]; continue }
+        val pieces = mutableListOf<Pair<Double, InkStroke>>()
+        while (index < input.size && input[index].extras.obj("synthesis")?.string("group") == group) {
+            val stroke = input[index++]
+            val segments = stroke.extras.obj("synthesis")?.array("segments")?.items.orEmpty()
+            val parsed = segments.mapNotNull { raw ->
+                val obj = raw as? ch.fasrv.fanotes.json.JsonValue.Obj ?: return@mapNotNull null
+                val start = obj.double("start")?.toInt() ?: return@mapNotNull null
+                val end = obj.double("end")?.toInt() ?: return@mapNotNull null
+                val order = obj.double("order") ?: return@mapNotNull null
+                if (start < 0 || end > stroke.points.size || start >= end) return@mapNotNull null
+                order to stroke.copy(points = stroke.points.subList(start, end))
+            }
+            if (parsed.size != segments.size || parsed.isEmpty()) return input
+            pieces += parsed
+        }
+        output += pieces.sortedBy { it.first }.map { it.second }
+    }
+    return output
 }

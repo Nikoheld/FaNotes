@@ -34,6 +34,7 @@ export const readSavedInkStrokes = (
   return value.flatMap((entry) => {
     if (!entry || typeof entry !== 'object') return []
     const raw = entry as {
+      synthesis?: unknown
       points?: unknown
       baseWidth?: unknown
       pressureEnabled?: unknown
@@ -78,6 +79,7 @@ export const readSavedInkStrokes = (
     const colorEffect = typeof raw.colorEffect === 'string' && catalogs.effectIds.has(raw.colorEffect) ? raw.colorEffect : 'solid'
     return [{
       points,
+      synthesis: raw.synthesis && typeof raw.synthesis === 'object' ? { engine: 2 as const } : undefined,
       baseWidth,
       pressureEnabled: raw.pressureEnabled !== false,
       color: typeof raw.color === 'string' && /^#[\da-f]{6}$/iu.test(raw.color) ? raw.color : fallbackColor,

@@ -573,6 +573,7 @@ fun FaNotesScreen(
     var mathOpen by remember { mutableStateOf(false) }
     val textHandOpen by model.textHandOpen.collectAsStateWithLifecycle()
     val glyphSamples by model.glyphSamples.collectAsStateWithLifecycle()
+    val handwritingLearning by model.handwritingLearning.collectAsStateWithLifecycle()
     var mathInput by remember { mutableStateOf("") }
     var mathOutput by remember { mutableStateOf("") }
     var mathOk by remember { mutableStateOf(false) }
@@ -1193,6 +1194,8 @@ fun FaNotesScreen(
     if (textHandOpen) {
         TextToHandwritingDialog(
             personal = glyphSamples,
+            learning = handwritingLearning,
+            onLearningEnabled = model::setHandwritingLearning,
             pageWidth = model.session.document.sourceWidth,
             pageHeight = model.session.document.sourceHeight,
             startY = ch.fasrv.fanotes.ink.suggestedHandwritingStartY(model.session.document),
