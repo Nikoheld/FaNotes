@@ -4,148 +4,152 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import ch.fasrv.fanotes.famd.isoNow
-import ch.fasrv.fanotes.ink.DEFAULT_PEN_COLOR
-import ch.fasrv.fanotes.ink.DEFAULT_PEN_WIDTH
-import ch.fasrv.fanotes.ink.InkDocument
-import ch.fasrv.fanotes.ink.InkStroke
-import ch.fasrv.fanotes.ink.StrokePoint
-import ch.fasrv.fanotes.ink.pressureWidth
-import kotlin.math.hypot
+import ch.fasrv.fanotes.ink.*
+import ch.fasrv.fanotes.input.POST_PEN_IGNORE_MS
+import ch.fasrv.fanotes.input.tiltDegrees
+import kotlin.math.max
 
-/** Finger and stylus page that writes the same stroke JSON as the tablet. */
-class CompanionInkView(
-    context: Context,
-    initial: InkDocument,
-    private val onChange: (InkDocument) -> Unit,
-) : View(context) {
-    var document: InkDocument = initial
-    var eraser: Boolean = false
-    var panning: Boolean = false
-    var penColor: String = DEFAULT_PEN_COLOR
-    private var scroll = 0f
-    private val active = mutableListOf<StrokePoint>()
-    private var stylus = false
-    private var lastPan = 0f
-
-    override fun onDraw(canvas: Canvas) {
-        canvas.drawColor(android.graphics.Color.parseColor("#F7F6F3"))
-        val scale = scale()
-        canvas.save()
-        canvas.translate(0f, -scroll)
-        canvas.scale(scale, scale)
-        if (document.paperStyle == "dots" || document.paperStyle.isBlank()) drawDots(canvas)
-        document.strokes.forEach { drawStroke(canvas, it) }
-        if (active.size > 1) {
-            drawStroke(canvas, InkStroke(active.toList(), DEFAULT_PEN_WIDTH, stylus, penColor, "handwriting", "fineliner"))
+/** Native phone paper; all stored points use the shared 0–1 contract. */
+class CompanionInkView(context: Context, val session: InkSession, private val onChange: () -> Unit) : View(context) {
+    var eraser = false
+    var panning = false
+    var readOnly = false
+    var penColor = DEFAULT_PEN_COLOR
+    var penWidth = DEFAULT_PEN_WIDTH
+    private var scrollYPage = 0f
+    private var scrollXPage = 0f
+    private var zoom = 1f
+    private var lastX = 0f
+    private var lastY = 0f
+    private var lastStylusAt = 0L
+    private var drawing = false
+    private var erasing = false
+    private var navigating = false
+    private var penPointer = -1
+    private val paperPaint = Paint().apply { color = 0xFFFCFBF7.toInt() }
+    private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+    private val rulingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFD8DDD9.toInt(); strokeWidth = 1f }
+    private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScale(detector: ScaleGestureDetector): Boolean {
+            val oldScale = scale()
+            val x = (detector.focusX + scrollXPage) / oldScale
+            val y = (detector.focusY + scrollYPage) / oldScale
+            zoom = (zoom * detector.scaleFactor).coerceIn(1f, 4f)
+            scrollXPage = x * scale() - detector.focusX
+            scrollYPage = y * scale() - detector.focusY
+            clampScroll(); invalidate(); return true
         }
+    })
+    init { isFocusable = true; contentDescription = "Handwriting page. Use the pen to draw, or two fingers to move and zoom." }
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paperPaint)
+        val doc = session.document
+        val factor = scale()
+        canvas.save(); canvas.translate(-scrollXPage, -scrollYPage); canvas.scale(factor, factor)
+        val top = (scrollYPage / factor).coerceAtLeast(0f)
+        val bottom = ((scrollYPage + height) / factor).coerceAtMost(doc.sourceHeight.toFloat())
+        val left = (scrollXPage / factor).coerceAtLeast(0f)
+        val right = ((scrollXPage + width) / factor).coerceAtMost(doc.sourceWidth.toFloat())
+        val step = if (doc.paperStyle == "millimeter") 9f else 24f
+        var y = (top / step).toInt() * step
+        while (y <= bottom) {
+            when (doc.paperStyle) {
+                "dots", "" -> {
+                    var x = (left / step).toInt() * step
+                    while (x <= right) { canvas.drawCircle(x, y, 1.3f, rulingPaint); x += step }
+                }
+                "lines", "squares", "grid", "millimeter" -> canvas.drawLine(left, y, right, y, rulingPaint)
+            }
+            y += step
+        }
+        if (doc.paperStyle in listOf("squares", "grid", "millimeter")) {
+            var x = (left / step).toInt() * step
+            while (x <= right) { canvas.drawLine(x, top, x, bottom, rulingPaint); x += step }
+        }
+        doc.strokes.forEach { drawStroke(canvas, it) }
+        if (drawing && !erasing) drawStroke(canvas, InkStroke(session.livePoints, penWidth, penPointer >= 0, penColor, "handwriting", "fineliner"))
         canvas.restore()
     }
-
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        val scale = scale()
-        stylus = event.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS
-        if (panning || event.pointerCount > 1) {
+        val stylusIndex = (0 until event.pointerCount).firstOrNull { event.getToolType(it) in listOf(MotionEvent.TOOL_TYPE_STYLUS, MotionEvent.TOOL_TYPE_ERASER) }
+        val index = stylusIndex ?: 0
+        val stylus = stylusIndex != null
+        if (!stylus && event.eventTime - lastStylusAt < POST_PEN_IGNORE_MS) return true
+        if (stylus) lastStylusAt = event.eventTime
+        parent?.requestDisallowInterceptTouchEvent(true)
+        if (!stylus) scaleDetector.onTouchEvent(event)
+        val pan = readOnly || panning || (!stylus && event.pointerCount > 1) || navigating
+        if (pan) {
+            if (drawing) { session.beginStroke(); session.endErase(); drawing = false }
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> lastPan = event.y
-                MotionEvent.ACTION_MOVE -> {
-                    scroll = (scroll - (event.y - lastPan)).coerceIn(0f, maxScroll(scale))
-                    lastPan = event.y
-                    invalidate()
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> { lastX = event.x; lastY = event.y; navigating = true }
+                MotionEvent.ACTION_MOVE -> if (!scaleDetector.isInProgress) {
+                    scrollXPage -= event.x - lastX; scrollYPage -= event.y - lastY
+                    lastX = event.x; lastY = event.y; clampScroll(); invalidate()
                 }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { navigating = false; performClick() }
             }
             return true
         }
-        val pageX = (event.x / scale).toDouble()
-        val pageY = ((event.y + scroll) / scale).toDouble()
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                if (eraser) erase(pageX, pageY) else {
-                    active.clear()
-                    active += point(event, pageX, pageY)
-                }
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                if (event.actionIndex != index) return true
+                drawing = true
+                penPointer = if (stylus) event.getPointerId(index) else -1
+                erasing = eraser || event.getToolType(index) == MotionEvent.TOOL_TYPE_ERASER || (stylus && event.buttonState and (MotionEvent.BUTTON_STYLUS_PRIMARY or MotionEvent.BUTTON_STYLUS_SECONDARY) != 0)
+                if (erasing) session.beginErase() else session.beginStroke()
+                sample(event, index)
             }
-            MotionEvent.ACTION_MOVE -> {
-                if (eraser) erase(pageX, pageY) else {
-                    val history = event.historySize
-                    for (index in 0 until history) {
-                        val x = (event.getHistoricalX(index) / scale).toDouble()
-                        val y = ((event.getHistoricalY(index) + scroll) / scale).toDouble()
-                        active += point(event, x, y, event.getHistoricalEventTime(index).toDouble(), event.getHistoricalPressure(index))
-                    }
-                    active += point(event, pageX, pageY)
-                }
+            MotionEvent.ACTION_MOVE -> if (drawing) {
+                for (history in 0 until event.historySize) sample(event, index, history)
+                sample(event, index)
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (!eraser && active.size > 1) {
-                    val stroke = InkStroke(
-                        points = active.toList(),
-                        baseWidth = DEFAULT_PEN_WIDTH,
-                        pressureEnabled = stylus,
-                        color = penColor,
-                        purpose = "handwriting",
-                        brush = "fineliner",
-                    )
-                    document = document.copy(strokes = document.strokes + stroke, updatedAt = isoNow())
-                    onChange(document)
-                }
-                active.clear()
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> if (drawing && event.actionIndex == index) {
+                sample(event, index)
+                if (erasing) session.endErase() else session.endStroke(StrokeStyle(color = penColor, baseWidth = penWidth, pressureEnabled = stylus), isoNow())
+                drawing = false; onChange(); performClick()
             }
+            MotionEvent.ACTION_CANCEL -> { session.beginStroke(); session.endErase(); drawing = false }
         }
-        invalidate()
-        return true
+        invalidate(); return true
     }
-
-    private fun erase(x: Double, y: Double) {
-        val kept = document.strokes.filterNot { stroke ->
-            stroke.points.any { hypot(it.x - x, it.y - y) < 28.0 }
-        }
-        if (kept.size != document.strokes.size) {
-            document = document.copy(strokes = kept, updatedAt = isoNow())
-            onChange(document)
-        }
+    private fun sample(event: MotionEvent, index: Int, history: Int = -1) {
+        val doc = session.document
+        val x = if (history < 0) event.getX(index) else event.getHistoricalX(index, history)
+        val y = if (history < 0) event.getY(index) else event.getHistoricalY(index, history)
+        val pressure = if (history < 0) event.getPressure(index) else event.getHistoricalPressure(index, history)
+        val tilt = tiltDegrees(event.getAxisValue(MotionEvent.AXIS_TILT, index), event.getAxisValue(MotionEvent.AXIS_ORIENTATION, index))
+        val point = StrokePoint(((x + scrollXPage) / scale() / doc.sourceWidth).coerceIn(0.0, 1.0), ((y + scrollYPage) / scale() / doc.sourceHeight).coerceIn(0.0, 1.0),
+            (if (history < 0) event.eventTime else event.getHistoricalEventTime(history)).toDouble(), pressure.toDouble().coerceIn(0.0, 1.0), tilt.first.toDouble(), tilt.second.toDouble(),
+            if (penPointer >= 0) "pen" else if (event.getToolType(index) == MotionEvent.TOOL_TYPE_MOUSE) "mouse" else "touch")
+        if (erasing) { if (session.eraseSamples(listOf(point), 22.0, isoNow())) onChange() } else session.addSample(point)
     }
-
-    private fun point(event: MotionEvent, x: Double, y: Double, time: Double = event.eventTime.toDouble(), pressure: Float = event.pressure): StrokePoint =
-        StrokePoint(
-            x = x,
-            y = y,
-            t = time,
-            pressure = if (stylus) pressure.toDouble().coerceIn(0.05, 1.0) else 0.5,
-            tiltX = event.getAxisValue(MotionEvent.AXIS_TILT).toDouble(),
-            tiltY = 0.0,
-            pointerType = if (stylus) "pen" else "touch",
-        )
-
     private fun drawStroke(canvas: Canvas, stroke: InkStroke) {
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeCap = Paint.Cap.ROUND
-            strokeJoin = Paint.Join.ROUND
-            color = runCatching { android.graphics.Color.parseColor(stroke.color) }.getOrDefault(android.graphics.Color.BLACK)
-            alpha = ((stroke.opacity ?: 1.0) * 255).toInt().coerceIn(0, 255)
-        }
+        val doc = session.document
         val points = stroke.points
-        for (index in 1 until points.size) {
-            paint.strokeWidth = pressureWidth(stroke.baseWidth, points[index].pressure, stroke.pressureEnabled).toFloat()
-            canvas.drawLine(points[index - 1].x.toFloat(), points[index - 1].y.toFloat(), points[index].x.toFloat(), points[index].y.toFloat(), paint)
+        if (points.isEmpty()) return
+        strokePaint.color = runCatching { android.graphics.Color.parseColor(stroke.color) }.getOrDefault(0xFF202333.toInt())
+        strokePaint.alpha = ((stroke.opacity ?: 1.0) * 255).toInt().coerceIn(0, 255)
+        for (i in 1 until points.size) {
+            val a = points[i - 1]; val b = points[i]
+            strokePaint.strokeWidth = pressureWidth(stroke.baseWidth, b.pressure, stroke.pressureEnabled).toFloat()
+            canvas.drawLine((a.x * doc.sourceWidth).toFloat(), (a.y * doc.sourceHeight).toFloat(), (b.x * doc.sourceWidth).toFloat(), (b.y * doc.sourceHeight).toFloat(), strokePaint)
+        }
+        if (points.size == 1) {
+            val point = points.first()
+            strokePaint.style = Paint.Style.FILL
+            canvas.drawCircle((point.x * doc.sourceWidth).toFloat(), (point.y * doc.sourceHeight).toFloat(), max(1f, stroke.baseWidth.toFloat() / 2), strokePaint)
+            strokePaint.style = Paint.Style.STROKE
         }
     }
-
-    private fun drawDots(canvas: Canvas) {
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.parseColor("#D5D3CC") }
-        var y = 36.0
-        while (y < document.sourceHeight) {
-            var x = 36.0
-            while (x < document.sourceWidth) {
-                canvas.drawCircle(x.toFloat(), y.toFloat(), 1.4f, paint)
-                x += 24.0
-            }
-            y += 24.0
-        }
+    private fun scale() = width.coerceAtLeast(1).toFloat() / session.document.sourceWidth.toFloat().coerceAtLeast(1f) * zoom
+    private fun clampScroll() {
+        scrollXPage = scrollXPage.coerceIn(0f, (session.document.sourceWidth * scale() - width).toFloat().coerceAtLeast(0f))
+        scrollYPage = scrollYPage.coerceIn(0f, (session.document.sourceHeight * scale() - height).toFloat().coerceAtLeast(0f))
     }
-
-    private fun scale(): Float = width.coerceAtLeast(1).toFloat() / document.sourceWidth.toFloat().coerceAtLeast(1f)
-    private fun maxScroll(scale: Float): Float = (document.sourceHeight.toFloat() * scale - height).coerceAtLeast(0f)
+    override fun performClick(): Boolean { super.performClick(); return true }
 }

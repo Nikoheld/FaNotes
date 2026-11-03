@@ -100,6 +100,9 @@ class CompanionGraph(private val context: Context) {
     val gate = SchulnetzGate()
     val loginRequests = MutableSharedFlow<Intent>(extraBufferCapacity = 1)
     val notices = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val vaultChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    fun localAccess(): Boolean = prefs.getBoolean("local-access", false)
+    fun setLocalAccess(enabled: Boolean) { prefs.edit().putBoolean("local-access", enabled).apply() }
     @Volatile var signedOut: Boolean = false
     @Volatile var oauthPermitted: Boolean = false
     @Volatile var viewingSession: Boolean = false
@@ -116,7 +119,7 @@ class CompanionGraph(private val context: Context) {
             deviceName = { prefs.getString("device-name", null)?.ifBlank { null } ?: "FaNotes Companion" },
             automatic = { true },
             isPathBusy = { path -> path in busyPaths },
-            onApplied = { _, _ -> scope.launch { /* vault changed remotely */ } },
+            onApplied = { _, _ -> vaultChanges.tryEmit(Unit) },
         ),
     )
 
@@ -149,6 +152,10 @@ class CompanionGraph(private val context: Context) {
 
     fun setBaseUrl(value: String) {
         val normal = normalizeSchoolBase(value) ?: return
+        if (normal != baseUrl()) {
+            prefs.edit().remove("web-session").apply()
+            signedOut = true
+        }
         prefs.edit().putString("schulnetz-base", normal).apply()
     }
 
@@ -177,6 +184,7 @@ class CompanionGraph(private val context: Context) {
     }
 
     suspend fun refreshSchulnetz(caller: String = "unspecified") {
+        if (schoolDisconnected()) return
         schulnetzLog.info("refresh queued caller=$caller lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()}")
         withContext(Dispatchers.IO) {
             gate.exclusive("refresh:$caller") {
@@ -259,7 +267,8 @@ class CompanionGraph(private val context: Context) {
 
     fun homework(): HomeworkDocument {
         val text = vault.read(HOMEWORK_NOTE_PATH)?.decodeToString() ?: return HomeworkDocument(emptyList())
-        return parseHomeworkMarkdown(text)
+        return (loadHomeworkMarkdown(text) as? NoteMarkdownLoad.Ready)?.document
+            ?: throw IllegalStateException("Your task file could not be read. It has been kept unchanged.")
     }
 
     fun setHomeworkDone(id: String, done: Boolean) {
@@ -273,7 +282,7 @@ class CompanionGraph(private val context: Context) {
     private fun patchHomework(id: String, edit: (HomeworkTask) -> HomeworkTask) {
         val existing = vault.read(HOMEWORK_NOTE_PATH)?.decodeToString()
         val loaded = existing?.let(::loadHomeworkMarkdown)
-        if (loaded is NoteMarkdownLoad.Unreadable) return
+        if (loaded is NoteMarkdownLoad.Unreadable) error("Your task file could not be read. It has been kept unchanged.")
         val document = (loaded as? NoteMarkdownLoad.Ready)?.document ?: HomeworkDocument(emptyList())
         val now = isoNow()
         val tasks = document.tasks.map { task ->
@@ -285,16 +294,17 @@ class CompanionGraph(private val context: Context) {
 
     fun importHomework(title: String, subject: String, due: String, notes: String) {
         val existing = vault.read(HOMEWORK_NOTE_PATH)?.decodeToString()
-        if (existing != null && loadHomeworkMarkdown(existing) is NoteMarkdownLoad.Unreadable) return
+        if (existing != null && loadHomeworkMarkdown(existing) is NoteMarkdownLoad.Unreadable) error("Your task file could not be read. It has been kept unchanged.")
         val document = existing?.let(::parseHomeworkMarkdown) ?: HomeworkDocument(emptyList())
-        if (document.tasks.any { it.title == title && it.dueDate == due.ifBlank { null } }) return
+        val dueDate = parseDisplayDate(due)?.toString()
+        if (document.tasks.any { it.title == title && it.subject == subject && it.dueDate == dueDate }) return
         val now = isoNow()
         val task = HomeworkTask(
-            id = "schulnetz-${title.hashCode().toUInt().toString(16)}",
+            id = "schulnetz-${java.util.UUID.randomUUID()}",
             title = title,
             notes = notes,
             subject = subject,
-            dueDate = due.ifBlank { null },
+            dueDate = dueDate,
             createdAt = now,
             updatedAt = now,
         )
@@ -304,12 +314,13 @@ class CompanionGraph(private val context: Context) {
 
     fun calendar(): CalendarDocument {
         val text = vault.read(CALENDAR_NOTE_PATH)?.decodeToString() ?: return emptyCalendar()
-        return parseCalendarMarkdown(text)
+        return (loadCalendarMarkdown(text) as? NoteMarkdownLoad.Ready)?.document
+            ?: throw IllegalStateException("Your calendar file could not be read. It has been kept unchanged.")
     }
 
     fun importExam(event: AgendaEvent) {
         val existing = vault.read(CALENDAR_NOTE_PATH)?.decodeToString()
-        if (existing != null && loadCalendarMarkdown(existing) is NoteMarkdownLoad.Unreadable) return
+        if (existing != null && loadCalendarMarkdown(existing) is NoteMarkdownLoad.Unreadable) error("Your calendar file could not be read. It has been kept unchanged.")
         val document = existing?.let(::parseCalendarMarkdown) ?: emptyCalendar()
         val id = "schulnetz-${event.id}"
         if (document.events.any { it.id == id }) return
@@ -325,6 +336,31 @@ class CompanionGraph(private val context: Context) {
             notes = event.comment,
         )
         vault.write(CALENDAR_NOTE_PATH, serializeCalendarMarkdown(CalendarDocument(calendars, document.events + added)).encodeToByteArray())
+        engine.notifyLocalChange()
+    }
+
+    fun saveHomeworkTask(task: HomeworkTask) {
+        val current = homework()
+        val now = isoNow()
+        val next = task.copy(updatedAt = now, createdAt = task.createdAt.ifBlank { now })
+        val tasks = if (current.tasks.any { it.id == task.id }) current.tasks.map { if (it.id == task.id) next else it } else current.tasks + next
+        vault.write(HOMEWORK_NOTE_PATH, serializeHomeworkMarkdown(current.copy(tasks = tasks)).encodeToByteArray())
+        engine.notifyLocalChange()
+    }
+    fun deleteHomeworkTask(id: String) {
+        val current = homework()
+        vault.write(HOMEWORK_NOTE_PATH, serializeHomeworkMarkdown(current.copy(tasks = current.tasks.filterNot { it.id == id })).encodeToByteArray())
+        engine.notifyLocalChange()
+    }
+    fun saveCalendarEvent(event: CalendarEvent) {
+        val current = calendar()
+        val events = if (current.events.any { it.id == event.id }) current.events.map { if (it.id == event.id) event else it } else current.events + event
+        vault.write(CALENDAR_NOTE_PATH, serializeCalendarMarkdown(current.copy(events = events)).encodeToByteArray())
+        engine.notifyLocalChange()
+    }
+    fun deleteCalendarEvent(id: String) {
+        val current = calendar()
+        vault.write(CALENDAR_NOTE_PATH, serializeCalendarMarkdown(current.copy(events = current.events.filterNot { it.id == id })).encodeToByteArray())
         engine.notifyLocalChange()
     }
 
@@ -405,6 +441,7 @@ class CompanionGraph(private val context: Context) {
     }
 
     suspend fun keepAlive() {
+        if (schoolDisconnected()) return
         if (!usesWebsiteSession(baseUrl())) return
         val session = readWebSession() ?: return
         if (session.id.isBlank()) return
@@ -610,6 +647,7 @@ class CompanionGraph(private val context: Context) {
     suspend fun runVisibleLogin(caller: String) {
         schulnetzLog.info("visible login queued caller=$caller lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()}")
         gate.exclusive("visible-login:$caller") {
+            prefs.edit().putBoolean("school-disconnected", false).apply()
             schulnetzLog.info("visible login acquired caller=$caller lockHeld=true holder=${gate.holder.orEmpty()}")
             var openOauth = signedOut || readWebSession() == null
             if (!openOauth) {
@@ -837,6 +875,17 @@ class CompanionGraph(private val context: Context) {
             append('}')
         }
         vault.write(LOCAL_TOKEN_PATH, body.encodeToByteArray())
+    }
+
+    fun schoolDisconnected(): Boolean = prefs.getBoolean("school-disconnected", false)
+
+    fun disconnectSchool() {
+        prefs.edit().putBoolean("school-disconnected", true).remove("web-session").remove("push-topic").remove("push-server").apply()
+        signedOut = true
+        clearLocalLink()
+        NtfyListenService.stop(context)
+        CompanionAlerts.forget(context, "schulnetz-login-required")
+        link.value = SchulnetzLinkState(baseUrl = baseUrl())
     }
 
     fun clearLocalLink() {

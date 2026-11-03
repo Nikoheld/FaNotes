@@ -3,22 +3,24 @@
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/widget_background"
+    android:background="@drawable/widget_surface"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:padding="16dp">
     <TextView
         android:id="@+id/widget_kicker"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Nächste Lektion"
+        android:text="@string/widget_name"
         android:textColor="@color/widget_accent"
         android:textSize="12sp" />
     <TextView
         android:id="@+id/widget_title"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:paddingTop="2dp"
+        android:paddingTop="4dp"
         android:text="FaNotes"
+        android:maxLines="2"
+        android:ellipsize="end"
         android:textColor="@color/widget_text"
         android:textSize="18sp"
         android:textStyle="bold" />
@@ -26,8 +28,10 @@
         android:id="@+id/widget_detail"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:paddingTop="2dp"
+        android:paddingTop="4dp"
         android:text=""
+        android:maxLines="3"
+        android:ellipsize="end"
         android:textColor="@color/widget_muted"
         android:textSize="14sp" />
 </LinearLayout>

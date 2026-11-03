@@ -54,4 +54,4 @@ android/app         Tablet UI, ink surface, storage, OkHttp, foreground sync
 android/companion   Phone UI: notes, ink, calendar, homework, Schulnetz
 ```
 
-The companion (`ch.fasrv.fanotes.companion`) is a separate phone app. It reuses `:core` for the vault, ink format and sync, and adds a German one-handed layout. Schulnetz login stays read-only. Server deploy steps are in `server-changes/schulnetz-companion/README.md`.
+The companion (`ch.fasrv.fanotes.companion`) is a separate phone app. It reuses `:core` for the vault, ink format and sync, and provides a phone-first Today, Planner, Notes and School experience. The redesign and validation are documented in [companion/README.md](companion/README.md). Schulnetz login stays read-only. Server deploy steps are in `server-changes/schulnetz-companion/README.md`.

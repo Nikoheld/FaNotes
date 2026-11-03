@@ -86,6 +86,7 @@ object CompanionAlerts {
     }
 
     fun show(context: Context, change: SchulnetzChange) {
+        if (change.category != "settings" && context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE).getBoolean("school-disconnected", false)) return
         if (change.id.isBlank() || !remember(context, change.id)) return
         val hidden = runCatching {
             val file = java.io.File(context.filesDir, "vault/${CompanionGraph.HIDDEN_PATH}")
@@ -298,18 +299,20 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
             val next = snapshot?.let { nextUp(visibleEvents(it.events, hidden, zone), java.time.Instant.now(), zone) }
             views.setViewVisibility(R.id.widget_kicker, if (compact) android.view.View.GONE else android.view.View.VISIBLE)
             if (next == null) {
-                views.setTextViewText(R.id.widget_title, "Keine Lektion")
-                views.setTextViewText(R.id.widget_detail, "Schulnetz öffnen")
+                views.setTextViewText(R.id.widget_title, "No upcoming lesson")
+                views.setTextViewText(R.id.widget_detail, "Open FaNotes")
             } else {
                 val start = next.startsAt(zone)?.atZone(zone)?.toLocalTime()?.format(CLOCK).orEmpty()
                 val end = next.endsAt(zone)?.atZone(zone)?.toLocalTime()?.format(CLOCK).orEmpty()
                 val time = if (end.isBlank() || end == start) start else "$start–$end"
-                val room = if (next.room.isBlank()) "" else "Raum ${next.room}"
-                val state = if (next.isCancelled()) "fällt aus" else if (next.isSubstitution()) "Vertretung" else ""
+                val room = if (next.room.isBlank()) "" else "Room ${next.room}"
+                val state = if (next.isCancelled()) "Cancelled" else if (next.isSubstitution()) "Substitution" else ""
                 views.setTextViewText(R.id.widget_title, next.label)
                 views.setTextViewText(R.id.widget_detail, if (compact) time else listOf(time, room, state).filter { it.isNotBlank() }.joinToString(" · "))
             }
-            val open = PendingIntent.getActivity(context, 1, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val target = if (next == null) Intent(context, MainActivity::class.java) else CompanionAlerts.notifyIntent(context,
+                ch.fasrv.fanotes.schulnetz.linkedChange("widget-next", "timetable", "", "", ch.fasrv.fanotes.schulnetz.lessonTargetId(next), date = ch.fasrv.fanotes.schulnetz.eventDay(next)))
+            val open = PendingIntent.getActivity(context, 1, target, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.widget_root, open)
             ids.forEach { manager.updateAppWidget(it, views) }
         }

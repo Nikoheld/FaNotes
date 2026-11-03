@@ -37,6 +37,8 @@ import ch.fasrv.fanotes.schulnetz.usesWebsiteSession
 import ch.fasrv.fanotes.schulnetz.webLoginUrl
 import ch.fasrv.fanotes.vault.VaultNode
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.webkit.CookieManager
@@ -45,14 +47,77 @@ import java.net.URI
 import java.time.LocalDate
 import java.util.UUID
 
-enum class PhoneTab { Heute, Plan, Noten, Notizen, Mehr }
-enum class PhoneSection { Menu, Hausaufgaben, Kalender, Absenzen, Pruefungen, Termine, Konto, Einstellungen, Editor }
-
 class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var desk by mutableStateOf(graph.deskPrefs())
     var hidden by mutableStateOf(graph.hiddenLessons())
-    var tab by mutableStateOf(startTab(graph.deskPrefs().startTab))
-    var section by mutableStateOf(PhoneSection.Menu)
+    var route by mutableStateOf(CompanionRoute(destinationFor(graph.deskPrefs().startTab), if (graph.deskPrefs().startTab == "Noten") Page.Grades else null))
+        private set
+    private var history = emptyList<CompanionRoute>()
+    var localAccess by mutableStateOf(graph.localAccess())
+    var plannerTasks by mutableStateOf(false)
+    var taskSource by mutableStateOf("open")
+    var tree by mutableStateOf<List<VaultNode>>(emptyList())
+    var loading by mutableStateOf(true)
+    var loadError by mutableStateOf<String?>(null)
+    var editor by mutableStateOf<NoteEditorController?>(null)
+        private set
+    private val writes = kotlinx.coroutines.sync.Mutex()
+    private var reloadJob: kotlinx.coroutines.Job? = null
+    private var deskGeneration = 0L
+    private var deskPending = 0
+    private val searchCache = object : android.util.LruCache<String, Pair<Long, String>>(8 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: Pair<Long, String>) = value.second.length.coerceAtMost(Int.MAX_VALUE / 2) * 2
+    }
+
+    fun select(destination: Destination) {
+        history = emptyList()
+        route = CompanionRoute(destination)
+        highlightIds = emptySet()
+        focusCourseId = ""
+    }
+    fun navigate(page: Page) {
+        history = history + route
+        route = route.copy(page = page)
+    }
+    fun back() {
+        if (history.isNotEmpty()) {
+            route = history.last()
+            history = history.dropLast(1)
+        } else if (route.page != null) route = route.copy(page = if (route.page == Page.Course) Page.Grades else null)
+        else if (route.destination == Destination.Notes && noteFolder.isNotBlank()) openFolder(noteFolder.substringBeforeLast('/', ""))
+        else if (route.destination != Destination.Today) select(Destination.Today)
+    }
+    fun continueLocally() { localAccess = true; graph.setLocalAccess(true); message = null }
+    fun openPlanner(tasks: Boolean = false, date: LocalDate = LocalDate.now()) {
+        select(Destination.Planner); plannerTasks = tasks; day = date
+    }
+    fun openFolder(path: String) { noteFolder = path; reload() }
+    fun openNote(path: String) {
+        editorPath = path
+        editor = NoteEditorController(graph, viewModelScope, path)
+        navigate(Page.Editor)
+    }
+    fun closeEditor() {
+        val current = editor ?: return
+        viewModelScope.launch {
+            if (current.close()) { editor = null; editorPath = null; back(); reload() }
+        }
+    }
+    fun perform(success: String? = null, onSuccess: () -> Unit = {}, action: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                writes.lock()
+                try { withContext(Dispatchers.IO) { action() } } finally { writes.unlock() }
+                onSuccess()
+                reload()
+                if (success != null) message = success
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                reload()
+                message = error.message ?: "Could not save. Please try again."
+            }
+        }
+    }
     var message by mutableStateOf<String?>(null)
     var busy by mutableStateOf(false)
     var email by mutableStateOf("")
@@ -69,7 +134,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var instant by mutableStateOf(graph.instantPush())
     var baseUrl by mutableStateOf(graph.baseUrl())
     var settings by mutableStateOf(graph.notifySettings())
-    var day by mutableStateOf(timetableAnchor(LocalDate.now()))
+    var day by mutableStateOf(LocalDate.now())
     var editorPath by mutableStateOf<String?>(null)
     var debugHtml by mutableStateOf("")
     var highlightIds by mutableStateOf<Set<String>>(emptySet())
@@ -78,38 +143,61 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     init {
         viewModelScope.launch { graph.snapshot.collect { snapshot = it } }
         viewModelScope.launch { graph.link.collect { link = it } }
+        viewModelScope.launch { graph.vaultChanges.collectLatest { kotlinx.coroutines.delay(200); reload() } }
         reload()
     }
 
     fun reload() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val nextNotes = runCatching {
-                graph.logNoteCensus()
-                val folder = if (graph.noteFolderExists(noteFolder)) noteFolder else ""
-                graph.notes(folder)
-            }.getOrDefault(emptyList())
-            val nextTasks = runCatching { graph.homework().tasks }.getOrDefault(emptyList())
-            val nextCalendar = runCatching { graph.calendar() }.getOrDefault(emptyCalendar())
-            val nextGuess = runCatching { graph.hypothetical() }.getOrDefault(emptyList())
-            val counted = runCatching { graph.writtenNoteCount() }.getOrDefault(0)
-            val nextDesk = runCatching { graph.deskPrefs() }.getOrDefault(desk)
-            val nextHidden = runCatching { graph.hiddenLessons() }.getOrDefault(hidden)
-            withContext(Dispatchers.Main) {
-                if (!graph.noteFolderExists(noteFolder)) noteFolder = ""
-                notes = nextNotes
-                writtenNotes = counted
-                tasks = nextTasks
-                calendar = nextCalendar
-                hypothetical = nextGuess
-                desk = nextDesk
-                hidden = nextHidden
-            }
+        val generation = deskGeneration
+        reloadJob?.cancel()
+        reloadJob = viewModelScope.launch {
+            try {
+                val data = withContext(Dispatchers.IO) {
+                    val nextTree = graph.store.tree()
+                    val folder = if (ch.fasrv.fanotes.vault.folderExists(nextTree, noteFolder)) noteFolder else ""
+                    Reloaded(nextTree, folder, ch.fasrv.fanotes.vault.folderChildren(nextTree, folder).filter { it.path !in setOf(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH) },
+                        runCatching { graph.homework().tasks }, runCatching { graph.calendar() }, graph.hypothetical(), graph.writtenNoteCount(), graph.deskPrefs(), graph.hiddenLessons())
+                }
+                tree = data.tree; noteFolder = data.folder; notes = data.notes
+                data.tasks.getOrNull()?.let { tasks = it }; data.calendar.getOrNull()?.let { calendar = it }
+                hypothetical = data.guesses; writtenNotes = data.count; hidden = data.hidden
+                if (generation == deskGeneration && deskPending == 0) desk = data.desk
+                loadError = listOfNotNull(data.tasks.exceptionOrNull()?.message, data.calendar.exceptionOrNull()?.message).joinToString("\n").ifBlank { null }
+                val paths = flattenNotes(tree).map { it.path }.toSet()
+                searchCache.snapshot().keys.filterNot { it in paths }.forEach { searchCache.remove(it) }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                loadError = error.message ?: "Could not read your local library." }
+            finally { loading = false }
         }
+    }
+
+    private data class Reloaded(val tree: List<VaultNode>, val folder: String, val notes: List<VaultNode>, val tasks: Result<List<HomeworkTask>>,
+        val calendar: Result<CalendarDocument>, val guesses: List<HypotheticalGrade>, val count: Int, val desk: DeskPrefs, val hidden: List<HiddenLesson>)
+
+    suspend fun loadPreview(node: VaultNode): NotePreview = withContext(Dispatchers.IO) {
+        val note = graph.store.readNote(node.path)
+        NotePreview(noteExcerpt(note.markdown, note.title), note.document)
+    }
+    suspend fun findNotes(query: String): List<NoteResult> = withContext(Dispatchers.IO) {
+        flattenNotes(tree).mapNotNull { node ->
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            val cached = searchCache.get(node.path)
+            val body = if (cached?.first == node.modifiedAt) cached.second else {
+                val note = graph.store.readNote(node.path)
+                searchableNoteText(note.markdown, note.document.extras.string("searchTranscript").orEmpty()).also { searchCache.put(node.path, node.modifiedAt to it) }
+            }
+            if (node.name.contains(query, true) || body.contains(query, true)) {
+                val index = body.indexOf(query, ignoreCase = true).coerceAtLeast(0)
+                NoteResult(node, plainPreview(body.substring((index - 30).coerceAtLeast(0))))
+            } else null
+        }.take(200)
     }
 
     fun login(register: Boolean) {
         if (email.isBlank() || password.isBlank()) {
-            message = "E-Mail und Passwort ausfüllen."
+            message = "Enter your email and password."
             return
         }
         busy = true
@@ -118,10 +206,14 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 if (register) graph.engine.register(email.trim(), password) else graph.engine.login(email.trim(), password)
                 graph.engine.syncNow("phone")
                 runCatching { graph.refreshSchulnetz("fa-notes-login") }
+                continueLocally()
+                password = ""
                 reload()
                 message = null
+                if (route.page == Page.Auth) back()
             } catch (error: Exception) {
-                message = error.message ?: "Anmeldung fehlgeschlagen."
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message = error.message ?: "Sign in failed."
             } finally {
                 busy = false
             }
@@ -135,9 +227,10 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 graph.engine.syncNow("phone")
                 graph.refreshSchulnetz("sync-button")
                 reload()
-                message = "Synchronisiert."
+                message = syncDescription(graph.engine.state.value.status)
             } catch (error: Exception) {
-                message = error.message ?: "Sync fehlgeschlagen."
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message = error.message ?: "Sync failed. Your local data is available."
             } finally {
                 busy = false
             }
@@ -151,29 +244,20 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         }
     }
 
-    fun schulnetzIntent(context: Context): Intent? {
+    fun requestVisibleLogin(caller: String) {
+        if (busy) return
         val base = normalizeSchoolBase(baseUrl)
-        if (base == null) {
-            message = "Diese Schulnetz-Adresse ist nicht erlaubt."
-            return null
-        }
+        if (base == null) { message = "This school address is not supported."; return }
+        if (!usesWebsiteSession(base)) { message = "Web sign-in is not available for this school."; return }
         graph.setBaseUrl(base)
         baseUrl = base
-        if (!usesWebsiteSession(base)) {
-            message = "Diese Schule nutzt die Web-Anmeldung noch nicht."
-            return null
-        }
-        val host = runCatching { URI(base).host }.getOrNull() ?: return null
-        return Intent(context, SchulnetzLoginActivity::class.java)
-            .putExtra(SchulnetzLoginActivity.EXTRA_URL, webLoginUrl(base))
-            .putExtra(SchulnetzLoginActivity.EXTRA_HOST, host)
-            .putExtra(SchulnetzLoginActivity.EXTRA_BASE, base)
-    }
-
-    fun requestVisibleLogin(caller: String) {
+        busy = true
         viewModelScope.launch {
-            graph.runVisibleLogin(caller)
-            debugHtml = graph.debugHtml()
+            try { graph.runVisibleLogin(caller) }
+            catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message = "Could not open school sign-in. Please try again."
+            } finally { busy = false }
         }
     }
 
@@ -187,17 +271,17 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         if (web == null) {
             graph.schulnetzLog.info("visible login bridge empty url=${redactSchulnetzSecrets(url)} cookieNames=${cookieNames(CookieManager.getInstance().getCookie(baseUrl).orEmpty()).joinToString("|")}")
             graph.finishVisibleLogin(null)
-            message = "Schulnetz-Anmeldung abgebrochen."
+            message = "School sign-in cancelled."
             return
         }
         graph.finishVisibleLogin(web.copy(phpSessionId = php))
-        message = "Schulnetz ist verbunden. Bei einem IP-Wechsel meldet die App sich neu an."
+        message = "Schulnetz connected."
     }
 
     fun onWebLoginCancelled() {
         val viewing = graph.viewingSession
         graph.finishVisibleLogin(null)
-        if (!viewing) message = "Schulnetz-Anmeldung abgebrochen."
+        if (!viewing) message = "School sign-in cancelled."
     }
 
     fun shareDebug(context: Context) {
@@ -206,18 +290,19 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             try {
                 val raw = debugHtml.ifBlank { graph.debugHtml() }
                 val body = buildString {
-                    if (raw.isBlank()) appendLine("Keine Schulnetz-Seite gespeichert.")
+                    if (raw.isBlank()) appendLine("No school page has been saved.")
                     else append(redactSchulnetzSecrets(raw).take(400_000))
                     appendLine()
                     append(graph.shareMeta())
                 }
                 val file = File(app.cacheDir, "share").apply { mkdirs() }.resolve("schulnetz-seite.html")
                 file.writeText(body)
-                withContext(Dispatchers.Main) { shareFile(app, "HTML teilen", file, "text/html", body.take(20_000)) }
+                withContext(Dispatchers.Main) { shareFile(app, "Share school page", file, "text/html", body.take(20_000)) }
             } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
                 graph.schulnetzLog.error(error)
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(app, "Teilen fehlgeschlagen: ${error.message ?: "unbekannt"}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(app, "Could not share: ${error.message ?: "unknown"}", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -229,23 +314,31 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             try {
                 graph.schulnetzLog.info("share logs")
                 val file = graph.buildShareZip()
-                withContext(Dispatchers.Main) { shareFile(app, "Logs teilen", file, "application/zip", "Schulnetz-Logs") }
+                withContext(Dispatchers.Main) { shareFile(app, "Share diagnostics", file, "application/zip", "School diagnostics") }
             } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
                 graph.schulnetzLog.error(error)
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(app, "Teilen fehlgeschlagen: ${error.message ?: "unbekannt"}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(app, "Could not share: ${error.message ?: "unknown"}", Toast.LENGTH_LONG).show()
                 }
             }
         }
     }
 
     fun unlink() {
+        if (busy) return
+        busy = true
         viewModelScope.launch {
-            val session = graph.engine.currentSession()
-            if (session != null) runCatching { graph.client.unlink(session) }
-            graph.clearLocalLink()
-            graph.link.value = SchulnetzLinkState()
-            message = "Schulnetz getrennt."
+            try {
+                graph.gate.exclusive("disconnect") {
+                    val session = graph.engine.currentSession()
+                    if (session != null) runCatching { graph.client.unlink(session) }
+                    withContext(Dispatchers.IO) { graph.disconnectSchool() }
+                }
+                message = "Schulnetz disconnected."
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) { message = error.message ?: "Could not disconnect school." }
+            finally { busy = false }
         }
     }
 
@@ -257,26 +350,29 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     fun updateDesk(next: DeskPrefs) {
         desk = next
         theme = next.theme
-        graph.saveDeskPrefs(next)
+        deskGeneration++
+        deskPending++
+        viewModelScope.launch {
+            try {
+                writes.lock()
+                try { withContext(Dispatchers.IO) { graph.saveDeskPrefs(next) } } finally { writes.unlock() }
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message = error.message ?: "Could not save your preferences." }
+            finally { deskPending--; if (deskPending == 0) reload() }
+        }
     }
 
     fun hideLesson(event: AgendaEvent, series: Boolean) {
         val next = if (series) hideSeries(event, hidden) else hideOnce(event, hidden)
         hidden = next
-        graph.saveHiddenLessons(next)
+        perform { graph.saveHiddenLessons(next) }
     }
 
     fun restoreLesson(id: String) {
         val next = hidden.filterNot { it.id == id }
         hidden = next
-        graph.saveHiddenLessons(next)
-    }
-
-    fun saveTaskNotes(id: String, notes: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            graph.setHomeworkNotes(id, notes)
-            reload()
-        }
+        perform { graph.saveHiddenLessons(next) }
     }
 
     fun renameCourse(key: String, name: String) {
@@ -306,27 +402,38 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
 
     fun toggleTask(task: HomeworkTask) {
-        viewModelScope.launch(Dispatchers.IO) {
-            graph.setHomeworkDone(task.id, !task.done)
-            reload()
+        tasks = tasks.map { if (it.id == task.id) it.copy(done = !it.done) else it }
+        perform { graph.setHomeworkDone(task.id, !task.done) }
+    }
+    fun saveTask(task: HomeworkTask, onSaved: () -> Unit, onError: (String) -> Unit = { message = it }) {
+        viewModelScope.launch {
+            try {
+                writes.lock()
+                try { withContext(Dispatchers.IO) { graph.saveHomeworkTask(task) } } finally { writes.unlock() }
+                reload(); onSaved(); message = "Task saved"
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                onError(error.message ?: "Could not save task") }
         }
     }
+    fun deleteTask(task: HomeworkTask) = perform("Task deleted") { graph.deleteHomeworkTask(task.id) }
+    fun saveEvent(event: ch.fasrv.fanotes.desk.CalendarEvent, onSaved: () -> Unit, onError: (String) -> Unit = { message = it }) {
+        viewModelScope.launch {
+            try {
+                writes.lock()
+                try { withContext(Dispatchers.IO) { graph.saveCalendarEvent(event) } } finally { writes.unlock() }
+                reload(); onSaved(); message = "Event saved"
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                onError(error.message ?: "Could not save event") }
+        }
+    }
+    fun deleteEvent(event: ch.fasrv.fanotes.desk.CalendarEvent) = perform("Event deleted") { graph.deleteCalendarEvent(event.id) }
 
-    fun importHomework(title: String, subject: String, due: String, notes: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            graph.importHomework(title, subject, due, notes)
-            reload()
-            withContext(Dispatchers.Main) { message = "In die Hausaufgaben übernommen." }
-        }
+    fun importHomework(title: String, subject: String, due: String, notes: String) = perform("Added to your tasks") {
+        graph.importHomework(title, subject, due, notes)
     }
-
-    fun importExam(event: AgendaEvent) {
-        viewModelScope.launch(Dispatchers.IO) {
-            graph.importExam(event)
-            reload()
-            withContext(Dispatchers.Main) { message = "In den Kalender übernommen." }
-        }
-    }
+    fun importExam(event: AgendaEvent) = perform("Added to your calendar") { graph.importExam(event) }
 
     var planWeek by mutableStateOf(false)
     var iconChoice by mutableStateOf(graph.iconChoice())
@@ -349,49 +456,45 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
 
     fun paintSubject(subject: String, color: String) {
-        graph.setSubjectColor(subject, color)
-        colors = graph.subjectColors()
+        colors = colors + ch.fasrv.fanotes.schulnetz.colorKeys(subject).associateWith { color }
+        perform { graph.setSubjectColor(subject, color) }
     }
 
     fun addHypothetical(courseId: String, title: String, mark: Double, weight: Double) {
-        val next = hypothetical + HypotheticalGrade(UUID.randomUUID().toString(), courseId, title.ifBlank { "Hypothetisch" }, mark, weight)
+        val next = hypothetical + HypotheticalGrade(UUID.randomUUID().toString(), courseId, title.ifBlank { "Local mark" }, mark, weight)
         hypothetical = next
-        viewModelScope.launch(Dispatchers.IO) { graph.saveHypothetical(next) }
+        perform { graph.saveHypothetical(next) }
     }
 
     fun clearHypothetical(courseId: String) {
         val next = hypothetical.filter { it.courseId != courseId }
         hypothetical = next
-        viewModelScope.launch(Dispatchers.IO) { graph.saveHypothetical(next) }
+        perform { graph.saveHypothetical(next) }
     }
 
     fun removeHypothetical(id: String) {
         val next = hypothetical.filter { it.id != id }
         hypothetical = next
-        viewModelScope.launch(Dispatchers.IO) { graph.saveHypothetical(next) }
+        perform { graph.saveHypothetical(next) }
     }
 
     fun createNote(title: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val path = graph.store.createUniqueMarkdown(noteFolder, title.ifBlank { "Notiz" })
-            graph.engine.notifyLocalChange()
-            withContext(Dispatchers.Main) {
-                editorPath = path
-                section = PhoneSection.Editor
-                tab = PhoneTab.Notizen
-            }
-            reload()
+        viewModelScope.launch {
+            try {
+                val folder = if (route.destination == Destination.Notes) noteFolder else ""
+                val path = withContext(Dispatchers.IO) { graph.store.createUniqueMarkdown(folder, title.ifBlank { "Untitled" }).also { graph.engine.notifyLocalChange() } }
+                openNote(path); reload()
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message = error.message ?: "Could not create note" }
         }
     }
-
-    fun saveNote(path: String, document: InkDocument, markdown: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val open = graph.store.readNote(path)
-            graph.store.save(open, document, markdown)
-            graph.engine.notifyLocalChange()
-            withContext(Dispatchers.Main) { message = "Notiz gespeichert." }
-        }
-    }
+    fun createFolder(title: String) = perform("Folder created") { graph.store.createFolder(noteFolder, title); graph.engine.notifyLocalChange() }
+    fun renameNote(node: VaultNode, title: String) = perform("Renamed") { graph.store.rename(node.path, title); graph.engine.notifyLocalChange() }
+    fun moveNote(node: VaultNode, folder: String) = perform("Moved") { graph.store.moveEntry(node.path, folder); graph.engine.notifyLocalChange() }
+    fun duplicateNote(node: VaultNode) = perform("Note duplicated") { graph.store.duplicateNote(node.path); graph.engine.notifyLocalChange() }
+    fun trashNote(node: VaultNode) = perform("Moved to recently deleted") { graph.store.trashEntry(node.path, UUID.randomUUID().toString(), ch.fasrv.fanotes.famd.isoNow()); graph.engine.notifyLocalChange() }
+    fun restoreNote(id: String, onRestored: () -> Unit = {}) = perform("Note restored", onRestored) { graph.store.restoreTrash(id); graph.engine.notifyLocalChange() }
 
     fun openNotify(intent: Intent?) {
         if (intent == null) return
@@ -415,9 +518,16 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
 
     fun applyNotify(link: ch.fasrv.fanotes.schulnetz.NotifyLink) {
+        val current = editor
+        if (current == null) applyNotificationRoute(link)
+        else viewModelScope.launch {
+            if (current.close()) { editor = null; editorPath = null; applyNotificationRoute(link) }
+        }
+    }
+    private fun applyNotificationRoute(link: ch.fasrv.fanotes.schulnetz.NotifyLink) {
         val route = ch.fasrv.fanotes.schulnetz.routeNotify(link, snapshot)
-        tab = PhoneTab.entries.firstOrNull { it.name.equals(route.tab, ignoreCase = true) } ?: PhoneTab.Heute
-        section = PhoneSection.entries.firstOrNull { it.name.equals(route.section, ignoreCase = true) } ?: PhoneSection.Menu
+        history = emptyList()
+        this.route = companionRoute(route)
         focusCourseId = route.courseId
         highlightIds = route.highlightIds.toSet()
         if (route.day.isNotBlank()) {
@@ -434,28 +544,28 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             ch.fasrv.fanotes.schulnetz.linkedChange(
                 "push-test",
                 "settings",
-                "Testbenachrichtigung",
-                "FaNotes Companion kann Mitteilungen anzeigen.",
+                "Test notification",
+                "FaNotes Companion can display notifications.",
                 targetId = "settings",
             ),
         )
         viewModelScope.launch {
             val session = graph.engine.currentSession()
             if (session == null) {
-                message = if (CompanionAlerts.notificationsAllowed(context)) "Lokale Testmeldung gesendet." else "Mitteilungen sind ausgeschaltet. Unter Android 13+ zuerst die Berechtigung erlauben."
+                message = if (CompanionAlerts.notificationsAllowed(context)) "Local test notification sent." else "Notifications are off. Allow them in Notification settings."
                 return@launch
             }
             runCatching { graph.client.testPush(session) }
-                .onSuccess { message = "Testbenachrichtigung gesendet." }
+                .onSuccess { message = "Test notification sent." }
                 .onFailure { error ->
-                    message = "Lokal gesendet. Server: ${error.message}"
+                    message = "Local notification sent. Server: ${error.message}"
                 }
         }
     }
 
     fun enablePush(context: Context) {
         val ok = enableUnifiedPush(context)
-        message = if (ok) "UnifiedPush ist verbunden." else "Kein UnifiedPush-Verteiler installiert. Die App nutzt ntfy direkt."
+        message = if (ok) "UnifiedPush connected." else "No UnifiedPush distributor installed. Direct ntfy delivery remains available."
         if (instant) graph.setInstant(true)
     }
 
@@ -466,8 +576,6 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         }
     }
 }
-
-internal fun startTab(raw: String): PhoneTab = PhoneTab.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) } ?: PhoneTab.Heute
 
 internal fun exportSsoCookies(): Map<String, String> {
     val manager = CookieManager.getInstance()
@@ -502,7 +610,8 @@ internal fun shareFile(context: Context, title: String, file: File, mime: String
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
             context.startActivity(chooser)
         } catch (error: Exception) {
-            Toast.makeText(context, "Teilen fehlgeschlagen: ${error.message ?: "unbekannt"}", Toast.LENGTH_LONG).show()
+                if (error is kotlinx.coroutines.CancellationException) throw error
+            Toast.makeText(context, "Could not share: ${error.message ?: "unknown"}", Toast.LENGTH_LONG).show()
         }
     }
     if (Looper.myLooper() == Looper.getMainLooper()) send.run() else Handler(Looper.getMainLooper()).post(send)
@@ -512,3 +621,6 @@ internal fun phpSessionCookie(baseUrl: String): String {
     val raw = CookieManager.getInstance().getCookie(baseUrl).orEmpty()
     return Regex("PHPSESSID=([^;]+)").find(raw)?.groupValues?.get(1).orEmpty()
 }
+
+data class NotePreview(val text: String, val ink: InkDocument)
+data class NoteResult(val node: VaultNode, val excerpt: String)
