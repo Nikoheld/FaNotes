@@ -20,10 +20,10 @@ class TextToHandwritingTest {
     }
 
     @Test
-    fun sharpSFoldsBeforeTheGlyphsAreChosen() {
+    fun sharpSIsPreservedInSynthesis() {
         val result = synthesize( "Straße", variation = 0.0)
-        assertEquals("Strasse", result.normalizedText)
-        assertEquals(7, result.glyphCount)
+        assertEquals("Straße", result.normalizedText)
+        assertEquals(6, result.glyphCount)
         assertTrue(result.missingCharacters.isEmpty())
         assertTrue(result.strokes.isNotEmpty())
     }
@@ -55,10 +55,11 @@ class TextToHandwritingTest {
     }
 
     @Test
-    fun joinedLettersAddAConnector() {
+    fun printLettersKeepAnInfeasibleJoinAsAPenLift() {
         val result = synthesize("ab", variation = 0.0, connect = true)
-        assertTrue(result.connectionCount >= 1)
-        assertTrue(result.strokes.size > 2)
+        val separate = synthesize("ab", variation = 0.0, connect = false)
+        assertEquals(0, result.connectionCount)
+        assertEquals(separate.strokes.size, result.strokes.size)
     }
 
     @Test

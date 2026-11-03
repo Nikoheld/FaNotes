@@ -3,6 +3,7 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 const CHANNELS = Object.freeze({
+  handwritingLearning: 'fanotes:handwriting-learning',
   bootstrap: 'fanotes:bootstrap',
   rendererReady: 'fanotes:renderer-ready',
   completeOnboarding: 'fanotes:complete-onboarding',
@@ -123,6 +124,7 @@ const api = Object.freeze({
   getTree: () => invoke(CHANNELS.getTree),
   readFile: (relativePath) => invoke(CHANNELS.readFile, relativePath),
   writeFile: (relativePath, content) => invoke(CHANNELS.writeFile, relativePath, content),
+  handwritingLearning: (op, value) => invoke(CHANNELS.handwritingLearning, op, value),
   readRecognitionModel: () => invoke(CHANNELS.readRecognitionModel),
   writeRecognitionModel: (content) => invoke(CHANNELS.writeRecognitionModel, content),
   readPdfOcr: (relativePath) => invoke(CHANNELS.readPdfOcr, relativePath),

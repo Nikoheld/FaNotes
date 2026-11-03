@@ -563,6 +563,7 @@ export type FaNotesApi = {
     confidence: number
   }>
   writeFile: (relativePath: string, content: string) => Promise<{ modifiedAt: string }>
+  handwritingLearning?: (op?: 'snapshot' | 'scan' | 'enabled' | 'templates', value?: unknown) => Promise<import('./lib/personalHandwritingClient').LearningSnapshot | null>
   readRecognitionModel?: () => Promise<string | null>
   writeRecognitionModel?: (content: string) => Promise<{ modifiedAt: string }>
   readPdfOcr?: (relativePath: string) => Promise<import('./lib/pdfOcr').PdfOcrCache | null>

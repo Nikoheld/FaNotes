@@ -31,6 +31,8 @@ private fun oval(cx: Double, cy: Double, rx: Double, ry: Double, steps: Int = 18
 
 private fun buildSchoolScript(): List<GlyphSample> {
     val letters = linkedMapOf<String, List<SchoolPath>>(
+        "ß" to listOf(line(.25,.92,.25,.28,.35,.1,.55,.1,.66,.24,.52,.46,.7,.62,.7,.8,.55,.92,.4,.84)),
+        "ẞ" to listOf(line(.25,.92,.25,.28,.35,.1,.55,.1,.66,.24,.52,.46,.7,.62,.7,.8,.55,.92,.4,.84)),
         "a" to listOf(oval(0.42, 0.74, 0.22, 0.16), line(0.62, 0.56, 0.62, 0.90)),
         "b" to listOf(line(0.30, 0.12, 0.30, 0.90), oval(0.50, 0.74, 0.20, 0.16)),
         "c" to listOf(line(0.68, 0.60, 0.50, 0.56, 0.28, 0.68, 0.28, 0.82, 0.50, 0.92, 0.68, 0.84)),
@@ -148,7 +150,7 @@ private fun schoolGlyph(label: String, paths: List<SchoolPath>): GlyphSample {
         labelId = "school-$label",
         sessionId = "school-script",
         bbox = listOf(left, top, width, height),
-        sourceWidth = 100.0,
+        sourceWidth = 100.0 * spanX / spanY,
         sourceHeight = 100.0,
         strokes = strokes,
     )

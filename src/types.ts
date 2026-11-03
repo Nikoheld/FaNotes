@@ -26,6 +26,7 @@ export type StrokePoint = {
 }
 
 export type Stroke = {
+  synthesis?: { engine: number; seed?: number }
   points: StrokePoint[]
   baseWidth: number
   pressureEnabled: boolean

@@ -1,0 +1,14 @@
+{
+  "realUnlabeledObservations": 5,
+  "pseudoLabeledUnits": 16,
+  "departureDegrees": 1.2166297583853347,
+  "arrivalDegrees": 1.2166297583847354,
+  "beforeOverlayConnectors": 27,
+  "stylePreservingPrintJoins": 0,
+  "cursiveContinuousJoins": 9,
+  "cursiveWords": 3,
+  "unlabeledJoiningMotions": 21,
+  "heldOutStyleUpdateRejected": true,
+  "heldOutRecognitionAccuracy": null,
+  "note": "Geometric regression fixtures; no claim of human indistinguishability or calibrated OCR accuracy."
+}

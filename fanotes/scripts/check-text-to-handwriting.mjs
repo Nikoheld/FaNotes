@@ -54,7 +54,7 @@ try {
   const {
     synthesizeHandwriting,
     synthesizeHandwritingToFit,
-  } = await server.ssrLoadModule('/src/lib/textToHandwriting.ts')
+  } = await server.ssrLoadModule('/src/lib/textToHandwritingLegacy.ts')
   const { WRITE_CAP_HEIGHT } = await server.ssrLoadModule('/src/lib/noteCanvas.ts')
 
   const characters = [...new Set('Test einer langen Zeile')].filter((char) => char !== ' ')

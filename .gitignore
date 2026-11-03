@@ -1,5 +1,5 @@
 # Dependencies and generated application bundles
-node_modules/
+node_modules
 fanotes/src-tauri/gen/
 /target/
 dist/
@@ -35,3 +35,7 @@ test-results/
 *.pfx
 .DS_Store
 Thumbs.db
+
+# Local handwriting development and Kotlin compiler caches
+/.scratch/
+/android/.kotlin/

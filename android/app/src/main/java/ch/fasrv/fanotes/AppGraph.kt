@@ -25,6 +25,7 @@ class FaNotesApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         graph = AppGraph(this)
+        graph.handwritingLearning.attach()
         if (Build.VERSION.SDK_INT >= 26) {
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(
@@ -46,7 +47,8 @@ class AppGraph(context: Context) {
     private val secrets = VaultSecrets(context)
     val defaultRoot: File = File(context.filesDir, "vault").apply { mkdirs() }
     var vault: VaultIo = DirectoryVault(defaultRoot.toPath())
-    var store: NoteStore = NoteStore(vault)
+    val handwritingLearning by lazy { HandwritingLearning(context.applicationContext, this) }
+    var store: NoteStore = NoteStore(vault) { path -> handwritingLearning.changed(path) }
     var vaultId: String = fingerprint(defaultRoot.absolutePath)
     var initialVaultLabel: String = "Auf diesem Tablet"
     @Volatile var busyPaths: Set<String> = emptySet()
@@ -65,7 +67,7 @@ class AppGraph(context: Context) {
             }
             if (allowed) {
                 vault = SafVault(context, uri)
-                store = NoteStore(vault)
+                store = NoteStore(vault) { path -> handwritingLearning.changed(path) }
                 vaultId = fingerprint(savedUri)
                 initialVaultLabel = "Ausgewählter Ordner"
             }
@@ -81,6 +83,7 @@ class AppGraph(context: Context) {
                 includeHistory = { readDesk()["sync-history"] == "on" },
                 onApplied = { written, removed ->
                     synchronized(remoteListeners) { remoteListeners.toList() }.forEach { it(written, removed) }
+                    handwritingLearning.changed(written + removed)
                 },
             ),
         )
@@ -89,16 +92,18 @@ class AppGraph(context: Context) {
 
     fun useDirectory(root: File) {
         vault = DirectoryVault(root.toPath())
-        store = NoteStore(vault)
+        store = NoteStore(vault) { path -> handwritingLearning.changed(path) }
         vaultId = fingerprint(root.absolutePath)
         engine.attach(host())
+        handwritingLearning.attach()
     }
 
     fun useSaf(io: VaultIo, id: String) {
         vault = io
-        store = NoteStore(vault)
+        store = NoteStore(vault) { path -> handwritingLearning.changed(path) }
         vaultId = id
         engine.attach(host())
+        handwritingLearning.attach()
     }
 
     fun rememberTree(uri: String?) {

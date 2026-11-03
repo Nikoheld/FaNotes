@@ -72,7 +72,7 @@ data class OpenNote(
     val inkId: String,
 )
 
-class NoteStore(private val io: VaultIo) {
+class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit = {}) {
     fun tree(): List<VaultNode> = buildTree("")
 
     fun readNote(path: String): OpenNote {
@@ -144,6 +144,7 @@ class NoteStore(private val io: VaultIo) {
             io.write(note.path, text.encodeToByteArray())
         }
         writeInkAsset(note.inkId, ink)
+        onSaved(famdPath)
         return note.copy(markdown = withMarker, document = document.copy(updatedAt = now), payload = payload, worksheets = worksheetIdsFromMarkdown(withMarker))
     }
 

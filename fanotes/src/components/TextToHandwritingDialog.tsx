@@ -4,11 +4,13 @@ import type { Sample } from '../../../src/types'
 import type { PaperStyle } from '../types'
 import { drawPaperBackground } from '../lib/paperStyles'
 import { getUiLocale } from '../i18n'
+import { fingerprint, type PersonalModel } from '../lib/personalHandwriting.mjs'
+import { learningStatus, type LearningState } from '../lib/personalHandwritingClient'
+import * as legacyEngine from '../lib/textToHandwritingLegacy'
 import { loadToolMemory, saveToolMemory } from '../lib/toolMemory'
 import {
   createHandwritingSeed,
   synthesizeHandwriting,
-  synthesizeHandwritingToFit,
   type HandwritingSynthesisResult,
   type SynthesizedInkStroke,
 } from '../lib/textToHandwriting'
@@ -131,6 +133,51 @@ export function TextToHandwritingDialog({
       handwriting: { fontSize, lineSpacing, variation, connectLetters, fitToPage, placement },
     })
   }, [connectLetters, fitToPage, fontSize, lineSpacing, placement, variation])
+  const isLinux = window.fanotes?.platform === 'linux'
+  const [learning, setLearning] = useState<LearningState | null>(null)
+  const learningRef = useRef<LearningState | null>(null)
+  useEffect(() => { learningRef.current = learning }, [learning])
+  const cachedWorkerData = useRef<{ model?: PersonalModel; samples: Sample[] } | null>(null)
+  const [preview, setPreview] = useState<HandwritingSynthesisResult | null>(null)
+  const [generating, setGenerating] = useState(false)
+  const [previewError, setPreviewError] = useState('')
+  const [learningError, setLearningError] = useState('')
+  const [completedInput, setCompletedInput] = useState<unknown>(null)
+  const workerRef = useRef<Worker | null>(null)
+  const requestRef = useRef(0)
+  const trajectorySamples = useMemo(() => samples.map(sample => ({ ...sample, imageData: '' })), [samples])
+  const templateKey = useRef<string | null>(null)
+  useEffect(() => {
+    if (!isLinux || !open) return
+    let cancelled = false
+    const refresh = async () => {
+      try {
+        const next = await window.fanotes.handwritingLearning?.('snapshot', { revision: learningRef.current?.model.revision, vaultId: learningRef.current?.vaultId })
+        if (!cancelled && next) { setLearningError(''); setLearning(old => {
+          const model = next.model ?? (old?.vaultId === next.vaultId ? old?.model : null)
+          if (!model) return old
+          return old && old.vaultId === next.vaultId && old.model.revision === model.revision && old.busy === next.busy && old.enabled === next.enabled && old.error === next.error ? old : { ...next, model }
+        }) }
+      } catch { if (!cancelled) setLearningError('Automatic learning is temporarily unavailable. Existing samples remain usable.') }
+    }
+    void refresh()
+    const timer = window.setInterval(refresh, 3000)
+    return () => { cancelled = true; window.clearInterval(timer) }
+  }, [isLinux, open])
+  useEffect(() => {
+    if (!isLinux || !open) return
+    const key = fingerprint(trajectorySamples.map(s => ({ id: s.id, label: s.label, strokes: s.strokes })))
+    if (key === templateKey.current) return
+    templateKey.current = key
+    void window.fanotes.handwritingLearning?.('templates', trajectorySamples).catch(() => {})
+  }, [isLinux, open, trajectorySamples])
+  useEffect(() => {
+    if (!isLinux || !open) return
+    const worker = new Worker(new URL('../lib/handwritingSynthesisWorker.ts', import.meta.url), { type: 'module' })
+    workerRef.current = worker
+    cachedWorkerData.current = null
+    return () => { worker.terminate(); workerRef.current = null }
+  }, [isLinux, open])
   const [seed, setSeed] = useState(createHandwritingSeed)
   const textRef = useRef<HTMLTextAreaElement>(null)
   const dialogRef = useRef<HTMLElement>(null)
@@ -191,21 +238,44 @@ export function TextToHandwritingDialog({
     pressureEnabled,
     seed,
     startY: placement === 'free-line' ? suggestedStartY : undefined,
-  }), [baseWidth, color, connectLetters, fontSize, lineSpacing, placement, pressureEnabled, seed, suggestedStartY, variation])
+    model: learning?.model,
+  }), [baseWidth, color, connectLetters, fontSize, lineSpacing, learning?.model, placement, pressureEnabled, seed, suggestedStartY, variation])
 
-  const result = useMemo(() => {
-    if (!text.trim() || !samples.length) {
-      return synthesizeHandwriting('', samples, options, { width: pageWidth, height: pageHeight })
-    }
-    return fitToPage
-      ? synthesizeHandwritingToFit(text, samples, options, { width: pageWidth, height: pageHeight })
-      : synthesizeHandwriting(text, samples, options, { width: pageWidth, height: pageHeight })
-  }, [fitToPage, options, pageHeight, pageWidth, samples, text])
+  const generationInput = useMemo(() => ({ text, samples: isLinux ? trajectorySamples : samples, options, fit: fitToPage, page: { width: pageWidth, height: pageHeight } }), [text, isLinux, trajectorySamples, samples, options, fitToPage, pageWidth, pageHeight])
+  const legacyResult = useMemo(() => {
+    if (isLinux) return null
+    return (fitToPage ? legacyEngine.synthesizeHandwritingToFit : legacyEngine.synthesizeHandwriting)(text, samples, options, { width: pageWidth, height: pageHeight })
+  }, [isLinux, fitToPage, options, pageHeight, pageWidth, samples, text])
+  useEffect(() => {
+    const worker = workerRef.current
+    if (!isLinux || !open || !worker) return
+    const id = ++requestRef.current
+    setGenerating(true)
+    const timer = window.setTimeout(() => {
+      worker.onmessage = ({ data }) => {
+        if (data.id !== requestRef.current) return
+        setGenerating(false)
+        if (data.result) { setPreview(data.result); setCompletedInput(generationInput); setPreviewError('') }
+        else setPreviewError(data.error)
+      }
+      worker.onerror = () => { setGenerating(false); setPreviewError('The handwriting preview could not be generated.') }
+      const { model, ...lightOptions } = generationInput.options
+      const cached = cachedWorkerData.current
+      if (!cached || cached.model !== model || cached.samples !== generationInput.samples) {
+        worker.postMessage({ op: 'model', model, samples: generationInput.samples })
+        cachedWorkerData.current = { model, samples: generationInput.samples }
+      }
+      worker.postMessage({ op: 'synthesize', id, text, options: lightOptions, fit: fitToPage, page: generationInput.page })
+    }, 100)
+    return () => window.clearTimeout(timer)
+  }, [isLinux, open, generationInput])
+  const empty = useMemo(() => synthesizeHandwriting('', [], { ...options, model: undefined }, { width: pageWidth, height: pageHeight }), [options, pageWidth, pageHeight])
+  const result = isLinux ? preview ?? empty : legacyResult ?? empty
 
   if (!open) return null
 
   const unavailable = result.missingCharacters.length > 0
-  const canInsert = result.strokes.length > 0 && !unavailable && !result.overflow
+  const canInsert = result.strokes.length > 0 && !unavailable && !result.overflow && !generating && !previewError && (!isLinux || completedInput === generationInput)
   const previewWidth = result.pageWidth || pageWidth
   const previewHeight = result.pageHeight || pageHeight
 
@@ -235,7 +305,7 @@ export function TextToHandwritingDialog({
         <span className="lw-tth-symbol"><Type size={20} /></span>
         <div>
           <h2 id="lw-tth-title">Text in deine Handschrift</h2>
-          <p>FaNotes setzt jedes Zeichen neu aus deinen eigenen GlyphenWerk-Strichen zusammen.</p>
+          <p>{isLinux ? 'Local learning from your everyday notes. Known words keep their original pen movements.' : 'FaNotes setzt jedes Zeichen neu aus deinen eigenen GlyphenWerk-Strichen zusammen.'}</p>
         </div>
         <button type="button" className="lw-tth-icon" aria-label="Dialog schließen" onClick={onClose}><X size={19} /></button>
       </header>
@@ -324,7 +394,14 @@ export function TextToHandwritingDialog({
             </select>
           </label>
 
-          {!samples.length && <div className="lw-tth-message is-warning">
+          {isLinux && <div className="lw-tth-message" role="status"><div>
+            <strong>{generating ? 'Preparing preview…' : learning ? learningStatus(learning) : 'Loading local handwriting model…'}</strong>
+            {learning && <label><input type="checkbox" checked={learning.enabled} onChange={event => {
+              void window.fanotes.handwritingLearning?.('enabled', event.target.checked).then(next => { if (next?.model) setLearning({ ...next, model: next.model }) }).catch(() => setPreviewError('The learning preference could not be saved.'))
+            }} /> Learn automatically from notes</label>}
+            {(previewError || learningError) && <span>{previewError || learningError}</span>}
+          </div></div>}
+          {!isLinux && !samples.length && <div className="lw-tth-message is-warning">
             <CircleAlert size={18} />
             <div><strong>Deine Schrift fehlt noch</strong><span>Importiere dein GlyphenWerk-Training. Nur so entsteht wirklich deine persönliche Handschrift.</span></div>
             <button type="button" onClick={onRequestTraining}>GlyphenWerk öffnen</button>
@@ -352,7 +429,7 @@ export function TextToHandwritingDialog({
             })}
           >
             <div><strong>Live-Vorschau</strong><small>{`${result.glyphCount} Zeichen · ${result.lineCount} Zeilen · ${result.connectionCount} Verbindungen`}</small></div>
-            <button type="button" onClick={() => setSeed(createHandwritingSeed())} disabled={!text.trim()} title="Alle Zeichen mit neuen natürlichen Abweichungen erzeugen">
+            <button type="button" onClick={() => setSeed(createHandwritingSeed())} disabled={!text.trim()} title={isLinux ? "Use another observed trajectory or style variant, when available" : "Alle Zeichen mit neuen natürlichen Abweichungen erzeugen"}>
               <RefreshCw size={15} /> Neu variieren
             </button>
           </div>
@@ -365,7 +442,7 @@ export function TextToHandwritingDialog({
       </div>
 
       <footer className="lw-tth-footer">
-        <p><Sparkles size={14} /> Jede Erzeugung variiert Form, Neigung, Grundlinie, Druck und Strichbreite behutsam.</p>
+        <p><Sparkles size={14} /> {isLinux ? 'Variation follows observed handwriting; unknown letter shapes use the school script.' : 'Jede Erzeugung variiert Form, Neigung, Grundlinie, Druck und Strichbreite behutsam.'}</p>
         <div>
           <button type="button" className="lw-tth-cancel" onClick={onClose}>Abbrechen</button>
           <button type="button" className="lw-tth-insert" disabled={!canInsert} onClick={() => onInsert(result.strokes, result)}>

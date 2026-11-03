@@ -163,6 +163,7 @@ app.on('child-process-gone', (_event, details) => {
 })
 
 const IPC = Object.freeze({
+  handwritingLearning: 'fanotes:handwriting-learning',
   bootstrap: 'fanotes:bootstrap',
   rendererReady: 'fanotes:renderer-ready',
   completeOnboarding: 'fanotes:complete-onboarding',
@@ -948,11 +949,16 @@ async function migrateLegacyUserData() {
 
 function setCurrentVaultPath(nextVaultPath) {
   if (currentVaultPath !== nextVaultPath) {
+    require('./handwriting-learning.cjs').stop()
     currentVaultGeneration += 1
     validatedVaultGeneration = -1
     validatedVaultAt = 0
   }
   currentVaultPath = nextVaultPath
+  if (process.platform === 'linux') {
+    const timer = setTimeout(() => { void assertCurrentVaultRoot().then(root => require('./handwriting-learning.cjs').request(root, app.getPath('userData'), 'scan')).catch(() => {}) }, 12000)
+    timer.unref()
+  }
 }
 
 function markCurrentVaultValidated() {
@@ -3155,6 +3161,10 @@ async function reportAnonymousDesktopAppOpen() {
 }
 
 function schedulePostStartupWork() {
+  if (process.platform === 'linux') {
+    const timer = setTimeout(() => { void assertCurrentVaultRoot().then(root => require('./handwriting-learning.cjs').request(root, app.getPath('userData'), 'scan')).catch(() => {}) }, 12000)
+    timer.unref()
+  }
   if (postStartupWorkStarted) return
   postStartupWorkStarted = true
 
@@ -3198,6 +3208,13 @@ function schedulePostStartupWork() {
 }
 
 function registerIpcHandlers() {
+  handle(IPC.handwritingLearning, async (_event, op = 'snapshot', value) => {
+    if (process.platform !== 'linux') return null
+    if (!['snapshot', 'scan', 'enabled', 'templates'].includes(op)) throw new Error('Invalid learning operation')
+    if (op === 'templates' && (!Array.isArray(value) || JSON.stringify(value).length > 12 * 1024 * 1024)) throw new Error('Training library is too large')
+    const root = await assertCurrentVaultRoot()
+    return require('./handwriting-learning.cjs').request(root, app.getPath('userData'), op, value)
+  })
   handle(IPC.bootstrap, async () => {
     const data = await ensureQuickBootstrap()
     return data
@@ -4068,6 +4085,9 @@ function registerIpcHandlers() {
       } catch (error) {
         throw new Error(`Handschrift konnte nicht in die Notiz geschrieben werden: ${error?.message ?? error}`)
       }
+    }
+    if (process.platform === 'linux' && typeof payload.noteRelativePath === 'string') {
+      void require('./handwriting-learning.cjs').request(root, app.getPath('userData'), 'changed', payload.noteRelativePath).catch(() => {})
     }
     return {
       ...metadata,

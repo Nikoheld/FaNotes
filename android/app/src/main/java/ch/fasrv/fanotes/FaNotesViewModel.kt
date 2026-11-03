@@ -231,6 +231,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val canvasToken = MutableStateFlow(0)
     val glyphSamples = MutableStateFlow<List<GlyphSample>>(emptyList())
     val textHandOpen = MutableStateFlow(false)
+    val handwritingLearning get() = graph.handwritingLearning.state
+    fun setHandwritingLearning(enabled: Boolean) = graph.handwritingLearning.setEnabled(enabled)
     val noteStandardStatus = MutableStateFlow<String?>(null)
     val noteStandardBusy = MutableStateFlow(false)
     private val glyphImportRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
@@ -3340,6 +3342,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun openTextHand() {
+        graph.handwritingLearning.request()
         textHandOpen.value = true
     }
 
@@ -3373,6 +3376,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             }
             outcome.onSuccess { (merged, notice) ->
                 glyphSamples.value = merged
+                graph.handwritingLearning.request()
                 message.value = notice
             }.onFailure { error ->
                 message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Das Training konnte nicht gelesen werden.")
@@ -3382,8 +3386,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearGlyphSamples() {
         glyphSamples.value = emptyList()
-        viewModelScope.launch(Dispatchers.IO) { graph.writeGlyphLibrary("") }
-        message.value = "Persönliches Training entfernt. Die Schulschrift bleibt."
+        viewModelScope.launch(Dispatchers.IO) { graph.writeGlyphLibrary(""); graph.handwritingLearning.request() }
+        message.value = "Imported letter samples removed. Automatic learning from notes remains available."
     }
 
     fun insertHandwriting(result: HandwritingSynthesisResult) {
