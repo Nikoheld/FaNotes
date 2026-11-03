@@ -17,7 +17,7 @@ fun diffSnapshots(
 ): List<SchulnetzChange> {
     if (previous == null) return emptyList()
     val changes = mutableListOf<SchulnetzChange>()
-    if (settings.grades) diffGrades(previous.grades, next.grades, changes)
+    if (settings.grades) diffGrades(previous.grades.withoutSummaryGrades(), next.grades.withoutSummaryGrades(), changes)
     if (settings.timetable) {
         diffAgenda(
             previous.events.filter { it.isLesson() },

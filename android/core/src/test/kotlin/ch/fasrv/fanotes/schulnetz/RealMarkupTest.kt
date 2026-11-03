@@ -2,6 +2,7 @@ package ch.fasrv.fanotes.schulnetz
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -10,18 +11,27 @@ class RealMarkupTest {
         checkNotNull(javaClass.getResource("/schulnetz/$name")) { name }.readText()
 
     @Test
-    fun gradesKeepCourseAveragesAndIndividualExams() {
+    fun gradesKeepIndividualExamsAndNotTheCourseAverage() {
         val grades = readGradesPage(fixture("noten.html"))
         assertNull(grades.error)
-        val courses = grades.value.filter { it.title == "Durchschnitt" }
-        assertEquals(13, courses.size)
-        assertEquals(3.1, courses.first { it.course.contains("MAT_") }.mark)
-        assertEquals(4.2, courses.first { it.subject.contains("Chemie") }.mark)
-        assertNull(courses.first { it.subject.contains("Biologie") }.mark)
-        val chem = grades.value.filter { it.course.contains("Chemie") && it.title != "Durchschnitt" }
-        assertTrue(chem.isNotEmpty())
-        assertEquals("2026-09-17", chem.first().date)
-        assertEquals(4.2, chem.first().mark)
+        assertTrue(grades.value.none { it.isSummaryGrade() })
+        assertTrue(grades.value.none { it.title.contains("Durchschnitt", ignoreCase = true) })
+        val chem = grades.value.filter { it.course.contains("Chemie") || it.subject.contains("Chemie") }
+        assertEquals(1, chem.size)
+        assertEquals("2026-09-17", chem.single().date)
+        assertEquals(4.2, chem.single().mark)
+        assertEquals(4.2, chem.single().courseGrade)
+        val math = grades.value.filter { it.course.contains("MAT_") }
+        assertEquals(1, math.size)
+        assertEquals(3.0, math.single().mark)
+        assertEquals(3.1, math.single().courseGrade)
+        val bio = grades.value.filter { it.subject.contains("Biologie") }
+        assertTrue(bio.isEmpty())
+        val summaries = courseSummaries(grades.value)
+        assertEquals(1, summaries.single { it.label.contains("Chemie") }.marks.size)
+        assertEquals(1.0, summaries.single { it.label.contains("Chemie") }.weight)
+        assertEquals(4.2, summaries.single { it.label.contains("Chemie") }.average)
+        assertFalse(summaries.any { it.label.contains("Biologie") })
     }
 
     @Test

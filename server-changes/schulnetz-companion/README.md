@@ -24,6 +24,8 @@ Der Server benutzt die PHPSESSID des Telefons nicht. Er speichert die Microsoft-
 
 `authorize.php` wird von der App nicht mehr geöffnet. Die REST-Routen bleiben im Code für andere Schulen, sind für `*.schulnetz-ag.ch` aber abgeschaltet.
 
+Die Notenseite (`pageid=21311`) hat pro Fach eine Spalte bzw. Zeile «Notendurchschnitt» / «Aktueller Durchschnitt». Das ist der Fachschnitt, keine Einzelprüfung. Parser, Schnappschuss und Diff ignorieren diese Zeilen; gespeicherte Schnappschüsse mit einer künstlichen Note «Durchschnitt» werden still bereinigt und erzeugen keinen Push.
+
 Der Poller liest standardmässig jede Minute (`FANOTES_SCHULNETZ_POLL_MS=60000`) und vergleicht mit dem letzten Schnappschuss. Eine Minute hält die Website-Sitzung lebendig (Schulnetz trennt nach etwa zehn Minuten Untätigkeit) und bringt eine neue Note oder einen Ausfall in der Regel in unter einer Minute aufs Telefon, sobald ntfy oder UnifiedPush zustellt. 30 Sekunden geht per Umgebungsvariable, belastet Schulnetz aber stärker; unter 30 Sekunden ist nicht vorgesehen. Die erste erfolgreiche Lesung erzeugt keine Meldungen. Danach gehen Änderungen an ntfy und an eingetragene UnifiedPush-Endpunkte. Die App hält zusätzlich eine ntfy-Verbindung (Vordergrunddienst), fordert `POST_NOTIFICATIONS` an und prüft per WorkManager alle 15 Minuten plus einem 3-Minuten-Fallback `/snapshot`. Ausgeblendete Lektionen liegen im Tresor und lösen auf dem Telefon keine Stundenplan-Pushs aus.
 
 ## Endpunkte

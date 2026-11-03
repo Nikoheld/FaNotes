@@ -53,7 +53,7 @@ fun CompanionRoot(model: CompanionModel) {
     }
     if (sync.account == null && !model.localAccess) {
         Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
-            AccountScreen(model, onboarding = true, modifier = Modifier.padding(padding).consumeWindowInsets(padding))
+            AccountScreen(model, onboarding = true, modifier = Modifier.padding(padding).consumeWindowInsets(padding).imePadding())
         }
         return
     }
@@ -72,7 +72,7 @@ fun CompanionRoot(model: CompanionModel) {
     }
     if (route.page == Page.Editor) {
         Scaffold(snackbarHost = { SnackbarHost(snackbar) }, contentWindowInsets = WindowInsets.safeDrawing) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) { NoteEditorScreen(model) }
+            Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) { NoteEditorScreen(model) }
         }
         return
     }
@@ -92,11 +92,13 @@ fun CompanionRoot(model: CompanionModel) {
         val wide = maxWidth >= 600.dp
         val primary = route.page == null
         val shortWindow = maxHeight < 500.dp
+        val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
         val hasCreation = primary && route.destination != Destination.School
         val dockCreation = hasCreation && !wide && LocalDensity.current.fontScale >= 1.3f
-        CompositionLocalProvider(LocalPageBottomPadding provides if (hasCreation && !dockCreation) 100.dp else 24.dp) {
+        CompositionLocalProvider(LocalPageBottomPadding provides if (hasCreation && !dockCreation && !imeVisible) 100.dp else 24.dp) {
         Scaffold(
             snackbarHost = { SnackbarHost(snackbar) },
+            contentWindowInsets = WindowInsets.safeDrawing,
             topBar = {
                 TopAppBar(
                     title = { Text(route.page?.title ?: route.destination.label, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -111,7 +113,7 @@ fun CompanionRoot(model: CompanionModel) {
                 )
             },
             bottomBar = {
-                if (primary && !wide) {
+                if (primary && !wide && !imeVisible) {
                     Column {
                         if (dockCreation) {
                             Button(onClick = ::requestCreation, modifier = Modifier.fillMaxWidth().padding(horizontal = Space.page, vertical = 8.dp).heightIn(min = 50.dp)) {
@@ -130,7 +132,7 @@ fun CompanionRoot(model: CompanionModel) {
                 }
             },
             floatingActionButton = {
-                if (hasCreation && !dockCreation) {
+                if (hasCreation && !dockCreation && !imeVisible) {
                     ExtendedFloatingActionButton(modifier = Modifier.semantics { contentDescription = creationLabel }, onClick = ::requestCreation,
                         icon = { Icon(Icons.Outlined.Add, null) }, text = { Text(creationLabel) }, containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary, elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 2.dp, pressedElevation = 4.dp))
@@ -138,7 +140,7 @@ fun CompanionRoot(model: CompanionModel) {
             },
             containerColor = MaterialTheme.colorScheme.background,
         ) { padding ->
-            Row(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
+            Row(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
                 if (wide && primary) {
                     NavigationRail(containerColor = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxHeight().verticalScroll(rememberScrollState())) {
                         Spacer(Modifier.height(12.dp))
@@ -183,7 +185,7 @@ fun CompanionRoot(model: CompanionModel) {
     }
     }
     if (create != null) ModalBottomSheet(onDismissRequest = { create = null }) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = Space.page).navigationBarsPadding().padding(bottom = Space.xl)) {
+        Column(Modifier.fillMaxWidth().sheetKeyboardPadding().padding(horizontal = Space.page).padding(bottom = Space.xl)) {
             SheetTitle("Make room for an idea", { create = null })
             SettingRow(Icons.Outlined.EditNote, "Note", "Write, draw or collect your thoughts") { begin("note") }
             SettingRow(Icons.Outlined.CheckCircleOutline, "Task", "Homework or something to get done") { begin("task") }

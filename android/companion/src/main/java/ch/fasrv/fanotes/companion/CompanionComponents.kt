@@ -38,9 +38,13 @@ fun ActionIcon(icon: ImageVector, label: String, enabled: Boolean = true, onClic
 }
 val LocalPageBottomPadding = staticCompositionLocalOf { 24.dp }
 
+/** Nav-bar plus IME so sheet content can scroll above the keyboard. */
+@Composable
+fun Modifier.sheetKeyboardPadding(): Modifier = windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+
 @Composable
 fun ScreenList(modifier: Modifier = Modifier, content: LazyListScope.() -> Unit) {
-    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(start = Space.page, end = Space.page, top = 8.dp, bottom = LocalPageBottomPadding.current), content = content)
+    LazyColumn(modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(start = Space.page, end = Space.page, top = 8.dp, bottom = LocalPageBottomPadding.current), content = content)
 }
 @Composable
 fun SectionLabel(title: String, action: String? = null, onAction: () -> Unit = {}) {

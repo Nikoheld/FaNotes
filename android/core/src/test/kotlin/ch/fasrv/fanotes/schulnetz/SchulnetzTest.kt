@@ -158,6 +158,25 @@ class SchulnetzDiffTest {
         assertEquals("Zeit geändert", shifted.single { it.category == "timetable" }.title)
         assertEquals("Neue Note", diffSnapshots(SchulnetzSnapshot(), SchulnetzSnapshot(grades = listOf(SchoolGrade("g2", "Chemie", "che", "Chemie", "Test", "2026-11-01", 6.0, 1.0, true, null, "")))).single { it.category == "grade" }.title)
     }
+
+    @Test
+    fun courseAverageRowsAreNotGradesAndDropSilently() {
+        val exam = SchoolGrade("exam:che", "Chemie", "che", "Chemie", "1. Prüfung", "2026-09-17", 4.2, 1.0, true, 4.2, "")
+        val average = SchoolGrade("course:che:4.2", "Chemie", "che", "Chemie", "Durchschnitt", "", 4.2, 1.0, true, 4.2, "")
+        val summaries = courseSummaries(listOf(average, exam))
+        assertEquals(1, summaries.single().marks.size)
+        assertEquals(4.2, summaries.single().average)
+        assertEquals(1.0, summaries.single().weight)
+        val stored = parseNormalizedSnapshot(
+            SchulnetzSnapshot(fetchedAt = "2026-11-02T12:00:00Z", grades = listOf(average, exam)).toNormalizedJson(),
+        )
+        assertEquals(listOf(exam), stored?.grades)
+        val changes = diffSnapshots(SchulnetzSnapshot(grades = listOf(average, exam)), SchulnetzSnapshot(grades = listOf(exam)))
+        assertTrue(changes.none { it.category == "grade" })
+        assertTrue(isSummaryGradeTitle("Aktueller Durchschnitt"))
+        assertTrue(isSummaryGradeTitle("Ø"))
+        assertFalse(isSummaryGradeTitle("1. Prüfung"))
+    }
 }
 
 class SchulnetzOAuthTest {

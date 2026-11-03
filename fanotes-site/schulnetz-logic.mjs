@@ -112,7 +112,7 @@ export const parseRawSnapshot = (raw, fetchedAt = '') => ({
   revision: 0,
   fetchedAt,
   profile: parseProfile(raw.me),
-  grades: safeList(raw.grades).map(parseGrade).filter(Boolean),
+  grades: safeList(raw.grades).map(parseGrade).filter(Boolean).filter((grade) => !isSummaryGrade(grade)),
   events: safeList(raw.events).map(parseEvent).filter(Boolean),
   exams: safeList(raw.exams).map(parseEvent).filter(Boolean),
   absences: [...safeList(raw.absences).map(parseAbsence).filter(Boolean), ...safeList(raw.lateness).map(parseLate).filter(Boolean)],
@@ -147,6 +147,7 @@ const parseGrade = (obj) => {
   const date = text(obj, 'date', 'examDate').slice(0, 10)
   const mark = parseMark(text(obj, 'mark', 'grade', 'note'))
   if (!course && !subject && !title && mark == null) return null
+  if (isSummaryGradeTitle(title)) return null
   return {
     id: text(obj, 'id') || stableId('grade', course, subject, title, date, numKey(mark)),
     course,
@@ -542,8 +543,28 @@ export const routeNotify = (link, snapshot = {}) => {
   }
 }
 
+export const isSummaryGradeTitle = (title) => {
+  const raw = String(title || '').trim()
+  if (raw === 'Ø' || raw === 'ø') return true
+  const folded = raw.toLowerCase()
+    .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+  if (!folded) return false
+  if (folded === 'o' || folded === 'avg' || folded === 'average') return true
+  if (folded === 'durchschnitt' || folded === 'schnitt') return true
+  if (folded === 'notendurchschnitt' || folded === 'notenschnitt') return true
+  return folded.startsWith('aktueller durchschnitt')
+}
+
+export const isSummaryGrade = (grade) => isSummaryGradeTitle(grade?.title)
+
+export const withoutSummaryGrades = (grades) => (grades || []).filter((grade) => !isSummaryGrade(grade))
+
 export const diffSnapshots = (previous, next, settings = {}, today = zurichToday()) => {
   if (!previous) return []
+  previous = { ...previous, grades: withoutSummaryGrades(previous.grades) }
+  next = { ...next, grades: withoutSummaryGrades(next.grades) }
   const prefs = {
     grades: settings.grades !== false,
     timetable: settings.timetable !== false,
@@ -802,6 +823,7 @@ export const parseGradesHtml = (html) => {
     if (!date) continue
     const dateAt = cells.indexOf(date)
     const topic = cells[dateAt + 1] || 'Note'
+    if (isSummaryGradeTitle(topic) || cells.some((cell) => isSummaryGradeTitle(cell))) continue
     const mark = parseMark(cells[dateAt + 2] || '')
     if (mark == null) continue
     const courseMatch = String(html).match(/<b>\s*([^<]*-[^<]*-[^<]*)\s*<\/b>/i)

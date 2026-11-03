@@ -21,6 +21,8 @@ import {
   roundToHalf,
   isSportCourse,
   promotionPoints,
+  isSummaryGradeTitle,
+  withoutSummaryGrades,
   notifyHash,
   gradeTargetId,
   lessonTargetId,
@@ -73,6 +75,23 @@ test('diff ids stay stable and the first snapshot is silent', () => {
   assert.equal(room.find((item) => item.category === 'timetable').title, 'Raum geändert')
   const time = diffSnapshots({ grades: [], events: [lesson], exams: [], absences: [], messages: [] }, { grades: [], events: [{ ...lesson, start: '2026-11-02T09:15:00', end: '2026-11-02T10:00:00' }], exams: [], absences: [], messages: [] })
   assert.equal(time.find((item) => item.category === 'timetable').title, 'Zeit geändert')
+})
+
+test('course average rows are not grades and drop silently', () => {
+  assert.equal(isSummaryGradeTitle('Durchschnitt'), true)
+  assert.equal(isSummaryGradeTitle('Aktueller Durchschnitt'), true)
+  assert.equal(isSummaryGradeTitle('1. Prüfung'), false)
+  const exam = { id: 'exam:che', course: 'Chemie', courseId: 'che', title: '1. Prüfung', date: '2026-09-17', mark: 4.2, weight: 1 }
+  const average = { id: 'course:che:4.2', course: 'Chemie', courseId: 'che', title: 'Durchschnitt', date: '', mark: 4.2, weight: 1 }
+  assert.deepEqual(withoutSummaryGrades([average, exam]).map((grade) => grade.id), ['exam:che'])
+  const changes = diffSnapshots(
+    { grades: [average, exam], events: [], exams: [], absences: [], messages: [] },
+    { grades: [exam], events: [], exams: [], absences: [], messages: [] },
+  )
+  assert.equal(changes.some((change) => change.category === 'grade'), false)
+  assert.equal(parseRawSnapshot({ grades: JSON.stringify([average, exam]) }).grades.length, 1)
+  const html = '<table><tr><td>17.09.2026</td><td>Durchschnitt</td><td>4.2</td><td>1</td></tr><tr><td>17.09.2026</td><td>1. Prüfung</td><td>4.2</td><td>1</td></tr></table>'
+  assert.deepEqual(parseGradesHtml(html).map((grade) => grade.title), ['1. Prüfung'])
 })
 
 test('an excuse deadline is pushed once and only inside the window', () => {

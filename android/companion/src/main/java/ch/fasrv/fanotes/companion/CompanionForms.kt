@@ -68,7 +68,7 @@ fun AccountScreen(model: CompanionModel, onboarding: Boolean = false, modifier: 
 @Composable
 fun NameDialog(title: String, label: String, confirm: String, initial: String = "", onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var value by rememberSaveable { mutableStateOf(initial) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = {
+    AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), title = { Text(title) }, text = {
         OutlinedTextField(value, { value = it.take(120) }, label = { Text(label) }, singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { if (value.isNotBlank()) onConfirm(value.trim()) }))
     }, confirmButton = { TextButton(onClick = { onConfirm(value.trim()) }, enabled = value.isNotBlank()) { Text(confirm) } },
@@ -105,7 +105,7 @@ fun TimeControl(label: String, value: String, allowClear: Boolean = false, onTim
     if (picking) {
         val initial = runCatching { LocalTime.parse(value) }.getOrDefault(LocalTime.of(9, 0))
         val state = rememberTimePickerState(initialHour = initial.hour, initialMinute = initial.minute, is24Hour = true)
-        AlertDialog(onDismissRequest = { picking = false }, title = { Text(label) }, text = { TimeInput(state) },
+        AlertDialog(onDismissRequest = { picking = false }, modifier = Modifier.imePadding(), title = { Text(label) }, text = { TimeInput(state) },
             confirmButton = { TextButton(onClick = { onTime("%02d:%02d".format(state.hour, state.minute)); picking = false }) { Text("Choose") } },
             dismissButton = { TextButton(onClick = { picking = false }) { Text("Cancel") } })
     }
@@ -125,7 +125,7 @@ fun TaskForm(model: CompanionModel, task: HomeworkTask? = null, onDismiss: () ->
     var formError by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).imePadding().padding(horizontal = Space.page)) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).sheetKeyboardPadding().padding(horizontal = Space.page)) {
             SheetTitle(if (task == null) "New task" else "Task details", onDismiss)
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(title, { title = it.take(240) }, label = { Text("What needs doing?") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
@@ -165,7 +165,7 @@ fun EventForm(model: CompanionModel, event: CalendarEvent? = null, onDismiss: ()
     val endValue = if (allDay) end else "${end}T$endTime"
     val valid = title.isNotBlank() && endValue >= startValue
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).imePadding().padding(horizontal = Space.page)) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).sheetKeyboardPadding().padding(horizontal = Space.page)) {
             SheetTitle(if (event == null) "New event" else "Edit event", onDismiss)
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(title, { title = it.take(240) }, label = { Text("Event title") }, modifier = Modifier.fillMaxWidth())

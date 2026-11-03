@@ -55,6 +55,28 @@ data class SchoolGrade(
     val courseLabel: String get() = course.ifBlank { subject }.ifBlank { courseId }
 }
 
+/** Course-average cells from page 21311, never a real Einzelprüfung. */
+fun isSummaryGradeTitle(title: String): Boolean {
+    val raw = title.trim()
+    if (raw == "Ø" || raw == "ø") return true
+    val folded = raw.lowercase()
+        .replace("ä", "ae")
+        .replace("ö", "oe")
+        .replace("ü", "ue")
+        .replace("ß", "ss")
+        .replace(Regex("[^a-z0-9]+"), " ")
+        .trim()
+    if (folded.isEmpty()) return false
+    if (folded == "o" || folded == "avg" || folded == "average") return true
+    if (folded == "durchschnitt" || folded == "schnitt") return true
+    if (folded == "notendurchschnitt" || folded == "notenschnitt") return true
+    return folded.startsWith("aktueller durchschnitt")
+}
+
+fun SchoolGrade.isSummaryGrade(): Boolean = isSummaryGradeTitle(title)
+
+fun List<SchoolGrade>.withoutSummaryGrades(): List<SchoolGrade> = filterNot { it.isSummaryGrade() }
+
 data class AgendaEvent(
     val id: String,
     val start: String,
