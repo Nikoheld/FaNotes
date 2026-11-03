@@ -50,11 +50,21 @@ class MainActivity : ComponentActivity() {
         model.openNotify(intent)
     }
 
+    override fun onStart() {
+        super.onStart()
+        model.graph.engine.resumeAutomaticSync()
+    }
+
     override fun onResume() {
         super.onResume()
         val graph = (application as CompanionApplication).graph
         if (System.currentTimeMillis() - graph.lastCheckAt() > 60_000L) {
             graph.scope.launch { runCatching { graph.refreshSchulnetz("resume") } }
         }
+    }
+
+    override fun onStop() {
+        model.graph.engine.pauseAutomaticSync()
+        super.onStop()
     }
 }

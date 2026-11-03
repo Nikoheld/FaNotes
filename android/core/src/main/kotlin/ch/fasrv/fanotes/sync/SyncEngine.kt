@@ -194,6 +194,18 @@ class SyncEngine(
         schedule(0)
     }
 
+    /** Stop the automatic timer so a background process does not keep syncing every minute. */
+    fun pauseAutomaticSync() {
+        timer?.cancel()
+        timer = null
+        debounce?.cancel()
+        debounce = null
+    }
+
+    fun resumeAutomaticSync() {
+        scope.launch { schedule(AUTO_INTERVAL_MS) }
+    }
+
     suspend fun switchVault() = onEngine {
         val current = host ?: return@onEngine
         vaultId = current.vaultId()

@@ -10,5 +10,4 @@
     <string name="channel_absence">Absences</string>
     <string name="channel_deadline">Excuse deadlines</string>
     <string name="channel_event">Events</string>
-    <string name="channel_live">Instant updates</string>
 </resources>

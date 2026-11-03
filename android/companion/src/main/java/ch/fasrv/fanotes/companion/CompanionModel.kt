@@ -131,7 +131,6 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var calendar by mutableStateOf<CalendarDocument>(emptyCalendar())
     var hypothetical by mutableStateOf<List<HypotheticalGrade>>(emptyList())
     var theme by mutableStateOf(graph.themeId())
-    var instant by mutableStateOf(graph.instantPush())
     var baseUrl by mutableStateOf(graph.baseUrl())
     var settings by mutableStateOf(graph.notifySettings())
     var day by mutableStateOf(LocalDate.now())
@@ -383,11 +382,6 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         updateDesk(desk.copy(courseAliases = aliases))
     }
 
-    fun chooseInstant(enabled: Boolean) {
-        instant = enabled
-        graph.setInstant(enabled)
-    }
-
     fun toggleSetting(name: String) {
         val next = when (name) {
             "grades" -> settings.copy(grades = !settings.grades)
@@ -564,9 +558,9 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
 
     fun enablePush(context: Context) {
-        val ok = enableUnifiedPush(context)
-        message = if (ok) "UnifiedPush connected." else "No UnifiedPush distributor installed. Direct ntfy delivery remains available."
-        if (instant) graph.setInstant(true)
+        configurePushDelivery(context)
+        val ok = hasUnifiedPushDistributor(context)
+        message = if (ok) "UnifiedPush connected. Instant school updates use that distributor." else "No UnifiedPush distributor installed. School updates are checked about every 15 minutes until ntfy or another distributor is available."
     }
 
     companion object {

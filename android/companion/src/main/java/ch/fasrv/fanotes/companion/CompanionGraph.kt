@@ -54,7 +54,6 @@ import ch.fasrv.fanotes.schulnetz.parseDeskPrefs
 import ch.fasrv.fanotes.schulnetz.parseHiddenLessons
 import ch.fasrv.fanotes.schulnetz.serializeDeskPrefs
 import ch.fasrv.fanotes.schulnetz.serializeHiddenLessons
-import ch.fasrv.fanotes.schulnetz.startPageUrl
 import ch.fasrv.fanotes.sync.SyncApi
 import ch.fasrv.fanotes.sync.SyncEngine
 import ch.fasrv.fanotes.sync.SyncEngineOptions
@@ -141,12 +140,7 @@ class CompanionGraph(private val context: Context) {
         prefs.edit().putString("theme", id).apply()
     }
 
-    fun instantPush(): Boolean = prefs.getBoolean("instant", true)
-
-    fun setInstant(enabled: Boolean) {
-        prefs.edit().putBoolean("instant", enabled).apply()
-        if (enabled) NtfyListenService.start(context) else NtfyListenService.stop(context)
-    }
+    fun hasInstantPush(): Boolean = hasUnifiedPushDistributor(context)
 
     fun baseUrl(): String = normalizeSchoolBase(prefs.getString("schulnetz-base", null) ?: AKSA) ?: AKSA
 
@@ -222,7 +216,7 @@ class CompanionGraph(private val context: Context) {
                 if (next != null) publishSnapshot(previous, next, remote.settings)
             }
             if (remote.topic.isNotBlank()) prefs.edit().putString("push-server", remote.pushServer).putString("push-topic", remote.topic).apply()
-            if (instantPush() && remote.topic.isNotBlank()) NtfyListenService.start(context)
+            configurePushDelivery(context)
             NextLessonWidget.update(context)
             return
         }
@@ -234,11 +228,12 @@ class CompanionGraph(private val context: Context) {
             publishSnapshot(previous, next, remote.settings)
             val changes = runCatching { client.changes(session, prefs.getLong("change-cursor", 0L)) }.getOrNull()
             if (changes != null) applyServerChanges(changes)
-            if (instantPush() && remote.topic.isNotBlank()) NtfyListenService.start(context)
+            configurePushDelivery(context)
             NextLessonWidget.update(context)
             return
         }
         refreshLocally(previous)
+        configurePushDelivery(context)
         NextLessonWidget.update(context)
     }
 
@@ -436,18 +431,9 @@ class CompanionGraph(private val context: Context) {
 
     fun nextCheckAt(): Long {
         val last = lastCheckAt()
-        if (last <= 0L) return 0L
-        return last + if (instantPush()) PHONE_FALLBACK_MS else 15 * 60_000L
-    }
-
-    suspend fun keepAlive() {
-        if (schoolDisconnected()) return
-        if (!usesWebsiteSession(baseUrl())) return
-        val session = readWebSession() ?: return
-        if (session.id.isBlank()) return
-        val url = startPageUrl(baseUrl(), session.id, session.transid, signedOut)
-        runCatching { browser.load(url) }
-        schulnetzLog.info("keepalive start page lockHeld=${gate.isLocked}")
+        val delay = schoolFallbackIntervalMs(hasInstantPush())
+        if (last <= 0L || delay <= 0L) return 0L
+        return last + delay
     }
 
     fun setSubjectColor(subject: String, color: String) {
@@ -883,7 +869,9 @@ class CompanionGraph(private val context: Context) {
         prefs.edit().putBoolean("school-disconnected", true).remove("web-session").remove("push-topic").remove("push-server").apply()
         signedOut = true
         clearLocalLink()
-        NtfyListenService.stop(context)
+        CompanionAlerts.retireLegacyPush(context)
+        runCatching { org.unifiedpush.android.connector.UnifiedPush.unregister(context, "schulnetz") }
+        androidx.work.WorkManager.getInstance(context).cancelUniqueWork(SCHOOL_WORK)
         CompanionAlerts.forget(context, "schulnetz-login-required")
         link.value = SchulnetzLinkState(baseUrl = baseUrl())
     }
@@ -946,7 +934,6 @@ class CompanionGraph(private val context: Context) {
         const val HIDDEN_PATH = ".fanotes/schulnetz/hidden-lessons.json"
         const val SNAPSHOT_VAULT_PATH = ".fanotes/schulnetz/snapshot.json"
         const val SERVER_POLL_MS = 60_000L
-        const val PHONE_FALLBACK_MS = 3 * 60_000L
         private const val SILENT_AT = "schulnetz-silent-at"
         private const val SILENT_GAP_MS = 3 * 60 * 1000L
         fun snapshotFile(context: Context) = File(context.filesDir, "schulnetz-snapshot.json")

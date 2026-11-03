@@ -2,9 +2,7 @@ package ch.fasrv.fanotes.companion
 
 import android.Manifest
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
-import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -142,7 +140,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             item {
                 fun at(ms: Long) = if (ms <= 0L) "Not yet" else Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm", Locale.ENGLISH))
                 DiagnosticLine("Last school check", at(model.graph.lastCheckAt()))
-                DiagnosticLine("Next scheduled check", at(model.graph.nextCheckAt()))
+                DiagnosticLine("Next scheduled check", if (model.graph.hasInstantPush()) "When a push arrives" else at(model.graph.nextCheckAt()))
                 DiagnosticLine("Cached school data", updatedLabel(model.snapshot.fetchedAt))
                 val error = model.graph.lastCheckError().ifBlank { model.link.lastError }
                 if (error.isNotBlank()) InfoBanner("Last check", error, error = true)
@@ -190,12 +188,12 @@ private fun NotificationSettings(model: CompanionModel) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
     var allowed by remember { mutableStateOf(CompanionAlerts.notificationsAllowed(context)) }
-    var batteryOk by remember { mutableStateOf(context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName)) }
+    var hasDistributor by remember { mutableStateOf(hasUnifiedPushDistributor(context)) }
     val request = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed = CompanionAlerts.notificationsAllowed(context) }
     DisposableEffect(owner) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) {
             allowed = CompanionAlerts.notificationsAllowed(context)
-            batteryOk = context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName)
+            hasDistributor = hasUnifiedPushDistributor(context)
         } }
         owner.lifecycle.addObserver(observer); onDispose { owner.lifecycle.removeObserver(observer) }
     }
@@ -216,13 +214,11 @@ private fun NotificationSettings(model: CompanionModel) {
         item { ToggleRow("Excuse deadlines", checked = model.settings.deadlines) { model.toggleSetting("deadlines") } }
         item { ToggleRow("Events & messages", checked = model.settings.events) { model.toggleSetting("events") } }
         item { SectionLabel("Delivery") }
-        item { ToggleRow("Instant delivery", "Keep an ntfy connection for prompt updates", model.instant) { model.chooseInstant(it) } }
-        item { OutlinedButton(onClick = { model.enablePush(context) }, modifier = Modifier.fillMaxWidth()) { Text("Connect UnifiedPush") } }
-        item { OutlinedButton(onClick = { model.testPush(context) }, modifier = Modifier.fillMaxWidth()) { Text("Send a test notification") } }
-        if (!batteryOk) item {
-            Text("Android battery optimization may delay background updates.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 16.dp))
-            TextButton(onClick = { open(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).setData(Uri.parse("package:${context.packageName}"))) }) { Text("Allow background delivery") }
+        if (!hasDistributor) item {
+            Text("Instant pushes need ntfy or another UnifiedPush distributor. Without one, school updates are checked about every 15 minutes.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 12.dp))
         }
+        item { OutlinedButton(onClick = { model.enablePush(context); hasDistributor = hasUnifiedPushDistributor(context) }, modifier = Modifier.fillMaxWidth()) { Text("Connect UnifiedPush") } }
+        item { OutlinedButton(onClick = { model.testPush(context) }, modifier = Modifier.fillMaxWidth()) { Text("Send a test notification") } }
     }
 }
 
