@@ -38,10 +38,7 @@ import ch.fasrv.fanotes.schulnetz.parseHiddenLessons
 import ch.fasrv.fanotes.schulnetz.parseNormalizedSnapshot
 import ch.fasrv.fanotes.schulnetz.startsAt
 import ch.fasrv.fanotes.schulnetz.visibleEvents
-import androidx.work.ExistingWorkPolicy
-import androidx.work.OneTimeWorkRequestBuilder
 import kotlinx.coroutines.launch
-import okhttp3.OkHttpClient
 import org.unifiedpush.android.connector.FailedReason
 import org.unifiedpush.android.connector.MessagingReceiver
 import org.unifiedpush.android.connector.UnifiedPush
@@ -71,7 +68,14 @@ object CompanionAlerts {
         manager.createNotificationChannel(NotificationChannel("schulnetz-absence", context.getString(R.string.channel_absence), NotificationManager.IMPORTANCE_DEFAULT))
         manager.createNotificationChannel(NotificationChannel("schulnetz-deadline", context.getString(R.string.channel_deadline), NotificationManager.IMPORTANCE_HIGH))
         manager.createNotificationChannel(NotificationChannel("schulnetz-event", context.getString(R.string.channel_event), NotificationManager.IMPORTANCE_DEFAULT))
-        manager.createNotificationChannel(NotificationChannel(NtfyListenService.LIVE, context.getString(R.string.channel_live), NotificationManager.IMPORTANCE_LOW))
+    }
+
+    fun retireLegacyPush(context: Context) {
+        context.stopService(Intent(context, NtfyListenService::class.java))
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.cancel(NtfyListenService.NOTICE)
+        manager.deleteNotificationChannel(NtfyListenService.LIVE)
+        WorkManager.getInstance(context).cancelUniqueWork(SCHOOL_WORK_FAST)
     }
 
     fun notificationsAllowed(context: Context): Boolean {
@@ -164,93 +168,82 @@ object CompanionAlerts {
     }
 }
 
+internal const val SCHOOL_WORK = "schulnetz"
+internal const val SCHOOL_WORK_FAST = "schulnetz-fast"
+internal const val SCHOOL_FALLBACK_MS = 15 * 60_000L
+
+fun schoolFallbackIntervalMs(hasDistributor: Boolean): Long = if (hasDistributor) 0L else SCHOOL_FALLBACK_MS
+
+fun hasUnifiedPushDistributor(context: Context): Boolean =
+    UnifiedPush.resolveDefaultDistributor(context) is ResolvedDistributor.Found
+
+fun configurePushDelivery(context: Context) {
+    CompanionAlerts.retireLegacyPush(context)
+    val work = WorkManager.getInstance(context)
+    work.cancelUniqueWork(SCHOOL_WORK_FAST)
+    if (enableUnifiedPush(context)) {
+        work.cancelUniqueWork(SCHOOL_WORK)
+        return
+    }
+    val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
+    val linked = !prefs.getBoolean("school-disconnected", false) && !prefs.getString("push-topic", null).isNullOrBlank()
+    if (linked) SchulnetzWorker.schedule(context) else work.cancelUniqueWork(SCHOOL_WORK)
+}
+
 class SchulnetzWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
-    override suspend fun doWork(): Result = try {
-        (applicationContext as CompanionApplication).graph.refreshSchulnetz("worker")
-        scheduleFast(applicationContext)
-        Result.success()
-    } catch (_: Exception) {
-        Result.retry()
+    override suspend fun doWork(): Result {
+        if (hasUnifiedPushDistributor(applicationContext)) {
+            WorkManager.getInstance(applicationContext).cancelUniqueWork(SCHOOL_WORK)
+            return Result.success()
+        }
+        return try {
+            (applicationContext as CompanionApplication).graph.refreshSchulnetz("worker")
+            Result.success()
+        } catch (_: Exception) {
+            Result.retry()
+        }
     }
 
     companion object {
         fun schedule(context: Context) {
-            val request = PeriodicWorkRequestBuilder<SchulnetzWorker>(15, TimeUnit.MINUTES)
+            val request = PeriodicWorkRequestBuilder<SchulnetzWorker>(15, TimeUnit.MINUTES, 5, TimeUnit.MINUTES)
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                 .build()
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork("schulnetz", ExistingPeriodicWorkPolicy.UPDATE, request)
-            scheduleFast(context)
-        }
-
-        fun scheduleFast(context: Context) {
-            val delay = if ((context.applicationContext as? CompanionApplication)?.graph?.instantPush() == false) 15L else 3L
-            val request = OneTimeWorkRequestBuilder<SchulnetzWorker>()
-                .setInitialDelay(delay, TimeUnit.MINUTES)
-                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-                .build()
-            WorkManager.getInstance(context).enqueueUniqueWork("schulnetz-fast", ExistingWorkPolicy.REPLACE, request)
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(SCHOOL_WORK, ExistingPeriodicWorkPolicy.UPDATE, request)
         }
     }
 }
 
+/** Upgrade stub: stop the old ntfy foreground service and drop its notification. */
 class NtfyListenService : Service() {
-    private val job = kotlinx.coroutines.SupervisorJob()
-    private val scope = kotlinx.coroutines.CoroutineScope(job + kotlinx.coroutines.Dispatchers.IO)
-    private val client = OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).connectTimeout(20, TimeUnit.SECONDS).build()
-
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        retire()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        retire()
+        return START_NOT_STICKY
+    }
+
+    private fun retire() {
         val notice = NotificationCompat.Builder(this, LIVE)
             .setSmallIcon(R.drawable.ic_stat)
             .setContentTitle("Schulnetz")
-            .setContentText("Änderungen kommen sofort an.")
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
             .build()
-        startForeground(42, notice)
-        scope.launch { listen() }
-        return START_STICKY
-    }
-
-    private suspend fun listen() {
-        val prefs = getSharedPreferences("fanotes-companion", MODE_PRIVATE)
-        val server = prefs.getString("push-server", null).orEmpty().ifBlank { "https://ntfy.sh" }.trimEnd('/')
-        val topic = prefs.getString("push-topic", null).orEmpty()
-        if (topic.isBlank()) {
-            stopSelf()
-            return
-        }
-        while (job.isActive) {
-            try {
-                val request = okhttp3.Request.Builder().url("$server/$topic/json").header("Accept", "application/x-ndjson").build()
-                client.newCall(request).execute().use { response ->
-                    val source = response.body?.source() ?: return@use
-                    while (!source.exhausted()) {
-                        val line = source.readUtf8Line() ?: break
-                        if (line.startsWith("{")) CompanionAlerts.onPushPayload(this@NtfyListenService, line)
-                    }
-                }
-            } catch (_: Exception) {
-                kotlinx.coroutines.delay(5_000)
-            }
-        }
-    }
-
-    override fun onDestroy() {
-        job.cancel()
-        super.onDestroy()
+        startForeground(NOTICE, notice)
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        getSystemService(NotificationManager::class.java).deleteNotificationChannel(LIVE)
+        stopSelf()
     }
 
     companion object {
         const val LIVE = "schulnetz-live"
-        fun start(context: Context) {
-            val intent = Intent(context, NtfyListenService::class.java)
-            androidx.core.content.ContextCompat.startForegroundService(context, intent)
-        }
-        fun stop(context: Context) {
-            context.stopService(Intent(context, NtfyListenService::class.java))
-        }
+        const val NOTICE = 42
     }
 }
 
@@ -258,6 +251,8 @@ class CompanionPushReceiver : MessagingReceiver() {
     override fun onNewEndpoint(context: Context, endpoint: PushEndpoint, instance: String) {
         val app = context.applicationContext as? CompanionApplication ?: return
         app.graph.scope.launch { app.graph.registerPushEndpoint(endpoint.url) }
+        WorkManager.getInstance(context).cancelUniqueWork(SCHOOL_WORK)
+        WorkManager.getInstance(context).cancelUniqueWork(SCHOOL_WORK_FAST)
     }
 
     override fun onRegistrationFailed(context: Context, reason: FailedReason, instance: String) = Unit

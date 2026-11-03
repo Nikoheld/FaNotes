@@ -16,18 +16,11 @@ class CompanionApplication : Application() {
         graph = CompanionGraph(this)
         graph.recordOpenToday()
         CompanionAlerts.ensureChannels(this)
-        SchulnetzWorker.schedule(this)
+        CompanionAlerts.retireLegacyPush(this)
+        configurePushDelivery(this)
         graph.scope.launch {
             graph.engine.start()
-            runCatching { graph.refreshSchulnetz("process-start") }
-            val topic = getSharedPreferences("fanotes-companion", MODE_PRIVATE).getString("push-topic", null)
-            if (graph.instantPush() && !topic.isNullOrBlank()) {
-                runCatching { NtfyListenService.start(this@CompanionApplication) }
-            }
-            while (true) {
-                kotlinx.coroutines.delay(CompanionGraph.PHONE_FALLBACK_MS)
-                runCatching { graph.keepAlive() }
-            }
+            graph.engine.pauseAutomaticSync()
         }
     }
 }
