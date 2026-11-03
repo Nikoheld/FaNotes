@@ -65,7 +65,10 @@ internal fun fitWritingPopulation(records: List<Pair<String, WritingObservation>
     val accepted = before == null || after!! <= before + 1e-9
     return (if (accepted) candidate else previous) to StyleValidation(if (enough) holdout.size else 0, before, after, accepted)
 }
-internal fun writingMedian(xs: List<Double>, fallback: Double = 0.0) = if (xs.isEmpty()) fallback else xs.sorted()[xs.size / 2]
+internal fun writingMedian(xs: List<Double>, fallback: Double = 0.0): Double {
+    val value = if (xs.isEmpty()) fallback else xs.sorted()[xs.size / 2]
+    return if (value == 0.0) 0.0 else value
+}
 internal fun writingHash(text: String) = MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
 private data class WritingBox(val x: Double, val y: Double, val width: Double, val height: Double) {
     val right get() = x + width
@@ -110,10 +113,25 @@ private fun extract(document: InkDocument): List<WritingWord> {
     }
     val words = mutableListOf<WritingWord>()
     for (line in lines) {
+        val sorted = line.items.sortedBy { it.box.x }
+        val gaps = mutableListOf<Double>(); var edge = Double.NEGATIVE_INFINITY
+        for (item in sorted) {
+            val gap = item.box.x - edge
+            if (gap.isFinite() && gap > typical * .025) gaps += gap
+            edge = max(edge, item.box.right)
+        }
+        gaps.sort()
+        var wordGap = typical * (if (sorted.count { it.box.width > typical * 1.7 } >= sorted.size / 2.0) .35 else .65)
+        var bestRatio = 2.0
+        for (i in 1 until gaps.size) {
+            val ratio = gaps[i] / gaps[i - 1]
+            if (gaps[i] >= typical * .18 && ratio > bestRatio) { bestRatio = ratio; wordGap = sqrt(gaps[i] * gaps[i - 1]) }
+        }
+        wordGap = wordGap.coerceIn(typical * .18, typical * .65)
         val groups = mutableListOf<MutableList<WritingItem>>()
         var right = Double.NEGATIVE_INFINITY
-        for (item in line.items.sortedBy { it.box.x }) {
-            if (groups.isEmpty() || item.box.x - right > typical * .65) { groups += mutableListOf<WritingItem>(); right = Double.NEGATIVE_INFINITY }
+        for (item in sorted) {
+            if (groups.isEmpty() || item.box.x - right > wordGap) { groups += mutableListOf<WritingItem>(); right = Double.NEGATIVE_INFINITY }
             groups.last() += item; right = max(right, item.box.right)
         }
         val baseline = writingMedian(groups.map { group -> group.maxOf { it.box.bottom } })
@@ -342,7 +360,7 @@ class WritingLearningStore(private val directory: File) {
         val companions = all.filter { it.path.endsWith(".famd", true) }.map { it.path.substringBeforeLast('.') }.toSet()
         val files = all.filter { it.path.endsWith(".famd", true) || ((it.path.endsWith(".md", true) || it.path.endsWith(".markdown", true)) && it.path.substringBeforeLast('.') !in companions) }
         val live = files.map { it.path }.toSet()
-        val templateKey = writingHash(encodeGlyphLibrary(templates))
+        val templateKey = writingHash("segmentation-v3:" + encodeGlyphLibrary(templates))
         for (file in files) {
             if (cancelled()) return choose()
             val checkpoint = File(directory, writingHash(file.path) + ".json")

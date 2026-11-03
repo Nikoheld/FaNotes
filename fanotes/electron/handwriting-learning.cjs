@@ -2,12 +2,15 @@
 const { Worker } = require('node:worker_threads')
 const path = require('node:path')
 const crypto = require('node:crypto')
+const os = require('node:os')
+const { desktopLearningPolicy } = require('../src/lib/desktopHandwritingPolicy.mjs')
 let current = null, nextId = 0
 function start(root, userData) {
   if (current?.root === root) return current
   if (current) { for (const task of current.tasks.values()) task.reject(Error('Vault changed')); void current.worker.terminate() }
   const cache = path.join(userData, 'personal-handwriting-v2', crypto.createHash('sha256').update(root).digest('hex'))
-  const worker = new Worker(path.join(__dirname, 'handwriting-learning-worker.mjs'), { workerData: { root, cache, userData }, resourceLimits: { maxOldGenerationSizeMb: 256 } })
+  const policy = desktopLearningPolicy({ cores: os.availableParallelism?.() ?? os.cpus().length, memoryBytes: os.totalmem() })
+  const worker = new Worker(path.join(__dirname, 'handwriting-learning-worker.mjs'), { workerData: { root, cache, userData, policy }, resourceLimits: { maxOldGenerationSizeMb: policy.heapMb } })
   worker.unref()
   const state = { root, worker, tasks: new Map() }; current = state
   worker.on('message', ({ id, result, error }) => {

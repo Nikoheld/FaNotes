@@ -1,6 +1,6 @@
 # Local personal handwriting, engine 2
 
-Implemented for the **Linux desktop and Android tablet app**. Windows and Web keep their existing synthesis route. No release, update feed, website, or server deployment is part of this change.
+Implemented for **Linux, Windows, and Android**. Linux and Windows use a stronger desktop trajectory engine; Android uses a smaller, independently budgeted Kotlin engine. Web keeps its existing synthesis route. No release, update feed, website, or server deployment is part of this change.
 
 ## What changed and why
 
@@ -10,7 +10,7 @@ Engine 2 models reusable **pen trajectories**, with complete words and context f
 
 ## Ordinary-page learning
 
-The source is `payload.ink` in current `.famd` companions, including the existing packed codec. Historical `.md` / `.markdown` notes with a live `fanotes-ink` reference can supply their `.fanotes/assets/<id>.json` ink. Companions take precedence, so clearing a current page does not resurrect its older asset. Linux also walks configured folder locations. Deleted notes' orphan assets, history snapshots, trash, art symbols, figure stamps, and generated strokes do not supply training data.
+The source is `payload.ink` in current `.famd` companions, including the existing packed codec. Historical `.md` / `.markdown` notes with a live `fanotes-ink` reference can supply their `.fanotes/assets/<id>.json` ink. Companions take precedence, so clearing a current page does not resurrect its older asset. Both desktop platforms also walk configured folder locations. Deleted notes' orphan assets, history snapshots, trash, art symbols, figure stamps, and generated strokes do not supply training data.
 
 Points remain native normalized x/y coordinates on disk. Extraction converts them to **page pixels before measuring distance, slope, line membership, or curvature**. This prevents rectangular-page distortion. Delayed dots and crossbars attach geometrically; stroke order, timing, tilt, and pressure remain available. Explicit drawing tools are excluded, as are isolated straight marks and small isolated loops. The geometric text/drawing filter is conservative, not a semantic diagram recognizer.
 
@@ -25,25 +25,38 @@ Imported GlyphenWerk strokes and explicit corrections remain useful but are opti
 
 ## Generation and connections
 
-A longest-matching trajectory is preferred, with context-specific variants when available. A word that exceeds the writable width falls back to smaller fragments before layout, rather than clipping a long trajectory. Known word geometry preserves proportions, pen lifts, and source pressure. Unknown shapes use the bundled school script, adapted to learned style. `äöü`, capitals, numbers, punctuation, and `ß` / `ẞ` are supported; synthesis preserves the requested sharp-s rather than applying the editor's Swiss spelling preference. Canonically equivalent input is normalized to NFC.
+Android prefers a longest-matching trajectory, with context-specific variants when available. Linux and Windows search an entire word over alternative word, triplet, pair, and letter trajectories. A bounded beam scores neighboring context, directed endpoint tangents, vertical displacement, feasible spacing, and repeated sample usage. Complete observed words receive preference. This avoids choosing each letter independently and discovering incompatible pen directions afterward. A word that exceeds the writable width falls back to smaller fragments before layout, rather than clipping a long trajectory. Known word geometry preserves proportions, pen lifts, and source pressure. Unknown shapes use the bundled school script, adapted to learned style. `äöü`, capitals, numbers, punctuation, and `ß` / `ẞ` are supported; synthesis preserves the requested sharp-s rather than applying the editor's Swiss spelling preference. Canonically equivalent input is normalized to NFC.
 
-An isolated-letter fallback uses the directed longest pen-down body. It never reverses a stroke to select a convenient anchor. A quintic Hermite splice matches endpoint velocity directions and estimated accelerations. A compatible observed joining motion adds a bounded cubic B-spline residual with zero position, first derivative, and second derivative at the splice endpoints. Thus the learned motion does not undo the endpoint constraints. The sampled output is still a finite polyline, not an analytic spline renderer.
+An isolated-letter fallback uses the directed pen-down body. Desktop measures actual arc length so a stationary dwell with many points cannot replace the main letter body. It never reverses a stroke to select a convenient anchor. A quintic Hermite splice matches endpoint velocity directions and estimated accelerations. A compatible observed joining motion adds a bounded cubic B-spline residual with zero position, first derivative, and second derivative at the splice endpoints. Thus the learned motion does not undo the endpoint constraints. The sampled output is still a finite polyline, not an analytic spline renderer. Desktop evaluates four or seven bounded alternatives to the compact splice, with multiple compatible observed motion donors, denser sampling, and different velocity tensions. It retains the compact result unless a candidate reduces arc-length-normalized bending/curvature energy. This metric protects geometry; it does not measure human legibility.
 
 Backward-facing endpoints, excessive gaps, large vertical displacement, overshoot, or excessive transition length cause a **pen lift**. A printing style is allowed to stay printed. Feasible bodies merge into one stroke; delayed marks remain separate. No overlay connector or straight bridge is added. Final timestamps use arc length, bounded source timing, and smoothed velocity. Native source boundaries stored in synthesis metadata let Android's school matcher inspect merged geometry without reading any text labels.
 
-Variation comes from alternative trajectories and correlated empirical style observations. Shape, width, and pressure already present in personal samples are retained. The new engine does not inject unconstrained per-point noise. With no relevant observations or alternative samples, regenerating may produce the same shapes; the UI does not promise otherwise.
+Variation comes from alternative trajectories and correlated empirical style observations. Shape, width, and pressure already present in personal samples are retained. Desktop also smooths empirical height and baseline changes within a word to maintain writing rhythm. The new engine does not inject unconstrained per-point noise. With no relevant observations or alternative samples, regenerating may produce the same shapes; the UI does not promise otherwise.
 
 ## Bounded model and update validation
 
-A page keeps at most 48 style observations, 32 joining motions, and 16 labeled units; a labeled unit has at most 768 points. Complete words take priority over redundant short fragments. Extraction bounds individual stroke sampling and skips files over 32 MiB. These limits affect the learning cache, never the user's original ink.
+Desktop chooses the expanded profile with at least four available CPU cores and 8 GiB RAM; smaller computers use the balanced profile. These are bounded CPU algorithms, with no neural training runtime or accelerator dependency.
 
-All page summaries inform the dominant style center. Copies share one vote. A deterministic reservoir of at most 48 distinct pages provides the heavier trajectory/style variants; full per-page checkpoints stay on disk. This bounds active model memory while allowing the collection to grow. Summaries are recomputed in batches, and unchanged pages skip extraction and matching.
+| Learning/generation budget | Android | Desktop balanced | Desktop expanded |
+| --- | ---: | ---: | ---: |
+| Active distinct source pages | 48 | 96 | 192 |
+| Style observations / joining motions per page | 48 / 32 | 96 / 64 | 96 / 64 |
+| Labeled trajectory units per page | 16 | 48 | 96 |
+| Points per labeled unit | 768 | 1,536 | 2,048 |
+| Arc-length recognition samples | 24 | 64 | 64 |
+| Word search beam | Greedy | 8 | 16 |
+| Joining motion reservoir | 128 | 256 | 512 |
+| Worker old-generation heap limit | Android managed | 320 MiB | 512 MiB |
+
+Desktop limits active labeled geometry to 300,000 / 750,000 points, and inference snapshots to 160,000 / 300,000 points. Diverse selection reserves room for full words and rare labels; repeated labels cannot exhaust the pool. Each page also has a total geometry budget. Original note strokes are never downsampled or rewritten. Extraction bounds individual stroke sampling and skips files over 32 MiB.
+
+All page summaries inform the dominant style center. Copies share one vote. A deterministic reservoir provides the heavier trajectory/style variants; full per-page checkpoints stay on disk. Desktop additionally indexes labels across the full corpus. A debounced typed-text query retrieves relevant known words/fragments from up to 32 source pages outside that reservoir, bounded to 512 units and 120,000 points. It sends no text over the network and assigns no new labels. Clearing or deleting a source retracts its vocabulary. Summaries are recomputed in batches, and unchanged pages skip extraction and matching. A profile/version change rebuilds derived checkpoints once.
 
 When there are at least two independent held-out pages and five training pages, an update's style-center reconstruction error is checked against the previous center on the held-out pages. A worse center is rejected while new data remains available for later updates. This evaluates **geometry**, not spelling, legibility, or perceptual identity. Smaller collections do not display or fabricate a validation score. Recognition ambiguity checks, finite geometry checks, version checks, and bounded sample counts apply before checkpoint promotion. Deletion recomputes the remaining population rather than retaining a deleted page's center.
 
 ## Background execution, persistence, privacy
 
-- Linux: one Node worker thread, deferred startup, a 120-second discovery interval, and a coalesced delay after saves. The renderer uses a separate module worker for preview/generation. Status polls omit unchanged models, and typed preview requests reuse cached model/library data rather than recopying it on every keystroke. Vault changes terminate the previous learner. Per-vault cache: `<userData>/personal-handwriting-v2/<SHA-256 of vault path>/`.
+- Linux and Windows: one Node worker thread, deferred startup, a 120-second discovery interval, and a coalesced delay after saves. The renderer uses a separate module worker for preview/generation. Status polls omit unchanged models, and typed preview requests reuse cached model/library data rather than recopying it on every keystroke. Vault changes terminate the previous learner. Per-vault cache: `<userData>/personal-handwriting-v2/<SHA-256 of vault path>/`.
 - Android: WorkManager 2.11.2, unique work after 25 seconds of quiet plus a six-hour periodic discovery pass, with battery-not-low and storage-not-low constraints. Saves and incoming sync changes schedule local learning. A coroutine mutex serializes workers and startup loading. Cancellation is checked between pages and before commit. Private cache: `<filesDir>/personal-handwriting-v2/<vaultId>/`.
 - Each page checkpoint is written to a temporary file, synced, and renamed atomically where supported. Interrupted temporary files do not replace the previous checkpoint. Corrupt derived cache files can be rebuilt from the source notes. Model format is versioned independently of the note format.
 - Disabling automatic learning is persisted and leaves the last model usable. Generation and learning perform no network requests and require no API keys, downloads, or paid services. The model is outside the synced vault. An already configured note-sync service remains separate from this feature.
@@ -63,9 +76,12 @@ npm --prefix fanotes run typecheck
 npm --prefix fanotes run check:text-to-handwriting
 npm --prefix fanotes run check:personal-handwriting
 
-# Real Linux worker/preview UI, including paste, sliders, opt-out, and insertability
-FANOTES_TTH_LINUX=1 npm --prefix fanotes run check:tth-dialog
-# Existing Windows/Web dialog path
+# Desktop geometry, whole-word selection, and larger learning budgets
+npm --prefix fanotes run check:desktop-handwriting
+# Real browser worker/preview UI; run sequentially (shared harness port)
+FANOTES_TTH_PLATFORM=linux npm --prefix fanotes run check:tth-dialog
+npm --prefix fanotes run check:tth-windows
+# Existing Web dialog path
 npm --prefix fanotes run check:tth-dialog
 
 # Frontend bundle (not a release package)
@@ -82,15 +98,21 @@ To regenerate the committed evaluation artifacts:
 ```sh
 FANOTES_HANDWRITING_ARTIFACTS="$PWD/fanotes/docs/handwriting-evaluation" \
   npm --prefix fanotes run check:personal-handwriting
+FANOTES_HANDWRITING_ARTIFACTS="$PWD/fanotes/docs/handwriting-evaluation" \
+  npm --prefix fanotes run check:desktop-handwriting
 ```
 
-The fixture suite checks real unlabeled IAM ink, ambiguity rejection, whole-fragment reuse, duplicate/changed/deleted pages, corrupt pages, interruption/restart, model persistence, bounded large collections, held-out geometry rejection, monotonic timing, feasible/infeasible joins, wrapping, page growth, special characters, provenance, and native editable-stroke undo/save/reload. Legacy synthesis remains separately regression-tested.
+The fixture suite checks real unlabeled IAM ink, ambiguity rejection, whole-fragment reuse, duplicate/changed/deleted pages, corrupt pages, interruption/restart, model persistence, bounded large collections, held-out geometry rejection, monotonic timing, feasible/infeasible joins, wrapping, page growth, special characters, provenance, and native editable-stroke undo/save/reload. The desktop worker test also verifies full-corpus word retrieval outside a deliberately tiny active reservoir and retraction after edits/deletions. Legacy synthesis remains separately regression-tested.
 
 `handwriting-evaluation/metrics.json`, the SVGs, and the synthetic cursive fixture are reproducible examples. The cursive fixture has 9 continuous joins across 3 words and 3 pen-down trajectories, replacing separate glyph/connector strokes. The endpoint test has approximately 1.22 degrees of finite-sampling tangent error. The real IAM fixture yields style and joining motions with **no transcript supplied**. The synthetic cursive example is not presented as real user handwriting or as a recognition accuracy benchmark.
 
+The desktop comparison adds a deliberately mixed forward/backward-letter fixture: independent selection yields zero joins and eight strokes, while whole-word search yields six joins and two cohesive word strokes. The transition sweep improves measured energy in 14 of 15 cases without worsening the remaining case. The same source page retains 96 labeled units on expanded desktop versus 16 in the compact profile. See `desktop-quality-metrics.json` and `desktop-word-before.svg` / `desktop-word-after.svg`. These synthetic cases demonstrate specific algorithmic improvements, not a real-writer quality score.
+
+The integrated core suite passes 438 Android tests and the debug APK builds. Linux and Windows browser harnesses exercise their respective desktop platform routes and real generation workers on Linux. A native Windows installation and physical pen/tablet battery or latency tests were not run on this host. The unrelated `check:windows` release smoke test still fails on its existing `fanotes.fasrv.ch/download/...` fixture URLs: the current updater accepts only GitHub release asset URLs. Neither that test nor the updater was changed here; it is not counted as a passing handwriting check.
+
 ## Genuine remaining limits
 
-This is a local hybrid trajectory engine, not a writer-conditioned neural sequence model. Arbitrary cursive cannot reliably acquire letter identities from the recognizer bundled in Android. Unrecognized notes still teach geometry and joining motions; unknown letters retain fallback shapes. The Linux implementation deliberately does not turn the existing recognition pipeline's heuristic confidence values into verified synthesis labels. General cursive pseudo-labeling would need a calibrated offline recognizer plus trustworthy stroke/text alignment and independent writer-held-out evaluation.
+This is a local hybrid trajectory engine, not a writer-conditioned neural sequence model. Arbitrary cursive cannot reliably acquire letter identities from the recognizer bundled in Android. Unrecognized notes still teach geometry and joining motions; unknown letters retain fallback shapes. The desktop implementation deliberately does not turn the existing recognition pipeline's heuristic confidence values into verified synthesis labels. General cursive pseudo-labeling would need a calibrated offline recognizer plus trustworthy stroke/text alignment and independent writer-held-out evaluation.
 
 No real-user indistinguishability result or character-error rate is claimed. Geometry tests and synthetic comparisons cannot establish that. Distinctive letter shapes require reliable corresponding examples; highly mixed styles, diagrams drawn with the writing pen, sparse samples, and absent pressure/timing reduce personalization. Physical tablet battery/latency and human legibility testing remain necessary before making stronger quality claims.
 

@@ -5,7 +5,8 @@ let samples: Sample[] = []
 let model: PersonalModel | undefined
 let style = personalStyle()
 self.onmessage = ({ data }) => {
-  if (data.op === 'model') { samples = data.samples; model = data.model; style = personalStyle(model); return }
+  if (data.op === 'model') { samples = data.samples; model = data.model; style = personalStyle(model, model?.desktop?.motions ?? 128);
+    const seen=new Set<string>(); style.units=[...(data.units ?? []),...style.units].filter(unit=>{const key=unit.label+':'+unit.id;if(seen.has(key))return false;seen.add(key);return true}); return }
   try {
     const options = { ...data.options, model }
     const result = data.fit ? synthesizeHandwritingToFit(data.text, samples, options, data.page, 18, style)

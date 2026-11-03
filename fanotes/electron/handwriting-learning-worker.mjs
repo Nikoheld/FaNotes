@@ -1,6 +1,8 @@
 import { parentPort, workerData } from 'node:worker_threads'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import os from 'node:os'
+import { desktopLearningPolicy, selectDiverseUnits } from '../src/lib/desktopHandwritingPolicy.mjs'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { emptyPersonalModel, learnPage, personalStyle, validModel, summarizeObservations, fitPopulation } from '../src/lib/personalHandwriting.mjs'
@@ -8,6 +10,7 @@ import { schoolScript } from '../src/lib/schoolScript.mjs'
 const require = createRequire(import.meta.url)
 const { parseFamd } = require('./famd.cjs')
 const { root, cache, userData } = workerData
+const policy = workerData.policy ?? desktopLearningPolicy({ cores: os.availableParallelism?.() ?? os.cpus().length, memoryBytes: os.totalmem() })
 const folderLocations = require('./folder-locations.cjs')
 const key = text => createHash('sha256').update(text).digest('hex')
 let model = emptyPersonalModel(), busy = false, enabled = true, error = null, stopped = false
@@ -45,33 +48,63 @@ async function walk(directory, result = [], logical = '', map = {}, active = new
 }
 let cachedStyle = null, cachedStyleRevision = -1, selectionKey = ''
 function snapshot(includeModel = true) {
-  if (cachedStyleRevision !== model.revision) { cachedStyle = personalStyle(model); cachedStyleRevision = model.revision }
+  if (cachedStyleRevision !== model.revision) { cachedStyle = personalStyle(model, policy.motions); cachedStyleRevision = model.revision }
   const style = cachedStyle
   // Bounded inference snapshot, independent from durable per-page contributions.
-  const observations = style.observations.filter((_, i) => i % Math.max(1, Math.ceil(style.observations.length / 2048)) === 0)
-  const byLabel = new Map()
-  for (const u of style.units) { const list = byLabel.get(u.label) ?? []; if (list.length < 8) list.push(u); byLabel.set(u.label, list) }
-  const units = [...byLabel.values()].flat().slice(0, 1500)
+  const observations = style.observations.filter((_, i) => i % Math.max(1, Math.ceil(style.observations.length / 8192)) === 0)
+  const units = selectDiverseUnits(style.units, { maxUnits: policy.snapshotUnits, pointBudget: policy.snapshotPoints, variants: policy.variants })
   const pages = {}
-  for (let i = 0; i < Math.max(observations.length / 48, units.length / 96, 1); i++) pages[`snapshot-${i}`] = { fingerprint: `${model.revision}-${i}`, observations: observations.slice(i * 48, i * 48 + 48), units: units.slice(i * 96, i * 96 + 96), joins: style.joins.slice(i * 32, i * 32 + 32) }
-  const compact = { version: 2, revision: model.revision, pages, population: model.population }
-  return { vaultId: key(root), model: includeModel ? compact : null, unchanged: !includeModel, pageCount: new Set([...index.values()].filter(r => r.observations).map(r => r.fingerprint)).size, observationCount: style.observations.length, unitCount: style.units.length, busy, enabled, error, scanned }
+  for (let i = 0; i < Math.max(observations.length / 96, units.length / 96, style.joins.length / 64, 1); i++) pages[`snapshot-${i}`] = { fingerprint: `${model.revision}-${i}`, observations: observations.slice(i * 96, i * 96 + 96), units: units.slice(i * 96, i * 96 + 96), joins: style.joins.slice(i * 64, i * 64 + 64) }
+  const compact = { version: 2, revision: model.revision, pages, population: model.population, desktop: { beamWidth: policy.beamWidth, variants: policy.variants, motions: policy.motions } }
+  return { profile: policy.tag, limits: policy, vaultId: key(root), model: includeModel ? compact : null, unchanged: !includeModel, pageCount: new Set([...index.values()].filter(r => r.observations).map(r => r.fingerprint)).size, observationCount: style.observations.length, unitCount: style.units.length, busy, enabled, error, scanned }
 }
-let manifest = {}, index = new Map()
-const metadata = (id, stamp, contribution) => ({ id, stamp, fingerprint: contribution.fingerprint, observations: contribution.observations.length, units: contribution.units.length, summary: summarizeObservations(contribution.observations) })
+let manifest = {}, index = new Map(), vocabulary = new Map()
+const metadata = (id, stamp, contribution) => ({ id, stamp, fingerprint: contribution.fingerprint, observations: contribution.observations.length, units: contribution.units.length, summary: summarizeObservations(contribution.observations), labels: [...new Set(contribution.units.map(u=>u.label))] })
+function remember(id,record) {
+  forget(id)
+  index.set(id,record)
+  for(const label of record.labels) { const pages=vocabulary.get(label) ?? new Set(); pages.add(id); vocabulary.set(label,pages) }
+}
+function forget(id) {
+  for(const label of index.get(id)?.labels ?? []) { const pages=vocabulary.get(label); pages?.delete(id); if(!pages?.size) vocabulary.delete(label) }
+  index.delete(id)
+}
+/** Query the full on-disk trajectory corpus, beyond the bounded active style reservoir. */
+async function retrieve(text) {
+  if(typeof text !== 'string') return []
+  const words=[...new Set(text.normalize('NFC').slice(0,8000).match(/\S+/gu) ?? [])].slice(0,128)
+  const keys=new Set(words)
+  for(const word of words) {
+    const chars=[...word]
+    for(let i=0;i<chars.length && keys.size<512;i++) for(const n of [1,2,3]) if(i+n<=chars.length) keys.add(chars.slice(i,i+n).join(''))
+  }
+  const pages=new Set()
+  for(const label of keys) for(const id of [...(vocabulary.get(label) ?? [])].slice(0,4)) if(pages.size<32) pages.add(id)
+  const candidates=[]
+  for(const id of pages) {
+    try {
+      const {contribution}=JSON.parse(await read(path.join(cache,`${key(id)}.json`)))
+      if(index.get(id)?.fingerprint !== contribution.fingerprint || !validModel({version:2,revision:0,pages:{check:contribution}})) continue
+      candidates.push(...contribution.units.filter(u=>keys.has(u.label)))
+    } catch {}
+  }
+  const ranked=candidates.sort((a,b)=>Number(!words.includes(a.label))-Number(!words.includes(b.label)) || b.label.length-a.label.length)
+  return selectDiverseUnits(ranked,{maxUnits:512,pointBudget:Math.min(120000,policy.snapshotPoints),variants:4})
+}
 async function selectRepresentatives() {
   const seen = new Set()
   const selected = [...index.values()].filter(r => r.observations || r.units).sort((a, b) => a.fingerprint.localeCompare(b.fingerprint)).filter(r => {
     if (seen.has(r.fingerprint)) return false
     seen.add(r.fingerprint); return true
-  }).slice(0, 48)
+  }).slice(0, policy.pages)
   const pages = {}
+  const pageBudget = Math.max(policy.unitPoints, Math.floor(policy.hotPoints / Math.max(1, selected.length)))
   for (const entry of selected) {
-    if (model.pages[entry.id]?.fingerprint === entry.fingerprint) pages[entry.id] = model.pages[entry.id]
+    if (model.pages[entry.id]?.fingerprint === entry.fingerprint && model.pages[entry.id]?.sampleBudget === pageBudget) pages[entry.id] = model.pages[entry.id]
     else {
       try {
         const checkpoint = JSON.parse(await read(path.join(cache, `${key(entry.id)}.json`)))
-        if (validModel({ version: 2, revision: 0, pages: { check: checkpoint.contribution } })) pages[entry.id] = checkpoint.contribution
+        if (validModel({ version: 2, revision: 0, pages: { check: checkpoint.contribution } })) pages[entry.id] = { ...checkpoint.contribution, sampleBudget: pageBudget, units: selectDiverseUnits(checkpoint.contribution.units, { maxUnits: policy.units, pointBudget: pageBudget, variants: policy.variants }) }
       } catch {}
     }
   }
@@ -95,7 +128,7 @@ async function scan() {
       if (stopped || !enabled || ticket !== epoch) return
       const stat = await fs.lstat(file)
       if (!stat.isFile() || stat.isSymbolicLink()) continue
-      let stamp = `${stat.mtimeMs}:${stat.size}`
+      let stamp = `${stat.mtimeMs}:${stat.size}:${policy.tag}`
       let doc
       if (!/\.famd$/iu.test(file)) {
         const source = await read(file)
@@ -121,13 +154,13 @@ async function scan() {
         }
         // Invalid/unavailable pages retain their last good contribution and retry next pass.
         if (!doc || !Array.isArray(doc.strokes)) { error = 'Some pages could not be processed; they will be retried.'; continue }
-        const contribution = learnPage(doc, templates)
+        const contribution = learnPage(doc, templates, policy)
         if (ticket !== epoch || !enabled) return
         const next = { version: 2, revision: 0, pages: { check: contribution } }
         if (!validModel(next)) throw Error('Invalid trajectory update')
         // Checkpoint one page at a time. Interrupted collections resume from this file.
         await atomic(path.join(cache, `${key(id)}.json`), { id, stamp, contribution })
-        model = { ...model, revision: model.revision + 1, pages: id in model.pages || Object.keys(model.pages).length < 48 ? { ...model.pages, [id]: contribution } : model.pages }; manifest[id] = stamp; index.set(id, metadata(id, stamp, contribution)); scanned++
+        model = { ...model, revision: model.revision + 1, pages: id in model.pages || Object.keys(model.pages).length < policy.pages ? { ...model.pages, [id]: contribution } : model.pages }; manifest[id] = stamp; remember(id, metadata(id, stamp, contribution)); scanned++
         if (scanned % 16 === 0) await selectRepresentatives()
         if (forced.get(id) === forcedTicket) forced.delete(id)
       } catch { error = 'Some pages could not be processed; they will be retried.' }
@@ -135,7 +168,7 @@ async function scan() {
       await new Promise(resolve => setImmediate(resolve))
     }
     for (const id of index.keys()) if (!live.has(id)) {
-      delete model.pages[id]; delete manifest[id]; index.delete(id); model.population = null; model.revision++
+      delete model.pages[id]; delete manifest[id]; forget(id); model.population = null; model.revision++
       await fs.unlink(path.join(cache, `${key(id)}.json`)).catch(() => {})
     }
     await selectRepresentatives()
@@ -149,7 +182,7 @@ parentPort.on('message', async ({ id, op, value }) => {
     if (op === 'enabled') { enabled = value === true; epoch++; await atomic(path.join(cache, 'settings.json'), { enabled }); if (enabled) void scan() }
     if (op === 'scan') void scan()
     if (op === 'changed' && typeof value === 'string') {
-      forced.set(value.replace(/\.(md|markdown)$/iu, '.famd'), ++changeSequence)
+      forced.set(value.replaceAll('\\', '/').replace(/\.(md|markdown)$/iu, '.famd'), ++changeSequence)
       clearTimeout(changedTimer); changedTimer = setTimeout(scan, 12000)
     }
     if (op === 'templates' && Array.isArray(value) && value.length <= 4000) {
@@ -158,7 +191,8 @@ parentPort.on('message', async ({ id, op, value }) => {
       // Reconsider unlabeled pages once explicit templates change, not every preview.
       manifest = {}; void scan()
     }
-    parentPort.postMessage({ id, result: snapshot(!(op === 'snapshot' && value?.revision === model.revision && value?.vaultId === key(root))) })
+    const requestedUnits = op === 'retrieve' ? await retrieve(value?.text) : undefined
+    parentPort.postMessage({ id, result: { ...snapshot(op !== 'retrieve' && !(op === 'snapshot' && value?.revision === model.revision && value?.vaultId === key(root))), ...(requestedUnits ? {requestedUnits} : {}) } })
   } catch { parentPort.postMessage({ id, error: 'Local handwriting learning failed.' }) }
 })
 try {
@@ -170,7 +204,7 @@ try {
     try {
       const { id, stamp, contribution } = JSON.parse(await read(path.join(cache, file)))
       const candidate = { version: 2, revision: 0, pages: { check: contribution } }
-      if (validModel(candidate)) { index.set(id, metadata(id, stamp, contribution)); model.revision++; manifest[id] = stamp }
+      if (validModel(candidate)) { remember(id, metadata(id, stamp, contribution)); model.revision++; manifest[id] = stamp }
     } catch { /* Recover all other page checkpoints; retry this page on next scan. */ }
   }
 } catch {}

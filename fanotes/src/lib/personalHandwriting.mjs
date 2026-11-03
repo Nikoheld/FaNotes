@@ -1,3 +1,5 @@
+import { TABLET_LEARNING_POLICY, selectDiverseUnits } from './desktopHandwritingPolicy.mjs'
+
 /** Local trajectory learning. No transcript is inferred from page text/search metadata. */
 export const MODEL_VERSION = 2
 export const MAX_PAGE_OBSERVATIONS = 48
@@ -18,15 +20,15 @@ export function fingerprint(value) {
 }
 export const emptyPersonalModel = () => ({ version: MODEL_VERSION, revision: 0, pages: {} })
 export function validModel(model) {
-  try { return model?.version === MODEL_VERSION && (!model.population || ['height','slant','pressure','pressureSpread','nibRatio','baseline','joinRate','gap','wordGap','speed'].every(k => Number.isFinite(model.population[k])) && model.population.height > 0 && model.population.nibRatio > 0) && Number.isSafeInteger(model.revision) && model.pages && typeof model.pages === 'object'
-    && Object.values(model.pages).every(p => p && Array.isArray(p.observations) && p.observations.length <= MAX_PAGE_OBSERVATIONS
+  try { return model?.version === MODEL_VERSION && (!model.population || ['height','slant','pressure','pressureSpread','nibRatio','baseline','joinRate','gap','wordGap','speed'].every(k => Number.isFinite(model.population[k])) && model.population.height > 0 && model.population.nibRatio > 0) && (!model.desktop || (Number.isInteger(model.desktop.beamWidth) && model.desktop.beamWidth >= 1 && model.desktop.beamWidth <= 16 && Number.isInteger(model.desktop.variants) && model.desktop.variants >= 1 && model.desktop.variants <= 16 && Number.isInteger(model.desktop.motions) && model.desktop.motions >= 1 && model.desktop.motions <= 512)) && Number.isSafeInteger(model.revision) && model.pages && typeof model.pages === 'object'
+    && Object.values(model.pages).every(p => p && Array.isArray(p.observations) && p.observations.length <= 96
       && p.observations.every(o => ['height', 'slant', 'pressure', 'pressureSpread', 'nibRatio', 'baseline', 'joinRate', 'gap', 'wordGap', 'speed'].every(k => Number.isFinite(o[k])) && o.height > 0 && o.nibRatio > 0)
       && Array.isArray(p.units) && p.units.length <= 96 && p.units.every(u => u && typeof u.id === 'string' && typeof u.sessionId === 'string' && typeof u.label === 'string' && u.label.length <= 48
         && Number.isFinite(u.baseline) && u.baseline >= -.5 && u.baseline <= 2 && Array.isArray(u.bbox) && u.bbox.length === 4 && u.bbox.every(Number.isFinite)
         && u.bbox[2] > 0 && u.bbox[3] > 0 && u.sourceCanvas?.width > 0 && u.sourceCanvas?.height > 0 && Number.isFinite(u.sourceCanvas.width + u.sourceCanvas.height)
         && u.strokes?.length && u.strokes.length <= 64 && u.strokes.every(s => s.points?.length && s.points.length <= 4096
           && s.points.every(q => [q.x, q.y, q.t, q.pressure].every(Number.isFinite))))
-      && (!p.joins || (p.joins.length <= 32 && p.joins.every(j => j.points?.length === 17 && j.entry?.length === 2 && j.exit?.length === 2 && [...j.entry, ...j.exit].every(Number.isFinite) && j.points.every(q => [q.x, q.y, q.pressure, q.t].every(Number.isFinite))))))
+      && (!p.joins || (p.joins.length <= 64 && p.joins.every(j => j.points?.length === 17 && j.entry?.length === 2 && j.exit?.length === 2 && [...j.entry, ...j.exit].every(Number.isFinite) && j.points.every(q => [q.x, q.y, q.pressure, q.t].every(Number.isFinite))))))
   } catch { return false }
 }
 const isHuman = s => !s.synthesis && !s.symbolId && !s.figurePaths?.length && s.purpose !== 'art'
@@ -34,13 +36,29 @@ const isHuman = s => !s.synthesis && !s.symbolId && !s.figurePaths?.length && s.
   && s.points?.length > 1 && s.points.length <= 20000
   && s.points.every(p => [p.x, p.y, p.pressure, p.t].every(Number.isFinite) && p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1)
 
+/** Separate the large-gap mode from character/pen-lift gaps, in page pixels. */
+function wordGapThreshold(items, typical) {
+  const gaps=[]; let right=-Infinity
+  for (const item of items) {
+    const gap=item.box[0]-right
+    if(Number.isFinite(gap) && gap>typical*.025) gaps.push(gap)
+    right=Math.max(right,item.box[0]+item.box[2])
+  }
+  gaps.sort((a,b)=>a-b)
+  let threshold=typical*(items.filter(i=>i.box[2]>typical*1.7).length>=items.length/2?.35:.65), best=2
+  for(let i=1;i<gaps.length;i++) {
+    const ratio=gaps[i]/gaps[i-1]
+    if(gaps[i]>=typical*.18 && ratio>best) { best=ratio; threshold=Math.sqrt(gaps[i]*gaps[i-1]) }
+  }
+  return clamp(threshold,typical*.18,typical*.65)
+}
 /** Pixel-space segmentation. Normalized x/y must never be compared across rectangular sheets. */
-export function extractWriting(document) {
+export function extractWriting(document, policy = TABLET_LEARNING_POLICY) {
   const w = document?.sourceWidth, h = document?.sourceHeight
   if (!(w > 0 && h > 0 && Number.isFinite(w + h))) return []
   const all = (document.strokes ?? []).filter(isHuman).slice(0, 20000).map(s => {
     // Retain pressure/timing, bound CPU and storage. Endpoints are always kept.
-    const step = Math.max(1, Math.ceil(s.points.length / 2048))
+    const step = Math.max(1, Math.ceil(s.points.length / policy.strokePoints))
     const points = s.points.filter((_, i) => i % step === 0 || i === s.points.length - 1).map(p => ({ ...p, x: p.x * w, y: p.y * h }))
     const stroke = { ...s, points }, box = bounds([stroke])
     return { stroke, box }
@@ -64,9 +82,10 @@ export function extractWriting(document) {
   const words = []
   for (const line of lines) {
     const sorted = line.items.sort((a, b) => a.box[0] - b.box[0])
+    const wordGap = wordGapThreshold(sorted,typical)
     const groups = []; let group = [], right = -Infinity
     for (const item of sorted) {
-      if (item.box[0] - right > typical * .65 && group.length) { groups.push(group); group = [] }
+      if (item.box[0] - right > wordGap && group.length) { groups.push(group); group = [] }
       group.push(item); right = Math.max(group.length === 1 ? -Infinity : right, item.box[0] + item.box[2])
     }
     if (group.length) groups.push(group)
@@ -117,13 +136,20 @@ function resample(ps, count = 24) {
     return { x: ps[j - 1].x + (ps[j].x - ps[j - 1].x) * t, y: ps[j - 1].y + (ps[j].y - ps[j - 1].y) * t }
   })
 }
-function signature(strokes) {
+function signature(strokes, count = 24) {
   const b = bounds(strokes)
   if (!(b[2] > 0 && b[3] > 0)) return null
-  return strokes.map(s => resample(s.points.map(p => ({ x: (p.x - b[0]) / b[2], y: (p.y - b[1]) / b[3] }))))
+  return strokes.map(s => resample(s.points.map(p => ({ x: (p.x - b[0]) / b[2], y: (p.y - b[1]) / b[3] })), count))
+}
+const templateSignatures = new WeakMap()
+function templateSignature(sample,count) {
+  let sizes = templateSignatures.get(sample)
+  if (!sizes) { sizes = new Map(); templateSignatures.set(sample,sizes) }
+  if (!sizes.has(count)) sizes.set(count,signature(sample.strokes,count))
+  return sizes.get(count)
 }
 /** Conservative local shape matching. Distances are errors, not calibrated OCR probabilities. */
-export function recognizeWord(word, library) {
+export function recognizeWord(word, library, count = 24) {
   const sorted = word.strokes.map(s => ({ s, b: bounds([s]) })).sort((a, b) => a.b[0] - b.b[0])
   const clusters = []; let right = -Infinity
   for (const item of sorted) {
@@ -134,14 +160,14 @@ export function recognizeWord(word, library) {
   const hits = []
   for (const cluster of clusters) {
     cluster.sort((a, b) => a.points[0].t - b.points[0].t)
-    const sig = signature(cluster)
+    const sig = signature(cluster, count)
     if (!sig) return null
     const byLabel = new Map()
     for (const sample of templates) {
       if (sample.strokes.length !== cluster.length) continue
-      const target = signature(sample.strokes)
+      const target = templateSignature(sample, count)
       if (!target) continue
-      const distance = Math.sqrt(sig.reduce((total, path, j) => total + path.reduce((sum, p, i) => sum + (p.x - target[j][i].x) ** 2 + (p.y - target[j][i].y) ** 2, 0), 0) / (sig.length * 24))
+      const distance = Math.sqrt(sig.reduce((total, path, j) => total + path.reduce((sum, p, i) => sum + (p.x - target[j][i].x) ** 2 + (p.y - target[j][i].y) ** 2, 0), 0) / (sig.length * count))
       byLabel.set(sample.label, Math.min(byLabel.get(sample.label) ?? Infinity, distance))
     }
     const scores = [...byLabel].sort((a, b) => a[1] - b[1])
@@ -187,32 +213,37 @@ function resampleFull(ps, count) {
     return { ...raw, ...p }
   })
 }
-export function learnPage(document, library = []) {
-  const words = extractWriting(document), observations = [], units = [], joins = []
+export function learnPage(document, library = [], policy = TABLET_LEARNING_POLICY) {
+  const words = extractWriting(document, policy), observations = [], units = [], joins = []
   // Stable, spatially distributed sampling: a long first paragraph cannot fill the entire budget.
-  const stride = Math.max(1, Math.ceil(words.length / MAX_PAGE_OBSERVATIONS))
+  const stride = Math.max(1, Math.ceil(words.length / policy.observations))
   for (let i = 0; i < words.length; i += stride) {
     const word = words[i]; observations.push(observation(word))
-    joins.push(...joiningMotions(word).slice(0, Math.max(0, 32 - joins.length)))
-    const hits = recognizeWord(word, library)
+    joins.push(...joiningMotions(word).slice(0, Math.max(0, policy.joins - joins.length)))
+    const hits = recognizeWord(word, library, policy.recognitionPoints)
     if (!hits) continue
     const label = hits.map(h => h.label).join('')
     if (!/^[\p{L}\p{N}.,!?;:'"()\-+%=]+$/u.test(label) || label.length > 48) continue
     // Full words, pair/triplet trajectories and context-conditioned glyphs retain real spacing and pen lifts.
     const wordId = fingerprint(word.strokes)
-    for (let start = 0; start < hits.length && units.length < 96; start++) {
+    for (let start = 0; start < hits.length; start++) {
       for (const count of [...new Set([1, 2, 3, hits.length])]) {
-        if (start + count > hits.length || (count === hits.length && start > 0) || units.length >= 96) continue
+        if (start + count > hits.length || (count === hits.length && start > 0)) continue
         const part = hits.slice(start, start + count)
         const text = part.map(h => h.label).join('')
         const ps = part.flatMap(h => h.strokes).sort((a, b) => a.points[0].t - b.points[0].t)
         units.push(unit(text, ps, word.baseline, `${wordId}-${start}-${count}`, `${hits[start - 1]?.label ?? '^'}|${hits[start + count]?.label ?? '$'}`))
       }
     }
+    if (units.length > policy.candidates * 2) {
+      units.sort((a,b) => Number(a.context !== '^|$') - Number(b.context !== '^|$') || a.id.localeCompare(b.id))
+      units.length = policy.candidates
+    }
   }
-  const boundedUnits = units.filter(u => u.baseline >= -.5 && u.baseline <= 2 && u.strokes.reduce((n, s) => n + s.points.length, 0) <= 768)
-    .sort((a, b) => (a.context === '^|$' && a.label.length > 1 ? 0 : Math.min(a.label.length, 4)) - (b.context === '^|$' && b.label.length > 1 ? 0 : Math.min(b.label.length, 4)) || a.id.localeCompare(b.id)).slice(0, 16)
-  return { fingerprint: fingerprint((document.strokes ?? []).filter(isHuman)), observations, units: boundedUnits, joins }
+  const boundedUnits = units.filter(u => u.baseline >= -.5 && u.baseline <= 2 && u.strokes.reduce((n, s) => n + s.points.length, 0) <= policy.unitPoints)
+    .sort((a, b) => (a.context === '^|$' && a.label.length > 1 ? 0 : Math.min(a.label.length, 4)) - (b.context === '^|$' && b.label.length > 1 ? 0 : Math.min(b.label.length, 4)) || a.id.localeCompare(b.id))
+  const selected = selectDiverseUnits(boundedUnits, { maxUnits: policy.units, pointBudget: policy.pagePoints, variants: policy.variants })
+  return { fingerprint: fingerprint((document.strokes ?? []).filter(isHuman)), observations, units: selected, joins }
 }
 export function updatePersonalPage(model, id, contribution) {
   if (!validModel(model)) model = emptyPersonalModel()
@@ -248,7 +279,7 @@ export function fitPopulation(records, previous = null) {
   const accepted = before === null || after <= before + 1e-9
   return { population: accepted ? candidate : previous, validation: { holdoutPages: enough ? holdout.length : 0, previousError: before, candidateError: after, accepted } }
 }
-export function personalStyle(model) {
+export function personalStyle(model, motionLimit = 128) {
   if (!validModel(model)) return { observations: [], units: [], joins: [], pageCount: 0 }
   // Duplicate geometry has one vote even when copied/renamed into several notes.
   const seen = new Set(), entries = Object.values(model.pages).filter(p => p.observations.length || p.units.length || p.joins?.length).filter(p => { if (seen.has(p.fingerprint)) return false; seen.add(p.fingerprint); return true })
@@ -262,7 +293,7 @@ export function personalStyle(model) {
   const center = summarizeObservations(empirical)
   const adjusted = model.population && center ? empirical.map(o => Object.fromEntries(STYLE_KEYS.map(k => [k,
     k === 'height' ? o[k] * model.population[k] / Math.max(1, center[k]) : o[k] + model.population[k] - center[k]]))) : empirical
-  return { observations: adjusted, units: entries.flatMap(p => p.units), joins: entries.flatMap(p => p.joins ?? []).slice(0, 128), pageCount: entries.length }
+  return { observations: adjusted, units: entries.flatMap(p => p.units), joins: entries.flatMap(p => p.joins ?? []).slice(0, motionLimit), pageCount: entries.length }
 }
 
 /**
@@ -270,7 +301,7 @@ export function personalStyle(model) {
  * It returns the whole continuous pen-down trajectory, never an overlay connector.
  * Reject infeasible joins instead of reversing strokes or adding long flourishes.
  */
-export function spliceTrajectories(left, right, em, motions = []) {
+export function spliceTrajectories(left, right, em, motions = [], configuration = {}) {
   if (left.length < 3 || right.length < 3) return null
   const a = left.at(-1), b = right[0], dx = b.x - a.x, dy = b.y - a.y, gap = Math.hypot(dx, dy)
   if (dx < -em * .06 || dx > em * .65 || Math.abs(dy) > em * .4 || gap < .05) return null
@@ -285,9 +316,9 @@ export function spliceTrajectories(left, right, em, motions = []) {
   // Backward or nearly vertical exits characteristic of print should lift.
   if (u.x < .1 || v.x < .1 || (u.x * v.x + u.y * v.y) < -.5) return null
   const cosine = (a, b) => (a[0] * b[0] + a[1] * b[1]) / Math.max(1e-9, Math.hypot(...a) * Math.hypot(...b))
-  const donor = motions.map(m => ({ motion: m, score: cosine(m.entry, [u.x, u.y]) + cosine(m.exit, [v.x, v.y]) }))
-    .filter(m => m.score > 1.65).sort((a, b) => b.score - a.score)[0]?.motion
-  const d = Math.min(em * .35, gap * .8)
+  const donors = motions.map(m => ({ motion: m, score: cosine(m.entry, [u.x, u.y]) + cosine(m.exit, [v.x, v.y]) }))
+    .filter(m => m.score > 1.65).sort((a, b) => b.score - a.score).slice(0, Math.max(1, Math.min(4, configuration.donorCount ?? 1)))
+  const d = Math.min(em * .35, gap * (configuration.tension ?? .8))
   const accel = (ps, end) => {
     const q = end ? ps.slice(-3) : ps.slice(0, 3)
     const ta = tangent(q.slice(0, 2), true), tb = tangent(q.slice(1), true)
@@ -301,23 +332,53 @@ export function spliceTrajectories(left, right, em, motions = []) {
   }
   const cx = coefficients(a.x, b.x, u.x * d, v.x * d, aa.x, ab.x), cy = coefficients(a.y, b.y, u.y * d, v.y * d, aa.y, ab.y)
   const evaluate = (c, t) => c.reduceRight((s, x) => s * t + x, 0)
-  const count = Math.max(12, Math.ceil(gap / .65)), bridge = []
+  const count = Math.max(12, Math.ceil(gap / (configuration.spacing ?? .65))), bridge = []
   for (let i = 1; i < count; i++) {
     const t = i / count
-    let residual = 0
-    if (donor) {
+    let residual = 0, pressureResidual = 0, totalWeight = 0
+    for (const {motion:donor,score} of donors) {
       const position = t * 16, k = Math.min(15, Math.floor(position)), f = position - k
       const weights = [(1-f)**3/6, (3*f**3-6*f*f+4)/6, (-3*f**3+3*f*f+3*f+1)/6, f**3/6]
       const neighbors = [-1,0,1,2].map(offset => donor.points[clamp(k + offset, 0, 16)])
       const end = donor.points[16]
       const px = neighbors.reduce((sum, p, n) => sum + weights[n] * p.x, 0), py = neighbors.reduce((sum, p, n) => sum + weights[n] * p.y, 0)
-      residual = (py * end.x - px * end.y) / Math.max(1e-6, end.x * end.x + end.y * end.y)
+      const weight = Math.max(.01,score-1.65)**2
+      totalWeight += weight
+      pressureResidual += weight * (neighbors.reduce((sum,p,n) => sum+weights[n]*p.pressure,0) - (donor.points[0].pressure+(end.pressure-donor.points[0].pressure)*t))
+      residual += weight * (py * end.x - px * end.y) / Math.max(1e-6, end.x * end.x + end.y * end.y)
         * gap * .35 * 64 * t ** 3 * (1 - t) ** 3
     }
+    if (totalWeight) { residual /= totalWeight; pressureResidual /= totalWeight }
     const x = evaluate(cx, t) - dy / gap * residual, y = evaluate(cy, t) + dx / gap * residual
     if (x < a.x - em * .08 || x > b.x + em * .08 || y < Math.min(a.y, b.y) - em * .18 || y > Math.max(a.y, b.y) + em * .18) return null
-    bridge.push({ ...a, x, y, t: a.t + (b.t - a.t) * t, pressure: a.pressure + (b.pressure - a.pressure) * (t * t * (3 - 2 * t)) })
+    bridge.push({ ...a, x, y, t: a.t + (b.t - a.t) * t, pressure: clamp(a.pressure + (b.pressure - a.pressure) * (t * t * (3 - 2 * t)) + (configuration.donorCount > 1 ? pressureResidual * .5 * 64*t**3*(1-t)**3 : 0), 0, 1) })
   }
   if (length([a, ...bridge, b]) > Math.max(gap * 1.65, em * .12)) return null
   return [...left, ...bridge, ...right]
+}
+
+/** Arc-length sampled bending/curvature-variation energy: comparable across resolutions. */
+export function trajectoryJoinEnergy(points, leftCount, rightCount, em) {
+  const start = Math.max(0,leftCount-3), end = Math.min(points.length,points.length-rightCount+3)
+  const path = points.slice(start,end), sampled = resample(path,48), angles = []
+  for (let i=1;i<sampled.length;i++) angles.push(Math.atan2(sampled[i].y-sampled[i-1].y,sampled[i].x-sampled[i-1].x))
+  const turns = angles.slice(1).map((a,i) => Math.atan2(Math.sin(a-angles[i]),Math.cos(a-angles[i])))
+  const bend = turns.reduce((sum,t) => sum+t*t,0)
+  const variation = turns.slice(1).reduce((sum,t,i) => sum+(t-turns[i])**2,0)
+  return bend+variation*.5+length(path)/em*.025
+}
+/** Desktop spends extra CPU comparing feasible C2 trajectories; source bodies stay intact. */
+export function optimizeDesktopSplice(left,right,em,motions=[],maxCandidates=7) {
+  const baseline = spliceTrajectories(left,right,em,motions)
+  let best = baseline, energy = baseline ? trajectoryJoinEnergy(baseline,left.length,right.length,em) : Infinity
+  const baselineEnergy = baseline ? energy : null
+  let candidatesEvaluated = 1
+  for (const tension of [.35,.5,.65,.8,1,1.2].slice(0,Math.max(0,Math.min(6,maxCandidates-1)))) {
+    const candidate = spliceTrajectories(left,right,em,motions,{tension,spacing:.35,donorCount:4})
+    candidatesEvaluated++
+    if (!candidate) continue
+    const score = trajectoryJoinEnergy(candidate,left.length,right.length,em)
+    if (score < energy) { energy = score; best = candidate }
+  }
+  return best ? {points:best,energy,baselineEnergy,candidatesEvaluated} : null
 }

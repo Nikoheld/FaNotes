@@ -1004,7 +1004,7 @@ function setCurrentVaultPath(nextVaultPath) {
     validatedVaultAt = 0
   }
   currentVaultPath = nextVaultPath
-  if (process.platform === 'linux') {
+  if (['linux', 'win32'].includes(process.platform)) {
     const timer = setTimeout(() => { void assertCurrentVaultRoot().then(root => require('./handwriting-learning.cjs').request(root, app.getPath('userData'), 'scan')).catch(() => {}) }, 12000)
     timer.unref()
   }
@@ -3210,7 +3210,7 @@ async function reportAnonymousDesktopAppOpen() {
 }
 
 function schedulePostStartupWork() {
-  if (process.platform === 'linux') {
+  if (['linux', 'win32'].includes(process.platform)) {
     const timer = setTimeout(() => { void assertCurrentVaultRoot().then(root => require('./handwriting-learning.cjs').request(root, app.getPath('userData'), 'scan')).catch(() => {}) }, 12000)
     timer.unref()
   }
@@ -3258,8 +3258,9 @@ function schedulePostStartupWork() {
 
 function registerIpcHandlers() {
   handle(IPC.handwritingLearning, async (_event, op = 'snapshot', value) => {
-    if (process.platform !== 'linux') return null
-    if (!['snapshot', 'scan', 'enabled', 'templates'].includes(op)) throw new Error('Invalid learning operation')
+    if (!['linux', 'win32'].includes(process.platform)) return null
+    if (!['snapshot', 'scan', 'enabled', 'templates', 'retrieve'].includes(op)) throw new Error('Invalid learning operation')
+    if (op === 'retrieve' && (typeof value?.text !== 'string' || value.text.length > 8000)) throw new Error('Invalid handwriting text query')
     if (op === 'templates' && (!Array.isArray(value) || JSON.stringify(value).length > 12 * 1024 * 1024)) throw new Error('Training library is too large')
     const root = await assertCurrentVaultRoot()
     return require('./handwriting-learning.cjs').request(root, app.getPath('userData'), op, value)
@@ -4135,7 +4136,7 @@ function registerIpcHandlers() {
         throw new Error(`Handschrift konnte nicht in die Notiz geschrieben werden: ${error?.message ?? error}`)
       }
     }
-    if (process.platform === 'linux' && typeof payload.noteRelativePath === 'string') {
+    if (['linux', 'win32'].includes(process.platform) && typeof payload.noteRelativePath === 'string') {
       void require('./handwriting-learning.cjs').request(root, app.getPath('userData'), 'changed', payload.noteRelativePath).catch(() => {})
     }
     return {

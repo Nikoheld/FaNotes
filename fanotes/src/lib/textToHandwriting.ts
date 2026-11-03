@@ -1,5 +1,6 @@
 import type { Sample, Stroke, StrokePoint } from '../../../src/types'
-import { personalStyle, spliceTrajectories, type PersonalModel, type StyleObservation } from './personalHandwriting.mjs'
+import { personalStyle, spliceTrajectories, optimizeDesktopSplice, type PersonalModel, type StyleObservation } from './personalHandwriting.mjs'
+import { planDesktopWord, primaryTrajectory, type WordCandidate, type WordSelection } from './desktopWordPlanner.mjs'
 import { schoolScript } from './schoolScript.mjs'
 import { WRITE_CAP_HEIGHT, WRITE_CAP_WIDTH } from './noteCanvas'
 
@@ -20,6 +21,7 @@ export type HandwritingSynthesisOptions = {
   marginBottom?: number
   startY?: number
   model?: PersonalModel
+  desktopQuality?: boolean
 }
 
 export type HandwritingSynthesisResult = {
@@ -194,7 +196,35 @@ const createPlans = (
   let previousSampleId: string | undefined
 
   const chars = [...text]
+  const desktopSelections = new Map<number, WordSelection>()
+  if (options.desktopQuality) {
+    const beamWidth = options.model?.desktop?.beamWidth ?? 12
+    const variants = options.model?.desktop?.variants ?? 16
+    const center = learned.observations[0]
+    let start = 0
+    while (start < chars.length) {
+      if (/\s/u.test(chars[start])) { start++; continue }
+      let end = start
+      while (end < chars.length && !/\s/u.test(chars[end])) end++
+      const word = chars.slice(start,end)
+      const selections = planDesktopWord(word.join(''), position => {
+        const char = word[position]
+        const observed = (unitsByFirst.get(char) ?? []).filter(u => word.slice(position,position+[...u.label].length).join('') === u.label)
+        const candidates: WordCandidate[] = observed.map(unit => {
+          const height = Math.max(...[...unit.label].map(c => { const p=glyphProfile(c); return p.top+p.bottom }))
+          return {text:unit.label,sample:unit,unit,width:height*unit.sourceCanvas.width/unit.sourceCanvas.height,height,top:unit.baseline*height}
+        }).filter(c => c.width*em <= availableWidth)
+        const fallback = samplesForCharacter(char,indexed)
+        const profile = glyphProfile(char), height = profile.top+profile.bottom
+        candidates.push(...fallback.samples.filter(s => s.sessionId !== 'school-script' || !observed.some(u => u.label === char)).slice(0,variants).map(sample => ({text:char,sample,diacritic:fallback.diacritic,width:clamp(height*sampleAspect(sample)*profile.widthScale,.06,/^[MWmw]$/u.test(char)?1.32:1.08),height,top:profile.top})))
+        return candidates
+      }, {random,beamWidth,variants,connect:options.connectLetters && (center?.joinRate ?? 1)>.5,gap:(center?.gap ?? .075)-.025})
+      for (const selection of selections) desktopSelections.set(start+selection.position,selection)
+      start = end
+    }
+  }
   let previousObservation: StyleObservation | undefined
+  let flowObservation: StyleObservation | undefined
   for (let index = 0; index < chars.length; index++) {
     let char = chars[index]
     const leftContext = index === 0 || /\s/u.test(chars[index - 1]) ? '^' : chars[index - 1]
@@ -204,7 +234,8 @@ const createPlans = (
     const longest = units[0]?.label
     const contextual = units.filter(u => u.label === longest && u.context === `${leftContext}|${chars[index + [...u.label].length] ?? '$'}`)
     const pool = contextual.length ? contextual : units.filter(u => u.label === longest)
-    const selectedUnit = pool.length ? pool[Math.floor(random() * Math.min(pool.length, 8))] : undefined
+    const desktopSelection = desktopSelections.get(index)
+    const selectedUnit = desktopSelection ? desktopSelection.unit : pool.length ? pool[Math.floor(random() * Math.min(pool.length, 8))] : undefined
     if (selectedUnit) { char = selectedUnit.label; index += [...char].length - 1 }
     const observation = previousObservation ?? learned.observations[Math.floor(random() * learned.observations.length)]
     previousObservation = observation
@@ -212,28 +243,35 @@ const createPlans = (
       plans.push({ kind: 'newline' })
       previousSampleId = undefined
       previousObservation = undefined
+      flowObservation = undefined
       continue
     }
     if (char === ' ') {
       plans.push({ kind: 'space', width: em * (observation?.wordGap ?? 0.3) })
       previousSampleId = undefined
       previousObservation = undefined
+      flowObservation = undefined
       continue
     }
 
-    const match = selectedUnit ? { samples: [selectedUnit], diacritic: undefined } : samplesForCharacter(char, indexed)
+    const match = desktopSelection ? { samples: [desktopSelection.sample], diacritic: desktopSelection.diacritic } : selectedUnit ? { samples: [selectedUnit], diacritic: undefined } : samplesForCharacter(char, indexed)
     if (!match.samples.length) {
       missing.add(char)
       plans.push({ kind: 'missing', char, width: em * 0.56 })
       previousSampleId = undefined
       previousObservation = undefined
+      flowObservation = undefined
       continue
     }
 
     const sample = selectSample(match.samples, random, previousSampleId)
     const unitHeight = selectedUnit ? Math.max(...[...char].map(c => { const p = glyphProfile(c); return p.top + p.bottom })) : 1
     const profile = selectedUnit ? { top: selectedUnit.baseline * unitHeight, bottom: (1 - selectedUnit.baseline) * unitHeight, widthScale: 1 } : glyphProfile(char)
-    const observed = learned.observations[Math.floor(random() * learned.observations.length)] ?? observation
+    const sampledObservation = learned.observations[Math.floor(random() * learned.observations.length)] ?? observation
+    const observed = options.desktopQuality && flowObservation && sampledObservation
+      ? { ...sampledObservation, height: flowObservation.height*.8+sampledObservation.height*.2, baseline: flowObservation.baseline*.8+sampledObservation.baseline*.2 }
+      : sampledObservation
+    flowObservation = observed
     // Replay correlated empirical observations; no sinusoidal per-point shape noise.
     const heightRatio = observation && observed ? clamp(observed.height / observation.height, .88, 1.12) : 1
     // Per-glyph height and baseline must move a little at the default
@@ -450,7 +488,7 @@ export const synthesizeHandwriting = (
   const random = createRandom(options.seed)
   const covered = new Set(samples.map(s => s.label))
   const library = [...samples, ...schoolScript.filter(s => !covered.has(s.label))]
-  const learned = preparedStyle ?? personalStyle(options.model)
+  const learned = preparedStyle ?? personalStyle(options.model, options.desktopQuality ? options.model?.desktop?.motions ?? 512 : 128)
   const { plans, missing } = createPlans(text, library, options, random, Math.max(12, width - (options.marginLeft ?? 72) - (options.marginRight ?? 72)), learned)
   const em = clamp(options.fontSize, 16, 96)
   const marginBottom = clamp(options.marginBottom ?? 72, 0, startHeight * 0.4)
@@ -492,14 +530,15 @@ export const synthesizeHandwriting = (
 
     const generated = transformGlyph(plan, slot.x, slot.baseline, slot.line, options, width, height, clock)
     // The longest pen-down body carries the join. Delayed dots/crossbars remain separate.
-    const bodyIndex = generated.strokes.reduce((best, stroke, i, all) => stroke.points.length > (all[best]?.points.length ?? 0) ? i : best, 0)
+    const bodyIndex = options.desktopQuality ? primaryTrajectory(generated.strokes,width,height) : generated.strokes.reduce((best, stroke, i, all) => stroke.points.length > (all[best]?.points.length ?? 0) ? i : best, 0)
     const body = generated.strokes[bodyIndex]
     let merged = false
     if (body && options.connectLetters && previousBody >= 0 && previousLine === slot.line && canJoin(previousChar) && canJoin(plan.char)
       && (plan.observation?.joinRate ?? 1) > .5 && [...plan.char].length === 1 && [...previousChar].length === 1) {
       const left = strokes[previousBody]
       const toPixels = (p: StrokePoint) => ({ ...p, x: p.x * width, y: p.y * height })
-      const joined = spliceTrajectories(left.points.map(toPixels), body.points.map(toPixels), em, learnedMotions)
+      const leftPoints = left.points.map(toPixels), rightPoints = body.points.map(toPixels)
+      const joined = options.desktopQuality ? optimizeDesktopSplice(leftPoints,rightPoints,em,learnedMotions,(options.model?.desktop?.beamWidth ?? 12)>8?7:4)?.points : spliceTrajectories(leftPoints,rightPoints,em,learnedMotions)
       if (joined) {
         strokes[previousBody] = { ...left, points: joined.map(p => ({ ...p, x: p.x / width, y: p.y / height })) }
         merged = true

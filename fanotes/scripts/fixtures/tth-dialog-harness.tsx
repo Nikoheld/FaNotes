@@ -49,12 +49,19 @@ const sample = (char: string, variant = 1): Sample => ({
 const samples = [...new Set('Test einer langen Zeile')].filter((char) => char !== ' ')
   .flatMap((char) => [sample(char, 1), sample(char, 2)])
 
-declare const __FANOTES_TEST_LINUX__: boolean
-const linux = typeof __FANOTES_TEST_LINUX__ !== 'undefined' && __FANOTES_TEST_LINUX__
-if (linux) {
+declare const __FANOTES_TEST_PLATFORM__: string
+const platform = typeof __FANOTES_TEST_PLATFORM__ !== 'undefined' ? __FANOTES_TEST_PLATFORM__ : ''
+const desktop = ['linux','win32'].includes(platform)
+if (desktop) {
   let enabled = true
-  window.fanotes = { platform: 'linux', handwritingLearning: async (op?: string, value?: unknown) => {
+  window.fanotes = { platform, handwritingLearning: async (op?: string, value?: unknown) => {
     if (op === 'enabled') enabled = value === true
+    if (op === 'retrieve') {
+      const state = window as unknown as { __tthLookups?: unknown[] }
+      ;(state.__tthLookups ??= []).push(value)
+      await new Promise(resolve => window.setTimeout(resolve, 80))
+      return { requestedUnits: [], model: null }
+    }
     return { model: { version: 2, revision: 0, pages: {} }, pageCount: 0, observationCount: 0, unitCount: 0, busy: false, enabled, error: null }
   } } as typeof window.fanotes
 }
@@ -63,7 +70,7 @@ const Harness = () => (
     <div className="lw-canvas-surface" style={{ width: 320, height: 240, background: '#eee' }} />
     <TextToHandwritingDialog
       open
-      samples={linux ? [] : samples}
+      samples={desktop ? [] : samples}
       pageWidth={400}
       pageHeight={420}
       suggestedStartY={96}

@@ -3,7 +3,9 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { Worker } from 'node:worker_threads'
 import { createRequire } from 'node:module'
-import { validModel, personalStyle } from '../src/lib/personalHandwriting.mjs'
+import { desktopLearningPolicy } from '../src/lib/desktopHandwritingPolicy.mjs'
+import { validModel, personalStyle, learnPage } from '../src/lib/personalHandwriting.mjs'
+import { schoolScript } from '../src/lib/schoolScript.mjs'
 const require = createRequire(import.meta.url)
 const { serializeFamd } = require('../electron/famd.cjs')
 const base = path.resolve(process.env.FANOTES_HANDWRITING_ARTIFACTS || '../.scratch/handwriting-evaluation')
@@ -17,8 +19,9 @@ const doc = { schemaVersion: 1, title: 'Ordinary page', paperStyle: 'dots', sour
 const file = path.join(root, 'Ordinary.famd')
 await fs.writeFile(file, serializeFamd('# Ordinary page', { ink: doc }))
 let worker, sequence = 0
+let policy = desktopLearningPolicy({cores:2,memoryBytes:4*1024**3})
 const open = () => {
-  worker = new Worker(new URL('../electron/handwriting-learning-worker.mjs', import.meta.url), { workerData: { root, cache } })
+  worker = new Worker(new URL('../electron/handwriting-learning-worker.mjs', import.meta.url), { workerData: { root, cache, policy } })
   worker.on('error', error => { throw error })
 }
 const request = (op = 'snapshot', value) => new Promise((resolve, reject) => {
@@ -65,8 +68,43 @@ try {
   }
   await request('scan')
   const large = await until(r => !r.busy && r.pageCount === 60)
-  assert(Object.keys(large.model.pages).length <= 48)
+  assert(Object.keys(large.model.pages).length <= policy.pages)
+  assert.equal(large.model.desktop.beamWidth,8)
+  assert(large.model.desktop.motions>128)
+  assert(Object.values(large.model.pages).flatMap(p=>p.units).reduce((n,u)=>n+u.strokes.reduce((m,s)=>m+s.points.length,0),0)<=policy.snapshotPoints)
   assert(validModel(large.model))
   assert(large.model.population, 'every indexed page contributes to the population style center')
+  await worker.terminate()
+  policy = desktopLearningPolicy({cores:8,memoryBytes:16*1024**3}); open()
+  const upgraded = await until(r => !r.busy && r.pageCount === 60 && r.scanned >= 60)
+  assert.equal(upgraded.model.desktop.beamWidth,16,'changing policy rebuilds existing page checkpoints once')
+  // A rare known word outside the active reservoir must still be available on demand.
+  const word = { sourceWidth:900, sourceHeight:1273, strokes:[] }
+  let time=0
+  for(const [label,x,y,height] of [['h',80,80,40],['e',113,90,30]]) {
+    const sample=schoolScript.find(s=>s.label===label), [bx,by,bw,bh]=sample.bbox
+    word.strokes.push(...sample.strokes.map(s=>({...s,purpose:'handwriting',points:s.points.map(p=>({...p,x:(x+(p.x-bx)/bw*30)/900,y:(y+(p.y-by)/bh*height)/1273,t:time+=4}))})))
+  }
+  const checkpoints = await Promise.all((await fs.readdir(cache)).filter(f=>/^[a-f0-9]{64}\.json$/u.test(f)).map(async f=>JSON.parse(await fs.readFile(path.join(cache,f)))))
+  const firstFingerprint=checkpoints.map(p=>p.contribution.fingerprint).sort()[0]
+  for(let i=0;learnPage(word,schoolScript,policy).fingerprint<=firstFingerprint && i<100;i++) word.strokes[0].points[0].pressure+=.0001
+  assert(learnPage(word,schoolScript,policy).fingerprint>firstFingerprint)
+  await fs.mkdir(path.join(root,'Nested'))
+  const wordFile=path.join(root,'Nested','Known-word.famd')
+  await fs.writeFile(wordFile,serializeFamd('# Ordinary word',{ink:word}))
+  await worker.terminate(); policy={...policy,pages:1}; open()
+  const reduced=await until(r=>!r.busy && r.pageCount===61)
+  assert(!personalStyle(reduced.model).units.some(u=>u.label==='he'),'fixture is outside the active reservoir')
+  const retrieved=await request('retrieve',{text:'he he'})
+  assert.equal(retrieved.model,null,'word lookup must not recopy the model')
+  assert.equal(retrieved.requestedUnits.filter(u=>u.label==='he').length,1)
+  await request('changed','Nested\\Known-word.md'); await request('scan')
+  assert.equal((await until(r=>!r.busy)).scanned,reduced.scanned+1,'Windows save paths force reprocessing even if file size and timestamp are unchanged')
+  await fs.writeFile(wordFile,serializeFamd('# Cleared',{ink:{...word,strokes:[]}})); await request('scan'); await until(r=>!r.busy)
+  assert.equal((await request('retrieve',{text:'he'})).requestedUnits.length,0,'clearing a page retracts its vocabulary')
+  await fs.writeFile(wordFile,serializeFamd('# Restored',{ink:word})); await request('scan'); await until(r=>!r.busy)
+  assert((await request('retrieve',{text:'he'})).requestedUnits.some(u=>u.label==='he'))
+  await fs.unlink(wordFile); await request('scan'); await until(r=>!r.busy)
+  assert.equal((await request('retrieve',{text:'he'})).requestedUnits.length,0,'deleted words cannot be retrieved from stale checkpoints')
   console.log('Local worker: ordinary FAMD and legacy ink, incremental updates, deduplication, restart, opt-out, interruption, corruption, and deletion passed.')
 } finally { if (worker) await worker.terminate(); await fs.rm(temp, { recursive: true, force: true }) }

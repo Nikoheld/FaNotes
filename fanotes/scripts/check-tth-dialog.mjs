@@ -7,6 +7,7 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'vite'
 
+const desktopPlatform = process.env.FANOTES_TTH_PLATFORM || (process.env.FANOTES_TTH_LINUX === '1' ? 'linux' : '')
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const boardSource = readFileSync(path.join(appRoot, 'src/components/DrawingBoard.tsx'), 'utf8')
 const dialogSource = readFileSync(path.join(appRoot, 'src/components/TextToHandwritingDialog.tsx'), 'utf8')
@@ -43,7 +44,7 @@ const runDialog = async () => {
       root: appRoot,
       logLevel: 'error',
       configFile: path.join(appRoot, 'vite.config.ts'),
-      define: { 'process.env.NODE_ENV': JSON.stringify('production'), __FANOTES_TEST_LINUX__: JSON.stringify(process.env.FANOTES_TTH_LINUX === '1') },
+      define: { 'process.env.NODE_ENV': JSON.stringify('production'), __FANOTES_TEST_PLATFORM__: JSON.stringify(desktopPlatform) },
       build: {
         outDir: output,
         emptyOutDir: true,
@@ -105,7 +106,7 @@ const runDialog = async () => {
       return response.result.value
     }
     await call('Runtime.enable')
-    if (process.env.FANOTES_TTH_LINUX === '1') await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false })
+    if (desktopPlatform) await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false })
     let ready = false
     for (let attempt = 0; attempt < 80; attempt += 1) {
       ready = await evaluate(`Boolean(document.querySelector('#ready') && document.querySelector('.lw-tth-dialog'))`)
@@ -161,14 +162,15 @@ const runDialog = async () => {
     })()`)
     assert.equal(pasted, 'Pasted handwritten line')
 
-    if (process.env.FANOTES_TTH_LINUX === '1') {
+    if (desktopPlatform) {
       let generated = false
       for (let attempt = 0; attempt < 100; attempt++) {
         generated = await evaluate(`(() => { const data = JSON.parse(document.querySelector('[data-tth-preview-options]').getAttribute('data-tth-preview-options')); return data.glyphCount > 0 && !document.querySelector('.lw-tth-insert').disabled })()`)
         if (generated) break
         await wait(50)
       }
-      assert(generated, 'Linux worker must generate an insertable offline preview without imported samples')
+      assert(generated, 'Desktop worker must generate an insertable offline preview without imported samples')
+      assert(await evaluate(`window.__tthLookups.some(query => query.text === 'Pasted handwritten line')`), 'desktop previews must query the full local word corpus')
       const state = await evaluate(`(() => { const box = document.querySelector('.lw-tth-message input[type="checkbox"]'); const before = box.checked; box.click(); return before })()`)
       assert.equal(state, true, 'automatic learning defaults on')
       await wait(100)
