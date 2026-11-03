@@ -67,22 +67,7 @@ fun parseGradesPage(html: String): List<SchoolGrade> {
         val average = cells.getOrNull(1)?.let { number(it.text()) }
         val detail = detailByCourse[row]
         val exams = detail?.let { examsFrom(it, name, courseId, average) }.orEmpty()
-        if (exams.isNotEmpty()) grades += exams
-        else if (average != null) {
-            grades += SchoolGrade(
-                id = stableId("course", courseId, numKey(average)),
-                course = name,
-                courseId = courseId,
-                subject = name,
-                title = "Durchschnitt",
-                date = "",
-                mark = average,
-                weight = 1.0,
-                confirmed = clean(row.text()).lowercase().let { it.contains("bestätigt") && !it.contains("bestätigen") },
-                courseGrade = average,
-                comment = "",
-            )
-        }
+        grades += exams
     }
     return grades
 }
@@ -227,19 +212,6 @@ fun parseSchulnetzCourseTable(html: String): List<SchoolGrade> {
         courseId = name.substringBefore(' ').ifBlank { name }
         val avgText = cells.getOrNull(1).orEmpty()
         average = if (avgText.isBlank() || avgText == "--") null else number(avgText)
-        grades += SchoolGrade(
-            id = stableId("course", courseId, numKey(average)),
-            course = name,
-            courseId = courseId,
-            subject = name.substringAfter(' ').ifBlank { name },
-            title = "Durchschnitt",
-            date = "",
-            mark = average,
-            weight = 1.0,
-            confirmed = cells.joinToString(" ").lowercase().let { it.contains("bestätigt") && !it.contains("bestätigen") },
-            courseGrade = average,
-            comment = "",
-        )
     }
     return grades
 }
@@ -348,6 +320,7 @@ fun parseGradesByHeader(html: String): List<SchoolGrade> = rowsByHeader(html) { 
     val course = cellAt(cells, courseAt).ifBlank { "Kurs" }
     val date = cellAt(cells, dateAt)
     val title = cellAt(cells, headerIndex(header, "thema", "pruefung", "titel", "bezeichnung")).ifBlank { "Note" }
+    if (isSummaryGradeTitle(title) || isSummaryGradeTitle(course)) return@rowsByHeader null
     val weight = number(cellAt(cells, headerIndex(header, "gewicht"))) ?: 1.0
     SchoolGrade(
         id = stableId("grade", course, date, title, numKey(mark)),
@@ -659,8 +632,9 @@ private fun examsFrom(detail: Element, course: String, courseId: String, average
         val cells = row.select("th, td").map { clean(it.text()) }
         if (cells.isEmpty()) continue
         val first = cells[0]
-        if (first == "Prüfungsgruppe" || first == "Einzelprüfungen" || first.startsWith("Aktueller Durchschnitt")) continue
+        if (first == "Prüfungsgruppe" || first == "Einzelprüfungen" || isSummaryGradeTitle(first) || first.startsWith("Aktueller Durchschnitt")) continue
         val values = if (cells[0].isBlank()) cells.drop(1) else cells
+        if (values.any { isSummaryGradeTitle(it) } && !DATE.containsMatchIn(values.getOrElse(0) { "" })) continue
         if (values.size < 2 || !DATE.containsMatchIn(values[0])) continue
         val markCell = values.getOrElse(2) { "" }.substringBefore("Details")
         val mark = number(markCell)

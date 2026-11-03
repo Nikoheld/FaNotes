@@ -94,6 +94,7 @@ fun courseSummaries(grades: List<SchoolGrade>, hypothetical: List<HypotheticalGr
     val groups = linkedMapOf<String, MutableList<WeightedMark>>()
     val labels = linkedMapOf<String, String>()
     for (grade in grades) {
+        if (grade.isSummaryGrade()) continue
         val mark = grade.mark ?: continue
         val key = grade.courseKey
         if (key.isBlank()) continue

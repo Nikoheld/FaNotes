@@ -14,7 +14,7 @@ fun parseRawSnapshot(raw: SchulnetzRaw, fetchedAt: String = ""): SchulnetzSnapsh
     return SchulnetzSnapshot(
         fetchedAt = fetchedAt,
         profile = parseProfile(raw.me),
-        grades = parseGrades(raw.grades),
+        grades = parseGrades(raw.grades).withoutSummaryGrades(),
         events = parseEvents(raw.events),
         exams = parseEvents(raw.exams),
         absences = absences,
@@ -48,6 +48,7 @@ fun parseGrades(json: String?): List<SchoolGrade> = jsonObjects(json).mapNotNull
     val mark = parseMark(obj.flexString("mark", "grade", "note"))
     val courseGrade = parseMark(obj.flexString("courseGrade", "classGrade", "average"))
     if (course.isBlank() && subject.isBlank() && title.isBlank() && mark == null) return@mapNotNull null
+    if (isSummaryGradeTitle(title)) return@mapNotNull null
     val id = obj.flexString("id").ifBlank { stableId("grade", course, subject, title, date, numKey(mark)) }
     SchoolGrade(
         id = id,
@@ -237,7 +238,7 @@ fun parseNormalizedSnapshot(json: String): SchulnetzSnapshot? {
                 email = profile.flexString("email"),
             )
         },
-        grades = obj.array("grades")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toGrade() },
+        grades = obj.array("grades")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toGrade() }.withoutSummaryGrades(),
         events = obj.array("events")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toEvent() },
         exams = obj.array("exams")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toEvent() },
         absences = obj.array("absences")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toAbsence() },
