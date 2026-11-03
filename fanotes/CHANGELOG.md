@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.11.1-beta.11
+
+- Rebuild Android Companion around daily planning and notes
+
 ## 2026.11.1-beta.10
 
 - Open the matching Schulnetz item from a notification tap.
