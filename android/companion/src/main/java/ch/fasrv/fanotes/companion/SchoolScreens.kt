@@ -158,7 +158,7 @@ fun CourseScreen(model: CompanionModel) {
     if (adding) {
         var title by rememberSaveable { mutableStateOf("") }; var mark by rememberSaveable { mutableStateOf("") }; var factor by rememberSaveable { mutableStateOf("1") }
         val number = mark.replace(',', '.').toDoubleOrNull(); val w = factor.replace(',', '.').toDoubleOrNull()
-        AlertDialog(onDismissRequest = { adding = false }, title = { Text("Add a local mark") }, text = {
+        AlertDialog(onDismissRequest = { adding = false }, modifier = Modifier.imePadding(), title = { Text("Add a local mark") }, text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Only used for your scenario.", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(title, { title = it }, label = { Text("Label (optional)") }, singleLine = true)
@@ -170,7 +170,7 @@ fun CourseScreen(model: CompanionModel) {
     if (customize) {
         var alias by rememberSaveable { mutableStateOf(courseAlias(course.label, model.desk.courseAliases)) }
         var color by rememberSaveable { mutableStateOf(subjectColor(course.label, overrides = model.colors)) }
-        AlertDialog(onDismissRequest = { customize = false }, title = { Text("Subject appearance") }, text = {
+        AlertDialog(onDismissRequest = { customize = false }, modifier = Modifier.imePadding(), title = { Text("Subject appearance") }, text = {
             Column { OutlinedTextField(alias, { alias = it }, label = { Text("Display name") }); Spacer(Modifier.height(12.dp)); ColorChoices(SUBJECT_PALETTE.take(6), color, { color = it }) }
         }, confirmButton = { TextButton(onClick = { model.renameCourse(course.label, alias); model.paintSubject(course.label, color); customize = false }) { Text("Save") } }, dismissButton = { TextButton(onClick = { customize = false }) { Text("Cancel") } })
     }

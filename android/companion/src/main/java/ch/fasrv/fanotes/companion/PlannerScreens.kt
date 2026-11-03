@@ -301,7 +301,7 @@ private fun TasksScreen(model: CompanionModel) {
     task?.let { TaskForm(model, it) { task = null } }
     schoolTask?.let { item ->
         ModalBottomSheet(onDismissRequest = { schoolTask = null }) {
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = Space.page).navigationBarsPadding().padding(bottom = Space.xl)) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).sheetKeyboardPadding().padding(horizontal = Space.page).padding(bottom = Space.xl)) {
                 SheetTitle(item.title) { schoolTask = null }
                 Tag("Schulnetz · read-only")
                 Text("${item.courseName} · ${dueLabel(item.dueDate)}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 12.dp))
@@ -319,7 +319,7 @@ fun AgendaDetails(model: CompanionModel, entry: AgendaEntry, onDismiss: () -> Un
     if (entry.task != null) { TaskForm(model, entry.task, onDismiss); return }
     if (edit && entry.local != null) { EventForm(model, entry.local, onDismiss); return }
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = Space.page).navigationBarsPadding().padding(bottom = Space.xl)) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).sheetKeyboardPadding().padding(horizontal = Space.page).padding(bottom = Space.xl)) {
             SheetTitle(courseAlias(entry.title, model.desk.courseAliases), onDismiss)
             Tag(if (entry.school != null) "Schulnetz · ${entry.kind.label.lowercase()}" else "FaNotes calendar")
             Text(dateLabel(entry.day), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp))

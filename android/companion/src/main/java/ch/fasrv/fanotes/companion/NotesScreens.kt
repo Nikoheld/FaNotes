@@ -169,7 +169,7 @@ private fun NoteActions(model: CompanionModel, node: VaultNode, onDismiss: () ->
         ConfirmDialog("Move ${if (node.kind == NoteKind.FOLDER) "folder" else "note"} to recently deleted?", "You can restore it from this device's library menu.", "Move", onDismiss) { model.trashNote(node); onDismiss() }; return
     }
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = Space.page).navigationBarsPadding().padding(bottom = 24.dp)) {
+        Column(Modifier.fillMaxWidth().sheetKeyboardPadding().padding(horizontal = Space.page).padding(bottom = 24.dp)) {
             SheetTitle(if (action == "move") "Move to folder" else node.name, onDismiss)
             if (action == "move") {
                 val folders = flattenFolders(model.tree).filterNot { it.path == node.path || it.path.startsWith("${node.path}/") }
