@@ -3,7 +3,7 @@
 A phone notebook and student planner built with Kotlin and Compose. The application
 works on the device before account setup; connecting a FaNotes account enables encrypted sync
 and the existing read-only Schulnetz integration. The launcher name is Kanti+. The
-package id stays `ch.fasrv.fanotes.companion`.
+application id is `ch.fasrv.kantiplus`. The Kotlin namespace stays `ch.fasrv.fanotes.companion`.
 
 ## Product structure
 
