@@ -38,17 +38,17 @@ Schulnetz-Daten hängen an einer Kanti+-Identität. Ein FaNotes-Konto benutzt `A
 | DELETE | `/guest` | Nur mit `X-Kanti-Guest`. Löscht Schulnetz-Link, Token, Schnappschuss, Noten-Ledger und Push-Endpunkte dieser Identität. |
 | POST | `/adopt` | FaNotes-Login. Body `{ guestAccountId, guestToken }`. Übernimmt die Schuldaten des Gasts. Hat FaNotes noch keinen Link, werden die Dateien kopiert. Hat FaNotes schon einen Link, werden nur Ledger und FCM-Tokens vereinigt, der Schnappschuss bleibt. Kein Push. |
 | POST | `/detach` | FaNotes-Login. Body `{ guestAccountId, guestToken, fcmToken }`. Kopiert die Schuldaten auf den Gast und verschiebt nur das FCM-Token dieses Geräts. Bei `mode: web` behält FaNotes die PHP-Sitzung; der Gast öffnet beim nächsten Poll eine eigene aus denselben Microsoft-Cookies. Ein REST-Refresh-Token wird nicht mitkopiert, damit die Rotation nicht das FaNotes-Konto abmeldet. Andere Geräte bleiben am FaNotes-Konto. Kein Push. |
-| GET | `/status` | Verbunden, Anzeigename, `needsReauth`, letzte Lesung, Push-Thema, Schalter. Kein Token. |
-| PUT | `/link` | Website: `{ mode:"web", baseUrl, deviceId, userAgent, displayName, ssoCookies }`. `ssoCookies` sind nur Microsoft-Hosts, ohne `PHPSESSID`. Ältere REST-Verknüpfungen mit `refreshToken` bleiben für Nicht-AKSA möglich. |
-| PUT | `/snapshot` | Normalisierter Schnappschuss vom Telefon. Der Server diff und pusht. Keine Cookies. |
+| GET | `/status` | Verbunden, Anzeigename, `needsReauth`, letzte Lesung, Schalter. Braucht dasselbe Bearer-Token wie die übrigen Routen. Ohne Token antwortet der Server mit 401. Kein Schulnetz-Token, kein Push-Thema. |
+| PUT | `/link` | Website: `{ mode:"web", baseUrl, deviceId, userAgent, displayName, ssoCookies }`. Gespeichert werden nur `ESTSAUTH`, `ESTSAUTHPERSISTENT`, `ESTSAUTHLIGHT`, `SignInStateCookie` und `x-ms-RefreshTokenCredential` von `login.microsoftonline.com`, `login.microsoft.com`, `login.live.com` und `login.windows.net`. `PHPSESSID` und andere Cookies fallen weg. Die Cookies gelten 14 Tage, danach braucht es eine neue Verknüpfung. Höchstens 5 Verknüpfungen pro Konto und Stunde. Ältere REST-Verknüpfungen mit `refreshToken` bleiben für Nicht-AKSA möglich. |
+| PUT | `/snapshot` | Normalisierter Schnappschuss vom Telefon. Der Server diff und pusht. Keine Cookies. Höchstens 60 pro Konto und Stunde. |
 | DELETE | `/link` | Trennt Schulnetz. Bei einem FaNotes-Konto wird das Schulnetz-Verzeichnis gelöscht. Beim anonymen Konto bleiben `guest.json` und die Identität, damit die App neu verbinden kann. |
 | GET | `/snapshot` | Normalisierter Schnappschuss (Noten, Stunden, Prüfungen, Absenzen, Aufgaben, Mitteilungen, Ferien, Kontoauszug, Startseite). |
 | GET | `/changes?since=<revision>` | Änderungen seit dieser Revision. |
 | PUT | `/settings` | `{ grades, timetable, exams, absences, events, deadlines, guessGrades }` als Booleans. `guessGrades` ist standardmässig aus. |
 | PUT | `/push-token` | `{ token }` FCM-Registrierung, höchstens 8. Kein Notentext. |
-| POST | `/push/test` | Schickt `{ event: "test" }`. Die App zeigt die Testmeldung selbst. |
+| POST | `/push/test` | Schickt `{ event: "test" }`. Die App zeigt die Testmeldung selbst. Höchstens 5 pro Konto und Stunde. |
 
-`baseUrl` muss HTTPS sein und nach Schulnetz aussehen (`*.schulnetz-ag.ch`, `*.schulnetz.ch`, `*.schulnetz.com`, `schulnetz.*`, `schulnetz.web.app`). AKSA ist `https://www.schulnetz-ag.ch/aksa`.
+`baseUrl` muss HTTPS sein. Erlaubt sind genau `www.schulnetz-ag.ch`, `schulnetz-ag.ch` und `schulnetz.web.app`, plus Hosts die auf `.schulnetz-ag.ch`, `.schulnetz.ch` oder `.schulnetz.com` enden. `schulnetz.evil.tld` und `evilschulnetz-ag.ch` sind nicht erlaubt. Weiterleitungen auf IP-Adressen werden verworfen. AKSA ist `https://www.schulnetz-ag.ch/aksa`.
 
 Antwort `503` auf `PUT /link` heisst: der Token-Schlüssel fehlt. Die App speichert das Token dann nur im E2E-Tresor und genau ein Telefon mit gültigem Lease darf es erneuern. Sobald der Schlüssel steht und die App neu verbindet, übernimmt der Server und die lokale Kopie wird gelöscht.
 
@@ -58,8 +58,8 @@ Antwort `503` auf `PUT /link` heisst: der Token-Schlüssel fehlt. Die App speich
 |---|---|---|
 | `FANOTES_SCHULNETZ_DIR` | `/var/lib/fanotes-schulnetz` | Datenverzeichnis, Modus `0700`, Besitzer `www-data` |
 | `FANOTES_SCHULNETZ_TOKEN_KEY` | leer | 32 Byte, Base64 oder 64 Hex-Zeichen. Nicht ins Journal schreiben. |
-| `FANOTES_SCHULNETZ_TOKEN_KEY_FILE` | `/etc/fanotes/schulnetz-token.key` | Datei mit demselben Schlüssel, Modus `0600`, Besitzer `www-data`. Wird genutzt, wenn die Variable leer ist. |
-| `FANOTES_FCM_SERVICE_ACCOUNT` | `/etc/fanotes/fcm-service-account.json` | Dienstkonto für FCM HTTP v1. Fehlt die Datei, wird FCM übersprungen. |
+| `FANOTES_SCHULNETZ_TOKEN_KEY_FILE` | systemd-Credential `schulnetz-token`, sonst `/etc/fanotes/schulnetz-token.key` | Datei mit demselben Schlüssel. Der Dienst liest sie über `LoadCredential=` und hat kein breites Leserecht auf `/etc/fanotes`. |
+| `FANOTES_FCM_SERVICE_ACCOUNT` | systemd-Credential `fcm-service-account`, sonst `/etc/fanotes/fcm-service-account.json` | Dienstkonto für FCM HTTP v1. Fehlt die Datei, wird FCM übersprungen. |
 | `FANOTES_SCHULNETZ_POLL_MS` | `60000` | Abstand zwischen zwei Lesungen. 60000 hält die Sitzung und liefert Noten/Ausfälle in unter einer Minute. |
 | `FANOTES_SCHULNETZ_POLL` | an | `0` schaltet den Poller im Website-Prozess aus. Dann darf genau der eigene Dienst laufen. |
 

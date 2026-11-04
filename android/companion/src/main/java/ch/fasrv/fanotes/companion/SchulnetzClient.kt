@@ -185,7 +185,7 @@ class SchulnetzClient(
         }
         fun adopt(page: LoadedPage) {
             val found = sessionIdsFromPage(page.finalUrl, page.body) ?: return
-            trace("session ids source=${found.source} id=${found.id} transid=${found.transid}")
+            trace("session ids source=${found.source}")
             id = found.id
             transid = found.transid
         }

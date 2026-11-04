@@ -38,6 +38,10 @@ class SchulnetzLog(directory: File) {
         val body = "<!-- ${redactSchulnetzSecrets(finalUrl)} -->\n" + redactSchulnetzSecrets(html).take(2_000_000)
         io.execute {
             synchronized(lock) {
+                val nowMs = System.currentTimeMillis()
+                captures.listFiles()?.forEach { file ->
+                    if (file.isFile && captureExpired(file.lastModified(), nowMs)) file.delete()
+                }
                 File(captures, "$safeName.html").writeText(body)
             }
         }
@@ -69,3 +73,8 @@ class SchulnetzLog(directory: File) {
         private const val MAX_LINES = 2000
     }
 }
+
+internal const val CAPTURE_MAX_AGE_MS = 24L * 60L * 60L * 1000L
+
+internal fun captureExpired(modifiedAt: Long, now: Long, maxAgeMs: Long = CAPTURE_MAX_AGE_MS): Boolean =
+    modifiedAt > 0L && now - modifiedAt > maxAgeMs

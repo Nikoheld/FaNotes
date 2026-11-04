@@ -2,7 +2,7 @@
 // A PHPSESSID is bound to the client IP, so this module always opens its own
 // session with the stored Microsoft SSO cookies and never replays a phone cookie.
 
-import { extractWebIds, microsoftLoginRequired, parseGradesHtml, parseSchedulerXml, schulnetzCallAllowed, sessionProblem, stripPhpSession } from './schulnetz-logic.mjs'
+import { extractWebIds, microsoftLoginHost, microsoftLoginRequired, parseGradesHtml, parseSchedulerXml, redirectTargetAllowed, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, stripPhpSession } from './schulnetz-logic.mjs'
 
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 
@@ -27,6 +27,14 @@ const storeCookies = (jar, host, lines) => {
 
 const cookieFor = (jar, sso, host) => stripPhpSession(sso[host] || '') || jar[host] || ''
 
+const schoolLanding = (url) => {
+  let parsed
+  try { parsed = new URL(url) } catch { return false }
+  if (!schoolHostAllowed(parsed.hostname)) return false
+  const path = parsed.pathname.replace(/\/+$/u, '')
+  return path.endsWith('/aksa') || path === ''
+}
+
 export const establishWebSession = async (baseUrl, ssoCookies, fetchImpl, userAgent = USER_AGENT) => {
   const sso = {}
   for (const [host, value] of Object.entries(ssoCookies || {})) sso[host] = stripPhpSession(value)
@@ -43,7 +51,8 @@ export const establishWebSession = async (baseUrl, ssoCookies, fetchImpl, userAg
     }
     const cookie = cookieFor(jar, sso, current.host)
     if (cookie) headers.Cookie = cookie
-    if (!schulnetzCallAllowed('GET', url) && !current.hostname.endsWith('schulnetz-ag.ch') && !current.hostname.includes('microsoft')) {
+    if (!redirectTargetAllowed(url)) return { needsInteraction: true, error: 'blocked' }
+    if (!schulnetzCallAllowed('GET', url) && !microsoftLoginHost(current.hostname) && !schoolLanding(url)) {
       return { needsInteraction: true, error: 'blocked' }
     }
     if (current.pathname.endsWith('/authorize.php')) return { needsInteraction: true, error: 'mobile-oauth' }
@@ -53,6 +62,7 @@ export const establishWebSession = async (baseUrl, ssoCookies, fetchImpl, userAg
       const location = response.headers.get('location')
       if (!location) return { needsInteraction: true, error: 'redirect' }
       url = new URL(location, url).toString()
+      if (!redirectTargetAllowed(url)) return { needsInteraction: true, error: 'blocked' }
       continue
     }
     html = await response.text()
@@ -68,7 +78,7 @@ export const establishWebSession = async (baseUrl, ssoCookies, fetchImpl, userAg
     const ids = extractWebIds(url, html)
     const php = /PHPSESSID=([^;]+)/i.exec(jar[current.host] || '')?.[1] || ''
     if (ids && php) return { php, id: ids.id, transid: ids.transid, html, jar, userAgent }
-    if (current.hostname.includes('microsoft') && /type=["']password["']/i.test(html)) return { needsInteraction: true, error: 'password' }
+    if (microsoftLoginHost(current.hostname) && /type=["']password["']/i.test(html)) return { needsInteraction: true, error: 'password' }
     return { needsInteraction: true, error: 'no-session' }
   }
   return { needsInteraction: true, error: 'hops' }
@@ -81,7 +91,7 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl) => {
   let transid = session.transid
   const get = async (path) => {
     const url = path.startsWith('http') ? path : `${root}${path}`
-    if (!schulnetzCallAllowed('GET', url) && !url.includes('/aksa/?') && !url.endsWith('/aksa/')) {
+    if (!redirectTargetAllowed(url) || (!schulnetzCallAllowed('GET', url) && !schoolLanding(url))) {
       pages.error = 'blocked'
       return ''
     }

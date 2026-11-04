@@ -11,7 +11,8 @@ import { handleProfileRequest } from './profile-api.mjs'
 import { handleRemoteSupportRequest } from './remote-support-api.mjs'
 import { handleBugReportRequest } from './bug-report-api.mjs'
 import { handleSendDataRequest } from './send-data-api.mjs'
-import { handleSyncRequest } from './sync-api.mjs'
+import { handleSyncRequest, setAccountDeletedHook } from './sync-api.mjs'
+import { credentialOr } from './credentials.mjs'
 import { handleMcpRequest } from './mcp-api.mjs'
 import { handleAiProxyRequest } from './ai-proxy.mjs'
 import { createSchulnetzRuntime } from './schulnetz-api.mjs'
@@ -40,8 +41,8 @@ const HOST = process.env.FANOTES_HOST || '127.0.0.1'
 const PORT = Number(process.env.FANOTES_PORT || 18185)
 const INTERNAL_DOWNLOAD_PREFIX = process.env.FANOTES_INTERNAL_DOWNLOAD_PREFIX || '/_fanotes_release/'
 const PUBLIC_ORIGIN = process.env.FANOTES_PUBLIC_ORIGIN || 'https://fanotes.fasrv.ch'
-const UPDATE_SIGNING_KEY_PATH = process.env.FANOTES_UPDATE_SIGNING_KEY || '/etc/fanotes/update-signing-private.pem'
-const RELEASE_CHECKSUM_SIGNATURE_PATH = process.env.FANOTES_RELEASE_CHECKSUM_SIGNATURE || '/etc/fanotes/SHA256SUMS.sig'
+const UPDATE_SIGNING_KEY_PATH = process.env.FANOTES_UPDATE_SIGNING_KEY || credentialOr('update-signing-key', '/etc/fanotes/update-signing-private.pem')
+const RELEASE_CHECKSUM_SIGNATURE_PATH = process.env.FANOTES_RELEASE_CHECKSUM_SIGNATURE || credentialOr('release-checksum-signature', '/etc/fanotes/SHA256SUMS.sig')
 const ANALYTICS_DIR = resolve(process.env.FANOTES_ANALYTICS_DIR || '/var/lib/fanotes-analytics')
 const MAX_STATIC_BYTES = 12 * 1024 * 1024
 const MAX_NEURAL_TEXT_MODEL_BYTES = 32 * 1024 * 1024
@@ -53,7 +54,8 @@ const DELTA_MAGIC = Buffer.from('FANOTESDELTA1\0\0\0', 'ascii')
 const MAX_DELTA_HEADER_BYTES = 8 * 1024 * 1024
 
 const analytics = await createAnalyticsService({ directory: ANALYTICS_DIR })
-const schulnetz = createSchulnetzRuntime()
+const schulnetz = createSchulnetzRuntime({ pruneOrphans: true })
+setAccountDeletedHook((accountId) => schulnetz.unlink(accountId))
 
 const MIME_TYPES = new Map([
   ['.css', 'text/css; charset=utf-8'],

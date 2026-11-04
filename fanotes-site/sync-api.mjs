@@ -18,7 +18,23 @@ import { createReadStream, promises as fs } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import { languageForRequest, localizeText } from './i18n.mjs'
 
-const SYNC_ROOT = resolve(process.env.FANOTES_SYNC_DIR || '/var/lib/fanotes-sync')
+const syncRoot = () => resolve(process.env.FANOTES_SYNC_DIR || '/var/lib/fanotes-sync')
+let onAccountDeleted = async () => {}
+export const setAccountDeletedHook = (hook) => {
+  onAccountDeleted = typeof hook === 'function' ? hook : async () => {}
+}
+export const notifyAccountDeleted = async (accountId) => {
+  await onAccountDeleted(accountId)
+}
+export const syncAccountExists = async (accountId) => {
+  if (!ACCOUNT_ID_PATTERN.test(String(accountId || ''))) return false
+  try {
+    const stat = await fs.stat(safeJoin(syncRoot(), 'accounts', accountId, 'account.json'))
+    return stat.isFile()
+  } catch {
+    return false
+  }
+}
 const PUBLIC_ORIGIN = process.env.FANOTES_PUBLIC_ORIGIN || 'https://fanotes.fasrv.ch'
 const API_PREFIX = '/api/v1/sync'
 const MAX_JSON_BYTES = 64 * 1024
@@ -204,15 +220,15 @@ const withAccountLock = async (accountId, task) => {
 
 // ── Storage ─────────────────────────────────────────────────────────────────
 
-const accountDirectory = (accountId) => safeJoin(SYNC_ROOT, 'accounts', accountId)
-const emailIndexPath = (email) => safeJoin(SYNC_ROOT, 'emails', sha256(email))
+const accountDirectory = (accountId) => safeJoin(syncRoot(), 'accounts', accountId)
+const emailIndexPath = (email) => safeJoin(syncRoot(), 'emails', sha256(email))
 
 let serverSecretPromise = null
 /** Random per-installation secret used to answer pre-login requests for unknown e-mails with a stable, fake salt. */
 const serverSecret = () => {
   serverSecretPromise ??= (async () => {
-    await fs.mkdir(SYNC_ROOT, { recursive: true, mode: 0o700 })
-    const target = safeJoin(SYNC_ROOT, 'server-secret')
+    await fs.mkdir(syncRoot(), { recursive: true, mode: 0o700 })
+    const target = safeJoin(syncRoot(), 'server-secret')
     try {
       return await fs.readFile(target)
     } catch (error) {
@@ -412,7 +428,7 @@ const handleRegister = async (request, response) => {
   const vaultKeyWrap = parseKeyWrap(body.vaultKeyWrap)
   const device = parseDevice(body.device)
   await serverSecret()
-  await fs.mkdir(safeJoin(SYNC_ROOT, 'emails'), { recursive: true, mode: 0o700 })
+  await fs.mkdir(safeJoin(syncRoot(), 'emails'), { recursive: true, mode: 0o700 })
   const id = randomBytes(16).toString('hex')
   const salt = randomBytes(16)
   const account = {
@@ -553,6 +569,7 @@ const handleDeleteAccount = async (request, response, auth) => {
     await fs.rm(emailIndexPath(account.email), { force: true })
     await fs.rm(accountDirectory(account.id), { recursive: true, force: true })
     tables.delete(account.id)
+    await notifyAccountDeleted(account.id)
     const { revokeAccountAccess } = await import('./mcp-grants.mjs')
     await revokeAccountAccess(account.id)
   })

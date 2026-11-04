@@ -7,7 +7,8 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { resolve, sep } from 'node:path'
-import { authenticateSyncRequest } from './sync-api.mjs'
+import { authenticateSyncRequest, syncAccountExists } from './sync-api.mjs'
+import { credentialOr } from './credentials.mjs'
 import {
   diffSnapshots,
   keepLoadedGrades,
@@ -40,6 +41,13 @@ const GUEST_LIMIT = 30
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 const REFERER = 'https://schulnetz.web.app/'
 const DEFAULT_SETTINGS = Object.freeze({ grades: true, timetable: true, exams: true, absences: true, events: true, deadlines: true, guessGrades: false })
+const COOKIE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000
+const SSO_HOSTS = new Set(['login.microsoftonline.com', 'login.microsoft.com', 'login.live.com', 'login.windows.net'])
+const SSO_COOKIE_NAMES = new Set(['ESTSAUTH', 'ESTSAUTHPERSISTENT', 'ESTSAUTHLIGHT', 'SignInStateCookie', 'x-ms-RefreshTokenCredential'])
+const LINK_LIMIT = 5
+const SNAPSHOT_LIMIT = 60
+const PUSH_TEST_LIMIT = 5
+const LIMIT_WINDOW_MS = 60 * 60 * 1000
 
 const readKeyMaterial = () => {
   const inline = process.env.FANOTES_SCHULNETZ_TOKEN_KEY
@@ -78,10 +86,17 @@ export const openToken = (key, sealed) => {
 }
 
 const fail = (status, message) => {
-  const error = new Error(message)
+  const error = new Error('schulnetz')
   error.status = status
+  error.publicMessage = message
   throw error
 }
+
+const keptSsoHeader = (value) => String(value || '')
+  .split(';')
+  .map((part) => part.trim())
+  .filter((part) => SSO_COOKIE_NAMES.has(part.slice(0, part.indexOf('='))))
+  .join('; ')
 
 export const createSchulnetzRuntime = (options = {}) => {
   const root = resolve(options.root || process.env.FANOTES_SCHULNETZ_DIR || '/var/lib/fanotes-schulnetz')
@@ -97,7 +112,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       keyPromise = (async () => {
         const inline = readKeyMaterial()
         if (inline) return inline
-        const file = options.keyFile || process.env.FANOTES_SCHULNETZ_TOKEN_KEY_FILE || '/etc/fanotes/schulnetz-token.key'
+        const file = options.keyFile || process.env.FANOTES_SCHULNETZ_TOKEN_KEY_FILE || credentialOr('schulnetz-token', '/etc/fanotes/schulnetz-token.key')
         return loadKeyFile(file)
       })()
     }
@@ -122,8 +137,24 @@ export const createSchulnetzRuntime = (options = {}) => {
     await fs.rename(temporary, file)
   }
 
-  const readLink = async (accountId) => readJson(resolve(accountDir(accountId), 'link.json'))
-  const saveLink = async (accountId, link) => writeJson(resolve(accountDir(accountId), 'link.json'), link)
+  const stripLegacyPush = (link) => {
+    if (!link || typeof link !== 'object') return link
+    delete link.topic
+    delete link.pushEndpoints
+    return link
+  }
+
+  const readLink = async (accountId) => {
+    const file = resolve(accountDir(accountId), 'link.json')
+    const link = await readJson(file)
+    if (!link) return null
+    if (link.topic != null || link.pushEndpoints != null) {
+      stripLegacyPush(link)
+      await writeJson(file, link)
+    }
+    return link
+  }
+  const saveLink = async (accountId, link) => writeJson(resolve(accountDir(accountId), 'link.json'), stripLegacyPush(link))
 
   const publicStatus = (link) => {
     if (!link) return { linked: false, settings: DEFAULT_SETTINGS }
@@ -137,7 +168,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       revision: link.revision || 0,
       settings: { ...DEFAULT_SETTINGS, ...(link.settings || {}) },
       mode: link.mode || 'rest',
-      push: { topic: link.topic, server: '', url: '', endpoints: (link.fcmTokens || []).length },
+      push: { endpoints: (link.fcmTokens || []).length },
     }
   }
 
@@ -170,8 +201,6 @@ export const createSchulnetzRuntime = (options = {}) => {
       needsReauth: false,
       lastError: '',
       lastPollAt: existing?.lastPollAt || '',
-      topic: existing?.topic || randomBytes(16).toString('hex'),
-      pushEndpoints: Array.isArray(existing?.pushEndpoints) ? existing.pushEndpoints.slice(0, 8) : [],
       fcmTokens: storedFcmTokens(existing),
       settings: { ...DEFAULT_SETTINGS, ...(existing?.settings || {}) },
       revision: existing?.revision || 0,
@@ -186,13 +215,13 @@ export const createSchulnetzRuntime = (options = {}) => {
     const sealedSource = {}
     let bytes = 0
     for (const [host, value] of Object.entries(cookies)) {
-      if (!/^[a-z0-9.-]+$/i.test(host) || typeof value !== 'string') continue
-      if (host.endsWith('schulnetz-ag.ch')) continue
-      const cleaned = stripPhpSession(value)
+      const hostName = String(host || '').toLowerCase()
+      if (!SSO_HOSTS.has(hostName) || typeof value !== 'string') continue
+      const cleaned = keptSsoHeader(stripPhpSession(value))
       if (!cleaned) continue
       bytes += cleaned.length
       if (bytes > 16_000) fail(413, 'Die Cookie-Daten sind zu gross.')
-      sealedSource[host] = cleaned
+      sealedSource[hostName] = cleaned
     }
     if (!Object.keys(sealedSource).length) fail(400, 'Die Microsoft-Cookies fehlen.')
     const existing = await readLink(accountId)
@@ -203,11 +232,10 @@ export const createSchulnetzRuntime = (options = {}) => {
       displayName: String(body?.displayName || existing?.displayName || '').slice(0, 80),
       userAgent: String(body?.userAgent || '').slice(0, 240),
       sso: sealToken(material, JSON.stringify(sealedSource)),
+      cookiesSavedAt: now().toISOString(),
       needsReauth: false,
       lastError: '',
       lastPollAt: existing?.lastPollAt || '',
-      topic: existing?.topic || randomBytes(16).toString('hex'),
-      pushEndpoints: Array.isArray(existing?.pushEndpoints) ? existing.pushEndpoints.slice(0, 8) : [],
       fcmTokens: storedFcmTokens(existing),
       settings: { ...DEFAULT_SETTINGS, ...(existing?.settings || {}) },
       revision: existing?.revision || 0,
@@ -246,26 +274,6 @@ export const createSchulnetzRuntime = (options = {}) => {
       if (typeof body?.[name] === 'boolean') settings[name] = body[name]
     }
     link.settings = settings
-    await saveLink(accountId, link)
-    return publicStatus(link)
-  }
-
-  const addEndpoint = async (accountId, endpoint) => {
-    let parsed
-    try { parsed = new URL(String(endpoint || '')) } catch { fail(400, 'Der Push-Endpunkt ist ungültig.') }
-    if (parsed.protocol !== 'https:') fail(400, 'Push-Endpunkte müssen HTTPS sein.')
-    const link = await readLink(accountId)
-    if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
-    const next = [...(link.pushEndpoints || []).filter((item) => item !== parsed.href), parsed.href].slice(-8)
-    link.pushEndpoints = next
-    await saveLink(accountId, link)
-    return publicStatus(link)
-  }
-
-  const removeEndpoint = async (accountId, endpoint) => {
-    const link = await readLink(accountId)
-    if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
-    link.pushEndpoints = (link.pushEndpoints || []).filter((item) => item !== endpoint)
     await saveLink(accountId, link)
     return publicStatus(link)
   }
@@ -588,11 +596,34 @@ export const createSchulnetzRuntime = (options = {}) => {
     return fresh
   }
 
+  const accountStillExists = options.syncAccountExists || syncAccountExists
+
+  const ownerStillExists = async (accountId) => {
+    if (await readGuestRecord(accountId)) return true
+    return accountStillExists(accountId)
+  }
+
   const pollAccount = async (accountId) => withAccount(accountId, async () => {
+    if (options.pruneOrphans === true && !(await ownerStillExists(accountId))) {
+      await unlink(accountId)
+      return { skipped: true }
+    }
     const material = await key()
     const link = await readLink(accountId)
     if (!material || !link || link.needsReauth) return { skipped: true }
-    if (link.mode === 'web') return pollWeb(accountId, link, material)
+    if (link.mode === 'web') {
+      const savedAt = Date.parse(link.cookiesSavedAt || '')
+      if (!Number.isFinite(savedAt) || now().getTime() - savedAt > COOKIE_MAX_AGE_MS) {
+        link.sso = null
+        link.cookiesSavedAt = ''
+        link.serverSession = null
+        link.needsReauth = true
+        link.lastError = 'cookie-expired'
+        await saveLink(accountId, link)
+        return { needsReauth: true }
+      }
+      return pollWeb(accountId, link, material)
+    }
     const baseUrl = normalizeSchoolBase(link.baseUrl)
     if (!baseUrl) return { skipped: true }
     let refreshToken = ''
@@ -814,6 +845,22 @@ export const createSchulnetzRuntime = (options = {}) => {
     try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { fail(400, 'Ungültiges JSON.') }
   }
 
+  const rateHits = new Map()
+  const accountRate = (accountId, bucket, maximum) => {
+    const keyName = `${accountId}:${bucket}`
+    const nowMs = now().getTime()
+    if (rateHits.size > 50_000) {
+      for (const [candidate, window] of rateHits) if (window.until <= nowMs) rateHits.delete(candidate)
+    }
+    const current = rateHits.get(keyName)
+    if (!current || current.until <= nowMs) {
+      rateHits.set(keyName, { count: 1, until: nowMs + LIMIT_WINDOW_MS })
+      return
+    }
+    if (current.count >= maximum) fail(429, 'Zu viele Anfragen. Bitte später erneut versuchen.')
+    current.count += 1
+  }
+
   const send = (response, status, value) => {
     const payload = JSON.stringify(value)
     response.writeHead(status, {
@@ -867,9 +914,17 @@ export const createSchulnetzRuntime = (options = {}) => {
         return true
       }
       if (route === '/status' && method === 'GET') { send(response, 200, publicStatus(await readLink(accountId))); return true }
-      if (route === '/link' && method === 'PUT') { send(response, 200, await linkAccount(accountId, await readBody(request))); return true }
+      if (route === '/link' && method === 'PUT') {
+        accountRate(accountId, 'link', LINK_LIMIT)
+        send(response, 200, await linkAccount(accountId, await readBody(request)))
+        return true
+      }
       if (route === '/link' && method === 'DELETE') { await unlink(accountId); send(response, 200, { linked: false }); return true }
-      if (route === '/snapshot' && method === 'PUT') { send(response, 200, await acceptSnapshot(accountId, await readBody(request))); return true }
+      if (route === '/snapshot' && method === 'PUT') {
+        accountRate(accountId, 'snapshot', SNAPSHOT_LIMIT)
+        send(response, 200, await acceptSnapshot(accountId, await readBody(request)))
+        return true
+      }
       if (route === '/snapshot' && method === 'GET') {
         const snapshot = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
         send(response, 200, snapshot || { revision: 0, grades: [], events: [], exams: [], absences: [], homework: [], messages: [], vacations: [], konto: [], startMessages: [] })
@@ -881,22 +936,13 @@ export const createSchulnetzRuntime = (options = {}) => {
         return true
       }
       if (route === '/settings' && method === 'PUT') { send(response, 200, await updateSettings(accountId, await readBody(request))); return true }
-      if (route === '/push-endpoint' && method === 'PUT') {
-        const body = await readBody(request)
-        send(response, 200, await addEndpoint(accountId, body.endpoint))
-        return true
-      }
-      if (route === '/push-endpoint' && method === 'DELETE') {
-        const body = await readBody(request)
-        send(response, 200, await removeEndpoint(accountId, String(body.endpoint || '')))
-        return true
-      }
       if (route === '/push-token' && method === 'PUT') {
         const body = await readBody(request)
         send(response, 200, await addFcmToken(accountId, body?.token))
         return true
       }
       if (route === '/push/test' && method === 'POST') {
+        accountRate(accountId, 'push-test', PUSH_TEST_LIMIT)
         const link = await readLink(accountId)
         if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
         await ping(accountId, link, 'test')
@@ -907,7 +953,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     } catch (error) {
       const status = Number(error?.status) || 500
       if (status >= 500) log('warn', `Anfrage fehlgeschlagen (${error?.name || 'error'})`)
-      send(response, status, { error: error?.publicMessage || error?.message || 'Der Schulnetz-Dienst ist vorübergehend nicht erreichbar.' })
+      send(response, status, { error: error?.publicMessage || 'Der Schulnetz-Dienst ist vorübergehend nicht erreichbar.' })
     }
     return true
   }
@@ -922,9 +968,9 @@ export const createSchulnetzRuntime = (options = {}) => {
     adoptGuest,
     detachGuest,
     deleteGuestAccount,
+    unlink,
     publicStatusOf: async (accountId) => publicStatus(await readLink(accountId)),
     root,
-    openStoredRefresh: async (accountId) => openToken(await requireKey(), (await readLink(accountId))?.refresh),
   }
 }
 

@@ -186,13 +186,20 @@ object CompanionAlerts {
         )
         val title = shown.title.ifBlank { "Schulnetz" }
         val body = shown.body
+        val lock = lockScreenNotice()
+        val publicVersion = NotificationCompat.Builder(context, channel)
+            .setSmallIcon(R.drawable.ic_stat)
+            .setContentTitle(lock.publicTitle)
+            .setContentText(lock.publicText)
+            .build()
         val notification = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_stat)
             .setContentTitle(title)
             .setContentText(body)
             .setTicker(title)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body).setBigContentTitle(title))
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setVisibility(lock.visibility)
+            .setPublicVersion(publicVersion)
             .setContentIntent(open)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -353,10 +360,22 @@ private fun schoolConstraints() = Constraints.Builder()
     .setRequiresBatteryNotLow(true)
     .build()
 
-private fun linkedForPush(context: Context): Boolean {
+internal fun linkedForPush(context: Context): Boolean {
     val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
-    return !prefs.getBoolean("school-disconnected", false) && !prefs.getString("push-topic", null).isNullOrBlank()
+    if (prefs.getBoolean("school-disconnected", false)) return false
+    if (!prefs.getBoolean("school-linked", false) && !prefs.getString("push-topic", null).isNullOrBlank()) {
+        prefs.edit().putBoolean("school-linked", true).remove("push-topic").remove("push-server").apply()
+    }
+    return prefs.getBoolean("school-linked", false)
 }
+
+internal data class LockScreenNotice(val visibility: Int, val publicTitle: String, val publicText: String)
+
+internal fun lockScreenNotice(): LockScreenNotice = LockScreenNotice(
+    NotificationCompat.VISIBILITY_PRIVATE,
+    "Neue Schulnetz-Meldung",
+    "Neue Schulnetz-Meldung",
+)
 
 /** Periodic fallback only when push is missing. A healthy push cancels it and arms a far-off check. */
 private fun armSchoolDelivery(context: Context) {

@@ -12,10 +12,12 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import ch.fasrv.fanotes.schulnetz.SessionProblem
+import ch.fasrv.fanotes.schulnetz.bridgeCallAllowed
 import ch.fasrv.fanotes.schulnetz.classifySchulnetzPage
 import ch.fasrv.fanotes.schulnetz.cookieNames
 import ch.fasrv.fanotes.schulnetz.isForcedLogoutUrl
 import ch.fasrv.fanotes.schulnetz.isMicrosoftLoginHost
+import ch.fasrv.fanotes.schulnetz.newBridgeNonce
 import ch.fasrv.fanotes.schulnetz.redactSchulnetzSecrets
 import ch.fasrv.fanotes.schulnetz.webReadAllowed
 import org.json.JSONObject
@@ -85,7 +87,7 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
         val script = """
             (function(){
               var target = $quoted;
-              var gen = ${slot.generation};
+              var gen = ${JSONObject.quote(slot.nonce)};
               fetch(target, {credentials:'include', redirect:'follow', headers:{'Accept':'text/xml,text/calendar,text/plain,*/*'}})
                 .then(function(r){ return r.text().then(function(body){ return {status:r.status, url:r.url, body:body}; }); })
                 .then(function(x){ window.FanotesHtml.deliverFetch(String(gen), String(x.status), String(x.url), String(x.body)); })
@@ -102,7 +104,7 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
     }
 
     private fun open(url: String): Slot {
-        val slot = Slot(generation.incrementAndGet(), url)
+        val slot = Slot(generation.incrementAndGet(), url, newBridgeNonce())
         pending = slot
         return slot
     }
@@ -157,7 +159,7 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
             val pause = if (slot.requested.contains("pageid=22202")) 1600L else 350L
             main.postDelayed({
                 if (slot.generation != generation.get() || slot.bumps.get() != token || slot.done.get()) return@postDelayed
-                view.evaluateJavascript(CAPTURE_JS.replace("GEN", slot.generation.toString()), null)
+                view.evaluateJavascript(CAPTURE_JS.replace("GEN", slot.nonce), null)
             }, pause)
         }
     }
@@ -232,10 +234,10 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
             finish(slot, LoadedPage(slot.requested, slot.finalUrl.ifBlank { slot.requested }, slot.status, buffer.toString(), message))
         }
 
-        private fun same(gen: String): Boolean = pending?.generation?.toString() == gen
+        private fun same(gen: String): Boolean = bridgeCallAllowed(gen, pending?.nonce.orEmpty(), currentUrl())
     }
 
-    private class Slot(val generation: Int, val requested: String) {
+    private class Slot(val generation: Int, val requested: String, val nonce: String) {
         val latch = CountDownLatch(1)
         val done = AtomicBoolean(false)
         val bumps = AtomicInteger()

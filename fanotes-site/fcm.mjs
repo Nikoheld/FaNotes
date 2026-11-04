@@ -3,8 +3,9 @@
 
 import { createSign } from 'node:crypto'
 import { promises as fs } from 'node:fs'
+import { credentialOr } from './credentials.mjs'
 
-export const FCM_ACCOUNT_FILE = '/etc/fanotes/fcm-service-account.json'
+export const FCM_ACCOUNT_FILE = credentialOr('fcm-service-account', '/etc/fanotes/fcm-service-account.json')
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const SCOPE = 'https://www.googleapis.com/auth/firebase.messaging'
 

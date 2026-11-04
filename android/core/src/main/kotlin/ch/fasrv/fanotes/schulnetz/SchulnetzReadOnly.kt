@@ -1,6 +1,7 @@
 package ch.fasrv.fanotes.schulnetz
 
 import java.net.URI
+import java.security.SecureRandom
 
 /**
  * Companion never enrols, never confirms a grade, and never files an absence.
@@ -32,11 +33,58 @@ private val READ_PAGE_IDS = setOf(
 
 private val BLOCKED_PAGE_IDS = setOf("23118", "23100", "23104", "23102", "23182", "23150", "23156", "9999")
 
+private val EXACT_SCHOOL_HOSTS = setOf("www.schulnetz-ag.ch", "schulnetz-ag.ch", "schulnetz.web.app")
+private val SCHOOL_HOST_SUFFIXES = listOf(".schulnetz-ag.ch", ".schulnetz.ch", ".schulnetz.com")
+
+fun isIpLiteral(host: String): Boolean {
+    val value = host.trim().removePrefix("[").removeSuffix("]").lowercase()
+    if (value.isEmpty()) return false
+    if (value.contains(':')) return value.all { it.isDigit() || it == ':' || it in 'a'..'f' || it == '.' }
+    val parts = value.split('.')
+    return parts.size == 4 && parts.all { part ->
+        part.isNotEmpty() && part.length <= 3 && part.all(Char::isDigit) && (part.toIntOrNull() ?: 256) in 0..255
+    }
+}
+
+fun schoolHostAllowed(host: String): Boolean {
+    val name = host.lowercase().trim().removeSuffix(".")
+    if (name.isEmpty() || isIpLiteral(name)) return false
+    if (name in EXACT_SCHOOL_HOSTS) return true
+    return SCHOOL_HOST_SUFFIXES.any { suffix -> name.endsWith(suffix) && name.length > suffix.length }
+}
+
+fun newBridgeNonce(): String {
+    val bytes = ByteArray(16)
+    SecureRandom().nextBytes(bytes)
+    return bytes.joinToString("") { "%02x".format(it) }
+}
+
+/** Bridge calls are accepted only for this load's nonce and a school or Microsoft login page. */
+fun bridgeCallAllowed(presented: String, expected: String, pageUrl: String): Boolean {
+    if (presented.isEmpty() || presented != expected) return false
+    val host = runCatching { URI(pageUrl).host }.getOrNull()?.lowercase().orEmpty()
+    return schoolHostAllowed(host) || isMicrosoftLoginHost(host)
+}
+
+fun schulnetzActionBlocked(url: String): Boolean {
+    val parsed = runCatching { URI(url) }.getOrNull() ?: return false
+    val path = (parsed.rawPath ?: "").lowercase()
+    val query = (parsed.rawQuery ?: "").lowercase()
+    return containsBlocked("$path?$query") || isForcedLogoutUrl(url)
+}
+
 fun schulnetzCallAllowed(method: String, url: String, body: String? = null): Boolean {
     val verb = method.trim().uppercase()
     if (verb !in setOf("GET", "HEAD", "POST")) return false
     val parsed = runCatching { URI(url) }.getOrNull() ?: return false
     if (!parsed.scheme.equals("https", true)) return false
+    val host = parsed.host?.lowercase().orEmpty()
+    if (isIpLiteral(host)) return false
+    if (isMicrosoftLoginHost(host)) {
+        val path = (parsed.rawPath ?: "").lowercase()
+        return verb == "POST" && hiddenAuthPostAllowed(parsed.host, path, body)
+    }
+    if (!schoolHostAllowed(host)) return false
     val path = (parsed.rawPath ?: "").lowercase()
     val query = (parsed.rawQuery ?: "").lowercase()
     val blob = "$path?$query"
@@ -62,29 +110,27 @@ fun loginWebViewAllowed(url: String, schulnetzHost: String): Boolean {
     val path = (parsed.rawPath ?: "").lowercase()
     if (path.endsWith("/authorize.php")) return false
     val host = parsed.host?.lowercase().orEmpty()
+    if (isIpLiteral(host)) return false
     if (isMicrosoftLoginHost(host)) return true
-    if (host == "schulnetz.web.app") return true
-    val school = (if (schulnetzHost.startsWith("http")) runCatching { URI(schulnetzHost).host }.getOrNull() else schulnetzHost)
-        ?.lowercase().orEmpty()
-    if (host == school || host.endsWith(".schulnetz-ag.ch")) {
-        val blob = "${path}?${parsed.rawQuery.orEmpty()}".lowercase()
-        if (containsBlocked(blob)) return false
-        val trimmed = path.trimEnd('/')
-        val basePath = if (schulnetzHost.startsWith("http")) {
-            runCatching { URI(schulnetzHost).rawPath }.getOrNull().orEmpty().trimEnd('/').lowercase()
-        } else {
-            ""
-        }
-        if (trimmed == "/aksa" || (basePath.isNotEmpty() && trimmed == basePath)) return true
-        return schulnetzCallAllowed("GET", url)
+    if (!schoolHostAllowed(host)) return false
+    val blob = "${path}?${parsed.rawQuery.orEmpty()}".lowercase()
+    if (containsBlocked(blob)) return false
+    val trimmed = path.trimEnd('/')
+    val basePath = if (schulnetzHost.startsWith("http")) {
+        runCatching { URI(schulnetzHost).rawPath }.getOrNull().orEmpty().trimEnd('/').lowercase()
+    } else {
+        ""
     }
-    return false
+    if (trimmed == "/aksa" || (basePath.isNotEmpty() && trimmed == basePath)) return true
+    return schulnetzCallAllowed("GET", url)
 }
 
 /** GET of a logged-in page or the bare school landing. Never authorize.php. */
 fun webReadAllowed(url: String): Boolean {
     val parsed = runCatching { URI(url) }.getOrNull() ?: return false
     if (!parsed.scheme.equals("https", true)) return false
+    val host = parsed.host?.lowercase().orEmpty()
+    if (isIpLiteral(host) || !schoolHostAllowed(host)) return false
     val path = (parsed.rawPath ?: "").lowercase()
     val blob = "$path?${parsed.rawQuery.orEmpty()}".lowercase()
     if (containsBlocked(blob) || path.endsWith("/authorize.php")) return false
@@ -115,7 +161,9 @@ fun isMicrosoftLoginHost(host: String): Boolean {
     return value == "login.microsoftonline.com" ||
         value == "login.microsoft.com" ||
         value == "login.live.com" ||
+        value == "login.windows.net" ||
         value.endsWith(".login.microsoftonline.com") ||
+        value.endsWith(".login.windows.net") ||
         value.endsWith(".msidentity.com") ||
         value.endsWith(".msauth.net") ||
         value.endsWith(".msftauth.net")
@@ -127,13 +175,7 @@ fun normalizeSchoolBase(baseUrl: String): String? {
     if (!parsed.scheme.equals("https", true)) return null
     if (!parsed.userInfo.isNullOrBlank()) return null
     val host = parsed.host?.lowercase() ?: return null
-    if (!host.matches(Regex("^[a-z0-9.-]+$"))) return null
-    val allowed = host == "schulnetz.web.app" ||
-        host.endsWith(".schulnetz-ag.ch") ||
-        host.endsWith(".schulnetz.ch") ||
-        host.endsWith(".schulnetz.com") ||
-        host.startsWith("schulnetz.")
-    if (!allowed) return null
+    if (!host.matches(Regex("^[a-z0-9.-]+$")) || !schoolHostAllowed(host)) return null
     val path = (parsed.rawPath ?: "").trimEnd('/')
     return "https://$host$path"
 }

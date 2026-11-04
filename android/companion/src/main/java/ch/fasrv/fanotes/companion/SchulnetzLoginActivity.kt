@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.webkit.CookieManager
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
@@ -78,6 +79,11 @@ class SchulnetzLoginActivity : ComponentActivity() {
                             prepareWebView(web)
                             web.webViewClient = object : WebViewClient() {
                                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = !loginWebViewAllowed(request.url.toString(), base)
+                                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                                    val target = request.url?.toString().orEmpty()
+                                    if (!schulnetzActionBlocked(target)) return null
+                                    return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
+                                }
                                 override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) { loading = true; pageError = null }
                                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                                     if (request.isForMainFrame) {
