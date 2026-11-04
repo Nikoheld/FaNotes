@@ -1,5 +1,13 @@
 # Änderungsverlauf
 
+## 2026.11.1-beta.12
+
+- Add advanced Linux and Windows handwriting trajectory synthesis
+- Redesign local personal handwriting synthesis for Linux and Android
+- Stop Companion from polling Schulnetz in the background.
+- Resize companion screens above the keyboard.
+- Stop treating the Schulnetz course average as a grade.
+
 ## 2026.11.1-beta.11
 
 - Rebuild Android Companion around daily planning and notes
