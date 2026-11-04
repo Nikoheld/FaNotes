@@ -29,6 +29,9 @@ test-results/
 .env
 .env.*
 !.env.example
+google-services.json
+*service-account*.json
+fcm-service-account.json
 *private*.pem
 *signing*.key
 *.p12

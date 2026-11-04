@@ -1,17 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-
-    <queries>
-        <intent>
-            <action android:name="org.unifiedpush.android.distributor.REGISTER" />
-        </intent>
-    </queries>
 
     <application
         android:name=".CompanionApplication"
@@ -77,20 +70,16 @@
                 android:resource="@xml/file_paths" />
         </provider>
         <service
-            android:name=".NtfyListenService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
-        <receiver
-            android:name=".CompanionPushReceiver"
-            android:exported="true">
+            android:name=".CompanionFcmService"
+            android:exported="false">
             <intent-filter>
-                <action android:name="org.unifiedpush.android.connector.MESSAGE" />
-                <action android:name="org.unifiedpush.android.connector.UNREGISTERED" />
-                <action android:name="org.unifiedpush.android.connector.NEW_ENDPOINT" />
-                <action android:name="org.unifiedpush.android.connector.REGISTRATION_FAILED" />
-                <action android:name="org.unifiedpush.android.connector.TEMP_UNAVAILABLE" />
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
-        </receiver>
+        </service>
+        <provider
+            android:name="com.google.firebase.provider.FirebaseInitProvider"
+            android:authorities="${applicationId}.firebaseinitprovider"
+            tools:node="remove" />
         <receiver
             android:name=".NextLessonWidget"
             android:exported="true"

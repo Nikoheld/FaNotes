@@ -3,8 +3,9 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { createCipheriv, randomBytes } from 'node:crypto'
+import { createCipheriv, generateKeyPairSync, randomBytes } from 'node:crypto'
 import { createSchulnetzRuntime, openToken, sealToken } from './schulnetz-api.mjs'
+import { fcmDataMessage, fcmDropToken, isValidFcmToken, serviceAccountJwt } from './fcm.mjs'
 import {
   diffSnapshots,
   normalizeSchoolBase,
@@ -166,17 +167,18 @@ test('stored refresh tokens are encrypted and only the poller refreshes', async 
     if (String(url).includes('pageid=1')) {
       return { status: 200, text: async () => '<div class="cls-start-mitteilung">Willkommen</div>' }
     }
-    if (String(url).startsWith('https://ntfy.example/')) {
-      calls.push({ url: String(url), method: options.method, body: options.body })
-      return { status: 200, text: async () => 'ok' }
-    }
     return json([])
   }
-  const previousNtfy = process.env.FANOTES_NTFY_URL
-  process.env.FANOTES_NTFY_URL = 'https://ntfy.example'
-  const runtime = createSchulnetzRuntime({ root, key, fetch, autostart: false })
+  const sent = []
+  const runtime = createSchulnetzRuntime({
+    root,
+    key,
+    fetch,
+    autostart: false,
+    fcmSend: async (message) => { sent.push(message); return { status: 200 } },
+  })
   const accountId = 'a'.repeat(32)
-  try {
+  {
     const status = await runtime.linkAccount(accountId, {
       baseUrl: 'https://www.schulnetz-ag.ch/aksa',
       deviceId: '0123456789abcdef01234567',
@@ -189,7 +191,10 @@ test('stored refresh tokens are encrypted and only the poller refreshes', async 
     assert.equal(stored.includes(secret), false)
     const roundTrip = openToken(key, JSON.parse(stored).refresh)
     assert.equal(roundTrip, secret)
+    await assert.rejects(() => runtime.addFcmToken(accountId, 'bad token'), /Push-Token/)
+    await runtime.addFcmToken(accountId, 'phone:APA91b-example-token-value')
     await runtime.pollAccount(accountId)
+    assert.equal(sent.length, 0)
     assert.equal(await runtime.openStoredRefresh(accountId), 'rotated-refresh-token-value-123456')
     assert.equal(calls.some((call) => call.method === 'POST' && call.url.endsWith('/token.php')), true)
     assert.equal(calls.some((call) => call.method !== 'GET' && call.method !== 'POST'), false)
@@ -204,15 +209,15 @@ test('stored refresh tokens are encrypted and only the poller refreshes', async 
     const changes = await readFile(join(root, 'accounts', accountId, 'changes.jsonl'), 'utf8')
     assert.match(changes, /grade:g2:4\.5\|1\|Essay\|2026-11-01/)
     assert.equal(changes.includes('rotated-refresh'), false)
-    const pushed = calls.filter((call) => String(call.url).startsWith('https://ntfy.example/') && call.body).at(-1)
-    const payload = JSON.parse(pushed.body)
-    assert.equal(payload.category, 'grade')
-    assert.equal(payload.target, 'grades')
-    assert.ok(payload.targetId)
-    assert.ok(Array.isArray(payload.targetIds))
-  } finally {
-    if (previousNtfy == null) delete process.env.FANOTES_NTFY_URL
-    else process.env.FANOTES_NTFY_URL = previousNtfy
+    assert.equal(sent.length, 1)
+    assert.equal(sent[0].message.data.event, 'sync')
+    assert.equal(sent[0].message.android.priority, 'HIGH')
+    assert.equal(sent[0].message.notification, undefined)
+    assert.equal(JSON.stringify(sent[0]).includes('4.5'), false)
+    assert.equal(JSON.stringify(sent[0]).includes('5.5'), false)
+    assert.equal(calls.some((call) => String(call.url).includes('ntfy')), false)
+    await runtime.pollAccount(accountId)
+    assert.equal(sent.length, 1)
   }
 })
 
@@ -420,8 +425,7 @@ test('an empty scrape does not announce grades that were already on file', async
   const root = await mkdtemp(join(tmpdir(), 'schulnetz-grades-'))
   const key = randomBytes(32)
   let polls = 0
-  const posted = []
-  const fetch = async (url, options = {}) => {
+  const fetch = async (url) => {
     const json = (value) => ({ status: 200, text: async () => JSON.stringify(value) })
     if (String(url).endsWith('/token.php')) {
       return json({ access_token: 'access-token-value', refresh_token: 'rotated-refresh-token-value-123456', expires_in: 3600 })
@@ -433,15 +437,16 @@ test('an empty scrape does not announce grades that were already on file', async
       if (polls === 3) return json([{ id: 'web:other', course: 'MA-4a-He', courseId: 'MA-4a-He', title: 'Probe', date: '20.10.2026', mark: '5.5', weight: '1' }])
       return json([{ id: 'g2', course: 'Englisch', courseId: 'en', title: 'Essay', date: '2026-11-01', mark: '4.5', weight: '1' }])
     }
-    if (String(url).startsWith('https://ntfy.example/')) {
-      posted.push(options.body)
-      return { status: 200, text: async () => 'ok' }
-    }
     return json([])
   }
-  const previousNtfy = process.env.FANOTES_NTFY_URL
-  process.env.FANOTES_NTFY_URL = 'https://ntfy.example'
-  const runtime = createSchulnetzRuntime({ root, key, fetch, autostart: false })
+  const sent = []
+  const runtime = createSchulnetzRuntime({
+    root,
+    key,
+    fetch,
+    autostart: false,
+    fcmSend: async (message) => { sent.push(message); return { status: 200 } },
+  })
   const accountId = 'c'.repeat(32)
   try {
     await runtime.linkAccount(accountId, {
@@ -449,33 +454,135 @@ test('an empty scrape does not announce grades that were already on file', async
       deviceId: '0123456789abcdef01234567',
       refreshToken: 'super-secret-refresh-token-value',
     })
+    await runtime.addFcmToken(accountId, 'phone:APA91b-example-token-value')
     await runtime.pollAccount(accountId)
     const ledger = JSON.parse(await readFile(join(root, 'accounts', accountId, 'notified-grades.json'), 'utf8'))
     assert.equal(ledger.version, 1)
     assert.ok(ledger.keys.length > 0)
-    assert.equal(posted.length, 0)
+    assert.equal(sent.length, 0)
     await runtime.pollAccount(accountId)
     const kept = JSON.parse(await readFile(join(root, 'accounts', accountId, 'snapshot.json'), 'utf8'))
     assert.equal(kept.grades.length, 1)
     assert.equal(kept.grades[0].id, 'g1')
-    assert.equal(posted.length, 0)
+    assert.equal(sent.length, 0)
     await rm(join(root, 'accounts', accountId, 'notified-grades.json'), { force: true })
     await runtime.pollAccount(accountId)
-    assert.equal(posted.length, 0)
+    assert.equal(sent.length, 0)
     const reseeded = JSON.parse(await readFile(join(root, 'accounts', accountId, 'notified-grades.json'), 'utf8'))
     assert.ok(reseeded.keys.length > 0)
     await runtime.pollAccount(accountId)
-    assert.equal(posted.length, 1)
-    const payload = JSON.parse(posted[0])
-    assert.equal(payload.category, 'grade')
-    assert.match(payload.title, /Neue Note|neue Noten/)
-    assert.ok(Array.isArray(payload.gradeKeys) && payload.gradeKeys.length > 0)
-    assert.equal(JSON.stringify(payload).includes('super-secret'), false)
+    assert.equal(sent.length, 1)
+    assert.equal(sent[0].message.data.event, 'sync')
+    assert.equal(sent[0].message.notification, undefined)
+    assert.equal(JSON.stringify(sent[0]).includes('4.5'), false)
+    assert.equal(JSON.stringify(sent[0]).includes('5.5'), false)
+    assert.equal(JSON.stringify(sent[0]).includes('super-secret'), false)
     await runtime.pollAccount(accountId)
-    assert.equal(posted.length, 1)
+    assert.equal(sent.length, 1)
   } finally {
-    if (previousNtfy == null) delete process.env.FANOTES_NTFY_URL
-    else process.env.FANOTES_NTFY_URL = previousNtfy
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('firebase data messages name an event and never a grade', () => {
+  for (const event of ['sync', 'reauth', 'test']) {
+    const message = fcmDataMessage('phone:APA91b-example-token-value', event)
+    assert.equal(message.message.data.event, event)
+    assert.equal(message.message.android.priority, 'HIGH')
+    assert.equal(message.message.notification, undefined)
+    assert.equal(JSON.stringify(message).includes('5.5'), false)
+    assert.equal(JSON.stringify(message).includes('Neue Note'), false)
+  }
+  assert.equal(isValidFcmToken('phone:APA91b-example-token-value'), true)
+  assert.equal(isValidFcmToken('bad token'), false)
+  assert.equal(isValidFcmToken(''), false)
+  assert.equal(fcmDropToken(404, '{}'), true)
+  assert.equal(fcmDropToken(400, '{"error":{"details":[{"errorCode":"UNREGISTERED"}]}}'), true)
+  assert.equal(fcmDropToken(200, '{}'), false)
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const signed = serviceAccountJwt({
+    client_email: 'push@kantiplus.iam.gserviceaccount.com',
+    private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+    project_id: 'kantiplus',
+  }, 1_700_000_000_000)
+  assert.equal(signed.jwt.split('.').length, 3)
+  assert.equal(signed.jwt.includes('PRIVATE'), false)
+  assert.equal(signed.exp, 1_700_000_000 + 3600)
+})
+
+test('missing firebase credentials skip the push and do not throw', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-fcm-'))
+  const key = randomBytes(32)
+  let polls = 0
+  const calls = []
+  const fetch = async (url) => {
+    calls.push(String(url))
+    const json = (value) => ({ status: 200, text: async () => JSON.stringify(value) })
+    if (String(url).endsWith('/token.php')) return json({ access_token: 'access-token-value', refresh_token: 'rotated-refresh-token-value-123456', expires_in: 3600 })
+    if (String(url).includes('/me/grades')) {
+      polls += 1
+      const grades = [{ id: 'g1', course: 'Mathematik', title: 'Probe', date: '2026-10-20', mark: '5.5', weight: '1' }]
+      if (polls > 1) grades.push({ id: 'g2', course: 'Englisch', title: 'Essay', date: '2026-11-01', mark: '4.5', weight: '1' })
+      return json(grades)
+    }
+    return json([])
+  }
+  const runtime = createSchulnetzRuntime({ root, key, fetch, autostart: false, fcmAccountFile: join(root, 'missing-fcm.json') })
+  const accountId = 'd'.repeat(32)
+  try {
+    await runtime.linkAccount(accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'super-secret-refresh-token-value',
+    })
+    const registered = await runtime.addFcmToken(accountId, 'phone:APA91b-example-token-value')
+    assert.equal(JSON.stringify(registered).includes('APA91b'), false)
+    await runtime.pollAccount(accountId)
+    await runtime.pollAccount(accountId)
+    assert.equal(calls.some((url) => url.includes('fcm.googleapis.com') || url.includes('ntfy') || url.includes('oauth2.googleapis.com')), false)
+    const changes = await readFile(join(root, 'accounts', accountId, 'changes.jsonl'), 'utf8')
+    assert.match(changes, /grade:g2:/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an unregistered firebase token is forgotten', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-fcm-drop-'))
+  const key = randomBytes(32)
+  let polls = 0
+  const fetch = async (url) => {
+    const json = (value) => ({ status: 200, text: async () => JSON.stringify(value) })
+    if (String(url).endsWith('/token.php')) return json({ access_token: 'access-token-value', refresh_token: 'rotated-refresh-token-value-123456', expires_in: 3600 })
+    if (String(url).includes('/me/grades')) {
+      polls += 1
+      const grades = [{ id: 'g1', course: 'Mathematik', title: 'Probe', date: '2026-10-20', mark: '5.5', weight: '1' }]
+      if (polls > 1) grades.push({ id: 'g2', course: 'Englisch', title: 'Essay', date: '2026-11-01', mark: '4.5', weight: '1' })
+      return json(grades)
+    }
+    return json([])
+  }
+  const runtime = createSchulnetzRuntime({
+    root,
+    key,
+    fetch,
+    autostart: false,
+    fcmSend: async (message) => ({ status: 404, drop: true, event: message.message.data.event }),
+  })
+  const accountId = 'e'.repeat(32)
+  try {
+    await runtime.linkAccount(accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'super-secret-refresh-token-value',
+    })
+    await runtime.addFcmToken(accountId, 'phone:APA91b-example-token-value')
+    await runtime.pollAccount(accountId)
+    await runtime.pollAccount(accountId)
+    const stored = JSON.parse(await readFile(join(root, 'accounts', accountId, 'link.json'), 'utf8'))
+    assert.deepEqual(stored.fcmTokens, [])
+  } finally {
+    await rm(root, { recursive: true, force: true })
   }
 })
 

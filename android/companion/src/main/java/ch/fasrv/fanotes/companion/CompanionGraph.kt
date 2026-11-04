@@ -150,7 +150,7 @@ class CompanionGraph(private val context: Context) {
         prefs.edit().putString("theme", id).apply()
     }
 
-    fun hasInstantPush(): Boolean = hasUnifiedPushDistributor(context)
+    fun hasInstantPush(): Boolean = firebaseConfigured(context)
 
     fun baseUrl(): String = normalizeSchoolBase(prefs.getString("schulnetz-base", null) ?: AKSA) ?: AKSA
 
@@ -264,12 +264,6 @@ class CompanionGraph(private val context: Context) {
         refreshLocally(previous)
         configurePushDelivery(context)
         NextLessonWidget.update(context)
-    }
-
-    suspend fun registerPushEndpoint(endpoint: String) {
-        val session = engine.currentSession() ?: return
-        if (!link.value.linked) return
-        runCatching { client.registerEndpoint(session, endpoint) }
     }
 
     fun noteFolderExists(folder: String): Boolean = folderExists(store.tree(), folder)
@@ -470,9 +464,36 @@ class CompanionGraph(private val context: Context) {
 
     fun nextCheckAt(): Long {
         val last = lastCheckAt()
-        val delay = schoolFallbackIntervalMs(hasInstantPush())
-        if (last <= 0L || delay <= 0L) return 0L
-        return last + delay
+        if (last <= 0L) return 0L
+        return last + schoolFallbackIntervalMs()
+    }
+
+    /** Fetch the server snapshot and change list. Does not open Schulnetz. */
+    suspend fun pullServerUpdates() {
+        if (schoolDisconnected()) return
+        withContext(Dispatchers.IO) {
+            gate.exclusive("pull:fcm") {
+                val session = engine.currentSession() ?: return@exclusive
+                val previous = snapshot.value
+                val body = runCatching { client.snapshot(session) }.getOrNull() ?: return@exclusive
+                val next = parseNormalizedSnapshot(body) ?: return@exclusive
+                publishSnapshot(previous, next, notifySettings())
+                val changes = runCatching { client.changes(session, prefs.getLong("change-cursor", 0L)) }.getOrNull()
+                if (changes != null) applyServerChanges(changes)
+                prefs.edit().putLong("last-check", System.currentTimeMillis()).putString("last-check-error", "").apply()
+                NextLessonWidget.update(context)
+            }
+        }
+    }
+
+    suspend fun registerFcmToken(token: String) {
+        if (token.isBlank()) return
+        prefs.edit().putString("fcm-token", token).apply()
+        if (schoolDisconnected()) return
+        val session = engine.currentSession() ?: return
+        if (prefs.getString("push-topic", null).isNullOrBlank() && !link.value.linked) return
+        runCatching { client.registerFcmToken(session, token) }
+            .onFailure { schulnetzLog.error(it) }
     }
 
     fun setSubjectColor(subject: String, color: String) {
@@ -920,7 +941,6 @@ class CompanionGraph(private val context: Context) {
         signedOut = true
         clearLocalLink()
         CompanionAlerts.retireLegacyPush(context)
-        runCatching { org.unifiedpush.android.connector.UnifiedPush.unregister(context, "schulnetz") }
         androidx.work.WorkManager.getInstance(context).cancelUniqueWork(SCHOOL_WORK)
         CompanionAlerts.forget(context, "schulnetz-login-required")
         link.value = SchulnetzLinkState(baseUrl = baseUrl())

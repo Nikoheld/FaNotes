@@ -26,7 +26,7 @@ Der Server benutzt die PHPSESSID des Telefons nicht. Er speichert die Microsoft-
 
 Die Notenseite (`pageid=21311`) hat pro Fach eine Spalte bzw. Zeile «Notendurchschnitt» / «Aktueller Durchschnitt». Das ist der Fachschnitt, keine Einzelprüfung. Parser, Schnappschuss und Diff ignorieren diese Zeilen; gespeicherte Schnappschüsse mit einer künstlichen Note «Durchschnitt» werden still bereinigt und erzeugen keinen Push.
 
-Der Poller liest standardmässig jede Minute (`FANOTES_SCHULNETZ_POLL_MS=60000`) und vergleicht mit dem letzten Schnappschuss. Eine Minute hält die Website-Sitzung lebendig (Schulnetz trennt nach etwa zehn Minuten Untätigkeit) und bringt eine neue Note oder einen Ausfall in der Regel in unter einer Minute aufs Telefon, sobald UnifiedPush/ntfy zustellt. 30 Sekunden geht per Umgebungsvariable, belastet Schulnetz aber stärker; unter 30 Sekunden ist nicht vorgesehen. Die erste erfolgreiche Lesung erzeugt keine Meldungen. Danach gehen Änderungen an ntfy und an eingetragene UnifiedPush-Endpunkte. Das Telefon hält keine eigene ntfy-Verbindung und keinen Vordergrunddienst; es wacht bei einem Push auf. Fehlt ein UnifiedPush-Verteiler, prüft WorkManager höchstens alle 15 Minuten `/snapshot`. Ausgeblendete Lektionen liegen im Tresor und lösen auf dem Telefon keine Stundenplan-Pushs aus.
+Der Poller liest standardmässig jede Minute (`FANOTES_SCHULNETZ_POLL_MS=60000`) und vergleicht mit dem letzten Schnappschuss. Eine Minute hält die Website-Sitzung lebendig (Schulnetz trennt nach etwa zehn Minuten Untätigkeit) und bringt eine neue Note oder einen Ausfall in der Regel in unter einer Minute aufs Telefon, sobald FCM zustellt. 30 Sekunden geht per Umgebungsvariable, belastet Schulnetz aber stärker; unter 30 Sekunden ist nicht vorgesehen. Die erste erfolgreiche Lesung erzeugt keine Meldungen. Danach schickt der Server eine Data-Message `{ event: "sync" }`. Das Telefon holt `/snapshot` und `/changes` und zeigt die Meldung selbst. Es hält keinen Vordergrunddienst. Zusätzlich prüft WorkManager etwa alle 15 Minuten, auch wenn FCM konfiguriert ist. Ausgeblendete Lektionen liegen im Tresor und lösen auf dem Telefon keine Stundenplan-Pushs aus.
 
 ## Endpunkte
 
@@ -41,9 +41,8 @@ Alle Routen hängen unter `/api/v1/schulnetz` und verlangen denselben Sync-Login
 | GET | `/snapshot` | Normalisierter Schnappschuss (Noten, Stunden, Prüfungen, Absenzen, Aufgaben, Mitteilungen, Ferien, Kontoauszug, Startseite). |
 | GET | `/changes?since=<revision>` | Änderungen seit dieser Revision. |
 | PUT | `/settings` | `{ grades, timetable, exams, absences, events, deadlines, guessGrades }` als Booleans. `guessGrades` ist standardmässig aus. |
-| PUT | `/push-endpoint` | `{ endpoint }` HTTPS-URL eines UnifiedPush- oder ntfy-Ziels, höchstens 8. |
-| DELETE | `/push-endpoint` | `{ endpoint }` entfernt eines davon. |
-| POST | `/push/test` | Sendet eine Testmeldung. |
+| PUT | `/push-token` | `{ token }` FCM-Registrierung, höchstens 8. Kein Notentext. |
+| POST | `/push/test` | Schickt `{ event: "test" }`. Die App zeigt die Testmeldung selbst. |
 
 `baseUrl` muss HTTPS sein und nach Schulnetz aussehen (`*.schulnetz-ag.ch`, `*.schulnetz.ch`, `*.schulnetz.com`, `schulnetz.*`, `schulnetz.web.app`). AKSA ist `https://www.schulnetz-ag.ch/aksa`.
 
@@ -56,8 +55,7 @@ Antwort `503` auf `PUT /link` heisst: der Token-Schlüssel fehlt. Die App speich
 | `FANOTES_SCHULNETZ_DIR` | `/var/lib/fanotes-schulnetz` | Datenverzeichnis, Modus `0700`, Besitzer `www-data` |
 | `FANOTES_SCHULNETZ_TOKEN_KEY` | leer | 32 Byte, Base64 oder 64 Hex-Zeichen. Nicht ins Journal schreiben. |
 | `FANOTES_SCHULNETZ_TOKEN_KEY_FILE` | `/etc/fanotes/schulnetz-token.key` | Datei mit demselben Schlüssel, Modus `0600`, Besitzer `www-data`. Wird genutzt, wenn die Variable leer ist. |
-| `FANOTES_NTFY_URL` | `https://ntfy.sh` | Server, an den Meldungen gehen. Eigenes ntfy ist möglich. |
-| `FANOTES_NTFY_TOKEN` | leer | Optionaler Bearer, falls das ntfy-Thema geschützt ist. |
+| `FANOTES_FCM_SERVICE_ACCOUNT` | `/etc/fanotes/fcm-service-account.json` | Dienstkonto für FCM HTTP v1. Fehlt die Datei, wird FCM übersprungen. |
 | `FANOTES_SCHULNETZ_POLL_MS` | `60000` | Abstand zwischen zwei Lesungen. 60000 hält die Sitzung und liefert Noten/Ausfälle in unter einer Minute. |
 | `FANOTES_SCHULNETZ_POLL` | an | `0` schaltet den Poller im Website-Prozess aus. Dann darf genau der eigene Dienst laufen. |
 
@@ -105,20 +103,29 @@ Der Poller prüft jede URL, bevor er sie aufruft, und folgt keinen Weiterleitung
 
 ## Push
 
-Ohne Google Play und ohne `google-services.json`.
+Sofortige Meldungen laufen über Firebase Cloud Messaging (HTTP v1). Die App braucht dafür keine ntfy-App und keinen Vordergrunddienst. Solange der Dienstkontoschlüssel fehlt, überspringt der Server FCM und das Telefon prüft etwa alle 15 Minuten. Beides ist dedupliziert: eine Note wird pro FaNotes-Konto genau einmal gemeldet.
 
-1. Beim Verbinden entsteht ein zufälliges ntfy-Thema. `GET /status` gibt `push.url` zurück, zum Beispiel `https://ntfy.sh/<32 hex>`.
-2. Der Server sendet bei einer Änderung ein POST an dieses Thema und an bis zu acht weitere HTTPS-Endpunkte.
-3. Die App öffnet keine eigene ntfy-Socket-Verbindung und zeigt keine dauerhafte Meldung. Ist eine UnifiedPush-App installiert (ntfy, Nextcloud, …), registriert Kanti+ deren Endpunkt unter `/push-endpoint`. Der Verteiler hält die eine Verbindung; Kanti+ wacht nur bei einem Push auf. Die Meldung erscheint auf dem passenden Kanal (Note, Stundenplan, …).
-4. Der Server postet den Rohtext an den UnifiedPush-Endpunkt. Verteiler, die Web-Push-Verschlüsselung erzwingen, bekommen hier den Klartext; ntfy nimmt ihn direkt an.
-5. Fehlt ein Verteiler, holt WorkManager `/snapshot` und `/changes` höchstens alle 15 Minuten (Netzwerkbedingung). In den Benachrichtigungs-Einstellungen steht dann ein kurzer Hinweis in der App, kein Notification-Banner.
-6. Jede Meldung trägt Typ und eine stabile Ziel-Id (Hash aus Fach+Datum+Titel bzw. Lektion Datum+Zeit+Fach). Ein Tipp öffnet das Element: Note → Noten mit geöffnetem Fach, Stundenplan → Tag und Lektion, Prüfung → Prüfungsdetail, Termin/Mitteilung → Termine, Absenzfrist → Absenz, Test → Einstellungen. Fehlt das Element, bleibt die passende Liste mit einem kurzen Hinweis. Mehrere neue Noten werden zu einer Meldung mit allen Ziel-Ids zusammengefasst. Dasselbe JSON gilt für ntfy, UnifiedPush und lokale WorkManager-Meldungen; `MainActivity` ist `singleTop`, damit ein Tipp aus dem Hintergrund und ein Kaltstart dieselben Extras lesen.
+1. Die App registriert ihr FCM-Token mit `PUT /push-token`, sobald `google-services.json` im Build liegt und Schulnetz verbunden ist. Höchstens acht Tokens. Ohne die Datei startet die App normal.
+2. Bei einer Änderung sendet der Server eine hochpriore Data-Message `{ event: "sync" }`. Kein Notentext und kein Titel gehen an Google. Die App holt `/snapshot` und `/changes` und zeigt die Meldung selbst.
+3. Eine abgelaufene Anmeldung sendet `{ event: "reauth" }`. `POST /push/test` sendet `{ event: "test" }`. «Send a test notification» bleibt in den Einstellungen.
+4. WorkManager bleibt das Netz, etwa alle 15 Minuten, auch wenn FCM konfiguriert ist.
+5. Ein Tipp öffnet das Element: Note → Noten, Stundenplan → Tag und Lektion, Prüfung → Prüfungsdetail, Termin → Termine, Absenzfrist → Absenz, Test → Einstellungen. `MainActivity` ist `singleTop`.
 
-FCM ist bewusst nicht eingebaut. Es würde Play-Dienste und ein Firebase-Projekt erzwingen. ntfy kann selbst gehostet werden, indem `FANOTES_NTFY_URL` gesetzt wird. Die App übernimmt die Adresse aus `/status`.
+### Firebase einrichten
 
-Wer ein privates ntfy will, setzt `FANOTES_NTFY_TOKEN` und schützt das Thema serverseitig. Das Thema selbst ist das Leserecht für die Meldungstexte (Fach und Note, kein Schulnetz-Token). Es ist 128 Bit zufällig und nur mit einem gültigen FaNotes-Login abrufbar.
+Das Firebase-Projekt legt Fabio an. Der Code läuft, sobald die beiden Dateien da sind.
 
-`guessGrades` (Einstellungen → Notifications → Guess the grade, standardmässig aus) lässt den Poller die Note aus Titel, Text und JSON-Payload. ntfy zeigt sonst den Servertext auf dem Sperrbildschirm, bevor die App startet. Mit dem Schalter lautet die Meldung «Neue Note in <Fach> – tippen zum Aufdecken» und nennt nur Fach und Prüfungstitel. Mehrere neue Noten bleiben einzelne Meldungen, damit jede ihr eigenes Aufdecken hat. Schnitt und Pluspunkte auf dem Telefon rechnen unaufgedeckte Noten nicht mit, bis sie aufgedeckt sind.
+1. Firebase-Projekt anlegen, Name zum Beispiel `Kanti+` (Projekt-ID zum Beispiel `kantiplus`).
+2. Android-App hinzufügen. Paketname exakt `ch.fasrv.kantiplus`. Nicht `ch.fasrv.fanotes.companion` — das ist nur der Kotlin-Namespace.
+3. `google-services.json` herunterladen und nicht ins Git legen. Den Dateiinhalt als GitHub-Secret `GOOGLE_SERVICES_JSON` im Repository Nikoheld/FaNotes speichern. CI schreibt `android/companion/google-services.json` nur, wenn das Secret gesetzt ist.
+4. Projekteinstellungen → Dienstkonten → neuen privaten Schlüssel erzeugen (FCM HTTP v1).
+5. Diese JSON auf dem Server nach `/etc/fanotes/fcm-service-account.json` legen, Modus `0600`, lesbar für `www-data`. Nicht ins Git und nicht ins Journal. Optionaler anderer Pfad: `FANOTES_FCM_SERVICE_ACCOUNT`. Der Standardpfad braucht keine Änderung der systemd-Unit.
+6. `sudo systemctl restart fanotes-site.service`, nachdem die Datei liegt.
+7. In der App: Einstellungen → Notifications → «Send a test notification».
+
+Bis Schritt 5 fehlt, sendet der Server kein FCM und stürzt nicht ab.
+
+`guessGrades` (Einstellungen → Notifications → Guess the grade, standardmässig aus) wertet die App aus, wenn sie die Meldung zeigt. Die Data-Message nennt die Note nicht. Mit dem Schalter lautet die Meldung «Neue Note in <Fach> – tippen zum Aufdecken» und nennt nur Fach und Prüfungstitel. «Hold to reveal» verlangt einen langen Druck. Schnitt und Pluspunkte auf dem Telefon rechnen unaufgedeckte Noten nicht mit, bis sie aufgedeckt sind.
 
 ## Deploy
 
@@ -161,7 +168,7 @@ node --test fanotes-site/schulnetz-logic.test.mjs
 - Der Sync-Bearer reicht, um die Verknüpfung zu ersetzen. Wer die FaNotes-Sitzung hat, kann Schulnetz neu verbinden. Das ist dieselbe Grenze wie beim Tresor-Login.
 - Der Server sieht Schulnetz-Inhalte im Klartext, weil er sie vergleichen und zuschicken muss. Notizen bleiben Ende-zu-Ende-verschlüsselt und liegen nicht in diesem Speicher.
 - Rate-Limits des Sync-Logins gelten weiter, weil jede Anfrage zuerst `authenticateSyncRequest` durchläuft.
-- Ausgehende Verbindungen: `www.schulnetz-ag.ch` (oder die gewählte Schul-Basis) und der ntfy-Host. Beides HTTPS.
+- Ausgehende Verbindungen: `www.schulnetz-ag.ch` (oder die gewählte Schul-Basis), `oauth2.googleapis.com` und `fcm.googleapis.com`. Alles HTTPS. Ohne Dienstkonto gibt es keinen FCM-Aufruf.
 
 ## Grenzen
 

@@ -42,7 +42,7 @@ ClamAV benötigt für die erlaubte PDF-Größe `StreamMaxLength 100M` in `/etc/c
 
 ## Schulnetz für Kanti+
 
-Die Telefon-App heißt Kanti+. `schulnetz-api.mjs` hält unter `/api/v1/schulnetz` genau ein Schulnetz-Konto je FaNotes-Konto. Refresh-Tokens liegen AES-256-GCM-verschlüsselt unter `/var/lib/fanotes-schulnetz` und werden nur vom einen Poller erneuert. Der Server liest Noten, Stundenplan, Prüfungen, Absenzen und Mitteilungen; Einschreiben und Bestätigen sind gesperrt. Push läuft über ntfy oder einen UnifiedPush-Endpunkt, ohne Firebase. Einrichtung, Umgebungsvariablen und systemd: `server-changes/schulnetz-companion/README.md`.
+Die Telefon-App heißt Kanti+. `schulnetz-api.mjs` hält unter `/api/v1/schulnetz` genau ein Schulnetz-Konto je FaNotes-Konto. Refresh-Tokens liegen AES-256-GCM-verschlüsselt unter `/var/lib/fanotes-schulnetz` und werden nur vom einen Poller erneuert. Der Server liest Noten, Stundenplan, Prüfungen, Absenzen und Mitteilungen; Einschreiben und Bestätigen sind gesperrt. Push läuft über Firebase Cloud Messaging (HTTP v1, nur ein Sync-Ereignis, kein Notentext). Fehlt das Dienstkonto, bleibt das 15-Minuten-Netz. Einrichtung: `server-changes/schulnetz-companion/README.md`.
 
 ## Sync-API
 

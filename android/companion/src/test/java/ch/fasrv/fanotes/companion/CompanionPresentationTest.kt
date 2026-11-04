@@ -114,8 +114,7 @@ class CompanionPresentationTest {
         assertEquals("Some text", noteExcerpt("# Essay\n\nSome text", "Essay"))
         assertEquals(LocalDate.of(2026, 11, 2), parseDisplayDate("2.11.2026"))
     }
-    @Test fun `school polling is a 15 minute fallback only when UnifiedPush is missing`() {
-        assertEquals(0L, schoolFallbackIntervalMs(hasDistributor = true))
-        assertEquals(15 * 60_000L, schoolFallbackIntervalMs(hasDistributor = false))
+    @Test fun `school polling stays a 15 minute safety net beside instant push`() {
+        assertEquals(15 * 60_000L, schoolFallbackIntervalMs())
     }
 }

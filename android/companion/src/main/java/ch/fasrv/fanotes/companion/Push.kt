@@ -3,12 +3,10 @@ package ch.fasrv.fanotes.companion
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.app.Service
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.os.IBinder
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import androidx.work.Constraints
@@ -46,13 +44,11 @@ import ch.fasrv.fanotes.schulnetz.parseDeskPrefs
 import ch.fasrv.fanotes.schulnetz.parseHiddenLessons
 import ch.fasrv.fanotes.schulnetz.startsAt
 import ch.fasrv.fanotes.schulnetz.visibleEvents
+import com.google.firebase.FirebaseApp
+import com.google.firebase.messaging.FirebaseMessaging
+import com.google.firebase.messaging.FirebaseMessagingService
+import com.google.firebase.messaging.RemoteMessage
 import kotlinx.coroutines.launch
-import org.unifiedpush.android.connector.FailedReason
-import org.unifiedpush.android.connector.MessagingReceiver
-import org.unifiedpush.android.connector.UnifiedPush
-import org.unifiedpush.android.connector.data.PushEndpoint
-import org.unifiedpush.android.connector.data.PushMessage
-import org.unifiedpush.android.connector.data.ResolvedDistributor
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
@@ -79,11 +75,30 @@ object CompanionAlerts {
     }
 
     fun retireLegacyPush(context: Context) {
-        context.stopService(Intent(context, NtfyListenService::class.java))
         val manager = context.getSystemService(NotificationManager::class.java)
-        manager.cancel(NtfyListenService.NOTICE)
-        manager.deleteNotificationChannel(NtfyListenService.LIVE)
+        manager.cancel(42)
+        manager.deleteNotificationChannel("schulnetz-live")
         WorkManager.getInstance(context).cancelUniqueWork(SCHOOL_WORK_FAST)
+    }
+
+    fun showReauth(context: Context) {
+        show(context, ch.fasrv.fanotes.schulnetz.linkedChange(
+            "schulnetz-login-required",
+            "event",
+            "Bei Schulnetz neu anmelden",
+            "Die Microsoft-Anmeldung ist abgelaufen. In Kanti+ neu anmelden.",
+            targetId = "settings",
+        ))
+    }
+
+    fun showTest(context: Context) {
+        show(context, ch.fasrv.fanotes.schulnetz.linkedChange(
+            "push-test",
+            "settings",
+            "Test notification",
+            "Kanti+ can display notifications.",
+            targetId = "settings",
+        ))
     }
 
     fun notificationsAllowed(context: Context): Boolean {
@@ -275,36 +290,46 @@ internal const val SCHOOL_WORK = "schulnetz"
 internal const val SCHOOL_WORK_FAST = "schulnetz-fast"
 internal const val SCHOOL_FALLBACK_MS = 15 * 60_000L
 
-fun schoolFallbackIntervalMs(hasDistributor: Boolean): Long = if (hasDistributor) 0L else SCHOOL_FALLBACK_MS
+fun schoolFallbackIntervalMs(): Long = SCHOOL_FALLBACK_MS
 
-fun hasUnifiedPushDistributor(context: Context): Boolean =
-    UnifiedPush.resolveDefaultDistributor(context) is ResolvedDistributor.Found
+fun firebaseConfigured(context: Context): Boolean =
+    context.resources.getIdentifier("google_app_id", "string", context.packageName) != 0
+
+/** Starts Firebase only when the Google Services plugin generated an app id. */
+fun prepareFirebase(context: Context): Boolean {
+    if (!firebaseConfigured(context)) return false
+    return runCatching {
+        if (FirebaseApp.getApps(context).isEmpty()) FirebaseApp.initializeApp(context)
+        FirebaseApp.getApps(context).isNotEmpty()
+    }.getOrDefault(false)
+}
+
+fun requestFcmToken(context: Context) {
+    if (!prepareFirebase(context)) return
+    val app = context.applicationContext as? CompanionApplication ?: return
+    runCatching {
+        FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+            if (!token.isNullOrBlank()) app.graph.scope.launch { app.graph.registerFcmToken(token) }
+        }
+    }
+}
 
 fun configurePushDelivery(context: Context) {
     CompanionAlerts.retireLegacyPush(context)
     val work = WorkManager.getInstance(context)
     work.cancelUniqueWork(SCHOOL_WORK_FAST)
-    if (enableUnifiedPush(context)) {
-        work.cancelUniqueWork(SCHOOL_WORK)
-        return
-    }
     val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
     val linked = !prefs.getBoolean("school-disconnected", false) && !prefs.getString("push-topic", null).isNullOrBlank()
     if (linked) SchulnetzWorker.schedule(context) else work.cancelUniqueWork(SCHOOL_WORK)
+    requestFcmToken(context)
 }
 
 class SchulnetzWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
-    override suspend fun doWork(): Result {
-        if (hasUnifiedPushDistributor(applicationContext)) {
-            WorkManager.getInstance(applicationContext).cancelUniqueWork(SCHOOL_WORK)
-            return Result.success()
-        }
-        return try {
-            (applicationContext as CompanionApplication).graph.refreshSchulnetz("worker")
-            Result.success()
-        } catch (_: Exception) {
-            Result.retry()
-        }
+    override suspend fun doWork(): Result = try {
+        (applicationContext as CompanionApplication).graph.refreshSchulnetz("worker")
+        Result.success()
+    } catch (_: Exception) {
+        Result.retry()
     }
 
     companion object {
@@ -317,63 +342,22 @@ class SchulnetzWorker(context: Context, params: WorkerParameters) : CoroutineWor
     }
 }
 
-/** Upgrade stub: stop the old ntfy foreground service and drop its notification. */
-class NtfyListenService : Service() {
-    override fun onBind(intent: Intent?): IBinder? = null
-
-    override fun onCreate() {
-        super.onCreate()
-        retire()
+class CompanionFcmService : FirebaseMessagingService() {
+    override fun onNewToken(token: String) {
+        val app = applicationContext as? CompanionApplication ?: return
+        app.graph.scope.launch { app.graph.registerFcmToken(token) }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        retire()
-        return START_NOT_STICKY
+    override fun onMessageReceived(message: RemoteMessage) {
+        when (message.data["event"].orEmpty()) {
+            "sync" -> {
+                val app = applicationContext as? CompanionApplication ?: return
+                app.graph.scope.launch { app.graph.pullServerUpdates() }
+            }
+            "reauth" -> CompanionAlerts.showReauth(applicationContext)
+            "test" -> CompanionAlerts.showTest(applicationContext)
+        }
     }
-
-    private fun retire() {
-        val notice = NotificationCompat.Builder(this, LIVE)
-            .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle("Schulnetz")
-            .setSilent(true)
-            .setPriority(NotificationCompat.PRIORITY_MIN)
-            .build()
-        startForeground(NOTICE, notice)
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        getSystemService(NotificationManager::class.java).deleteNotificationChannel(LIVE)
-        stopSelf()
-    }
-
-    companion object {
-        const val LIVE = "schulnetz-live"
-        const val NOTICE = 42
-    }
-}
-
-class CompanionPushReceiver : MessagingReceiver() {
-    override fun onNewEndpoint(context: Context, endpoint: PushEndpoint, instance: String) {
-        val app = context.applicationContext as? CompanionApplication ?: return
-        app.graph.scope.launch { app.graph.registerPushEndpoint(endpoint.url) }
-        WorkManager.getInstance(context).cancelUniqueWork(SCHOOL_WORK)
-        WorkManager.getInstance(context).cancelUniqueWork(SCHOOL_WORK_FAST)
-    }
-
-    override fun onRegistrationFailed(context: Context, reason: FailedReason, instance: String) = Unit
-
-    override fun onUnregistered(context: Context, instance: String) = Unit
-
-    override fun onMessage(context: Context, message: PushMessage, instance: String) {
-        CompanionAlerts.onPushPayload(context, message.content.toString(Charsets.UTF_8))
-    }
-}
-
-fun enableUnifiedPush(context: Context): Boolean = when (val resolved = UnifiedPush.resolveDefaultDistributor(context)) {
-    is ResolvedDistributor.Found -> {
-        UnifiedPush.saveDistributor(context, resolved.packageName)
-        UnifiedPush.register(context, "schulnetz", "Kanti+")
-        true
-    }
-    else -> false
 }
 
 class NextLessonWidget : android.appwidget.AppWidgetProvider() {

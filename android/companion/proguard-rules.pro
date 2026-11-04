@@ -1,6 +1,6 @@
 -keep class ch.fasrv.fanotes.** { *; }
 -keepclassmembers class ch.fasrv.fanotes.** { *; }
--keep class org.unifiedpush.** { *; }
+-keep class com.google.firebase.messaging.** { *; }
 -keep class androidx.work.** { *; }
 -keep class org.jsoup.** { *; }
 -keepnames class kotlinx.coroutines.** { *; }

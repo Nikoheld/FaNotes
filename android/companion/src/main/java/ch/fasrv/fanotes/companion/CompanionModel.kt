@@ -652,16 +652,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
 
     fun testPush(context: Context) {
         CompanionAlerts.forget(context, "push-test")
-        CompanionAlerts.show(
-            context,
-            ch.fasrv.fanotes.schulnetz.linkedChange(
-                "push-test",
-                "settings",
-                "Test notification",
-                "Kanti+ can display notifications.",
-                targetId = "settings",
-            ),
-        )
+        CompanionAlerts.showTest(context)
         viewModelScope.launch {
             val session = graph.engine.currentSession()
             if (session == null) {
@@ -674,12 +665,6 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                     message = "Local notification sent. Server: ${error.message}"
                 }
         }
-    }
-
-    fun enablePush(context: Context) {
-        configurePushDelivery(context)
-        val ok = hasUnifiedPushDistributor(context)
-        message = if (ok) "UnifiedPush connected. Instant school updates use that distributor." else "No UnifiedPush distributor installed. School updates are checked about every 15 minutes until ntfy or another distributor is available."
     }
 
     companion object {

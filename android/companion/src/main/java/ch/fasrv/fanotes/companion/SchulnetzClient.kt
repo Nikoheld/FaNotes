@@ -350,8 +350,8 @@ class SchulnetzClient(
         return body
     }
 
-    fun registerEndpoint(session: SyncSession, endpoint: String) {
-        val (code, body) = fanotes("PUT", "/push-endpoint", session, "{\"endpoint\":${escapeJson(endpoint)}}")
+    fun registerFcmToken(session: SyncSession, token: String) {
+        val (code, body) = fanotes("PUT", "/push-token", session, "{\"token\":${escapeJson(token)}}")
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
 
