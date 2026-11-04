@@ -63,9 +63,18 @@ fun TodayScreen(model: CompanionModel) {
             val firstName = model.snapshot.profile?.firstName.orEmpty()
             Text(if (firstName.isNotBlank()) "Hello, $firstName." else "A little more in focus.", style = MaterialTheme.typography.headlineMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp, bottom = 20.dp))
         }
+        if (!model.notesAccount && !model.link.linked && model.snapshot.fetchedAt.isBlank() && !model.link.needsReauth) item {
+            Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                Column(Modifier.padding(20.dp)) {
+                    Text("Your school day", style = MaterialTheme.typography.titleLarge)
+                    Text("Connect Schulnetz to see grades, the timetable, exams and absences.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp, bottom = 16.dp))
+                    Button(onClick = { model.requestVisibleLogin("today") }, enabled = !model.busy) { Text("Connect Schulnetz") }
+                }
+            }
+        }
         if (model.link.needsReauth) item { InfoBanner("Reconnect your school", "Your last school data is still here.", "Sign in", onAction = { model.navigate(Page.Connections) }) }
         else if (sync.status == SyncStatus.OFFLINE || sync.status == SyncStatus.ERROR) item {
-            InfoBanner(if (sync.status == SyncStatus.OFFLINE) "You're offline" else "Sync needs attention", "Keep working. Changes are saved on this device.", "Account & sync", onAction = { model.navigate(Page.Connections) })
+            InfoBanner(if (sync.status == SyncStatus.OFFLINE) "You're offline" else if (model.notesAccount) "Sync needs attention" else "Connection needs attention", "Keep working. Changes are saved on this device.", if (model.notesAccount) "Account & sync" else "School", onAction = { model.navigate(Page.Connections) })
         }
         if ("lessons" in cards) item {
             if (next != null) {
@@ -104,9 +113,11 @@ fun TodayScreen(model: CompanionModel) {
             items(urgent.take(3), key = { "today-task:${it.id}" }) { item -> TaskRow(item, today, { model.toggleTask(item) }) { task = item } }
             if (model.snapshot.homework.isNotEmpty()) item { TextButton(onClick = { model.openPlanner(true); model.taskSource = "school" }) { Text("${model.snapshot.homework.size} school assignments to review") } }
         }
-        item { SectionLabel("Pick up a note", "Library") { model.select(Destination.Notes) } }
-        if (recent.isEmpty()) item { Text("Your notes will be waiting here. Capture an idea with Create.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 12.dp)) }
-        items(recent, key = { "recent:${it.path}" }) { node -> NoteRow(model, node) { model.openNote(node.path) } }
+        if (model.notesAccount) {
+            item { SectionLabel("Pick up a note", "Library") { model.select(Destination.Notes) } }
+            if (recent.isEmpty()) item { Text("Your notes will be waiting here. Capture an idea with Create.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 12.dp)) }
+            items(recent, key = { "recent:${it.path}" }) { node -> NoteRow(model, node) { model.openNote(node.path) } }
+        }
         if ("exam" in cards) {
             val exam = nextCommitment(agenda.filter { it.kind == AgendaKind.Exam && it.key != next?.key }, now, zone)
             if (exam != null) {

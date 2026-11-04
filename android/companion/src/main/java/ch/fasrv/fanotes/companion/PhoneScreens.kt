@@ -27,7 +27,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import ch.fasrv.fanotes.schulnetz.validateNavBar
+import ch.fasrv.fanotes.schulnetz.presentedNavBar
 import ch.fasrv.fanotes.sync.SyncStatus
 
 @Composable
@@ -46,13 +46,19 @@ fun CompanionRoot(model: CompanionModel) {
     }
     if (sync.account == null && !model.localAccess) {
         Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
-            AccountScreen(model, onboarding = true, modifier = Modifier.padding(padding).consumeWindowInsets(padding).imePadding())
+            WelcomeScreen(model, Modifier.padding(padding).consumeWindowInsets(padding).imePadding())
         }
         return
     }
+    LaunchedEffect(model.pendingSchoolConnect) {
+        if (model.pendingSchoolConnect) {
+            model.pendingSchoolConnect = false
+            model.requestVisibleLogin("welcome")
+        }
+    }
     val route = model.route
     val savedScreens = rememberSaveableStateHolder()
-    val barItems = validateNavBar(model.desk.navBar)
+    val barItems = presentedNavBar(model.desk.navBar, model.notesAccount)
     val barVisible = showsNavBar(route, model.plannerTasks, barItems)
     BackHandler(route.page == Page.Editor || !model.atNavRoot()) {
         if (route.page == Page.Editor) model.closeEditor() else model.back()
@@ -65,21 +71,21 @@ fun CompanionRoot(model: CompanionModel) {
         create = null
         when (kind) { "note" -> noteName = true; "task" -> taskForm = true; "event" -> { if (route.destination == Destination.Today) model.day = java.time.LocalDate.now(); eventForm = true } }
     }
-    if (route.page == Page.Editor) {
+    if (route.page == Page.Editor && model.notesAccount) {
         Scaffold(snackbarHost = { SnackbarHost(snackbar) }, contentWindowInsets = WindowInsets.safeDrawing) { padding ->
             Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) { NoteEditorScreen(model) }
         }
         return
     }
-    val creationLabel = when (route.destination) {
-        Destination.Notes -> "New note"
-        Destination.Planner -> if (model.plannerTasks) "New task" else "New event"
+    val creationLabel = when {
+        model.notesAccount && route.destination == Destination.Notes -> "New note"
+        route.destination == Destination.Planner -> if (model.plannerTasks) "New task" else "New event"
         else -> "Create"
     }
     fun requestCreation() {
-        when (route.destination) {
-            Destination.Notes -> begin("note")
-            Destination.Planner -> begin(if (model.plannerTasks) "task" else "event")
+        when {
+            model.notesAccount && route.destination == Destination.Notes -> begin("note")
+            route.destination == Destination.Planner -> begin(if (model.plannerTasks) "task" else "event")
             else -> create = "choose"
         }
     }
@@ -91,7 +97,10 @@ fun CompanionRoot(model: CompanionModel) {
         val hasCreation = primary && route.page == null && route.destination != Destination.School
         val dockCreation = hasCreation && !wide && LocalDensity.current.fontScale >= 1.3f
         val selectedId = selectedNavId(route, model.plannerTasks, barItems)
-        val title = selectedId?.let(::navBarLabel) ?: route.page?.title ?: route.destination.label
+        val title = when {
+            !model.notesAccount && route.page == Page.Connections -> "School"
+            else -> selectedId?.let(::navBarLabel) ?: route.page?.title ?: route.destination.label
+        }
         CompositionLocalProvider(LocalPageBottomPadding provides if (hasCreation && !dockCreation && !imeVisible) 100.dp else 24.dp) {
         Scaffold(
             snackbarHost = { SnackbarHost(snackbar) },
@@ -102,7 +111,7 @@ fun CompanionRoot(model: CompanionModel) {
                     navigationIcon = { if (!primary) ActionIcon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") { model.back() } },
                     actions = {
                         if (primary) {
-                            ActionIcon(Icons.Outlined.Search, "Search notes, tasks and school") { model.navigate(Page.Search) }
+                            ActionIcon(Icons.Outlined.Search, if (model.notesAccount) "Search notes, tasks and school" else "Search tasks and school") { model.navigate(Page.Search) }
                             ActionIcon(Icons.Outlined.Settings, "Settings") { model.openSettings() }
                         }
                     },
@@ -154,15 +163,15 @@ fun CompanionRoot(model: CompanionModel) {
                         if ((sync.status == SyncStatus.OFFLINE || sync.status == SyncStatus.ERROR) && route.destination != Destination.Today) {
                             Box(Modifier.padding(horizontal = Space.page, vertical = 8.dp)) {
                                 InfoBanner(
-                                    if (sync.status == SyncStatus.OFFLINE) "You're offline" else "Sync needs attention",
+                                    if (sync.status == SyncStatus.OFFLINE) "You're offline" else if (model.notesAccount) "Sync needs attention" else "Connection needs attention",
                                     "Keep working. Changes are saved on this device.",
-                                    "Account & sync",
+                                    if (model.notesAccount) "Account & sync" else "School",
                                     error = sync.status == SyncStatus.ERROR,
                                 ) { model.navigate(Page.Connections) }
                             }
                         }
                         model.loadError?.let { error ->
-                            Box(Modifier.padding(horizontal = Space.page, vertical = 8.dp)) { InfoBanner("Library needs attention", error, "Try again", true, model::reload) }
+                            Box(Modifier.padding(horizontal = Space.page, vertical = 8.dp)) { InfoBanner(if (model.notesAccount) "Library needs attention" else "Tasks and calendar need attention", error, "Try again", true, model::reload) }
                         }
                         Box(Modifier.weight(1f)) {
                             Crossfade(targetState = route, animationSpec = tween(120), label = "Screen transition") { current ->
@@ -175,11 +184,11 @@ fun CompanionRoot(model: CompanionModel) {
                                 Page.Course -> CourseScreen(model)
                                 Page.Exams, Page.Absences, Page.Updates, Page.Statement -> SchoolRecordScreen(model, current.page)
                                 Page.Settings, Page.Connections, Page.Appearance, Page.Navigation, Page.Planning, Page.Notifications, Page.Diagnostics, Page.Profile -> SettingsScreen(model, current.page)
-                                Page.Trash -> TrashScreen(model)
+                                Page.Trash -> if (model.notesAccount) TrashScreen(model) else TodayScreen(model)
                                 else -> when (current.destination) {
                                     Destination.Today -> TodayScreen(model)
                                     Destination.Planner -> PlannerScreen(model)
-                                    Destination.Notes -> NotesScreen(model)
+                                    Destination.Notes -> if (model.notesAccount) NotesScreen(model) else TodayScreen(model)
                                     Destination.School -> SchoolScreen(model)
                                 }
                             }
@@ -194,8 +203,8 @@ fun CompanionRoot(model: CompanionModel) {
     }
     if (create != null) ModalBottomSheet(onDismissRequest = { create = null }) {
         Column(Modifier.fillMaxWidth().sheetKeyboardPadding().padding(horizontal = Space.page).padding(bottom = Space.xl)) {
-            SheetTitle("Make room for an idea", { create = null })
-            SettingRow(Icons.Outlined.EditNote, "Note", "Write, draw or collect your thoughts") { begin("note") }
+            SheetTitle(if (model.notesAccount) "Make room for an idea" else "Add to your day", { create = null })
+            if (model.notesAccount) SettingRow(Icons.Outlined.EditNote, "Note", "Write, draw or collect your thoughts") { begin("note") }
             SettingRow(Icons.Outlined.CheckCircleOutline, "Task", "Homework or something to get done") { begin("task") }
             SettingRow(Icons.Outlined.Event, "Event", "Put a commitment on your calendar") { begin("event") }
         }
@@ -204,6 +213,15 @@ fun CompanionRoot(model: CompanionModel) {
     if (taskForm) TaskForm(model, onDismiss = { taskForm = false })
     if (eventForm) EventForm(model, onDismiss = { eventForm = false })
     if (model.revealQueue.isNotEmpty()) GradeRevealSheet(model)
+    if (model.offerUpload) {
+        AlertDialog(
+            onDismissRequest = model::declineUpload,
+            title = { Text("Upload tasks and calendar from this device?") },
+            text = { Text("They stay on this device until you upload them. School data is already connected.") },
+            confirmButton = { TextButton(onClick = model::acceptUpload) { Text("Upload") } },
+            dismissButton = { TextButton(onClick = model::declineUpload) { Text("Not now") } },
+        )
+    }
 }
 
 fun syncDescription(status: SyncStatus): String = when (status) {

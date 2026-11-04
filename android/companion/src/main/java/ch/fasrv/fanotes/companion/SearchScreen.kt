@@ -24,8 +24,9 @@ fun CompanionSearchScreen(model: CompanionModel) {
     var failed by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<AgendaEntry?>(null) }
     var task by remember { mutableStateOf<HomeworkTask?>(null) }
-    LaunchedEffect(query, model.tree) {
-        if (query.trim().length < 2) { notes = emptyList(); loading = false; return@LaunchedEffect }
+    LaunchedEffect(model.notesAccount) { if (!model.notesAccount && scope == "notes") scope = "all" }
+    LaunchedEffect(query, model.tree, model.notesAccount) {
+        if (!model.notesAccount || query.trim().length < 2) { notes = emptyList(); loading = false; return@LaunchedEffect }
         loading = true; failed = false
         delay(250)
         try { notes = model.findNotes(query.trim()) } catch (error: Exception) { if (error is CancellationException) throw error; failed = true }
@@ -39,17 +40,22 @@ fun CompanionSearchScreen(model: CompanionModel) {
     val local = remember(needle, model.calendar.events) { if (needle.length < 2) emptyList() else model.calendar.events.filter { "${it.title} ${it.location} ${it.notes}".contains(needle, true) } }
     val recentNotes = remember(model.tree) { flattenNotes(model.tree).sortedByDescending { it.modifiedAt }.take(3) }
     Column {
-        SearchField(query, { query = it }, "Notes, tasks, subjects, events…", Modifier.padding(horizontal = Space.page, vertical = 8.dp))
-        ChoiceRow(listOf("all" to "All", "notes" to "Notes", "tasks" to "Tasks", "school" to "School"), scope, { scope = it }, Modifier.padding(horizontal = Space.page))
+        SearchField(query, { query = it }, if (model.notesAccount) "Notes, tasks, subjects, events…" else "Tasks, subjects, events…", Modifier.padding(horizontal = Space.page, vertical = 8.dp))
+        ChoiceRow(listOf("all" to "All", "tasks" to "Tasks", "school" to "School") + if (model.notesAccount) listOf("notes" to "Notes") else emptyList(), scope, { scope = it }, Modifier.padding(horizontal = Space.page))
         ScreenList {
             if (needle.length < 2) {
-                item { EmptyState(Icons.Outlined.Search, "Find your next thought", "Search note text, existing handwriting transcripts, assignments, events and school records. Enter at least two characters.") }
-                item { SectionLabel("Jump back in") }
-                items(recentNotes, key = { it.path }) { note -> NoteRow(model, note) { model.openNote(note.path) } }
+                item {
+                    if (model.notesAccount) EmptyState(Icons.Outlined.Search, "Find your next thought", "Search note text, existing handwriting transcripts, assignments, events and school records. Enter at least two characters.")
+                    else EmptyState(Icons.Outlined.Search, "Find a class, task or grade", "Search tasks, subjects, events and school records. Enter at least two characters.")
+                }
+                if (model.notesAccount) {
+                    item { SectionLabel("Jump back in") }
+                    items(recentNotes, key = { it.path }) { note -> NoteRow(model, note) { model.openNote(note.path) } }
+                }
             } else {
                 if (loading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 12.dp)) }
-                if (failed) item { InfoBanner("Note search needs attention", "Some notes could not be read. Your files have been kept unchanged.") }
-                if (scope in listOf("all", "notes") && notes.isNotEmpty()) {
+                if (model.notesAccount && failed) item { InfoBanner("Note search needs attention", "Some notes could not be read. Your files have been kept unchanged.") }
+                if (model.notesAccount && scope in listOf("all", "notes") && notes.isNotEmpty()) {
                     item { SectionLabel("Notes · ${notes.size}${if (notes.size == 200) "+" else ""}") }
                     items(notes, key = { "search-note:${it.node.path}" }) { result -> NoteRow(model, result.node) { model.openNote(result.node.path) } }
                 }
@@ -75,8 +81,13 @@ fun CompanionSearchScreen(model: CompanionModel) {
                     if (messages.isNotEmpty()) item { SectionLabel("School messages") }
                     items(messages, key = { "search-message:${messageTargetId(it)}" }) { message -> SettingRow(Icons.Outlined.Forum, message.title.ifBlank { "School message" }, plainPreview(message.body).take(100)) { model.highlightIds = setOf(messageTargetId(message)); model.navigate(Page.Updates) } }
                 }
-                val empty = when (scope) { "notes" -> notes.isEmpty(); "tasks" -> tasks.isEmpty(); "school" -> events.isEmpty() && messages.isEmpty() && courses.isEmpty(); else -> notes.isEmpty() && tasks.isEmpty() && events.isEmpty() && messages.isEmpty() && courses.isEmpty() && local.isEmpty() }
-                if (!loading && empty) item { EmptyState(Icons.Outlined.SearchOff, "Nothing matches “$needle”", "Try fewer words, a subject, or a note title.") }
+                val empty = when (scope) {
+                    "notes" -> !model.notesAccount || notes.isEmpty()
+                    "tasks" -> tasks.isEmpty()
+                    "school" -> events.isEmpty() && messages.isEmpty() && courses.isEmpty()
+                    else -> (!model.notesAccount || notes.isEmpty()) && tasks.isEmpty() && events.isEmpty() && messages.isEmpty() && courses.isEmpty() && local.isEmpty()
+                }
+                if (!loading && empty) item { EmptyState(Icons.Outlined.SearchOff, "Nothing matches “$needle”", if (model.notesAccount) "Try fewer words, a subject, or a note title." else "Try fewer words, a subject, or a task.") }
             }
         }
     }

@@ -360,7 +360,7 @@ const corsHeaders = (request) => {
   return {
     ...(allowed ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}),
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-Match, X-FaNotes-Account, X-FaNotes-Meta, X-FaNotes-Sha256',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-Match, X-FaNotes-Account, X-Kanti-Guest, X-FaNotes-Meta, X-FaNotes-Sha256',
     'Access-Control-Expose-Headers': 'ETag, X-FaNotes-Meta, X-FaNotes-Revision, X-FaNotes-Deleted',
     'Access-Control-Max-Age': '600',
   }

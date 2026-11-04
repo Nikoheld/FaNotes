@@ -79,6 +79,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
@@ -106,6 +108,23 @@ class CompanionGraph(private val context: Context) {
     val vaultChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     fun localAccess(): Boolean = prefs.getBoolean("local-access", false)
     fun setLocalAccess(enabled: Boolean) { prefs.edit().putBoolean("local-access", enabled).apply() }
+    private val guestLock = Mutex()
+    private val guestFile: File get() = File(context.filesDir, "kanti-guest.json")
+    fun plannerHold(): Boolean = prefs.getBoolean(PLANNER_HOLD_PREF, false)
+    fun setPlannerHold(hold: Boolean) {
+        prefs.edit().putBoolean(PLANNER_HOLD_PREF, hold).apply()
+        busyPaths = if (hold) PLANNER_HOLD_PATHS else emptySet()
+    }
+    /** Keep tasks, calendar and desk settings on this device until the user agrees to upload them. */
+    fun armPlannerHold(): Boolean {
+        val tasks = runCatching { homework().tasks.any { it.title.isNotBlank() } }.getOrDefault(true)
+        val events = runCatching { calendar().events.isNotEmpty() }.getOrDefault(true)
+        val deskCustom = vault.exists(DESK_PATH) && runCatching { deskPrefs() != DeskPrefs(theme = themeId()) }.getOrDefault(true)
+        val hold = tasks || events || deskCustom
+        if (hold) setPlannerHold(true)
+        return hold
+    }
+    fun releasePlannerHold() = setPlannerHold(false)
     @Volatile var signedOut: Boolean = false
     @Volatile var oauthPermitted: Boolean = false
     @Volatile var viewingSession: Boolean = false
@@ -127,6 +146,7 @@ class CompanionGraph(private val context: Context) {
     )
 
     init {
+        if (plannerHold()) busyPaths = PLANNER_HOLD_PATHS
         engine.attach(host())
         scope.launch {
             val cached = readCachedSnapshot()
@@ -184,8 +204,8 @@ class CompanionGraph(private val context: Context) {
             .putBoolean(GUESS_GRADES_PREF, settings.guessGrades)
             .apply()
         scope.launch {
-            val session = engine.currentSession() ?: return@launch
-            if (link.value.linked) runCatching { client.saveSettings(session, settings) }
+            val auth = runCatching { schoolAuth() }.getOrNull() ?: return@launch
+            if (link.value.linked) runCatching { client.saveSettings(auth, settings) }
         }
     }
 
@@ -220,7 +240,11 @@ class CompanionGraph(private val context: Context) {
     }
 
     private suspend fun refreshLocked(caller: String) {
-        val session = engine.currentSession() ?: return
+        val session = runCatching { schoolAuth() }.getOrElse { error ->
+            prefs.edit().putString("last-check-error", error.message ?: "Schulnetz nicht erreichbar").apply()
+            schulnetzLog.error(error)
+            return
+        }
         val previous = snapshot.value
         prefs.edit().putLong("last-check", System.currentTimeMillis()).putString("last-check-error", "").apply()
         val remote = runCatching { client.status(session) }.getOrElse { error ->
@@ -473,7 +497,7 @@ class CompanionGraph(private val context: Context) {
         if (schoolDisconnected()) return
         withContext(Dispatchers.IO) {
             gate.exclusive("pull:fcm") {
-                val session = engine.currentSession() ?: return@exclusive
+                val session = runCatching { schoolAuth() }.getOrNull() ?: return@exclusive
                 val previous = snapshot.value
                 val body = runCatching { client.snapshot(session) }.getOrNull() ?: return@exclusive
                 val next = parseNormalizedSnapshot(body) ?: return@exclusive
@@ -490,7 +514,7 @@ class CompanionGraph(private val context: Context) {
         if (token.isBlank()) return
         prefs.edit().putString("fcm-token", token).apply()
         if (schoolDisconnected()) return
-        val session = engine.currentSession() ?: return
+        val session = runCatching { schoolAuth() }.getOrNull() ?: return
         if (prefs.getString("push-topic", null).isNullOrBlank() && !link.value.linked) return
         runCatching { client.registerFcmToken(session, token) }
             .onFailure { schulnetzLog.error(it) }
@@ -720,9 +744,9 @@ class CompanionGraph(private val context: Context) {
                         schulnetzLog.info("visible login not shown caller=$caller reason=no-subscriber")
                     } else if (withTimeoutOrNull(300_000) { done.await() } == true) {
                         withContext(Dispatchers.IO) {
-                            val fanotes = engine.currentSession()
-                            if (fanotes != null) {
-                                runCatching { client.linkWeb(fanotes, baseUrl(), deviceId(), ch.fasrv.fanotes.schulnetz.SCHULNETZ_USER_AGENT, exportSsoCookies(), "Kanti+") }
+                            val auth = runCatching { schoolAuth() }.getOrNull()
+                            if (auth != null) {
+                                runCatching { client.linkWeb(auth, baseUrl(), deviceId(), ch.fasrv.fanotes.schulnetz.SCHULNETZ_USER_AGENT, exportSsoCookies(), "Kanti+") }
                                     .onSuccess { link.value = it }
                                     .onFailure { schulnetzLog.error(it) }
                             }
@@ -934,6 +958,98 @@ class CompanionGraph(private val context: Context) {
         vault.write(LOCAL_TOKEN_PATH, body.encodeToByteArray())
     }
 
+    private fun rememberRevision(revision: Long) {
+        if (revision <= 0L) return
+        val current = prefs.getLong("change-cursor", 0L)
+        if (revision > current) prefs.edit().putLong("change-cursor", revision).apply()
+    }
+
+    private fun readGuestFile(): SchoolAuth? {
+        if (!guestFile.isFile) return null
+        val obj = runCatching { parseJson(guestFile.readText()) as? JsonValue.Obj }.getOrNull() ?: return null
+        val id = obj.string("accountId").orEmpty()
+        val token = obj.string("token").orEmpty()
+        if (!id.matches(Regex("^[a-f0-9]{32}$")) || !token.matches(Regex("^[A-Za-z0-9_-]{40,80}$"))) return null
+        return SchoolAuth(id, token, guest = true)
+    }
+
+    private fun writeGuestFile(auth: SchoolAuth) {
+        guestFile.writeText("{\"accountId\":${escapeJson(auth.accountId)},\"token\":${escapeJson(auth.token)}}")
+    }
+
+    suspend fun ensureGuest(): SchoolAuth = guestLock.withLock {
+        readGuestFile()?.let { return@withLock it }
+        val created = client.createGuest()
+        writeGuestFile(created)
+        created
+    }
+
+    private suspend fun adoptGuest(session: ch.fasrv.fanotes.sync.SyncSession) {
+        if (readGuestFile() == null) return
+        guestLock.withLock {
+            val guest = readGuestFile() ?: return@withLock
+            runCatching { client.adopt(SchoolAuth(session.accountId, session.token, false), guest.accountId, guest.token) }
+                .onSuccess { revision ->
+                    guestFile.delete()
+                    rememberRevision(revision)
+                }
+                .onFailure { schulnetzLog.error(it) }
+        }
+    }
+
+    /** FaNotes session when signed in, otherwise the anonymous device identity. */
+    suspend fun schoolAuth(): SchoolAuth {
+        val session = engine.currentSession()
+        if (session != null) {
+            adoptGuest(session)
+            return SchoolAuth(session.accountId, session.token, false)
+        }
+        return ensureGuest()
+    }
+
+    /** Copy school data onto a guest identity and move this device's push token before sign-out. */
+    suspend fun detachKeepingSchool() {
+        val session = engine.currentSession() ?: return
+        val guest = ensureGuest()
+        runCatching {
+            client.detach(
+                SchoolAuth(session.accountId, session.token, false),
+                guest.accountId,
+                guest.token,
+                prefs.getString("fcm-token", null),
+            )
+        }.onSuccess { rememberRevision(it) }.onFailure { schulnetzLog.error(it) }
+    }
+
+    /** Remove the anonymous identity's server data and this device's school cache. Tasks and calendar stay. */
+    suspend fun deleteKantiData() {
+        val auth = readGuestFile() ?: ensureGuest()
+        if (auth.guest) client.deleteGuest(auth)
+        guestFile.delete()
+        clearSchoolCache()
+        ensureGuest()
+    }
+
+    private fun clearSchoolCache() {
+        prefs.edit()
+            .putBoolean("school-disconnected", false)
+            .remove("web-session")
+            .remove("push-topic")
+            .remove("push-server")
+            .remove("change-cursor")
+            .apply()
+        signedOut = false
+        snapshotFile(context).delete()
+        gradeLedgerFile(context).delete()
+        listOf(LOCAL_TOKEN_PATH, LEASE_PATH, SNAPSHOT_VAULT_PATH).forEach { path ->
+            if (vault.exists(path)) vault.delete(path)
+        }
+        snapshot.value = SchulnetzSnapshot()
+        link.value = SchulnetzLinkState(baseUrl = baseUrl())
+        CompanionAlerts.retireLegacyPush(context)
+        androidx.work.WorkManager.getInstance(context).cancelUniqueWork(SCHOOL_WORK)
+    }
+
     fun schoolDisconnected(): Boolean = prefs.getBoolean("school-disconnected", false)
 
     fun disconnectSchool() {
@@ -1006,6 +1122,8 @@ class CompanionGraph(private val context: Context) {
         const val SNAPSHOT_VAULT_PATH = ".fanotes/schulnetz/snapshot.json"
         const val GUESS_GRADES_PREF = "notify-guess-grades"
         const val UNREVEALED_PREF = "unrevealed-grades"
+        const val PLANNER_HOLD_PREF = "hold-planner-upload"
+        val PLANNER_HOLD_PATHS = setOf(HOMEWORK_NOTE_PATH, CALENDAR_NOTE_PATH, DESK_PATH)
         const val SERVER_POLL_MS = 60_000L
         private const val SILENT_AT = "schulnetz-silent-at"
         private const val SILENT_GAP_MS = 3 * 60 * 1000L

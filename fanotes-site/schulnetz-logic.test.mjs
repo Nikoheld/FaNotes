@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Readable } from 'node:stream'
 import test from 'node:test'
 import { createCipheriv, generateKeyPairSync, randomBytes } from 'node:crypto'
 import { createSchulnetzRuntime, openToken, sealToken } from './schulnetz-api.mjs'
@@ -581,6 +582,171 @@ test('an unregistered firebase token is forgotten', async () => {
     await runtime.pollAccount(accountId)
     const stored = JSON.parse(await readFile(join(root, 'accounts', accountId, 'link.json'), 'utf8'))
     assert.deepEqual(stored.fcmTokens, [])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+const invokeSchulnetz = async (runtime, method, path, headers = {}, body = '') => {
+  const request = Readable.from(body ? [Buffer.from(body)] : [])
+  request.method = method
+  request.headers = headers
+  request.socket = { remoteAddress: '198.51.100.10' }
+  let status = 0
+  let payload = ''
+  const response = {
+    writeHead(code) { status = code },
+    end(value) { payload = value || '' },
+  }
+  const handled = await runtime.handle(request, response, new URL(`http://127.0.0.1${path}`))
+  assert.equal(handled, true)
+  return { status, body: payload ? JSON.parse(payload) : {} }
+}
+
+const guestHeaders = (guest) => ({
+  authorization: `Bearer ${guest.token}`,
+  'x-kanti-guest': guest.accountId,
+})
+
+const schoolFetch = () => async (url) => {
+  const json = (value) => ({ status: 200, text: async () => JSON.stringify(value) })
+  if (String(url).endsWith('/token.php')) return json({ access_token: 'access-token-value', refresh_token: 'rotated-refresh-token-value-123456', expires_in: 3600 })
+  if (String(url).includes('/me/grades')) {
+    return json([{ id: 'g1', course: 'Mathematik', title: 'Probe', date: '2026-10-20', mark: '5.5', weight: '1' }])
+  }
+  return json([])
+}
+
+const linkBody = {
+  baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+  deviceId: '0123456789abcdef01234567',
+  refreshToken: 'super-secret-refresh-token-value',
+}
+
+test('an anonymous kanti identity owns schulnetz without a fanotes login', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-guest-'))
+  const runtime = createSchulnetzRuntime({ root, key: randomBytes(32), fetch: schoolFetch(), autostart: false, fcmSend: async () => ({ status: 200 }) })
+  try {
+    const created = await invokeSchulnetz(runtime, 'POST', '/api/v1/schulnetz/guest')
+    assert.equal(created.status, 200)
+    assert.match(created.body.accountId, /^[a-f0-9]{32}$/)
+    assert.match(created.body.token, /^[A-Za-z0-9_-]{40,80}$/)
+    const stored = JSON.parse(await readFile(join(root, 'accounts', created.body.accountId, 'guest.json'), 'utf8'))
+    assert.equal(stored.v, 1)
+    assert.equal(JSON.stringify(stored).includes(created.body.token), false)
+    const wrong = await invokeSchulnetz(runtime, 'GET', '/api/v1/schulnetz/status', {
+      authorization: `Bearer ${'a'.repeat(43)}`,
+      'x-kanti-guest': created.body.accountId,
+    })
+    assert.equal(wrong.status, 401)
+    const status = await invokeSchulnetz(runtime, 'GET', '/api/v1/schulnetz/status', guestHeaders(created.body))
+    assert.equal(status.status, 200)
+    assert.equal(status.body.linked, false)
+    const blocked = await invokeSchulnetz(runtime, 'POST', '/api/v1/schulnetz/adopt', guestHeaders(created.body), '{}')
+    assert.equal(blocked.status, 403)
+    await runtime.linkAccount(created.body.accountId, linkBody)
+    const unlinked = await invokeSchulnetz(runtime, 'DELETE', '/api/v1/schulnetz/link', guestHeaders(created.body))
+    assert.equal(unlinked.status, 200)
+    assert.equal(JSON.parse(await readFile(join(root, 'accounts', created.body.accountId, 'guest.json'), 'utf8')).v, 1)
+    await assert.rejects(readFile(join(root, 'accounts', created.body.accountId, 'link.json')))
+    const removed = await invokeSchulnetz(runtime, 'DELETE', '/api/v1/schulnetz/guest', guestHeaders(created.body))
+    assert.equal(removed.status, 200)
+    await assert.rejects(readFile(join(root, 'accounts', created.body.accountId, 'guest.json')))
+    for (let i = 0; i < 30; i += 1) await runtime.createGuest('203.0.113.77')
+    await assert.rejects(() => runtime.createGuest('203.0.113.77'), (error) => error.status === 429)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('adopt and detach move school data without a second grade push', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-adopt-'))
+  const sent = []
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: schoolFetch(),
+    autostart: false,
+    fcmSend: async (message) => { sent.push(message); return { status: 200 } },
+  })
+  const fa = 'a'.repeat(32)
+  const other = 'phone:APA91b-other-device-token'
+  const mine = 'phone:APA91b-example-token-value'
+  try {
+    const guest = await runtime.createGuest('203.0.113.41')
+    await runtime.linkAccount(guest.accountId, linkBody)
+    await runtime.addFcmToken(guest.accountId, mine)
+    await runtime.pollAccount(guest.accountId)
+    assert.equal(sent.length, 0)
+    await runtime.addFcmToken(guest.accountId, other)
+    const adopted = await runtime.adoptGuest(fa, { guestAccountId: guest.accountId, guestToken: guest.token })
+    assert.equal(adopted.adopted, true)
+    assert.equal(sent.length, 0)
+    await assert.rejects(readFile(join(root, 'accounts', guest.accountId, 'guest.json')))
+    await runtime.pollAccount(fa)
+    assert.equal(sent.length, 0)
+    const quiet = await readFile(join(root, 'accounts', fa, 'changes.jsonl'), 'utf8').catch(() => '')
+    assert.equal(quiet.includes('grade:'), false)
+
+    const home = await runtime.createGuest('203.0.113.43')
+    const detached = await runtime.detachGuest(fa, { guestAccountId: home.accountId, guestToken: home.token, fcmToken: mine })
+    assert.equal(detached.detached, true)
+    assert.equal(sent.length, 0)
+    const faTokens = JSON.parse(await readFile(join(root, 'accounts', fa, 'link.json'), 'utf8')).fcmTokens
+    const guestTokens = JSON.parse(await readFile(join(root, 'accounts', home.accountId, 'link.json'), 'utf8')).fcmTokens
+    assert.equal(faTokens.includes(mine), false)
+    assert.ok(faTokens.includes(other))
+    assert.deepEqual(guestTokens, [mine])
+    const guestLink = JSON.parse(await readFile(join(root, 'accounts', home.accountId, 'link.json'), 'utf8'))
+    assert.equal(guestLink.needsReauth, true)
+    assert.equal(guestLink.refresh, null)
+    const faLink = JSON.parse(await readFile(join(root, 'accounts', fa, 'link.json'), 'utf8'))
+    assert.ok(faLink.refresh)
+    await runtime.pollAccount(fa)
+    await runtime.pollAccount(home.accountId)
+    assert.equal(sent.length, 0)
+    const faAfter = JSON.parse(await readFile(join(root, 'accounts', fa, 'link.json'), 'utf8'))
+    assert.equal(faAfter.needsReauth, false)
+
+    const faWeb = 'c'.repeat(32)
+    await runtime.linkAccount(faWeb, {
+      mode: 'web',
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      userAgent: 'KantiPlus',
+      ssoCookies: { 'login.microsoftonline.com': 'ESTSAUTHPERSISTENT=cookie-value-long' },
+    })
+    const webBefore = JSON.parse(await readFile(join(root, 'accounts', faWeb, 'link.json'), 'utf8'))
+    webBefore.serverSession = webBefore.sso
+    await writeFile(join(root, 'accounts', faWeb, 'link.json'), JSON.stringify(webBefore))
+    const device = await runtime.createGuest('203.0.113.44')
+    await runtime.detachGuest(faWeb, { guestAccountId: device.accountId, guestToken: device.token })
+    const webGuest = JSON.parse(await readFile(join(root, 'accounts', device.accountId, 'link.json'), 'utf8'))
+    const webFa = JSON.parse(await readFile(join(root, 'accounts', faWeb, 'link.json'), 'utf8'))
+    assert.equal(webGuest.mode, 'web')
+    assert.equal(webGuest.serverSession, null)
+    assert.equal(webGuest.needsReauth, false)
+    assert.ok(webGuest.sso)
+    assert.ok(webFa.serverSession)
+    assert.equal(sent.length, 0)
+
+    const second = await runtime.createGuest('203.0.113.42')
+    await runtime.linkAccount(second.accountId, linkBody)
+    await writeFile(join(root, 'accounts', fa, 'snapshot.json'), JSON.stringify({ revision: 3, grades: [{ id: 'keep' }] }))
+    await writeFile(join(root, 'accounts', second.accountId, 'snapshot.json'), JSON.stringify({ revision: 9, grades: [{ id: 'other' }] }))
+    await writeFile(join(root, 'accounts', fa, 'notified-grades.json'), JSON.stringify({ version: 1, keys: ['c:aaa'] }))
+    await writeFile(join(root, 'accounts', second.accountId, 'notified-grades.json'), JSON.stringify({ version: 1, keys: ['c:bbb'] }))
+    await runtime.addFcmToken(second.accountId, 'phone:APA91b-second-guest-token')
+    await runtime.adoptGuest(fa, { guestAccountId: second.accountId, guestToken: second.token })
+    assert.equal(sent.length, 0)
+    const kept = JSON.parse(await readFile(join(root, 'accounts', fa, 'snapshot.json'), 'utf8'))
+    assert.equal(kept.grades[0].id, 'keep')
+    const ledger = JSON.parse(await readFile(join(root, 'accounts', fa, 'notified-grades.json'), 'utf8'))
+    assert.ok(ledger.keys.includes('c:aaa'))
+    assert.ok(ledger.keys.includes('c:bbb'))
+    await assert.rejects(() => runtime.deleteGuestAccount(fa), (error) => error.status === 404)
+    await runtime.deleteGuestAccount(home.accountId)
+    await assert.rejects(readFile(join(root, 'accounts', home.accountId, 'link.json')))
   } finally {
     await rm(root, { recursive: true, force: true })
   }
