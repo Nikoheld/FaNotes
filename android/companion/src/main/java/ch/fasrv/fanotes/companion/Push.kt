@@ -302,7 +302,7 @@ class CompanionPushReceiver : MessagingReceiver() {
 fun enableUnifiedPush(context: Context): Boolean = when (val resolved = UnifiedPush.resolveDefaultDistributor(context)) {
     is ResolvedDistributor.Found -> {
         UnifiedPush.saveDistributor(context, resolved.packageName)
-        UnifiedPush.register(context, "schulnetz", "FaNotes Companion")
+        UnifiedPush.register(context, "schulnetz", "Kanti+")
         true
     }
     else -> false
@@ -330,7 +330,7 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
             views.setViewVisibility(R.id.widget_kicker, if (compact) android.view.View.GONE else android.view.View.VISIBLE)
             if (next == null) {
                 views.setTextViewText(R.id.widget_title, "No upcoming lesson")
-                views.setTextViewText(R.id.widget_detail, "Open FaNotes")
+                views.setTextViewText(R.id.widget_detail, "Open Kanti+")
             } else {
                 val start = next.startsAt(zone)?.atZone(zone)?.toLocalTime()?.format(CLOCK).orEmpty()
                 val end = next.endsAt(zone)?.atZone(zone)?.toLocalTime()?.format(CLOCK).orEmpty()

@@ -10,7 +10,7 @@
         android:id="@+id/widget_kicker"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/widget_name"
+        android:text="@string/widget_kicker"
         android:textColor="@color/widget_accent"
         android:textSize="12sp" />
     <TextView
@@ -18,7 +18,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:paddingTop="4dp"
-        android:text="FaNotes"
+        android:text="Kanti+"
         android:maxLines="2"
         android:ellipsize="end"
         android:textColor="@color/widget_text"

@@ -398,7 +398,7 @@ export const createSchulnetzRuntime = (options = {}) => {
           id: `reauth:${link.revision || 0}`,
           category: 'event',
           title: 'Schulnetz erneut anmelden',
-          body: 'Die Sitzung ist abgelaufen. In FaNotes Companion unter Mehr → Schulnetz neu verbinden.',
+          body: 'Die Sitzung ist abgelaufen. In Kanti+ unter Mehr → Schulnetz neu verbinden.',
         })
         return { needsReauth: true }
       }
@@ -469,7 +469,7 @@ export const createSchulnetzRuntime = (options = {}) => {
             id: 'schulnetz-login-required',
             category: 'event',
             title: 'Bei Schulnetz neu anmelden',
-            body: 'Die Microsoft-Anmeldung ist abgelaufen. In FaNotes Companion neu anmelden.',
+            body: 'Die Microsoft-Anmeldung ist abgelaufen. In Kanti+ neu anmelden.',
           })
           link.loginPushSent = true
           await saveLink(accountId, link)
@@ -488,7 +488,7 @@ export const createSchulnetzRuntime = (options = {}) => {
             id: 'schulnetz-login-required',
             category: 'event',
             title: 'Bei Schulnetz neu anmelden',
-            body: 'Die Microsoft-Anmeldung ist abgelaufen. In FaNotes Companion neu anmelden.',
+            body: 'Die Microsoft-Anmeldung ist abgelaufen. In Kanti+ neu anmelden.',
           })
           link.loginPushSent = true
         }

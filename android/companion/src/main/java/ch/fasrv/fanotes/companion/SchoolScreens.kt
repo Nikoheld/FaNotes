@@ -35,7 +35,7 @@ fun SchoolScreen(model: CompanionModel) {
             Text("Last updated ${updatedLabel(model.snapshot.fetchedAt)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp, bottom = 20.dp))
         }
         if (model.snapshot.fetchedAt.isBlank() || model.link.needsReauth) item {
-            InfoBanner(if (model.link.needsReauth) "Sign in to refresh school data" else "Connect Schulnetz", "Bring your timetable and school records into FaNotes. School access stays read-only.", "Manage connection", onAction = { model.navigate(Page.Connections) })
+            InfoBanner(if (model.link.needsReauth) "Sign in to refresh school data" else "Connect Schulnetz", "Bring your timetable and school records into Kanti+. School access stays read-only.", "Manage connection", onAction = { model.navigate(Page.Connections) })
         }
         item { SectionLabel("School records") }
         item { SettingRow(Icons.Outlined.Insights, "Grades", "Marks, subject averages and your own grades", "${remember(model.snapshot.grades, model.gradeBook, model.unrevealedIds, model.settings.guessGrades) { activeCourses(courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds(), book = model.gradeBook)).size }}") { model.navigate(Page.Grades) }; FineDivider() }

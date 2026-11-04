@@ -54,10 +54,10 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             item { SettingRow(Icons.Outlined.ViewWeek, "Navigation bar", "Choose tabs and their order") { model.navigate(Page.Navigation) } }
             item { SettingRow(Icons.Outlined.Tune, "Planning & grades", "Today, timetable and grade display") { model.navigate(Page.Planning) } }
             item { SettingRow(Icons.Outlined.NotificationsNone, "Notifications", "What reaches you, and when") { model.navigate(Page.Notifications) } }
-            item { SectionLabel("About your companion") }
+            item { SectionLabel("About Kanti+") }
             item { SettingRow(Icons.Outlined.AutoGraph, "Your activity", "Notes, habits and milestones") { model.navigate(Page.Profile) } }
             item { SettingRow(Icons.Outlined.BugReport, "Diagnostics", "Connection checks and support exports") { model.navigate(Page.Diagnostics) } }
-            item { Text("FaNotes Companion · ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 28.dp)) }
+            item { Text("Kanti+ · ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 28.dp)) }
         }
         Page.Connections -> ScreenList {
             item { SectionLabel("FaNotes account") }
@@ -101,13 +101,13 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                 Text("Accent contrast adjusts to your theme.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             item { SectionLabel("Home screen icon") }
-            item { ChoiceRow(listOf("standard" to "FaNotes", "schule" to "School", "notiz" to "Notebook"), model.iconChoice, { model.chooseIcon(context, it) }) }
+            item { ChoiceRow(listOf("standard" to "Kanti+", "schule" to "School", "notiz" to "Notebook"), model.iconChoice, { model.chooseIcon(context, it) }) }
             item { SectionLabel("Navigation") }
             item { SettingRow(Icons.Outlined.ViewWeek, "Navigation bar", "Choose tabs and their order") { model.navigate(Page.Navigation) } }
         }
         Page.Navigation -> NavigationBarSettings(model)
         Page.Planning -> ScreenList {
-            item { SectionLabel("When you open FaNotes") }
+            item { SectionLabel("When you open Kanti+") }
             item { ChoiceRow(NAV_BAR_IDS.map { it to navBarLabel(it) }, startTabId(model.desk.startTab), { model.updateDesk(model.desk.copy(startTab = it)) }) }
             item { SectionLabel("On Today") }
             items(TODAY_CARD_IDS, key = { it }) { id ->
@@ -173,7 +173,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             }
             items(companionBadges(model.writtenNotes, model.graph.streakDays(), highestVisibleMark(model.snapshot.grades, model.hiddenGradeIds(), model.settings.guessGrades)), key = { it.id }) { badge ->
                 val title = when (badge.id) { "notes-1" -> "First thought"; "notes-10" -> "A growing notebook"; "streak-3" -> "Finding your rhythm"; else -> "Top marks" }
-                val body = when (badge.id) { "notes-1" -> "Write your first note"; "notes-10" -> "Keep ten notes in your library"; "streak-3" -> "Open FaNotes three days in a row"; else -> "Receive a grade of 6" }
+                val body = when (badge.id) { "notes-1" -> "Write your first note"; "notes-10" -> "Keep ten notes in your library"; "streak-3" -> "Open Kanti+ three days in a row"; else -> "Receive a grade of 6" }
                 Row(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     Icon(if (badge.earned) Icons.Outlined.Verified else Icons.Outlined.RadioButtonUnchecked, if (badge.earned) "Achieved" else "Not yet achieved", tint = if (badge.earned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                     Column { Text(title, style = MaterialTheme.typography.titleMedium); Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }

@@ -40,9 +40,9 @@ Die Daten liegen außerhalb des Webroots unter `/var/lib/fanotes-backups`, gehö
 
 ClamAV benötigt für die erlaubte PDF-Größe `StreamMaxLength 100M` in `/etc/clamav/clamd.conf`. Nach einer Änderung wird `clamav-daemon.service` neu gestartet. Der systemd-Dienst darf nur `/var/lib/fanotes-backups` beschreiben; `/etc/fanotes` und das Release-Verzeichnis bleiben schreibgeschützt.
 
-## Schulnetz Companion
+## Schulnetz für Kanti+
 
-`schulnetz-api.mjs` hält unter `/api/v1/schulnetz` genau ein Schulnetz-Konto je FaNotes-Konto. Refresh-Tokens liegen AES-256-GCM-verschlüsselt unter `/var/lib/fanotes-schulnetz` und werden nur vom einen Poller erneuert. Der Server liest Noten, Stundenplan, Prüfungen, Absenzen und Mitteilungen; Einschreiben und Bestätigen sind gesperrt. Push läuft über ntfy oder einen UnifiedPush-Endpunkt, ohne Firebase. Einrichtung, Umgebungsvariablen und systemd: `server-changes/schulnetz-companion/README.md`.
+Die Telefon-App heißt Kanti+. `schulnetz-api.mjs` hält unter `/api/v1/schulnetz` genau ein Schulnetz-Konto je FaNotes-Konto. Refresh-Tokens liegen AES-256-GCM-verschlüsselt unter `/var/lib/fanotes-schulnetz` und werden nur vom einen Poller erneuert. Der Server liest Noten, Stundenplan, Prüfungen, Absenzen und Mitteilungen; Einschreiben und Bestätigen sind gesperrt. Push läuft über ntfy oder einen UnifiedPush-Endpunkt, ohne Firebase. Einrichtung, Umgebungsvariablen und systemd: `server-changes/schulnetz-companion/README.md`.
 
 ## Sync-API
 
