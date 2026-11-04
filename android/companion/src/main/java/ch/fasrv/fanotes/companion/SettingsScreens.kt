@@ -263,6 +263,7 @@ private fun NotificationSettings(model: CompanionModel) {
         item { SectionLabel("School updates") }
         item { ToggleRow("Grades", "New or changed marks", model.settings.grades) { model.toggleSetting("grades") } }
         item { ToggleRow("Guess the grade", "Hide new marks until you reveal them. Notifications show the subject only.", model.settings.guessGrades) { model.toggleSetting("guessGrades") } }
+        item { ToggleRow("Hold to reveal", "With Guess the grade, a long press opens a hidden mark. A tap leaves it covered.", model.desk.revealLongPress) { model.updateDesk(model.desk.copy(revealLongPress = it)) } }
         item { ToggleRow("Timetable changes", "Room changes, substitutions and cancellations", model.settings.timetable) { model.toggleSetting("timetable") } }
         item { ToggleRow("Exams", checked = model.settings.exams) { model.toggleSetting("exams") } }
         item { ToggleRow("Absences", checked = model.settings.absences) { model.toggleSetting("absences") } }

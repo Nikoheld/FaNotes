@@ -35,7 +35,7 @@ fun CompanionSearchScreen(model: CompanionModel) {
     val tasks = remember(needle, model.tasks) { if (needle.length < 2) emptyList() else model.tasks.filter { "${it.title} ${it.subject} ${it.notes}".contains(needle, true) } }
     val events = remember(needle, model.snapshot.events, model.snapshot.exams) { if (needle.length < 2) emptyList() else (model.snapshot.events + model.snapshot.exams).distinctBy(::lessonTargetId).filter { "${it.label} ${it.comment}".contains(needle, true) } }
     val messages = remember(needle, model.snapshot.messages) { if (needle.length < 2) emptyList() else model.snapshot.messages.filter { "${it.title} ${it.body}".contains(needle, true) } }
-    val courses = remember(needle, model.snapshot.grades, model.desk.courseAliases, model.unrevealedIds, model.settings.guessGrades) { if (needle.length < 2) emptyList() else courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds()).filter { courseAlias(it.label, model.desk.courseAliases).contains(needle, true) } }
+    val courses = remember(needle, model.snapshot.grades, model.gradeBook, model.desk.courseAliases, model.unrevealedIds, model.settings.guessGrades) { if (needle.length < 2) emptyList() else activeCourses(courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds(), book = model.gradeBook)).filter { courseAlias(it.label, model.desk.courseAliases).contains(needle, true) } }
     val local = remember(needle, model.calendar.events) { if (needle.length < 2) emptyList() else model.calendar.events.filter { "${it.title} ${it.location} ${it.notes}".contains(needle, true) } }
     val recentNotes = remember(model.tree) { flattenNotes(model.tree).sortedByDescending { it.modifiedAt }.take(3) }
     Column {

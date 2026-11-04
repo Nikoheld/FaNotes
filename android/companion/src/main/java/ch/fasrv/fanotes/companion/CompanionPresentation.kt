@@ -16,7 +16,7 @@ enum class Destination(val label: String, val legacy: String) {
 enum class Page(val title: String) {
     Search("Search"), Editor("Note"), Grades("Grades"), Course("Subject"), Exams("Exams"),
     Absences("Absences"), Updates("School updates"), Statement("School account"),
-    Settings("Settings"), Connections("Account & sync"), Appearance("Appearance"),
+    Settings("Settings"), Connections("Account & sync"), Appearance("Appearance"), ArchivedSubjects("Archived subjects"),
     Navigation("Navigation bar"), Planning("Planning & grades"), Notifications("Notifications"),
     Profile("Your activity"), Diagnostics("Diagnostics"), Auth("Connect FaNotes"), Trash("Recently deleted")
 }

@@ -18,9 +18,15 @@ import ch.fasrv.fanotes.desk.HomeworkTask
 import ch.fasrv.fanotes.desk.emptyCalendar
 import ch.fasrv.fanotes.ink.InkDocument
 import ch.fasrv.fanotes.schulnetz.AgendaEvent
+import ch.fasrv.fanotes.schulnetz.CollectiveGrade
 import ch.fasrv.fanotes.schulnetz.DeskPrefs
+import ch.fasrv.fanotes.schulnetz.cleaned
+import ch.fasrv.fanotes.schulnetz.normalized
+import ch.fasrv.fanotes.schulnetz.GradeAdjustment
+import ch.fasrv.fanotes.schulnetz.GradeBook
 import ch.fasrv.fanotes.schulnetz.HiddenLesson
 import ch.fasrv.fanotes.schulnetz.HypotheticalGrade
+import ch.fasrv.fanotes.schulnetz.OwnGrade
 import ch.fasrv.fanotes.schulnetz.NotifySettings
 import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
 import ch.fasrv.fanotes.schulnetz.hideOnce
@@ -169,6 +175,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var tasks by mutableStateOf<List<HomeworkTask>>(emptyList())
     var calendar by mutableStateOf<CalendarDocument>(emptyCalendar())
     var hypothetical by mutableStateOf<List<HypotheticalGrade>>(emptyList())
+    var gradeBook by mutableStateOf(GradeBook())
     var theme by mutableStateOf(graph.themeId())
     var baseUrl by mutableStateOf(graph.baseUrl())
     var settings by mutableStateOf(graph.notifySettings())
@@ -212,11 +219,11 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                     val nextTree = graph.store.tree()
                     val folder = if (ch.fasrv.fanotes.vault.folderExists(nextTree, noteFolder)) noteFolder else ""
                     Reloaded(nextTree, folder, ch.fasrv.fanotes.vault.folderChildren(nextTree, folder).filter { it.path !in setOf(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH) },
-                        runCatching { graph.homework().tasks }, runCatching { graph.calendar() }, graph.hypothetical(), graph.writtenNoteCount(), graph.deskPrefs(), graph.hiddenLessons(), graph.subjectColors())
+                        runCatching { graph.homework().tasks }, runCatching { graph.calendar() }, graph.hypothetical(), graph.gradeBook(), graph.writtenNoteCount(), graph.deskPrefs(), graph.hiddenLessons(), graph.subjectColors())
                 }
                 tree = data.tree; noteFolder = data.folder; notes = data.notes
                 data.tasks.getOrNull()?.let { tasks = it }; data.calendar.getOrNull()?.let { calendar = it }
-                hypothetical = data.guesses; writtenNotes = data.count; hidden = data.hidden; colors = data.colors
+                hypothetical = data.guesses; gradeBook = data.book; writtenNotes = data.count; hidden = data.hidden; colors = data.colors
                 if (generation == deskGeneration && deskPending == 0) {
                     desk = data.desk
                     if (!startTabApplied && history.isEmpty() && highlightIds.isEmpty() && route.page == null && route.destination == Destination.Today) {
@@ -239,7 +246,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
 
     private data class Reloaded(val tree: List<VaultNode>, val folder: String, val notes: List<VaultNode>, val tasks: Result<List<HomeworkTask>>,
-        val calendar: Result<CalendarDocument>, val guesses: List<HypotheticalGrade>, val count: Int, val desk: DeskPrefs, val hidden: List<HiddenLesson>, val colors: Map<String, String>)
+        val calendar: Result<CalendarDocument>, val guesses: List<HypotheticalGrade>, val book: GradeBook, val count: Int, val desk: DeskPrefs, val hidden: List<HiddenLesson>, val colors: Map<String, String>)
 
     suspend fun loadPreview(node: VaultNode): NotePreview = withContext(Dispatchers.IO) {
         val hit = previewCache.get(node.path)
@@ -540,6 +547,46 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         val next = hypothetical.filter { it.id != id }
         hypothetical = next
         perform { graph.saveHypothetical(next) }
+    }
+
+    fun saveOwnGrade(grade: OwnGrade) {
+        val clean = GradeBook(own = listOf(grade)).normalized().own.singleOrNull() ?: return
+        saveGradeBook(gradeBook.copy(own = gradeBook.own.filterNot { it.id == clean.id } + clean))
+    }
+
+    fun deleteOwnGrade(id: String) = saveGradeBook(gradeBook.copy(own = gradeBook.own.filterNot { it.id == id }))
+
+    fun saveCollectiveGrade(grade: CollectiveGrade) {
+        val clean = GradeBook(collective = listOf(grade)).normalized().collective.singleOrNull() ?: return
+        saveGradeBook(gradeBook.copy(collective = gradeBook.collective.filterNot { it.id == clean.id } + clean))
+    }
+
+    fun deleteCollectiveGrade(id: String) = saveGradeBook(gradeBook.copy(collective = gradeBook.collective.filterNot { it.id == id }))
+
+    fun saveGradeAdjustment(adjustment: GradeAdjustment) {
+        val clean = adjustment.cleaned()
+        if (clean == null) restoreGradeAdjustment(adjustment.targetId) else {
+            saveGradeBook(gradeBook.copy(adjustments = gradeBook.adjustments.filterNot { it.targetId == clean.targetId } + clean))
+        }
+    }
+
+    fun restoreGradeAdjustment(targetId: String) {
+        saveGradeBook(gradeBook.copy(adjustments = gradeBook.adjustments.filterNot { it.targetId == targetId }))
+    }
+
+    fun archiveCourse(courseId: String) {
+        if (courseId.isBlank()) return
+        saveGradeBook(gradeBook.copy(archivedCourseIds = (gradeBook.archivedCourseIds + courseId).distinct()))
+    }
+
+    fun restoreCourse(courseId: String) {
+        saveGradeBook(gradeBook.copy(archivedCourseIds = gradeBook.archivedCourseIds.filterNot { it == courseId }))
+    }
+
+    private fun saveGradeBook(next: GradeBook) {
+        val clean = next.normalized()
+        gradeBook = clean
+        perform { graph.saveGradeBook(clean) }
     }
 
     fun createNote(title: String) {

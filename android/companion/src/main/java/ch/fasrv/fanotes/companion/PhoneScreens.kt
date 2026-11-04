@@ -161,6 +161,7 @@ fun CompanionRoot(model: CompanionModel) {
                                 Page.Search -> CompanionSearchScreen(model)
                                 Page.Auth -> AccountScreen(model)
                                 Page.Grades -> GradesScreen(model)
+                                Page.ArchivedSubjects -> ArchivedSubjectsScreen(model)
                                 Page.Course -> CourseScreen(model)
                                 Page.Exams, Page.Absences, Page.Updates, Page.Statement -> SchoolRecordScreen(model, current.page)
                                 Page.Settings, Page.Connections, Page.Appearance, Page.Navigation, Page.Planning, Page.Notifications, Page.Diagnostics, Page.Profile -> SettingsScreen(model, current.page)

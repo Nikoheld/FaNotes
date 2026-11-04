@@ -38,7 +38,7 @@ fun SchoolScreen(model: CompanionModel) {
             InfoBanner(if (model.link.needsReauth) "Sign in to refresh school data" else "Connect Schulnetz", "Bring your timetable and school records into FaNotes. School access stays read-only.", "Manage connection", onAction = { model.navigate(Page.Connections) })
         }
         item { SectionLabel("School records") }
-        item { SettingRow(Icons.Outlined.Insights, "Grades", "Marks, subject averages & local scenarios", "${remember(model.snapshot.grades, model.unrevealedIds, model.settings.guessGrades) { courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds()) }.size}") { model.navigate(Page.Grades) }; FineDivider() }
+        item { SettingRow(Icons.Outlined.Insights, "Grades", "Marks, subject averages and your own grades", "${remember(model.snapshot.grades, model.gradeBook, model.unrevealedIds, model.settings.guessGrades) { activeCourses(courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds(), book = model.gradeBook)).size }}") { model.navigate(Page.Grades) }; FineDivider() }
         item { SettingRow(Icons.AutoMirrored.Outlined.Assignment, "Exams", "Prepare for what's coming", "${(model.snapshot.exams + model.snapshot.events.filter { it.isExamLike() }).distinctBy(::lessonTargetId).size}") { model.navigate(Page.Exams) }; FineDivider() }
         item { SettingRow(Icons.Outlined.EventBusy, "Absences", "Status & excuse deadlines", "${model.snapshot.absences.count { !it.excused }} open") { model.navigate(Page.Absences) }; FineDivider() }
         item { SettingRow(Icons.Outlined.Forum, "Updates", "Messages, school events & holidays", "${model.snapshot.messages.size + model.snapshot.startMessages.size}") { model.navigate(Page.Updates) }; FineDivider() }
@@ -54,7 +54,8 @@ fun SchoolScreen(model: CompanionModel) {
 @Composable
 fun GradesScreen(model: CompanionModel) {
     var query by rememberSaveable { mutableStateOf("") }
-    val official = remember(model.snapshot.grades, model.unrevealedIds, model.settings.guessGrades) { courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds()) }
+    val official = remember(model.snapshot.grades, model.gradeBook, model.unrevealedIds, model.settings.guessGrades) { activeCourses(courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds(), book = model.gradeBook)) }
+    val archived = remember(model.snapshot.grades, model.gradeBook, model.unrevealedIds, model.settings.guessGrades) { courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds(), book = model.gradeBook).filter { it.archived } }
     val courses = remember(official, model.desk.gradeSort, model.highlightIds, query, model.desk.courseAliases) {
         sortCourses(official, model.desk.gradeSort).sortedBy { if (it.marks.any { mark -> mark.targetId in model.highlightIds }) 0 else 1 }.filter { courseAlias(it.label, model.desk.courseAliases).contains(query, true) }
     }
@@ -72,7 +73,7 @@ fun GradesScreen(model: CompanionModel) {
                     Text(formatPluspunkte(totals.total), style = MaterialTheme.typography.headlineMedium, color = if (totals.total >= 0) LocalCompanionSemantics.current.success else MaterialTheme.colorScheme.error)
                 }
             }
-            Text("Calculated from your school marks. Local scenarios appear inside each subject.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 20.dp))
+            Text("School marks plus your own grades. What-if scenarios stay inside each subject.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 20.dp))
             }
             SearchField(query, { query = it }, "Find a subject")
             ChoiceRow(listOf("name" to "Subject", "average" to "Average", "pluspunkte" to "Points"), model.desk.gradeSort, { model.updateDesk(model.desk.copy(gradeSort = it)) })
@@ -84,12 +85,20 @@ fun GradesScreen(model: CompanionModel) {
                 Box(Modifier.width(3.dp).height(36.dp).background(paletteColor(subjectColor(course.label, overrides = model.colors)), MaterialTheme.shapes.extraSmall))
                 Column(Modifier.weight(1f)) {
                     Text(courseAlias(course.label, model.desk.courseAliases), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text("${course.marks.size} marks${if (model.hypothetical.any { it.courseId == course.courseId }) " · local scenario saved" else ""}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(buildList {
+                        add("${course.marks.size} marks")
+                        if (course.marks.any { it.own }) add("includes your grades")
+                        if (course.marks.any { it.adjusted || it.excluded }) add("adjusted")
+                        if (model.hypothetical.any { it.courseId == course.courseId }) add("local scenario saved")
+                    }.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Text(if (course.marks.any { model.isUnrevealed(it.targetId) } && course.average == null) "?" else formatMark(course.average, model.desk.gradeDecimals), style = MaterialTheme.typography.titleLarge, color = if ((course.average ?: 4.0) < 4.0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
                 Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             FineDivider()
+        }
+        if (archived.isNotEmpty() && query.isBlank()) item {
+            SettingRow(Icons.Outlined.Archive, "Archived subjects", "Hidden from this list and your averages", "${archived.size}") { model.navigate(Page.ArchivedSubjects) }
         }
         schoolError(model, "Noten:")
     }
@@ -97,46 +106,70 @@ fun GradesScreen(model: CompanionModel) {
 
 @Composable
 fun CourseScreen(model: CompanionModel) {
-    val official = remember(model.snapshot.grades, model.unrevealedIds, model.settings.guessGrades) { courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds()) }
+    val official = remember(model.snapshot.grades, model.gradeBook, model.unrevealedIds, model.settings.guessGrades) { courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds(), book = model.gradeBook) }
     val course = official.firstOrNull { it.courseId == model.focusCourseId }
     if (course == null) { ScreenList { item { EmptyState(Icons.Outlined.Insights, "Subject unavailable", "It is no longer in the last school snapshot.", "All subjects") { model.back() } } }; return }
-    val scenario = remember(model.snapshot.grades, model.hypothetical, course.courseId, model.unrevealedIds, model.settings.guessGrades) { courseSummaries(model.snapshot.grades, model.hypothetical, model.hiddenGradeIds()).first { it.courseId == course.courseId } }
+    val scenario = remember(model.snapshot.grades, model.hypothetical, model.gradeBook, course.courseId, model.unrevealedIds, model.settings.guessGrades) { courseSummaries(model.snapshot.grades, model.hypothetical, model.hiddenGradeIds(), model.gradeBook).first { it.courseId == course.courseId } }
     val decimals = model.desk.gradeDecimals
-    val own = model.hypothetical.filter { it.courseId == course.courseId }
+    val scenarioMarks = model.hypothetical.filter { it.courseId == course.courseId }
+    val ownGrades = model.gradeBook.own.filter { it.courseId == course.courseId }
+    val collectiveGrades = model.gradeBook.collective.filter { it.courseId == course.courseId }
     var calculator by rememberSaveable { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
+    var addingOwn by remember { mutableStateOf(false) }
+    var editingOwn by remember { mutableStateOf<OwnGrade?>(null) }
+    var addingCollective by remember { mutableStateOf(false) }
+    var editingCollective by remember { mutableStateOf<CollectiveGrade?>(null) }
+    var adjusting by remember { mutableStateOf<WeightedMark?>(null) }
     var customize by remember { mutableStateOf(false) }
+    var confirmArchive by remember { mutableStateOf(false) }
     var target by rememberSaveable { mutableStateOf("5.0") }
     var weight by rememberSaveable { mutableStateOf("1") }
     ScreenList {
         item {
             Text(courseAlias(course.label, model.desk.courseAliases), style = MaterialTheme.typography.headlineMedium)
+            if (course.archived) Text("Archived. Hidden from your list, overall average and promotion points.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
             FlowRow(Modifier.fillMaxWidth().padding(vertical = 18.dp), horizontalArrangement = Arrangement.spacedBy(28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column { Text("Average", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(formatMark(course.average, decimals), style = MaterialTheme.typography.headlineLarge) }
                 Column { Text("Rounded", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(formatMark(course.zeugnis, decimals), style = MaterialTheme.typography.headlineLarge) }
                 if (model.desk.showPluspunkte) Column { Text("Points", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(if (course.promotion) formatPluspunkte(course.pluspunkte) else "—", style = MaterialTheme.typography.headlineLarge) }
             }
             TextButton(onClick = { customize = true }) { Text("Subject name & color") }
+            if (course.archived) TextButton(onClick = { model.restoreCourse(course.courseId) }) { Text("Restore subject") }
+            else TextButton(onClick = { confirmArchive = true }) { Text("Archive subject") }
             SectionLabel("School marks")
         }
-        items(course.marks.filterNot { it.own }, key = { "${it.targetId}:${it.label}:${it.mark}" }) { mark ->
-            val highlighted = mark.targetId in model.highlightIds
-            val hidden = model.isUnrevealed(mark.targetId)
-            Row(Modifier.fillMaxWidth().background(if (highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background, MaterialTheme.shapes.small).then(if (hidden) Modifier.clickable { model.openReveal(listOf(mark.targetId)) } else Modifier).padding(vertical = 14.dp, horizontal = if (highlighted) 12.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Text(mark.label.ifBlank { "School mark" }, style = MaterialTheme.typography.bodyLarge); Text(if (hidden) "Hidden · tap to reveal" else "Weight ${formatMark(mark.weight)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                Text(if (hidden) "?" else formatMark(mark.mark, decimals), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            }
-            FineDivider()
+        items(course.marks.filterNot { it.own }, key = { "${it.targetId}:${it.label}:${it.displayMark}" }) { mark ->
+            SchoolMarkRow(
+                mark = mark,
+                decimals = decimals,
+                hidden = model.isUnrevealed(mark.targetId),
+                highlighted = mark.targetId in model.highlightIds,
+                longPressReveal = model.desk.revealLongPress,
+                onReveal = { model.openReveal(listOf(mark.targetId)) },
+                onAdjust = { adjusting = mark },
+                onRestore = { model.restoreGradeAdjustment(mark.targetId) },
+            )
+        }
+        item { SectionLabel("Your marks", "Add") { editingOwn = null; addingOwn = true } }
+        item { Text("Your own grades count in this average, promotion points and the target calculator.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        items(ownGrades, key = { "own:${it.id}" }) { grade ->
+            OwnMarkRow(grade, decimals, onEdit = { editingOwn = grade; addingOwn = true }, onDelete = { model.deleteOwnGrade(grade.id) })
+        }
+        item { SectionLabel("Collective grades", "Add") { editingCollective = null; addingCollective = true } }
+        item { Text("A Sammelnote combines partial tests into one mark.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        items(collectiveGrades, key = { "collective:${it.id}" }) { grade ->
+            CollectiveMarkRow(grade, decimals, onEdit = { editingCollective = grade; addingCollective = true }, onDelete = { model.deleteCollectiveGrade(grade.id) })
         }
         item { SectionLabel("What if?", "Add a mark") { adding = true } }
         item { Text("Explore a local scenario. Your school records stay unchanged.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        if (own.isNotEmpty()) {
+        if (scenarioMarks.isNotEmpty()) {
             item {
                 Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.padding(vertical = 12.dp)) {
                     Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) { Text("Projected average", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium); Text(formatMark(scenario.average, decimals), style = MaterialTheme.typography.headlineMedium) }
                 }
             }
-            items(own, key = { it.id }) { extra ->
+            items(scenarioMarks, key = { it.id }) { extra ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) { Text(extra.title, style = MaterialTheme.typography.bodyLarge); Text("Local · ${formatMark(extra.mark, decimals)} · weight ${formatMark(extra.weight)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     ActionIcon(Icons.Outlined.Close, "Remove local mark ${extra.title}") { model.removeHypothetical(extra.id) }
@@ -153,12 +186,17 @@ fun CourseScreen(model: CompanionModel) {
                 val goal = target.replace(',', '.').toDoubleOrNull()
                 val factor = weight.replace(',', '.').toDoubleOrNull()
                 if (goal != null && goal.isFinite() && goal in 1.0..6.0 && factor != null && factor.isFinite() && factor > 0) {
-                    val result = wunschnote(scenario.marks, goal, factor)
+                    val result = wunschnote(countingMarks(scenario.marks), goal, factor)
                     Text(when { result.alreadyMet -> "Your current scenario already reaches this target."; !result.achievable -> "This target cannot be reached with one mark at this weight."; else -> "Needed next: ${formatMark(result.needed, decimals)} · half mark ${formatMark(result.neededHalf, decimals)}" }, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(vertical = 16.dp))
                     if (model.desk.showPluspunkte && course.promotion && result.pluspunkteAfter != null) Text("Promotion points ${formatPluspunkte(result.pluspunkteBefore ?: 0.0)} → ${formatPluspunkte(result.pluspunkteAfter ?: 0.0)}", style = MaterialTheme.typography.bodySmall)
                 } else Text("Enter an average from 1–6 and a positive weight.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 12.dp))
             }
         }
+    }
+    if (addingOwn) OwnGradeDialog(course.courseId, editingOwn, { addingOwn = false; editingOwn = null }) { grade -> model.saveOwnGrade(grade); addingOwn = false; editingOwn = null }
+    if (addingCollective) CollectiveGradeDialog(course.courseId, editingCollective, { addingCollective = false; editingCollective = null }) { grade -> model.saveCollectiveGrade(grade); addingCollective = false; editingCollective = null }
+    adjusting?.let { mark ->
+        GradeAdjustmentDialog(mark, decimals, model.gradeBook.adjustments.firstOrNull { it.targetId == mark.targetId }, { adjusting = null }, { model.saveGradeAdjustment(it); adjusting = null }, { model.restoreGradeAdjustment(mark.targetId); adjusting = null })
     }
     if (adding) {
         var title by rememberSaveable { mutableStateOf("") }; var mark by rememberSaveable { mutableStateOf("") }; var factor by rememberSaveable { mutableStateOf("1") }
@@ -178,6 +216,11 @@ fun CourseScreen(model: CompanionModel) {
         AlertDialog(onDismissRequest = { customize = false }, modifier = Modifier.imePadding(), title = { Text("Subject appearance") }, text = {
             Column { OutlinedTextField(alias, { alias = it }, label = { Text("Display name") }); Spacer(Modifier.height(12.dp)); ColorChoices(SUBJECT_PALETTE.take(6), color, { color = it }) }
         }, confirmButton = { TextButton(onClick = { model.renameCourse(course.label, alias); model.paintSubject(course.label, color); customize = false }) { Text("Save") } }, dismissButton = { TextButton(onClick = { customize = false }) { Text("Cancel") } })
+    }
+    if (confirmArchive) ConfirmDialog("Archive this subject?", "It leaves your list, overall average and promotion points. School marks stay on record. Restore it from Archived subjects.", "Archive", { confirmArchive = false }) {
+        model.archiveCourse(course.courseId)
+        confirmArchive = false
+        model.back()
     }
 }
 

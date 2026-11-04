@@ -16,6 +16,16 @@ data class WeightedMark(
     val label: String = "",
     val own: Boolean = false,
     val targetId: String = "",
+    /** False for a hidden guess-the-grade mark or a mark the student excluded. */
+    val counted: Boolean = true,
+    /** School value, kept when [mark] is the student's override. */
+    val displayMark: Double = mark,
+    val displayWeight: Double = weight,
+    val adjusted: Boolean = false,
+    val excluded: Boolean = false,
+    val collective: Boolean = false,
+    val sourceId: String = "",
+    val date: String = "",
 )
 
 data class HypotheticalGrade(
@@ -35,6 +45,7 @@ data class CourseSummary(
     val promotion: Boolean,
     val weight: Double,
     val marks: List<WeightedMark>,
+    val archived: Boolean = false,
 )
 
 data class WishResult(
@@ -90,11 +101,26 @@ fun coursePromotion(label: String, average: Double?): Pair<Double?, Double> {
     return zeugnis to (promotionPoints(zeugnis) ?: 0.0)
 }
 
+fun countingMarks(marks: List<WeightedMark>): List<WeightedMark> =
+    marks.filter { it.counted && it.weight > 0.0 && it.mark.isFinite() }
+
+/** Weighted average of the partial tests. Parts themselves are not separate subject marks. */
+fun collectiveValue(parts: List<CollectivePart>): Double? {
+    if (parts.size < 2) return null
+    return weightedAverage(parts.map { WeightedMark(it.mark, it.weight, it.title, own = true) })
+}
+
+fun activeCourses(courses: List<CourseSummary>): List<CourseSummary> = courses.filterNot { it.archived }
+
 fun courseSummaries(
     grades: List<SchoolGrade>,
     hypothetical: List<HypotheticalGrade> = emptyList(),
     hiddenTargetIds: Set<String> = emptySet(),
+    book: GradeBook = GradeBook(),
 ): List<CourseSummary> {
+    val stored = book.normalized()
+    val adjustments = stored.adjustments.associateBy { it.targetId }
+    val archived = stored.archivedCourseIds.toSet()
     val groups = linkedMapOf<String, MutableList<WeightedMark>>()
     val labels = linkedMapOf<String, String>()
     for (grade in grades) {
@@ -103,18 +129,61 @@ fun courseSummaries(
         val key = grade.courseKey
         if (key.isBlank()) continue
         labels.putIfAbsent(key, grade.courseLabel)
-        groups.getOrPut(key) { mutableListOf() } += WeightedMark(mark, grade.weight, grade.title, targetId = gradeTargetId(grade))
+        val target = gradeTargetId(grade)
+        val adjustment = adjustments[target]
+        val hidden = target.isNotBlank() && target in hiddenTargetIds
+        val excluded = adjustment?.excluded == true
+        val overrideMark = adjustment?.mark
+        val overrideWeight = adjustment?.weight
+        groups.getOrPut(key) { mutableListOf() } += WeightedMark(
+            mark = overrideMark ?: mark,
+            weight = overrideWeight ?: grade.weight,
+            label = grade.title,
+            targetId = target,
+            counted = !hidden && !excluded,
+            displayMark = mark,
+            displayWeight = grade.weight,
+            adjusted = !excluded && (overrideMark != null || overrideWeight != null),
+            excluded = excluded,
+            date = grade.date,
+        )
     }
     for (extra in hypothetical) {
         if (!extra.mark.isFinite() || extra.weight <= 0.0) continue
         val key = extra.courseId
         if (key.isBlank()) continue
         labels.putIfAbsent(key, key)
-        groups.getOrPut(key) { mutableListOf() } += WeightedMark(extra.mark, extra.weight, extra.title.ifBlank { "Eigene Note" }, own = true)
+        groups.getOrPut(key) { mutableListOf() } += WeightedMark(extra.mark, extra.weight, extra.title.ifBlank { "Eigene Note" }, own = true, sourceId = extra.id)
+    }
+    for (extra in stored.own) {
+        val key = extra.courseId
+        labels.putIfAbsent(key, key)
+        groups.getOrPut(key) { mutableListOf() } += WeightedMark(
+            extra.mark,
+            extra.weight,
+            extra.title.ifBlank { "Own mark" },
+            own = true,
+            sourceId = extra.id,
+            date = extra.date,
+        )
+    }
+    for (extra in stored.collective) {
+        val value = collectiveValue(extra.parts) ?: continue
+        val key = extra.courseId
+        labels.putIfAbsent(key, key)
+        groups.getOrPut(key) { mutableListOf() } += WeightedMark(
+            mark = value,
+            weight = extra.weight,
+            label = extra.title.ifBlank { "Collective grade" },
+            own = true,
+            collective = true,
+            sourceId = extra.id,
+            date = extra.date,
+        )
     }
     return groups.map { (key, marks) ->
         val label = labels[key] ?: key
-        val counted = marks.filter { it.own || it.targetId.isBlank() || it.targetId !in hiddenTargetIds }
+        val counted = countingMarks(marks).filter { it.own || it.targetId.isBlank() || it.targetId !in hiddenTargetIds }
         val average = weightedAverage(counted)
         val sport = isSportCourse(label)
         val zeugnis = average?.let(::roundToHalf)
@@ -128,6 +197,7 @@ fun courseSummaries(
             promotion = counts,
             weight = counted.sumOf { it.weight },
             marks = marks,
+            archived = key in archived,
         )
     }.sortedBy { it.label.lowercase() }
 }
@@ -141,10 +211,8 @@ fun promotionTotals(courses: List<CourseSummary>): PromotionTotals {
     return PromotionTotals(plus, minus, plus + minus)
 }
 
-fun overallAverage(courses: List<CourseSummary>): Double? {
-    val marks = courses.flatMap { it.marks }
-    return weightedAverage(marks)
-}
+fun overallAverage(courses: List<CourseSummary>): Double? =
+    weightedAverage(courses.flatMap { countingMarks(it.marks) })
 
 /**
  * Mark required on the next exam so the weighted average becomes [target].
