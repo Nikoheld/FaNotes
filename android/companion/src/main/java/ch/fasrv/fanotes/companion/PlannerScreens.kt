@@ -114,11 +114,11 @@ fun TodayScreen(model: CompanionModel) {
         }
         if ("grades" in cards && model.snapshot.grades.isNotEmpty()) item {
             SectionLabel("From school")
-            val gradeCourses = remember(model.snapshot.grades, model.hypothetical, model.unrevealedIds, model.settings.guessGrades) { courseSummaries(model.snapshot.grades, model.hypothetical, model.hiddenGradeIds()) }
+            val gradeCourses = remember(model.snapshot.grades, model.gradeBook, model.unrevealedIds, model.settings.guessGrades) { activeCourses(courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds(), book = model.gradeBook)) }
             SettingRow(Icons.Outlined.Insights, "Your grades", "${gradeCourses.size} subjects · review your progress") { model.navigate(Page.Grades) }
         }
         if ("pluspunkte" in cards && model.desk.showPluspunkte && model.snapshot.grades.isNotEmpty()) item {
-            val total = remember(model.snapshot.grades, model.hypothetical, model.unrevealedIds, model.settings.guessGrades) { promotionTotals(courseSummaries(model.snapshot.grades, model.hypothetical, model.hiddenGradeIds())) }
+            val total = remember(model.snapshot.grades, model.gradeBook, model.unrevealedIds, model.settings.guessGrades) { promotionTotals(activeCourses(courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds(), book = model.gradeBook))) }
             Text("Promotion points ${formatPluspunkte(total.total)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
         }
         if ("events" in cards && (model.snapshot.messages.isNotEmpty() || model.snapshot.startMessages.isNotEmpty())) item {

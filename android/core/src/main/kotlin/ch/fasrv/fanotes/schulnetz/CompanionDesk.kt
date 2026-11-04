@@ -83,6 +83,8 @@ data class DeskPrefs(
     val widgetCompact: Boolean = false,
     val startTab: String = "Heute",
     val navBar: List<String> = DEFAULT_NAV_BAR,
+    /** With guess-the-grade, a hidden mark opens only after a long press. */
+    val revealLongPress: Boolean = false,
 )
 
 fun lessonClock(event: AgendaEvent, zone: java.time.ZoneId = java.time.ZoneId.of("Europe/Zurich")): String =
@@ -239,6 +241,7 @@ fun parseDeskPrefs(json: String): DeskPrefs {
         widgetCompact = obj.bool("widgetCompact") == true,
         startTab = obj.string("startTab").orEmpty().ifBlank { "Heute" },
         navBar = validateNavBar(obj.array("navBar")?.items?.mapNotNull { (it as? ch.fasrv.fanotes.json.JsonValue.Str)?.value }),
+        revealLongPress = obj.bool("revealLongPress") == true,
     )
 }
 
@@ -276,5 +279,6 @@ fun serializeDeskPrefs(prefs: DeskPrefs): String = buildString {
         append(ch.fasrv.fanotes.json.escapeJson(id))
     }
     append("]")
+    append(",\"revealLongPress\":").append(prefs.revealLongPress)
     append('}')
 }

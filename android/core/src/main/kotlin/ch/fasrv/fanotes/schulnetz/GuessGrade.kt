@@ -89,6 +89,9 @@ fun pickCelebrity(age: Int, seed: String, today: LocalDate, catalog: List<Celebr
     return matches[Math.floorMod(hash, matches.size)]
 }
 
+fun hiddenMarkHint(longPress: Boolean): String =
+    if (longPress) "Hidden · hold to reveal" else "Hidden · tap to reveal"
+
 fun hiddenGradeTitle(change: SchulnetzChange, course: String): String {
     val subject = course.ifBlank { "einem Fach" }
     val kind = if (change.title.contains("änderung", ignoreCase = true) || change.title.contains("aenderung", ignoreCase = true)) {

@@ -49,12 +49,15 @@ import ch.fasrv.fanotes.schulnetz.schulnetzDeviceId
 import ch.fasrv.fanotes.schulnetz.toNormalizedJson
 import ch.fasrv.fanotes.schulnetz.usesWebsiteSession
 import ch.fasrv.fanotes.schulnetz.DeskPrefs
+import ch.fasrv.fanotes.schulnetz.GradeBook
 import ch.fasrv.fanotes.schulnetz.HiddenLesson
 import ch.fasrv.fanotes.schulnetz.changeFromObj
 import ch.fasrv.fanotes.schulnetz.changeIsHidden
 import ch.fasrv.fanotes.schulnetz.parseDeskPrefs
+import ch.fasrv.fanotes.schulnetz.parseGradeBook
 import ch.fasrv.fanotes.schulnetz.parseHiddenLessons
 import ch.fasrv.fanotes.schulnetz.serializeDeskPrefs
+import ch.fasrv.fanotes.schulnetz.serializeGradeBook
 import ch.fasrv.fanotes.schulnetz.serializeHiddenLessons
 import ch.fasrv.fanotes.sync.SyncApi
 import ch.fasrv.fanotes.sync.SyncEngine
@@ -417,6 +420,16 @@ class CompanionGraph(private val context: Context) {
             append("]}")
         }
         vault.write(HYPOTHETICAL_PATH, body.encodeToByteArray())
+        engine.notifyLocalChange()
+    }
+
+    fun gradeBook(): GradeBook {
+        val text = vault.read(GRADE_BOOK_PATH)?.decodeToString() ?: return GradeBook()
+        return parseGradeBook(text)
+    }
+
+    fun saveGradeBook(book: GradeBook) {
+        vault.write(GRADE_BOOK_PATH, serializeGradeBook(book).encodeToByteArray())
         engine.notifyLocalChange()
     }
 
@@ -962,6 +975,7 @@ class CompanionGraph(private val context: Context) {
         const val LOCAL_TOKEN_PATH = ".fanotes/schulnetz/link.json"
         const val LEASE_PATH = ".fanotes/schulnetz/lease.json"
         const val HYPOTHETICAL_PATH = ".fanotes/schulnetz/hypothetical.json"
+        const val GRADE_BOOK_PATH = ".fanotes/schulnetz/grade-book.json"
         const val COLORS_PATH = ".fanotes/schulnetz/colors.json"
         const val DESK_PATH = ".fanotes/schulnetz/desk.json"
         const val HIDDEN_PATH = ".fanotes/schulnetz/hidden-lessons.json"
