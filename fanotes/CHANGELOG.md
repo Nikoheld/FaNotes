@@ -1,5 +1,20 @@
 # Änderungsverlauf
 
+## 2026.11.1-beta.14
+
+- Replace public Schulnetz fixtures and close the privacy gaps around them.
+- Refuse to seal ink that a heavy-page paint has already cleared.
+- Keep note text mounted while panning, zooming, writing, and erasing.
+- Keep new-grade alerts instant without a frequent background wake.
+- Let Kanti+ run without a FaNotes account.
+- Polish Kanti+ screens for small phones, offline use, and accessibility.
+- Send school alerts through Firebase data messages.
+- Give Kanti+ the application id ch.fasrv.kantiplus.
+- Notify each Schulnetz grade once per account.
+- Rename the companion app to Kanti+.
+- Add own grades, collective marks, adjustments and an archive.
+- Redraw the companion home-screen icons.
+
 ## 2026.11.1-beta.13
 
 - Make the companion bottom navigation bar configurable.
