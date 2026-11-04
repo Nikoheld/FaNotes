@@ -151,6 +151,16 @@ fun CompanionRoot(model: CompanionModel) {
                 Box(Modifier.weight(1f), contentAlignment = Alignment.TopCenter) {
                     Column(Modifier.fillMaxHeight().widthIn(max = 840.dp).fillMaxWidth()) {
                         if (model.busy || sync.status == SyncStatus.SYNCING) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp))
+                        if ((sync.status == SyncStatus.OFFLINE || sync.status == SyncStatus.ERROR) && route.destination != Destination.Today) {
+                            Box(Modifier.padding(horizontal = Space.page, vertical = 8.dp)) {
+                                InfoBanner(
+                                    if (sync.status == SyncStatus.OFFLINE) "You're offline" else "Sync needs attention",
+                                    "Keep working. Changes are saved on this device.",
+                                    "Account & sync",
+                                    error = sync.status == SyncStatus.ERROR,
+                                ) { model.navigate(Page.Connections) }
+                            }
+                        }
                         model.loadError?.let { error ->
                             Box(Modifier.padding(horizontal = Space.page, vertical = 8.dp)) { InfoBanner("Library needs attention", error, "Try again", true, model::reload) }
                         }

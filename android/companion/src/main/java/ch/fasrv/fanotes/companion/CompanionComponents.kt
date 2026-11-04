@@ -25,6 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -76,7 +78,7 @@ fun EmptyState(icon: ImageVector, title: String, body: String, action: String? =
             Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(26.dp))
         }
         Spacer(Modifier.height(Space.lg))
-        Text(title, style = MaterialTheme.typography.titleMedium)
+        Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 3, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.widthIn(max = 320.dp))
         Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 6.dp).widthIn(max = 320.dp))
         if (action != null) TextButton(onClick = onAction, modifier = Modifier.padding(top = 8.dp)) { Text(action) }
@@ -104,7 +106,7 @@ fun InfoBanner(title: String, body: String, action: String? = null, error: Boole
 }
 @Composable
 fun SearchField(query: String, onQuery: (String) -> Unit, hint: String, modifier: Modifier = Modifier) {
-    OutlinedTextField(query, onQuery, modifier.fillMaxWidth(), placeholder = { Text(hint, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+    OutlinedTextField(query, onQuery, modifier.fillMaxWidth().semantics { if (query.isEmpty()) contentDescription = hint }, placeholder = { Text(hint, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         leadingIcon = { Icon(Icons.Outlined.Search, null, Modifier.size(20.dp)) },
         trailingIcon = { if (query.isNotEmpty()) ActionIcon(Icons.Outlined.Close, "Clear search") { onQuery("") } },
         singleLine = true, shape = MaterialTheme.shapes.medium,
@@ -121,12 +123,12 @@ fun ChoiceRow(choices: List<Pair<String, String>>, selected: String, onSelect: (
 }
 @Composable
 fun SettingRow(icon: ImageVector, title: String, subtitle: String = "", trailing: String = "", onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).clickable(onClick = onClick).padding(vertical = 14.dp, horizontal = 4.dp),
+    Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).clickable(role = Role.Button, onClick = onClick).padding(vertical = 14.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
         }
         if (trailing.isNotBlank()) Text(trailing, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         Icon(Icons.Outlined.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
@@ -166,14 +168,15 @@ fun ColorChoices(colors: List<String>, selected: String, onSelect: (String) -> U
 private fun Color.luminanceCompat() = (red * 0.2126f + green * 0.7152f + blue * 0.0722f)
 @Composable
 fun ConfirmDialog(title: String, body: String, confirm: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = { Text(body) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(confirm, color = MaterialTheme.colorScheme.error) } },
+    val haptic = LocalHapticFeedback.current
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(title, maxLines = 3, overflow = TextOverflow.Ellipsis) }, text = { Text(body) },
+        confirmButton = { TextButton(onClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onConfirm() }) { Text(confirm, color = MaterialTheme.colorScheme.error) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 @Composable
 fun SheetTitle(title: String, onClose: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+        Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         ActionIcon(Icons.Outlined.Close, "Close") { onClose() }
     }
 }

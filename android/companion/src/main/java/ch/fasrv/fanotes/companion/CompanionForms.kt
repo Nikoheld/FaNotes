@@ -19,6 +19,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ch.fasrv.fanotes.desk.CalendarEvent
 import ch.fasrv.fanotes.desk.HomeworkTask
@@ -81,7 +82,7 @@ fun DateControl(label: String, value: LocalDate?, allowClear: Boolean = false, o
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         OutlinedButton(onClick = { picking = true }, modifier = Modifier.weight(1f).heightIn(min = 52.dp), shape = MaterialTheme.shapes.small, contentPadding = PaddingValues(horizontal = 12.dp)) {
             Icon(Icons.Outlined.CalendarToday, null, Modifier.size(18.dp)); Spacer(Modifier.width(10.dp))
-            Text("$label: ${value?.let { dueLabel(it.toString()) } ?: "None"}", modifier = Modifier.weight(1f))
+            Text("$label: ${value?.let { dueLabel(it.toString()) } ?: "None"}", modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (allowClear && value != null) ActionIcon(Icons.Outlined.Close, "Clear $label") { onDate(null) }
     }
@@ -98,7 +99,7 @@ fun TimeControl(label: String, value: String, allowClear: Boolean = false, onTim
     var picking by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         OutlinedButton(onClick = { picking = true }, modifier = Modifier.weight(1f).heightIn(min = 52.dp), shape = MaterialTheme.shapes.small) {
-            Icon(Icons.Outlined.Schedule, null, Modifier.size(18.dp)); Spacer(Modifier.width(10.dp)); Text("$label: ${value.ifBlank { "None" }}", Modifier.weight(1f))
+            Icon(Icons.Outlined.Schedule, null, Modifier.size(18.dp)); Spacer(Modifier.width(10.dp)); Text("$label: ${value.ifBlank { "None" }}", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (allowClear && value.isNotBlank()) ActionIcon(Icons.Outlined.Close, "Clear $label") { onTime("") }
     }
