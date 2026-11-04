@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.gms.google-services") apply false
 }
 
 val fanotesVersion = providers.gradleProperty("fanotes.version").orElse("2026.11.1-beta.13")
@@ -84,6 +85,10 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.10.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
-    implementation("org.unifiedpush.android:connector:3.3.5")
+    implementation("com.google.firebase:firebase-messaging:24.1.0")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+}
+
+if (file("google-services.json").isFile) {
+    pluginManager.apply("com.google.gms.google-services")
 }

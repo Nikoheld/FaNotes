@@ -9,7 +9,6 @@ import { authenticateSyncRequest } from './sync-api.mjs'
 import {
   diffSnapshots,
   keepLoadedGrades,
-  notifyPayload,
   prepareGradeNotifications,
   settleGradeNotifications,
   unseenChanges,
@@ -22,6 +21,14 @@ import {
   stripPhpSession,
 } from './schulnetz-logic.mjs'
 import { establishWebSession, scrapeWithSession } from './schulnetz-web.mjs'
+import {
+  FCM_ACCOUNT_FILE,
+  exchangeServiceAccount,
+  fcmDataMessage,
+  fcmDropToken,
+  isValidFcmToken,
+  readServiceAccount,
+} from './fcm.mjs'
 
 const API_PREFIX = '/api/v1/schulnetz'
 const MAX_BODY = 64 * 1024
@@ -115,7 +122,6 @@ export const createSchulnetzRuntime = (options = {}) => {
 
   const publicStatus = (link) => {
     if (!link) return { linked: false, settings: DEFAULT_SETTINGS }
-    const server = (process.env.FANOTES_NTFY_URL || 'https://ntfy.sh').replace(/\/+$/u, '')
     return {
       linked: true,
       baseUrl: link.baseUrl,
@@ -126,7 +132,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       revision: link.revision || 0,
       settings: { ...DEFAULT_SETTINGS, ...(link.settings || {}) },
       mode: link.mode || 'rest',
-      push: { topic: link.topic, server, url: `${server}/${link.topic}`, endpoints: (link.pushEndpoints || []).length },
+      push: { topic: link.topic, server: '', url: '', endpoints: (link.fcmTokens || []).length },
     }
   }
 
@@ -161,6 +167,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       lastPollAt: existing?.lastPollAt || '',
       topic: existing?.topic || randomBytes(16).toString('hex'),
       pushEndpoints: Array.isArray(existing?.pushEndpoints) ? existing.pushEndpoints.slice(0, 8) : [],
+      fcmTokens: storedFcmTokens(existing),
       settings: { ...DEFAULT_SETTINGS, ...(existing?.settings || {}) },
       revision: existing?.revision || 0,
     }
@@ -196,12 +203,17 @@ export const createSchulnetzRuntime = (options = {}) => {
       lastPollAt: existing?.lastPollAt || '',
       topic: existing?.topic || randomBytes(16).toString('hex'),
       pushEndpoints: Array.isArray(existing?.pushEndpoints) ? existing.pushEndpoints.slice(0, 8) : [],
+      fcmTokens: storedFcmTokens(existing),
       settings: { ...DEFAULT_SETTINGS, ...(existing?.settings || {}) },
       revision: existing?.revision || 0,
     }
     await saveLink(accountId, record)
     return publicStatus(record)
   }
+
+  const storedFcmTokens = (existing) => (
+    Array.isArray(existing?.fcmTokens) ? existing.fcmTokens.filter(isValidFcmToken).slice(-8) : []
+  )
 
   const acceptSnapshot = async (accountId, body) => {
     const link = await readLink(accountId)
@@ -249,6 +261,15 @@ export const createSchulnetzRuntime = (options = {}) => {
     const link = await readLink(accountId)
     if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
     link.pushEndpoints = (link.pushEndpoints || []).filter((item) => item !== endpoint)
+    await saveLink(accountId, link)
+    return publicStatus(link)
+  }
+
+  const addFcmToken = async (accountId, token) => {
+    if (!isValidFcmToken(token)) fail(400, 'Das Push-Token ist ungültig.')
+    const link = await readLink(accountId)
+    if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
+    link.fcmTokens = [...(link.fcmTokens || []).filter((item) => item !== token), token].slice(-8)
     await saveLink(accountId, link)
     return publicStatus(link)
   }
@@ -307,26 +328,46 @@ export const createSchulnetzRuntime = (options = {}) => {
     return { unauthorized: false, body: response.body }
   }
 
-  const deliver = async (link, change) => {
-    const server = (process.env.FANOTES_NTFY_URL || 'https://ntfy.sh').replace(/\/+$/u, '')
-    const targets = [`${server}/${link.topic}`, ...(link.pushEndpoints || [])]
-    const payload = notifyPayload(change)
-    for (const target of targets) {
+  let fcmCache = null
+  const sendFcm = async (token, event) => {
+    const message = fcmDataMessage(token, event)
+    if (typeof options.fcmSend === 'function') return options.fcmSend(message)
+    const nowMs = now().getTime()
+    if (!fcmCache || fcmCache.exp - 60 <= Math.floor(nowMs / 1000)) {
+      const account = options.fcmAccount || await readServiceAccount(options.fcmAccountFile || process.env.FANOTES_FCM_SERVICE_ACCOUNT || FCM_ACCOUNT_FILE)
+      if (!account) return { skipped: true }
+      fcmCache = await exchangeServiceAccount(account, fetchImpl, nowMs)
+    }
+    const response = await fetchImpl(`https://fcm.googleapis.com/v1/projects/${fcmCache.projectId}/messages:send`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${fcmCache.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(message),
+    })
+    const body = await response.text()
+    if (response.status === 401) fcmCache = null
+    return { status: response.status, drop: fcmDropToken(response.status, body) }
+  }
+
+  const ping = async (accountId, link, event) => {
+    if (event !== 'sync' && event !== 'reauth' && event !== 'test') return
+    const tokens = (link.fcmTokens || []).filter(isValidFcmToken)
+    if (!tokens.length) return
+    let dropped = false
+    for (const token of tokens) {
       try {
-        const parsed = new URL(target)
-        if (parsed.protocol !== 'https:') continue
-        const headers = {
-          Title: change.title,
-          Priority: 'high',
-          Tags: change.category,
-          'Content-Type': 'text/plain; charset=utf-8',
+        const result = await sendFcm(token, event)
+        if (result?.drop) {
+          link.fcmTokens = (link.fcmTokens || []).filter((item) => item !== token)
+          dropped = true
         }
-        if (process.env.FANOTES_NTFY_TOKEN && target.startsWith(server)) headers.Authorization = `Bearer ${process.env.FANOTES_NTFY_TOKEN}`
-        await fetchImpl(target, { method: 'POST', headers, body: payload })
       } catch (error) {
-        log('warn', `Push an ${new URL(target).host} fehlgeschlagen (${error?.name || 'error'})`)
+        log('warn', `FCM fehlgeschlagen (${error?.name || 'error'})`)
       }
     }
+    if (dropped) await saveLink(accountId, link)
   }
 
   const appendChanges = async (accountId, changes, revision) => {
@@ -371,7 +412,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     const unseen = unseenChanges(settled.changes, await knownChangeIds(accountId))
     await appendChanges(accountId, unseen, revision)
     const fresh = prepareGradeNotifications(unseen, link.settings?.guessGrades === true)
-    for (const change of fresh) await deliver(link, change)
+    if (fresh.length) await ping(accountId, link, 'sync')
     return fresh
   }
 
@@ -414,12 +455,7 @@ export const createSchulnetzRuntime = (options = {}) => {
         link.needsReauth = true
         link.lastError = tokens.error === 'biometric_required' ? 'biometric_required' : 'reauth'
         await saveLink(accountId, link)
-        await deliver(link, {
-          id: `reauth:${link.revision || 0}`,
-          category: 'event',
-          title: 'Schulnetz erneut anmelden',
-          body: 'Die Sitzung ist abgelaufen. In Kanti+ unter Mehr → Schulnetz neu verbinden.',
-        })
+        await ping(accountId, link, 'reauth')
         return { needsReauth: true }
       }
       await storeRefresh(tokens)
@@ -486,12 +522,7 @@ export const createSchulnetzRuntime = (options = {}) => {
         link.serverSession = null
         await saveLink(accountId, link)
         if (link.loginPushSent !== true) {
-          await deliver(link, {
-            id: 'schulnetz-login-required',
-            category: 'event',
-            title: 'Bei Schulnetz neu anmelden',
-            body: 'Die Microsoft-Anmeldung ist abgelaufen. In Kanti+ neu anmelden.',
-          })
+          await ping(accountId, link, 'reauth')
           link.loginPushSent = true
           await saveLink(accountId, link)
         }
@@ -505,12 +536,7 @@ export const createSchulnetzRuntime = (options = {}) => {
         link.lastError = 'microsoft'
         link.serverSession = null
         if (link.loginPushSent !== true) {
-          await deliver(link, {
-            id: 'schulnetz-login-required',
-            category: 'event',
-            title: 'Bei Schulnetz neu anmelden',
-            body: 'Die Microsoft-Anmeldung ist abgelaufen. In Kanti+ neu anmelden.',
-          })
+          await ping(accountId, link, 'reauth')
           link.loginPushSent = true
         }
         await saveLink(accountId, link)
@@ -664,10 +690,15 @@ export const createSchulnetzRuntime = (options = {}) => {
         send(response, 200, await removeEndpoint(accountId, String(body.endpoint || '')))
         return true
       }
+      if (route === '/push-token' && method === 'PUT') {
+        const body = await readBody(request)
+        send(response, 200, await addFcmToken(accountId, body?.token))
+        return true
+      }
       if (route === '/push/test' && method === 'POST') {
         const link = await readLink(accountId)
         if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
-        await deliver(link, { id: `test:${now().getTime()}`, category: 'settings', title: 'Testbenachrichtigung', body: 'Testbenachrichtigung von Schulnetz.', target: 'settings' })
+        await ping(accountId, link, 'test')
         send(response, 200, { ok: true })
         return true
       }
@@ -680,7 +711,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     return true
   }
 
-  return { handle, start, pollAccount, linkAccount, publicStatusOf: async (accountId) => publicStatus(await readLink(accountId)), root, openStoredRefresh: async (accountId) => openToken(await requireKey(), (await readLink(accountId))?.refresh) }
+  return { handle, start, pollAccount, linkAccount, addFcmToken, publicStatusOf: async (accountId) => publicStatus(await readLink(accountId)), root, openStoredRefresh: async (accountId) => openToken(await requireKey(), (await readLink(accountId))?.refresh) }
 }
 
 const eventsPath = () => {

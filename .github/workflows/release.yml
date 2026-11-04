@@ -172,6 +172,14 @@ jobs:
           yes | "$sdk_root/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk_root" --licenses >/dev/null
           set -o pipefail
           "$sdk_root/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk_root" "platforms;android-37.0" "build-tools;36.0.0" "platform-tools"
+      - name: Firebase config when the secret exists
+        working-directory: android
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "${GOOGLE_SERVICES_JSON}" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > companion/google-services.json
+          fi
       - name: Test Schulnetz logic and build the companion
         working-directory: android
         env:
