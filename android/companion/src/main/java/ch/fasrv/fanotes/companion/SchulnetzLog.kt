@@ -5,6 +5,7 @@ import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.time.Instant
+import java.util.concurrent.Executors
 
 /** File-backed ring of the last Schulnetz steps. Secrets are redacted before they hit disk. */
 class SchulnetzLog(directory: File) {
@@ -12,23 +13,33 @@ class SchulnetzLog(directory: File) {
     private val file = File(dir, "schulnetz.log")
     private val captures = File(dir, "captures").apply { mkdirs() }
     private val lock = Any()
+    private val io = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "schulnetz-log").apply { isDaemon = true }
+    }
 
     fun info(message: String) {
-        append(redactSchulnetzSecrets(message).replace("\r", " ").replace("\n", "\\n"))
+        writeAsync(redactSchulnetzSecrets(message).replace("\r", " ").replace("\n", "\\n"))
     }
 
     fun error(error: Throwable) {
         val writer = StringWriter()
         error.printStackTrace(PrintWriter(writer))
-        append(redactSchulnetzSecrets(writer.toString()).replace("\r\n", "\n"))
+        writeAsync(redactSchulnetzSecrets(writer.toString()).replace("\r\n", "\n"))
+    }
+
+    private fun writeAsync(line: String) {
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) io.execute { append(line) }
+        else append(line)
     }
 
     fun rememberPage(name: String, finalUrl: String, html: String) {
         if (html.isBlank()) return
         val safeName = name.lowercase().replace(Regex("[^a-z0-9_-]"), "").ifBlank { "page" }.take(24)
         val body = "<!-- ${redactSchulnetzSecrets(finalUrl)} -->\n" + redactSchulnetzSecrets(html).take(2_000_000)
-        synchronized(lock) {
-            File(captures, "$safeName.html").writeText(body)
+        io.execute {
+            synchronized(lock) {
+                File(captures, "$safeName.html").writeText(body)
+            }
         }
     }
 

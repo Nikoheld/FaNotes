@@ -14,11 +14,11 @@ class CompanionApplication : Application() {
         }
         android.webkit.CookieManager.getInstance().setAcceptCookie(true)
         graph = CompanionGraph(this)
-        graph.recordOpenToday()
         CompanionAlerts.ensureChannels(this)
         CompanionAlerts.retireLegacyPush(this)
         configurePushDelivery(this)
         graph.scope.launch {
+            graph.recordOpenToday()
             graph.engine.start()
             graph.engine.pauseAutomaticSync()
         }

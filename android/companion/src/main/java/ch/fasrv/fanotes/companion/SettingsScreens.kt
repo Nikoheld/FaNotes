@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -105,7 +106,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             item { SectionLabel("When you open FaNotes") }
             item { ChoiceRow(Destination.entries.map { it.legacy to it.label }, destinationFor(model.desk.startTab).legacy, { model.updateDesk(model.desk.copy(startTab = it)) }) }
             item { SectionLabel("On Today") }
-            items(TODAY_CARD_IDS) { id ->
+            items(TODAY_CARD_IDS, key = { it }) { id ->
                 ToggleRow(when (id) { "lessons" -> "Next commitment"; "exam" -> "Upcoming exam"; "grades" -> "Grade overview"; "pluspunkte" -> "Promotion points"; "events" -> "School updates"; else -> "Tasks" }, checked = id !in model.desk.hiddenCards) { show ->
                     model.updateDesk(model.desk.copy(hiddenCards = if (show) model.desk.hiddenCards - id else (model.desk.hiddenCards + id).distinct()))
                 }
@@ -147,7 +148,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             }
             if (model.snapshot.readErrors.isNotEmpty()) {
                 item { SectionLabel("Source reports") }
-                items(model.snapshot.readErrors) { error -> Text(error, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 8.dp)) }
+                itemsIndexed(model.snapshot.readErrors, key = { index, error -> "err:$index:$error" }) { _, error -> Text(error, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 8.dp)) }
             }
             item { SectionLabel("Support exports") }
             item {

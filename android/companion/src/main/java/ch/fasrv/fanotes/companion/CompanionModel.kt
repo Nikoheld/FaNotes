@@ -48,10 +48,11 @@ import java.time.LocalDate
 import java.util.UUID
 
 class CompanionModel(val graph: CompanionGraph) : ViewModel() {
-    var desk by mutableStateOf(graph.deskPrefs())
-    var hidden by mutableStateOf(graph.hiddenLessons())
-    var route by mutableStateOf(CompanionRoute(destinationFor(graph.deskPrefs().startTab), if (graph.deskPrefs().startTab == "Noten") Page.Grades else null))
+    var desk by mutableStateOf(ch.fasrv.fanotes.schulnetz.DeskPrefs(theme = graph.themeId()))
+    var hidden by mutableStateOf(emptyList<ch.fasrv.fanotes.schulnetz.HiddenLesson>())
+    var route by mutableStateOf(CompanionRoute())
         private set
+    private var startTabApplied = false
     private var history = emptyList<CompanionRoute>()
     var localAccess by mutableStateOf(graph.localAccess())
     var plannerTasks by mutableStateOf(false)
@@ -68,6 +69,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     private val searchCache = object : android.util.LruCache<String, Pair<Long, String>>(8 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Pair<Long, String>) = value.second.length.coerceAtMost(Int.MAX_VALUE / 2) * 2
     }
+    private val previewCache = object : android.util.LruCache<String, Pair<Long, NotePreview>>(24) {}
 
     fun select(destination: Destination) {
         history = emptyList()
@@ -155,15 +157,22 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                     val nextTree = graph.store.tree()
                     val folder = if (ch.fasrv.fanotes.vault.folderExists(nextTree, noteFolder)) noteFolder else ""
                     Reloaded(nextTree, folder, ch.fasrv.fanotes.vault.folderChildren(nextTree, folder).filter { it.path !in setOf(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH) },
-                        runCatching { graph.homework().tasks }, runCatching { graph.calendar() }, graph.hypothetical(), graph.writtenNoteCount(), graph.deskPrefs(), graph.hiddenLessons())
+                        runCatching { graph.homework().tasks }, runCatching { graph.calendar() }, graph.hypothetical(), graph.writtenNoteCount(), graph.deskPrefs(), graph.hiddenLessons(), graph.subjectColors())
                 }
                 tree = data.tree; noteFolder = data.folder; notes = data.notes
                 data.tasks.getOrNull()?.let { tasks = it }; data.calendar.getOrNull()?.let { calendar = it }
-                hypothetical = data.guesses; writtenNotes = data.count; hidden = data.hidden
-                if (generation == deskGeneration && deskPending == 0) desk = data.desk
+                hypothetical = data.guesses; writtenNotes = data.count; hidden = data.hidden; colors = data.colors
+                if (generation == deskGeneration && deskPending == 0) {
+                    desk = data.desk
+                    if (!startTabApplied && history.isEmpty() && highlightIds.isEmpty() && route.page == null && route.destination == Destination.Today) {
+                        startTabApplied = true
+                        route = CompanionRoute(destinationFor(data.desk.startTab), if (data.desk.startTab == "Noten") Page.Grades else null)
+                    }
+                }
                 loadError = listOfNotNull(data.tasks.exceptionOrNull()?.message, data.calendar.exceptionOrNull()?.message).joinToString("\n").ifBlank { null }
                 val paths = flattenNotes(tree).map { it.path }.toSet()
                 searchCache.snapshot().keys.filterNot { it in paths }.forEach { searchCache.remove(it) }
+                previewCache.snapshot().keys.filterNot { it in paths }.forEach { previewCache.remove(it) }
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (error: Exception) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
@@ -173,11 +182,13 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
 
     private data class Reloaded(val tree: List<VaultNode>, val folder: String, val notes: List<VaultNode>, val tasks: Result<List<HomeworkTask>>,
-        val calendar: Result<CalendarDocument>, val guesses: List<HypotheticalGrade>, val count: Int, val desk: DeskPrefs, val hidden: List<HiddenLesson>)
+        val calendar: Result<CalendarDocument>, val guesses: List<HypotheticalGrade>, val count: Int, val desk: DeskPrefs, val hidden: List<HiddenLesson>, val colors: Map<String, String>)
 
     suspend fun loadPreview(node: VaultNode): NotePreview = withContext(Dispatchers.IO) {
+        val hit = previewCache.get(node.path)
+        if (hit != null && hit.first == node.modifiedAt) return@withContext hit.second
         val note = graph.store.readNote(node.path)
-        NotePreview(noteExcerpt(note.markdown, note.title), note.document)
+        NotePreview(noteExcerpt(note.markdown, note.title), note.document).also { previewCache.put(node.path, node.modifiedAt to it) }
     }
     suspend fun findNotes(query: String): List<NoteResult> = withContext(Dispatchers.IO) {
         flattenNotes(tree).mapNotNull { node ->
@@ -431,7 +442,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
 
     var planWeek by mutableStateOf(false)
     var iconChoice by mutableStateOf(graph.iconChoice())
-    var colors by mutableStateOf(graph.subjectColors())
+    var colors by mutableStateOf<Map<String, String>>(emptyMap())
 
     fun chooseIcon(context: Context, id: String) {
         val choice = if (id == "schule" || id == "notiz") id else "standard"

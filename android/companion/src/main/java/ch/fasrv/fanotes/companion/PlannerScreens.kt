@@ -54,7 +54,7 @@ fun TodayScreen(model: CompanionModel) {
     val urgent = sortHomeworkTasks(model.tasks.filter { !it.done }).sortedBy { when (taskBucket(it, today)) { "Overdue" -> 0; "Today" -> 1; "Upcoming" -> 2; else -> 3 } }
     var selected by remember { mutableStateOf<AgendaEntry?>(null) }
     var task by remember { mutableStateOf<HomeworkTask?>(null) }
-    val recent = flattenNotes(model.tree).sortedByDescending { it.modifiedAt }.take(3)
+    val recent = remember(model.tree) { flattenNotes(model.tree).sortedByDescending { it.modifiedAt }.take(3) }
     ScreenList {
         item {
             Text(dateLabel(today), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -114,10 +114,11 @@ fun TodayScreen(model: CompanionModel) {
         }
         if ("grades" in cards && model.snapshot.grades.isNotEmpty()) item {
             SectionLabel("From school")
-            SettingRow(Icons.Outlined.Insights, "Your grades", "${courseSummaries(model.snapshot.grades, model.hypothetical).size} subjects · review your progress") { model.navigate(Page.Grades) }
+            val gradeCourses = remember(model.snapshot.grades, model.hypothetical) { courseSummaries(model.snapshot.grades, model.hypothetical) }
+            SettingRow(Icons.Outlined.Insights, "Your grades", "${gradeCourses.size} subjects · review your progress") { model.navigate(Page.Grades) }
         }
         if ("pluspunkte" in cards && model.desk.showPluspunkte && model.snapshot.grades.isNotEmpty()) item {
-            val total = promotionTotals(courseSummaries(model.snapshot.grades, model.hypothetical))
+            val total = remember(model.snapshot.grades, model.hypothetical) { promotionTotals(courseSummaries(model.snapshot.grades, model.hypothetical)) }
             Text("Promotion points ${formatPluspunkte(total.total)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
         }
         if ("events" in cards && (model.snapshot.messages.isNotEmpty() || model.snapshot.startMessages.isNotEmpty())) item {
