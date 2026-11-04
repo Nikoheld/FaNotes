@@ -192,6 +192,7 @@ fun CompanionRoot(model: CompanionModel) {
     if (noteName) NameDialog("New note", "Note title", "Create", onDismiss = { noteName = false }) { title -> noteName = false; model.createNote(title) }
     if (taskForm) TaskForm(model, onDismiss = { taskForm = false })
     if (eventForm) EventForm(model, onDismiss = { eventForm = false })
+    if (model.revealQueue.isNotEmpty()) GradeRevealSheet(model)
 }
 
 fun syncDescription(status: SyncStatus): String = when (status) {

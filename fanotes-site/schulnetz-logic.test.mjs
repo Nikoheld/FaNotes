@@ -29,6 +29,8 @@ import {
   groupGradeChanges,
   notifyPayload,
   parseNotifyLink,
+  prepareGradeNotifications,
+  redactGradeChange,
   routeNotify,
 } from './schulnetz-logic.mjs'
 
@@ -326,6 +328,31 @@ test('notify payload hashes stay stable and route to the matching screen', () =>
   const testRoute = routeNotify(parseNotifyLink(JSON.stringify({ id: 'push-test', category: 'settings', title: 'Testbenachrichtigung', body: 'x' })), snapshot)
   assert.equal(testRoute.section, 'Einstellungen')
   assert.equal(parseNotifyLink(JSON.stringify({ event: 'keepalive' })), null)
+})
+
+test('guess-grade mode redacts the mark from push copy and keeps each grade separate', () => {
+  const grade = { id: 'g1', courseId: 'math', course: 'Mathematik', title: 'Probe', date: '2026-11-01', mark: 5.5, weight: 1 }
+  const other = { id: 'g2', courseId: 'che', course: 'Chemie', title: 'Test', date: '2026-11-02', mark: 4.25, weight: 1 }
+  const previous = { grades: [], events: [], exams: [], absences: [], messages: [] }
+  const next = { grades: [grade, other], events: [], exams: [], absences: [], messages: [] }
+  const changes = diffSnapshots(previous, next)
+  assert.equal(changes.length, 2)
+  assert.match(changes[0].body, /5[,.]5/)
+  const hidden = prepareGradeNotifications(changes, true)
+  assert.equal(hidden.length, 2)
+  for (const change of hidden) {
+    assert.match(change.title, /tippen zum Aufdecken/)
+    assert.equal(change.body.includes('5,5') || change.body.includes('5.5') || change.body.includes('4,25') || change.body.includes('4.25'), false)
+    assert.equal(JSON.stringify(change).includes('5,5') || JSON.stringify(change).includes('5.5'), false)
+    assert.match(change.id, /:hidden$/)
+  }
+  assert.equal(hidden[0].body, 'Probe')
+  assert.equal(hidden[1].body, 'Test')
+  const open = prepareGradeNotifications(changes, false)
+  assert.equal(open.length, 1)
+  assert.equal(open[0].title, '2 neue Noten')
+  const again = redactGradeChange(hidden[0])
+  assert.equal(again.title, hidden[0].title)
 })
 
 test('seal round trip uses aes-256-gcm', () => {

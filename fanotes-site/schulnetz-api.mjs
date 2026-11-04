@@ -8,8 +8,8 @@ import { resolve, sep } from 'node:path'
 import { authenticateSyncRequest } from './sync-api.mjs'
 import {
   diffSnapshots,
-  groupGradeChanges,
   notifyPayload,
+  prepareGradeNotifications,
   unseenChanges,
   normalizeSchoolBase,
   parseKontoauszug,
@@ -25,7 +25,7 @@ const API_PREFIX = '/api/v1/schulnetz'
 const MAX_BODY = 64 * 1024
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 const REFERER = 'https://schulnetz.web.app/'
-const DEFAULT_SETTINGS = Object.freeze({ grades: true, timetable: true, exams: true, absences: true, events: true, deadlines: true })
+const DEFAULT_SETTINGS = Object.freeze({ grades: true, timetable: true, exams: true, absences: true, events: true, deadlines: true, guessGrades: false })
 
 const readKeyMaterial = () => {
   const inline = process.env.FANOTES_SCHULNETZ_TOKEN_KEY
@@ -221,10 +221,9 @@ export const createSchulnetzRuntime = (options = {}) => {
   const updateSettings = async (accountId, body) => {
     const link = await readLink(accountId)
     if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
-    const settings = { ...DEFAULT_SETTINGS }
+    const settings = { ...DEFAULT_SETTINGS, ...(link.settings || {}) }
     for (const name of Object.keys(DEFAULT_SETTINGS)) {
       if (typeof body?.[name] === 'boolean') settings[name] = body[name]
-      else settings[name] = link.settings?.[name] !== false
     }
     link.settings = settings
     await saveLink(accountId, link)
@@ -349,8 +348,9 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 
   const publishChanges = async (accountId, link, changes, revision) => {
-    const fresh = groupGradeChanges(unseenChanges(changes, await knownChangeIds(accountId)))
-    await appendChanges(accountId, fresh, revision)
+    const unseen = unseenChanges(changes, await knownChangeIds(accountId))
+    await appendChanges(accountId, unseen, revision)
+    const fresh = prepareGradeNotifications(unseen, link.settings?.guessGrades === true)
     for (const change of fresh) await deliver(link, change)
     return fresh
   }

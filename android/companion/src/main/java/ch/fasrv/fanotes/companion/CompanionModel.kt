@@ -177,9 +177,27 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var debugHtml by mutableStateOf("")
     var highlightIds by mutableStateOf<Set<String>>(emptySet())
     var focusCourseId by mutableStateOf("")
+    var unrevealedIds by mutableStateOf(graph.unrevealedGradeIds())
+    var revealQueue by mutableStateOf<List<String>>(emptyList())
+
+    fun hiddenGradeIds(): Set<String> = if (settings.guessGrades) unrevealedIds else emptySet()
+    fun isUnrevealed(targetId: String): Boolean = targetId.isNotBlank() && targetId in hiddenGradeIds()
+    fun refreshUnrevealed() { unrevealedIds = graph.unrevealedGradeIds() }
+    fun openReveal(ids: Collection<String>) {
+        val next = ids.filter { isUnrevealed(it) }.distinct()
+        if (next.isNotEmpty()) revealQueue = next
+    }
+    fun revealGrade(targetId: String) {
+        graph.revealGrade(targetId)
+        unrevealedIds = graph.unrevealedGradeIds()
+    }
+    fun finishReveal() {
+        revealQueue = revealQueue.drop(1)
+    }
+    fun dismissReveal() { revealQueue = emptyList() }
 
     init {
-        viewModelScope.launch { graph.snapshot.collect { snapshot = it } }
+        viewModelScope.launch { graph.snapshot.collect { snapshot = it; refreshUnrevealed() } }
         viewModelScope.launch { graph.link.collect { link = it } }
         viewModelScope.launch { graph.vaultChanges.collectLatest { kotlinx.coroutines.delay(200); reload() } }
         reload()
@@ -439,10 +457,12 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             "exams" -> settings.copy(exams = !settings.exams)
             "absences" -> settings.copy(absences = !settings.absences)
             "deadlines" -> settings.copy(deadlines = !settings.deadlines)
+            "guessGrades" -> settings.copy(guessGrades = !settings.guessGrades)
             else -> settings.copy(events = !settings.events)
         }
         settings = next
         graph.setNotifySettings(next)
+        if (next.guessGrades) refreshUnrevealed() else revealQueue = emptyList()
     }
 
     fun toggleTask(task: HomeworkTask) {
@@ -579,6 +599,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             planWeek = false
         }
         if (route.hint.isNotBlank()) message = route.hint
+        refreshUnrevealed()
+        if (link.kind == "grade" && settings.guessGrades) openReveal(route.highlightIds)
     }
 
     fun testPush(context: Context) {

@@ -40,7 +40,7 @@ Alle Routen hängen unter `/api/v1/schulnetz` und verlangen denselben Sync-Login
 | DELETE | `/link` | Löscht Token, Schnappschuss und Push-Endpunkte. |
 | GET | `/snapshot` | Normalisierter Schnappschuss (Noten, Stunden, Prüfungen, Absenzen, Aufgaben, Mitteilungen, Ferien, Kontoauszug, Startseite). |
 | GET | `/changes?since=<revision>` | Änderungen seit dieser Revision. |
-| PUT | `/settings` | `{ grades, timetable, exams, absences, events, deadlines }` als Booleans. |
+| PUT | `/settings` | `{ grades, timetable, exams, absences, events, deadlines, guessGrades }` als Booleans. `guessGrades` ist standardmässig aus. |
 | PUT | `/push-endpoint` | `{ endpoint }` HTTPS-URL eines UnifiedPush- oder ntfy-Ziels, höchstens 8. |
 | DELETE | `/push-endpoint` | `{ endpoint }` entfernt eines davon. |
 | POST | `/push/test` | Sendet eine Testmeldung. |
@@ -117,6 +117,8 @@ Ohne Google Play und ohne `google-services.json`.
 FCM ist bewusst nicht eingebaut. Es würde Play-Dienste und ein Firebase-Projekt erzwingen. ntfy kann selbst gehostet werden, indem `FANOTES_NTFY_URL` gesetzt wird. Die App übernimmt die Adresse aus `/status`.
 
 Wer ein privates ntfy will, setzt `FANOTES_NTFY_TOKEN` und schützt das Thema serverseitig. Das Thema selbst ist das Leserecht für die Meldungstexte (Fach und Note, kein Schulnetz-Token). Es ist 128 Bit zufällig und nur mit einem gültigen FaNotes-Login abrufbar.
+
+`guessGrades` (Einstellungen → Notifications → Guess the grade, standardmässig aus) lässt den Poller die Note aus Titel, Text und JSON-Payload. ntfy zeigt sonst den Servertext auf dem Sperrbildschirm, bevor die App startet. Mit dem Schalter lautet die Meldung «Neue Note in <Fach> – tippen zum Aufdecken» und nennt nur Fach und Prüfungstitel. Mehrere neue Noten bleiben einzelne Meldungen, damit jede ihr eigenes Aufdecken hat. Schnitt und Pluspunkte auf dem Telefon rechnen unaufgedeckte Noten nicht mit, bis sie aufgedeckt sind.
 
 ## Deploy
 

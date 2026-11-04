@@ -29,6 +29,8 @@ import ch.fasrv.fanotes.schulnetz.RefreshLease
 import ch.fasrv.fanotes.schulnetz.SchulnetzGate
 import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
 import ch.fasrv.fanotes.schulnetz.diffSnapshots
+import ch.fasrv.fanotes.schulnetz.newGradeTargetIds
+import ch.fasrv.fanotes.schulnetz.prepareGradeNotifications
 import ch.fasrv.fanotes.schulnetz.localRefreshLease
 import ch.fasrv.fanotes.schulnetz.classifySchulnetzPage
 import ch.fasrv.fanotes.schulnetz.extractWebSession
@@ -166,6 +168,7 @@ class CompanionGraph(private val context: Context) {
         absences = prefs.getBoolean("notify-absences", true),
         events = prefs.getBoolean("notify-events", true),
         deadlines = prefs.getBoolean("notify-deadlines", true),
+        guessGrades = prefs.getBoolean(GUESS_GRADES_PREF, false),
     )
 
     fun setNotifySettings(settings: NotifySettings) {
@@ -176,11 +179,29 @@ class CompanionGraph(private val context: Context) {
             .putBoolean("notify-absences", settings.absences)
             .putBoolean("notify-events", settings.events)
             .putBoolean("notify-deadlines", settings.deadlines)
+            .putBoolean(GUESS_GRADES_PREF, settings.guessGrades)
             .apply()
         scope.launch {
             val session = engine.currentSession() ?: return@launch
             if (link.value.linked) runCatching { client.saveSettings(session, settings) }
         }
+    }
+
+    fun unrevealedGradeIds(): Set<String> = prefs.getStringSet(UNREVEALED_PREF, emptySet()).orEmpty().toSet()
+
+    fun addUnrevealedGrades(ids: Collection<String>) {
+        val next = ids.filter { it.isNotBlank() }
+        if (next.isEmpty()) return
+        val stored = prefs.getStringSet(UNREVEALED_PREF, emptySet()).orEmpty().toMutableSet()
+        if (!stored.addAll(next)) return
+        prefs.edit().putStringSet(UNREVEALED_PREF, stored).apply()
+    }
+
+    fun revealGrade(id: String) {
+        if (id.isBlank()) return
+        val stored = prefs.getStringSet(UNREVEALED_PREF, emptySet()).orEmpty().toMutableSet()
+        if (!stored.remove(id)) return
+        prefs.edit().putStringSet(UNREVEALED_PREF, stored).apply()
     }
 
     suspend fun refreshSchulnetz(caller: String = "unspecified") {
@@ -812,11 +833,14 @@ class CompanionGraph(private val context: Context) {
 
     private fun publishSnapshot(previous: SchulnetzSnapshot?, next: SchulnetzSnapshot, settings: NotifySettings) {
         val hidden = hiddenLessons()
-        val changes = diffSnapshots(previous?.takeIf { it.fetchedAt.isNotBlank() || it.grades.isNotEmpty() || it.events.isNotEmpty() }, next, settings)
+        val local = notifySettings()
+        val effective = settings.copy(guessGrades = local.guessGrades)
+        val changes = diffSnapshots(previous?.takeIf { it.fetchedAt.isNotBlank() || it.grades.isNotEmpty() || it.events.isNotEmpty() }, next, effective)
             .filterNot { changeIsHidden(it, hidden) }
+        if (effective.guessGrades) addUnrevealedGrades(newGradeTargetIds(changes))
         snapshot.value = next
         writeCache(next)
-        CompanionAlerts.showAll(context, changes)
+        CompanionAlerts.showAll(context, prepareGradeNotifications(changes, effective.guessGrades, next))
     }
 
     private fun applyServerChanges(json: String) {
@@ -825,7 +849,10 @@ class CompanionGraph(private val context: Context) {
             val change = item as? JsonValue.Obj ?: return@mapNotNull null
             changeFromObj(change)
         }
-        CompanionAlerts.showAll(context, items.filterNot { changeIsHidden(it, hiddenLessons()) })
+        val guess = notifySettings().guessGrades
+        val visible = items.filterNot { changeIsHidden(it, hiddenLessons()) }
+        if (guess) addUnrevealedGrades(newGradeTargetIds(visible))
+        CompanionAlerts.showAll(context, prepareGradeNotifications(visible, guess, snapshot.value))
         val maxRevision = obj.array("changes")?.items.orEmpty().mapNotNull { item ->
             (item as? JsonValue.Obj)?.double("revision")?.toLong()
         }.maxOrNull()
@@ -939,6 +966,8 @@ class CompanionGraph(private val context: Context) {
         const val DESK_PATH = ".fanotes/schulnetz/desk.json"
         const val HIDDEN_PATH = ".fanotes/schulnetz/hidden-lessons.json"
         const val SNAPSHOT_VAULT_PATH = ".fanotes/schulnetz/snapshot.json"
+        const val GUESS_GRADES_PREF = "notify-guess-grades"
+        const val UNREVEALED_PREF = "unrevealed-grades"
         const val SERVER_POLL_MS = 60_000L
         private const val SILENT_AT = "schulnetz-silent-at"
         private const val SILENT_GAP_MS = 3 * 60 * 1000L
