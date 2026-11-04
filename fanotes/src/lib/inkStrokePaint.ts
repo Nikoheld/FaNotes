@@ -2,6 +2,7 @@ import { inkQuickTurnKeep } from './inkTurn'
 import { inkStrokePaintScale } from './paperGrow'
 import { commitInkPointerSequence, type InkPointerLike } from './inkSampleMap'
 import { markdownInkPageBox } from './noteCanvas'
+import { decideNoteTextGesture } from './noteTextStay'
 
 /** A 3.5px pen must occupy at least this many backing-store pixels. */
 export const INK_MIN_BITMAP_PX = 1
@@ -348,6 +349,35 @@ export const removedStrokeBitmapPatch = <T extends { points: ReadonlyArray<{ x: 
     patch = unionBitmapPatch(patch, strokeBitmapPatch(points, pageWidth, pageHeight, marginOf(stroke)))
   }
   return patch
+}
+
+/**
+ * Ink erase. The note string is returned unchanged and the text layer is not
+ * full-cleared. The bitmap patch is only the ink that disappeared.
+ */
+export const eraseInkKeepingNoteText = <T extends { points: ReadonlyArray<{ x: number; y: number }> }>(
+  note: string,
+  before: readonly T[],
+  after: readonly T[],
+  pageWidth: number,
+  pageHeight: number,
+  marginOf: (stroke: T) => number,
+) => {
+  const decision = decideNoteTextGesture(
+    { note, anchorX: 0, anchorY: 0, mounted: true },
+    { kind: 'erase' },
+  )
+  return {
+    note: decision.note,
+    prefix: decision.prefix,
+    suffix: decision.suffix,
+    signal: decision.signal,
+    hide: decision.hide,
+    unmount: decision.unmount,
+    fullClear: decision.fullClear,
+    mounted: decision.mounted,
+    patch: removedStrokeBitmapPatch(before, after, pageWidth, pageHeight, marginOf),
+  }
 }
 
 /** Clears one device-pixel rectangle of a marker mask and leaves the rest. */

@@ -6,6 +6,7 @@ import {
   type StayPutOp,
   type StayPutState,
 } from './noteCanvas'
+import { decideNoteTextGesture, paperNoteTextOf } from './noteTextStay'
 
 export const PAPER_VIEW_SCROLLER_SELECTOR = '.paper-view, .unified-note-view'
 export const EDITOR_LAYER_SCROLLER_SELECTOR = '.cm-scroller, .cm-editor, .markdown-editor, .editor-pane'
@@ -461,27 +462,34 @@ export type VisualGrowCanvasTarget = {
   canvases?: Array<PaperCanvasBacking | null | undefined>
 }
 
-/** Force a layer invalidation. This alone does not snap slipped glyphs. */
+/**
+ * Bump the compositor generation. This alone does not snap slipped glyphs.
+ * Do not toggle `translateZ` on the sheet: that promotes the note and Linux
+ * drops every glyph for a frame.
+ */
 export const forcePaperCompositorRefresh = (root: HTMLElement | null) => {
   if (!root) return 0
+  const kept = decideNoteTextGesture({
+    note: paperNoteTextOf(root),
+    anchorX: 0,
+    anchorY: 0,
+  }, { kind: 'pan' })
+  if (kept.fullClear || kept.hide || kept.unmount) return paperCompositorRefreshGen(root)
   void root.offsetWidth
   void root.offsetHeight
   const current = Number.parseInt(root.getAttribute?.(PAPER_COMPOSITOR_REFRESH_ATTR) || '0', 10)
   const next = (Number.isFinite(current) ? current : 0) + 1
   root.setAttribute?.(PAPER_COMPOSITOR_REFRESH_ATTR, String(next))
-  const plane = (
-    typeof root.querySelector === 'function'
-      ? root.querySelector('.paper-sheet-plane, .unified-paper')
-      : null
-  ) as HTMLElement | null
-  if (plane?.style) {
-    const prev = plane.style.transform
-    plane.style.transform = prev ? `${prev} translateZ(0)` : 'translateZ(0)'
-    void plane.offsetHeight
-    plane.style.transform = prev
-  }
   return next
 }
+
+/** A keystroke replaces only `[from, to)`. The prefix and the suffix stay. */
+export const commitEditorTextInsert = (
+  note: string,
+  from: number,
+  to: number,
+  insert: string,
+) => decideNoteTextGesture({ note, anchorX: 0, anchorY: 0 }, { kind: 'insert', from, to, insert })
 
 export const paperCompositorRefreshGen = (root: HTMLElement | null) => {
   const current = Number.parseInt(root?.getAttribute?.(PAPER_COMPOSITOR_REFRESH_ATTR) || '0', 10)
@@ -560,12 +568,6 @@ export const refreshPaperCanvasSurface = (
   if (targets.length === 0) return 0
   void surface?.offsetWidth
   void surface?.offsetHeight
-  if (surface?.style) {
-    const prev = surface.style.transform || ''
-    surface.style.transform = prev ? `${prev} translateZ(0)` : 'translateZ(0)'
-    void surface.offsetHeight
-    surface.style.transform = prev
-  }
   let painted = 0
   for (const canvas of targets) {
     if (paintPaperCanvasSurfaceUpdate(canvas)) painted += 1

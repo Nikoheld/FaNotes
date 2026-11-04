@@ -1,5 +1,11 @@
 import { clampCanvasScroll, paperScrollBoundsFromVisualRect } from './noteCanvas'
 import { lockPaperViewportScrollStayPut } from './paperCaretScroll'
+import {
+  decideNoteTextGesture,
+  paperNoteTextOf,
+  retainPlainNoteText,
+  type NoteTextLayer,
+} from './noteTextStay'
 
 export const VIEW_ZOOM_MIN = 0.45
 export const VIEW_ZOOM_MAX = 3.25
@@ -529,29 +535,40 @@ export const paperZoomPreviewStyle = (
 
 /**
  * False when the sheet is rotated: one transform-origin cannot serve both.
- * Only the scale string is written on later frames. Repeating the origin and
- * `will-change` still invalidates style on some Chromium builds.
+ * Only the scale string is written on later frames. `will-change: transform`
+ * on this plane rasterizes the note at 1×, so the gesture must not set it.
  */
-export const applyPaperZoomGestureFrame = (plane: HTMLElement | null, gesture: PaperZoomGesture) => {
+export const applyPaperZoomGestureFrame = (
+  plane: HTMLElement | null,
+  gesture: PaperZoomGesture,
+  text?: { textContent: string | null; style?: { visibility?: string; display?: string }; querySelector?: (selector: string) => unknown } | null,
+) => {
+  const decision = decideNoteTextGesture({
+    note: paperNoteTextOf(plane),
+    anchorX: gesture.anchorLocalX,
+    anchorY: gesture.anchorLocalY,
+  }, { kind: 'zoom' })
   if (!plane || gesture.rotation !== 0) return false
   const preview = paperZoomPreviewStyle(gesture)
   if (Math.abs(preview.scale - 1) < 0.0005) {
     clearPaperZoomGestureFrame(plane, gesture.rotation)
+    retainPlainNoteText(text ?? null, decision)
     return true
   }
   if (plane.style.transformOrigin !== preview.transformOrigin) {
     plane.style.transformOrigin = preview.transformOrigin
   }
-  if (plane.style.willChange !== 'transform') plane.style.willChange = 'transform'
+  if (plane.style.willChange === 'transform') plane.style.willChange = 'auto'
   if (!plane.classList.contains('is-zoom-gesture')) plane.classList.add('is-zoom-gesture')
   if (plane.style.transform !== preview.transform) plane.style.transform = preview.transform
+  retainPlainNoteText(text ?? null, decision)
   return true
 }
 
 export const clearPaperZoomGestureFrame = (plane: HTMLElement | null, rotation: number) => {
   if (!plane) return
   plane.classList.remove('is-zoom-gesture')
-  plane.style.willChange = 'auto'
+  if (plane.style.willChange === 'transform') plane.style.willChange = 'auto'
   if (rotation) {
     plane.style.transform = `rotate(${rotation}deg)`
     plane.style.transformOrigin = 'center center'
@@ -559,6 +576,41 @@ export const clearPaperZoomGestureFrame = (plane: HTMLElement | null, rotation: 
     plane.style.removeProperty('transform')
     plane.style.removeProperty('transform-origin')
   }
+}
+
+type PlainNoteNode = {
+  textContent: string | null
+  style?: { visibility?: string; display?: string }
+  querySelector?: (selector: string) => unknown
+}
+
+/**
+ * Move the camera and leave the note mounted. Pan only assigns scroll when it
+ * changed. Zoom uses the compositor scale and never promotes the text layer.
+ */
+export const keepPaperTextOnCameraMove = (
+  layer: NoteTextLayer,
+  move: { kind: 'pan'; scrollLeft: number; scrollTop: number } | { kind: 'zoom'; factor: number; originX: number; originY: number },
+  nodes?: { scroller?: HTMLElement | null; plane?: HTMLElement | null; text?: PlainNoteNode | null },
+) => {
+  const decision = decideNoteTextGesture(layer, { kind: move.kind })
+  if (move.kind === 'pan' && nodes?.scroller) {
+    if (nodes.scroller.scrollLeft !== move.scrollLeft) nodes.scroller.scrollLeft = move.scrollLeft
+    if (nodes.scroller.scrollTop !== move.scrollTop) nodes.scroller.scrollTop = move.scrollTop
+  }
+  if (move.kind === 'zoom' && nodes?.plane) {
+    const base = Math.max(0.01, readUsedSheetZoom(nodes.plane))
+    applyPaperZoomGestureFrame(nodes.plane, {
+      baseZoom: base,
+      zoom: clampViewZoom(base * (Number.isFinite(move.factor) ? move.factor : 1)),
+      rotation: 0,
+      origin: { x: move.originX, y: move.originY },
+      anchorLocalX: move.originX,
+      anchorLocalY: move.originY,
+    }, nodes.text ?? null)
+  }
+  retainPlainNoteText(nodes?.text ?? null, decision)
+  return decision
 }
 
 export const applyPaperZoomStayPut = (

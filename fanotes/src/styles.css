@@ -1544,9 +1544,12 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
      The sheet is this scroller, so that strip stays paper. Wheel, pen and keys still pan. */
   scrollbar-width: none;
   overscroll-behavior: contain;
-  /* Native compositor scrolling — never `smooth` (lags and smears glyphs). */
+  /* Native compositor scrolling — never `smooth` (lags and smears glyphs).
+     Do not promote this scroller. A permanent scroll layer on Linux
+     re-rasterizes the whole note whenever the camera, the caret, or the
+     ink overlay updates, so every other glyph flashes. */
   scroll-behavior: auto;
-  will-change: scroll-position;
+  will-change: auto;
   /* Zoom grows the sheet; anchoring would fight our cursor-lock scroll. */
   overflow-anchor: none;
 }
@@ -1641,7 +1644,7 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
   transition: none;
   /* Do not use will-change:transform — Chromium then rasterizes text at 1× and
      stretches it when zoomed, which makes markdown unreadable. The pinch
-     preview sets will-change inline only while .is-zoom-gesture is on. */
+     preview must not set it either: promoting the plane blanks the note. */
   will-change: auto;
   transform-origin: center center;
 }

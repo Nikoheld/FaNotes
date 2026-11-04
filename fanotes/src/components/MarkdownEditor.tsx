@@ -73,7 +73,9 @@ import {
   resolvePaperCaretScroller,
   sealNestedEditorScroll,
   tickPaperViewportEditorScrollHold,
+  commitEditorTextInsert,
 } from '../lib/paperCaretScroll'
+import { bindPaperNoteText } from '../lib/noteTextStay'
 import { buildTextMotionDiagnosticEvent, recordTextMotionDiagnostic } from '../lib/bugReport'
 import { revealDocumentLine } from '../lib/noteOutline'
 import { fenceIsOpen, isFenceLine, toggleTaskLine } from '../lib/noteEveryday'
@@ -1539,7 +1541,11 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
           if (update.docChanged && !syncingExternalContent.current) {
             // CodeMirror paints immediately. React, word count, outline and
             // autosave receive one trailing snapshot per short typing burst.
-            changeScheduler.push(() => update.state.doc.toString())
+            changeScheduler.push(() => {
+              const text = update.state.doc.toString()
+              bindPaperNoteText(resolvePaperCaretScroller(update.view.dom), text)
+              return text
+            })
             const report = onEditActivityRef.current
             if (report) {
               for (const transaction of update.transactions) {
@@ -1554,6 +1560,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
 
     const view = new EditorView({ state, parent: host })
     viewRef.current = view
+    bindPaperNoteText(resolvePaperCaretScroller(host), state.doc.toString())
     // The paper camera remembers the text under the viewport edge, not a
     // pixel offset: CodeMirror only estimates the height of unrendered lines.
     const unregisterAnchor = registerPaperTextAnchorProvider(host, {
@@ -1626,16 +1633,21 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       return
     }
 
+    const span = minimalReplacement(current, content)
+    const kept = commitEditorTextInsert(current, span.from, span.to, span.insert)
+    if (kept.hide || kept.unmount || kept.fullClear) return
+    if (!kept.note.startsWith(kept.prefix) || !kept.note.endsWith(kept.suffix)) return
     syncingExternalContent.current = true
     try {
       view.dispatch({
         // Replace only the span that differs. CodeMirror maps the selection
         // through the change, so a cursor after the edited span stays where it
         // is instead of being clamped to the new document length.
-        changes: minimalReplacement(current, content),
+        changes: { from: span.from, to: span.to, insert: span.insert },
         // React owns this replacement. It must not become an undo step itself.
         annotations: Transaction.addToHistory.of(false),
       })
+      bindPaperNoteText(resolvePaperCaretScroller(view.dom), kept.note)
       lastEmittedContentRef.current = content
     } finally {
       syncingExternalContent.current = false

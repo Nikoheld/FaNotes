@@ -147,7 +147,8 @@ import {
   mapClientToPaperPoint,
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
-import { bitmapPatchesTouch, clearMarkerCoverageRect, createMarkerCoverage, drawInkStroke as paintInkStroke, inkStrokeIsTranslucent, inkStrokePaintMargin, removedStrokeBitmapPatch, shiftMarkerCoverage, strokeBitmapPatch, unionBitmapPatch, type BitmapPatch, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
+import { bitmapPatchesTouch, clearMarkerCoverageRect, createMarkerCoverage, drawInkStroke as paintInkStroke, eraseInkKeepingNoteText, inkStrokeIsTranslucent, inkStrokePaintMargin, shiftMarkerCoverage, strokeBitmapPatch, unionBitmapPatch, type BitmapPatch, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
+import { paperNoteTextOf } from '../lib/noteTextStay'
 import { liveTranslucentCanGrow, paintGrowingTranslucentStroke, type LiveTranslucentSession } from '../lib/liveTranslucentInk'
 import { MATH_FIGURES, FIGURE_LINE_MAX, FIGURE_LINE_MIN, FIGURE_LINE_STEP, clampFigureLineWidth, clampFigureParams, defaultFigureParams, figureLineWidthForSize, isMathFigureId, mathFigurePaths, type MathFigureGroup, type MathFigureId, type MathFigureParam } from '../lib/mathFigures'
 import {
@@ -2552,7 +2553,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     )
     const pendingErase = committedPatchRef.current
     committedPatchRef.current = null
-    const coverageNow = markerCoverageRef.current
     const eraseBitmapReady = Boolean(
       pendingErase
       && pendingErase.strokes === strokesRef.current
@@ -2561,8 +2561,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       && held.topPx === topPx
       && !committedResized
       && !activeStrokeRef.current
-      && !painting
-      && (!coverageNow || (coverageNow.width === committedCanvas.width && coverageNow.height === committedCanvas.height))
     )
     let erasePatch: { x: number; y: number; width: number; height: number } | null = null
     let eraseOutside = false
@@ -4129,9 +4127,21 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return
     }
     const scale = inkStrokePaintScale(pageWidth, size.layoutWidth > 1 ? size.layoutWidth : sourceWidthRef.current)
-    const rect = removedStrokeBitmapPatch(before, after, pageWidth, pageHeight, (stroke) => (
-      inkStrokePaintMargin({ ...stroke, symbolPaths: placedSymbolPaths(stroke) }, scale)
-    ))
+    const paper = resolvePaperElement()
+    const scroller = paper?.closest('.paper-view, .unified-note-view') ?? paper
+    const kept = eraseInkKeepingNoteText(
+      paperNoteTextOf(scroller),
+      before,
+      after,
+      pageWidth,
+      pageHeight,
+      (stroke) => inkStrokePaintMargin({ ...stroke, symbolPaths: placedSymbolPaths(stroke) }, scale),
+    )
+    if (kept.fullClear || kept.hide || kept.unmount || kept.note !== paperNoteTextOf(scroller)) {
+      committedPatchRef.current = null
+      return
+    }
+    const rect = kept.patch
     const previous = committedPatchRef.current
     if (!rect || (previous && previous.strokes !== before)) {
       committedPatchRef.current = null

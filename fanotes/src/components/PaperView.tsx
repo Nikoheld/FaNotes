@@ -19,6 +19,7 @@ import {
   applyPaperZoomGestureFrame,
   applyPaperZoomStayPut,
   beginPaperZoomGesture,
+  keepPaperTextOnCameraMove,
   centrePageInViewportIfFits,
   clearPaperZoomGestureFrame,
   centredScrollLeftForPage,
@@ -66,6 +67,7 @@ import {
   type PaperViewMemoryEntry,
 } from '../lib/paperViewMemory'
 import { findPaperTextAnchorProvider } from '../lib/paperTextAnchor'
+import { paperNoteTextOf } from '../lib/noteTextStay'
 import { pdfOpenCameraFromScroller } from '../lib/pdfOpenCamera'
 import {
   captureGhostTextAroundLock,
@@ -156,6 +158,8 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
   /** While set, scroll listeners must not measure the sheet. Stay-put already does. */
   const zoomGestureActiveRef = useRef(false)
   const zoomPlaneRef = useRef<HTMLElement | null>(null)
+  const noteTextRef = useRef<HTMLElement | null>(null)
+  const noteTextMissRef = useRef(false)
   const commitZoomGestureRef = useRef(() => {})
   const cancelZoomGestureRef = useRef(() => {})
   const pushZoomGestureRef = useRef<(factor: number, origin: { x: number; y: number }) => void>(() => {})
@@ -214,6 +218,17 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     let gaveUp = false
     let pointerHeld = false
     let scrollArm = false
+    noteTextRef.current = null
+    noteTextMissRef.current = false
+    const readNoteText = () => {
+      const cached = noteTextRef.current
+      if (cached?.isConnected) return cached
+      if (noteTextMissRef.current) return null
+      const found = scroller.querySelector<HTMLElement>('.cm-content')
+      if (found) noteTextRef.current = found
+      else if (!scroller.querySelector('.markdown-editor')) noteTextMissRef.current = true
+      return found
+    }
     // Set for one turn by a wheel, key, click, or scrollbar. A later layout
     // scroll must not inherit it.
     let gestureArm = 0
@@ -430,6 +445,11 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       }
       const zoomedOrPdf = Math.abs(viewRef.current.zoom - 1) >= 0.001 || scroller.classList.contains('is-pdf-note')
       if (zoomedOrPdf && !scrollLayoutFrame) scrollLayoutFrame = window.requestAnimationFrame(runScrollLayout)
+      keepPaperTextOnCameraMove(
+        { note: paperNoteTextOf(scroller), anchorX: scroller.scrollLeft, anchorY: scroller.scrollTop },
+        { kind: 'pan', scrollLeft: scroller.scrollLeft, scrollTop: scroller.scrollTop },
+        { scroller, text: readNoteText() },
+      )
       // Layout and focus scrolls are not the user's camera — not even after
       // a real pan, or the next open would restore the jump.
       if (!fromGesture || !userOwned) return
@@ -792,7 +812,13 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     const gesture = stepPaperZoomGesture(zoomGestureRef.current!, factor)
     zoomGestureRef.current = gesture
     const plane = zoomPlaneRef.current
-    if (!applyPaperZoomGestureFrame(plane, gesture)) {
+    const cachedText = noteTextRef.current
+    const noteText = cachedText?.isConnected
+      ? cachedText
+      : (noteTextMissRef.current ? null : scroller.querySelector<HTMLElement>('.cm-content'))
+    if (noteText) noteTextRef.current = noteText
+    else if (!cachedText && !scroller.querySelector('.markdown-editor')) noteTextMissRef.current = true
+    if (!applyPaperZoomGestureFrame(plane, gesture, noteText)) {
       zoomGestureRef.current = null
       zoomPlaneRef.current = null
       clearPaperZoomGestureFrame(plane, gesture.rotation)
