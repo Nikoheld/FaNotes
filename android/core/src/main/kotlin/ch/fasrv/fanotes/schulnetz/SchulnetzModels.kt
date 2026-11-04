@@ -162,6 +162,8 @@ data class NotifySettings(
     val absences: Boolean = true,
     val events: Boolean = true,
     val deadlines: Boolean = true,
+    /** When true, new-grade pushes and lists hide the mark until it is revealed. Default off. */
+    val guessGrades: Boolean = false,
 )
 
 data class SchulnetzChange(

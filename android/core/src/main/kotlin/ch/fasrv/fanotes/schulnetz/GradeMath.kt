@@ -90,7 +90,11 @@ fun coursePromotion(label: String, average: Double?): Pair<Double?, Double> {
     return zeugnis to (promotionPoints(zeugnis) ?: 0.0)
 }
 
-fun courseSummaries(grades: List<SchoolGrade>, hypothetical: List<HypotheticalGrade> = emptyList()): List<CourseSummary> {
+fun courseSummaries(
+    grades: List<SchoolGrade>,
+    hypothetical: List<HypotheticalGrade> = emptyList(),
+    hiddenTargetIds: Set<String> = emptySet(),
+): List<CourseSummary> {
     val groups = linkedMapOf<String, MutableList<WeightedMark>>()
     val labels = linkedMapOf<String, String>()
     for (grade in grades) {
@@ -110,7 +114,8 @@ fun courseSummaries(grades: List<SchoolGrade>, hypothetical: List<HypotheticalGr
     }
     return groups.map { (key, marks) ->
         val label = labels[key] ?: key
-        val average = weightedAverage(marks)
+        val counted = marks.filter { it.own || it.targetId.isBlank() || it.targetId !in hiddenTargetIds }
+        val average = weightedAverage(counted)
         val sport = isSportCourse(label)
         val zeugnis = average?.let(::roundToHalf)
         val counts = zeugnis != null && !sport
@@ -121,7 +126,7 @@ fun courseSummaries(grades: List<SchoolGrade>, hypothetical: List<HypotheticalGr
             zeugnis = zeugnis,
             pluspunkte = if (counts) promotionPoints(zeugnis) ?: 0.0 else 0.0,
             promotion = counts,
-            weight = marks.sumOf { it.weight },
+            weight = counted.sumOf { it.weight },
             marks = marks,
         )
     }.sortedBy { it.label.lowercase() }
