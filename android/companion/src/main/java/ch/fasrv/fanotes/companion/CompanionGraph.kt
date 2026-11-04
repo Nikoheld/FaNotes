@@ -120,7 +120,7 @@ class CompanionGraph(private val context: Context) {
         SyncApi(OkHttpSyncTransport()),
         SyncEngineOptions(
             platform = "android-phone",
-            deviceName = { prefs.getString("device-name", null)?.ifBlank { null } ?: "FaNotes Companion" },
+            deviceName = { prefs.getString("device-name", null)?.ifBlank { null } ?: "Kanti+" },
             automatic = { true },
             isPathBusy = { path -> path in busyPaths },
             onApplied = { _, _ -> vaultChanges.tryEmit(Unit) },
@@ -702,7 +702,7 @@ class CompanionGraph(private val context: Context) {
                         withContext(Dispatchers.IO) {
                             val fanotes = engine.currentSession()
                             if (fanotes != null) {
-                                runCatching { client.linkWeb(fanotes, baseUrl(), deviceId(), ch.fasrv.fanotes.schulnetz.SCHULNETZ_USER_AGENT, exportSsoCookies(), "Companion") }
+                                runCatching { client.linkWeb(fanotes, baseUrl(), deviceId(), ch.fasrv.fanotes.schulnetz.SCHULNETZ_USER_AGENT, exportSsoCookies(), "Kanti+") }
                                     .onSuccess { link.value = it }
                                     .onFailure { schulnetzLog.error(it) }
                             }

@@ -143,7 +143,7 @@ fun TaskForm(model: CompanionModel, task: HomeworkTask? = null, onDismiss: () ->
                 enabled = title.isNotBlank() && !saving, modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp).heightIn(min = 50.dp)) { Text(if (saving) "Saving…" else "Save task") }
         }
     }
-    if (confirm && task != null) ConfirmDialog("Delete this task?", "This removes it from your FaNotes task list.", "Delete", { confirm = false }) { model.deleteTask(task); onDismiss() }
+    if (confirm && task != null) ConfirmDialog("Delete this task?", "This removes it from your Kanti+ task list.", "Delete", { confirm = false }) { model.deleteTask(task); onDismiss() }
 }
 
 @Composable
@@ -187,5 +187,5 @@ fun EventForm(model: CompanionModel, event: CalendarEvent? = null, onDismiss: ()
                 enabled = valid && !saving, modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp).heightIn(min = 50.dp)) { Text(if (saving) "Saving…" else "Save event") }
         }
     }
-    if (confirm && event != null) ConfirmDialog("Delete ${if (event.recurrence != "none") "this series" else "this event"}?", "This removes it from your FaNotes calendar.", "Delete", { confirm = false }) { model.deleteEvent(event); onDismiss() }
+    if (confirm && event != null) ConfirmDialog("Delete ${if (event.recurrence != "none") "this series" else "this event"}?", "This removes it from your Kanti+ calendar.", "Delete", { confirm = false }) { model.deleteEvent(event); onDismiss() }
 }

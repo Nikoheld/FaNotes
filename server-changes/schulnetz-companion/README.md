@@ -1,6 +1,6 @@
-# Schulnetz für FaNotes Companion
+# Schulnetz für Kanti+
 
-Die Telefon-App `ch.fasrv.fanotes.companion` spricht mit dem bestehenden FaNotes-Server. Dieser Ordner beschreibt **jede** Änderung, die auf `fanotes.fasrv.ch` nötig ist. Der Code liegt im Repository und wird mit dem normalen Site-Deploy ausgeliefert:
+Die Telefon-App Kanti+ (`ch.fasrv.fanotes.companion`) spricht mit dem bestehenden FaNotes-Server. Dieser Ordner beschreibt **jede** Änderung, die auf `fanotes.fasrv.ch` nötig ist. Der Code liegt im Repository und wird mit dem normalen Site-Deploy ausgeliefert:
 
 - `fanotes-site/schulnetz-api.mjs` — HTTP, Verschlüsselung, Poller
 - `fanotes-site/schulnetz-logic.mjs` — Parser, Notenrechnung, Diff, Lesesperre
@@ -109,7 +109,7 @@ Ohne Google Play und ohne `google-services.json`.
 
 1. Beim Verbinden entsteht ein zufälliges ntfy-Thema. `GET /status` gibt `push.url` zurück, zum Beispiel `https://ntfy.sh/<32 hex>`.
 2. Der Server sendet bei einer Änderung ein POST an dieses Thema und an bis zu acht weitere HTTPS-Endpunkte.
-3. Die App öffnet keine eigene ntfy-Socket-Verbindung und zeigt keine dauerhafte Meldung. Ist eine UnifiedPush-App installiert (ntfy, Nextcloud, …), registriert Companion deren Endpunkt unter `/push-endpoint`. Der Verteiler hält die eine Verbindung; Companion wacht nur bei einem Push auf. Die Meldung erscheint auf dem passenden Kanal (Note, Stundenplan, …).
+3. Die App öffnet keine eigene ntfy-Socket-Verbindung und zeigt keine dauerhafte Meldung. Ist eine UnifiedPush-App installiert (ntfy, Nextcloud, …), registriert Kanti+ deren Endpunkt unter `/push-endpoint`. Der Verteiler hält die eine Verbindung; Kanti+ wacht nur bei einem Push auf. Die Meldung erscheint auf dem passenden Kanal (Note, Stundenplan, …).
 4. Der Server postet den Rohtext an den UnifiedPush-Endpunkt. Verteiler, die Web-Push-Verschlüsselung erzwingen, bekommen hier den Klartext; ntfy nimmt ihn direkt an.
 5. Fehlt ein Verteiler, holt WorkManager `/snapshot` und `/changes` höchstens alle 15 Minuten (Netzwerkbedingung). In den Benachrichtigungs-Einstellungen steht dann ein kurzer Hinweis in der App, kein Notification-Banner.
 6. Jede Meldung trägt Typ und eine stabile Ziel-Id (Hash aus Fach+Datum+Titel bzw. Lektion Datum+Zeit+Fach). Ein Tipp öffnet das Element: Note → Noten mit geöffnetem Fach, Stundenplan → Tag und Lektion, Prüfung → Prüfungsdetail, Termin/Mitteilung → Termine, Absenzfrist → Absenz, Test → Einstellungen. Fehlt das Element, bleibt die passende Liste mit einem kurzen Hinweis. Mehrere neue Noten werden zu einer Meldung mit allen Ziel-Ids zusammengefasst. Dasselbe JSON gilt für ntfy, UnifiedPush und lokale WorkManager-Meldungen; `MainActivity` ist `singleTop`, damit ein Tipp aus dem Hintergrund und ein Kaltstart dieselben Extras lesen.

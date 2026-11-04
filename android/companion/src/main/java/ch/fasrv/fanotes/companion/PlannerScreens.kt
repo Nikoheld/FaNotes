@@ -322,7 +322,7 @@ fun AgendaDetails(model: CompanionModel, entry: AgendaEntry, onDismiss: () -> Un
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).sheetKeyboardPadding().padding(horizontal = Space.page).padding(bottom = Space.xl)) {
             SheetTitle(courseAlias(entry.title, model.desk.courseAliases), onDismiss)
-            Tag(if (entry.school != null) "Schulnetz · ${entry.kind.label.lowercase()}" else "FaNotes calendar")
+            Tag(if (entry.school != null) "Schulnetz · ${entry.kind.label.lowercase()}" else "Kanti+")
             Text(dateLabel(entry.day), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp))
             Text(entry.time, style = MaterialTheme.typography.bodyLarge)
             if (entry.detail.isNotBlank()) Text(entry.detail, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp))

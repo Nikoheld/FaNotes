@@ -658,7 +658,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 "push-test",
                 "settings",
                 "Test notification",
-                "FaNotes Companion can display notifications.",
+                "Kanti+ can display notifications.",
                 targetId = "settings",
             ),
         )
