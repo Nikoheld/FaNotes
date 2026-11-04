@@ -59,6 +59,15 @@ import java.util.concurrent.TimeUnit
 
 class SchulnetzHttpException(val status: Int, message: String) : Exception(message)
 
+/** Server identity for Schulnetz. Guest identities have no email or password. */
+data class SchoolAuth(
+    val accountId: String,
+    val token: String,
+    val guest: Boolean = false,
+)
+
+fun SyncSession.asSchoolAuth() = SchoolAuth(accountId, token, guest = false)
+
 data class WebBundle(
     val snapshot: SchulnetzSnapshot,
     val problem: SessionProblem,
@@ -122,14 +131,14 @@ class SchulnetzClient(
         )
     }
 
-    fun status(session: SyncSession): SchulnetzLinkState {
+    fun status(session: SchoolAuth): SchulnetzLinkState {
         val (code, body) = fanotes("GET", "/status", session, null)
         if (code == 404) return SchulnetzLinkState(reachable = false)
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
         return parseStatus(body)
     }
 
-    fun linkWeb(session: SyncSession, baseUrl: String, deviceId: String, userAgent: String, ssoCookies: Map<String, String>, displayName: String): SchulnetzLinkState {
+    fun linkWeb(session: SchoolAuth, baseUrl: String, deviceId: String, userAgent: String, ssoCookies: Map<String, String>, displayName: String): SchulnetzLinkState {
         val cookies = ssoCookies.entries.joinToString(",") { (host, value) -> "${escapeJson(host)}:${escapeJson(value)}" }
         val payload = buildString {
             append("{\"mode\":\"web\",\"baseUrl\":").append(escapeJson(baseUrl))
@@ -143,7 +152,7 @@ class SchulnetzClient(
         return parseStatus(body)
     }
 
-    fun uploadSnapshot(session: SyncSession, snapshot: SchulnetzSnapshot) {
+    fun uploadSnapshot(session: SchoolAuth, snapshot: SchulnetzSnapshot) {
         val (code, body) = fanotes("PUT", "/snapshot", session, snapshot.toNormalizedJson())
         if (code !in 200..299 && code != 404) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
@@ -312,7 +321,7 @@ class SchulnetzClient(
         else -> snapshot
     }
 
-    fun link(session: SyncSession, baseUrl: String, deviceId: String, tokens: SchulnetzTokens, displayName: String): SchulnetzLinkState {
+    fun link(session: SchoolAuth, baseUrl: String, deviceId: String, tokens: SchulnetzTokens, displayName: String): SchulnetzLinkState {
         val payload = buildString {
             append("{\"baseUrl\":").append(escapeJson(baseUrl))
             append(",\"deviceId\":").append(escapeJson(deviceId))
@@ -327,37 +336,72 @@ class SchulnetzClient(
         return parseStatus(body)
     }
 
-    fun unlink(session: SyncSession) {
+    fun unlink(session: SchoolAuth) {
         val (code, body) = fanotes("DELETE", "/link", session, null)
         if (code !in 200..299 && code != 404) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
 
-    fun saveSettings(session: SyncSession, settings: NotifySettings) {
+    fun saveSettings(session: SchoolAuth, settings: NotifySettings) {
         val payload = """{"grades":${settings.grades},"timetable":${settings.timetable},"exams":${settings.exams},"absences":${settings.absences},"events":${settings.events},"deadlines":${settings.deadlines},"guessGrades":${settings.guessGrades}}"""
         val (code, body) = fanotes("PUT", "/settings", session, payload)
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
 
-    fun snapshot(session: SyncSession): String {
+    fun snapshot(session: SchoolAuth): String {
         val (code, body) = fanotes("GET", "/snapshot", session, null)
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
         return body
     }
 
-    fun changes(session: SyncSession, since: Long): String {
+    fun changes(session: SchoolAuth, since: Long): String {
         val (code, body) = fanotes("GET", "/changes?since=$since", session, null)
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
         return body
     }
 
-    fun registerFcmToken(session: SyncSession, token: String) {
+    fun registerFcmToken(session: SchoolAuth, token: String) {
         val (code, body) = fanotes("PUT", "/push-token", session, "{\"token\":${escapeJson(token)}}")
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
 
-    fun testPush(session: SyncSession) {
+    fun testPush(session: SchoolAuth) {
         val (code, body) = fanotes("POST", "/push/test", session, "{}")
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
+    }
+
+    fun createGuest(): SchoolAuth {
+        val (code, body) = call(
+            "POST",
+            "$SYNC_ORIGIN$SCHULNETZ_API_PATH/guest",
+            mapOf("Accept" to "application/json", "Content-Type" to "application/json"),
+            "{}",
+        )
+        if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
+        val obj = parseJson(body) as? JsonValue.Obj ?: throw SchulnetzHttpException(code, "Anfrage fehlgeschlagen ($code).")
+        val accountId = obj.string("accountId").orEmpty()
+        val token = obj.string("token").orEmpty()
+        if (!accountId.matches(Regex("^[a-f0-9]{32}$")) || !token.matches(Regex("^[A-Za-z0-9_-]{40,80}$"))) {
+            throw SchulnetzHttpException(code, "Anfrage fehlgeschlagen ($code).")
+        }
+        return SchoolAuth(accountId, token, guest = true)
+    }
+
+    fun adopt(session: SchoolAuth, guestId: String, guestToken: String): Long {
+        val (code, body) = fanotes("POST", "/adopt", session, "{\"guestAccountId\":${escapeJson(guestId)},\"guestToken\":${escapeJson(guestToken)}}")
+        if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
+        return (parseJson(body) as? JsonValue.Obj)?.double("revision")?.toLong() ?: 0L
+    }
+
+    fun detach(session: SchoolAuth, guestId: String, guestToken: String, fcmToken: String?): Long {
+        val tokenField = if (fcmToken.isNullOrBlank()) "" else ",\"fcmToken\":${escapeJson(fcmToken)}"
+        val (code, body) = fanotes("POST", "/detach", session, "{\"guestAccountId\":${escapeJson(guestId)},\"guestToken\":${escapeJson(guestToken)}$tokenField}")
+        if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
+        return (parseJson(body) as? JsonValue.Obj)?.double("revision")?.toLong() ?: 0L
+    }
+
+    fun deleteGuest(session: SchoolAuth) {
+        val (code, body) = fanotes("DELETE", "/guest", session, null)
+        if (code !in 200..299 && code != 404) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
 
     private fun token(baseUrl: String, form: String): SchulnetzTokens {
@@ -387,13 +431,13 @@ class SchulnetzClient(
         return tokens
     }
 
-    private fun fanotes(method: String, path: String, session: SyncSession, json: String?): Pair<Int, String> =
+    private fun fanotes(method: String, path: String, session: SchoolAuth, json: String?): Pair<Int, String> =
         call(
             method,
             "$SYNC_ORIGIN$SCHULNETZ_API_PATH$path",
             mapOf(
                 "Authorization" to "Bearer ${session.token}",
-                "X-FaNotes-Account" to session.accountId,
+                (if (session.guest) "X-Kanti-Guest" else "X-FaNotes-Account") to session.accountId,
                 "Accept" to "application/json",
                 "Content-Type" to "application/json",
             ),

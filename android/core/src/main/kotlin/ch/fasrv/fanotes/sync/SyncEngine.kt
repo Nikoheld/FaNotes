@@ -535,11 +535,11 @@ class SyncEngine(
         val entries = currentHost.scan().filter { acceptsPath(it.path) }
         val present = entries.map { it.path }.toSet()
         val changed = entries.filter { entry ->
-            if (entry.size > MAX_FILE_BYTES) return@filter false
+            if (entry.size > MAX_FILE_BYTES || options.isPathBusy(entry.path)) return@filter false
             val base = table.files[entry.path]
             base == null || base.size != entry.size || base.mtimeMs != entry.mtimeMs || entry.mtimeMs == 0L || base.sha256.isEmpty()
         }
-        val deleted = table.files.keys.filter { acceptsPath(it) && it !in present }
+        val deleted = table.files.keys.filter { acceptsPath(it) && it !in present && !options.isPathBusy(it) }
         publish(state.value.copy(pendingLocal = changed.size + deleted.size, progress = SyncProgress("push", 0, changed.size + deleted.size)))
         var uploads = 0
         var deletes = 0

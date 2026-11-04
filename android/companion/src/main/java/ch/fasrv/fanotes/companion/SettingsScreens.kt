@@ -44,25 +44,32 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
         Page.Settings -> ScreenList {
             item {
                 Row(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Box(Modifier.size(48.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PersonOutline, null, tint = MaterialTheme.colorScheme.primary) }
-                    Column(Modifier.weight(1f)) { Text(sync.account?.email ?: "Your FaNotes", style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis); Text(syncDescription(sync.status), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    Box(Modifier.size(48.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape), contentAlignment = Alignment.Center) { Icon(if (model.notesAccount) Icons.Outlined.PersonOutline else Icons.Outlined.School, null, tint = MaterialTheme.colorScheme.primary) }
+                    Column(Modifier.weight(1f)) {
+                        Text(sync.account?.email ?: if (model.notesAccount) "Your FaNotes" else "Kanti+", style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(if (model.notesAccount) syncDescription(sync.status) else "Grades, timetable and school updates", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
                 FineDivider()
             }
-            item { SectionLabel("Make it yours") }
-            item { SettingRow(Icons.Outlined.ManageAccounts, "Account & sync", "FaNotes, Schulnetz and offline status") { model.navigate(Page.Connections) } }
+            item { SectionLabel(if (model.notesAccount) "Make it yours" else "School") }
+            if (model.notesAccount) item { SettingRow(Icons.Outlined.ManageAccounts, "Account & sync", "FaNotes, Schulnetz and offline status") { model.navigate(Page.Connections) } }
+            else item { SettingRow(Icons.Outlined.School, "Schulnetz", "Connection, notifications and this device") { model.navigate(Page.Connections) } }
+            if (!model.notesAccount) item { SectionLabel("Make it yours") }
             item { SettingRow(Icons.Outlined.Palette, "Appearance", "Theme, accent and app icon") { model.navigate(Page.Appearance) } }
             item { SettingRow(Icons.Outlined.ViewWeek, "Navigation bar", "Choose tabs and their order") { model.navigate(Page.Navigation) } }
             item { SettingRow(Icons.Outlined.Tune, "Planning & grades", "Today, timetable and grade display") { model.navigate(Page.Planning) } }
             item { SettingRow(Icons.Outlined.NotificationsNone, "Notifications", "What reaches you, and when") { model.navigate(Page.Notifications) } }
-            item { SectionLabel("About Kanti+") }
-            item { SettingRow(Icons.Outlined.AutoGraph, "Your activity", "Notes, habits and milestones") { model.navigate(Page.Profile) } }
+            item { SectionLabel(if (model.notesAccount) "About Kanti+" else "Optional") }
+            if (model.notesAccount) item { SettingRow(Icons.Outlined.AutoGraph, "Your activity", "Notes, habits and milestones") { model.navigate(Page.Profile) } }
+            else item { SettingRow(Icons.Outlined.EditNote, "Sync notes with FaNotes", "Optional. School stays available either way.") { model.navigate(Page.Auth) } }
+            if (!model.notesAccount) item { SectionLabel("About Kanti+") }
             item { SettingRow(Icons.Outlined.BugReport, "Diagnostics", "Connection checks and support exports") { model.navigate(Page.Diagnostics) } }
             item { Text("Kanti+ · ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 28.dp)) }
         }
         Page.Connections -> ScreenList {
-            item { SectionLabel("FaNotes account") }
-            item {
+            if (model.notesAccount) item { SectionLabel("FaNotes account") }
+            if (model.notesAccount) item {
                 Text(sync.account?.email ?: "Work on this device", style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(syncDescription(sync.status), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
                 Text("Your notes stay available offline. A connected account syncs them using end-to-end encryption.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
@@ -71,6 +78,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                     Text("Last sync ${sync.lastSyncAt?.let(::updatedLabel) ?: "Not yet"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Button(onClick = model::sync, enabled = !model.busy && sync.status != SyncStatus.SYNCING, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) { Icon(Icons.Outlined.Sync, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Sync now") }
                     TextButton(onClick = { confirm = "logout" }) { Text("Sign out") }
+                    if (model.graph.plannerHold()) TextButton(onClick = model::acceptUpload) { Text("Upload tasks and calendar") }
                 }
                 sync.error?.let { error -> InfoBanner("Sync needs attention", error, "Try again", true, model::sync) }
                 if (sync.conflicts.isNotEmpty()) InfoBanner("Conflict copies kept", "${sync.conflicts.size} conflicting edits were preserved as separate notes. Find them in your library.")
@@ -84,9 +92,12 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                 Text(when { model.link.needsReauth -> "Sign in again to refresh"; model.link.linked -> "Connected"; else -> "Not connected" }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
                 Text("Read your school information here. Manage official records through your school.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
                 OutlinedTextField(model.baseUrl, { model.baseUrl = it }, Modifier.fillMaxWidth(), label = { Text("School address") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
-                if (sync.account == null) TextButton(onClick = { model.navigate(Page.Auth) }, modifier = Modifier.fillMaxWidth()) { Text("Connect FaNotes first") }
-                else Button(onClick = { model.requestVisibleLogin("connections") }, enabled = !model.busy, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) { Text(if (model.link.needsReauth) "Sign in to Schulnetz again" else if (model.link.linked) "Open school session" else "Connect with Microsoft") }
+                Button(onClick = { model.requestVisibleLogin("connections") }, enabled = !model.busy, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) { Text(if (model.link.needsReauth) "Sign in to Schulnetz again" else if (model.link.linked) "Open school session" else "Connect with Microsoft") }
                 if (model.link.linked) TextButton(onClick = { confirm = "unlink" }) { Text("Disconnect school") }
+                if (!model.notesAccount) {
+                    TextButton(onClick = { model.navigate(Page.Auth) }, modifier = Modifier.fillMaxWidth()) { Text("Sync notes with FaNotes") }
+                    TextButton(onClick = { confirm = "delete-kanti" }) { Text("Delete my Kanti+ data") }
+                }
                 Text("School data updated ${updatedLabel(model.snapshot.fetchedAt)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp))
                 if (model.link.lastError.isNotBlank()) InfoBanner("School connection needs attention", model.link.lastError, "Diagnostics", true) { model.navigate(Page.Diagnostics) }
             }
@@ -97,7 +108,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                 Text("Theme", style = MaterialTheme.typography.titleMedium)
                 ChoiceRow(THEME_CHOICES.map { it.id to when (it.id) { "light" -> "Paper"; "dark" -> "Graphite"; "midnight" -> "Midnight"; "forest" -> "Forest"; "aurora" -> "Aurora"; "sepia" -> "Warm paper"; else -> "System" } }, model.desk.theme, model::chooseTheme)
                 ToggleRow("Pure black", "Use a black background in dark themes", model.desk.amoled) { model.updateDesk(model.desk.copy(amoled = it)) }
-                SectionLabel("Ink accent")
+                SectionLabel(if (model.notesAccount) "Ink accent" else "Accent")
                 ColorChoices(listOf("#2a6f97", "#7f6df2", "#3d8bfd", "#2f9e6b", "#e15b64"), model.desk.accent) { model.updateDesk(model.desk.copy(accent = it)) }
                 Text("Accent contrast adjusts to your theme.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -109,7 +120,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
         Page.Navigation -> NavigationBarSettings(model)
         Page.Planning -> ScreenList {
             item { SectionLabel("When you open Kanti+") }
-            item { ChoiceRow(NAV_BAR_IDS.map { it to navBarLabel(it) }, startTabId(model.desk.startTab), { model.updateDesk(model.desk.copy(startTab = it)) }) }
+            item { ChoiceRow((if (model.notesAccount) NAV_BAR_IDS else NAV_BAR_IDS.filter { it != "notes" }).map { it to navBarLabel(it) }, startTabId(model.desk.startTab).let { if (!model.notesAccount && it == "notes") "today" else it }, { model.updateDesk(model.desk.copy(startTab = it)) }) }
             item { SectionLabel("On Today") }
             items(TODAY_CARD_IDS, key = { it }) { id ->
                 ToggleRow(when (id) { "lessons" -> "Next commitment"; "exam" -> "Upcoming exam"; "grades" -> "Grade overview"; "pluspunkte" -> "Promotion points"; "events" -> "School updates"; else -> "Tasks" }, checked = id !in model.desk.hiddenCards) { show ->
@@ -160,19 +171,20 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                 Text("Share an export when troubleshooting a school connection. Exports can contain school content; review who you share them with.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedButton(onClick = { model.shareDebug(context) }, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) { Text("Share school page") }
                 OutlinedButton(onClick = { model.shareLogs(context) }, modifier = Modifier.fillMaxWidth()) { Text("Share diagnostic archive") }
-                OutlinedButton(onClick = model::sync, enabled = sync.account != null && !model.busy, modifier = Modifier.fillMaxWidth()) { Text("Refresh connections") }
+                if (model.notesAccount) OutlinedButton(onClick = model::sync, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text("Refresh connections") }
+                else OutlinedButton(onClick = model::refreshSchool, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text("Refresh school data") }
             }
         }
         Page.Profile -> ScreenList {
             item {
                 Text("A little progress, every day.", style = MaterialTheme.typography.headlineMedium)
                 Row(Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
-                    Column { Text(model.writtenNotes.toString(), style = MaterialTheme.typography.headlineLarge); Text("notes", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    if (model.notesAccount) Column { Text(model.writtenNotes.toString(), style = MaterialTheme.typography.headlineLarge); Text("notes", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     Column { Text(model.graph.streakDays().toString(), style = MaterialTheme.typography.headlineLarge); Text("days in a row", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
                 SectionLabel("Milestones")
             }
-            items(companionBadges(model.writtenNotes, model.graph.streakDays(), highestVisibleMark(model.snapshot.grades, model.hiddenGradeIds(), model.settings.guessGrades)), key = { it.id }) { badge ->
+            items(companionBadges(model.writtenNotes, model.graph.streakDays(), highestVisibleMark(model.snapshot.grades, model.hiddenGradeIds(), model.settings.guessGrades)).filter { model.notesAccount || !it.id.startsWith("notes") }, key = { it.id }) { badge ->
                 val title = when (badge.id) { "notes-1" -> "First thought"; "notes-10" -> "A growing notebook"; "streak-3" -> "Finding your rhythm"; else -> "Top marks" }
                 val body = when (badge.id) { "notes-1" -> "Write your first note"; "notes-10" -> "Keep ten notes in your library"; "streak-3" -> "Open Kanti+ three days in a row"; else -> "Receive a grade of 6" }
                 Row(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -184,15 +196,41 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
         }
         else -> Unit
     }
-    if (confirm.isNotBlank()) ConfirmDialog(if (confirm == "logout") "Sign out of FaNotes?" else "Disconnect Schulnetz?", if (confirm == "logout") "Your local notes stay on this device. Sync will stop until you sign in again." else "Your last school snapshot stays available. You can reconnect later.", if (confirm == "logout") "Sign out" else "Disconnect", { confirm = "" }) {
-        if (confirm == "logout") model.logout() else model.unlink(); confirm = ""
+    if (confirm.isNotBlank()) {
+        val deleteKanti = confirm == "delete-kanti"
+        ConfirmDialog(
+            when (confirm) {
+                "logout" -> "Sign out of FaNotes?"
+                "delete-kanti" -> "Delete my Kanti+ data?"
+                else -> "Disconnect Schulnetz?"
+            },
+            when (confirm) {
+                "logout" -> "Your local notes stay on this device. School updates keep working. Sync will stop until you sign in again."
+                "delete-kanti" -> "School data stored for this device is removed from the server, including the Schulnetz link, snapshot and push setup. Tasks and calendar on this device stay."
+                else -> "Your last school snapshot stays available. You can reconnect later."
+            },
+            when (confirm) {
+                "logout" -> "Sign out"
+                "delete-kanti" -> "Delete"
+                else -> "Disconnect"
+            },
+            { confirm = "" },
+        ) {
+            when {
+                confirm == "logout" -> model.logout()
+                deleteKanti -> model.deleteKantiData()
+                else -> model.unlink()
+            }
+            confirm = ""
+        }
     }
 }
 
 @Composable
 private fun NavigationBarSettings(model: CompanionModel) {
-    val bar = validateNavBar(model.desk.navBar)
-    val available = remainingNavBar(bar)
+    val bar = presentedNavBar(model.desk.navBar, model.notesAccount)
+    val fallback = if (model.notesAccount) DEFAULT_NAV_BAR else SCHOOL_NAV_BAR
+    val available = remainingNavBar(bar).filter { model.notesAccount || it != "notes" }
     ScreenList {
         item {
             Text("Shown in the bar", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = Space.xl, bottom = Space.sm))
@@ -230,8 +268,8 @@ private fun NavigationBarSettings(model: CompanionModel) {
         }
         item {
             TextButton(
-                onClick = { model.updateDesk(model.desk.copy(navBar = DEFAULT_NAV_BAR)) },
-                enabled = bar != DEFAULT_NAV_BAR,
+                onClick = { model.updateDesk(model.desk.copy(navBar = fallback)) },
+                enabled = bar != fallback,
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
             ) { Text("Reset to default") }
         }

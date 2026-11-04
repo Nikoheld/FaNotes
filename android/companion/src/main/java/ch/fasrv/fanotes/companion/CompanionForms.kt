@@ -27,6 +27,24 @@ import java.time.*
 import java.util.UUID
 
 @Composable
+fun WelcomeScreen(model: CompanionModel, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Space.xl).widthIn(max = 480.dp), verticalArrangement = Arrangement.Center) {
+        Surface(color = MaterialTheme.colorScheme.primary, shape = MaterialTheme.shapes.large, modifier = Modifier.size(52.dp)) {
+            Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.School, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(30.dp)) }
+        }
+        Spacer(Modifier.height(24.dp))
+        Text("Kanti+", style = MaterialTheme.typography.headlineLarge)
+        Text("Grades, timetable, exams and absences, ready on this device.",
+            style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp, bottom = 28.dp))
+        Button(onClick = { model.finishWelcome(connectSchool = true, openNotes = false) }, enabled = !model.busy, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) { Text("Connect Schulnetz") }
+        OutlinedButton(onClick = { model.finishWelcome(connectSchool = false, openNotes = true) }, enabled = !model.busy, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).heightIn(min = 50.dp)) { Text("Sync notes with FaNotes") }
+        TextButton(onClick = { model.finishWelcome(connectSchool = false, openNotes = false) }, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text("Continue") }
+        Text("School features work without an account. Notes sync is optional.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+    }
+}
+
+@Composable
 fun AccountScreen(model: CompanionModel, onboarding: Boolean = false, modifier: Modifier = Modifier) {
     var register by rememberSaveable { mutableStateOf(false) }
     var visible by rememberSaveable { mutableStateOf(false) }
@@ -59,7 +77,7 @@ fun AccountScreen(model: CompanionModel, onboarding: Boolean = false, modifier: 
         if (onboarding) {
             FineDivider()
             TextButton(onClick = model::continueLocally, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) { Text("Continue on this device") }
-            Text("You can connect an account later to sync your work and link Schulnetz.", style = MaterialTheme.typography.bodySmall,
+            Text("You can connect notes later. School features stay available on this device.", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         }
         Spacer(Modifier.height(24.dp))

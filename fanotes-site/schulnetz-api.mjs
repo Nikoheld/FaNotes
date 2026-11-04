@@ -1,8 +1,10 @@
-// Schulnetz link for one FaNotes account. The refresh token is sealed with
-// AES-256-GCM and only the single poller calls token.php. Devices receive the
-// normalised snapshot and change list, never the token.
+// Schulnetz link for one Kanti+ identity. That identity is either a FaNotes
+// account or a lightweight anonymous device account (no email, no password).
+// The refresh token is sealed with AES-256-GCM and only the single poller
+// calls token.php. Devices receive the normalised snapshot and change list,
+// never the token.
 
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import { authenticateSyncRequest } from './sync-api.mjs'
@@ -32,6 +34,8 @@ import {
 
 const API_PREFIX = '/api/v1/schulnetz'
 const MAX_BODY = 64 * 1024
+const SCHOOL_FILES = ['link.json', 'snapshot.json', 'notified-grades.json', 'changes.jsonl']
+const GUEST_LIMIT = 30
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 const REFERER = 'https://schulnetz.web.app/'
 const DEFAULT_SETTINGS = Object.freeze({ grades: true, timetable: true, exams: true, absences: true, events: true, deadlines: true, guessGrades: false })
@@ -275,7 +279,173 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 
   const unlink = async (accountId) => {
+    const guest = await readGuestRecord(accountId)
+    if (guest) {
+      for (const name of SCHOOL_FILES) await fs.rm(resolve(accountDir(accountId), name), { force: true })
+      return
+    }
     await fs.rm(accountDir(accountId), { recursive: true, force: true })
+  }
+
+  const guestHits = new Map()
+  const guestAllowed = (address) => {
+    const key = String(address || 'unknown').slice(0, 80)
+    const nowMs = now().getTime()
+    const recent = (guestHits.get(key) || []).filter((at) => nowMs - at < 60_000)
+    if (guestHits.size > 1000) {
+      for (const [stored, stamps] of guestHits) {
+        if (stamps.every((at) => nowMs - at >= 60_000)) guestHits.delete(stored)
+      }
+    }
+    if (recent.length >= GUEST_LIMIT) {
+      guestHits.set(key, recent)
+      return false
+    }
+    recent.push(nowMs)
+    guestHits.set(key, recent)
+    return true
+  }
+
+  const hashGuestToken = (token) => createHash('sha256').update(String(token)).digest('hex')
+  const guestTokenOk = (token) => typeof token === 'string' && /^[A-Za-z0-9_-]{40,80}$/u.test(token)
+  const hashesEqual = (left, right) => {
+    const a = Buffer.from(String(left))
+    const b = Buffer.from(String(right))
+    return a.length === b.length && timingSafeEqual(a, b)
+  }
+
+  const readGuestRecord = async (accountId) => {
+    if (!/^[a-f0-9]{32}$/u.test(String(accountId || ''))) return null
+    const parsed = await readJson(resolve(accountDir(accountId), 'guest.json'))
+    if (!parsed || parsed.v !== 1 || typeof parsed.tokenHash !== 'string') return null
+    return parsed
+  }
+
+  const assertGuest = async (accountId, token) => {
+    if (!guestTokenOk(token)) fail(401, 'Bitte erneut anmelden.')
+    const guest = await readGuestRecord(accountId)
+    if (!guest || !hashesEqual(guest.tokenHash, hashGuestToken(token))) fail(401, 'Bitte erneut anmelden.')
+    return accountId
+  }
+
+  const createGuest = async (address) => {
+    if (!guestAllowed(address)) fail(429, 'Zu viele Anfragen. Bitte kurz warten.')
+    const accountId = randomBytes(16).toString('hex')
+    const token = randomBytes(32).toString('base64url')
+    await writeJson(resolve(accountDir(accountId), 'guest.json'), {
+      v: 1,
+      tokenHash: hashGuestToken(token),
+      createdAt: now().toISOString(),
+    })
+    return { accountId, token }
+  }
+
+  const copySchoolFiles = async (fromId, toId) => {
+    const from = accountDir(fromId)
+    const to = accountDir(toId)
+    await fs.mkdir(to, { recursive: true, mode: 0o700 })
+    for (const name of SCHOOL_FILES) {
+      try {
+        const dest = resolve(to, name)
+        await fs.copyFile(resolve(from, name), dest)
+        await fs.chmod(dest, 0o600)
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error
+      }
+    }
+  }
+
+  const unionLedger = async (targetId, sourceId) => {
+    const target = await readGradeLedger(targetId)
+    const source = await readGradeLedger(sourceId)
+    if (target == null && source == null) return
+    await writeGradeLedger(targetId, [...(target || []), ...(source || [])])
+  }
+
+  const unionFcmTokens = (targetLink, sourceLink) => {
+    const merged = []
+    for (const token of [...storedFcmTokens(targetLink), ...storedFcmTokens(sourceLink)]) {
+      if (!merged.includes(token)) merged.push(token)
+    }
+    return merged.slice(-8)
+  }
+
+  /** Move a guest's school files onto a FaNotes account. Never publishes. */
+  const adoptGuest = async (faAccountId, body) => {
+    const guestId = String(body?.guestAccountId || '')
+    const guestToken = String(body?.guestToken || '')
+    await assertGuest(guestId, guestToken)
+    if (guestId === faAccountId) return { adopted: false, revision: 0 }
+    const targetLink = await readLink(faAccountId)
+    const guestLink = await readLink(guestId)
+    if (!targetLink && guestLink) await copySchoolFiles(guestId, faAccountId)
+    else if (targetLink && guestLink) {
+      await unionLedger(faAccountId, guestId)
+      targetLink.fcmTokens = unionFcmTokens(targetLink, guestLink)
+      await saveLink(faAccountId, targetLink)
+    }
+    await fs.rm(accountDir(guestId), { recursive: true, force: true })
+    const revision = (await readLink(faAccountId))?.revision || 0
+    return { adopted: true, revision }
+  }
+
+  /**
+   * Copy the FaNotes school link onto this device's guest so sign-out keeps
+   * school updates. This device's push token moves. Other devices stay.
+   * Never publishes.
+   */
+  const detachGuest = async (faAccountId, body) => {
+    const guestId = String(body?.guestAccountId || '')
+    const guestToken = String(body?.guestToken || '')
+    const fcmToken = body?.fcmToken
+    await assertGuest(guestId, guestToken)
+    if (guestId === faAccountId) fail(400, 'Ungültiges Konto.')
+    const faLink = await readLink(faAccountId)
+    if (faLink) {
+      await copySchoolFiles(faAccountId, guestId)
+      const guestLink = await readLink(guestId)
+      if (guestLink) {
+        guestLink.fcmTokens = isValidFcmToken(fcmToken) ? [fcmToken] : []
+        guestLink.loginPushSent = false
+        if (guestLink.mode === 'web') {
+          // Microsoft cookies can open a fresh PHP session. Sharing the
+          // FaNotes PHPSESSID would let one poll invalidate the other.
+          guestLink.serverSession = null
+        } else {
+          // A REST refresh token rotates on use. Drop the copy so this
+          // device cannot sign the FaNotes link out of Schulnetz.
+          guestLink.refresh = null
+          guestLink.access = null
+          guestLink.accessExpiresAt = null
+          guestLink.needsReauth = true
+        }
+        await saveLink(guestId, guestLink)
+      }
+      if (isValidFcmToken(fcmToken)) {
+        faLink.fcmTokens = storedFcmTokens(faLink).filter((item) => item !== fcmToken)
+        await saveLink(faAccountId, faLink)
+      }
+    }
+    const revision = (await readLink(guestId))?.revision || 0
+    return { detached: true, revision }
+  }
+
+  const deleteGuestAccount = async (accountId) => {
+    const guest = await readGuestRecord(accountId)
+    if (!guest) fail(404, 'Dieses Kanti+-Konto gibt es nicht.')
+    await fs.rm(accountDir(accountId), { recursive: true, force: true })
+    return { deleted: true }
+  }
+
+  const bearerToken = (request) => {
+    const header = request.headers?.authorization
+    return typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7).trim() : ''
+  }
+
+  const clientAddress = (request) => {
+    const forwarded = request.headers?.['x-forwarded-for']
+    const raw = typeof forwarded === 'string' && forwarded.trim() ? forwarded : request.socket?.remoteAddress || ''
+    return String(raw).split(',')[0].trim()
   }
 
   const tails = new Map()
@@ -663,8 +833,37 @@ export const createSchulnetzRuntime = (options = {}) => {
         response.end()
         return true
       }
-      const auth = await authenticateSyncRequest(request)
-      const accountId = auth.account.id
+      if (route === '/guest' && method === 'POST') {
+        await readBody(request)
+        send(response, 200, await createGuest(clientAddress(request)))
+        return true
+      }
+      const guestHeader = request.headers?.['x-kanti-guest']
+      let accountId
+      let guestAuth = false
+      if (guestHeader) {
+        const headerId = String(Array.isArray(guestHeader) ? guestHeader[0] : guestHeader).trim()
+        accountId = await assertGuest(headerId, bearerToken(request))
+        guestAuth = true
+      } else {
+        const auth = await authenticateSyncRequest(request)
+        accountId = auth.account.id
+      }
+      if (route === '/adopt' && method === 'POST') {
+        if (guestAuth) fail(403, 'Diese Anfrage braucht ein FaNotes-Konto.')
+        send(response, 200, await adoptGuest(accountId, await readBody(request)))
+        return true
+      }
+      if (route === '/detach' && method === 'POST') {
+        if (guestAuth) fail(403, 'Diese Anfrage braucht ein FaNotes-Konto.')
+        send(response, 200, await detachGuest(accountId, await readBody(request)))
+        return true
+      }
+      if (route === '/guest' && method === 'DELETE') {
+        if (!guestAuth) fail(403, 'Diese Anfrage braucht ein Kanti+-Konto.')
+        send(response, 200, await deleteGuestAccount(accountId))
+        return true
+      }
       if (route === '/status' && method === 'GET') { send(response, 200, publicStatus(await readLink(accountId))); return true }
       if (route === '/link' && method === 'PUT') { send(response, 200, await linkAccount(accountId, await readBody(request))); return true }
       if (route === '/link' && method === 'DELETE') { await unlink(accountId); send(response, 200, { linked: false }); return true }
@@ -711,7 +910,20 @@ export const createSchulnetzRuntime = (options = {}) => {
     return true
   }
 
-  return { handle, start, pollAccount, linkAccount, addFcmToken, publicStatusOf: async (accountId) => publicStatus(await readLink(accountId)), root, openStoredRefresh: async (accountId) => openToken(await requireKey(), (await readLink(accountId))?.refresh) }
+  return {
+    handle,
+    start,
+    pollAccount,
+    linkAccount,
+    addFcmToken,
+    createGuest,
+    adoptGuest,
+    detachGuest,
+    deleteGuestAccount,
+    publicStatusOf: async (accountId) => publicStatus(await readLink(accountId)),
+    root,
+    openStoredRefresh: async (accountId) => openToken(await requireKey(), (await readLink(accountId))?.refresh),
+  }
 }
 
 const eventsPath = () => {

@@ -32,8 +32,8 @@ import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
 import ch.fasrv.fanotes.schulnetz.hideOnce
 import ch.fasrv.fanotes.schulnetz.hideSeries
 import ch.fasrv.fanotes.schulnetz.homeNavId
+import ch.fasrv.fanotes.schulnetz.presentedNavBar
 import ch.fasrv.fanotes.schulnetz.startTabId
-import ch.fasrv.fanotes.schulnetz.validateNavBar
 import ch.fasrv.fanotes.schulnetz.SCHULNETZ_USER_AGENT
 import ch.fasrv.fanotes.schulnetz.SSO_COOKIE_URLS
 import ch.fasrv.fanotes.schulnetz.cookieNames
@@ -64,6 +64,10 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     private var startTabApplied = false
     private var history = emptyList<CompanionRoute>()
     var localAccess by mutableStateOf(graph.localAccess())
+    var notesAccount by mutableStateOf(graph.engine.state.value.account != null)
+    var offerUpload by mutableStateOf(false)
+    var pendingSchoolConnect by mutableStateOf(false)
+    fun shownBar(): List<String> = presentedNavBar(desk.navBar, notesAccount)
     var plannerTasks by mutableStateOf(false)
     var taskSource by mutableStateOf("open")
     var tree by mutableStateOf<List<VaultNode>>(emptyList())
@@ -89,7 +93,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         })
     }
     fun selectNav(id: String) {
-        val placement = navPlacement(id)
+        val safe = if (!notesAccount && startTabId(id) == "notes") "today" else id
+        val placement = navPlacement(safe)
         history = emptyList()
         plannerTasks = placement.plannerTasks
         route = placement.route
@@ -101,10 +106,10 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         route = route.copy(page = page)
     }
     fun openSettings() {
-        if ("settings" in validateNavBar(desk.navBar)) selectNav("settings")
+        if ("settings" in shownBar()) selectNav("settings")
         else navigate(Page.Settings)
     }
-    fun atNavRoot(): Boolean = isAtNavRoot(route, plannerTasks, desk.startTab, desk.navBar, noteFolder, history.isNotEmpty())
+    fun atNavRoot(): Boolean = isAtNavRoot(route, plannerTasks, desk.startTab, shownBar(), noteFolder, history.isNotEmpty())
     fun back() {
         if (history.isNotEmpty()) {
             route = history.last()
@@ -119,7 +124,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             openFolder(noteFolder.substringBeforeLast('/', ""))
             return
         }
-        val bar = validateNavBar(desk.navBar)
+        val bar = shownBar()
         val chrome = navChromeId(route, plannerTasks, bar)
         val home = homeNavId(desk.startTab, bar)
         if (chrome != null && chrome in bar) {
@@ -133,6 +138,11 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         if (chrome != home) selectNav(home)
     }
     fun continueLocally() { localAccess = true; graph.setLocalAccess(true); message = null }
+    fun finishWelcome(connectSchool: Boolean, openNotes: Boolean) {
+        continueLocally()
+        pendingSchoolConnect = connectSchool
+        if (openNotes) route = CompanionRoute(page = Page.Auth)
+    }
     fun openPlanner(tasks: Boolean = false, date: LocalDate = LocalDate.now()) {
         selectNav(if (tasks) "tasks" else "planner"); day = date
     }
@@ -206,6 +216,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     init {
         viewModelScope.launch { graph.snapshot.collect { snapshot = it; refreshUnrevealed() } }
         viewModelScope.launch { graph.link.collect { link = it } }
+        viewModelScope.launch { graph.engine.state.collect { notesAccount = it.account != null } }
+        if (graph.plannerHold() && notesAccount) offerUpload = true
         viewModelScope.launch { graph.vaultChanges.collectLatest { kotlinx.coroutines.delay(200); reload() } }
         reload()
     }
@@ -228,7 +240,9 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                     desk = data.desk
                     if (!startTabApplied && history.isEmpty() && highlightIds.isEmpty() && route.page == null && route.destination == Destination.Today) {
                         startTabApplied = true
-                        val placement = navPlacement(startTabId(data.desk.startTab))
+                        var start = startTabId(data.desk.startTab)
+                        if (graph.engine.state.value.account == null && start == "notes") start = "today"
+                        val placement = navPlacement(start)
                         plannerTasks = placement.plannerTasks
                         route = placement.route
                     }
@@ -277,10 +291,12 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         busy = true
         viewModelScope.launch {
             try {
+                val offer = withContext(Dispatchers.IO) { graph.armPlannerHold() }
                 if (register) graph.engine.register(email.trim(), password) else graph.engine.login(email.trim(), password)
                 graph.engine.syncNow("phone")
                 runCatching { graph.refreshSchulnetz("fa-notes-login") }
                 continueLocally()
+                offerUpload = offer
                 password = ""
                 reload()
                 message = null
@@ -313,8 +329,52 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
 
     fun logout() {
         viewModelScope.launch {
+            runCatching { graph.detachKeepingSchool() }
             runCatching { graph.engine.logout() }
+            runCatching { graph.refreshSchulnetz("fa-notes-logout") }
+            if (route.destination == Destination.Notes || route.page == Page.Editor || route.page == Page.Trash || route.page == Page.Profile) {
+                history = emptyList()
+                route = CompanionRoute(Destination.Today)
+            }
+            notesAccount = false
             message = null
+        }
+    }
+
+    fun acceptUpload() {
+        offerUpload = false
+        graph.releasePlannerHold()
+        sync()
+    }
+
+    fun declineUpload() { offerUpload = false }
+
+    fun refreshSchool() {
+        busy = true
+        viewModelScope.launch {
+            try {
+                graph.refreshSchulnetz("settings")
+                message = "School data refreshed."
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message = error.message ?: "Could not refresh school data."
+            } finally { busy = false }
+        }
+    }
+
+    fun deleteKantiData() {
+        if (busy || notesAccount) return
+        busy = true
+        viewModelScope.launch {
+            try {
+                graph.deleteKantiData()
+                snapshot = graph.snapshot.value
+                link = graph.link.value
+                message = "Kanti+ data deleted."
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message = error.message ?: "Could not delete Kanti+ data."
+            } finally { busy = false }
         }
     }
 
@@ -405,8 +465,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         viewModelScope.launch {
             try {
                 graph.gate.exclusive("disconnect") {
-                    val session = graph.engine.currentSession()
-                    if (session != null) runCatching { graph.client.unlink(session) }
+                    val auth = runCatching { graph.schoolAuth() }.getOrNull()
+                    if (auth != null) runCatching { graph.client.unlink(auth) }
                     withContext(Dispatchers.IO) { graph.disconnectSchool() }
                 }
                 message = "Schulnetz disconnected."
@@ -654,12 +714,12 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         CompanionAlerts.forget(context, "push-test")
         CompanionAlerts.showTest(context)
         viewModelScope.launch {
-            val session = graph.engine.currentSession()
-            if (session == null) {
+            val auth = runCatching { graph.schoolAuth() }.getOrNull()
+            if (auth == null || !link.linked) {
                 message = if (CompanionAlerts.notificationsAllowed(context)) "Local test notification sent." else "Notifications are off. Allow them in Notification settings."
                 return@launch
             }
-            runCatching { graph.client.testPush(session) }
+            runCatching { graph.client.testPush(auth) }
                 .onSuccess { message = "Test notification sent." }
                 .onFailure { error ->
                     message = "Local notification sent. Server: ${error.message}"

@@ -30,14 +30,18 @@ Der Poller liest standardmässig jede Minute (`FANOTES_SCHULNETZ_POLL_MS=60000`)
 
 ## Endpunkte
 
-Alle Routen hängen unter `/api/v1/schulnetz` und verlangen denselben Sync-Login wie der Tresor: `Authorization: Bearer <token>` und `X-FaNotes-Account: <32 hex>`.
+Schulnetz-Daten hängen an einer Kanti+-Identität. Ein FaNotes-Konto benutzt `Authorization: Bearer <token>` und `X-FaNotes-Account: <32 hex>`. Ohne FaNotes legt die App ein anonymes Gerätekonto an (`POST /guest`, kein E-Mail, kein Passwort) und schickt danach `Authorization: Bearer <token>` mit `X-Kanti-Guest: <32 hex>`. Die übrigen Routen sind für beide Identitäten dieselben. Adopt und Detach laufen nur mit einem FaNotes-Login und rufen weder Diff noch FCM auf, damit eine schon gemeldete Note nicht noch einmal gepusht wird.
 
 | Methode | Pfad | Bedeutung |
 |---|---|---|
+| POST | `/guest` | Legt ein anonymes Konto an und gibt `{ accountId, token }` einmal zurück. Höchstens 30 Anfragen pro Minute und Adresse. |
+| DELETE | `/guest` | Nur mit `X-Kanti-Guest`. Löscht Schulnetz-Link, Token, Schnappschuss, Noten-Ledger und Push-Endpunkte dieser Identität. |
+| POST | `/adopt` | FaNotes-Login. Body `{ guestAccountId, guestToken }`. Übernimmt die Schuldaten des Gasts. Hat FaNotes noch keinen Link, werden die Dateien kopiert. Hat FaNotes schon einen Link, werden nur Ledger und FCM-Tokens vereinigt, der Schnappschuss bleibt. Kein Push. |
+| POST | `/detach` | FaNotes-Login. Body `{ guestAccountId, guestToken, fcmToken }`. Kopiert die Schuldaten auf den Gast und verschiebt nur das FCM-Token dieses Geräts. Bei `mode: web` behält FaNotes die PHP-Sitzung; der Gast öffnet beim nächsten Poll eine eigene aus denselben Microsoft-Cookies. Ein REST-Refresh-Token wird nicht mitkopiert, damit die Rotation nicht das FaNotes-Konto abmeldet. Andere Geräte bleiben am FaNotes-Konto. Kein Push. |
 | GET | `/status` | Verbunden, Anzeigename, `needsReauth`, letzte Lesung, Push-Thema, Schalter. Kein Token. |
 | PUT | `/link` | Website: `{ mode:"web", baseUrl, deviceId, userAgent, displayName, ssoCookies }`. `ssoCookies` sind nur Microsoft-Hosts, ohne `PHPSESSID`. Ältere REST-Verknüpfungen mit `refreshToken` bleiben für Nicht-AKSA möglich. |
 | PUT | `/snapshot` | Normalisierter Schnappschuss vom Telefon. Der Server diff und pusht. Keine Cookies. |
-| DELETE | `/link` | Löscht Token, Schnappschuss und Push-Endpunkte. |
+| DELETE | `/link` | Trennt Schulnetz. Bei einem FaNotes-Konto wird das Schulnetz-Verzeichnis gelöscht. Beim anonymen Konto bleiben `guest.json` und die Identität, damit die App neu verbinden kann. |
 | GET | `/snapshot` | Normalisierter Schnappschuss (Noten, Stunden, Prüfungen, Absenzen, Aufgaben, Mitteilungen, Ferien, Kontoauszug, Startseite). |
 | GET | `/changes?since=<revision>` | Änderungen seit dieser Revision. |
 | PUT | `/settings` | `{ grades, timetable, exams, absences, events, deadlines, guessGrades }` als Booleans. `guessGrades` ist standardmässig aus. |
@@ -78,9 +82,11 @@ Ein verlorener Schlüssel macht gespeicherte Tokens unlesbar. Die App muss Schul
 ```text
 /var/lib/fanotes-schulnetz/
   poller.lock                         PID des einen Pollers
-  accounts/<faNotesAccountId>/
+  accounts/<identityId>/
+    guest.json                        nur beim anonymen Konto: Version und SHA-256 des Tokens, nie der Token
     link.json                         verschlüsseltes Refresh- und Access-Token, Gerät, Schalter, Thema
     snapshot.json                     Schnappschuss ohne Geheimnisse
+    notified-grades.json              gesehene Noten, damit ein Umzug keine zweite Meldung auslöst
     changes.jsonl                     letzte 200 Änderungen ohne Geheimnisse
 ```
 

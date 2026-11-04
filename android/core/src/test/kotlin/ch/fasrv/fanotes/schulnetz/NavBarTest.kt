@@ -55,6 +55,17 @@ class NavBarTest {
     }
 
     @Test
+    fun schoolModeDropsNotesAndKeepsACompleteBar() {
+        assertEquals(listOf("today", "planner", "grades", "school"), SCHOOL_NAV_BAR)
+        assertEquals(SCHOOL_NAV_BAR, presentedNavBar(null, notes = false))
+        assertEquals(SCHOOL_NAV_BAR, presentedNavBar(DEFAULT_NAV_BAR, notes = false))
+        assertEquals(DEFAULT_NAV_BAR, presentedNavBar(DEFAULT_NAV_BAR, notes = true))
+        assertEquals(listOf("today", "grades", "school"), presentedNavBar(listOf("today", "notes", "grades", "school"), notes = false))
+        assertEquals(listOf("grades", "today"), presentedNavBar(listOf("grades"), notes = false))
+        assertEquals(false, presentedNavBar(listOf("today", "planner", "notes", "exams"), notes = false).contains("notes"))
+    }
+
+    @Test
     fun deskPrefsRoundTripNavBarAndKeepOlderFiles() {
         val stored = parseDeskPrefs(serializeDeskPrefs(DeskPrefs(startTab = "grades", navBar = listOf("grades", "notes", "settings"))))
         assertEquals(listOf("grades", "notes", "settings"), stored.navBar)
