@@ -38,7 +38,7 @@ fun SchoolScreen(model: CompanionModel) {
             InfoBanner(if (model.link.needsReauth) "Sign in to refresh school data" else "Connect Schulnetz", "Bring your timetable and school records into FaNotes. School access stays read-only.", "Manage connection", onAction = { model.navigate(Page.Connections) })
         }
         item { SectionLabel("School records") }
-        item { SettingRow(Icons.Outlined.Insights, "Grades", "Marks, subject averages & local scenarios", "${remember(model.snapshot.grades) { courseSummaries(model.snapshot.grades) }.size}") { model.navigate(Page.Grades) }; FineDivider() }
+        item { SettingRow(Icons.Outlined.Insights, "Grades", "Marks, subject averages & local scenarios", "${remember(model.snapshot.grades, model.unrevealedIds, model.settings.guessGrades) { courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds()) }.size}") { model.navigate(Page.Grades) }; FineDivider() }
         item { SettingRow(Icons.AutoMirrored.Outlined.Assignment, "Exams", "Prepare for what's coming", "${(model.snapshot.exams + model.snapshot.events.filter { it.isExamLike() }).distinctBy(::lessonTargetId).size}") { model.navigate(Page.Exams) }; FineDivider() }
         item { SettingRow(Icons.Outlined.EventBusy, "Absences", "Status & excuse deadlines", "${model.snapshot.absences.count { !it.excused }} open") { model.navigate(Page.Absences) }; FineDivider() }
         item { SettingRow(Icons.Outlined.Forum, "Updates", "Messages, school events & holidays", "${model.snapshot.messages.size + model.snapshot.startMessages.size}") { model.navigate(Page.Updates) }; FineDivider() }
@@ -54,7 +54,7 @@ fun SchoolScreen(model: CompanionModel) {
 @Composable
 fun GradesScreen(model: CompanionModel) {
     var query by rememberSaveable { mutableStateOf("") }
-    val official = remember(model.snapshot.grades) { courseSummaries(model.snapshot.grades) }
+    val official = remember(model.snapshot.grades, model.unrevealedIds, model.settings.guessGrades) { courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds()) }
     val courses = remember(official, model.desk.gradeSort, model.highlightIds, query, model.desk.courseAliases) {
         sortCourses(official, model.desk.gradeSort).sortedBy { if (it.marks.any { mark -> mark.targetId in model.highlightIds }) 0 else 1 }.filter { courseAlias(it.label, model.desk.courseAliases).contains(query, true) }
     }
@@ -86,7 +86,7 @@ fun GradesScreen(model: CompanionModel) {
                     Text(courseAlias(course.label, model.desk.courseAliases), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text("${course.marks.size} marks${if (model.hypothetical.any { it.courseId == course.courseId }) " · local scenario saved" else ""}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Text(formatMark(course.average, model.desk.gradeDecimals), style = MaterialTheme.typography.titleLarge, color = if ((course.average ?: 4.0) < 4.0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                Text(if (course.marks.any { model.isUnrevealed(it.targetId) } && course.average == null) "?" else formatMark(course.average, model.desk.gradeDecimals), style = MaterialTheme.typography.titleLarge, color = if ((course.average ?: 4.0) < 4.0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
                 Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             FineDivider()
@@ -97,10 +97,10 @@ fun GradesScreen(model: CompanionModel) {
 
 @Composable
 fun CourseScreen(model: CompanionModel) {
-    val official = remember(model.snapshot.grades) { courseSummaries(model.snapshot.grades) }
+    val official = remember(model.snapshot.grades, model.unrevealedIds, model.settings.guessGrades) { courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds()) }
     val course = official.firstOrNull { it.courseId == model.focusCourseId }
     if (course == null) { ScreenList { item { EmptyState(Icons.Outlined.Insights, "Subject unavailable", "It is no longer in the last school snapshot.", "All subjects") { model.back() } } }; return }
-    val scenario = remember(model.snapshot.grades, model.hypothetical, course.courseId) { courseSummaries(model.snapshot.grades, model.hypothetical).first { it.courseId == course.courseId } }
+    val scenario = remember(model.snapshot.grades, model.hypothetical, course.courseId, model.unrevealedIds, model.settings.guessGrades) { courseSummaries(model.snapshot.grades, model.hypothetical, model.hiddenGradeIds()).first { it.courseId == course.courseId } }
     val decimals = model.desk.gradeDecimals
     val own = model.hypothetical.filter { it.courseId == course.courseId }
     var calculator by rememberSaveable { mutableStateOf(false) }
@@ -121,9 +121,10 @@ fun CourseScreen(model: CompanionModel) {
         }
         items(course.marks.filterNot { it.own }, key = { "${it.targetId}:${it.label}:${it.mark}" }) { mark ->
             val highlighted = mark.targetId in model.highlightIds
-            Row(Modifier.fillMaxWidth().background(if (highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background, MaterialTheme.shapes.small).padding(vertical = 14.dp, horizontal = if (highlighted) 12.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Text(mark.label.ifBlank { "School mark" }, style = MaterialTheme.typography.bodyLarge); Text("Weight ${formatMark(mark.weight)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                Text(formatMark(mark.mark, decimals), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            val hidden = model.isUnrevealed(mark.targetId)
+            Row(Modifier.fillMaxWidth().background(if (highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background, MaterialTheme.shapes.small).then(if (hidden) Modifier.clickable { model.openReveal(listOf(mark.targetId)) } else Modifier).padding(vertical = 14.dp, horizontal = if (highlighted) 12.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) { Text(mark.label.ifBlank { "School mark" }, style = MaterialTheme.typography.bodyLarge); Text(if (hidden) "Hidden · tap to reveal" else "Weight ${formatMark(mark.weight)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                Text(if (hidden) "?" else formatMark(mark.mark, decimals), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             }
             FineDivider()
         }

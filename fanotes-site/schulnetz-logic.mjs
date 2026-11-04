@@ -467,6 +467,35 @@ export const parseNotifyLink = (json) => {
   }
 }
 
+export const hiddenGradeTitle = (change, course) => {
+  const subject = course || 'einem Fach'
+  const kind = /änderung|aenderung/i.test(change?.title || '') ? 'Notenänderung' : 'Neue Note'
+  return `${kind} in ${subject} – tippen zum Aufdecken`
+}
+
+export const hiddenGradeBody = (examTitle) => (examTitle && String(examTitle).trim()) || 'Tippen zum Aufdecken'
+
+export const publicGradeChangeId = (id) => {
+  const raw = String(id || '')
+  if (!raw.startsWith('grade:')) return raw
+  const entity = raw.split(':')[1]
+  return entity ? `grade:${entity}:hidden` : 'grade:hidden'
+}
+
+export const redactGradeChange = (change) => {
+  if (!change || change.category !== 'grade') return change
+  if (String(change.title || '').includes('Aufdecken')) return { ...change, id: publicGradeChangeId(change.id) }
+  const parts = String(change.body || '').split(' · ').map((part) => part.trim()).filter(Boolean)
+  const course = change.courseLabel || parts[0] || change.courseId || 'einem Fach'
+  const exam = parts[1] && !/^gewicht/i.test(parts[1]) ? parts[1] : (change.examTitle || 'Note')
+  return { ...change, id: publicGradeChangeId(change.id), title: hiddenGradeTitle(change, course), body: hiddenGradeBody(exam) }
+}
+
+export const prepareGradeNotifications = (changes, guessGrades) => {
+  if (!guessGrades) return groupGradeChanges(changes)
+  return (changes || []).map(redactGradeChange)
+}
+
 export const groupGradeChanges = (changes) => {
   const grades = (changes || []).filter((change) => change.category === 'grade')
   if (grades.length <= 1) return changes || []

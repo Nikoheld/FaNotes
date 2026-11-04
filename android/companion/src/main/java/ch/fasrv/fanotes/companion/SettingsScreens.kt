@@ -167,7 +167,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                 }
                 SectionLabel("Milestones")
             }
-            items(companionBadges(model.writtenNotes, model.graph.streakDays(), model.snapshot.grades.mapNotNull { it.mark }.maxOrNull()), key = { it.id }) { badge ->
+            items(companionBadges(model.writtenNotes, model.graph.streakDays(), highestVisibleMark(model.snapshot.grades, model.hiddenGradeIds(), model.settings.guessGrades)), key = { it.id }) { badge ->
                 val title = when (badge.id) { "notes-1" -> "First thought"; "notes-10" -> "A growing notebook"; "streak-3" -> "Finding your rhythm"; else -> "Top marks" }
                 val body = when (badge.id) { "notes-1" -> "Write your first note"; "notes-10" -> "Keep ten notes in your library"; "streak-3" -> "Open FaNotes three days in a row"; else -> "Receive a grade of 6" }
                 Row(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -209,6 +209,7 @@ private fun NotificationSettings(model: CompanionModel) {
         }
         item { SectionLabel("School updates") }
         item { ToggleRow("Grades", "New or changed marks", model.settings.grades) { model.toggleSetting("grades") } }
+        item { ToggleRow("Guess the grade", "Hide new marks until you reveal them. Notifications show the subject only.", model.settings.guessGrades) { model.toggleSetting("guessGrades") } }
         item { ToggleRow("Timetable changes", "Room changes, substitutions and cancellations", model.settings.timetable) { model.toggleSetting("timetable") } }
         item { ToggleRow("Exams", checked = model.settings.exams) { model.toggleSetting("exams") } }
         item { ToggleRow("Absences", checked = model.settings.absences) { model.toggleSetting("absences") } }

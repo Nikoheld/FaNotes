@@ -27,15 +27,19 @@ import androidx.core.content.ContextCompat
 import ch.fasrv.fanotes.schulnetz.SchulnetzChange
 import ch.fasrv.fanotes.schulnetz.changeFromPayload
 import ch.fasrv.fanotes.schulnetz.changeIsHidden
-import ch.fasrv.fanotes.schulnetz.groupGradeChanges
+import ch.fasrv.fanotes.schulnetz.hiddenGradeBody
+import ch.fasrv.fanotes.schulnetz.hiddenGradeTitle
+import ch.fasrv.fanotes.schulnetz.newGradeTargetIds
 import ch.fasrv.fanotes.schulnetz.notifyPayload
+import ch.fasrv.fanotes.schulnetz.parseNormalizedSnapshot
+import ch.fasrv.fanotes.schulnetz.prepareGradeNotifications
+import ch.fasrv.fanotes.schulnetz.redactGradeChange
 import ch.fasrv.fanotes.schulnetz.endsAt
 import ch.fasrv.fanotes.schulnetz.isCancelled
 import ch.fasrv.fanotes.schulnetz.isSubstitution
 import ch.fasrv.fanotes.schulnetz.nextUp
 import ch.fasrv.fanotes.schulnetz.parseDeskPrefs
 import ch.fasrv.fanotes.schulnetz.parseHiddenLessons
-import ch.fasrv.fanotes.schulnetz.parseNormalizedSnapshot
 import ch.fasrv.fanotes.schulnetz.startsAt
 import ch.fasrv.fanotes.schulnetz.visibleEvents
 import kotlinx.coroutines.launch
@@ -86,7 +90,11 @@ object CompanionAlerts {
     }
 
     fun showAll(context: Context, changes: List<SchulnetzChange>) {
-        groupGradeChanges(changes).forEach { show(context, it) }
+        val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
+        val guess = prefs.getBoolean(CompanionGraph.GUESS_GRADES_PREF, false)
+        val snapshot = CompanionGraph.snapshotFile(context).takeIf { it.isFile }?.readText()?.let { parseNormalizedSnapshot(it) } ?: ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot()
+        if (guess) rememberUnrevealed(context, newGradeTargetIds(changes))
+        prepareGradeNotifications(changes, guess, snapshot).forEach { show(context, it) }
     }
 
     fun show(context: Context, change: SchulnetzChange) {
@@ -98,7 +106,21 @@ object CompanionAlerts {
         }.getOrDefault(emptyList())
         if (changeIsHidden(change, hidden)) return
         if (!notificationsAllowed(context)) return
-        val channel = when (change.category) {
+        val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
+        val guess = prefs.getBoolean(CompanionGraph.GUESS_GRADES_PREF, false)
+        val snapshot = CompanionGraph.snapshotFile(context).takeIf { it.isFile }?.readText()?.let { parseNormalizedSnapshot(it) }
+        var shown = change
+        if (guess && change.category == "grade") {
+            rememberUnrevealed(context, change.linkIds())
+            shown = if (snapshot != null) redactGradeChange(change, snapshot) else change.copy(
+                title = hiddenGradeTitle(change, change.courseId.ifBlank { "einem Fach" }),
+                body = hiddenGradeBody(change.body.substringAfter(" · ").substringBefore(" · ").ifBlank { "Tippen zum Aufdecken" }),
+            )
+            if (shown.linkIds().size > 1) {
+                shown = shown.copy(title = "${shown.linkIds().size} neue Noten – tippen zum Aufdecken", body = "Tippen zum Aufdecken")
+            }
+        }
+        val channel = when (shown.category) {
             "grade" -> "schulnetz-grade"
             "timetable" -> "schulnetz-timetable"
             "exam" -> "schulnetz-exam"
@@ -109,21 +131,34 @@ object CompanionAlerts {
         }
         val open = PendingIntent.getActivity(
             context,
-            change.id.hashCode(),
-            notifyIntent(context, change),
+            shown.id.hashCode(),
+            notifyIntent(context, shown),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val title = shown.title.ifBlank { "Schulnetz" }
+        val body = shown.body
         val notification = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle(change.title.ifBlank { "Schulnetz" })
-            .setContentText(change.body)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(change.body))
+            .setContentTitle(title)
+            .setContentText(body)
+            .setTicker(title)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body).setBigContentTitle(title))
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(open)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
         val manager = context.getSystemService(NotificationManager::class.java)
-        manager.notify(change.id.hashCode(), notification)
+        manager.notify(shown.id.hashCode(), notification)
+    }
+
+    fun rememberUnrevealed(context: Context, ids: Collection<String>) {
+        val next = ids.filter { it.isNotBlank() }
+        if (next.isEmpty()) return
+        val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
+        val stored = prefs.getStringSet(CompanionGraph.UNREVEALED_PREF, emptySet()).orEmpty().toMutableSet()
+        if (!stored.addAll(next)) return
+        prefs.edit().putStringSet(CompanionGraph.UNREVEALED_PREF, stored).apply()
     }
 
     fun onPushPayload(context: Context, payload: String) {
