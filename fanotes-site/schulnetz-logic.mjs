@@ -389,6 +389,113 @@ export const notifyHash = (...parts) => {
 }
 
 const courseKeyOf = (grade) => grade.courseId || grade.course || grade.subject || ''
+
+/** dd.mm.yyyy and yyyy-mm-dd become yyyy-mm-dd. Anything else is kept, lowercased. */
+export const normalizeGradeDate = (raw) => {
+  const value = String(raw || '').trim()
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(value)
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
+  const de = /^(\d{1,2})\.(\d{1,2})\.(\d{4})/.exec(value)
+  if (de) return `${de[3]}-${de[2].padStart(2, '0')}-${de[1].padStart(2, '0')}`
+  return value.toLowerCase()
+}
+
+export const normalizeGradeText = (raw) => String(raw || '').trim().toLowerCase().replace(/\s+/g, ' ')
+
+const gradeContentParts = (grade) => [
+  normalizeGradeText(courseKeyOf(grade)),
+  normalizeGradeDate(grade?.date),
+  normalizeGradeText(grade?.title),
+  numKey(grade?.mark),
+  numKey(grade?.weight),
+]
+
+const gradeLooseParts = (grade) => [
+  normalizeGradeDate(grade?.date),
+  normalizeGradeText(grade?.title),
+  numKey(grade?.mark),
+  numKey(grade?.weight),
+]
+
+const partKey = (parts) => parts.join('\u0000')
+
+/** Hash of course + date + title + mark + weight. Stable when the row id changes. */
+export const gradeContentHash = (grade) => notifyHash('c', ...gradeContentParts(grade))
+
+/**
+ * Hash without the course. The HTML parser stamps every row with the first
+ * bold course label on the page, so a label change rewrites every id and
+ * every course string at once. The loose hash still matches that grade.
+ */
+export const gradeLooseHash = (grade) => notifyHash('l', ...gradeLooseParts(grade))
+
+const looseCounts = (grades) => {
+  const counts = new Map()
+  for (const grade of withoutSummaryGrades(grades)) {
+    const key = partKey(gradeLooseParts(grade))
+    counts.set(key, (counts.get(key) || 0) + 1)
+  }
+  return counts
+}
+
+export const gradeNotifyKeys = (grade, uniqueLoose) => {
+  const keys = [`c:${gradeContentHash(grade)}`]
+  if (uniqueLoose) keys.push(`l:${gradeLooseHash(grade)}`)
+  return keys
+}
+
+/**
+ * Identity keys for every real grade. The loose key is always stored so two
+ * parser representations of one grade (different course label, same mark)
+ * stay one grade. A change only carries the loose key when that mark is
+ * unique in the snapshot, so a second subject with the same mark is not swallowed.
+ */
+export const gradeLedgerEntries = (grades) => {
+  const keys = []
+  for (const grade of withoutSummaryGrades(grades)) {
+    keys.push(`c:${gradeContentHash(grade)}`, `l:${gradeLooseHash(grade)}`)
+  }
+  return [...new Set(keys)]
+}
+
+/**
+ * Decide which changes may be announced and which identity keys to store.
+ * `ledger === null` means the account has no notified-grades file yet: every
+ * grade currently on file is marked seen and none of them are announced.
+ * A later mark or weight is a new key and is announced once.
+ */
+export const settleGradeNotifications = (changes, grades, ledger) => {
+  const pool = gradeLedgerEntries(grades)
+  if (ledger == null) {
+    return {
+      changes: (changes || []).filter((change) => change?.category !== 'grade'),
+      keys: pool,
+      migrated: true,
+    }
+  }
+  const known = new Set(ledger)
+  const fresh = []
+  for (const change of changes || []) {
+    if (change?.category !== 'grade') {
+      fresh.push(change)
+      continue
+    }
+    const keys = (change.gradeKeys || []).filter(Boolean)
+    if (keys.length > 0 && keys.some((key) => known.has(key))) continue
+    fresh.push(change)
+    for (const key of keys) known.add(key)
+  }
+  for (const key of pool) known.add(key)
+  return { changes: fresh, keys: [...known], migrated: false }
+}
+
+/** A failed or empty scrape must not wipe a grade list that was already loaded. */
+export const keepLoadedGrades = (previousGrades, nextGrades) => {
+  const next = Array.isArray(nextGrades) ? nextGrades : []
+  const prev = Array.isArray(previousGrades) ? previousGrades : []
+  if (next.length === 0 && prev.length > 0) return prev
+  return next
+}
 export const eventLabel = (event) => event.courseName || event.text || event.timetableText || 'Lektion'
 export const eventDay = (event) => (event.start || '').slice(0, 10)
 export const eventClock = (event) => (event.start || '').includes('T') ? (event.start || '').split('T')[1].slice(0, 5) : ''
@@ -409,6 +516,7 @@ export const defaultTarget = (category) => {
 export const linkedChange = (id, category, title, body, extra = {}) => {
   const targetId = extra.targetId || ''
   const targetIds = extra.targetIds || (targetId ? [targetId] : [])
+  const gradeKeys = Array.isArray(extra.gradeKeys) ? extra.gradeKeys.filter((key) => typeof key === 'string' && key) : []
   return {
     id,
     category,
@@ -419,6 +527,7 @@ export const linkedChange = (id, category, title, body, extra = {}) => {
     courseId: extra.courseId || '',
     date: extra.date || '',
     targetIds,
+    gradeKeys,
   }
 }
 
@@ -439,6 +548,7 @@ export const notifyPayload = (change) => JSON.stringify({
   courseId: change.courseId || '',
   date: change.date || '',
   targetIds: change.targetIds || (change.targetId ? String(change.targetId).split(',').filter(Boolean) : []),
+  gradeKeys: Array.isArray(change.gradeKeys) ? change.gradeKeys : [],
 })
 
 export const parseNotifyLink = (json) => {
@@ -502,11 +612,13 @@ export const groupGradeChanges = (changes) => {
   const rest = (changes || []).filter((change) => change.category !== 'grade')
   const ids = [...new Set(grades.flatMap((change) => change.targetIds || String(change.targetId || '').split(',').filter(Boolean)))]
   const courses = [...new Set(grades.map((change) => change.courseId).filter(Boolean))]
+  const gradeKeys = [...new Set(grades.flatMap((change) => change.gradeKeys || []))]
   return [linkedChange(`grades:${ids.slice().sort().join(',')}`, 'grade', `${grades.length} neue Noten`, grades.map((change) => change.body).join('\n'), {
     target: 'grades',
     targetId: ids.join(','),
     courseId: courses.length === 1 ? courses[0] : '',
     targetIds: ids,
+    gradeKeys,
   }), ...rest]
 }
 
@@ -603,20 +715,7 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
     deadlines: settings.deadlines !== false,
   }
   const changes = []
-  if (prefs.grades) {
-    const before = new Map((previous.grades || []).map((grade) => [grade.id, grade]))
-    for (const grade of next.grades || []) {
-      const old = before.get(grade.id)
-      const key = gradeKey(grade)
-      if (old && gradeKey(old) === key) continue
-      const course = grade.course || grade.subject || grade.courseId || 'Kurs'
-      changes.push(linkedChange(`grade:${grade.id}:${key}`, 'grade', old ? 'Notenänderung' : 'Neue Note', `${course} · ${grade.title || 'Note'} · ${formatMark(grade.mark)} · Gewicht ${formatMark(grade.weight)}`, {
-        targetId: gradeTargetId(grade),
-        courseId: courseKeyOf(grade),
-        date: grade.date || '',
-      }))
-    }
-  }
+  if (prefs.grades) diffGradeList(previous.grades || [], next.grades || [], changes)
   if (prefs.timetable) {
     diffAgenda((previous.events || []).filter(isLesson), (next.events || []).filter(isLesson), 'timetable', 'Stundenplan geändert', 'Lektion entfernt', changes)
   }
@@ -650,6 +749,56 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
     }
   }
   return changes
+}
+
+/**
+ * Same mark under a new row id, or the same mark after the course label
+ * changes, is not a new grade. A different mark on the same row is.
+ */
+const diffGradeList = (previous, next, changes) => {
+  const consumed = new Set()
+  const prevById = new Map(previous.map((grade, index) => [grade.id, index]))
+  const prevByContent = new Map()
+  const looseBuckets = new Map()
+  previous.forEach((grade, index) => {
+    const content = partKey(gradeContentParts(grade))
+    const loose = partKey(gradeLooseParts(grade))
+    if (!prevByContent.has(content)) prevByContent.set(content, [])
+    prevByContent.get(content).push(index)
+    if (!looseBuckets.has(loose)) looseBuckets.set(loose, [])
+    looseBuckets.get(loose).push(index)
+  })
+  const nextLooseCounts = looseCounts(next)
+  for (const grade of next) {
+    const content = partKey(gradeContentParts(grade))
+    const loose = partKey(gradeLooseParts(grade))
+    let matchedIndex = null
+    const idIndex = prevById.get(grade.id)
+    if (idIndex != null && !consumed.has(idIndex)) matchedIndex = idIndex
+    if (matchedIndex == null) {
+      matchedIndex = (prevByContent.get(content) || []).find((index) => !consumed.has(index)) ?? null
+    }
+    if (matchedIndex == null && nextLooseCounts.get(loose) === 1) {
+      const bucket = looseBuckets.get(loose) || []
+      if (bucket.length === 1 && !consumed.has(bucket[0])) matchedIndex = bucket[0]
+    }
+    const matched = matchedIndex == null ? null : previous[matchedIndex]
+    if (matchedIndex != null) consumed.add(matchedIndex)
+    if (matched) {
+      const same = partKey(gradeContentParts(matched)) === content
+        || partKey(gradeLooseParts(matched)) === loose
+        || gradeKey(matched) === gradeKey(grade)
+      if (same) continue
+    }
+    const key = gradeKey(grade)
+    const course = grade.course || grade.subject || grade.courseId || 'Kurs'
+    changes.push(linkedChange(`grade:${grade.id}:${key}`, 'grade', matched ? 'Notenänderung' : 'Neue Note', `${course} · ${grade.title || 'Note'} · ${formatMark(grade.mark)} · Gewicht ${formatMark(grade.weight)}`, {
+      targetId: gradeTargetId(grade),
+      courseId: courseKeyOf(grade),
+      date: grade.date || '',
+      gradeKeys: gradeNotifyKeys(grade, nextLooseCounts.get(loose) === 1),
+    }))
+  }
 }
 
 const diffAgenda = (previous, next, category, created, removed, changes) => {

@@ -82,6 +82,11 @@ fun notifyPayload(change: SchulnetzChange): String {
             if (index > 0) append(',')
             append(ch.fasrv.fanotes.json.escapeJson(id))
         }
+        append("],\"gradeKeys\":[")
+        change.gradeKeys.forEachIndexed { index, key ->
+            if (index > 0) append(',')
+            append(ch.fasrv.fanotes.json.escapeJson(key))
+        }
         append("]}")
     }
 }
@@ -121,6 +126,7 @@ fun changeFromObj(obj: ch.fasrv.fanotes.json.JsonValue.Obj): SchulnetzChange? {
     val id = source.string("id") ?: obj.string("id") ?: return null
     val ids = (source.array("targetIds")?.items.orEmpty().mapNotNull { (it as? ch.fasrv.fanotes.json.JsonValue.Str)?.value }
         + (source.string("targetId").orEmpty().split(',').map { it.trim() }.filter { it.isNotBlank() })).distinct()
+    val gradeKeys = source.array("gradeKeys")?.items.orEmpty().mapNotNull { (it as? ch.fasrv.fanotes.json.JsonValue.Str)?.value }.distinct()
     return SchulnetzChange(
         id = id,
         category = source.string("category") ?: obj.string("category") ?: "event",
@@ -131,6 +137,7 @@ fun changeFromObj(obj: ch.fasrv.fanotes.json.JsonValue.Obj): SchulnetzChange? {
         courseId = source.string("courseId").orEmpty(),
         date = source.string("date").orEmpty(),
         targetIds = ids,
+        gradeKeys = gradeKeys,
     )
 }
 
@@ -149,6 +156,7 @@ fun groupGradeChanges(changes: List<SchulnetzChange>): List<SchulnetzChange> {
         courseId = grades.map { it.courseId }.distinct().singleOrNull().orEmpty(),
         date = "",
         targetIds = ids,
+        gradeKeys = grades.flatMap { it.gradeKeys }.filter { it.isNotBlank() }.distinct(),
     )
     return listOf(grouped) + rest
 }
@@ -173,6 +181,7 @@ fun linkedChange(
     targetId: String,
     courseId: String = "",
     date: String = "",
+    gradeKeys: List<String> = emptyList(),
 ): SchulnetzChange = SchulnetzChange(
     id = id,
     category = category,
@@ -183,6 +192,7 @@ fun linkedChange(
     courseId = courseId,
     date = date,
     targetIds = listOf(targetId).filter { it.isNotBlank() },
+    gradeKeys = gradeKeys,
 )
 
 private fun routeGrades(link: NotifyLink, snapshot: SchulnetzSnapshot): NotifyRoute {

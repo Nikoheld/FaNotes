@@ -86,25 +86,7 @@ fun diffSnapshots(
 }
 
 private fun diffGrades(previous: List<SchoolGrade>, next: List<SchoolGrade>, changes: MutableList<SchulnetzChange>) {
-    val before = previous.associateBy { it.id }
-    for (grade in next) {
-        val old = before[grade.id]
-        val key = gradeKey(grade)
-        if (old != null && gradeKey(old) == key) continue
-        val title = if (old == null) "Neue Note" else "Notenänderung"
-        val mark = formatMark(grade.mark)
-        val course = grade.courseLabel.ifBlank { "Kurs" }
-        val name = grade.title.ifBlank { "Note" }
-        changes += linkedChange(
-            id = "grade:${grade.id}:$key",
-            category = "grade",
-            title = title,
-            body = "$course · $name · $mark · Gewicht ${formatMark(grade.weight)}",
-            targetId = gradeTargetId(grade),
-            courseId = grade.courseKey,
-            date = grade.date,
-        )
-    }
+    changes += matchGradeChanges(previous, next)
 }
 
 private fun diffAgenda(

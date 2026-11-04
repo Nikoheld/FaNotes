@@ -19,13 +19,17 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import ch.fasrv.fanotes.json.JsonValue
+import ch.fasrv.fanotes.json.escapeJson
 import ch.fasrv.fanotes.json.parseJson
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
+import ch.fasrv.fanotes.schulnetz.SchoolGrade
 import ch.fasrv.fanotes.schulnetz.SchulnetzChange
+import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
 import ch.fasrv.fanotes.schulnetz.changeFromPayload
+import ch.fasrv.fanotes.schulnetz.settleGradeNotifications
 import ch.fasrv.fanotes.schulnetz.changeIsHidden
 import ch.fasrv.fanotes.schulnetz.hiddenGradeBody
 import ch.fasrv.fanotes.schulnetz.hiddenGradeTitle
@@ -89,17 +93,38 @@ object CompanionAlerts {
         return ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     }
 
-    fun showAll(context: Context, changes: List<SchulnetzChange>) {
+    fun showAll(context: Context, changes: List<SchulnetzChange>, gradeKeysSettled: Boolean = false) {
         val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
         val guess = prefs.getBoolean(CompanionGraph.GUESS_GRADES_PREF, false)
-        val snapshot = CompanionGraph.snapshotFile(context).takeIf { it.isFile }?.readText()?.let { parseNormalizedSnapshot(it) } ?: ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot()
+        val snapshot = CompanionGraph.snapshotFile(context).takeIf { it.isFile }?.readText()?.let { parseNormalizedSnapshot(it) } ?: SchulnetzSnapshot()
         if (guess) rememberUnrevealed(context, newGradeTargetIds(changes))
-        prepareGradeNotifications(changes, guess, snapshot).forEach { show(context, it) }
+        prepareGradeNotifications(changes, guess, snapshot).forEach { show(context, it, gradeKeysSettled) }
     }
 
-    fun show(context: Context, change: SchulnetzChange) {
+    /**
+     * Drop grades this account has already been told about, and on the first
+     * run after this fix record every grade currently on file without telling
+     * anyone again. [gradeKeysSettled] on the following [showAll] must be true.
+     */
+    fun settledChanges(context: Context, changes: List<SchulnetzChange>, grades: List<SchoolGrade>): List<SchulnetzChange> {
+        val ledger = readGradeLedger(context)
+        val settled = settleGradeNotifications(changes, grades, ledger)
+        writeGradeLedger(context, settled.keys)
+        return settled.changes
+    }
+
+    fun show(context: Context, change: SchulnetzChange, gradeKeysSettled: Boolean = false) {
         if (change.category != "settings" && context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE).getBoolean("school-disconnected", false)) return
-        if (change.id.isBlank() || !remember(context, change.id)) return
+        if (change.id.isBlank()) return
+        if (!gradeKeysSettled && change.category == "grade") {
+            val keys = change.gradeKeys.filter { it.isNotBlank() }
+            if (keys.isNotEmpty()) {
+                val known = readGradeLedger(context) ?: emptySet()
+                if (keys.all { it in known }) return
+                writeGradeLedger(context, known + keys)
+            }
+        }
+        if (!remember(context, change.id)) return
         val hidden = runCatching {
             val file = java.io.File(context.filesDir, "vault/${CompanionGraph.HIDDEN_PATH}")
             if (!file.isFile) emptyList() else parseHiddenLessons(file.readText())
@@ -197,9 +222,52 @@ object CompanionAlerts {
         val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
         val seen = prefs.getStringSet(SEEN, emptySet()).orEmpty().toMutableSet()
         if (!seen.add(id)) return false
-        val trimmed = if (seen.size > 200) seen.toList().takeLast(200).toSet() else seen
-        prefs.edit().putStringSet(SEEN, trimmed).apply()
+        val stored = if (seen.size > 2000) {
+            val kept = LinkedHashSet<String>()
+            kept.add(id)
+            for (old in seen) {
+                if (kept.size >= 2000) break
+                kept.add(old)
+            }
+            kept
+        } else {
+            seen
+        }
+        prefs.edit().putStringSet(SEEN, stored).apply()
         return true
+    }
+}
+
+private const val GRADE_LEDGER = "notified-grades-v1.json"
+
+internal fun gradeLedgerFile(context: Context) = java.io.File(context.filesDir, GRADE_LEDGER)
+
+/** Null when this install has never recorded grade identities. That is the migration. */
+internal fun readGradeLedger(context: Context): Set<String>? {
+    val file = gradeLedgerFile(context)
+    if (!file.isFile) return null
+    val obj = runCatching { parseJson(file.readText()) as? JsonValue.Obj }.getOrNull() ?: return null
+    if (obj.double("version") != 1.0) return null
+    val keys = obj.array("keys")?.items?.mapNotNull { (it as? JsonValue.Str)?.value } ?: return null
+    return keys.toSet()
+}
+
+internal fun writeGradeLedger(context: Context, keys: Set<String>) {
+    val body = buildString {
+        append("{\"version\":1,\"keys\":[")
+        keys.sorted().forEachIndexed { index, key ->
+            if (index > 0) append(',')
+            append(escapeJson(key))
+        }
+        append("]}")
+    }
+    val file = gradeLedgerFile(context)
+    file.parentFile?.mkdirs()
+    val temporary = java.io.File(file.parentFile, "${file.name}.${System.nanoTime()}.tmp")
+    temporary.writeText(body)
+    if (!temporary.renameTo(file)) {
+        file.writeText(body)
+        temporary.delete()
     }
 }
 
