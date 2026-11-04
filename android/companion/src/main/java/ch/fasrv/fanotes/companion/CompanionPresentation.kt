@@ -17,15 +17,79 @@ enum class Page(val title: String) {
     Search("Search"), Editor("Note"), Grades("Grades"), Course("Subject"), Exams("Exams"),
     Absences("Absences"), Updates("School updates"), Statement("School account"),
     Settings("Settings"), Connections("Account & sync"), Appearance("Appearance"),
-    Planning("Planning & grades"), Notifications("Notifications"), Profile("Your activity"),
-    Diagnostics("Diagnostics"), Auth("Connect FaNotes"), Trash("Recently deleted")
+    Navigation("Navigation bar"), Planning("Planning & grades"), Notifications("Notifications"),
+    Profile("Your activity"), Diagnostics("Diagnostics"), Auth("Connect FaNotes"), Trash("Recently deleted")
 }
 data class CompanionRoute(val destination: Destination = Destination.Today, val page: Page? = null)
-fun destinationFor(raw: String): Destination = when (raw.lowercase()) {
-    "plan", "planner" -> Destination.Planner
-    "notizen", "notes" -> Destination.Notes
-    "noten", "mehr", "school" -> Destination.School
+data class NavPlacement(val route: CompanionRoute, val plannerTasks: Boolean = false)
+fun destinationFor(raw: String): Destination = when (startTabId(raw)) {
+    "planner", "tasks" -> Destination.Planner
+    "notes" -> Destination.Notes
+    "school", "grades", "exams", "absences", "updates", "statement", "settings" -> Destination.School
     else -> Destination.Today
+}
+fun navBarLabel(id: String): String = when (startTabId(id)) {
+    "planner" -> "Planner"
+    "tasks" -> "To-dos"
+    "notes" -> "Notes"
+    "school" -> "School"
+    "grades" -> "Grades"
+    "exams" -> "Exams"
+    "absences" -> "Absences"
+    "updates" -> "Updates"
+    "statement" -> "Account"
+    "settings" -> "Settings"
+    else -> "Today"
+}
+fun navPlacement(id: String): NavPlacement = when (startTabId(id)) {
+    "planner" -> NavPlacement(CompanionRoute(Destination.Planner))
+    "tasks" -> NavPlacement(CompanionRoute(Destination.Planner), plannerTasks = true)
+    "notes" -> NavPlacement(CompanionRoute(Destination.Notes))
+    "school" -> NavPlacement(CompanionRoute(Destination.School))
+    "grades" -> NavPlacement(CompanionRoute(Destination.School, Page.Grades))
+    "exams" -> NavPlacement(CompanionRoute(Destination.School, Page.Exams))
+    "absences" -> NavPlacement(CompanionRoute(Destination.School, Page.Absences))
+    "updates" -> NavPlacement(CompanionRoute(Destination.School, Page.Updates))
+    "statement" -> NavPlacement(CompanionRoute(Destination.School, Page.Statement))
+    "settings" -> NavPlacement(CompanionRoute(Destination.School, Page.Settings))
+    else -> NavPlacement(CompanionRoute(Destination.Today))
+}
+fun navChromeId(route: CompanionRoute, plannerTasks: Boolean, bar: List<String> = DEFAULT_NAV_BAR): String? {
+    val shown = validateNavBar(bar)
+    return when (route.page) {
+        null -> when (route.destination) {
+            Destination.Today -> "today"
+            Destination.Planner -> if (plannerTasks && "tasks" in shown) "tasks" else "planner"
+            Destination.Notes -> "notes"
+            Destination.School -> "school"
+        }
+        Page.Grades -> "grades"
+        Page.Exams -> "exams"
+        Page.Absences -> "absences"
+        Page.Updates -> "updates"
+        Page.Statement -> "statement"
+        Page.Settings -> "settings"
+        else -> null
+    }
+}
+fun showsNavBar(route: CompanionRoute, plannerTasks: Boolean, bar: List<String>): Boolean {
+    val id = navChromeId(route, plannerTasks, bar) ?: return false
+    return id in validateNavBar(bar) || route.page == null
+}
+fun selectedNavId(route: CompanionRoute, plannerTasks: Boolean, bar: List<String>): String? {
+    val id = navChromeId(route, plannerTasks, bar) ?: return null
+    return id.takeIf { it in validateNavBar(bar) }
+}
+fun isAtNavRoot(
+    route: CompanionRoute,
+    plannerTasks: Boolean,
+    startTab: String,
+    bar: List<String>,
+    noteFolder: String,
+    hasHistory: Boolean,
+): Boolean {
+    if (hasHistory || noteFolder.isNotBlank() || route.page == Page.Course) return false
+    return navChromeId(route, plannerTasks, bar) == homeNavId(startTab, bar)
 }
 fun companionRoute(route: NotifyRoute): CompanionRoute = when {
     route.tab == "Noten" -> CompanionRoute(Destination.School, if (route.courseId.isBlank()) Page.Grades else Page.Course)

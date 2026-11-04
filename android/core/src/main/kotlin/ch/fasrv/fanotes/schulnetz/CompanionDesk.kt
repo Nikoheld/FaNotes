@@ -82,6 +82,7 @@ data class DeskPrefs(
     val courseAliases: Map<String, String> = emptyMap(),
     val widgetCompact: Boolean = false,
     val startTab: String = "Heute",
+    val navBar: List<String> = DEFAULT_NAV_BAR,
 )
 
 fun lessonClock(event: AgendaEvent, zone: java.time.ZoneId = java.time.ZoneId.of("Europe/Zurich")): String =
@@ -237,6 +238,7 @@ fun parseDeskPrefs(json: String): DeskPrefs {
         courseAliases = aliases,
         widgetCompact = obj.bool("widgetCompact") == true,
         startTab = obj.string("startTab").orEmpty().ifBlank { "Heute" },
+        navBar = validateNavBar(obj.array("navBar")?.items?.mapNotNull { (it as? ch.fasrv.fanotes.json.JsonValue.Str)?.value }),
     )
 }
 
@@ -268,5 +270,11 @@ fun serializeDeskPrefs(prefs: DeskPrefs): String = buildString {
     }
     append("},\"widgetCompact\":").append(prefs.widgetCompact)
     append(",\"startTab\":").append(ch.fasrv.fanotes.json.escapeJson(prefs.startTab))
+    append(",\"navBar\":[")
+    validateNavBar(prefs.navBar).forEachIndexed { index, id ->
+        if (index > 0) append(',')
+        append(ch.fasrv.fanotes.json.escapeJson(id))
+    }
+    append("]")
     append('}')
 }
