@@ -6,7 +6,7 @@ import { Readable } from 'node:stream'
 import test from 'node:test'
 import { createCipheriv, generateKeyPairSync, randomBytes } from 'node:crypto'
 import { createSchulnetzRuntime, openToken, sealToken } from './schulnetz-api.mjs'
-import { fcmDataMessage, fcmDropToken, isValidFcmToken, serviceAccountJwt } from './fcm.mjs'
+import { fcmDataMessage, fcmDropToken, fcmPriorityForChanges, isValidFcmToken, serviceAccountJwt } from './fcm.mjs'
 import {
   diffSnapshots,
   normalizeSchoolBase,
@@ -213,6 +213,7 @@ test('stored refresh tokens are encrypted and only the poller refreshes', async 
     assert.equal(sent.length, 1)
     assert.equal(sent[0].message.data.event, 'sync')
     assert.equal(sent[0].message.android.priority, 'HIGH')
+    assert.equal(sent[0].message.android.collapse_key, 'kanti-sync')
     assert.equal(sent[0].message.notification, undefined)
     assert.equal(JSON.stringify(sent[0]).includes('4.5'), false)
     assert.equal(JSON.stringify(sent[0]).includes('5.5'), false)
@@ -490,10 +491,22 @@ test('firebase data messages name an event and never a grade', () => {
     const message = fcmDataMessage('phone:APA91b-example-token-value', event)
     assert.equal(message.message.data.event, event)
     assert.equal(message.message.android.priority, 'HIGH')
+    assert.equal(message.message.android.collapse_key, event === 'reauth' ? 'kanti-reauth' : event === 'test' ? 'kanti-test' : 'kanti-sync')
+    assert.equal(message.message.android.ttl, '21600s')
     assert.equal(message.message.notification, undefined)
     assert.equal(JSON.stringify(message).includes('5.5'), false)
     assert.equal(JSON.stringify(message).includes('Neue Note'), false)
   }
+  assert.equal(fcmPriorityForChanges([{ category: 'grade' }, { category: 'timetable' }]), 'HIGH')
+  assert.equal(fcmPriorityForChanges([{ category: 'exam' }]), 'HIGH')
+  assert.equal(fcmPriorityForChanges([{ category: 'absence' }]), 'HIGH')
+  assert.equal(fcmPriorityForChanges([{ category: 'deadline' }]), 'HIGH')
+  assert.equal(fcmPriorityForChanges([{ category: 'event' }]), 'HIGH')
+  assert.equal(fcmPriorityForChanges([{ category: 'timetable' }]), null)
+  assert.equal(fcmPriorityForChanges([]), null)
+  const quiet = fcmDataMessage('phone:APA91b-example-token-value', 'sync', { priority: 'NORMAL' })
+  assert.equal(quiet.message.android.priority, 'NORMAL')
+  assert.equal(quiet.message.android.ttl, '3600s')
   assert.equal(isValidFcmToken('phone:APA91b-example-token-value'), true)
   assert.equal(isValidFcmToken('bad token'), false)
   assert.equal(isValidFcmToken(''), false)

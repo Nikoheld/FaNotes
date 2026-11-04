@@ -53,13 +53,35 @@ export const serviceAccountJwt = (account, nowMs) => {
   return { jwt: `${header}.${payload}.${signature}`, exp }
 }
 
-export const fcmDataMessage = (token, event) => ({
-  message: {
-    token,
-    data: { event: String(event) },
-    android: { priority: 'HIGH' },
-  },
-})
+const COLLAPSE_KEY = {
+  reauth: 'kanti-reauth',
+  test: 'kanti-test',
+  sync: 'kanti-sync',
+}
+
+/** High priority wakes the phone. Timetable-only refreshes do not. */
+export const fcmPriorityForChanges = (changes) => {
+  const categories = (Array.isArray(changes) ? changes : [])
+    .map((change) => change?.category)
+    .filter((category) => typeof category === 'string' && category)
+  if (categories.some((category) => category !== 'timetable')) return 'HIGH'
+  return null
+}
+
+export const fcmDataMessage = (token, event, options = {}) => {
+  const priority = options.priority === 'NORMAL' ? 'NORMAL' : 'HIGH'
+  return {
+    message: {
+      token,
+      data: { event: String(event) },
+      android: {
+        priority,
+        collapse_key: COLLAPSE_KEY[event] || 'kanti-sync',
+        ttl: priority === 'HIGH' ? '21600s' : '3600s',
+      },
+    },
+  }
+}
 
 export const fcmDropToken = (status, body) => {
   const text = String(body || '')

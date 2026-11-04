@@ -26,7 +26,7 @@ Der Server benutzt die PHPSESSID des Telefons nicht. Er speichert die Microsoft-
 
 Die Notenseite (`pageid=21311`) hat pro Fach eine Spalte bzw. Zeile «Notendurchschnitt» / «Aktueller Durchschnitt». Das ist der Fachschnitt, keine Einzelprüfung. Parser, Schnappschuss und Diff ignorieren diese Zeilen; gespeicherte Schnappschüsse mit einer künstlichen Note «Durchschnitt» werden still bereinigt und erzeugen keinen Push.
 
-Der Poller liest standardmässig jede Minute (`FANOTES_SCHULNETZ_POLL_MS=60000`) und vergleicht mit dem letzten Schnappschuss. Eine Minute hält die Website-Sitzung lebendig (Schulnetz trennt nach etwa zehn Minuten Untätigkeit) und bringt eine neue Note oder einen Ausfall in der Regel in unter einer Minute aufs Telefon, sobald FCM zustellt. 30 Sekunden geht per Umgebungsvariable, belastet Schulnetz aber stärker; unter 30 Sekunden ist nicht vorgesehen. Die erste erfolgreiche Lesung erzeugt keine Meldungen. Danach schickt der Server eine Data-Message `{ event: "sync" }`. Das Telefon holt `/snapshot` und `/changes` und zeigt die Meldung selbst. Es hält keinen Vordergrunddienst. Zusätzlich prüft WorkManager etwa alle 15 Minuten, auch wenn FCM konfiguriert ist. Ausgeblendete Lektionen liegen im Tresor und lösen auf dem Telefon keine Stundenplan-Pushs aus.
+Der Poller liest standardmässig jede Minute (`FANOTES_SCHULNETZ_POLL_MS=60000`) und vergleicht mit dem letzten Schnappschuss. Eine Minute hält die Website-Sitzung lebendig (Schulnetz trennt nach etwa zehn Minuten Untätigkeit) und bringt eine neue Note oder einen Ausfall in der Regel in unter einer Minute aufs Telefon, sobald FCM zustellt. 30 Sekunden geht per Umgebungsvariable, belastet Schulnetz aber stärker; unter 30 Sekunden ist nicht vorgesehen. Die erste erfolgreiche Lesung erzeugt keine Meldungen. Danach schickt der Server eine Data-Message `{ event: "sync" }`, hochprior nur wenn die Änderung eine Note, Prüfung, Absenz, Frist oder Mitteilung ist. Ein reiner Stundenplan-Wechsel weckt das Telefon nicht. Das Telefon holt nur `/changes` und zeigt die Meldung selbst. Es hält keinen Vordergrunddienst. WorkManager prüft nur, wenn FCM fehlt oder 12 Stunden lang kein Push kam, dann etwa alle 6 Stunden. Ausgeblendete Lektionen liegen im Tresor und lösen auf dem Telefon keine Stundenplan-Pushs aus.
 
 ## Endpunkte
 
@@ -109,13 +109,14 @@ Der Poller prüft jede URL, bevor er sie aufruft, und folgt keinen Weiterleitung
 
 ## Push
 
-Sofortige Meldungen laufen über Firebase Cloud Messaging (HTTP v1). Die App braucht dafür keine ntfy-App und keinen Vordergrunddienst. Solange der Dienstkontoschlüssel fehlt, überspringt der Server FCM und das Telefon prüft etwa alle 15 Minuten. Beides ist dedupliziert: eine Note wird pro FaNotes-Konto genau einmal gemeldet.
+Sofortige Meldungen laufen über Firebase Cloud Messaging (HTTP v1). Die App braucht dafür keine ntfy-App, keinen Vordergrunddienst, keinen eigenen WakeLock und keinen exakten Alarm. Solange der Dienstkontoschlüssel fehlt, überspringt der Server FCM und das Telefon prüft etwa alle 6 Stunden, nur mit Netz und nicht bei niedrigem Akku. Eine Note wird pro Konto genau einmal gemeldet.
 
 1. Die App registriert ihr FCM-Token mit `PUT /push-token`, sobald `google-services.json` im Build liegt und Schulnetz verbunden ist. Höchstens acht Tokens. Ohne die Datei startet die App normal.
-2. Bei einer Änderung sendet der Server eine hochpriore Data-Message `{ event: "sync" }`. Kein Notentext und kein Titel gehen an Google. Die App holt `/snapshot` und `/changes` und zeigt die Meldung selbst.
-3. Eine abgelaufene Anmeldung sendet `{ event: "reauth" }`. `POST /push/test` sendet `{ event: "test" }`. «Send a test notification» bleibt in den Einstellungen.
-4. WorkManager bleibt das Netz, etwa alle 15 Minuten, auch wenn FCM konfiguriert ist.
+2. Eine neue Note, Prüfung, Absenz, Frist oder Mitteilung sendet eine hochpriore Data-Message `{ event: "sync" }` mit `collapse_key` `kanti-sync` und TTL 6 Stunden. Ein reiner Stundenplan-Wechsel sendet nichts. Kein Notentext und kein Titel gehen an Google. Die App liest nur `/changes` (kurzes Timeout) und zeigt die Meldung selbst. Sie startet keinen vollen Sync.
+3. Eine abgelaufene Anmeldung sendet `{ event: "reauth" }` (`kanti-reauth`). `POST /push/test` sendet `{ event: "test" }` (`kanti-test`). «Send a test notification» bleibt in den Einstellungen.
+4. WorkManager läuft nicht, solange in den letzten 12 Stunden ein Push ankam. Danach, oder ohne Firebase, prüft ein Auftrag etwa alle 6 Stunden `/changes`. Kein 15-Minuten-Takt.
 5. Ein Tipp öffnet das Element: Note → Noten, Stundenplan → Tag und Lektion, Prüfung → Prüfungsdetail, Termin → Termine, Absenzfrist → Absenz, Test → Einstellungen. `MainActivity` ist `singleTop`.
+6. Das Stundenplan-Widget hat keinen 30-Minuten-Takt. Liegt es auf dem Homescreen, plant die App ein ungenaues `setWindow` auf die nächste Lektionsgrenze und liest dabei nur den lokalen Cache.
 
 ### Firebase einrichten
 
