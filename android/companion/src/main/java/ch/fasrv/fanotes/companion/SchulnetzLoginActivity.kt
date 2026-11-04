@@ -4,6 +4,7 @@ package ch.fasrv.fanotes.companion
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.webkit.CookieManager
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -18,13 +19,17 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
 import ch.fasrv.fanotes.desk.themePalette
 import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.schulnetz.*
 
-/** The school/provider owns the web content; the surrounding chrome belongs to Companion. */
+/** The school site owns the page. Kanti+ only draws the bar around it. */
 class SchulnetzLoginActivity : ComponentActivity() {
     private var webView: WebView? = null
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,20 +48,43 @@ class SchulnetzLoginActivity : ComponentActivity() {
         val prefs = graph.deskPrefs()
         setContent {
             var loading by remember { mutableStateOf(true) }
+            var pageError by remember { mutableStateOf<String?>(null) }
             CompanionTheme(themePalette(prefs.theme, isSystemInDarkTheme()), prefs.accent, prefs.amoled) {
+                val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+                SideEffect {
+                    WindowCompat.getInsetsController(window, window.decorView).apply {
+                        isAppearanceLightStatusBars = !dark
+                        isAppearanceLightNavigationBars = !dark
+                    }
+                }
                 BackHandler { val web = webView; if (web?.canGoBack() == true) web.goBack() else finish() }
                 Scaffold(topBar = {
-                    TopAppBar(title = { Text(if (viewOnly) "School session" else "Connect Schulnetz", style = MaterialTheme.typography.titleLarge) },
+                    TopAppBar(title = { Text(if (viewOnly) "School session" else "Connect Schulnetz", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         navigationIcon = { ActionIcon(Icons.Outlined.Close, "Close school sign-in") { finish() } })
                 }) { padding ->
                     Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
                         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        pageError?.let { message ->
+                            Box(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                                InfoBanner("Could not open Schulnetz", message, "Try again", true) {
+                                    pageError = null
+                                    loading = true
+                                    webView?.reload()
+                                }
+                            }
+                        }
                         AndroidView(factory = { context -> WebView(context).also { web ->
                             webView = web
                             prepareWebView(web)
                             web.webViewClient = object : WebViewClient() {
                                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = !loginWebViewAllowed(request.url.toString(), base)
-                                override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) { loading = true }
+                                override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) { loading = true; pageError = null }
+                                override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                                    if (request.isForMainFrame) {
+                                        loading = false
+                                        pageError = "The school page did not load. Check your connection, then try again."
+                                    }
+                                }
                                 override fun onPageFinished(view: WebView, url: String) {
                                     loading = false
                                     view.evaluateJavascript(HTML_JS) { raw ->

@@ -18,6 +18,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -30,7 +33,7 @@ fun SchoolScreen(model: CompanionModel) {
     val profile = model.snapshot.profile
     ScreenList {
         item {
-            Text(profile?.displayName?.ifBlank { "Your school, in one place" } ?: "Your school, in one place", style = MaterialTheme.typography.headlineMedium)
+            Text(profile?.displayName?.ifBlank { "Your school, in one place" } ?: "Your school, in one place", style = MaterialTheme.typography.headlineMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (!profile?.className.isNullOrBlank()) Text(profile!!.className, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
             Text("Last updated ${updatedLabel(model.snapshot.fetchedAt)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp, bottom = 20.dp))
         }
@@ -63,14 +66,14 @@ fun GradesScreen(model: CompanionModel) {
     ScreenList {
         item {
             if (query.isBlank()) {
-            Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                Column(Modifier.weight(1f)) {
+            FlowRow(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.widthIn(min = 140.dp)) {
                     Text("Overall average", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(formatMark(overallAverage(official), model.desk.gradeDecimals), style = MaterialTheme.typography.displayLarge, modifier = Modifier.padding(top = 4.dp))
+                    Text(formatMark(overallAverage(official), model.desk.gradeDecimals), style = MaterialTheme.typography.displayLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
                 }
-                if (model.desk.showPluspunkte) Column(horizontalAlignment = Alignment.End) {
+                if (model.desk.showPluspunkte) Column {
                     Text("Promotion points", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(formatPluspunkte(totals.total), style = MaterialTheme.typography.headlineMedium, color = if (totals.total >= 0) LocalCompanionSemantics.current.success else MaterialTheme.colorScheme.error)
+                    Text(formatPluspunkte(totals.total), style = MaterialTheme.typography.headlineMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (totals.total >= 0) LocalCompanionSemantics.current.success else MaterialTheme.colorScheme.error)
                 }
             }
             Text("School marks plus your own grades. What-if scenarios stay inside each subject.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 20.dp))
@@ -78,10 +81,15 @@ fun GradesScreen(model: CompanionModel) {
             SearchField(query, { query = it }, "Find a subject")
             ChoiceRow(listOf("name" to "Subject", "average" to "Average", "pluspunkte" to "Points"), model.desk.gradeSort, { model.updateDesk(model.desk.copy(gradeSort = it)) })
         }
-        if (courses.isEmpty()) item { EmptyState(Icons.Outlined.Insights, if (query.isBlank()) "No grades yet" else "No matching subjects", if (query.isBlank()) "Your available marks appear after connecting and refreshing Schulnetz." else "Try a different subject name.") }
+        if (courses.isEmpty() && query.isBlank() && model.busy && model.snapshot.fetchedAt.isBlank()) item {
+            Row(Modifier.fillMaxWidth().padding(vertical = 28.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                Text("Loading grades…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 12.dp))
+            }
+        } else if (courses.isEmpty()) item { EmptyState(Icons.Outlined.Insights, if (query.isBlank()) "No grades yet" else "No matching subjects", if (query.isBlank()) "Your available marks appear after connecting and refreshing Schulnetz." else "Try a different subject name.") }
         items(courses, key = { it.courseId }) { course ->
             val highlighted = course.marks.any { it.targetId in model.highlightIds }
-            Row(Modifier.fillMaxWidth().background(if (highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background, MaterialTheme.shapes.small).clickable { model.focusCourseId = course.courseId; model.navigate(Page.Course) }.padding(vertical = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(Modifier.fillMaxWidth().background(if (highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background, MaterialTheme.shapes.small).clickable(role = Role.Button) { model.focusCourseId = course.courseId; model.navigate(Page.Course) }.padding(vertical = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Box(Modifier.width(3.dp).height(36.dp).background(paletteColor(subjectColor(course.label, overrides = model.colors)), MaterialTheme.shapes.extraSmall))
                 Column(Modifier.weight(1f)) {
                     Text(courseAlias(course.label, model.desk.courseAliases), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -90,7 +98,7 @@ fun GradesScreen(model: CompanionModel) {
                         if (course.marks.any { it.own }) add("includes your grades")
                         if (course.marks.any { it.adjusted || it.excluded }) add("adjusted")
                         if (model.hypothetical.any { it.courseId == course.courseId }) add("local scenario saved")
-                    }.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 Text(if (course.marks.any { model.isUnrevealed(it.targetId) } && course.average == null) "?" else formatMark(course.average, model.desk.gradeDecimals), style = MaterialTheme.typography.titleLarge, color = if ((course.average ?: 4.0) < 4.0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
                 Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -127,7 +135,7 @@ fun CourseScreen(model: CompanionModel) {
     var weight by rememberSaveable { mutableStateOf("1") }
     ScreenList {
         item {
-            Text(courseAlias(course.label, model.desk.courseAliases), style = MaterialTheme.typography.headlineMedium)
+            Text(courseAlias(course.label, model.desk.courseAliases), style = MaterialTheme.typography.headlineMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
             if (course.archived) Text("Archived. Hidden from your list, overall average and promotion points.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
             FlowRow(Modifier.fillMaxWidth().padding(vertical = 18.dp), horizontalArrangement = Arrangement.spacedBy(28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column { Text("Average", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(formatMark(course.average, decimals), style = MaterialTheme.typography.headlineLarge) }
@@ -240,7 +248,8 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
             Page.Exams -> {
                 item { ChoiceRow(listOf("all" to "All", "upcoming" to "Upcoming"), filter, { filter = it }) }
                 val events = (model.snapshot.exams + model.snapshot.events.filter { it.isExamLike() }).distinctBy(::lessonTargetId).filter { "${it.label} ${it.comment}".contains(query, true) && (filter == "all" || (parseDisplayDate(it.start) ?: today) >= today) }.sortedWith(compareBy<AgendaEvent> { if (lessonTargetId(it) in model.highlightIds) 0 else 1 }.thenBy { it.start })
-                if (events.isEmpty()) item { EmptyState(Icons.AutoMirrored.Outlined.Assignment, "No exams to show", "Available exam dates appear after your school is refreshed.") }
+                if (events.isEmpty() && query.isBlank() && model.busy && model.snapshot.fetchedAt.isBlank()) item { SchoolLoading("Loading exams…") }
+                else if (events.isEmpty()) item { EmptyState(Icons.AutoMirrored.Outlined.Assignment, "No exams to show", "Available exam dates appear after your school is refreshed.") }
                 items(events, key = { lessonTargetId(it) }) { event ->
                     val entry = AgendaEntry("exam:${lessonTargetId(event)}", event.label, AgendaKind.Exam, parseDisplayDate(event.start) ?: today, eventClock(event), detail = listOf(dueLabel(event.start), event.room).filter { it.isNotBlank() }.joinToString(" · "), school = event)
                     AgendaRow(model, entry) { selected = entry }
@@ -250,11 +259,12 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
             Page.Absences -> {
                 item { ChoiceRow(listOf("all" to "All", "open" to "Open", "excused" to "Excused"), filter, { filter = it }) }
                 val absences = model.snapshot.absences.filter { "${it.subject} ${it.reason} ${it.dateFrom}".contains(query, true) && when (filter) { "open" -> !it.excused; "excused" -> it.excused; else -> true } }.sortedWith(compareBy<SchoolAbsence> { if (absenceTargetId(it) in model.highlightIds) 0 else 1 }.thenByDescending { it.dateFrom })
-                if (absences.isEmpty()) item { EmptyState(Icons.Outlined.EventAvailable, "No absences to show", "Your available absence records and deadlines will appear here.") }
+                if (absences.isEmpty() && query.isBlank() && model.busy && model.snapshot.fetchedAt.isBlank()) item { SchoolLoading("Loading absences…") }
+                else if (absences.isEmpty()) item { EmptyState(Icons.Outlined.EventAvailable, "No absences to show", "Your available absence records and deadlines will appear here.") }
                 items(absences, key = { absenceTargetId(it) }) { absence ->
                     val highlighted = absenceTargetId(absence) in model.highlightIds
                     Column(Modifier.fillMaxWidth().background(if (highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background, MaterialTheme.shapes.small).padding(vertical = 16.dp, horizontal = if (highlighted) 12.dp else 0.dp)) {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text(absence.subject.ifBlank { "Absence" }, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f)); Tag(if (absence.excused) "Excused" else "Open", if (absence.excused) LocalCompanionSemantics.current.success else LocalCompanionSemantics.current.warning) }
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) { Text(absence.subject.ifBlank { "Absence" }, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis); Tag(if (absence.excused) "Excused" else "Open", if (absence.excused) LocalCompanionSemantics.current.success else LocalCompanionSemantics.current.warning) }
                         Text(listOf(absence.dateFrom, absence.dateTo.takeIf { it != absence.dateFrom }.orEmpty(), absence.hourFrom, absence.hourTo).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         if (absence.reason.isNotBlank()) Text(absence.reason, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp))
                         if (absence.excuseUntil.isNotBlank() && !absence.excused) Text("Excuse by ${absence.excuseUntil}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
@@ -280,14 +290,20 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
                 val vacations = model.snapshot.vacations.filter { it.name.contains(query, true) }
                 if (vacations.isNotEmpty()) item { SectionLabel("Holidays") }
                 items(vacations, key = { "vacation:${it.id}" }) { vacation -> ExpandableRecord(vacation.name, "${vacation.start} – ${vacation.end}") }
-                if (messages.isEmpty() && announcements.isEmpty() && events.isEmpty() && vacations.isEmpty()) item { EmptyState(Icons.Outlined.Forum, "All quiet here", "School announcements, messages and dates will appear here.") }
+                if (messages.isEmpty() && announcements.isEmpty() && events.isEmpty() && vacations.isEmpty()) item {
+                    if (query.isBlank() && model.busy && model.snapshot.fetchedAt.isBlank()) SchoolLoading("Loading updates…")
+                    else EmptyState(Icons.Outlined.Forum, "All quiet here", "School announcements, messages and dates will appear here.")
+                }
             }
             Page.Statement -> {
-                if (model.snapshot.konto.isEmpty()) item { EmptyState(Icons.AutoMirrored.Outlined.ReceiptLong, "No statement available", "Some schools do not provide an account statement through this integration. If available, it will appear after a refresh.") }
+                if (model.snapshot.konto.isEmpty()) item {
+                    if (model.busy && model.snapshot.fetchedAt.isBlank()) SchoolLoading("Loading statement…")
+                    else EmptyState(Icons.AutoMirrored.Outlined.ReceiptLong, "No statement available", "Some schools do not provide an account statement through this integration. If available, it will appear after a refresh.")
+                }
                 itemsIndexed(model.snapshot.konto, key = { index, line -> "konto:$index:${line.date}:${line.label}:${line.amount}" }) { _, line ->
                     Column(Modifier.padding(vertical = 16.dp)) {
                         Text(line.date, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) { Text(line.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge); Text(line.amount, style = MaterialTheme.typography.titleMedium) }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) { Text(line.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, maxLines = 3, overflow = TextOverflow.Ellipsis); Text(line.amount, style = MaterialTheme.typography.titleMedium, maxLines = 1) }
                         if (line.balance.isNotBlank()) Text("Balance ${line.balance}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     FineDivider()
@@ -299,13 +315,21 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
     selected?.let { AgendaDetails(model, it) { selected = null } }
 }
 
+@Composable
+private fun SchoolLoading(label: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 28.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 12.dp))
+    }
+}
+
 private fun androidx.compose.foundation.lazy.LazyListScope.schoolError(model: CompanionModel, prefix: String) {
     model.snapshot.readErrors.firstOrNull { it.startsWith(prefix) }?.let { error -> item { Spacer(Modifier.height(16.dp)); InfoBanner("School data needs attention", error, "Connection details", true) { model.navigate(Page.Connections) } } }
 }
 @Composable
 private fun ExpandableRecord(title: String, body: String, date: String = "", highlighted: Boolean = false) {
     var expanded by rememberSaveable(title, body) { mutableStateOf(highlighted) }
-    Column(Modifier.fillMaxWidth().background(if (highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background, MaterialTheme.shapes.small).clickable { expanded = !expanded }.padding(vertical = 16.dp, horizontal = if (highlighted) 12.dp else 0.dp)) {
+    Column(Modifier.fillMaxWidth().background(if (highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background, MaterialTheme.shapes.small).clickable(role = Role.Button) { expanded = !expanded }.semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }.padding(vertical = 16.dp, horizontal = if (highlighted) 12.dp else 0.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 3, overflow = TextOverflow.Ellipsis)
             Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, if (expanded) "Collapse" else "Expand", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)

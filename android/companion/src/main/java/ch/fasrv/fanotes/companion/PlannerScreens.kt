@@ -20,6 +20,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -59,7 +61,7 @@ fun TodayScreen(model: CompanionModel) {
         item {
             Text(dateLabel(today), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             val firstName = model.snapshot.profile?.firstName.orEmpty()
-            Text(if (firstName.isNotBlank()) "Hello, $firstName." else "A little more in focus.", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 8.dp, bottom = 20.dp))
+            Text(if (firstName.isNotBlank()) "Hello, $firstName." else "A little more in focus.", style = MaterialTheme.typography.headlineMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp, bottom = 20.dp))
         }
         if (model.link.needsReauth) item { InfoBanner("Reconnect your school", "Your last school data is still here.", "Sign in", onAction = { model.navigate(Page.Connections) }) }
         else if (sync.status == SyncStatus.OFFLINE || sync.status == SyncStatus.ERROR) item {
@@ -73,7 +75,7 @@ fun TodayScreen(model: CompanionModel) {
                             Text(if (next.day == today) "UP NEXT" else dueLabel(next.day.toString()).uppercase(Locale.ENGLISH), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
                             Icon(Icons.Outlined.ArrowOutward, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                         }
-                        Text(courseAlias(next.title, model.desk.courseAliases), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
+                        Text(courseAlias(next.title, model.desk.courseAliases), style = MaterialTheme.typography.headlineSmall, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
                         Text(listOf(next.time, next.detail).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodyMedium)
                         if (next.school?.isSubstitution() == true) Tag("Substitution", LocalCompanionSemantics.current.warning)
                     }
@@ -89,7 +91,7 @@ fun TodayScreen(model: CompanionModel) {
                     }
                 }
             }
-            TextButton(onClick = { model.openPlanner() }, modifier = Modifier.fillMaxWidth()) { Text("Open today's schedule", Modifier.weight(1f)); Spacer(Modifier.width(6.dp)); Icon(Icons.Outlined.ChevronRight, null, Modifier.size(16.dp)) }
+            TextButton(onClick = { model.openPlanner() }, modifier = Modifier.fillMaxWidth()) { Text("Open today's schedule", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis); Spacer(Modifier.width(6.dp)); Icon(Icons.Outlined.ChevronRight, "Open schedule", Modifier.size(16.dp)) }
         }
         if ("tasks" in cards) {
             item { SectionLabel("On your list", if (urgent.isEmpty()) "Tasks" else "All ${urgent.size}") { model.openPlanner(true) } }
@@ -252,8 +254,12 @@ fun AgendaRow(model: CompanionModel, entry: AgendaEntry, onClick: () -> Unit) {
 @Composable
 fun TaskRow(task: HomeworkTask, today: LocalDate, onToggle: () -> Unit, onOpen: () -> Unit) {
     val overdue = taskBucket(task, today) == "Overdue"
-    Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).clickable(onClick = onOpen).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked = task.done, onCheckedChange = { onToggle() }, modifier = Modifier.semantics { contentDescription = "${if (task.done) "Reopen" else "Complete"} ${task.title}" })
+    val haptic = LocalHapticFeedback.current
+    Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).clickable(role = Role.Button, onClick = onOpen).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked = task.done, onCheckedChange = {
+            haptic.performHapticFeedback(if (task.done) HapticFeedbackType.ToggleOff else HapticFeedbackType.ToggleOn)
+            onToggle()
+        }, modifier = Modifier.semantics { contentDescription = "${if (task.done) "Reopen" else "Complete"} ${task.title}" })
         Column(Modifier.weight(1f).padding(start = 4.dp, end = 8.dp)) {
             Text(task.title, style = MaterialTheme.typography.bodyLarge, textDecoration = if (task.done) TextDecoration.LineThrough else TextDecoration.None, color = if (task.done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface, maxLines = 3, overflow = TextOverflow.Ellipsis)
             Text(listOf(task.subject, dueLabel(task.dueDate), task.dueTime.orEmpty()).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = if (overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -280,7 +286,7 @@ private fun TasksScreen(model: CompanionModel) {
                 if (tasks.isEmpty()) item { EmptyState(Icons.AutoMirrored.Outlined.Assignment, "No school assignments", if (query.isNotBlank()) "Try another search." else "Assignments appear after a school refresh, when your school provides them.") }
                 items(tasks, key = { "school-task:${it.id}" }) { item ->
                     Column(Modifier.fillMaxWidth().clickable { schoolTask = item }.padding(vertical = 16.dp)) {
-                        Text(item.title, style = MaterialTheme.typography.titleMedium)
+                        Text(item.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(listOf(item.courseName, dueLabel(item.dueDate)).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         if (model.tasks.any { it.title == item.title && it.subject == item.courseName && it.dueDate == parseDisplayDate(item.dueDate)?.toString() }) Tag("Added to tasks")
                     }

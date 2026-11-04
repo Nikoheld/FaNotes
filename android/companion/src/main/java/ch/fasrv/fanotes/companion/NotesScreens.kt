@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -50,7 +51,7 @@ import java.util.Locale
 fun NoteRow(model: CompanionModel, node: VaultNode, onMore: (() -> Unit)? = null, onClick: () -> Unit) {
     val preview by produceState<NotePreview?>(null, node.path, node.modifiedAt) { value = runCatching { model.loadPreview(node) }.getOrNull() }
     Column {
-        Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).clickable(onClick = onClick).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).clickable(role = Role.Button, onClick = onClick).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             Box(Modifier.size(58.dp, 68.dp).clip(MaterialTheme.shapes.small).background(LocalCompanionSemantics.current.paper), contentAlignment = Alignment.Center) {
                 val ink = preview?.ink
                 if (ink != null && ink.strokes.isNotEmpty()) InkThumbnail(ink, Modifier.fillMaxSize().padding(5.dp), cacheKey = "${node.path}:${node.modifiedAt}")
@@ -80,7 +81,7 @@ fun InkThumbnail(document: InkDocument, modifier: Modifier = Modifier, cacheKey:
         }
     }
     val image = bitmap
-    if (image != null) Image(image.asImageBitmap(), null, modifier)
+    if (image != null) Image(image.asImageBitmap(), "Handwriting preview", modifier)
 }
 
 @Composable
@@ -144,10 +145,10 @@ fun NotesScreen(model: CompanionModel) {
                 if (nodes.isEmpty()) item { EmptyState(Icons.Outlined.AutoStories, if (model.noteFolder.isBlank()) "A home for your notes" else "This folder is ready", "Create a note to start writing. Everything saves on this device, even offline.") }
                 items(nodes, key = { it.path }) { node ->
                     if (node.kind == NoteKind.FOLDER) {
-                        Row(Modifier.fillMaxWidth().clickable { model.openFolder(node.path) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Row(Modifier.fillMaxWidth().clickable(role = Role.Button) { model.openFolder(node.path) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                             Icon(Icons.Outlined.Folder, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(8.dp).size(24.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(node.name, style = MaterialTheme.typography.titleMedium)
+                                Text(node.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 Text(flattenNotes(node.children).size.let { "$it ${if (it == 1) "note" else "notes"}" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             ActionIcon(Icons.Outlined.MoreVert, "Actions for ${node.name}") { selected = node }
@@ -204,7 +205,7 @@ fun TrashScreen(model: CompanionModel) {
         if (trash?.isEmpty() == true) item { EmptyState(Icons.Outlined.DeleteOutline, "Nothing here", "Notes you remove from the library will appear here.") }
         items(trash.orEmpty(), key = { it.id }) { item ->
             Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Text(item.name, style = MaterialTheme.typography.titleMedium); Text(item.path, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                Column(Modifier.weight(1f)) { Text(item.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis); Text(item.path, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 TextButton(onClick = { model.restoreNote(item.id) { trash = trash.orEmpty().filterNot { it.id == item.id } } }) { Text("Restore") }
             }
             FineDivider()

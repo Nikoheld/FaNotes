@@ -18,6 +18,11 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,17 +42,23 @@ fun SchoolMarkRow(
     onAdjust: () -> Unit,
     onRestore: () -> Unit,
 ) {
-    val gesture = when {
-        hidden && longPressReveal -> Modifier.combinedClickable(onClick = {}, onLongClick = onReveal)
-        hidden -> Modifier.combinedClickable(onClick = onReveal, onLongClick = onReveal)
-        else -> Modifier.clickable(onClick = onAdjust)
+    val haptic = LocalHapticFeedback.current
+    val reveal = {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        onReveal()
     }
+    val gesture = when {
+        hidden && longPressReveal -> Modifier.combinedClickable(role = Role.Button, onClick = {}, onLongClick = reveal)
+        hidden -> Modifier.combinedClickable(role = Role.Button, onClick = reveal, onLongClick = reveal)
+        else -> Modifier.clickable(role = Role.Button, onClick = onAdjust)
+    }
+    val spoken = "${mark.label.ifBlank { "School mark" }}. ${hiddenMarkHint(longPressReveal)}"
     Row(
-        Modifier.fillMaxWidth().background(if (highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background, MaterialTheme.shapes.small).then(gesture).padding(vertical = 14.dp, horizontal = if (highlighted) 12.dp else 0.dp),
+        Modifier.fillMaxWidth().background(if (highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background, MaterialTheme.shapes.small).then(gesture).then(if (hidden) Modifier.semantics { contentDescription = spoken } else Modifier).padding(vertical = 14.dp, horizontal = if (highlighted) 12.dp else 0.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(mark.label.ifBlank { "School mark" }, style = MaterialTheme.typography.bodyLarge)
+            Text(mark.label.ifBlank { "School mark" }, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(
                 when {
                     hidden -> hiddenMarkHint(longPressReveal)
@@ -70,7 +81,7 @@ fun OwnMarkRow(grade: OwnGrade, decimals: Int, onEdit: () -> Unit, onDelete: () 
     Row(Modifier.fillMaxWidth().clickable(onClick = onEdit).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(grade.title.ifBlank { "Own mark" }, style = MaterialTheme.typography.bodyLarge)
+                Text(grade.title.ifBlank { "Own mark" }, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 Tag("Own")
             }
             Text("${formatGradeDate(grade.date)} · weight ${formatMark(grade.weight)} · tap to edit", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -95,6 +106,8 @@ fun CollectiveMarkRow(grade: CollectiveGrade, decimals: Int, onEdit: () -> Unit,
                     if (value == null) "Add at least two partial tests before this counts" else "Sammelnote · ${formatGradeDate(grade.date)} · counts as one mark · weight ${formatMark(grade.weight)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Text(formatMark(value, decimals), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp))
@@ -119,7 +132,7 @@ fun ArchivedSubjectsScreen(model: CompanionModel) {
         }
         if (courses.isEmpty()) item { EmptyState(Icons.Outlined.Archive, "Nothing archived", "Archive a finished subject from its page. You can restore it here.") }
         items(courses, key = { it.courseId }) { course ->
-            Row(Modifier.fillMaxWidth().clickable { model.focusCourseId = course.courseId; model.navigate(Page.Course) }.padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().clickable(role = Role.Button) { model.focusCourseId = course.courseId; model.navigate(Page.Course) }.padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(courseAlias(course.label, model.desk.courseAliases), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(formatMark(course.average, model.desk.gradeDecimals), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -143,7 +156,7 @@ fun OwnGradeDialog(courseId: String, existing: OwnGrade?, onDismiss: () -> Unit,
     val iso = parseGradeDate(date)
     val ready = number != null && number.isFinite() && number in 1.0..6.0 && factor != null && factor.isFinite() && factor > 0.0 && iso != null
     AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), title = { Text(if (existing == null) "Add your mark" else "Edit your mark") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Counted in this subject, your promotion points and the target calculator. Marked as your own.", style = MaterialTheme.typography.bodySmall)
             OutlinedTextField(title, { title = it }, label = { Text("Name") }, singleLine = true)
             OutlinedTextField(mark, { mark = it }, label = { Text("Mark · 1 to 6") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
@@ -184,7 +197,7 @@ fun CollectiveGradeDialog(courseId: String, existing: CollectiveGrade?, onDismis
     val iso = parseGradeDate(date)
     val ready = title.isNotBlank() && parts.size >= 2 && parts.size == drafts.size && factor != null && factor > 0.0 && iso != null
     AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), title = { Text(if (existing == null) "Collective grade" else "Edit collective grade") }, text = {
-        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Partial tests combine into one Sammelnote. Only that mark counts in the subject.", style = MaterialTheme.typography.bodySmall)
             OutlinedTextField(title, { title = it }, label = { Text("Name") }, singleLine = true)
             OutlinedTextField(date, { date = it }, label = { Text("Date") }, singleLine = true)
@@ -218,8 +231,8 @@ fun GradeAdjustmentDialog(mark: WeightedMark, decimals: Int, existing: GradeAdju
     val parsedWeight = overrideWeight.replace(',', '.').toDoubleOrNull()
     val markOk = overrideMark.isBlank() || (parsedMark != null && parsedMark in 1.0..6.0)
     val weightOk = overrideWeight.isBlank() || (parsedWeight != null && parsedWeight > 0.0)
-    AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), title = { Text(mark.label.ifBlank { "School mark" }) }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), title = { Text(mark.label.ifBlank { "School mark" }, maxLines = 2, overflow = TextOverflow.Ellipsis) }, text = {
+        Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("School mark ${formatMark(mark.displayMark, decimals)} · weight ${formatMark(mark.displayWeight)}. The original stays visible. This changes only your averages.", style = MaterialTheme.typography.bodySmall)
             OutlinedTextField(overrideMark, { overrideMark = it }, label = { Text("Your mark") }, placeholder = { Text(formatMark(mark.displayMark, decimals)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
             OutlinedTextField(overrideWeight, { overrideWeight = it }, label = { Text("Your weight") }, placeholder = { Text(formatMark(mark.displayWeight)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))

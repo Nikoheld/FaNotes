@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -44,7 +45,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             item {
                 Row(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     Box(Modifier.size(48.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PersonOutline, null, tint = MaterialTheme.colorScheme.primary) }
-                    Column(Modifier.weight(1f)) { Text(sync.account?.email ?: "Your FaNotes", style = MaterialTheme.typography.titleMedium); Text(syncDescription(sync.status), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    Column(Modifier.weight(1f)) { Text(sync.account?.email ?: "Your FaNotes", style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis); Text(syncDescription(sync.status), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
                 FineDivider()
             }
@@ -62,7 +63,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
         Page.Connections -> ScreenList {
             item { SectionLabel("FaNotes account") }
             item {
-                Text(sync.account?.email ?: "Work on this device", style = MaterialTheme.typography.titleLarge)
+                Text(sync.account?.email ?: "Work on this device", style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(syncDescription(sync.status), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
                 Text("Your notes stay available offline. A connected account syncs them using end-to-end encryption.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
                 if (sync.account == null) Button(onClick = { model.navigate(Page.Auth) }, modifier = Modifier.fillMaxWidth()) { Text("Connect an account") }

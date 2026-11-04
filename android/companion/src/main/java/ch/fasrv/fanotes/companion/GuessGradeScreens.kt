@@ -12,8 +12,11 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ch.fasrv.fanotes.schulnetz.*
 import java.time.LocalDate
@@ -29,6 +32,7 @@ fun GradeRevealSheet(model: CompanionModel) {
     var last by rememberSaveable(targetId) { mutableStateOf("") }
     var guessed by rememberSaveable(targetId) { mutableStateOf(false) }
     val today = remember { LocalDate.now(ZoneId.of("Europe/Zurich")) }
+    val haptic = LocalHapticFeedback.current
     ModalBottomSheet(onDismissRequest = model::dismissReveal, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).sheetKeyboardPadding().padding(horizontal = Space.page)) {
             SheetTitle(
@@ -71,11 +75,18 @@ fun GradeRevealSheet(model: CompanionModel) {
                                     GuessComparison.CORRECT -> {
                                         guessed = true
                                         last = "That's it — ${formatMark(mark, markDecimals(mark))}."
+                                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                         model.revealGrade(targetId)
                                         step = "shown"
                                     }
-                                    GuessComparison.ACTUAL_HIGHER -> last = "Higher — the real mark is better than ${formatMark(value, markDecimals(mark))}."
-                                    GuessComparison.ACTUAL_LOWER -> last = "Lower — the real mark is worse than ${formatMark(value, markDecimals(mark))}."
+                                    GuessComparison.ACTUAL_HIGHER -> {
+                                        haptic.performHapticFeedback(HapticFeedbackType.Reject)
+                                        last = "Higher — the real mark is better than ${formatMark(value, markDecimals(mark))}."
+                                    }
+                                    GuessComparison.ACTUAL_LOWER -> {
+                                        haptic.performHapticFeedback(HapticFeedbackType.Reject)
+                                        last = "Lower — the real mark is worse than ${formatMark(value, markDecimals(mark))}."
+                                    }
                                 }
                                 guess = ""
                             },
@@ -113,7 +124,7 @@ fun GradeRevealSheet(model: CompanionModel) {
                                 }
                             }
                         }
-                        Text(formatMark(mark, model.desk.gradeDecimals), style = MaterialTheme.typography.displayMedium, modifier = Modifier.padding(vertical = 12.dp))
+                        Text(formatMark(mark, model.desk.gradeDecimals), style = MaterialTheme.typography.displayMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(vertical = 12.dp))
                         Text(grade.title.ifBlank { "School mark" }, style = MaterialTheme.typography.bodyLarge)
                         if (model.revealQueue.size > 1) {
                             Button(onClick = { model.finishReveal(); step = "menu"; guess = ""; tries = 0; last = ""; guessed = false }, modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 50.dp)) { Text("Next hidden mark") }
