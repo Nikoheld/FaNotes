@@ -20,7 +20,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.semantics
@@ -28,14 +27,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.fasrv.fanotes.schulnetz.validateNavBar
 import ch.fasrv.fanotes.sync.SyncStatus
-
-private fun destinationIcon(destination: Destination): ImageVector = when (destination) {
-    Destination.Today -> Icons.Outlined.Today
-    Destination.Planner -> Icons.Outlined.DateRange
-    Destination.Notes -> Icons.Outlined.AutoStories
-    Destination.School -> Icons.Outlined.School
-}
 
 @Composable
 fun CompanionRoot(model: CompanionModel) {
@@ -59,7 +52,9 @@ fun CompanionRoot(model: CompanionModel) {
     }
     val route = model.route
     val savedScreens = rememberSaveableStateHolder()
-    BackHandler(route.page != null || route.destination != Destination.Today || (route.destination == Destination.Notes && model.noteFolder.isNotBlank())) {
+    val barItems = validateNavBar(model.desk.navBar)
+    val barVisible = showsNavBar(route, model.plannerTasks, barItems)
+    BackHandler(route.page == Page.Editor || !model.atNavRoot()) {
         if (route.page == Page.Editor) model.closeEditor() else model.back()
     }
     var create by rememberSaveable { mutableStateOf<String?>(null) }
@@ -90,23 +85,25 @@ fun CompanionRoot(model: CompanionModel) {
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
-        val primary = route.page == null
+        val primary = barVisible
         val shortWindow = maxHeight < 500.dp
         val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-        val hasCreation = primary && route.destination != Destination.School
+        val hasCreation = primary && route.page == null && route.destination != Destination.School
         val dockCreation = hasCreation && !wide && LocalDensity.current.fontScale >= 1.3f
+        val selectedId = selectedNavId(route, model.plannerTasks, barItems)
+        val title = selectedId?.let(::navBarLabel) ?: route.page?.title ?: route.destination.label
         CompositionLocalProvider(LocalPageBottomPadding provides if (hasCreation && !dockCreation && !imeVisible) 100.dp else 24.dp) {
         Scaffold(
             snackbarHost = { SnackbarHost(snackbar) },
             contentWindowInsets = WindowInsets.safeDrawing,
             topBar = {
                 TopAppBar(
-                    title = { Text(route.page?.title ?: route.destination.label, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    title = { Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     navigationIcon = { if (!primary) ActionIcon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") { model.back() } },
                     actions = {
                         if (primary) {
                             ActionIcon(Icons.Outlined.Search, "Search notes, tasks and school") { model.navigate(Page.Search) }
-                            ActionIcon(Icons.Outlined.Settings, "Settings") { model.navigate(Page.Settings) }
+                            ActionIcon(Icons.Outlined.Settings, "Settings") { model.openSettings() }
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
@@ -122,9 +119,9 @@ fun CompanionRoot(model: CompanionModel) {
                         }
                         FineDivider()
                         NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
-                            Destination.entries.forEach { destination -> NavigationBarItem(
-                                selected = route.destination == destination, onClick = { model.select(destination) },
-                                icon = { Icon(destinationIcon(destination), null, Modifier.size(23.dp)) }, label = { Text(destination.label, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            barItems.forEach { id -> NavigationBarItem(
+                                selected = selectedId == id, onClick = { model.selectNav(id) },
+                                icon = { Icon(navBarIcon(id), null, Modifier.size(23.dp)) }, label = { Text(navBarLabel(id), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.primaryContainer),
                             ) }
                         }
@@ -144,10 +141,10 @@ fun CompanionRoot(model: CompanionModel) {
                 if (wide && primary) {
                     NavigationRail(containerColor = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxHeight().verticalScroll(rememberScrollState())) {
                         Spacer(Modifier.height(12.dp))
-                        Destination.entries.forEach { destination -> NavigationRailItem(
-                            selected = route.destination == destination, onClick = { model.select(destination) },
-                            icon = { Icon(destinationIcon(destination), destination.label) },
-                            label = if (shortWindow) null else ({ Text(destination.label) }), modifier = Modifier.padding(vertical = if (shortWindow) 2.dp else 6.dp),
+                        barItems.forEach { id -> NavigationRailItem(
+                            selected = selectedId == id, onClick = { model.selectNav(id) },
+                            icon = { Icon(navBarIcon(id), navBarLabel(id)) },
+                            label = if (shortWindow) null else ({ Text(navBarLabel(id)) }), modifier = Modifier.padding(vertical = if (shortWindow) 2.dp else 6.dp),
                         ) }
                     }
                 }
@@ -166,7 +163,7 @@ fun CompanionRoot(model: CompanionModel) {
                                 Page.Grades -> GradesScreen(model)
                                 Page.Course -> CourseScreen(model)
                                 Page.Exams, Page.Absences, Page.Updates, Page.Statement -> SchoolRecordScreen(model, current.page)
-                                Page.Settings, Page.Connections, Page.Appearance, Page.Planning, Page.Notifications, Page.Diagnostics, Page.Profile -> SettingsScreen(model, current.page)
+                                Page.Settings, Page.Connections, Page.Appearance, Page.Navigation, Page.Planning, Page.Notifications, Page.Diagnostics, Page.Profile -> SettingsScreen(model, current.page)
                                 Page.Trash -> TrashScreen(model)
                                 else -> when (current.destination) {
                                     Destination.Today -> TodayScreen(model)

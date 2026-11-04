@@ -51,6 +51,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             item { SectionLabel("Make it yours") }
             item { SettingRow(Icons.Outlined.ManageAccounts, "Account & sync", "FaNotes, Schulnetz and offline status") { model.navigate(Page.Connections) } }
             item { SettingRow(Icons.Outlined.Palette, "Appearance", "Theme, accent and app icon") { model.navigate(Page.Appearance) } }
+            item { SettingRow(Icons.Outlined.ViewWeek, "Navigation bar", "Choose tabs and their order") { model.navigate(Page.Navigation) } }
             item { SettingRow(Icons.Outlined.Tune, "Planning & grades", "Today, timetable and grade display") { model.navigate(Page.Planning) } }
             item { SettingRow(Icons.Outlined.NotificationsNone, "Notifications", "What reaches you, and when") { model.navigate(Page.Notifications) } }
             item { SectionLabel("About your companion") }
@@ -101,10 +102,13 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             }
             item { SectionLabel("Home screen icon") }
             item { ChoiceRow(listOf("standard" to "FaNotes", "schule" to "School", "notiz" to "Notebook"), model.iconChoice, { model.chooseIcon(context, it) }) }
+            item { SectionLabel("Navigation") }
+            item { SettingRow(Icons.Outlined.ViewWeek, "Navigation bar", "Choose tabs and their order") { model.navigate(Page.Navigation) } }
         }
+        Page.Navigation -> NavigationBarSettings(model)
         Page.Planning -> ScreenList {
             item { SectionLabel("When you open FaNotes") }
-            item { ChoiceRow(Destination.entries.map { it.legacy to it.label }, destinationFor(model.desk.startTab).legacy, { model.updateDesk(model.desk.copy(startTab = it)) }) }
+            item { ChoiceRow(NAV_BAR_IDS.map { it to navBarLabel(it) }, startTabId(model.desk.startTab), { model.updateDesk(model.desk.copy(startTab = it)) }) }
             item { SectionLabel("On Today") }
             items(TODAY_CARD_IDS, key = { it }) { id ->
                 ToggleRow(when (id) { "lessons" -> "Next commitment"; "exam" -> "Upcoming exam"; "grades" -> "Grade overview"; "pluspunkte" -> "Promotion points"; "events" -> "School updates"; else -> "Tasks" }, checked = id !in model.desk.hiddenCards) { show ->
@@ -181,6 +185,55 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
     }
     if (confirm.isNotBlank()) ConfirmDialog(if (confirm == "logout") "Sign out of FaNotes?" else "Disconnect Schulnetz?", if (confirm == "logout") "Your local notes stay on this device. Sync will stop until you sign in again." else "Your last school snapshot stays available. You can reconnect later.", if (confirm == "logout") "Sign out" else "Disconnect", { confirm = "" }) {
         if (confirm == "logout") model.logout() else model.unlink(); confirm = ""
+    }
+}
+
+@Composable
+private fun NavigationBarSettings(model: CompanionModel) {
+    val bar = validateNavBar(model.desk.navBar)
+    val available = remainingNavBar(bar)
+    ScreenList {
+        item {
+            Text("Shown in the bar", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = Space.xl, bottom = Space.sm))
+            Text("Choose 2 to 5 destinations. Settings stays available from the top bar.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        itemsIndexed(bar, key = { _, id -> "bar:$id" }) { index, id ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(navBarIcon(id), null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(navBarLabel(id), style = MaterialTheme.typography.titleMedium)
+                    Text("${index + 1} of ${bar.size}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                ActionIcon(Icons.Outlined.KeyboardArrowUp, "Move ${navBarLabel(id)} up", enabled = index > 0) {
+                    model.updateDesk(model.desk.copy(navBar = moveNavBarItem(bar, index, -1)))
+                }
+                ActionIcon(Icons.Outlined.KeyboardArrowDown, "Move ${navBarLabel(id)} down", enabled = index < bar.lastIndex) {
+                    model.updateDesk(model.desk.copy(navBar = moveNavBarItem(bar, index, 1)))
+                }
+                ActionIcon(Icons.Outlined.Close, "Remove ${navBarLabel(id)}", enabled = bar.size > NAV_BAR_MIN) {
+                    model.updateDesk(model.desk.copy(navBar = removeNavBarItem(bar, id)))
+                }
+            }
+            FineDivider()
+        }
+        if (available.isNotEmpty()) {
+            item { SectionLabel(if (bar.size >= NAV_BAR_MAX) "Remove a tab to add another" else "Add a destination") }
+            items(available, key = { "add:$it" }) { id ->
+                val enabled = bar.size < NAV_BAR_MAX
+                SettingRow(
+                    navBarIcon(id),
+                    navBarLabel(id),
+                    if (enabled) "Add to the navigation bar" else "Maximum of 5 tabs",
+                ) { if (enabled) model.updateDesk(model.desk.copy(navBar = addNavBarItem(bar, id))) }
+            }
+        }
+        item {
+            TextButton(
+                onClick = { model.updateDesk(model.desk.copy(navBar = DEFAULT_NAV_BAR)) },
+                enabled = bar != DEFAULT_NAV_BAR,
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+            ) { Text("Reset to default") }
+        }
     }
 }
 

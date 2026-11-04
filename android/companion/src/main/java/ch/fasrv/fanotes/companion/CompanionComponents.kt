@@ -13,6 +13,8 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.Assignment
+import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -29,6 +31,20 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+
+fun navBarIcon(id: String): ImageVector = when (id) {
+    "planner" -> Icons.Outlined.DateRange
+    "tasks" -> Icons.Outlined.CheckCircleOutline
+    "notes" -> Icons.Outlined.AutoStories
+    "school" -> Icons.Outlined.School
+    "grades" -> Icons.Outlined.Insights
+    "exams" -> Icons.AutoMirrored.Outlined.Assignment
+    "absences" -> Icons.Outlined.EventBusy
+    "updates" -> Icons.Outlined.Forum
+    "statement" -> Icons.AutoMirrored.Outlined.ReceiptLong
+    "settings" -> Icons.Outlined.Settings
+    else -> Icons.Outlined.Today
+}
 
 @Composable
 fun ActionIcon(icon: ImageVector, label: String, enabled: Boolean = true, onClick: () -> Unit) {

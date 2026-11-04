@@ -25,6 +25,9 @@ import ch.fasrv.fanotes.schulnetz.NotifySettings
 import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
 import ch.fasrv.fanotes.schulnetz.hideOnce
 import ch.fasrv.fanotes.schulnetz.hideSeries
+import ch.fasrv.fanotes.schulnetz.homeNavId
+import ch.fasrv.fanotes.schulnetz.startTabId
+import ch.fasrv.fanotes.schulnetz.validateNavBar
 import ch.fasrv.fanotes.schulnetz.SCHULNETZ_USER_AGENT
 import ch.fasrv.fanotes.schulnetz.SSO_COOKIE_URLS
 import ch.fasrv.fanotes.schulnetz.cookieNames
@@ -72,8 +75,18 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     private val previewCache = object : android.util.LruCache<String, Pair<Long, NotePreview>>(24) {}
 
     fun select(destination: Destination) {
+        selectNav(when (destination) {
+            Destination.Today -> "today"
+            Destination.Planner -> "planner"
+            Destination.Notes -> "notes"
+            Destination.School -> "school"
+        })
+    }
+    fun selectNav(id: String) {
+        val placement = navPlacement(id)
         history = emptyList()
-        route = CompanionRoute(destination)
+        plannerTasks = placement.plannerTasks
+        route = placement.route
         highlightIds = emptySet()
         focusCourseId = ""
     }
@@ -81,17 +94,41 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         history = history + route
         route = route.copy(page = page)
     }
+    fun openSettings() {
+        if ("settings" in validateNavBar(desk.navBar)) selectNav("settings")
+        else navigate(Page.Settings)
+    }
+    fun atNavRoot(): Boolean = isAtNavRoot(route, plannerTasks, desk.startTab, desk.navBar, noteFolder, history.isNotEmpty())
     fun back() {
         if (history.isNotEmpty()) {
             route = history.last()
             history = history.dropLast(1)
-        } else if (route.page != null) route = route.copy(page = if (route.page == Page.Course) Page.Grades else null)
-        else if (route.destination == Destination.Notes && noteFolder.isNotBlank()) openFolder(noteFolder.substringBeforeLast('/', ""))
-        else if (route.destination != Destination.Today) select(Destination.Today)
+            return
+        }
+        if (route.page == Page.Course) {
+            route = route.copy(page = Page.Grades)
+            return
+        }
+        if (route.destination == Destination.Notes && noteFolder.isNotBlank()) {
+            openFolder(noteFolder.substringBeforeLast('/', ""))
+            return
+        }
+        val bar = validateNavBar(desk.navBar)
+        val chrome = navChromeId(route, plannerTasks, bar)
+        val home = homeNavId(desk.startTab, bar)
+        if (chrome != null && chrome in bar) {
+            if (chrome != home) selectNav(home)
+            return
+        }
+        if (route.page != null) {
+            route = route.copy(page = null)
+            return
+        }
+        if (chrome != home) selectNav(home)
     }
     fun continueLocally() { localAccess = true; graph.setLocalAccess(true); message = null }
     fun openPlanner(tasks: Boolean = false, date: LocalDate = LocalDate.now()) {
-        select(Destination.Planner); plannerTasks = tasks; day = date
+        selectNav(if (tasks) "tasks" else "planner"); day = date
     }
     fun openFolder(path: String) { noteFolder = path; reload() }
     fun openNote(path: String) {
@@ -184,7 +221,9 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                     desk = data.desk
                     if (!startTabApplied && history.isEmpty() && highlightIds.isEmpty() && route.page == null && route.destination == Destination.Today) {
                         startTabApplied = true
-                        route = CompanionRoute(destinationFor(data.desk.startTab), if (data.desk.startTab == "Noten") Page.Grades else null)
+                        val placement = navPlacement(startTabId(data.desk.startTab))
+                        plannerTasks = placement.plannerTasks
+                        route = placement.route
                     }
                 }
                 loadError = listOfNotNull(data.tasks.exceptionOrNull()?.message, data.calendar.exceptionOrNull()?.message).joinToString("\n").ifBlank { null }

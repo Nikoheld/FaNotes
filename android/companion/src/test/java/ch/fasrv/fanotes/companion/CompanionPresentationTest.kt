@@ -24,6 +24,34 @@ class CompanionPresentationTest {
         assertEquals(Page.Notifications, companionRoute(NotifyRoute("Mehr", "Einstellungen")).page)
         assertEquals(Page.Updates, companionRoute(NotifyRoute("Mehr", "Termine")).page)
         assertEquals(Destination.Planner, companionRoute(NotifyRoute("Plan", "Menu")).destination)
+        assertEquals(Page.Grades, companionRoute(NotifyRoute("Noten", "Menu")).page)
+        assertEquals(Page.Exams, navPlacement("exams").route.page)
+        assertTrue(navPlacement("tasks").plannerTasks)
+        assertFalse(navPlacement("planner").plannerTasks)
+    }
+
+    @Test fun `nav bar keeps off-bar start pages and notification targets reachable`() {
+        val defaultBar = DEFAULT_NAV_BAR
+        val custom = listOf("notes", "grades", "settings")
+        assertEquals("today", selectedNavId(CompanionRoute(), false, defaultBar))
+        assertTrue(showsNavBar(CompanionRoute(), false, defaultBar))
+        assertEquals("grades", selectedNavId(navPlacement("grades").route, false, custom))
+        assertTrue(showsNavBar(navPlacement("grades").route, false, custom))
+        assertFalse(showsNavBar(CompanionRoute(Destination.School, Page.Grades), false, defaultBar))
+        assertFalse(showsNavBar(CompanionRoute(Destination.School, Page.Course), false, custom))
+        assertFalse(showsNavBar(CompanionRoute(Destination.School, Page.Appearance), false, custom))
+        assertFalse(showsNavBar(CompanionRoute(Destination.Today, Page.Search), false, defaultBar))
+        assertTrue(showsNavBar(CompanionRoute(Destination.Today), false, custom))
+        assertEquals(null, selectedNavId(CompanionRoute(Destination.Today), false, custom))
+        assertEquals(Page.Grades, navPlacement(startTabId("Noten")).route.page)
+        assertEquals("notes", homeNavId("Heute", custom))
+        assertFalse(isAtNavRoot(navPlacement("grades").route, false, "Heute", custom, "", false))
+        assertTrue(isAtNavRoot(navPlacement("notes").route, false, "Heute", custom, "", false))
+        val notifyGrades = companionRoute(NotifyRoute("Noten", "Menu", courseId = "math"))
+        assertEquals(Page.Course, notifyGrades.page)
+        assertFalse(showsNavBar(notifyGrades, false, custom))
+        assertEquals("tasks", navChromeId(CompanionRoute(Destination.Planner), true, listOf("today", "planner", "tasks", "notes")))
+        assertEquals("planner", navChromeId(CompanionRoute(Destination.Planner), true, defaultBar))
     }
     @Test fun `merged agenda sorts chronologically and preserves actionable sources`() {
         val task = HomeworkTask("homework", "Read chapter", dueDate = day.toString(), dueTime = "10:00")

@@ -100,6 +100,7 @@ class DeskTest {
         val prefs = parseDeskPrefs(serializeDeskPrefs(DeskPrefs(hiddenCards = listOf("tasks"), showPluspunkte = false, startTab = "Noten")))
         assertEquals(listOf("pluspunkte", "lessons", "exam", "grades", "events"), shownTodayCards(prefs))
         assertEquals("Noten", prefs.startTab)
+        assertEquals(DEFAULT_NAV_BAR, prefs.navBar)
         assertFalse(prefs.showPluspunkte)
     }
 }
