@@ -176,6 +176,8 @@ data class SchulnetzChange(
     val courseId: String = "",
     val date: String = "",
     val targetIds: List<String> = emptyList(),
+    /** Opaque identity hashes. Dedup uses these, never the row id. */
+    val gradeKeys: List<String> = emptyList(),
 ) {
     fun linkIds(): List<String> = targetIds.ifEmpty { listOf(targetId).filter { it.isNotBlank() } }
 }

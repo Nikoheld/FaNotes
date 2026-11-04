@@ -8,8 +8,10 @@ import { resolve, sep } from 'node:path'
 import { authenticateSyncRequest } from './sync-api.mjs'
 import {
   diffSnapshots,
+  keepLoadedGrades,
   notifyPayload,
   prepareGradeNotifications,
+  settleGradeNotifications,
   unseenChanges,
   normalizeSchoolBase,
   parseKontoauszug,
@@ -207,7 +209,8 @@ export const createSchulnetzRuntime = (options = {}) => {
     if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, 'Der Schnappschuss ist ungültig.')
     const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
     const snapshot = { ...body, revision: (link.revision || 0) + 1, fetchedAt: body.fetchedAt || now().toISOString() }
-    const changes = await publishChanges(accountId, link, diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision)
+    snapshot.grades = keepLoadedGrades(previous?.grades, snapshot.grades)
+    const changes = await publishChanges(accountId, link, diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
     link.needsReauth = false
@@ -347,8 +350,25 @@ export const createSchulnetzRuntime = (options = {}) => {
     }
   }
 
-  const publishChanges = async (accountId, link, changes, revision) => {
-    const unseen = unseenChanges(changes, await knownChangeIds(accountId))
+  const gradePool = (previous, snapshot) => [...(previous?.grades || []), ...(snapshot?.grades || [])]
+
+  /** Missing file means "not migrated yet". A present file is the durable ledger. */
+  const readGradeLedger = async (accountId) => {
+    const parsed = await readJson(resolve(accountDir(accountId), 'notified-grades.json'))
+    if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.keys)) return null
+    return parsed.keys.filter((key) => typeof key === 'string' && key)
+  }
+
+  const writeGradeLedger = async (accountId, keys) => {
+    const unique = [...new Set(keys)].sort()
+    await writeJson(resolve(accountDir(accountId), 'notified-grades.json'), { version: 1, keys: unique })
+  }
+
+  const publishChanges = async (accountId, link, changes, revision, grades = []) => {
+    const ledger = await readGradeLedger(accountId)
+    const settled = settleGradeNotifications(changes, grades, ledger)
+    await writeGradeLedger(accountId, settled.keys)
+    const unseen = unseenChanges(settled.changes, await knownChangeIds(accountId))
     await appendChanges(accountId, unseen, revision)
     const fresh = prepareGradeNotifications(unseen, link.settings?.guessGrades === true)
     for (const change of fresh) await deliver(link, change)
@@ -437,8 +457,9 @@ export const createSchulnetzRuntime = (options = {}) => {
     }
     const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
     const snapshot = parseRawSnapshot(raw, now().toISOString())
+    snapshot.grades = keepLoadedGrades(previous?.grades, snapshot.grades)
     snapshot.revision = (link.revision || 0) + 1
-    const changes = await publishChanges(accountId, link, diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision)
+    const changes = await publishChanges(accountId, link, diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
     link.lastError = ''
@@ -500,7 +521,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     const snapshot = {
       revision: (link.revision || 0) + 1,
       fetchedAt: now().toISOString(),
-      grades: scraped.grades || [],
+      grades: keepLoadedGrades(previous?.grades, scraped.grades || []),
       events: scraped.events || [],
       exams: previous?.exams || [],
       absences: previous?.absences || [],
@@ -511,7 +532,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       startMessages: parseStartMessages(scraped.startHtml || ''),
       readErrors: scraped.problem ? [`Schulnetz: ${scraped.problem}`] : [],
     }
-    const changes = await publishChanges(accountId, link, diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision)
+    const changes = await publishChanges(accountId, link, diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
     link.lastError = ''

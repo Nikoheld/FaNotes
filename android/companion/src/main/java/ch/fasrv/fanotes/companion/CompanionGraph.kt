@@ -30,7 +30,6 @@ import ch.fasrv.fanotes.schulnetz.SchulnetzGate
 import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
 import ch.fasrv.fanotes.schulnetz.diffSnapshots
 import ch.fasrv.fanotes.schulnetz.newGradeTargetIds
-import ch.fasrv.fanotes.schulnetz.prepareGradeNotifications
 import ch.fasrv.fanotes.schulnetz.localRefreshLease
 import ch.fasrv.fanotes.schulnetz.classifySchulnetzPage
 import ch.fasrv.fanotes.schulnetz.extractWebSession
@@ -848,12 +847,13 @@ class CompanionGraph(private val context: Context) {
         val hidden = hiddenLessons()
         val local = notifySettings()
         val effective = settings.copy(guessGrades = local.guessGrades)
-        val changes = diffSnapshots(previous?.takeIf { it.fetchedAt.isNotBlank() || it.grades.isNotEmpty() || it.events.isNotEmpty() }, next, effective)
-            .filterNot { changeIsHidden(it, hidden) }
+        val prior = previous?.takeIf { it.fetchedAt.isNotBlank() || it.grades.isNotEmpty() || it.events.isNotEmpty() }
+        val raw = diffSnapshots(prior, next, effective).filterNot { changeIsHidden(it, hidden) }
+        val changes = CompanionAlerts.settledChanges(context, raw, prior?.grades.orEmpty() + next.grades)
         if (effective.guessGrades) addUnrevealedGrades(newGradeTargetIds(changes))
         snapshot.value = next
         writeCache(next)
-        CompanionAlerts.showAll(context, prepareGradeNotifications(changes, effective.guessGrades, next))
+        CompanionAlerts.showAll(context, changes, gradeKeysSettled = true)
     }
 
     private fun applyServerChanges(json: String) {
@@ -863,9 +863,13 @@ class CompanionGraph(private val context: Context) {
             changeFromObj(change)
         }
         val guess = notifySettings().guessGrades
-        val visible = items.filterNot { changeIsHidden(it, hiddenLessons()) }
+        val visible = CompanionAlerts.settledChanges(
+            context,
+            items.filterNot { changeIsHidden(it, hiddenLessons()) },
+            snapshot.value.grades,
+        )
         if (guess) addUnrevealedGrades(newGradeTargetIds(visible))
-        CompanionAlerts.showAll(context, prepareGradeNotifications(visible, guess, snapshot.value))
+        CompanionAlerts.showAll(context, visible, gradeKeysSettled = true)
         val maxRevision = obj.array("changes")?.items.orEmpty().mapNotNull { item ->
             (item as? JsonValue.Obj)?.double("revision")?.toLong()
         }.maxOrNull()

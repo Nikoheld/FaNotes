@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -32,6 +32,12 @@ import {
   prepareGradeNotifications,
   redactGradeChange,
   routeNotify,
+  gradeLedgerEntries,
+  gradeContentHash,
+  gradeLooseHash,
+  settleGradeNotifications,
+  keepLoadedGrades,
+  normalizeGradeDate,
 } from './schulnetz-logic.mjs'
 
 const marks = [
@@ -353,6 +359,124 @@ test('guess-grade mode redacts the mark from push copy and keeps each grade sepa
   assert.equal(open[0].title, '2 neue Noten')
   const again = redactGradeChange(hidden[0])
   assert.equal(again.title, hidden[0].title)
+})
+
+const probe = (id, course, courseId = course) => ({
+  id, course, courseId, subject: course, title: 'Probe', date: '2026-10-20', mark: 5.5, weight: 1,
+})
+
+test('a grade is notified once across redeploy, model change, app update and both delivery paths', () => {
+  assert.equal(normalizeGradeDate('20.10.2026'), '2026-10-20')
+  assert.equal(normalizeGradeDate('2026-10-20T08:00:00'), '2026-10-20')
+  const hashed = { courseId: 'math', course: 'Mathematik', title: 'Probe', date: '2026-10-20', mark: 5.5, weight: 1 }
+  assert.equal(gradeContentHash(hashed), '7a0eaaf2')
+  assert.equal(gradeLooseHash(hashed), '38afa78f')
+  const original = probe('web:MA-4a-He:20.10.2026:Probe:5.5', 'MA-4a-He')
+  const reparsed = probe('api-99', 'Mathematik', 'math')
+  reparsed.date = '20.10.2026'
+  assert.equal(gradeLooseHash(original), gradeLooseHash(reparsed))
+  const empty = { grades: [], events: [], exams: [], absences: [], messages: [] }
+  const current = { ...empty, grades: [reparsed] }
+  const lookedNew = diffSnapshots(empty, current)
+  assert.equal(lookedNew.length, 1)
+  assert.equal(lookedNew[0].title, 'Neue Note')
+  assert.ok(lookedNew[0].gradeKeys.includes(`l:${gradeLooseHash(reparsed)}`))
+
+  const redeploy = settleGradeNotifications(lookedNew, [original, reparsed], null)
+  assert.equal(redeploy.migrated, true)
+  assert.equal(redeploy.changes.length, 0)
+  assert.ok(redeploy.keys.includes(`l:${gradeLooseHash(original)}`))
+
+  const modelChange = diffSnapshots({ ...empty, grades: [original] }, current)
+  assert.equal(modelChange.some((change) => change.category === 'grade'), false)
+  const wipedModel = settleGradeNotifications(lookedNew, [reparsed], gradeLedgerEntries([original]))
+  assert.equal(wipedModel.migrated, false)
+  assert.equal(wipedModel.changes.some((change) => change.category === 'grade'), false)
+
+  const appUpdate = settleGradeNotifications(lookedNew, [reparsed], null)
+  assert.equal(appUpdate.migrated, true)
+  assert.equal(appUpdate.changes.some((change) => change.category === 'grade'), false)
+
+  const freshLedger = []
+  const edited = { ...reparsed, id: 'api-99', mark: 4.5 }
+  const editedChanges = diffSnapshots({ ...empty, grades: [reparsed] }, { ...empty, grades: [edited] })
+  assert.equal(editedChanges[0].title, 'Notenänderung')
+  const firstDelivery = settleGradeNotifications(editedChanges, [edited], freshLedger)
+  assert.equal(firstDelivery.changes.filter((change) => change.category === 'grade').length, 1)
+  const pushed = prepareGradeNotifications(firstDelivery.changes, false)
+  assert.equal(pushed.length, 1)
+  assert.deepEqual(pushed[0].gradeKeys, firstDelivery.changes[0].gradeKeys)
+  const phone = settleGradeNotifications(pushed, [edited], firstDelivery.keys)
+  assert.equal(phone.changes.some((change) => change.category === 'grade'), false)
+  const secondDelivery = settleGradeNotifications(editedChanges, [edited], firstDelivery.keys)
+  assert.equal(secondDelivery.changes.some((change) => change.category === 'grade'), false)
+
+  assert.deepEqual(keepLoadedGrades([original], []), [original])
+  assert.deepEqual(keepLoadedGrades([original], [reparsed]), [reparsed])
+  assert.deepEqual(keepLoadedGrades([], []), [])
+})
+
+test('an empty scrape does not announce grades that were already on file', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-grades-'))
+  const key = randomBytes(32)
+  let polls = 0
+  const posted = []
+  const fetch = async (url, options = {}) => {
+    const json = (value) => ({ status: 200, text: async () => JSON.stringify(value) })
+    if (String(url).endsWith('/token.php')) {
+      return json({ access_token: 'access-token-value', refresh_token: 'rotated-refresh-token-value-123456', expires_in: 3600 })
+    }
+    if (String(url).includes('/me/grades')) {
+      polls += 1
+      if (polls === 1) return json([{ id: 'g1', course: 'Mathematik', courseId: 'math', title: 'Probe', date: '2026-10-20', mark: '5.5', weight: '1' }])
+      if (polls === 2) return json([])
+      if (polls === 3) return json([{ id: 'web:other', course: 'MA-4a-He', courseId: 'MA-4a-He', title: 'Probe', date: '20.10.2026', mark: '5.5', weight: '1' }])
+      return json([{ id: 'g2', course: 'Englisch', courseId: 'en', title: 'Essay', date: '2026-11-01', mark: '4.5', weight: '1' }])
+    }
+    if (String(url).startsWith('https://ntfy.example/')) {
+      posted.push(options.body)
+      return { status: 200, text: async () => 'ok' }
+    }
+    return json([])
+  }
+  const previousNtfy = process.env.FANOTES_NTFY_URL
+  process.env.FANOTES_NTFY_URL = 'https://ntfy.example'
+  const runtime = createSchulnetzRuntime({ root, key, fetch, autostart: false })
+  const accountId = 'c'.repeat(32)
+  try {
+    await runtime.linkAccount(accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'super-secret-refresh-token-value',
+    })
+    await runtime.pollAccount(accountId)
+    const ledger = JSON.parse(await readFile(join(root, 'accounts', accountId, 'notified-grades.json'), 'utf8'))
+    assert.equal(ledger.version, 1)
+    assert.ok(ledger.keys.length > 0)
+    assert.equal(posted.length, 0)
+    await runtime.pollAccount(accountId)
+    const kept = JSON.parse(await readFile(join(root, 'accounts', accountId, 'snapshot.json'), 'utf8'))
+    assert.equal(kept.grades.length, 1)
+    assert.equal(kept.grades[0].id, 'g1')
+    assert.equal(posted.length, 0)
+    await rm(join(root, 'accounts', accountId, 'notified-grades.json'), { force: true })
+    await runtime.pollAccount(accountId)
+    assert.equal(posted.length, 0)
+    const reseeded = JSON.parse(await readFile(join(root, 'accounts', accountId, 'notified-grades.json'), 'utf8'))
+    assert.ok(reseeded.keys.length > 0)
+    await runtime.pollAccount(accountId)
+    assert.equal(posted.length, 1)
+    const payload = JSON.parse(posted[0])
+    assert.equal(payload.category, 'grade')
+    assert.match(payload.title, /Neue Note|neue Noten/)
+    assert.ok(Array.isArray(payload.gradeKeys) && payload.gradeKeys.length > 0)
+    assert.equal(JSON.stringify(payload).includes('super-secret'), false)
+    await runtime.pollAccount(accountId)
+    assert.equal(posted.length, 1)
+  } finally {
+    if (previousNtfy == null) delete process.env.FANOTES_NTFY_URL
+    else process.env.FANOTES_NTFY_URL = previousNtfy
+  }
 })
 
 test('seal round trip uses aes-256-gcm', () => {
