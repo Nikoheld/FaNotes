@@ -190,15 +190,19 @@ jobs:
           printf '%s' "$FANOTES_ANDROID_KEYSTORE_B64" | base64 -d > "$keystore"
           export FANOTES_ANDROID_KEYSTORE="$keystore"
           version="$(node -p "require('../fanotes/package.json').version")"
-          ./gradlew :core:test --tests ch.fasrv.fanotes.schulnetz.* :companion:assembleRelease -Pfanotes.version="$version" --stacktrace
+          ./gradlew :core:test --tests ch.fasrv.fanotes.schulnetz.* :companion:assembleRelease :companion:bundleRelease -Pfanotes.version="$version" --stacktrace
           apk="companion/build/outputs/apk/release/companion-release.apk"
+          aab="companion/build/outputs/bundle/release/companion-release.aab"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --min-sdk-version 29 "$apk"
-          cp "$apk" "FaNotes-Companion-${version}-android.apk"
+          cp "$apk" "Kanti-Plus-${version}-android.apk"
+          cp "$aab" "Kanti-Plus-${version}-android.aab"
       - uses: actions/upload-artifact@v6
         with:
           name: android-companion
           if-no-files-found: error
-          path: android/FaNotes-Companion-*-android.apk
+          path: |
+            android/Kanti-Plus-*-android.apk
+            android/Kanti-Plus-*-android.aab
 
   publish:
     name: Publish GitHub release

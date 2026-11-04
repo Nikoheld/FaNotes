@@ -44,8 +44,9 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew :core:test :companion:assembleDebug --stacktrace
+          cp companion/build/outputs/apk/debug/companion-debug.apk Kanti-Plus-debug.apk
       - uses: actions/upload-artifact@v6
         with:
-          name: android-companion-debug
+          name: Kanti-Plus-debug
           if-no-files-found: error
-          path: android/companion/build/outputs/apk/debug/companion-debug.apk
+          path: android/Kanti-Plus-debug.apk

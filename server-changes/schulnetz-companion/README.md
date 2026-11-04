@@ -1,6 +1,6 @@
 # Schulnetz für Kanti+
 
-Die Telefon-App Kanti+ (`ch.fasrv.fanotes.companion`) spricht mit dem bestehenden FaNotes-Server. Dieser Ordner beschreibt **jede** Änderung, die auf `fanotes.fasrv.ch` nötig ist. Der Code liegt im Repository und wird mit dem normalen Site-Deploy ausgeliefert:
+Die Telefon-App Kanti+ (`ch.fasrv.kantiplus`) spricht mit dem bestehenden FaNotes-Server. Dieser Ordner beschreibt **jede** Änderung, die auf `fanotes.fasrv.ch` nötig ist. Der Code liegt im Repository und wird mit dem normalen Site-Deploy ausgeliefert:
 
 - `fanotes-site/schulnetz-api.mjs` — HTTP, Verschlüsselung, Poller
 - `fanotes-site/schulnetz-logic.mjs` — Parser, Notenrechnung, Diff, Lesesperre
