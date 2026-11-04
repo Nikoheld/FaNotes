@@ -1,7 +1,7 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package ch.fasrv.fanotes.companion
 
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -9,7 +9,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.automirrored.outlined.Article
 import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
@@ -26,12 +25,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -39,8 +36,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import ch.fasrv.fanotes.ink.InkDocument
-import ch.fasrv.fanotes.text.PaperKind
-import ch.fasrv.fanotes.text.paperLines
+import ch.fasrv.fanotes.ink.InkSession
 import ch.fasrv.fanotes.vault.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -57,7 +53,7 @@ fun NoteRow(model: CompanionModel, node: VaultNode, onMore: (() -> Unit)? = null
         Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).clickable(onClick = onClick).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             Box(Modifier.size(58.dp, 68.dp).clip(MaterialTheme.shapes.small).background(LocalCompanionSemantics.current.paper), contentAlignment = Alignment.Center) {
                 val ink = preview?.ink
-                if (ink != null && ink.strokes.isNotEmpty()) InkThumbnail(ink, Modifier.fillMaxSize().padding(5.dp))
+                if (ink != null && ink.strokes.isNotEmpty()) InkThumbnail(ink, Modifier.fillMaxSize().padding(5.dp), cacheKey = "${node.path}:${node.modifiedAt}")
                 else Icon(if (node.kind == NoteKind.PDF) Icons.Outlined.PictureAsPdf else Icons.AutoMirrored.Outlined.Article, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
             }
             Column(Modifier.weight(1f)) {
@@ -73,21 +69,28 @@ fun NoteRow(model: CompanionModel, node: VaultNode, onMore: (() -> Unit)? = null
 }
 
 @Composable
-fun InkThumbnail(document: InkDocument, modifier: Modifier = Modifier) {
-    Canvas(modifier) {
-        val scale = size.width / document.sourceWidth.toFloat().coerceAtLeast(1f)
-        document.strokes.take(400).forEach { stroke ->
-            val points = stroke.points
-            val stride = (points.size / 200).coerceAtLeast(1)
-            for (i in stride until points.size step stride) {
-                val a = points[i - stride]; val b = points[i]
-                drawLine(paletteColor(stroke.color).copy(alpha = (stroke.opacity ?: 1.0).toFloat().coerceIn(0f, 1f)),
-                    Offset((a.x * document.sourceWidth * scale).toFloat(), (a.y * document.sourceHeight * scale).toFloat()),
-                    Offset((b.x * document.sourceWidth * scale).toFloat(), (b.y * document.sourceHeight * scale).toFloat()),
-                    strokeWidth = (stroke.baseWidth * scale).toFloat().coerceAtLeast(0.6f), cap = StrokeCap.Round)
-            }
+fun InkThumbnail(document: InkDocument, modifier: Modifier = Modifier, cacheKey: String = document.updatedAt) {
+    val density = LocalDensity.current
+    val bitmap by produceState(null as android.graphics.Bitmap?, cacheKey, document.updatedAt, document.strokes.size) {
+        val width = with(density) { 116.dp.roundToPx() }
+        val height = with(density) { 136.dp.roundToPx() }
+        val cached = CompanionImageCache.ink(cacheKey, width, height)
+        value = cached ?: rasterizeInkThumbnail(document, width, height).also {
+            CompanionImageCache.putInk(cacheKey, width, height, it)
         }
     }
+    val image = bitmap
+    if (image != null) Image(image.asImageBitmap(), null, modifier)
+}
+
+@Composable
+fun InkPreview(document: InkDocument, modifier: Modifier = Modifier) {
+    val session = remember { InkSession(document) }
+    AndroidView(
+        factory = { context -> CompanionInkView(context, session) {}.also { it.readOnly = true } },
+        update = { view -> view.readOnly = true; view.bindDocument(document) },
+        modifier = modifier.clipToBounds(),
+    )
 }
 
 @Composable
@@ -120,6 +123,7 @@ fun NotesScreen(model: CompanionModel) {
         }
         ChoiceRow(listOf("browse" to "Library", "recent" to "Recently edited"), mode, { mode = it }, Modifier.padding(horizontal = Space.page))
         if (model.loading) { LoadingState("Opening your library…"); return }
+        val nodes = remember(mode, model.notes, model.tree) { if (mode == "browse") model.notes else flattenNotes(model.tree).sortedByDescending { it.modifiedAt } }
         ScreenList {
             if (query.isNotBlank()) {
                 if (searching) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 12.dp)) }
@@ -137,7 +141,6 @@ fun NotesScreen(model: CompanionModel) {
                         }
                     }
                 }
-                val nodes = if (mode == "browse") model.notes else flattenNotes(model.tree).sortedByDescending { it.modifiedAt }
                 if (nodes.isEmpty()) item { EmptyState(Icons.Outlined.AutoStories, if (model.noteFolder.isBlank()) "A home for your notes" else "This folder is ready", "Create a note to start writing. Everything saves on this device, even offline.") }
                 items(nodes, key = { it.path }) { node ->
                     if (node.kind == NoteKind.FOLDER) {
@@ -254,9 +257,18 @@ fun NoteEditorScreen(model: CompanionModel) {
             }
             "ink" -> {
                 val session = editor.session
-                if (session != null) AndroidView(factory = { context -> CompanionInkView(context, session, editor::inkChanged) },
-                    update = { view -> view.penColor = color; view.eraser = tool == "eraser"; view.panning = tool == "pan"; editor.document; view.invalidate() },
-                    modifier = Modifier.weight(1f).fillMaxWidth().clipToBounds())
+                if (session != null) Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
+                    key(editor.path) {
+                        AndroidView(factory = { context -> CompanionInkView(context, session, editor::inkChanged) },
+                            update = { view ->
+                                view.penColor = color
+                                view.eraser = tool == "eraser"
+                                view.panning = tool == "pan"
+                                view.syncFromSession()
+                            },
+                            modifier = Modifier.fillMaxSize())
+                    }
+                }
                 Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 1.dp) {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

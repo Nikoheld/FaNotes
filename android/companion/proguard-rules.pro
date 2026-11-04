@@ -1,0 +1,11 @@
+-keep class ch.fasrv.fanotes.** { *; }
+-keepclassmembers class ch.fasrv.fanotes.** { *; }
+-keep class org.unifiedpush.** { *; }
+-keep class androidx.work.** { *; }
+-keep class org.jsoup.** { *; }
+-keepnames class kotlinx.coroutines.** { *; }
+-dontwarn javax.annotation.**
+-dontwarn org.codehaus.mojo.animal_sniffer.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**

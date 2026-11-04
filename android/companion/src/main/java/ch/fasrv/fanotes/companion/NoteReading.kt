@@ -1,7 +1,6 @@
 package ch.fasrv.fanotes.companion
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -9,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material3.MaterialTheme
@@ -44,7 +44,7 @@ fun NoteReading(model: CompanionModel, editor: NoteEditorController, onInk: () -
         if (plainPreview(editor.markdown).isBlank() && editor.document?.strokes?.isEmpty() == true && editor.note?.kind != ch.fasrv.fanotes.vault.NoteKind.PDF) item {
             EmptyState(androidx.compose.material.icons.Icons.Outlined.EditNote, "A blank page, a fresh thought", "Switch to Text to write, or Ink to draw.")
         }
-        items(lines) { line ->
+        itemsIndexed(lines, key = { index, line -> "line:$index:${line.kind}:${line.text.take(48)}" }) { _, line ->
             when (line.kind) {
                 "rule" -> FineDivider()
                 "image" -> {
@@ -66,9 +66,9 @@ fun NoteReading(model: CompanionModel, editor: NoteEditorController, onInk: () -
             }
             LocalNoteImage(file, "Worksheet")
         }
-        editor.document?.takeIf { it.strokes.isNotEmpty() }?.let { ink -> item {
+        editor.document?.takeIf { it.strokes.isNotEmpty() }?.let { ink -> item(key = "ink:${ink.updatedAt}") {
             SectionLabel("Handwriting preview")
-            InkThumbnail(ink, Modifier.fillMaxWidth().aspectRatio((ink.sourceWidth / ink.sourceHeight).toFloat().coerceAtLeast(0.1f)).background(LocalCompanionSemantics.current.paper).padding(12.dp))
+            InkPreview(ink, Modifier.fillMaxWidth().aspectRatio((ink.sourceWidth / ink.sourceHeight).toFloat().coerceAtLeast(0.1f)).background(LocalCompanionSemantics.current.paper))
             androidx.compose.material3.TextButton(onClick = onInk) { Text("Open handwriting canvas") }
         } }
     }
@@ -113,17 +113,8 @@ private fun ReadingLine(line: DetailsReadingLine) {
 
 @Composable
 private fun LocalNoteImage(file: File?, label: String) {
-    val bitmap by produceState<Bitmap?>(null, file?.path) {
-        value = withContext(Dispatchers.IO) {
-            if (file == null) return@withContext null
-            runCatching {
-                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeFile(file.path, options)
-                var sample = 1
-                while (options.outWidth / sample > 1600 || options.outHeight / sample > 2400) sample *= 2
-                BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
-            }.getOrNull()
-        }
+    val bitmap by produceState<Bitmap?>(null, file?.path, file?.lastModified()) {
+        value = if (file == null) null else decodeNoteImage(file)
     }
     if (bitmap != null) Image(bitmap!!.asImageBitmap(), label, Modifier.fillMaxWidth().heightIn(max = 500.dp))
     else Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

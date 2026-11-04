@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.automirrored.outlined.Assignment
@@ -37,7 +38,7 @@ fun SchoolScreen(model: CompanionModel) {
             InfoBanner(if (model.link.needsReauth) "Sign in to refresh school data" else "Connect Schulnetz", "Bring your timetable and school records into FaNotes. School access stays read-only.", "Manage connection", onAction = { model.navigate(Page.Connections) })
         }
         item { SectionLabel("School records") }
-        item { SettingRow(Icons.Outlined.Insights, "Grades", "Marks, subject averages & local scenarios", "${courseSummaries(model.snapshot.grades).size}") { model.navigate(Page.Grades) }; FineDivider() }
+        item { SettingRow(Icons.Outlined.Insights, "Grades", "Marks, subject averages & local scenarios", "${remember(model.snapshot.grades) { courseSummaries(model.snapshot.grades) }.size}") { model.navigate(Page.Grades) }; FineDivider() }
         item { SettingRow(Icons.AutoMirrored.Outlined.Assignment, "Exams", "Prepare for what's coming", "${(model.snapshot.exams + model.snapshot.events.filter { it.isExamLike() }).distinctBy(::lessonTargetId).size}") { model.navigate(Page.Exams) }; FineDivider() }
         item { SettingRow(Icons.Outlined.EventBusy, "Absences", "Status & excuse deadlines", "${model.snapshot.absences.count { !it.excused }} open") { model.navigate(Page.Absences) }; FineDivider() }
         item { SettingRow(Icons.Outlined.Forum, "Updates", "Messages, school events & holidays", "${model.snapshot.messages.size + model.snapshot.startMessages.size}") { model.navigate(Page.Updates) }; FineDivider() }
@@ -53,9 +54,11 @@ fun SchoolScreen(model: CompanionModel) {
 @Composable
 fun GradesScreen(model: CompanionModel) {
     var query by rememberSaveable { mutableStateOf("") }
-    val official = courseSummaries(model.snapshot.grades)
-    val courses = sortCourses(official, model.desk.gradeSort).sortedBy { if (it.marks.any { mark -> mark.targetId in model.highlightIds }) 0 else 1 }.filter { courseAlias(it.label, model.desk.courseAliases).contains(query, true) }
-    val totals = promotionTotals(official)
+    val official = remember(model.snapshot.grades) { courseSummaries(model.snapshot.grades) }
+    val courses = remember(official, model.desk.gradeSort, model.highlightIds, query, model.desk.courseAliases) {
+        sortCourses(official, model.desk.gradeSort).sortedBy { if (it.marks.any { mark -> mark.targetId in model.highlightIds }) 0 else 1 }.filter { courseAlias(it.label, model.desk.courseAliases).contains(query, true) }
+    }
+    val totals = remember(official) { promotionTotals(official) }
     ScreenList {
         item {
             if (query.isBlank()) {
@@ -94,9 +97,10 @@ fun GradesScreen(model: CompanionModel) {
 
 @Composable
 fun CourseScreen(model: CompanionModel) {
-    val course = courseSummaries(model.snapshot.grades).firstOrNull { it.courseId == model.focusCourseId }
+    val official = remember(model.snapshot.grades) { courseSummaries(model.snapshot.grades) }
+    val course = official.firstOrNull { it.courseId == model.focusCourseId }
     if (course == null) { ScreenList { item { EmptyState(Icons.Outlined.Insights, "Subject unavailable", "It is no longer in the last school snapshot.", "All subjects") { model.back() } } }; return }
-    val scenario = courseSummaries(model.snapshot.grades, model.hypothetical).first { it.courseId == course.courseId }
+    val scenario = remember(model.snapshot.grades, model.hypothetical, course.courseId) { courseSummaries(model.snapshot.grades, model.hypothetical).first { it.courseId == course.courseId } }
     val decimals = model.desk.gradeDecimals
     val own = model.hypothetical.filter { it.courseId == course.courseId }
     var calculator by rememberSaveable { mutableStateOf(false) }
@@ -222,7 +226,7 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
                 items(messages, key = { messageTargetId(it) }) { message -> ExpandableRecord(message.title.ifBlank { "School message" }, message.body, message.at, messageTargetId(message) in model.highlightIds) }
                 val announcements = model.snapshot.startMessages.filter { it.contains(query, true) }
                 if (announcements.isNotEmpty()) item { SectionLabel("Announcements") }
-                items(announcements) { body -> ExpandableRecord("Announcement", body) }
+                itemsIndexed(announcements, key = { index, body -> "announcement:$index:${body.take(48)}" }) { _, body -> ExpandableRecord("Announcement", body) }
                 val events = model.snapshot.events.filter { !it.isLesson() && "${it.label} ${it.comment}".contains(query, true) }.sortedBy { it.start }
                 if (events.isNotEmpty()) item { SectionLabel("School events") }
                 items(events, key = { "update:${lessonTargetId(it)}" }) { event ->
@@ -236,7 +240,7 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
             }
             Page.Statement -> {
                 if (model.snapshot.konto.isEmpty()) item { EmptyState(Icons.AutoMirrored.Outlined.ReceiptLong, "No statement available", "Some schools do not provide an account statement through this integration. If available, it will appear after a refresh.") }
-                items(model.snapshot.konto) { line ->
+                itemsIndexed(model.snapshot.konto, key = { index, line -> "konto:$index:${line.date}:${line.label}:${line.amount}" }) { _, line ->
                     Column(Modifier.padding(vertical = 16.dp)) {
                         Text(line.date, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) { Text(line.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge); Text(line.amount, style = MaterialTheme.typography.titleMedium) }

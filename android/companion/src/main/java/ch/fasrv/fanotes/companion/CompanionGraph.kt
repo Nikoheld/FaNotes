@@ -91,7 +91,7 @@ class CompanionGraph(private val context: Context) {
     val store = NoteStore(vault)
     val vaultId: String = fingerprint(root.absolutePath)
     @Volatile var busyPaths: Set<String> = emptySet()
-    val snapshot = MutableStateFlow(readCachedSnapshot())
+    val snapshot = MutableStateFlow(SchulnetzSnapshot())
     val link = MutableStateFlow(SchulnetzLinkState())
     val client = SchulnetzClient()
     val schulnetzLog = SchulnetzLog(File(context.filesDir, "schulnetz"))
@@ -124,6 +124,12 @@ class CompanionGraph(private val context: Context) {
 
     init {
         engine.attach(host())
+        scope.launch {
+            val cached = readCachedSnapshot()
+            if (cached.fetchedAt.isNotBlank() || cached.grades.isNotEmpty() || cached.events.isNotEmpty()) {
+                snapshot.value = cached
+            }
+        }
     }
 
     fun deviceId(): String {

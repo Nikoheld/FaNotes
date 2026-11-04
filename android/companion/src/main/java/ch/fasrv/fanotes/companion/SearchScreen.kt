@@ -32,11 +32,12 @@ fun CompanionSearchScreen(model: CompanionModel) {
         loading = false
     }
     val needle = query.trim()
-    val tasks = if (needle.length < 2) emptyList() else model.tasks.filter { "${it.title} ${it.subject} ${it.notes}".contains(needle, true) }
-    val events = if (needle.length < 2) emptyList() else (model.snapshot.events + model.snapshot.exams).distinctBy(::lessonTargetId).filter { "${it.label} ${it.comment}".contains(needle, true) }
-    val messages = if (needle.length < 2) emptyList() else model.snapshot.messages.filter { "${it.title} ${it.body}".contains(needle, true) }
-    val courses = if (needle.length < 2) emptyList() else courseSummaries(model.snapshot.grades).filter { courseAlias(it.label, model.desk.courseAliases).contains(needle, true) }
-    val local = if (needle.length < 2) emptyList() else model.calendar.events.filter { "${it.title} ${it.location} ${it.notes}".contains(needle, true) }
+    val tasks = remember(needle, model.tasks) { if (needle.length < 2) emptyList() else model.tasks.filter { "${it.title} ${it.subject} ${it.notes}".contains(needle, true) } }
+    val events = remember(needle, model.snapshot.events, model.snapshot.exams) { if (needle.length < 2) emptyList() else (model.snapshot.events + model.snapshot.exams).distinctBy(::lessonTargetId).filter { "${it.label} ${it.comment}".contains(needle, true) } }
+    val messages = remember(needle, model.snapshot.messages) { if (needle.length < 2) emptyList() else model.snapshot.messages.filter { "${it.title} ${it.body}".contains(needle, true) } }
+    val courses = remember(needle, model.snapshot.grades, model.desk.courseAliases) { if (needle.length < 2) emptyList() else courseSummaries(model.snapshot.grades).filter { courseAlias(it.label, model.desk.courseAliases).contains(needle, true) } }
+    val local = remember(needle, model.calendar.events) { if (needle.length < 2) emptyList() else model.calendar.events.filter { "${it.title} ${it.location} ${it.notes}".contains(needle, true) } }
+    val recentNotes = remember(model.tree) { flattenNotes(model.tree).sortedByDescending { it.modifiedAt }.take(3) }
     Column {
         SearchField(query, { query = it }, "Notes, tasks, subjects, events…", Modifier.padding(horizontal = Space.page, vertical = 8.dp))
         ChoiceRow(listOf("all" to "All", "notes" to "Notes", "tasks" to "Tasks", "school" to "School"), scope, { scope = it }, Modifier.padding(horizontal = Space.page))
@@ -44,7 +45,7 @@ fun CompanionSearchScreen(model: CompanionModel) {
             if (needle.length < 2) {
                 item { EmptyState(Icons.Outlined.Search, "Find your next thought", "Search note text, existing handwriting transcripts, assignments, events and school records. Enter at least two characters.") }
                 item { SectionLabel("Jump back in") }
-                items(flattenNotes(model.tree).sortedByDescending { it.modifiedAt }.take(3), key = { it.path }) { note -> NoteRow(model, note) { model.openNote(note.path) } }
+                items(recentNotes, key = { it.path }) { note -> NoteRow(model, note) { model.openNote(note.path) } }
             } else {
                 if (loading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 12.dp)) }
                 if (failed) item { InfoBanner("Note search needs attention", "Some notes could not be read. Your files have been kept unchanged.") }
