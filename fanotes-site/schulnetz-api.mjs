@@ -27,6 +27,7 @@ import {
   FCM_ACCOUNT_FILE,
   exchangeServiceAccount,
   fcmDataMessage,
+  fcmPriorityForChanges,
   fcmDropToken,
   isValidFcmToken,
   readServiceAccount,
@@ -499,8 +500,8 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 
   let fcmCache = null
-  const sendFcm = async (token, event) => {
-    const message = fcmDataMessage(token, event)
+  const sendFcm = async (token, event, priority = 'HIGH') => {
+    const message = fcmDataMessage(token, event, { priority })
     if (typeof options.fcmSend === 'function') return options.fcmSend(message)
     const nowMs = now().getTime()
     if (!fcmCache || fcmCache.exp - 60 <= Math.floor(nowMs / 1000)) {
@@ -521,14 +522,14 @@ export const createSchulnetzRuntime = (options = {}) => {
     return { status: response.status, drop: fcmDropToken(response.status, body) }
   }
 
-  const ping = async (accountId, link, event) => {
+  const ping = async (accountId, link, event, priority = 'HIGH') => {
     if (event !== 'sync' && event !== 'reauth' && event !== 'test') return
     const tokens = (link.fcmTokens || []).filter(isValidFcmToken)
     if (!tokens.length) return
     let dropped = false
     for (const token of tokens) {
       try {
-        const result = await sendFcm(token, event)
+        const result = await sendFcm(token, event, priority)
         if (result?.drop) {
           link.fcmTokens = (link.fcmTokens || []).filter((item) => item !== token)
           dropped = true
@@ -582,7 +583,8 @@ export const createSchulnetzRuntime = (options = {}) => {
     const unseen = unseenChanges(settled.changes, await knownChangeIds(accountId))
     await appendChanges(accountId, unseen, revision)
     const fresh = prepareGradeNotifications(unseen, link.settings?.guessGrades === true)
-    if (fresh.length) await ping(accountId, link, 'sync')
+    const priority = fcmPriorityForChanges(fresh)
+    if (priority) await ping(accountId, link, 'sync', priority)
     return fresh
   }
 

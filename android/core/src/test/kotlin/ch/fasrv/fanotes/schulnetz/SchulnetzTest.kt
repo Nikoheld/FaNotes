@@ -262,6 +262,7 @@ class SchulnetzPolicyTest {
         val later = cancelled.copy(id = "n", status = "confirmed", start = "2026-11-02T08:15:00Z", end = "2026-11-02T09:00:00Z", courseName = "Mathematik")
         val now = Instant.parse("2026-11-02T07:00:00Z")
         assertEquals("n", nextUp(listOf(cancelled, later), now, zone)?.id)
+        assertEquals(Instant.parse("2026-11-02T07:15:00Z"), nextLessonBoundary(listOf(cancelled, later), now, zone))
         assertEquals(1, todayChanges(listOf(cancelled, later), LocalDate.of(2026, 11, 2), zone).size)
         assertEquals("#3d8bfd", subjectColor("Mathematik", "#3d8bfd"))
     }

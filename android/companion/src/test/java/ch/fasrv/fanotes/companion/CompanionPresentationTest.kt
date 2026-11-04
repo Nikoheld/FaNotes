@@ -114,7 +114,12 @@ class CompanionPresentationTest {
         assertEquals("Some text", noteExcerpt("# Essay\n\nSome text", "Essay"))
         assertEquals(LocalDate.of(2026, 11, 2), parseDisplayDate("2.11.2026"))
     }
-    @Test fun `school polling stays a 15 minute safety net beside instant push`() {
-        assertEquals(15 * 60_000L, schoolFallbackIntervalMs())
+    @Test fun `school fallback waits hours and stays off while push is healthy`() {
+        assertEquals(6 * 60 * 60_000L, schoolFallbackIntervalMs())
+        val now = 1_700_000_000_000L
+        assertEquals("Fallback", deliveryModeLabel(false, now, now))
+        assertEquals("Fallback", deliveryModeLabel(true, 0L, now))
+        assertEquals("Instant via push", deliveryModeLabel(true, now - 60_000L, now))
+        assertEquals("Fallback", deliveryModeLabel(true, now - FCM_HEALTHY_MS - 1, now))
     }
 }

@@ -156,8 +156,11 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             item { Text("Connection checks", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(vertical = 16.dp)) }
             item {
                 fun at(ms: Long) = if (ms <= 0L) "Not yet" else Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm", Locale.ENGLISH))
+                val delivery = deliveryModeLabel(firebaseConfigured(context), model.graph.lastPushAt(), System.currentTimeMillis())
+                DiagnosticLine("Delivery", delivery)
+                DiagnosticLine("Last push", at(model.graph.lastPushAt()))
                 DiagnosticLine("Last school check", at(model.graph.lastCheckAt()))
-                DiagnosticLine("Next scheduled check", if (model.graph.hasInstantPush()) "Instant, with a check about every 15 minutes" else at(model.graph.nextCheckAt()))
+                DiagnosticLine("Next scheduled check", if (delivery == "Instant via push") "Not scheduled while push is healthy" else at(model.graph.nextCheckAt()))
                 DiagnosticLine("Cached school data", updatedLabel(model.snapshot.fetchedAt))
                 val error = model.graph.lastCheckError().ifBlank { model.link.lastError }
                 if (error.isNotBlank()) InfoBanner("Last check", error, error = true)
@@ -309,8 +312,11 @@ private fun NotificationSettings(model: CompanionModel) {
         item { SectionLabel("Delivery") }
         item {
             Text(
-                if (firebaseConfigured(context)) "School updates arrive instantly. A check about every 15 minutes is the backup."
-                else "School updates are checked about every 15 minutes.",
+                when (deliveryModeLabel(firebaseConfigured(context), model.graph.lastPushAt(), System.currentTimeMillis())) {
+                    "Instant via push" -> "New grades arrive instantly. No background check while push is healthy."
+                    else -> if (firebaseConfigured(context)) "Push has been quiet. Kanti+ checks about every 6 hours until a push arrives."
+                    else "School updates are checked about every 6 hours."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 12.dp),

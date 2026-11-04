@@ -296,6 +296,16 @@ fun eventsOn(events: List<AgendaEvent>, day: LocalDate, zone: ZoneId = ZoneId.of
         start.atZone(zone).toLocalDate() == day
     }.sortedBy { it.startsAt(zone) ?: Instant.EPOCH }
 
+/** Next lesson start or end after [now]. Widget alarms use this once, then stop. */
+fun nextLessonBoundary(events: List<AgendaEvent>, now: Instant, zone: ZoneId = ZoneId.of("Europe/Zurich")): Instant? {
+    val earliest = now.plusSeconds(30)
+    return events.asSequence()
+        .flatMap { sequenceOf(it.startsAt(zone), it.endsAt(zone)) }
+        .filterNotNull()
+        .filter { it.isAfter(earliest) }
+        .minOrNull()
+}
+
 fun nextUp(events: List<AgendaEvent>, now: Instant, zone: ZoneId = ZoneId.of("Europe/Zurich")): AgendaEvent? =
     events.mapNotNull { event ->
         val end = event.endsAt(zone) ?: return@mapNotNull null

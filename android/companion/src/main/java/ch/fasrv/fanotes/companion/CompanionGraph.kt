@@ -170,7 +170,7 @@ class CompanionGraph(private val context: Context) {
         prefs.edit().putString("theme", id).apply()
     }
 
-    fun hasInstantPush(): Boolean = firebaseConfigured(context)
+    fun hasInstantPush(): Boolean = fcmPushHealthy(lastPushAt(), System.currentTimeMillis(), firebaseConfigured(context))
 
     fun baseUrl(): String = normalizeSchoolBase(prefs.getString("schulnetz-base", null) ?: AKSA) ?: AKSA
 
@@ -484,6 +484,8 @@ class CompanionGraph(private val context: Context) {
 
     fun lastCheckAt(): Long = prefs.getLong("last-check", 0L)
 
+    fun lastPushAt(): Long = prefs.getLong(LAST_PUSH_PREF, 0L)
+
     fun lastCheckError(): String = prefs.getString("last-check-error", "").orEmpty()
 
     fun nextCheckAt(): Long {
@@ -492,20 +494,19 @@ class CompanionGraph(private val context: Context) {
         return last + schoolFallbackIntervalMs()
     }
 
-    /** Fetch the server snapshot and change list. Does not open Schulnetz. */
-    suspend fun pullServerUpdates() {
+    /**
+     * One short read of new school changes. Used from FCM and the rare fallback.
+     * Does not scrape Schulnetz and does not sync notes.
+     */
+    suspend fun pullChangeDelta() {
         if (schoolDisconnected()) return
         withContext(Dispatchers.IO) {
-            gate.exclusive("pull:fcm") {
-                val session = runCatching { schoolAuth() }.getOrNull() ?: return@exclusive
-                val previous = snapshot.value
-                val body = runCatching { client.snapshot(session) }.getOrNull() ?: return@exclusive
-                val next = parseNormalizedSnapshot(body) ?: return@exclusive
-                publishSnapshot(previous, next, notifySettings())
-                val changes = runCatching { client.changes(session, prefs.getLong("change-cursor", 0L)) }.getOrNull()
-                if (changes != null) applyServerChanges(changes)
+            withTimeoutOrNull(8_000) {
+                val session = runCatching { schoolAuth() }.getOrNull() ?: return@withTimeoutOrNull
+                val changes = runCatching { client.changes(session, prefs.getLong("change-cursor", 0L), quick = true) }.getOrNull()
+                    ?: return@withTimeoutOrNull
+                applyServerChanges(changes)
                 prefs.edit().putLong("last-check", System.currentTimeMillis()).putString("last-check-error", "").apply()
-                NextLessonWidget.update(context)
             }
         }
     }
@@ -1047,7 +1048,7 @@ class CompanionGraph(private val context: Context) {
         snapshot.value = SchulnetzSnapshot()
         link.value = SchulnetzLinkState(baseUrl = baseUrl())
         CompanionAlerts.retireLegacyPush(context)
-        androidx.work.WorkManager.getInstance(context).cancelUniqueWork(SCHOOL_WORK)
+        cancelSchoolDelivery(context)
     }
 
     fun schoolDisconnected(): Boolean = prefs.getBoolean("school-disconnected", false)
@@ -1057,7 +1058,7 @@ class CompanionGraph(private val context: Context) {
         signedOut = true
         clearLocalLink()
         CompanionAlerts.retireLegacyPush(context)
-        androidx.work.WorkManager.getInstance(context).cancelUniqueWork(SCHOOL_WORK)
+        cancelSchoolDelivery(context)
         CompanionAlerts.forget(context, "schulnetz-login-required")
         link.value = SchulnetzLinkState(baseUrl = baseUrl())
     }

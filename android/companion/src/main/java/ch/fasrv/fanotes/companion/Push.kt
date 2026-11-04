@@ -1,9 +1,11 @@
 package ch.fasrv.fanotes.companion
 
+import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -12,7 +14,9 @@ import androidx.core.app.NotificationCompat
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -49,6 +53,9 @@ import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
+import ch.fasrv.fanotes.schulnetz.nextLessonBoundary
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
@@ -78,7 +85,9 @@ object CompanionAlerts {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.cancel(42)
         manager.deleteNotificationChannel("schulnetz-live")
-        WorkManager.getInstance(context).cancelUniqueWork(SCHOOL_WORK_FAST)
+        val work = WorkManager.getInstance(context)
+        work.cancelUniqueWork(SCHOOL_WORK_FAST)
+        work.cancelUniqueWork(SCHOOL_WORK)
     }
 
     fun showReauth(context: Context) {
@@ -288,9 +297,28 @@ internal fun writeGradeLedger(context: Context, keys: Set<String>) {
 
 internal const val SCHOOL_WORK = "schulnetz"
 internal const val SCHOOL_WORK_FAST = "schulnetz-fast"
-internal const val SCHOOL_FALLBACK_MS = 15 * 60_000L
+internal const val SCHOOL_FALLBACK = "schulnetz-fallback"
+internal const val SCHOOL_WATCH = "schulnetz-fcm-watch"
+internal const val LAST_PUSH_PREF = "last-push-at"
+internal const val SCHOOL_FALLBACK_MS = 6 * 60 * 60_000L
+internal const val FCM_HEALTHY_MS = 12 * 60 * 60_000L
+internal const val WIDGET_WINDOW_MS = 10 * 60_000L
 
 fun schoolFallbackIntervalMs(): Long = SCHOOL_FALLBACK_MS
+
+fun fcmPushHealthy(lastPushAt: Long, now: Long, firebaseReady: Boolean): Boolean =
+    firebaseReady && lastPushAt > 0L && now - lastPushAt in 0 until FCM_HEALTHY_MS
+
+fun deliveryModeLabel(firebaseReady: Boolean, lastPushAt: Long, now: Long): String =
+    if (fcmPushHealthy(lastPushAt, now, firebaseReady)) "Instant via push" else "Fallback"
+
+fun cancelSchoolDelivery(context: Context) {
+    val work = WorkManager.getInstance(context)
+    work.cancelUniqueWork(SCHOOL_WORK)
+    work.cancelUniqueWork(SCHOOL_WORK_FAST)
+    work.cancelUniqueWork(SCHOOL_FALLBACK)
+    work.cancelUniqueWork(SCHOOL_WATCH)
+}
 
 fun firebaseConfigured(context: Context): Boolean =
     context.resources.getIdentifier("google_app_id", "string", context.packageName) != 0
@@ -316,29 +344,76 @@ fun requestFcmToken(context: Context) {
 
 fun configurePushDelivery(context: Context) {
     CompanionAlerts.retireLegacyPush(context)
-    val work = WorkManager.getInstance(context)
-    work.cancelUniqueWork(SCHOOL_WORK_FAST)
-    val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
-    val linked = !prefs.getBoolean("school-disconnected", false) && !prefs.getString("push-topic", null).isNullOrBlank()
-    if (linked) SchulnetzWorker.schedule(context) else work.cancelUniqueWork(SCHOOL_WORK)
+    armSchoolDelivery(context)
     requestFcmToken(context)
 }
 
-class SchulnetzWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
-    override suspend fun doWork(): Result = try {
-        (applicationContext as CompanionApplication).graph.refreshSchulnetz("worker")
-        Result.success()
-    } catch (_: Exception) {
-        Result.retry()
-    }
+private fun schoolConstraints() = Constraints.Builder()
+    .setRequiredNetworkType(NetworkType.CONNECTED)
+    .setRequiresBatteryNotLow(true)
+    .build()
 
-    companion object {
-        fun schedule(context: Context) {
-            val request = PeriodicWorkRequestBuilder<SchulnetzWorker>(15, TimeUnit.MINUTES, 5, TimeUnit.MINUTES)
-                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-                .build()
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(SCHOOL_WORK, ExistingPeriodicWorkPolicy.UPDATE, request)
+private fun linkedForPush(context: Context): Boolean {
+    val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
+    return !prefs.getBoolean("school-disconnected", false) && !prefs.getString("push-topic", null).isNullOrBlank()
+}
+
+/** Periodic fallback only when push is missing. A healthy push cancels it and arms a far-off check. */
+private fun armSchoolDelivery(context: Context) {
+    val work = WorkManager.getInstance(context)
+    if (!linkedForPush(context)) {
+        cancelSchoolDelivery(context)
+        return
+    }
+    val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
+    val healthy = fcmPushHealthy(prefs.getLong(LAST_PUSH_PREF, 0L), System.currentTimeMillis(), firebaseConfigured(context))
+    if (healthy) {
+        work.cancelUniqueWork(SCHOOL_FALLBACK)
+        val watch = OneTimeWorkRequestBuilder<FcmWatchWorker>()
+            .setInitialDelay(12, TimeUnit.HOURS)
+            .setConstraints(schoolConstraints())
+            .build()
+        work.enqueueUniqueWork(SCHOOL_WATCH, ExistingWorkPolicy.REPLACE, watch)
+    } else {
+        work.cancelUniqueWork(SCHOOL_WATCH)
+        val request = PeriodicWorkRequestBuilder<SchulnetzWorker>(6, TimeUnit.HOURS, 1, TimeUnit.HOURS)
+            .setConstraints(schoolConstraints())
+            .build()
+        work.enqueueUniquePeriodicWork(SCHOOL_FALLBACK, ExistingPeriodicWorkPolicy.KEEP, request)
+    }
+}
+
+fun notePushReceived(context: Context) {
+    context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
+        .edit().putLong(LAST_PUSH_PREF, System.currentTimeMillis()).apply()
+    armSchoolDelivery(context)
+}
+
+class SchulnetzWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result {
+        val app = applicationContext as? CompanionApplication ?: return Result.success()
+        withTimeoutOrNull(8_000) { app.graph.pullChangeDelta() }
+        return Result.success()
+    }
+}
+
+/** Fires only after a long quiet stretch, then starts the slow fallback. */
+class FcmWatchWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result {
+        val prefs = applicationContext.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
+        val healthy = fcmPushHealthy(prefs.getLong(LAST_PUSH_PREF, 0L), System.currentTimeMillis(), firebaseConfigured(applicationContext))
+        if (healthy) {
+            armSchoolDelivery(applicationContext)
+            return Result.success()
         }
+        WorkManager.getInstance(applicationContext).cancelUniqueWork(SCHOOL_WATCH)
+        val request = PeriodicWorkRequestBuilder<SchulnetzWorker>(6, TimeUnit.HOURS, 1, TimeUnit.HOURS)
+            .setConstraints(schoolConstraints())
+            .build()
+        WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(SCHOOL_FALLBACK, ExistingPeriodicWorkPolicy.KEEP, request)
+        val app = applicationContext as? CompanionApplication
+        if (app != null) withTimeoutOrNull(8_000) { app.graph.pullChangeDelta() }
+        return Result.success()
     }
 }
 
@@ -349,10 +424,11 @@ class CompanionFcmService : FirebaseMessagingService() {
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
+        notePushReceived(applicationContext)
         when (message.data["event"].orEmpty()) {
             "sync" -> {
                 val app = applicationContext as? CompanionApplication ?: return
-                app.graph.scope.launch { app.graph.pullServerUpdates() }
+                runBlocking { withTimeoutOrNull(8_000) { app.graph.pullChangeDelta() } }
             }
             "reauth" -> CompanionAlerts.showReauth(applicationContext)
             "test" -> CompanionAlerts.showTest(applicationContext)
@@ -360,9 +436,19 @@ class CompanionFcmService : FirebaseMessagingService() {
     }
 }
 
+class WidgetTickReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        NextLessonWidget.update(context)
+    }
+}
+
 class NextLessonWidget : android.appwidget.AppWidgetProvider() {
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
         update(context, manager, ids)
+    }
+
+    override fun onDisabled(context: Context) {
+        context.getSystemService(AlarmManager::class.java)?.cancel(widgetTickIntent(context))
     }
 
     companion object {
@@ -397,8 +483,37 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
             val open = PendingIntent.getActivity(context, 1, target, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.widget_root, open)
             ids.forEach { manager.updateAppWidget(it, views) }
+            scheduleWidgetTick(context, snapshot, hidden, zone)
+        }
+
+        private fun scheduleWidgetTick(context: Context, snapshot: SchulnetzSnapshot?, hidden: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, zone: ZoneId) {
+            val alarm = context.getSystemService(AlarmManager::class.java) ?: return
+            val pending = widgetTickIntent(context)
+            val ids = AppWidgetManager.getInstance(context).getAppWidgetIds(ComponentName(context, NextLessonWidget::class.java))
+            if (ids.isEmpty()) {
+                alarm.cancel(pending)
+                return
+            }
+            val boundary = snapshot?.let { nextLessonBoundary(visibleEvents(it.events, hidden, zone), java.time.Instant.now(), zone) }
+            if (boundary == null) {
+                alarm.cancel(pending)
+                return
+            }
+            try {
+                alarm.setWindow(AlarmManager.RTC, boundary.toEpochMilli(), WIDGET_WINDOW_MS, pending)
+            } catch (_: Exception) {
+                alarm.cancel(pending)
+            }
         }
 
         private val CLOCK: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     }
 }
+
+private fun widgetTickIntent(context: Context): PendingIntent =
+    PendingIntent.getBroadcast(
+        context,
+        7,
+        Intent(context, WidgetTickReceiver::class.java),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )

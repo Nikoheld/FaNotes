@@ -100,6 +100,12 @@ class SchulnetzClient(
         .writeTimeout(40, TimeUnit.SECONDS)
         .build(),
 ) {
+    /** Bound used by the FCM callback so a push finishes inside a few seconds. */
+    private val quickHttp: OkHttpClient = http.newBuilder()
+        .callTimeout(6, TimeUnit.SECONDS)
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .build()
     fun exchangeCode(baseUrl: String, code: String, verifier: String, deviceId: String): SchulnetzTokens =
         token(baseUrl, authorizationCodeForm(code, verifier, deviceId))
 
@@ -353,8 +359,8 @@ class SchulnetzClient(
         return body
     }
 
-    fun changes(session: SchoolAuth, since: Long): String {
-        val (code, body) = fanotes("GET", "/changes?since=$since", session, null)
+    fun changes(session: SchoolAuth, since: Long, quick: Boolean = false): String {
+        val (code, body) = fanotes("GET", "/changes?since=$since", session, null, if (quick) quickHttp else http)
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
         return body
     }
@@ -431,7 +437,7 @@ class SchulnetzClient(
         return tokens
     }
 
-    private fun fanotes(method: String, path: String, session: SchoolAuth, json: String?): Pair<Int, String> =
+    private fun fanotes(method: String, path: String, session: SchoolAuth, json: String?, client: OkHttpClient = http): Pair<Int, String> =
         call(
             method,
             "$SYNC_ORIGIN$SCHULNETZ_API_PATH$path",
@@ -442,9 +448,10 @@ class SchulnetzClient(
                 "Content-Type" to "application/json",
             ),
             json,
+            client,
         )
 
-    private fun call(method: String, url: String, headers: Map<String, String>, body: String?): Pair<Int, String> {
+    private fun call(method: String, url: String, headers: Map<String, String>, body: String?, client: OkHttpClient = http): Pair<Int, String> {
         val media = if (headers["Content-Type"]?.contains("json") == true) "application/json" else "application/x-www-form-urlencoded"
         val requestBody = when {
             method == "GET" -> null
@@ -453,7 +460,7 @@ class SchulnetzClient(
         }
         val builder = Request.Builder().url(url).method(method, requestBody)
         headers.forEach { (name, value) -> builder.header(name, value) }
-        http.newCall(builder.build()).execute().use { response ->
+        client.newCall(builder.build()).execute().use { response ->
             return response.code to (response.body?.string().orEmpty())
         }
     }

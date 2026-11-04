@@ -20,7 +20,7 @@ Account login/registration gates the whole app. Settings mix seven themes, accen
 AMOLED, startup destination, dashboard visibility, timetable hours/weekends/density,
 hidden lessons, grade precision/sort/promotion points, widget density, school URL
 and Microsoft login, notification categories/background checks, local profile,
-badges, launcher aliases, Firebase Cloud Messaging with a 15-minute fallback, diagnostics, sync and logout.
+badges, launcher aliases, Firebase Cloud Messaging with a fallback every few hours only when push is quiet, diagnostics, sync and logout.
 School homework and exams can be copied to the local managed notes. School data is
 cached. An excuse deadline is informational, never an absence submission.
 
