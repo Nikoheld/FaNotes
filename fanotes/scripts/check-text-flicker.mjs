@@ -24,7 +24,12 @@ const {
   forcePaperCompositorRefresh,
   sampleGhostTextLayout,
 } = await server.ssrLoadModule('/src/lib/paperCaretScroll.ts')
-const { eraseInkKeepingNoteText } = await server.ssrLoadModule('/src/lib/inkStrokePaint.ts')
+const {
+  decideCommittedEraseHole,
+  eraseInkKeepingNoteText,
+  inkBudgetSliceClearsBitmap,
+  noteBudgetSliceCleared,
+} = await server.ssrLoadModule('/src/lib/inkStrokePaint.ts')
 const { applyToolErase } = await server.ssrLoadModule('/src/lib/toolErase.ts')
 const { bindPaperNoteText } = await server.ssrLoadModule('/src/lib/noteTextStay.ts')
 
@@ -162,6 +167,14 @@ try {
   assert.doesNotMatch(caretSource, /translateZ\(0\)/)
   assert.doesNotMatch(cameraSource, /willChange = 'transform'/)
   assert.match(boardSource, /eraseInkKeepingNoteText\(/)
+  assert.match(boardSource, /decideCommittedEraseHole\(/)
+  assert.match(boardSource, /job\.cleared = noteBudgetSliceCleared\(job\.cleared, from\)/)
+  assert.match(boardSource, /budgetCleared: Boolean\(painting\?\.cleared\)/)
+  assert.equal(
+    boardSource.match(/if \(eraseHole\.seal\) committedBitmapRef\.current = \{ key: contentKey, topPx \}/g)?.length,
+    2,
+    'both erase seals wait for the hole decision',
+  )
   assert.match(css, /\.unified-note-view \{[\s\S]*?will-change:\s*auto;/)
   assert.doesNotMatch(css, /will-change:\s*scroll-position/)
 
@@ -297,6 +310,45 @@ try {
   assert.equal(erased.signal, 'visible')
   assert.ok(erased.patch, 'erase still punches only the ink that left')
   assert.equal(erased.note, `${ORIGINAL.slice(0, at)}still ${ORIGINAL.slice(at)}`)
+
+  assert.equal(inkBudgetSliceClearsBitmap(0), true)
+  assert.equal(inkBudgetSliceClearsBitmap(12), false)
+  let budgetCleared = noteBudgetSliceCleared(false, 0)
+  assert.equal(budgetCleared, true, 'the first budget slice clearRect\'s the page')
+  const midBudget = decideCommittedEraseHole({
+    patchMatchesStrokes: true,
+    held: true,
+    keyMatches: true,
+    topMatches: true,
+    resized: false,
+    activeStroke: false,
+    budgetCleared,
+  })
+  assert.equal(midBudget.punch, false)
+  assert.equal(midBudget.seal, false, 'a mid-budget erase must not seal the cleared bitmap')
+  budgetCleared = noteBudgetSliceCleared(budgetCleared, 12)
+  assert.equal(budgetCleared, true, 'a later slice does not forget the clear')
+  const stillOpen = decideCommittedEraseHole({
+    patchMatchesStrokes: true,
+    held: true,
+    keyMatches: true,
+    topMatches: true,
+    resized: false,
+    activeStroke: false,
+    budgetCleared,
+  })
+  assert.equal(stillOpen.seal, false, 'the open job still must not seal')
+  const intact = decideCommittedEraseHole({
+    patchMatchesStrokes: true,
+    held: true,
+    keyMatches: true,
+    topMatches: true,
+    resized: false,
+    activeStroke: false,
+    budgetCleared: noteBudgetSliceCleared(false, 12),
+  })
+  assert.equal(intact.punch, true, 'an intact bitmap still punches only the erased ink')
+  assert.equal(intact.seal, true)
 
   const beforeRefresh = plane.style.transform
   const generation = forcePaperCompositorRefresh(scroller)

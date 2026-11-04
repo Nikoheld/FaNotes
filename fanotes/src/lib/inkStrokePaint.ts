@@ -352,6 +352,61 @@ export const removedStrokeBitmapPatch = <T extends { points: ReadonlyArray<{ x: 
 }
 
 /**
+ * The first slice of a heavy-page budget paint clears the whole bitmap.
+ * Later slices only add strokes, so the canvas is not a full page until the
+ * job finishes and seals it.
+ */
+export const inkBudgetSliceClearsBitmap = (from: number) => from === 0
+
+/** The first slice clears the bitmap. Later slices must not forget that. */
+export const noteBudgetSliceCleared = (already: boolean, from: number) => (
+  already || inkBudgetSliceClearsBitmap(from)
+)
+
+export type CommittedEraseHole = {
+  /** The pending erase still describes the strokes now on the page. */
+  patchMatchesStrokes: boolean
+  /** A sealed bitmap record exists. */
+  held: boolean
+  /** That record's key matches. Strokes are not part of the key, so a clear does not change it. */
+  keyMatches: boolean
+  topMatches: boolean
+  resized: boolean
+  activeStroke: boolean
+  /**
+   * `paintInkBudgetSlice` already ran with `from === 0` and the job has not
+   * sealed. The held key can still match. Punching a hole and sealing then
+   * drops every stroke outside the eraser.
+   */
+  budgetCleared: boolean
+}
+
+export type CommittedEraseHoleDecision = {
+  /** Punch only the erased ink. The rest of the bitmap is still the page. */
+  punch: boolean
+  /** Write the committed-bitmap seal. Never after a mid-budget clear. */
+  seal: boolean
+}
+
+/**
+ * An erase may punch a hole and seal the committed bitmap only when that
+ * bitmap is still the full page. A heavy-page budget paint clearRect's the
+ * canvas on its first slice and only seals when every stroke has been painted.
+ */
+export const decideCommittedEraseHole = (input: CommittedEraseHole): CommittedEraseHoleDecision => {
+  if (input.budgetCleared) return { punch: false, seal: false }
+  const punch = Boolean(
+    input.patchMatchesStrokes
+    && input.held
+    && input.keyMatches
+    && input.topMatches
+    && !input.resized
+    && !input.activeStroke
+  )
+  return { punch, seal: punch }
+}
+
+/**
  * Ink erase. The note string is returned unchanged and the text layer is not
  * full-cleared. The bitmap patch is only the ink that disappeared.
  */

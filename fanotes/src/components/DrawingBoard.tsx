@@ -147,7 +147,7 @@ import {
   mapClientToPaperPoint,
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
-import { bitmapPatchesTouch, clearMarkerCoverageRect, createMarkerCoverage, drawInkStroke as paintInkStroke, eraseInkKeepingNoteText, inkStrokeIsTranslucent, inkStrokePaintMargin, shiftMarkerCoverage, strokeBitmapPatch, unionBitmapPatch, type BitmapPatch, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
+import { bitmapPatchesTouch, clearMarkerCoverageRect, createMarkerCoverage, decideCommittedEraseHole, drawInkStroke as paintInkStroke, eraseInkKeepingNoteText, inkBudgetSliceClearsBitmap, inkStrokeIsTranslucent, inkStrokePaintMargin, noteBudgetSliceCleared, shiftMarkerCoverage, strokeBitmapPatch, unionBitmapPatch, type BitmapPatch, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
 import { paperNoteTextOf } from '../lib/noteTextStay'
 import { liveTranslucentCanGrow, paintGrowingTranslucentStroke, type LiveTranslucentSession } from '../lib/liveTranslucentInk'
 import { MATH_FIGURES, FIGURE_LINE_MAX, FIGURE_LINE_MIN, FIGURE_LINE_STEP, clampFigureLineWidth, clampFigureParams, defaultFigureParams, figureLineWidthForSize, isMathFigureId, mathFigurePaths, type MathFigureGroup, type MathFigureId, type MathFigureParam } from '../lib/mathFigures'
@@ -1298,7 +1298,7 @@ const paintInkBudgetSlice = (
   const virtualHeight = slice.pixelHeight / span
   const topPx = slice.inkWindow.y0 * virtualHeight
   let active = coverage
-  if (from === 0) {
+  if (inkBudgetSliceClearsBitmap(from)) {
     context.setTransform(1, 0, 0, 1, 0, 0)
     context.clearRect(0, 0, canvas.width, canvas.height)
     if (slice.includePaper) drawPaper(context, slice.pixelWidth, slice.pixelHeight, slice.paperStyle, slice.squareMm)
@@ -1544,6 +1544,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     key: string
     strokes: readonly InkStroke[]
     frame: number
+    /** True after the first slice clearRect'd the bitmap. The job has not sealed it. */
+    cleared: boolean
   } | null>(null)
   /** False while a packed page is still becoming strokes, and until its first paint finishes. */
   const inkReadyRef = useRef(true)
@@ -2553,15 +2555,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     )
     const pendingErase = committedPatchRef.current
     committedPatchRef.current = null
-    const eraseBitmapReady = Boolean(
-      pendingErase
-      && pendingErase.strokes === strokesRef.current
-      && held
-      && held.key === contentKey
-      && held.topPx === topPx
-      && !committedResized
-      && !activeStrokeRef.current
-    )
+    const eraseHole = decideCommittedEraseHole({
+      patchMatchesStrokes: Boolean(pendingErase && pendingErase.strokes === strokesRef.current),
+      held: Boolean(held),
+      keyMatches: Boolean(held && held.key === contentKey),
+      topMatches: Boolean(held && held.topPx === topPx),
+      resized: committedResized,
+      activeStroke: Boolean(activeStrokeRef.current),
+      budgetCleared: Boolean(painting?.cleared),
+    })
+    const eraseBitmapReady = eraseHole.punch
     let erasePatch: { x: number; y: number; width: number; height: number } | null = null
     let eraseOutside = false
     if (eraseBitmapReady && pendingErase) {
@@ -2621,12 +2624,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         markerCoverageRef.current,
         erasePatch,
       )
-      committedBitmapRef.current = { key: contentKey, topPx }
+      if (eraseHole.seal) committedBitmapRef.current = { key: contentKey, topPx }
       committedCanvasDirtyRef.current = false
       markInkPainted()
     } else if (eraseOutside) {
       cancelInkPaint()
-      committedBitmapRef.current = { key: contentKey, topPx }
+      if (eraseHole.seal) committedBitmapRef.current = { key: contentKey, topPx }
       committedCanvasDirtyRef.current = false
       markInkPainted()
     } else if (!activeStrokeRef.current && inkPageIsHeavy(strokesRef.current)) {
@@ -2645,10 +2648,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         squareMm: settings.paperSquareMm,
         includePaper: !inline,
       }
-      const job = { key: contentKey, strokes, frame: 0 }
+      const job = { key: contentKey, strokes, frame: 0, cleared: false }
       inkPaintJobRef.current = job
       const step = (from: number) => {
         if (inkPaintJobRef.current !== job || committedCanvasDirtyRef.current) return
+        job.cleared = noteBudgetSliceCleared(job.cleared, from)
         const painted = paintInkBudgetSlice(committedCanvas, slice, markerCoverageRef.current, from)
         if (inkPaintJobRef.current !== job || committedCanvasDirtyRef.current) return
         markerCoverageRef.current = painted.coverage
