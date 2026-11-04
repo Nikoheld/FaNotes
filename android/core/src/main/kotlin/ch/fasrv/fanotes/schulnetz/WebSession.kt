@@ -122,7 +122,7 @@ fun isLoggedInLanding(url: String, html: String): Boolean {
     if (sessionProblem(url, html) != SessionProblem.NONE) return false
     val parsed = runCatching { URI(url) }.getOrNull() ?: return false
     val host = parsed.host?.lowercase().orEmpty()
-    if (host != "schulnetz-ag.ch" && !host.endsWith(".schulnetz-ag.ch")) return false
+    if (!schoolHostAllowed(host)) return false
     val path = (parsed.path ?: "").trimEnd('/').lowercase()
     val page = queryValue(parsed.rawQuery, "pageid")
     val start = path.endsWith("/aksa") || page == null || page == "1"
@@ -229,19 +229,21 @@ fun linkedPageUrl(html: String, pageId: String, baseUrl: String, sessionId: Stri
     return absolute.takeIf { webReadAllowed(it) }
 }
 
-/** Cookie values, OAuth codes and bearer tokens are removed. id and transid stay. */
+/** Cookie values, OAuth codes, bearer tokens, and session ids are removed before anything is logged. */
 fun redactSchulnetzSecrets(value: String): String {
     var text = value
     text = Regex("""(?i)(Cookie\s*:\s*)([^\r\n]+)""").replace(text) { match ->
         val names = cookieNames(match.groupValues[2])
         "${match.groupValues[1]}names=${names.joinToString(",")}"
     }
-    text = Regex("""(?i)([?&#\s]|^)(code|flowToken|access_token|refresh_token|id_token|client_secret)=([^&\s#"'<>]+)""")
+    text = Regex("""(?i)([?&#\s]|^)(code|flowToken|access_token|refresh_token|id_token|client_secret|sFT|canary|buid|fpc|esctx)=([^&\s#"'<>]+)""")
         .replace(text) { "${it.groupValues[1]}${it.groupValues[2]}=[redacted]" }
-    text = Regex("""(?i)"(flowToken|access_token|refresh_token|id_token|client_secret|code)"\s*:\s*"[^"]*"""")
+    text = Regex("""(?i)"(flowToken|access_token|refresh_token|id_token|client_secret|code|sFT|canary|buid|fpc|esctx)"\s*:\s*"[^"]*"""")
         .replace(text) { "\"${it.groupValues[1]}\":\"[redacted]\"" }
-    text = Regex("""(?i)\b(PHPSESSID|ESTSAUTH[A-Z0-9]*|SignInStateCookie|esctx)=([^;\s,]+)""")
+    text = Regex("""(?i)\b(PHPSESSID|ESTSAUTH[A-Z0-9]*|SignInStateCookie|esctx|buid|fpc|x-ms-RefreshTokenCredential)=([^;\s,]+)""")
         .replace(text) { "${it.groupValues[1]}=[redacted]" }
+    text = Regex("""(?i)([?&#\s]|^)(transid|id)=([^&\s#"'<>]+)""")
+        .replace(text) { "${it.groupValues[1]}${it.groupValues[2]}=[redacted]" }
     text = Regex("""(?i)(Authorization\s*:\s*)\S+""").replace(text) { "${it.groupValues[1]}[redacted]" }
     text = Regex("""(?i)\bBearer\s+\S+""").replace(text, "Bearer [redacted]")
     return text
@@ -260,7 +262,7 @@ fun cookieNames(header: String): List<String> =
 private fun missingPageId(uri: URI?, html: String): Boolean {
     if (uri == null) return false
     val host = uri.host?.lowercase().orEmpty()
-    val school = host == "schulnetz-ag.ch" || host.endsWith(".schulnetz-ag.ch") || host.endsWith(".schulnetz.ch") || host.endsWith(".schulnetz.com")
+    val school = schoolHostAllowed(host)
     if (!school) return false
     if (PAGE_ID_QUERY.containsMatchIn(uri.rawQuery.orEmpty())) return false
     val text = html.replace("&amp;", "&")

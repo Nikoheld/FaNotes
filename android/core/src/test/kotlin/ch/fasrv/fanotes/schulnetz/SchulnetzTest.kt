@@ -20,7 +20,7 @@ class SchulnetzParseTest {
     @Test
     fun gradesEventsAndWrappedListsKeepTheMobileFields() {
         val raw = SchulnetzRaw(
-            me = """{"id":"s1","firstName":"Fabio","lastName":"Muster","email":"f@aksa.ch","regularClasses":[{"className":"4a"}]}""",
+            me = """{"id":"s1","firstName":"Max","lastName":"Muster","email":"max@example.com","regularClasses":[{"className":"K26A"}]}""",
             grades = """{"grades":[{"id":"g1","course":"Mathematik 4a","courseId":"math","subject":"Mathematik","title":"Probe","date":"2026-10-20","mark":"5,5","weight":"1.5","isConfirmed":true,"courseGrade":"5.3","comment":"gut"}]}""",
             events = """[{"id":"e1","startDate":"2026-11-02T08:15:00","endDate":"2026-11-02T09:00:00","text":"Mathematik","roomToken":"R201","teachers":["Herr Schmidt"],"courseName":"Mathematik","status":"confirmed","eventType":"lesson","color":"#4CAF50"}]""",
             absences = """[{"id":"a1","dateFrom":"2026-10-01","dateTo":"2026-10-01","hourFrom":"08:00","hourTo":"08:45","subject":"Französisch","reason":"Arzt","isExcused":false}]""",
@@ -28,8 +28,8 @@ class SchulnetzParseTest {
             messages = """[{"id":"m1","title":"Elternabend","message":"Freitag 19 Uhr","date":"2026-11-01"}]""",
         )
         val snapshot = parseRawSnapshot(raw, "2026-11-01T12:00:00Z")
-        assertEquals("Fabio Muster", snapshot.profile?.displayName)
-        assertEquals("4a", snapshot.profile?.className)
+        assertEquals("Max Muster", snapshot.profile?.displayName)
+        assertEquals("K26A", snapshot.profile?.className)
         val grade = snapshot.grades.single()
         assertEquals(5.5, grade.mark)
         assertEquals(1.5, grade.weight)
@@ -237,6 +237,24 @@ class SchulnetzPolicyTest {
         assertTrue(loginWebViewAllowed("https://login.microsoftonline.com/tenant/oauth2/v2.0/authorize", "www.schulnetz-ag.ch"))
         assertEquals(base, normalizeSchoolBase("$base/"))
         assertNull(normalizeSchoolBase("https://evil.example/aksa"))
+        assertNull(normalizeSchoolBase("https://schulnetz.evil.tld/aksa"))
+        assertNull(normalizeSchoolBase("https://evilschulnetz-ag.ch/aksa"))
+        assertFalse(schulnetzCallAllowed("GET", "https://schulnetz.evil.tld/rest/v1/me/grades"))
+        assertFalse(schulnetzCallAllowed("GET", "https://evilschulnetz-ag.ch/rest/v1/me/grades"))
+        assertFalse(schulnetzCallAllowed("GET", "https://127.0.0.1/aksa/index.php?pageid=1"))
+        assertFalse(schulnetzCallAllowed("GET", "https://microsoft.evil.tld/"))
+        assertTrue(schulnetzActionBlocked("$base/index.php?pageid=23118"))
+        assertTrue(schulnetzActionBlocked("$base/index.php?pageid=9999"))
+        assertTrue(schulnetzActionBlocked("$base/index.php?pageid=21311&action=confirm"))
+        assertFalse(schulnetzActionBlocked("$base/index.php?pageid=21311"))
+        val nonce = newBridgeNonce()
+        assertTrue(nonce.matches(Regex("[0-9a-f]{32}")))
+        assertTrue(newBridgeNonce() != nonce)
+        assertTrue(bridgeCallAllowed(nonce, nonce, "$base/index.php?pageid=1"))
+        assertFalse(bridgeCallAllowed("1", nonce, "$base/index.php?pageid=1"))
+        assertFalse(bridgeCallAllowed(nonce, nonce, "https://schulnetz.evil.tld/aksa/"))
+        assertFalse(bridgeCallAllowed(nonce, nonce, "https://microsoft.evil.tld/"))
+        assertTrue(bridgeCallAllowed(nonce, nonce, "https://login.microsoftonline.com/tenant"))
     }
 
     @Test
@@ -401,16 +419,23 @@ class WebSessionTest {
     }
 
     @Test
-    fun logRedactionKeepsSessionIdsAndDropsSecrets() {
-        val raw = "https://www.schulnetz-ag.ch/aksa/index.php?pageid=1&id=abc123&transid=a1b2c3&code=secret&flowToken=flow-secret Cookie: PHPSESSID=phone; ESTSAUTHPERSISTENT=persist Authorization: Bearer tok-1"
+    fun logRedactionDropsSessionIdsAndSecrets() {
+        val raw = "https://www.schulnetz-ag.ch/aksa/index.php?pageid=1&id=abc123&transid=a1b2c3&code=secret&flowToken=flow-secret&buid=b1&fpc=f1&sFT=s1&canary=c1 SignInStateCookie=state x-ms-RefreshTokenCredential=rt Cookie: PHPSESSID=phone; ESTSAUTHPERSISTENT=persist Authorization: Bearer tok-1"
         val redacted = redactSchulnetzSecrets(raw)
-        assertTrue(redacted.contains("id=abc123"))
-        assertTrue(redacted.contains("transid=a1b2c3"))
+        assertTrue(redacted.contains("id=[redacted]"))
+        assertTrue(redacted.contains("transid=[redacted]"))
+        assertFalse(redacted.contains("abc123"))
+        assertFalse(redacted.contains("a1b2c3"))
         assertFalse(redacted.contains("secret"))
         assertFalse(redacted.contains("phone"))
         assertFalse(redacted.contains("persist"))
         assertFalse(redacted.contains("tok-1"))
+        assertFalse(redacted.contains("b1"))
+        assertFalse(redacted.contains("=state"))
+        assertFalse(redacted.contains("=rt"))
         assertTrue(redacted.contains("code=[redacted]"))
+        assertTrue(redacted.contains("SignInStateCookie=[redacted]"))
+        assertTrue(redacted.contains("x-ms-RefreshTokenCredential=[redacted]"))
         assertTrue(redacted.contains("names=PHPSESSID,ESTSAUTHPERSISTENT"))
     }
 

@@ -442,12 +442,12 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         }
     }
 
-    fun shareLogs(context: Context) {
+    fun shareLogs(context: Context, includeCaptures: Boolean = false) {
         val app = context.applicationContext
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 graph.schulnetzLog.info("share logs")
-                val file = graph.buildShareZip()
+                val file = graph.buildShareZip(includeCaptures)
                 withContext(Dispatchers.Main) { shareFile(app, "Share diagnostics", file, "application/zip", "School diagnostics") }
             } catch (error: Exception) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
@@ -753,7 +753,18 @@ internal fun microsoftCookieNames(): String =
         if (names.isEmpty()) null else "$host=${names.joinToString("|")}"
     }.joinToString(",")
 
+internal fun sharePathAllowed(cacheDir: File, file: File): Boolean {
+    val root = File(cacheDir, "share").canonicalFile
+    val target = runCatching { file.canonicalFile }.getOrNull() ?: return false
+    return target.path == root.path || target.path.startsWith(root.path + File.separator)
+}
+
 internal fun shareFile(context: Context, title: String, file: File, mime: String, extraText: String?) {
+    if (!sharePathAllowed(context.cacheDir, file)) {
+        val warn = Runnable { Toast.makeText(context, "Could not share that file.", Toast.LENGTH_LONG).show() }
+        if (Looper.myLooper() == Looper.getMainLooper()) warn.run() else Handler(Looper.getMainLooper()).post(warn)
+        return
+    }
     val send = Runnable {
         try {
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)

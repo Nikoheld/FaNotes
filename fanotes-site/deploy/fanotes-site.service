@@ -17,9 +17,7 @@ Environment=NODE_ENV=production
 Environment=FANOTES_HOST=127.0.0.1
 Environment=FANOTES_PORT=18185
 Environment=FANOTES_RELEASE_DIR=/mnt/truenas/Fabio/FaNotes-Arch-x86_64
-Environment=FANOTES_UPDATE_SIGNING_KEY=/etc/fanotes/update-signing-private.pem
 Environment=FANOTES_BACKUP_DIR=/var/lib/fanotes-backups
-Environment=FANOTES_BACKUP_ENROLLMENT_TOKEN_PATH=/etc/fanotes/backup-enrollment-token
 Environment=FANOTES_ANALYTICS_DIR=/var/lib/fanotes-analytics
 Environment=FANOTES_HOMEWORK_DIR=/var/lib/fanotes-homework
 Environment=FANOTES_BUG_REPORT_DIR=/var/lib/fanotes-bug-reports
@@ -29,12 +27,16 @@ Environment=FANOTES_MCP_DIR=/var/lib/fanotes-mcp
 Environment=FANOTES_SHARE_DIR=/var/lib/fanotes-shares
 Environment=FANOTES_PROFILE_DIR=/var/lib/fanotes-profiles
 Environment=FANOTES_SCHULNETZ_DIR=/var/lib/fanotes-schulnetz
-Environment=FANOTES_SCHULNETZ_TOKEN_KEY_FILE=/etc/fanotes/schulnetz-token.key
-Environment=FANOTES_NTFY_URL=https://ntfy.sh
 Environment=FANOTES_SCHULNETZ_POLL_MS=180000
 # Encrypted X-FaNotes-Meta may be 8 KiB of bytes, about 11 KiB of Base64,
 # plus the session headers. The Node default of 16 KiB can reject that.
 Environment=NODE_OPTIONS=--max-http-header-size=65536
+# Credentials replace the broad /etc/fanotes read. Omit a line at deploy when that file is absent.
+LoadCredential=schulnetz-token:/etc/fanotes/schulnetz-token.key
+LoadCredential=fcm-service-account:/etc/fanotes/fcm-service-account.json
+LoadCredential=update-signing-key:/etc/fanotes/update-signing-private.pem
+LoadCredential=release-checksum-signature:/etc/fanotes/SHA256SUMS.sig
+LoadCredential=backup-enrollment-token:/etc/fanotes/backup-enrollment-token
 ExecStart=/usr/bin/node /opt/fanotes-site/server.mjs
 Restart=on-failure
 RestartSec=3s
@@ -58,7 +60,7 @@ MemoryHigh=1200M
 MemoryMax=1600M
 SystemCallArchitectures=native
 ReadOnlyPaths=/mnt/truenas/Fabio/FaNotes-Arch-x86_64
-ReadOnlyPaths=/etc/fanotes
+InaccessiblePaths=/etc/fanotes
 ReadWritePaths=/var/lib/fanotes-backups
 ReadWritePaths=/var/lib/fanotes-analytics
 ReadWritePaths=/var/lib/fanotes-homework

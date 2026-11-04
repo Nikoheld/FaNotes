@@ -18,19 +18,19 @@ class RealMarkupTest {
         assertTrue(grades.value.none { it.title.contains("Durchschnitt", ignoreCase = true) })
         val chem = grades.value.filter { it.course.contains("Chemie") || it.subject.contains("Chemie") }
         assertEquals(1, chem.size)
-        assertEquals("2026-09-17", chem.single().date)
-        assertEquals(4.2, chem.single().mark)
-        assertEquals(4.2, chem.single().courseGrade)
-        val math = grades.value.filter { it.course.contains("MAT_") }
+        assertEquals("2026-03-03", chem.single().date)
+        assertEquals(5.5, chem.single().mark)
+        assertEquals(5.0, chem.single().courseGrade)
+        val math = grades.value.filter { it.course.contains("MATH-K26A") }
         assertEquals(1, math.size)
-        assertEquals(3.0, math.single().mark)
-        assertEquals(3.1, math.single().courseGrade)
+        assertEquals(4.5, math.single().mark)
+        assertEquals(4.0, math.single().courseGrade)
         val bio = grades.value.filter { it.subject.contains("Biologie") }
         assertTrue(bio.isEmpty())
         val summaries = courseSummaries(grades.value)
         assertEquals(1, summaries.single { it.label.contains("Chemie") }.marks.size)
         assertEquals(1.0, summaries.single { it.label.contains("Chemie") }.weight)
-        assertEquals(4.2, summaries.single { it.label.contains("Chemie") }.average)
+        assertEquals(5.5, summaries.single { it.label.contains("Chemie") }.average)
         assertFalse(summaries.any { it.label.contains("Biologie") })
     }
 
@@ -45,8 +45,8 @@ class RealMarkupTest {
     fun kontoauszugReadsTheClassAccount() {
         val lines = parseKontoauszug(fixture("kontoauszug.html"))
         assertEquals(11, lines.size)
-        assertEquals("11.10.2026", lines.first().date)
-        assertTrue(lines.first().amount.contains("-56.95"))
+        assertEquals("01.02.2026", lines.first().date)
+        assertTrue(lines.first().amount.contains("-12.50"))
         assertTrue(lines.last().balance.isNotBlank())
     }
 
@@ -56,18 +56,18 @@ class RealMarkupTest {
         val events = readTerminliste(html)
         assertNull(events.error)
         assertEquals(25, events.value.size)
-        assertEquals("Lunchtimekonzert", events.value.first().text)
-        assertEquals(173, terminlisteTotal(html))
+        assertEquals("Probenkonzert", events.value.first().text)
+        assertEquals(40, terminlisteTotal(html))
         assertTrue(terminlisteNextUrl(html, AKSA_SCHULNETZ_BASE)!!.contains("sRow=25"))
     }
 
     @Test
     fun stundenplanReadsRenderedLessons() {
         val lessons = parseRenderedTimetable(fixture("stundenplan.html"))
-        assertEquals(45, lessons.size)
+        assertEquals(4, lessons.size)
         val first = lessons.first { it.start.startsWith("2026-11-02T07:45") }
-        assertEquals("222", first.room)
-        assertTrue(first.text.contains("Amat"))
+        assertEquals("A12", first.room)
+        assertTrue(first.text.contains("Holm"))
         assertEquals(
             "https://www.schulnetz-ag.ch/aksa/scheduler_processor.php?view=week&curr_date=2026-11-04&min_date=2026-11-02&max_date=2026-11-09&ansicht=schueleransicht&id=abc&transid=def&pageid=22202&timeshift=-60",
             schedulerUrl(AKSA_SCHULNETZ_BASE, "abc", "def", "2026-11-04", "2026-11-02", "2026-11-09"),
@@ -91,8 +91,8 @@ class RealMarkupTest {
         val html = fixture("start.html")
         val grades = parseStartRecentGrades(html)
         assertTrue(grades.size >= 3)
-        assertEquals(3.6, grades.first { it.title.contains("Lesecheck") }.mark)
+        assertEquals(5.5, grades.first { it.title.contains("Lesetest") }.mark)
         val appointments = parseStartAppointments(html)
-        assertTrue(appointments.any { it.text.contains("Lunchtimekonzert") })
+        assertTrue(appointments.any { it.text.contains("Probenkonzert") })
     }
 }

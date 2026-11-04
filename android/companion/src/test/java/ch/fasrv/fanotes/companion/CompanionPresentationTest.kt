@@ -2,8 +2,10 @@ package ch.fasrv.fanotes.companion
 
 import ch.fasrv.fanotes.desk.*
 import ch.fasrv.fanotes.schulnetz.*
+import androidx.core.app.NotificationCompat
 import org.junit.Assert.*
 import org.junit.Test
+import java.io.File
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -121,5 +123,35 @@ class CompanionPresentationTest {
         assertEquals("Fallback", deliveryModeLabel(true, 0L, now))
         assertEquals("Instant via push", deliveryModeLabel(true, now - 60_000L, now))
         assertEquals("Fallback", deliveryModeLabel(true, now - FCM_HEALTHY_MS - 1, now))
+    }
+
+    @Test fun `lock screen notice, diagnostic zip and share path stay private`() {
+        val lock = lockScreenNotice()
+        assertEquals(NotificationCompat.VISIBILITY_PRIVATE, lock.visibility)
+        assertEquals("Neue Schulnetz-Meldung", lock.publicTitle)
+        assertEquals("Neue Schulnetz-Meldung", lock.publicText)
+        assertTrue(diagnosticEntryAllowed("device.txt", false))
+        assertTrue(diagnosticEntryAllowed("schulnetz.log", false))
+        assertFalse(diagnosticEntryAllowed("captures/page.html", false))
+        assertFalse(diagnosticEntryAllowed("last-page.html", false))
+        assertTrue(diagnosticEntryAllowed("captures/page.html", true))
+        assertTrue(diagnosticEntryAllowed("last-page.html", true))
+        assertFalse(diagnosticEntryAllowed("notes/secret.txt", true))
+        val root = File(System.getProperty("java.io.tmpdir"), "kanti-share-${System.nanoTime()}")
+        val share = File(root, "share")
+        assertTrue(share.mkdirs())
+        val inside = File(share, "log.zip")
+        inside.writeText("x")
+        val outside = File(root, "other.txt")
+        outside.writeText("y")
+        assertTrue(sharePathAllowed(root, inside))
+        assertFalse(sharePathAllowed(root, outside))
+        assertFalse(sharePathAllowed(root, root))
+        val now = 1_700_000_000_000L
+        assertFalse(captureExpired(now, now))
+        assertFalse(captureExpired(now - CAPTURE_MAX_AGE_MS, now))
+        assertTrue(captureExpired(now - CAPTURE_MAX_AGE_MS - 1, now))
+        assertFalse(captureExpired(0L, now))
+        root.deleteRecursively()
     }
 }

@@ -268,14 +268,14 @@ class CompanionGraph(private val context: Context) {
                 val next = body?.let { parseNormalizedSnapshot(it) }
                 if (next != null) publishSnapshot(previous, next, remote.settings)
             }
-            if (remote.topic.isNotBlank()) prefs.edit().putString("push-server", remote.pushServer).putString("push-topic", remote.topic).apply()
+            if (remote.linked) prefs.edit().putBoolean("school-linked", true).remove("push-topic").remove("push-server").apply()
             configurePushDelivery(context)
             NextLessonWidget.update(context)
             return
         }
         if (remote.linked) {
             deleteLocalToken()
-            prefs.edit().putString("push-server", remote.pushServer).putString("push-topic", remote.topic).apply()
+            prefs.edit().putBoolean("school-linked", true).remove("push-topic").remove("push-server").apply()
             val body = client.snapshot(session)
             val next = parseNormalizedSnapshot(body) ?: previous
             publishSnapshot(previous, next, remote.settings)
@@ -516,7 +516,10 @@ class CompanionGraph(private val context: Context) {
         prefs.edit().putString("fcm-token", token).apply()
         if (schoolDisconnected()) return
         val session = runCatching { schoolAuth() }.getOrNull() ?: return
-        if (prefs.getString("push-topic", null).isNullOrBlank() && !link.value.linked) return
+        if (!prefs.getBoolean("school-linked", false) && prefs.getString("push-topic", null).isNullOrBlank() && !link.value.linked) return
+        if (link.value.linked || !prefs.getString("push-topic", null).isNullOrBlank()) {
+            prefs.edit().putBoolean("school-linked", true).remove("push-topic").remove("push-server").apply()
+        }
         runCatching { client.registerFcmToken(session, token) }
             .onFailure { schulnetzLog.error(it) }
     }
@@ -582,20 +585,23 @@ class CompanionGraph(private val context: Context) {
         }
     }
 
-    fun buildShareZip(): File {
+    fun buildShareZip(includeCaptures: Boolean = false): File {
         val dir = File(context.cacheDir, "share").apply { mkdirs() }
         val zip = File(dir, "schulnetz-logs.zip")
         ZipOutputStream(zip.outputStream()).use { out ->
             fun put(name: String, text: String) {
+                if (!diagnosticEntryAllowed(name, includeCaptures)) return
                 out.putNextEntry(ZipEntry(name))
                 out.write(text.toByteArray())
                 out.closeEntry()
             }
             put("device.txt", shareMeta())
             put("schulnetz.log", schulnetzLog.text().ifBlank { "(leer)\n" })
-            schulnetzLog.captureFiles().forEach { file -> put("captures/${file.name}", file.readText()) }
-            val debug = redactSchulnetzSecrets(debugHtml())
-            if (debug.isNotBlank()) put("last-page.html", debug)
+            if (includeCaptures) {
+                schulnetzLog.captureFiles().forEach { file -> put("captures/${file.name}", file.readText()) }
+                val debug = redactSchulnetzSecrets(debugHtml())
+                if (debug.isNotBlank()) put("last-page.html", debug)
+            }
         }
         return zip
     }
@@ -767,7 +773,7 @@ class CompanionGraph(private val context: Context) {
     private suspend fun showExistingSession(caller: String, session: WebSession) {
         notices.tryEmit("Bereits bei Schulnetz angemeldet")
         link.value = link.value.copy(needsReauth = false, lastError = "")
-        schulnetzLog.info("visible login shows session caller=$caller lockHeld=true id=${session.id} transid=${session.transid}")
+        schulnetzLog.info("visible login shows session caller=$caller lockHeld=true")
         if (System.currentTimeMillis() - lastSessionShownAt < 30_000) return
         lastSessionShownAt = System.currentTimeMillis()
         val intent = sessionViewIntent(session) ?: return
@@ -1037,6 +1043,7 @@ class CompanionGraph(private val context: Context) {
             .remove("web-session")
             .remove("push-topic")
             .remove("push-server")
+            .remove("school-linked")
             .remove("change-cursor")
             .apply()
         signedOut = false
@@ -1054,7 +1061,7 @@ class CompanionGraph(private val context: Context) {
     fun schoolDisconnected(): Boolean = prefs.getBoolean("school-disconnected", false)
 
     fun disconnectSchool() {
-        prefs.edit().putBoolean("school-disconnected", true).remove("web-session").remove("push-topic").remove("push-server").apply()
+        prefs.edit().putBoolean("school-disconnected", true).remove("web-session").remove("push-topic").remove("push-server").remove("school-linked").apply()
         signedOut = true
         clearLocalLink()
         CompanionAlerts.retireLegacyPush(context)
@@ -1130,6 +1137,12 @@ class CompanionGraph(private val context: Context) {
         private const val SILENT_GAP_MS = 3 * 60 * 1000L
         fun snapshotFile(context: Context) = File(context.filesDir, "schulnetz-snapshot.json")
     }
+}
+
+internal fun diagnosticEntryAllowed(name: String, includeCaptures: Boolean): Boolean {
+    if (name == "device.txt" || name == "schulnetz.log") return true
+    if (!includeCaptures) return false
+    return name == "last-page.html" || name.startsWith("captures/")
 }
 
 private fun fingerprint(value: String): String {

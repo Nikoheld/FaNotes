@@ -3,10 +3,11 @@ import { createReadStream, createWriteStream, promises as fs } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { basename, join, resolve, sep } from 'node:path'
 import { localizeResponse } from './i18n.mjs'
+import { credentialOr } from './credentials.mjs'
 
 const BACKUP_ROOT = resolve(process.env.FANOTES_BACKUP_DIR || '/var/lib/fanotes-backups')
 const PUBLIC_ORIGIN = process.env.FANOTES_PUBLIC_ORIGIN || 'https://fanotes.fasrv.ch'
-const ENROLLMENT_TOKEN_PATH = resolve(process.env.FANOTES_BACKUP_ENROLLMENT_TOKEN_PATH || '/etc/fanotes/backup-enrollment-token')
+const ENROLLMENT_TOKEN_PATH = resolve(process.env.FANOTES_BACKUP_ENROLLMENT_TOKEN_PATH || credentialOr('backup-enrollment-token', '/etc/fanotes/backup-enrollment-token'))
 const CREDENTIAL_FILE = 'credential.json'
 const SNAPSHOT_FILE = 'snapshot.json'
 const ASSET_DIR = 'assets'

@@ -2,5 +2,5 @@
 // FANOTES_SCHULNETZ_POLL=0. A lock file keeps a second poller from refreshing.
 import { createSchulnetzRuntime } from './schulnetz-api.mjs'
 
-const runtime = createSchulnetzRuntime()
+const runtime = createSchulnetzRuntime({ pruneOrphans: true })
 runtime.start()

@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import test from 'node:test'
 import { createCipheriv, generateKeyPairSync, randomBytes } from 'node:crypto'
 import { createSchulnetzRuntime, openToken, sealToken } from './schulnetz-api.mjs'
+import { notifyAccountDeleted, setAccountDeletedHook } from './sync-api.mjs'
 import { fcmDataMessage, fcmDropToken, fcmPriorityForChanges, isValidFcmToken, serviceAccountJwt } from './fcm.mjs'
 import {
   diffSnapshots,
@@ -14,6 +15,7 @@ import {
   parseRawSnapshot,
   pluspunkte,
   redactSecrets,
+  redirectTargetAllowed,
   microsoftLoginRequired,
   schulnetzCallAllowed,
   sessionProblem,
@@ -130,7 +132,31 @@ test('read-only policy blocks enrolment, confirmation and absence writes', () =>
   assert.equal(schulnetzCallAllowed('POST', `${base}/token.php`, 'grant_type=password&passwort=secret'), false)
   assert.equal(normalizeSchoolBase(`${base}/`), base)
   assert.equal(normalizeSchoolBase('https://evil.example/aksa'), null)
+  assert.equal(normalizeSchoolBase('https://schulnetz.evil.tld/aksa'), null)
+  assert.equal(normalizeSchoolBase('https://evilschulnetz-ag.ch/aksa'), null)
+  assert.equal(normalizeSchoolBase('https://microsoft.evil.tld/'), null)
+  assert.equal(schulnetzCallAllowed('GET', 'https://schulnetz.evil.tld/rest/v1/me/grades'), false)
+  assert.equal(schulnetzCallAllowed('GET', 'https://evilschulnetz-ag.ch/rest/v1/me/grades'), false)
+  assert.equal(schulnetzCallAllowed('GET', 'https://microsoft.evil.tld/'), false)
+  assert.equal(redirectTargetAllowed('https://127.0.0.1/'), false)
+  assert.equal(redirectTargetAllowed('https://10.1.2.3/'), false)
+  assert.equal(redirectTargetAllowed('https://192.168.1.1/'), false)
+  assert.equal(redirectTargetAllowed('https://169.254.1.1/'), false)
+  assert.equal(redirectTargetAllowed('https://[::1]/'), false)
+  assert.equal(redirectTargetAllowed('https://microsoft.evil.tld/'), false)
+  assert.equal(redirectTargetAllowed('https://www.schulnetz-ag.ch/aksa'), true)
+  assert.equal(redirectTargetAllowed('https://login.microsoftonline.com/tenant'), true)
   assert.equal(redactSecrets('Bearer super-secret refresh_token=abcdef'), 'Bearer [redacted] refresh_token=[redacted]')
+  const redacted = redactSecrets('id=abc&transid=def&code=secret&buid=b1&fpc=f1&esctx=e1&sFT=s1&canary=c1 SignInStateCookie=state x-ms-RefreshTokenCredential=rt Cookie: PHPSESSID=phone; ESTSAUTH=auth')
+  assert.equal(redacted.includes('secret'), false)
+  assert.equal(redacted.includes('abc'), false)
+  assert.equal(redacted.includes('phone'), false)
+  assert.equal(redacted.includes('SignInStateCookie=state'), false)
+  assert.equal(redacted.includes('SignInStateCookie=[redacted]'), true)
+  assert.equal(redacted.includes('b1'), false)
+  assert.equal(redacted.includes('id=[redacted]'), true)
+  assert.equal(redacted.includes('transid=[redacted]'), true)
+  assert.equal(redacted.includes('names=PHPSESSID,ESTSAUTH'), true)
 })
 
 test('parser reads the mobile grade shape and the Kontoauszug table', () => {
@@ -184,7 +210,7 @@ test('stored refresh tokens are encrypted and only the poller refreshes', async 
       baseUrl: 'https://www.schulnetz-ag.ch/aksa',
       deviceId: '0123456789abcdef01234567',
       refreshToken: secret,
-      displayName: 'Fabio',
+      displayName: 'Max',
     })
     assert.equal(status.linked, true)
     assert.equal(JSON.stringify(status).includes(secret), false)
@@ -192,11 +218,14 @@ test('stored refresh tokens are encrypted and only the poller refreshes', async 
     assert.equal(stored.includes(secret), false)
     const roundTrip = openToken(key, JSON.parse(stored).refresh)
     assert.equal(roundTrip, secret)
-    await assert.rejects(() => runtime.addFcmToken(accountId, 'bad token'), /Push-Token/)
+    await assert.rejects(() => runtime.addFcmToken(accountId, 'bad token'), (error) => error.publicMessage.includes('Push-Token'))
     await runtime.addFcmToken(accountId, 'phone:APA91b-example-token-value')
     await runtime.pollAccount(accountId)
     assert.equal(sent.length, 0)
-    assert.equal(await runtime.openStoredRefresh(accountId), 'rotated-refresh-token-value-123456')
+    const afterPoll = JSON.parse(await readFile(join(root, 'accounts', accountId, 'link.json'), 'utf8'))
+    assert.equal(openToken(key, afterPoll.refresh), 'rotated-refresh-token-value-123456')
+    assert.equal(afterPoll.topic, undefined)
+    assert.equal(afterPoll.pushEndpoints, undefined)
     assert.equal(calls.some((call) => call.method === 'POST' && call.url.endsWith('/token.php')), true)
     assert.equal(calls.some((call) => call.method !== 'GET' && call.method !== 'POST'), false)
     assert.equal(calls.some((call) => call.url.includes('/me/absences') && call.method !== 'GET'), false)
@@ -760,6 +789,235 @@ test('adopt and detach move school data without a second grade push', async () =
     await assert.rejects(() => runtime.deleteGuestAccount(fa), (error) => error.status === 404)
     await runtime.deleteGuestAccount(home.accountId)
     await assert.rejects(readFile(join(root, 'accounts', home.accountId, 'link.json')))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+const guestCall = async (runtime, guest, method, path, body) => {
+  const request = {
+    method,
+    headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+    socket: { remoteAddress: '203.0.113.9' },
+    async *[Symbol.asyncIterator]() {
+      if (body != null) yield Buffer.from(body)
+    },
+  }
+  let status = 0
+  let payload = ''
+  const response = {
+    writeHead(code) { status = code },
+    end(text) { payload = String(text || '') },
+  }
+  await runtime.handle(request, response, new URL(`http://127.0.0.1${path}`))
+  return { status, body: payload ? JSON.parse(payload) : {} }
+}
+
+const webLinkBody = (cookies) => JSON.stringify({
+  mode: 'web',
+  baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+  deviceId: '0123456789abcdef01234567',
+  ssoCookies: cookies,
+})
+
+test('account deletion unlinks schulnetz and a later poll does not recreate it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-delete-'))
+  const key = randomBytes(32)
+  const runtime = createSchulnetzRuntime({ root, key, autostart: false, fetch: async () => { throw new Error('fetched') } })
+  const accountId = 'd'.repeat(32)
+  setAccountDeletedHook((id) => runtime.unlink(id))
+  try {
+    await runtime.linkAccount(accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'refresh-token-value-long-enough',
+    })
+    await notifyAccountDeleted(accountId)
+    await assert.rejects(stat(join(root, 'accounts', accountId)))
+    const polled = await runtime.pollAccount(accountId)
+    assert.equal(polled.skipped, true)
+    await assert.rejects(stat(join(root, 'accounts', accountId)))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('the poller drops an orphan link and keeps a guest', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-orphan-'))
+  const key = randomBytes(32)
+  const runtime = createSchulnetzRuntime({
+    root,
+    key,
+    autostart: false,
+    pruneOrphans: true,
+    syncAccountExists: async () => false,
+    fetch: async () => ({ status: 200, text: async () => '[]' }),
+  })
+  try {
+    const orphan = 'e'.repeat(32)
+    await runtime.linkAccount(orphan, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'refresh-token-value-long-enough',
+    })
+    const skipped = await runtime.pollAccount(orphan)
+    assert.equal(skipped.skipped, true)
+    await assert.rejects(stat(join(root, 'accounts', orphan)))
+    const guest = await runtime.createGuest('203.0.113.10')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'refresh-token-value-long-enough',
+    })
+    await runtime.pollAccount(guest.accountId)
+    assert.equal((await stat(join(root, 'accounts', guest.accountId, 'guest.json'))).isFile(), true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a redirect to loopback and a microsoft lookalike are not fetched', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-ssrf-'))
+  const key = randomBytes(32)
+  const calls = []
+  const fetch = async (url) => {
+    const target = String(url)
+    calls.push(target)
+    if (target.includes('127.0.0.1') || target.includes('microsoft.evil.tld')) throw new Error('fetched blocked host')
+    return {
+      status: 302,
+      headers: { get: (name) => name.toLowerCase() === 'location' ? 'https://127.0.0.1/' : null },
+      setCookies: [],
+      text: async () => '',
+    }
+  }
+  const runtime = createSchulnetzRuntime({ root, key, fetch, autostart: false })
+  const accountId = 'f'.repeat(32)
+  try {
+    await runtime.linkAccount(accountId, JSON.parse(webLinkBody({ 'login.microsoftonline.com': 'ESTSAUTHPERSISTENT=microsoft-cookie-value' })))
+    const result = await runtime.pollAccount(accountId)
+    assert.equal(result.needsReauth, true)
+    assert.equal(calls.some((url) => url.includes('127.0.0.1')), false)
+    assert.equal(calls.some((url) => url.includes('microsoft.evil.tld')), false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('stored cookies keep only the login names and expire after 14 days', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-cookie-'))
+  const key = randomBytes(32)
+  let clock = Date.parse('2026-01-01T00:00:00Z')
+  const runtime = createSchulnetzRuntime({
+    root,
+    key,
+    autostart: false,
+    now: () => new Date(clock),
+    fetch: async () => { throw new Error('fetched after expiry') },
+  })
+  const accountId = '1'.repeat(32)
+  try {
+    await runtime.linkAccount(accountId, JSON.parse(webLinkBody({
+      'login.microsoftonline.com': 'PHPSESSID=phone; buid=drop-me; ESTSAUTH=keep-me; fpc=also-drop',
+      'evil.example': 'ESTSAUTH=foreign',
+    })))
+    const stored = JSON.parse(await readFile(join(root, 'accounts', accountId, 'link.json'), 'utf8'))
+    assert.equal(stored.cookiesSavedAt, '2026-01-01T00:00:00.000Z')
+    const cookies = JSON.parse(openToken(key, stored.sso))
+    assert.deepEqual(cookies, { 'login.microsoftonline.com': 'ESTSAUTH=keep-me' })
+    clock += 15 * 24 * 60 * 60 * 1000
+    const expired = await runtime.pollAccount(accountId)
+    assert.equal(expired.needsReauth, true)
+    const after = JSON.parse(await readFile(join(root, 'accounts', accountId, 'link.json'), 'utf8'))
+    assert.equal(after.sso, null)
+    await runtime.unlink(accountId)
+    await assert.rejects(stat(join(root, 'accounts', accountId, 'link.json')))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('schulnetz routes are rate limited per account', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-rate-'))
+  const key = randomBytes(32)
+  const runtime = createSchulnetzRuntime({ root, key, autostart: false, fetch: async () => ({ status: 200, text: async () => '{}' }) })
+  try {
+    const first = await runtime.createGuest('203.0.113.20')
+    const second = await runtime.createGuest('203.0.113.21')
+    const body = webLinkBody({ 'login.microsoftonline.com': 'ESTSAUTH=microsoft-cookie-value' })
+    for (let index = 0; index < 5; index += 1) {
+      const response = await guestCall(runtime, first, 'PUT', '/api/v1/schulnetz/link', body)
+      assert.equal(response.status, 200)
+    }
+    const blocked = await guestCall(runtime, first, 'PUT', '/api/v1/schulnetz/link', body)
+    assert.equal(blocked.status, 429)
+    assert.equal(blocked.body.error, 'Zu viele Anfragen. Bitte später erneut versuchen.')
+    const other = await guestCall(runtime, second, 'PUT', '/api/v1/schulnetz/link', body)
+    assert.equal(other.status, 200)
+    for (let index = 0; index < 60; index += 1) {
+      const response = await guestCall(runtime, second, 'PUT', '/api/v1/schulnetz/snapshot', '{"grades":[]}')
+      assert.equal(response.status, 200)
+    }
+    const snapshotBlocked = await guestCall(runtime, second, 'PUT', '/api/v1/schulnetz/snapshot', '{"grades":[]}')
+    assert.equal(snapshotBlocked.status, 429)
+    for (let index = 0; index < 5; index += 1) {
+      const response = await guestCall(runtime, second, 'POST', '/api/v1/schulnetz/push/test', '{}')
+      assert.equal(response.status, 200)
+    }
+    const pushBlocked = await guestCall(runtime, second, 'POST', '/api/v1/schulnetz/push/test', '{}')
+    assert.equal(pushBlocked.status, 429)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('schulnetz errors do not echo internal messages', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-error-'))
+  const key = randomBytes(32)
+  const runtime = createSchulnetzRuntime({ root, key, autostart: false })
+  const guest = await runtime.createGuest('203.0.113.30')
+  try {
+    const rejected = await guestCall(runtime, guest, 'PUT', '/api/v1/schulnetz/link', '{}')
+    assert.equal(rejected.status, 400)
+    assert.equal(rejected.body.error, 'Die Schulnetz-Adresse ist nicht erlaubt.')
+    assert.equal(JSON.stringify(rejected.body).includes('schulnetz'), false)
+    const request = {
+      method: 'PUT',
+      headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+      socket: { remoteAddress: '203.0.113.30' },
+      async *[Symbol.asyncIterator]() { throw new Error('leak-this-token-value') },
+    }
+    let payload = ''
+    const response = { writeHead() {}, end(text) { payload = String(text || '') } }
+    await runtime.handle(request, response, new URL('http://127.0.0.1/api/v1/schulnetz/link'))
+    assert.equal(payload.includes('leak-this-token-value'), false)
+    assert.equal(JSON.parse(payload).error, 'Der Schulnetz-Dienst ist vorübergehend nicht erreichbar.')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('reading a link drops the retired ntfy fields', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-legacy-'))
+  const key = randomBytes(32)
+  const runtime = createSchulnetzRuntime({ root, key, autostart: false })
+  const accountId = '2'.repeat(32)
+  try {
+    await runtime.linkAccount(accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'refresh-token-value-long-enough',
+    })
+    const file = join(root, 'accounts', accountId, 'link.json')
+    const stored = JSON.parse(await readFile(file, 'utf8'))
+    stored.topic = 'old-topic'
+    stored.pushEndpoints = ['https://ntfy.example/topic']
+    await writeFile(file, JSON.stringify(stored))
+    const status = await runtime.publicStatusOf(accountId)
+    assert.equal(status.push.topic, undefined)
+    const cleaned = JSON.parse(await readFile(file, 'utf8'))
+    assert.equal(cleaned.topic, undefined)
+    assert.equal(cleaned.pushEndpoints, undefined)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

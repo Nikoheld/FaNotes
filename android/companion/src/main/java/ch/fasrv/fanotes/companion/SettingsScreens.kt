@@ -174,6 +174,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                 Text("Share an export when troubleshooting a school connection. Exports can contain school content; review who you share them with.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedButton(onClick = { model.shareDebug(context) }, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) { Text("Share school page") }
                 OutlinedButton(onClick = { model.shareLogs(context) }, modifier = Modifier.fillMaxWidth()) { Text("Share diagnostic archive") }
+                TextButton(onClick = { confirm = "logs-captures" }, modifier = Modifier.fillMaxWidth()) { Text("Include saved school pages") }
                 if (model.notesAccount) OutlinedButton(onClick = model::sync, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text("Refresh connections") }
                 else OutlinedButton(onClick = model::refreshSchool, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text("Refresh school data") }
             }
@@ -205,16 +206,19 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             when (confirm) {
                 "logout" -> "Sign out of FaNotes?"
                 "delete-kanti" -> "Delete my Kanti+ data?"
+                "logs-captures" -> "Include saved school pages?"
                 else -> "Disconnect Schulnetz?"
             },
             when (confirm) {
                 "logout" -> "Your local notes stay on this device. School updates keep working. Sync will stop until you sign in again."
                 "delete-kanti" -> "School data stored for this device is removed from the server, including the Schulnetz link, snapshot and push setup. Tasks and calendar on this device stay."
+                "logs-captures" -> "These pages contain grades, absences and names."
                 else -> "Your last school snapshot stays available. You can reconnect later."
             },
             when (confirm) {
                 "logout" -> "Sign out"
                 "delete-kanti" -> "Delete"
+                "logs-captures" -> "Include pages"
                 else -> "Disconnect"
             },
             { confirm = "" },
@@ -222,6 +226,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             when {
                 confirm == "logout" -> model.logout()
                 deleteKanti -> model.deleteKantiData()
+                confirm == "logs-captures" -> model.shareLogs(context, includeCaptures = true)
                 else -> model.unlink()
             }
             confirm = ""

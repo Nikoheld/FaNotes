@@ -2,6 +2,8 @@
 // The phone app has the same rules in android/core/.../schulnetz. Keep the
 // change-id formula identical: category:entityId:key.
 
+import { isIP } from 'node:net'
+
 const PASS = 4
 
 export const REST_GET = new Set([
@@ -885,12 +887,50 @@ const blocked = (value) => {
   return BLOCKED_PAGES.some((pageId) => blob.includes(`pageid=${pageId}`))
 }
 
+const EXACT_SCHOOL_HOSTS = new Set(['www.schulnetz-ag.ch', 'schulnetz-ag.ch', 'schulnetz.web.app'])
+const SCHOOL_HOST_SUFFIXES = ['.schulnetz-ag.ch', '.schulnetz.ch', '.schulnetz.com']
+const MICROSOFT_LOGIN_HOSTS = new Set([
+  'login.microsoftonline.com',
+  'login.microsoft.com',
+  'login.live.com',
+  'login.windows.net',
+])
+const MICROSOFT_LOGIN_SUFFIXES = ['.login.microsoftonline.com', '.msidentity.com', '.msauth.net', '.msftauth.net']
+
+export const ipLiteral = (host) => isIP(String(host || '').replace(/^\[|\]$/u, '')) !== 0
+
+export const schoolHostAllowed = (host) => {
+  const name = String(host || '').toLowerCase().replace(/\.$/u, '')
+  if (!name || ipLiteral(name)) return false
+  if (EXACT_SCHOOL_HOSTS.has(name)) return true
+  return SCHOOL_HOST_SUFFIXES.some((suffix) => name.endsWith(suffix) && name.length > suffix.length)
+}
+
+export const microsoftLoginHost = (host) => {
+  const name = String(host || '').toLowerCase().replace(/\.$/u, '')
+  if (!name || ipLiteral(name)) return false
+  if (MICROSOFT_LOGIN_HOSTS.has(name)) return true
+  return MICROSOFT_LOGIN_SUFFIXES.some((suffix) => name.endsWith(suffix) && name.length > suffix.length)
+}
+
+/** HTTPS school or Microsoft login host. IP literals, including loopback, are rejected. */
+export const redirectTargetAllowed = (url) => {
+  let parsed
+  try { parsed = new URL(String(url || '')) } catch { return false }
+  if (parsed.protocol !== 'https:') return false
+  if (ipLiteral(parsed.hostname)) return false
+  return schoolHostAllowed(parsed.hostname) || microsoftLoginHost(parsed.hostname)
+}
+
 export const schulnetzCallAllowed = (method, url, body = '') => {
   const verb = String(method || '').toUpperCase()
   if (!['GET', 'HEAD', 'POST'].includes(verb)) return false
   let parsed
   try { parsed = new URL(url) } catch { return false }
   if (parsed.protocol !== 'https:') return false
+  if (ipLiteral(parsed.hostname)) return false
+  const host = parsed.hostname.toLowerCase()
+  if (!schoolHostAllowed(host)) return false
   const path = parsed.pathname.toLowerCase()
   const query = parsed.search.replace(/^\?/, '').toLowerCase()
   if (blocked(`${path}?${query}`) || blocked(String(body || '').toLowerCase())) return false
@@ -924,22 +964,28 @@ export const normalizeSchoolBase = (baseUrl) => {
   try { parsed = new URL(String(baseUrl || '').trim()) } catch { return null }
   if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return null
   const host = parsed.hostname.toLowerCase()
-  if (!/^[a-z0-9.-]+$/.test(host)) return null
-  const allowed = host === 'schulnetz.web.app' || host.endsWith('.schulnetz-ag.ch') || host.endsWith('.schulnetz.ch') || host.endsWith('.schulnetz.com') || host.startsWith('schulnetz.')
-  if (!allowed) return null
+  if (!/^[a-z0-9.-]+$/.test(host) || !schoolHostAllowed(host)) return null
   return `https://${host}${parsed.pathname.replace(/\/+$/, '')}`
 }
 
+const cookieHeaderNames = (header) => String(header || '').split(';').map((part) => part.trim().split('=')[0]).filter(Boolean)
+
 export const redactSecrets = (value) => String(value ?? '')
-  .replace(/refresh_token=[^&\s]+/gi, 'refresh_token=[redacted]')
-  .replace(/access_token=[^&\s]+/gi, 'access_token=[redacted]')
-  .replace(/code_verifier=[^&\s]+/gi, 'code_verifier=[redacted]')
-  .replace(/PHPSESSID=[^;\s]+/gi, 'PHPSESSID=[redacted]')
-  .replace(/ESTSAUTH[A-Z]*=[^;\s]+/gi, 'ESTSAUTH=[redacted]')
+  .replace(/(Cookie\s*:\s*)([^\r\n]+)/gi, (_, prefix, header) => `${prefix}names=${cookieHeaderNames(header).join(',')}`)
+  .replace(/([?&#\s]|^)(code_verifier|code|flowToken|access_token|refresh_token|id_token|client_secret|sFT|canary|buid|fpc|esctx)=([^&\s#"'<>]+)/gi, '$1$2=[redacted]')
+  .replace(/"(flowToken|access_token|refresh_token|id_token|client_secret|code|sFT|canary|buid|fpc|esctx)"\s*:\s*"[^"]*"/gi, '"$1":"[redacted]"')
+  .replace(/\b(PHPSESSID|ESTSAUTH[A-Z0-9]*|SignInStateCookie|esctx|buid|fpc|x-ms-RefreshTokenCredential)=([^;\s,]+)/gi, '$1=[redacted]')
+  .replace(/([?&#\s]|^)(transid|id)=([^&\s#"'<>]+)/gi, '$1$2=[redacted]')
+  .replace(/(Authorization\s*:\s*)\S+/gi, '$1[redacted]')
   .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
 
 export const usesWebsiteSession = (baseUrl) => {
-  try { return new URL(baseUrl).hostname.toLowerCase().endsWith('schulnetz-ag.ch') } catch { return false }
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase()
+    return schoolHostAllowed(host) && (host === 'schulnetz-ag.ch' || host.endsWith('.schulnetz-ag.ch'))
+  } catch {
+    return false
+  }
 }
 
 const IP_REJECTED_TEXT = [
@@ -951,7 +997,7 @@ const INACTIVITY_TEXT = [
   'inaktivitaetslimit ueberschritten',
 ]
 
-const schoolHost = (host) => host === 'schulnetz-ag.ch' || host.endsWith('.schulnetz-ag.ch') || host.endsWith('.schulnetz.ch') || host.endsWith('.schulnetz.com')
+const schoolHost = (host) => schoolHostAllowed(host)
 
 /** Final URL, a missing page id, or the exact inactivity / IP sentence. Menu logout links are not a signal. */
 export const sessionProblem = (url, html) => {
@@ -959,7 +1005,7 @@ export const sessionProblem = (url, html) => {
   let parsed = null
   try { parsed = new URL(String(url || 'https://invalid.local')) } catch { parsed = null }
   const host = parsed?.hostname?.toLowerCase() || ''
-  if (host === 'login.microsoftonline.com' || host === 'login.microsoft.com' || host === 'login.live.com' || host.endsWith('.login.microsoftonline.com')) return 'microsoft'
+  if (microsoftLoginHost(host)) return 'microsoft'
   if (text.includes('ConvergedSignIn')) return 'microsoft'
   if (text.includes('AADSTS50058')) return 'microsoft'
   if (/"sErrorCode"\s*:\s*"50058"/.test(text) || /sErrorCode\\?"?\s*:\s*\\?"?50058/.test(text)) return 'microsoft'
