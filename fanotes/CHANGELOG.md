@@ -1,5 +1,12 @@
 # Änderungsverlauf
 
+## 2026.11.1-beta.13
+
+- Make the companion bottom navigation bar configurable.
+- Add an optional guess-the-grade mode for new Schulnetz marks.
+- Move companion I/O off the UI thread and cut list jank.
+- Smooth companion handwriting zoom, pan, and stroke caching.
+
 ## 2026.11.1-beta.12
 
 - Add advanced Linux and Windows handwriting trajectory synthesis
