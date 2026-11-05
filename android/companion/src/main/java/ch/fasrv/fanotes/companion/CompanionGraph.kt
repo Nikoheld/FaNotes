@@ -618,7 +618,7 @@ class CompanionGraph(private val context: Context) {
     private suspend fun refreshWebsite(previous: SchulnetzSnapshot): SchulnetzSnapshot? {
         schulnetzLog.info("refresh pages family=${SchulnetzBrowser.localAddressFamily()} signedOut=$signedOut lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()} microsoftCookies=${microsoftCookieNames()}")
         var current = readWebSession() ?: WebSession(baseUrl(), phpSessionCookie(baseUrl()), "", "")
-        var bundle = runCatching { client.fetchWeb(baseUrl(), current, browser::load, signedOut, schulnetzLog::info) }.onFailure { schulnetzLog.error(it) }.getOrNull()
+        var bundle = runCatching { client.fetchWeb(baseUrl(), current, browser::load, signedOut, schulnetzLog::info, previous) }.onFailure { schulnetzLog.error(it) }.getOrNull()
         storeCaptures(bundle)
         if (bundle != null && bundle.oauthPage != null && bundle.okPages > 0) {
             val kept = recoverOauth(previous, bundle)
@@ -641,7 +641,7 @@ class CompanionGraph(private val context: Context) {
                 return null
             }
             current = silent
-            bundle = runCatching { client.fetchWeb(baseUrl(), current, browser::load, signedOut = false, schulnetzLog::info) }.onFailure { schulnetzLog.error(it) }.getOrNull()
+            bundle = runCatching { client.fetchWeb(baseUrl(), current, browser::load, signedOut = false, trace = schulnetzLog::info, previous = previous) }.onFailure { schulnetzLog.error(it) }.getOrNull()
             storeCaptures(bundle)
             if (bundle != null && bundle.oauthPage != null && bundle.okPages > 0) {
                 signedOut = false
@@ -840,6 +840,10 @@ class CompanionGraph(private val context: Context) {
         vacations = next.vacations.ifEmpty { previous.vacations },
         konto = next.konto.ifEmpty { previous.konto },
         startMessages = next.startMessages.ifEmpty { previous.startMessages },
+        weekFetched = next.weekFetched.ifEmpty { previous.weekFetched },
+        weekSpanStart = next.weekSpanStart.ifBlank { previous.weekSpanStart },
+        weekSpanEnd = next.weekSpanEnd.ifBlank { previous.weekSpanEnd },
+        icalFetchedAt = next.icalFetchedAt.ifBlank { previous.icalFetchedAt },
         revision = previous.revision + 1,
     )
 
@@ -888,8 +892,26 @@ class CompanionGraph(private val context: Context) {
             return
         }
         writeLocalToken(stored.copy(refreshToken = access.refreshToken.ifBlank { stored.refreshToken }, accessToken = access.accessToken, accessExpiresAt = System.currentTimeMillis() + ((access.expiresInSeconds ?: 600) - 60) * 1000))
-        val raw = client.fetchRaw(stored.baseUrl, access.accessToken)
-        val next = parseRawSnapshot(raw, isoNow()).copy(revision = previous.revision + 1)
+        val raw = client.fetchRaw(stored.baseUrl, access.accessToken, previous)
+        val parsed = parseRawSnapshot(raw, isoNow())
+        val events = if (raw.eventsFetched && raw.eventMin.isNotBlank() && raw.eventMax.isNotBlank()) {
+            ch.fasrv.fanotes.schulnetz.applyEventWindow(previous.events, parsed.events, raw.eventMin, raw.eventMax)
+        } else {
+            previous.events.ifEmpty { parsed.events }
+        }
+        val weekFetched = if (raw.eventsFetched && raw.eventMin.isNotBlank() && raw.eventMax.isNotBlank()) {
+            ch.fasrv.fanotes.schulnetz.stampWeeks(previous.weekFetched, raw.eventMin, raw.eventMax, parsed.fetchedAt)
+        } else {
+            previous.weekFetched
+        }
+        val next = parsed.copy(
+            revision = previous.revision + 1,
+            events = events,
+            weekFetched = weekFetched,
+            weekSpanStart = raw.weekSpanStart.ifBlank { previous.weekSpanStart },
+            weekSpanEnd = raw.weekSpanEnd.ifBlank { previous.weekSpanEnd },
+            icalFetchedAt = previous.icalFetchedAt,
+        )
         publishSnapshot(previous, next, notifySettings())
         vault.write(SNAPSHOT_VAULT_PATH, next.toNormalizedJson().encodeToByteArray())
         engine.notifyLocalChange()

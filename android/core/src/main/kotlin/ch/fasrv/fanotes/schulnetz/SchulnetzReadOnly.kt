@@ -100,6 +100,7 @@ fun schulnetzCallAllowed(method: String, url: String, body: String? = null): Boo
         if (query.contains("action=")) return false
         return query.contains("pageid=22202") || query.contains("pageid=21312") || query.contains("ansicht=schueleransicht") || query.contains("ansicht=klassenuebersicht")
     }
+    if (verb == "GET" && path.endsWith(".ics") && !query.contains("action=")) return true
     return false
 }
 

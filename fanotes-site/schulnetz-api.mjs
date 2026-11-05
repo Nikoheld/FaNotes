@@ -11,10 +11,15 @@ import { authenticateSyncRequest, syncAccountExists } from './sync-api.mjs'
 import { credentialOr } from './credentials.mjs'
 import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
 import {
+  applyEventWindow,
   diffSnapshots,
+  eventQueryWindow,
+  hasFetchedWeeks,
   keepLoadedGrades,
+  parseWeekSpan,
   prepareGradeNotifications,
   settleGradeNotifications,
+  stampWeeks,
   unseenChanges,
   normalizeSchoolBase,
   parseKontoauszug,
@@ -23,6 +28,7 @@ import {
   redactSecrets,
   schulnetzCallAllowed,
   stripPhpSession,
+  zurichToday,
 } from './schulnetz-logic.mjs'
 import { establishWebSession, scrapeWithSession } from './schulnetz-web.mjs'
 import {
@@ -664,21 +670,41 @@ export const createSchulnetzRuntime = (options = {}) => {
       }
       await storeRefresh(tokens)
     }
-    const paths = [
-      ['me', '/rest/v1/me'],
-      ['grades', '/rest/v1/me/grades'],
-      ['events', eventsPath()],
-      ['exams', '/rest/v1/me/exams'],
-      ['absences', '/rest/v1/me/absences'],
-      ['homework', '/rest/v1/me/notes/homework'],
-      ['messages', '/rest/v1/me/notifications/push'],
-      ['vacations', '/rest/v1/me/vacations'],
-      ['lateness', '/rest/v1/me/lateness'],
-      ['kontoHtml', '/index.php?pageid=21411'],
-      ['startHtml', '/index.php?pageid=1'],
-    ]
+    const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+    const span = { start: String(previous?.weekSpanStart || ''), end: String(previous?.weekSpanEnd || '') }
+    const needPlan = !(span.start && span.end) && !hasFetchedWeeks(previous?.weekFetched)
     const raw = {}
-    for (const [name, path] of paths) {
+    let eventMin = ''
+    let eventMax = ''
+    const paths = [
+      ['me', () => '/rest/v1/me'],
+      ['grades', () => '/rest/v1/me/grades'],
+      ['planHtml', () => (needPlan ? '/index.php?pageid=22202' : '')],
+      ['events', () => {
+        const window = eventQueryWindow({
+          spanStart: span.start,
+          spanEnd: span.end,
+          weekFetched: previous?.weekFetched || {},
+          icalFetchedAt: previous?.icalFetchedAt || '',
+          today: zurichToday(now()),
+          now: now().toISOString(),
+        })
+        eventMin = window.min
+        eventMax = window.max
+        return eventsPath(window.min, window.max)
+      }],
+      ['exams', () => '/rest/v1/me/exams'],
+      ['absences', () => '/rest/v1/me/absences'],
+      ['homework', () => '/rest/v1/me/notes/homework'],
+      ['messages', () => '/rest/v1/me/notifications/push'],
+      ['vacations', () => '/rest/v1/me/vacations'],
+      ['lateness', () => '/rest/v1/me/lateness'],
+      ['kontoHtml', () => '/index.php?pageid=21411'],
+      ['startHtml', () => '/index.php?pageid=1'],
+    ]
+    for (const [name, pathOf] of paths) {
+      const path = pathOf()
+      if (!path) continue
       const response = await readCollection(baseUrl, access, path)
       if (response.unauthorized) {
         const tokens = await refreshTokens(baseUrl, refreshToken, link.deviceId)
@@ -694,10 +720,27 @@ export const createSchulnetzRuntime = (options = {}) => {
       } else {
         raw[name] = response.body
       }
+      if (name === 'planHtml') {
+        const found = parseWeekSpan(String(raw.planHtml || ''))
+        if (found) {
+          span.start = found.start
+          span.end = found.end
+        }
+      }
     }
-    const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
     const snapshot = parseRawSnapshot(raw, now().toISOString())
     snapshot.grades = keepLoadedGrades(previous?.grades, snapshot.grades)
+    const eventsOk = typeof raw.events === 'string' && raw.events.trim() !== ''
+    if (eventsOk && eventMin && eventMax) {
+      snapshot.events = applyEventWindow(previous?.events || [], snapshot.events, eventMin, eventMax)
+      snapshot.weekFetched = stampWeeks(previous?.weekFetched || {}, eventMin, eventMax, snapshot.fetchedAt)
+    } else {
+      snapshot.events = previous?.events || []
+      snapshot.weekFetched = previous?.weekFetched || {}
+    }
+    snapshot.weekSpanStart = span.start || ''
+    snapshot.weekSpanEnd = span.end || ''
+    snapshot.icalFetchedAt = previous?.icalFetchedAt || ''
     snapshot.revision = (link.revision || 0) + 1
     const changes = await publishChanges(accountId, link, diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
     link.revision = snapshot.revision
@@ -716,7 +759,19 @@ export const createSchulnetzRuntime = (options = {}) => {
     let serverSession = null
     try { serverSession = JSON.parse(openToken(material, link.serverSession)) } catch { serverSession = null }
     const baseUrl = link.baseUrl
-    const scrape = async (session) => scrapeWithSession(baseUrl, { ...session, userAgent }, fetchImpl)
+    const scrape = async (session) => {
+      const stored = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+      return scrapeWithSession(baseUrl, { ...session, userAgent }, fetchImpl, {
+        previousEvents: stored?.events || [],
+        previousExams: stored?.exams || [],
+        weekFetched: stored?.weekFetched || {},
+        weekSpanStart: stored?.weekSpanStart || '',
+        weekSpanEnd: stored?.weekSpanEnd || '',
+        icalFetchedAt: stored?.icalFetchedAt || '',
+        today: zurichToday(now()),
+        now: now().toISOString(),
+      })
+    }
     let scraped = serverSession ? await scrape(serverSession) : { problem: 'login' }
     if (scraped.problem) {
       const established = await establishWebSession(baseUrl, cookies, fetchImpl, userAgent)
@@ -748,12 +803,13 @@ export const createSchulnetzRuntime = (options = {}) => {
       }
     }
     const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+    const failed = Boolean(scraped.problem)
     const snapshot = {
       revision: (link.revision || 0) + 1,
       fetchedAt: now().toISOString(),
       grades: keepLoadedGrades(previous?.grades, scraped.grades || []),
-      events: scraped.events || [],
-      exams: previous?.exams || [],
+      events: failed ? (previous?.events || []) : (scraped.events || []),
+      exams: failed ? (previous?.exams || []) : (scraped.exams || previous?.exams || []),
       absences: previous?.absences || [],
       homework: previous?.homework || [],
       messages: parseStartMessages(scraped.startHtml || '').map((body, index) => ({ id: `start-${index}`, title: 'Mitteilung', body, at: '' })),
@@ -761,6 +817,10 @@ export const createSchulnetzRuntime = (options = {}) => {
       konto: parseKontoauszug(scraped.kontoHtml || ''),
       startMessages: parseStartMessages(scraped.startHtml || ''),
       readErrors: scraped.problem ? [`Schulnetz: ${scraped.problem}`] : [],
+      weekFetched: failed ? (previous?.weekFetched || {}) : (scraped.weekFetched || {}),
+      weekSpanStart: scraped.weekSpanStart || previous?.weekSpanStart || '',
+      weekSpanEnd: scraped.weekSpanEnd || previous?.weekSpanEnd || '',
+      icalFetchedAt: scraped.icalFetchedAt || previous?.icalFetchedAt || '',
     }
     const changes = await publishChanges(accountId, link, diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
     link.revision = snapshot.revision
@@ -977,12 +1037,7 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 }
 
-const eventsPath = () => {
-  const today = new Date()
-  const min = new Date(today.getTime() - 7 * 86400000).toISOString().slice(0, 10)
-  const max = new Date(today.getTime() + 21 * 86400000).toISOString().slice(0, 10)
-  return `/rest/v1/me/events?min_date=${min}&max_date=${max}`
-}
+const eventsPath = (min, max) => `/rest/v1/me/events?min_date=${min}&max_date=${max}`
 
 const alive = (pid) => {
   try {

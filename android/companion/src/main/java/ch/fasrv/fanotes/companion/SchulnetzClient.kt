@@ -17,8 +17,19 @@ import ch.fasrv.fanotes.schulnetz.WebSession
 import ch.fasrv.fanotes.schulnetz.authorizationCodeForm
 import ch.fasrv.fanotes.schulnetz.describeTables
 import ch.fasrv.fanotes.schulnetz.findIcalUrl
+import ch.fasrv.fanotes.schulnetz.eventQueryWindow
 import ch.fasrv.fanotes.schulnetz.examSchedulerUrl
 import ch.fasrv.fanotes.schulnetz.findSchedulerUrl
+import ch.fasrv.fanotes.schulnetz.icalBodyUsable
+import ch.fasrv.fanotes.schulnetz.mergeById
+import ch.fasrv.fanotes.schulnetz.mondaysBetween
+import ch.fasrv.fanotes.schulnetz.overlayDated
+import ch.fasrv.fanotes.schulnetz.overlayLessons
+import ch.fasrv.fanotes.schulnetz.parseWeekSpan
+import ch.fasrv.fanotes.schulnetz.planWeekFetches
+import ch.fasrv.fanotes.schulnetz.schedulerBodyUsable
+import ch.fasrv.fanotes.schulnetz.spanOfEvents
+import ch.fasrv.fanotes.schulnetz.weekMonday
 import ch.fasrv.fanotes.schulnetz.classifySchulnetzPage
 import ch.fasrv.fanotes.schulnetz.isForcedLogoutUrl
 import ch.fasrv.fanotes.schulnetz.linkedPageUrl
@@ -43,7 +54,8 @@ import ch.fasrv.fanotes.schulnetz.readTerminliste
 import ch.fasrv.fanotes.schulnetz.refreshTokenForm
 import ch.fasrv.fanotes.schulnetz.schedulerUrl
 import ch.fasrv.fanotes.schulnetz.terminlisteNextUrl
-import ch.fasrv.fanotes.schulnetz.weekBounds
+import ch.fasrv.fanotes.schulnetz.weekMondayKey
+import ch.fasrv.fanotes.schulnetz.WeekSpan
 import ch.fasrv.fanotes.schulnetz.schulnetzCallAllowed
 import ch.fasrv.fanotes.schulnetz.sessionProblemText
 import ch.fasrv.fanotes.schulnetz.toNormalizedJson
@@ -112,7 +124,7 @@ class SchulnetzClient(
     fun refresh(baseUrl: String, refreshToken: String, deviceId: String): SchulnetzTokens =
         token(baseUrl, refreshTokenForm(refreshToken, deviceId))
 
-    fun fetchRaw(baseUrl: String, accessToken: String): SchulnetzRaw {
+    fun fetchRaw(baseUrl: String, accessToken: String, previous: SchulnetzSnapshot? = null): SchulnetzRaw {
         val root = baseUrl.trimEnd('/')
         val today = LocalDate.now()
         fun get(path: String): String? {
@@ -122,10 +134,21 @@ class SchulnetzClient(
             if (status == 401) throw SchulnetzHttpException(401, "Die Schulnetz-Sitzung ist abgelaufen.")
             return body.takeIf { status in 200..299 }
         }
+        var spanStart = previous?.weekSpanStart.orEmpty()
+        var spanEnd = previous?.weekSpanEnd.orEmpty()
+        val planHtml = if ((spanStart.isBlank() || spanEnd.isBlank()) && previous?.weekFetched.isNullOrEmpty()) get("/index.php?pageid=22202") else null
+        if (!planHtml.isNullOrBlank()) {
+            parseWeekSpan(planHtml)?.let { span ->
+                spanStart = span.start.toString()
+                spanEnd = span.end.toString()
+            }
+        }
+        val window = eventQueryWindow(spanStart, spanEnd, previous?.weekFetched.orEmpty(), previous?.icalFetchedAt.orEmpty(), today, java.time.Instant.now())
+        val events = get("/rest/v1/me/events?min_date=${window.min}&max_date=${window.max}")
         return SchulnetzRaw(
             me = get("/rest/v1/me"),
             grades = get("/rest/v1/me/grades"),
-            events = get("/rest/v1/me/events?min_date=${today.minusDays(7)}&max_date=${today.plusDays(21)}"),
+            events = events,
             exams = get("/rest/v1/me/exams"),
             absences = get("/rest/v1/me/absences"),
             homework = get("/rest/v1/me/notes/homework"),
@@ -134,6 +157,11 @@ class SchulnetzClient(
             lateness = get("/rest/v1/me/lateness"),
             kontoHtml = get("/index.php?pageid=21411"),
             startHtml = get("/index.php?pageid=1"),
+            eventMin = window.min.toString(),
+            eventMax = window.max.toString(),
+            weekSpanStart = spanStart,
+            weekSpanEnd = spanEnd,
+            eventsFetched = !events.isNullOrBlank(),
         )
     }
 
@@ -163,7 +191,7 @@ class SchulnetzClient(
         if (code !in 200..299 && code != 404) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
 
-    fun fetchWeb(baseUrl: String, session: WebSession, loader: (String) -> LoadedPage, signedOut: Boolean = false, trace: (String) -> Unit = {}): WebBundle {
+    fun fetchWeb(baseUrl: String, session: WebSession, loader: (String) -> LoadedPage, signedOut: Boolean = false, trace: (String) -> Unit = {}, previous: SchulnetzSnapshot? = null): WebBundle {
         val root = baseUrl.trimEnd('/')
         var id = session.id
         var transid = session.transid
@@ -270,31 +298,78 @@ class SchulnetzClient(
         exams.error?.let { errors += it }
         termine.error?.let { errors += it }
         val today = java.time.LocalDate.now()
-        val (monday, nextMonday) = weekBounds(today)
+        val fetchedNow = java.time.Instant.now().toString()
+        val planHtml = pages["22202"].orEmpty()
+        val htmlSpan = parseWeekSpan(planHtml)
+        val icalUrl = findIcalUrl(planHtml, root)
+        val icalAvailable = !icalUrl.isNullOrBlank() && webReadAllowed(icalUrl)
+        val knownSpan = htmlSpan ?: previous.storedSpan()
+        val plan = planWeekFetches(
+            if (knownSpan != null) mondaysBetween(knownSpan.start, knownSpan.end) else emptyList(),
+            previous?.weekFetched.orEmpty(),
+            previous?.icalFetchedAt.orEmpty(),
+            java.time.Instant.parse(fetchedNow),
+            today,
+            icalAvailable,
+        )
+        val discovered = findSchedulerUrl(planHtml, root)
         val fromPlan = parseSchedulerNote(planNote)
-        val discovered = findSchedulerUrl(pages["22202"].orEmpty(), root)
-        trace("scheduler source=${if (discovered != null) "page" else "built"} domEvents=${fromPlan.second.size}")
-        val scheduler = if (oauthPage != null || sawSessionProblem || pages["22202"].isNullOrBlank()) "" else {
-            get(discovered ?: schedulerUrl(root, id, transid, today.toString(), monday.toString(), nextMonday.toString()), "scheduler", "scheduler")
+        trace("scheduler source=${if (discovered != null) "page" else "built"} weeks=${plan.fetch.size} ical=${plan.fetchIcal} domEvents=${fromPlan.second.size}")
+        val canFetch = oauthPage == null && !sawSessionProblem && planHtml.isNotBlank() && id.isNotBlank() && transid.isNotBlank()
+        val lessonWeeks = linkedMapOf<java.time.LocalDate, List<ch.fasrv.fanotes.schulnetz.AgendaEvent>>()
+        val examWeeks = linkedMapOf<java.time.LocalDate, List<ch.fasrv.fanotes.schulnetz.AgendaEvent>>()
+        if (canFetch) {
+            for (monday in plan.fetch) {
+                if (oauthPage != null || sawSessionProblem) break
+                val max = monday.plusDays(7)
+                val curr = if (monday == weekMonday(today)) today.toString() else monday.toString()
+                val lessonBody = get(schedulerUrl(root, id, transid, curr, monday.toString(), max.toString()), "scheduler", "scheduler")
+                if (schedulerBodyUsable(lessonBody)) lessonWeeks[monday] = parseSchedulerXml(lessonBody)
+                if (oauthPage != null || sawSessionProblem) break
+                val examBody = get(examSchedulerUrl(root, id, transid, curr, monday.toString(), max.toString()), "pruefungen-xml", "21312")
+                if (schedulerBodyUsable(examBody)) {
+                    examWeeks[monday] = parseSchedulerXml(examBody).map { event ->
+                        event.copy(eventType = if (event.eventType.isBlank() || event.eventType == "lesson") "exam" else event.eventType)
+                    }
+                }
+            }
         }
-        val examXml = if (oauthPage != null || sawSessionProblem || pages["21312"].isNullOrBlank()) "" else {
-            get(examSchedulerUrl(root, id, transid, today.toString(), monday.toString(), nextMonday.toString()), "pruefungen-xml", "21312")
+        val currentMonday = weekMonday(today)
+        if (currentMonday !in lessonWeeks && canFetch) {
+            val rendered = parseRenderedTimetable(planHtml)
+            val fallback = when {
+                rendered.isNotEmpty() -> rendered
+                fromPlan.second.isNotEmpty() -> fromPlan.second
+                else -> parseTimetableHtml(planHtml)
+            }
+            if (fallback.isNotEmpty()) lessonWeeks[currentMonday] = fallback
         }
-        val icalUrl = findIcalUrl(pages["22202"].orEmpty(), root)
-        val ical = if (oauthPage != null || sawSessionProblem || icalUrl.isNullOrBlank() || !webReadAllowed(icalUrl)) emptyList() else parseIcs(get(icalUrl, "ical", "ical"))
-        val rendered = parseRenderedTimetable(pages["22202"].orEmpty())
-        val events = when {
-            rendered.isNotEmpty() -> rendered
-            fromPlan.second.isNotEmpty() -> fromPlan.second
-            else -> parseSchedulerXml(scheduler).ifEmpty { ical }.ifEmpty { parseTimetableHtml(pages["22202"].orEmpty()) }
+        if (currentMonday !in examWeeks && exams.value.isNotEmpty()) examWeeks[currentMonday] = exams.value
+        val refreshedLessons = lessonWeeks.keys.map { it.toString() }.toSet()
+        var events = overlayLessons(previous?.events.orEmpty(), lessonWeeks.values.flatten(), refreshedLessons)
+        var span = knownSpan
+        var icalAt = previous?.icalFetchedAt.orEmpty()
+        val stamps = previous?.weekFetched.orEmpty().toMutableMap()
+        if (canFetch) for (monday in refreshedLessons) stamps[monday] = fetchedNow
+        if (canFetch && plan.fetchIcal && icalAvailable) {
+            val body = get(icalUrl.orEmpty(), "ical", "ical")
+            if (icalBodyUsable(body)) {
+                val parsed = parseIcs(body)
+                icalAt = fetchedNow
+                if (htmlSpan == null) spanOfEvents(parsed)?.let { span = it }
+                val covered = if (span != null) mondaysBetween(span.start, span.end).map { it.toString() }.toSet() else parsed.mapNotNull { weekMondayKey(it.start) }.toSet()
+                events = overlayLessons(events, parsed, covered - refreshedLessons)
+                for (monday in covered - refreshedLessons) stamps[monday] = fetchedNow
+            }
         }
-        if (events.isEmpty() && pages["22202"].orEmpty().length > 1000 && !pages["22202"].orEmpty().contains("dhx_cal_container")) {
+        if (termine.value.isNotEmpty()) events = mergeById(events, termine.value)
+        val examEvents = overlayDated(previous?.exams.orEmpty(), examWeeks.values.flatten(), examWeeks.keys.map { it.toString() }.toSet())
+        if (events.isEmpty() && planHtml.length > 1000 && !planHtml.contains("dhx_cal_container")) {
             errors += "Stundenplan: Seite geladen, aber nicht lesbar"
         }
-        val examEvents = readExamsPage(pages["21312"].orEmpty()).value.ifEmpty { parseSchedulerXml(examXml).map { it.copy(eventType = "exam") } }
-        trace("parsed grades=${grades.value.size} absences=${absences.value.size} exams=${exams.value.size} events=${events.size} termine=${termine.value.size} okPages=$okPages oauth=${oauthPage.orEmpty()} errors=${errors.size}")
+        trace("parsed grades=${grades.value.size} absences=${absences.value.size} exams=${exams.value.size} events=${events.size} termine=${termine.value.size} weeks=${refreshedLessons.size} okPages=$okPages oauth=${oauthPage.orEmpty()} errors=${errors.size}")
         val snapshot = SchulnetzSnapshot(
-            fetchedAt = java.time.Instant.now().toString(),
+            fetchedAt = fetchedNow,
             grades = grades.value,
             events = events,
             exams = examEvents,
@@ -304,6 +379,10 @@ class SchulnetzClient(
             konto = parseKontoauszug(pages["21411"].orEmpty()),
             startMessages = parseStartMessages(pages["1"].orEmpty()),
             readErrors = errors,
+            weekFetched = stamps,
+            weekSpanStart = span?.start?.toString().orEmpty(),
+            weekSpanEnd = span?.end?.toString().orEmpty(),
+            icalFetchedAt = icalAt,
         )
         val problem = when {
             oauthPage != null -> SessionProblem.OAUTH_FAILED
@@ -315,6 +394,14 @@ class SchulnetzClient(
         }
         val reported = if (problem == SessionProblem.INTERACTIVE) snapshot.copy(readErrors = listOf("Bei Schulnetz neu anmelden")) else snapshot
         return WebBundle(reported, problem, debug, WebSession(root, "", id, transid), okPages, oauthPage, captured)
+    }
+
+    private fun SchulnetzSnapshot?.storedSpan(): WeekSpan? {
+        val snap = this ?: return null
+        val start = snap.weekSpanStart.takeIf { it.isNotBlank() }?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() } ?: return null
+        val end = snap.weekSpanEnd.takeIf { it.isNotBlank() }?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() } ?: return null
+        if (end.isBefore(start)) return null
+        return WeekSpan(start, end)
     }
 
     fun mergePage(snapshot: SchulnetzSnapshot, pageId: String, html: String): SchulnetzSnapshot = when (pageId) {
