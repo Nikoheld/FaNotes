@@ -51,7 +51,7 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew :core:test :companion:assembleDebug --stacktrace
+          ./gradlew :core:test :companion:testDebugUnitTest :companion:assembleDebug --stacktrace
           cp companion/build/outputs/apk/debug/companion-debug.apk Kanti-Plus-debug.apk
       - uses: actions/upload-artifact@v6
         with:

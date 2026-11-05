@@ -192,6 +192,50 @@ class SyncEngineTest {
         }
     }
 
+    @Test
+    fun applyRemoteOomPausesWithoutLosingLocalNotesOrAdvancingTheCursor() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("memory-a")
+        val hostB = MemoryHost("memory-b")
+        val diagnostics = mutableListOf<String>()
+        val engineA = engine(SyncApi(server), hostA, "A")
+        val engineB = SyncEngine(SyncApi(server), SyncEngineOptions(automatic = { false }, onDiagnostic = { line ->
+            diagnostics += line
+        }))
+        engineB.attach(hostB)
+        try {
+            engineA.register("memory@example.com", "synthetic passphrase")
+            hostA.put("Notes/synthetic.famd", noteFamd("2026-01-01T00:00:00Z").encodeToByteArray(), 1_000)
+            engineA.syncNow()
+            engineB.login("memory@example.com", "synthetic passphrase")
+            engineB.syncNow()
+            val original = hostB.read("Notes/synthetic.famd")
+            val stateBefore = hostB.readState("memory-b")
+            val schoolCache = "synthetic last good snapshot".encodeToByteArray()
+            hostB.put(".fanotes/schulnetz/snapshot.json", schoolCache, 1_000)
+            val changed = noteFamd("2026-02-01T00:00:00Z").replace("# Seite", "# Changed")
+            hostA.put("Notes/synthetic.famd", changed.encodeToByteArray(), 2_000)
+            engineA.syncNow()
+            hostB.failWritesWithOom = true
+            engineB.syncNow()
+            assertEquals(SyncStatus.PAUSED, engineB.state.value.status)
+            assertEquals(stateBefore, hostB.readState("memory-b"))
+            kotlin.test.assertContentEquals(original, hostB.read("Notes/synthetic.famd"))
+            kotlin.test.assertContentEquals(schoolCache, hostB.read(".fanotes/schulnetz/snapshot.json"))
+            assertTrue(diagnostics.none { it.contains("synthetic.famd") || it.contains("Changed") || it.contains("example.com") })
+            hostB.failWritesWithOom = false
+            engineB.syncNow("timer") // No automatic retry loop under memory pressure.
+            assertEquals(SyncStatus.PAUSED, engineB.state.value.status)
+            engineB.syncNow()
+            assertEquals(SyncStatus.IDLE, engineB.state.value.status)
+            kotlin.test.assertContentEquals(changed.encodeToByteArray(), hostB.read("Notes/synthetic.famd"))
+            assertTrue(diagnostics.any { it.contains("depth=") && it.contains("deepCopyDepth=0") })
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
     private fun noteFamd(updatedAt: String): String {
         val ink = JsonValue.Obj()
         ink.put("updatedAt", jsonString(updatedAt))
@@ -220,6 +264,7 @@ class SyncEngineTest {
 
 private class MemoryHost(private val id: String) : SyncHost {
     val files = linkedMapOf<String, Pair<ByteArray, Long>>()
+    var failWritesWithOom = false
     private var secrets: String? = null
     private var state: String? = null
 
@@ -235,6 +280,7 @@ private class MemoryHost(private val id: String) : SyncHost {
         files[path]?.first ?: throw NoSuchElementException(path)
     }
     override suspend fun write(path: String, bytes: ByteArray, mtimeMs: Long): SyncScanEntry = synchronized(files) {
+        if (failWritesWithOom) throw OutOfMemoryError("synthetic")
         files[path] = bytes to mtimeMs
         SyncScanEntry(path, bytes.size.toLong(), mtimeMs)
     }

@@ -5,8 +5,6 @@ import ch.fasrv.fanotes.schulnetz.redactDiagnostic
 import ch.fasrv.fanotes.schulnetz.redactSchulnetzSecrets
 import java.io.File
 import java.io.FileOutputStream
-import java.io.PrintWriter
-import java.io.StringWriter
 import java.time.Instant
 import java.util.concurrent.Executors
 
@@ -25,10 +23,10 @@ class SchulnetzLog(directory: File) {
     }
 
     fun error(error: Throwable) {
-        val writer = StringWriter()
-        error.printStackTrace(PrintWriter(writer))
-        val text = redactDiagnostic(writer.toString())
-        write(text, durable = true)
+        val frames = error.stackTrace.take(24).joinToString(" | ") {
+            ch.fasrv.fanotes.schulnetz.safeFrame("${it.className}.${it.methodName}:${it.lineNumber}")
+        }
+        write("exception=${ch.fasrv.fanotes.schulnetz.safeLogToken(error.javaClass.name)} frames=$frames", durable = true)
     }
 
     /** Crash record. Flushed to disk before the process is allowed to die. The message text is omitted. */

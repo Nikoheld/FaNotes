@@ -28,7 +28,7 @@ sealed class JsonValue {
     data object Null : JsonValue()
 }
 
-class JsonParseException(message: String) : IllegalArgumentException(message)
+open class JsonParseException(message: String) : IllegalArgumentException(message)
 
 fun jsonString(value: String) = JsonValue.Str(value)
 fun jsonBool(value: Boolean) = JsonValue.Bool(value)
@@ -48,11 +48,17 @@ fun jsonObject(vararg pairs: Pair<String, JsonValue?>): JsonValue.Obj {
     return obj
 }
 
-fun parseJson(text: String): JsonValue = JsonParser(text).parseValue().also { parser ->
-    // parseValue consumes one value; trailing whitespace is fine, trailing junk is not.
-}
+/** Limits are checked before allocating DOM nodes or entering another recursive frame. */
+data class JsonLimits(val maxDepth: Int = 64, val maxNodes: Int = 1_000_000)
+class JsonLimitException(val depth: Int, val nodes: Int) :
+    JsonParseException("JSON resource limit depth=$depth nodes=$nodes")
+data class JsonShape(val depth: Int, val nodes: Int)
 
-private class JsonParser(private val text: String) {
+fun parseJson(text: String, limits: JsonLimits = JsonLimits()): JsonValue = JsonParser(text, limits).parseValue()
+
+private class JsonParser(private val text: String, private val limits: JsonLimits) {
+    private var depth = 0
+    private var nodes = 0
     private var index = 0
 
     fun parseValue(): JsonValue {
@@ -67,7 +73,10 @@ private class JsonParser(private val text: String) {
     private fun readValue(): JsonValue {
         skip()
         if (index >= text.length) throw JsonParseException("Unexpected end of JSON")
-        return when (val char = text[index]) {
+        depth += 1
+        nodes += 1
+        if (depth > limits.maxDepth || nodes > limits.maxNodes) throw JsonLimitException(depth, nodes)
+        val value = when (val char = text[index]) {
             '{' -> readObject()
             '[' -> readArray()
             '"' -> JsonValue.Str(readString())
@@ -77,6 +86,8 @@ private class JsonParser(private val text: String) {
             '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' -> readNumber()
             else -> throw JsonParseException("Unexpected '${char}' at $index")
         }
+        depth -= 1
+        return value
     }
 
     private fun literal(token: String, value: JsonValue): JsonValue {
@@ -203,7 +214,10 @@ private class JsonParser(private val text: String) {
     }
 }
 
-fun JsonValue.stringify(): String = buildString { appendJson(this@stringify) }
+fun JsonValue.stringify(): String {
+    shape() // Also rejects cycles before a StringBuilder can grow without bound.
+    return buildString { appendJson(this@stringify) }
+}
 
 private fun StringBuilder.appendJson(value: JsonValue) {
     when (value) {
@@ -263,13 +277,46 @@ fun jsNumber(value: Double): String {
     return value.toString().replace('E', 'e')
 }
 
-fun JsonValue.deepCopy(): JsonValue = when (this) {
+/** Bounded traversal counts aliases per occurrence: an exponential DAG is not a cheap tree. */
+fun JsonValue.shape(limits: JsonLimits = JsonLimits()): JsonShape {
+    var nodes = 0
+    var maxDepth = 0
+    val ancestors = java.util.IdentityHashMap<JsonValue, Boolean>()
+    fun visit(value: JsonValue, depth: Int) {
+        nodes += 1
+        maxDepth = maxOf(maxDepth, depth)
+        if (depth > limits.maxDepth || nodes > limits.maxNodes || ancestors.containsKey(value)) {
+            throw JsonLimitException(depth, nodes)
+        }
+        when (value) {
+            is JsonValue.Obj -> {
+                ancestors[value] = true
+                for (item in value.fields.values) visit(item, depth + 1)
+                ancestors.remove(value)
+            }
+            is JsonValue.Arr -> {
+                ancestors[value] = true
+                for (item in value.items) visit(item, depth + 1)
+                ancestors.remove(value)
+            }
+            else -> Unit
+        }
+    }
+    visit(this, 1)
+    return JsonShape(maxDepth, nodes)
+}
+
+fun JsonValue.deepCopy(): JsonValue {
+    shape() // Preflight before allocating copies; no recursive allocation on cycles/deep trees.
+    return copyTree()
+}
+
+private fun JsonValue.copyTree(): JsonValue = when (this) {
     is JsonValue.Obj -> JsonValue.Obj(LinkedHashMap<String, JsonValue>(fields.size).also { copy ->
-        for ((key, value) in fields) copy[key] = value.deepCopy()
+        for ((key, value) in fields) copy[key] = value.copyTree()
     })
-    is JsonValue.Arr -> JsonValue.Arr(items.map { it.deepCopy() }.toMutableList())
-    is JsonValue.Str -> this
-    is JsonValue.Num -> this
-    is JsonValue.Bool -> this
-    JsonValue.Null -> this
+    is JsonValue.Arr -> JsonValue.Arr(ArrayList<JsonValue>(items.size).also { copy ->
+        for (item in items) copy.add(item.copyTree())
+    })
+    else -> this // Scalars are immutable.
 }

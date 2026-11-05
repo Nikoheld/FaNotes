@@ -3,6 +3,7 @@ package ch.fasrv.fanotes.companion
 import ch.fasrv.fanotes.sync.SyncHttpRequest
 import ch.fasrv.fanotes.sync.SyncHttpResponse
 import ch.fasrv.fanotes.sync.SyncTransport
+import ch.fasrv.fanotes.sync.readSyncResponseBody
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -37,11 +38,18 @@ class OkHttpSyncTransport(
             }
 
             override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
-                response.use {
-                    val headers = linkedMapOf<String, String>()
-                    for (index in 0 until it.headers.size) headers[it.headers.name(index)] = it.headers.value(index)
-                    val bytes = it.body?.bytes() ?: ByteArray(0)
-                    if (continuation.isActive) continuation.resume(SyncHttpResponse(it.code, headers, bytes))
+                try {
+                    response.use {
+                        val headers = linkedMapOf<String, String>()
+                        for (index in 0 until it.headers.size) headers[it.headers.name(index)] = it.headers.value(index)
+                        val bytes = it.body?.let { body -> readSyncResponseBody(body.byteStream(), body.contentLength()) } ?: ByteArray(0)
+                        if (continuation.isActive) continuation.resume(SyncHttpResponse(it.code, headers, bytes))
+                    }
+                } catch (error: OutOfMemoryError) {
+                    // Callback failures must resume the engine's recovery boundary, never kill OkHttp's thread.
+                    if (continuation.isActive) continuation.resumeWithException(error)
+                } catch (error: Exception) {
+                    if (continuation.isActive) continuation.resumeWithException(error)
                 }
             }
         })

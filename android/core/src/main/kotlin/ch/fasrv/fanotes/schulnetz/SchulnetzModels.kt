@@ -158,6 +158,8 @@ data class SchulnetzSnapshot(
     val weekSpanStart: String = "",
     val weekSpanEnd: String = "",
     val icalFetchedAt: String = "",
+    /** False for blocked/partial reads; preserved in uploads so another device cannot adopt them. */
+    val gradesReadComplete: Boolean = true,
 )
 
 data class NotifySettings(

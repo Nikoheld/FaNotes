@@ -118,7 +118,7 @@ test('course average rows are not grades and drop silently', () => {
   )
   assert.equal(changes.some((change) => change.category === 'grade'), false)
   assert.equal(parseRawSnapshot({ grades: JSON.stringify([average, exam]) }).grades.length, 1)
-  const html = '<table><tr><td>17.09.2026</td><td>Durchschnitt</td><td>4.2</td><td>1</td></tr><tr><td>17.09.2026</td><td>1. Prüfung</td><td>4.2</td><td>1</td></tr></table>'
+  const html = '<table><tr><td><b>CHE-K26A-1</b></td><td>4.2</td></tr><tr><td><table><tr><td>17.09.2026</td><td>Durchschnitt</td><td>4.2</td><td>1</td></tr><tr><td>17.09.2026</td><td>1. Prüfung</td><td>4.2</td><td>1</td></tr></table></td></tr></table>'
   assert.deepEqual(parseGradesHtml(html).map((grade) => grade.title), ['1. Prüfung'])
 })
 
@@ -292,7 +292,7 @@ test('web session is opened with Microsoft cookies and not the phone PHPSESSID',
       return response(200, '<a href="index.php?pageid=21311&id=abc123&transid=a1b2c3">Noten</a>', { cookies: ['PHPSESSID=server-session; Path=/; HttpOnly'] })
     }
     if (target.includes('pageid=21311')) {
-      return response(200, '<table><tr><td></td><td>20.10.2026</td><td>Probe</td><td>5.5</td><td>1</td></tr></table><b>MA-4a-He</b>')
+      return response(200, '<table><tr><td><b>MA-4a-He</b></td><td>5.5</td></tr><tr><td><table><tr><td>20.10.2026</td><td>Probe</td><td>5.5</td><td>1</td></tr></table></td></tr></table>')
     }
     return response(200, '<main>Termin</main>')
   }
@@ -1371,4 +1371,58 @@ test('seal round trip uses aes-256-gcm', () => {
   assert.equal(openToken(key, sealed), 'token-value-which-is-long-enough')
   sealed.data = createCipheriv('aes-256-gcm', key, Buffer.from(sealed.iv, 'base64')).update('x').toString('base64')
   assert.throws(() => openToken(key, sealed))
+})
+
+
+test('synthetic nested tables keep three courses and eighteen individual marks separate', async () => {
+  const html = await readFile(new URL('../android/core/src/test/resources/schulnetz/noten-multi-course.html', import.meta.url), 'utf8')
+  const grades = parseGradesHtml(html)
+  assert.equal(grades.length, 18)
+  assert.deepEqual([...new Set(grades.map((grade) => grade.courseId))], ['Alpha-K26A-1', 'Beta-K26A-1', 'Gamma-K26A-1'])
+  for (const [index, subject] of ['Alpha', 'Beta', 'Gamma'].entries()) {
+    const group = grades.filter((grade) => grade.courseId === `${subject}-K26A-1`)
+    assert.equal(group.length, 6)
+    assert.equal(group.every((grade) => grade.title.startsWith(`Exercise ${index + 1}-`) && grade.mark === 3 + (index + 1) / 2), true)
+  }
+  const partial = grades.slice(0, 7).map((grade) => ({ ...grade, course: 'Fach Kurs', courseId: 'Fach Kurs', subject: 'Fach Kurs' }))
+  assert.deepEqual(keepLoadedGrades(grades, partial), grades)
+  assert.deepEqual(keepLoadedGrades(grades, grades.slice(0, 7), false), grades)
+  const blocked = await readFile(new URL('../android/core/src/test/resources/schulnetz/blocked-start-grades.html', import.meta.url), 'utf8')
+  assert.deepEqual(parseGradesHtml(blocked), [])
+})
+
+
+test('snapshot uploads with blocked or partial grades preserve the previous complete grade book', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-partial-'))
+  const runtime = createSchulnetzRuntime({ root, key: randomBytes(32), autostart: false })
+  try {
+    const guest = await runtime.createGuest('203.0.113.33')
+    await runtime.linkAccount(guest.accountId, { baseUrl: 'https://www.schulnetz-ag.ch/aksa', deviceId: '0123456789abcdef01234567', refreshToken: 'synthetic-refresh-token-long-enough' })
+    const html = await readFile(new URL('../android/core/src/test/resources/schulnetz/noten-multi-course.html', import.meta.url), 'utf8')
+    const grades = parseGradesHtml(html)
+    const send = (body) => guestCall(runtime, guest, 'PUT', '/api/v1/schulnetz/snapshot', JSON.stringify(body))
+    assert.equal((await send({ grades })).status, 200)
+    for (const partial of [
+      { grades: grades.slice(0, 7), gradesReadComplete: false },
+      { grades: grades.slice(0, 7), readErrors: ['Inaktivitätslimit überschritten'] },
+      { grades: grades.slice(0, 7), readErrors: ['Schulnetz hat die IP-Adresse abgelehnt'] },
+      { grades: grades.slice(0, 7), readErrors: ['Bei Schulnetz neu anmelden'] },
+      { grades: grades.slice(0, 7).map((grade) => ({ ...grade, course: 'Fach Kurs', courseId: 'Fach Kurs', subject: 'Fach Kurs' })) },
+    ]) {
+      assert.equal((await send(partial)).status, 200)
+      const stored = JSON.parse(await readFile(join(root, 'accounts', guest.accountId, 'snapshot.json'), 'utf8'))
+      assert.deepEqual(stored.grades, grades)
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+
+test('a nonempty parse with an unowned exam is incomplete, not a replacement grade book', async () => {
+  const html = await readFile(new URL('../android/core/src/test/resources/schulnetz/noten-multi-course.html', import.meta.url), 'utf8')
+  const partial = html.replace('</main>', '<table><tr><td>07.11.2026</td><td>Unowned exercise</td><td>4.5</td><td>1</td></tr></table></main>')
+  assert.deepEqual(parseGradesHtml(partial), [])
+  const previous = parseGradesHtml(html)
+  assert.deepEqual(keepLoadedGrades(previous, parseGradesHtml(partial)), previous)
 })

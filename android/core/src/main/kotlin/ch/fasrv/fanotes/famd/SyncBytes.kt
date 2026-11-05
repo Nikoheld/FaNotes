@@ -1,11 +1,37 @@
 package ch.fasrv.fanotes.famd
 
 import ch.fasrv.fanotes.json.JsonValue
-import ch.fasrv.fanotes.json.deepCopy
+import ch.fasrv.fanotes.json.JsonLimits
+import ch.fasrv.fanotes.json.JsonLimitException
+import ch.fasrv.fanotes.json.JsonShape
+import ch.fasrv.fanotes.json.shape
 import ch.fasrv.fanotes.json.jsonString
 
 /** What a file is allowed to do on the next sync upload. */
 enum class NoteSyncKind { PRESENT, BLANK, UNREADABLE }
+
+/** Packed documents stay packed. Legacy JSON is bounded before building its DOM. */
+const val MAX_SYNC_DOCUMENT_BYTES = 16 * 1024 * 1024
+private val SYNC_JSON_LIMITS = JsonLimits(maxDepth = 64, maxNodes = 100_000)
+class SyncDocumentLimitException : IllegalStateException("Sync document exceeds the safe memory budget; local and remote copies were kept.")
+
+fun requireSyncDocumentBudget(path: String, bytes: Long) {
+    if (!isFamdSyncPath(path)) return
+    val runtime = Runtime.getRuntime()
+    if (bytes > MAX_SYNC_DOCUMENT_BYTES || bytes < 0) throw SyncDocumentLimitException()
+    fun available() = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory())
+    if (bytes * 8 > available()) {
+        // Previous sequential transforms may be collectible. One collection avoids a false pause;
+        // this runs on the sync worker, and genuinely low memory still fails before allocation.
+        runtime.gc()
+        if (bytes * 8 > available()) throw SyncDocumentLimitException()
+    }
+}
+
+private fun storedDocument(path: String, bytes: ByteArray, text: String? = null): FamdDocument {
+    requireSyncDocumentBudget(path, bytes.size.toLong())
+    return parseFamd(text ?: bytes.toString(Charsets.UTF_8), unpackPoints = false, limits = SYNC_JSON_LIMITS)
+}
 
 private const val IDENTITY_STAMP = "1970-01-01T00:00:00.000Z"
 
@@ -17,9 +43,14 @@ fun isFamdSyncPath(path: String): Boolean {
 fun noteSyncKind(path: String, bytes: ByteArray): NoteSyncKind {
     if (bytes.isEmpty()) return NoteSyncKind.BLANK
     if (!isFamdSyncPath(path)) return NoteSyncKind.PRESENT
+    requireSyncDocumentBudget(path, bytes.size.toLong())
     val text = bytes.toString(Charsets.UTF_8)
     val parsed = try {
-        parseFamd(text)
+        storedDocument(path, bytes, text)
+    } catch (error: JsonLimitException) {
+        throw error
+    } catch (error: SyncDocumentLimitException) {
+        throw error
     } catch (_: Exception) {
         return NoteSyncKind.UNREADABLE
     }
@@ -30,31 +61,48 @@ fun noteSyncKind(path: String, bytes: ByteArray): NoteSyncKind {
 }
 
 /** Bytes compared for "did this note change": page statistics and timestamps are ignored. */
-fun identitySyncBytes(path: String, bytes: ByteArray): ByteArray? {
-    if (noteSyncKind(path, bytes) == NoteSyncKind.UNREADABLE) return null
+fun identitySyncBytes(path: String, bytes: ByteArray, onShape: (JsonShape) -> Unit = {}): ByteArray? {
     if (!isFamdSyncPath(path)) return bytes
+    requireSyncDocumentBudget(path, bytes.size.toLong())
     val text = bytes.toString(Charsets.UTF_8)
-    val parsed = parseFamd(text)
+    val parsed = try {
+        storedDocument(path, bytes, text)
+    } catch (error: JsonLimitException) {
+        throw error
+    } catch (error: SyncDocumentLimitException) {
+        throw error
+    } catch (_: Exception) {
+        return null
+    }
+    if ((text.contains("fanotes-famd:v1") || text.contains("fanotes-famd:v2")) && parsed.payload == null) return null
     val payload = parsed.payload ?: return canonicalSyncBytes(path, bytes)
-    val copy = payload.deepCopy() as JsonValue.Obj
+    onShape(payload.shape(SYNC_JSON_LIMITS))
+    val copy = JsonValue.Obj(LinkedHashMap(payload.fields))
     copy.put("pageStats", null)
     copy.put("updatedAt", jsonString(IDENTITY_STAMP))
-    copy.obj("ink")?.put("updatedAt", jsonString(IDENTITY_STAMP))
+    payload.obj("ink")?.let { ink ->
+        copy.put("ink", JsonValue.Obj(LinkedHashMap(ink.fields)).put("updatedAt", jsonString(IDENTITY_STAMP)))
+    }
     return serializeFamd(parsed.markdown, copy, famdEncodingForSave(text)).toByteArray(Charsets.UTF_8)
 }
 
 /** The bytes actually uploaded. Page statistics stay on the device. */
 fun canonicalSyncBytes(path: String, bytes: ByteArray): ByteArray {
     if (!isFamdSyncPath(path)) return bytes
+    requireSyncDocumentBudget(path, bytes.size.toLong())
     val text = bytes.toString(Charsets.UTF_8)
     val parsed = try {
-        parseFamd(text)
+        storedDocument(path, bytes, text)
+    } catch (error: JsonLimitException) {
+        throw error
+    } catch (error: SyncDocumentLimitException) {
+        throw error
     } catch (_: Exception) {
         return bytes
     }
     val payload = parsed.payload ?: return bytes
     if (payload.obj("pageStats") == null) return bytes
-    val copy = payload.deepCopy() as JsonValue.Obj
+    val copy = JsonValue.Obj(LinkedHashMap(payload.fields))
     copy.put("pageStats", null)
     return serializeFamd(parsed.markdown, copy, famdEncodingForSave(text)).toByteArray(Charsets.UTF_8)
 }
@@ -62,18 +110,26 @@ fun canonicalSyncBytes(path: String, bytes: ByteArray): ByteArray {
 fun withLocalPageStats(downloaded: ByteArray, local: ByteArray, path: String): ByteArray {
     if (!isFamdSyncPath(path)) return downloaded
     val stats = try {
-        parseFamd(local.toString(Charsets.UTF_8)).payload?.obj("pageStats")
+        storedDocument(path, local).payload?.obj("pageStats")
+    } catch (error: JsonLimitException) {
+        throw error
+    } catch (error: SyncDocumentLimitException) {
+        throw error
     } catch (_: Exception) {
         null
     } ?: return downloaded
     val remote = try {
-        parseFamd(downloaded.toString(Charsets.UTF_8))
+        storedDocument(path, downloaded)
+    } catch (error: JsonLimitException) {
+        throw error
+    } catch (error: SyncDocumentLimitException) {
+        throw error
     } catch (_: Exception) {
         return downloaded
     }
     val payload = remote.payload ?: return downloaded
-    val copy = payload.deepCopy() as JsonValue.Obj
-    copy.put("pageStats", stats.deepCopy())
+    val copy = JsonValue.Obj(LinkedHashMap(payload.fields))
+    copy.put("pageStats", stats)
     return serializeFamd(remote.markdown, copy, famdEncodingForSave(downloaded.toString(Charsets.UTF_8))).toByteArray(Charsets.UTF_8)
 }
 

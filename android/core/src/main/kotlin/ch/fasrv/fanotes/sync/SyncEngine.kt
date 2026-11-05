@@ -1,6 +1,9 @@
 package ch.fasrv.fanotes.sync
 
 import ch.fasrv.fanotes.famd.NoteSyncKind
+import ch.fasrv.fanotes.famd.SyncDocumentLimitException
+import ch.fasrv.fanotes.famd.requireSyncDocumentBudget
+import ch.fasrv.fanotes.json.JsonLimitException
 import ch.fasrv.fanotes.famd.canonicalSyncBytes
 import ch.fasrv.fanotes.famd.identitySyncBytes
 import ch.fasrv.fanotes.famd.isoNow
@@ -129,6 +132,8 @@ class SyncEngineOptions(
     val onApplied: (written: List<String>, removed: List<String>) -> Unit = { _, _ -> },
     val onConflict: (SyncConflict) -> Unit = {},
     val onSignedOut: (String) -> Unit = {},
+    /** Fixed numeric/enum diagnostics only: never paths, metadata, or document contents. */
+    val onDiagnostic: (String) -> Unit = {},
     val now: () -> Long = { System.currentTimeMillis() },
 )
 
@@ -171,6 +176,9 @@ class SyncEngine(
     private val api: SyncApi,
     private val options: SyncEngineOptions = SyncEngineOptions(),
 ) : AutoCloseable {
+    private var memoryPaused = false
+    private var emergencyReserve: ByteArray? = ByteArray(256 * 1024)
+    private val memoryBudgetFailure = SyncDocumentLimitException()
     private val dispatcher: ExecutorCoroutineDispatcher = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "fanotes-sync").apply { isDaemon = true }
     }.asCoroutineDispatcher()
@@ -235,7 +243,7 @@ class SyncEngine(
     }
 
     fun notifyLocalChange() {
-        if (session == null || !options.automatic()) return
+        if (memoryPaused || session == null || !options.automatic()) return
         debounce?.cancel()
         debounce = scope.launch {
             delay(LOCAL_DEBOUNCE_MS)
@@ -376,6 +384,11 @@ class SyncEngine(
     }
 
     private suspend fun syncNowOnEngine(reason: String) {
+        if (memoryPaused) {
+            if (reason != "manual" && reason != "phone") return
+            memoryPaused = false
+            if (emergencyReserve == null) emergencyReserve = ByteArray(256 * 1024)
+        }
         if (session == null || host == null) {
             publish(state.value.copy(status = SyncStatus.SIGNED_OUT, error = "Nicht angemeldet."))
             return
@@ -409,7 +422,14 @@ class SyncEngine(
                 log("info", "Sync finished (${pushed.uploads} uploaded, ${pushed.deletes} deleted${if (conflicts > 0) ", $conflicts conflict(s)" else ""}).")
             }
             schedule(AUTO_INTERVAL_MS)
+        } catch (_: OutOfMemoryError) {
+            memoryFailure()
         } catch (error: Exception) {
+            if (error is SyncDocumentLimitException || error is JsonLimitException) {
+                memoryFailure()
+                diagnostic("sync memoryBudget rejected deepCopyDepth=0")
+                return
+            }
             try {
                 persistState()
             } catch (_: Exception) {
@@ -425,6 +445,17 @@ class SyncEngine(
             log(if (offline) "warn" else "error", message)
             schedule(if (offline) OFFLINE_RETRY_MS else AUTO_INTERVAL_MS)
         }
+    }
+
+    private fun memoryFailure() {
+        emergencyReserve = null
+        memoryPaused = true
+        queued = false
+        timer?.cancel()
+        debounce?.cancel()
+        // Do not serialize state or automatically retry while the heap is exhausted.
+        publish(state.value.copy(status = SyncStatus.PAUSED, progress = null,
+            error = "Sync paused because memory is low. Local and remote copies were kept. Retry manually."))
     }
 
     private suspend fun pull(): Int {
@@ -475,6 +506,25 @@ class SyncEngine(
         currentHost: SyncHost,
         active: SyncSession,
         table: EngineState,
+    ): ApplyResult = try {
+        applyRemoteDocument(entry, idIndex, syncKeys, currentHost, active, table)
+    } catch (_: OutOfMemoryError) {
+        // Unwind document/crypto allocations before the cycle publishes its fixed failure state.
+        emergencyReserve = null
+        diagnostic("sync applyRemote rejected reason=oom deepCopyDepth=0")
+        throw memoryBudgetFailure
+    } catch (error: JsonLimitException) {
+        diagnostic("sync applyRemote rejected depth=${error.depth} nodes=${error.nodes} deepCopyDepth=0")
+        throw error
+    }
+
+    private suspend fun applyRemoteDocument(
+        entry: SyncRemoteEntry,
+        idIndex: MutableMap<String, String>,
+        syncKeys: SyncKeys,
+        currentHost: SyncHost,
+        active: SyncSession,
+        table: EngineState,
     ): ApplyResult {
         val knownPath = idIndex[entry.id]
         if (entry.deleted) {
@@ -508,6 +558,8 @@ class SyncEngine(
         }
         val path = meta.path
         if (!acceptsPath(path)) return ApplyResult("skipped", null)
+        diagnostic("sync applyRemote declaredBytes=${meta.size} deepCopyDepth=0")
+        requireSyncDocumentBudget(path, meta.size)
         val base = table.files[path]
         if (base != null && base.id == entry.id && entry.revision <= base.revision) return ApplyResult("noop", path)
         if (options.isPathBusy(path)) return ApplyResult("deferred", path)
@@ -535,25 +587,13 @@ class SyncEngine(
             )
         }
         var result = "written"
-        if (changedLocal != null) {
-            val at = java.time.Instant.ofEpochMilli(options.now())
-            val copyPath = conflictCopyPath(path, deviceInfo().first, at)
-            currentHost.write(copyPath, changedLocal.bytes, at.toEpochMilli())
-            val conflict = SyncConflict(path, copyPath, isoNow(at.toEpochMilli()))
-            table.conflicts.add(conflict)
-            if (table.conflicts.size > 50) table.conflicts.removeAt(0)
-            log("warn", "Conflict in “$path”. The local copy is now “$copyPath”.")
-            options.onConflict(conflict)
-            publish(state.value.copy(conflicts = table.conflicts.toList()))
-            result = "conflict"
-        }
         when (val download = api.download(active, entry.id)) {
             is DownloadResult.Deleted -> return ApplyResult("noop", path)
             is DownloadResult.Blob -> {
                 if (sha256Hex(download.bytes) != download.sha256) throw IllegalStateException("“$path” arrived damaged.")
                 val plain = decryptBytes(syncKeys, entry.id, download.bytes)
                 if (sha256Hex(plain) != meta.sha256) throw IllegalStateException("The checksum of “$path” does not match.")
-                val plainIdentity = identitySyncBytes(path, plain)?.let { sha256Hex(it) }.orEmpty()
+                val plainIdentity = remoteIdentity(path, plain, "download")
                 val localIdentity = local?.identity.orEmpty()
                 if (local != null && local.kind != NoteSyncKind.UNREADABLE && plainIdentity.isNotEmpty() && plainIdentity == localIdentity) {
                     val stat = currentHost.scan().firstOrNull { it.path == path }
@@ -562,7 +602,12 @@ class SyncEngine(
                     return ApplyResult("noop", path)
                 }
                 val remoteKind = noteSyncKind(path, plain)
-                if (local != null && remoteKind == NoteSyncKind.BLANK && local.kind != NoteSyncKind.BLANK && changedLocal == null) {
+                if (remoteKind == NoteSyncKind.UNREADABLE) throw IllegalStateException("Remote note could not be validated; the local copy was kept.")
+                val body = if (local != null && isFamdSyncPath(path)) withLocalPageStats(plain, local.bytes, path) else plain
+                // Finish all fallible document transforms before replacing the last good file.
+                val storedIdentity = if (body === plain) plainIdentity else remoteIdentity(path, body, "stored")
+                val storedKind = if (body === plain) remoteKind else noteSyncKind(path, body)
+                if (local != null && (changedLocal != null || (remoteKind == NoteSyncKind.BLANK && local.kind != NoteSyncKind.BLANK))) {
                     val at = java.time.Instant.ofEpochMilli(options.now())
                     val copyPath = conflictCopyPath(path, deviceInfo().first, at)
                     currentHost.write(copyPath, local.bytes, at.toEpochMilli())
@@ -574,14 +619,29 @@ class SyncEngine(
                     publish(state.value.copy(conflicts = table.conflicts.toList()))
                     result = "conflict"
                 }
-                val body = if (local != null && isFamdSyncPath(path)) withLocalPageStats(plain, local.bytes, path) else plain
                 val stat = currentHost.write(path, body, meta.mtimeMs.takeIf { it > 0 } ?: options.now())
-                val storedIdentity = identitySyncBytes(path, body)?.let { sha256Hex(it) }.orEmpty()
-                table.files[path] = LocalBase(entry.id, download.revision, meta.sha256, stat.size, stat.mtimeMs, storedIdentity, noteSyncKind(path, body) == NoteSyncKind.BLANK)
+                table.files[path] = LocalBase(entry.id, download.revision, meta.sha256, stat.size, stat.mtimeMs, storedIdentity, storedKind == NoteSyncKind.BLANK)
                 idIndex[entry.id] = path
                 return ApplyResult(result, path)
             }
         }
+    }
+
+    private fun diagnostic(message: String) {
+        try {
+            options.onDiagnostic(message)
+        } catch (_: OutOfMemoryError) {
+            emergencyReserve = null
+        } catch (_: Exception) {
+            // Diagnostics must not affect stored data or sync state.
+        }
+    }
+
+    private fun remoteIdentity(path: String, bytes: ByteArray, phase: String): String {
+        diagnostic("sync applyRemote phase=$phase bytes=${bytes.size} deepCopyDepth=0")
+        return identitySyncBytes(path, bytes) { shape ->
+            diagnostic("sync applyRemote phase=$phase bytes=${bytes.size} depth=${shape.depth} nodes=${shape.nodes} deepCopyDepth=0")
+        }?.let { sha256Hex(it) }.orEmpty()
     }
 
     private suspend fun push(): PushResult {
@@ -633,6 +693,7 @@ class SyncEngine(
     private data class PushResult(val uploads: Int, val deletes: Int, val conflicts: Int)
 
     private suspend fun uploadPath(entry: SyncScanEntry, table: EngineState, syncKeys: SyncKeys, active: SyncSession, currentHost: SyncHost): String {
+        requireSyncDocumentBudget(entry.path, entry.size)
         val raw = try {
             currentHost.read(entry.path)
         } catch (_: Exception) {
@@ -732,6 +793,9 @@ class SyncEngine(
     }
 
     private suspend fun localSnapshot(path: String, currentHost: SyncHost): Snapshot? = try {
+        if (isFamdSyncPath(path)) currentHost.scan().firstOrNull { it.path == path }?.let {
+            requireSyncDocumentBudget(path, it.size)
+        }
         val bytes = currentHost.read(path)
         val kind = noteSyncKind(path, bytes)
         if (kind == NoteSyncKind.UNREADABLE) {
@@ -747,6 +811,10 @@ class SyncEngine(
                 if (identityBytes == null) NoteSyncKind.UNREADABLE else kind,
             )
         }
+    } catch (error: JsonLimitException) {
+        throw error
+    } catch (error: SyncDocumentLimitException) {
+        throw error
     } catch (_: Exception) {
         null
     }
@@ -813,6 +881,7 @@ class SyncEngine(
     }
 
     private fun schedule(delay: Long) {
+        if (memoryPaused) return
         if (disposed || session == null) return
         timer?.cancel()
         timer = scope.launch {
