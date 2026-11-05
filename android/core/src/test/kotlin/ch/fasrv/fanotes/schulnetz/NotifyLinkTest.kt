@@ -74,6 +74,20 @@ class NotifyLinkTest {
         assertEquals("Plan", missingLesson.tab)
         assertEquals("2026-11-03", missingLesson.day)
         assertTrue(missingLesson.hint.contains("Lektion"))
+        val replaced = lesson.copy(id = "neu", text = "Mathematik Holm", courseName = "Mathematik Holm", timetableText = "Mathematik Holm")
+        val opened = routeNotify(
+            NotifyLink("timetable", listOf("gone"), "math", "2026-11-02", "Mathematik · 08:15–09:00 · Raum R201"),
+            snapshot.copy(events = listOf(replaced)),
+        )
+        assertTrue(opened.found)
+        assertEquals("", opened.hint)
+        assertEquals(listOf(lessonTargetId(replaced)), opened.highlightIds)
+        val wrongRoom = routeNotify(
+            NotifyLink("timetable", listOf("gone"), "math", "2026-11-02", "Mathematik · 08:15–09:00 · Raum Z9"),
+            snapshot.copy(events = listOf(replaced)),
+        )
+        assertFalse(wrongRoom.found)
+        assertTrue(wrongRoom.hint.contains("Lektion"))
         val examRoute = routeNotify(NotifyLink("exam", listOf(lessonTargetId(exam))), snapshot)
         assertEquals("Pruefungen", examRoute.section)
         assertTrue(examRoute.found)

@@ -162,17 +162,21 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
       const lessonUrl = schedulerFetchUrl({ root, pageId: '22202', ansicht: 'schueleransicht', id: session.id, transid, today: curr, min: monday, max, extra: '' })
       const lessonBody = await get(lessonUrl)
       if (schedulerWeekLoaded(lessonBody)) {
-        lessonWeeks[monday] = parseSchedulerXml(lessonBody)
-        weekFetched[monday] = nowIso
+        const parsed = parseSchedulerXml(lessonBody)
+        if (parsed.length) {
+          lessonWeeks[monday] = parsed
+          weekFetched[monday] = nowIso
+        }
       }
       if (pages.problem) break
       const examUrl = schedulerFetchUrl({ root, pageId: '21312', ansicht: 'klassenuebersicht', id: session.id, transid, today: curr, min: monday, max, extra: 'showOnlyThisClass=-1' })
       const examBody = await get(examUrl)
       if (schedulerWeekLoaded(examBody)) {
-        examWeeks[monday] = parseSchedulerXml(examBody).map((event) => ({
+        const parsed = parseSchedulerXml(examBody).map((event) => ({
           ...event,
           eventType: event.eventType && event.eventType !== 'lesson' ? event.eventType : 'exam',
         }))
+        if (parsed.length) examWeeks[monday] = parsed
       }
     }
     const lessonEvents = Object.values(lessonWeeks).flat()

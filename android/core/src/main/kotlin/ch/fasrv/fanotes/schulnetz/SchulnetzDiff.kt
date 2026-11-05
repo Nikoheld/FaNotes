@@ -129,17 +129,20 @@ private fun diffAgenda(
             null
         }
         if (old == null && adopted != null && !schoolEventMoved(adopted, event)) continue
+        val slotTwin = if (old == null && category == "timetable") previous.firstOrNull { sameLessonSlot(event, it) } else null
+        val prior = old ?: slotTwin
+        if (prior != null && category == "timetable" && !lessonContentChanged(prior, event)) continue
         val key = eventKey(event)
         if (old != null && eventKey(old) == key) continue
         val title = when {
-            old == null && adopted != null -> "Prüfung verschoben"
-            old == null -> if (category == "exam") "Neue Prüfung" else created
-            event.isCancelled() && !old.isCancelled() -> if (category == "exam") "Prüfung fällt aus" else "Lektion fällt aus"
-            event.teachers.joinToString() != old.teachers.joinToString() || (event.isSubstitution() && !old.isSubstitution()) -> "Vertretung"
-            category == "exam" && (event.start != old.start || event.room != old.room) -> "Prüfung verschoben"
-            event.room != old.room && (event.start != old.start || event.end != old.end) -> if (category == "exam") "Prüfung geändert" else "Stundenplan geändert"
-            event.room != old.room -> "Raum geändert"
-            event.start != old.start || event.end != old.end -> "Zeit geändert"
+            prior == null && adopted != null -> "Prüfung verschoben"
+            prior == null -> if (category == "exam") "Neue Prüfung" else created
+            event.isCancelled() && !prior.isCancelled() -> if (category == "exam") "Prüfung fällt aus" else "Lektion fällt aus"
+            event.teachers.joinToString() != prior.teachers.joinToString() || (event.isSubstitution() && !prior.isSubstitution()) -> "Vertretung"
+            category == "exam" && (event.start != prior.start || event.room != prior.room) -> "Prüfung verschoben"
+            event.room != prior.room && (event.start != prior.start || event.end != prior.end) -> if (category == "exam") "Prüfung geändert" else "Stundenplan geändert"
+            event.room != prior.room -> "Raum geändert"
+            event.start != prior.start || event.end != prior.end -> "Zeit geändert"
             else -> if (category == "exam") "Prüfung geändert" else "Stundenplan geändert"
         }
         val body = eventBody(event)
@@ -158,6 +161,7 @@ private fun diffAgenda(
         if (after[event.id] != null) continue
         if (weekMondayKey(event.start) in skipWeeks) continue
         if (spareAgainst.any { sameSchoolSlot(event, it) }) continue
+        if (category == "timetable" && next.any { sameLessonSlot(event, it) }) continue
         val body = eventBody(event)
         if (body.isBlank()) continue
         changes += linkedChange(
@@ -198,6 +202,47 @@ private fun eventBody(event: AgendaEvent): String {
     return (listOf(name, time, room) + flags + listOf(cleanSchulnetzText(event.comment)))
         .filter { it.isNotBlank() }
         .joinToString(" · ")
+}
+
+/**
+ * Same lesson after an id or parser change. Course, clock, and room identify it.
+ * A blank room on one side still matches, so a field the parser dropped is not a removal.
+ */
+internal fun sameLessonSlot(left: AgendaEvent, right: AgendaEvent): Boolean {
+    val leftDay = eventDayKey(left.start)
+    val rightDay = eventDayKey(right.start)
+    if (leftDay.isBlank() || leftDay != rightDay) return false
+    if (!sameCourse(left, right)) return false
+    val leftClock = realClock(left.start)
+    val rightClock = realClock(right.start)
+    if (leftClock.isBlank() || rightClock.isBlank() || leftClock != rightClock) return false
+    val leftRoom = cleanSchulnetzText(left.room)
+    val rightRoom = cleanSchulnetzText(right.room)
+    return leftRoom.isBlank() || rightRoom.isBlank() || leftRoom.equals(rightRoom, ignoreCase = true)
+}
+
+private fun lessonContentChanged(previous: AgendaEvent, next: AgendaEvent): Boolean {
+    if (schoolEventMoved(previous, next)) return true
+    if (next.isCancelled() != previous.isCancelled()) return true
+    val beforeTeachers = previous.teachers.map { cleanSchulnetzText(it) }.filter { it.isNotBlank() }
+    val afterTeachers = next.teachers.map { cleanSchulnetzText(it) }.filter { it.isNotBlank() }
+    if (beforeTeachers.isNotEmpty() && afterTeachers.isNotEmpty() && beforeTeachers.joinToString() != afterTeachers.joinToString()) return true
+    return next.isSubstitution() != previous.isSubstitution()
+}
+
+private fun sameCourse(left: AgendaEvent, right: AgendaEvent): Boolean {
+    val rightKeys = courseKeys(right)
+    if (rightKeys.isEmpty()) return false
+    return courseKeys(left).any { it in rightKeys }
+}
+
+private fun courseKeys(event: AgendaEvent): Set<String> {
+    val texts = listOf(event.courseName, event.text, event.timetableText, event.courseId)
+        .map { cleanSchulnetzText(it).lowercase() }
+        .filter { it.isNotBlank() }
+    return texts.flatMap { text ->
+        listOf(text, text.substringBefore(' ').trim(), text.substringBefore('(').trim())
+    }.filter { it.length >= 2 }.toSet()
 }
 
 /** Same subject on the same day. A missing clock still matches, so a stored lesson can be the same test. */

@@ -307,11 +307,11 @@ fun canonicalEventType(raw: String): String {
 
 fun AgendaEvent.isExamLike(): Boolean = examMarker(eventType) || examLead(text) || examLead(timetableText)
 
-/** Blank event types on the agenda endpoint are ordinary lessons. */
+/** Blank event types on the agenda endpoint are ordinary lessons. `0_stp` is the scheduler's Stundenplan row. */
 fun AgendaEvent.isLesson(): Boolean {
     if (isExamLike()) return false
     val kind = cleanSchulnetzText(eventType).lowercase()
-    if (kind.isBlank()) return true
+    if (kind.isBlank() || kind == "0_stp") return true
     return kind.contains("lesson") || kind.contains("unterricht") || kind.contains("timetable") || kind == "period" || kind == "stunde"
 }
 

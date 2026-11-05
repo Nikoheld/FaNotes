@@ -38,11 +38,13 @@ import ch.fasrv.fanotes.schulnetz.redactSchulnetzSecrets
 import ch.fasrv.fanotes.schulnetz.sessionIdsFromPage
 import ch.fasrv.fanotes.schulnetz.startPageUrl
 import ch.fasrv.fanotes.schulnetz.isExamLike
+import ch.fasrv.fanotes.schulnetz.isLesson
 import ch.fasrv.fanotes.schulnetz.parseIcs
 import ch.fasrv.fanotes.schulnetz.parseSchedulerNote
 import ch.fasrv.fanotes.schulnetz.parseRenderedTimetable
 import ch.fasrv.fanotes.schulnetz.parseStartAppointments
 import ch.fasrv.fanotes.schulnetz.parseStartRecentGrades
+import ch.fasrv.fanotes.schulnetz.parseTerminliste
 import ch.fasrv.fanotes.schulnetz.parseTimetableHtml
 import ch.fasrv.fanotes.schulnetz.parseKontoauszug
 import ch.fasrv.fanotes.schulnetz.parseSchedulerXml
@@ -283,13 +285,21 @@ class SchulnetzClient(
         val exams = readExamsPage(pages["21312"].orEmpty())
         val terminePages = mutableListOf(pages["22108"].orEmpty())
         if (oauthPage == null && !sawSessionProblem) {
-            var next = terminlisteNextUrl(pages["22108"].orEmpty(), root)
+            val seenTermine = parseTerminliste(pages["22108"].orEmpty()).map { it.id }.toMutableSet()
+            var currentRow = 0
+            var next = terminlisteNextUrl(pages["22108"].orEmpty(), root, currentRow)
             var guard = 0
             while (!next.isNullOrBlank() && guard < 8) {
+                val row = Regex("""sRow=(\d+)""").find(next)?.groupValues?.get(1)?.toIntOrNull() ?: break
+                if (row <= currentRow) break
                 val body = get(next, "termine", "22108")
                 if (body.isBlank()) break
+                val ids = parseTerminliste(body).map { it.id }
+                if (ids.isEmpty() || ids.all { it in seenTermine }) break
+                seenTermine += ids
                 terminePages += body
-                next = terminlisteNextUrl(body, root)
+                currentRow = row
+                next = terminlisteNextUrl(body, root, currentRow)
                 guard += 1
             }
         }
@@ -325,14 +335,18 @@ class SchulnetzClient(
                 val max = monday.plusDays(7)
                 val curr = if (monday == weekMonday(today)) today.toString() else monday.toString()
                 val lessonBody = get(schedulerUrl(root, id, transid, curr, monday.toString(), max.toString()), "scheduler", "scheduler")
-                if (schedulerWeekLoaded(lessonBody)) lessonWeeks[monday] = parseSchedulerXml(lessonBody)
+                val lessonParsed = if (schedulerWeekLoaded(lessonBody)) parseSchedulerXml(lessonBody) else emptyList()
+                if (lessonParsed.isNotEmpty()) lessonWeeks[monday] = lessonParsed
                 if (oauthPage != null || sawSessionProblem) break
                 val examBody = get(examSchedulerUrl(root, id, transid, curr, monday.toString(), max.toString()), "pruefungen-xml", "21312")
-                if (schedulerWeekLoaded(examBody)) {
-                    examWeeks[monday] = parseSchedulerXml(examBody).map { event ->
+                val examParsed = if (schedulerWeekLoaded(examBody)) {
+                    parseSchedulerXml(examBody).map { event ->
                         event.copy(eventType = if (event.eventType.isBlank() || event.eventType == "lesson") "exam" else event.eventType)
                     }
+                } else {
+                    emptyList()
                 }
+                if (examParsed.isNotEmpty()) examWeeks[monday] = examParsed
             }
         }
         val currentMonday = weekMonday(today)
@@ -366,24 +380,31 @@ class SchulnetzClient(
             }
         }
         if (termine.value.isNotEmpty()) events = mergeById(events, termine.value)
-        val examEvents = mergeById(
+        var examEvents = mergeById(
             mergeById(
                 overlayDated(previous?.exams.orEmpty(), examWeeks.values.flatten(), examWeeks.keys.map { it.toString() }.toSet()),
                 lessonWeeks.values.flatten().filter { it.isExamLike() },
             ),
             icalExams,
         )
+        var messages = startMessages(pages["1"].orEmpty(), previous, sawSessionProblem)
+        if (sawSessionProblem) {
+            if (events.isEmpty()) events = previous?.events.orEmpty()
+            else if (events.none { it.isLesson() }) events = previous?.events.orEmpty().filter { it.isLesson() } + events
+            if (examEvents.isEmpty()) examEvents = previous?.exams.orEmpty()
+            if (messages.isEmpty()) messages = previous?.messages.orEmpty()
+        }
         if (events.isEmpty() && planHtml.length > 1000 && !planHtml.contains("dhx_cal_container")) {
             errors += "Stundenplan: Seite geladen, aber nicht lesbar"
         }
-        trace("parsed grades=${grades.value.size} absences=${absences.value.size} exams=${exams.value.size} events=${events.size} termine=${termine.value.size} weeks=${refreshedLessons.size} okPages=$okPages oauth=${oauthPage.orEmpty()} errors=${errors.size}")
+        trace("parsed grades=${grades.value.size} absences=${absences.value.size} exams=${examEvents.size} events=${events.size} termine=${termine.value.size} weeks=${refreshedLessons.size} okPages=$okPages oauth=${oauthPage.orEmpty()} errors=${errors.size}")
         val snapshot = SchulnetzSnapshot(
             fetchedAt = fetchedNow,
             grades = grades.value,
             events = events,
             exams = examEvents,
             absences = absences.value,
-            messages = startMessages(pages["1"].orEmpty(), previous),
+            messages = messages,
             konto = parseKontoauszug(pages["21411"].orEmpty()),
             startMessages = parseStartMessages(pages["1"].orEmpty()),
             readErrors = errors,
@@ -404,13 +425,14 @@ class SchulnetzClient(
         return WebBundle(reported, problem, debug, WebSession(root, "", id, transid), okPages, oauthPage, captured)
     }
 
-    private fun startMessages(startHtml: String, previous: SchulnetzSnapshot?): List<ch.fasrv.fanotes.schulnetz.SchoolMessage> {
+    private fun startMessages(startHtml: String, previous: SchulnetzSnapshot?, failed: Boolean = false): List<ch.fasrv.fanotes.schulnetz.SchoolMessage> {
         val notes = parseStartMessages(startHtml).mapIndexed { index, text ->
             ch.fasrv.fanotes.schulnetz.SchoolMessage("start-$index", "Mitteilung", text, "")
         }
         val appointments = parseStartAppointments(startHtml).map {
             ch.fasrv.fanotes.schulnetz.SchoolMessage(it.id, "Termin", it.text, it.start)
         }
+        if (failed && notes.isEmpty() && appointments.isEmpty()) return previous?.messages.orEmpty()
         val keptAppointments = if (appointments.isNotEmpty()) appointments else previous?.messages.orEmpty().filter { it.title == "Termin" }
         return notes + keptAppointments
     }

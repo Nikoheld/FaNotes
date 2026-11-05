@@ -6,8 +6,6 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import java.time.Instant
 import java.time.ZoneId
-import org.w3c.dom.Element as XmlElement
-import javax.xml.parsers.DocumentBuilderFactory
 
 private val COURSE_TOKEN = Regex("""^[A-Za-zÄÖÜäöü0-9 ()]+-[A-Za-z0-9]+-[A-Za-zÄÖÜäöü0-9]+""")
 private val DATE = Regex("""\d{2}\.\d{2}\.\d{4}""")
@@ -504,46 +502,39 @@ fun parseSchedulerNote(note: String): Pair<String, List<AgendaEvent>> {
 
 fun parseSchedulerXml(xml: String): List<AgendaEvent> {
     if (xml.isBlank() || !xml.contains("<event")) return emptyList()
-    return try {
-        val factory = DocumentBuilderFactory.newInstance()
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-        factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
-        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-        val root = factory.newDocumentBuilder().parse(xml.byteInputStream()).documentElement
-        val nodes = root.getElementsByTagName("event")
-        buildList {
-            for (index in 0 until nodes.length) {
-                val event = nodes.item(index) as? XmlElement ?: continue
-                val start = childText(event, "start_date")
-                if (start.isBlank()) continue
-                val text = childText(event, "text")
-                val course = childText(event, "kurskuerzel").ifBlank { childText(event, "fachkuerzel") }
-                val room = childText(event, "zimmerkuerzel").ifBlank { childText(event, "zimmer") }
-                val teacher = childText(event, "lehrerkuerzelname")
-                val comment = childText(event, "kommentar")
-                val kind = childText(event, "event_type")
-                add(
-                    AgendaEvent(
-                        id = event.getAttribute("id").ifBlank { stableId("sched", start, text, course) },
-                        start = schedulerTime(start),
-                        end = schedulerTime(childText(event, "end_date").ifBlank { start }),
-                        text = text,
-                        comment = comment,
-                        room = room,
-                        teachers = listOf(teacher).filter { it.isNotBlank() },
-                        courseId = childText(event, "kursid"),
-                        courseName = course.ifBlank { text },
-                        status = if (comment.lowercase().contains("fällt") || comment.lowercase().contains("faellt")) "cancelled" else "",
-                        eventType = canonicalEventType(kind),
-                        color = childText(event, "color"),
-                        timetableText = text,
-                    ),
-                )
-            }
+    return Regex("""(?is)<event\b([^>]*)>(.*?)</event>""").findAll(xml).mapNotNull { block ->
+        val attrs = block.groupValues[1]
+        val inner = block.groupValues[2]
+        fun field(name: String): String {
+            val match = Regex("""(?is)<$name\b[^>]*>(.*?)</$name>""").find(inner) ?: return ""
+            return decodeXmlText(cleanSchulnetzText(match.groupValues[1]))
         }
-    } catch (_: Exception) {
-        emptyList()
-    }
+        val start = schedulerStamp(field("start_date"), field("vdatum"), field("vzeit"))
+        if (start.isBlank()) return@mapNotNull null
+        val end = schedulerStamp(field("end_date"), field("bdatum"), field("bzeit")).ifBlank { start }
+        val text = field("text")
+        val course = field("kurskuerzel").ifBlank { field("fachkuerzel") }.ifBlank { text }
+        val room = field("zimmerkuerzel").ifBlank { field("zimmer") }
+        val teacher = field("lehrerkuerzelname")
+        val comment = field("kommentar")
+        val kind = field("event_type")
+        val idAttr = Regex("""\bid\s*=\s*["']([^"']+)["']""").find(attrs)?.groupValues?.get(1).orEmpty()
+        AgendaEvent(
+            id = idAttr.ifBlank { field("identity") }.ifBlank { stableId("sched", start, text, course) },
+            start = schedulerTime(start),
+            end = schedulerTime(end),
+            text = text,
+            comment = comment,
+            room = room,
+            teachers = listOf(teacher).filter { it.isNotBlank() },
+            courseId = field("kursid"),
+            courseName = course.ifBlank { text },
+            status = if (comment.lowercase().contains("fällt") || comment.lowercase().contains("faellt")) "cancelled" else "",
+            eventType = canonicalEventType(kind),
+            color = field("color"),
+            timetableText = text,
+        )
+    }.toList()
 }
 
 fun parseIcs(text: String): List<AgendaEvent> {
@@ -696,16 +687,33 @@ private fun isoDate(swiss: String): String {
     return "${match.groupValues[3]}-${match.groupValues[2]}-${match.groupValues[1]}"
 }
 
+private fun decodeXmlText(raw: String): String = raw
+    .replace("&lt;", "<")
+    .replace("&gt;", ">")
+    .replace("&quot;", "\"")
+    .replace("&apos;", "'")
+    .replace("&amp;", "&")
+
 private fun schedulerTime(raw: String): String {
     val match = Regex("""(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})""").find(raw)
     return if (match == null) raw else "${match.groupValues[1]}T${match.groupValues[2]}:00"
 }
 
-private fun childText(event: XmlElement, name: String): String {
-    val nodes = event.getElementsByTagName(name)
-    if (nodes.length == 0) return ""
-    return nodes.item(0).textContent?.trim().orEmpty()
+/** `start_date` when it carries a day. Prüfungsplan rows often leave it blank and use von/bis instead. */
+private fun schedulerStamp(direct: String, day: String, clock: String): String {
+    val dated = if (hasSchedulerDay(direct)) direct else ""
+    val raw = dated.ifBlank {
+        if (!hasSchedulerDay(day)) "" else if (Regex("""\d{2}:\d{2}""").containsMatchIn(clock)) "$day $clock" else day
+    }
+    if (raw.isBlank()) return ""
+    val swiss = Regex("""(\d{1,2})\.(\d{1,2})\.(\d{4})(?:[ T](\d{2}:\d{2}))?""").find(raw) ?: return raw
+    val date = "${swiss.groupValues[3]}-${swiss.groupValues[2].padStart(2, '0')}-${swiss.groupValues[1].padStart(2, '0')}"
+    val time = swiss.groupValues[4]
+    return if (time.isBlank()) date else "$date $time"
 }
+
+private fun hasSchedulerDay(raw: String): Boolean =
+    Regex("""\d{4}-\d{2}-\d{2}|\d{1,2}\.\d{1,2}\.\d{4}""").containsMatchIn(raw)
 
 private fun icsValue(block: String, name: String): String? =
     Regex("""(?m)^$name(?:;[^:]*)?:(.+)$""").find(block)?.groupValues?.get(1)?.trim()?.replace("\\n", "\n")?.replace("\\,", ",")

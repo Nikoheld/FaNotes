@@ -195,14 +195,14 @@ fun findSchedulerUrl(html: String, baseUrl: String): String? {
     return absolute
 }
 
-/** Next Terminliste page (`sRow`), not a filter, sort, or show-all link. */
-fun terminlisteNextUrl(html: String, baseUrl: String): String? {
+/** Next Terminliste page (`sRow`), not a filter, sort, show-all, or the page just loaded. */
+fun terminlisteNextUrl(html: String, baseUrl: String, currentRow: Int = 0): String? {
     val next = Regex("""href\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE).findAll(html).map { it.groupValues[1].replace("&amp;", "&") }
         .mapNotNull { href ->
             if (!href.contains("pageid=22108") || !href.contains("sRow=")) return@mapNotNull null
             if (href.contains("ff") || href.contains("sort=") || href.contains("action=") || href.contains("numRows=")) return@mapNotNull null
             val row = Regex("""sRow=(\d+)""").find(href)?.groupValues?.get(1)?.toIntOrNull() ?: return@mapNotNull null
-            if (row <= 0) null else row to href
+            if (row <= currentRow) null else row to href
         }
         .minByOrNull { it.first } ?: return null
     val absolute = absoluteSchoolUrl(baseUrl, next.second)
