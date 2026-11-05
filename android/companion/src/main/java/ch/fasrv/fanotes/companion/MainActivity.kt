@@ -1,11 +1,16 @@
 package ch.fasrv.fanotes.companion
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.runtime.SideEffect
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.graphics.luminance
@@ -22,6 +27,17 @@ class MainActivity : ComponentActivity() {
     private val model: CompanionModel by viewModels {
         CompanionModel.factory((application as CompanionApplication).graph)
     }
+    private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) return@registerForActivityResult
+        val graph = (application as CompanionApplication).graph
+        graph.scope.launch { graph.pullChangeDelta() }
+    }
+
+    private fun askForNotifications() {
+        if (Build.VERSION.SDK_INT < 33) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
 
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(AppLanguage.wrap(newBase))
@@ -29,6 +45,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        askForNotifications()
         enableEdgeToEdge()
         window.isNavigationBarContrastEnforced = false
         model.openNotify(intent)
