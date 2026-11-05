@@ -145,3 +145,43 @@ fun gradesForAverages(grades: List<SchoolGrade>, hiddenTargetIds: Set<String>, g
 
 fun highestVisibleMark(grades: List<SchoolGrade>, hiddenTargetIds: Set<String>, guessGrades: Boolean): Double? =
     gradesForAverages(grades, hiddenTargetIds, guessGrades).mapNotNull { it.mark }.maxOrNull()
+
+/** One frame of the reveal count-up. [delayBeforeMs] is how long to wait after the previous frame. */
+data class GradeRevealStep(val value: Double, val delayBeforeMs: Long)
+
+private const val GRADE_REVEAL_MIN_MS = 2_000L
+private const val GRADE_REVEAL_MAX_MS = 3_500L
+private const val GRADE_REVEAL_SPAN = 5.0
+
+/**
+ * Count from 1.0 up to [mark] in steps of 0.1, then land on [mark] itself
+ * (so 4.75 is not rounded to 4.8). Delays grow so the count eases out.
+ * The waits add up to about 2s for a mark just above 1, and 3.5s for a 6.
+ * A mark at or below 1.0 is a single frame with no wait.
+ */
+fun gradeRevealSteps(mark: Double): List<GradeRevealStep> {
+    if (!mark.isFinite() || mark <= 1.0) return listOf(GradeRevealStep(if (mark.isFinite()) mark else 1.0, 0))
+    val targetUnits = BigDecimal.valueOf(mark).setScale(3, RoundingMode.HALF_UP).movePointRight(3).intValueExact()
+    val values = ArrayList<Double>()
+    var units = 1_000
+    values += 1.0
+    while (units + 100 <= targetUnits) {
+        units += 100
+        values += units / 1_000.0
+    }
+    if (units != targetUnits) values += mark
+    val gaps = values.size - 1
+    if (gaps <= 0) return listOf(GradeRevealStep(values.first(), 0))
+    val distance = (mark - 1.0).coerceAtMost(GRADE_REVEAL_SPAN)
+    val total = GRADE_REVEAL_MIN_MS + Math.round((GRADE_REVEAL_MAX_MS - GRADE_REVEAL_MIN_MS) * (distance / GRADE_REVEAL_SPAN))
+    val weightSum = gaps.toLong() * (gaps + 1) / 2
+    val waits = LongArray(gaps) { index -> total * (index + 1) / weightSum }
+    var leftover = total - waits.sum()
+    var cursor = gaps - 1
+    while (leftover > 0) {
+        waits[cursor] += 1
+        leftover -= 1
+        cursor = if (cursor == 0) gaps - 1 else cursor - 1
+    }
+    return values.mapIndexed { index, value -> GradeRevealStep(value, if (index == 0) 0 else waits[index - 1]) }
+}

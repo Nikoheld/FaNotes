@@ -99,4 +99,30 @@ class GuessGradeTest {
         assertEquals(4.0, highestVisibleMark(listOf(older, grade), setOf(id), guessGrades = true))
         assertEquals(listOf(id), newGradeTargetIds(listOf(change)))
     }
+
+    @Test
+    fun revealCountClimbsByTenthsAndSlowsDownOntoTheExactMark() {
+        val steps = gradeRevealSteps(4.75)
+        assertEquals(1.0, steps.first().value)
+        assertEquals(0L, steps.first().delayBeforeMs)
+        assertEquals(4.75, steps.last().value)
+        assertTrue(steps.none { kotlin.math.abs(it.value - 4.8) < 1e-9 })
+        for (index in 0 until steps.lastIndex) {
+            assertEquals(10L + index, Math.round(steps[index].value * 10.0), "step $index")
+        }
+        val waits = steps.drop(1).map { it.delayBeforeMs }
+        assertTrue(waits.zipWithNext().all { (earlier, later) -> later > earlier })
+        val total = waits.sum()
+        assertTrue(total in 2_000..3_500, "4.75 took ${total}ms")
+        val low = gradeRevealSteps(1.1).drop(1).sumOf { it.delayBeforeMs }
+        val mid = gradeRevealSteps(4.0).drop(1).sumOf { it.delayBeforeMs }
+        val high = gradeRevealSteps(6.0).drop(1).sumOf { it.delayBeforeMs }
+        assertTrue(low in 2_000..2_200, "1.1 took ${low}ms")
+        assertTrue(mid in low + 1 until high, "4.0 took ${mid}ms")
+        assertEquals(3_500L, high)
+        assertEquals(1.0, gradeRevealSteps(1.0).single().value)
+        assertEquals(0L, gradeRevealSteps(1.0).single().delayBeforeMs)
+        assertEquals(5.5, gradeRevealSteps(5.5).last().value)
+        assertEquals(6.0, gradeRevealSteps(6.0).last().value)
+    }
 }
