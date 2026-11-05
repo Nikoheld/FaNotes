@@ -16,14 +16,20 @@ const MAX_IMAGE_BYTES = 32 * 1024 * 1024
 const TOOL_TIMEOUT_MS = 12 * 60 * 1000
 const TOOL_MANIFEST = Object.freeze({
   linux: Object.freeze({
-    one2html: Object.freeze({ fileName: 'one2html', sha256: '140c347e192d8bed8225f01a4c736e04c19bed241589d46cdc8b241b906eadb0' }),
+    one2html: Object.freeze({ fileName: 'one2html', sha256: '343c247d7a5513df08185418d2be0ecaeb00ac06e4bc427f084f1e2179af5523' }),
     sevenZip: Object.freeze({ fileName: '7za', sha256: 'afc9448bd0cc2eeda131cce313ef4994f9656417e0a15c8465fcda9ca859b280' }),
   }),
   win32: Object.freeze({
-    one2html: Object.freeze({ fileName: 'one2html.exe', sha256: 'cfcba9231edf433e3f84b92a7ce119ec4af3df870301691bbefea83618f295af' }),
+    one2html: Object.freeze({ fileName: 'one2html.exe', sha256: '9d3d043f86a65e8b97782bb72275837768a066353c771dab96bceef683136981' }),
     sevenZip: Object.freeze({ fileName: '7za.exe', sha256: 'b0cfdeaf429f5cc53f85123dd8f5a5feb92c19d31aa34df257edf9a26be05f95' }),
   }),
 })
+// The official Windows one2html build imports VCRUNTIME140.dll. Electron already
+// ships that DLL beside the app executable. The converter runs from the tool
+// cache, so Windows would not search the app directory unless we copy it there.
+const WINDOWS_CRT_NAMES = Object.freeze(['vcruntime140.dll', 'vcruntime140_1.dll'])
+const WINDOWS_CRT_MAX_BYTES = 8 * 1024 * 1024
+
 const IMAGE_FORMATS = new Map([
   ['.png', { mime: 'image/png', signature: (data) => data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) }],
   ['.jpg', { mime: 'image/jpeg', signature: (data) => data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff }],
@@ -76,13 +82,58 @@ const atomicCopy = async (source, target) => {
   await fsp.rename(temporary, target)
 }
 
+function windowsAppDirectory() {
+  return path.dirname(process.execPath)
+}
+
+function toolEnv() {
+  const env = { ...process.env, NO_COLOR: '1', RUST_BACKTRACE: '0' }
+  if (process.platform !== 'win32') return env
+  const appDirectory = windowsAppDirectory()
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'Path'
+  const entries = String(env[pathKey] ?? '').split(';').filter(Boolean)
+  if (!entries.some((entry) => path.resolve(entry) === path.resolve(appDirectory))) {
+    env[pathKey] = [appDirectory, ...entries].join(';')
+  }
+  return env
+}
+
+async function stageWindowsCrt(targetDirectory) {
+  if (process.platform !== 'win32') return
+  const appDirectory = windowsAppDirectory()
+  for (const name of WINDOWS_CRT_NAMES) {
+    const source = path.join(appDirectory, name)
+    let info
+    try {
+      info = await fsp.lstat(source)
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue
+      throw error
+    }
+    if (!info.isFile() || info.isSymbolicLink() || !info.size || info.size > WINDOWS_CRT_MAX_BYTES) continue
+    const data = await fsp.readFile(source)
+    const target = path.join(targetDirectory, name)
+    let reuse = false
+    try {
+      const existing = await fsp.lstat(target)
+      reuse = existing.isFile() && !existing.isSymbolicLink() && await hashFile(target) === hashBuffer(data)
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+    if (!reuse) {
+      await fsp.rm(target, { force: true })
+      await atomicWrite(target, data)
+    }
+  }
+}
+
 async function runTool(executable, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args, {
       cwd: options.cwd,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, NO_COLOR: '1', RUST_BACKTRACE: '0' },
+      env: toolEnv(),
     })
     let stdout = ''
     let stderr = ''
@@ -260,6 +311,7 @@ async function materializeOneNoteTools({ embeddedRoot, cacheRoot, platform = pro
     await fsp.chmod(target, 0o700)
     tools[name] = target
   }
+  if (platform === 'win32') await stageWindowsCrt(targetDirectory)
   return tools
 }
 

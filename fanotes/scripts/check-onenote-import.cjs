@@ -113,8 +113,13 @@ void (async () => {
     console.log('Der binäre OneNote-Regressionstest läuft auf dem Linux-Buildhost.')
     return
   }
-  assert.equal(hash(await fsp.readFile(one2html)), '140c347e192d8bed8225f01a4c736e04c19bed241589d46cdc8b241b906eadb0')
-  assert.equal(hash(await fsp.readFile(path.join(root, 'resources', 'onenote', 'windows', 'one2html.exe'))), 'cfcba9231edf433e3f84b92a7ce119ec4af3df870301691bbefea83618f295af')
+  assert.equal(hash(await fsp.readFile(one2html)), '343c247d7a5513df08185418d2be0ecaeb00ac06e4bc427f084f1e2179af5523')
+  const windowsExe = await fsp.readFile(path.join(root, 'resources', 'onenote', 'windows', 'one2html.exe'))
+  assert.equal(hash(windowsExe), '9d3d043f86a65e8b97782bb72275837768a066353c771dab96bceef683136981')
+  assert.equal(windowsExe.subarray(0, 2).toString('latin1'), 'MZ')
+  const version = spawnSync(one2html, ['--version'], { encoding: 'utf8' })
+  assert.equal(version.status, 0, version.stderr || version.stdout)
+  assert.match(version.stdout, /^one2html 2\.0\.1\b/u)
   assert.equal(hash(await fsp.readFile(sevenZip)), TOOL_MANIFEST.linux.sevenZip.sha256)
   assert.equal(hash(await fsp.readFile(path.join(root, 'resources', 'onenote', 'windows', '7za.exe'))), TOOL_MANIFEST.win32.sevenZip.sha256)
   const materialized = await materializeOneNoteTools({
@@ -127,6 +132,7 @@ void (async () => {
   assert.equal(hash(await fsp.readFile(one2html)), TOOL_MANIFEST.linux.one2html.sha256)
   assert.equal((await fsp.stat(one2html)).mode & 0o777, 0o700)
   await verifyImport(path.join(fixtures, 'Open Notebook.onetoc2'), 'direct')
+  await verifyImport(path.join(fixtures, 'New Section 1.one'), 'section')
 
   const archive = path.join(temporary, 'OneDrive-Export.zip')
   const archived = spawnSync(sevenZip, ['a', '-tzip', archive, 'Open Notebook.onetoc2', 'New Section 1.one'], { cwd: fixtures, encoding: 'utf8' })
@@ -140,6 +146,10 @@ void (async () => {
   const preload = await fsp.readFile(path.join(root, 'electron', 'preload.cjs'), 'utf8')
   const settings = await fsp.readFile(path.join(root, 'src', 'components', 'SettingsModal.tsx'), 'utf8')
   const worksheetLayer = await fsp.readFile(path.join(root, 'src', 'components', 'WorksheetLayer.tsx'), 'utf8')
+  const importer = await fsp.readFile(path.join(root, 'electron', 'onenote-importer.cjs'), 'utf8')
+  assert.match(importer, /stageWindowsCrt/u)
+  assert.match(importer, /vcruntime140\.dll/u)
+  assert.match(importer, /dirname\(process\.execPath\)/u)
   assert.match(main, /require\('\.\/onenote-importer\.cjs'\)/u)
   assert.match(main, /materializeOneNoteTools/u)
   assert.match(main, /extensions:\s*\['one', 'onetoc2', 'onepkg', 'zip'\]/u)
@@ -163,7 +173,7 @@ void (async () => {
     const extraResources = packageConfig.build[platform].extraResources ?? []
     assert.ok(extraResources.every((entry) => !String(entry.from ?? '').includes('resources/onenote') && !String(entry.to ?? '').includes('onenote')))
   }
-  console.log('OneNote-Import erfolgreich: direkte, gezippte und .onepkg-Notizbücher, Hierarchie, Originalquellen, Suchtext, MathML, Ink, Bilder, CSP, Sandbox und hashgeprüfte Delta-Ressourcen geprüft.')
+  console.log('OneNote-Import erfolgreich: direkte .one-Abschnitte, Notizbücher, ZIP, .onepkg, Hierarchie, Originalquellen, Suchtext, MathML, Ink, Bilder, CSP, Sandbox und hashgeprüfte Delta-Ressourcen geprüft.')
 })().finally(() => fsp.rm(temporary, { recursive: true, force: true })).catch((error) => {
   console.error(error instanceof Error ? error.stack : String(error))
   process.exitCode = 1

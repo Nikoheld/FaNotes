@@ -213,13 +213,15 @@ Source: https://www.npmjs.com/package/nspell
 
 OneNote import components
 =========================
-FaNotes uses one2html 1.3.1 and onenote_parser 1.1.1 only after the user
+FaNotes uses one2html 2.0.1 and onenote_parser 2.1.0 only after the user
 explicitly starts a Microsoft OneNote import. The platform binaries are copied
 from the signed GitHub release archives whose SHA-256 digests are verified by
-the FaNotes release process. Version 1.3.1 includes the fixes for
-CVE-2026-22810 and GHSA-4j5m-wc25-pvh7.
+the FaNotes release process. Version 2.0.1 includes the 1.3.1 fixes for
+CVE-2026-22810 and GHSA-4j5m-wc25-pvh7. It also reads OneNote desktop sections,
+files with revision dependency overrides, and Windows paths that include a
+drive letter.
 
-one2html 1.3.1
+one2html 2.0.1
 --------------
 Copyright (c) Markus Siemens and contributors.
 Licensed under the MIT License. The complete license is embedded beside the
@@ -227,7 +229,7 @@ import component as `resources/onenote/LICENSE-one2html.txt`.
 
 Source: https://github.com/msiemens/one2html
 
-onenote_parser 1.1.1
+onenote_parser 2.1.0
 ---------------------
 Copyright (c) Markus Siemens and contributors.
 Licensed under the Mozilla Public License 2.0. The complete license is

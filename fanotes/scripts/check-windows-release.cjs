@@ -132,7 +132,7 @@ assert.equal(
 )
 assert.equal(
   crypto.createHash('sha256').update(fs.readFileSync(path.join(root, 'resources', 'onenote', 'windows', 'one2html.exe'))).digest('hex'),
-  'cfcba9231edf433e3f84b92a7ce119ec4af3df870301691bbefea83618f295af',
+  '9d3d043f86a65e8b97782bb72275837768a066353c771dab96bceef683136981',
 )
 assert.equal(
   crypto.createHash('sha256').update(fs.readFileSync(path.join(root, 'resources', 'onenote', 'windows', '7za.exe'))).digest('hex'),
