@@ -182,6 +182,78 @@ export const canonicalSyncBytes = (path: string, bytes: Uint8Array): Uint8Array 
   return syncTextEncoder.encode(serializeFamd(parsed.markdown, rest, famdEncodingForSave(text)))
 }
 
+export type NoteSyncKind = 'present' | 'blank' | 'unreadable'
+
+const IDENTITY_STAMP = '1970-01-01T00:00:00.000Z'
+
+const headerLooksStored = (text: string) => text.includes('fanotes-famd:v1') || text.includes('fanotes-famd:v2')
+
+/** True when the ink object, including packed strokes and collapsed sections, holds marks. */
+export const inkHasMarks = (value: unknown, depth = 0): boolean => {
+  if (!value || depth > 6) return false
+  if (Array.isArray(value)) return value.some((item) => inkHasMarks(item, depth + 1))
+  if (typeof value !== 'object') return false
+  const record = value as Record<string, unknown>
+  if (typeof record.famdPts === 'string' && record.famdPts.length > 0) return true
+  if (Array.isArray(record.points) && record.points.length > 0) return true
+  if (Array.isArray(record.figurePaths) && record.figurePaths.length > 0) return true
+  if (Array.isArray(record.strokes) && record.strokes.some((stroke) => inkHasMarks(stroke, depth + 1))) return true
+  return inkHasMarks(record.ink, depth + 1) || inkHasMarks(record.hidden, depth + 1) || inkHasMarks(record.sections, depth + 1)
+}
+
+const textFieldsHaveText = (payload: FamdPayload | null) => (
+  payload?.textFields?.some((field) => typeof field.text === 'string' && field.text.trim().length > 0) ?? false
+)
+
+/** Blank means no prose and no ink. A truncated famd is unreadable and must not be uploaded. */
+export const noteSyncKind = (path: string, bytes: Uint8Array): NoteSyncKind => {
+  if (!bytes.byteLength) return 'blank'
+  if (!isFamdSyncPath(path)) return 'present'
+  let text: string
+  try {
+    text = syncTextDecoder.decode(bytes)
+  } catch {
+    return 'unreadable'
+  }
+  try {
+    if (isActiveV2(text)) {
+      const payload = payloadFromParsed(readV2Payload(text) as Partial<FamdPayload>)
+      if (!payload) return 'unreadable'
+      const markdown = stripFamdPayload(text).trim()
+      if (!markdown && !inkHasMarks(payload) && !textFieldsHaveText(payload)) return 'blank'
+      return 'present'
+    }
+  } catch {
+    return 'unreadable'
+  }
+  const parsed = parseFamd(text)
+  if (headerLooksStored(text) && !parsed.payload) return 'unreadable'
+  const markdown = parsed.markdown.trim()
+  if (!markdown && !inkHasMarks(parsed.payload) && !textFieldsHaveText(parsed.payload)) return 'blank'
+  return 'present'
+}
+
+/**
+ * Hash input that ignores page statistics and timestamps.
+ * Two saves of the same strokes and prose produce the same bytes.
+ */
+export const identitySyncBytes = (path: string, bytes: Uint8Array): Uint8Array | null => {
+  if (noteSyncKind(path, bytes) === 'unreadable') return null
+  if (!isFamdSyncPath(path)) return bytes
+  const text = syncTextDecoder.decode(bytes)
+  const parsed = parseFamd(text)
+  if (!parsed.payload) return canonicalSyncBytes(path, bytes)
+  const { pageStats: _pageStats, ink, ...rest } = parsed.payload
+  const stableInk = ink && typeof ink === 'object'
+    ? { ...ink, updatedAt: IDENTITY_STAMP }
+    : ink
+  return syncTextEncoder.encode(serializeFamd(parsed.markdown, {
+    ...rest,
+    updatedAt: IDENTITY_STAMP,
+    ink: stableInk,
+  }, famdEncodingForSave(text)))
+}
+
 /** Put this device's page statistics back into a note downloaded from sync. */
 export const withLocalPageStats = (downloaded: string, local: string): string => {
   const stats = parseFamd(local).payload?.pageStats

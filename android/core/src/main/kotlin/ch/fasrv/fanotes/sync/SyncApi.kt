@@ -195,18 +195,21 @@ class SyncApi(
         )
     }
 
-    suspend fun upload(session: SyncSession, fileId: String, baseRevision: Long, meta: String, sha256: String, blob: ByteArray): Long {
+    suspend fun upload(session: SyncSession, fileId: String, baseRevision: Long, meta: String, sha256: String, blob: ByteArray, blank: Boolean = false, clear: Boolean = false): Long {
+        val headers = mutableMapOf(
+            "Content-Type" to "application/octet-stream",
+            "If-Match" to baseRevision.toString(),
+            "X-FaNotes-Meta" to meta,
+            "X-FaNotes-Sha256" to sha256,
+            "X-FaNotes-Blank" to if (blank) "1" else "0",
+        )
+        if (clear) headers["X-FaNotes-Clear"] = "1"
         val response = raw(
             "PUT",
             "/files/$fileId",
             session,
             blob,
-            mapOf(
-                "Content-Type" to "application/octet-stream",
-                "If-Match" to baseRevision.toString(),
-                "X-FaNotes-Meta" to meta,
-                "X-FaNotes-Sha256" to sha256,
-            ),
+            headers,
         )
         val json = parseJson(response.body.toString(StandardCharsets.UTF_8)) as JsonValue.Obj
         return json.double("revision")?.toLong() ?: error("revision")

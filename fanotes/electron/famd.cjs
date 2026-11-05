@@ -322,8 +322,26 @@ function openFamdFile(source) {
  * The text a companion write stores. `ink === undefined` keeps the ink already
  * in the file. Callers that already hold a large file run this off the UI thread.
  */
+function inkHasMarks(value, depth = 0) {
+  if (!value || depth > 6) return false
+  if (Array.isArray(value)) return value.some((item) => inkHasMarks(item, depth + 1))
+  if (typeof value !== 'object') return false
+  if (typeof value.famdPts === 'string' && value.famdPts.length > 0) return true
+  if (Array.isArray(value.points) && value.points.length > 0) return true
+  if (Array.isArray(value.figurePaths) && value.figurePaths.length > 0) return true
+  if (Array.isArray(value.strokes) && value.strokes.some((stroke) => inkHasMarks(stroke, depth + 1))) return true
+  return inkHasMarks(value.ink, depth + 1) || inkHasMarks(value.hidden, depth + 1) || inkHasMarks(value.sections, depth + 1)
+}
+
+function famdLooksStored(source) {
+  return typeof source === 'string' && (source.includes('fanotes-famd:v1') || source.includes('fanotes-famd:v2'))
+}
+
 function composeFamdCompanion(existingSource, markdown, ink, settingsPaperStyle) {
   const existing = existingSource ? parseFamd(existingSource) : { markdown: '', payload: emptyFamdPayload() }
+  if (existingSource && famdLooksStored(existingSource) && !existing.payload) {
+    throw new Error('Die Notiz konnte nicht gelesen werden und wurde nicht überschrieben.')
+  }
   const incoming = parseFamd(typeof markdown === 'string' ? markdown : '')
   const body = incoming.markdown || stripFamdPayload(typeof markdown === 'string' ? markdown : '')
   const existingPayload = existing.payload || emptyFamdPayload()
@@ -331,10 +349,12 @@ function composeFamdCompanion(existingSource, markdown, ink, settingsPaperStyle)
   const paperFromInk = inkDocument && typeof inkDocument === 'object' && isPaperStyle(inkDocument.paperStyle)
     ? inkDocument.paperStyle
     : undefined
+  const textChanged = body !== stripFamdPayload(existing.markdown || '')
+  const inkChanged = ink !== undefined && JSON.stringify(inkDocument ?? null) !== JSON.stringify(existingPayload.ink ?? null)
   const payload = {
     ...existingPayload,
     ...(incoming.payload || {}),
-    updatedAt: new Date().toISOString(),
+    updatedAt: textChanged || inkChanged ? new Date().toISOString() : (existingPayload.updatedAt || new Date().toISOString()),
     worksheets: worksheetIdsFromMarkdown(body),
     ink: inkDocument ?? null,
     paperStyle: existingPayload.paperStyle || incoming.payload?.paperStyle || paperFromInk || (isPaperStyle(settingsPaperStyle) ? settingsPaperStyle : undefined),
@@ -542,6 +562,8 @@ module.exports = {
   createNoteCompanion,
   FAMD_ASYNC_CHARS: famdPack.FAMD_ASYNC_CHARS,
   composeFamdCompanion,
+  famdLooksStored,
+  inkHasMarks,
   famdEncodingForSave: v2codec.famdEncodingForSave,
   openFamdFile,
   parseFamd,

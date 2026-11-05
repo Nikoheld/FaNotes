@@ -1,6 +1,12 @@
 package ch.fasrv.fanotes.sync
 
+import ch.fasrv.fanotes.famd.NoteSyncKind
+import ch.fasrv.fanotes.famd.canonicalSyncBytes
+import ch.fasrv.fanotes.famd.identitySyncBytes
 import ch.fasrv.fanotes.famd.isoNow
+import ch.fasrv.fanotes.famd.isFamdSyncPath
+import ch.fasrv.fanotes.famd.noteSyncKind
+import ch.fasrv.fanotes.famd.withLocalPageStats
 import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.jsonNumber
 import ch.fasrv.fanotes.json.jsonString
@@ -126,7 +132,15 @@ class SyncEngineOptions(
     val now: () -> Long = { System.currentTimeMillis() },
 )
 
-private data class LocalBase(val id: String, val revision: Long, val sha256: String, val size: Long, val mtimeMs: Long)
+private data class LocalBase(
+    val id: String,
+    val revision: Long,
+    val sha256: String,
+    val size: Long,
+    val mtimeMs: Long,
+    val contentSha256: String = "",
+    val blank: Boolean = false,
+)
 
 private data class EngineState(
     val accountId: String,
@@ -175,6 +189,7 @@ class SyncEngine(
     private var queued = false
     private var timer: Job? = null
     private var debounce: Job? = null
+    private val cleared = mutableSetOf<String>()
 
     fun attach(host: SyncHost) {
         this.host = host
@@ -226,6 +241,11 @@ class SyncEngine(
             delay(LOCAL_DEBOUNCE_MS)
             syncNowOnEngine("local-change")
         }
+    }
+
+    /** The editor cleared this note on purpose. A blank file is not uploaded without it. */
+    fun markCleared(path: String) {
+        cleared += path
     }
 
     /** Runs one cycle. Overlapping calls collapse into a single follow-up cycle. */
@@ -468,7 +488,7 @@ class SyncEngine(
                 idIndex.remove(entry.id)
                 return ApplyResult("noop", knownPath)
             }
-            if (local.sha256 == base.sha256) {
+            if (local.kind != NoteSyncKind.UNREADABLE && (local.sha256 == base.sha256 || local.rawSha256 == base.sha256)) {
                 currentHost.remove(knownPath)
                 table.files.remove(knownPath)
                 idIndex.remove(entry.id)
@@ -492,13 +512,28 @@ class SyncEngine(
         if (base != null && base.id == entry.id && entry.revision <= base.revision) return ApplyResult("noop", path)
         if (options.isPathBusy(path)) return ApplyResult("deferred", path)
         val local = localSnapshot(path, currentHost)
-        if (local != null && local.sha256 == meta.sha256) {
+        // Match the server hash only. A stored identity means the local file still
+        // matches the previous revision, which is when a newer remote edit must be applied.
+        if (local != null && local.kind != NoteSyncKind.UNREADABLE && (local.sha256 == meta.sha256 || local.rawSha256 == meta.sha256)) {
             val stat = currentHost.scan().firstOrNull { it.path == path }
-            table.files[path] = LocalBase(entry.id, entry.revision, meta.sha256, local.bytes.size.toLong(), stat?.mtimeMs ?: 0L)
+            table.files[path] = LocalBase(
+                entry.id,
+                entry.revision,
+                local.sha256.ifEmpty { meta.sha256 },
+                local.bytes.size.toLong(),
+                stat?.mtimeMs ?: 0L,
+                local.identity,
+                local.kind == NoteSyncKind.BLANK,
+            )
             idIndex[entry.id] = path
             return ApplyResult("noop", path)
         }
-        val changedLocal = local?.takeIf { base == null || it.sha256 != base.sha256 }
+        val changedLocal = local?.takeIf { snapshot ->
+            base == null || snapshot.kind == NoteSyncKind.UNREADABLE || (
+                if (base.contentSha256.isNotEmpty()) snapshot.identity != base.contentSha256
+                else snapshot.sha256 != base.sha256 && snapshot.rawSha256 != base.sha256
+            )
+        }
         var result = "written"
         if (changedLocal != null) {
             val at = java.time.Instant.ofEpochMilli(options.now())
@@ -518,8 +553,31 @@ class SyncEngine(
                 if (sha256Hex(download.bytes) != download.sha256) throw IllegalStateException("“$path” arrived damaged.")
                 val plain = decryptBytes(syncKeys, entry.id, download.bytes)
                 if (sha256Hex(plain) != meta.sha256) throw IllegalStateException("The checksum of “$path” does not match.")
-                val stat = currentHost.write(path, plain, meta.mtimeMs.takeIf { it > 0 } ?: options.now())
-                table.files[path] = LocalBase(entry.id, download.revision, meta.sha256, stat.size, stat.mtimeMs)
+                val plainIdentity = identitySyncBytes(path, plain)?.let { sha256Hex(it) }.orEmpty()
+                val localIdentity = local?.identity.orEmpty()
+                if (local != null && local.kind != NoteSyncKind.UNREADABLE && plainIdentity.isNotEmpty() && plainIdentity == localIdentity) {
+                    val stat = currentHost.scan().firstOrNull { it.path == path }
+                    table.files[path] = LocalBase(entry.id, download.revision, meta.sha256, local.bytes.size.toLong(), stat?.mtimeMs ?: 0L, plainIdentity, local.kind == NoteSyncKind.BLANK)
+                    idIndex[entry.id] = path
+                    return ApplyResult("noop", path)
+                }
+                val remoteKind = noteSyncKind(path, plain)
+                if (local != null && remoteKind == NoteSyncKind.BLANK && local.kind != NoteSyncKind.BLANK && changedLocal == null) {
+                    val at = java.time.Instant.ofEpochMilli(options.now())
+                    val copyPath = conflictCopyPath(path, deviceInfo().first, at)
+                    currentHost.write(copyPath, local.bytes, at.toEpochMilli())
+                    val conflict = SyncConflict(path, copyPath, isoNow(at.toEpochMilli()))
+                    table.conflicts.add(conflict)
+                    if (table.conflicts.size > 50) table.conflicts.removeAt(0)
+                    log("warn", "Conflict in “$path”. The local copy is now “$copyPath”.")
+                    options.onConflict(conflict)
+                    publish(state.value.copy(conflicts = table.conflicts.toList()))
+                    result = "conflict"
+                }
+                val body = if (local != null && isFamdSyncPath(path)) withLocalPageStats(plain, local.bytes, path) else plain
+                val stat = currentHost.write(path, body, meta.mtimeMs.takeIf { it > 0 } ?: options.now())
+                val storedIdentity = identitySyncBytes(path, body)?.let { sha256Hex(it) }.orEmpty()
+                table.files[path] = LocalBase(entry.id, download.revision, meta.sha256, stat.size, stat.mtimeMs, storedIdentity, noteSyncKind(path, body) == NoteSyncKind.BLANK)
                 idIndex[entry.id] = path
                 return ApplyResult(result, path)
             }
@@ -575,26 +633,43 @@ class SyncEngine(
     private data class PushResult(val uploads: Int, val deletes: Int, val conflicts: Int)
 
     private suspend fun uploadPath(entry: SyncScanEntry, table: EngineState, syncKeys: SyncKeys, active: SyncSession, currentHost: SyncHost): String {
-        val bytes = try {
+        val raw = try {
             currentHost.read(entry.path)
         } catch (_: Exception) {
             return "skipped"
         }
+        val kind = noteSyncKind(entry.path, raw)
+        if (kind == NoteSyncKind.UNREADABLE) {
+            log("warn", "“${entry.path}” could not be read, so it was not uploaded.")
+            return "skipped"
+        }
+        val identityBytes = identitySyncBytes(entry.path, raw) ?: return "skipped"
+        val bytes = canonicalSyncBytes(entry.path, raw)
         val hash = sha256Hex(bytes)
+        val identity = sha256Hex(identityBytes)
         val base = table.files[entry.path]
-        if (base != null && base.sha256 == hash) {
-            table.files[entry.path] = base.copy(size = entry.size, mtimeMs = entry.mtimeMs)
+        if (base != null && (base.contentSha256 == identity || base.sha256 == hash || base.sha256 == sha256Hex(raw))) {
+            table.files[entry.path] = base.copy(size = entry.size, mtimeMs = entry.mtimeMs, contentSha256 = identity, blank = kind == NoteSyncKind.BLANK)
+            cleared.remove(entry.path)
             return "unchanged"
+        }
+        val clearing = entry.path in cleared
+        val baseHoldsContent = base != null && !base.blank && base.size > raw.size + 64
+        if (kind == NoteSyncKind.BLANK && baseHoldsContent && !clearing) {
+            log("warn", "“${entry.path}” is empty and was not uploaded over the copy already on the server.")
+            return restoreInstead(entry, base!!, raw, table, syncKeys, active, currentHost)
         }
         val id = base?.id ?: fileIdFor(syncKeys, entry.path)
         val meta = encryptMeta(syncKeys, id, SyncFileMeta(entry.path, entry.mtimeMs, bytes.size.toLong(), hash))
         val blob = encryptBytes(syncKeys, id, bytes)
         return try {
-            val revision = api.upload(active, id, base?.revision ?: 0L, meta, sha256Hex(blob), blob)
-            table.files[entry.path] = LocalBase(id, revision, hash, entry.size, entry.mtimeMs)
+            val revision = api.upload(active, id, base?.revision ?: 0L, meta, sha256Hex(blob), blob, kind == NoteSyncKind.BLANK, clearing && kind == NoteSyncKind.BLANK)
+            cleared.remove(entry.path)
+            table.files[entry.path] = LocalBase(id, revision, hash, entry.size, entry.mtimeMs, identity, kind == NoteSyncKind.BLANK)
             "uploaded"
         } catch (error: SyncApiError) {
             when {
+                error.conflict && kind == NoteSyncKind.BLANK && base != null -> restoreInstead(entry, base, raw, table, syncKeys, active, currentHost)
                 error.conflict -> "conflict"
                 error.status == 507 -> {
                     log("error", "“${entry.path}” does not fit in the account: ${error.message}")
@@ -603,6 +678,41 @@ class SyncEngine(
                 else -> throw error
             }
         }
+    }
+
+    private suspend fun restoreInstead(
+        entry: SyncScanEntry,
+        base: LocalBase,
+        localBytes: ByteArray,
+        table: EngineState,
+        syncKeys: SyncKeys,
+        active: SyncSession,
+        currentHost: SyncHost,
+    ): String {
+        val download = when (val response = api.download(active, base.id)) {
+            is DownloadResult.Deleted -> return "conflict"
+            is DownloadResult.Blob -> response
+        }
+        if (sha256Hex(download.bytes) != download.sha256) return "skipped"
+        val plain = decryptBytes(syncKeys, base.id, download.bytes)
+        if (noteSyncKind(entry.path, plain) != NoteSyncKind.PRESENT) {
+            val identity = identitySyncBytes(entry.path, localBytes)?.let { sha256Hex(it) }.orEmpty()
+            table.files[entry.path] = base.copy(size = entry.size, mtimeMs = entry.mtimeMs, contentSha256 = identity, blank = true)
+            return "skipped"
+        }
+        val at = java.time.Instant.ofEpochMilli(options.now())
+        val copyPath = conflictCopyPath(entry.path, deviceInfo().first, at)
+        currentHost.write(copyPath, localBytes, at.toEpochMilli())
+        val conflict = SyncConflict(entry.path, copyPath, isoNow(at.toEpochMilli()))
+        table.conflicts.add(conflict)
+        if (table.conflicts.size > 50) table.conflicts.removeAt(0)
+        log("warn", "“${entry.path}” was empty locally. That copy is now “$copyPath”, and the server copy was kept.")
+        options.onConflict(conflict)
+        publish(state.value.copy(conflicts = table.conflicts.toList()))
+        val stat = currentHost.write(entry.path, plain, at.toEpochMilli())
+        val identity = identitySyncBytes(entry.path, plain)?.let { sha256Hex(it) }.orEmpty()
+        table.files[entry.path] = base.copy(sha256 = base.sha256.ifEmpty { sha256Hex(plain) }, size = stat.size, mtimeMs = stat.mtimeMs, contentSha256 = identity, blank = false)
+        return "conflict"
     }
 
     private suspend fun deletePath(path: String, table: EngineState, active: SyncSession): String {
@@ -623,12 +733,25 @@ class SyncEngine(
 
     private suspend fun localSnapshot(path: String, currentHost: SyncHost): Snapshot? = try {
         val bytes = currentHost.read(path)
-        Snapshot(bytes, sha256Hex(bytes))
+        val kind = noteSyncKind(path, bytes)
+        if (kind == NoteSyncKind.UNREADABLE) {
+            Snapshot(bytes, "", "", "", kind)
+        } else {
+            val identityBytes = identitySyncBytes(path, bytes)
+            val canonical = canonicalSyncBytes(path, bytes)
+            Snapshot(
+                bytes,
+                sha256Hex(canonical),
+                sha256Hex(bytes),
+                identityBytes?.let { sha256Hex(it) }.orEmpty(),
+                if (identityBytes == null) NoteSyncKind.UNREADABLE else kind,
+            )
+        }
     } catch (_: Exception) {
         null
     }
 
-    private data class Snapshot(val bytes: ByteArray, val sha256: String)
+    private data class Snapshot(val bytes: ByteArray, val sha256: String, val rawSha256: String, val identity: String, val kind: NoteSyncKind)
 
     private fun acceptsPath(path: String) = isSyncablePath(
         path,
@@ -782,6 +905,8 @@ private fun encodeState(state: EngineState): String {
                 "sha256" to jsonString(base.sha256),
                 "size" to jsonNumber(base.size.toDouble()),
                 "mtimeMs" to jsonNumber(base.mtimeMs.toDouble()),
+                "contentSha256" to jsonString(base.contentSha256),
+                "blank" to ch.fasrv.fanotes.json.jsonBool(base.blank),
             ),
         )
     }
@@ -818,7 +943,15 @@ private fun parseState(raw: String?, accountId: String): EngineState {
                 if (!isSyncablePath(path)) continue
                 val id = base.string("id") ?: continue
                 val hash = base.string("sha256") ?: continue
-                files[path] = LocalBase(id, base.double("revision")?.toLong() ?: 0L, hash, base.double("size")?.toLong() ?: 0L, base.double("mtimeMs")?.toLong() ?: 0L)
+                files[path] = LocalBase(
+                    id,
+                    base.double("revision")?.toLong() ?: 0L,
+                    hash,
+                    base.double("size")?.toLong() ?: 0L,
+                    base.double("mtimeMs")?.toLong() ?: 0L,
+                    base.string("contentSha256").orEmpty(),
+                    base.bool("blank") == true,
+                )
             }
         }
         val conflicts = parsed.array("conflicts")?.items.orEmpty().mapNotNull { item ->

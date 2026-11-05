@@ -156,11 +156,19 @@ export class SyncApi {
     return { revision, meta, sha256, blob: new Uint8Array(await response.arrayBuffer()) }
   }
 
-  async upload(session: SyncSession, fileId: string, baseRevision: number, meta: string, sha256: string, blob: Uint8Array): Promise<number> {
+  async upload(session: SyncSession, fileId: string, baseRevision: number, meta: string, sha256: string, blob: Uint8Array, flags?: { blank?: boolean; clear?: boolean }): Promise<number> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/octet-stream',
+      'If-Match': String(baseRevision),
+      'X-FaNotes-Meta': meta,
+      'X-FaNotes-Sha256': sha256,
+      'X-FaNotes-Blank': flags?.blank ? '1' : '0',
+    }
+    if (flags?.clear) headers['X-FaNotes-Clear'] = '1'
     const result = await this.json<{ revision: number }>(`/files/${fileId}`, {
       method: 'PUT',
       session,
-      headers: { 'Content-Type': 'application/octet-stream', 'If-Match': String(baseRevision), 'X-FaNotes-Meta': meta, 'X-FaNotes-Sha256': sha256 },
+      headers,
       body: blob as BodyInit,
     })
     return result.revision

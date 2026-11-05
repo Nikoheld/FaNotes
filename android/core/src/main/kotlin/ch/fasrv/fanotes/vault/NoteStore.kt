@@ -5,6 +5,7 @@ import ch.fasrv.fanotes.famd.attachNoteInk
 import ch.fasrv.fanotes.famd.safeWorksheetSource
 import ch.fasrv.fanotes.famd.worksheetRecordPath
 import ch.fasrv.fanotes.famd.companionPath
+import ch.fasrv.fanotes.famd.FamdDocument
 import ch.fasrv.fanotes.famd.emptyFamdPayload
 import ch.fasrv.fanotes.famd.famdEncodingForSave
 import ch.fasrv.fanotes.famd.isoNow
@@ -36,6 +37,18 @@ import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
 import kotlin.io.path.name
 import kotlin.io.path.relativeTo
+
+private fun famdHeaderStored(text: String) = text.contains("fanotes-famd:v1") || text.contains("fanotes-famd:v2")
+
+/** A stored header whose payload will not parse must not become an empty note. */
+private fun readStoredFamd(bytes: ByteArray): FamdDocument {
+    val text = bytes.decodeToString()
+    val parsed = parseFamd(text)
+    if (famdHeaderStored(text) && parsed.payload == null) {
+        throw IllegalStateException("This note could not be read and was left unchanged.")
+    }
+    return parsed
+}
 
 interface VaultIo {
     fun read(path: String): ByteArray?
@@ -140,14 +153,20 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
             else -> normalized
         }
         val famdBytes = io.read(famdPath)
-        val famd = famdBytes?.let { parseFamd(it.decodeToString()) }
+        val famd = famdBytes?.let { readStoredFamd(it) }
         val mdBytes = markdownPath?.let { io.read(it) }
+        // Ink that lives only inside the markdown, with no sidecar yet, is still the note.
+        val embedded = if (famdBytes == null && mdBytes != null && famdHeaderStored(mdBytes.decodeToString())) {
+            readStoredFamd(mdBytes)
+        } else {
+            null
+        }
         val markdown = when {
             mdBytes != null -> stripFamdPayload(mdBytes.decodeToString())
             famd != null -> famd.markdown
             else -> ""
         }
-        val payload = famd?.payload ?: emptyFamdPayload(isoNow())
+        val payload = famd?.payload ?: embedded?.payload ?: emptyFamdPayload(isoNow())
         val title = titleOf(normalized)
         val document = parseInkDocument(payload.obj("ink"), title, payload.string("paperStyle") ?: "dots", payload.string("updatedAt") ?: isoNow())
         val inkId = noteInkId(markdown) ?: UUID.randomUUID().toString()

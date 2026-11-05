@@ -12,7 +12,7 @@
 // as "Name (Konflikt <Gerät> <Datum>).ext", which is then uploaded as a new
 // file so every device ends up with both.
 import type { SyncHostApi, SyncScanEntry } from '../../types'
-import { canonicalSyncBytes, isFamdSyncPath, withLocalPageStats } from '../famd'
+import { canonicalSyncBytes, identitySyncBytes, isFamdSyncPath, noteSyncKind, withLocalPageStats, type NoteSyncKind } from '../famd'
 
 const syncText = (bytes: Uint8Array) => new TextDecoder().decode(bytes)
 import { pathIsSyncExcluded, RECOGNITION_MODEL_SYNC_PATH } from './folderSync'
@@ -44,7 +44,7 @@ export type SyncPublicState = {
   mcpReader: boolean
 }
 
-type LocalBase = { id: string; revision: number; sha256: string; size: number; mtimeMs: number }
+type LocalBase = { id: string; revision: number; sha256: string; size: number; mtimeMs: number; contentSha256?: string; blank?: boolean }
 type PersistedState = { version: 1; accountId: string; cursor: number; lastSyncAt: string | null; files: Record<string, LocalBase>; conflicts: SyncConflict[] }
 type Secrets = { v: 1; accountId: string; deviceId: string; token: string; expiresAt: string; email: string; vaultSecret: string; mcpReader?: string }
 
@@ -133,7 +133,15 @@ const parseState = (raw: string | null, accountId: string): PersistedState => {
       if (!isSyncablePath(path) || !base || typeof base !== 'object') continue
       const candidate = base as Partial<LocalBase>
       if (typeof candidate.id !== 'string' || typeof candidate.sha256 !== 'string') continue
-      files[path] = { id: candidate.id, revision: Number(candidate.revision) || 0, sha256: candidate.sha256, size: Number(candidate.size) || 0, mtimeMs: Number(candidate.mtimeMs) || 0 }
+      files[path] = {
+        id: candidate.id,
+        revision: Number(candidate.revision) || 0,
+        sha256: candidate.sha256,
+        size: Number(candidate.size) || 0,
+        mtimeMs: Number(candidate.mtimeMs) || 0,
+        ...(typeof candidate.contentSha256 === 'string' && candidate.contentSha256 ? { contentSha256: candidate.contentSha256 } : {}),
+        ...(candidate.blank === true ? { blank: true } : {}),
+      }
     }
     return {
       version: 1,
@@ -189,6 +197,7 @@ export class SyncEngine {
   private queued = false
   private timer: number | null = null
   private debounce: number | null = null
+  private readonly cleared = new Set<string>()
   private disposed = false
   private windowListeners: Array<() => void> = []
 
@@ -537,6 +546,11 @@ export class SyncEngine {
     this.debounce = window.setTimeout(() => { this.debounce = null; void this.syncNow('local-change') }, LOCAL_DEBOUNCE_MS)
   }
 
+  /** The editor cleared this note on purpose. A blank file is not uploaded without it. */
+  markCleared(path: string) {
+    this.cleared.add(path)
+  }
+
   private schedule(delay: number) {
     if (this.disposed || !this.session) return
     if (this.timer !== null) window.clearTimeout(this.timer)
@@ -597,14 +611,18 @@ export class SyncEngine {
 
   // ── Pull ────────────────────────────────────────────────────────────────
 
-  private async localSnapshot(path: string): Promise<{ bytes: Uint8Array; sha256: string; rawSha256: string; stat: SyncScanEntry } | null> {
+  private async localSnapshot(path: string): Promise<{ bytes: Uint8Array; sha256: string; rawSha256: string; identity: string; kind: NoteSyncKind; stat: SyncScanEntry } | null> {
     if (!this.host) return null
     try {
       const bytes = await this.host.read(path)
+      const kind = noteSyncKind(path, bytes)
+      if (kind === 'unreadable') return { bytes, sha256: '', rawSha256: '', identity: '', kind, stat: { path, size: bytes.byteLength, mtimeMs: 0 } }
+      const identityBytes = identitySyncBytes(path, bytes)
+      if (!identityBytes) return { bytes, sha256: '', rawSha256: '', identity: '', kind: 'unreadable', stat: { path, size: bytes.byteLength, mtimeMs: 0 } }
       const syncBytes = canonicalSyncBytes(path, bytes)
       const rawSha256 = await sha256Hex(bytes)
       const sha256 = syncBytes === bytes ? rawSha256 : await sha256Hex(syncBytes)
-      return { bytes, sha256, rawSha256, stat: { path, size: bytes.byteLength, mtimeMs: 0 } }
+      return { bytes, sha256, rawSha256, identity: await sha256Hex(identityBytes), kind, stat: { path, size: bytes.byteLength, mtimeMs: 0 } }
     } catch {
       return null
     }
@@ -660,7 +678,7 @@ export class SyncEngine {
         idIndex.delete(entry.id)
         return { result: 'noop', path: knownPath }
       }
-      if (local.sha256 === base.sha256 || local.rawSha256 === base.sha256) {
+      if (local.kind !== 'unreadable' && (local.sha256 === base.sha256 || local.rawSha256 === base.sha256)) {
         await this.host.remove(knownPath)
         delete this.state.files[knownPath]
         idIndex.delete(entry.id)
@@ -687,21 +705,31 @@ export class SyncEngine {
     if (base && base.id === entry.id && entry.revision <= base.revision) return { result: 'noop', path }
     if (this.options?.isPathBusy?.(path)) return { result: 'deferred', path }
     const local = await this.localSnapshot(path)
-    if (local && (local.sha256 === meta.sha256 || local.rawSha256 === meta.sha256)) {
+    // Match the server hash only. The stored identity says the local file still
+    // matches the previous revision, which is exactly when a newer remote edit must be applied.
+    if (local && local.kind !== 'unreadable' && (local.sha256 === meta.sha256 || local.rawSha256 === meta.sha256)) {
       const stat = await this.statOf(path)
       // Remember the canonical hash once the file still matches the server, so a
       // later statistics write (new size, same note) is not uploaded.
       this.state.files[path] = {
         id: entry.id,
         revision: entry.revision,
-        sha256: local.sha256,
+        sha256: local.sha256 || meta.sha256,
         size: stat?.size ?? local.stat.size,
         mtimeMs: stat?.mtimeMs ?? local.stat.mtimeMs,
+        contentSha256: local.identity,
+        ...(local.kind === 'blank' ? { blank: true } : {}),
       }
       idIndex.set(entry.id, path)
       return { result: 'noop', path }
     }
-    const localChanged = Boolean(local) && (!base || (local!.sha256 !== base.sha256 && local!.rawSha256 !== base.sha256))
+    const localChanged = Boolean(local) && (
+      !base
+      || local!.kind === 'unreadable'
+      || (base.contentSha256
+        ? local!.identity !== base.contentSha256
+        : local!.sha256 !== base.sha256 && local!.rawSha256 !== base.sha256)
+    )
     const download = await this.api.download(this.session, entry.id)
     if ('deleted' in download) {
       // Deleted again between the change list and the download; the tombstone arrives with the next pull.
@@ -712,8 +740,10 @@ export class SyncEngine {
     if (await sha256Hex(plain) !== meta.sha256) throw new Error(`Die Prüfsumme von „${path}“ stimmt nach dem Entschlüsseln nicht.`)
     const plainCanonical = canonicalSyncBytes(path, plain)
     const plainCanonicalSha = plainCanonical === plain ? meta.sha256 : await sha256Hex(plainCanonical)
-    if (local && plainCanonicalSha === local.sha256) {
-      // The note matches. Only page statistics differ, and those stay on this device.
+    const plainIdentityBytes = identitySyncBytes(path, plain)
+    const plainIdentity = plainIdentityBytes ? await sha256Hex(plainIdentityBytes) : ''
+    if (local && local.kind !== 'unreadable' && (plainCanonicalSha === local.sha256 || (plainIdentity && plainIdentity === local.identity))) {
+      // The note matches. Only page statistics or the timestamp differ, and those stay on this device.
       const stat = await this.statOf(path)
       this.state.files[path] = {
         id: entry.id,
@@ -721,12 +751,15 @@ export class SyncEngine {
         sha256: plainCanonicalSha,
         size: stat?.size ?? local.stat.size,
         mtimeMs: stat?.mtimeMs ?? 0,
+        contentSha256: local.identity || plainIdentity,
+        ...(local.kind === 'blank' ? { blank: true } : {}),
       }
       idIndex.set(entry.id, path)
       return { result: 'noop', path }
     }
+    const remoteKind = noteSyncKind(path, plain)
     let result: 'written' | 'conflict' = 'written'
-    if (localChanged && local) {
+    if (local && (localChanged || (remoteKind === 'blank' && local.kind !== 'blank'))) {
       const at = new Date(this.options?.now?.() ?? Date.now())
       const copyPath = conflictCopyPath(path, this.deviceInfo().name, at)
       await this.host.write(copyPath, local.bytes, at.getTime())
@@ -742,7 +775,17 @@ export class SyncEngine {
       body = new TextEncoder().encode(spliced)
     }
     const stat = await this.host.write(path, body, meta.mtimeMs || Date.now())
-    this.state.files[path] = { id: entry.id, revision: download.revision, sha256: meta.sha256, size: stat.size, mtimeMs: stat.mtimeMs }
+    const storedKind = noteSyncKind(path, body)
+    const storedIdentity = identitySyncBytes(path, body)
+    this.state.files[path] = {
+      id: entry.id,
+      revision: download.revision,
+      sha256: meta.sha256,
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      ...(storedIdentity ? { contentSha256: await sha256Hex(storedIdentity) } : {}),
+      ...(storedKind === 'blank' ? { blank: true } : {}),
+    }
     idIndex.set(entry.id, path)
     return { result, path }
   }
@@ -805,25 +848,57 @@ export class SyncEngine {
     if (!this.session || !this.host || !this.state || !this.keys) return 'skipped'
     const raw = await this.host.read(entry.path).catch(() => null)
     if (!raw) return 'skipped'
+    const kind = noteSyncKind(entry.path, raw)
+    if (kind === 'unreadable') {
+      this.log('warn', `„${entry.path}“ konnte nicht gelesen werden und wird nicht hochgeladen.`)
+      return 'skipped'
+    }
+    const identityBytes = identitySyncBytes(entry.path, raw)
+    if (!identityBytes) return 'skipped'
     const bytes = canonicalSyncBytes(entry.path, raw)
     const rawSha256 = await sha256Hex(raw)
     const sha256 = bytes === raw ? rawSha256 : await sha256Hex(bytes)
+    const identity = await sha256Hex(identityBytes)
     const base = this.state.files[entry.path]
-    if (base && (base.sha256 === sha256 || base.sha256 === rawSha256)) {
-      // Touched but the same note (a statistics write, or the editor saved the
-      // same text): remember the canonical hash and the new stat, nothing to send.
-      this.state.files[entry.path] = { ...base, sha256, size: entry.size, mtimeMs: entry.mtimeMs }
+    if (base && (base.contentSha256 === identity || base.sha256 === sha256 || base.sha256 === rawSha256)) {
+      // Touched but the same note (a statistics write, a new timestamp, or the
+      // editor saved the same text): nothing to send.
+      this.state.files[entry.path] = {
+        ...base,
+        sha256: base.sha256 || sha256,
+        contentSha256: identity,
+        size: entry.size,
+        mtimeMs: entry.mtimeMs,
+        ...(kind === 'blank' ? { blank: true } : { blank: undefined }),
+      }
+      this.cleared.delete(entry.path)
       return 'unchanged'
+    }
+    const clearing = this.cleared.has(entry.path)
+    const baseHoldsContent = Boolean(base) && !base?.blank && base!.size > raw.byteLength + 64
+    if (kind === 'blank' && baseHoldsContent && !clearing) {
+      this.log('warn', `„${entry.path}“ ist leer und wird nicht über die vorhandene Fassung hochgeladen.`)
+      return this.restoreInstead(entry, base!, raw)
     }
     const id = base?.id ?? await fileIdFor(this.keys, entry.path)
     const meta = await encryptMeta(this.keys, id, { path: entry.path, mtimeMs: entry.mtimeMs, size: bytes.byteLength, sha256 })
     const blob = await encryptBytes(this.keys, id, bytes)
     try {
-      const revision = await this.api.upload(this.session, id, base?.revision ?? 0, meta, await sha256Hex(blob), blob)
-      this.state.files[entry.path] = { id, revision, sha256, size: entry.size, mtimeMs: entry.mtimeMs }
+      const revision = await this.api.upload(this.session, id, base?.revision ?? 0, meta, await sha256Hex(blob), blob, { blank: kind === 'blank', clear: clearing && kind === 'blank' })
+      this.cleared.delete(entry.path)
+      this.state.files[entry.path] = {
+        id,
+        revision,
+        sha256,
+        size: entry.size,
+        mtimeMs: entry.mtimeMs,
+        contentSha256: identity,
+        ...(kind === 'blank' ? { blank: true } : {}),
+      }
       return 'uploaded'
     } catch (error) {
       if (error instanceof SyncApiError && error.conflict) {
+        if (kind === 'blank' && base) return this.restoreInstead(entry, base, raw)
         // Someone else moved this file on; the follow-up pull decides (same content → adopt, different → conflict copy).
         return 'conflict'
       }
@@ -833,6 +908,44 @@ export class SyncEngine {
       }
       throw error
     }
+  }
+
+  /** The blank local file is kept beside the note. The server copy is written back. */
+  private async restoreInstead(entry: SyncScanEntry, base: LocalBase, localBytes: Uint8Array): Promise<'conflict' | 'skipped'> {
+    if (!this.session || !this.host || !this.state || !this.keys) return 'skipped'
+    const download = await this.api.download(this.session, base.id)
+    if ('deleted' in download) return 'conflict'
+    if (await sha256Hex(download.blob) !== download.sha256) return 'skipped'
+    const plain = await decryptBytes(this.keys, base.id, download.blob)
+    if (noteSyncKind(entry.path, plain) !== 'present') {
+      const identityBytes = identitySyncBytes(entry.path, localBytes)
+      this.state.files[entry.path] = {
+        ...base,
+        size: entry.size,
+        mtimeMs: entry.mtimeMs,
+        blank: true,
+        ...(identityBytes ? { contentSha256: await sha256Hex(identityBytes) } : {}),
+      }
+      return 'skipped'
+    }
+    const at = new Date(this.options?.now?.() ?? Date.now())
+    const copyPath = conflictCopyPath(entry.path, this.deviceInfo().name, at)
+    await this.host.write(copyPath, localBytes, at.getTime())
+    const conflict = { path: entry.path, copyPath, at: at.toISOString() }
+    this.state.conflicts = [...this.state.conflicts, conflict].slice(-50)
+    this.log('warn', `Leere Fassung von „${entry.path}“ wurde nicht hochgeladen. Die lokale Kopie liegt unter „${copyPath}“.`)
+    this.options?.onConflict?.(conflict)
+    const stat = await this.host.write(entry.path, plain, at.getTime())
+    const identityBytes = identitySyncBytes(entry.path, plain)
+    const { blank: _ignored, ...kept } = base
+    this.state.files[entry.path] = {
+      ...kept,
+      sha256: base.sha256 || await sha256Hex(plain),
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      ...(identityBytes ? { contentSha256: await sha256Hex(identityBytes) } : {}),
+    }
+    return 'conflict'
   }
 
   private async deletePath(path: string): Promise<'deleted' | 'conflict' | 'skipped'> {

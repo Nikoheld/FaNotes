@@ -48,6 +48,8 @@ const {
   noteStem,
   FAMD_ASYNC_CHARS,
   composeFamdCompanion,
+  famdLooksStored,
+  inkHasMarks,
   convertFamdDirectory,
   famdEncodingForSave,
   parseFamd,
@@ -1839,6 +1841,9 @@ async function mutateFamdCompanion(notePath, mutate) {
       updatedAt: new Date().toISOString(),
       worksheets: worksheetIdsFromMarkdown(nextBody),
     }
+    const sameInk = JSON.stringify(nextPayload.ink ?? null) === JSON.stringify(existing.payload?.ink ?? null)
+    const sameText = nextBody === stripFamdPayload(existing.markdown || '')
+    if (sameInk && sameText && existing.payload?.updatedAt) nextPayload.updatedAt = existing.payload.updatedAt
     await atomicWrite(target, serializeFamd(nextBody, nextPayload, famdEncodingForSave(existingSource)), { encoding: 'utf8', mode: 0o600 })
     return next.result
   })
@@ -3477,13 +3482,34 @@ function registerIpcHandlers() {
           }
           const isFamdFile = path.extname(normalizedRelativePath).toLocaleLowerCase('en-US') === '.famd'
           const existingFamdSource = isFamdFile ? await readOptionalNoteFile(normalizedRelativePath) : null
-          const written = isFamdFile
-            ? serializeFamd(markdownBody, {
-              ...(parseFamd(existingFamdSource ?? '')).payload || emptyFamdPayload(),
-              updatedAt: new Date().toISOString(),
+          let written
+          if (isFamdFile) {
+            const parsedExisting = parseFamd(existingFamdSource ?? '')
+            if (existingFamdSource && famdLooksStored(existingFamdSource) && !parsedExisting.payload) {
+              throw new Error('Die Notiz konnte nicht gelesen werden und wurde nicht überschrieben.')
+            }
+            const previous = parsedExisting.payload || emptyFamdPayload()
+            const textChanged = markdownBody !== stripFamdPayload(parsedExisting.markdown || '')
+            written = serializeFamd(markdownBody, {
+              ...previous,
+              updatedAt: textChanged ? new Date().toISOString() : (previous.updatedAt || new Date().toISOString()),
               worksheets: worksheetIdsFromMarkdown(markdownBody),
             }, famdEncodingForSave(existingFamdSource))
-            : (markdownBody.endsWith('\n') ? markdownBody : `${markdownBody}\n`)
+          } else {
+            const existingMd = existing ? await readOptionalNoteFile(normalizedRelativePath, noteByteLimit(normalizedRelativePath)) : null
+            if (existingMd && famdLooksStored(existingMd) && inkHasMarks(parseFamd(existingMd).payload) && !inkHasMarks(parseFamd(content).payload)) {
+              const parsedExisting = parseFamd(existingMd)
+              if (!parsedExisting.payload) throw new Error('Die Notiz konnte nicht gelesen werden und wurde nicht überschrieben.')
+              const textChanged = markdownBody !== stripFamdPayload(parsedExisting.markdown || '')
+              written = serializeFamd(markdownBody, {
+                ...parsedExisting.payload,
+                updatedAt: textChanged ? new Date().toISOString() : (parsedExisting.payload.updatedAt || new Date().toISOString()),
+                worksheets: worksheetIdsFromMarkdown(markdownBody),
+              }, famdEncodingForSave(existingMd))
+            } else {
+              written = markdownBody.endsWith('\n') || markdownBody.length === 0 ? markdownBody : `${markdownBody}\n`
+            }
+          }
           await atomicWrite(target, written, { encoding: 'utf8', mode: 0o600 })
           // A failed companion write has to fail the save. The markdown is
           // already on disk; the renderer stays dirty and writes it again.

@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import ch.fasrv.fanotes.famd.companionPath
 import ch.fasrv.fanotes.ink.InkDocument
 import ch.fasrv.fanotes.ink.InkSession
+import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.vault.OpenNote
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
@@ -71,6 +72,8 @@ class NoteEditorController(private val graph: CompanionGraph, private val scope:
         val target = revision
         val ink = document ?: return@withLock false
         val text = markdown
+        // Only a real edit that removes the prose and the strokes may replace a note with a blank file.
+        if (!noteBlank(opened.markdown, opened.document) && noteBlank(text, ink)) rememberCleared(opened)
         saving = true
         try {
             val saved = withContext(Dispatchers.IO) { graph.store.save(opened, ink, text).also { graph.engine.notifyLocalChange() } }
@@ -83,6 +86,33 @@ class NoteEditorController(private val graph: CompanionGraph, private val scope:
         catch (failure: Exception) { error = failure.message ?: "Could not save. Your draft is still open."; false }
         finally { saving = false }
     }
+    private fun rememberCleared(opened: OpenNote) {
+        val path = opened.path
+        val lower = path.lowercase()
+        when {
+            lower.endsWith(".pdf") -> graph.engine.markCleared(companionPath(path, ".famd"))
+            lower.endsWith(".famd") -> {
+                graph.engine.markCleared(path)
+                graph.engine.markCleared(companionPath(path, ".md"))
+            }
+            else -> {
+                graph.engine.markCleared(path)
+                graph.engine.markCleared(companionPath(path, ".famd"))
+            }
+        }
+    }
+
+    private fun noteBlank(text: String, document: InkDocument): Boolean {
+        val prose = text.replace(Regex("<!--\\s*fanotes-ink:[a-zA-Z0-9_-]{1,96}\\s*-->"), "").trim()
+        if (prose.isNotEmpty()) return false
+        if (document.strokes.any { it.points.isNotEmpty() || it.figurePaths.isNotEmpty() }) return false
+        val fields = document.extras.array("textFields")?.items.orEmpty()
+        return fields.none { field ->
+            val value = (field as? JsonValue.Obj)?.string("text")
+            !value.isNullOrBlank()
+        }
+    }
+
     suspend fun close(): Boolean {
         debounce?.cancel()
         if (loading) return false
