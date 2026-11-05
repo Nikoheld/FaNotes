@@ -111,6 +111,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
     fun atNavRoot(): Boolean = isAtNavRoot(route, plannerTasks, desk.startTab, shownBar(), noteFolder, history.isNotEmpty())
     fun back() {
+        graph.trail.action("back")
         if (history.isNotEmpty()) {
             route = history.last()
             history = history.dropLast(1)
@@ -379,6 +380,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
 
     fun requestVisibleLogin(caller: String) {
+        graph.trail.action("connect")
         if (busy) return
         val base = normalizeSchoolBase(baseUrl)
         if (base == null) { message = t(R.string.school_address_unsupported); return }
@@ -446,7 +448,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         val app = context.applicationContext
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                graph.schulnetzLog.info("share logs")
+                graph.trail.action("share-logs")
+                graph.schulnetzLog.info("share logs ${graph.trail.snapshot()}")
                 val file = graph.buildShareZip(includeCaptures)
                 withContext(Dispatchers.Main) { shareFile(app, t(R.string.share_diagnostics), file, "application/zip", t(R.string.school_diagnostics)) }
             } catch (error: Exception) {

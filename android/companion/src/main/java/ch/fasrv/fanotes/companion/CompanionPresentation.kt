@@ -20,6 +20,12 @@ enum class Page(val title: String) {
     Profile("Your activity"), Diagnostics("Diagnostics"), Auth("Connect FaNotes"), Trash("Recently deleted")
 }
 data class CompanionRoute(val destination: Destination = Destination.Today, val page: Page? = null)
+
+fun screenToken(route: CompanionRoute): String {
+    val dest = route.destination.name.lowercase()
+    val page = route.page?.name?.lowercase().orEmpty()
+    return if (page.isBlank()) dest else "$dest/$page"
+}
 data class NavPlacement(val route: CompanionRoute, val plannerTasks: Boolean = false)
 fun destinationFor(raw: String): Destination = when (startTabId(raw)) {
     "planner", "tasks" -> Destination.Planner

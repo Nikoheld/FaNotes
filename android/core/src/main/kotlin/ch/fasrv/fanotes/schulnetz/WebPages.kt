@@ -324,6 +324,10 @@ fun describeTables(html: String): String {
     return "tables=${tables.size} " + sketches.joinToString(" | ")
 }
 
+/** Table count only. Header cells can contain names, so the log uses this instead of [describeTables]. */
+fun tableCount(html: String): Int =
+    if (html.isBlank()) 0 else Regex("""<table\b""", RegexOption.IGNORE_CASE).findAll(html).count()
+
 fun parseGradesByHeader(html: String): List<SchoolGrade> = rowsByHeader(html) { header, cells ->
     val markAt = headerIndex(header, "note", "punkte")
     val dateAt = headerIndex(header, "datum")

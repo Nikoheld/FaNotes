@@ -773,3 +773,104 @@ class WebFallbackTest {
         assertTrue(parseStartMessages("<html><body>Login</body></html>").isEmpty())
     }
 }
+
+class ReadGuardTest {
+    private fun lesson(id: String) = AgendaEvent(
+        id, "2026-11-02T08:15:00", "2026-11-02T09:00:00", "Deutsch", "", "A1",
+        emptyList(), "D", "Deutsch", "", "0_stp", "", "Deutsch",
+    )
+
+    private fun grade() = SchoolGrade("g1", "Deutsch", "D", "Deutsch", "Schriftlich", "2026-11-01", 5.0, 1.0, true, null, "")
+
+    private fun stored() = SchulnetzSnapshot(
+        grades = listOf(grade()),
+        events = listOf(lesson("s1")),
+        exams = listOf(lesson("phy").copy(eventType = "exam", text = "Physik")),
+        messages = listOf(SchoolMessage("m1", "Termin", "Elternabend", "2026-11-06")),
+        startMessages = listOf("Elternabend am Freitag"),
+        weekFetched = mapOf("2026-11-02" to "2026-11-05T12:00:00Z"),
+        weekSpanStart = "2026-08-17",
+        weekSpanEnd = "2027-07-02",
+    )
+
+    @Test
+    fun anIpRejectedStartKeepsGradesLessonsExamsAndAppointments() {
+        val empty = SchulnetzSnapshot(readErrors = listOf("Schulnetz hat die IP-Adresse abgelehnt. Anmeldung wird erneuert."))
+        val kept = keepStoredRead(stored(), empty, blocked = true, timetableFailed = false)
+        assertEquals(1, kept.grades.size)
+        assertEquals("s1", kept.events.single().id)
+        assertEquals("phy", kept.exams.single().id)
+        assertEquals("Elternabend", kept.messages.single().body)
+        assertEquals(listOf("Elternabend am Freitag"), kept.startMessages)
+        assertEquals("2026-11-05T12:00:00Z", kept.weekFetched["2026-11-02"])
+    }
+
+    @Test
+    fun aFailedTimetableKeepsTheLastLessonsAndASuccessfulGradeRead() {
+        val freshGrades = stored().copy(events = emptyList(), exams = emptyList(), weekFetched = emptyMap(), grades = listOf(grade().copy(id = "g2")))
+        val kept = keepStoredRead(stored(), freshGrades, blocked = false, timetableFailed = true)
+        assertEquals("g2", kept.grades.single().id)
+        assertEquals("s1", kept.events.single().id)
+        assertEquals("phy", kept.exams.single().id)
+        assertEquals("2026-11-05T12:00:00Z", kept.weekFetched["2026-11-02"])
+    }
+
+    @Test
+    fun aRepeatedTerminlistePageAfterASessionChangeStops() {
+        fun page(session: String) = """
+            <table><tr><td>Datum</td><td>Bezeichnung</td></tr>
+            <tr><td>02.11.2026</td><td>Elternabend</td></tr></table>
+            <a href="index.php?pageid=22108&amp;id=$session&amp;sRow=25">25</a>
+            <a href="index.php?pageid=22108&amp;id=$session&amp;sRow=50">50</a>
+        """.trimIndent()
+        val first = page("oldsession1")
+        val again = page("abcff123")
+        assertTrue(terminlisteNextUrl(again, AKSA_SCHULNETZ_BASE)!!.contains("sRow=25"))
+        assertFalse(terminlisteHrefSkips("index.php?pageid=22108&id=abcff123&sRow=25"))
+        assertTrue(terminlisteHrefSkips("index.php?pageid=22108&sRow=0&ff=1"))
+        assertEquals(1, terminlistePagesFetched(listOf(first, again, again, again, again), AKSA_SCHULNETZ_BASE))
+        val next = terminlisteNextUrl(first, AKSA_SCHULNETZ_BASE)!!
+        assertTrue(terminlisteShouldFetch(next, 0, emptySet()))
+        assertFalse(terminlisteShouldFetch(next, 25, setOf(25)))
+        assertEquals(null, terminlisteNextUrl(again, AKSA_SCHULNETZ_BASE, 50))
+    }
+
+    @Test
+    fun crashAndLogcatLinesStayFreeOfMarkupAndOtherApps() {
+        val line = formatCrashRecord(
+            "2026-11-05T18:51:14Z",
+            "2026.11.2-beta.1",
+            51000151,
+            "main",
+            "java.lang.IllegalStateException",
+            listOf("ch.fasrv.fanotes.companion.SchulnetzBrowser.load:88", "<html>Deutsch 5.5</html>"),
+            "screen=today caller=resume actions=resume url=https://www.schulnetz-ag.ch/aksa/index.php?pageid=22202&id=abcdef&name=Ada",
+        )
+        assertTrue(line.contains("version=2026.11.2-beta.1"))
+        assertTrue(line.contains("versionCode=51000151"))
+        assertTrue(line.contains("thread=main"))
+        assertTrue(line.contains("exception=java.lang.illegalstateexception"))
+        assertTrue(line.contains("ch.fasrv.fanotes.companion.SchulnetzBrowser.load:88"))
+        assertFalse(line.contains("<html"))
+        assertFalse(line.contains("abcdef"))
+        assertFalse(line.contains("Ada"))
+        assertFalse(line.contains("https://"))
+        val excerpt = redactLogcatExcerpt(
+            """
+            E AndroidRuntime: FATAL EXCEPTION: main Process: ch.fasrv.kantiplus
+            E AndroidRuntime: FATAL EXCEPTION: main Process: com.other.app
+            E ActivityManager: ANR in ch.fasrv.kantiplus https://www.schulnetz-ag.ch/aksa/index.php?pageid=22202&id=secret
+            I chatter: hello ch.fasrv.kantiplus
+            """.trimIndent(),
+        )
+        assertTrue(excerpt.contains("ch.fasrv.kantiplus"))
+        assertFalse(excerpt.contains("com.other.app"))
+        assertFalse(excerpt.contains("hello"))
+        assertFalse(excerpt.contains("secret"))
+        assertFalse(excerpt.contains("https://"))
+        assertTrue(exitUnclean("anr"))
+        assertTrue(exitUnclean("crash-native"))
+        assertFalse(exitUnclean("user-requested"))
+        assertEquals(2, tableCount("<table><tr></tr></table><TABLE id='x'></TABLE><div>no</div>"))
+    }
+}

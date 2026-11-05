@@ -1356,7 +1356,7 @@ export const terminlisteNextUrl = (html, baseUrl, currentRow = 0) => {
   for (const match of String(html || '').matchAll(/href\s*=\s*["']([^"']+)["']/giu)) {
     const href = match[1].replace(/&amp;/gu, '&')
     if (!href.includes('pageid=22108') || !href.includes('sRow=')) continue
-    if (href.includes('ff') || href.includes('sort=') || href.includes('action=') || href.includes('numRows=')) continue
+    if (/(?:^|[?&])ff=/iu.test(href) || href.includes('sort=') || href.includes('action=') || href.includes('numRows=')) continue
     const row = Number(href.match(/sRow=(\d+)/u)?.[1] || 0)
     if (!row || row <= currentRow) continue
     if (best == null || row < bestRow) {

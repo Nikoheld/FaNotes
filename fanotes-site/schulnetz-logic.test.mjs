@@ -1304,6 +1304,10 @@ test('a web scrape reads the whole current week and keeps a far lesson', async (
   assert.equal(terminlisteNextUrl(links, base).includes('sRow=25'), true)
   assert.equal(terminlisteNextUrl(links, base, 25).includes('sRow=50'), true)
   assert.equal(terminlisteNextUrl(links, base, 50), '')
+  const rotated = '<a href="index.php?pageid=22108&amp;id=abcff123&amp;sRow=25">25</a><a href="index.php?pageid=22108&amp;id=abcff123&amp;sRow=50">50</a>'
+  assert.equal(terminlisteNextUrl(rotated, base).includes('sRow=25'), true)
+  assert.equal(terminlisteNextUrl(rotated, base, 25).includes('sRow=50'), true)
+  assert.equal(terminlisteNextUrl(rotated, base, 50), '')
 })
 
 test('exam alerts ignore a stored lesson, empty markup and a missing clock', () => {
