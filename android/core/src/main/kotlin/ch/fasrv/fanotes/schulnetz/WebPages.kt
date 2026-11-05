@@ -248,12 +248,27 @@ fun parseRenderedTimetable(html: String): List<AgendaEvent> {
             courseId = text.substringBefore(' '),
             courseName = text.substringBefore(" ("),
             status = "",
-            eventType = if (classes.contains("event_line")) "event" else "lesson",
+            eventType = renderedEventType(classes, tooltipLines(element)),
             color = "",
             timetableText = text,
         )
     }
     return events
+}
+
+private fun tooltipLines(element: org.jsoup.nodes.Element): List<String> = buildList {
+    if (element.attr("title").isNotBlank()) add(element.attr("title"))
+    element.select("[title]").forEach { node ->
+        val title = node.attr("title")
+        if (title.isNotBlank()) add(title)
+    }
+}
+
+/** A Prüfung or Test tooltip wins over the generic lesson block. All-day bars stay appointments. */
+private fun renderedEventType(classes: String, tooltips: List<String>): String = when {
+    tooltips.any(::examLead) -> "exam"
+    classes.contains("event_line") -> "event"
+    else -> "lesson"
 }
 
 fun parseStartRecentGrades(html: String): List<SchoolGrade> = sectionRows(html, "letzten noten").mapNotNull { cells ->
@@ -422,7 +437,7 @@ fun parseTimetableHtml(html: String): List<AgendaEvent> {
             courseId = "",
             courseName = label,
             status = "",
-            eventType = "lesson",
+            eventType = if (examLead(label) || tooltipLines(event).any(::examLead)) "exam" else "lesson",
             color = "",
             timetableText = label,
         )
@@ -449,7 +464,7 @@ fun parseTimetableHtml(html: String): List<AgendaEvent> {
                 courseId = course,
                 courseName = course,
                 status = "",
-                eventType = "lesson",
+                eventType = if (examLead(course)) "exam" else "lesson",
                 color = "",
                 timetableText = course,
             )
@@ -479,7 +494,7 @@ fun parseSchedulerNote(note: String): Pair<String, List<AgendaEvent>> {
             courseId = "",
             courseName = text,
             status = "",
-            eventType = "lesson",
+            eventType = canonicalEventType(event.string("event_type").orEmpty().ifBlank { if (examLead(text)) "test" else "" }),
             color = "",
             timetableText = text,
         )
@@ -519,7 +534,7 @@ fun parseSchedulerXml(xml: String): List<AgendaEvent> {
                         courseId = childText(event, "kursid"),
                         courseName = course.ifBlank { text },
                         status = if (comment.lowercase().contains("fällt") || comment.lowercase().contains("faellt")) "cancelled" else "",
-                        eventType = kind.ifBlank { "lesson" },
+                        eventType = canonicalEventType(kind),
                         color = childText(event, "color"),
                         timetableText = text,
                     ),
@@ -550,7 +565,7 @@ fun parseIcs(text: String): List<AgendaEvent> {
             courseId = "",
             courseName = summary,
             status = "",
-            eventType = "lesson",
+            eventType = if (examLead(summary) || examMarker(icsValue(body, "CATEGORIES").orEmpty())) "exam" else "lesson",
             color = "",
             timetableText = summary,
         )

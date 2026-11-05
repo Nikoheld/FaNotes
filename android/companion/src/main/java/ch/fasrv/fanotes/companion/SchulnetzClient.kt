@@ -37,6 +37,7 @@ import ch.fasrv.fanotes.schulnetz.pageUrl
 import ch.fasrv.fanotes.schulnetz.redactSchulnetzSecrets
 import ch.fasrv.fanotes.schulnetz.sessionIdsFromPage
 import ch.fasrv.fanotes.schulnetz.startPageUrl
+import ch.fasrv.fanotes.schulnetz.isExamLike
 import ch.fasrv.fanotes.schulnetz.parseIcs
 import ch.fasrv.fanotes.schulnetz.parseSchedulerNote
 import ch.fasrv.fanotes.schulnetz.parseRenderedTimetable
@@ -351,6 +352,7 @@ class SchulnetzClient(
         var icalAt = previous?.icalFetchedAt.orEmpty()
         val stamps = previous?.weekFetched.orEmpty().toMutableMap()
         if (canFetch) for (monday in refreshedLessons) stamps[monday] = fetchedNow
+        var icalExams = emptyList<ch.fasrv.fanotes.schulnetz.AgendaEvent>()
         if (canFetch && plan.fetchIcal && icalAvailable) {
             val body = get(icalUrl.orEmpty(), "ical", "ical")
             if (icalBodyUsable(body)) {
@@ -359,11 +361,18 @@ class SchulnetzClient(
                 if (htmlSpan == null) spanOfEvents(parsed)?.let { span = it }
                 val covered = if (span != null) mondaysBetween(span.start, span.end).map { it.toString() }.toSet() else parsed.mapNotNull { weekMondayKey(it.start) }.toSet()
                 events = overlayLessons(events, parsed, covered - refreshedLessons)
+                icalExams = parsed.filter { it.isExamLike() }
                 for (monday in covered - refreshedLessons) stamps[monday] = fetchedNow
             }
         }
         if (termine.value.isNotEmpty()) events = mergeById(events, termine.value)
-        val examEvents = overlayDated(previous?.exams.orEmpty(), examWeeks.values.flatten(), examWeeks.keys.map { it.toString() }.toSet())
+        val examEvents = mergeById(
+            mergeById(
+                overlayDated(previous?.exams.orEmpty(), examWeeks.values.flatten(), examWeeks.keys.map { it.toString() }.toSet()),
+                lessonWeeks.values.flatten().filter { it.isExamLike() },
+            ),
+            icalExams,
+        )
         if (events.isEmpty() && planHtml.length > 1000 && !planHtml.contains("dhx_cal_container")) {
             errors += "Stundenplan: Seite geladen, aber nicht lesbar"
         }
