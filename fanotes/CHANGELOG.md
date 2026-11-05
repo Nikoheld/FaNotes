@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.2
+
+- Keep the timetable when a Schulnetz read is blocked or times out.
+
 ## 2026.11.2-beta.1
 
 - Keep timetable lessons when the scheduler id or the fetch is empty.
