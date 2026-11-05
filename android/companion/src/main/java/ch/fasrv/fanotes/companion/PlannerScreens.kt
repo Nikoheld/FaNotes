@@ -3,6 +3,7 @@ package ch.fasrv.fanotes.companion
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -20,6 +21,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.*
@@ -203,7 +205,19 @@ private fun ScheduleScreen(model: CompanionModel) {
         ChoiceRow(listOf("all" to t(R.string.all), "school" to t(R.string.school), "personal" to t(R.string.personal), "due" to t(R.string.deadlines)), source, { source = it }, Modifier.padding(horizontal = Space.page, vertical = 4.dp))
         }
         FineDivider()
-        ScreenList {
+        ScreenList(Modifier.pointerInput(compact, model.day) {
+            var drag = 0f
+            detectHorizontalDragGestures(
+                onHorizontalDrag = { _, amount -> drag += amount },
+                onDragEnd = {
+                    val threshold = 72.dp.toPx()
+                    if (drag <= -threshold) model.day = if (compact) model.day.plusDays(1) else model.day.plusWeeks(1)
+                    else if (drag >= threshold) model.day = if (compact) model.day.minusDays(1) else model.day.minusWeeks(1)
+                    drag = 0f
+                },
+                onDragCancel = { drag = 0f },
+            )
+        }) {
             item { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(if (model.planWeek) t(R.string.this_week) else dateLabel(model.day), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 TextButton(onClick = { model.planWeek = !model.planWeek }) { Text(if (model.planWeek) t(R.string.day_view) else t(R.string.week_view)) }

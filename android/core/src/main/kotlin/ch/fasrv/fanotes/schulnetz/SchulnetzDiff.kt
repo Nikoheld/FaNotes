@@ -16,6 +16,7 @@ fun diffSnapshots(
     today: LocalDate = LocalDate.now(),
 ): List<SchulnetzChange> {
     if (previous == null) return emptyList()
+    val freshWeeks = introducedWeeks(previous, next)
     val changes = mutableListOf<SchulnetzChange>()
     if (settings.grades) diffGrades(previous.grades.withoutSummaryGrades(), next.grades.withoutSummaryGrades(), changes)
     if (settings.timetable) {
@@ -26,6 +27,7 @@ fun diffSnapshots(
             created = "Stundenplan geändert",
             removed = "Lektion entfernt",
             changes = changes,
+            skipWeeks = freshWeeks,
         )
     }
     if (settings.exams) {
@@ -36,6 +38,7 @@ fun diffSnapshots(
             created = "Neue Prüfung",
             removed = "Prüfung entfällt",
             changes = changes,
+            skipWeeks = freshWeeks,
         )
     }
     if (settings.absences) {
@@ -70,6 +73,7 @@ fun diffSnapshots(
         }
         val beforeEvents = previous.events.associateBy { it.id }
         for (event in next.events) {
+            if (weekMondayKey(event.start) in freshWeeks) continue
             if (event.isLesson() || event.isExamLike() || beforeEvents[event.id] != null) continue
             changes += linkedChange(
                 id = "event:${event.id}:${eventKey(event)}",
@@ -96,11 +100,13 @@ private fun diffAgenda(
     created: String,
     removed: String,
     changes: MutableList<SchulnetzChange>,
+    skipWeeks: Set<String> = emptySet(),
 ) {
     val before = previous.associateBy { it.id }
     val after = next.associateBy { it.id }
     for (event in next) {
         val old = before[event.id]
+        if (old == null && weekMondayKey(event.start) in skipWeeks) continue
         val key = eventKey(event)
         if (old != null && eventKey(old) == key) continue
         val title = when {
@@ -125,6 +131,7 @@ private fun diffAgenda(
     }
     for (event in previous) {
         if (after[event.id] != null) continue
+        if (weekMondayKey(event.start) in skipWeeks) continue
         changes += linkedChange(
             id = "$category:${event.id}:removed",
             category = category,

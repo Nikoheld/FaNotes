@@ -42,7 +42,16 @@ import {
   settleGradeNotifications,
   keepLoadedGrades,
   normalizeGradeDate,
+  parseWeekSpan,
+  planWeekFetches,
+  introducedWeeks,
+  eventQueryWindow,
+  overlayLessons,
+  schedulerFetchUrl,
+  zurichTimeshift,
+  WEEK_CAP,
 } from './schulnetz-logic.mjs'
+import { scrapeWithSession } from './schulnetz-web.mjs'
 
 const marks = [
   { mark: 5.5, weight: 1 },
@@ -1021,6 +1030,93 @@ test('reading a link drops the retired ntfy fields', async () => {
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('week range follows the page span and stays quiet for a new week', () => {
+  const clock = '<script>scheduler.config.limit_start = new Date(2026, 7, 17); scheduler.config.limit_end = new Date(2027, 6, 4);</script>'
+  assert.deepEqual(parseWeekSpan(clock), { start: '2026-08-17', end: '2027-07-04' })
+  assert.equal(parseWeekSpan('<html><body>Stundenplan</body></html>'), null)
+  assert.deepEqual(parseWeekSpan('<div data-min-date="2026-08-17" data-max-date="2027-07-04"></div>'), { start: '2026-08-17', end: '2027-07-04' })
+  const mondays = []
+  for (let day = '2026-01-05'; day <= '2027-06-28'; day = new Date(Date.parse(`${day}T00:00:00Z`) + 7 * 86400000).toISOString().slice(0, 10)) mondays.push(day)
+  const first = planWeekFetches({ mondays, fetchedAt: {}, icalFetchedAt: '', now: '2026-11-04T12:00:00Z', today: '2026-11-04', icalAvailable: true })
+  assert.deepEqual(first.fetch, ['2026-10-26', '2026-11-02', '2026-11-09'])
+  assert.equal(first.fetchIcal, true)
+  const walked = planWeekFetches({ mondays, fetchedAt: {}, icalFetchedAt: '', now: '2026-11-04T12:00:00Z', today: '2026-11-04', icalAvailable: false })
+  assert.equal(walked.fetch.length, WEEK_CAP)
+  assert.equal(walked.fetchIcal, false)
+  const currentOnly = planWeekFetches({ mondays: [], fetchedAt: {}, icalFetchedAt: '', now: '2026-11-04T12:00:00Z', today: '2026-11-04', icalAvailable: false })
+  assert.deepEqual(currentOnly.fetch, ['2026-11-02'])
+  const lesson = (id, start, room = 'A1') => ({ id, start, end: start, room, text: 'Mathematik', courseName: 'Mathematik', teachers: ['Nord'], status: '', eventType: 'lesson' })
+  const previous = { events: [lesson('e1', '2026-11-02T08:15:00')], exams: [], weekFetched: {} }
+  const next = {
+    events: [lesson('e1', '2026-11-02T08:15:00', 'B2'), lesson('e2', '2026-11-16T08:15:00')],
+    exams: [],
+    weekFetched: { '2026-11-02': '2026-11-04T12:00:00Z', '2026-11-16': '2026-11-04T12:00:00Z' },
+  }
+  assert.deepEqual(diffSnapshots(previous, next).map((change) => change.title), ['Raum geändert'])
+  assert.equal(introducedWeeks({ events: [], exams: [] }, { events: [lesson('e1', '2026-11-02T08:15:00')], exams: [] }).size, 0)
+  const legacy = diffSnapshots({ grades: [], events: [], exams: [], absences: [], messages: [] }, { events: [lesson('e1', '2026-11-02T08:15:00')], exams: [] })
+  assert.equal(legacy.some((change) => change.category === 'timetable'), true)
+  const merged = overlayLessons(
+    [lesson('e1', '2026-11-02T08:15:00'), { ...lesson('t1', '2026-11-03T15:00:00'), eventType: 'event' }, lesson('far', '2026-12-07T08:15:00')],
+    [lesson('e2', '2026-11-04T09:00:00', 'B2')],
+    new Set(['2026-11-02']),
+  )
+  assert.deepEqual(merged.map((event) => event.id), ['t1', 'far', 'e2'])
+  const narrow = eventQueryWindow({ spanStart: '', spanEnd: '', weekFetched: {}, icalFetchedAt: '', today: '2026-11-04', now: '2026-11-04T12:00:00Z' })
+  assert.equal(narrow.wide, false)
+  assert.equal(narrow.min, '2026-10-28')
+  assert.equal(narrow.max, '2026-11-25')
+  const wide = eventQueryWindow({ spanStart: '2026-08-17', spanEnd: '2027-07-04', weekFetched: {}, icalFetchedAt: '', today: '2026-11-04', now: '2026-11-04T12:00:00Z' })
+  assert.equal(wide.wide, true)
+  assert.equal(wide.min, '2026-08-17')
+  const base = 'https://www.schulnetz-ag.ch/aksa'
+  assert.equal(schulnetzCallAllowed('GET', `${base}/abo.ics`), true)
+  assert.equal(schulnetzCallAllowed('POST', `${base}/abo.ics`), false)
+  assert.equal(schulnetzCallAllowed('GET', `${base}/abo.ics?pageid=23118`), false)
+  assert.equal(schulnetzCallAllowed('GET', `${base}/abo.ics?pageid=9999`), false)
+  assert.equal(schulnetzCallAllowed('GET', `${base}/index.php?pageid=9999`), false)
+  assert.equal(zurichTimeshift('2026-11-04'), -60)
+  assert.equal(zurichTimeshift('2026-08-17'), -120)
+  const url = schedulerFetchUrl({ root: base, pageId: '22202', ansicht: 'schueleransicht', id: 'abc', transid: 'def', today: '2026-11-04', min: '2026-11-02', max: '2026-11-09' })
+  assert.equal(url.includes('action='), false)
+  assert.equal(url.includes('pageid=22202'), true)
+  assert.equal(url.includes('min_date=2026-11-02'), true)
+  assert.equal(url.includes('max_date=2026-11-09'), true)
+  assert.equal(url.includes('timeshift=-60'), true)
+  const examUrl = schedulerFetchUrl({ root: base, pageId: '21312', ansicht: 'klassenuebersicht', id: 'abc', transid: 'def', today: '2026-11-02', min: '2026-11-02', max: '2026-11-09', extra: 'showOnlyThisClass=-1' })
+  assert.equal(examUrl.includes('pageid=21312'), true)
+  assert.equal(examUrl.includes('action='), false)
+})
+
+test('a web scrape reads the whole current week and keeps a far lesson', async () => {
+  const urls = []
+  const fetchImpl = async (url) => {
+    urls.push(String(url))
+    const scheduler = String(url).includes('scheduler_processor')
+    const body = scheduler ? '<data></data>' : '<html><body>ok</body></html>'
+    return { status: 200, headers: { get: () => '' }, text: async () => body }
+  }
+  const session = { php: 'php', id: 'abc', transid: 'def', userAgent: 'test' }
+  const base = 'https://www.schulnetz-ag.ch/aksa'
+  const first = await scrapeWithSession(base, session, fetchImpl, { today: '2026-11-04', now: '2026-11-04T12:00:00Z' })
+  const schedulers = urls.filter((url) => url.includes('scheduler_processor'))
+  assert.equal(schedulers.some((url) => url.includes('pageid=22202') && url.includes('min_date=2026-11-02') && url.includes('max_date=2026-11-09') && !url.includes('action=')), true)
+  assert.equal(schedulers.some((url) => url.includes('pageid=21312') && !url.includes('action=')), true)
+  assert.equal(first.weekFetched['2026-11-02'], '2026-11-04T12:00:00Z')
+  urls.length = 0
+  const far = { id: 'far', start: '2026-12-07T08:15:00', end: '2026-12-07T09:00:00', text: 'Deutsch', courseName: 'Deutsch', teachers: [], status: '', eventType: 'lesson', room: 'A1' }
+  const appointment = { id: 't1', start: '2026-11-04T15:00:00', end: '2026-11-04T16:00:00', text: 'Probe', courseName: 'Probe', teachers: [], status: '', eventType: 'event', room: '' }
+  const second = await scrapeWithSession(base, session, fetchImpl, {
+    today: '2026-11-04',
+    now: '2026-11-04T12:30:00Z',
+    previousEvents: [far, appointment],
+    weekFetched: { '2026-11-02': '2026-11-04T12:00:00Z', '2026-12-07': '2026-11-04T12:00:00Z' },
+  })
+  assert.equal(second.events.some((event) => event.id === 'far'), true)
+  assert.equal(second.events.some((event) => event.id === 't1'), true)
+  assert.equal(urls.filter((url) => url.includes('scheduler_processor')).length, 2)
 })
 
 test('seal round trip uses aes-256-gcm', () => {

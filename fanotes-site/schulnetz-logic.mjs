@@ -706,6 +706,7 @@ export const withoutSummaryGrades = (grades) => (grades || []).filter((grade) =>
 
 export const diffSnapshots = (previous, next, settings = {}, today = zurichToday()) => {
   if (!previous) return []
+  const freshWeeks = introducedWeeks(previous, next)
   previous = { ...previous, grades: withoutSummaryGrades(previous.grades) }
   next = { ...next, grades: withoutSummaryGrades(next.grades) }
   const prefs = {
@@ -719,9 +720,9 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
   const changes = []
   if (prefs.grades) diffGradeList(previous.grades || [], next.grades || [], changes)
   if (prefs.timetable) {
-    diffAgenda((previous.events || []).filter(isLesson), (next.events || []).filter(isLesson), 'timetable', 'Stundenplan geändert', 'Lektion entfernt', changes)
+    diffAgenda((previous.events || []).filter(isLesson), (next.events || []).filter(isLesson), 'timetable', 'Stundenplan geändert', 'Lektion entfernt', changes, freshWeeks)
   }
-  if (prefs.exams) diffAgenda(previous.exams || [], next.exams || [], 'exam', 'Neue Prüfung', 'Prüfung entfällt', changes)
+  if (prefs.exams) diffAgenda(previous.exams || [], next.exams || [], 'exam', 'Neue Prüfung', 'Prüfung entfällt', changes, freshWeeks)
   if (prefs.absences) {
     const before = new Set((previous.absences || []).map((item) => item.id))
     for (const absence of next.absences || []) {
@@ -742,6 +743,7 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
     }
     const beforeEvents = new Set((previous.events || []).map((item) => item.id))
     for (const event of next.events || []) {
+      if (freshWeeks.has(weekMondayKey(event.start))) continue
       if (isLesson(event) || isExamLike(event) || beforeEvents.has(event.id)) continue
       changes.push(linkedChange(`event:${event.id}:${eventKey(event)}`, 'event', 'Neuer Termin', eventBody(event), {
         targetId: lessonTargetId(event),
@@ -803,11 +805,12 @@ const diffGradeList = (previous, next, changes) => {
   }
 }
 
-const diffAgenda = (previous, next, category, created, removed, changes) => {
+const diffAgenda = (previous, next, category, created, removed, changes, skipWeeks = new Set()) => {
   const before = new Map(previous.map((event) => [event.id, event]))
   const after = new Set(next.map((event) => event.id))
   for (const event of next) {
     const old = before.get(event.id)
+    if (!old && skipWeeks.has(weekMondayKey(event.start))) continue
     const key = eventKey(event)
     if (old && eventKey(old) === key) continue
     let title
@@ -827,6 +830,7 @@ const diffAgenda = (previous, next, category, created, removed, changes) => {
   }
   for (const event of previous) {
     if (after.has(event.id)) continue
+    if (skipWeeks.has(weekMondayKey(event.start))) continue
     changes.push(linkedChange(`${category}:${event.id}:removed`, category, removed, eventBody(event), {
       targetId: lessonTargetId(event),
       courseId: event.courseId || eventLabel(event),
@@ -947,6 +951,7 @@ export const schulnetzCallAllowed = (method, url, body = '') => {
   if (path.endsWith('/scheduler_processor.php')) {
     return !query.includes('action=') && (query.includes('pageid=22202') || query.includes('pageid=21312') || query.includes('ansicht=schueleransicht') || query.includes('ansicht=klassenuebersicht'))
   }
+  if (verb === 'GET' && path.endsWith('.ics') && !query.includes('action=')) return true
   return false
 }
 
@@ -1103,4 +1108,253 @@ export const extractWebIds = (url, html) => {
   const id = /[?&]id=([a-f0-9]{4,})/i.exec(blob)?.[1] || ''
   const transid = /[?&]transid=([a-f0-9]{4,})/i.exec(blob)?.[1] || ''
   return id && transid ? { id, transid } : null
+}
+
+export const WEEK_ADJACENT_MS = 30 * 60 * 1000
+export const WEEK_FAR_MS = 24 * 60 * 60 * 1000
+export const WEEK_CAP = 48
+
+export const weekMonday = (iso) => {
+  const [year, month, day] = String(iso || '').split('-').map(Number)
+  if (!year || !month || !day) return ''
+  const date = new Date(Date.UTC(year, month - 1, day))
+  const weekday = date.getUTCDay()
+  const delta = weekday === 0 ? 6 : weekday - 1
+  date.setUTCDate(date.getUTCDate() - delta)
+  return date.toISOString().slice(0, 10)
+}
+
+export const addDays = (iso, days) => {
+  const [year, month, day] = String(iso || '').split('-').map(Number)
+  if (!year || !month || !day) return ''
+  const date = new Date(Date.UTC(year, month - 1, day + days))
+  return date.toISOString().slice(0, 10)
+}
+
+export const eventDate = (start) => {
+  const iso = String(start || '').match(/(\d{4}-\d{2}-\d{2})/)
+  if (iso) return iso[1]
+  const swiss = String(start || '').match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/)
+  if (!swiss) return ''
+  return `${swiss[3]}-${swiss[2].padStart(2, '0')}-${swiss[1].padStart(2, '0')}`
+}
+
+export const weekMondayKey = (start) => {
+  const day = eventDate(start)
+  return day ? weekMonday(day) : ''
+}
+
+export const mondaysBetween = (start, end) => {
+  if (!start || !end || end < start) return []
+  const last = weekMonday(end)
+  const out = []
+  let monday = weekMonday(start)
+  while (monday && monday <= last && out.length < 520) {
+    out.push(monday)
+    monday = addDays(monday, 7)
+  }
+  return out
+}
+
+export const capMondays = (mondays, today) => {
+  const unique = [...new Set((mondays || []).map(weekMonday).filter(Boolean))].sort()
+  if (unique.length <= WEEK_CAP) return unique
+  const anchor = weekMonday(today)
+  return unique
+    .sort((left, right) => Math.abs(Date.parse(`${left}T00:00:00Z`) - Date.parse(`${anchor}T00:00:00Z`)) - Math.abs(Date.parse(`${right}T00:00:00Z`) - Date.parse(`${anchor}T00:00:00Z`)) || left.localeCompare(right))
+    .slice(0, WEEK_CAP)
+    .sort()
+}
+
+const parsedDay = (value) => (/^\d{4}-\d{2}-\d{2}$/.test(value || '') ? value : '')
+
+const limitDate = (html, which) => {
+  const constructed = new RegExp(`scheduler\\.config\\.limit_${which}\\s*=\\s*new\\s+Date\\(\\s*(\\d{4})\\s*,\\s*(\\d{1,2})\\s*,\\s*(\\d{1,2})`, 'i').exec(html || '')
+  if (constructed) {
+    const month = String(Number(constructed[2]) + 1).padStart(2, '0')
+    const day = String(Number(constructed[3])).padStart(2, '0')
+    const iso = `${constructed[1]}-${month}-${day}`
+    return parsedDay(iso) && !Number.isNaN(Date.parse(`${iso}T00:00:00Z`)) ? iso : ''
+  }
+  const quoted = new RegExp(`scheduler\\.config\\.limit_${which}\\s*=\\s*["'](\\d{4}-\\d{2}-\\d{2})["']`, 'i').exec(html || '')
+  return parsedDay(quoted?.[1] || '')
+}
+
+const dataDate = (html, which) => {
+  const match = new RegExp(`data-${which}-date\\s*=\\s*["'](\\d{4}-\\d{2}-\\d{2})["']`, 'i').exec(html || '')
+  return parsedDay(match?.[1] || '')
+}
+
+/** A missing limit stays null. Callers then keep the current week. */
+export const parseWeekSpan = (html) => {
+  const scriptStart = limitDate(html, 'start')
+  const scriptEnd = limitDate(html, 'end')
+  if (scriptStart && scriptEnd && scriptEnd >= scriptStart) return { start: scriptStart, end: scriptEnd }
+  const min = dataDate(html, 'min')
+  const max = dataDate(html, 'max')
+  if (min && max && max >= min) return { start: min, end: max }
+  return null
+}
+
+export const spanOfEvents = (events) => {
+  const days = (events || []).map((event) => eventDate(event.start)).filter(Boolean).sort()
+  if (!days.length) return null
+  return { start: days[0], end: days[days.length - 1] }
+}
+
+const stampAge = (stamp, now) => {
+  const then = Date.parse(stamp || '')
+  const at = Date.parse(now || '')
+  if (!Number.isFinite(then) || !Number.isFinite(at)) return Number.POSITIVE_INFINITY
+  return at - then
+}
+
+const weekDistance = (monday, current) => Math.round((Date.parse(`${monday}T00:00:00Z`) - Date.parse(`${current}T00:00:00Z`)) / (7 * 86400000))
+
+export const planWeekFetches = ({ mondays = [], fetchedAt = {}, icalFetchedAt = '', now, today, icalAvailable = false } = {}) => {
+  const current = weekMonday(today)
+  const universe = capMondays(mondays.length ? mondays : [current], today)
+  const near = universe.filter((monday) => Math.abs(weekDistance(monday, current)) <= 1)
+  const far = universe.filter((monday) => Math.abs(weekDistance(monday, current)) > 1)
+  const first = Object.keys(fetchedAt || {}).length === 0 && !icalFetchedAt
+  if (first && icalAvailable) return { fetch: near, fetchIcal: true }
+  if (first) return { fetch: universe, fetchIcal: false }
+  const due = []
+  for (const monday of near) {
+    if (monday === current || stampAge(fetchedAt[monday], now) >= WEEK_ADJACENT_MS) due.push(monday)
+  }
+  if (icalAvailable && stampAge(icalFetchedAt, now) >= WEEK_FAR_MS) return { fetch: due, fetchIcal: true }
+  const farDue = far.filter((monday) => stampAge(fetchedAt[monday], now) >= WEEK_FAR_MS)
+    .sort((left, right) => String(fetchedAt[left] || '').localeCompare(String(fetchedAt[right] || '')))
+  if (farDue.length) due.push(farDue[0])
+  return { fetch: due, fetchIcal: false }
+}
+
+export const eventQueryWindow = ({ spanStart = '', spanEnd = '', weekFetched = {}, icalFetchedAt = '', today, now } = {}) => {
+  const nearMin = addDays(today, -7)
+  const nearMax = addDays(today, 21)
+  if (!parsedDay(spanStart) || !parsedDay(spanEnd) || spanEnd < spanStart) return { min: nearMin, max: nearMax, wide: false }
+  const current = weekMonday(today)
+  const far = mondaysBetween(spanStart, spanEnd).filter((monday) => Math.abs(weekDistance(monday, current)) > 1)
+  const icalFresh = stampAge(icalFetchedAt, now) < WEEK_FAR_MS
+  const missingFar = far.some((monday) => !weekFetched?.[monday])
+  const staleFar = far.some((monday) => weekFetched?.[monday] && stampAge(weekFetched[monday], now) >= WEEK_FAR_MS)
+  const wide = missingFar || (staleFar && !icalFresh)
+  return wide ? { min: spanStart, max: spanEnd, wide: true } : { min: nearMin, max: nearMax, wide: false }
+}
+
+export const hasFetchedWeeks = (weekFetched) => Object.keys(weekFetched || {}).some((key) => weekMonday(key) === key)
+
+export const introducedWeeks = (previous, next) => {
+  const keys = Object.keys(next?.weekFetched || {}).filter((key) => weekMonday(key) === key)
+  if (!keys.length) return new Set()
+  const prevKeys = Object.keys(previous?.weekFetched || {}).filter((key) => weekMonday(key) === key)
+  const known = new Set(prevKeys)
+  if (!prevKeys.length) {
+    for (const event of [...(previous?.events || []), ...(previous?.exams || [])]) {
+      const monday = weekMondayKey(event?.start)
+      if (monday) known.add(monday)
+    }
+  }
+  return new Set(keys.filter((key) => !known.has(key)))
+}
+
+export const overlayLessons = (previous, incoming, refreshed) => {
+  const weeks = refreshed instanceof Set ? refreshed : new Set(refreshed || [])
+  if (!weeks.size) return previous || []
+  const kept = (previous || []).filter((event) => {
+    const monday = weekMondayKey(event.start)
+    return !weeks.has(monday) || !isLesson(event)
+  })
+  const added = (incoming || []).filter((event) => isLesson(event) && weeks.has(weekMondayKey(event.start)))
+  return kept.concat(added)
+}
+
+export const overlayDated = (previous, incoming, refreshed) => {
+  const weeks = refreshed instanceof Set ? refreshed : new Set(refreshed || [])
+  if (!weeks.size) return previous || []
+  const kept = (previous || []).filter((event) => !weeks.has(weekMondayKey(event.start)))
+  const added = (incoming || []).filter((event) => weeks.has(weekMondayKey(event.start)))
+  return kept.concat(added)
+}
+
+export const applyEventWindow = (previous, incoming, minDay, maxDay) => {
+  if (!parsedDay(minDay) || !parsedDay(maxDay)) return previous || []
+  const inside = (event) => {
+    const day = eventDate(event.start)
+    return Boolean(day) && day >= minDay && day <= maxDay
+  }
+  return (previous || []).filter((event) => !inside(event)).concat((incoming || []).filter(inside))
+}
+
+export const stampWeeks = (previous, minDay, maxDay, nowIso) => {
+  const out = { ...(previous || {}) }
+  if (!parsedDay(minDay) || !parsedDay(maxDay)) return out
+  for (const monday of mondaysBetween(minDay, maxDay)) out[monday] = nowIso
+  return out
+}
+
+export const schedulerBodyUsable = (body) => {
+  const trimmed = String(body || '').trim()
+  return Boolean(trimmed) && (trimmed.includes('<data') || trimmed.includes('<event'))
+}
+
+export const icalBodyUsable = (body) => String(body || '').includes('BEGIN:VCALENDAR')
+
+export const findIcalUrl = (html, baseUrl) => {
+  const href = /href=["']([^"']+\.ics[^"']*)["']/i.exec(html || '')?.[1]
+  const call = /icalAbo\(\s*['"]([^'"]+)['"]/i.exec(html || '')?.[1]
+  const raw = href || call
+  if (!raw) return ''
+  if (raw.startsWith('http')) return raw
+  if (raw.startsWith('//')) return `https:${raw}`
+  return `${String(baseUrl || '').replace(/\/+$/u, '')}/${raw.replace(/^\/+/u, '')}`
+}
+
+export const parseIcs = (text) => {
+  if (!String(text || '').includes('BEGIN:VEVENT')) return []
+  return String(text).split('BEGIN:VEVENT').slice(1).map((block) => {
+    const body = block.split('END:VEVENT')[0]
+    const value = (name) => new RegExp(`^${name}(?:;[^:]*)?:(.+)$`, 'm').exec(body)?.[1]?.trim()?.replace(/\\n/g, '\n')?.replace(/\\,/g, ',') || ''
+    const summary = value('SUMMARY')
+    const start = value('DTSTART')
+    if (!summary || !start) return null
+    const icsTime = (raw) => {
+      const compact = /(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/.exec(raw)
+      if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}T${compact[4]}:${compact[5]}:00`
+      const day = /(\d{4})(\d{2})(\d{2})/.exec(raw)
+      return day ? `${day[1]}-${day[2]}-${day[3]}` : raw
+    }
+    return {
+      id: value('UID') || `ics:${start}:${summary}`,
+      start: icsTime(start),
+      end: icsTime(value('DTEND') || start),
+      text: summary,
+      comment: value('DESCRIPTION'),
+      room: value('LOCATION'),
+      teachers: [],
+      courseId: '',
+      courseName: summary,
+      status: '',
+      eventType: 'lesson',
+      color: '',
+      timetableText: summary,
+    }
+  }).filter(Boolean)
+}
+
+/** Europe/Zurich offset at noon UTC, negated the way the scheduler page sends timeshift. */
+export const zurichTimeshift = (day) => {
+  const date = new Date(`${day}T12:00:00Z`)
+  if (Number.isNaN(date.getTime())) return -60
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Zurich', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date)
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value || '0')
+  const minute = Number(parts.find((part) => part.type === 'minute')?.value || '0')
+  return -((hour * 60 + minute) - 12 * 60)
+}
+
+export const schedulerFetchUrl = ({ root, pageId, ansicht, id, transid, today, min, max, extra = '' }) => {
+  const shift = zurichTimeshift(today)
+  const middle = extra ? `&${extra}` : ''
+  return `${String(root).replace(/\/+$/u, '')}/scheduler_processor.php?view=week&curr_date=${today}&min_date=${min}&max_date=${max}&ansicht=${ansicht}${middle}&id=${id}&transid=${transid}&pageid=${pageId}&timeshift=${shift}`
 }

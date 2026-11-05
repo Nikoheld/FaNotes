@@ -153,6 +153,11 @@ data class SchulnetzSnapshot(
     val konto: List<KontoLine> = emptyList(),
     val startMessages: List<String> = emptyList(),
     val readErrors: List<String> = emptyList(),
+    /** Monday (ISO date) to the instant that week was last read. */
+    val weekFetched: Map<String, String> = emptyMap(),
+    val weekSpanStart: String = "",
+    val weekSpanEnd: String = "",
+    val icalFetchedAt: String = "",
 )
 
 data class NotifySettings(
@@ -195,6 +200,11 @@ data class SchulnetzRaw(
     val lateness: String? = null,
     val kontoHtml: String? = null,
     val startHtml: String? = null,
+    val eventMin: String = "",
+    val eventMax: String = "",
+    val weekSpanStart: String = "",
+    val weekSpanEnd: String = "",
+    val eventsFetched: Boolean = false,
 )
 
 fun parseSchulnetzInstant(raw: String, zone: ZoneId = ZoneId.of("Europe/Zurich")): Instant? {
