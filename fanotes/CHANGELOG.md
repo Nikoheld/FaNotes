@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.1
+
+- Keep timetable lessons when the scheduler id or the fetch is empty.
+- Stop empty Schulnetz fetches from cancelling every exam.
+
 ## 2026.11.1
 
 - **OneNote.** Windows und Linux importieren Desktop-.one-Dateien, auch Abschnitte mit Revisionsabhängigkeiten und Pfade mit Laufwerksbuchstabe. Der Android-Import bleibt unverändert.
