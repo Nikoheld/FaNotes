@@ -46,15 +46,27 @@ fun absenceTargetId(absence: SchoolAbsence): String =
 
 fun messageTargetId(message: SchoolMessage): String = notifyHash(message.id, message.title, message.body)
 
-fun eventDay(event: AgendaEvent, zone: ZoneId = ZoneId.of("Europe/Zurich")): String =
-    event.startsAt(zone)?.atZone(zone)?.toLocalDate()?.toString()
+fun eventDay(event: AgendaEvent, zone: ZoneId = ZoneId.of("Europe/Zurich")): String {
+    if (zonedStamp(event.start)) {
+        event.startsAt(zone)?.atZone(zone)?.toLocalDate()?.toString()?.let { return it }
+    }
+    val key = eventDayKey(event.start)
+    if (key.isNotBlank()) return key
+    return event.startsAt(zone)?.atZone(zone)?.toLocalDate()?.toString()
         ?: event.start.take(10).takeIf { it.length == 10 }.orEmpty()
+}
 
 fun eventClock(event: AgendaEvent, zone: ZoneId = ZoneId.of("Europe/Zurich")): String {
-    if (!event.start.contains('T') && event.start.length <= 10) return ""
-    return event.startsAt(zone)?.atZone(zone)?.toLocalTime()?.toString()?.take(5)
-        ?: event.start.substringAfter('T', "").take(5)
+    val clock = if (zonedStamp(event.start)) {
+        event.startsAt(zone)?.atZone(zone)?.toLocalTime()?.toString()?.take(5) ?: schulnetzClock(event.start)
+    } else {
+        schulnetzClock(event.start)
+    }
+    return if (clock.isBlank() || clock == "00:00") "" else clock
 }
+
+private fun zonedStamp(raw: String): Boolean =
+    raw.contains('Z') || Regex("""[+-]\d{2}:\d{2}$""").containsMatchIn(raw)
 
 fun notifyKindOf(category: String, id: String = "", title: String = ""): String = when {
     category == "settings" || id == "push-test" || title.contains("Testbenachrichtigung") -> "settings"

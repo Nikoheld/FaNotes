@@ -27,7 +27,7 @@ import ch.fasrv.fanotes.schulnetz.overlayDated
 import ch.fasrv.fanotes.schulnetz.overlayLessons
 import ch.fasrv.fanotes.schulnetz.parseWeekSpan
 import ch.fasrv.fanotes.schulnetz.planWeekFetches
-import ch.fasrv.fanotes.schulnetz.schedulerBodyUsable
+import ch.fasrv.fanotes.schulnetz.schedulerWeekLoaded
 import ch.fasrv.fanotes.schulnetz.spanOfEvents
 import ch.fasrv.fanotes.schulnetz.weekMonday
 import ch.fasrv.fanotes.schulnetz.classifySchulnetzPage
@@ -325,10 +325,10 @@ class SchulnetzClient(
                 val max = monday.plusDays(7)
                 val curr = if (monday == weekMonday(today)) today.toString() else monday.toString()
                 val lessonBody = get(schedulerUrl(root, id, transid, curr, monday.toString(), max.toString()), "scheduler", "scheduler")
-                if (schedulerBodyUsable(lessonBody)) lessonWeeks[monday] = parseSchedulerXml(lessonBody)
+                if (schedulerWeekLoaded(lessonBody)) lessonWeeks[monday] = parseSchedulerXml(lessonBody)
                 if (oauthPage != null || sawSessionProblem) break
                 val examBody = get(examSchedulerUrl(root, id, transid, curr, monday.toString(), max.toString()), "pruefungen-xml", "21312")
-                if (schedulerBodyUsable(examBody)) {
+                if (schedulerWeekLoaded(examBody)) {
                     examWeeks[monday] = parseSchedulerXml(examBody).map { event ->
                         event.copy(eventType = if (event.eventType.isBlank() || event.eventType == "lesson") "exam" else event.eventType)
                     }
@@ -383,8 +383,7 @@ class SchulnetzClient(
             events = events,
             exams = examEvents,
             absences = absences.value,
-            messages = (parseStartMessages(pages["1"].orEmpty()).mapIndexed { index, text -> ch.fasrv.fanotes.schulnetz.SchoolMessage("start-$index", "Mitteilung", text, "") }
-                + parseStartAppointments(pages["1"].orEmpty()).map { ch.fasrv.fanotes.schulnetz.SchoolMessage(it.id, "Termin", it.text, it.start) }),
+            messages = startMessages(pages["1"].orEmpty(), previous),
             konto = parseKontoauszug(pages["21411"].orEmpty()),
             startMessages = parseStartMessages(pages["1"].orEmpty()),
             readErrors = errors,
@@ -403,6 +402,17 @@ class SchulnetzClient(
         }
         val reported = if (problem == SessionProblem.INTERACTIVE) snapshot.copy(readErrors = listOf("Bei Schulnetz neu anmelden")) else snapshot
         return WebBundle(reported, problem, debug, WebSession(root, "", id, transid), okPages, oauthPage, captured)
+    }
+
+    private fun startMessages(startHtml: String, previous: SchulnetzSnapshot?): List<ch.fasrv.fanotes.schulnetz.SchoolMessage> {
+        val notes = parseStartMessages(startHtml).mapIndexed { index, text ->
+            ch.fasrv.fanotes.schulnetz.SchoolMessage("start-$index", "Mitteilung", text, "")
+        }
+        val appointments = parseStartAppointments(startHtml).map {
+            ch.fasrv.fanotes.schulnetz.SchoolMessage(it.id, "Termin", it.text, it.start)
+        }
+        val keptAppointments = if (appointments.isNotEmpty()) appointments else previous?.messages.orEmpty().filter { it.title == "Termin" }
+        return notes + keptAppointments
     }
 
     private fun SchulnetzSnapshot?.storedSpan(): WeekSpan? {

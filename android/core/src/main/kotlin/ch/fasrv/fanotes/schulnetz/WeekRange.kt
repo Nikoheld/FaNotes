@@ -186,6 +186,10 @@ fun schedulerBodyUsable(body: String): Boolean {
     return trimmed.isNotEmpty() && (trimmed.contains("<data") || trimmed.contains("<event"))
 }
 
+/** An empty `<data></data>` body is readable but not a timetable. It must not wipe the week. */
+fun schedulerWeekLoaded(body: String): Boolean =
+    schedulerBodyUsable(body) && Regex("""(?i)<event""").containsMatchIn(body)
+
 fun icalBodyUsable(body: String): Boolean = body.contains("BEGIN:VCALENDAR")
 
 private fun stampAge(stamp: String?, now: Instant): Long {

@@ -259,9 +259,13 @@ fun agendaForDay(
         .distinctBy(::lessonTargetId)
         .filterNot { "schulnetz-${it.id}" in imported }
         .map { event ->
+            val startClock = eventClock(event, zone)
+            val endClock = if (event.end.contains('T')) event.endsAt(zone)?.atZone(zone)?.format(clock).orEmpty() else ""
+            val shownEnd = if (endClock == "00:00" && startClock.isBlank()) "" else endClock
+            val room = cleanSchulnetzText(event.room)
             AgendaEntry("school:${lessonTargetId(event)}", event.label, if (event.isExamLike() || event in snapshot.exams) AgendaKind.Exam else if (event.isLesson()) AgendaKind.Lesson else AgendaKind.Event, day,
-                eventClock(event, zone), if (event.end.contains('T')) event.endsAt(zone)?.atZone(zone)?.format(clock).orEmpty() else "",
-                listOf(event.room.takeIf { it.isNotBlank() }?.let { t(R.string.room_named, it) }.orEmpty(), event.teachers.joinToString(", ")).filter { it.isNotBlank() }.joinToString(" · "), school = event)
+                startClock, shownEnd,
+                listOf(room.takeIf { it.isNotBlank() }?.let { t(R.string.room_named, it) }.orEmpty(), event.teachers.joinToString(", ") { cleanSchulnetzText(it) }).filter { it.isNotBlank() }.joinToString(" · "), school = event)
         }
     val visibleCalendars = calendar.calendars.filter { it.visible }.map { it.id }.toSet()
     val local = calendar.events.filter { it.calendarId in visibleCalendars && !(it.id.startsWith("hw:") && tasks.any { t -> "hw:${t.id}" == it.id }) }

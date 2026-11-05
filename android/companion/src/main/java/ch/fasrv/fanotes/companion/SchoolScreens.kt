@@ -251,7 +251,7 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
                 if (events.isEmpty() && query.isBlank() && model.busy && model.snapshot.fetchedAt.isBlank()) item { SchoolLoading(t(R.string.loading_exams)) }
                 else if (events.isEmpty()) item { EmptyState(Icons.AutoMirrored.Outlined.Assignment, t(R.string.no_exams_to_show), t(R.string.available_exam_dates_appear_after_your_school_is)) }
                 items(events, key = { lessonTargetId(it) }) { event ->
-                    val entry = AgendaEntry("exam:${lessonTargetId(event)}", event.label, AgendaKind.Exam, parseDisplayDate(event.start) ?: today, eventClock(event), detail = listOf(dueLabel(event.start), event.room).filter { it.isNotBlank() }.joinToString(" · "), school = event)
+                    val entry = AgendaEntry("exam:${lessonTargetId(event)}", event.label, AgendaKind.Exam, parseDisplayDate(event.start) ?: today, eventClock(event), detail = listOf(dueLabel(event.start), cleanSchulnetzText(event.room)).filter { it.isNotBlank() }.joinToString(" · "), school = event)
                     AgendaRow(model, entry) { selected = entry }
                 }
                 schoolError(model, "Prüfungen:")

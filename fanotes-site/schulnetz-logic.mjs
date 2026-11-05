@@ -314,13 +314,53 @@ export const unwrapSchulnetz = (raw) => {
   return value
 }
 
+/** Drop CDATA markup, including a wrapper that sits inside a longer field. */
+export const cleanSchulnetzText = (raw) => {
+  let value = unwrapSchulnetz(raw)
+  let previous = ''
+  while (value !== previous) {
+    previous = value
+    value = value.replace(/<!\[CDATA\[/iu, '').replace(/\]\]>/u, '')
+  }
+  return value.replace(/\s+/gu, ' ').trim()
+}
+
+/** A real HH:mm. The T inside `<![CDATA[` is not a time, and a date alone is not 00:00. */
+export const schulnetzClock = (raw) => {
+  const match = /(?:^|[\sT])([01]\d|2[0-3]):([0-5]\d)\b/u.exec(cleanSchulnetzText(raw))
+  return match ? `${match[1]}:${match[2]}` : ''
+}
+
+export const eventDayKey = (raw) => {
+  const text = cleanSchulnetzText(raw)
+  const iso = /(\d{4}-\d{2}-\d{2})/u.exec(text)
+  if (iso) return iso[1]
+  const swiss = /(\d{1,2})\.(\d{1,2})\.(\d{4})/u.exec(text)
+  if (!swiss) return ''
+  return `${swiss[3]}-${swiss[2].padStart(2, '0')}-${swiss[1].padStart(2, '0')}`
+}
+
+/** Clock text for a notification. Midnight is shown only when the event also ends at a later time. */
+export const displayClock = (start, end = '') => {
+  const from = schulnetzClock(start)
+  const to = schulnetzClock(end)
+  if (!from || (from === '00:00' && (!to || to === '00:00'))) return ''
+  if (!to || to === from) return from
+  return `${from}–${to}`
+}
+
+const realClock = (raw) => {
+  const clock = schulnetzClock(raw)
+  return clock === '00:00' ? '' : clock
+}
+
 const pruefungCode = /(?:^|_)pru(?:fung)?$/iu
 const examToken = /(?:^|[^a-zäöü])test(?:[^a-zäöü]|$)/iu
 const examLeadRegex = /^(?:prüfung|pruefung|klausur|test)\b/iu
 
 /** Scheduler codes such as `1_pru`, plus the words exam, Prüfung, Klausur, and Test. */
 export const examMarker = (raw) => {
-  const kind = unwrapSchulnetz(raw).toLowerCase()
+  const kind = cleanSchulnetzText(raw).toLowerCase()
   if (!kind) return false
   if (kind === '1_pru' || pruefungCode.test(kind)) return true
   if (kind.includes('prüfung') || kind.includes('pruefung') || kind.includes('klausur') || kind.includes('exam')) return true
@@ -329,12 +369,12 @@ export const examMarker = (raw) => {
 
 /** A leading Test/Prüfung/Klausur on a title. Lesetest and other longer words do not match. */
 export const examLead = (raw) => {
-  const line = unwrapSchulnetz(raw).split(/\r?\n/u).find((part) => part.trim()) || ''
+  const line = cleanSchulnetzText(raw).split(/\r?\n/u).find((part) => part.trim()) || ''
   return examLeadRegex.test(line.trim())
 }
 
 export const canonicalEventType = (raw) => {
-  const kind = unwrapSchulnetz(raw)
+  const kind = cleanSchulnetzText(raw)
   if (!kind) return 'lesson'
   if (examMarker(kind)) return 'exam'
   return kind
@@ -344,7 +384,7 @@ export const isExamLike = (event) => examMarker(event?.eventType) || examLead(ev
 
 export const isLesson = (event) => {
   if (isExamLike(event)) return false
-  const kind = unwrapSchulnetz(event?.eventType).toLowerCase()
+  const kind = cleanSchulnetzText(event?.eventType).toLowerCase()
   if (!kind) return true
   return kind.includes('lesson') || kind.includes('unterricht') || kind.includes('timetable') || kind === 'period' || kind === 'stunde'
 }
@@ -374,8 +414,10 @@ export const carryTimetableExams = (events, exams) => mergeEventsById(exams || [
 const gradeKey = (grade) => [numKey(grade.mark), numKey(grade.weight), grade.title || '', grade.date || ''].join('|')
 
 const eventKey = (event) => [
-  event.start || '', event.end || '', event.room || '', event.status || '', event.text || '',
-  (event.teachers || []).join(','), isCancelled(event) ? 'aus' : 'da', event.courseName || '',
+  eventDayKey(event.start), realClock(event.start), realClock(event.end), cleanSchulnetzText(event.room),
+  cleanSchulnetzText(event.status), cleanSchulnetzText(event.text),
+  (event.teachers || []).map((teacher) => cleanSchulnetzText(teacher)).join(','),
+  isCancelled(event) ? 'aus' : 'da', cleanSchulnetzText(event.courseName),
 ].join('|')
 
 const formatMark = (value) => {
@@ -385,13 +427,54 @@ const formatMark = (value) => {
 }
 
 const eventBody = (event) => {
-  const start = (event.start || '').split('T')[1]?.slice(0, 5) || ''
-  const end = (event.end || '').split('T')[1]?.slice(0, 5) || ''
-  const time = !start ? '' : !end || end === start ? start : `${start}–${end}`
-  const label = event.courseName || event.text || event.timetableText || 'Lektion'
-  return [label, time, event.room ? `Raum ${event.room}` : '', isCancelled(event) ? 'fällt aus' : '', isSubstitution(event) ? 'Vertretung' : '', event.comment || '']
+  const time = displayClock(event.start, event.end)
+  const room = cleanSchulnetzText(event.room)
+  const label = [event.courseName, event.text, event.timetableText].map((part) => cleanSchulnetzText(part)).find((part) => part) || ''
+  return [label, time, room ? `Raum ${room}` : '', isCancelled(event) ? 'fällt aus' : '', isSubstitution(event) ? 'Vertretung' : '', cleanSchulnetzText(event.comment)]
     .filter(Boolean)
     .join(' · ')
+}
+
+const eventMatchLabel = (event) => [event?.courseName, event?.text, event?.timetableText]
+  .map((part) => cleanSchulnetzText(part).toLowerCase())
+  .find((part) => part) || ''
+
+/** Same subject on the same day. A missing clock still matches, so a stored lesson can be the same test. */
+const sameSchoolSlot = (left, right) => {
+  if (left?.id && left.id === right?.id) return true
+  const leftLabel = eventMatchLabel(left)
+  const rightLabel = eventMatchLabel(right)
+  if (!leftLabel || leftLabel !== rightLabel) return false
+  const leftDay = eventDayKey(left?.start)
+  const rightDay = eventDayKey(right?.start)
+  return Boolean(leftDay) && leftDay === rightDay
+}
+
+const schoolEventMoved = (left, right) => {
+  const leftClock = realClock(left?.start)
+  const rightClock = realClock(right?.start)
+  if (leftClock && rightClock && leftClock !== rightClock) return true
+  const leftRoom = cleanSchulnetzText(left?.room)
+  const rightRoom = cleanSchulnetzText(right?.room)
+  return Boolean(leftRoom) && Boolean(rightRoom) && leftRoom !== rightRoom
+}
+
+const messageIdentity = (message) => {
+  const title = cleanSchulnetzText(message?.title).toLowerCase()
+  const body = cleanSchulnetzText(message?.body).toLowerCase()
+  if (!title && !body) return ''
+  return `${title}|${body}`
+}
+
+const deduped = (changes) => {
+  const seen = new Set()
+  return changes.filter((change) => {
+    if (change.category !== 'exam' && change.category !== 'event' && change.category !== 'timetable') return true
+    const key = `${change.category}|${change.title}|${cleanSchulnetzText(change.body)}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 export const parseSchoolDate = (raw) => {
@@ -556,9 +639,12 @@ export const keepLoadedGrades = (previousGrades, nextGrades) => {
   if (next.length === 0 && prev.length > 0) return prev
   return next
 }
-export const eventLabel = (event) => event.courseName || event.text || event.timetableText || 'Lektion'
-export const eventDay = (event) => (event.start || '').slice(0, 10)
-export const eventClock = (event) => (event.start || '').includes('T') ? (event.start || '').split('T')[1].slice(0, 5) : ''
+export const eventLabel = (event) => cleanSchulnetzText(event.courseName) || cleanSchulnetzText(event.text) || cleanSchulnetzText(event.timetableText) || 'Lektion'
+export const eventDay = (event) => eventDayKey(event.start) || String(event.start || '').slice(0, 10)
+export const eventClock = (event) => {
+  const clock = schulnetzClock(event.start)
+  return clock === '00:00' ? '' : clock
+}
 export const gradeTargetId = (grade) => notifyHash(courseKeyOf(grade), grade.date || '', grade.title || '')
 export const lessonTargetId = (event) => notifyHash(eventDay(event), eventClock(event), eventLabel(event))
 export const absenceTargetId = (absence) => notifyHash(absence.id || '', absence.dateFrom || '', absence.subject || '', absence.reason || '')
@@ -778,9 +864,9 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
   const changes = []
   if (prefs.grades) diffGradeList(previous.grades || [], next.grades || [], changes)
   if (prefs.timetable) {
-    diffAgenda((previous.events || []).filter(isLesson), (next.events || []).filter(isLesson), 'timetable', 'Stundenplan geändert', 'Lektion entfernt', changes, freshWeeks)
+    diffAgenda((previous.events || []).filter(isLesson), (next.events || []).filter(isLesson), 'timetable', 'Stundenplan geändert', 'Lektion entfernt', changes, freshWeeks, [], [], next.exams || [])
   }
-  if (prefs.exams) diffAgenda(previous.exams || [], next.exams || [], 'exam', 'Neue Prüfung', 'Prüfung entfällt', changes, freshWeeks)
+  if (prefs.exams) diffAgenda(previous.exams || [], next.exams || [], 'exam', 'Neue Prüfung', 'Prüfung entfällt', changes, freshWeeks, previous.events || [], next.events || [], [])
   if (prefs.absences) {
     const before = new Set((previous.absences || []).map((item) => item.id))
     for (const absence of next.absences || []) {
@@ -795,22 +881,32 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
   if (prefs.deadlines) changes.push(...excuseReminders(next.absences || [], today))
   if (prefs.events) {
     const beforeMessages = new Set((previous.messages || []).map((item) => item.id))
+    const knownMessages = new Set((previous.messages || []).map(messageIdentity).filter(Boolean))
     for (const message of next.messages || []) {
       if (beforeMessages.has(message.id)) continue
-      changes.push(linkedChange(`event:${message.id}`, 'event', message.title || 'Neue Mitteilung', message.body || message.title || '', { targetId: messageTargetId(message) }))
+      const identity = messageIdentity(message)
+      if (identity && knownMessages.has(identity)) continue
+      const title = cleanSchulnetzText(message.title) || 'Neue Mitteilung'
+      const body = cleanSchulnetzText(message.body) || cleanSchulnetzText(message.title)
+      if (!body) continue
+      changes.push(linkedChange(`event:${message.id}`, 'event', title, body, { targetId: messageTargetId(message) }))
     }
     const beforeEvents = new Set((previous.events || []).map((item) => item.id))
+    const knownEvents = [...(previous.events || []), ...(previous.exams || []), ...(next.exams || [])]
     for (const event of next.events || []) {
       if (freshWeeks.has(weekMondayKey(event.start))) continue
       if (isLesson(event) || isExamLike(event) || beforeEvents.has(event.id)) continue
-      changes.push(linkedChange(`event:${event.id}:${eventKey(event)}`, 'event', 'Neuer Termin', eventBody(event), {
+      if (knownEvents.some((known) => sameSchoolSlot(event, known))) continue
+      const body = eventBody(event)
+      if (!body) continue
+      changes.push(linkedChange(`event:${event.id}:${eventKey(event)}`, 'event', 'Neuer Termin', body, {
         targetId: lessonTargetId(event),
         courseId: event.courseId || eventLabel(event),
         date: eventDay(event),
       }))
     }
   }
-  return changes
+  return deduped(changes)
 }
 
 /**
@@ -863,16 +959,19 @@ const diffGradeList = (previous, next, changes) => {
   }
 }
 
-const diffAgenda = (previous, next, category, created, removed, changes, skipWeeks = new Set()) => {
+const diffAgenda = (previous, next, category, created, removed, changes, skipWeeks = new Set(), adoptFrom = [], stillThere = [], spareAgainst = []) => {
   const before = new Map(previous.map((event) => [event.id, event]))
   const after = new Set(next.map((event) => event.id))
   for (const event of next) {
     const old = before.get(event.id)
     if (!old && skipWeeks.has(weekMondayKey(event.start))) continue
+    const adopted = old ? null : adoptFrom.find((candidate) => sameSchoolSlot(event, candidate) && !stillThere.some((item) => item.id === candidate.id))
+    if (!old && adopted && !schoolEventMoved(adopted, event)) continue
     const key = eventKey(event)
     if (old && eventKey(old) === key) continue
     let title
-    if (!old) title = category === 'exam' ? 'Neue Prüfung' : created
+    if (!old && adopted) title = 'Prüfung verschoben'
+    else if (!old) title = category === 'exam' ? 'Neue Prüfung' : created
     else if (isCancelled(event) && !isCancelled(old)) title = category === 'exam' ? 'Prüfung fällt aus' : 'Lektion fällt aus'
     else if ((event.teachers || []).join() !== (old.teachers || []).join() || (isSubstitution(event) && !isSubstitution(old))) title = 'Vertretung'
     else if (category === 'exam' && (event.start !== old.start || event.room !== old.room)) title = 'Prüfung verschoben'
@@ -880,7 +979,9 @@ const diffAgenda = (previous, next, category, created, removed, changes, skipWee
     else if (event.room !== old.room) title = 'Raum geändert'
     else if (event.start !== old.start || event.end !== old.end) title = 'Zeit geändert'
     else title = category === 'exam' ? 'Prüfung geändert' : 'Stundenplan geändert'
-    changes.push(linkedChange(`${category}:${event.id}:${key}`, category, title, eventBody(event), {
+    const body = eventBody(event)
+    if (!body) continue
+    changes.push(linkedChange(`${category}:${event.id}:${key}`, category, title, body, {
       targetId: lessonTargetId(event),
       courseId: event.courseId || eventLabel(event),
       date: eventDay(event),
@@ -889,7 +990,10 @@ const diffAgenda = (previous, next, category, created, removed, changes, skipWee
   for (const event of previous) {
     if (after.has(event.id)) continue
     if (skipWeeks.has(weekMondayKey(event.start))) continue
-    changes.push(linkedChange(`${category}:${event.id}:removed`, category, removed, eventBody(event), {
+    if (spareAgainst.some((candidate) => sameSchoolSlot(event, candidate))) continue
+    const body = eventBody(event)
+    if (!body) continue
+    changes.push(linkedChange(`${category}:${event.id}:removed`, category, removed, body, {
       targetId: lessonTargetId(event),
       courseId: event.courseId || eventLabel(event),
       date: eventDay(event),
@@ -1136,7 +1240,7 @@ export const parseSchedulerXml = (xml) => {
   const events = []
   for (const block of String(xml).matchAll(/<event\b([^>]*)>([\s\S]*?)<\/event>/gi)) {
     const id = /id="([^"]+)"/.exec(block[1])?.[1] || ''
-    const field = (name) => unwrapSchulnetz(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`, 'i').exec(block[2])?.[1] || '')
+    const field = (name) => cleanSchulnetzText(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`, 'i').exec(block[2])?.[1] || '')
     const start = field('start_date').replace(' ', 'T')
     if (!start) continue
     const end = field('end_date').replace(' ', 'T') || start
@@ -1356,6 +1460,9 @@ export const schedulerBodyUsable = (body) => {
   const trimmed = String(body || '').trim()
   return Boolean(trimmed) && (trimmed.includes('<data') || trimmed.includes('<event'))
 }
+
+/** An empty `<data></data>` body is readable but not a timetable. It must not wipe the week. */
+export const schedulerWeekLoaded = (body) => schedulerBodyUsable(body) && /<event/iu.test(body)
 
 export const icalBodyUsable = (body) => String(body || '').includes('BEGIN:VCALENDAR')
 

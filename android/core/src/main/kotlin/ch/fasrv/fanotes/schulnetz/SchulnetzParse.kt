@@ -290,18 +290,18 @@ private fun JsonValue.Obj.toEvent(): AgendaEvent? {
     if (id.isBlank()) return null
     return AgendaEvent(
         id = id,
-        start = flexString("start"),
-        end = flexString("end"),
-        text = flexString("text"),
-        comment = flexString("comment"),
-        room = flexString("room"),
-        teachers = flexStrings("teachers"),
-        courseId = flexString("courseId"),
-        courseName = flexString("courseName"),
-        status = flexString("status"),
-        eventType = flexString("eventType"),
+        start = cleanSchulnetzText(flexString("start")),
+        end = cleanSchulnetzText(flexString("end")),
+        text = cleanSchulnetzText(flexString("text")),
+        comment = cleanSchulnetzText(flexString("comment")),
+        room = cleanSchulnetzText(flexString("room")),
+        teachers = flexStrings("teachers").map(::cleanSchulnetzText).filter { it.isNotBlank() },
+        courseId = cleanSchulnetzText(flexString("courseId")),
+        courseName = cleanSchulnetzText(flexString("courseName")),
+        status = cleanSchulnetzText(flexString("status")),
+        eventType = cleanSchulnetzText(flexString("eventType")),
         color = flexString("color"),
-        timetableText = flexString("timetableText"),
+        timetableText = cleanSchulnetzText(flexString("timetableText")),
     )
 }
 
@@ -322,8 +322,8 @@ private fun JsonValue.Obj.toHomework(): SchoolHomework? {
 }
 
 private fun JsonValue.Obj.toMessage(): SchoolMessage? {
-    val body = flexString("body")
-    val title = flexString("title")
+    val body = cleanSchulnetzText(flexString("body"))
+    val title = cleanSchulnetzText(flexString("title"))
     if (body.isBlank() && title.isBlank()) return null
     return SchoolMessage(flexString("id").ifBlank { stableId("msg", title, body) }, title, body, flexString("at"))
 }
