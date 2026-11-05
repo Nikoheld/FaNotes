@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 
 use crate::Host;
 
-const ONE2HTML_SHA: &str = "140c347e192d8bed8225f01a4c736e04c19bed241589d46cdc8b241b906eadb0";
+const ONE2HTML_SHA: &str = "343c247d7a5513df08185418d2be0ecaeb00ac06e4bc427f084f1e2179af5523";
 const SEVENZIP_SHA: &str = "afc9448bd0cc2eeda131cce313ef4994f9656417e0a15c8465fcda9ca859b280";
 const MAX_SOURCE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const MAX_HTML_BYTES: usize = 128 * 1024 * 1024;

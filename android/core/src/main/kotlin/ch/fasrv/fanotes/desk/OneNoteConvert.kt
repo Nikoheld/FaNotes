@@ -20,7 +20,7 @@ import kotlin.io.path.name
  * package had no pages.
  */
 
-internal const val ONE2HTML_SHA256 = "140c347e192d8bed8225f01a4c736e04c19bed241589d46cdc8b241b906eadb0"
+internal const val ONE2HTML_SHA256 = "343c247d7a5513df08185418d2be0ecaeb00ac06e4bc427f084f1e2179af5523"
 internal const val SEVENZIP_SHA256 = "afc9448bd0cc2eeda131cce313ef4994f9656417e0a15c8465fcda9ca859b280"
 internal const val ONE2HTML_ANDROID_ARM64_SHA256 =
     "d344f8c3306c6f088bd8e7a2499a683f4fc6d68153d444f809912884791be888"
