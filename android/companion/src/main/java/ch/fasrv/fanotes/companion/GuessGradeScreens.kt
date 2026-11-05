@@ -1,6 +1,9 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package ch.fasrv.fanotes.companion
 
+import android.provider.Settings
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -12,13 +15,19 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ch.fasrv.fanotes.schulnetz.*
+import kotlinx.coroutines.delay
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -31,9 +40,34 @@ fun GradeRevealSheet(model: CompanionModel) {
     var tries by rememberSaveable(targetId) { mutableStateOf(0) }
     var last by rememberSaveable(targetId) { mutableStateOf("") }
     var guessed by rememberSaveable(targetId) { mutableStateOf(false) }
+    var countUp by rememberSaveable(targetId) { mutableStateOf(false) }
+    var settled by rememberSaveable(targetId) { mutableStateOf(false) }
     val today = remember { LocalDate.now(ZoneId.of("Europe/Zurich")) }
     val haptic = LocalHapticFeedback.current
-    ModalBottomSheet(onDismissRequest = model::dismissReveal, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    val motion = animatorDurationScale()
+    fun commitReveal() {
+        if (settled) return
+        settled = true
+        model.revealGrade(targetId)
+    }
+    // "Show now" skips the game and the count. A game's reveal button counts up first,
+    // and the course average stays on the old marks until that count finishes.
+    fun showNow() {
+        commitReveal()
+        countUp = false
+        step = "shown"
+    }
+    fun unveil() {
+        countUp = motion > 0f
+        step = "shown"
+    }
+    ModalBottomSheet(
+        onDismissRequest = {
+            if (countUp && !settled) commitReveal()
+            model.dismissReveal()
+        },
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).sheetKeyboardPadding().padding(horizontal = Space.page)) {
             SheetTitle(
                 if (grade == null) "New mark" else "New mark in ${courseAlias(grade.courseLabel, model.desk.courseAliases)}",
@@ -48,10 +82,7 @@ fun GradeRevealSheet(model: CompanionModel) {
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 when (step) {
                     "menu" -> {
-                        SettingRow(Icons.Outlined.Visibility, "Show now", "Reveal the mark immediately") {
-                            model.revealGrade(targetId)
-                            step = "shown"
-                        }
+                        SettingRow(Icons.Outlined.Visibility, "Show now", "Reveal the mark immediately") { showNow() }
                         SettingRow(Icons.Outlined.Tune, "Guess", "Enter marks until you find it. Higher is better.") { step = "guess" }
                         SettingRow(Icons.Outlined.Cake, "Celebrity age", "See someone who is that old, then reveal") { step = "age" }
                     }
@@ -76,8 +107,7 @@ fun GradeRevealSheet(model: CompanionModel) {
                                         guessed = true
                                         last = "That's it — ${formatMark(mark, markDecimals(mark))}."
                                         haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                                        model.revealGrade(targetId)
-                                        step = "shown"
+                                        unveil()
                                     }
                                     GuessComparison.ACTUAL_HIGHER -> {
                                         haptic.performHapticFeedback(HapticFeedbackType.Reject)
@@ -95,7 +125,7 @@ fun GradeRevealSheet(model: CompanionModel) {
                         ) { Text("Check guess") }
                         if (last.isNotBlank()) Text(last, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
                         if (tries > 0) Text("$tries ${if (tries == 1) "try" else "tries"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        TextButton(onClick = { model.revealGrade(targetId); step = "shown" }, modifier = Modifier.fillMaxWidth()) { Text("Reveal") }
+                        TextButton(onClick = { unveil() }, modifier = Modifier.fillMaxWidth()) { Text("Reveal") }
                     }
                     "age" -> {
                         val age = celebrityAge(mark)
@@ -113,7 +143,7 @@ fun GradeRevealSheet(model: CompanionModel) {
                                 }
                             }
                         }
-                        Button(onClick = { model.revealGrade(targetId); step = "shown" }, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) { Text("Reveal the mark") }
+                        Button(onClick = { unveil() }, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) { Text("Reveal the mark") }
                     }
                     else -> {
                         if (guessed) {
@@ -124,16 +154,78 @@ fun GradeRevealSheet(model: CompanionModel) {
                                 }
                             }
                         }
-                        Text(formatMark(mark, model.desk.gradeDecimals), style = MaterialTheme.typography.displayMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(vertical = 12.dp))
+                        CountingMark(mark, play = countUp, onFinished = { commitReveal() })
                         Text(grade.title.ifBlank { "School mark" }, style = MaterialTheme.typography.bodyLarge)
                         if (model.revealQueue.size > 1) {
-                            Button(onClick = { model.finishReveal(); step = "menu"; guess = ""; tries = 0; last = ""; guessed = false }, modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 50.dp)) { Text("Next hidden mark") }
+                            Button(
+                                onClick = { commitReveal(); model.finishReveal(); step = "menu"; guess = ""; tries = 0; last = ""; guessed = false; countUp = false; settled = false },
+                                enabled = settled,
+                                modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 50.dp),
+                            ) { Text("Next hidden mark") }
                         } else {
-                            Button(onClick = { model.finishReveal(); model.dismissReveal() }, modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 50.dp)) { Text("Done") }
+                            Button(
+                                onClick = { commitReveal(); model.finishReveal(); model.dismissReveal() },
+                                enabled = settled,
+                                modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 50.dp),
+                            ) { Text("Done") }
                         }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun animatorDurationScale(): Float {
+    val resolver = LocalContext.current.contentResolver
+    val scale = Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+    return if (scale.isFinite() && scale >= 0f) scale else 1f
+}
+
+/** Counts 1.0, 1.1, 1.2, … and lands on the real mark. Reduced motion shows it at once. */
+@Composable
+private fun CountingMark(mark: Double, play: Boolean, onFinished: () -> Unit) {
+    val steps = remember(mark) { gradeRevealSteps(mark) }
+    var index by remember(mark, play) { mutableIntStateOf(if (play) 0 else steps.lastIndex) }
+    val pulse = remember(mark) { Animatable(1f) }
+    val haptic = LocalHapticFeedback.current
+    val view = LocalView.current
+    val motion = animatorDurationScale()
+    LaunchedEffect(mark, play) {
+        if (!play || motion == 0f || steps.size < 2) {
+            index = steps.lastIndex
+            onFinished()
+            return@LaunchedEffect
+        }
+        for (step in 1 until steps.size) {
+            delay((steps[step].delayBeforeMs * motion).toLong().coerceAtLeast(1L))
+            index = step
+            if (view.isHapticFeedbackEnabled) {
+                val kind = if (step == steps.lastIndex) HapticFeedbackType.Confirm else HapticFeedbackType.SegmentTick
+                haptic.performHapticFeedback(kind)
+            }
+        }
+        onFinished()
+        pulse.snapTo(1f)
+        pulse.animateTo(1.08f, tween(120))
+        pulse.animateTo(1f, tween(180))
+    }
+    val shown = steps[index.coerceIn(0, steps.lastIndex)]
+    Text(
+        formatCountingMark(shown.value, index >= steps.lastIndex, mark),
+        style = MaterialTheme.typography.displayMedium,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.padding(vertical = 12.dp).graphicsLayer {
+            scaleX = pulse.value
+            scaleY = pulse.value
+        },
+    )
+}
+
+private fun formatCountingMark(value: Double, final: Boolean, mark: Double): String {
+    val places = if (final) markDecimals(mark).coerceAtLeast(1) else 1
+    val shown = if (final) mark else value
+    return BigDecimal.valueOf(shown).setScale(places, RoundingMode.HALF_UP).toPlainString().replace('.', ',')
 }
