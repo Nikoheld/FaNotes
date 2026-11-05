@@ -2,7 +2,7 @@
 // A PHPSESSID is bound to the client IP, so this module always opens its own
 // session with the stored Microsoft SSO cookies and never replays a phone cookie.
 
-import { addDays, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
+import { addDays, carryTimetableExams, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
 
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 
@@ -175,8 +175,9 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
         }))
       }
     }
-    events = overlayLessons(previousEvents, Object.values(lessonWeeks).flat(), new Set(Object.keys(lessonWeeks)))
-    exams = overlayDated(previousExams, Object.values(examWeeks).flat(), new Set(Object.keys(examWeeks)))
+    const lessonEvents = Object.values(lessonWeeks).flat()
+    events = overlayLessons(previousEvents, lessonEvents, new Set(Object.keys(lessonWeeks)))
+    exams = carryTimetableExams(lessonEvents, overlayDated(previousExams, Object.values(examWeeks).flat(), new Set(Object.keys(examWeeks))))
     if (plan.fetchIcal && icalAvailable && !pages.problem) {
       const body = await get(icalUrl)
       if (icalBodyUsable(body)) {
@@ -194,7 +195,9 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
         for (const monday of covered) {
           if (!refreshed.has(monday)) weekFetched[monday] = nowIso
         }
-        events = overlayLessons(events, icalEvents, new Set([...covered].filter((monday) => !refreshed.has(monday))))
+        const uncovered = new Set([...covered].filter((monday) => !refreshed.has(monday)))
+        events = overlayLessons(events, icalEvents, uncovered)
+        exams = carryTimetableExams(icalEvents, exams)
       }
     }
   }

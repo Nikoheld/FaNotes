@@ -47,6 +47,11 @@ import {
   introducedWeeks,
   eventQueryWindow,
   overlayLessons,
+  isExamLike,
+  isLesson,
+  parseSchedulerXml,
+  parseIcs,
+  carryTimetableExams,
   schedulerFetchUrl,
   zurichTimeshift,
   WEEK_CAP,
@@ -1064,6 +1069,30 @@ test('week range follows the page span and stays quiet for a new week', () => {
     new Set(['2026-11-02']),
   )
   assert.deepEqual(merged.map((event) => event.id), ['t1', 'far', 'e2'])
+  const xml = `<data>
+    <event id="p1"><start_date>2026-11-12 10:00</start_date><end_date>2026-11-12 10:45</end_date><text><![CDATA[Mathematik]]></text><event_type><![CDATA[1_pru]]></event_type></event>
+    <event id="s1"><start_date>2026-11-12 08:00</start_date><end_date>2026-11-12 08:45</end_date><text><![CDATA[Deutsch]]></text><event_type><![CDATA[0_stp]]></event_type></event>
+    <event id="w1"><start_date>2026-11-13 09:00</start_date><end_date>2026-11-13 09:45</end_date><text><![CDATA[Test Chemie]]></text><event_type>0_stp</event_type></event>
+  </data>`
+  const byId = Object.fromEntries(parseSchedulerXml(xml).map((event) => [event.id, event]))
+  assert.equal(byId.p1.eventType, 'exam')
+  assert.equal(byId.p1.text, 'Mathematik')
+  assert.equal(isExamLike(byId.p1), true)
+  assert.equal(isLesson(byId.p1), false)
+  assert.equal(byId.s1.eventType, '0_stp')
+  assert.equal(isExamLike(byId.s1), false)
+  assert.equal(isExamLike(byId.w1), true)
+  assert.equal(isLesson(byId.w1), false)
+  assert.equal(isExamLike({ eventType: 'lesson', text: 'Lesetest', timetableText: 'Lesetest' }), false)
+  assert.equal(isLesson({ eventType: 'lesson', text: 'Lesetest', timetableText: 'Lesetest' }), true)
+  assert.equal(isExamLike({ eventType: '<![CDATA[1_pru]]>', text: 'Mathematik' }), true)
+  assert.equal(isLesson({ eventType: '<![CDATA[1_pru]]>', text: 'Mathematik' }), false)
+  const carried = carryTimetableExams([byId.s1, byId.w1], [byId.p1])
+  assert.deepEqual(carried.map((event) => event.id), ['p1', 'w1'])
+  const icsTest = parseIcs('BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:u-test\nDTSTART:20261112T100000\nDTEND:20261112T104500\nSUMMARY:Test Chemie\nEND:VEVENT\nEND:VCALENDAR')
+  assert.equal(icsTest[0].eventType, 'exam')
+  const icsLesson = parseIcs('BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:u-lesson\nDTSTART:20261112T080000\nDTEND:20261112T084500\nSUMMARY:Lesetest\nEND:VEVENT\nEND:VCALENDAR')
+  assert.equal(icsLesson[0].eventType, 'lesson')
   const narrow = eventQueryWindow({ spanStart: '', spanEnd: '', weekFetched: {}, icalFetchedAt: '', today: '2026-11-04', now: '2026-11-04T12:00:00Z' })
   assert.equal(narrow.wide, false)
   assert.equal(narrow.min, '2026-10-28')

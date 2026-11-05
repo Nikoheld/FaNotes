@@ -301,17 +301,75 @@ export const isCancelled = (event) => ['cancel', 'cancelled', 'canceled', 'abges
 export const isSubstitution = (event) => ['substitution', 'vertretung', 'suppl', 'supply', 'stellvertretung']
   .some((word) => cancelledBlob(event).includes(word))
 
-export const isExamLike = (event) => {
-  const kind = (event.eventType || '').toLowerCase()
-  return kind.includes('exam') || kind.includes('prüfung') || kind.includes('pruefung') || kind.includes('klausur')
+const cdataWrapped = /^<!\[CDATA\[([\s\S]*)\]\]>$/iu
+
+/** Schulnetz wraps scheduler fields in CDATA. The brackets are not part of the value. */
+export const unwrapSchulnetz = (raw) => {
+  let value = String(raw || '').trim()
+  let match = cdataWrapped.exec(value)
+  while (match) {
+    value = match[1].trim()
+    match = cdataWrapped.exec(value)
+  }
+  return value
 }
+
+const pruefungCode = /(?:^|_)pru(?:fung)?$/iu
+const examToken = /(?:^|[^a-zäöü])test(?:[^a-zäöü]|$)/iu
+const examLeadRegex = /^(?:prüfung|pruefung|klausur|test)\b/iu
+
+/** Scheduler codes such as `1_pru`, plus the words exam, Prüfung, Klausur, and Test. */
+export const examMarker = (raw) => {
+  const kind = unwrapSchulnetz(raw).toLowerCase()
+  if (!kind) return false
+  if (kind === '1_pru' || pruefungCode.test(kind)) return true
+  if (kind.includes('prüfung') || kind.includes('pruefung') || kind.includes('klausur') || kind.includes('exam')) return true
+  return examToken.test(kind)
+}
+
+/** A leading Test/Prüfung/Klausur on a title. Lesetest and other longer words do not match. */
+export const examLead = (raw) => {
+  const line = unwrapSchulnetz(raw).split(/\r?\n/u).find((part) => part.trim()) || ''
+  return examLeadRegex.test(line.trim())
+}
+
+export const canonicalEventType = (raw) => {
+  const kind = unwrapSchulnetz(raw)
+  if (!kind) return 'lesson'
+  if (examMarker(kind)) return 'exam'
+  return kind
+}
+
+export const isExamLike = (event) => examMarker(event?.eventType) || examLead(event?.text) || examLead(event?.timetableText)
 
 export const isLesson = (event) => {
   if (isExamLike(event)) return false
-  const kind = (event.eventType || '').toLowerCase()
+  const kind = unwrapSchulnetz(event?.eventType).toLowerCase()
   if (!kind) return true
   return kind.includes('lesson') || kind.includes('unterricht') || kind.includes('timetable') || kind === 'period' || kind === 'stunde'
 }
+
+export const mergeEventsById = (base, incoming) => {
+  const extra = incoming || []
+  if (!extra.length) return base || []
+  const incomingById = new Map(extra.map((event) => [event.id, event]))
+  const seen = new Set()
+  const out = []
+  for (const event of base || []) {
+    if (seen.has(event.id)) continue
+    seen.add(event.id)
+    out.push(incomingById.get(event.id) || event)
+  }
+  for (const event of extra) {
+    if (seen.has(event.id)) continue
+    seen.add(event.id)
+    out.push(event)
+  }
+  return out
+}
+
+/** Exams found inside the timetable feed stay on the exam list after lesson overlay drops them. */
+export const carryTimetableExams = (events, exams) => mergeEventsById(exams || [], (events || []).filter(isExamLike))
 
 const gradeKey = (grade) => [numKey(grade.mark), numKey(grade.weight), grade.title || '', grade.date || ''].join('|')
 
@@ -1078,7 +1136,7 @@ export const parseSchedulerXml = (xml) => {
   const events = []
   for (const block of String(xml).matchAll(/<event\b([^>]*)>([\s\S]*?)<\/event>/gi)) {
     const id = /id="([^"]+)"/.exec(block[1])?.[1] || ''
-    const field = (name) => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`, 'i').exec(block[2])?.[1]?.trim() || ''
+    const field = (name) => unwrapSchulnetz(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`, 'i').exec(block[2])?.[1] || '')
     const start = field('start_date').replace(' ', 'T')
     if (!start) continue
     const end = field('end_date').replace(' ', 'T') || start
@@ -1095,7 +1153,7 @@ export const parseSchedulerXml = (xml) => {
       courseId: field('kursid'),
       courseName: course,
       status: /fällt|faellt|aus/i.test(comment) ? 'cancelled' : '',
-      eventType: field('event_type') || 'lesson',
+      eventType: canonicalEventType(field('event_type')),
       color: field('color'),
       timetableText: field('text'),
     })
@@ -1264,7 +1322,7 @@ export const overlayLessons = (previous, incoming, refreshed) => {
   if (!weeks.size) return previous || []
   const kept = (previous || []).filter((event) => {
     const monday = weekMondayKey(event.start)
-    return !weeks.has(monday) || !isLesson(event)
+    return !weeks.has(monday) || (!isLesson(event) && !isExamLike(event))
   })
   const added = (incoming || []).filter((event) => isLesson(event) && weeks.has(weekMondayKey(event.start)))
   return kept.concat(added)
@@ -1336,7 +1394,7 @@ export const parseIcs = (text) => {
       courseId: '',
       courseName: summary,
       status: '',
-      eventType: 'lesson',
+      eventType: examLead(summary) || examMarker(value('CATEGORIES')) ? 'exam' : 'lesson',
       color: '',
       timetableText: summary,
     }

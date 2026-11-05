@@ -234,15 +234,48 @@ fun AgendaEvent.isSubstitution(): Boolean {
     return listOf("substitution", "vertretung", "suppl", "supply", "stellvertretung").any { blob.contains(it) }
 }
 
-fun AgendaEvent.isExamLike(): Boolean {
-    val kind = eventType.lowercase()
-    return kind.contains("exam") || kind.contains("prüfung") || kind.contains("pruefung") || kind.contains("klausur")
+private val cdataWrapped = Regex("""(?is)^<!\[CDATA\[([\s\S]*)\]\]>$""")
+private val examLeadRegex = Regex("""(?iu)^(prüfung|pruefung|klausur|test)\b""")
+private val examTokenRegex = Regex("""(?i)(?:^|[^a-zäöü])test(?:[^a-zäöü]|$)""")
+private val pruefungCodeRegex = Regex("""(?i)(?:^|_)pru(?:fung)?$""")
+
+/** Schulnetz wraps scheduler fields in CDATA. The brackets are not part of the value. */
+fun unwrapSchulnetz(raw: String): String {
+    var value = raw.trim()
+    while (true) {
+        val match = cdataWrapped.find(value) ?: return value
+        value = match.groupValues[1].trim()
+    }
 }
+
+/** Scheduler codes such as `1_pru`, plus the words exam, Prüfung, Klausur, and Test. */
+fun examMarker(raw: String): Boolean {
+    val kind = unwrapSchulnetz(raw).lowercase()
+    if (kind.isEmpty()) return false
+    if (kind == "1_pru" || pruefungCodeRegex.containsMatchIn(kind)) return true
+    if (kind.contains("prüfung") || kind.contains("pruefung") || kind.contains("klausur") || kind.contains("exam")) return true
+    return examTokenRegex.containsMatchIn(kind)
+}
+
+/** A leading Test/Prüfung/Klausur on a title. Lesetest and other longer words do not match. */
+fun examLead(raw: String): Boolean {
+    val line = unwrapSchulnetz(raw).lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+    return examLeadRegex.containsMatchIn(line)
+}
+
+fun canonicalEventType(raw: String): String {
+    val kind = unwrapSchulnetz(raw)
+    if (kind.isEmpty()) return "lesson"
+    if (examMarker(kind)) return "exam"
+    return kind
+}
+
+fun AgendaEvent.isExamLike(): Boolean = examMarker(eventType) || examLead(text) || examLead(timetableText)
 
 /** Blank event types on the agenda endpoint are ordinary lessons. */
 fun AgendaEvent.isLesson(): Boolean {
     if (isExamLike()) return false
-    val kind = eventType.lowercase()
+    val kind = unwrapSchulnetz(eventType).lowercase()
     if (kind.isBlank()) return true
     return kind.contains("lesson") || kind.contains("unterricht") || kind.contains("timetable") || kind == "period" || kind == "stunde"
 }

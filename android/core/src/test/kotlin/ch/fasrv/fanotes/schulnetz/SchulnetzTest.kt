@@ -527,6 +527,66 @@ class WebSessionTest {
         assertEquals("A12", ics.single().room)
         assertEquals("https://www.schulnetz-ag.ch/aksa/abo.ics", findIcalUrl("<script>icalAbo('abo.ics')</script>", AKSA_SCHULNETZ_BASE))
     }
+
+    @Test
+    fun aSchulnetzTestIsAnExamAndLesetestStaysALesson() {
+        val wrapped = """
+            <data>
+              <event id="p1">
+                <start_date>2026-11-12 10:00</start_date>
+                <end_date>2026-11-12 10:45</end_date>
+                <text><![CDATA[Mathematik]]></text>
+                <event_type><![CDATA[1_pru]]></event_type>
+              </event>
+              <event id="s1">
+                <start_date>2026-11-12 08:00</start_date>
+                <end_date>2026-11-12 08:45</end_date>
+                <text><![CDATA[Deutsch]]></text>
+                <event_type><![CDATA[0_stp]]></event_type>
+              </event>
+              <event id="w1">
+                <start_date>2026-11-13 09:00</start_date>
+                <end_date>2026-11-13 09:45</end_date>
+                <text><![CDATA[Test Chemie]]></text>
+                <event_type>0_stp</event_type>
+              </event>
+            </data>
+        """.trimIndent()
+        val parsed = parseSchedulerXml(wrapped).associateBy { it.id }
+        assertEquals("exam", parsed.getValue("p1").eventType)
+        assertEquals("Mathematik", parsed.getValue("p1").text)
+        assertTrue(parsed.getValue("p1").isExamLike())
+        assertFalse(parsed.getValue("p1").isLesson())
+        assertEquals("0_stp", parsed.getValue("s1").eventType)
+        assertFalse(parsed.getValue("s1").isExamLike())
+        assertTrue(parsed.getValue("w1").isExamLike())
+        assertFalse(parsed.getValue("w1").isLesson())
+        val lesetest = AgendaEvent("g", "2026-11-02T08:00:00", "2026-11-02T08:45:00", "Lesetest", "", "", emptyList(), "", "Lesetest", "", "lesson", "", "Lesetest")
+        assertFalse(lesetest.isExamLike())
+        assertTrue(lesetest.isLesson())
+        val stored = lesetest.copy(eventType = "<![CDATA[1_pru]]>", text = "Mathematik", timetableText = "Mathematik")
+        assertTrue(stored.isExamLike())
+        assertFalse(stored.isLesson())
+        val html = """
+            <div class="dhx_cal_event stpt_event" event_id="t1" data-bar-start="1793601900000" data-bar-end="1793604600000">
+              <div class="stpt_event_text" title="TEST&#10;Mathematik">Mathematik</div>
+              <div class="stpt_event_date">07:45 - 08:30 / A12</div>
+            </div>
+            <div class="dhx_cal_event_line stpt_event" event_id="p2">
+              <span class="stpt_event_text" title="PRÜFUNG&#10;Deutsch">Deutsch</span>
+            </div>
+            <div class="dhx_cal_event stpt_event" event_id="l1" data-bar-start="1793601900000" data-bar-end="1793604600000">
+              <div class="stpt_event_text">Lesetest</div>
+              <div class="stpt_event_date">08:35 - 09:20 / B04</div>
+            </div>
+        """.trimIndent()
+        val rendered = parseRenderedTimetable(html).associateBy { it.id }
+        assertEquals("exam", rendered.getValue("t1").eventType)
+        assertEquals("exam", rendered.getValue("p2").eventType)
+        assertEquals("lesson", rendered.getValue("l1").eventType)
+        assertFalse(rendered.getValue("l1").isExamLike())
+        assertTrue(rendered.getValue("l1").isLesson())
+    }
 }
 
 class SchulnetzGateTest {

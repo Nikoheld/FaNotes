@@ -137,7 +137,7 @@ fun overlayLessons(previous: List<AgendaEvent>, incoming: List<AgendaEvent>, ref
     if (refreshed.isEmpty()) return previous
     val kept = previous.filter { event ->
         val monday = weekMondayKey(event.start)
-        monday !in refreshed || !event.isLesson()
+        monday !in refreshed || (!event.isLesson() && !event.isExamLike())
     }
     val added = incoming.filter { event -> event.isLesson() && weekMondayKey(event.start) in refreshed }
     return kept + added
