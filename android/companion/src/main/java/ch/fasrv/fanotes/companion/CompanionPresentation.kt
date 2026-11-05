@@ -7,7 +7,6 @@ import ch.fasrv.fanotes.vault.VaultNode
 import java.time.*
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
-import java.util.Locale
 
 /** Presentation routes are independent of the persisted desktop preference and push vocabulary. */
 enum class Destination(val label: String, val legacy: String) {
@@ -29,17 +28,46 @@ fun destinationFor(raw: String): Destination = when (startTabId(raw)) {
     else -> Destination.Today
 }
 fun navBarLabel(id: String): String = when (startTabId(id)) {
-    "planner" -> "Planner"
-    "tasks" -> "To-dos"
-    "notes" -> "Notes"
-    "school" -> "School"
-    "grades" -> "Grades"
-    "exams" -> "Exams"
-    "absences" -> "Absences"
-    "updates" -> "Updates"
-    "statement" -> "Account"
-    "settings" -> "Settings"
-    else -> "Today"
+    "planner" -> t(R.string.planner)
+    "tasks" -> t(R.string.to_dos)
+    "notes" -> t(R.string.notes)
+    "school" -> t(R.string.school)
+    "grades" -> t(R.string.grades)
+    "exams" -> t(R.string.exams)
+    "absences" -> t(R.string.absences)
+    "updates" -> t(R.string.updates)
+    "statement" -> t(R.string.account)
+    "settings" -> t(R.string.settings)
+    else -> t(R.string.today)
+}
+
+fun Destination.uiLabel(): String = when (this) {
+    Destination.Today -> t(R.string.today)
+    Destination.Planner -> t(R.string.planner)
+    Destination.Notes -> t(R.string.notes)
+    Destination.School -> t(R.string.school)
+}
+
+fun Page.uiTitle(): String = when (this) {
+    Page.Search -> t(R.string.search)
+    Page.Editor -> t(R.string.note)
+    Page.Grades -> t(R.string.grades)
+    Page.Course -> t(R.string.subject)
+    Page.Exams -> t(R.string.exams)
+    Page.Absences -> t(R.string.absences)
+    Page.Updates -> t(R.string.school_updates)
+    Page.Statement -> t(R.string.school_account)
+    Page.Settings -> t(R.string.settings)
+    Page.Connections -> t(R.string.account_sync)
+    Page.Appearance -> t(R.string.appearance)
+    Page.ArchivedSubjects -> t(R.string.archived_subjects)
+    Page.Navigation -> t(R.string.navigation_bar)
+    Page.Planning -> t(R.string.planning_grades)
+    Page.Notifications -> t(R.string.notifications)
+    Page.Profile -> t(R.string.your_activity)
+    Page.Diagnostics -> t(R.string.diagnostics)
+    Page.Auth -> t(R.string.connect_fanotes)
+    Page.Trash -> t(R.string.recently_deleted)
 }
 fun navPlacement(id: String): NavPlacement = when (startTabId(id)) {
     "planner" -> NavPlacement(CompanionRoute(Destination.Planner))
@@ -111,19 +139,37 @@ fun taskBucket(task: HomeworkTask, today: LocalDate): String = when (classifyHom
     "done" -> "Completed"
     else -> "No due date"
 }
+
+fun bucketLabel(bucket: String): String = when (bucket) {
+    "Overdue" -> t(R.string.overdue)
+    "Today" -> t(R.string.today)
+    "Upcoming" -> t(R.string.upcoming)
+    "Completed" -> t(R.string.completed)
+    "No due date" -> t(R.string.no_due_date)
+    else -> bucket
+}
+
+fun recurrenceLabel(recurrence: String): String = when (recurrence) {
+    "daily" -> t(R.string.recurrence_daily)
+    "weekly" -> t(R.string.recurrence_weekly)
+    "monthly" -> t(R.string.recurrence_monthly)
+    "yearly" -> t(R.string.recurrence_yearly)
+    else -> recurrence
+}
+
 fun dueLabel(raw: String?, today: LocalDate = LocalDate.now()): String {
-    val day = parseDisplayDate(raw.orEmpty()) ?: return "No due date"
+    val day = parseDisplayDate(raw.orEmpty()) ?: return t(R.string.no_due_date)
     return when (day) {
-        today -> "Today"
-        today.plusDays(1) -> "Tomorrow"
-        today.minusDays(1) -> "Yesterday"
-        else -> day.format(DateTimeFormatter.ofPattern(if (day.year == today.year) "EEE, d MMM" else "d MMM yyyy", Locale.ENGLISH))
+        today -> t(R.string.today)
+        today.plusDays(1) -> t(R.string.tomorrow)
+        today.minusDays(1) -> t(R.string.yesterday)
+        else -> day.format(DateTimeFormatter.ofPattern(if (day.year == today.year) "EEE, d MMM" else "d MMM yyyy", AppLanguage.formatLocale()))
     }
 }
 fun parseDisplayDate(raw: String): LocalDate? = runCatching { LocalDate.parse(raw.take(10)) }.getOrNull() ?: parseSchoolDate(raw)
-fun dateLabel(day: LocalDate): String = day.format(DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.ENGLISH))
+fun dateLabel(day: LocalDate): String = day.format(DateTimeFormatter.ofPattern("EEEE, d MMMM", AppLanguage.formatLocale()))
 fun updatedLabel(raw: String): String = parseSchulnetzInstant(raw, ZoneId.systemDefault())?.atZone(ZoneId.systemDefault())
-    ?.format(DateTimeFormatter.ofPattern("d MMM · HH:mm", Locale.ENGLISH)) ?: "Not fetched yet"
+    ?.format(DateTimeFormatter.ofPattern("d MMM · HH:mm", AppLanguage.formatLocale())) ?: t(R.string.not_fetched_yet)
 fun plainPreview(markdown: String): String = markdown.replace(Regex("<!--[\\s\\S]*?-->"), "")
     .replace(Regex("[#*`>_\\[\\]]"), "").trim().replace(Regex("\\s+"), " ").take(180)
 
@@ -133,7 +179,14 @@ fun searchableNoteText(markdown: String, transcript: String = ""): String =
 fun noteExcerpt(markdown: String, title: String): String = plainPreview(markdown.trimStart().replaceFirst(
     Regex("""^#{1,6}\s+${Regex.escape(title)}\s*(?:\n|$)""", RegexOption.IGNORE_CASE), ""))
 
-enum class AgendaKind(val label: String) { Lesson("Lesson"), Exam("Exam"), Event("Event"), Task("Due") }
+enum class AgendaKind(val label: String) { Lesson("Lesson"), Exam("Exam"), Event("Event"), Task("Due");
+    fun uiLabel(): String = when (this) {
+        Lesson -> t(R.string.lesson)
+        Exam -> t(R.string.exam)
+        Event -> t(R.string.event)
+        Task -> t(R.string.due)
+    }
+}
 data class AgendaEntry(
     val key: String,
     val title: String,
@@ -146,7 +199,7 @@ data class AgendaEntry(
     val local: CalendarEvent? = null,
     val task: HomeworkTask? = null,
 ) {
-    val time: String get() = if (start.isBlank()) "All day" else if (end.isBlank() || end == start) start else "$start–$end"
+    val time: String get() = if (start.isBlank()) t(R.string.all_day) else if (end.isBlank() || end == start) start else "$start–$end"
 }
 
 fun nextCommitment(entries: List<AgendaEntry>, now: Instant, zone: ZoneId): AgendaEntry? {
@@ -208,7 +261,7 @@ fun agendaForDay(
         .map { event ->
             AgendaEntry("school:${lessonTargetId(event)}", event.label, if (event.isExamLike() || event in snapshot.exams) AgendaKind.Exam else if (event.isLesson()) AgendaKind.Lesson else AgendaKind.Event, day,
                 eventClock(event, zone), if (event.end.contains('T')) event.endsAt(zone)?.atZone(zone)?.format(clock).orEmpty() else "",
-                listOf(event.room.takeIf { it.isNotBlank() }?.let { "Room $it" }.orEmpty(), event.teachers.joinToString(", ")).filter { it.isNotBlank() }.joinToString(" · "), school = event)
+                listOf(event.room.takeIf { it.isNotBlank() }?.let { t(R.string.room_named, it) }.orEmpty(), event.teachers.joinToString(", ")).filter { it.isNotBlank() }.joinToString(" · "), school = event)
         }
     val visibleCalendars = calendar.calendars.filter { it.visible }.map { it.id }.toSet()
     val local = calendar.events.filter { it.calendarId in visibleCalendars && !(it.id.startsWith("hw:") && tasks.any { t -> "hw:${t.id}" == it.id }) }

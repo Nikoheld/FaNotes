@@ -40,46 +40,46 @@ fun CompanionSearchScreen(model: CompanionModel) {
     val local = remember(needle, model.calendar.events) { if (needle.length < 2) emptyList() else model.calendar.events.filter { "${it.title} ${it.location} ${it.notes}".contains(needle, true) } }
     val recentNotes = remember(model.tree) { flattenNotes(model.tree).sortedByDescending { it.modifiedAt }.take(3) }
     Column {
-        SearchField(query, { query = it }, if (model.notesAccount) "Notes, tasks, subjects, events…" else "Tasks, subjects, events…", Modifier.padding(horizontal = Space.page, vertical = 8.dp))
-        ChoiceRow(listOf("all" to "All", "tasks" to "Tasks", "school" to "School") + if (model.notesAccount) listOf("notes" to "Notes") else emptyList(), scope, { scope = it }, Modifier.padding(horizontal = Space.page))
+        SearchField(query, { query = it }, if (model.notesAccount) t(R.string.notes_tasks_subjects_events) else t(R.string.tasks_subjects_events), Modifier.padding(horizontal = Space.page, vertical = 8.dp))
+        ChoiceRow(listOf("all" to t(R.string.all), "tasks" to t(R.string.tasks), "school" to t(R.string.school)) + if (model.notesAccount) listOf("notes" to t(R.string.notes)) else emptyList(), scope, { scope = it }, Modifier.padding(horizontal = Space.page))
         ScreenList {
             if (needle.length < 2) {
                 item {
-                    if (model.notesAccount) EmptyState(Icons.Outlined.Search, "Find your next thought", "Search note text, existing handwriting transcripts, assignments, events and school records. Enter at least two characters.")
-                    else EmptyState(Icons.Outlined.Search, "Find a class, task or grade", "Search tasks, subjects, events and school records. Enter at least two characters.")
+                    if (model.notesAccount) EmptyState(Icons.Outlined.Search, t(R.string.find_your_next_thought), t(R.string.search_note_text_existing_handwriting_transcript))
+                    else EmptyState(Icons.Outlined.Search, t(R.string.find_a_class_task_or_grade), t(R.string.search_tasks_subjects_events_and_school_records))
                 }
                 if (model.notesAccount) {
-                    item { SectionLabel("Jump back in") }
+                    item { SectionLabel(t(R.string.jump_back_in)) }
                     items(recentNotes, key = { it.path }) { note -> NoteRow(model, note) { model.openNote(note.path) } }
                 }
             } else {
                 if (loading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 12.dp)) }
-                if (model.notesAccount && failed) item { InfoBanner("Note search needs attention", "Some notes could not be read. Your files have been kept unchanged.") }
+                if (model.notesAccount && failed) item { InfoBanner(t(R.string.note_search_needs_attention), t(R.string.some_notes_could_not_be_read_your_files_have_bee)) }
                 if (model.notesAccount && scope in listOf("all", "notes") && notes.isNotEmpty()) {
-                    item { SectionLabel("Notes · ${notes.size}${if (notes.size == 200) "+" else ""}") }
+                    item { SectionLabel(t(R.string.notes_2, notes.size, if (notes.size == 200) "+" else "")) }
                     items(notes, key = { "search-note:${it.node.path}" }) { result -> NoteRow(model, result.node) { model.openNote(result.node.path) } }
                 }
                 if (scope in listOf("all", "tasks") && tasks.isNotEmpty()) {
-                    item { SectionLabel("Tasks · ${tasks.size}") }
+                    item { SectionLabel(t(R.string.tasks_2, tasks.size)) }
                     items(tasks, key = { "search-task:${it.id}" }) { item -> TaskRow(item, LocalDate.now(), { model.toggleTask(item) }) { task = item } }
                 }
                 if (scope == "all" && local.isNotEmpty()) {
-                    item { SectionLabel("Calendar") }
+                    item { SectionLabel(t(R.string.calendar)) }
                     items(local, key = { "search-local:${it.id}" }) { event ->
                         val entry = AgendaEntry("local:${event.id}", event.title, AgendaKind.Event, parseDisplayDate(event.start) ?: LocalDate.now(), detail = dueLabel(event.start), local = event)
                         AgendaRow(model, entry) { selected = entry }
                     }
                 }
                 if (scope in listOf("all", "school")) {
-                    if (courses.isNotEmpty()) item { SectionLabel("Subjects") }
-                    items(courses, key = { "search-course:${it.courseId}" }) { course -> SettingRow(Icons.Outlined.Insights, courseAlias(course.label, model.desk.courseAliases), "${course.marks.size} marks") { model.focusCourseId = course.courseId; model.navigate(Page.Course) } }
-                    if (events.isNotEmpty()) item { SectionLabel("School schedule") }
+                    if (courses.isNotEmpty()) item { SectionLabel(t(R.string.subjects)) }
+                    items(courses, key = { "search-course:${it.courseId}" }) { course -> SettingRow(Icons.Outlined.Insights, courseAlias(course.label, model.desk.courseAliases), tp(R.plurals.marks_count, course.marks.size, course.marks.size)) { model.focusCourseId = course.courseId; model.navigate(Page.Course) } }
+                    if (events.isNotEmpty()) item { SectionLabel(t(R.string.school_schedule)) }
                     items(events, key = { "search-event:${lessonTargetId(it)}" }) { event ->
                         val entry = AgendaEntry("school:${lessonTargetId(event)}", event.label, if (event.isExamLike()) AgendaKind.Exam else if (event.isLesson()) AgendaKind.Lesson else AgendaKind.Event, parseDisplayDate(event.start) ?: LocalDate.now(), eventClock(event), detail = dueLabel(event.start), school = event)
                         AgendaRow(model, entry) { selected = entry }
                     }
-                    if (messages.isNotEmpty()) item { SectionLabel("School messages") }
-                    items(messages, key = { "search-message:${messageTargetId(it)}" }) { message -> SettingRow(Icons.Outlined.Forum, message.title.ifBlank { "School message" }, plainPreview(message.body).take(100)) { model.highlightIds = setOf(messageTargetId(message)); model.navigate(Page.Updates) } }
+                    if (messages.isNotEmpty()) item { SectionLabel(t(R.string.school_messages)) }
+                    items(messages, key = { "search-message:${messageTargetId(it)}" }) { message -> SettingRow(Icons.Outlined.Forum, shownText(message.title).ifBlank { t(R.string.school_message) }, plainPreview(message.body).take(100)) { model.highlightIds = setOf(messageTargetId(message)); model.navigate(Page.Updates) } }
                 }
                 val empty = when (scope) {
                     "notes" -> !model.notesAccount || notes.isEmpty()
@@ -87,7 +87,7 @@ fun CompanionSearchScreen(model: CompanionModel) {
                     "school" -> events.isEmpty() && messages.isEmpty() && courses.isEmpty()
                     else -> (!model.notesAccount || notes.isEmpty()) && tasks.isEmpty() && events.isEmpty() && messages.isEmpty() && courses.isEmpty() && local.isEmpty()
                 }
-                if (!loading && empty) item { EmptyState(Icons.Outlined.SearchOff, "Nothing matches “$needle”", if (model.notesAccount) "Try fewer words, a subject, or a note title." else "Try fewer words, a subject, or a task.") }
+                if (!loading && empty) item { EmptyState(Icons.Outlined.SearchOff, t(R.string.nothing_matches, needle), if (model.notesAccount) t(R.string.try_fewer_words_a_subject_or_a_note_title) else t(R.string.try_fewer_words_a_subject_or_a_task)) }
             }
         }
     }

@@ -70,30 +70,30 @@ fun GradeRevealSheet(model: CompanionModel) {
     ) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).sheetKeyboardPadding().padding(horizontal = Space.page)) {
             SheetTitle(
-                if (grade == null) "New mark" else "New mark in ${courseAlias(grade.courseLabel, model.desk.courseAliases)}",
+                if (grade == null) t(R.string.new_mark) else t(R.string.new_mark_in, courseAlias(grade.courseLabel, model.desk.courseAliases)),
                 model::dismissReveal,
             )
             val mark = grade?.mark
             if (grade == null || mark == null || !mark.isFinite()) {
-                Text("The mark is not in the last school snapshot yet.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
+                Text(t(R.string.the_mark_is_not_in_the_last_school_snapshot_yet), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
                 return@Column
             }
-            Text(grade.title.ifBlank { "School mark" }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(grade.title.ifBlank { t(R.string.school_mark) }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 when (step) {
                     "menu" -> {
-                        SettingRow(Icons.Outlined.Visibility, "Show now", "Reveal the mark immediately") { showNow() }
-                        SettingRow(Icons.Outlined.Tune, "Guess", "Enter marks until you find it. Higher is better.") { step = "guess" }
-                        SettingRow(Icons.Outlined.Cake, "Celebrity age", "See someone who is that old, then reveal") { step = "age" }
+                        SettingRow(Icons.Outlined.Visibility, t(R.string.show_now), t(R.string.reveal_the_mark_immediately)) { showNow() }
+                        SettingRow(Icons.Outlined.Tune, t(R.string.guess), t(R.string.enter_marks_until_you_find_it_higher_is_better)) { step = "guess" }
+                        SettingRow(Icons.Outlined.Cake, t(R.string.celebrity_age), t(R.string.see_someone_who_is_that_old_then_reveal)) { step = "age" }
                     }
                     "guess" -> {
-                        Text("Swiss marks are 1 to 6. Higher is better.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(t(R.string.swiss_marks_are_1_to_6_higher_is_better), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         OutlinedTextField(
                             guess,
                             { guess = it.take(8) },
                             Modifier.fillMaxWidth(),
-                            label = { Text("Your guess") },
-                            placeholder = { Text("4.5") },
+                            label = { Text(t(R.string.your_guess)) },
+                            placeholder = { Text(t(R.string.guess_sample)) },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         )
@@ -105,69 +105,69 @@ fun GradeRevealSheet(model: CompanionModel) {
                                 when (compareGuess(value, mark)) {
                                     GuessComparison.CORRECT -> {
                                         guessed = true
-                                        last = "That's it — ${formatMark(mark, markDecimals(mark))}."
+                                        last = t(R.string.that_s_it, uiMark(mark, markDecimals(mark)))
                                         haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                         unveil()
                                     }
                                     GuessComparison.ACTUAL_HIGHER -> {
                                         haptic.performHapticFeedback(HapticFeedbackType.Reject)
-                                        last = "Higher — the real mark is better than ${formatMark(value, markDecimals(mark))}."
+                                        last = t(R.string.higher_the_real_mark_is_better_than, uiMark(value, markDecimals(mark)))
                                     }
                                     GuessComparison.ACTUAL_LOWER -> {
                                         haptic.performHapticFeedback(HapticFeedbackType.Reject)
-                                        last = "Lower — the real mark is worse than ${formatMark(value, markDecimals(mark))}."
+                                        last = t(R.string.lower_the_real_mark_is_worse_than, uiMark(value, markDecimals(mark)))
                                     }
                                 }
                                 guess = ""
                             },
                             enabled = parsed != null,
                             modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
-                        ) { Text("Check guess") }
+                        ) { Text(t(R.string.check_guess)) }
                         if (last.isNotBlank()) Text(last, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
-                        if (tries > 0) Text("$tries ${if (tries == 1) "try" else "tries"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        TextButton(onClick = { unveil() }, modifier = Modifier.fillMaxWidth()) { Text("Reveal") }
+                        if (tries > 0) Text(tp(R.plurals.tries_count, tries, tries), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        TextButton(onClick = { unveil() }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.reveal)) }
                     }
                     "age" -> {
                         val age = celebrityAge(mark)
                         val person = remember(targetId, age) { pickCelebrity(age, targetId, today) }
-                        Text("This mark as an age is $age.", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
-                        Text("Mark × 10, rounded to a whole year (4.25 → 43).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(t(R.string.this_mark_as_an_age_is, age), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
+                        Text(t(R.string.mark_10_rounded_to_a_whole_year_4_25_43), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         if (person == null) {
-                            Text("No bundled celebrity for this age.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 16.dp))
+                            Text(t(R.string.no_bundled_celebrity_for_this_age), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 16.dp))
                         } else {
                             Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
                                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(person.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                                    Text("${ageOn(person.born, today)} years old · born ${person.born}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(t(R.string.years_old_born, ageOn(person.born, today), person.born), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text(person.line, style = MaterialTheme.typography.bodyMedium)
                                 }
                             }
                         }
-                        Button(onClick = { unveil() }, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) { Text("Reveal the mark") }
+                        Button(onClick = { unveil() }, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) { Text(t(R.string.reveal_the_mark)) }
                     }
                     else -> {
                         if (guessed) {
                             Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
                                 Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("You got it", style = MaterialTheme.typography.titleLarge)
-                                    Text("in $tries ${if (tries == 1) "try" else "tries"}.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(t(R.string.you_got_it), style = MaterialTheme.typography.titleLarge)
+                                    Text(tp(R.plurals.in_tries, tries, tries), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
                         CountingMark(mark, play = countUp, onFinished = { commitReveal() })
-                        Text(grade.title.ifBlank { "School mark" }, style = MaterialTheme.typography.bodyLarge)
+                        Text(grade.title.ifBlank { t(R.string.school_mark) }, style = MaterialTheme.typography.bodyLarge)
                         if (model.revealQueue.size > 1) {
                             Button(
                                 onClick = { commitReveal(); model.finishReveal(); step = "menu"; guess = ""; tries = 0; last = ""; guessed = false; countUp = false; settled = false },
                                 enabled = settled,
                                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 50.dp),
-                            ) { Text("Next hidden mark") }
+                            ) { Text(t(R.string.next_hidden_mark)) }
                         } else {
                             Button(
                                 onClick = { commitReveal(); model.finishReveal(); model.dismissReveal() },
                                 enabled = settled,
                                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 50.dp),
-                            ) { Text("Done") }
+                            ) { Text(t(R.string.done)) }
                         }
                     }
                 }
@@ -227,5 +227,6 @@ private fun CountingMark(mark: Double, play: Boolean, onFinished: () -> Unit) {
 private fun formatCountingMark(value: Double, final: Boolean, mark: Double): String {
     val places = if (final) markDecimals(mark).coerceAtLeast(1) else 1
     val shown = if (final) mark else value
-    return BigDecimal.valueOf(shown).setScale(places, RoundingMode.HALF_UP).toPlainString().replace('.', ',')
+    val separator = java.text.DecimalFormatSymbols.getInstance(AppLanguage.formatLocale()).decimalSeparator
+    return BigDecimal.valueOf(shown).setScale(places, RoundingMode.HALF_UP).toPlainString().replace('.', separator)
 }

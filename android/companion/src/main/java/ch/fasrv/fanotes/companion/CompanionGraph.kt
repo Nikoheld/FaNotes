@@ -310,7 +310,7 @@ class CompanionGraph(private val context: Context) {
     fun homework(): HomeworkDocument {
         val text = vault.read(HOMEWORK_NOTE_PATH)?.decodeToString() ?: return HomeworkDocument(emptyList())
         return (loadHomeworkMarkdown(text) as? NoteMarkdownLoad.Ready)?.document
-            ?: throw IllegalStateException("Your task file could not be read. It has been kept unchanged.")
+            ?: throw IllegalStateException("${t(R.string.task_file_unreadable)}")
     }
 
     fun setHomeworkDone(id: String, done: Boolean) {
@@ -324,7 +324,7 @@ class CompanionGraph(private val context: Context) {
     private fun patchHomework(id: String, edit: (HomeworkTask) -> HomeworkTask) {
         val existing = vault.read(HOMEWORK_NOTE_PATH)?.decodeToString()
         val loaded = existing?.let(::loadHomeworkMarkdown)
-        if (loaded is NoteMarkdownLoad.Unreadable) error("Your task file could not be read. It has been kept unchanged.")
+        if (loaded is NoteMarkdownLoad.Unreadable) error("${t(R.string.task_file_unreadable)}")
         val document = (loaded as? NoteMarkdownLoad.Ready)?.document ?: HomeworkDocument(emptyList())
         val now = isoNow()
         val tasks = document.tasks.map { task ->
@@ -336,7 +336,7 @@ class CompanionGraph(private val context: Context) {
 
     fun importHomework(title: String, subject: String, due: String, notes: String) {
         val existing = vault.read(HOMEWORK_NOTE_PATH)?.decodeToString()
-        if (existing != null && loadHomeworkMarkdown(existing) is NoteMarkdownLoad.Unreadable) error("Your task file could not be read. It has been kept unchanged.")
+        if (existing != null && loadHomeworkMarkdown(existing) is NoteMarkdownLoad.Unreadable) error("${t(R.string.task_file_unreadable)}")
         val document = existing?.let(::parseHomeworkMarkdown) ?: HomeworkDocument(emptyList())
         val dueDate = parseDisplayDate(due)?.toString()
         if (document.tasks.any { it.title == title && it.subject == subject && it.dueDate == dueDate }) return
@@ -357,12 +357,12 @@ class CompanionGraph(private val context: Context) {
     fun calendar(): CalendarDocument {
         val text = vault.read(CALENDAR_NOTE_PATH)?.decodeToString() ?: return emptyCalendar()
         return (loadCalendarMarkdown(text) as? NoteMarkdownLoad.Ready)?.document
-            ?: throw IllegalStateException("Your calendar file could not be read. It has been kept unchanged.")
+            ?: throw IllegalStateException("${t(R.string.calendar_file_unreadable)}")
     }
 
     fun importExam(event: AgendaEvent) {
         val existing = vault.read(CALENDAR_NOTE_PATH)?.decodeToString()
-        if (existing != null && loadCalendarMarkdown(existing) is NoteMarkdownLoad.Unreadable) error("Your calendar file could not be read. It has been kept unchanged.")
+        if (existing != null && loadCalendarMarkdown(existing) is NoteMarkdownLoad.Unreadable) error("${t(R.string.calendar_file_unreadable)}")
         val document = existing?.let(::parseCalendarMarkdown) ?: emptyCalendar()
         val id = "schulnetz-${event.id}"
         if (document.events.any { it.id == id }) return
@@ -771,7 +771,7 @@ class CompanionGraph(private val context: Context) {
     }
 
     private suspend fun showExistingSession(caller: String, session: WebSession) {
-        notices.tryEmit("Bereits bei Schulnetz angemeldet")
+        notices.tryEmit(t(R.string.already_signed_in_schulnetz))
         link.value = link.value.copy(needsReauth = false, lastError = "")
         schulnetzLog.info("visible login shows session caller=$caller lockHeld=true")
         if (System.currentTimeMillis() - lastSessionShownAt < 30_000) return

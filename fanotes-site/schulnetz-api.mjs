@@ -9,6 +9,7 @@ import { promises as fs } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import { authenticateSyncRequest, syncAccountExists } from './sync-api.mjs'
 import { credentialOr } from './credentials.mjs'
+import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
 import {
   diffSnapshots,
   keepLoadedGrades,
@@ -862,7 +863,8 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 
   const send = (response, status, value) => {
-    const payload = JSON.stringify(value)
+    const language = response.schulnetzLanguage || 'de'
+    const payload = JSON.stringify(localizeSchulnetzPayload(value, language))
     response.writeHead(status, {
       'Content-Type': 'application/json; charset=utf-8',
       'Content-Length': Buffer.byteLength(payload),
@@ -876,6 +878,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     if (url.pathname !== API_PREFIX && !url.pathname.startsWith(`${API_PREFIX}/`)) return false
     const route = url.pathname.slice(API_PREFIX.length).replace(/\/+$/u, '') || '/'
     const method = request.method || 'GET'
+    response.schulnetzLanguage = schulnetzLanguage(request)
     try {
       if (method === 'OPTIONS') {
         response.writeHead(204, { 'Cache-Control': 'no-store' })

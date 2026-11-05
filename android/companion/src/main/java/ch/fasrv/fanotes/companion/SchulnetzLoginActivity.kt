@@ -1,6 +1,7 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package ch.fasrv.fanotes.companion
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.webkit.CookieManager
@@ -32,6 +33,10 @@ import ch.fasrv.fanotes.schulnetz.*
 
 /** The school site owns the page. Kanti+ only draws the bar around it. */
 class SchulnetzLoginActivity : ComponentActivity() {
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLanguage.wrap(newBase))
+    }
+
     private var webView: WebView? = null
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -60,14 +65,14 @@ class SchulnetzLoginActivity : ComponentActivity() {
                 }
                 BackHandler { val web = webView; if (web?.canGoBack() == true) web.goBack() else finish() }
                 Scaffold(topBar = {
-                    TopAppBar(title = { Text(if (viewOnly) "School session" else "Connect Schulnetz", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        navigationIcon = { ActionIcon(Icons.Outlined.Close, "Close school sign-in") { finish() } })
+                    TopAppBar(title = { Text(if (viewOnly) t(R.string.school_session) else t(R.string.connect_schulnetz), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        navigationIcon = { ActionIcon(Icons.Outlined.Close, t(R.string.close_school_sign_in)) { finish() } })
                 }) { padding ->
                     Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
                         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                         pageError?.let { message ->
                             Box(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                                InfoBanner("Could not open Schulnetz", message, "Try again", true) {
+                                InfoBanner(t(R.string.could_not_open_schulnetz), message, t(R.string.try_again), true) {
                                     pageError = null
                                     loading = true
                                     webView?.reload()
@@ -88,7 +93,7 @@ class SchulnetzLoginActivity : ComponentActivity() {
                                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                                     if (request.isForMainFrame) {
                                         loading = false
-                                        pageError = "The school page did not load. Check your connection, then try again."
+                                        pageError = t(R.string.school_page_failed)
                                     }
                                 }
                                 override fun onPageFinished(view: WebView, url: String) {

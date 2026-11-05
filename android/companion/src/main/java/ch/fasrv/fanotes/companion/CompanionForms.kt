@@ -33,13 +33,13 @@ fun WelcomeScreen(model: CompanionModel, modifier: Modifier = Modifier) {
             Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.School, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(30.dp)) }
         }
         Spacer(Modifier.height(24.dp))
-        Text("Kanti+", style = MaterialTheme.typography.headlineLarge)
-        Text("Grades, timetable, exams and absences, ready on this device.",
+        Text(t(R.string.kanti), style = MaterialTheme.typography.headlineLarge)
+        Text(t(R.string.grades_timetable_exams_and_absences_ready_on_thi),
             style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp, bottom = 28.dp))
-        Button(onClick = { model.finishWelcome(connectSchool = true, openNotes = false) }, enabled = !model.busy, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) { Text("Connect Schulnetz") }
-        OutlinedButton(onClick = { model.finishWelcome(connectSchool = false, openNotes = true) }, enabled = !model.busy, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).heightIn(min = 50.dp)) { Text("Sync notes with FaNotes") }
-        TextButton(onClick = { model.finishWelcome(connectSchool = false, openNotes = false) }, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text("Continue") }
-        Text("School features work without an account. Notes sync is optional.",
+        Button(onClick = { model.finishWelcome(connectSchool = true, openNotes = false) }, enabled = !model.busy, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) { Text(t(R.string.connect_schulnetz)) }
+        OutlinedButton(onClick = { model.finishWelcome(connectSchool = false, openNotes = true) }, enabled = !model.busy, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).heightIn(min = 50.dp)) { Text(t(R.string.sync_notes_with_fanotes)) }
+        TextButton(onClick = { model.finishWelcome(connectSchool = false, openNotes = false) }, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.continue_action)) }
+        Text(t(R.string.school_features_work_without_an_account_notes_sy),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
     }
 }
@@ -54,30 +54,30 @@ fun AccountScreen(model: CompanionModel, onboarding: Boolean = false, modifier: 
             Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.EditNote, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(30.dp)) }
         }
         Spacer(Modifier.height(24.dp))
-        Text(if (register) "A place for your work." else "Your day. Your notes.", style = MaterialTheme.typography.headlineLarge)
-        Text(if (register) "Create your FaNotes account." else "A calmer school day, with everything you need close at hand.",
+        Text(if (register) t(R.string.a_place_for_your_work) else t(R.string.your_day_your_notes), style = MaterialTheme.typography.headlineLarge)
+        Text(if (register) t(R.string.create_your_fanotes_account) else t(R.string.a_calmer_school_day_with_everything_you_need_clo),
             style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp, bottom = 28.dp))
-        OutlinedTextField(model.email, { model.email = it }, Modifier.fillMaxWidth(), label = { Text("Email") }, singleLine = true,
+        OutlinedTextField(model.email, { model.email = it }, Modifier.fillMaxWidth(), label = { Text(t(R.string.email)) }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next), shape = MaterialTheme.shapes.small)
         Spacer(Modifier.height(12.dp))
-        OutlinedTextField(model.password, { model.password = it }, Modifier.fillMaxWidth(), label = { Text("Password") }, singleLine = true,
+        OutlinedTextField(model.password, { model.password = it }, Modifier.fillMaxWidth(), label = { Text(t(R.string.password)) }, singleLine = true,
             visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
-            trailingIcon = { ActionIcon(if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (visible) "Hide password" else "Show password") { visible = !visible } },
+            trailingIcon = { ActionIcon(if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (visible) t(R.string.hide_password) else t(R.string.show_password)) { visible = !visible } },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { focus.clearFocus(); if (!model.busy) model.login(register) }), shape = MaterialTheme.shapes.small)
         if (register) {
-            Text("Your notes are end-to-end encrypted. Keep your password safe: a forgotten password cannot be recovered.",
+            Text(t(R.string.your_notes_are_end_to_end_encrypted_keep_your_pa),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp))
         }
         Button(onClick = { focus.clearFocus(); model.login(register) }, enabled = !model.busy && model.email.isNotBlank() && model.password.isNotBlank(), modifier = Modifier.fillMaxWidth().padding(top = 24.dp).heightIn(min = 50.dp)) {
             if (model.busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-            else Text(if (register) "Create account" else "Sign in")
+            else Text(if (register) t(R.string.create_account) else t(R.string.sign_in))
         }
-        TextButton(onClick = { register = !register; model.message = null }, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text(if (register) "Already have an account? Sign in" else "Create an account") }
+        TextButton(onClick = { register = !register; model.message = null }, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text(if (register) t(R.string.already_have_an_account_sign_in) else t(R.string.create_an_account)) }
         if (onboarding) {
             FineDivider()
-            TextButton(onClick = model::continueLocally, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) { Text("Continue on this device") }
-            Text("You can connect notes later. School features stay available on this device.", style = MaterialTheme.typography.bodySmall,
+            TextButton(onClick = model::continueLocally, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) { Text(t(R.string.continue_on_this_device)) }
+            Text(t(R.string.you_can_connect_notes_later_school_features_stay), style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         }
         Spacer(Modifier.height(24.dp))
@@ -91,7 +91,7 @@ fun NameDialog(title: String, label: String, confirm: String, initial: String = 
         OutlinedTextField(value, { value = it.take(120) }, label = { Text(label) }, singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { if (value.isNotBlank()) onConfirm(value.trim()) }))
     }, confirmButton = { TextButton(onClick = { onConfirm(value.trim()) }, enabled = value.isNotBlank()) { Text(confirm) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+        dismissButton = { TextButton(onClick = onDismiss) { Text(t(R.string.cancel)) } })
 }
 
 @Composable
@@ -100,15 +100,15 @@ fun DateControl(label: String, value: LocalDate?, allowClear: Boolean = false, o
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         OutlinedButton(onClick = { picking = true }, modifier = Modifier.weight(1f).heightIn(min = 52.dp), shape = MaterialTheme.shapes.small, contentPadding = PaddingValues(horizontal = 12.dp)) {
             Icon(Icons.Outlined.CalendarToday, null, Modifier.size(18.dp)); Spacer(Modifier.width(10.dp))
-            Text("$label: ${value?.let { dueLabel(it.toString()) } ?: "None"}", modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(t(R.string.text_4, label, value?.let { dueLabel(it.toString()) } ?: t(R.string.none)), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (allowClear && value != null) ActionIcon(Icons.Outlined.Close, "Clear $label") { onDate(null) }
+        if (allowClear && value != null) ActionIcon(Icons.Outlined.Close, t(R.string.clear, label)) { onDate(null) }
     }
     if (picking) {
         val state = rememberDatePickerState(initialSelectedDateMillis = (value ?: LocalDate.now()).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli())
         DatePickerDialog(onDismissRequest = { picking = false }, confirmButton = {
-            TextButton(onClick = { state.selectedDateMillis?.let { onDate(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) }; picking = false }) { Text("Choose") }
-        }, dismissButton = { TextButton(onClick = { picking = false }) { Text("Cancel") } }) { DatePicker(state, showModeToggle = true) }
+            TextButton(onClick = { state.selectedDateMillis?.let { onDate(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) }; picking = false }) { Text(t(R.string.choose)) }
+        }, dismissButton = { TextButton(onClick = { picking = false }) { Text(t(R.string.cancel)) } }) { DatePicker(state, showModeToggle = true) }
     }
 }
 
@@ -117,16 +117,16 @@ fun TimeControl(label: String, value: String, allowClear: Boolean = false, onTim
     var picking by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         OutlinedButton(onClick = { picking = true }, modifier = Modifier.weight(1f).heightIn(min = 52.dp), shape = MaterialTheme.shapes.small) {
-            Icon(Icons.Outlined.Schedule, null, Modifier.size(18.dp)); Spacer(Modifier.width(10.dp)); Text("$label: ${value.ifBlank { "None" }}", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Icon(Icons.Outlined.Schedule, null, Modifier.size(18.dp)); Spacer(Modifier.width(10.dp)); Text(t(R.string.text_4, label, value.ifBlank { t(R.string.none) }), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (allowClear && value.isNotBlank()) ActionIcon(Icons.Outlined.Close, "Clear $label") { onTime("") }
+        if (allowClear && value.isNotBlank()) ActionIcon(Icons.Outlined.Close, t(R.string.clear, label)) { onTime("") }
     }
     if (picking) {
         val initial = runCatching { LocalTime.parse(value) }.getOrDefault(LocalTime.of(9, 0))
         val state = rememberTimePickerState(initialHour = initial.hour, initialMinute = initial.minute, is24Hour = true)
         AlertDialog(onDismissRequest = { picking = false }, modifier = Modifier.imePadding(), title = { Text(label) }, text = { TimeInput(state) },
-            confirmButton = { TextButton(onClick = { onTime("%02d:%02d".format(state.hour, state.minute)); picking = false }) { Text("Choose") } },
-            dismissButton = { TextButton(onClick = { picking = false }) { Text("Cancel") } })
+            confirmButton = { TextButton(onClick = { onTime("%02d:%02d".format(state.hour, state.minute)); picking = false }) { Text(t(R.string.choose)) } },
+            dismissButton = { TextButton(onClick = { picking = false }) { Text(t(R.string.cancel)) } })
     }
 }
 
@@ -145,24 +145,24 @@ fun TaskForm(model: CompanionModel, task: HomeworkTask? = null, onDismiss: () ->
     var saving by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).sheetKeyboardPadding().padding(horizontal = Space.page)) {
-            SheetTitle(if (task == null) "New task" else "Task details", onDismiss)
+            SheetTitle(if (task == null) t(R.string.new_task) else t(R.string.task_details), onDismiss)
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(title, { title = it.take(240) }, label = { Text("What needs doing?") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
-                OutlinedTextField(subject, { subject = it.take(80) }, label = { Text("Subject") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                DateControl("Due", parseDisplayDate(date), true) { date = it?.toString().orEmpty() }
-                if (date.isNotBlank()) TimeControl("Time", time, true) { time = it }
-                ToggleRow("Important", "Keep this task easy to spot", important) { important = it }
-                ToggleRow("Appointment", "An appointment rather than homework", appointment) { appointment = it }
-                OutlinedTextField(notes, { notes = it.take(4000) }, label = { Text("Details") }, modifier = Modifier.fillMaxWidth(), minLines = 4)
-                if (task != null) TextButton(onClick = { confirm = true }) { Icon(Icons.Outlined.DeleteOutline, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Delete task", color = MaterialTheme.colorScheme.error) }
+                OutlinedTextField(title, { title = it.take(240) }, label = { Text(t(R.string.what_needs_doing)) }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+                OutlinedTextField(subject, { subject = it.take(80) }, label = { Text(t(R.string.subject)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                DateControl(t(R.string.due), parseDisplayDate(date), true) { date = it?.toString().orEmpty() }
+                if (date.isNotBlank()) TimeControl(t(R.string.time_label), time, true) { time = it }
+                ToggleRow(t(R.string.important), t(R.string.keep_this_task_easy_to_spot), important) { important = it }
+                ToggleRow(t(R.string.appointment), t(R.string.an_appointment_rather_than_homework), appointment) { appointment = it }
+                OutlinedTextField(notes, { notes = it.take(4000) }, label = { Text(t(R.string.details)) }, modifier = Modifier.fillMaxWidth(), minLines = 4)
+                if (task != null) TextButton(onClick = { confirm = true }) { Icon(Icons.Outlined.DeleteOutline, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(t(R.string.delete_task), color = MaterialTheme.colorScheme.error) }
                 Spacer(Modifier.height(16.dp))
             }
-            formError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            formError?.let { Text(shownText(it), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             Button(onClick = { saving = true; model.saveTask((task ?: HomeworkTask(id, title)).copy(title = title.trim(), subject = subject.trim(), dueDate = date.ifBlank { null }, dueTime = time.takeIf { date.isNotBlank() && it.isNotBlank() }, notes = notes, priority = if (important) "high" else "normal", kind = if (appointment) "appointment" else "homework"), onDismiss, { formError = it; saving = false }) },
-                enabled = title.isNotBlank() && !saving, modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp).heightIn(min = 50.dp)) { Text(if (saving) "Saving…" else "Save task") }
+                enabled = title.isNotBlank() && !saving, modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp).heightIn(min = 50.dp)) { Text(if (saving) t(R.string.saving) else t(R.string.save_task)) }
         }
     }
-    if (confirm && task != null) ConfirmDialog("Delete this task?", "This removes it from your Kanti+ task list.", "Delete", { confirm = false }) { model.deleteTask(task); onDismiss() }
+    if (confirm && task != null) ConfirmDialog(t(R.string.delete_this_task), t(R.string.this_removes_it_from_your_kanti_task_list), t(R.string.delete), { confirm = false }) { model.deleteTask(task); onDismiss() }
 }
 
 @Composable
@@ -185,26 +185,26 @@ fun EventForm(model: CompanionModel, event: CalendarEvent? = null, onDismiss: ()
     val valid = title.isNotBlank() && endValue >= startValue
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).sheetKeyboardPadding().padding(horizontal = Space.page)) {
-            SheetTitle(if (event == null) "New event" else "Edit event", onDismiss)
+            SheetTitle(if (event == null) t(R.string.new_event) else t(R.string.edit_event), onDismiss)
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(title, { title = it.take(240) }, label = { Text("Event title") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(title, { title = it.take(240) }, label = { Text(t(R.string.event_title)) }, modifier = Modifier.fillMaxWidth())
                 ChoiceRow(model.calendar.calendars.map { it.id to it.name }, calendar, { calendar = it })
-                ToggleRow("All day", checked = allDay) { allDay = it }
-                DateControl("Starts", parseDisplayDate(start)) { it?.let { day -> start = day.toString(); if (end < start) end = start } }
-                if (!allDay) TimeControl("Starts at", startTime) { startTime = it }
-                DateControl("Ends", parseDisplayDate(end)) { it?.let { day -> end = day.toString() } }
-                if (!allDay) TimeControl("Ends at", endTime) { endTime = it }
-                if (endValue < startValue) Text("End must be after the start.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(location, { location = it }, label = { Text("Location") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(notes, { notes = it }, label = { Text("Details") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
-                if (event != null && event.recurrence != "none") Text("Repeats ${event.recurrence}. Changes apply to the series.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (event != null) TextButton(onClick = { confirm = true }) { Text("Delete ${if (event.recurrence != "none") "series" else "event"}", color = MaterialTheme.colorScheme.error) }
+                ToggleRow(t(R.string.all_day), checked = allDay) { allDay = it }
+                DateControl(t(R.string.starts), parseDisplayDate(start)) { it?.let { day -> start = day.toString(); if (end < start) end = start } }
+                if (!allDay) TimeControl(t(R.string.starts_at), startTime) { startTime = it }
+                DateControl(t(R.string.ends), parseDisplayDate(end)) { it?.let { day -> end = day.toString() } }
+                if (!allDay) TimeControl(t(R.string.ends_at), endTime) { endTime = it }
+                if (endValue < startValue) Text(t(R.string.end_must_be_after_the_start), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(location, { location = it }, label = { Text(t(R.string.location)) }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(notes, { notes = it }, label = { Text(t(R.string.details)) }, modifier = Modifier.fillMaxWidth(), minLines = 3)
+                if (event != null && event.recurrence != "none") Text(t(R.string.repeats_changes_apply_to_the_series, recurrenceLabel(event.recurrence)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (event != null) TextButton(onClick = { confirm = true }) { Text(t(R.string.delete_2, if (event.recurrence != "none") t(R.string.series_noun) else t(R.string.event_noun)), color = MaterialTheme.colorScheme.error) }
                 Spacer(Modifier.height(16.dp))
             }
-            formError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            formError?.let { Text(shownText(it), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             Button(onClick = { saving = true; model.saveEvent((event ?: CalendarEvent(id, calendar, title, startValue, endValue)).copy(title = title.trim(), calendarId = calendar, start = startValue, end = endValue, allDay = allDay, location = location, notes = notes), onDismiss, { formError = it; saving = false }) },
-                enabled = valid && !saving, modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp).heightIn(min = 50.dp)) { Text(if (saving) "Saving…" else "Save event") }
+                enabled = valid && !saving, modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp).heightIn(min = 50.dp)) { Text(if (saving) t(R.string.saving) else t(R.string.save_event)) }
         }
     }
-    if (confirm && event != null) ConfirmDialog("Delete ${if (event.recurrence != "none") "this series" else "this event"}?", "This removes it from your Kanti+ calendar.", "Delete", { confirm = false }) { model.deleteEvent(event); onDismiss() }
+    if (confirm && event != null) ConfirmDialog(t(R.string.delete_3, if (event.recurrence != "none") t(R.string.this_series) else t(R.string.this_event)), t(R.string.this_removes_it_from_your_kanti_calendar), t(R.string.delete), { confirm = false }) { model.deleteEvent(event); onDismiss() }
 }

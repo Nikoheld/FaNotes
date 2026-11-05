@@ -26,6 +26,9 @@ class OkHttpSyncTransport(
         }
         val builder = Request.Builder().url(request.url).method(request.method, body)
         request.headers.forEach { (name, value) -> builder.header(name, value) }
+        if (request.headers.keys.none { it.equals("Accept-Language", ignoreCase = true) }) {
+            builder.header("Accept-Language", AppLanguage.acceptLanguage())
+        }
         val call = client.newCall(builder.build())
         continuation.invokeOnCancellation { call.cancel() }
         call.enqueue(object : okhttp3.Callback {
