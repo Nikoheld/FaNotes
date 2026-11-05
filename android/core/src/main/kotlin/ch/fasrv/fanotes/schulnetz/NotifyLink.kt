@@ -13,6 +13,7 @@ data class NotifyLink(
     val ids: List<String> = emptyList(),
     val courseId: String = "",
     val date: String = "",
+    val body: String = "",
 )
 
 data class NotifyRoute(
@@ -76,7 +77,7 @@ fun notifyKindOf(category: String, id: String = "", title: String = ""): String 
 }
 
 fun notifyLinkOf(change: SchulnetzChange): NotifyLink =
-    NotifyLink(notifyKindOf(change.category, change.id, change.title), change.linkIds(), change.courseId, change.date)
+    NotifyLink(notifyKindOf(change.category, change.id, change.title), change.linkIds(), change.courseId, change.date, change.body)
 
 fun notifyPayload(change: SchulnetzChange): String {
     val ids = change.linkIds()
@@ -123,6 +124,7 @@ fun parseNotifyLink(obj: ch.fasrv.fanotes.json.JsonValue.Obj): NotifyLink? {
         ids = ids,
         courseId = source.string("courseId") ?: obj.string("courseId").orEmpty(),
         date = source.string("date") ?: obj.string("date").orEmpty(),
+        body = source.string("body") ?: obj.string("body").orEmpty(),
     )
 }
 
@@ -223,11 +225,37 @@ private fun routeGrades(link: NotifyLink, snapshot: SchulnetzSnapshot): NotifyRo
     )
 }
 
+/** Course, clock, and room taken from a notification, so a replaced id still opens the lesson. */
+private fun noticeLesson(link: NotifyLink): AgendaEvent {
+    val clock = Regex("""(?<!\d)(\d{2}:\d{2})""").find(link.body)?.groupValues?.get(1).orEmpty()
+    val room = Regex("""Raum\s+([^\s·]+)""").find(link.body)?.groupValues?.get(1).orEmpty()
+    val name = cleanSchulnetzText(link.body.substringBefore("·"))
+    val day = link.date.take(10)
+    val start = if (day.isNotBlank() && clock.isNotBlank()) "${day}T$clock:00" else day
+    return AgendaEvent(
+        id = "",
+        start = start,
+        end = start,
+        text = name,
+        comment = "",
+        room = room,
+        teachers = emptyList(),
+        courseId = link.courseId,
+        courseName = name.ifBlank { link.courseId },
+        status = "",
+        eventType = "lesson",
+        color = "",
+        timetableText = name,
+    )
+}
+
 private fun routeLesson(link: NotifyLink, snapshot: SchulnetzSnapshot, zone: ZoneId): NotifyRoute {
     val found = snapshot.events.filter { event ->
         lessonTargetId(event) in link.ids || event.id in link.ids
     }
-    val event = found.firstOrNull()
+    val event = found.firstOrNull() ?: snapshot.events.firstOrNull { candidate ->
+        candidate.isLesson() && sameLessonSlot(candidate, noticeLesson(link))
+    }
     val day = event?.let { eventDay(it, zone) } ?: link.date
     val hint = if (event == null) "Die Lektion ist nicht mehr im letzten Stand." else ""
     return NotifyRoute(

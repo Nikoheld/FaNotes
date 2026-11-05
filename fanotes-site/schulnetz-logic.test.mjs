@@ -54,6 +54,7 @@ import {
   carryTimetableExams,
   schedulerFetchUrl,
   schedulerWeekLoaded,
+  terminlisteNextUrl,
   zurichTimeshift,
   WEEK_CAP,
 } from './schulnetz-logic.mjs'
@@ -318,6 +319,87 @@ test('web session is opened with Microsoft cookies and not the phone PHPSESSID',
   assert.equal(snapshot.grades[0].course.includes('MA-4a-He'), true)
 })
 
+test('an empty scheduler read keeps lessons, exams and appointments', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-keep-'))
+  const key = randomBytes(32)
+  let phase = 'good'
+  const lessonXml = '<data><event id="neu"><start_date>2026-11-04 08:15</start_date><end_date>2026-11-04 09:00</end_date><text>Mathematik</text><zimmerkuerzel>A1</zimmerkuerzel><event_type>0_stp</event_type></event></data>'
+  const examXml = '<data><event id="phy"><start_date></start_date><vdatum>04.11.2026</vdatum><vzeit>10:15</vzeit><bdatum>04.11.2026</bdatum><bzeit>11:00</bzeit><text>Mathe &amp; Physik</text><fachkuerzel>PHY</fachkuerzel><zimmerkuerzel>B04</zimmerkuerzel><event_type>1_pru</event_type></event></data>'
+  const calls = []
+  const fetch = async (url, options = {}) => {
+    const cookie = options.headers?.Cookie || ''
+    const target = String(url)
+    calls.push(target)
+    const response = (status, body, { location = '', cookies = [] } = {}) => ({
+      status,
+      headers: { get: (name) => name.toLowerCase() === 'location' ? location : null },
+      setCookies: cookies,
+      text: async () => body,
+    })
+    if (target.endsWith('/index.php?pageid=1') && !cookie.includes('PHPSESSID=server-session')) {
+      return response(302, '', { location: 'https://login.microsoftonline.com/tenant/oauth2/v2.0/authorize?redirect_uri=https%3A%2F%2Fwww.schulnetz-ag.ch%2Faksa%2F' })
+    }
+    if (target.includes('login.microsoftonline.com')) {
+      return response(302, '', { location: 'https://www.schulnetz-ag.ch/aksa/?code=abc' })
+    }
+    if (target.includes('/aksa/?code=') || target.includes('/aksa?code=')) {
+      return response(200, '<a href="index.php?pageid=21311&id=abc123&transid=a1b2c3">Noten</a>', { cookies: ['PHPSESSID=server-session; Path=/; HttpOnly'] })
+    }
+    if (phase === 'wall') return response(200, '<html><body>Inaktivitätslimit überschritten</body></html>')
+    if (target.includes('scheduler_processor') && target.includes('pageid=22202')) {
+      return response(200, phase === 'good' ? lessonXml : '<data><event id="e"></event></data>')
+    }
+    if (target.includes('scheduler_processor') && target.includes('pageid=21312')) {
+      return response(200, phase === 'good' ? examXml : '<data><event id="e"></event></data>')
+    }
+    const note = phase === 'good' ? '<div class="cls-start-mitteilung">Elternabend am Freitag</div>' : ''
+    return response(200, `<html><body><a href="index.php?pageid=21311&amp;id=abc123&amp;transid=a1b2c3">Noten</a>${note}</body></html>`)
+  }
+  const runtime = createSchulnetzRuntime({
+    root,
+    key,
+    fetch,
+    autostart: false,
+    now: () => new Date('2026-11-04T12:00:00Z'),
+  })
+  const accountId = 'd'.repeat(32)
+  try {
+    await runtime.linkAccount(accountId, {
+      mode: 'web',
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      userAgent: 'FaNotesTest',
+      ssoCookies: { 'login.microsoftonline.com': 'ESTSAUTHPERSISTENT=microsoft-cookie-value' },
+    })
+    await runtime.pollAccount(accountId)
+    const first = JSON.parse(await readFile(join(root, 'accounts', accountId, 'snapshot.json'), 'utf8'))
+    assert.equal(first.events.some((event) => event.id === 'neu'), true)
+    assert.equal(first.exams.some((event) => event.id === 'phy' && event.text === 'Mathe & Physik'), true)
+    assert.equal(first.messages.some((message) => message.body === 'Elternabend am Freitag'), true)
+    const stamped = first.weekFetched['2026-11-02']
+    phase = 'empty'
+    await runtime.pollAccount(accountId)
+    const second = JSON.parse(await readFile(join(root, 'accounts', accountId, 'snapshot.json'), 'utf8'))
+    assert.equal(second.events.some((event) => event.id === 'neu'), true)
+    assert.equal(second.exams.some((event) => event.id === 'phy'), true)
+    assert.equal(second.messages.some((message) => message.body === 'Elternabend am Freitag'), true)
+    assert.equal(second.weekFetched['2026-11-02'], stamped)
+    phase = 'wall'
+    await runtime.pollAccount(accountId)
+    const third = JSON.parse(await readFile(join(root, 'accounts', accountId, 'snapshot.json'), 'utf8'))
+    assert.equal(third.events.some((event) => event.id === 'neu'), true)
+    assert.equal(third.exams.some((event) => event.id === 'phy'), true)
+    assert.equal(third.messages.some((message) => message.body === 'Elternabend am Freitag'), true)
+    const changesPath = join(root, 'accounts', accountId, 'changes.jsonl')
+    const changes = await readFile(changesPath, 'utf8').catch(() => '')
+    assert.equal(changes.includes('Lektion entfernt'), false)
+    assert.equal(changes.includes('Prüfung entfällt'), false)
+    assert.equal(calls.some((url) => url.includes('pageid=23118') || url.includes('pageid=9999')), false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('a logged-in schulNetz page with menu logout links stays ok', () => {
   const html = `<html><body>
     <a href="loginto.php?pageid=1&amp;mode=5">Abmelden</a>
@@ -380,6 +462,13 @@ test('notify payload hashes stay stable and route to the matching screen', () =>
   const lessonRoute = routeNotify({ kind: 'timetable', ids: [lessonTargetId(lesson)], courseId: '', date: '2026-11-02' }, snapshot)
   assert.equal(lessonRoute.tab, 'Plan')
   assert.equal(lessonRoute.day, '2026-11-02')
+  const replaced = { ...lesson, id: 'neu', text: 'Mathematik Holm', courseName: 'Mathematik Holm', timetableText: 'Mathematik Holm', room: 'R201' }
+  const replacedRoute = routeNotify({ kind: 'timetable', ids: ['gone'], courseId: 'math', date: '2026-11-02', body: 'Mathematik · 08:15–09:00 · Raum R201' }, { ...snapshot, events: [replaced] })
+  assert.equal(replacedRoute.found, true)
+  assert.equal(replacedRoute.hint, '')
+  assert.deepEqual(replacedRoute.highlightIds, [lessonTargetId(replaced)])
+  const wrongRoom = routeNotify({ kind: 'timetable', ids: ['gone'], courseId: 'math', date: '2026-11-02', body: 'Mathematik · 08:15–09:00 · Raum Z9' }, { ...snapshot, events: [replaced] })
+  assert.equal(wrongRoom.found, false)
   const examRoute = routeNotify({ kind: 'exam', ids: [lessonTargetId(exam)], courseId: '', date: '' }, snapshot)
   assert.equal(examRoute.section, 'Pruefungen')
   const testRoute = routeNotify(parseNotifyLink(JSON.stringify({ id: 'push-test', category: 'settings', title: 'Testbenachrichtigung', body: 'x' })), snapshot)
@@ -1082,8 +1171,14 @@ test('week range follows the page span and stays quiet for a new week', () => {
   assert.equal(isLesson(byId.p1), false)
   assert.equal(byId.s1.eventType, '0_stp')
   assert.equal(isExamLike(byId.s1), false)
+  assert.equal(isLesson(byId.s1), true)
   assert.equal(isExamLike(byId.w1), true)
   assert.equal(isLesson(byId.w1), false)
+  const oldDeutsch = { id: 'old', start: '2026-11-12T08:00:00', end: '2026-11-12T08:45:00', text: 'Deutsch', courseName: 'Deutsch', room: 'A1', teachers: ['Nord'], status: '', eventType: 'lesson' }
+  const shown = overlayLessons([oldDeutsch], [byId.s1], new Set(['2026-11-09']))
+  assert.deepEqual(shown.map((event) => event.id), ['s1'])
+  const quietId = diffSnapshots({ events: [oldDeutsch], exams: [], messages: [] }, { events: [byId.s1], exams: [], messages: [] })
+  assert.equal(quietId.some((change) => change.title === 'Lektion entfernt' || change.title === 'Stundenplan geändert'), false)
   assert.equal(isExamLike({ eventType: 'lesson', text: 'Lesetest', timetableText: 'Lesetest' }), false)
   assert.equal(isLesson({ eventType: 'lesson', text: 'Lesetest', timetableText: 'Lesetest' }), true)
   assert.equal(isExamLike({ eventType: '<![CDATA[1_pru]]>', text: 'Mathematik' }), true)
@@ -1155,6 +1250,60 @@ test('a web scrape reads the whole current week and keeps a far lesson', async (
   assert.equal(second.exams.some((event) => event.id === 'x1'), true)
   assert.equal(second.weekFetched['2026-11-02'], '2026-11-04T12:00:00Z')
   assert.equal(urls.filter((url) => url.includes('scheduler_processor')).length, 2)
+  const undated = async (url) => {
+    const scheduler = String(url).includes('scheduler_processor')
+    const body = scheduler ? '<data><event id="e"></event></data>' : '<html><body>ok</body></html>'
+    return { status: 200, headers: { get: () => '' }, text: async () => body }
+  }
+  const keptWeek = await scrapeWithSession(base, session, undated, {
+    today: '2026-11-04',
+    now: '2026-11-04T13:00:00Z',
+    previousEvents: [far, appointment, currentLesson],
+    previousExams: [currentExam],
+    weekFetched: { '2026-11-02': '2026-11-04T12:00:00Z' },
+  })
+  assert.equal(keptWeek.events.some((event) => event.id === 'e1'), true)
+  assert.equal(keptWeek.events.some((event) => event.id === 'far'), true)
+  assert.equal(keptWeek.exams.some((event) => event.id === 'x1'), true)
+  assert.equal(keptWeek.weekFetched['2026-11-02'], '2026-11-04T12:00:00Z')
+  const lessonXml = '<data><event id="neu"><start_date>2026-11-04 08:15</start_date><end_date>2026-11-04 09:00</end_date><text>Mathematik</text><zimmerkuerzel>A1</zimmerkuerzel><event_type>0_stp</event_type></event></data>'
+  const examXml = '<data><event id="phy"><start_date></start_date><vdatum>04.11.2026</vdatum><vzeit>10:15</vzeit><bdatum>04.11.2026</bdatum><bzeit>11:00</bzeit><text>Mathe &amp; Physik</text><fachkuerzel>PHY</fachkuerzel><zimmerkuerzel>B04</zimmerkuerzel><event_type>1_pru</event_type></event><event id="bare"><start_date></start_date><vdatum>05.11.2026</vdatum><vzeit>08:15</vzeit><text>Mathe & Physik</text><event_type>1_pru</event_type></event></data>'
+  const parsedExam = Object.fromEntries(parseSchedulerXml(examXml).map((event) => [event.id, event]))
+  assert.equal(parsedExam.phy.start, '2026-11-04T10:15:00')
+  assert.equal(parsedExam.phy.end, '2026-11-04T11:00:00')
+  assert.equal(parsedExam.phy.courseName, 'PHY')
+  assert.equal(parsedExam.phy.room, 'B04')
+  assert.equal(parsedExam.phy.text, 'Mathe & Physik')
+  assert.equal(parsedExam.phy.eventType, 'exam')
+  assert.equal(parsedExam.bare.text, 'Mathe & Physik')
+  const loaded = async (url) => {
+    const target = String(url)
+    let body = '<html><body>ok</body></html>'
+    if (target.includes('scheduler_processor') && target.includes('pageid=22202')) body = lessonXml
+    if (target.includes('scheduler_processor') && target.includes('pageid=21312')) body = examXml
+    return { status: 200, headers: { get: () => '' }, text: async () => body }
+  }
+  const read = await scrapeWithSession(base, session, loaded, {
+    today: '2026-11-04',
+    now: '2026-11-04T13:30:00Z',
+    previousEvents: [currentLesson, far],
+    previousExams: [],
+    weekFetched: {},
+  })
+  assert.equal(read.events.some((event) => event.id === 'neu'), true)
+  assert.equal(read.events.some((event) => event.id === 'e1'), false)
+  assert.equal(read.events.some((event) => event.id === 'far'), true)
+  assert.equal(read.exams.some((event) => event.id === 'phy'), true)
+  assert.equal(read.exams.some((event) => event.text === 'Mathe & Physik'), true)
+  const quietRead = diffSnapshots(
+    { events: [currentLesson], exams: [], messages: [] },
+    { events: read.events, exams: read.exams, messages: [] },
+  )
+  assert.equal(quietRead.some((change) => change.title === 'Lektion entfernt'), false)
+  const links = '<a href="index.php?pageid=22108&amp;sRow=0&amp;ff=1">alle</a><a href="index.php?pageid=22108&amp;sRow=25">25</a><a href="index.php?pageid=22108&amp;sRow=50">50</a><a href="index.php?pageid=22108&amp;sRow=25&amp;sort=datum">sort</a>'
+  assert.equal(terminlisteNextUrl(links, base).includes('sRow=25'), true)
+  assert.equal(terminlisteNextUrl(links, base, 25).includes('sRow=50'), true)
+  assert.equal(terminlisteNextUrl(links, base, 50), '')
 })
 
 test('exam alerts ignore a stored lesson, empty markup and a missing clock', () => {
@@ -1209,6 +1358,7 @@ test('exam alerts ignore a stored lesson, empty markup and a missing clock', () 
   assert.equal(sameNote.some((change) => change.category === 'event'), false)
   assert.equal(isLesson({ eventType: 'lesson', text: 'Lesetest', timetableText: 'Lesetest' }), true)
   assert.equal(isExamLike({ eventType: '0_stp', text: 'Deutsch', timetableText: 'Deutsch' }), false)
+  assert.equal(isLesson({ eventType: '0_stp', text: 'Deutsch', timetableText: 'Deutsch' }), true)
 })
 
 test('seal round trip uses aes-256-gcm', () => {

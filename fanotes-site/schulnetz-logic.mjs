@@ -385,7 +385,7 @@ export const isExamLike = (event) => examMarker(event?.eventType) || examLead(ev
 export const isLesson = (event) => {
   if (isExamLike(event)) return false
   const kind = cleanSchulnetzText(event?.eventType).toLowerCase()
-  if (!kind) return true
+  if (!kind || kind === '0_stp') return true
   return kind.includes('lesson') || kind.includes('unterricht') || kind.includes('timetable') || kind === 'period' || kind === 'stunde'
 }
 
@@ -438,6 +438,63 @@ const eventBody = (event) => {
 const eventMatchLabel = (event) => [event?.courseName, event?.text, event?.timetableText]
   .map((part) => cleanSchulnetzText(part).toLowerCase())
   .find((part) => part) || ''
+
+const courseKeys = (event) => {
+  const texts = [event?.courseName, event?.text, event?.timetableText, event?.courseId]
+    .map((part) => cleanSchulnetzText(part).toLowerCase())
+    .filter(Boolean)
+  return new Set(texts.flatMap((text) => [text, text.split(' ')[0], text.split('(')[0].trim()]).filter((text) => text.length >= 2))
+}
+
+/** Same lesson after an id or parser change. Course, clock, and room identify it. */
+const sameLessonSlot = (left, right) => {
+  const leftDay = eventDayKey(left?.start)
+  const rightDay = eventDayKey(right?.start)
+  if (!leftDay || leftDay !== rightDay) return false
+  const leftKeys = courseKeys(left)
+  const rightKeys = courseKeys(right)
+  if (![...leftKeys].some((key) => rightKeys.has(key))) return false
+  const leftClock = realClock(left?.start)
+  const rightClock = realClock(right?.start)
+  if (!leftClock || !rightClock || leftClock !== rightClock) return false
+  const leftRoom = cleanSchulnetzText(left?.room)
+  const rightRoom = cleanSchulnetzText(right?.room)
+  return !leftRoom || !rightRoom || leftRoom.toLowerCase() === rightRoom.toLowerCase()
+}
+
+const namedTeachers = (event) => (event?.teachers || []).map((teacher) => cleanSchulnetzText(teacher)).filter(Boolean)
+
+const lessonContentChanged = (previous, next) => {
+  if (schoolEventMoved(previous, next)) return true
+  if (isCancelled(next) !== isCancelled(previous)) return true
+  const before = namedTeachers(previous)
+  const after = namedTeachers(next)
+  if (before.length && after.length && before.join() !== after.join()) return true
+  return isSubstitution(next) !== isSubstitution(previous)
+}
+
+/** A notification body still carries course, clock, and room when the stored id is gone. */
+const noticeLesson = (link) => {
+  const body = String(link?.body || '')
+  const clock = body.match(/(?<!\d)(\d{2}:\d{2})/u)?.[1] || ''
+  const room = body.match(/Raum\s+([^\s·]+)/u)?.[1] || ''
+  const name = cleanSchulnetzText(body.split('·')[0] || '')
+  const day = String(link?.date || '').slice(0, 10)
+  const start = day && clock ? `${day}T${clock}:00` : day
+  return {
+    id: '',
+    start,
+    end: start,
+    text: name,
+    courseName: name || link?.courseId || '',
+    courseId: link?.courseId || '',
+    timetableText: name,
+    room,
+    eventType: 'lesson',
+    teachers: [],
+    status: '',
+  }
+}
 
 /** Same subject on the same day. A missing clock still matches, so a stored lesson can be the same test. */
 const sameSchoolSlot = (left, right) => {
@@ -720,6 +777,7 @@ export const parseNotifyLink = (json) => {
     ids: ids.length ? ids : (id ? [id] : []),
     courseId: source.courseId || obj.courseId || '',
     date: source.date || obj.date || '',
+    body: source.body || obj.body || '',
   }
 }
 
@@ -785,7 +843,8 @@ export const routeNotify = (link, snapshot = {}) => {
   }
   if (link.kind === 'timetable') {
     const found = (snapshot.events || []).filter((event) => link.ids.includes(lessonTargetId(event)) || link.ids.includes(event.id))
-    const event = found[0]
+    const notice = noticeLesson(link)
+    const event = found[0] || (snapshot.events || []).find((candidate) => isLesson(candidate) && sameLessonSlot(candidate, notice))
     return {
       tab: 'Plan',
       section: 'Menu',
@@ -967,17 +1026,20 @@ const diffAgenda = (previous, next, category, created, removed, changes, skipWee
     if (!old && skipWeeks.has(weekMondayKey(event.start))) continue
     const adopted = old ? null : adoptFrom.find((candidate) => sameSchoolSlot(event, candidate) && !stillThere.some((item) => item.id === candidate.id))
     if (!old && adopted && !schoolEventMoved(adopted, event)) continue
+    const slotTwin = !old && category === 'timetable' ? previous.find((candidate) => sameLessonSlot(event, candidate)) : null
+    const prior = old || slotTwin
+    if (prior && category === 'timetable' && !lessonContentChanged(prior, event)) continue
     const key = eventKey(event)
     if (old && eventKey(old) === key) continue
     let title
-    if (!old && adopted) title = 'Prüfung verschoben'
-    else if (!old) title = category === 'exam' ? 'Neue Prüfung' : created
-    else if (isCancelled(event) && !isCancelled(old)) title = category === 'exam' ? 'Prüfung fällt aus' : 'Lektion fällt aus'
-    else if ((event.teachers || []).join() !== (old.teachers || []).join() || (isSubstitution(event) && !isSubstitution(old))) title = 'Vertretung'
-    else if (category === 'exam' && (event.start !== old.start || event.room !== old.room)) title = 'Prüfung verschoben'
-    else if (event.room !== old.room && (event.start !== old.start || event.end !== old.end)) title = category === 'exam' ? 'Prüfung geändert' : 'Stundenplan geändert'
-    else if (event.room !== old.room) title = 'Raum geändert'
-    else if (event.start !== old.start || event.end !== old.end) title = 'Zeit geändert'
+    if (!prior && adopted) title = 'Prüfung verschoben'
+    else if (!prior) title = category === 'exam' ? 'Neue Prüfung' : created
+    else if (isCancelled(event) && !isCancelled(prior)) title = category === 'exam' ? 'Prüfung fällt aus' : 'Lektion fällt aus'
+    else if ((event.teachers || []).join() !== (prior.teachers || []).join() || (isSubstitution(event) && !isSubstitution(prior))) title = 'Vertretung'
+    else if (category === 'exam' && (event.start !== prior.start || event.room !== prior.room)) title = 'Prüfung verschoben'
+    else if (event.room !== prior.room && (event.start !== prior.start || event.end !== prior.end)) title = category === 'exam' ? 'Prüfung geändert' : 'Stundenplan geändert'
+    else if (event.room !== prior.room) title = 'Raum geändert'
+    else if (event.start !== prior.start || event.end !== prior.end) title = 'Zeit geändert'
     else title = category === 'exam' ? 'Prüfung geändert' : 'Stundenplan geändert'
     const body = eventBody(event)
     if (!body) continue
@@ -991,6 +1053,7 @@ const diffAgenda = (previous, next, category, created, removed, changes, skipWee
     if (after.has(event.id)) continue
     if (skipWeeks.has(weekMondayKey(event.start))) continue
     if (spareAgainst.some((candidate) => sameSchoolSlot(event, candidate))) continue
+    if (category === 'timetable' && next.some((candidate) => sameLessonSlot(event, candidate))) continue
     const body = eventBody(event)
     if (!body) continue
     changes.push(linkedChange(`${category}:${event.id}:removed`, category, removed, body, {
@@ -1236,33 +1299,74 @@ export const parseGradesHtml = (html) => {
   return grades
 }
 
+const hasSchedulerDay = (raw) => /\d{4}-\d{2}-\d{2}|\d{1,2}\.\d{1,2}\.\d{4}/u.test(String(raw || ''))
+
+/** `start_date` when it carries a day. Prüfungsplan rows often leave it blank and use von/bis instead. */
+const schedulerStamp = (direct, day, clock) => {
+  const dated = hasSchedulerDay(direct) ? direct : ''
+  const raw = dated || (hasSchedulerDay(day) ? (/\d{2}:\d{2}/u.test(clock || '') ? `${day} ${clock}` : day) : '')
+  if (!raw) return ''
+  const swiss = String(raw).match(/(\d{1,2})\.(\d{1,2})\.(\d{4})(?:[ T](\d{2}:\d{2}))?/u)
+  if (!swiss) return raw
+  const date = `${swiss[3]}-${swiss[2].padStart(2, '0')}-${swiss[1].padStart(2, '0')}`
+  return swiss[4] ? `${date} ${swiss[4]}` : date
+}
+
+const schedulerTime = (raw) => {
+  const text = String(raw || '').replace(' ', 'T')
+  return text.length === 16 ? `${text}:00` : text
+}
+
 export const parseSchedulerXml = (xml) => {
   const events = []
-  for (const block of String(xml).matchAll(/<event\b([^>]*)>([\s\S]*?)<\/event>/gi)) {
-    const id = /id="([^"]+)"/.exec(block[1])?.[1] || ''
-    const field = (name) => cleanSchulnetzText(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`, 'i').exec(block[2])?.[1] || '')
-    const start = field('start_date').replace(' ', 'T')
+  for (const block of String(xml).matchAll(/<event\b([^>]*)>([\s\S]*?)<\/event>/giu)) {
+    const id = /id=["']([^"']+)["']/u.exec(block[1])?.[1] || ''
+    const decodeXml = (value) => String(value || '').replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"').replaceAll('&apos;', "'").replaceAll('&amp;', '&')
+    const field = (name) => decodeXml(cleanSchulnetzText(new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)</${name}>`, 'iu').exec(block[2])?.[1] || ''))
+    const start = schedulerStamp(field('start_date'), field('vdatum'), field('vzeit'))
     if (!start) continue
-    const end = field('end_date').replace(' ', 'T') || start
+    const end = schedulerStamp(field('end_date'), field('bdatum'), field('bzeit')) || start
     const comment = field('kommentar')
-    const course = field('kurskuerzel') || field('text')
+    const course = field('kurskuerzel') || field('fachkuerzel') || field('text')
+    const startIso = schedulerTime(start)
+    const endIso = schedulerTime(end)
     events.push({
-      id: id || `sched:${start}:${course}`,
-      start: start.length === 16 ? `${start}:00` : start,
-      end: end.length === 16 ? `${end}:00` : end,
+      id: id || field('identity') || `sched:${startIso}:${course}`,
+      start: startIso,
+      end: endIso,
       text: field('text'),
       comment,
       room: field('zimmerkuerzel') || field('zimmer'),
       teachers: field('lehrerkuerzelname') ? [field('lehrerkuerzelname')] : [],
       courseId: field('kursid'),
       courseName: course,
-      status: /fällt|faellt|aus/i.test(comment) ? 'cancelled' : '',
+      status: /fällt|faellt/iu.test(comment) ? 'cancelled' : '',
       eventType: canonicalEventType(field('event_type')),
       color: field('color'),
       timetableText: field('text'),
     })
   }
   return events
+}
+
+/** Next Terminliste page (`sRow`), not a filter, sort, show-all, or the page just loaded. */
+export const terminlisteNextUrl = (html, baseUrl, currentRow = 0) => {
+  let best = null
+  let bestRow = 0
+  for (const match of String(html || '').matchAll(/href\s*=\s*["']([^"']+)["']/giu)) {
+    const href = match[1].replace(/&amp;/gu, '&')
+    if (!href.includes('pageid=22108') || !href.includes('sRow=')) continue
+    if (href.includes('ff') || href.includes('sort=') || href.includes('action=') || href.includes('numRows=')) continue
+    const row = Number(href.match(/sRow=(\d+)/u)?.[1] || 0)
+    if (!row || row <= currentRow) continue
+    if (best == null || row < bestRow) {
+      best = href
+      bestRow = row
+    }
+  }
+  if (!best) return ''
+  if (best.startsWith('http')) return best
+  return `${String(baseUrl || '').replace(/\/+$/u, '')}/${best.replace(/^\/+/u, '')}`
 }
 
 export const extractWebIds = (url, html) => {

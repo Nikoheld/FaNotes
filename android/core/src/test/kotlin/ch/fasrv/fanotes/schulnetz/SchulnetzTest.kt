@@ -143,12 +143,16 @@ class SchulnetzDiffTest {
 
     @Test
     fun cancellationSubstitutionAndRemovalAreTimetableChanges() {
-        val previous = SchulnetzSnapshot(events = listOf(lesson, lesson.copy(id = "gone")))
+        val previous = SchulnetzSnapshot(events = listOf(
+            lesson,
+            lesson.copy(id = "gone", start = "2026-11-03T08:15:00", end = "2026-11-03T09:00:00", text = "Deutsch", courseName = "Deutsch"),
+        ))
         val cancelled = lesson.copy(status = "cancelled")
         val cover = lesson.copy(id = "e2", teachers = listOf("Frau Meier"), comment = "Vertretung")
         val next = SchulnetzSnapshot(events = listOf(cancelled, cover))
         val changes = diffSnapshots(previous, next)
         assertEquals("Lektion fällt aus", changes.first { it.id.startsWith("timetable:e1:") }.title)
+        assertEquals("Vertretung", changes.first { it.id.startsWith("timetable:e2:") }.title)
         assertEquals("Lektion entfernt", changes.first { it.id == "timetable:gone:removed" }.title)
         val again = diffSnapshots(next, next)
         assertTrue(again.none { it.category == "timetable" })
@@ -240,6 +244,25 @@ class SchulnetzDiffTest {
             SchulnetzSnapshot(messages = listOf(SchoolMessage("b", "Termin", "Elternabend", "13.11.2026"))),
         )
         assertTrue(sameNote.none { it.category == "event" })
+    }
+
+    @Test
+    fun theSameLessonWithANewIdIsQuiet() {
+        val renamed = lesson.copy(id = "neu", courseName = "Mathematik Holm", text = "Mathematik Holm", timetableText = "Mathematik Holm")
+        val quiet = diffSnapshots(SchulnetzSnapshot(events = listOf(lesson)), SchulnetzSnapshot(events = listOf(renamed)))
+        assertTrue(quiet.none { it.category == "timetable" })
+        val droppedTeachers = lesson.copy(id = "plain", teachers = emptyList())
+        assertTrue(diffSnapshots(SchulnetzSnapshot(events = listOf(lesson)), SchulnetzSnapshot(events = listOf(droppedTeachers))).none { it.category == "timetable" })
+        val cover = lesson.copy(id = "cover", teachers = listOf("Frau Meier"))
+        assertEquals("Vertretung", diffSnapshots(SchulnetzSnapshot(events = listOf(lesson)), SchulnetzSnapshot(events = listOf(cover))).single { it.category == "timetable" }.title)
+        val otherRoom = lesson.copy(id = "room", room = "R202")
+        val moved = diffSnapshots(SchulnetzSnapshot(events = listOf(lesson)), SchulnetzSnapshot(events = listOf(otherRoom)))
+        assertTrue(moved.any { it.title == "Lektion entfernt" })
+        assertTrue(moved.any { it.title == "Stundenplan geändert" })
+        val missing = lesson.copy(id = "bio", start = "2026-11-03T10:00:00", end = "2026-11-03T10:45:00", text = "Biologie", courseName = "Biologie")
+        val removed = diffSnapshots(SchulnetzSnapshot(events = listOf(lesson, missing)), SchulnetzSnapshot(events = listOf(renamed)))
+        assertEquals("Lektion entfernt", removed.single { it.id == "timetable:bio:removed" }.title)
+        assertTrue(removed.none { it.id.contains("e1") })
     }
 }
 
@@ -623,6 +646,7 @@ class WebSessionTest {
         assertFalse(parsed.getValue("p1").isLesson())
         assertEquals("0_stp", parsed.getValue("s1").eventType)
         assertFalse(parsed.getValue("s1").isExamLike())
+        assertTrue(parsed.getValue("s1").isLesson())
         assertTrue(parsed.getValue("w1").isExamLike())
         assertFalse(parsed.getValue("w1").isLesson())
         val lesetest = AgendaEvent("g", "2026-11-02T08:00:00", "2026-11-02T08:45:00", "Lesetest", "", "", emptyList(), "", "Lesetest", "", "lesson", "", "Lesetest")
@@ -650,6 +674,51 @@ class WebSessionTest {
         assertEquals("lesson", rendered.getValue("l1").eventType)
         assertFalse(rendered.getValue("l1").isExamLike())
         assertTrue(rendered.getValue("l1").isLesson())
+        val examXml = """
+            <data>
+              <event id="phy">
+                <start_date></start_date>
+                <end_date></end_date>
+                <vdatum>12.11.2026</vdatum>
+                <vzeit>10:15</vzeit>
+                <bdatum>12.11.2026</bdatum>
+                <bzeit>11:00</bzeit>
+                <text>Mathe &amp; Physik</text>
+                <fachkuerzel>PHY</fachkuerzel>
+                <zimmerkuerzel>B04</zimmerkuerzel>
+                <event_type>1_pru</event_type>
+              </event>
+              <event id="bare">
+                <start_date></start_date>
+                <vdatum>13.11.2026</vdatum>
+                <vzeit>08:15</vzeit>
+                <text>Mathe & Physik</text>
+                <event_type>1_pru</event_type>
+              </event>
+              <event id="nodate"></event>
+            </data>
+        """.trimIndent()
+        val exams = parseSchedulerXml(examXml).associateBy { it.id }
+        assertEquals(setOf("phy", "bare"), exams.keys)
+        assertEquals("2026-11-12T10:15:00", exams.getValue("phy").start)
+        assertEquals("2026-11-12T11:00:00", exams.getValue("phy").end)
+        assertEquals("PHY", exams.getValue("phy").courseName)
+        assertEquals("B04", exams.getValue("phy").room)
+        assertEquals("Mathe & Physik", exams.getValue("phy").text)
+        assertEquals("exam", exams.getValue("phy").eventType)
+        assertTrue(exams.getValue("phy").isExamLike())
+        assertFalse(exams.getValue("phy").isLesson())
+        assertEquals("Mathe & Physik", exams.getValue("bare").text)
+        assertEquals("2026-11-13T08:15:00", exams.getValue("bare").start)
+        val page = """
+            <a href="index.php?pageid=22108&amp;sRow=0&amp;ff=1">alle</a>
+            <a href="index.php?pageid=22108&amp;sRow=0&amp;sort=datum">sort</a>
+            <a href="index.php?pageid=22108&amp;sRow=25">25</a>
+            <a href="index.php?pageid=22108&amp;sRow=50">50</a>
+        """.trimIndent()
+        assertTrue(terminlisteNextUrl(page, AKSA_SCHULNETZ_BASE)!!.contains("sRow=25"))
+        assertTrue(terminlisteNextUrl(page, AKSA_SCHULNETZ_BASE, 25)!!.contains("sRow=50"))
+        assertEquals(null, terminlisteNextUrl(page, AKSA_SCHULNETZ_BASE, 50))
     }
 }
 

@@ -804,6 +804,8 @@ export const createSchulnetzRuntime = (options = {}) => {
     }
     const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
     const failed = Boolean(scraped.problem)
+    const parsedNotes = parseStartMessages(scraped.startHtml || '').map((body, index) => ({ id: `start-${index}`, title: 'Mitteilung', body, at: '' }))
+    const keepMessages = failed || parsedNotes.length === 0
     const snapshot = {
       revision: (link.revision || 0) + 1,
       fetchedAt: now().toISOString(),
@@ -812,10 +814,10 @@ export const createSchulnetzRuntime = (options = {}) => {
       exams: failed ? (previous?.exams || []) : (scraped.exams || previous?.exams || []),
       absences: previous?.absences || [],
       homework: previous?.homework || [],
-      messages: parseStartMessages(scraped.startHtml || '').map((body, index) => ({ id: `start-${index}`, title: 'Mitteilung', body, at: '' })),
+      messages: keepMessages ? (previous?.messages || []) : parsedNotes,
       vacations: previous?.vacations || [],
       konto: parseKontoauszug(scraped.kontoHtml || ''),
-      startMessages: parseStartMessages(scraped.startHtml || ''),
+      startMessages: keepMessages ? (previous?.startMessages || []) : parseStartMessages(scraped.startHtml || ''),
       readErrors: scraped.problem ? [`Schulnetz: ${scraped.problem}`] : [],
       weekFetched: failed ? (previous?.weekFetched || {}) : (scraped.weekFetched || {}),
       weekSpanStart: scraped.weekSpanStart || previous?.weekSpanStart || '',
