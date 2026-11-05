@@ -76,7 +76,7 @@ import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/Ma
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
 import { hasConnectedAiProvider } from './lib/aiProviderConnection'
 import { clipboardImageFile } from './lib/clipboardImage'
-import { companionNotePath, emptyFamdPayload, famdEncodingForSave, isNoteFileName, isPdfNotePath, parseFamd, readPageStatsFromNote, serializeFamd, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
+import { companionNotePath, emptyFamdPayload, famdEncodingForSave, inkHasMarks, isNoteFileName, isPdfNotePath, parseFamd, readPageStatsFromNote, serializeFamd, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
 import { inkJsonForRewrite } from './lib/packedInk'
 import { createAppAddonBridge, safeSettingsView, type AppAddonDeps } from './lib/addons/appBridge'
 import { sanitizeCustomCss } from './lib/customCss'
@@ -2005,7 +2005,16 @@ export default function App({ startupBootstrap }: AppProps) {
       addonRuntime.emit('note:saved', { path, title: fileName(path).replace(/\.(md|markdown|pdf)$/iu, ''), length: visibleContent.length })
       // A statistics-only save must not start a sync. The timer still runs;
       // the engine then sees the same note and skips the upload.
-      if (!options?.quiet) syncEngine.notifyLocalChange()
+      // A statistics tick must not count as the user clearing the note.
+      if (!options?.quiet) {
+        const parsed = parseFamd(content)
+        const prose = stripFamdPayload(content).replace(/<!--\s*fanotes-ink:[a-zA-Z0-9_-]{1,96}\s*-->/gu, '').trim()
+        const fieldText = parsed.payload?.textFields?.some((field) => field.text.trim().length > 0) ?? false
+        if (!prose && !inkHasMarks(parsed.payload) && !fieldText) {
+          syncEngine.markCleared(isPdfNotePath(path) ? companionNotePath(path, '.famd') : path)
+        }
+        syncEngine.notifyLocalChange()
+      }
       if (!options?.quiet) pushEditableShare(path, { content: visibleContent })
       if (!options?.quiet) queueLiveShareRefresh({
         settingsRecent: () => settingsRef.current.shareRecent ?? '',

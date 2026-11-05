@@ -3,7 +3,7 @@
 // the wiring in App / Electron / nginx / systemd.
 import assert from 'node:assert/strict'
 import { createServer as createHttpServer } from 'node:http'
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -312,6 +312,91 @@ try {
   assert.equal(hostB.text('Mathe/Algebra.md'), '# Algebra\n\nDritte Fassung.', 'same files, same content, no conflict copies after re-login')
   assert.equal([...hostB.files.keys()].filter((path) => path.includes('(Konflikt')).length, 1)
 
+  // A famd whose only change is the timestamp is not uploaded again.
+  const inkFamd = (updatedAt) => {
+    const payload = {
+      schema: 'fanotes-famd-v1',
+      updatedAt,
+      ink: { strokes: [{ points: Array.from({ length: 30 }, (_, index) => ({ x: index, y: 1 })) }], updatedAt },
+      worksheets: [],
+    }
+    const json = JSON.stringify(payload)
+    return `# Seite\n\n${'Wort '.repeat(40)}\n\n<!-- fanotes-famd:v1 chars=${json.length} -->\n${json}\n`
+  }
+  const blankFamd = () => {
+    const payload = { schema: 'fanotes-famd-v1', updatedAt: '2026-03-03T00:00:00.000Z', ink: null, worksheets: [] }
+    const json = JSON.stringify(payload)
+    return `<!-- fanotes-famd:v1 chars=${json.length} -->\n${json}\n`
+  }
+  hostA.put('Notizen/Seite.famd', inkFamd('2026-01-01T00:00:00.000Z'))
+  await A.engine.syncNow()
+  await C.engine.syncNow()
+  const keptNote = hostB.text('Notizen/Seite.famd')
+  assert.ok(keptNote.includes('"points"'))
+  const beforeStamp = (await A.engine.refreshAccount()).revision
+  hostA.put('Notizen/Seite.famd', inkFamd('2026-02-02T00:00:00.000Z'))
+  await A.engine.syncNow()
+  assert.equal((await A.engine.refreshAccount()).revision, beforeStamp, 'a timestamp-only famd is not uploaded')
+  await C.engine.syncNow()
+  assert.equal(hostB.text('Notizen/Seite.famd'), keptNote)
+
+  // A blank local file is not uploaded over the note. It is kept as a conflict copy.
+  const blank = blankFamd()
+  assert.ok(keptNote.length > blank.length + 64)
+  hostB.put('Notizen/Seite.famd', blank)
+  await C.engine.syncNow()
+  assert.equal(hostB.text('Notizen/Seite.famd'), keptNote, 'the server copy is written back')
+  const blankCopies = [...hostB.files.keys()].filter((path) => path.startsWith('Notizen/Seite (Konflikt Tablet '))
+  assert.equal(blankCopies.length, 1, 'the blank stays beside the note')
+  assert.equal(hostB.text(blankCopies[0]), blank)
+  await A.engine.syncNow()
+  assert.ok(hostA.text('Notizen/Seite.famd').includes('"points"'), 'the other device still has the ink')
+  await C.engine.syncNow()
+  await A.engine.syncNow()
+  assert.equal(hostA.text(blankCopies[0]), blank, 'the conflict copy is uploaded on the next sync')
+
+  // An explicit clear is allowed, and the previous blob stays on the server.
+  const revisionSizes = () => {
+    const accountsDirectory = join(dataDirectory, 'accounts')
+    const [accountId] = readdirSync(accountsDirectory)
+    const revisionsRoot = join(accountsDirectory, accountId, 'revisions')
+    const sizes = []
+    let names
+    try { names = readdirSync(revisionsRoot) } catch { return sizes }
+    for (const fileId of names) {
+      for (const name of readdirSync(join(revisionsRoot, fileId))) {
+        sizes.push(statSync(join(revisionsRoot, fileId, name)).size)
+      }
+    }
+    return sizes
+  }
+  const archivedBefore = revisionSizes()
+  A.engine.markCleared('Notizen/Seite.famd')
+  hostA.put('Notizen/Seite.famd', blank)
+  await A.engine.syncNow()
+  assert.equal(hostA.text('Notizen/Seite.famd'), blank)
+  const archivedAfter = revisionSizes()
+  assert.ok(archivedAfter.length > archivedBefore.length, 'the previous blob is kept in the revision archive')
+  assert.ok(Math.max(...archivedAfter) > Math.max(0, ...archivedBefore))
+
+  // A write that names an older base revision does not replace the body.
+  {
+    const session = A.engine.getSession()
+    const direct = new SyncApi(ORIGIN)
+    const id = 'ab'.repeat(32)
+    const first = new Uint8Array(64).fill(7)
+    const second = new Uint8Array(64).fill(8)
+    const meta = Buffer.from(new Uint8Array(32).fill(3)).toString('base64')
+    await direct.upload(session, id, 0, meta, await crypto.sha256Hex(first), first, { blank: false })
+    await assert.rejects(
+      direct.upload(session, id, 0, meta, await crypto.sha256Hex(second), second, { blank: false }),
+      (error) => error.status === 409,
+    )
+    const downloaded = await direct.download(session, id)
+    assert.ok(!('deleted' in downloaded))
+    assert.deepEqual(downloaded.blob, first)
+  }
+
   // Device management + logout + account deletion.
   const devices = (await A.engine.refreshAccount()).devices
   assert.equal(devices.length, 2, 'password change also drops devices whose sessions were revoked')
@@ -331,7 +416,7 @@ try {
 
   // ── Wiring ──────────────────────────────────────────────────────────────
   const serverSource = read('../fanotes-site/server.mjs')
-  assert.match(serverSource, /import \{ handleSyncRequest \} from '\.\/sync-api\.mjs'/u)
+  assert.match(serverSource, /import \{[^}]*\bhandleSyncRequest\b[^}]*\} from '\.\/sync-api\.mjs'/u)
   assert.ok(serverSource.indexOf('handleSyncRequest(request, response, url)') < serverSource.indexOf('Nur GET und HEAD sind erlaubt'), 'sync is routed before the GET/HEAD guard')
   assert.match(read('../fanotes-site/deploy/fanotes-fasrv.conf'), /location \^~ \/api\/v1\/sync\/ \{[\s\S]*?client_max_body_size 110m;[\s\S]*?proxy_request_buffering off;/u)
   const service = read('../fanotes-site/deploy/fanotes-site.service')
@@ -346,8 +431,10 @@ try {
 
   const mainSource = read('electron/main.cjs')
   assert.match(mainSource, /registerSyncIpc\(handle, createSyncHost\(\{/u)
-  assert.match(mainSource, /syncAutomatic: \{ type: 'boolean' \}/u)
-  assert.match(mainSource, /syncDeviceName: \{ type: 'string', max: 80 \}/u)
+  assert.match(mainSource, /require\('\.\/settings-sanitize\.cjs'\)/u)
+  const settingsSchema = read('electron/settings-sanitize.cjs')
+  assert.match(settingsSchema, /syncAutomatic: \{ type: 'boolean' \}/u)
+  assert.match(settingsSchema, /syncDeviceName: \{ type: 'string', max: 80 \}/u)
   const preloadSource = read('electron/preload.cjs')
   for (const channel of ['sync-vault-id', 'sync-scan', 'sync-read', 'sync-write', 'sync-remove', 'sync-read-state', 'sync-write-state', 'sync-read-secrets', 'sync-write-secrets']) {
     assert.ok(preloadSource.includes(`'fanotes:${channel}'`), `preload exposes ${channel}`)
@@ -417,8 +504,8 @@ try {
     assert.equal(await locked.readSecrets(), '{"token":"secret"}')
     rmSync(lockedUserData, { recursive: true, force: true })
     const { localizeText } = await import('../electron/i18n.cjs')
-    const translated = localizeText('Error invoking remote method \'fanotes:sync-write-secrets\': Error: Sync-Anmeldedaten können ohne verfügbaren Systemschlüsselbund nicht gespeichert werden.', 'en')
-    assert.match(translated, /Sync sign-in cannot be saved without an available system keychain\./u)
+    const translated = localizeText('Die Sync-Anmeldung ist mit dem Schlüsselbund dieses Systems geschützt, der gerade nicht verfügbar ist.', 'en')
+    assert.match(translated, /Schlüsselbund|keychain/u)
     assert.doesNotMatch(translated, /saved become/u)
     const vaultId = await host.vaultId()
     await host.writeState(vaultId, '{"cursor":1}')
@@ -430,7 +517,7 @@ try {
   const appSource = read('src/App.tsx')
   assert.match(appSource, /useSyncExternalStore\(syncEngine\.subscribe, syncEngine\.getState, syncEngine\.getState\)/u)
   assert.match(appSource, /syncEngine\.notifyLocalChange\(\)/u, 'saves kick the engine')
-  assert.match(appSource, /if \(!options\?\.quiet\) syncEngine\.notifyLocalChange\(\)/u, 'statistics-only saves do not kick the engine')
+  assert.match(appSource, /if \(!options\?\.quiet\) \{[\s\S]*?syncEngine\.notifyLocalChange\(\)/u, 'statistics-only saves do not kick the engine')
   assert.match(read('src/lib/sync/engine.ts'), /canonicalSyncBytes\(entry\.path, raw\)/u, 'uploads hash the note without page statistics')
   assert.match(read('src/lib/sync/engine.ts'), /withLocalPageStats\(/u, 'a download keeps the statistics already on this device')
   assert.match(read('src/lib/sync/engine.ts'), /AUTO_INTERVAL_MS/u, 'the regular sync timer stays')

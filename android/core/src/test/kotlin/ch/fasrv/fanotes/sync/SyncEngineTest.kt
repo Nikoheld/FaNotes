@@ -1,6 +1,9 @@
 package ch.fasrv.fanotes.sync
 
+import ch.fasrv.fanotes.famd.emptyFamdPayload
+import ch.fasrv.fanotes.famd.serializeFamd
 import ch.fasrv.fanotes.json.JsonValue
+import ch.fasrv.fanotes.json.jsonString
 import ch.fasrv.fanotes.json.parseJson
 import kotlinx.coroutines.runBlocking
 import java.nio.charset.StandardCharsets
@@ -93,6 +96,119 @@ class SyncEngineTest {
             engineA.close()
             engineB.close()
         }
+    }
+
+    @Test
+    fun aTimestampOnlySaveIsNotUploaded() = runBlocking {
+        val server = MemorySyncServer()
+        val apiA = SyncApi(server)
+        val apiB = SyncApi(server)
+        val hostA = MemoryHost("vault-a")
+        val hostB = MemoryHost("vault-b")
+        val engineA = engine(apiA, hostA, "Tablet A")
+        val engineB = engine(apiB, hostB, "Tablet B")
+        try {
+            engineA.register("ada@example.com", "correct horse")
+            val first = noteFamd("2026-01-01T00:00:00.000Z")
+            val shifted = noteFamd("2026-02-02T00:00:00.000Z")
+            hostA.put("Notizen/Seite.famd", first.encodeToByteArray(), 1_000)
+            engineA.syncNow()
+            engineB.login("ada@example.com", "correct horse")
+            engineB.syncNow()
+            val kept = hostB.read("Notizen/Seite.famd")
+            hostA.put("Notizen/Seite.famd", shifted.encodeToByteArray(), 2_000)
+            engineA.syncNow()
+            engineB.syncNow()
+            assertTrue(hostB.read("Notizen/Seite.famd").contentEquals(kept))
+            assertTrue(kept.decodeToString().contains("\"points\""))
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
+    @Test
+    fun aBlankLocalNoteIsRestoredAndKeptBesideTheOriginal() = runBlocking {
+        val server = MemorySyncServer()
+        val apiA = SyncApi(server)
+        val apiB = SyncApi(server)
+        val hostA = MemoryHost("vault-a")
+        val hostB = MemoryHost("vault-b")
+        val engineA = engine(apiA, hostA, "Tablet A")
+        val engineB = engine(apiB, hostB, "Tablet B")
+        try {
+            engineA.register("ada@example.com", "correct horse")
+            val note = noteFamd("2026-01-01T00:00:00.000Z")
+            val blank = serializeFamd("", emptyFamdPayload("2026-03-03T00:00:00.000Z"))
+            assertTrue(note.length > blank.length + 64)
+            hostA.put("Notizen/Seite.famd", note.encodeToByteArray(), 1_000)
+            engineA.syncNow()
+            engineB.login("ada@example.com", "correct horse")
+            engineB.syncNow()
+            hostB.put("Notizen/Seite.famd", blank.encodeToByteArray(), 2_000)
+            engineB.syncNow()
+            assertTrue(hostB.read("Notizen/Seite.famd").decodeToString().contains("\"points\""))
+            assertTrue(hostB.files.keys.any { it.contains("Konflikt") && it.contains("Seite") })
+            engineA.syncNow()
+            assertTrue(hostA.read("Notizen/Seite.famd").decodeToString().contains("\"points\""))
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
+    @Test
+    fun aStaleBaseRevisionIsRejected() = runBlocking {
+        val server = MemorySyncServer()
+        val host = MemoryHost("vault")
+        val api = SyncApi(server)
+        val engine = engine(api, host, "Tablet")
+        try {
+            engine.register("ada@example.com", "correct horse")
+            val secrets = parseJson(host.readSecrets()!!) as JsonValue.Obj
+            val session = SyncSession(
+                secrets.string("accountId")!!,
+                secrets.string("deviceId")!!,
+                secrets.string("token")!!,
+                secrets.string("expiresAt")!!,
+                secrets.string("email")!!,
+            )
+            val id = "11".repeat(32)
+            val first = ByteArray(64) { 7 }
+            val meta = "bWVldG1ldG1ldG1ldG1ldG1ldG1ldG1ldA=="
+            api.upload(session, id, 0, meta, sha256Hex(first), first)
+            val second = ByteArray(64) { 8 }
+            val rejected = try {
+                api.upload(session, id, 0, meta, sha256Hex(second), second)
+                null
+            } catch (error: SyncApiError) {
+                error
+            }
+            assertEquals(409, rejected?.status)
+            val downloaded = api.download(session, id) as DownloadResult.Blob
+            assertTrue(downloaded.bytes.contentEquals(first))
+        } finally {
+            engine.close()
+        }
+    }
+
+    private fun noteFamd(updatedAt: String): String {
+        val ink = JsonValue.Obj()
+        ink.put("updatedAt", jsonString(updatedAt))
+        val stroke = JsonValue.Obj()
+        val points = JsonValue.Arr()
+        repeat(24) { index ->
+            val point = JsonValue.Obj()
+            point.put("x", ch.fasrv.fanotes.json.jsonNumber(index.toDouble()))
+            point.put("y", ch.fasrv.fanotes.json.jsonNumber(1.0))
+            points.items.add(point)
+        }
+        stroke.put("points", points)
+        ink.put("strokes", JsonValue.Arr(mutableListOf(stroke)))
+        val payload = emptyFamdPayload(updatedAt)
+        payload.put("ink", ink)
+        payload.put("updatedAt", jsonString(updatedAt))
+        return serializeFamd("# Seite\n\n${"Wort ".repeat(40)}", payload)
     }
 
     private fun engine(api: SyncApi, host: MemoryHost, name: String): SyncEngine {
@@ -248,6 +364,13 @@ private class MemorySyncServer : SyncTransport {
         val declared = header(request, "X-FaNotes-Sha256") ?: return json(400, """{"error":"sha"}""")
         val body = request.body ?: ByteArray(0)
         if (sha256Hex(body) != declared) return json(400, """{"error":"checksum"}""")
+        val blank = when (header(request, "X-FaNotes-Blank")) {
+            "1" -> true
+            "0" -> false
+            else -> null
+        }
+        val clear = header(request, "X-FaNotes-Clear") == "1"
+        if (rejectsBlank(current, body.size, blank, clear)) return conflict(current, id)
         account.revision += 1
         val entry = FileEntry(id, account.revision, false, body.size.toLong(), declared, header(request, "X-FaNotes-Meta"), body)
         account.files[id] = entry
@@ -291,6 +414,14 @@ private class MemorySyncServer : SyncTransport {
 
     private fun header(request: SyncHttpRequest, name: String) =
         request.headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
+
+    /** Same rule as fanotes-site: a blank body does not replace a real note unless the editor cleared it. */
+    private fun rejectsBlank(current: FileEntry?, nextSize: Int, blank: Boolean?, clear: Boolean): Boolean {
+        if (clear || current == null || current.deleted || current.size <= 0L) return false
+        if (blank == true && nextSize + 64 < current.size) return true
+        if (blank == null && current.size >= 4096L && nextSize <= 1024) return true
+        return false
+    }
 
     private class Account(
         val id: String,

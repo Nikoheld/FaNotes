@@ -13,6 +13,8 @@
 //   accounts/<id>/index.json          -> snapshot of the file table { revision, entries }
 //   accounts/<id>/changes.jsonl       -> appended mutations since the snapshot
 //   accounts/<id>/blobs/<fileId>      -> ciphertext
+//   accounts/<id>/revisions/<fileId>/ -> one previous blob, plus up to three
+//     collapse archives (c-<revision>) so a shrink can be undone
 import { createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import { createReadStream, promises as fs } from 'node:fs'
 import { resolve, sep } from 'node:path'
@@ -40,6 +42,11 @@ const API_PREFIX = '/api/v1/sync'
 const MAX_JSON_BYTES = 64 * 1024
 const MAX_BLOB_BYTES = Number(process.env.FANOTES_SYNC_MAX_FILE_BYTES || 100 * 1024 * 1024)
 const QUOTA_BYTES = Number(process.env.FANOTES_SYNC_QUOTA_BYTES || 4 * 1024 * 1024 * 1024)
+// A large note replaced by a few hundred bytes is the empty-overwrite failure.
+// Only clients that do not say whether the body has content hit this net.
+const COLLAPSE_OLD_BYTES = 4096
+const COLLAPSE_NEW_BYTES = 1024
+const MAX_COLLAPSE_KEPT = 3
 const MAX_FILES = Number(process.env.FANOTES_SYNC_MAX_FILES || 50_000)
 const MAX_DEVICES = 20
 const MAX_SESSIONS = 40
@@ -281,8 +288,39 @@ const loadTable = async (accountId) => {
     if (error?.code !== 'ENOENT') throw error
   }
   for (const entry of table.entries.values()) if (!entry.deleted) table.bytes += Number(entry.size) || 0
+  table.historyBytes = await measureHistory(accountId)
   tables.set(accountId, table)
   return table
+}
+
+const revisionsDirectory = (accountId, fileId) => safeJoin(accountDirectory(accountId), 'revisions', fileId)
+
+const measureHistory = async (accountId) => {
+  const root = safeJoin(accountDirectory(accountId), 'revisions')
+  let total = 0
+  let fileIds
+  try {
+    fileIds = await fs.readdir(root)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return 0
+    throw error
+  }
+  for (const fileId of fileIds) {
+    if (!FILE_ID_PATTERN.test(fileId)) continue
+    let names
+    try {
+      names = await fs.readdir(revisionsDirectory(accountId, fileId))
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue
+      throw error
+    }
+    for (const name of names) {
+      if (!/^(?:c-)?\d+$/u.test(name)) continue
+      const stat = await fs.stat(safeJoin(revisionsDirectory(accountId, fileId), name)).catch(() => null)
+      if (stat?.isFile()) total += stat.size
+    }
+  }
+  return total
 }
 
 const appendChange = async (accountId, table, entry) => {
@@ -376,7 +414,7 @@ const corsHeaders = (request) => {
   return {
     ...(allowed ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}),
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-Match, X-FaNotes-Account, X-Kanti-Guest, X-FaNotes-Meta, X-FaNotes-Sha256',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-Match, X-FaNotes-Account, X-Kanti-Guest, X-FaNotes-Meta, X-FaNotes-Sha256, X-FaNotes-Blank, X-FaNotes-Clear',
     'Access-Control-Expose-Headers': 'ETag, X-FaNotes-Meta, X-FaNotes-Revision, X-FaNotes-Deleted',
     'Access-Control-Max-Age': '600',
   }
@@ -506,7 +544,7 @@ const handleAccount = async (request, response, auth) => {
     email: auth.account.email,
     createdAt: auth.account.createdAt,
     revision: table.revision,
-    usage: { files, bytes: table.bytes, quotaBytes: QUOTA_BYTES, maxFiles: MAX_FILES, maxFileBytes: MAX_BLOB_BYTES },
+    usage: { files, bytes: table.bytes + (table.historyBytes || 0), quotaBytes: QUOTA_BYTES, maxFiles: MAX_FILES, maxFileBytes: MAX_BLOB_BYTES },
     devices: Object.values(auth.account.devices).map((device) => ({ ...device, current: device.id === auth.deviceId })),
   })
 }
@@ -642,6 +680,66 @@ const conflict = (request, response, entry) => {
   sendJson(request, response, 409, { error: 'Die Datei wurde inzwischen von einem anderen Gerät geändert.', entry: publicEntry(entry) })
 }
 
+// '1' / '0' are the new client. No header means an older client.
+const headerFlag = (value) => (value === '1' ? true : value === '0' ? false : null)
+
+/**
+ * A blank body must not replace a note that still has content unless the
+ * editor set X-FaNotes-Clear. The previous blob stays; the response is the
+ * same 409 the client already treats as "keep the server copy".
+ */
+const rejectsBlankOverwrite = (current, nextSize, blank, clear) => {
+  if (clear || !current || current.deleted) return false
+  const previous = Number(current.size) || 0
+  if (previous <= 0) return false
+  if (blank === true && nextSize + 64 < previous) return true
+  if (blank == null && previous >= COLLAPSE_OLD_BYTES && nextSize <= COLLAPSE_NEW_BYTES) return true
+  return false
+}
+
+const listRevisionFiles = async (directory) => {
+  let names
+  try {
+    names = await fs.readdir(directory)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return []
+    throw error
+  }
+  const files = []
+  for (const name of names) {
+    if (!/^(?:c-)?\d+$/u.test(name)) continue
+    const stat = await fs.stat(safeJoin(directory, name)).catch(() => null)
+    if (!stat?.isFile()) continue
+    files.push({ name, size: stat.size, revision: Number(name.slice(name.startsWith('c-') ? 2 : 0)) })
+  }
+  return files
+}
+
+/** Copy the live blob aside before it is replaced. Returns the byte delta of the archive. */
+const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) => {
+  if (!current || current.deleted) return 0
+  const blobPath = safeJoin(accountDirectory(accountId), 'blobs', fileId)
+  const stat = await fs.stat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+  if (!stat?.isFile()) return 0
+  const collapse = stat.size >= COLLAPSE_OLD_BYTES && (nextSize <= COLLAPSE_NEW_BYTES || nextSize * 4 < stat.size)
+  const directory = revisionsDirectory(accountId, fileId)
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 })
+  const before = (await listRevisionFiles(directory)).reduce((sum, file) => sum + file.size, 0)
+  const name = `${collapse ? 'c-' : ''}${current.revision}`
+  const dest = safeJoin(directory, name)
+  if (move) await fs.rename(blobPath, dest)
+  else await fs.copyFile(blobPath, dest)
+  const files = await listRevisionFiles(directory)
+  const collapses = files.filter((file) => file.name.startsWith('c-')).sort((left, right) => left.revision - right.revision)
+  const previous = files.filter((file) => !file.name.startsWith('c-')).sort((left, right) => left.revision - right.revision)
+  const drop = []
+  if (previous.length > 1) drop.push(...previous.slice(0, -1))
+  if (collapses.length > MAX_COLLAPSE_KEPT) drop.push(...collapses.slice(0, collapses.length - MAX_COLLAPSE_KEPT))
+  for (const file of drop) await fs.rm(safeJoin(directory, file.name), { force: true })
+  const after = (await listRevisionFiles(directory)).reduce((sum, file) => sum + file.size, 0)
+  return after - before
+}
+
 const handlePutFile = async (request, response, auth, fileId) => {
   const base = parseIfMatch(request)
   const meta = parseMeta(request)
@@ -650,15 +748,22 @@ const handlePutFile = async (request, response, auth, fileId) => {
   const body = await readBinaryBody(request, MAX_BLOB_BYTES)
   if (body.length < 28) fail(400, 'Der verschlüsselte Inhalt ist zu kurz.')
   if (sha256(body) !== declaredSha) fail(400, 'Die Datei kam beschädigt an. Bitte erneut versuchen.')
+  const blank = headerFlag(request.headers['x-fanotes-blank'])
+  const clear = request.headers['x-fanotes-clear'] === '1'
   await withAccountLock(auth.account.id, async () => {
     const table = await loadTable(auth.account.id)
     const current = table.entries.get(fileId)
     const currentRevision = current ? current.revision : 0
     if (currentRevision !== base) return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
+    if (rejectsBlankOverwrite(current, body.length, blank, clear)) return conflict(request, response, current)
     const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
-    if (table.bytes - previousBytes + body.length > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
+    const historyDelta = current && !current.deleted && (current.sha256 !== declaredSha) ? (Number(current.size) || 0) : 0
+    if (table.bytes - previousBytes + body.length + (table.historyBytes || 0) + historyDelta > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
     const liveFiles = [...table.entries.values()].filter((entry) => !entry.deleted).length
     if ((!current || current.deleted) && liveFiles >= MAX_FILES) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
+    if (current && !current.deleted && current.sha256 !== declaredSha) {
+      table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, body.length, false)
+    }
     const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
     await atomicWrite(blobPath, body)
     const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: body.length, sha256: declaredSha, meta, updatedAt: nowIso(), deviceId: auth.deviceId }
@@ -681,7 +786,7 @@ const handleDeleteFile = async (request, response, auth, fileId) => {
       sendJson(request, response, 200, { revision: currentRevision, tableRevision: table.revision })
       return
     }
-    await fs.rm(safeJoin(accountDirectory(auth.account.id), 'blobs', fileId), { force: true })
+    table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, 0, true)
     const entry = { id: fileId, revision: table.revision + 1, deleted: true, size: 0, sha256: null, meta: null, updatedAt: nowIso(), deviceId: auth.deviceId }
     table.revision = entry.revision
     table.entries.set(fileId, entry)
