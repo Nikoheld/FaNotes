@@ -76,7 +76,7 @@ class CompanionInkView(context: Context, val session: InkSession, private val on
     init {
         isFocusable = true
         isClickable = true
-        contentDescription = "Handwriting page. Use the pen to draw, or two fingers to move and zoom."
+        contentDescription = t(R.string.handwriting_page_use_the_pen_to_draw_or_two_fing)
     }
 
     fun bindDocument(document: InkDocument) {

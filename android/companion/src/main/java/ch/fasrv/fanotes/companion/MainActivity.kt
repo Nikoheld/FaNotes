@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes.companion
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -20,6 +21,10 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private val model: CompanionModel by viewModels {
         CompanionModel.factory((application as CompanionApplication).graph)
+    }
+
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLanguage.wrap(newBase))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

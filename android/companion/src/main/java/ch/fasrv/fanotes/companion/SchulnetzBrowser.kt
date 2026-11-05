@@ -51,7 +51,7 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
     private var pending: Slot? = null
 
     fun load(url: String): LoadedPage {
-        check(Looper.myLooper() != Looper.getMainLooper()) { "Schulnetz-Seiten werden ausserhalb des UI-Threads geladen." }
+        check(Looper.myLooper() != Looper.getMainLooper()) { t(R.string.ui_thread_load) }
         if (isForcedLogoutUrl(url)) {
             log.info("refused logout url=${redactSchulnetzSecrets(url)}")
             return LoadedPage(url, url, 0, "", "logout-blocked")

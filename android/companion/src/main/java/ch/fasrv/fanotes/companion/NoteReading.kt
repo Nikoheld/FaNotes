@@ -42,7 +42,7 @@ fun NoteReading(model: CompanionModel, editor: NoteEditorController, onInk: () -
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(Space.page), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (editor.note?.kind == ch.fasrv.fanotes.vault.NoteKind.PDF) item { PdfReader(model.graph.root.resolve(editor.path)) }
         if (plainPreview(editor.markdown).isBlank() && editor.document?.strokes?.isEmpty() == true && editor.note?.kind != ch.fasrv.fanotes.vault.NoteKind.PDF) item {
-            EmptyState(androidx.compose.material.icons.Icons.Outlined.EditNote, "A blank page, a fresh thought", "Switch to Text to write, or Ink to draw.")
+            EmptyState(androidx.compose.material.icons.Icons.Outlined.EditNote, t(R.string.a_blank_page_a_fresh_thought), t(R.string.switch_to_text_to_write_or_ink_to_draw))
         }
         itemsIndexed(lines, key = { index, line -> "line:$index:${line.kind}:${line.text.take(48)}" }) { _, line ->
             when (line.kind) {
@@ -51,7 +51,7 @@ fun NoteReading(model: CompanionModel, editor: NoteEditorController, onInk: () -
                     val file by produceState<File?>(null, editor.path, line.source) {
                         value = withContext(Dispatchers.IO) { resolvePaperImagePaths(editor.path, line.source).map { model.graph.root.resolve(it) }.firstOrNull { it.isFile } }
                     }
-                    LocalNoteImage(file, line.text.ifBlank { "Note image" })
+                    LocalNoteImage(file, line.text.ifBlank { t(R.string.note_image) })
                 }
                 else -> ReadingLine(line)
             }
@@ -64,12 +64,12 @@ fun NoteReading(model: CompanionModel, editor: NoteEditorController, onInk: () -
                     safeWorksheetSource(id, data?.string("sourceRelativePath"))?.let { model.graph.root.resolve(it) }
                 }
             }
-            LocalNoteImage(file, "Worksheet")
+            LocalNoteImage(file, t(R.string.worksheet))
         }
         editor.document?.takeIf { it.strokes.isNotEmpty() }?.let { ink -> item(key = "ink:${ink.updatedAt}") {
-            SectionLabel("Handwriting preview")
+            SectionLabel(t(R.string.handwriting_preview))
             InkPreview(ink, Modifier.fillMaxWidth().aspectRatio((ink.sourceWidth / ink.sourceHeight).toFloat().coerceAtLeast(0.1f)).background(LocalCompanionSemantics.current.paper))
-            androidx.compose.material3.TextButton(onClick = onInk) { Text("Open handwriting canvas") }
+            androidx.compose.material3.TextButton(onClick = onInk) { Text(t(R.string.open_handwriting_canvas)) }
         } }
     }
     }

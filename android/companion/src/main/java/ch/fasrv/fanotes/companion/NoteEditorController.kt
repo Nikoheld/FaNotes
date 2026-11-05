@@ -37,7 +37,7 @@ class NoteEditorController(private val graph: CompanionGraph, private val scope:
         scope.launch {
             try {
                 val loaded = withContext(Dispatchers.IO) {
-                    check(graph.vault.exists(path)) { "This note is no longer in the library." }
+                    check(graph.vault.exists(path)) { t(R.string.note_gone) }
                     graph.store.readNote(path)
                 }
                 note = loaded
@@ -48,7 +48,7 @@ class NoteEditorController(private val graph: CompanionGraph, private val scope:
                 protected = protected + ".fanotes/assets/${loaded.inkId}.json"
                 graph.busyPaths += protected
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { error = failure.message ?: "Could not open this note." }
+            catch (failure: Exception) { error = failure.message?.takeIf { it.isNotBlank() }?.let(::shownText) ?: t(R.string.could_not_open_note) }
             finally { loading = false }
         }
     }
@@ -83,7 +83,7 @@ class NoteEditorController(private val graph: CompanionGraph, private val scope:
             error = null
             true
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (failure: Exception) { error = failure.message ?: "Could not save. Your draft is still open."; false }
+        catch (failure: Exception) { error = failure.message?.takeIf { it.isNotBlank() }?.let(::shownText) ?: t(R.string.could_not_save_draft); false }
         finally { saving = false }
     }
     private fun rememberCleared(opened: OpenNote) {

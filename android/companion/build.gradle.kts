@@ -82,6 +82,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.work:work-runtime-ktx:2.10.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
@@ -92,3 +93,12 @@ dependencies {
 if (file("google-services.json").isFile) {
     pluginManager.apply("com.google.gms.google-services")
 }
+
+tasks.register<Exec>("checkUserStrings") {
+    group = "verification"
+    description = "Check that German and English catalogs match and UI copy uses string resources."
+    workingDir = rootProject.projectDir
+    commandLine("python3", "companion/check-user-strings.py")
+}
+
+tasks.named("preBuild").configure { dependsOn("checkUserStrings") }

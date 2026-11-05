@@ -71,14 +71,18 @@ object CompanionAlerts {
     private const val SEEN = "seen-changes"
 
     fun ensureChannels(context: Context) {
+        val localized = AppLanguage.wrap(context)
         val manager = context.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel(CHANNEL, context.getString(R.string.channel_alerts), NotificationManager.IMPORTANCE_HIGH))
-        manager.createNotificationChannel(NotificationChannel("schulnetz-grade", context.getString(R.string.channel_grade), NotificationManager.IMPORTANCE_HIGH))
-        manager.createNotificationChannel(NotificationChannel("schulnetz-timetable", context.getString(R.string.channel_timetable), NotificationManager.IMPORTANCE_HIGH))
-        manager.createNotificationChannel(NotificationChannel("schulnetz-exam", context.getString(R.string.channel_exam), NotificationManager.IMPORTANCE_DEFAULT))
-        manager.createNotificationChannel(NotificationChannel("schulnetz-absence", context.getString(R.string.channel_absence), NotificationManager.IMPORTANCE_DEFAULT))
-        manager.createNotificationChannel(NotificationChannel("schulnetz-deadline", context.getString(R.string.channel_deadline), NotificationManager.IMPORTANCE_HIGH))
-        manager.createNotificationChannel(NotificationChannel("schulnetz-event", context.getString(R.string.channel_event), NotificationManager.IMPORTANCE_DEFAULT))
+        fun channel(id: String, nameId: Int, importance: Int) {
+            manager.createNotificationChannel(NotificationChannel(id, localized.getString(nameId), importance))
+        }
+        channel(CHANNEL, R.string.channel_alerts, NotificationManager.IMPORTANCE_HIGH)
+        channel("schulnetz-grade", R.string.channel_grade, NotificationManager.IMPORTANCE_HIGH)
+        channel("schulnetz-timetable", R.string.channel_timetable, NotificationManager.IMPORTANCE_HIGH)
+        channel("schulnetz-exam", R.string.channel_exam, NotificationManager.IMPORTANCE_DEFAULT)
+        channel("schulnetz-absence", R.string.channel_absence, NotificationManager.IMPORTANCE_DEFAULT)
+        channel("schulnetz-deadline", R.string.channel_deadline, NotificationManager.IMPORTANCE_HIGH)
+        channel("schulnetz-event", R.string.channel_event, NotificationManager.IMPORTANCE_DEFAULT)
     }
 
     fun retireLegacyPush(context: Context) {
@@ -104,8 +108,8 @@ object CompanionAlerts {
         show(context, ch.fasrv.fanotes.schulnetz.linkedChange(
             "push-test",
             "settings",
-            "Test notification",
-            "Kanti+ can display notifications.",
+            t(R.string.test_notification),
+            t(R.string.test_notification_body),
             targetId = "settings",
         ))
     }
@@ -184,13 +188,15 @@ object CompanionAlerts {
             notifyIntent(context, shown),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val title = shown.title.ifBlank { "Schulnetz" }
-        val body = shown.body
+        val title = shownText(shown.title.ifBlank { t(R.string.schulnetz) })
+        val body = shownText(shown.body)
         val lock = lockScreenNotice()
+        val publicTitle = shownText(lock.publicTitle, fragments = false)
+        val publicText = shownText(lock.publicText, fragments = false)
         val publicVersion = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle(lock.publicTitle)
-            .setContentText(lock.publicText)
+            .setContentTitle(publicTitle)
+            .setContentText(publicText)
             .build()
         val notification = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_stat)
@@ -486,14 +492,14 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
             val next = snapshot?.let { nextUp(visibleEvents(it.events, hidden, zone), java.time.Instant.now(), zone) }
             views.setViewVisibility(R.id.widget_kicker, if (compact) android.view.View.GONE else android.view.View.VISIBLE)
             if (next == null) {
-                views.setTextViewText(R.id.widget_title, "No upcoming lesson")
-                views.setTextViewText(R.id.widget_detail, "Open Kanti+")
+                views.setTextViewText(R.id.widget_title, t(R.string.no_upcoming_lesson))
+                views.setTextViewText(R.id.widget_detail, t(R.string.open_kanti))
             } else {
                 val start = next.startsAt(zone)?.atZone(zone)?.toLocalTime()?.format(CLOCK).orEmpty()
                 val end = next.endsAt(zone)?.atZone(zone)?.toLocalTime()?.format(CLOCK).orEmpty()
                 val time = if (end.isBlank() || end == start) start else "$start–$end"
-                val room = if (next.room.isBlank()) "" else "Room ${next.room}"
-                val state = if (next.isCancelled()) "Cancelled" else if (next.isSubstitution()) "Substitution" else ""
+                val room = if (next.room.isBlank()) "" else t(R.string.room_named, next.room)
+                val state = if (next.isCancelled()) t(R.string.cancelled) else if (next.isSubstitution()) t(R.string.substitution) else ""
                 views.setTextViewText(R.id.widget_title, next.label)
                 views.setTextViewText(R.id.widget_detail, if (compact) time else listOf(time, room, state).filter { it.isNotBlank() }.joinToString(" · "))
             }

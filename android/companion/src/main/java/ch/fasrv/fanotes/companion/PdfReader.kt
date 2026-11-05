@@ -51,13 +51,13 @@ fun PdfReader(file: File) {
             bitmap = rendered.first; count = rendered.second
         } catch (error: Exception) { if (error is kotlinx.coroutines.CancellationException) throw error; failed = true }
     }
-    if (failed) EmptyState(Icons.Outlined.PictureAsPdf, "PDF preview unavailable", "This document may be encrypted or unreadable. Its original file is unchanged.")
+    if (failed) EmptyState(Icons.Outlined.PictureAsPdf, t(R.string.pdf_preview_unavailable), t(R.string.this_document_may_be_encrypted_or_unreadable_its))
     else {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            ActionIcon(Icons.Outlined.ChevronLeft, "Previous PDF page", page > 0) { page-- }
-            Text(if (count == 0) "Loading PDF…" else "Page ${page + 1} of $count", style = MaterialTheme.typography.labelMedium)
-            ActionIcon(Icons.Outlined.ChevronRight, "Next PDF page", page < count - 1) { page++ }
+            ActionIcon(Icons.Outlined.ChevronLeft, t(R.string.previous_pdf_page), page > 0) { page-- }
+            Text(if (count == 0) t(R.string.loading_pdf) else t(R.string.page_of, page + 1, count), style = MaterialTheme.typography.labelMedium)
+            ActionIcon(Icons.Outlined.ChevronRight, t(R.string.next_pdf_page), page < count - 1) { page++ }
         }
-        bitmap?.let { image -> Image(image.asImageBitmap(), "PDF page ${page + 1}", Modifier.fillMaxWidth().aspectRatio(image.width.toFloat() / image.height).background(Color.White)) }
+        bitmap?.let { image -> Image(image.asImageBitmap(), t(R.string.pdf_page, page + 1), Modifier.fillMaxWidth().aspectRatio(image.width.toFloat() / image.height).background(Color.White)) }
     }
 }

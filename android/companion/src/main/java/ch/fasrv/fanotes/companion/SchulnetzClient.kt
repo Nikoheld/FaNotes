@@ -379,7 +379,11 @@ class SchulnetzClient(
         val (code, body) = call(
             "POST",
             "$SYNC_ORIGIN$SCHULNETZ_API_PATH/guest",
-            mapOf("Accept" to "application/json", "Content-Type" to "application/json"),
+            mapOf(
+                "Accept" to "application/json",
+                "Accept-Language" to AppLanguage.acceptLanguage(),
+                "Content-Type" to "application/json",
+            ),
             "{}",
         )
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
@@ -445,6 +449,7 @@ class SchulnetzClient(
                 "Authorization" to "Bearer ${session.token}",
                 (if (session.guest) "X-Kanti-Guest" else "X-FaNotes-Account") to session.accountId,
                 "Accept" to "application/json",
+                "Accept-Language" to AppLanguage.acceptLanguage(),
                 "Content-Type" to "application/json",
             ),
             json,

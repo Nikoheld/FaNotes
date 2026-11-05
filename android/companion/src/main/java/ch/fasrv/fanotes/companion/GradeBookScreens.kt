@@ -52,26 +52,26 @@ fun SchoolMarkRow(
         hidden -> Modifier.combinedClickable(role = Role.Button, onClick = reveal, onLongClick = reveal)
         else -> Modifier.clickable(role = Role.Button, onClick = onAdjust)
     }
-    val spoken = "${mark.label.ifBlank { "School mark" }}. ${hiddenMarkHint(longPressReveal)}"
+    val spoken = "${mark.label.ifBlank { t(R.string.school_mark) }}. ${if (longPressReveal) t(R.string.hidden_hold) else t(R.string.hidden_tap)}"
     Row(
         Modifier.fillMaxWidth().background(if (highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background, MaterialTheme.shapes.small).then(gesture).then(if (hidden) Modifier.semantics { contentDescription = spoken } else Modifier).padding(vertical = 14.dp, horizontal = if (highlighted) 12.dp else 0.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(mark.label.ifBlank { "School mark" }, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(mark.label.ifBlank { t(R.string.school_mark) }, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(
                 when {
-                    hidden -> hiddenMarkHint(longPressReveal)
-                    mark.excluded -> "Excluded · school mark ${formatMark(mark.displayMark, decimals)} · weight ${formatMark(mark.displayWeight)}"
-                    mark.adjusted -> "Adjusted · school ${formatMark(mark.displayMark, decimals)} · weight ${formatMark(mark.displayWeight)}"
-                    else -> "Weight ${formatMark(mark.weight)}"
+                    hidden -> if (longPressReveal) t(R.string.hidden_hold) else t(R.string.hidden_tap)
+                    mark.excluded -> t(R.string.excluded_school_mark_weight, uiMark(mark.displayMark, decimals), uiMark(mark.displayWeight))
+                    mark.adjusted -> t(R.string.adjusted_school_weight, uiMark(mark.displayMark, decimals), uiMark(mark.displayWeight))
+                    else -> t(R.string.weight, uiMark(mark.weight))
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if ((mark.adjusted || mark.excluded) && !hidden) TextButton(onClick = onRestore) { Text("Restore") }
-        Text(if (hidden) "?" else formatMark(mark.mark, decimals), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        if ((mark.adjusted || mark.excluded) && !hidden) TextButton(onClick = onRestore) { Text(t(R.string.restore)) }
+        Text(if (hidden) "?" else uiMark(mark.mark, decimals), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
     }
     FineDivider()
 }
@@ -81,13 +81,13 @@ fun OwnMarkRow(grade: OwnGrade, decimals: Int, onEdit: () -> Unit, onDelete: () 
     Row(Modifier.fillMaxWidth().clickable(onClick = onEdit).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(grade.title.ifBlank { "Own mark" }, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                Tag("Own")
+                Text(grade.title.ifBlank { t(R.string.own_mark) }, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                Tag(t(R.string.own))
             }
-            Text("${formatGradeDate(grade.date)} · weight ${formatMark(grade.weight)} · tap to edit", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(t(R.string.weight_tap_to_edit, formatGradeDate(grade.date), uiMark(grade.weight)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Text(formatMark(grade.mark, decimals), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp))
-        ActionIcon(Icons.Outlined.Close, "Delete own mark ${grade.title}", onClick = onDelete)
+        Text(uiMark(grade.mark, decimals), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp))
+        ActionIcon(Icons.Outlined.Close, t(R.string.delete_own_mark, grade.title), onClick = onDelete)
     }
     FineDivider()
 }
@@ -100,21 +100,21 @@ fun CollectiveMarkRow(grade: CollectiveGrade, decimals: Int, onEdit: () -> Unit,
             Column(Modifier.weight(1f)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(grade.title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Tag("Own")
+                    Tag(t(R.string.own))
                 }
                 Text(
-                    if (value == null) "Add at least two partial tests before this counts" else "Sammelnote · ${formatGradeDate(grade.date)} · counts as one mark · weight ${formatMark(grade.weight)}",
+                    if (value == null) t(R.string.add_at_least_two_partial_tests_before_this_count) else t(R.string.sammelnote_counts_as_one_mark_weight, formatGradeDate(grade.date), uiMark(grade.weight)),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text(formatMark(value, decimals), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp))
-            ActionIcon(Icons.Outlined.Close, "Delete collective grade ${grade.title}", onClick = onDelete)
+            Text(uiMark(value, decimals), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp))
+            ActionIcon(Icons.Outlined.Close, t(R.string.delete_collective_grade, grade.title), onClick = onDelete)
         }
         grade.parts.forEach { part ->
-            Text("${part.title.ifBlank { "Partial test" }} · ${formatMark(part.mark, decimals)} · weight ${formatMark(part.weight)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp, start = 8.dp))
+            Text(t(R.string.weight_2, part.title.ifBlank { t(R.string.partial_test_name) }, uiMark(part.mark, decimals), uiMark(part.weight)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp, start = 8.dp))
         }
     }
     FineDivider()
@@ -127,17 +127,17 @@ fun ArchivedSubjectsScreen(model: CompanionModel) {
     }
     ScreenList {
         item {
-            Text("Archived subjects", style = MaterialTheme.typography.headlineMedium)
-            Text("Hidden from your list, overall average and promotion points. School marks stay on record.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp, bottom = 12.dp))
+            Text(t(R.string.archived_subjects), style = MaterialTheme.typography.headlineMedium)
+            Text(t(R.string.hidden_from_your_list_overall_average_and_promot), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp, bottom = 12.dp))
         }
-        if (courses.isEmpty()) item { EmptyState(Icons.Outlined.Archive, "Nothing archived", "Archive a finished subject from its page. You can restore it here.") }
+        if (courses.isEmpty()) item { EmptyState(Icons.Outlined.Archive, t(R.string.nothing_archived), t(R.string.archive_a_finished_subject_from_its_page_you_can)) }
         items(courses, key = { it.courseId }) { course ->
             Row(Modifier.fillMaxWidth().clickable(role = Role.Button) { model.focusCourseId = course.courseId; model.navigate(Page.Course) }.padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(courseAlias(course.label, model.desk.courseAliases), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(formatMark(course.average, model.desk.gradeDecimals), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(uiMark(course.average, model.desk.gradeDecimals), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                TextButton(onClick = { model.restoreCourse(course.courseId) }) { Text("Restore") }
+                TextButton(onClick = { model.restoreCourse(course.courseId) }) { Text(t(R.string.restore)) }
                 Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             FineDivider()
@@ -148,26 +148,26 @@ fun ArchivedSubjectsScreen(model: CompanionModel) {
 @Composable
 fun OwnGradeDialog(courseId: String, existing: OwnGrade?, onDismiss: () -> Unit, onSave: (OwnGrade) -> Unit) {
     var title by rememberSaveable { mutableStateOf(existing?.title.orEmpty()) }
-    var mark by rememberSaveable { mutableStateOf(existing?.mark?.let { formatMark(it, 3) }.orEmpty()) }
-    var weight by rememberSaveable { mutableStateOf(existing?.weight?.let { formatMark(it, 3) } ?: "1") }
+    var mark by rememberSaveable { mutableStateOf(existing?.mark?.let { uiMark(it, 3) }.orEmpty()) }
+    var weight by rememberSaveable { mutableStateOf(existing?.weight?.let { uiMark(it, 3) } ?: "1") }
     var date by rememberSaveable { mutableStateOf(existing?.date?.ifBlank { LocalDate.now().toString() } ?: LocalDate.now().toString()) }
     val number = mark.replace(',', '.').toDoubleOrNull()
     val factor = weight.replace(',', '.').toDoubleOrNull()
     val iso = parseGradeDate(date)
     val ready = number != null && number.isFinite() && number in 1.0..6.0 && factor != null && factor.isFinite() && factor > 0.0 && iso != null
-    AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), title = { Text(if (existing == null) "Add your mark" else "Edit your mark") }, text = {
+    AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), title = { Text(if (existing == null) t(R.string.add_your_mark) else t(R.string.edit_your_mark)) }, text = {
         Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Counted in this subject, your promotion points and the target calculator. Marked as your own.", style = MaterialTheme.typography.bodySmall)
-            OutlinedTextField(title, { title = it }, label = { Text("Name") }, singleLine = true)
-            OutlinedTextField(mark, { mark = it }, label = { Text("Mark · 1 to 6") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-            OutlinedTextField(weight, { weight = it }, label = { Text("Weight") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-            OutlinedTextField(date, { date = it }, label = { Text("Date") }, singleLine = true, supportingText = { Text("4.11.2026 or 2026-11-04") })
+            Text(t(R.string.counted_in_this_subject_your_promotion_points_an), style = MaterialTheme.typography.bodySmall)
+            OutlinedTextField(title, { title = it }, label = { Text(t(R.string.name)) }, singleLine = true)
+            OutlinedTextField(mark, { mark = it }, label = { Text(t(R.string.mark_1_to_6)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+            OutlinedTextField(weight, { weight = it }, label = { Text(t(R.string.weight_3)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+            OutlinedTextField(date, { date = it }, label = { Text(t(R.string.date)) }, singleLine = true, supportingText = { Text(t(R.string.s_4_11_2026_or_2026_11_04)) })
         }
     }, confirmButton = {
         TextButton(onClick = {
-            onSave(OwnGrade(existing?.id ?: UUID.randomUUID().toString(), courseId, title.trim().ifBlank { "Own mark" }, number!!, factor!!, iso!!))
-        }, enabled = ready) { Text("Save") }
-    }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+            onSave(OwnGrade(existing?.id ?: UUID.randomUUID().toString(), courseId, title.trim().ifBlank { t(R.string.own_mark) }, number!!, factor!!, iso!!))
+        }, enabled = ready) { Text(t(R.string.save)) }
+    }, dismissButton = { TextButton(onClick = onDismiss) { Text(t(R.string.cancel)) } })
 }
 
 private data class PartDraft(val id: String, val title: String, val mark: String, val weight: String)
@@ -175,7 +175,7 @@ private data class PartDraft(val id: String, val title: String, val mark: String
 @Composable
 fun CollectiveGradeDialog(courseId: String, existing: CollectiveGrade?, onDismiss: () -> Unit, onSave: (CollectiveGrade) -> Unit) {
     var title by rememberSaveable { mutableStateOf(existing?.title.orEmpty()) }
-    var weight by rememberSaveable { mutableStateOf(existing?.weight?.let { formatMark(it, 3) } ?: "1") }
+    var weight by rememberSaveable { mutableStateOf(existing?.weight?.let { uiMark(it, 3) } ?: "1") }
     var date by rememberSaveable { mutableStateOf(existing?.date?.ifBlank { LocalDate.now().toString() } ?: LocalDate.now().toString()) }
     val drafts = remember {
         mutableStateListOf<PartDraft>().apply {
@@ -184,64 +184,64 @@ fun CollectiveGradeDialog(courseId: String, existing: CollectiveGrade?, onDismis
                 add(PartDraft(UUID.randomUUID().toString(), "", "", "1"))
                 add(PartDraft(UUID.randomUUID().toString(), "", "", "1"))
             } else {
-                seed.forEach { add(PartDraft(it.id.ifBlank { UUID.randomUUID().toString() }, it.title, formatMark(it.mark, 3), formatMark(it.weight, 3))) }
+                seed.forEach { add(PartDraft(it.id.ifBlank { UUID.randomUUID().toString() }, it.title, uiMark(it.mark, 3), uiMark(it.weight, 3))) }
             }
         }
     }
     val parts = drafts.mapNotNull { draft ->
         val mark = draft.mark.replace(',', '.').toDoubleOrNull()
         val factor = draft.weight.replace(',', '.').toDoubleOrNull()
-        if (mark == null || mark !in 1.0..6.0 || factor == null || factor <= 0.0) null else CollectivePart(draft.id, draft.title.trim().ifBlank { "Partial test" }, mark, factor)
+        if (mark == null || mark !in 1.0..6.0 || factor == null || factor <= 0.0) null else CollectivePart(draft.id, draft.title.trim().ifBlank { t(R.string.partial_test_name) }, mark, factor)
     }
     val factor = weight.replace(',', '.').toDoubleOrNull()
     val iso = parseGradeDate(date)
     val ready = title.isNotBlank() && parts.size >= 2 && parts.size == drafts.size && factor != null && factor > 0.0 && iso != null
-    AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), title = { Text(if (existing == null) "Collective grade" else "Edit collective grade") }, text = {
+    AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), title = { Text(if (existing == null) t(R.string.collective_grade) else t(R.string.edit_collective_grade)) }, text = {
         Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Partial tests combine into one Sammelnote. Only that mark counts in the subject.", style = MaterialTheme.typography.bodySmall)
-            OutlinedTextField(title, { title = it }, label = { Text("Name") }, singleLine = true)
-            OutlinedTextField(date, { date = it }, label = { Text("Date") }, singleLine = true)
-            OutlinedTextField(weight, { weight = it }, label = { Text("Weight in the subject") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+            Text(t(R.string.partial_tests_combine_into_one_sammelnote_only_t), style = MaterialTheme.typography.bodySmall)
+            OutlinedTextField(title, { title = it }, label = { Text(t(R.string.name)) }, singleLine = true)
+            OutlinedTextField(date, { date = it }, label = { Text(t(R.string.date)) }, singleLine = true)
+            OutlinedTextField(weight, { weight = it }, label = { Text(t(R.string.weight_in_the_subject)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
             drafts.forEachIndexed { index, draft ->
-                Text("Partial test ${index + 1}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedTextField(draft.title, { drafts[index] = draft.copy(title = it) }, label = { Text("Name") }, singleLine = true)
+                Text(t(R.string.partial_test, index + 1), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(draft.title, { drafts[index] = draft.copy(title = it) }, label = { Text(t(R.string.name)) }, singleLine = true)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(draft.mark, { drafts[index] = draft.copy(mark = it) }, label = { Text("Mark") }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-                    OutlinedTextField(draft.weight, { drafts[index] = draft.copy(weight = it) }, label = { Text("Weight") }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                    OutlinedTextField(draft.mark, { drafts[index] = draft.copy(mark = it) }, label = { Text(t(R.string.mark)) }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                    OutlinedTextField(draft.weight, { drafts[index] = draft.copy(weight = it) }, label = { Text(t(R.string.weight_3)) }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
                 }
-                if (drafts.size > 2) TextButton(onClick = { drafts.removeAt(index) }) { Text("Remove partial test") }
+                if (drafts.size > 2) TextButton(onClick = { drafts.removeAt(index) }) { Text(t(R.string.remove_partial_test)) }
             }
-            TextButton(onClick = { drafts.add(PartDraft(UUID.randomUUID().toString(), "", "", "1")) }) { Text("Add partial test") }
+            TextButton(onClick = { drafts.add(PartDraft(UUID.randomUUID().toString(), "", "", "1")) }) { Text(t(R.string.add_partial_test)) }
             val value = collectiveValue(parts)
-            if (value != null) Text("Counts as ${formatMark(value)}", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+            if (value != null) Text(t(R.string.counts_as, uiMark(value)), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
         }
     }, confirmButton = {
         TextButton(onClick = {
             onSave(CollectiveGrade(existing?.id ?: UUID.randomUUID().toString(), courseId, title.trim(), iso!!, factor!!, parts))
-        }, enabled = ready) { Text("Save") }
-    }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+        }, enabled = ready) { Text(t(R.string.save)) }
+    }, dismissButton = { TextButton(onClick = onDismiss) { Text(t(R.string.cancel)) } })
 }
 
 @Composable
 fun GradeAdjustmentDialog(mark: WeightedMark, decimals: Int, existing: GradeAdjustment?, onDismiss: () -> Unit, onSave: (GradeAdjustment) -> Unit, onRestore: () -> Unit) {
-    var overrideMark by rememberSaveable { mutableStateOf(existing?.mark?.let { formatMark(it, 3) }.orEmpty()) }
-    var overrideWeight by rememberSaveable { mutableStateOf(existing?.weight?.let { formatMark(it, 3) }.orEmpty()) }
+    var overrideMark by rememberSaveable { mutableStateOf(existing?.mark?.let { uiMark(it, 3) }.orEmpty()) }
+    var overrideWeight by rememberSaveable { mutableStateOf(existing?.weight?.let { uiMark(it, 3) }.orEmpty()) }
     var excluded by rememberSaveable { mutableStateOf(existing?.excluded == true) }
     val parsedMark = overrideMark.replace(',', '.').toDoubleOrNull()
     val parsedWeight = overrideWeight.replace(',', '.').toDoubleOrNull()
     val markOk = overrideMark.isBlank() || (parsedMark != null && parsedMark in 1.0..6.0)
     val weightOk = overrideWeight.isBlank() || (parsedWeight != null && parsedWeight > 0.0)
-    AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), title = { Text(mark.label.ifBlank { "School mark" }, maxLines = 2, overflow = TextOverflow.Ellipsis) }, text = {
+    AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), title = { Text(mark.label.ifBlank { t(R.string.school_mark) }, maxLines = 2, overflow = TextOverflow.Ellipsis) }, text = {
         Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("School mark ${formatMark(mark.displayMark, decimals)} · weight ${formatMark(mark.displayWeight)}. The original stays visible. This changes only your averages.", style = MaterialTheme.typography.bodySmall)
-            OutlinedTextField(overrideMark, { overrideMark = it }, label = { Text("Your mark") }, placeholder = { Text(formatMark(mark.displayMark, decimals)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-            OutlinedTextField(overrideWeight, { overrideWeight = it }, label = { Text("Your weight") }, placeholder = { Text(formatMark(mark.displayWeight)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-            ToggleRow("Exclude from your average", "The school mark stays on this page.", excluded) { excluded = it }
-            if (existing != null) TextButton(onClick = onRestore) { Text("Restore school mark") }
+            Text(t(R.string.school_mark_weight_the_original_stays_visible_th, uiMark(mark.displayMark, decimals), uiMark(mark.displayWeight)), style = MaterialTheme.typography.bodySmall)
+            OutlinedTextField(overrideMark, { overrideMark = it }, label = { Text(t(R.string.your_mark)) }, placeholder = { Text(uiMark(mark.displayMark, decimals)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+            OutlinedTextField(overrideWeight, { overrideWeight = it }, label = { Text(t(R.string.your_weight)) }, placeholder = { Text(uiMark(mark.displayWeight)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+            ToggleRow(t(R.string.exclude_from_your_average), t(R.string.the_school_mark_stays_on_this_page), excluded) { excluded = it }
+            if (existing != null) TextButton(onClick = onRestore) { Text(t(R.string.restore_school_mark)) }
         }
     }, confirmButton = {
         TextButton(onClick = {
             onSave(GradeAdjustment(mark.targetId, if (overrideMark.isBlank()) null else parsedMark, if (overrideWeight.isBlank()) null else parsedWeight, excluded))
-        }, enabled = markOk && weightOk && mark.targetId.isNotBlank()) { Text("Save") }
-    }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+        }, enabled = markOk && weightOk && mark.targetId.isNotBlank()) { Text(t(R.string.save)) }
+    }, dismissButton = { TextButton(onClick = onDismiss) { Text(t(R.string.cancel)) } })
 }

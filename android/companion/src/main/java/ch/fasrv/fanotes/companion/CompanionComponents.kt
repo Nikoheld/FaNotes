@@ -85,7 +85,7 @@ fun EmptyState(icon: ImageVector, title: String, body: String, action: String? =
     }
 }
 @Composable
-fun LoadingState(label: String = "Loading…") {
+fun LoadingState(label: String = t(R.string.loading)) {
     Column(Modifier.fillMaxSize().padding(Space.xl), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
         Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = Space.lg))
@@ -108,7 +108,7 @@ fun InfoBanner(title: String, body: String, action: String? = null, error: Boole
 fun SearchField(query: String, onQuery: (String) -> Unit, hint: String, modifier: Modifier = Modifier) {
     OutlinedTextField(query, onQuery, modifier.fillMaxWidth().semantics { if (query.isEmpty()) contentDescription = hint }, placeholder = { Text(hint, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         leadingIcon = { Icon(Icons.Outlined.Search, null, Modifier.size(20.dp)) },
-        trailingIcon = { if (query.isNotEmpty()) ActionIcon(Icons.Outlined.Close, "Clear search") { onQuery("") } },
+        trailingIcon = { if (query.isNotEmpty()) ActionIcon(Icons.Outlined.Close, t(R.string.clear_search)) { onQuery("") } },
         singleLine = true, shape = MaterialTheme.shapes.medium,
         colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = MaterialTheme.colorScheme.surface, unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant),
         textStyle = MaterialTheme.typography.bodyMedium,
@@ -156,7 +156,7 @@ fun Tag(text: String, color: Color = MaterialTheme.colorScheme.primary) {
 fun ColorChoices(colors: List<String>, selected: String, onSelect: (String) -> Unit) {
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         colors.forEach { color ->
-            IconButton(onClick = { onSelect(color) }, modifier = Modifier.size(48.dp).semantics { contentDescription = "${colorName(color)}${if (selected == color) ", selected" else ""}" }) {
+            IconButton(onClick = { onSelect(color) }, modifier = Modifier.size(48.dp).semantics { contentDescription = t(R.string.text_3, colorName(color), if (selected == color) t(R.string.selected_suffix) else "") }) {
                 Box(Modifier.size(30.dp).background(paletteColor(color), CircleShape)
                     .then(if (selected == color) Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier), contentAlignment = Alignment.Center) {
                     if (selected == color) Icon(Icons.Outlined.Check, null, tint = if (paletteColor(color).luminanceCompat() > 0.4f) Color.Black else Color.White, modifier = Modifier.size(18.dp))
@@ -171,18 +171,18 @@ fun ConfirmDialog(title: String, body: String, confirm: String, onDismiss: () ->
     val haptic = LocalHapticFeedback.current
     AlertDialog(onDismissRequest = onDismiss, title = { Text(title, maxLines = 3, overflow = TextOverflow.Ellipsis) }, text = { Text(body) },
         confirmButton = { TextButton(onClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onConfirm() }) { Text(confirm, color = MaterialTheme.colorScheme.error) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+        dismissButton = { TextButton(onClick = onDismiss) { Text(t(R.string.cancel)) } })
 }
 @Composable
 fun SheetTitle(title: String, onClose: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        ActionIcon(Icons.Outlined.Close, "Close") { onClose() }
+        ActionIcon(Icons.Outlined.Close, t(R.string.close)) { onClose() }
     }
 }
 
 private fun colorName(color: String): String = when (color.lowercase()) {
-    "#202333" -> "Ink"; "#2a6f97" -> "Ocean blue"; "#7f6df2" -> "Violet"; "#3d8bfd" -> "Blue"
-    "#2f9e6b", "#0f7b6c" -> "Green"; "#e0ac39" -> "Gold"; "#e15b64", "#c4554d" -> "Coral"
-    "#d06ad6" -> "Orchid"; else -> "Color $color"
+    "#202333" -> t(R.string.color_ink); "#2a6f97" -> t(R.string.color_ocean); "#7f6df2" -> t(R.string.color_violet); "#3d8bfd" -> t(R.string.color_blue)
+    "#2f9e6b", "#0f7b6c" -> t(R.string.color_green); "#e0ac39" -> t(R.string.color_gold); "#e15b64", "#c4554d" -> t(R.string.color_coral)
+    "#d06ad6" -> t(R.string.color_orchid); else -> t(R.string.color_hex, color)
 }
