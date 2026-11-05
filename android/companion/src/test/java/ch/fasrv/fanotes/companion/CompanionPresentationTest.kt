@@ -57,7 +57,8 @@ class CompanionPresentationTest {
     }
     @Test fun `merged agenda sorts chronologically and preserves actionable sources`() {
         val task = HomeworkTask("homework", "Read chapter", dueDate = day.toString(), dueTime = "10:00")
-        val snapshot = SchulnetzSnapshot(events = listOf(school()))
+        // This JVM test checks ordering and source actions without Android room-label resources.
+        val snapshot = SchulnetzSnapshot(events = listOf(school().copy(room = "")))
         val event = local(start = "2026-11-02T09:00", end = "2026-11-02T09:30", allDay = false)
         val entries = agendaForDay(day, snapshot, emptyCalendar().copy(events = listOf(event)), listOf(task), emptyList(), zone)
         assertEquals(listOf(AgendaKind.Lesson, AgendaKind.Event, AgendaKind.Task), entries.map { it.kind })

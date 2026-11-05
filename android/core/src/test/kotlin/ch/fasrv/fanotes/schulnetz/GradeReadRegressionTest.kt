@@ -40,7 +40,7 @@ class GradeReadRegressionTest {
         val read = readGradesPage(source.replace("</main>", "$orphan</main>"))
         assertNotNull(read.error)
         assertTrue(read.value.isEmpty())
-        assertEquals(grades(), keepGradeRead(grades(), read.value, read.error == null))
+        assertEquals(grades(), keepGradeRead(grades(), read.value, read.ok()))
     }
 
     @Test fun siblingCourseTablesDoNotLoseAllButTheFirstCourse() {
