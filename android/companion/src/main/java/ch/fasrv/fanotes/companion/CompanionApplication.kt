@@ -22,11 +22,10 @@ class CompanionApplication : Application() {
         graph = CompanionGraph(this)
         CompanionAlerts.ensureChannels(this)
         CompanionAlerts.retireLegacyPush(this)
-        configurePushDelivery(this)
+        prepareFirebase(this)
         graph.scope.launch {
             graph.recordOpenToday()
-            graph.engine.start()
-            graph.engine.pauseAutomaticSync()
+            graph.boot()
         }
     }
 }

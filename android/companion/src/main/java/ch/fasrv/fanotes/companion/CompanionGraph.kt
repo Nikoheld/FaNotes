@@ -29,6 +29,7 @@ import ch.fasrv.fanotes.schulnetz.RefreshLease
 import ch.fasrv.fanotes.schulnetz.SchulnetzGate
 import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
 import ch.fasrv.fanotes.schulnetz.diffSnapshots
+import ch.fasrv.fanotes.schulnetz.fcmTokenNeedsUpload
 import ch.fasrv.fanotes.schulnetz.newGradeTargetIds
 import ch.fasrv.fanotes.schulnetz.localRefreshLease
 import ch.fasrv.fanotes.schulnetz.classifySchulnetzPage
@@ -109,6 +110,8 @@ class CompanionGraph(private val context: Context) {
     fun localAccess(): Boolean = prefs.getBoolean("local-access", false)
     fun setLocalAccess(enabled: Boolean) { prefs.edit().putBoolean("local-access", enabled).apply() }
     private val guestLock = Mutex()
+    private val pushLock = Mutex()
+    private val booted = CompletableDeferred<Unit>()
     private val guestFile: File get() = File(context.filesDir, "kanti-guest.json")
     fun plannerHold(): Boolean = prefs.getBoolean(PLANNER_HOLD_PREF, false)
     fun setPlannerHold(hold: Boolean) {
@@ -240,6 +243,7 @@ class CompanionGraph(private val context: Context) {
     }
 
     private suspend fun refreshLocked(caller: String) {
+        awaitBoot()
         val session = runCatching { schoolAuth() }.getOrElse { error ->
             prefs.edit().putString("last-check-error", error.message ?: "Schulnetz nicht erreichbar").apply()
             schulnetzLog.error(error)
@@ -494,34 +498,79 @@ class CompanionGraph(private val context: Context) {
         return last + schoolFallbackIntervalMs()
     }
 
+    /** Start the saved FaNotes session before any push registration or fetch. */
+    suspend fun boot() {
+        try {
+            engine.start()
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            schulnetzLog.error(error)
+        } finally {
+            engine.pauseAutomaticSync()
+            if (!booted.isCompleted) booted.complete(Unit)
+        }
+        configurePushDelivery(context)
+    }
+
+    suspend fun awaitBoot() {
+        booted.await()
+    }
+
     /**
      * One short read of new school changes. Used from FCM and the rare fallback.
      * Does not scrape Schulnetz and does not sync notes.
      */
     suspend fun pullChangeDelta() {
         if (schoolDisconnected()) return
+        awaitBoot()
         withContext(Dispatchers.IO) {
             withTimeoutOrNull(8_000) {
-                val session = runCatching { schoolAuth() }.getOrNull() ?: return@withTimeoutOrNull
-                val changes = runCatching { client.changes(session, prefs.getLong("change-cursor", 0L), quick = true) }.getOrNull()
-                    ?: return@withTimeoutOrNull
-                applyServerChanges(changes)
-                prefs.edit().putLong("last-check", System.currentTimeMillis()).putString("last-check-error", "").apply()
+                if (snapshot.value.fetchedAt.isBlank() && snapshot.value.grades.isEmpty() && snapshot.value.events.isEmpty()) {
+                    val cached = readCachedSnapshot()
+                    if (cached.fetchedAt.isNotBlank() || cached.grades.isNotEmpty() || cached.events.isNotEmpty()) snapshot.value = cached
+                }
+                val session = runCatching { schoolAuth() }.getOrNull()
+                if (session != null) {
+                    val changes = runCatching { client.changes(session, prefs.getLong("change-cursor", 0L), quick = true) }.getOrNull()
+                    if (changes != null) {
+                        applyServerChanges(changes)
+                        prefs.edit().putLong("last-check", System.currentTimeMillis()).putString("last-check-error", "").apply()
+                    }
+                    val body = runCatching { client.snapshot(session) }.getOrNull()
+                    val next = body?.let { parseNormalizedSnapshot(it) }
+                    if (next != null && next.fetchedAt.isNotBlank()) {
+                        snapshot.value = next
+                        writeCache(next)
+                    }
+                }
+                NextLessonWidget.update(context)
             }
         }
     }
 
     suspend fun registerFcmToken(token: String) {
-        if (token.isBlank()) return
-        prefs.edit().putString("fcm-token", token).apply()
+        val trimmed = token.trim()
+        if (trimmed.isBlank()) return
+        prefs.edit().putString("fcm-token", trimmed).apply()
+        awaitBoot()
+        pushLock.withLock { uploadFcmToken(trimmed) }
+    }
+
+    private suspend fun uploadFcmToken(token: String) {
         if (schoolDisconnected()) return
         val session = runCatching { schoolAuth() }.getOrNull() ?: return
-        if (!prefs.getBoolean("school-linked", false) && prefs.getString("push-topic", null).isNullOrBlank() && !link.value.linked) return
-        if (link.value.linked || !prefs.getString("push-topic", null).isNullOrBlank()) {
-            prefs.edit().putBoolean("school-linked", true).remove("push-topic").remove("push-server").apply()
-        }
-        runCatching { client.registerFcmToken(session, token) }
-            .onFailure { schulnetzLog.error(it) }
+        val now = System.currentTimeMillis()
+        val sentToken = prefs.getString("fcm-sent-token", "").orEmpty()
+        val sentAccount = prefs.getString("fcm-sent-account", "").orEmpty()
+        val sentAt = prefs.getLong("fcm-sent-at", 0L)
+        if (!fcmTokenNeedsUpload(token, session.accountId, sentToken, sentAccount, sentAt, now, false)) return
+        val uploaded = runCatching { client.registerFcmToken(session, token) }.onFailure { schulnetzLog.error(it) }.isSuccess
+        if (!uploaded) return
+        prefs.edit()
+            .putString("fcm-sent-token", token)
+            .putString("fcm-sent-account", session.accountId)
+            .putLong("fcm-sent-at", now)
+            .apply()
     }
 
     fun setSubjectColor(subject: String, color: String) {
@@ -923,11 +972,17 @@ class CompanionGraph(private val context: Context) {
         val effective = settings.copy(guessGrades = local.guessGrades)
         val prior = previous?.takeIf { it.fetchedAt.isNotBlank() || it.grades.isNotEmpty() || it.events.isNotEmpty() }
         val raw = diffSnapshots(prior, next, effective).filterNot { changeIsHidden(it, hidden) }
-        val changes = CompanionAlerts.settledChanges(context, raw, prior?.grades.orEmpty() + next.grades)
-        if (effective.guessGrades) addUnrevealedGrades(newGradeTargetIds(changes))
+        val allowed = CompanionAlerts.notificationsAllowed(context)
+        val changes = if (allowed || readGradeLedger(context) == null) {
+            CompanionAlerts.settledChanges(context, raw, prior?.grades.orEmpty() + next.grades)
+        } else {
+            emptyList()
+        }
+        if (allowed && effective.guessGrades) addUnrevealedGrades(newGradeTargetIds(changes))
         snapshot.value = next
         writeCache(next)
-        CompanionAlerts.showAll(context, changes, gradeKeysSettled = true)
+        if (allowed) CompanionAlerts.showAll(context, changes, gradeKeysSettled = true)
+        NextLessonWidget.update(context)
     }
 
     private fun applyServerChanges(json: String) {
@@ -935,6 +990,10 @@ class CompanionGraph(private val context: Context) {
         val items = obj.array("changes")?.items.orEmpty().mapNotNull { item ->
             val change = item as? JsonValue.Obj ?: return@mapNotNull null
             changeFromObj(change)
+        }
+        if (!CompanionAlerts.notificationsAllowed(context)) {
+            if (readGradeLedger(context) == null) CompanionAlerts.settledChanges(context, items, snapshot.value.grades)
+            return
         }
         val guess = notifySettings().guessGrades
         val visible = CompanionAlerts.settledChanges(

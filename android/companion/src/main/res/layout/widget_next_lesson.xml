@@ -34,4 +34,15 @@
         android:ellipsize="end"
         android:textColor="@color/widget_muted"
         android:textSize="14sp" />
+    <TextView
+        android:id="@+id/widget_more"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingTop="8dp"
+        android:text=""
+        android:maxLines="4"
+        android:ellipsize="end"
+        android:visibility="gone"
+        android:textColor="@color/widget_muted"
+        android:textSize="14sp" />
 </LinearLayout>
