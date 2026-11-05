@@ -3,9 +3,11 @@ package ch.fasrv.fanotes.companion
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -18,7 +20,9 @@ import ch.fasrv.fanotes.schulnetz.cookieNames
 import ch.fasrv.fanotes.schulnetz.isForcedLogoutUrl
 import ch.fasrv.fanotes.schulnetz.isMicrosoftLoginHost
 import ch.fasrv.fanotes.schulnetz.newBridgeNonce
+import ch.fasrv.fanotes.schulnetz.pageToken
 import ch.fasrv.fanotes.schulnetz.redactSchulnetzSecrets
+import ch.fasrv.fanotes.schulnetz.tableCount
 import ch.fasrv.fanotes.schulnetz.webReadAllowed
 import org.json.JSONObject
 import java.net.Inet4Address
@@ -45,25 +49,37 @@ data class LoadedPage(
  */
 class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
     private val app = context.applicationContext
-    private val main = Handler(Looper.getMainLooper())
+    private val webThread = HandlerThread("schulnetz-web").apply { start() }
+    private val webHandler = Handler(webThread.looper)
     private val generation = AtomicInteger()
     private var web: WebView? = null
     private var pending: Slot? = null
 
     fun load(url: String): LoadedPage {
-        check(Looper.myLooper() != Looper.getMainLooper()) { t(R.string.ui_thread_load) }
+        val started = System.nanoTime()
+        val mainThread = Looper.myLooper() == Looper.getMainLooper()
+        val kind = if (url.contains("pageid=22202")) "stundenplan" else "page"
+        log.info("load begin kind=$kind page=${pageToken(url)} mainThread=$mainThread thread=${Thread.currentThread().name}")
         if (isForcedLogoutUrl(url)) {
-            log.info("refused logout url=${redactSchulnetzSecrets(url)}")
+            log.info("refused logout page=${pageToken(url)}")
             return LoadedPage(url, url, 0, "", "logout-blocked")
         }
+        if (mainThread) {
+            log.info("load end kind=$kind error=main-thread durationMs=0 timeout=false cancelled=true mainThread=true")
+            return LoadedPage(url, url, 0, "", "main-thread")
+        }
         val page = if (url.contains("scheduler_processor.php") || url.lowercase().contains(".ics")) fetchDocument(url) else navigate(url)
+        val duration = (System.nanoTime() - started) / 1_000_000
+        val timedOut = page.error == "timeout"
+        val cancelled = page.error == "cancelled" || page.error == "render-process-gone" || page.error == "main-thread"
+        log.info("load end kind=$kind page=${pageToken(page.finalUrl.ifBlank { url })} status=${page.status} bytes=${page.body.length} tables=${tableCount(page.body)} durationMs=$duration timeout=$timedOut cancelled=$cancelled mainThread=false error=${page.error.orEmpty()}")
         log.info(describe(url, page))
         return page
     }
 
     private fun navigate(url: String): LoadedPage {
         val slot = open(url)
-        main.post {
+        webHandler.post {
             if (slot.generation != generation.get()) return@post
             val view = ensure()
             view.webViewClient = client(slot, url)
@@ -94,7 +110,7 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
                 .catch(function(e){ window.FanotesHtml.fail(String(gen), String(e && e.message || e)); });
             })()
         """.trimIndent()
-        main.post {
+        webHandler.post {
             if (slot.generation != generation.get()) return@post
             ensure().evaluateJavascript(script, null)
         }
@@ -104,14 +120,25 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
     }
 
     private fun open(url: String): Slot {
+        pending?.let { old ->
+            if (old.done.compareAndSet(false, true)) {
+                old.page = LoadedPage(old.requested, old.finalUrl.ifBlank { old.requested }, old.status, "", "cancelled")
+                old.latch.countDown()
+                log.info("load cancelled page=${pageToken(old.requested)}")
+            }
+        }
         val slot = Slot(generation.incrementAndGet(), url, newBridgeNonce())
         pending = slot
         return slot
     }
 
+    private fun budget(url: String): Long = if (url.contains("pageid=22202")) 12L else 25L
+
     private fun await(slot: Slot, url: String): LoadedPage {
-        if (!slot.latch.await(25, TimeUnit.SECONDS)) {
-            main.post { if (generation.get() == slot.generation) web?.stopLoading() }
+        if (!slot.latch.await(budget(url), TimeUnit.SECONDS)) {
+            slot.done.set(true)
+            webHandler.post { if (generation.get() == slot.generation) web?.stopLoading() }
+            log.info("load timeout page=${pageToken(url)} budgetS=${budget(url)} mainThread=false")
             return LoadedPage(url, slot.finalUrl.ifBlank { url }, slot.status, "", "timeout")
         }
         return slot.page ?: LoadedPage(url, url, 0, "", "empty")
@@ -122,7 +149,7 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
         if (!slot.done.compareAndSet(false, true)) return
         slot.page = page
         slot.latch.countDown()
-        main.post { CookieManager.getInstance().flush() }
+        webHandler.post { CookieManager.getInstance().flush() }
     }
 
     private fun client(slot: Slot, requested: String) = object : WebViewClient() {
@@ -156,11 +183,31 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
             if (slot.generation != generation.get() || slot.done.get()) return
             slot.finalUrl = finished
             val token = slot.bumps.incrementAndGet()
-            val pause = if (slot.requested.contains("pageid=22202")) 1600L else 350L
-            main.postDelayed({
-                if (slot.generation != generation.get() || slot.bumps.get() != token || slot.done.get()) return@postDelayed
+            val timetable = slot.requested.contains("pageid=22202")
+            if (timetable && token > 3) {
+                log.info("stundenplan navigation cancelled after=$token")
+                view.stopLoading()
+                finish(slot, LoadedPage(slot.requested, finished, slot.status, "", "cancelled"))
+                return
+            }
+            val pause = if (timetable) 1600L else 350L
+            webHandler.postDelayed({
+                if (slot.generation != generation.get() || slot.done.get()) return@postDelayed
+                if (slot.bumps.get() != token) return@postDelayed
                 view.evaluateJavascript(CAPTURE_JS.replace("GEN", slot.nonce), null)
             }, pause)
+        }
+
+        override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+            log.info("render process gone crashed=${detail.didCrash()} page=${pageToken(slot.requested)}")
+            finish(slot, LoadedPage(slot.requested, slot.finalUrl.ifBlank { slot.requested }, 0, "", "render-process-gone"))
+            webHandler.post {
+                if (web === view) {
+                    web = null
+                    view.destroy()
+                }
+            }
+            return true
         }
     }
 
@@ -175,9 +222,10 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
     }
 
     private fun currentUrl(): String {
+        if (Looper.myLooper() == webThread.looper) return web?.url.orEmpty()
         val latch = CountDownLatch(1)
         val box = arrayOf("")
-        main.post {
+        webHandler.post {
             box[0] = web?.url.orEmpty()
             latch.countDown()
         }
@@ -188,7 +236,7 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
     private fun describe(requested: String, page: LoadedPage): String {
         val names = runCatching { cookieNames(CookieManager.getInstance().getCookie(page.finalUrl.ifBlank { requested }).orEmpty()) }.getOrDefault(emptyList())
         val classified = classifySchulnetzPage(page.finalUrl.ifBlank { requested }, page.body)
-        return "load status=${page.status} rule=${classified.rule} class=${classified.problem} bytes=${page.body.length} family=${localAddressFamily()} cookieNames=${names.joinToString("|")} error=${page.error.orEmpty()} url=${redactSchulnetzSecrets(requested)} final=${redactSchulnetzSecrets(page.finalUrl)}"
+        return "load status=${page.status} rule=${classified.rule} class=${classified.problem} bytes=${page.body.length} tables=${tableCount(page.body)} family=${localAddressFamily()} cookieNames=${names.joinToString("|")} error=${page.error.orEmpty()} page=${pageToken(requested)} final=${pageToken(page.finalUrl)}"
     }
 
     private inner class Bridge {
@@ -234,7 +282,11 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
             finish(slot, LoadedPage(slot.requested, slot.finalUrl.ifBlank { slot.requested }, slot.status, buffer.toString(), message))
         }
 
-        private fun same(gen: String): Boolean = bridgeCallAllowed(gen, pending?.nonce.orEmpty(), currentUrl())
+        private fun same(gen: String): Boolean {
+            val slot = pending ?: return false
+            val page = slot.finalUrl.ifBlank { slot.requested }
+            return bridgeCallAllowed(gen, slot.nonce, page)
+        }
     }
 
     private class Slot(val generation: Int, val requested: String, val nonce: String) {

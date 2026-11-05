@@ -1,7 +1,10 @@
 package ch.fasrv.fanotes.companion
 
+import ch.fasrv.fanotes.schulnetz.formatCrashRecord
+import ch.fasrv.fanotes.schulnetz.redactDiagnostic
 import ch.fasrv.fanotes.schulnetz.redactSchulnetzSecrets
 import java.io.File
+import java.io.FileOutputStream
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.time.Instant
@@ -18,18 +21,40 @@ class SchulnetzLog(directory: File) {
     }
 
     fun info(message: String) {
-        writeAsync(redactSchulnetzSecrets(message).replace("\r", " ").replace("\n", "\\n"))
+        write(redactDiagnostic(message), durable(message))
     }
 
     fun error(error: Throwable) {
         val writer = StringWriter()
         error.printStackTrace(PrintWriter(writer))
-        writeAsync(redactSchulnetzSecrets(writer.toString()).replace("\r\n", "\n"))
+        val text = redactDiagnostic(writer.toString())
+        write(text, durable = true)
     }
 
-    private fun writeAsync(line: String) {
-        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) io.execute { append(line) }
-        else append(line)
+    /** Crash record. Flushed to disk before the process is allowed to die. The message text is omitted. */
+    fun crash(version: String, versionCode: Int, thread: String, error: Throwable, context: String) {
+        val frames = error.stackTrace.take(24).map { "${it.className}.${it.methodName}:${it.lineNumber}" }
+        val line = formatCrashRecord(
+            Instant.now().toString(),
+            version,
+            versionCode,
+            thread,
+            error.javaClass.name,
+            frames,
+            context,
+        )
+        write(line, durable = true)
+    }
+
+    private fun durable(message: String): Boolean =
+        message.contains("CRASH") || message.contains("stundenplan") || message.contains("load begin") ||
+            message.contains("load end") || message.contains("load timeout") || message.contains("previous run") ||
+            message.contains("render process")
+
+    private fun write(line: String, durable: Boolean) {
+        val flat = line.replace("\r", " ").replace("\n", "\\n")
+        if (!durable && android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) io.execute { append(flat, false) }
+        else append(flat, durable)
     }
 
     fun rememberPage(name: String, finalUrl: String, html: String) {
@@ -53,10 +78,19 @@ class SchulnetzLog(directory: File) {
         captures.listFiles()?.filter { it.isFile }?.sortedBy { it.lastModified() }.orEmpty()
     }
 
-    private fun append(message: String) {
+    private fun append(message: String, durable: Boolean) {
         val stamp = Instant.now().toString()
+        val line = "$stamp $message\n"
         synchronized(lock) {
-            file.appendText("$stamp $message\n")
+            if (durable) {
+                FileOutputStream(file, true).use { out ->
+                    out.write(line.toByteArray())
+                    out.flush()
+                    out.fd.sync()
+                }
+            } else {
+                file.appendText(line)
+            }
             if (file.length() > MAX_BYTES) trim()
         }
     }

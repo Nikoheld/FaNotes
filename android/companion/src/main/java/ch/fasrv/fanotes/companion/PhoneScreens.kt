@@ -57,6 +57,11 @@ fun CompanionRoot(model: CompanionModel) {
         }
     }
     val route = model.route
+    LaunchedEffect(route.destination, route.page) {
+        val token = screenToken(route)
+        model.graph.trail.screen(token)
+        model.graph.trail.action("screen-$token")
+    }
     val savedScreens = rememberSaveableStateHolder()
     val barItems = presentedNavBar(model.desk.navBar, model.notesAccount)
     val barVisible = showsNavBar(route, model.plannerTasks, barItems)

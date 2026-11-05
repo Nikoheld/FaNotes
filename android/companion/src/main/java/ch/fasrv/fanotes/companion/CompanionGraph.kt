@@ -37,6 +37,8 @@ import ch.fasrv.fanotes.schulnetz.extractWebSession
 import ch.fasrv.fanotes.schulnetz.normalizeSchoolBase
 import ch.fasrv.fanotes.schulnetz.pageUrl
 import ch.fasrv.fanotes.schulnetz.sessionIdsFromPage
+import ch.fasrv.fanotes.schulnetz.exitUnclean
+import ch.fasrv.fanotes.schulnetz.redactLogcatExcerpt
 import ch.fasrv.fanotes.schulnetz.redactSchulnetzSecrets
 import ch.fasrv.fanotes.schulnetz.SessionProblem
 import ch.fasrv.fanotes.schulnetz.SchulnetzTokens
@@ -102,6 +104,7 @@ class CompanionGraph(private val context: Context) {
     val link = MutableStateFlow(SchulnetzLinkState())
     val client = SchulnetzClient()
     val schulnetzLog = SchulnetzLog(File(context.filesDir, "schulnetz"))
+    val trail = DiagnosticTrail()
     val browser = SchulnetzBrowser(context, schulnetzLog)
     val gate = SchulnetzGate()
     val loginRequests = MutableSharedFlow<Intent>(extraBufferCapacity = 1)
@@ -229,9 +232,33 @@ class CompanionGraph(private val context: Context) {
         prefs.edit().putStringSet(UNREVEALED_PREF, stored).apply()
     }
 
+    fun notePreviousExit() {
+        if (android.os.Build.VERSION.SDK_INT < 30) return
+        val manager = context.getSystemService(android.app.ActivityManager::class.java) ?: return
+        val info = runCatching { manager.getHistoricalProcessExitReasons(context.packageName, 0, 1) }.getOrNull()?.firstOrNull() ?: return
+        val token = exitReasonToken(info.reason)
+        if (!exitUnclean(token) || prefs.getLong(EXIT_SEEN, 0L) == info.timestamp) return
+        prefs.edit().putLong(EXIT_SEEN, info.timestamp).apply()
+        schulnetzLog.info("previous run did not shut down cleanly reason=$token ${trail.snapshot()}")
+        val trace = runCatching {
+            info.traceInputStream?.use { stream ->
+                val buffer = ByteArray(12_000)
+                val count = stream.read(buffer)
+                if (count <= 0) "" else String(buffer, 0, count, Charsets.UTF_8)
+            }.orEmpty()
+        }.getOrDefault("")
+        val excerpt = redactLogcatExcerpt(trace)
+        if (excerpt.isNotBlank()) schulnetzLog.info("exit trace $excerpt")
+        scope.launch {
+            val live = redactLogcatExcerpt(readOwnLogcat())
+            if (live.isNotBlank()) schulnetzLog.info("logcat $live")
+        }
+    }
+
     suspend fun refreshSchulnetz(caller: String = "unspecified") {
         if (schoolDisconnected()) return
-        schulnetzLog.info("refresh queued caller=$caller lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()}")
+        trail.caller(caller)
+        schulnetzLog.info("refresh queued caller=$caller ${trail.snapshot()} lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()}")
         withContext(Dispatchers.IO) {
             gate.exclusive("refresh:$caller") {
                 schulnetzLog.info("refresh running caller=$caller lockHeld=true holder=${gate.holder.orEmpty()}")
@@ -667,7 +694,8 @@ class CompanionGraph(private val context: Context) {
     private suspend fun refreshWebsite(previous: SchulnetzSnapshot): SchulnetzSnapshot? {
         schulnetzLog.info("refresh pages family=${SchulnetzBrowser.localAddressFamily()} signedOut=$signedOut lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()} microsoftCookies=${microsoftCookieNames()}")
         var current = readWebSession() ?: WebSession(baseUrl(), phpSessionCookie(baseUrl()), "", "")
-        var bundle = runCatching { client.fetchWeb(baseUrl(), current, browser::load, signedOut, schulnetzLog::info, previous) }.onFailure { schulnetzLog.error(it) }.getOrNull()
+        val context = trail.snapshot()
+        var bundle = runCatching { client.fetchWeb(baseUrl(), current, browser::load, signedOut, schulnetzLog::info, previous, context) }.onFailure { schulnetzLog.error(it) }.getOrNull()
         storeCaptures(bundle)
         if (bundle != null && bundle.oauthPage != null && bundle.okPages > 0) {
             val kept = recoverOauth(previous, bundle)
@@ -690,7 +718,7 @@ class CompanionGraph(private val context: Context) {
                 return null
             }
             current = silent
-            bundle = runCatching { client.fetchWeb(baseUrl(), current, browser::load, signedOut = false, trace = schulnetzLog::info, previous = previous) }.onFailure { schulnetzLog.error(it) }.getOrNull()
+            bundle = runCatching { client.fetchWeb(baseUrl(), current, browser::load, signedOut = false, trace = schulnetzLog::info, previous = previous, context = trail.snapshot()) }.onFailure { schulnetzLog.error(it) }.getOrNull()
             storeCaptures(bundle)
             if (bundle != null && bundle.oauthPage != null && bundle.okPages > 0) {
                 signedOut = false
@@ -1216,6 +1244,30 @@ class CompanionGraph(private val context: Context) {
         const val SERVER_POLL_MS = 60_000L
         private const val SILENT_AT = "schulnetz-silent-at"
         private const val SILENT_GAP_MS = 3 * 60 * 1000L
+        private const val EXIT_SEEN = "schulnetz-exit-seen"
+
+        private fun exitReasonToken(reason: Int): String = when (reason) {
+            android.app.ApplicationExitInfo.REASON_ANR -> "anr"
+            android.app.ApplicationExitInfo.REASON_CRASH -> "crash"
+            android.app.ApplicationExitInfo.REASON_CRASH_NATIVE -> "crash-native"
+            android.app.ApplicationExitInfo.REASON_LOW_MEMORY -> "low-memory"
+            android.app.ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "excessive-resource"
+            android.app.ApplicationExitInfo.REASON_SIGNALED -> "signaled"
+            android.app.ApplicationExitInfo.REASON_EXIT_SELF -> "exit-self"
+            android.app.ApplicationExitInfo.REASON_USER_REQUESTED -> "user-requested"
+            android.app.ApplicationExitInfo.REASON_USER_STOPPED -> "user-stopped"
+            else -> "other"
+        }
+
+        private fun readOwnLogcat(): String = runCatching {
+            val process = ProcessBuilder("logcat", "-d", "-t", "60", "AndroidRuntime:E", "ActivityManager:E", "*:S")
+                .redirectErrorStream(true)
+                .start()
+            val text = process.inputStream.bufferedReader().use { it.readText() }
+            process.waitFor(1, java.util.concurrent.TimeUnit.SECONDS)
+            process.destroy()
+            text
+        }.getOrDefault("")
         fun snapshotFile(context: Context) = File(context.filesDir, "schulnetz-snapshot.json")
     }
 }

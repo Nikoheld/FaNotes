@@ -15,8 +15,12 @@ import ch.fasrv.fanotes.schulnetz.SchulnetzTokens
 import ch.fasrv.fanotes.schulnetz.SessionProblem
 import ch.fasrv.fanotes.schulnetz.WebSession
 import ch.fasrv.fanotes.schulnetz.authorizationCodeForm
-import ch.fasrv.fanotes.schulnetz.describeTables
 import ch.fasrv.fanotes.schulnetz.findIcalUrl
+import ch.fasrv.fanotes.schulnetz.keepStoredRead
+import ch.fasrv.fanotes.schulnetz.pageToken
+import ch.fasrv.fanotes.schulnetz.tableCount
+import ch.fasrv.fanotes.schulnetz.terminlisteRow
+import ch.fasrv.fanotes.schulnetz.terminlisteShouldFetch
 import ch.fasrv.fanotes.schulnetz.eventQueryWindow
 import ch.fasrv.fanotes.schulnetz.examSchedulerUrl
 import ch.fasrv.fanotes.schulnetz.findSchedulerUrl
@@ -65,12 +69,16 @@ import ch.fasrv.fanotes.schulnetz.toNormalizedJson
 import ch.fasrv.fanotes.schulnetz.webReadAllowed
 import ch.fasrv.fanotes.sync.SYNC_ORIGIN
 import ch.fasrv.fanotes.sync.SyncSession
+import android.os.Looper
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.time.LocalDate
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 class SchulnetzHttpException(val status: Int, message: String) : Exception(message)
 
@@ -115,6 +123,11 @@ class SchulnetzClient(
         .writeTimeout(40, TimeUnit.SECONDS)
         .build(),
 ) {
+    /** Timetable HTML and XML are parsed here so a large page cannot run on the UI thread. */
+    private val timetableParse = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "schulnetz-parse").apply { isDaemon = true }
+    }
+
     /** Bound used by the FCM callback so a push finishes inside a few seconds. */
     private val quickHttp: OkHttpClient = http.newBuilder()
         .callTimeout(6, TimeUnit.SECONDS)
@@ -194,7 +207,7 @@ class SchulnetzClient(
         if (code !in 200..299 && code != 404) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
 
-    fun fetchWeb(baseUrl: String, session: WebSession, loader: (String) -> LoadedPage, signedOut: Boolean = false, trace: (String) -> Unit = {}, previous: SchulnetzSnapshot? = null): WebBundle {
+    fun fetchWeb(baseUrl: String, session: WebSession, loader: (String) -> LoadedPage, signedOut: Boolean = false, trace: (String) -> Unit = {}, previous: SchulnetzSnapshot? = null, context: String = ""): WebBundle {
         val root = baseUrl.trimEnd('/')
         var id = session.id
         var transid = session.transid
@@ -204,13 +217,14 @@ class SchulnetzClient(
         var oauthPage: String? = null
         var okPages = 0
         var planNote = ""
+        var planError = ""
         val captured = linkedMapOf<String, String>()
         fun remember(name: String, page: LoadedPage) {
             if (name == "stundenplan") planNote = page.note
             if (page.body.isNotBlank()) {
                 debug = page.body
                 captured[name] = page.body
-                if (!page.body.trimStart().startsWith("<?xml")) trace("markup $name ${describeTables(page.body)}")
+                if (!page.body.trimStart().startsWith("<?xml")) trace("markup $name tables=${tableCount(page.body)}")
             }
             trace("page $name")
         }
@@ -221,30 +235,44 @@ class SchulnetzClient(
             transid = found.transid
         }
         fun get(url: String, label: String, pageId: String): String {
+            val started = System.nanoTime()
+            val mainThread = Looper.myLooper() == Looper.getMainLooper()
+            val pageName = pageToken(url)
+            fun duration() = (System.nanoTime() - started) / 1_000_000
             if (isForcedLogoutUrl(url) || !webReadAllowed(url)) {
-                trace("blocked $label url=${redactSchulnetzSecrets(url)}")
-                errors += "Blockiert: ${redactSchulnetzSecrets(url)}"
+                trace("blocked $label page=$pageName mainThread=$mainThread $context")
+                errors += "Blockiert"
+                if (label == "stundenplan") planError = "blocked"
                 return ""
             }
-            trace("request $label url=${redactSchulnetzSecrets(url)}")
+            trace("request $label page=$pageName mainThread=$mainThread $context")
             val page = try {
                 loader(url)
             } catch (error: Exception) {
-                trace("exception $label ${error.javaClass.simpleName}: ${error.message}")
-                errors += error.message ?: "Laden fehlgeschlagen"
+                trace("exception $label ${error.javaClass.simpleName} durationMs=${duration()} timeout=false cancelled=false mainThread=$mainThread $context")
+                errors += "Laden fehlgeschlagen"
+                if (label == "stundenplan") planError = error.javaClass.simpleName
                 return ""
             }
             val classified = classifySchulnetzPage(page.finalUrl.ifBlank { url }, page.body)
-            trace("result $label status=${page.status} rule=${classified.rule} class=${classified.problem} bytes=${page.body.length} final=${redactSchulnetzSecrets(page.finalUrl)}")
+            val timedOut = page.error == "timeout"
+            val cancelled = page.error == "cancelled" || page.error == "render-process-gone" || page.error == "main-thread"
+            trace("result $label status=${page.status} rule=${classified.rule} class=${classified.problem} bytes=${page.body.length} durationMs=${duration()} timeout=$timedOut cancelled=$cancelled mainThread=$mainThread final=${pageToken(page.finalUrl)} $context")
+            if (label == "stundenplan") {
+                planError = page.error.orEmpty()
+                trace("stundenplan bytes=${page.body.length} tables=${tableCount(page.body)} timeout=$timedOut cancelled=$cancelled $context")
+            }
             remember(label, page)
             if (classified.problem == SessionProblem.OAUTH_FAILED) {
                 oauthPage = pageId
                 errors += sessionProblemText(classified.problem)
+                if (label == "stundenplan" && planError.isBlank()) planError = classified.problem.name
                 return ""
             }
             if (classified.problem != SessionProblem.NONE) {
                 sawSessionProblem = true
                 errors += sessionProblemText(classified.problem)
+                if (label == "stundenplan" && planError.isBlank()) planError = classified.problem.name
                 return ""
             }
             okPages += 1
@@ -286,12 +314,14 @@ class SchulnetzClient(
         val terminePages = mutableListOf(pages["22108"].orEmpty())
         if (oauthPage == null && !sawSessionProblem) {
             val seenTermine = parseTerminliste(pages["22108"].orEmpty()).map { it.id }.toMutableSet()
+            val seenRows = mutableSetOf<Int>()
             var currentRow = 0
             var next = terminlisteNextUrl(pages["22108"].orEmpty(), root, currentRow)
             var guard = 0
             while (!next.isNullOrBlank() && guard < 8) {
-                val row = Regex("""sRow=(\d+)""").find(next)?.groupValues?.get(1)?.toIntOrNull() ?: break
-                if (row <= currentRow) break
+                val row = terminlisteRow(next) ?: break
+                if (!terminlisteShouldFetch(next, currentRow, seenRows)) break
+                seenRows += row
                 val body = get(next, "termine", "22108")
                 if (body.isBlank()) break
                 val ids = parseTerminliste(body).map { it.id }
@@ -325,94 +355,136 @@ class SchulnetzClient(
         )
         val discovered = findSchedulerUrl(planHtml, root)
         val fromPlan = parseSchedulerNote(planNote)
+        val callerMain = Looper.myLooper() == Looper.getMainLooper()
+        var parseFailed = false
+        val parseStarted = System.nanoTime()
+        trace("parse stundenplan begin mainThread=$callerMain bytes=${planHtml.length} tables=${tableCount(planHtml)} weeksRequested=${plan.fetch.size} $context")
         trace("scheduler source=${if (discovered != null) "page" else "built"} weeks=${plan.fetch.size} ical=${plan.fetchIcal} domEvents=${fromPlan.second.size}")
-        val canFetch = oauthPage == null && !sawSessionProblem && planHtml.isNotBlank() && id.isNotBlank() && transid.isNotBlank()
+        fun <T> offMain(label: String, block: () -> T): T? {
+            if (callerMain) {
+                parseFailed = true
+                trace("parse $label skipped reason=main-thread $context")
+                return null
+            }
+            val future = timetableParse.submit(Callable<T> { block() })
+            return try {
+                future.get(8, TimeUnit.SECONDS)
+            } catch (timeout: TimeoutException) {
+                future.cancel(true)
+                parseFailed = true
+                trace("parse $label timeout durationMs=8000 mainThread=false $context")
+                null
+            } catch (error: Exception) {
+                val cause = (error as? java.util.concurrent.ExecutionException)?.cause ?: error
+                parseFailed = true
+                trace("parse $label failed ${cause.javaClass.simpleName} mainThread=false $context")
+                null
+            }
+        }
+        val canFetch = oauthPage == null && !sawSessionProblem && planHtml.isNotBlank() && id.isNotBlank() && transid.isNotBlank() && planError.isBlank()
         val lessonWeeks = linkedMapOf<java.time.LocalDate, List<ch.fasrv.fanotes.schulnetz.AgendaEvent>>()
         val examWeeks = linkedMapOf<java.time.LocalDate, List<ch.fasrv.fanotes.schulnetz.AgendaEvent>>()
-        if (canFetch) {
+        if (canFetch && !callerMain) {
             for (monday in plan.fetch) {
-                if (oauthPage != null || sawSessionProblem) break
+                if (oauthPage != null || sawSessionProblem || parseFailed) break
                 val max = monday.plusDays(7)
                 val curr = if (monday == weekMonday(today)) today.toString() else monday.toString()
                 val lessonBody = get(schedulerUrl(root, id, transid, curr, monday.toString(), max.toString()), "scheduler", "scheduler")
-                val lessonParsed = if (schedulerWeekLoaded(lessonBody)) parseSchedulerXml(lessonBody) else emptyList()
+                val lessonParsed = if (schedulerWeekLoaded(lessonBody)) offMain("scheduler-xml") { parseSchedulerXml(lessonBody) } else emptyList()
+                if (lessonParsed == null) break
                 if (lessonParsed.isNotEmpty()) lessonWeeks[monday] = lessonParsed
-                if (oauthPage != null || sawSessionProblem) break
+                if (oauthPage != null || sawSessionProblem || parseFailed) break
                 val examBody = get(examSchedulerUrl(root, id, transid, curr, monday.toString(), max.toString()), "pruefungen-xml", "21312")
                 val examParsed = if (schedulerWeekLoaded(examBody)) {
-                    parseSchedulerXml(examBody).map { event ->
-                        event.copy(eventType = if (event.eventType.isBlank() || event.eventType == "lesson") "exam" else event.eventType)
+                    offMain("exam-xml") {
+                        parseSchedulerXml(examBody).map { event ->
+                            event.copy(eventType = if (event.eventType.isBlank() || event.eventType == "lesson") "exam" else event.eventType)
+                        }
                     }
                 } else {
                     emptyList()
                 }
+                if (examParsed == null) break
                 if (examParsed.isNotEmpty()) examWeeks[monday] = examParsed
             }
+        } else if (canFetch) {
+            parseFailed = true
         }
         val currentMonday = weekMonday(today)
-        if (currentMonday !in lessonWeeks && canFetch) {
-            val rendered = parseRenderedTimetable(planHtml)
-            val fallback = when {
-                rendered.isNotEmpty() -> rendered
-                fromPlan.second.isNotEmpty() -> fromPlan.second
-                else -> parseTimetableHtml(planHtml)
+        if (currentMonday !in lessonWeeks && canFetch && !parseFailed) {
+            val fallback = offMain("stundenplan-html") {
+                val rendered = parseRenderedTimetable(planHtml)
+                when {
+                    rendered.isNotEmpty() -> rendered
+                    fromPlan.second.isNotEmpty() -> fromPlan.second
+                    else -> parseTimetableHtml(planHtml)
+                }
             }
-            if (fallback.isNotEmpty()) lessonWeeks[currentMonday] = fallback
+            if (fallback?.isNotEmpty() == true) lessonWeeks[currentMonday] = fallback
         }
-        if (currentMonday !in examWeeks && exams.value.isNotEmpty()) examWeeks[currentMonday] = exams.value
+        if (currentMonday !in examWeeks && exams.value.isNotEmpty() && !parseFailed && planError.isBlank()) examWeeks[currentMonday] = exams.value
+        val expectedPlan = oauthPage == null && !sawSessionProblem && id.isNotBlank() && transid.isNotBlank()
+        val timetableFailed = planError.isNotBlank() || parseFailed || (expectedPlan && planHtml.isBlank())
+        if (timetableFailed) {
+            lessonWeeks.clear()
+            examWeeks.clear()
+        }
         val refreshedLessons = lessonWeeks.keys.map { it.toString() }.toSet()
+        trace("parse stundenplan end weeksRequested=${plan.fetch.size} weeksReceived=${refreshedLessons.size} durationMs=${(System.nanoTime() - parseStarted) / 1_000_000} mainThread=$callerMain bytes=${planHtml.length} tables=${tableCount(planHtml)} $context")
         var events = overlayLessons(previous?.events.orEmpty(), lessonWeeks.values.flatten(), refreshedLessons)
         var span = knownSpan
         var icalAt = previous?.icalFetchedAt.orEmpty()
         val stamps = previous?.weekFetched.orEmpty().toMutableMap()
-        if (canFetch) for (monday in refreshedLessons) stamps[monday] = fetchedNow
+        if (canFetch && !timetableFailed) for (monday in refreshedLessons) stamps[monday] = fetchedNow
         var icalExams = emptyList<ch.fasrv.fanotes.schulnetz.AgendaEvent>()
-        if (canFetch && plan.fetchIcal && icalAvailable) {
+        if (canFetch && !timetableFailed && plan.fetchIcal && icalAvailable) {
             val body = get(icalUrl.orEmpty(), "ical", "ical")
             if (icalBodyUsable(body)) {
-                val parsed = parseIcs(body)
-                icalAt = fetchedNow
-                if (htmlSpan == null) spanOfEvents(parsed)?.let { span = it }
-                val covered = if (span != null) mondaysBetween(span.start, span.end).map { it.toString() }.toSet() else parsed.mapNotNull { weekMondayKey(it.start) }.toSet()
-                events = overlayLessons(events, parsed, covered - refreshedLessons)
-                icalExams = parsed.filter { it.isExamLike() }
-                for (monday in covered - refreshedLessons) stamps[monday] = fetchedNow
+                val parsed = offMain("ical") { parseIcs(body) }
+                if (parsed != null) {
+                    icalAt = fetchedNow
+                    if (htmlSpan == null) spanOfEvents(parsed)?.let { span = it }
+                    val covered = if (span != null) mondaysBetween(span.start, span.end).map { it.toString() }.toSet() else parsed.mapNotNull { weekMondayKey(it.start) }.toSet()
+                    events = overlayLessons(events, parsed, covered - refreshedLessons)
+                    icalExams = parsed.filter { it.isExamLike() }
+                    for (monday in covered - refreshedLessons) stamps[monday] = fetchedNow
+                }
             }
         }
         if (termine.value.isNotEmpty()) events = mergeById(events, termine.value)
-        var examEvents = mergeById(
+        val examEvents = mergeById(
             mergeById(
                 overlayDated(previous?.exams.orEmpty(), examWeeks.values.flatten(), examWeeks.keys.map { it.toString() }.toSet()),
                 lessonWeeks.values.flatten().filter { it.isExamLike() },
             ),
             icalExams,
         )
-        var messages = startMessages(pages["1"].orEmpty(), previous, sawSessionProblem)
-        if (sawSessionProblem) {
-            if (events.isEmpty()) events = previous?.events.orEmpty()
-            else if (events.none { it.isLesson() }) events = previous?.events.orEmpty().filter { it.isLesson() } + events
-            if (examEvents.isEmpty()) examEvents = previous?.exams.orEmpty()
-            if (messages.isEmpty()) messages = previous?.messages.orEmpty()
-        }
-        if (events.isEmpty() && planHtml.length > 1000 && !planHtml.contains("dhx_cal_container")) {
+        val messages = startMessages(pages["1"].orEmpty(), previous, sawSessionProblem)
+        if (events.isEmpty() && planHtml.length > 1000 && !planHtml.contains("dhx_cal_container") && !timetableFailed) {
             errors += "Stundenplan: Seite geladen, aber nicht lesbar"
         }
-        trace("parsed grades=${grades.value.size} absences=${absences.value.size} exams=${examEvents.size} events=${events.size} termine=${termine.value.size} weeks=${refreshedLessons.size} okPages=$okPages oauth=${oauthPage.orEmpty()} errors=${errors.size}")
-        val snapshot = SchulnetzSnapshot(
-            fetchedAt = fetchedNow,
-            grades = grades.value,
-            events = events,
-            exams = examEvents,
-            absences = absences.value,
-            messages = messages,
-            konto = parseKontoauszug(pages["21411"].orEmpty()),
-            startMessages = parseStartMessages(pages["1"].orEmpty()),
-            readErrors = errors,
-            weekFetched = stamps,
-            weekSpanStart = span?.start?.toString().orEmpty(),
-            weekSpanEnd = span?.end?.toString().orEmpty(),
-            icalFetchedAt = icalAt,
+        val blocked = sawSessionProblem || pages["1"].isNullOrBlank()
+        val snapshot = keepStoredRead(
+            previous,
+            SchulnetzSnapshot(
+                fetchedAt = fetchedNow,
+                grades = grades.value,
+                events = events,
+                exams = examEvents,
+                absences = absences.value,
+                messages = messages,
+                konto = parseKontoauszug(pages["21411"].orEmpty()),
+                startMessages = parseStartMessages(pages["1"].orEmpty()),
+                readErrors = errors,
+                weekFetched = stamps,
+                weekSpanStart = span?.start?.toString().orEmpty(),
+                weekSpanEnd = span?.end?.toString().orEmpty(),
+                icalFetchedAt = icalAt,
+            ),
+            blocked = blocked,
+            timetableFailed = timetableFailed,
         )
+        trace("parsed grades=${snapshot.grades.size} absences=${snapshot.absences.size} exams=${snapshot.exams.size} events=${snapshot.events.size} termine=${termine.value.size} weeks=${if (timetableFailed) 0 else refreshedLessons.size} okPages=$okPages oauth=${oauthPage.orEmpty()} blocked=$blocked timetableFailed=$timetableFailed errors=${errors.size} $context")
         val problem = when {
             oauthPage != null -> SessionProblem.OAUTH_FAILED
             errors.any { it == "Bei Schulnetz neu anmelden" } -> SessionProblem.INTERACTIVE
