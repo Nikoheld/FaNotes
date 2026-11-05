@@ -1,5 +1,7 @@
 package ch.fasrv.fanotes.famd
 
+import ch.fasrv.fanotes.json.JsonLimits
+import ch.fasrv.fanotes.json.JsonLimitException
 import ch.fasrv.fanotes.json.JsonParseException
 import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.deepCopy
@@ -115,10 +117,14 @@ private fun isFamdSidecarJson(value: String): Boolean {
     }
 }
 
-fun parseFamd(source: String): FamdDocument {
+fun parseFamd(
+    source: String,
+    unpackPoints: Boolean = true,
+    limits: JsonLimits = JsonLimits(),
+): FamdDocument {
     val markdown = stripFamdPayload(source)
     if (source.isEmpty()) return FamdDocument("", null)
-    if (isActiveV2(source)) return FamdDocument(markdown, readV2Payload(source))
+    if (isActiveV2(source)) return FamdDocument(markdown, readV2Payload(source, unpackPoints, limits))
     val match = HEADER.findAll(source).lastOrNull() ?: return FamdDocument(markdown, null)
     val length = match.groupValues[1].toIntOrNull() ?: return FamdDocument(markdown, null)
     if (length < 2 || length > MAX_JSON_CHARS) return FamdDocument(markdown, null)
@@ -127,7 +133,9 @@ fun parseFamd(source: String): FamdDocument {
     val json = source.substring(start, start + length)
     if (json.length != length) return FamdDocument(markdown, null)
     val parsed = try {
-        parseJson(json) as? JsonValue.Obj
+        parseJson(json, limits) as? JsonValue.Obj
+    } catch (error: JsonLimitException) {
+        throw error
     } catch (_: JsonParseException) {
         null
     } ?: return FamdDocument(markdown, null)
@@ -166,14 +174,14 @@ fun serializeFamd(markdown: String, payload: JsonValue.Obj, encoding: String = "
     val updatedAt = payload.string("updatedAt")?.takeIf { it.isNotBlank() } ?: isoNow()
     next.put("updatedAt", jsonString(updatedAt))
     val ink = payload.obj("ink")
-    next.put("ink", ink?.deepCopy() ?: jsonNull())
+    next.put("ink", ink ?: jsonNull())
     next.put("worksheets", JsonValue.Arr(worksheetValues.toMutableList()))
     val paper = payload.string("paperStyle")
     if (isPaperStyle(paper)) next.put("paperStyle", jsonString(paper!!))
     copyIfArray(payload, next, "noteLinks")
     copyIfArray(payload, next, "noteBackups")
     payload["pageStats"]?.let { stats ->
-        if (stats is JsonValue.Obj) next.put("pageStats", stats.deepCopy())
+        if (stats is JsonValue.Obj) next.put("pageStats", stats)
     }
     copyIfArray(payload, next, "textFields")
     if (encoding == "v2") return encodeV2Document(body, next)
@@ -185,7 +193,7 @@ fun serializeFamd(markdown: String, payload: JsonValue.Obj, encoding: String = "
 private fun copyIfArray(from: JsonValue.Obj, to: JsonValue.Obj, key: String) {
     val value = from[key] as? JsonValue.Arr ?: return
     if (value.items.isEmpty()) return
-    to.put(key, value.deepCopy())
+    to.put(key, value)
 }
 
 fun isoNow(epochMs: Long = System.currentTimeMillis()): String {

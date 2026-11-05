@@ -255,6 +255,8 @@ class SyncApi(
                 val response = transport.execute(request)
                 if (response.status in 200..299) return response
                 throw parseError(response)
+            } catch (error: ch.fasrv.fanotes.famd.SyncDocumentLimitException) {
+                throw error // A resource limit is not a transient network failure.
             } catch (error: SyncApiError) {
                 throw error
             } catch (error: Exception) {

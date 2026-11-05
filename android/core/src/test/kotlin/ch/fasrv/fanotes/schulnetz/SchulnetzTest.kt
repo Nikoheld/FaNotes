@@ -857,7 +857,7 @@ class ReadGuardTest {
         assertFalse(line.contains("https://"))
         val excerpt = redactLogcatExcerpt(
             """
-            E AndroidRuntime: FATAL EXCEPTION: main Process: ch.fasrv.kantiplus
+            E AndroidRuntime: FATAL EXCEPTION: main Process: ch.fasrv.kantiplus Student Example course Alpha grade 5.5
             E AndroidRuntime: FATAL EXCEPTION: main Process: com.other.app
             E ActivityManager: ANR in ch.fasrv.kantiplus https://www.schulnetz-ag.ch/aksa/index.php?pageid=22202&id=secret
             I chatter: hello ch.fasrv.kantiplus
@@ -865,6 +865,8 @@ class ReadGuardTest {
         )
         assertTrue(excerpt.contains("ch.fasrv.kantiplus"))
         assertFalse(excerpt.contains("com.other.app"))
+        assertFalse(excerpt.contains("Student Example"))
+        assertFalse(excerpt.contains("5.5"))
         assertFalse(excerpt.contains("hello"))
         assertFalse(excerpt.contains("secret"))
         assertFalse(excerpt.contains("https://"))

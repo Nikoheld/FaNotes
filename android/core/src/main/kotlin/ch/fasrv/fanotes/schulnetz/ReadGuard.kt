@@ -61,7 +61,11 @@ fun redactLogcatExcerpt(raw: String): String {
         .map { it.trim() }
         .filter { it.isNotEmpty() && logcatLineKept(it) }
         .take(12)
-        .joinToString(" | ") { redactDiagnostic(it).take(240) }
+        .joinToString(" | ") { line ->
+            val app = if (line.contains("ch.fasrv.kantiplus")) "ch.fasrv.kantiplus" else "ch.fasrv.fanotes"
+            val kind = if (line.contains("anr", ignoreCase = true)) "anr" else "fatal"
+            "$kind process=$app" // Arbitrary logcat messages may contain names or note content.
+        }
         .take(1800)
 }
 
@@ -113,6 +117,18 @@ fun terminlistePagesFetched(pages: List<String>, baseUrl: String): Int {
     return fetched
 }
 
+/** Headers are never subjects, even when a permissive fallback found numeric cells below them. */
+fun placeholderCourse(value: String): Boolean {
+    val words = value.lowercase().trim().split(Regex("[^a-zäöü]+" )).filter { it.isNotBlank() }
+    return words.isEmpty() || words.all { it in setOf("fach", "kurs", "course", "subject") }
+}
+
+private val GRADE_READ_FAILURE = Regex("inaktivit|ip.adresse|neu anmelden|anmeldung|login|not(en|es):.*(nicht lesbar|failed)", RegexOption.IGNORE_CASE)
+fun SchulnetzSnapshot.trustedGradeRead(): Boolean = gradesReadComplete && readErrors.none { GRADE_READ_FAILURE.containsMatchIn(it) }
+
+fun keepGradeRead(previous: List<SchoolGrade>, next: List<SchoolGrade>, complete: Boolean): List<SchoolGrade> =
+    if (!complete || next.isEmpty() || next.any { placeholderCourse(it.courseLabel) }) previous else next
+
 /**
  * A blocked start page or a failed timetable read must not replace the stored plan.
  * [blocked] is an IP rejection, inactivity page, login wall, or empty start page.
@@ -123,10 +139,14 @@ fun keepStoredRead(
     next: SchulnetzSnapshot,
     blocked: Boolean,
     timetableFailed: Boolean,
+    okPages: Int = 1,
+    gradesComplete: Boolean = true,
 ): SchulnetzSnapshot {
-    val prior = previous ?: return next
-    if (!blocked && !timetableFailed) return next
-    var grades = next.grades
+    val trustedGrades = !blocked && okPages > 0 && gradesComplete
+    val grades = keepGradeRead(previous?.grades.orEmpty(), next.grades, trustedGrades)
+    val guarded = next.copy(grades = grades, gradesReadComplete = trustedGrades)
+    val prior = previous ?: return guarded
+    if (!blocked && okPages > 0 && !timetableFailed) return guarded
     var events = next.events
     var exams = next.exams
     var messages = next.messages
@@ -136,8 +156,7 @@ fun keepStoredRead(
     var weekFetched = next.weekFetched
     var weekSpanStart = next.weekSpanStart
     var weekSpanEnd = next.weekSpanEnd
-    if (blocked) {
-        if (grades.isEmpty()) grades = prior.grades
+    if (blocked || okPages == 0) {
         if (exams.isEmpty()) exams = prior.exams
         if (messages.isEmpty()) messages = prior.messages
         if (absences.isEmpty()) absences = prior.absences
@@ -158,7 +177,7 @@ fun keepStoredRead(
         if (weekSpanStart.isBlank()) weekSpanStart = prior.weekSpanStart
         if (weekSpanEnd.isBlank()) weekSpanEnd = prior.weekSpanEnd
     }
-    return next.copy(
+    return guarded.copy(
         grades = grades,
         events = events,
         exams = exams,

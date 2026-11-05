@@ -64,6 +64,7 @@ import ch.fasrv.fanotes.schulnetz.serializeHiddenLessons
 import ch.fasrv.fanotes.sync.SyncApi
 import ch.fasrv.fanotes.sync.SyncEngine
 import ch.fasrv.fanotes.sync.SyncEngineOptions
+import ch.fasrv.fanotes.schulnetz.trustedGradeRead
 import ch.fasrv.fanotes.sync.SyncHost
 import ch.fasrv.fanotes.sync.SyncScanEntry
 import ch.fasrv.fanotes.vault.DirectoryVault
@@ -148,6 +149,7 @@ class CompanionGraph(private val context: Context) {
             automatic = { true },
             isPathBusy = { path -> path in busyPaths },
             onApplied = { _, _ -> vaultChanges.tryEmit(Unit) },
+            onDiagnostic = schulnetzLog::info,
         ),
     )
 
@@ -334,8 +336,7 @@ class CompanionGraph(private val context: Context) {
 
     fun logNoteCensus() {
         val census = censusNotes(store.tree(), setOf(HOMEWORK_NOTE_PATH, CALENDAR_NOTE_PATH))
-        val detail = census.perFolder.entries.joinToString(",") { (folder, count) -> "$folder:$count" }
-        schulnetzLog.info("notes fetched=${census.notes} folders=${census.folders} perFolder=$detail")
+        schulnetzLog.info("notes fetched=${census.notes} folders=${census.folders}")
     }
 
     fun homework(): HomeworkDocument {
@@ -564,7 +565,7 @@ class CompanionGraph(private val context: Context) {
                         prefs.edit().putLong("last-check", System.currentTimeMillis()).putString("last-check-error", "").apply()
                     }
                     val body = runCatching { client.snapshot(session) }.getOrNull()
-                    val next = body?.let { parseNormalizedSnapshot(it) }
+                    val next = body?.let { parseNormalizedSnapshot(it) }?.let { keepLoaded(snapshot.value, it) }
                     if (next != null && next.fetchedAt.isNotBlank()) {
                         snapshot.value = next
                         writeCache(next)
@@ -908,7 +909,7 @@ class CompanionGraph(private val context: Context) {
     }
 
     private fun keepLoaded(previous: SchulnetzSnapshot, next: SchulnetzSnapshot): SchulnetzSnapshot = next.copy(
-        grades = next.grades.ifEmpty { previous.grades },
+        grades = ch.fasrv.fanotes.schulnetz.keepGradeRead(previous.grades, next.grades, next.trustedGradeRead()),
         absences = next.absences.ifEmpty { previous.absences },
         events = next.events.ifEmpty { previous.events },
         exams = next.exams.ifEmpty { previous.exams },
@@ -994,7 +995,8 @@ class CompanionGraph(private val context: Context) {
         engine.notifyLocalChange()
     }
 
-    private fun publishSnapshot(previous: SchulnetzSnapshot?, next: SchulnetzSnapshot, settings: NotifySettings) {
+    private fun publishSnapshot(previous: SchulnetzSnapshot?, incoming: SchulnetzSnapshot, settings: NotifySettings) {
+        val next = incoming.copy(grades = ch.fasrv.fanotes.schulnetz.keepGradeRead(previous?.grades.orEmpty(), incoming.grades, incoming.trustedGradeRead()))
         val hidden = hiddenLessons()
         val local = notifySettings()
         val effective = settings.copy(guessGrades = local.guessGrades)

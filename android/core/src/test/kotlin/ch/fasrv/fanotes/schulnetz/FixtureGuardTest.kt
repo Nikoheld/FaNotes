@@ -17,6 +17,8 @@ class FixtureGuardTest {
             "agenda.html",
             "kontoauszug.html",
             "noten.html",
+            "noten-multi-course.html",
+            "blocked-start-grades.html",
             "pruefungsplan.html",
             "start.html",
             "stundenplan.html",

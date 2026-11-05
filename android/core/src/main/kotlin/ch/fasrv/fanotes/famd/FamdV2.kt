@@ -1,5 +1,7 @@
 package ch.fasrv.fanotes.famd
 
+import ch.fasrv.fanotes.json.JsonLimits
+import ch.fasrv.fanotes.json.JsonLimitException
 import ch.fasrv.fanotes.json.JsonParseException
 import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.deepCopy
@@ -8,6 +10,7 @@ import ch.fasrv.fanotes.json.jsonNumber
 import ch.fasrv.fanotes.json.jsonString
 import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.json.stringify
+import ch.fasrv.fanotes.json.shape
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.zip.CRC32
@@ -68,36 +71,45 @@ fun v2CutIndex(source: String): Int {
     }
 }
 
-fun readV2Payload(source: String): JsonValue.Obj {
+fun readV2Payload(
+    source: String,
+    unpackPoints: Boolean = true,
+    limits: JsonLimits = JsonLimits(),
+): JsonValue.Obj {
     val located = locateV2(source) ?: throw FamdCorruptException("missing famd v2 header")
     if (located.jsonStart + located.length > source.length) throw FamdCorruptException("truncated famd v2 payload")
     val json = source.substring(located.jsonStart, located.jsonStart + located.length)
     if (json.length != located.length) throw FamdCorruptException("truncated famd v2 payload")
     if (crcHex(json) != located.crc) throw FamdCorruptException("famd v2 checksum")
     val parsed = try {
-        parseJson(json) as? JsonValue.Obj
+        parseJson(json, limits) as? JsonValue.Obj
+    } catch (error: JsonLimitException) {
+        throw error
     } catch (_: JsonParseException) {
         null
     } ?: throw FamdCorruptException("famd v2 json")
     if (parsed.string("schema") != FAMD_V2_SCHEMA) throw FamdCorruptException("famd v2 schema")
     val ink = parsed["ink"]
-    if (ink != null) parsed.put("ink", unpackInk(ink))
+    if (ink != null) {
+        if (unpackPoints) parsed.put("ink", unpackInk(ink)) else validatePackedInk(ink)
+    }
     parsed.put("schema", jsonString(FAMD_SCHEMA))
     return parsed
 }
 
 fun encodeV2Document(body: String, payload: JsonValue.Obj): String {
+    payload.shape() // Reject cycles/depth/size before packing allocates buffers.
     val stored = JsonValue.Obj()
     stored.put("schema", jsonString(FAMD_V2_SCHEMA))
-    stored.put("updatedAt", (payload["updatedAt"] ?: jsonString(isoNow())).deepCopy())
+    stored.put("updatedAt", payload["updatedAt"] ?: jsonString(isoNow()))
     stored.put("ink", packInk(payload["ink"]))
-    stored.put("worksheets", (payload["worksheets"] ?: JsonValue.Arr()).deepCopy())
+    stored.put("worksheets", payload["worksheets"] ?: JsonValue.Arr())
     val paper = payload.string("paperStyle")
     if (isPaperStyle(paper)) stored.put("paperStyle", jsonString(paper!!))
     copyArray(payload, stored, "noteLinks")
     copyArray(payload, stored, "noteBackups")
     val stats = payload["pageStats"]
-    if (stats is JsonValue.Obj) stored.put("pageStats", stats.deepCopy())
+    if (stats is JsonValue.Obj) stored.put("pageStats", stats)
     copyArray(payload, stored, "textFields")
     val json = stored.stringify()
     val header = "<!-- fanotes-famd:v2 chars=${json.length} crc=${crcHex(json)} -->\n"
@@ -121,7 +133,7 @@ private fun locateV2(source: String): LocatedV2? {
 private fun copyArray(from: JsonValue.Obj, to: JsonValue.Obj, key: String) {
     val value = from[key] as? JsonValue.Arr ?: return
     if (value.items.isEmpty()) return
-    to.put(key, value.deepCopy())
+    to.put(key, value)
 }
 
 private fun encode85(bytes: ByteArray): String {
@@ -142,6 +154,46 @@ private fun encode85(bytes: ByteArray): String {
         index += 4
     }
     return out.toString()
+}
+
+/** Same packed-block checks as unpacking, without allocating bytes or point maps. */
+private fun validate85(value: String, word: (Long, Int) -> Unit = { _, _ -> }) {
+    if (value.length % 5 != 0) throw FamdCorruptException("famd v2 point block")
+    var index = 0
+    while (index < value.length) {
+        var number = 0L
+        for (digit in 0 until 5) {
+            val code = value[index + digit].code
+            val decoded = if (code < 128) FAMD85_INDEX[code] else -1
+            if (decoded < 0) throw FamdCorruptException("famd v2 point block")
+            number = number * 85 + decoded
+        }
+        if (number > 0xFFFFFFFFL) throw FamdCorruptException("famd v2 point block")
+        word(number, index / 5 * 4)
+        index += 5
+    }
+}
+
+private fun validatePackedInk(ink: JsonValue) {
+    val strokes = (ink as? JsonValue.Obj)?.array("strokes") ?: return
+    for (stroke in strokes.items) {
+        val obj = stroke as? JsonValue.Obj ?: continue
+        val packed = obj.string("famdPts") ?: continue
+        if (packed.length % 45 != 0) throw FamdCorruptException("famd v2 point block length")
+        validate85(packed)
+        val count = packed.length / 45
+        val list = obj.array("famdPtrList")
+        val indices = obj.string("famdPtrIdx")
+        if (list != null && indices != null) {
+            if (indices.length / 5 * 4 < count) throw FamdCorruptException("famd v2 pointer index")
+            validate85(indices) { number, offset ->
+                for (byte in 0 until minOf(4, count - offset)) {
+                    val code = ((number ushr (24 - byte * 8)) and 0xFF).toInt()
+                    if (code != 255 && list.items.getOrNull(code) !is JsonValue.Str) throw FamdCorruptException("famd v2 pointer index")
+                }
+            }
+        }
+    }
 }
 
 private fun decode85(value: String): ByteArray {
@@ -192,7 +244,7 @@ private fun pointExtras(point: JsonValue.Obj?, keepPointer: Boolean): JsonValue.
     val extra = JsonValue.Obj()
     for ((key, value) in point.fields) {
         if (key in PACKED_POINT_KEYS && (key != "pointerType" || !keepPointer)) continue
-        extra.fields[key] = value.deepCopy()
+        extra.fields[key] = value
     }
     return extra.takeIf { it.fields.isNotEmpty() }
 }
@@ -228,6 +280,7 @@ private fun packPointer(points: JsonValue.Arr): PackedPointer {
 }
 
 private fun packPoints(points: JsonValue.Arr, keepPointer: Boolean): Pair<String, JsonValue.Arr?> {
+    if (points.items.size > MAX_PAYLOAD_CHARS / 45) throw FamdCorruptException("famd v2 point limit")
     val buffer = ByteBuffer.allocate(points.items.size * POINT_STRIDE).order(ByteOrder.LITTLE_ENDIAN)
     val extras = JsonValue.Arr()
     var anyExtra = false
@@ -248,11 +301,11 @@ private fun packPoints(points: JsonValue.Arr, keepPointer: Boolean): Pair<String
 
 private fun packStroke(stroke: JsonValue): JsonValue {
     val obj = stroke as? JsonValue.Obj ?: return stroke
-    val points = obj.array("points") ?: return stroke.deepCopy()
+    val points = obj.array("points") ?: return stroke
     val next = JsonValue.Obj()
     for ((key, value) in obj.fields) {
         if (key in PACKED_STROKE_KEYS) continue
-        next.fields[key] = value.deepCopy()
+        next.fields[key] = value
     }
     val pointer = packPointer(points)
     val (encoded, extra) = packPoints(points, pointer.overflow)
@@ -268,10 +321,10 @@ private fun packStroke(stroke: JsonValue): JsonValue {
 
 private fun packInk(ink: JsonValue?): JsonValue {
     val obj = ink as? JsonValue.Obj ?: return ink ?: jsonNull()
-    val strokes = obj.array("strokes") ?: return obj.deepCopy()
+    val strokes = obj.array("strokes") ?: return obj
     val next = JsonValue.Obj()
     for ((key, value) in obj.fields) {
-        if (key != "strokes") next.fields[key] = value.deepCopy()
+        if (key != "strokes") next.fields[key] = value
     }
     next.put("strokes", JsonValue.Arr(strokes.items.map(::packStroke).toMutableList()))
     return next
@@ -330,7 +383,8 @@ private fun unpackStroke(stroke: JsonValue): JsonValue {
 private fun unpackInk(ink: JsonValue): JsonValue {
     val obj = ink as? JsonValue.Obj ?: return ink
     val strokes = obj.array("strokes") ?: return ink
-    val next = obj.deepCopy() as JsonValue.Obj
+    val next = JsonValue.Obj()
+    for ((key, value) in obj.fields) if (key != "strokes") next.put(key, value.deepCopy())
     next.put("strokes", JsonValue.Arr(strokes.items.map(::unpackStroke).toMutableList()))
     return next
 }

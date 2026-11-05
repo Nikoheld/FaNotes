@@ -275,6 +275,10 @@ class SchulnetzClient(
                 if (label == "stundenplan" && planError.isBlank()) planError = classified.problem.name
                 return ""
             }
+            if (page.error != null || page.status !in 200..299 || page.body.isBlank()) {
+                errors += "Laden fehlgeschlagen"
+                return ""
+            }
             okPages += 1
             adopt(page)
             return page.body
@@ -306,9 +310,8 @@ class SchulnetzClient(
             }
             pages[pageId] = get(url, label, pageId)
         }
-        val grades = readGradesPage(pages["21311"].orEmpty()).let { read ->
-            if (read.value.isNotEmpty()) read else read.copy(value = parseStartRecentGrades(pages["1"].orEmpty()))
-        }
+        // The start page contains recent marks, not a complete grade book.
+        val grades = readGradesPage(pages["21311"].orEmpty())
         val absences = readAbsencesPage(pages["21111"].orEmpty())
         val exams = readExamsPage(pages["21312"].orEmpty())
         val terminePages = mutableListOf(pages["22108"].orEmpty())
@@ -483,6 +486,8 @@ class SchulnetzClient(
             ),
             blocked = blocked,
             timetableFailed = timetableFailed,
+            okPages = okPages,
+            gradesComplete = !pages["21311"].isNullOrBlank() && grades.error == null,
         )
         trace("parsed grades=${snapshot.grades.size} absences=${snapshot.absences.size} exams=${snapshot.exams.size} events=${snapshot.events.size} termine=${termine.value.size} weeks=${if (timetableFailed) 0 else refreshedLessons.size} okPages=$okPages oauth=${oauthPage.orEmpty()} blocked=$blocked timetableFailed=$timetableFailed errors=${errors.size} $context")
         val problem = when {
@@ -518,7 +523,10 @@ class SchulnetzClient(
     }
 
     fun mergePage(snapshot: SchulnetzSnapshot, pageId: String, html: String): SchulnetzSnapshot = when (pageId) {
-        "21311" -> snapshot.copy(grades = readGradesPage(html).value.ifEmpty { snapshot.grades })
+        "21311" -> readGradesPage(html).let { read ->
+            snapshot.copy(grades = ch.fasrv.fanotes.schulnetz.keepGradeRead(snapshot.grades, read.value, read.error == null),
+                gradesReadComplete = read.error == null && read.value.isNotEmpty())
+        }
         "21111" -> snapshot.copy(absences = readAbsencesPage(html).value.ifEmpty { snapshot.absences })
         "21312" -> snapshot.copy(exams = readExamsPage(html).value.ifEmpty { snapshot.exams })
         "22108" -> snapshot.copy(events = (snapshot.events + readTerminliste(html).value).distinctBy { it.id })

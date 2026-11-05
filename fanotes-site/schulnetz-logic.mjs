@@ -690,10 +690,18 @@ export const settleGradeNotifications = (changes, grades, ledger) => {
 }
 
 /** A failed or empty scrape must not wipe a grade list that was already loaded. */
-export const keepLoadedGrades = (previousGrades, nextGrades) => {
+export const placeholderCourse = (value) => {
+  const words = String(value || '').toLowerCase().trim().split(/[^a-zäöü]+/u).filter(Boolean)
+  return words.length === 0 || words.every((word) => ['fach', 'kurs', 'course', 'subject'].includes(word))
+}
+
+export const trustedGradeRead = (snapshot) => snapshot?.gradesReadComplete !== false &&
+  !(snapshot?.readErrors || []).some((error) => /inaktivit|ip.adresse|neu anmelden|anmeldung|login|not(en|es):.*(nicht lesbar|failed)/iu.test(String(error)))
+
+export const keepLoadedGrades = (previousGrades, nextGrades, complete = true) => {
   const next = Array.isArray(nextGrades) ? nextGrades : []
   const prev = Array.isArray(previousGrades) ? previousGrades : []
-  if (next.length === 0 && prev.length > 0) return prev
+  if (!complete || next.length === 0 || next.some((grade) => placeholderCourse(grade.course || grade.subject || grade.courseId))) return prev
   return next
 }
 export const eventLabel = (event) => cleanSchulnetzText(event.courseName) || cleanSchulnetzText(event.text) || cleanSchulnetzText(event.timetableText) || 'Lektion'
@@ -1267,36 +1275,92 @@ export const stripPhpSession = (cookieHeader) => String(cookieHeader || '')
 
 const clean = (value) => String(value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 
-export const parseGradesHtml = (html) => {
-  const grades = []
-  const rowRe = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi
-  const cellRe = /<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi
-  for (const row of String(html).matchAll(rowRe)) {
-    const cells = [...row[1].matchAll(cellRe)].map((cell) => clean(cell[1]))
-    const date = cells.find((cell) => /^\d{2}\.\d{2}\.\d{4}$/.test(cell))
-    if (!date) continue
-    const dateAt = cells.indexOf(date)
-    const topic = cells[dateAt + 1] || 'Note'
-    if (isSummaryGradeTitle(topic) || cells.some((cell) => isSummaryGradeTitle(cell))) continue
-    const mark = parseMark(cells[dateAt + 2] || '')
-    if (mark == null) continue
-    const courseMatch = String(html).match(/<b>\s*([^<]*-[^<]*-[^<]*)\s*<\/b>/i)
-    const course = clean(courseMatch?.[1] || 'Kurs')
-    grades.push({
-      id: `web:${course}:${date}:${topic}:${numKey(mark)}`,
-      course,
-      courseId: course,
-      subject: course,
-      title: topic,
-      date: `${date.slice(6, 10)}-${date.slice(3, 5)}-${date.slice(0, 2)}`,
-      mark,
-      weight: parseWeight(cells[dateAt + 3] || '1'),
-      confirmed: true,
-      courseGrade: null,
-      comment: '',
-    })
+/** Read own table rows/cells only; descendant exam tables never supply a course label. */
+const gradeTables = (html) => {
+  const tables = []
+  const stack = []
+  for (const token of String(html || '').matchAll(/<!--[\s\S]*?-->|<script\b[^>]*>[\s\S]*?<\/script\s*>|<[^>]+>|[^<]+/gi)) {
+    const part = token[0]
+    const tag = /^<(\/)?(table|tr|td|th)\b/i.exec(part)
+    if (tag) {
+      const close = Boolean(tag[1])
+      const name = tag[2].toLowerCase()
+      if (name === 'table') {
+        if (close) stack.pop()
+        else {
+          const table = { rows: [], row: null, cell: null }
+          if (stack.length && stack.at(-1).row) stack.at(-1).row.nested.push(table)
+          tables.push(table)
+          stack.push(table)
+        }
+      } else if (stack.length) {
+        const table = stack.at(-1)
+        if (name === 'tr') {
+          table.cell = null
+          table.row = close ? null : { cells: [], nested: [] }
+          if (table.row) table.rows.push(table.row)
+        } else if (close) table.cell = null
+        else if (table.row) {
+          table.cell = { text: '', header: name === 'th' }
+          table.row.cells.push(table.cell)
+        }
+      }
+    } else if (stack.length && stack.at(-1).cell && !part.startsWith('<')) {
+      stack.at(-1).cell.text += part + ' '
+    }
   }
-  return grades
+  return tables
+}
+
+export const parseGradesHtml = (html) => {
+  if (sessionProblem('', html)) return []
+  const grades = []
+  const tokenPattern = /^[A-Za-zÄÖÜäöü0-9 ()]+-[A-Za-z0-9]+-[A-Za-zÄÖÜäöü0-9]+/u
+  const tables = gradeTables(html)
+  const expected = tables.flatMap((table) => table.rows).filter((row) => {
+    const values = row.cells.map((cell) => clean(cell.text))
+    if (values[0] === '') values.shift()
+    return /^\d{2}\.\d{2}\.\d{4}$/u.test(values[0] || '') && !isSummaryGradeTitle(values[1] || '') && parseMark(values[2] || '') != null
+  }).length
+  for (const table of tables) {
+    let course = ''
+    let courseId = ''
+    let average = null
+    const header = table.rows[0]?.cells.map((cell) => clean(cell.text).toLowerCase()) || []
+    const courseTable = header.some((cell) => placeholderCourse(cell) && /fach|kurs/u.test(cell)) && header.some((cell) => cell.includes('durchschnitt'))
+    for (const row of table.rows) {
+      const cells = row.cells.map((cell) => clean(cell.text))
+      if (row.nested.length) {
+        if (!course) continue
+        for (const detail of row.nested) for (const exam of detail.rows) {
+          const values = exam.cells.map((cell) => clean(cell.text))
+          if (values[0] === '') values.shift()
+          const [date, topic, markText, weight] = values
+          if (!/^\d{2}\.\d{2}\.\d{4}$/u.test(date || '') || !topic || isSummaryGradeTitle(topic)) continue
+          const mark = parseMark(markText || '')
+          if (mark == null) continue
+          grades.push({
+            id: `web:${courseId}:${date}:${topic}:${numKey(mark)}`,
+            course, courseId, subject: course, title: topic,
+            date: `${date.slice(6, 10)}-${date.slice(3, 5)}-${date.slice(0, 2)}`,
+            mark, weight: parseWeight(weight || '1'), confirmed: true, courseGrade: average, comment: '',
+          })
+        }
+        continue
+      }
+      const name = cells[0] || ''
+      if (placeholderCourse(name) || row.cells.some((cell) => cell.header)) {
+        course = ''
+        continue
+      }
+      const token = tokenPattern.exec(name)?.[0]
+      if (!token && !courseTable) continue
+      course = token ? name.slice(token.length).trim() || token : name
+      courseId = token || name.split(' ')[0]
+      average = parseMark(cells[1] || '')
+    }
+  }
+  return grades.length < expected ? [] : grades
 }
 
 const hasSchedulerDay = (raw) => /\d{4}-\d{2}-\d{2}|\d{1,2}\.\d{1,2}\.\d{4}/u.test(String(raw || ''))

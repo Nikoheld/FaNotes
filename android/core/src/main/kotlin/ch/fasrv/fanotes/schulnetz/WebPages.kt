@@ -22,7 +22,16 @@ fun readGradesPage(html: String): PageRead<List<SchoolGrade>> {
     if (problem == SessionProblem.INTERACTIVE) return PageRead(emptyList(), sessionProblemText(problem))
     if (problem != SessionProblem.NONE) return PageRead(emptyList(), "Noten: ${sessionProblemText(problem)}", html)
     val grades = parseGradesPage(html).ifEmpty { parseSchulnetzCourseTable(html) }.ifEmpty { parseGradesByHeader(html) }
-    if (grades.isNotEmpty()) return PageRead(grades, null)
+    if (grades.isNotEmpty()) {
+        // A nonempty parse can still be partial. Every dated exam row must have a course owner.
+        val expected = Jsoup.parse(html).select("tr").count { row ->
+            val table = row.closestTable() ?: return@count false
+            val cells = ownTexts(row, table).dropWhile { it.isBlank() }
+            cells.size >= 3 && DATE.matches(cells[0]) && !isSummaryGradeTitle(cells[1]) && number(cells[2]) != null
+        }
+        if (grades.size < expected) return PageRead(emptyList(), "Noten: Seite geladen, aber nicht lesbar")
+        return PageRead(grades, null)
+    }
     if (html.isNotBlank()) return PageRead(emptyList(), "Noten: Seite geladen, aber nicht lesbar", html)
     return PageRead(emptyList(), null)
 }
@@ -31,41 +40,47 @@ fun parseGradesPage(html: String): List<SchoolGrade> {
     if (html.isBlank()) return emptyList()
     val doc = Jsoup.parse(html)
     val main = doc.selectFirst("main") ?: doc.body() ?: return emptyList()
-    val outer = main.selectFirst("table") ?: return emptyList()
-    val grades = mutableListOf<SchoolGrade>()
-    val rows = outer.select("tr").filter { it.closestTable() == outer }
-    val detailByCourse = linkedMapOf<Element, Element>()
-    for (detail in outer.select("table")) {
-        var row = detail.parent()?.closest("tr")
-        var course: Element? = null
-        while (row != null) {
-            row = row.previousElementSibling()
-            if (row == null || !row.tagName().equals("tr", true)) continue
-            if (row.closestTable() != outer) continue
-            val cells = ownCells(row, outer)
-            if (cells.isNotEmpty() && COURSE_TOKEN.containsMatchIn(clean(cells[0].text())) && row.selectFirst("table") == null) {
-                course = row
-                break
-            }
+    val tables = main.select("table").filter { table ->
+        table.select("tr").any { row ->
+            row.closestTable() == table && row.selectFirst("table") == null &&
+                ownCells(row, table).firstOrNull()?.text()?.let { COURSE_TOKEN.containsMatchIn(clean(it)) } == true
         }
-        if (course != null) detailByCourse[course] = detail
     }
-    for (row in rows) {
-        if (row.selectFirst("table") != null) continue
-        val cells = ownCells(row, outer)
-        if (cells.isEmpty()) continue
-        val token = cells[0].selectFirst("b")?.let { clean(it.text()) }
-        val raw = clean(cells[0].text())
-        val name = when {
-            token != null && COURSE_TOKEN.containsMatchIn(token) -> clean(cells[0].text().replaceFirst(token, "")).ifBlank { token }
-            COURSE_TOKEN.containsMatchIn(raw) -> raw
-            else -> continue
+    val grades = mutableListOf<SchoolGrade>()
+    for (outer in tables) {
+        val rows = outer.select("tr").filter { it.closestTable() == outer }
+        val detailByCourse = linkedMapOf<Element, MutableList<Element>>()
+        for (detail in outer.select("table")) {
+            var row = detail.parent()?.closest("tr")
+            var course: Element? = null
+            while (row != null) {
+                row = row.previousElementSibling()
+                if (row == null || !row.tagName().equals("tr", true)) continue
+                if (row.closestTable() != outer) continue
+                val cells = ownCells(row, outer)
+                if (cells.isNotEmpty() && COURSE_TOKEN.containsMatchIn(clean(cells[0].text())) && row.selectFirst("table") == null) {
+                    course = row
+                    break
+                }
+            }
+            if (course != null) detailByCourse.getOrPut(course) { mutableListOf() }.add(detail)
         }
-        val courseId = token?.takeIf { COURSE_TOKEN.containsMatchIn(it) } ?: name
-        val average = cells.getOrNull(1)?.let { number(it.text()) }
-        val detail = detailByCourse[row]
-        val exams = detail?.let { examsFrom(it, name, courseId, average) }.orEmpty()
-        grades += exams
+        for (row in rows) {
+            if (row.selectFirst("table") != null) continue
+            val cells = ownCells(row, outer)
+            if (cells.isEmpty()) continue
+            val token = cells[0].selectFirst("b")?.let { clean(it.text()) }
+            val raw = clean(cells[0].text())
+            val name = when {
+                token != null && COURSE_TOKEN.containsMatchIn(token) -> clean(cells[0].text().replaceFirst(token, "")).ifBlank { token }
+                COURSE_TOKEN.containsMatchIn(raw) -> raw
+                else -> continue
+            }
+            val courseId = token?.takeIf { COURSE_TOKEN.containsMatchIn(it) } ?: name
+            val average = cells.getOrNull(1)?.let { number(it.text()) }
+            val exams = detailByCourse[row].orEmpty().flatMap { examsFrom(it, name, courseId, average) }
+            grades += exams
+        }
     }
     return grades
 }
@@ -191,7 +206,7 @@ fun parseSchulnetzCourseTable(html: String): List<SchoolGrade> {
     val doc = Jsoup.parse(html)
     val table = doc.select("table").firstOrNull { candidate ->
         val header = candidate.select("tr").firstOrNull { it.closestTable() == candidate }?.let { ownTexts(it, candidate).map { cell -> foldLabel(cell) } }.orEmpty()
-        header.any { it == "kurs" || it.startsWith("kurs ") } && header.any { it.contains("durchschnitt") }
+        header.any { placeholderCourse(it) && (it.contains("kurs") || it.contains("fach")) } && header.any { it.contains("durchschnitt") }
     } ?: return emptyList()
     val grades = mutableListOf<SchoolGrade>()
     var course = ""
@@ -205,7 +220,10 @@ fun parseSchulnetzCourseTable(html: String): List<SchoolGrade> {
         }
         val cells = ownTexts(row, table)
         val name = cells.firstOrNull().orEmpty()
-        if (name.isBlank() || foldLabel(name) == "kurs" || name == "--") continue
+        if (name.isBlank() || placeholderCourse(name) || name == "--" || row.selectFirst("th") != null) {
+            course = ""
+            continue
+        }
         course = name
         courseId = name.substringBefore(' ').ifBlank { name }
         val avgText = cells.getOrNull(1).orEmpty()
@@ -332,9 +350,10 @@ fun parseGradesByHeader(html: String): List<SchoolGrade> = rowsByHeader(html) { 
     val markAt = headerIndex(header, "note", "punkte")
     val dateAt = headerIndex(header, "datum")
     val courseAt = headerIndex(header, "fach", "kurs", "fachname")
-    if (markAt < 0 || (dateAt < 0 && courseAt < 0)) return@rowsByHeader null
+    if (markAt < 0 || courseAt < 0) return@rowsByHeader null
     val mark = number(cellAt(cells, markAt)) ?: return@rowsByHeader null
-    val course = cellAt(cells, courseAt).ifBlank { "Kurs" }
+    val course = cellAt(cells, courseAt)
+    if (placeholderCourse(course)) return@rowsByHeader null
     val date = cellAt(cells, dateAt)
     val title = cellAt(cells, headerIndex(header, "thema", "pruefung", "titel", "bezeichnung")).ifBlank { "Note" }
     if (isSummaryGradeTitle(title) || isSummaryGradeTitle(course)) return@rowsByHeader null
@@ -638,8 +657,8 @@ private fun foldLabel(raw: String): String =
 
 private fun examsFrom(detail: Element, course: String, courseId: String, average: Double?): List<SchoolGrade> {
     val exams = mutableListOf<SchoolGrade>()
-    for (row in detail.select("tr")) {
-        val cells = row.select("th, td").map { clean(it.text()) }
+    for (row in detail.select("tr").filter { it.closestTable() == detail }) {
+        val cells = ownTexts(row, detail)
         if (cells.isEmpty()) continue
         val first = cells[0]
         if (first == "Prüfungsgruppe" || first == "Einzelprüfungen" || isSummaryGradeTitle(first) || first.startsWith("Aktueller Durchschnitt")) continue
