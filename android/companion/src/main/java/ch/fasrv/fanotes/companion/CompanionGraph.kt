@@ -378,7 +378,7 @@ class CompanionGraph(private val context: Context) {
             start = event.start,
             end = event.end.ifBlank { event.start },
             allDay = !event.start.contains('T'),
-            location = event.room,
+            location = ch.fasrv.fanotes.schulnetz.cleanSchulnetzText(event.room),
             notes = event.comment,
         )
         vault.write(CALENDAR_NOTE_PATH, serializeCalendarMarkdown(CalendarDocument(calendars, document.events + added)).encodeToByteArray())

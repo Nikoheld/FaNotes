@@ -92,7 +92,7 @@ data class AgendaEvent(
     val color: String,
     val timetableText: String,
 ) {
-    val label: String get() = courseName.ifBlank { text }.ifBlank { timetableText }.ifBlank { "Lektion" }
+    val label: String get() = listOf(courseName, text, timetableText).map(::cleanSchulnetzText).firstOrNull { it.isNotBlank() } ?: "Lektion"
 }
 
 data class SchoolAbsence(
@@ -235,6 +235,11 @@ fun AgendaEvent.isSubstitution(): Boolean {
 }
 
 private val cdataWrapped = Regex("""(?is)^<!\[CDATA\[([\s\S]*)\]\]>$""")
+private val cdataOpen = Regex("""(?i)<!\[CDATA\[""")
+private val cdataClose = Regex("""\]\]>""")
+private val clockToken = Regex("""(?:^|[\sT])([01]\d|2[0-3]):([0-5]\d)\b""")
+private val isoDay = Regex("""(\d{4}-\d{2}-\d{2})""")
+private val swissDay = Regex("""(\d{1,2})\.(\d{1,2})\.(\d{4})""")
 private val examLeadRegex = Regex("""(?iu)^(prüfung|pruefung|klausur|test)\b""")
 private val examTokenRegex = Regex("""(?i)(?:^|[^a-zäöü])test(?:[^a-zäöü]|$)""")
 private val pruefungCodeRegex = Regex("""(?i)(?:^|_)pru(?:fung)?$""")
@@ -248,9 +253,39 @@ fun unwrapSchulnetz(raw: String): String {
     }
 }
 
+/** Drop CDATA markup, including a wrapper that sits inside a longer field. */
+fun cleanSchulnetzText(raw: String): String =
+    cdataClose.replace(cdataOpen.replace(unwrapSchulnetz(raw), ""), "")
+        .replace(Regex("""\s+"""), " ")
+        .trim()
+
+/** A real HH:mm from the field. The T inside `<![CDATA[` is not a time, and a date alone is not 00:00. */
+fun schulnetzClock(raw: String): String {
+    val match = clockToken.find(cleanSchulnetzText(raw)) ?: return ""
+    return "${match.groupValues[1]}:${match.groupValues[2]}"
+}
+
+fun eventDayKey(raw: String): String {
+    val text = cleanSchulnetzText(raw)
+    isoDay.find(text)?.let { return it.groupValues[1] }
+    val swiss = swissDay.find(text) ?: return ""
+    val day = swiss.groupValues[1].padStart(2, '0')
+    val month = swiss.groupValues[2].padStart(2, '0')
+    return "${swiss.groupValues[3]}-$month-$day"
+}
+
+/** Clock text for a notification. Midnight is shown only when the event also ends at a later time. */
+fun displayClock(start: String, end: String = ""): String {
+    val from = schulnetzClock(start)
+    val to = schulnetzClock(end)
+    if (from.isBlank() || (from == "00:00" && (to.isBlank() || to == "00:00"))) return ""
+    if (to.isBlank() || to == from) return from
+    return "$from–$to"
+}
+
 /** Scheduler codes such as `1_pru`, plus the words exam, Prüfung, Klausur, and Test. */
 fun examMarker(raw: String): Boolean {
-    val kind = unwrapSchulnetz(raw).lowercase()
+    val kind = cleanSchulnetzText(raw).lowercase()
     if (kind.isEmpty()) return false
     if (kind == "1_pru" || pruefungCodeRegex.containsMatchIn(kind)) return true
     if (kind.contains("prüfung") || kind.contains("pruefung") || kind.contains("klausur") || kind.contains("exam")) return true
@@ -259,12 +294,12 @@ fun examMarker(raw: String): Boolean {
 
 /** A leading Test/Prüfung/Klausur on a title. Lesetest and other longer words do not match. */
 fun examLead(raw: String): Boolean {
-    val line = unwrapSchulnetz(raw).lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+    val line = cleanSchulnetzText(raw).lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
     return examLeadRegex.containsMatchIn(line)
 }
 
 fun canonicalEventType(raw: String): String {
-    val kind = unwrapSchulnetz(raw)
+    val kind = cleanSchulnetzText(raw)
     if (kind.isEmpty()) return "lesson"
     if (examMarker(kind)) return "exam"
     return kind
@@ -275,7 +310,7 @@ fun AgendaEvent.isExamLike(): Boolean = examMarker(eventType) || examLead(text) 
 /** Blank event types on the agenda endpoint are ordinary lessons. */
 fun AgendaEvent.isLesson(): Boolean {
     if (isExamLike()) return false
-    val kind = unwrapSchulnetz(eventType).lowercase()
+    val kind = cleanSchulnetzText(eventType).lowercase()
     if (kind.isBlank()) return true
     return kind.contains("lesson") || kind.contains("unterricht") || kind.contains("timetable") || kind == "period" || kind == "stunde"
 }

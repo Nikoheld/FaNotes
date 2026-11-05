@@ -48,6 +48,8 @@ import ch.fasrv.fanotes.schulnetz.isCancelled
 import ch.fasrv.fanotes.schulnetz.isSubstitution
 import ch.fasrv.fanotes.schulnetz.parseDeskPrefs
 import ch.fasrv.fanotes.schulnetz.parseHiddenLessons
+import ch.fasrv.fanotes.schulnetz.cleanSchulnetzText
+import ch.fasrv.fanotes.schulnetz.displayClock
 import ch.fasrv.fanotes.schulnetz.startsAt
 import ch.fasrv.fanotes.schulnetz.WidgetSpan
 import ch.fasrv.fanotes.schulnetz.upcomingLessons
@@ -530,12 +532,13 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
                 views.setViewVisibility(R.id.widget_more, android.view.View.GONE)
             } else {
                 val time = lessonClock(next, zone)
-                val room = if (next.room.isBlank()) "" else t(R.string.room_named, next.room)
+                val roomText = cleanSchulnetzText(next.room)
+                val room = if (roomText.isBlank()) "" else t(R.string.room_named, roomText)
                 val state = if (next.isCancelled()) t(R.string.cancelled) else if (next.isSubstitution()) t(R.string.substitution) else ""
                 views.setTextViewText(R.id.widget_title, next.label)
                 views.setTextViewText(R.id.widget_detail, if (small) time else listOf(time, room, state).filter { it.isNotBlank() }.joinToString(" · "))
                 val extra = if (span == WidgetSpan.LARGE) lessons.drop(1).joinToString("\n") { lesson ->
-                    listOf(lessonClock(lesson, zone), lesson.label, lesson.room).filter { it.isNotBlank() }.joinToString(" · ")
+                    listOf(lessonClock(lesson, zone), lesson.label, cleanSchulnetzText(lesson.room)).filter { it.isNotBlank() }.joinToString(" · ")
                 } else ""
                 views.setViewVisibility(R.id.widget_more, if (extra.isBlank()) android.view.View.GONE else android.view.View.VISIBLE)
                 views.setTextViewText(R.id.widget_more, extra)
@@ -548,8 +551,11 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
         }
 
         private fun lessonClock(event: ch.fasrv.fanotes.schulnetz.AgendaEvent, zone: ZoneId): String {
+            val zoned = event.start.contains('Z') || Regex("""[+-]\d{2}:\d{2}$""").containsMatchIn(event.start)
+            if (!zoned) return displayClock(event.start, event.end)
             val start = event.startsAt(zone)?.atZone(zone)?.toLocalTime()?.format(CLOCK).orEmpty()
             val end = event.endsAt(zone)?.atZone(zone)?.toLocalTime()?.format(CLOCK).orEmpty()
+            if (start.isBlank() || (start == "00:00" && (end.isBlank() || end == "00:00"))) return ""
             return if (end.isBlank() || end == start) start else "$start–$end"
         }
 

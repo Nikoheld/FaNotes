@@ -53,6 +53,7 @@ import {
   parseIcs,
   carryTimetableExams,
   schedulerFetchUrl,
+  schedulerWeekLoaded,
   zurichTimeshift,
   WEEK_CAP,
 } from './schulnetz-logic.mjs'
@@ -1133,19 +1134,81 @@ test('a web scrape reads the whole current week and keeps a far lesson', async (
   const schedulers = urls.filter((url) => url.includes('scheduler_processor'))
   assert.equal(schedulers.some((url) => url.includes('pageid=22202') && url.includes('min_date=2026-11-02') && url.includes('max_date=2026-11-09') && !url.includes('action=')), true)
   assert.equal(schedulers.some((url) => url.includes('pageid=21312') && !url.includes('action=')), true)
-  assert.equal(first.weekFetched['2026-11-02'], '2026-11-04T12:00:00Z')
+  assert.equal(first.weekFetched['2026-11-02'], undefined)
+  assert.equal(schedulerWeekLoaded('<data></data>'), false)
+  assert.equal(schedulerWeekLoaded('<data><event id="e"></event></data>'), true)
   urls.length = 0
   const far = { id: 'far', start: '2026-12-07T08:15:00', end: '2026-12-07T09:00:00', text: 'Deutsch', courseName: 'Deutsch', teachers: [], status: '', eventType: 'lesson', room: 'A1' }
   const appointment = { id: 't1', start: '2026-11-04T15:00:00', end: '2026-11-04T16:00:00', text: 'Probe', courseName: 'Probe', teachers: [], status: '', eventType: 'event', room: '' }
+  const currentLesson = { id: 'e1', start: '2026-11-04T08:15:00', end: '2026-11-04T09:00:00', text: 'Mathematik', courseName: 'Mathematik', teachers: [], status: '', eventType: 'lesson', room: 'A1' }
+  const currentExam = { id: 'x1', start: '2026-11-04T10:00:00', end: '2026-11-04T10:45:00', text: 'Test Chemie', courseName: 'Test Chemie', teachers: [], status: '', eventType: 'exam', room: 'B1' }
   const second = await scrapeWithSession(base, session, fetchImpl, {
     today: '2026-11-04',
     now: '2026-11-04T12:30:00Z',
-    previousEvents: [far, appointment],
+    previousEvents: [far, appointment, currentLesson],
+    previousExams: [currentExam],
     weekFetched: { '2026-11-02': '2026-11-04T12:00:00Z', '2026-12-07': '2026-11-04T12:00:00Z' },
   })
   assert.equal(second.events.some((event) => event.id === 'far'), true)
   assert.equal(second.events.some((event) => event.id === 't1'), true)
+  assert.equal(second.events.some((event) => event.id === 'e1'), true)
+  assert.equal(second.exams.some((event) => event.id === 'x1'), true)
+  assert.equal(second.weekFetched['2026-11-02'], '2026-11-04T12:00:00Z')
   assert.equal(urls.filter((url) => url.includes('scheduler_processor')).length, 2)
+})
+
+test('exam alerts ignore a stored lesson, empty markup and a missing clock', () => {
+  const wrapped = {
+    id: 'p', start: '<![CDATA[2026-11-12 10:00]]>', end: '<![CDATA[2026-11-12 10:45]]>',
+    text: '<![CDATA[Mathematik]]>', courseName: '<![CDATA[]]>', room: '<![CDATA[]]>', timetableText: '<![CDATA[Mathematik]]>',
+    teachers: [], status: '', eventType: 'exam', comment: '',
+  }
+  const duplicates = diffSnapshots({ events: [], exams: [], messages: [] }, { events: [], exams: [wrapped, { ...wrapped, id: 'p2' }], messages: [] })
+    .filter((change) => change.category === 'exam')
+  assert.equal(duplicates.length, 1)
+  assert.equal(duplicates[0].title, 'Neue Prüfung')
+  assert.equal(duplicates[0].body.includes('Mathematik'), true)
+  assert.equal(duplicates[0].body.includes('10:00'), true)
+  assert.equal(duplicates[0].body.includes('CDATA'), false)
+  assert.equal(duplicates[0].body.includes('A[202'), false)
+  assert.equal(duplicates[0].body.includes('Raum'), false)
+  const dateOnly = { id: 'd', start: '2026-11-12', end: '2026-11-12', text: 'Prüfung', courseName: 'Prüfung', room: '', teachers: [], status: '', eventType: 'exam' }
+  const midnight = { id: 'm', start: '2026-11-12T00:00:00', end: '2026-11-12T00:00:00', text: 'Klausur', courseName: 'Klausur', room: '', teachers: [], status: '', eventType: 'exam' }
+  const timed = { id: 'r', start: '2026-11-12T08:15:00', end: '2026-11-12T09:00:00', text: 'Test Physik', courseName: 'Test Physik', room: 'A1', teachers: [], status: '', eventType: 'exam' }
+  const clocks = diffSnapshots({ events: [], exams: [], messages: [] }, { events: [], exams: [dateOnly, midnight, timed], messages: [] })
+    .filter((change) => change.category === 'exam')
+  assert.equal(clocks.some((change) => change.body.includes('00:00')), false)
+  assert.equal(clocks.find((change) => change.body.includes('Physik')).body.includes('08:15'), true)
+  const stored = { id: 'old', start: '2026-11-02T08:15:00', end: '2026-11-02T09:00:00', text: 'Test Chemie', courseName: 'Test Chemie', timetableText: 'Test Chemie', room: 'A1', teachers: [], status: '', eventType: 'lesson' }
+  const exam = { ...stored, id: 'new', eventType: 'exam' }
+  const quiet = diffSnapshots({ events: [stored], exams: [], messages: [] }, { events: [], exams: [exam], messages: [] })
+  assert.equal(quiet.some((change) => change.title === 'Neue Prüfung' || change.title === 'Lektion entfernt' || change.title === 'Neuer Termin'), false)
+  const block = { ...stored, eventType: '0_stp' }
+  const stillQuiet = diffSnapshots({ events: [block], exams: [], messages: [] }, { events: [], exams: [exam], messages: [] })
+  assert.equal(stillQuiet.some((change) => change.title === 'Neue Prüfung' || change.title === 'Lektion entfernt'), false)
+  const later = { ...exam, start: '2026-11-02T10:15:00', end: '2026-11-02T11:00:00' }
+  assert.deepEqual(diffSnapshots({ events: [stored], exams: [], messages: [] }, { events: [], exams: [later], messages: [] }).map((change) => change.title), ['Prüfung verschoben'])
+  const other = { ...stored, id: 'bio', text: 'Test Biologie', courseName: 'Test Biologie', timetableText: 'Test Biologie', eventType: 'exam' }
+  const added = diffSnapshots({ events: [stored], exams: [], messages: [] }, { events: [stored], exams: [other], messages: [] })
+  assert.equal(added.some((change) => change.title === 'Neue Prüfung'), true)
+  const dropped = diffSnapshots(
+    { events: [], exams: [timed], messages: [], weekFetched: { '2026-11-09': '2026-11-04T12:00:00Z' } },
+    { events: [], exams: [], messages: [], weekFetched: { '2026-11-09': '2026-11-04T12:00:00Z' } },
+  )
+  assert.equal(dropped.find((change) => change.category === 'exam').title, 'Prüfung entfällt')
+  const termin = { id: 'term-2', start: '2026-11-04T15:00:00', end: '2026-11-04T16:00:00', text: 'Elternabend', courseName: 'Elternabend', timetableText: 'Elternabend', room: '', teachers: [], status: '', eventType: 'event' }
+  const earlier = { ...termin, id: 'term-1' }
+  const repeat = diffSnapshots({ events: [earlier], exams: [], messages: [] }, { events: [earlier, termin], exams: [], messages: [] })
+  assert.equal(repeat.some((change) => change.title === 'Neuer Termin'), false)
+  const fresh = { ...termin, id: 'term-3', text: 'Konzert', courseName: 'Konzert', timetableText: 'Konzert' }
+  assert.equal(diffSnapshots({ events: [earlier], exams: [], messages: [] }, { events: [earlier, fresh], exams: [], messages: [] }).some((change) => change.title === 'Neuer Termin'), true)
+  const sameNote = diffSnapshots(
+    { events: [], exams: [], messages: [{ id: 'a', title: 'Termin', body: 'Elternabend' }] },
+    { events: [], exams: [], messages: [{ id: 'b', title: 'Termin', body: 'Elternabend' }] },
+  )
+  assert.equal(sameNote.some((change) => change.category === 'event'), false)
+  assert.equal(isLesson({ eventType: 'lesson', text: 'Lesetest', timetableText: 'Lesetest' }), true)
+  assert.equal(isExamLike({ eventType: '0_stp', text: 'Deutsch', timetableText: 'Deutsch' }), false)
 })
 
 test('seal round trip uses aes-256-gcm', () => {

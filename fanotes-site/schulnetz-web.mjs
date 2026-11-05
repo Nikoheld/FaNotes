@@ -2,7 +2,7 @@
 // A PHPSESSID is bound to the client IP, so this module always opens its own
 // session with the stored Microsoft SSO cookies and never replays a phone cookie.
 
-import { addDays, carryTimetableExams, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
+import { addDays, carryTimetableExams, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
 
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 
@@ -161,14 +161,14 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
       const curr = monday === current ? today : monday
       const lessonUrl = schedulerFetchUrl({ root, pageId: '22202', ansicht: 'schueleransicht', id: session.id, transid, today: curr, min: monday, max, extra: '' })
       const lessonBody = await get(lessonUrl)
-      if (schedulerBodyUsable(lessonBody)) {
+      if (schedulerWeekLoaded(lessonBody)) {
         lessonWeeks[monday] = parseSchedulerXml(lessonBody)
         weekFetched[monday] = nowIso
       }
       if (pages.problem) break
       const examUrl = schedulerFetchUrl({ root, pageId: '21312', ansicht: 'klassenuebersicht', id: session.id, transid, today: curr, min: monday, max, extra: 'showOnlyThisClass=-1' })
       const examBody = await get(examUrl)
-      if (schedulerBodyUsable(examBody)) {
+      if (schedulerWeekLoaded(examBody)) {
         examWeeks[monday] = parseSchedulerXml(examBody).map((event) => ({
           ...event,
           eventType: event.eventType && event.eventType !== 'lesson' ? event.eventType : 'exam',

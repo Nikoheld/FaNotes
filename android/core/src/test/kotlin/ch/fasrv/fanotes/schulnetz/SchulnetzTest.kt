@@ -177,6 +177,70 @@ class SchulnetzDiffTest {
         assertTrue(isSummaryGradeTitle("Ø"))
         assertFalse(isSummaryGradeTitle("1. Prüfung"))
     }
+
+    @Test
+    fun examAlertsStayQuietForStoredTestsMarkupAndEmptyClocks() {
+        val wrapped = lesson.copy(
+            id = "p",
+            start = "<![CDATA[2026-11-12 10:00]]>",
+            end = "<![CDATA[2026-11-12 10:45]]>",
+            text = "<![CDATA[Mathematik]]>",
+            courseName = "<![CDATA[]]>",
+            room = "<![CDATA[]]>",
+            timetableText = "<![CDATA[Mathematik]]>",
+            eventType = "exam",
+            teachers = emptyList(),
+            comment = "",
+        )
+        val duplicates = diffSnapshots(SchulnetzSnapshot(), SchulnetzSnapshot(exams = listOf(wrapped, wrapped.copy(id = "p2"))))
+            .filter { it.category == "exam" }
+        assertEquals(1, duplicates.size)
+        assertEquals("Neue Prüfung", duplicates.single().title)
+        assertTrue(duplicates.single().body.contains("Mathematik"))
+        assertTrue(duplicates.single().body.contains("10:00"))
+        assertFalse(duplicates.single().body.contains("CDATA"))
+        assertFalse(duplicates.single().body.contains("A[202"))
+        assertFalse(duplicates.single().body.contains("Raum"))
+        val dateOnly = lesson.copy(id = "d", start = "2026-11-12", end = "2026-11-12", text = "Prüfung", courseName = "Prüfung", eventType = "exam", room = "")
+        val midnight = lesson.copy(id = "m", start = "2026-11-12T00:00:00", end = "2026-11-12T00:00:00", text = "Klausur", courseName = "Klausur", eventType = "exam", room = "")
+        val timed = lesson.copy(id = "r", start = "2026-11-12T08:15:00", end = "2026-11-12T09:00:00", text = "Test Physik", courseName = "Test Physik", eventType = "exam")
+        val clocks = diffSnapshots(SchulnetzSnapshot(), SchulnetzSnapshot(exams = listOf(dateOnly, midnight, timed))).filter { it.category == "exam" }
+        assertTrue(clocks.none { it.body.contains("00:00") })
+        assertTrue(clocks.single { it.body.contains("Physik") }.body.contains("08:15"))
+        val overnight = lesson.copy(id = "z", start = "2026-11-12T00:00:00", end = "2026-11-12T01:00:00", text = "Nacht", courseName = "Nacht", eventType = "exam", room = "")
+        assertTrue(diffSnapshots(SchulnetzSnapshot(), SchulnetzSnapshot(exams = listOf(overnight))).single { it.category == "exam" }.body.contains("00:00"))
+        val stored = lesson.copy(id = "old", text = "Test Chemie", courseName = "Test Chemie", timetableText = "Test Chemie", eventType = "lesson")
+        val movedId = stored.copy(id = "new", eventType = "exam")
+        val quiet = diffSnapshots(SchulnetzSnapshot(events = listOf(stored)), SchulnetzSnapshot(exams = listOf(movedId)))
+        assertTrue(quiet.none { it.title == "Neue Prüfung" || it.title == "Lektion entfernt" || it.title == "Neuer Termin" })
+        val asBlock = stored.copy(eventType = "0_stp")
+        val stillQuiet = diffSnapshots(SchulnetzSnapshot(events = listOf(asBlock)), SchulnetzSnapshot(exams = listOf(movedId)))
+        assertTrue(stillQuiet.none { it.title == "Neue Prüfung" || it.title == "Lektion entfernt" })
+        val later = movedId.copy(start = "2026-11-02T10:15:00", end = "2026-11-02T11:00:00")
+        assertEquals(listOf("Prüfung verschoben"), diffSnapshots(SchulnetzSnapshot(events = listOf(stored)), SchulnetzSnapshot(exams = listOf(later))).map { it.title })
+        val other = lesson.copy(id = "bio", text = "Test Biologie", courseName = "Test Biologie", timetableText = "Test Biologie", eventType = "exam")
+        val added = diffSnapshots(SchulnetzSnapshot(events = listOf(stored)), SchulnetzSnapshot(events = listOf(stored), exams = listOf(other)))
+        assertTrue(added.any { it.title == "Neue Prüfung" })
+        assertTrue(added.none { it.title == "Lektion entfernt" })
+        val gone = diffSnapshots(
+            SchulnetzSnapshot(exams = listOf(timed), weekFetched = mapOf("2026-11-09" to "2026-11-04T12:00:00Z")),
+            SchulnetzSnapshot(weekFetched = mapOf("2026-11-09" to "2026-11-04T12:00:00Z")),
+        )
+        assertEquals("Prüfung entfällt", gone.single { it.category == "exam" }.title)
+        val kept = diffSnapshots(SchulnetzSnapshot(exams = listOf(timed)), SchulnetzSnapshot(exams = listOf(timed)))
+        assertTrue(kept.none { it.title == "Prüfung entfällt" || it.title == "Neue Prüfung" })
+        val termin = lesson.copy(id = "term-2", eventType = "event", text = "Elternabend", courseName = "Elternabend", timetableText = "Elternabend")
+        val earlier = termin.copy(id = "term-1")
+        val repeat = diffSnapshots(SchulnetzSnapshot(events = listOf(earlier)), SchulnetzSnapshot(events = listOf(earlier, termin)))
+        assertTrue(repeat.none { it.title == "Neuer Termin" })
+        val fresh = termin.copy(id = "term-3", text = "Konzert", courseName = "Konzert", timetableText = "Konzert")
+        assertTrue(diffSnapshots(SchulnetzSnapshot(events = listOf(earlier)), SchulnetzSnapshot(events = listOf(earlier, fresh))).any { it.title == "Neuer Termin" })
+        val sameNote = diffSnapshots(
+            SchulnetzSnapshot(messages = listOf(SchoolMessage("a", "Termin", "Elternabend", "12.11.2026"))),
+            SchulnetzSnapshot(messages = listOf(SchoolMessage("b", "Termin", "Elternabend", "13.11.2026"))),
+        )
+        assertTrue(sameNote.none { it.category == "event" })
+    }
 }
 
 class SchulnetzOAuthTest {

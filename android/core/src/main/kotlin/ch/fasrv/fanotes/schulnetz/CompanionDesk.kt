@@ -87,8 +87,12 @@ data class DeskPrefs(
     val revealLongPress: Boolean = false,
 )
 
-fun lessonClock(event: AgendaEvent, zone: java.time.ZoneId = java.time.ZoneId.of("Europe/Zurich")): String =
-    event.startsAt(zone)?.atZone(zone)?.toLocalTime()?.toString()?.take(5).orEmpty()
+fun lessonClock(event: AgendaEvent, zone: java.time.ZoneId = java.time.ZoneId.of("Europe/Zurich")): String {
+    val clock = event.startsAt(zone)?.atZone(zone)?.toLocalTime()?.toString()?.take(5).orEmpty()
+    val end = schulnetzClock(event.end)
+    if (clock == "00:00" && (schulnetzClock(event.start).let { it.isBlank() || it == "00:00" }) && (end.isBlank() || end == "00:00")) return ""
+    return clock
+}
 
 fun lessonWeekday(event: AgendaEvent, zone: java.time.ZoneId = java.time.ZoneId.of("Europe/Zurich")): Int =
     event.startsAt(zone)?.atZone(zone)?.dayOfWeek?.value ?: 0
