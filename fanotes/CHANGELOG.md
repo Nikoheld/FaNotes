@@ -1,5 +1,19 @@
 # Änderungsverlauf
 
+## 2026.11.1
+
+- **OneNote.** Windows und Linux importieren Desktop-.one-Dateien, auch Abschnitte mit Revisionsabhängigkeiten und Pfade mit Laufwerksbuchstabe. Der Android-Import bleibt unverändert.
+- **Blatt.** Der Text bleibt beim Verschieben, Zoomen, Schreiben und Radieren stehen. Radieren löscht nur die betroffene Tinte. Scrollen und Zoomen laufen auf dem Compositor, und Tippen hält einen Schreibrand frei.
+- **Schnee.** Das optionale Schneethema lässt Flocken liegen, zu Schneebällen wachsen und zur Seite schieben.
+- **Teilen.** Geteilte Notizen zeigen Absätze und Formatierung. Mehrere Personen können dieselbe Notiz gleichzeitig bearbeiten, und die Handschrift erscheint mit den Abschnitten.
+- **Handschrift.** Die Erkennung liest auf Linux und Windows lokal, lernt die eigene Schrift und hält die gelesenen Wörter näher an der Spur.
+- **PDF.** Seiten ohne Text werden lokal per OCR gelesen. Die offene Handschriftseite lässt sich als PDF exportieren.
+- **Suche.** Suchen und Ersetzen sitzt in der Notizleiste.
+- **Kanti+.** Die Companion-App heißt Kanti+, zeigt Stundenplan, Noten und Archiv, benachrichtigt einmal je Note und spricht Deutsch.
+- **Sync.** Eine leere Notiz ersetzt keine vorhandene. Große Notizen frieren das Fenster nicht ein.
+- **Profil.** Die öffentliche Seite zeigt die Aktivitätstage.
+- **Release.** Es gibt kein macOS-Paket mehr.
+
 ## 2026.11.1-beta.14
 
 - Replace public Schulnetz fixtures and close the privacy gaps around them.
