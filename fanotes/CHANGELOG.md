@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.3
+
+- Prevent ink sync OOM and preserve complete Schulnetz grade books (#1008)
+
 ## 2026.11.2-beta.2
 
 - Keep the timetable when a Schulnetz read is blocked or times out.
