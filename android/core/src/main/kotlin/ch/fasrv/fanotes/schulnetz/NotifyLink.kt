@@ -229,7 +229,7 @@ private fun routeGrades(link: NotifyLink, snapshot: SchulnetzSnapshot): NotifyRo
 private fun noticeLesson(link: NotifyLink): AgendaEvent {
     val clock = Regex("""(?<!\d)(\d{2}:\d{2})""").find(link.body)?.groupValues?.get(1).orEmpty()
     val room = Regex("""Raum\s+([^\s·]+)""").find(link.body)?.groupValues?.get(1).orEmpty()
-    val name = cleanSchulnetzText(link.body.substringBefore("·"))
+    val name = link.body.split("·").map(::cleanSchulnetzText).firstOrNull { !Regex("""\d{2}\.\d{2}\.\d{4}""").matches(it) }.orEmpty()
     val day = link.date.take(10)
     val start = if (day.isNotBlank() && clock.isNotBlank()) "${day}T$clock:00" else day
     return AgendaEvent(

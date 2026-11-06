@@ -227,6 +227,11 @@ fun SchulnetzSnapshot.toNormalizedJson(): String = buildString {
         if (index > 0) append(',')
         append(escapeJson(day)).append(':').append(escapeJson(stamp))
     }
+    append("},\"examWeekFetched\":{")
+    examWeekFetched.toSortedMap().entries.forEachIndexed { index, (day, stamp) ->
+        if (index > 0) append(',')
+        append(escapeJson(day)).append(':').append(escapeJson(stamp))
+    }
     append("},\"weekSpanStart\":").append(escapeJson(weekSpanStart))
     append(",\"weekSpanEnd\":").append(escapeJson(weekSpanEnd))
     append(",\"icalFetchedAt\":").append(escapeJson(icalFetchedAt))
@@ -262,6 +267,10 @@ fun parseNormalizedSnapshot(json: String): SchulnetzSnapshot? {
             val stamp = (value as? JsonValue.Str)?.value ?: return@mapNotNull null
             if (!Regex("""\d{4}-\d{2}-\d{2}""").matches(key)) return@mapNotNull null
             key to stamp
+        }.toMap(),
+        examWeekFetched = obj.obj("examWeekFetched")?.fields.orEmpty().mapNotNull { (key, value) ->
+            val stamp = (value as? JsonValue.Str)?.value ?: return@mapNotNull null
+            if (weekMondayKey(key) != key) null else key to stamp
         }.toMap(),
         weekSpanStart = obj.flexString("weekSpanStart"),
         weekSpanEnd = obj.flexString("weekSpanEnd"),

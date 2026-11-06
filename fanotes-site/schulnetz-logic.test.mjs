@@ -10,6 +10,7 @@ import { notifyAccountDeleted, setAccountDeletedHook } from './sync-api.mjs'
 import { fcmDataMessage, fcmDropToken, fcmPriorityForChanges, isValidFcmToken, serviceAccountJwt } from './fcm.mjs'
 import {
   diffSnapshots,
+  prepareAgendaRead,
   normalizeSchoolBase,
   parseGradesHtml,
   parseRawSnapshot,
@@ -1426,7 +1427,7 @@ test('exam alerts ignore a stored lesson, empty markup and a missing clock', () 
   const block = { ...stored, eventType: '0_stp' }
   const stillQuiet = diffSnapshots({ events: [block], exams: [], messages: [] }, { events: [], exams: [exam], messages: [] })
   assert.equal(stillQuiet.some((change) => change.title === 'Neue Prüfung' || change.title === 'Lektion entfernt'), false)
-  const later = { ...exam, start: '2026-11-02T10:15:00', end: '2026-11-02T11:00:00' }
+  const later = { ...exam, id: stored.id, start: '2026-11-02T10:15:00', end: '2026-11-02T11:00:00' }
   assert.deepEqual(diffSnapshots({ events: [stored], exams: [], messages: [] }, { events: [], exams: [later], messages: [] }).map((change) => change.title), ['Prüfung verschoben'])
   const other = { ...stored, id: 'bio', text: 'Test Biologie', courseName: 'Test Biologie', timetableText: 'Test Biologie', eventType: 'exam' }
   const added = diffSnapshots({ events: [stored], exams: [], messages: [] }, { events: [stored], exams: [other], messages: [] })
@@ -1435,7 +1436,7 @@ test('exam alerts ignore a stored lesson, empty markup and a missing clock', () 
     { events: [], exams: [timed], messages: [], weekFetched: { '2026-11-09': '2026-11-04T12:00:00Z' } },
     { events: [], exams: [], messages: [], weekFetched: { '2026-11-09': '2026-11-04T12:00:00Z' } },
   )
-  assert.equal(dropped.find((change) => change.category === 'exam').title, 'Prüfung entfällt')
+  assert.equal(dropped.some((change) => change.category === 'exam'), false)
   const termin = { id: 'term-2', start: '2026-11-04T15:00:00', end: '2026-11-04T16:00:00', text: 'Elternabend', courseName: 'Elternabend', timetableText: 'Elternabend', room: '', teachers: [], status: '', eventType: 'event' }
   const earlier = { ...termin, id: 'term-1' }
   const repeat = diffSnapshots({ events: [earlier], exams: [], messages: [] }, { events: [earlier, termin], exams: [], messages: [] })
@@ -1512,4 +1513,129 @@ test('a nonempty parse with an unowned exam is incomplete, not a replacement gra
   assert.deepEqual(parseGradesHtml(partial), [])
   const previous = parseGradesHtml(html)
   assert.deepEqual(keepLoadedGrades(previous, parseGradesHtml(partial)), previous)
+})
+
+
+// Synthetic events only. No screenshot text, real course codes, or account data.
+const baselineWeek = '2026-11-23'
+const syntheticExam = (id = 'synthetic-101@calendar.example.org', day = baselineWeek) => ({
+  id, start: `${day}T10:15:00`, end: `${day}T11:00:00`, text: 'Synthetic quiz', timetableText: 'Synthetic quiz',
+  courseName: 'Synthetic course', courseId: 'synthetic', room: 'R1', teachers: [], status: '', eventType: 'exam', comment: '',
+})
+const agendaRead = (exams, hour, weeks = [baselineWeek], events = []) => ({
+  fetchedAt: `2026-11-06T${hour}:00:00Z`, exams, events,
+  weekFetched: Object.fromEntries(weeks.map((week) => [week, `2026-11-06T${hour}:00:00Z`])),
+  examWeekFetched: Object.fromEntries(weeks.map((week) => [week, `2026-11-06T${hour}:00:00Z`])),
+})
+const baselineDiff = (previous, next, stored) => {
+  const read = prepareAgendaRead(stored, next)
+  const persisted = JSON.parse(JSON.stringify(read.weeks))
+  const before = previous ? { ...previous, exams: read.before.exams,
+    events: read.before.events.filter((event) => event.eventType === 'lesson').concat((previous.events || []).filter((event) => event.eventType === 'event')) } : null
+  return { changes: diffSnapshots(before, next), weeks: persisted }
+}
+
+test('future exam baseline persists quietly; overlapping UID formats stay quiet; one later real move alerts', () => {
+  const ordinary = { ...syntheticExam('old-lesson'), eventType: 'lesson', text: 'Synthetic course', timetableText: 'Synthetic course', start: `${baselineWeek}T08:00:00`, room: 'R2' }
+  const previous = { ...agendaRead([], '09', [baselineWeek], [ordinary]), examWeekFetched: {} }
+  const first = agendaRead([syntheticExam()], '10', [baselineWeek], [ordinary])
+  const initial = baselineDiff(previous, first, {})
+  assert.deepEqual(initial.changes, [])
+  assert.equal(initial.weeks[baselineWeek].exams.length, 1)
+  const alias = syntheticExam('synthetic-101')
+  const repeated = agendaRead([alias, syntheticExam()], '11', [baselineWeek, '2026-11-30'], [ordinary])
+  const stable = baselineDiff(first, repeated, initial.weeks)
+  assert.deepEqual(stable.changes, [])
+  const moved = { ...alias, start: `${baselineWeek}T12:00:00`, end: `${baselineWeek}T12:45:00` }
+  const latest = agendaRead([moved], '12', [baselineWeek, '2026-11-30'], [ordinary])
+  const actual = baselineDiff(repeated, latest, stable.weeks)
+  assert.deepEqual(actual.changes.map((change) => change.title), ['Prüfung verschoben'])
+  assert.equal(actual.changes[0].body.startsWith('23.11.2026 · '), true)
+  assert.deepEqual(baselineDiff(latest, latest, actual.weeks).changes, [])
+  assert.deepEqual(baselineDiff(latest, agendaRead([moved], '13', [baselineWeek, '2026-11-30'], [ordinary]), actual.weeks).changes, [])
+})
+
+test('stale, empty, partial, and missing-field reads keep the last complete exam baseline', () => {
+  const first = agendaRead([syntheticExam()], '11')
+  const stored = baselineDiff({}, first, {}).weeks
+  const moved = { ...syntheticExam(), start: `${baselineWeek}T12:00:00`, end: `${baselineWeek}T12:45:00` }
+  for (const next of [agendaRead([moved], '10'), agendaRead([], '12'),
+    agendaRead([{ ...syntheticExam(), start: baselineWeek, end: '' }], '12'),
+    { ...agendaRead([moved], '12'), readErrors: ['Laden fehlgeschlagen'] },
+    { ...agendaRead([moved], '12'), examWeekFetched: {} }]) {
+    const read = baselineDiff(first, next, stored)
+    assert.deepEqual(read.changes, [])
+    assert.deepEqual(read.weeks[baselineWeek].exams, stored[baselineWeek].exams)
+    assert.equal(read.weeks[baselineWeek].examWeekFetched[baselineWeek], '2026-11-06T11:00:00Z')
+  }
+  assert.equal(baselineDiff(first, agendaRead([moved], '12'), stored).changes[0].title, 'Prüfung verschoben')
+  assert.equal(baselineDiff(first, { ...agendaRead([moved], '12'), readErrors: ['Noten: Seite geladen, aber nicht lesbar'] }, stored).changes[0].title, 'Prüfung verschoben')
+})
+
+test('new exams in an established empty week still alert and room-only changes are not moves', () => {
+  const first = agendaRead([], '10')
+  const stored = baselineDiff({}, first, {}).weeks
+  const next = agendaRead([syntheticExam()], '11')
+  const added = baselineDiff(first, next, stored)
+  assert.deepEqual(added.changes.map((change) => change.title), ['Neue Prüfung'])
+  assert.deepEqual(baselineDiff(next, agendaRead([{ ...syntheticExam(), room: 'R3' }], '12'), added.weeks).changes.map((change) => change.title), ['Raum geändert'])
+  assert.deepEqual(baselineDiff(next, agendaRead([{ ...syntheticExam(), end: `${baselineWeek}T11:30:00` }], '12'), added.weeks).changes.map((change) => change.title), ['Prüfung verschoben'])
+})
+
+test('moved exams and cancelled lessons show each own German event date, including Zurich midnight', () => {
+  const first = agendaRead([syntheticExam(), syntheticExam('synthetic-102', '2026-11-24')], '10')
+  const stored = baselineDiff({}, first, {}).weeks
+  const moved = first.exams.map((event) => ({ ...event, start: event.start.replace('10:15', '12:00'), end: event.end.replace('11:00', '12:45') }))
+  const notices = baselineDiff(first, agendaRead(moved, '11'), stored).changes
+  assert.deepEqual(new Set(notices.map((change) => change.body.split(' · ')[0])), new Set(['23.11.2026', '24.11.2026']))
+  const lessons = first.exams.map((event) => ({ ...event, text: 'Synthetic lesson', timetableText: 'Synthetic lesson', eventType: 'lesson' }))
+  const cancelled = diffSnapshots({ events: lessons }, { events: lessons.map((event) => ({ ...event, status: 'cancelled' })) })
+  assert.equal(cancelled.every((change) => change.title === 'Lektion fällt aus'), true)
+  assert.deepEqual(new Set(cancelled.map((change) => change.body.split(' · ')[0])), new Set(['23.11.2026', '24.11.2026']))
+  const night = { ...lessons[0], start: '2026-11-08T23:30:00Z', end: '2026-11-09T00:15:00Z' }
+  assert.equal(diffSnapshots({ events: [night] }, { events: [{ ...night, status: 'cancelled' }] })[0].body.startsWith('09.11.2026 · '), true)
+})
+
+test('snapshot upload stores week baselines before push and emits one actual later move', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-exam-baseline-'))
+  let account, pushes = 0
+  const runtime = createSchulnetzRuntime({ root, key: randomBytes(32), autostart: false,
+    fcmSend: async () => {
+      const baseline = JSON.parse(await readFile(join(root, 'accounts', account, 'notification-baseline.json'), 'utf8'))
+      assert.equal(baseline.weeks[baselineWeek].exams[0].start, `${baselineWeek}T12:00:00`)
+      pushes += 1
+      return { status: 200 }
+    },
+  })
+  try {
+    const guest = await runtime.createGuest('203.0.113.34'); account = guest.accountId
+    await runtime.linkAccount(account, { baseUrl: 'https://www.schulnetz-ag.ch/aksa', deviceId: '0123456789abcdef01234567', refreshToken: 'synthetic-refresh-token-long-enough' })
+    await runtime.addFcmToken(account, 'phone:APA91b-example-token-value')
+    const send = (body) => guestCall(runtime, guest, 'PUT', '/api/v1/schulnetz/snapshot', JSON.stringify(body))
+    const first = agendaRead([syntheticExam()], '10')
+    assert.equal((await send(first)).body.changes, 0)
+    assert.equal((await stat(join(root, 'accounts', account, 'notification-baseline.json'))).mode & 0o777, 0o600)
+    const next = agendaRead([syntheticExam('synthetic-101')], '11')
+    assert.equal((await send(next)).body.changes, 0)
+    const moved = agendaRead([{ ...syntheticExam('synthetic-101'), start: `${baselineWeek}T12:00:00`, end: `${baselineWeek}T12:45:00` }], '12')
+    assert.equal((await send(moved)).body.changes, 1)
+    assert.equal(pushes, 1)
+    assert.equal((await send(moved)).body.changes, 0)
+    assert.equal(pushes, 1)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+
+test('a known exam really moving into a new week alerts once while equivalent time formats stay quiet', () => {
+  const first = agendaRead([syntheticExam()], '10')
+  const baseline = baselineDiff({}, first, {}).weeks
+  const formatted = { ...syntheticExam('synthetic-101'), start: '2026-11-23T09:15:00Z', end: '2026-11-23T10:00:00Z' }
+  assert.deepEqual(baselineDiff(first, agendaRead([formatted], '11'), baseline).changes, [])
+  const later = syntheticExam('synthetic-101', '2026-11-30')
+  const next = agendaRead([later], '11', [baselineWeek, '2026-11-30'])
+  const moved = baselineDiff(first, next, baseline)
+  assert.deepEqual(moved.changes.map((change) => change.title), ['Prüfung verschoben'])
+  assert.equal(moved.changes[0].body.startsWith('30.11.2026 · '), true)
+  assert.deepEqual(moved.weeks[baselineWeek].exams, [])
+  assert.deepEqual(baselineDiff(next, agendaRead([later], '12', [baselineWeek, '2026-11-30']), moved.weeks).changes, [])
 })

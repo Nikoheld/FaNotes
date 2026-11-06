@@ -179,6 +179,7 @@ fun keepStoredRead(
     }
     return guarded.copy(
         grades = grades,
+        examWeekFetched = if (blocked || okPages == 0 || timetableFailed) prior.examWeekFetched else next.examWeekFetched,
         events = events,
         exams = exams,
         messages = messages,
