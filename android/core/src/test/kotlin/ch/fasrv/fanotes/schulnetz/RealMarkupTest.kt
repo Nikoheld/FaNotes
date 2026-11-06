@@ -68,6 +68,17 @@ class RealMarkupTest {
         val first = lessons.first { it.start.startsWith("2026-11-02T07:45") }
         assertEquals("A12", first.room)
         assertTrue(first.text.contains("Holm"))
+        val nested = """
+            <div class="dhx_cal_event stpt_event" event_id="deep">
+              <div class="stpt_bar" data-bar-start="1794208500000" data-bar-end="1794211200000"></div>
+              <div class="stpt_event_text">Mathematik</div>
+              <div class="stpt_event_date">08:15 - 09:00 / A1</div>
+            </div>
+        """.trimIndent()
+        val deep = parseRenderedTimetable(nested).single()
+        assertTrue(deep.start.startsWith("2026-11-09T08:15"))
+        assertEquals("A1", deep.room)
+        assertEquals("lesson", deep.eventType)
         assertEquals(
             "https://www.schulnetz-ag.ch/aksa/scheduler_processor.php?view=week&curr_date=2026-11-04&min_date=2026-11-02&max_date=2026-11-09&ansicht=schueleransicht&id=abc&transid=def&pageid=22202&timeshift=-60",
             schedulerUrl(AKSA_SCHULNETZ_BASE, "abc", "def", "2026-11-04", "2026-11-02", "2026-11-09"),

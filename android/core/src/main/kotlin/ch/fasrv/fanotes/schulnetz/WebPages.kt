@@ -247,8 +247,10 @@ fun parseRenderedTimetable(html: String): List<AgendaEvent> {
         val text = clean(element.selectFirst(".stpt_event_text")?.text().orEmpty()).ifBlank { clean(element.attr("aria-label")) }
         if (text.isBlank()) continue
         val whenLine = clean(element.selectFirst(".stpt_event_date")?.text().orEmpty())
-        val startMs = element.attr("data-bar-start").toLongOrNull()
-        val endMs = element.attr("data-bar-end").toLongOrNull()
+        val timed = if (element.hasAttr("data-bar-start") || element.hasAttr("data-bar-end")) element
+            else element.selectFirst("[data-bar-start], [data-bar-end]")
+        val startMs = timed?.attr("data-bar-start")?.toLongOrNull()
+        val endMs = timed?.attr("data-bar-end")?.toLongOrNull()
         val start = if (startMs != null) Instant.ofEpochMilli(startMs).atZone(zone).toLocalDateTime().toString() else whenLine
         val end = if (endMs != null) Instant.ofEpochMilli(endMs).atZone(zone).toLocalDateTime().toString() else start
         val room = Regex("""/\s*([A-Za-z0-9.-]+)""").find(whenLine)?.groupValues?.get(1).orEmpty()
