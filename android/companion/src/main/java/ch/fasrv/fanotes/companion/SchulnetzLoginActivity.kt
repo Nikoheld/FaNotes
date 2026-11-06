@@ -47,7 +47,7 @@ class SchulnetzLoginActivity : ComponentActivity() {
         val graph = (application as CompanionApplication).graph
         val viewOnly = intent.getBooleanExtra(EXTRA_VIEW, false)
         val explicit = intent.getStringExtra(EXTRA_URL).orEmpty()
-        if (!viewOnly && !graph.consumeOauthPermit()) {
+        if (!viewOnly && savedInstanceState?.getBoolean(STATE_PERMITTED) != true && !graph.consumeOauthPermit()) {
             graph.schulnetzLog.info("visible login activity refused reason=oauth-not-permitted")
             finish(); return
         }
@@ -97,10 +97,11 @@ class SchulnetzLoginActivity : ComponentActivity() {
                                     }
                                 }
                                 override fun onPageFinished(view: WebView, url: String) {
+                                    if (webView !== view || isDestroyed || isFinishing) return
                                     loading = false
                                     view.evaluateJavascript(HTML_JS) { raw ->
                                         val html = decodeJsString(raw)
-                                        if (!viewOnly && isLoggedInLanding(url, html)) {
+                                        if (webView === view && !isFinishing && !isDestroyed && !viewOnly && isLoggedInLanding(url, html)) {
                                             SchulnetzLoginBridge.landingUrl = url
                                             SchulnetzLoginBridge.landingHtml = html
                                             CookieManager.getInstance().flush()
@@ -116,8 +117,19 @@ class SchulnetzLoginActivity : ComponentActivity() {
             }
         }
     }
-    override fun onDestroy() { webView?.destroy(); webView = null; super.onDestroy() }
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean(STATE_PERMITTED, true)
+        super.onSaveInstanceState(outState)
+    }
+    override fun onDestroy() {
+        val view = webView
+        webView = null
+        view?.stopLoading()
+        view?.destroy()
+        super.onDestroy()
+    }
     companion object {
+        private const val STATE_PERMITTED = "login-permitted"
         const val EXTRA_BASE = "base"; const val EXTRA_HOST = "host"; const val EXTRA_URL = "url"; const val EXTRA_VIEW = "view"
         private const val HTML_JS = "(function(){return document.documentElement?document.documentElement.outerHTML:''})()"
     }

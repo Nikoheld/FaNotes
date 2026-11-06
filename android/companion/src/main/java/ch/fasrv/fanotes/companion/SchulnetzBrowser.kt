@@ -3,7 +3,6 @@ package ch.fasrv.fanotes.companion
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Handler
-import android.os.HandlerThread
 import android.os.Looper
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
@@ -49,11 +48,11 @@ data class LoadedPage(
  */
 class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
     private val app = context.applicationContext
-    private val webThread = HandlerThread("schulnetz-web").apply { start() }
-    private val webHandler = Handler(webThread.looper)
+    private val webHandler = Handler(Looper.getMainLooper())
     private val generation = AtomicInteger()
     private var web: WebView? = null
-    private var pending: Slot? = null
+    internal var webViewFactory: (Context) -> WebView = { WebView(it) }
+    @Volatile private var pending: Slot? = null
 
     fun load(url: String): LoadedPage {
         val started = System.nanoTime()
@@ -80,7 +79,7 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
     private fun navigate(url: String): LoadedPage {
         val slot = open(url)
         webHandler.post {
-            if (slot.generation != generation.get()) return@post
+            if (slot.generation != generation.get() || slot.done.get()) return@post
             val view = ensure()
             view.webViewClient = client(slot, url)
             view.loadUrl(url)
@@ -111,14 +110,15 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
             })()
         """.trimIndent()
         webHandler.post {
-            if (slot.generation != generation.get()) return@post
+            if (slot.generation != generation.get() || slot.done.get()) return@post
             ensure().evaluateJavascript(script, null)
         }
         val fetched = await(slot, url)
-        if (fetched.error != null && fetched.body.isBlank()) return navigate(url)
+        if (fetched.error != null && fetched.error != "cancelled" && fetched.body.isBlank()) return navigate(url)
         return fetched
     }
 
+    @Synchronized
     private fun open(url: String): Slot {
         pending?.let { old ->
             if (old.done.compareAndSet(false, true)) {
@@ -135,21 +135,49 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
     private fun budget(url: String): Long = if (url.contains("pageid=22202")) 12L else 25L
 
     private fun await(slot: Slot, url: String): LoadedPage {
-        if (!slot.latch.await(budget(url), TimeUnit.SECONDS)) {
-            slot.done.set(true)
-            webHandler.post { if (generation.get() == slot.generation) web?.stopLoading() }
-            log.info("load timeout page=${pageToken(url)} budgetS=${budget(url)} mainThread=false")
-            return LoadedPage(url, slot.finalUrl.ifBlank { url }, slot.status, "", "timeout")
+        val completed = try {
+            slot.latch.await(budget(url), TimeUnit.SECONDS)
+        } catch (e: InterruptedException) {
+            cancel(slot, "cancelled")
+            throw e
         }
+        if (!completed) cancel(slot, "timeout")
         return slot.page ?: LoadedPage(url, url, 0, "", "empty")
     }
 
+    @Synchronized
+    private fun cancel(slot: Slot, reason: String) {
+        if (!slot.done.compareAndSet(false, true)) return
+        slot.page = LoadedPage(slot.requested, slot.finalUrl.ifBlank { slot.requested }, slot.status, "", reason)
+        slot.latch.countDown()
+        webHandler.post { if (generation.get() == slot.generation) web?.stopLoading() }
+        log.info("load $reason page=${pageToken(slot.requested)}")
+    }
+
+    @Synchronized
     private fun finish(slot: Slot, page: LoadedPage) {
         if (slot.generation != generation.get()) return
         if (!slot.done.compareAndSet(false, true)) return
         slot.page = page
         slot.latch.countDown()
         webHandler.post { CookieManager.getInstance().flush() }
+    }
+
+    internal fun hasPendingLoad(): Boolean = pending?.done?.get() == false
+
+    /** Cancel queued work before destroying the browser on its owning thread. */
+    @Synchronized
+    internal fun dispose() {
+        pending?.let { cancel(it, "cancelled") }
+        generation.incrementAndGet()
+        pending = null
+        webHandler.post {
+            web?.let { view ->
+                web = null
+                view.stopLoading()
+                view.destroy()
+            }
+        }
     }
 
     private fun client(slot: Slot, requested: String) = object : WebViewClient() {
@@ -213,8 +241,9 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun ensure(): WebView {
+        check(Looper.myLooper() == Looper.getMainLooper())
         web?.let { return it }
-        val created = WebView(app)
+        val created = webViewFactory(app)
         prepareWebView(created)
         created.addJavascriptInterface(Bridge(), "FanotesHtml")
         web = created
@@ -222,7 +251,7 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
     }
 
     private fun currentUrl(): String {
-        if (Looper.myLooper() == webThread.looper) return web?.url.orEmpty()
+        if (Looper.myLooper() == Looper.getMainLooper()) return web?.url.orEmpty()
         val latch = CountDownLatch(1)
         val box = arrayOf("")
         webHandler.post {
