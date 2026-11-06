@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.8
+
+- Fix Schulnetz WebView thread ownership
+
 ## 2026.11.2-beta.7
 
 - Persist quiet exam week baselines and date agenda notifications (#1012)
