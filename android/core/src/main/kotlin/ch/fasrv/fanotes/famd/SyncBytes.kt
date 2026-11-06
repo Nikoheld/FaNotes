@@ -12,20 +12,46 @@ enum class NoteSyncKind { PRESENT, BLANK, UNREADABLE }
 
 /** Packed documents stay packed. Legacy JSON is bounded before building its DOM. */
 const val MAX_SYNC_DOCUMENT_BYTES = 16 * 1024 * 1024
+
+/** A normal note, including a short guest document, must not consult the live heap. */
+const val MODEST_SYNC_DOCUMENT_BYTES = 1024 * 1024
+
+/** Packed sync keeps points packed, so two copies are enough headroom for a large note. */
+const val SYNC_DOCUMENT_HEADROOM = 2L
+
 private val SYNC_JSON_LIMITS = JsonLimits(maxDepth = 64, maxNodes = 100_000)
-class SyncDocumentLimitException : IllegalStateException("Sync document exceeds the safe memory budget; local and remote copies were kept.")
+
+/**
+ * Hard cap misses are permanent for that document. A headroom miss on a legal
+ * note is transient: the caller retries without treating the note as blank.
+ */
+class SyncDocumentLimitException(val transient: Boolean = false) : IllegalStateException(
+    "Sync document exceeds the safe memory budget; local and remote copies were kept.",
+)
+
+enum class SyncBudget { ALLOW, REJECT }
+
+/** Heap pressure is ignored for a modest document. Only an oversized or unsafe note is rejected. */
+fun syncDocumentBudget(bytes: Long, availableBytes: Long): SyncBudget {
+    if (bytes < 0L || bytes > MAX_SYNC_DOCUMENT_BYTES) return SyncBudget.REJECT
+    if (bytes <= MODEST_SYNC_DOCUMENT_BYTES) return SyncBudget.ALLOW
+    val room = availableBytes.coerceAtLeast(0L)
+    if (room < bytes * SYNC_DOCUMENT_HEADROOM) return SyncBudget.REJECT
+    return SyncBudget.ALLOW
+}
 
 fun requireSyncDocumentBudget(path: String, bytes: Long) {
     if (!isFamdSyncPath(path)) return
+    // Modest notes never read the live heap. Packed sync does not need spare copies of them.
+    if (bytes >= 0L && bytes <= MODEST_SYNC_DOCUMENT_BYTES) return
+    if (bytes < 0L || bytes > MAX_SYNC_DOCUMENT_BYTES) throw SyncDocumentLimitException(transient = false)
     val runtime = Runtime.getRuntime()
-    if (bytes > MAX_SYNC_DOCUMENT_BYTES || bytes < 0) throw SyncDocumentLimitException()
     fun available() = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory())
-    if (bytes * 8 > available()) {
-        // Previous sequential transforms may be collectible. One collection avoids a false pause;
-        // this runs on the sync worker, and genuinely low memory still fails before allocation.
-        runtime.gc()
-        if (bytes * 8 > available()) throw SyncDocumentLimitException()
-    }
+    if (syncDocumentBudget(bytes, available()) == SyncBudget.ALLOW) return
+    // One collection covers a transient spike. A note that still cannot fit is
+    // retried by the engine; it is not stored and not reported as a blank note.
+    runtime.gc()
+    if (syncDocumentBudget(bytes, available()) == SyncBudget.REJECT) throw SyncDocumentLimitException(transient = true)
 }
 
 private fun storedDocument(path: String, bytes: ByteArray, text: String? = null): FamdDocument {
@@ -136,7 +162,7 @@ fun withLocalPageStats(downloaded: ByteArray, local: ByteArray, path: String): B
 private fun documentIsBlank(parsed: FamdDocument): Boolean {
     if (parsed.markdown.isNotBlank()) return false
     val payload = parsed.payload ?: return true
-    if (jsonHasInk(payload)) return false
+    if (inkHasMarks(payload)) return false
     val fields = payload.array("textFields")?.items.orEmpty()
     return fields.none { field ->
         val text = (field as? JsonValue.Obj)?.string("text")
@@ -144,21 +170,4 @@ private fun documentIsBlank(parsed: FamdDocument): Boolean {
     }
 }
 
-private fun jsonHasInk(value: JsonValue?, depth: Int = 0): Boolean {
-    if (value == null || depth > 6) return false
-    return when (value) {
-        is JsonValue.Arr -> value.items.any { jsonHasInk(it, depth + 1) }
-        is JsonValue.Obj -> {
-            val packed = value.string("famdPts")
-            if (!packed.isNullOrEmpty()) return true
-            val points = value.array("points")
-            if (points != null && points.items.isNotEmpty()) return true
-            val figures = value.array("figurePaths")
-            if (figures != null && figures.items.isNotEmpty()) return true
-            val strokes = value.array("strokes")
-            if (strokes != null && strokes.items.any { jsonHasInk(it, depth + 1) }) return true
-            jsonHasInk(value["ink"], depth + 1) || jsonHasInk(value["hidden"], depth + 1) || jsonHasInk(value["sections"], depth + 1)
-        }
-        else -> false
-    }
-}
+

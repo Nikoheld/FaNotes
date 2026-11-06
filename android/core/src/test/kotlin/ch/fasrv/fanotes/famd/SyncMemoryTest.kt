@@ -82,4 +82,40 @@ class SyncMemoryTest {
         assertFailsWith<JsonLimitException> { canonicalSyncBytes("Synthetic.famd", source) }
         assertFailsWith<JsonLimitException> { noteSyncKind("Synthetic.famd", source) }
     }
+
+    @Test fun aModestDocumentIsAllowedWhenTheHeapHasNoRoom() {
+        assertEquals(SyncBudget.ALLOW, syncDocumentBudget(48_000, 0))
+        assertEquals(SyncBudget.ALLOW, syncDocumentBudget(MODEST_SYNC_DOCUMENT_BYTES.toLong(), 0))
+        assertEquals(SyncBudget.REJECT, syncDocumentBudget(MODEST_SYNC_DOCUMENT_BYTES.toLong() + 1, 1))
+        assertEquals(
+            SyncBudget.ALLOW,
+            syncDocumentBudget(MODEST_SYNC_DOCUMENT_BYTES.toLong() + 1, (MODEST_SYNC_DOCUMENT_BYTES + 1L) * SYNC_DOCUMENT_HEADROOM),
+        )
+        assertEquals(SyncBudget.REJECT, syncDocumentBudget(MAX_SYNC_DOCUMENT_BYTES.toLong() + 1, Long.MAX_VALUE / 4))
+        assertEquals(SyncBudget.REJECT, syncDocumentBudget(-1, Long.MAX_VALUE / 4))
+        requireSyncDocumentBudget("Synthetic.famd", MODEST_SYNC_DOCUMENT_BYTES.toLong())
+        requireSyncDocumentBudget("Notes/plain.txt", -1)
+        val hard = assertFailsWith<SyncDocumentLimitException> {
+            requireSyncDocumentBudget("Synthetic.famd", MAX_SYNC_DOCUMENT_BYTES.toLong() + 1)
+        }
+        assertFalse(hard.transient)
+    }
+
+    @Test fun aBlankOrGuestDocumentSkipsPackedInk() {
+        val blankPayload = emptyFamdPayload("2026-11-06T00:00:00Z")
+        val blank = serializeFamd("", blankPayload, "v2").encodeToByteArray()
+        assertFalse(inkHasMarks(blankPayload))
+        assertEquals(NoteSyncKind.BLANK, noteSyncKind("Notes/guest.famd", blank))
+        val blankIdentity = identitySyncBytes("Notes/guest.famd", blank)
+        assertNotNull(blankIdentity)
+        assertFalse(blankIdentity.decodeToString().contains("\"points\""))
+        val reusedPayload = emptyFamdPayload("2026-11-06T00:00:00Z")
+        reusedPayload.put("ink", jsonObject("strokes" to jsonArray(), "updatedAt" to jsonString("2026-11-06T00:00:00Z")))
+        assertFalse(inkHasMarks(reusedPayload))
+        val reused = serializeFamd("", reusedPayload, "v2").encodeToByteArray()
+        assertEquals(NoteSyncKind.BLANK, noteSyncKind("Notes/guest.famd", reused))
+        assertNotNull(identitySyncBytes("Notes/guest.famd", reused))
+        assertFalse(reused.decodeToString().contains("\"points\""))
+        assertFalse(reused.decodeToString().contains("famdPts"))
+    }
 }
