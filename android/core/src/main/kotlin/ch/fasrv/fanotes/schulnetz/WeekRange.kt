@@ -10,6 +10,9 @@ const val WEEK_ADJACENT_MS = 30L * 60L * 1000L
 const val WEEK_FAR_MS = 24L * 60L * 60L * 1000L
 const val WEEK_CAP = 48
 
+/** Future Mondays tried when the page has no start or end. Current week plus this many. */
+const val WEEK_PROBE = 4
+
 data class WeekSpan(val start: LocalDate, val end: LocalDate)
 
 data class WeekPlan(val fetch: List<LocalDate>, val fetchIcal: Boolean)
@@ -49,9 +52,15 @@ fun capMondays(mondays: List<LocalDate>, today: LocalDate): List<LocalDate> {
     return unique.sortedWith(compareBy<LocalDate> { abs(ChronoUnit.DAYS.between(anchor, it)) }.thenBy { it }).take(WEEK_CAP).sorted()
 }
 
+/** Current Monday through [WEEK_PROBE] future Mondays. Not a school year. */
+fun probeMondays(today: LocalDate): List<LocalDate> {
+    val current = weekMonday(today)
+    return (0..WEEK_PROBE).map { current.plusWeeks(it.toLong()) }
+}
+
 /**
- * Weeks the page actually offers. A missing limit stays null: the caller then
- * keeps the current week and does not invent a school year.
+ * Weeks the page actually offers. A missing limit stays null: callers then
+ * probe a few future weeks and do not invent a school year.
  */
 fun parseWeekSpan(html: String): WeekSpan? {
     val scriptStart = limitDate(html, "start")
@@ -78,7 +87,8 @@ fun planWeekFetches(
     icalAvailable: Boolean,
 ): WeekPlan {
     val current = weekMonday(today)
-    val universe = capMondays(if (mondays.isEmpty()) listOf(current) else mondays, today)
+    val probing = mondays.isEmpty()
+    val universe = capMondays(if (probing) probeMondays(today) else mondays, today)
     val near = universe.filter { abs(ChronoUnit.DAYS.between(current, it)) / 7 <= 1 }
     val far = universe.filter { abs(ChronoUnit.DAYS.between(current, it)) / 7 > 1 }
     val first = fetchedAt.isEmpty() && icalFetchedAt.isBlank()
@@ -92,7 +102,12 @@ fun planWeekFetches(
     if (icalDue) return WeekPlan(due, fetchIcal = true)
     val farDue = far.filter { stampAge(fetchedAt[it.toString()], now) >= WEEK_FAR_MS }
         .sortedBy { fetchedAt[it.toString()].orEmpty() }
-    if (farDue.isNotEmpty()) due += farDue.first()
+    if (probing) {
+        val missing = far.filter { fetchedAt[it.toString()].isNullOrBlank() }
+        if (missing.isNotEmpty()) due += missing else if (farDue.isNotEmpty()) due += farDue.first()
+    } else if (farDue.isNotEmpty()) {
+        due += farDue.first()
+    }
     return WeekPlan(due, fetchIcal = false)
 }
 

@@ -31,6 +31,7 @@ import ch.fasrv.fanotes.schulnetz.overlayDated
 import ch.fasrv.fanotes.schulnetz.overlayLessons
 import ch.fasrv.fanotes.schulnetz.parseWeekSpan
 import ch.fasrv.fanotes.schulnetz.planWeekFetches
+import ch.fasrv.fanotes.schulnetz.schedulerBodyUsable
 import ch.fasrv.fanotes.schulnetz.schedulerWeekLoaded
 import ch.fasrv.fanotes.schulnetz.spanOfEvents
 import ch.fasrv.fanotes.schulnetz.weekMonday
@@ -387,6 +388,7 @@ class SchulnetzClient(
         val canFetch = oauthPage == null && !sawSessionProblem && planHtml.isNotBlank() && id.isNotBlank() && transid.isNotBlank() && planError.isBlank()
         val lessonWeeks = linkedMapOf<java.time.LocalDate, List<ch.fasrv.fanotes.schulnetz.AgendaEvent>>()
         val examWeeks = linkedMapOf<java.time.LocalDate, List<ch.fasrv.fanotes.schulnetz.AgendaEvent>>()
+        val checkedEmpty = mutableSetOf<java.time.LocalDate>()
         if (canFetch && !callerMain) {
             for (monday in plan.fetch) {
                 if (oauthPage != null || sawSessionProblem || parseFailed) break
@@ -396,6 +398,7 @@ class SchulnetzClient(
                 val lessonParsed = if (schedulerWeekLoaded(lessonBody)) offMain("scheduler-xml") { parseSchedulerXml(lessonBody) } else emptyList()
                 if (lessonParsed == null) break
                 if (lessonParsed.isNotEmpty()) lessonWeeks[monday] = lessonParsed
+                else if (monday != weekMonday(today) && schedulerBodyUsable(lessonBody) && !schedulerWeekLoaded(lessonBody)) checkedEmpty += monday
                 if (oauthPage != null || sawSessionProblem || parseFailed) break
                 val examBody = get(examSchedulerUrl(root, id, transid, curr, monday.toString(), max.toString()), "pruefungen-xml", "21312")
                 val examParsed = if (schedulerWeekLoaded(examBody)) {
@@ -431,6 +434,7 @@ class SchulnetzClient(
         if (timetableFailed) {
             lessonWeeks.clear()
             examWeeks.clear()
+            checkedEmpty.clear()
         }
         val refreshedLessons = lessonWeeks.keys.map { it.toString() }.toSet()
         trace("parse stundenplan end weeksRequested=${plan.fetch.size} weeksReceived=${refreshedLessons.size} durationMs=${(System.nanoTime() - parseStarted) / 1_000_000} mainThread=$callerMain bytes=${planHtml.length} tables=${tableCount(planHtml)} $context")
@@ -438,7 +442,10 @@ class SchulnetzClient(
         var span = knownSpan
         var icalAt = previous?.icalFetchedAt.orEmpty()
         val stamps = previous?.weekFetched.orEmpty().toMutableMap()
-        if (canFetch && !timetableFailed) for (monday in refreshedLessons) stamps[monday] = fetchedNow
+        if (canFetch && !timetableFailed) {
+            for (monday in refreshedLessons) stamps[monday] = fetchedNow
+            for (monday in checkedEmpty) stamps[monday.toString()] = fetchedNow
+        }
         var icalExams = emptyList<ch.fasrv.fanotes.schulnetz.AgendaEvent>()
         if (canFetch && !timetableFailed && plan.fetchIcal && icalAvailable) {
             val body = get(icalUrl.orEmpty(), "ical", "ical")

@@ -29,6 +29,39 @@ class WeekRangeTest {
         val data = """<div data-min-date="2026-08-17" data-max-date="2027-07-04"></div>"""
         assertEquals(fromClock, parseWeekSpan(data))
         assertNull(parseWeekSpan("<html><body>Stundenplan</body></html>"))
+        assertNull(parseWeekSpan("""<script>scheduler.config.limit_start = new Date(Date.UTC(2026, 7, 17)); scheduler.config.limit_end = new Date(Date.UTC(2027, 6, 4));</script>"""))
+        assertNull(parseWeekSpan("""<div data-min-date="17.08.2026" data-max-date="04.07.2027"></div>"""))
+    }
+
+    @Test
+    fun anUnmarkedPageProbesTheNextWeeksOnceAndThenWaits() {
+        val first = planWeekFetches(emptyList(), emptyMap(), "", now, today, icalAvailable = false)
+        assertEquals(
+            listOf("2026-11-02", "2026-11-09", "2026-11-16", "2026-11-23", "2026-11-30").map(LocalDate::parse),
+            first.fetch,
+        )
+        val held = planWeekFetches(emptyList(), mapOf("2026-11-02" to now.toString()), "", now, today, icalAvailable = false)
+        assertEquals(first.fetch, held.fetch)
+        val fresh = first.fetch.associate { it.toString() to now.toString() }
+        val quiet = planWeekFetches(emptyList(), fresh, "", now, today, icalAvailable = false)
+        assertEquals(listOf(LocalDate.parse("2026-11-02")), quiet.fetch)
+        val stale = fresh.toMutableMap()
+        stale["2026-11-16"] = "2026-11-03T11:00:00Z"
+        stale["2026-11-23"] = "2026-11-03T11:00:00Z"
+        stale["2026-11-30"] = "2026-11-03T10:00:00Z"
+        val one = planWeekFetches(emptyList(), stale, "", now, today, icalAvailable = false)
+        assertEquals(listOf(LocalDate.parse("2026-11-02"), LocalDate.parse("2026-11-30")), one.fetch)
+        val next = LocalDate.parse("2026-11-09")
+        val url = schedulerUrl(AKSA_SCHULNETZ_BASE, "abc", "def", next.toString(), next.toString(), next.plusDays(7).toString())
+        assertTrue(url.contains("min_date=2026-11-09"))
+        assertTrue(url.contains("max_date=2026-11-16"))
+        assertFalse(url.contains("min_date=2026-08-17"))
+        val xml = """<data><event id="next"><start_date>2026-11-09 08:15</start_date><end_date>2026-11-09 09:00</end_date><text>Mathematik</text><event_type>0_stp</event_type></event></data>"""
+        val current = lesson("e1", "2026-11-04T08:15:00")
+        val merged = overlayLessons(listOf(current), parseSchedulerXml(xml), setOf("2026-11-09"))
+        assertEquals(setOf("e1", "next"), merged.map { it.id }.toSet())
+        assertTrue(schedulerBodyUsable("<data></data>"))
+        assertFalse(schedulerWeekLoaded("<data></data>"))
     }
 
     @Test
@@ -44,7 +77,13 @@ class WeekRangeTest {
         val withoutCalendar = planWeekFetches(mondays, emptyMap(), "", now, today, icalAvailable = false)
         assertEquals(WEEK_CAP, withoutCalendar.fetch.size)
         assertFalse(withoutCalendar.fetchIcal)
-        assertEquals(listOf(weekMonday(today)), planWeekFetches(emptyList(), emptyMap(), "", now, today, icalAvailable = false).fetch)
+        val probed = planWeekFetches(emptyList(), emptyMap(), "", now, today, icalAvailable = false)
+        assertEquals(probeMondays(today), probed.fetch)
+        assertEquals(WEEK_PROBE + 1, probed.fetch.size)
+        assertFalse(probed.fetchIcal)
+        val withCalendarProbe = planWeekFetches(emptyList(), emptyMap(), "", now, today, icalAvailable = true)
+        assertEquals(listOf(LocalDate.parse("2026-11-02"), LocalDate.parse("2026-11-09")), withCalendarProbe.fetch)
+        assertTrue(withCalendarProbe.fetchIcal)
 
         val fresh = mondays.associate { it.toString() to now.toString() }
         val quiet = planWeekFetches(mondays, fresh, now.toString(), now, today, icalAvailable = true)

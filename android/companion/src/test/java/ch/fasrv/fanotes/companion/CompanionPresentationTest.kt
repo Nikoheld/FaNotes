@@ -73,6 +73,34 @@ class CompanionPresentationTest {
         assertEquals(2, entries.size)
         assertEquals(1, entries.count { it.local != null }); assertEquals(1, entries.count { it.task != null })
     }
+    @Test fun `next week from an unmarked timetable shows on the agenda`() {
+        val today = LocalDate.of(2026, 11, 4)
+        val now = java.time.Instant.parse("2026-11-04T12:00:00Z")
+        val deep = """<script>scheduler.config.limit_start = new Date(Date.UTC(2026, 7, 17)); scheduler.config.limit_end = new Date(Date.UTC(2027, 6, 4));</script><div data-min-date="17.08.2026" data-max-date="04.07.2027"><div class="dhx_cal_date">02.11.2026</div></div>"""
+        assertNull(parseWeekSpan(deep))
+        val plan = planWeekFetches(emptyList(), mapOf("2026-11-02" to now.toString()), "", now, today, icalAvailable = false)
+        val nextMonday = LocalDate.parse("2026-11-09")
+        assertTrue(plan.fetch.contains(nextMonday))
+        assertEquals(WEEK_PROBE + 1, plan.fetch.size)
+        val url = schedulerUrl("https://www.schulnetz-ag.ch/aksa", "abc", "def", nextMonday.toString(), nextMonday.toString(), nextMonday.plusDays(7).toString())
+        assertTrue(url.contains("scheduler_processor.php?view=week"))
+        assertTrue(url.contains("min_date=2026-11-09"))
+        assertTrue(url.contains("max_date=2026-11-16"))
+        assertFalse(url.contains("action="))
+        val xml = """<data><event id="next"><start_date>2026-11-09 08:15</start_date><end_date>2026-11-09 09:00</end_date><text>Mathematik</text><event_type>0_stp</event_type></event></data>"""
+        val events = overlayLessons(listOf(school(start = "2026-11-04T08:15").copy(room = "")), parseSchedulerXml(xml), setOf(nextMonday.toString()))
+        val snapshot = SchulnetzSnapshot(events = events, fetchedAt = now.toString())
+        val shown = agendaForDay(nextMonday, snapshot, emptyCalendar(), emptyList(), emptyList(), zone)
+        assertEquals(listOf("Mathematik"), shown.map { it.title })
+        assertEquals(AgendaKind.Lesson, shown.single().kind)
+        assertEquals("08:15", shown.single().start)
+        assertTrue(eventInHours(shown.single().school!!, 7, 18, zone))
+        val window = (0L..14L).flatMap { offset -> agendaForDay(today.plusDays(offset), snapshot, emptyCalendar(), emptyList(), emptyList(), zone) }
+        assertTrue(window.any { it.school?.id == "next" })
+        assertTrue(window.any { it.school?.id == "lesson" })
+        val quiet = planWeekFetches(emptyList(), plan.fetch.associate { it.toString() to now.toString() }, "", now, today, icalAvailable = false)
+        assertEquals(listOf(weekMonday(today)), quiet.fetch)
+    }
     @Test fun `hidden lessons and hidden calendars remain hidden while completed tasks leave schedule`() {
         val lesson = school()
         val hidden = hideOnce(lesson, emptyList())

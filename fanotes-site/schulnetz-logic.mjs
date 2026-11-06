@@ -1443,6 +1443,8 @@ export const extractWebIds = (url, html) => {
 export const WEEK_ADJACENT_MS = 30 * 60 * 1000
 export const WEEK_FAR_MS = 24 * 60 * 60 * 1000
 export const WEEK_CAP = 48
+/** Future Mondays tried when the page has no start or end. Current week plus this many. */
+export const WEEK_PROBE = 4
 
 export const weekMonday = (iso) => {
   const [year, month, day] = String(iso || '').split('-').map(Number)
@@ -1515,7 +1517,17 @@ const dataDate = (html, which) => {
   return parsedDay(match?.[1] || '')
 }
 
-/** A missing limit stays null. Callers then keep the current week. */
+export const probeMondays = (today) => {
+  const current = weekMonday(today)
+  const out = []
+  for (let step = 0; step <= WEEK_PROBE; step += 1) {
+    const monday = addDays(current, step * 7)
+    if (monday) out.push(monday)
+  }
+  return out
+}
+
+/** A missing limit stays null. Callers then probe a few future weeks. */
 export const parseWeekSpan = (html) => {
   const scriptStart = limitDate(html, 'start')
   const scriptEnd = limitDate(html, 'end')
@@ -1543,7 +1555,8 @@ const weekDistance = (monday, current) => Math.round((Date.parse(`${monday}T00:0
 
 export const planWeekFetches = ({ mondays = [], fetchedAt = {}, icalFetchedAt = '', now, today, icalAvailable = false } = {}) => {
   const current = weekMonday(today)
-  const universe = capMondays(mondays.length ? mondays : [current], today)
+  const probing = !mondays.length
+  const universe = capMondays(probing ? probeMondays(today) : mondays, today)
   const near = universe.filter((monday) => Math.abs(weekDistance(monday, current)) <= 1)
   const far = universe.filter((monday) => Math.abs(weekDistance(monday, current)) > 1)
   const first = Object.keys(fetchedAt || {}).length === 0 && !icalFetchedAt
@@ -1556,7 +1569,11 @@ export const planWeekFetches = ({ mondays = [], fetchedAt = {}, icalFetchedAt = 
   if (icalAvailable && stampAge(icalFetchedAt, now) >= WEEK_FAR_MS) return { fetch: due, fetchIcal: true }
   const farDue = far.filter((monday) => stampAge(fetchedAt[monday], now) >= WEEK_FAR_MS)
     .sort((left, right) => String(fetchedAt[left] || '').localeCompare(String(fetchedAt[right] || '')))
-  if (farDue.length) due.push(farDue[0])
+  if (probing) {
+    const missing = far.filter((monday) => !fetchedAt[monday])
+    if (missing.length) due.push(...missing)
+    else if (farDue.length) due.push(farDue[0])
+  } else if (farDue.length) due.push(farDue[0])
   return { fetch: due, fetchIcal: false }
 }
 

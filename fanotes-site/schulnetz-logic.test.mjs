@@ -1131,6 +1131,8 @@ test('week range follows the page span and stays quiet for a new week', () => {
   const clock = '<script>scheduler.config.limit_start = new Date(2026, 7, 17); scheduler.config.limit_end = new Date(2027, 6, 4);</script>'
   assert.deepEqual(parseWeekSpan(clock), { start: '2026-08-17', end: '2027-07-04' })
   assert.equal(parseWeekSpan('<html><body>Stundenplan</body></html>'), null)
+  assert.equal(parseWeekSpan('<script>scheduler.config.limit_start = new Date(Date.UTC(2026, 7, 17)); scheduler.config.limit_end = new Date(Date.UTC(2027, 6, 4));</script>'), null)
+  assert.equal(parseWeekSpan('<div data-min-date="17.08.2026" data-max-date="04.07.2027"></div>'), null)
   assert.deepEqual(parseWeekSpan('<div data-min-date="2026-08-17" data-max-date="2027-07-04"></div>'), { start: '2026-08-17', end: '2027-07-04' })
   const mondays = []
   for (let day = '2026-01-05'; day <= '2027-06-28'; day = new Date(Date.parse(`${day}T00:00:00Z`) + 7 * 86400000).toISOString().slice(0, 10)) mondays.push(day)
@@ -1141,7 +1143,29 @@ test('week range follows the page span and stays quiet for a new week', () => {
   assert.equal(walked.fetch.length, WEEK_CAP)
   assert.equal(walked.fetchIcal, false)
   const currentOnly = planWeekFetches({ mondays: [], fetchedAt: {}, icalFetchedAt: '', now: '2026-11-04T12:00:00Z', today: '2026-11-04', icalAvailable: false })
-  assert.deepEqual(currentOnly.fetch, ['2026-11-02'])
+  assert.deepEqual(currentOnly.fetch, ['2026-11-02', '2026-11-09', '2026-11-16', '2026-11-23', '2026-11-30'])
+  assert.equal(currentOnly.fetchIcal, false)
+  const held = planWeekFetches({ mondays: [], fetchedAt: { '2026-11-02': '2026-11-04T12:00:00Z' }, icalFetchedAt: '', now: '2026-11-04T12:00:00Z', today: '2026-11-04', icalAvailable: false })
+  assert.deepEqual(held.fetch, currentOnly.fetch)
+  const freshProbe = Object.fromEntries(currentOnly.fetch.map((day) => [day, '2026-11-04T12:00:00Z']))
+  const quietProbe = planWeekFetches({ mondays: [], fetchedAt: freshProbe, icalFetchedAt: '', now: '2026-11-04T12:00:00Z', today: '2026-11-04', icalAvailable: false })
+  assert.deepEqual(quietProbe.fetch, ['2026-11-02'])
+  const oneFar = planWeekFetches({
+    mondays: [],
+    fetchedAt: { ...freshProbe, '2026-11-16': '2026-11-03T11:00:00Z', '2026-11-23': '2026-11-03T11:00:00Z', '2026-11-30': '2026-11-03T10:00:00Z' },
+    icalFetchedAt: '',
+    now: '2026-11-04T12:00:00Z',
+    today: '2026-11-04',
+    icalAvailable: false,
+  })
+  assert.deepEqual(oneFar.fetch, ['2026-11-02', '2026-11-30'])
+  const spanStamps = Object.fromEntries(mondays.map((day) => [day, '2026-11-03T11:00:00Z']))
+  spanStamps['2026-11-02'] = '2026-11-04T12:00:00Z'
+  spanStamps['2026-10-26'] = '2026-11-04T12:00:00Z'
+  spanStamps['2026-11-09'] = '2026-11-04T12:00:00Z'
+  spanStamps['2026-08-17'] = '2026-10-01T00:00:00Z'
+  const spanFar = planWeekFetches({ mondays, fetchedAt: spanStamps, icalFetchedAt: '', now: '2026-11-04T12:00:00Z', today: '2026-11-04', icalAvailable: false })
+  assert.deepEqual(spanFar.fetch, ['2026-11-02', '2026-08-17'])
   const lesson = (id, start, room = 'A1') => ({ id, start, end: start, room, text: 'Mathematik', courseName: 'Mathematik', teachers: ['Nord'], status: '', eventType: 'lesson' })
   const previous = { events: [lesson('e1', '2026-11-02T08:15:00')], exams: [], weekFetched: {} }
   const next = {
@@ -1230,6 +1254,10 @@ test('a web scrape reads the whole current week and keeps a far lesson', async (
   assert.equal(schedulers.some((url) => url.includes('pageid=22202') && url.includes('min_date=2026-11-02') && url.includes('max_date=2026-11-09') && !url.includes('action=')), true)
   assert.equal(schedulers.some((url) => url.includes('pageid=21312') && !url.includes('action=')), true)
   assert.equal(first.weekFetched['2026-11-02'], undefined)
+  assert.equal(first.weekFetched['2026-11-09'], '2026-11-04T12:00:00Z')
+  assert.equal(schedulers.filter((url) => url.includes('min_date=2026-11-09') && url.includes('pageid=22202') && !url.includes('action=')).length, 1)
+  assert.equal(schedulers.some((url) => url.includes('min_date=2026-08-17')), false)
+  assert.equal(schedulers.length, 10)
   assert.equal(schedulerWeekLoaded('<data></data>'), false)
   assert.equal(schedulerWeekLoaded('<data><event id="e"></event></data>'), true)
   urls.length = 0
@@ -1249,7 +1277,13 @@ test('a web scrape reads the whole current week and keeps a far lesson', async (
   assert.equal(second.events.some((event) => event.id === 'e1'), true)
   assert.equal(second.exams.some((event) => event.id === 'x1'), true)
   assert.equal(second.weekFetched['2026-11-02'], '2026-11-04T12:00:00Z')
-  assert.equal(urls.filter((url) => url.includes('scheduler_processor')).length, 2)
+  assert.equal(second.weekFetched['2026-11-09'], '2026-11-04T12:30:00Z')
+  assert.equal(second.weekFetched['2026-12-07'], '2026-11-04T12:00:00Z')
+  const secondSchedulers = urls.filter((url) => url.includes('scheduler_processor'))
+  assert.equal(secondSchedulers.length, 10)
+  assert.equal(secondSchedulers.some((url) => url.includes('min_date=2026-11-02') && url.includes('pageid=22202')), true)
+  assert.equal(secondSchedulers.some((url) => url.includes('min_date=2026-11-09') && url.includes('pageid=22202')), true)
+  assert.equal(secondSchedulers.some((url) => url.includes('min_date=2026-12-07')), false)
   const undated = async (url) => {
     const scheduler = String(url).includes('scheduler_processor')
     const body = scheduler ? '<data><event id="e"></event></data>' : '<html><body>ok</body></html>'
@@ -1308,6 +1342,59 @@ test('a web scrape reads the whole current week and keeps a far lesson', async (
   assert.equal(terminlisteNextUrl(rotated, base).includes('sRow=25'), true)
   assert.equal(terminlisteNextUrl(rotated, base, 25).includes('sRow=50'), true)
   assert.equal(terminlisteNextUrl(rotated, base, 50), '')
+})
+
+test('an unmarked timetable still loads next week into the schedule', async () => {
+  const urls = []
+  const page = `<html><body>
+    <script>scheduler.config.limit_start = new Date(Date.UTC(2026, 7, 17)); scheduler.config.limit_end = new Date(Date.UTC(2027, 6, 4)); scheduler.init('scheduler_here', new Date(2026, 10, 4), 'week');</script>
+    <div data-min-date="17.08.2026" data-max-date="04.07.2027"><div class="dhx_cal_date">02.11.2026 – 08.11.2026</div></div>
+    <div class="dhx_cal_event" event_id="nested"><div data-bar-start="1794208500000"></div><div class="stpt_event_text">Mathematik</div><div class="stpt_event_date">08:15 - 09:00 / A1</div></div>
+  </body></html>`
+  assert.equal(parseWeekSpan(page), null)
+  const currentXml = '<data><event id="now"><start_date>2026-11-04 08:15</start_date><end_date>2026-11-04 09:00</end_date><text>Deutsch</text><event_type>0_stp</event_type></event></data>'
+  const nextXml = '<data><event id="next"><start_date>2026-11-09 08:15</start_date><end_date>2026-11-09 09:00</end_date><text>Mathematik</text><zimmerkuerzel>A1</zimmerkuerzel><event_type>0_stp</event_type></event></data>'
+  const fetchImpl = async (url) => {
+    const target = String(url)
+    urls.push(target)
+    let body = '<html><body>ok</body></html>'
+    if (target.includes('pageid=22202') && !target.includes('scheduler_processor')) body = page
+    if (target.includes('scheduler_processor') && target.includes('pageid=22202') && target.includes('min_date=2026-11-02')) body = currentXml
+    if (target.includes('scheduler_processor') && target.includes('pageid=22202') && target.includes('min_date=2026-11-09')) body = nextXml
+    if (target.includes('scheduler_processor') && !body.startsWith('<data><event')) body = '<data></data>'
+    return { status: 200, headers: { get: () => '' }, text: async () => body }
+  }
+  const session = { php: 'php', id: 'abc', transid: 'def', userAgent: 'test' }
+  const base = 'https://www.schulnetz-ag.ch/aksa'
+  const read = await scrapeWithSession(base, session, fetchImpl, {
+    today: '2026-11-04',
+    now: '2026-11-04T12:00:00Z',
+    previousEvents: [{ id: 'e1', start: '2026-11-04T08:15:00', end: '2026-11-04T09:00:00', text: 'Deutsch', courseName: 'Deutsch', teachers: [], status: '', eventType: 'lesson', room: 'A1' }],
+    previousExams: [{ id: 'x1', start: '2026-11-04T10:00:00', end: '2026-11-04T10:45:00', text: 'Test Chemie', courseName: 'Test Chemie', teachers: [], status: '', eventType: 'exam', room: 'B1' }],
+    weekFetched: { '2026-11-02': '2026-11-04T11:00:00Z' },
+  })
+  const schedulers = urls.filter((url) => url.includes('scheduler_processor'))
+  assert.equal(schedulers.some((url) => url.includes('pageid=22202') && url.includes('min_date=2026-11-09') && url.includes('max_date=2026-11-16') && !url.includes('action=')), true)
+  assert.equal(schedulers.some((url) => url.includes('min_date=2026-08-17') || url.includes('min_date=2027-')), false)
+  assert.equal(schedulers.length, 10)
+  assert.equal(read.events.some((event) => event.id === 'next' && event.start === '2026-11-09T08:15:00'), true)
+  assert.equal(read.events.some((event) => event.id === 'now'), true)
+  assert.equal(read.events.some((event) => event.id === 'e1'), false)
+  assert.equal(read.exams.some((event) => event.id === 'x1'), true)
+  assert.equal(read.weekFetched['2026-11-09'], '2026-11-04T12:00:00Z')
+  assert.equal(read.weekFetched['2026-11-16'], '2026-11-04T12:00:00Z')
+  urls.length = 0
+  const again = await scrapeWithSession(base, session, fetchImpl, {
+    today: '2026-11-04',
+    now: '2026-11-04T12:10:00Z',
+    previousEvents: read.events,
+    previousExams: read.exams,
+    weekFetched: read.weekFetched,
+  })
+  const againSchedulers = urls.filter((url) => url.includes('scheduler_processor'))
+  assert.equal(againSchedulers.length, 2)
+  assert.equal(againSchedulers.every((url) => url.includes('min_date=2026-11-02')), true)
+  assert.equal(again.events.some((event) => event.id === 'next'), true)
 })
 
 test('exam alerts ignore a stored lesson, empty markup and a missing clock', () => {
