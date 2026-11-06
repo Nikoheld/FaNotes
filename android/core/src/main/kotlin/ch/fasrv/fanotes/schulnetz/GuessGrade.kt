@@ -118,6 +118,34 @@ fun celebrityAgePrompt(mark: Double, seed: String, today: LocalDate, catalog: Li
     return CelebrityAgePrompt(portraitUrl(person.photoFile))
 }
 
+/**
+ * Portrait for one hidden mark. Several marks, guess mode off, or no free
+ * photo of that age return null. The notice text must not include this URL.
+ */
+fun hiddenGradePortraitUrl(
+    guessGrades: Boolean,
+    change: SchulnetzChange,
+    mark: Double?,
+    today: LocalDate,
+    catalog: List<Celebrity> = CELEBRITIES,
+): String? {
+    if (!guessGrades || change.category != "grade") return null
+    val ids = change.linkIds()
+    if (ids.size != 1) return null
+    val value = mark ?: return null
+    return celebrityAgePrompt(value, ids.single(), today, catalog).imageUrl
+}
+
+/** Age and the ×10 link. Null until the count-up has settled after an age guess. */
+data class AgeConnection(val age: Int, val guess: Int?)
+
+fun ageConnection(mark: Double, settled: Boolean, fromAge: Boolean, ageGuess: Int): AgeConnection? {
+    if (!settled || !fromAge || !mark.isFinite()) return null
+    val age = celebrityAge(mark)
+    if (age <= 0) return null
+    return AgeConnection(age, ageGuess.takeIf { it in 1..120 })
+}
+
 fun parseAgeGuess(raw: String): Int? {
     val text = raw.trim()
     if (!Regex("""\d{1,3}""").matches(text)) return null

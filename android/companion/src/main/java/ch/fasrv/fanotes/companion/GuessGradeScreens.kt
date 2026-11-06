@@ -187,10 +187,12 @@ fun GradeRevealSheet(model: CompanionModel) {
                             }
                         }
                         CountingMark(mark, play = countUp, onFinished = { commitReveal() })
-                        if (settled && fromAge) {
-                            Text(t(R.string.this_mark_as_an_age_is, celebrityAge(mark).toString()), style = MaterialTheme.typography.titleMedium)
+                        val connection = ageConnection(mark, settled, fromAge, ageGuess)
+                        if (connection != null) {
+                            Text(t(R.string.this_mark_as_an_age_is, connection.age.toString()), style = MaterialTheme.typography.titleMedium)
                             Text(t(R.string.mark_10_rounded_to_a_whole_year_4_25_43), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (ageGuess > 0) Text(t(R.string.your_age_guess, ageGuess), style = MaterialTheme.typography.bodyMedium)
+                            val guessedAge = connection.guess
+                            if (guessedAge != null) Text(t(R.string.your_age_guess, guessedAge), style = MaterialTheme.typography.bodyMedium)
                         }
                         Text(grade.title.ifBlank { t(R.string.school_mark) }, style = MaterialTheme.typography.bodyLarge)
                         if (model.revealQueue.size > 1) {

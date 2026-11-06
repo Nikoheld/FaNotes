@@ -156,6 +156,46 @@ class GuessGradeTest {
     }
 
     @Test
+    fun theAnswerStaysHiddenUntilTheAgeGuessIsSettled() {
+        val today = LocalDate.of(2026, 11, 4)
+        val pictured = Celebrity("Pictured Person", LocalDate.of(1983, 6, 2), "portrait", "Pictured Person 2020.jpg")
+        val neighbor = Celebrity("Neighbor Person", LocalDate.of(1984, 6, 2), "other age", "Neighbor Person.jpg")
+        val plain = Celebrity("Plain Person", LocalDate.of(1983, 1, 1), "no portrait")
+        val catalog = listOf(pictured, neighbor, plain)
+        val grade = SchoolGrade("g1", "Mathematik", "math", "Mathematik", "Probe", "2026-11-01", 4.3, 1.0, true, null, "")
+        val older = SchoolGrade("g0", "Mathematik", "math", "Mathematik", "Alte Probe", "2026-09-01", 4.0, 1.0, true, null, "")
+        val snapshot = SchulnetzSnapshot(grades = listOf(older, grade))
+        val change = diffSnapshots(SchulnetzSnapshot(grades = listOf(older)), snapshot).single { it.category == "grade" }
+        val hidden = prepareGradeNotifications(listOf(change), guessGrades = true, snapshot = snapshot).single()
+        val id = gradeTargetId(grade)
+        val url = "https://commons.wikimedia.org/wiki/Special:FilePath/Pictured%20Person%202020.jpg?width=640"
+        val prompt = celebrityAgePrompt(4.3, id, today, catalog)
+        assertEquals(CelebrityAgePrompt(url), prompt)
+        assertFalse(prompt.toString().contains("43"))
+        assertFalse(prompt.toString().contains("4.3"))
+        assertFalse(prompt.toString().contains("4,3"))
+        assertFalse(prompt.toString().contains("1983"))
+        assertEquals(url, hiddenGradePortraitUrl(true, hidden, 4.3, today, catalog))
+        assertEquals(prompt.imageUrl, hiddenGradePortraitUrl(true, hidden, grade.mark, today, catalog))
+        assertFalse(hidden.title.contains("43"))
+        assertFalse(hidden.body.contains("43"))
+        assertFalse(hidden.title.contains("4.3") || hidden.title.contains("4,3"))
+        assertFalse(hidden.body.contains("4.3") || hidden.body.contains("4,3"))
+        assertFalse(hidden.title.contains(url))
+        assertFalse(hidden.body.contains(url))
+        assertNull(hiddenGradePortraitUrl(true, hidden.copy(targetIds = listOf(id, "other"), targetId = "$id,other"), 4.3, today, catalog))
+        assertNull(hiddenGradePortraitUrl(false, hidden, 4.3, today, catalog))
+        assertNull(hiddenGradePortraitUrl(true, hidden, 4.3, today, listOf(plain, neighbor)))
+        assertNull(ageConnection(4.3, settled = false, fromAge = true, ageGuess = 40))
+        assertNull(ageConnection(4.3, settled = true, fromAge = false, ageGuess = 40))
+        assertEquals(AgeConnection(43, 40), ageConnection(4.3, settled = true, fromAge = true, ageGuess = 40))
+        assertEquals(AgeConnection(43, null), ageConnection(4.3, settled = true, fromAge = true, ageGuess = 0))
+        assertEquals("?", courseSummaries(listOf(grade), hiddenTargetIds = setOf(id)).single().let {
+            if (it.average == null) "?" else it.average.toString()
+        })
+    }
+
+    @Test
     fun hiddenGradeNoticeDoesNotContainTheAgeOrTheMark() {
         val grade = SchoolGrade("g1", "Mathematik", "math", "Mathematik", "Probe", "2026-11-01", 4.3, 1.0, true, null, "")
         val older = SchoolGrade("g0", "Mathematik", "math", "Mathematik", "Alte Probe", "2026-09-01", 4.0, 1.0, true, null, "")

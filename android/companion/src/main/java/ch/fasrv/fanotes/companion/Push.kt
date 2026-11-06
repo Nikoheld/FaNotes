@@ -33,7 +33,7 @@ import androidx.core.content.ContextCompat
 import ch.fasrv.fanotes.schulnetz.SchoolGrade
 import ch.fasrv.fanotes.schulnetz.SchulnetzChange
 import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
-import ch.fasrv.fanotes.schulnetz.celebrityAgePrompt
+import ch.fasrv.fanotes.schulnetz.hiddenGradePortraitUrl
 import ch.fasrv.fanotes.schulnetz.changeFromPayload
 import ch.fasrv.fanotes.schulnetz.gradeTargetId
 import ch.fasrv.fanotes.schulnetz.settleGradeNotifications
@@ -247,12 +247,10 @@ object CompanionAlerts {
 
     /** Portrait for a single hidden mark. The notice text never includes this URL or the age. */
     private fun guessPortraitUrl(guess: Boolean, shown: SchulnetzChange, snapshot: SchulnetzSnapshot?): String? {
-        if (!guess || shown.category != "grade" || snapshot == null) return null
-        val ids = shown.linkIds()
-        if (ids.size != 1) return null
-        val id = ids.single()
-        val mark = snapshot.grades.firstOrNull { gradeTargetId(it) == id }?.mark ?: return null
-        return celebrityAgePrompt(mark, id, LocalDate.now(ZoneId.of("Europe/Zurich"))).imageUrl
+        if (snapshot == null) return null
+        val id = shown.linkIds().singleOrNull()
+        val mark = id?.let { target -> snapshot.grades.firstOrNull { gradeTargetId(it) == target }?.mark }
+        return hiddenGradePortraitUrl(guess, shown, mark, LocalDate.now(ZoneId.of("Europe/Zurich")))
     }
 
     fun rememberUnrevealed(context: Context, ids: Collection<String>) {
