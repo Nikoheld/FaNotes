@@ -1,7 +1,10 @@
 package ch.fasrv.fanotes.sync
 
+import ch.fasrv.fanotes.famd.MAX_SYNC_DOCUMENT_BYTES
 import ch.fasrv.fanotes.famd.emptyFamdPayload
 import ch.fasrv.fanotes.famd.serializeFamd
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.jsonString
 import ch.fasrv.fanotes.json.parseJson
@@ -226,10 +229,135 @@ class SyncEngineTest {
             hostB.failWritesWithOom = false
             engineB.syncNow("timer") // No automatic retry loop under memory pressure.
             assertEquals(SyncStatus.PAUSED, engineB.state.value.status)
-            engineB.syncNow()
+            kotlin.test.assertContentEquals(schoolCache, hostB.read(".fanotes/schulnetz/snapshot.json"))
+            engineB.syncNow("resume")
             assertEquals(SyncStatus.IDLE, engineB.state.value.status)
             kotlin.test.assertContentEquals(changed.encodeToByteArray(), hostB.read("Notes/synthetic.famd"))
             assertTrue(diagnostics.any { it.contains("depth=") && it.contains("deepCopyDepth=0") })
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
+    @Test
+    fun aTransientOutOfMemoryDoesNotPauseOrShowTheBanner() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("spike-a")
+        val hostB = MemoryHost("spike-b")
+        val engineA = engine(SyncApi(server), hostA, "A")
+        val engineB = engine(SyncApi(server), hostB, "B")
+        try {
+            engineA.register("memory@example.com", "synthetic passphrase")
+            hostA.put("Notes/synthetic.famd", noteFamd("2026-01-01T00:00:00Z").encodeToByteArray(), 1_000)
+            engineA.syncNow()
+            engineB.login("memory@example.com", "synthetic passphrase")
+            engineB.syncNow()
+            val original = hostB.read("Notes/synthetic.famd")
+            val stateBefore = hostB.readState("spike-b")
+            val changed = noteFamd("2026-02-01T00:00:00Z").replace("# Seite", "# Changed")
+            hostA.put("Notes/synthetic.famd", changed.encodeToByteArray(), 2_000)
+            engineA.syncNow()
+            hostB.failWritesWithOom = true
+            engineB.syncNow()
+            assertEquals(SyncStatus.IDLE, engineB.state.value.status)
+            assertEquals(null, engineB.state.value.error)
+            assertEquals(stateBefore, hostB.readState("spike-b"))
+            kotlin.test.assertContentEquals(original, hostB.read("Notes/synthetic.famd"))
+        } finally {
+            hostB.failWritesWithOom = false
+            engineA.close()
+            engineB.close()
+        }
+    }
+
+    @Test
+    fun openingTheAppClearsAMemoryPauseAndAppliesTheRemoteNote() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("resume-a")
+        val hostB = MemoryHost("resume-b")
+        val engineA = engine(SyncApi(server), hostA, "A")
+        val engineB = SyncEngine(SyncApi(server), SyncEngineOptions(automatic = { false }))
+        engineB.attach(hostB)
+        try {
+            engineA.register("memory@example.com", "synthetic passphrase")
+            hostA.put("Notes/synthetic.famd", noteFamd("2026-01-01T00:00:00Z").encodeToByteArray(), 1_000)
+            engineA.syncNow()
+            engineB.login("memory@example.com", "synthetic passphrase")
+            engineB.syncNow()
+            val changed = noteFamd("2026-02-01T00:00:00Z").replace("# Seite", "# Changed")
+            hostA.put("Notes/synthetic.famd", changed.encodeToByteArray(), 2_000)
+            engineA.syncNow()
+            hostB.failWritesWithOom = true
+            engineB.syncNow()
+            assertEquals(SyncStatus.PAUSED, engineB.state.value.status)
+            hostB.failWritesWithOom = false
+            engineB.resumeAutomaticSync()
+            withTimeout(5_000) {
+                while (engineB.state.value.status != SyncStatus.IDLE) delay(10)
+            }
+            kotlin.test.assertContentEquals(changed.encodeToByteArray(), hostB.read("Notes/synthetic.famd"))
+        } finally {
+            hostB.failWritesWithOom = false
+            engineA.close()
+            engineB.close()
+        }
+    }
+
+    @Test
+    fun anOversizedNoteIsSkippedWithoutPausingOrDroppingItsSibling() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("cap-a")
+        val hostB = MemoryHost("cap-b")
+        val engineA = engine(SyncApi(server), hostA, "A")
+        val engineB = engine(SyncApi(server), hostB, "B")
+        val kept = noteFamd("2026-03-01T00:00:00Z").encodeToByteArray()
+        val huge = noteFamd("2026-03-02T00:00:00Z").encodeToByteArray()
+        try {
+            engineA.register("memory@example.com", "synthetic passphrase")
+            hostA.put("Notes/ok.famd", kept, 1_000)
+            hostA.put("Notes/huge.famd", huge, 1_000)
+            hostA.reportedSizes["Notes/huge.famd"] = MAX_SYNC_DOCUMENT_BYTES.toLong() + 1
+            engineA.syncNow()
+            assertEquals(SyncStatus.IDLE, engineA.state.value.status)
+            assertTrue(engineA.state.value.error?.contains("memory is low") != true)
+            kotlin.test.assertContentEquals(huge, hostA.read("Notes/huge.famd"))
+            engineB.login("memory@example.com", "synthetic passphrase")
+            engineB.syncNow()
+            assertEquals(SyncStatus.IDLE, engineB.state.value.status)
+            kotlin.test.assertContentEquals(kept, hostB.read("Notes/ok.famd"))
+            assertTrue("Notes/huge.famd" !in hostB.files)
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
+    @Test
+    fun aBlankGuestNoteSyncsWithoutPausingOrExpandingInk() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("guest-a")
+        val hostB = MemoryHost("guest-b")
+        val engineA = engine(SyncApi(server), hostA, "A")
+        val engineB = engine(SyncApi(server), hostB, "B")
+        val blank = serializeFamd("", emptyFamdPayload("2026-11-06T00:00:00Z"), "v2")
+        val reused = serializeFamd(
+            "Gast",
+            emptyFamdPayload("2026-11-06T00:00:00Z").put("ink", JsonValue.Obj().put("strokes", JsonValue.Arr())),
+            "v2",
+        )
+        try {
+            engineA.register("guest-sync@example.com", "synthetic passphrase")
+            hostA.put("Notes/guest-blank.famd", blank.encodeToByteArray(), 1_000)
+            hostA.put("Notes/guest-reused.famd", reused.encodeToByteArray(), 1_000)
+            engineA.syncNow()
+            engineB.login("guest-sync@example.com", "synthetic passphrase")
+            engineB.syncNow()
+            assertEquals(SyncStatus.IDLE, engineA.state.value.status)
+            assertEquals(SyncStatus.IDLE, engineB.state.value.status)
+            kotlin.test.assertContentEquals(blank.encodeToByteArray(), hostB.read("Notes/guest-blank.famd"))
+            kotlin.test.assertContentEquals(reused.encodeToByteArray(), hostB.read("Notes/guest-reused.famd"))
+            assertTrue(!blank.contains("\"points\"") && !reused.contains("\"points\""))
         } finally {
             engineA.close()
             engineB.close()
@@ -264,6 +392,7 @@ class SyncEngineTest {
 
 private class MemoryHost(private val id: String) : SyncHost {
     val files = linkedMapOf<String, Pair<ByteArray, Long>>()
+    val reportedSizes = mutableMapOf<String, Long>()
     var failWritesWithOom = false
     private var secrets: String? = null
     private var state: String? = null
@@ -274,7 +403,7 @@ private class MemoryHost(private val id: String) : SyncHost {
 
     override suspend fun vaultId() = id
     override suspend fun scan() = synchronized(files) {
-        files.map { (path, value) -> SyncScanEntry(path, value.first.size.toLong(), value.second) }
+        files.map { (path, value) -> SyncScanEntry(path, reportedSizes[path] ?: value.first.size.toLong(), value.second) }
     }
     override suspend fun read(path: String) = synchronized(files) {
         files[path]?.first ?: throw NoSuchElementException(path)

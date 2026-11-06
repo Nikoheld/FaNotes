@@ -176,7 +176,9 @@ class SyncEngine(
     private val api: SyncApi,
     private val options: SyncEngineOptions = SyncEngineOptions(),
 ) : AutoCloseable {
-    private var memoryPaused = false
+    @Volatile private var memoryPaused = false
+    @Volatile private var memoryCooling = false
+    private var memoryStrikes = 0
     private var emergencyReserve: ByteArray? = ByteArray(256 * 1024)
     private val memoryBudgetFailure = SyncDocumentLimitException()
     private val dispatcher: ExecutorCoroutineDispatcher = Executors.newSingleThreadExecutor { runnable ->
@@ -226,7 +228,11 @@ class SyncEngine(
     }
 
     fun resumeAutomaticSync() {
-        scope.launch { schedule(AUTO_INTERVAL_MS) }
+        scope.launch {
+            val retry = memoryPaused || memoryCooling
+            if (retry) clearMemoryHold()
+            schedule(if (retry) 0L else AUTO_INTERVAL_MS)
+        }
     }
 
     suspend fun switchVault() = onEngine {
@@ -243,7 +249,7 @@ class SyncEngine(
     }
 
     fun notifyLocalChange() {
-        if (memoryPaused || session == null || !options.automatic()) return
+        if (memoryPaused || memoryCooling || session == null || !options.automatic()) return
         debounce?.cancel()
         debounce = scope.launch {
             delay(LOCAL_DEBOUNCE_MS)
@@ -384,10 +390,9 @@ class SyncEngine(
     }
 
     private suspend fun syncNowOnEngine(reason: String) {
-        if (memoryPaused) {
-            if (reason != "manual" && reason != "phone") return
-            memoryPaused = false
-            if (emergencyReserve == null) emergencyReserve = ByteArray(256 * 1024)
+        if (memoryPaused || memoryCooling) {
+            if (reason != "manual" && reason != "phone" && reason != "resume") return
+            clearMemoryHold()
         }
         if (session == null || host == null) {
             publish(state.value.copy(status = SyncStatus.SIGNED_OUT, error = "Nicht angemeldet."))
@@ -415,9 +420,11 @@ class SyncEngine(
             var conflicts = pull()
             val pushed = push()
             if (pushed.conflicts > 0) conflicts += pull()
+            memoryStrikes = 0
+            memoryCooling = false
             engineState?.lastSyncAt = isoNow(options.now())
             persistState()
-            publish(state.value.copy(status = SyncStatus.IDLE, progress = null, pendingLocal = 0, lastSyncAt = engineState?.lastSyncAt))
+            publish(state.value.copy(status = SyncStatus.IDLE, progress = null, pendingLocal = 0, error = null, lastSyncAt = engineState?.lastSyncAt))
             if (reason != "timer" || pushed.uploads > 0 || pushed.deletes > 0 || conflicts > 0) {
                 log("info", "Sync finished (${pushed.uploads} uploaded, ${pushed.deletes} deleted${if (conflicts > 0) ", $conflicts conflict(s)" else ""}).")
             }
@@ -426,8 +433,11 @@ class SyncEngine(
             memoryFailure()
         } catch (error: Exception) {
             if (error is SyncDocumentLimitException || error is JsonLimitException) {
-                memoryFailure()
+                // A single oversized file is skipped at the file boundary. What
+                // reaches here is a process-wide failure. The first spikes retry;
+                // a repeated failure still pauses below.
                 diagnostic("sync memoryBudget rejected deepCopyDepth=0")
+                memoryFailure()
                 return
             }
             try {
@@ -447,13 +457,39 @@ class SyncEngine(
         }
     }
 
+    private fun clearMemoryHold() {
+        memoryPaused = false
+        memoryCooling = false
+        memoryStrikes = 0
+        if (emergencyReserve == null) emergencyReserve = ByteArray(256 * 1024)
+    }
+
     private fun memoryFailure() {
         emergencyReserve = null
-        memoryPaused = true
+        memoryStrikes += 1
         queued = false
         timer?.cancel()
         debounce?.cancel()
-        // Do not serialize state or automatically retry while the heap is exhausted.
+        // Do not serialize state here. A transient spike retries on its own;
+        // opening the app again and a manual sync both clear the hold.
+        val pause = memoryStrikes >= 3 || !options.automatic()
+        if (!pause) {
+            memoryCooling = true
+            memoryPaused = false
+            publish(state.value.copy(status = SyncStatus.IDLE, progress = null, error = null))
+            timer = scope.launch {
+                delay(OFFLINE_RETRY_MS)
+                if (disposed || !memoryCooling) return@launch
+                // Drop the cooling flag before the retry so this attempt keeps
+                // the strike count. Success resets it. Manual and phone retry clear it.
+                memoryCooling = false
+                if (emergencyReserve == null) emergencyReserve = ByteArray(256 * 1024)
+                syncNowOnEngine("resume")
+            }
+            return
+        }
+        memoryCooling = false
+        memoryPaused = true
         publish(state.value.copy(status = SyncStatus.PAUSED, progress = null,
             error = "Sync paused because memory is low. Local and remote copies were kept. Retry manually."))
     }
@@ -513,9 +549,19 @@ class SyncEngine(
         emergencyReserve = null
         diagnostic("sync applyRemote rejected reason=oom deepCopyDepth=0")
         throw memoryBudgetFailure
+    } catch (error: SyncDocumentLimitException) {
+        // Headroom can return. Skipping here would advance the cursor past a
+        // note that was never stored. The hard cap cannot fit, so that file
+        // is left behind and the rest of the cycle continues.
+        if (error.transient) {
+            diagnostic("sync applyRemote rejected reason=budget deepCopyDepth=0")
+            throw error
+        }
+        diagnostic("sync applyRemote skipped reason=budget deepCopyDepth=0")
+        ApplyResult("skipped", null)
     } catch (error: JsonLimitException) {
-        diagnostic("sync applyRemote rejected depth=${error.depth} nodes=${error.nodes} deepCopyDepth=0")
-        throw error
+        diagnostic("sync applyRemote skipped depth=${error.depth} nodes=${error.nodes} deepCopyDepth=0")
+        ApplyResult("skipped", null)
     }
 
     private suspend fun applyRemoteDocument(
@@ -670,6 +716,11 @@ class SyncEngine(
                     "uploaded" -> uploads += 1
                     "conflict" -> conflicts += 1
                 }
+            } catch (error: SyncDocumentLimitException) {
+                if (error.transient) throw error
+                diagnostic("sync upload skipped reason=budget deepCopyDepth=0")
+            } catch (error: JsonLimitException) {
+                diagnostic("sync upload skipped depth=${error.depth} nodes=${error.nodes} deepCopyDepth=0")
             } finally {
                 done += 1
                 publish(state.value.copy(progress = SyncProgress("push", done, total)))
@@ -881,7 +932,7 @@ class SyncEngine(
     }
 
     private fun schedule(delay: Long) {
-        if (memoryPaused) return
+        if (memoryPaused || memoryCooling) return
         if (disposed || session == null) return
         timer?.cancel()
         timer = scope.launch {

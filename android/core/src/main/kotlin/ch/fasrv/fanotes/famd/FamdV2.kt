@@ -90,7 +90,9 @@ fun readV2Payload(
     } ?: throw FamdCorruptException("famd v2 json")
     if (parsed.string("schema") != FAMD_V2_SCHEMA) throw FamdCorruptException("famd v2 schema")
     val ink = parsed["ink"]
-    if (ink != null) {
+    // Blank notes and a reused guest document store ink as null or an empty
+    // stroke list. Validating or unpacking that allocates nothing useful.
+    if (ink != null && inkHasMarks(ink)) {
         if (unpackPoints) parsed.put("ink", unpackInk(ink)) else validatePackedInk(ink)
     }
     parsed.put("schema", jsonString(FAMD_SCHEMA))
@@ -154,6 +156,26 @@ private fun encode85(bytes: ByteArray): String {
         index += 4
     }
     return out.toString()
+}
+
+/** True when packed strokes, loose points, or figures hold marks. Null and empty ink do not. */
+fun inkHasMarks(value: JsonValue?, depth: Int = 0): Boolean {
+    if (value == null || depth > 6) return false
+    return when (value) {
+        is JsonValue.Arr -> value.items.any { inkHasMarks(it, depth + 1) }
+        is JsonValue.Obj -> {
+            val packed = value.string("famdPts")
+            if (!packed.isNullOrEmpty()) return true
+            val points = value.array("points")
+            if (points != null && points.items.isNotEmpty()) return true
+            val figures = value.array("figurePaths")
+            if (figures != null && figures.items.isNotEmpty()) return true
+            val strokes = value.array("strokes")
+            if (strokes != null && strokes.items.any { inkHasMarks(it, depth + 1) }) return true
+            inkHasMarks(value["ink"], depth + 1) || inkHasMarks(value["hidden"], depth + 1) || inkHasMarks(value["sections"], depth + 1)
+        }
+        else -> false
+    }
 }
 
 /** Same packed-block checks as unpacking, without allocating bytes or point maps. */
