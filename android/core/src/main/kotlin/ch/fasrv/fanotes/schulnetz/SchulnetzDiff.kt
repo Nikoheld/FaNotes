@@ -32,17 +32,7 @@ fun diffSnapshots(
         )
     }
     if (settings.exams) {
-        diffAgenda(
-            previous.exams,
-            next.exams,
-            category = "exam",
-            created = "Neue Prüfung",
-            removed = "Prüfung entfällt",
-            changes = changes,
-            skipWeeks = freshWeeks,
-            adoptFrom = previous.events,
-            stillThere = next.events,
-        )
+        diffExams(previous.exams + previous.events.filter { it.isExamLike() }, next.exams, changes, freshWeeks)
     }
     if (settings.absences) {
         val before = previous.absences.associateBy { it.id }
@@ -106,6 +96,37 @@ private fun diffGrades(previous: List<SchoolGrade>, next: List<SchoolGrade>, cha
     changes += matchGradeChanges(previous, next)
 }
 
+private fun diffExams(previous: List<AgendaEvent>, next: List<AgendaEvent>, changes: MutableList<SchulnetzChange>, skipWeeks: Set<String>) {
+    val before = distinctExams(previous)
+    val consumed = mutableSetOf<Int>()
+    for (event in distinctExams(next)) {
+        if (eventDate(eventDay(event)) == null) continue
+        val ids = before.indices.filter { it !in consumed && sameExamId(before[it], event) }
+        val slots = before.indices.filter { it !in consumed && sameExamSlot(before[it], event) }
+        val index = ids.singleOrNull() ?: slots.singleOrNull()
+        val prior = index?.let { before[it] }
+        if (index != null) consumed += index
+        if (prior == null && weekMondayKey(eventDay(event)) in skipWeeks) continue
+        val title = when {
+            prior == null -> "Neue Prüfung"
+            event.isCancelled() && !prior.isCancelled() -> "Prüfung fällt aus"
+            examTimeChanged(prior, event) -> "Prüfung verschoben"
+            prior.room.isNotBlank() && event.room.isNotBlank() && cleanSchulnetzText(prior.room) != cleanSchulnetzText(event.room) -> "Raum geändert"
+            else -> continue
+        }
+        changes += linkedChange("exam:${event.id.substringBefore('@')}:${eventKey(event)}", "exam", title, eventBody(event),
+            targetId = lessonTargetId(event), courseId = event.courseId.ifBlank { event.label }, date = eventDay(event))
+    }
+    // Empty/partial snapshots cannot establish a cancellation. A later complete fetch can.
+    if (next.isEmpty()) return
+    for ((index, event) in before.withIndex()) {
+        if (index in consumed || weekMondayKey(eventDay(event)) in skipWeeks || eventDate(eventDay(event)) == null) continue
+        if (next.any { sameExamId(event, it) || sameExamSlot(event, it) }) continue
+        changes += linkedChange("exam:${event.id}:removed", "exam", "Prüfung entfällt", eventBody(event),
+            targetId = lessonTargetId(event), courseId = event.courseId.ifBlank { event.label }, date = eventDay(event))
+    }
+}
+
 private fun diffAgenda(
     previous: List<AgendaEvent>,
     next: List<AgendaEvent>,
@@ -114,8 +135,6 @@ private fun diffAgenda(
     removed: String,
     changes: MutableList<SchulnetzChange>,
     skipWeeks: Set<String> = emptySet(),
-    adoptFrom: List<AgendaEvent> = emptyList(),
-    stillThere: List<AgendaEvent> = emptyList(),
     spareAgainst: List<AgendaEvent> = emptyList(),
 ) {
     val before = previous.associateBy { it.id }
@@ -123,23 +142,15 @@ private fun diffAgenda(
     for (event in next) {
         val old = before[event.id]
         if (old == null && weekMondayKey(event.start) in skipWeeks) continue
-        val adopted = if (old == null) {
-            adoptFrom.firstOrNull { candidate -> sameSchoolSlot(event, candidate) && stillThere.none { it.id == candidate.id } }
-        } else {
-            null
-        }
-        if (old == null && adopted != null && !schoolEventMoved(adopted, event)) continue
         val slotTwin = if (old == null && category == "timetable") previous.firstOrNull { sameLessonSlot(event, it) } else null
         val prior = old ?: slotTwin
         if (prior != null && category == "timetable" && !lessonContentChanged(prior, event)) continue
         val key = eventKey(event)
         if (old != null && eventKey(old) == key) continue
         val title = when {
-            prior == null && adopted != null -> "Prüfung verschoben"
             prior == null -> if (category == "exam") "Neue Prüfung" else created
             event.isCancelled() && !prior.isCancelled() -> if (category == "exam") "Prüfung fällt aus" else "Lektion fällt aus"
             event.teachers.joinToString() != prior.teachers.joinToString() || (event.isSubstitution() && !prior.isSubstitution()) -> "Vertretung"
-            category == "exam" && (event.start != prior.start || event.room != prior.room) -> "Prüfung verschoben"
             event.room != prior.room && (event.start != prior.start || event.end != prior.end) -> if (category == "exam") "Prüfung geändert" else "Stundenplan geändert"
             event.room != prior.room -> "Raum geändert"
             event.start != prior.start || event.end != prior.end -> "Zeit geändert"
@@ -192,14 +203,19 @@ internal fun eventKey(event: AgendaEvent): String = listOf(
 ).joinToString("|")
 
 private fun eventBody(event: AgendaEvent): String {
-    val time = displayClock(event.start, event.end)
+    fun wall(raw: String): String {
+        if (schulnetzClock(raw).isBlank()) return raw
+        return parseSchulnetzInstant(raw)?.atZone(java.time.ZoneId.of("Europe/Zurich"))?.toLocalDateTime()?.toString() ?: raw
+    }
+    val time = displayClock(wall(event.start), wall(event.end))
     val room = cleanSchulnetzText(event.room).let { if (it.isBlank()) "" else "Raum $it" }
     val name = listOf(event.courseName, event.text, event.timetableText).map(::cleanSchulnetzText).firstOrNull { it.isNotBlank() }.orEmpty()
     val flags = listOfNotNull(
         if (event.isCancelled()) "fällt aus" else null,
         if (event.isSubstitution()) "Vertretung" else null,
     )
-    return (listOf(name, time, room) + flags + listOf(cleanSchulnetzText(event.comment)))
+    val day = eventDate(eventDay(event))?.format(java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy")).orEmpty()
+    return (listOf(day, name, time, room) + flags + listOf(cleanSchulnetzText(event.comment)))
         .filter { it.isNotBlank() }
         .joinToString(" · ")
 }

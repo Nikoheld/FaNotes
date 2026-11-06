@@ -109,6 +109,10 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
       pages.problem = microsoftLoginRequired(location, '') ? 'microsoft' : 'login'
       return ''
     }
+    if (response.status < 200 || response.status >= 300) {
+      pages.problem = 'read-failed'
+      return ''
+    }
     const body = await response.text()
     const problem = sessionProblem(url, body)
     if (problem) {
@@ -130,6 +134,7 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
   const previousEvents = Array.isArray(options.previousEvents) ? options.previousEvents : []
   const previousExams = Array.isArray(options.previousExams) ? options.previousExams : []
   const weekFetched = { ...(options.weekFetched || {}) }
+  const examWeekFetched = { ...(options.examWeekFetched || {}) }
   let weekSpanStart = options.weekSpanStart || ''
   let weekSpanEnd = options.weekSpanEnd || ''
   let icalFetchedAt = options.icalFetchedAt || ''
@@ -178,7 +183,12 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
           ...event,
           eventType: event.eventType && event.eventType !== 'lesson' ? event.eventType : 'exam',
         }))
-        if (parsed.length) examWeeks[monday] = parsed
+        if (parsed.length) {
+          examWeeks[monday] = parsed
+          examWeekFetched[monday] = nowIso
+        }
+      } else if (schedulerBodyUsable(examBody) && !previousExams.some((event) => weekMonday(String(event.start || '').slice(0, 10)) === monday)) {
+        examWeekFetched[monday] = nowIso
       }
     }
     const lessonEvents = Object.values(lessonWeeks).flat()
@@ -203,7 +213,11 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
         }
         const uncovered = new Set([...covered].filter((monday) => !refreshed.has(monday)))
         events = overlayLessons(events, icalEvents, uncovered)
-        exams = carryTimetableExams(icalEvents, exams)
+        exams = carryTimetableExams(icalEvents.filter((event) => !Object.hasOwn(examWeeks, weekMonday(String(event.start || '').slice(0, 10)))), exams)
+        for (const monday of covered) {
+          if (icalEvents.some((event) => event.eventType === 'exam' && weekMonday(String(event.start || '').slice(0, 10)) === monday) ||
+            !previousExams.some((event) => weekMonday(String(event.start || '').slice(0, 10)) === monday)) examWeekFetched[monday] = nowIso
+        }
       }
     }
   }
@@ -219,6 +233,7 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
     termineHtml: pages['22108'] || '',
     transid,
     weekFetched,
+    examWeekFetched,
     weekSpanStart,
     weekSpanEnd,
     icalFetchedAt,

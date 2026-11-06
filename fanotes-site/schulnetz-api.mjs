@@ -13,6 +13,10 @@ import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
 import {
   applyEventWindow,
   diffSnapshots,
+  prepareAgendaRead,
+  isLesson,
+  isExamLike,
+  weekMondayKey,
   eventQueryWindow,
   hasFetchedWeeks,
   keepLoadedGrades,
@@ -44,7 +48,7 @@ import {
 
 const API_PREFIX = '/api/v1/schulnetz'
 const MAX_BODY = 64 * 1024
-const SCHOOL_FILES = ['link.json', 'snapshot.json', 'notified-grades.json', 'changes.jsonl']
+const SCHOOL_FILES = ['link.json', 'snapshot.json', 'notified-grades.json', 'changes.jsonl', 'notification-baseline.json']
 const GUEST_LIMIT = 30
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 const REFERER = 'https://schulnetz.web.app/'
@@ -263,7 +267,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
     const snapshot = { ...body, revision: (link.revision || 0) + 1, fetchedAt: body.fetchedAt || now().toISOString() }
     snapshot.grades = keepLoadedGrades(previous?.grades, snapshot.grades, trustedGradeRead(snapshot))
-    const changes = await publishChanges(accountId, link, diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
+    const changes = await publishChanges(accountId, link, await agendaDiff(accountId, previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
     link.needsReauth = false
@@ -604,6 +608,15 @@ export const createSchulnetzRuntime = (options = {}) => {
     return fresh
   }
 
+  const agendaDiff = async (accountId, previous, snapshot, settings) => {
+    const path = resolve(accountDir(accountId), 'notification-baseline.json')
+    const stored = await readJson(path)
+    const read = prepareAgendaRead(stored?.version === 1 ? stored.weeks || {} : {}, snapshot)
+    // Durable before any diff/push; a crash cannot turn an imported week into a second first read.
+    await writeJson(path, { version: 1, weeks: read.weeks })
+    return diffSnapshots(previous ? { ...previous, events: read.before.events.filter(isLesson).concat((previous.events || []).filter((event) => !isLesson(event) && !isExamLike(event))), exams: read.before.exams } : null, snapshot, settings)
+  }
+
   const accountStillExists = options.syncAccountExists || syncAccountExists
 
   const ownerStillExists = async (accountId) => {
@@ -739,11 +752,18 @@ export const createSchulnetzRuntime = (options = {}) => {
       snapshot.events = previous?.events || []
       snapshot.weekFetched = previous?.weekFetched || {}
     }
+    snapshot.examWeekFetched = previous?.examWeekFetched || {}
+    if (typeof raw.exams === 'string' && (snapshot.exams.length || raw.exams.trim() === '[]')) {
+      const keys = new Set([...Object.keys(snapshot.weekFetched || {}), ...(previous?.exams || []).concat(snapshot.exams).map((event) => weekMondayKey(event.start)).filter(Boolean)])
+      snapshot.examWeekFetched = { ...snapshot.examWeekFetched }
+      for (const week of keys) if (snapshot.exams.some((event) => weekMondayKey(event.start) === week) ||
+        !(previous?.exams || []).some((event) => weekMondayKey(event.start) === week)) snapshot.examWeekFetched[week] = snapshot.fetchedAt
+    }
     snapshot.weekSpanStart = span.start || ''
     snapshot.weekSpanEnd = span.end || ''
     snapshot.icalFetchedAt = previous?.icalFetchedAt || ''
     snapshot.revision = (link.revision || 0) + 1
-    const changes = await publishChanges(accountId, link, diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
+    const changes = await publishChanges(accountId, link, await agendaDiff(accountId, previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
     link.lastError = ''
@@ -766,6 +786,7 @@ export const createSchulnetzRuntime = (options = {}) => {
         previousEvents: stored?.events || [],
         previousExams: stored?.exams || [],
         weekFetched: stored?.weekFetched || {},
+        examWeekFetched: stored?.examWeekFetched || {},
         weekSpanStart: stored?.weekSpanStart || '',
         weekSpanEnd: stored?.weekSpanEnd || '',
         icalFetchedAt: stored?.icalFetchedAt || '',
@@ -822,11 +843,12 @@ export const createSchulnetzRuntime = (options = {}) => {
       startMessages: keepMessages ? (previous?.startMessages || []) : parseStartMessages(scraped.startHtml || ''),
       readErrors: scraped.problem ? [`Schulnetz: ${scraped.problem}`] : [],
       weekFetched: failed ? (previous?.weekFetched || {}) : (scraped.weekFetched || {}),
+      examWeekFetched: failed ? (previous?.examWeekFetched || {}) : (scraped.examWeekFetched || {}),
       weekSpanStart: scraped.weekSpanStart || previous?.weekSpanStart || '',
       weekSpanEnd: scraped.weekSpanEnd || previous?.weekSpanEnd || '',
       icalFetchedAt: scraped.icalFetchedAt || previous?.icalFetchedAt || '',
     }
-    const changes = await publishChanges(accountId, link, diffSnapshots(previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
+    const changes = await publishChanges(accountId, link, await agendaDiff(accountId, previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
     link.lastError = ''
@@ -989,7 +1011,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       if (route === '/link' && method === 'DELETE') { await unlink(accountId); send(response, 200, { linked: false }); return true }
       if (route === '/snapshot' && method === 'PUT') {
         accountRate(accountId, 'snapshot', SNAPSHOT_LIMIT)
-        send(response, 200, await acceptSnapshot(accountId, await readBody(request)))
+        const body = await readBody(request)
+        send(response, 200, await withAccount(accountId, () => acceptSnapshot(accountId, body)))
         return true
       }
       if (route === '/snapshot' && method === 'GET') {

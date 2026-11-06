@@ -160,6 +160,8 @@ data class SchulnetzSnapshot(
     val icalFetchedAt: String = "",
     /** False for blocked/partial reads; preserved in uploads so another device cannot adopt them. */
     val gradesReadComplete: Boolean = true,
+    /** Only successfully read exam weeks; lesson coverage must not stand in for exam coverage. */
+    val examWeekFetched: Map<String, String> = emptyMap(),
 )
 
 data class NotifySettings(

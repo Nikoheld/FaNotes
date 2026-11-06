@@ -389,6 +389,7 @@ class SchulnetzClient(
         val lessonWeeks = linkedMapOf<java.time.LocalDate, List<ch.fasrv.fanotes.schulnetz.AgendaEvent>>()
         val examWeeks = linkedMapOf<java.time.LocalDate, List<ch.fasrv.fanotes.schulnetz.AgendaEvent>>()
         val checkedEmpty = mutableSetOf<java.time.LocalDate>()
+        val examStamps = previous?.examWeekFetched.orEmpty().toMutableMap()
         if (canFetch && !callerMain) {
             for (monday in plan.fetch) {
                 if (oauthPage != null || sawSessionProblem || parseFailed) break
@@ -411,7 +412,13 @@ class SchulnetzClient(
                     emptyList()
                 }
                 if (examParsed == null) break
-                if (examParsed.isNotEmpty()) examWeeks[monday] = examParsed
+                if (examParsed.isNotEmpty()) {
+                    examWeeks[monday] = examParsed
+                    examStamps[monday.toString()] = fetchedNow
+                } else if (schedulerBodyUsable(examBody) && !schedulerWeekLoaded(examBody) &&
+                    previous?.exams.orEmpty().none { weekMondayKey(it.start) == monday.toString() }) {
+                    examStamps[monday.toString()] = fetchedNow
+                }
             }
         } else if (canFetch) {
             parseFailed = true
@@ -435,6 +442,8 @@ class SchulnetzClient(
             lessonWeeks.clear()
             examWeeks.clear()
             checkedEmpty.clear()
+            examStamps.clear()
+            examStamps.putAll(previous?.examWeekFetched.orEmpty())
         }
         val refreshedLessons = lessonWeeks.keys.map { it.toString() }.toSet()
         trace("parse stundenplan end weeksRequested=${plan.fetch.size} weeksReceived=${refreshedLessons.size} durationMs=${(System.nanoTime() - parseStarted) / 1_000_000} mainThread=$callerMain bytes=${planHtml.length} tables=${tableCount(planHtml)} $context")
@@ -456,8 +465,10 @@ class SchulnetzClient(
                     if (htmlSpan == null) spanOfEvents(parsed)?.let { span = it }
                     val covered = if (span != null) mondaysBetween(span.start, span.end).map { it.toString() }.toSet() else parsed.mapNotNull { weekMondayKey(it.start) }.toSet()
                     events = overlayLessons(events, parsed, covered - refreshedLessons)
-                    icalExams = parsed.filter { it.isExamLike() }
+                    icalExams = parsed.filter { it.isExamLike() && weekMondayKey(it.start) !in examWeeks.keys.map { week -> week.toString() }.toSet() }
                     for (monday in covered - refreshedLessons) stamps[monday] = fetchedNow
+                    for (monday in covered) if (icalExams.any { weekMondayKey(it.start) == monday } ||
+                        previous?.exams.orEmpty().none { weekMondayKey(it.start) == monday }) examStamps[monday] = fetchedNow
                 }
             }
         }
@@ -487,6 +498,7 @@ class SchulnetzClient(
                 startMessages = parseStartMessages(pages["1"].orEmpty()),
                 readErrors = errors,
                 weekFetched = stamps,
+                examWeekFetched = examStamps,
                 weekSpanStart = span?.start?.toString().orEmpty(),
                 weekSpanEnd = span?.end?.toString().orEmpty(),
                 icalFetchedAt = icalAt,

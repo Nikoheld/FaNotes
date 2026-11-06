@@ -65,6 +65,10 @@ import ch.fasrv.fanotes.sync.SyncApi
 import ch.fasrv.fanotes.sync.SyncEngine
 import ch.fasrv.fanotes.sync.SyncEngineOptions
 import ch.fasrv.fanotes.schulnetz.trustedGradeRead
+import ch.fasrv.fanotes.schulnetz.prepareAgendaRead
+import ch.fasrv.fanotes.schulnetz.parseAgendaBaseline
+import ch.fasrv.fanotes.schulnetz.agendaBaselineJson
+import ch.fasrv.fanotes.schulnetz.comparison
 import ch.fasrv.fanotes.sync.SyncHost
 import ch.fasrv.fanotes.sync.SyncScanEntry
 import ch.fasrv.fanotes.vault.DirectoryVault
@@ -984,6 +988,14 @@ class CompanionGraph(private val context: Context) {
         }
         val next = parsed.copy(
             revision = previous.revision + 1,
+            examWeekFetched = if (!raw.exams.isNullOrBlank() && (parsed.exams.isNotEmpty() || raw.exams?.trim() == "[]")) {
+                previous.examWeekFetched.toMutableMap().apply {
+                    for (week in weekFetched.keys + (previous.exams + parsed.exams).mapNotNull { ch.fasrv.fanotes.schulnetz.weekMondayKey(it.start) }) {
+                        if (parsed.exams.any { ch.fasrv.fanotes.schulnetz.weekMondayKey(it.start) == week } ||
+                            previous.exams.none { ch.fasrv.fanotes.schulnetz.weekMondayKey(it.start) == week }) put(week, parsed.fetchedAt)
+                    }
+                }
+            } else previous.examWeekFetched,
             events = events,
             weekFetched = weekFetched,
             weekSpanStart = raw.weekSpanStart.ifBlank { previous.weekSpanStart },
@@ -1001,7 +1013,21 @@ class CompanionGraph(private val context: Context) {
         val local = notifySettings()
         val effective = settings.copy(guessGrades = local.guessGrades)
         val prior = previous?.takeIf { it.fetchedAt.isNotBlank() || it.grades.isNotEmpty() || it.events.isNotEmpty() }
-        val raw = diffSnapshots(prior, next, effective).filterNot { changeIsHidden(it, hidden) }
+        val baseline = android.util.AtomicFile(File(context.filesDir, "school-agenda-baseline.json"))
+        val stored = runCatching { parseAgendaBaseline(baseline.readFully().decodeToString()) }.getOrDefault(emptyMap())
+        val read = prepareAgendaRead(stored, next)
+        val bytes = agendaBaselineJson(read.weeks).encodeToByteArray()
+        val output = baseline.startWrite()
+        try {
+            output.write(bytes)
+            baseline.finishWrite(output)
+        } catch (error: Throwable) {
+            baseline.failWrite(output)
+            throw error
+        }
+        // Baselines are durable before any notification diff or dispatch, including first covered weeks.
+        val before = read.comparison(prior)
+        val raw = diffSnapshots(before, next, effective).filterNot { changeIsHidden(it, hidden) }
         val allowed = CompanionAlerts.notificationsAllowed(context)
         val changes = if (allowed || readGradeLedger(context) == null) {
             CompanionAlerts.settledChanges(context, raw, prior?.grades.orEmpty() + next.grades)
@@ -1159,6 +1185,7 @@ class CompanionGraph(private val context: Context) {
             .apply()
         signedOut = false
         snapshotFile(context).delete()
+        android.util.AtomicFile(File(context.filesDir, "school-agenda-baseline.json")).delete()
         gradeLedgerFile(context).delete()
         listOf(LOCAL_TOKEN_PATH, LEASE_PATH, SNAPSHOT_VAULT_PATH).forEach { path ->
             if (vault.exists(path)) vault.delete(path)
