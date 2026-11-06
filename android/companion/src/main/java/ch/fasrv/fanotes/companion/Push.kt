@@ -56,7 +56,6 @@ import ch.fasrv.fanotes.schulnetz.startsAt
 import ch.fasrv.fanotes.schulnetz.WidgetSpan
 import ch.fasrv.fanotes.schulnetz.upcomingLessons
 import java.time.LocalDate
-import java.time.ZoneId
 import java.util.concurrent.Executors
 import ch.fasrv.fanotes.schulnetz.visibleEvents
 import ch.fasrv.fanotes.schulnetz.widgetSizeDp

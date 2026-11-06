@@ -46,9 +46,10 @@ private fun loadPortrait(pageUrl: String, maxEdge: Int): Bitmap? {
             } else {
                 val host = response.request.url.host.lowercase()
                 if (host != "upload.wikimedia.org" && host != "commons.wikimedia.org") return null
-                val declared = response.body.contentLength()
+                val body = response.body ?: return null
+                val declared = body.contentLength()
                 if (declared > PORTRAIT_CAP) return null
-                val bytes = readCapped(response.body) ?: return null
+                val bytes = readCapped(body) ?: return null
                 return decodePortrait(bytes, maxEdge)
             }
         }
