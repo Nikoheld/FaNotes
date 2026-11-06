@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.5
+
+- Guess a celebrity's age from a licensed photo (#1010)
+
 ## 2026.11.2-beta.4
 
 - Retry a transient sync memory pause without dropping notes.
