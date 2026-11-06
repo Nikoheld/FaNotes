@@ -374,6 +374,7 @@
     <string name="pen">Stift</string>
     <string name="personal">Persönlich</string>
     <string name="personal_timetable">Persönlicher Stundenplan</string>
+    <string name="photo_unavailable">Foto nicht verfügbar</string>
     <string name="phrase_a_subject">einem Fach</string>
     <string name="phrase_absences_unreadable">Absenzen: Seite geladen, aber nicht lesbar</string>
     <string name="phrase_address_not_allowed">Die Schulnetz-Adresse ist nicht erlaubt.</string>
@@ -555,7 +556,7 @@
     <string name="search_tasks_and_school">Aufgaben und Schule durchsuchen</string>
     <string name="search_tasks_subjects_events_and_school_records">Aufgaben, Fächer, Termine und Schuldaten durchsuchen. Mindestens zwei Zeichen.</string>
     <string name="search_unavailable">Suche nicht verfügbar</string>
-    <string name="see_someone_who_is_that_old_then_reveal">Sieh dir jemanden in dem Alter an und decke dann auf</string>
+    <string name="see_someone_who_is_that_old_then_reveal">Schätze das Alter anhand des Fotos</string>
     <string name="selected_suffix">, ausgewählt</string>
     <string name="send_a_test_notification">Testbenachrichtigung senden</string>
     <string name="series_noun">Serie</string>
@@ -690,6 +691,7 @@
     <string name="you_got_it">Stimmt</string>
     <string name="you_re_all_caught_up">Du bist auf dem neuesten Stand.</string>
     <string name="you_re_offline">Du bist offline</string>
+    <string name="your_age_guess">Dein Alterstipp: %1$d</string>
     <string name="your_activity">Deine Aktivität</string>
     <string name="your_available_absence_records_and_deadlines_wil">Deine Absenzen und Fristen erscheinen hier, sobald sie verfügbar sind.</string>
     <string name="your_available_marks_appear_after_connecting_and">Deine Noten erscheinen, nachdem du Schulnetz verbunden und aktualisiert hast.</string>

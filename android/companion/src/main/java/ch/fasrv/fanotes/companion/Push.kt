@@ -33,7 +33,9 @@ import androidx.core.content.ContextCompat
 import ch.fasrv.fanotes.schulnetz.SchoolGrade
 import ch.fasrv.fanotes.schulnetz.SchulnetzChange
 import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
+import ch.fasrv.fanotes.schulnetz.celebrityAgePrompt
 import ch.fasrv.fanotes.schulnetz.changeFromPayload
+import ch.fasrv.fanotes.schulnetz.gradeTargetId
 import ch.fasrv.fanotes.schulnetz.settleGradeNotifications
 import ch.fasrv.fanotes.schulnetz.changeIsHidden
 import ch.fasrv.fanotes.schulnetz.hiddenGradeBody
@@ -53,6 +55,9 @@ import ch.fasrv.fanotes.schulnetz.displayClock
 import ch.fasrv.fanotes.schulnetz.startsAt
 import ch.fasrv.fanotes.schulnetz.WidgetSpan
 import ch.fasrv.fanotes.schulnetz.upcomingLessons
+import java.time.LocalDate
+import java.time.ZoneId
+import java.util.concurrent.Executors
 import ch.fasrv.fanotes.schulnetz.visibleEvents
 import ch.fasrv.fanotes.schulnetz.widgetSizeDp
 import ch.fasrv.fanotes.schulnetz.widgetSpan
@@ -77,6 +82,9 @@ object CompanionAlerts {
     const val EXTRA_DATE = "ch.fasrv.fanotes.companion.NOTIFY_DATE"
     const val EXTRA_PAYLOAD = "ch.fasrv.fanotes.companion.NOTIFY_PAYLOAD"
     private const val SEEN = "seen-changes"
+    private val portraitLoader = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "kanti-portrait").apply { isDaemon = true }
+    }
 
     fun ensureChannels(context: Context) {
         val localized = AppLanguage.wrap(context)
@@ -206,20 +214,45 @@ object CompanionAlerts {
             .setContentTitle(publicTitle)
             .setContentText(publicText)
             .build()
-        val notification = NotificationCompat.Builder(context, channel)
-            .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setTicker(title)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(body).setBigContentTitle(title))
-            .setVisibility(lock.visibility)
-            .setPublicVersion(publicVersion)
-            .setContentIntent(open)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .build()
         val manager = context.getSystemService(NotificationManager::class.java)
-        manager.notify(shown.id.hashCode(), notification)
+        val id = shown.id.hashCode()
+        fun post(picture: android.graphics.Bitmap?) {
+            val builder = NotificationCompat.Builder(context, channel)
+                .setSmallIcon(R.drawable.ic_stat)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setTicker(title)
+                .setVisibility(lock.visibility)
+                .setPublicVersion(publicVersion)
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+            if (picture == null) {
+                builder.setStyle(NotificationCompat.BigTextStyle().bigText(body).setBigContentTitle(title))
+            } else {
+                builder.setLargeIcon(picture)
+                builder.setStyle(NotificationCompat.BigPictureStyle().bigPicture(picture).setBigContentTitle(title).setSummaryText(body))
+            }
+            manager.notify(id, builder.build())
+        }
+        post(null)
+        val portrait = guessPortraitUrl(guess, shown, snapshot)
+        if (portrait != null) {
+            portraitLoader.execute {
+                val picture = runCatching { fetchCelebrityPortrait(portrait, maxEdge = 360) }.getOrNull() ?: return@execute
+                runCatching { post(picture) }
+            }
+        }
+    }
+
+    /** Portrait for a single hidden mark. The notice text never includes this URL or the age. */
+    private fun guessPortraitUrl(guess: Boolean, shown: SchulnetzChange, snapshot: SchulnetzSnapshot?): String? {
+        if (!guess || shown.category != "grade" || snapshot == null) return null
+        val ids = shown.linkIds()
+        if (ids.size != 1) return null
+        val id = ids.single()
+        val mark = snapshot.grades.firstOrNull { gradeTargetId(it) == id }?.mark ?: return null
+        return celebrityAgePrompt(mark, id, LocalDate.now(ZoneId.of("Europe/Zurich"))).imageUrl
     }
 
     fun rememberUnrevealed(context: Context, ids: Collection<String>) {

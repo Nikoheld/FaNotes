@@ -374,6 +374,7 @@
     <string name="pen">Pen</string>
     <string name="personal">Personal</string>
     <string name="personal_timetable">Personal timetable</string>
+    <string name="photo_unavailable">Photo unavailable</string>
     <string name="phrase_a_subject">a subject</string>
     <string name="phrase_absences_unreadable">Absences: the page loaded, but it could not be read</string>
     <string name="phrase_address_not_allowed">The Schulnetz address is not allowed.</string>
@@ -555,7 +556,7 @@
     <string name="search_tasks_and_school">Search tasks and school</string>
     <string name="search_tasks_subjects_events_and_school_records">Search tasks, subjects, events and school records. Enter at least two characters.</string>
     <string name="search_unavailable">Search unavailable</string>
-    <string name="see_someone_who_is_that_old_then_reveal">See someone who is that old, then reveal</string>
+    <string name="see_someone_who_is_that_old_then_reveal">Guess their age from the photo</string>
     <string name="selected_suffix">, selected</string>
     <string name="send_a_test_notification">Send a test notification</string>
     <string name="series_noun">series</string>
@@ -690,6 +691,7 @@
     <string name="you_got_it">You got it</string>
     <string name="you_re_all_caught_up">You\'re all caught up.</string>
     <string name="you_re_offline">You\'re offline</string>
+    <string name="your_age_guess">Your age guess: %1$d</string>
     <string name="your_activity">Your activity</string>
     <string name="your_available_absence_records_and_deadlines_wil">Your available absence records and deadlines will appear here.</string>
     <string name="your_available_marks_appear_after_connecting_and">Your available marks appear after connecting and refreshing Schulnetz.</string>

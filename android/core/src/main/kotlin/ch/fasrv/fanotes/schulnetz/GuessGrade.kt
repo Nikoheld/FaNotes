@@ -2,6 +2,8 @@ package ch.fasrv.fanotes.schulnetz
 
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.time.LocalDate
 import java.time.Period
 
@@ -12,7 +14,8 @@ import java.time.Period
  *
  * Celebrity age = mark × 10, rounded to a whole year with HALF_UP
  * (4.25 → 42.5 → 43). Age of a person is years completed on [today]
- * from the bundled birth date ([ageOn]).
+ * from the bundled birth date ([ageOn]). The guessing step shows only a
+ * licensed portrait. The age and the mark stay hidden until an age is submitted.
  */
 enum class GuessComparison {
     /** Guess matches the mark after rounding both to the mark's own precision. */
@@ -27,6 +30,8 @@ data class Celebrity(
     val name: String,
     val born: LocalDate,
     val line: String,
+    /** Wikimedia Commons file name. Empty when no free portrait is known. */
+    val photoFile: String = "",
 )
 
 fun markDecimals(mark: Double): Int {
@@ -84,9 +89,47 @@ fun celebritiesAtAge(age: Int, today: LocalDate, catalog: List<Celebrity> = CELE
 fun pickCelebrity(age: Int, seed: String, today: LocalDate, catalog: List<Celebrity> = CELEBRITIES): Celebrity? {
     val matches = celebritiesAtAge(age, today, catalog)
     if (matches.isEmpty()) return null
+    return matches[stablePick(seed, matches.size)]
+}
+
+private val PORTRAIT_FILE = Regex("""^[^/\\?#]{1,180}\.(?:jpg|jpeg|png|webp)$""", RegexOption.IGNORE_CASE)
+
+/** Commons FilePath for a stored portrait. Rejects anything that is not a bare file name. */
+fun portraitUrl(file: String): String? {
+    val trimmed = file.trim()
+    if (trimmed.isEmpty() || trimmed.contains("..") || !PORTRAIT_FILE.matches(trimmed)) return null
+    val encoded = URLEncoder.encode(trimmed, StandardCharsets.UTF_8).replace("+", "%20")
+    return "https://commons.wikimedia.org/wiki/Special:FilePath/$encoded?width=640"
+}
+
+/** Same stable pick as [pickCelebrity], but only people with a usable portrait. */
+fun pickCelebrityPhoto(age: Int, seed: String, today: LocalDate, catalog: List<Celebrity> = CELEBRITIES): Celebrity? {
+    val matches = celebritiesAtAge(age, today, catalog).filter { portraitUrl(it.photoFile) != null }
+    if (matches.isEmpty()) return null
+    return matches[stablePick(seed, matches.size)]
+}
+
+/** What the age step may show before a guess: the portrait, and nothing about the mark. */
+data class CelebrityAgePrompt(val imageUrl: String?)
+
+fun celebrityAgePrompt(mark: Double, seed: String, today: LocalDate, catalog: List<Celebrity> = CELEBRITIES): CelebrityAgePrompt {
+    if (!mark.isFinite()) return CelebrityAgePrompt(null)
+    val person = pickCelebrityPhoto(celebrityAge(mark), seed, today, catalog) ?: return CelebrityAgePrompt(null)
+    return CelebrityAgePrompt(portraitUrl(person.photoFile))
+}
+
+fun parseAgeGuess(raw: String): Int? {
+    val text = raw.trim()
+    if (!Regex("""\d{1,3}""").matches(text)) return null
+    val value = text.toIntOrNull() ?: return null
+    if (value !in 1..120) return null
+    return value
+}
+
+private fun stablePick(seed: String, size: Int): Int {
     var hash = 0
     for (char in seed) hash = hash * 31 + char.code
-    return matches[Math.floorMod(hash, matches.size)]
+    return Math.floorMod(hash, size)
 }
 
 fun hiddenMarkHint(longPress: Boolean): String =

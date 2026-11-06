@@ -5,6 +5,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class GuessGradeTest {
@@ -124,5 +125,78 @@ class GuessGradeTest {
         assertEquals(0L, gradeRevealSteps(1.0).single().delayBeforeMs)
         assertEquals(5.5, gradeRevealSteps(5.5).last().value)
         assertEquals(6.0, gradeRevealSteps(6.0).last().value)
+    }
+
+    @Test
+    fun agePromptIsOnlyThePortraitOfSomeoneThatAge() {
+        val today = LocalDate.of(2026, 11, 4)
+        val plain = Celebrity("Plain Person", LocalDate.of(1983, 1, 1), "no portrait")
+        val pictured = Celebrity("Pictured Person", LocalDate.of(1983, 6, 2), "has portrait", "Pictured Person 2020.jpg")
+        val otherAge = Celebrity("Younger Person", LocalDate.of(2016, 1, 1), "other age", "Younger Person.jpg")
+        val catalog = listOf(plain, pictured, otherAge)
+        val prompt = celebrityAgePrompt(4.3, "grade-a", today, catalog)
+        assertEquals(
+            "https://commons.wikimedia.org/wiki/Special:FilePath/Pictured%20Person%202020.jpg?width=640",
+            prompt.imageUrl,
+        )
+        assertFalse(prompt.imageUrl!!.contains("43"))
+        assertFalse(prompt.imageUrl!!.contains("4.3"))
+        assertFalse(prompt.imageUrl!!.contains("4,3"))
+        assertNull(celebrityAgePrompt(4.3, "grade-a", today, listOf(plain, otherAge)).imageUrl)
+        assertEquals("Younger Person", pickCelebrityPhoto(10, "grade-a", today, catalog)?.name)
+        assertNull(pickCelebrityPhoto(43, "grade-a", today, listOf(plain)))
+        assertNull(portraitUrl(""))
+        assertNull(portraitUrl("../other.jpg"))
+        assertNull(portraitUrl("https://example.test/a.jpg"))
+        assertNull(portraitUrl("notes.gif"))
+        assertEquals(40, parseAgeGuess("40"))
+        assertEquals(null, parseAgeGuess("4.5"))
+        assertEquals(null, parseAgeGuess("0"))
+        assertEquals(null, parseAgeGuess("121"))
+    }
+
+    @Test
+    fun hiddenGradeNoticeDoesNotContainTheAgeOrTheMark() {
+        val grade = SchoolGrade("g1", "Mathematik", "math", "Mathematik", "Probe", "2026-11-01", 4.3, 1.0, true, null, "")
+        val older = SchoolGrade("g0", "Mathematik", "math", "Mathematik", "Alte Probe", "2026-09-01", 4.0, 1.0, true, null, "")
+        val snapshot = SchulnetzSnapshot(grades = listOf(older, grade))
+        val change = diffSnapshots(SchulnetzSnapshot(grades = listOf(older)), snapshot).single { it.category == "grade" }
+        val hidden = prepareGradeNotifications(listOf(change), guessGrades = true, snapshot = snapshot).single()
+        val prompt = celebrityAgePrompt(4.3, gradeTargetId(grade), today)
+        assertFalse(hidden.title.contains("43"))
+        assertFalse(hidden.body.contains("43"))
+        assertFalse(hidden.title.contains("4.3") || hidden.title.contains("4,3"))
+        assertFalse(hidden.body.contains("4.3") || hidden.body.contains("4,3"))
+        assertTrue(prompt.imageUrl == null || !hidden.title.contains(prompt.imageUrl!!))
+        assertTrue(prompt.imageUrl == null || !hidden.body.contains(prompt.imageUrl!!))
+        assertEquals("?", courseSummaries(listOf(grade), hiddenTargetIds = setOf(gradeTargetId(grade))).single().let {
+            if (it.average == null) "?" else it.average.toString()
+        })
+    }
+
+    @Test
+    fun aRealPortraitIsNeverBorrowedFromAnotherAge() {
+        val filesByBirth = linkedMapOf<String, MutableSet<String>>()
+        for (person in CELEBRITIES) {
+            if (portraitUrl(person.photoFile) == null) continue
+            filesByBirth.getOrPut(person.born.toString()) { linkedSetOf() }.add(person.photoFile)
+        }
+        val seen = linkedMapOf<String, String>()
+        for ((born, files) in filesByBirth) {
+            for (file in files) {
+                val other = seen.put(file, born)
+                assertTrue(other == null || other == born, "$file is used for $other and $born")
+            }
+        }
+        for (age in 10..60) {
+            val person = pickCelebrityPhoto(age, "grade-$age", today)
+            if (person == null) {
+                assertTrue(celebritiesAtAge(age, today).none { portraitUrl(it.photoFile) != null })
+            } else {
+                assertEquals(age, ageOn(person.born, today))
+                assertNotNull(portraitUrl(person.photoFile))
+                assertTrue(celebritiesAtAge(age, today).any { it.photoFile == person.photoFile })
+            }
+        }
     }
 }

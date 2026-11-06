@@ -4,6 +4,7 @@ package ch.fasrv.fanotes.companion
 import android.provider.Settings
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -15,17 +16,20 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ch.fasrv.fanotes.schulnetz.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.LocalDate
@@ -42,6 +46,11 @@ fun GradeRevealSheet(model: CompanionModel) {
     var guessed by rememberSaveable(targetId) { mutableStateOf(false) }
     var countUp by rememberSaveable(targetId) { mutableStateOf(false) }
     var settled by rememberSaveable(targetId) { mutableStateOf(false) }
+    var fromAge by rememberSaveable(targetId) { mutableStateOf(false) }
+    var ageGuess by rememberSaveable(targetId) { mutableIntStateOf(0) }
+    var ageImage by rememberSaveable(targetId) { mutableStateOf("") }
+    var ageAttempt by rememberSaveable(targetId) { mutableIntStateOf(0) }
+    var ageReload by rememberSaveable(targetId) { mutableIntStateOf(0) }
     val today = remember { LocalDate.now(ZoneId.of("Europe/Zurich")) }
     val haptic = LocalHapticFeedback.current
     val motion = animatorDurationScale()
@@ -128,24 +137,47 @@ fun GradeRevealSheet(model: CompanionModel) {
                         TextButton(onClick = { unveil() }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.reveal)) }
                     }
                     "age" -> {
-                        val age = celebrityAge(mark)
-                        val person = remember(targetId, age) { pickCelebrity(age, targetId, today) }
-                        Text(t(R.string.this_mark_as_an_age_is, age), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
-                        Text(t(R.string.mark_10_rounded_to_a_whole_year_4_25_43), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (person == null) {
-                            Text(t(R.string.no_bundled_celebrity_for_this_age), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 16.dp))
+                        val seed = if (ageAttempt == 0) targetId else "$targetId#$ageAttempt"
+                        val prompt = remember(targetId, mark, ageAttempt) { celebrityAgePrompt(mark, seed, today) }
+                        val imageUrl = prompt.imageUrl
+                        if (imageUrl == null) {
+                            Text(t(R.string.photo_unavailable), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 16.dp))
+                            TextButton(onClick = { ageAttempt += 1 }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.try_again)) }
                         } else {
-                            Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-                                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(person.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                                    Text(t(R.string.years_old_born, ageOn(person.born, today), person.born), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text(person.line, style = MaterialTheme.typography.bodyMedium)
-                                }
+                            CelebrityPortraitImage(imageUrl, ageReload) {
+                                ageReload += 1
+                                ageAttempt += 1
                             }
+                            OutlinedTextField(
+                                guess,
+                                { guess = it.filter { char -> char.isDigit() }.take(3) },
+                                Modifier.fillMaxWidth().padding(top = 12.dp),
+                                label = { Text(t(R.string.your_guess)) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            )
+                            val parsedAge = parseAgeGuess(guess)
+                            Button(
+                                onClick = {
+                                    val value = parsedAge ?: return@Button
+                                    ageGuess = value
+                                    ageImage = imageUrl
+                                    fromAge = true
+                                    if (value == celebrityAge(mark)) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                    } else {
+                                        haptic.performHapticFeedback(HapticFeedbackType.Reject)
+                                    }
+                                    unveil()
+                                },
+                                enabled = parsedAge != null,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
+                            ) { Text(t(R.string.check_guess)) }
                         }
-                        Button(onClick = { unveil() }, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) { Text(t(R.string.reveal_the_mark)) }
+                        TextButton(onClick = { fromAge = true; ageImage = imageUrl.orEmpty(); unveil() }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.reveal)) }
                     }
                     else -> {
+                        if (fromAge && ageImage.isNotBlank()) CelebrityPortraitImage(ageImage, 0) {}
                         if (guessed) {
                             Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
                                 Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -155,10 +187,15 @@ fun GradeRevealSheet(model: CompanionModel) {
                             }
                         }
                         CountingMark(mark, play = countUp, onFinished = { commitReveal() })
+                        if (settled && fromAge) {
+                            Text(t(R.string.this_mark_as_an_age_is, celebrityAge(mark).toString()), style = MaterialTheme.typography.titleMedium)
+                            Text(t(R.string.mark_10_rounded_to_a_whole_year_4_25_43), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (ageGuess > 0) Text(t(R.string.your_age_guess, ageGuess), style = MaterialTheme.typography.bodyMedium)
+                        }
                         Text(grade.title.ifBlank { t(R.string.school_mark) }, style = MaterialTheme.typography.bodyLarge)
                         if (model.revealQueue.size > 1) {
                             Button(
-                                onClick = { commitReveal(); model.finishReveal(); step = "menu"; guess = ""; tries = 0; last = ""; guessed = false; countUp = false; settled = false },
+                                onClick = { commitReveal(); model.finishReveal(); step = "menu"; guess = ""; tries = 0; last = ""; guessed = false; countUp = false; settled = false; fromAge = false; ageGuess = 0; ageImage = ""; ageAttempt = 0 },
                                 enabled = settled,
                                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 50.dp),
                             ) { Text(t(R.string.next_hidden_mark)) }
@@ -181,6 +218,30 @@ private fun animatorDurationScale(): Float {
     val resolver = LocalContext.current.contentResolver
     val scale = Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
     return if (scale.isFinite() && scale >= 0f) scale else 1f
+}
+
+@Composable
+private fun CelebrityPortraitImage(url: String, reload: Int, onFailed: () -> Unit) {
+    var localReload by remember(url, reload) { mutableIntStateOf(0) }
+    var bitmap by remember(url, reload, localReload) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    var failed by remember(url, reload, localReload) { mutableStateOf(false) }
+    LaunchedEffect(url, reload, localReload) {
+        val loaded = withContext(Dispatchers.IO) { fetchCelebrityPortrait(url) }
+        if (loaded == null) failed = true else bitmap = loaded.asImageBitmap()
+    }
+    when {
+        bitmap != null -> Image(
+            bitmap = bitmap!!,
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 180.dp, max = 360.dp),
+        )
+        failed -> {
+            Text(t(R.string.photo_unavailable), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 16.dp))
+            TextButton(onClick = { localReload += 1; onFailed() }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.try_again)) }
+        }
+        else -> CircularProgressIndicator(Modifier.padding(vertical = 24.dp))
+    }
 }
 
 /** Counts 1.0, 1.1, 1.2, … and lands on the real mark. Reduced motion shows it at once. */
