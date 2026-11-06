@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.4
+
+- Retry a transient sync memory pause without dropping notes.
+
 ## 2026.11.2-beta.3
 
 - Prevent ink sync OOM and preserve complete Schulnetz grade books (#1008)
