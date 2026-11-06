@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.6
+
+- Load the next Schulnetz weeks when the timetable page has no date range.
+
 ## 2026.11.2-beta.5
 
 - Guess a celebrity's age from a licensed photo (#1010)
