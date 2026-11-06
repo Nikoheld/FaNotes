@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.7
+
+- Persist quiet exam week baselines and date agenda notifications (#1012)
+
 ## 2026.11.2-beta.6
 
 - Load the next Schulnetz weeks when the timetable page has no date range.
