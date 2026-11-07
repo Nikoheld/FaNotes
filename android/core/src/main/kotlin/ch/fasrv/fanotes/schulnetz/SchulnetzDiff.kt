@@ -73,6 +73,43 @@ fun alertAllowed(settings: NotifySettings, change: SchulnetzChange): Boolean {
     }
 }
 
+/** Login and the local test button are not school-event switches. */
+fun keepsAlertDespiteSwitches(change: SchulnetzChange): Boolean {
+    if (change.id == "schulnetz-login-required" || change.id == "push-test") return true
+    return change.category == "settings"
+}
+
+/**
+ * Decision used before a notice is posted. Remote push, an open app, and the
+ * fallback check all use it. A disabled switch is not a notice that is shown
+ * and then cancelled. Android permission is a separate gate and does not
+ * rewrite the stored switches.
+ */
+enum class AlertGate { DELIVER, PREFERENCE, PERMISSION }
+
+fun schoolAlertGate(settings: NotifySettings, change: SchulnetzChange, notificationsPermitted: Boolean): AlertGate {
+    if (!keepsAlertDespiteSwitches(change) && !alertAllowed(settings, change)) return AlertGate.PREFERENCE
+    if (!notificationsPermitted) return AlertGate.PERMISSION
+    return AlertGate.DELIVER
+}
+
+/** One representative school change for each kind the diff can emit. */
+fun sampleSchoolAlert(kind: String): SchulnetzChange = when (kind) {
+    "grade-new" -> SchulnetzChange("grade:g1", "grade", "Neue Note", "Mathematik")
+    "grade-changed" -> SchulnetzChange("grade:g1", "grade", "Notenänderung", "Mathematik")
+    "lesson-cancelled" -> SchulnetzChange("lesson:e1", "timetable", "Lektion fällt aus", "Mathematik")
+    "lesson-changed" -> SchulnetzChange("lesson:e1", "timetable", "Stundenplan geändert", "Mathematik")
+    "exam-new" -> SchulnetzChange("exam:x", "exam", "Neue Prüfung", "Mathematik")
+    "exam-moved" -> SchulnetzChange("exam:x", "exam", "Prüfung verschoben", "Mathematik")
+    "exam-cancelled" -> SchulnetzChange("exam:x", "exam", "Prüfung fällt aus", "Mathematik")
+    "exam-room" -> SchulnetzChange("exam:x", "exam", "Raum geändert", "Mathematik")
+    "appointment-new" -> SchulnetzChange("event:t1", "event", "Neuer Termin", "Elternabend")
+    "message-new" -> SchulnetzChange("event:m1", "event", "Neue Mitteilung", "Hinweis")
+    "absence-new" -> SchulnetzChange("absence:a1", "absence", "Neue Absenz", "Deutsch")
+    "deadline" -> SchulnetzChange("deadline:a1:2026-11-08", "deadline", "Entschuldigung läuft ab", "Deutsch")
+    else -> SchulnetzChange("other", "home", "Hinweis", "")
+}
+
 /**
  * Difference between two normalised snapshots.
  * The first snapshot after linking produces no notifications, so a fresh login
@@ -86,6 +123,8 @@ fun diffSnapshots(
     today: LocalDate = LocalDate.now(),
 ): List<SchulnetzChange> {
     if (previous == null) return emptyList()
+    // The master switch drops the diff before any row is built. Callers still store the snapshot.
+    if (!settings.enabled) return emptyList()
     val freshWeeks = introducedWeeks(previous, next)
     val changes = mutableListOf<SchulnetzChange>()
     if (settings.grades) diffGrades(previous.grades.withoutSummaryGrades(), next.grades.withoutSummaryGrades(), changes)

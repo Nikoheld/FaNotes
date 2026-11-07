@@ -13,6 +13,7 @@ enum class DiagnosticScenario {
     SCHOOL,
     STATES,
     MALFORMED,
+    ALERTS,
     ;
 
     fun id(): String = name.lowercase()
@@ -22,6 +23,7 @@ enum class DiagnosticScenario {
             "school" -> SCHOOL
             "states" -> STATES
             "malformed" -> MALFORMED
+            "alerts" -> ALERTS
             else -> OFF
         }
     }
@@ -114,11 +116,81 @@ fun diagnosticReport(build: String, status: List<String>, entries: List<Diagnost
     }
 }.take(12_000)
 
-fun diagnosticPreview(scenario: DiagnosticScenario, zone: ZoneId, today: LocalDate): List<DiagnosticPreview> = when (scenario) {
+fun diagnosticPreview(
+    scenario: DiagnosticScenario,
+    zone: ZoneId,
+    today: LocalDate,
+    settings: NotifySettings = NotifySettings(),
+): List<DiagnosticPreview> = when (scenario) {
     DiagnosticScenario.OFF -> emptyList()
     DiagnosticScenario.SCHOOL -> schoolPreview(zone, today)
     DiagnosticScenario.STATES -> statePreview()
     DiagnosticScenario.MALFORMED -> malformedPreview()
+    DiagnosticScenario.ALERTS -> alertPreview(settings)
+}
+
+/** Short export line. It names switches, never a mark or a school payload. */
+fun diagnosticAlertStatus(settings: NotifySettings): String {
+    val off = ArrayList<String>()
+    if (!settings.gradeNew) off += "neue Noten"
+    if (!settings.gradeChanged) off += "Notenänderungen"
+    if (!settings.examNew) off += "neue Prüfungen"
+    if (!settings.examMoved) off += "Prüfungen verschoben"
+    if (!settings.examCancelled) off += "Prüfungen abgesagt"
+    if (!settings.examRoom) off += "Prüfungsraum"
+    if (!settings.lessonCancelled) off += "Lektionen abgesagt"
+    if (!settings.lessonChanged) off += "Stundenplan"
+    if (!settings.appointmentNew) off += "neue Termine"
+    if (!settings.messageNew) off += "Mitteilungen"
+    if (!settings.absences) off += "Absenzen"
+    if (!settings.deadlines) off += "Fristen"
+    val master = if (settings.enabled) "an" else "aus"
+    val hidden = if (settings.guessGrades) "an" else "aus"
+    val tail = if (off.isEmpty()) "" else " · aus: ${off.joinToString(", ")}"
+    return "Schulmeldungen: $master$tail · Noten verstecken: $hidden"
+}
+
+private val alertPreviewKinds = listOf(
+    "grade-new" to "Neue Noten",
+    "grade-changed" to "Notenänderungen",
+    "exam-new" to "Neue Prüfungen",
+    "exam-moved" to "Prüfungen verschoben",
+    "exam-cancelled" to "Prüfungen abgesagt",
+    "exam-room" to "Raumänderung bei Prüfungen",
+    "lesson-cancelled" to "Lektionen abgesagt",
+    "lesson-changed" to "Stundenplan geändert",
+    "appointment-new" to "Neue Termine",
+    "message-new" to "Neue Mitteilungen",
+    "absence-new" to "Neue Absenzen",
+    "deadline" to "Entschuldigungsfristen",
+)
+
+/** Local preview of the saved switches. It does not post a notice or write the snapshot. */
+private fun alertPreview(settings: NotifySettings): List<DiagnosticPreview> {
+    val lines = ArrayList<DiagnosticPreview>()
+    lines += DiagnosticPreview(
+        "Simulation: Hauptschalter",
+        if (settings.enabled) "an · Schuldaten werden weiter gelesen" else "aus · Schuldaten werden weiter gelesen",
+    )
+    for ((kind, label) in alertPreviewKinds) {
+        val gate = schoolAlertGate(settings, sampleSchoolAlert(kind), notificationsPermitted = true)
+        lines += DiagnosticPreview("Simulation: $label", if (gate == AlertGate.DELIVER) "an" else "aus")
+    }
+    val probe = schoolAlertGate(
+        settings,
+        SchulnetzChange("probe:1", "grade", "Test: Neue Note", "Test"),
+        notificationsPermitted = true,
+    )
+    lines += DiagnosticPreview(
+        "Simulation: Zustelltest",
+        if (probe == AlertGate.DELIVER) "an · ignoriert die Schulschalter" else "aus",
+    )
+    lines += DiagnosticPreview("Simulation: Vordergrund und Hintergrund", "gleiche Prüfung vor dem Anzeigen")
+    lines += DiagnosticPreview(
+        "Simulation: Noten verstecken",
+        if (settings.guessGrades) "an · unabhängig vom Hauptschalter" else "aus · unabhängig vom Hauptschalter",
+    )
+    return lines
 }
 
 private fun schoolPreview(zone: ZoneId, today: LocalDate): List<DiagnosticPreview> {

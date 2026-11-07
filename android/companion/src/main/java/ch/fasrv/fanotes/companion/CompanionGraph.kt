@@ -24,8 +24,12 @@ import ch.fasrv.fanotes.json.escapeJson
 import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.schulnetz.AgendaEvent
 import ch.fasrv.fanotes.schulnetz.HypotheticalGrade
+import ch.fasrv.fanotes.schulnetz.AlertGate
+import ch.fasrv.fanotes.schulnetz.NotifyPrefs
 import ch.fasrv.fanotes.schulnetz.NotifySettings
-import ch.fasrv.fanotes.schulnetz.alertAllowed
+import ch.fasrv.fanotes.schulnetz.storedFields
+import ch.fasrv.fanotes.schulnetz.notifySettingsFromPrefs
+import ch.fasrv.fanotes.schulnetz.schoolAlertGate
 import ch.fasrv.fanotes.schulnetz.RefreshLease
 import ch.fasrv.fanotes.schulnetz.SchulnetzGate
 import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
@@ -220,54 +224,18 @@ class CompanionGraph(private val context: Context) {
         prefs.edit().putString("schulnetz-base", normal).apply()
     }
 
-    fun notifySettings(): NotifySettings {
-        val grades = prefs.getBoolean("notify-grades", true)
-        val timetable = prefs.getBoolean("notify-timetable", true)
-        val exams = prefs.getBoolean("notify-exams", true)
-        val events = prefs.getBoolean("notify-events", true)
-        return NotifySettings(
-            grades = grades,
-            timetable = timetable,
-            exams = exams,
-            absences = prefs.getBoolean("notify-absences", true),
-            events = events,
-            deadlines = prefs.getBoolean("notify-deadlines", true),
-            guessGrades = prefs.getBoolean(GUESS_GRADES_PREF, false),
-            enabled = prefs.getBoolean("notify-enabled", true),
-            gradeNew = prefs.getBoolean("notify-grade-new", grades),
-            gradeChanged = prefs.getBoolean("notify-grade-changed", grades),
-            lessonCancelled = prefs.getBoolean("notify-lesson-cancelled", timetable),
-            lessonChanged = prefs.getBoolean("notify-lesson-changed", timetable),
-            examNew = prefs.getBoolean("notify-exam-new", exams),
-            examMoved = prefs.getBoolean("notify-exam-moved", exams),
-            examCancelled = prefs.getBoolean("notify-exam-cancelled", exams),
-            examRoom = prefs.getBoolean("notify-exam-room", exams),
-            appointmentNew = prefs.getBoolean("notify-appointment-new", events),
-            messageNew = prefs.getBoolean("notify-message-new", events),
-        )
-    }
+    fun notifySettings(): NotifySettings = notifySettingsFromPrefs(
+        present = { prefs.contains(it) },
+        read = { prefs.getBoolean(it, false) },
+    )
 
     fun setNotifySettings(settings: NotifySettings) {
-        prefs.edit()
-            .putBoolean("notify-enabled", settings.enabled)
-            .putBoolean("notify-grades", settings.grades)
-            .putBoolean("notify-grade-new", settings.gradeNew)
-            .putBoolean("notify-grade-changed", settings.gradeChanged)
-            .putBoolean("notify-timetable", settings.timetable)
-            .putBoolean("notify-lesson-cancelled", settings.lessonCancelled)
-            .putBoolean("notify-lesson-changed", settings.lessonChanged)
-            .putBoolean("notify-exams", settings.exams)
-            .putBoolean("notify-exam-new", settings.examNew)
-            .putBoolean("notify-exam-moved", settings.examMoved)
-            .putBoolean("notify-exam-cancelled", settings.examCancelled)
-            .putBoolean("notify-exam-room", settings.examRoom)
-            .putBoolean("notify-absences", settings.absences)
-            .putBoolean("notify-events", settings.events)
-            .putBoolean("notify-appointment-new", settings.appointmentNew)
-            .putBoolean("notify-message-new", settings.messageNew)
-            .putBoolean("notify-deadlines", settings.deadlines)
-            .putBoolean(GUESS_GRADES_PREF, settings.guessGrades)
-            .apply()
+        val editor = prefs.edit()
+        val values = settings.storedFields()
+        for ((field, key) in NotifyPrefs.fields) {
+            editor.putBoolean(key, values[field] == true)
+        }
+        editor.commit()
         scope.launch {
             val auth = runCatching { schoolAuth() }.getOrNull() ?: return@launch
             if (link.value.linked) runCatching { client.saveSettings(auth, settings) }
@@ -1082,7 +1050,10 @@ class CompanionGraph(private val context: Context) {
         }
         // Baselines are durable before any notification diff or dispatch, including first covered weeks.
         val before = read.comparison(prior)
-        val raw = diffSnapshots(before, next, effective).filterNot { changeIsHidden(it, hidden) }
+        // Fallback check: drop a disabled school alert before it can be posted. An empty list still stores the snapshot below.
+        val raw = diffSnapshots(before, next, effective)
+            .filter { schoolAlertGate(effective, it, notificationsPermitted = true) == AlertGate.DELIVER }
+            .filterNot { changeIsHidden(it, hidden) }
         val allowed = CompanionAlerts.notificationsAllowed(context)
         val changes = if (allowed || readGradeLedger(context) == null) {
             CompanionAlerts.settledChanges(context, raw, prior?.grades.orEmpty() + next.grades)
@@ -1106,10 +1077,13 @@ class CompanionGraph(private val context: Context) {
             if (readGradeLedger(context) == null) CompanionAlerts.settledChanges(context, items, snapshot.value.grades)
             return
         }
-        val guess = notifySettings().guessGrades
+        val settings = notifySettings()
+        val guess = settings.guessGrades
+        // Foreground and background delivery both arrive here. The filter runs before show.
         val visible = CompanionAlerts.settledChanges(
             context,
-            items.filter { alertAllowed(notifySettings(), it) }.filterNot { changeIsHidden(it, hiddenLessons()) },
+            items.filter { schoolAlertGate(settings, it, notificationsPermitted = true) == AlertGate.DELIVER }
+                .filterNot { changeIsHidden(it, hiddenLessons()) },
             snapshot.value.grades,
         )
         if (guess) addUnrevealedGrades(newGradeTargetIds(visible))
@@ -1321,7 +1295,7 @@ class CompanionGraph(private val context: Context) {
         const val DESK_PATH = ".fanotes/schulnetz/desk.json"
         const val HIDDEN_PATH = ".fanotes/schulnetz/hidden-lessons.json"
         const val SNAPSHOT_VAULT_PATH = ".fanotes/schulnetz/snapshot.json"
-        const val GUESS_GRADES_PREF = "notify-guess-grades"
+        const val GUESS_GRADES_PREF = NotifyPrefs.GUESS
         const val UNREVEALED_PREF = "unrevealed-grades"
         const val PLANNER_HOLD_PREF = "hold-planner-upload"
         const val DIAGNOSTIC_MODE_PREF = "diagnostic-mode"

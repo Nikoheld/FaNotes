@@ -260,6 +260,120 @@ fun NotifySettings.aligned(): NotifySettings = copy(
     events = appointmentNew || messageNew,
 )
 
+/**
+ * Preference file keys. Absent fine keys follow the older category switch, so an
+ * update does not change which alerts an existing install already receives.
+ */
+object NotifyPrefs {
+    const val FILE = "fanotes-companion"
+    const val ENABLED = "notify-enabled"
+    const val GRADES = "notify-grades"
+    const val GRADE_NEW = "notify-grade-new"
+    const val GRADE_CHANGED = "notify-grade-changed"
+    const val TIMETABLE = "notify-timetable"
+    const val LESSON_CANCELLED = "notify-lesson-cancelled"
+    const val LESSON_CHANGED = "notify-lesson-changed"
+    const val EXAMS = "notify-exams"
+    const val EXAM_NEW = "notify-exam-new"
+    const val EXAM_MOVED = "notify-exam-moved"
+    const val EXAM_CANCELLED = "notify-exam-cancelled"
+    const val EXAM_ROOM = "notify-exam-room"
+    const val ABSENCES = "notify-absences"
+    const val EVENTS = "notify-events"
+    const val APPOINTMENT_NEW = "notify-appointment-new"
+    const val MESSAGE_NEW = "notify-message-new"
+    const val DEADLINES = "notify-deadlines"
+    const val GUESS = "notify-guess-grades"
+
+    val fields: List<Pair<String, String>> = listOf(
+        "enabled" to ENABLED,
+        "grades" to GRADES,
+        "gradeNew" to GRADE_NEW,
+        "gradeChanged" to GRADE_CHANGED,
+        "timetable" to TIMETABLE,
+        "lessonCancelled" to LESSON_CANCELLED,
+        "lessonChanged" to LESSON_CHANGED,
+        "exams" to EXAMS,
+        "examNew" to EXAM_NEW,
+        "examMoved" to EXAM_MOVED,
+        "examCancelled" to EXAM_CANCELLED,
+        "examRoom" to EXAM_ROOM,
+        "absences" to ABSENCES,
+        "events" to EVENTS,
+        "appointmentNew" to APPOINTMENT_NEW,
+        "messageNew" to MESSAGE_NEW,
+        "deadlines" to DEADLINES,
+        "guessGrades" to GUESS,
+    )
+}
+
+/** Every stored boolean, including false. Used to prove a round trip. */
+fun NotifySettings.storedFields(): Map<String, Boolean> = mapOf(
+    "enabled" to enabled,
+    "grades" to grades,
+    "gradeNew" to gradeNew,
+    "gradeChanged" to gradeChanged,
+    "timetable" to timetable,
+    "lessonCancelled" to lessonCancelled,
+    "lessonChanged" to lessonChanged,
+    "exams" to exams,
+    "examNew" to examNew,
+    "examMoved" to examMoved,
+    "examCancelled" to examCancelled,
+    "examRoom" to examRoom,
+    "absences" to absences,
+    "events" to events,
+    "appointmentNew" to appointmentNew,
+    "messageNew" to messageNew,
+    "deadlines" to deadlines,
+    "guessGrades" to guessGrades,
+)
+
+/**
+ * Rebuilds switches from a partial store. A missing key is not a stored false:
+ * the master and the older categories default on, a missing fine switch follows
+ * its category, and hidden grades stay off until the key is explicitly true.
+ * This does not call [aligned], which would turn a stored category back on.
+ */
+fun notifySettingsFromStored(stored: Map<String, Boolean>): NotifySettings {
+    fun parent(name: String): Boolean = stored[name] ?: true
+    val grades = parent("grades")
+    val timetable = parent("timetable")
+    val exams = parent("exams")
+    val events = parent("events")
+    fun fine(name: String, fallback: Boolean): Boolean = stored[name] ?: fallback
+    return NotifySettings(
+        grades = grades,
+        timetable = timetable,
+        exams = exams,
+        absences = parent("absences"),
+        events = events,
+        deadlines = parent("deadlines"),
+        guessGrades = stored["guessGrades"] == true,
+        enabled = parent("enabled"),
+        gradeNew = fine("gradeNew", grades),
+        gradeChanged = fine("gradeChanged", grades),
+        lessonCancelled = fine("lessonCancelled", timetable),
+        lessonChanged = fine("lessonChanged", timetable),
+        examNew = fine("examNew", exams),
+        examMoved = fine("examMoved", exams),
+        examCancelled = fine("examCancelled", exams),
+        examRoom = fine("examRoom", exams),
+        appointmentNew = fine("appointmentNew", events),
+        messageNew = fine("messageNew", events),
+    )
+}
+
+/** Reads only keys that are present, so an app update keeps the stored choices. */
+fun notifySettingsFromPrefs(present: (String) -> Boolean, read: (String) -> Boolean): NotifySettings {
+    val stored = buildMap {
+        for ((field, key) in NotifyPrefs.fields) {
+            if (present(key)) put(field, read(key))
+        }
+    }
+    return notifySettingsFromStored(stored)
+}
+
 data class SchulnetzChange(
     val id: String,
     val category: String,

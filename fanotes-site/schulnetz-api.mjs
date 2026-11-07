@@ -13,6 +13,7 @@ import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
 import {
   applyEventWindow,
   diffSnapshots,
+  resolvedAlertSettings,
   prepareAgendaRead,
   isLesson,
   isExamLike,
@@ -679,6 +680,7 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 
   const publishChanges = async (accountId, link, changes, revision, grades = []) => {
+    // No allowed school alert means no row and no push. Callers still save the snapshot.
     const ledger = await readGradeLedger(accountId)
     const settled = settleGradeNotifications(changes, grades, ledger)
     await writeGradeLedger(accountId, settled.keys)
@@ -696,7 +698,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     const read = prepareAgendaRead(stored?.version === 1 ? stored.weeks || {} : {}, snapshot)
     // Durable before any diff/push; a crash cannot turn an imported week into a second first read.
     await writeJson(path, { version: 1, weeks: read.weeks })
-    return diffSnapshots(previous ? { ...previous, events: read.before.events.filter(isLesson).concat((previous.events || []).filter((event) => !isLesson(event) && !isExamLike(event))), exams: read.before.exams } : null, snapshot, settings)
+    return diffSnapshots(previous ? { ...previous, events: read.before.events.filter(isLesson).concat((previous.events || []).filter((event) => !isLesson(event) && !isExamLike(event))), exams: read.before.exams } : null, snapshot, resolvedAlertSettings(settings))
   }
 
   const accountStillExists = options.syncAccountExists || syncAccountExists

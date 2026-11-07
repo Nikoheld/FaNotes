@@ -134,7 +134,11 @@ Das Firebase-Projekt legt Fabio an. Der Code läuft, sobald die beiden Dateien d
 
 Bis Schritt 5 fehlt, sendet der Server kein FCM und stürzt nicht ab.
 
-`guessGrades` (Einstellungen → Notifications → Guess the grade, standardmässig aus) wertet die App aus, wenn sie die Meldung zeigt. Die Data-Message nennt die Note nicht. Mit dem Schalter lautet die Meldung «Neue Note in <Fach> – tippen zum Aufdecken» und nennt nur Fach und Prüfungstitel. «Hold to reveal» verlangt einen langen Druck. Schnitt und Pluspunkte auf dem Telefon rechnen unaufgedeckte Noten nicht mit, bis sie aufgedeckt sind.
+`guessGrades` (Einstellungen → Notifications → Guess the grade, standardmässig aus) wertet die App aus, wenn sie die Meldung zeigt. Die Data-Message nennt die Note nicht. Mit dem Schalter lautet die Meldung «Neue Note in <Fach> – tippen zum Aufdecken» und nennt nur Fach und Prüfungstitel. «Hold to reveal» verlangt einen langen Druck. Schnitt und Pluspunkte auf dem Telefon rechnen unaufgedeckte Noten nicht mit, bis sie aufgedeckt sind. Der Hauptschalter schaltet `guessGrades` nicht um.
+
+Die Schulschalter liegen auf dem Telefon in den privaten Einstellungen und auf dem Server in `link.settings`. Fehlt nach einem Update ein feiner Schalter, gilt die ältere Kategorie. `enabled` fehlt bei einem alten Stand und gilt dann als an. Der Vergleich filtert, bevor eine Zeile in `changes.jsonl` kommt und bevor FCM etwas sendet. Die Nachricht ist nur `data`, ohne `notification`, damit Android sie nicht vor der App anzeigt. Dieselbe Prüfung gilt für die offene App und für den seltenen Fallback. Ein ausgeschalteter Hinweis wird nicht erst gezeigt und danach versteckt. Der Schnappschuss wird trotzdem geschrieben. Die Android-Berechtigung bleibt davon getrennt: ohne sie zeigt das Telefon nichts und löscht die Schalter nicht.
+
+Ein Server ohne diese Fassung ignoriert `enabled` und die feinen Schalter. Die älteren Kategorien `grades`, `timetable`, `exams`, `absences`, `events` und `deadlines` gelten weiter. Steht der Hauptschalter aus und die Kategorien bleiben an, sendet so ein Server weiter. Das Telefon filtert vor dem Anzeigen. Geänderte oder abgesagte Termine erzeugt der Vergleich nicht. Zustelltests (`probe:`) ignorieren die Schulschalter. Firebase kann eine Meldung nicht absichtlich zurückhalten. Vordergrund und Hintergrund laufen über denselben Weg; die Laufzeit auf einem Telefon misst dieses Repository nicht.
 
 ## Deploy
 

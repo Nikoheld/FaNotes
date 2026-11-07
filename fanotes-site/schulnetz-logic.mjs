@@ -1065,6 +1065,41 @@ export const notifyAlertKind = (change) => {
 }
 
 /**
+ * Fills an older stored settings object. A missing fine switch follows its
+ * category. A missing master switch stays on. Hidden grades stay off.
+ * An older server that ignores unknown keys never sees `enabled`.
+ */
+export const resolvedAlertSettings = (stored = {}) => {
+  const source = stored && typeof stored === 'object' ? stored : {}
+  const parent = (name) => source[name] !== false
+  const grades = parent('grades')
+  const timetable = parent('timetable')
+  const exams = parent('exams')
+  const events = parent('events')
+  const fine = (name, fallback) => (typeof source[name] === 'boolean' ? source[name] : fallback)
+  return {
+    enabled: source.enabled !== false,
+    grades,
+    gradeNew: fine('gradeNew', grades),
+    gradeChanged: fine('gradeChanged', grades),
+    timetable,
+    lessonCancelled: fine('lessonCancelled', timetable),
+    lessonChanged: fine('lessonChanged', timetable),
+    exams,
+    examNew: fine('examNew', exams),
+    examMoved: fine('examMoved', exams),
+    examCancelled: fine('examCancelled', exams),
+    examRoom: fine('examRoom', exams),
+    absences: parent('absences'),
+    events,
+    appointmentNew: fine('appointmentNew', events),
+    messageNew: fine('messageNew', events),
+    deadlines: parent('deadlines'),
+    guessGrades: source.guessGrades === true,
+  }
+}
+
+/**
  * A missing fine flag follows the older category switch. `enabled: false` blocks
  * every school alert. Delivery probes stay visible because the user asked for them.
  */
@@ -1082,6 +1117,8 @@ export const alertAllowed = (settings = {}, change) => {
 
 export const diffSnapshots = (previous, next, settings = {}, today = zurichToday()) => {
   if (!previous) return []
+  // Master off: do not build rows. The caller still stores the snapshot.
+  if (settings?.enabled === false) return []
   const freshWeeks = introducedWeeks(previous, next)
   previous = { ...previous, grades: withoutSummaryGrades(previous.grades) }
   next = { ...next, grades: withoutSummaryGrades(next.grades) }

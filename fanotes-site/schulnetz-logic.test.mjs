@@ -48,6 +48,7 @@ import {
   notificationProbeChanges,
   alertAllowed,
   notifyAlertKind,
+  resolvedAlertSettings,
   keepLoadedGrades,
   normalizeGradeDate,
   parseWeekSpan,
@@ -2065,4 +2066,135 @@ test('notification preferences keep only the school events the diff actually emi
   assert.deepEqual(titles(blank, { ...blank, absences: [absence] }, { enabled: false }), [])
   assert.equal(alertAllowed({ enabled: false, gradeNew: false }, { id: 'probe:1', category: 'grade', title: 'Test: Neue Note' }), true)
   assert.equal(alertAllowed({}, { id: 'grade:g1', category: 'grade', title: 'Neue Note' }), true)
+})
+
+test('older settings keep the category behaviour and a disabled master does not leak a mark', () => {
+  const legacy = resolvedAlertSettings({
+    grades: false,
+    timetable: true,
+    exams: true,
+    absences: true,
+    events: true,
+    deadlines: true,
+    guessGrades: false,
+  })
+  assert.equal(legacy.enabled, true)
+  assert.equal(legacy.gradeNew, false)
+  assert.equal(legacy.gradeChanged, false)
+  assert.equal(legacy.lessonChanged, true)
+  assert.equal(legacy.guessGrades, false)
+  const kept = resolvedAlertSettings({ grades: true, timetable: true, exams: true, absences: true, events: true, deadlines: true })
+  assert.equal(kept.enabled, true)
+  assert.equal(kept.gradeNew, true)
+  assert.equal(kept.appointmentNew, true)
+  const master = resolvedAlertSettings({ enabled: false, grades: true, gradeNew: true, guessGrades: true })
+  assert.equal(master.enabled, false)
+  assert.equal(master.gradeNew, true)
+  assert.equal(master.guessGrades, true)
+  const blank = { grades: [], events: [], exams: [], absences: [], messages: [] }
+  const grade = { id: 'g1', course: 'Mathematik', title: 'Probe', date: '2026-10-20', mark: 5.5, weight: 1 }
+  const lesson = { id: 'e1', start: '2026-11-02T08:15:00', end: '2026-11-02T09:00:00', text: 'Mathematik', room: 'R201', teachers: [], courseName: 'Mathematik', status: 'confirmed', eventType: 'lesson' }
+  const moved = { ...lesson, room: 'R202' }
+  const mixed = diffSnapshots({ ...blank, events: [lesson] }, { ...blank, grades: [grade], events: [moved] }, legacy)
+  assert.deepEqual(mixed.map((change) => change.title), ['Raum geändert'])
+  assert.equal(JSON.stringify(mixed).includes('5.5'), false)
+  const silent = diffSnapshots(blank, { ...blank, grades: [grade] }, master)
+  assert.deepEqual(silent, [])
+  assert.equal(alertAllowed(master, { id: 'probe:4', category: 'grade', title: 'Test: Neue Note' }), true)
+})
+
+const gradePollFetch = () => {
+  let polls = 0
+  return async (url) => {
+    const json = (value) => ({ status: 200, text: async () => JSON.stringify(value) })
+    if (String(url).endsWith('/token.php')) return json({ access_token: 'access-token-value', refresh_token: 'rotated-refresh-token-value-123456', expires_in: 3600 })
+    if (String(url).includes('/me/grades')) {
+      polls += 1
+      const grades = [{ id: 'g1', course: 'Mathematik', title: 'Probe', date: '2026-10-20', mark: '5.5', weight: '1' }]
+      if (polls > 1) grades.push({ id: 'g2', course: 'Englisch', title: 'Essay', date: '2026-11-01', mark: '4.5', weight: '1' })
+      return json(grades)
+    }
+    return json([])
+  }
+}
+
+test('turning alerts off still stores the snapshot and does not push', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-alerts-off-'))
+  const key = randomBytes(32)
+  const sent = []
+  const runtime = createSchulnetzRuntime({
+    root,
+    key,
+    fetch: gradePollFetch(),
+    autostart: false,
+    fcmSend: async (message) => { sent.push(message); return { status: 200 } },
+  })
+  try {
+    const guest = await runtime.createGuest('203.0.113.9')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'super-secret-refresh-token-value',
+    })
+    await runtime.addFcmToken(guest.accountId, 'phone:APA91b-example-token-value')
+    await runtime.pollAccount(guest.accountId)
+    assert.equal(sent.length, 0)
+    const saved = await guestCall(runtime, guest, 'PUT', '/api/v1/schulnetz/settings', '{"enabled":false}')
+    assert.equal(saved.status, 200)
+    assert.equal(saved.body.settings.enabled, false)
+    assert.equal(saved.body.settings.gradeNew, true)
+    assert.equal(saved.body.settings.guessGrades, false)
+    const again = await runtime.publicStatusOf(guest.accountId)
+    assert.equal(again.settings.enabled, false)
+    assert.equal(again.settings.gradeNew, true)
+    await runtime.pollAccount(guest.accountId)
+    const snapshot = JSON.parse(await readFile(join(root, 'accounts', guest.accountId, 'snapshot.json'), 'utf8'))
+    assert.equal(snapshot.grades.some((row) => row.id === 'g2'), true)
+    assert.equal(sent.length, 0)
+    const changes = await readFile(join(root, 'accounts', guest.accountId, 'changes.jsonl'), 'utf8').catch(() => '')
+    assert.equal(changes.includes('g2'), false)
+    assert.equal(changes.includes('4.5'), false)
+    assert.equal(changes.includes('5.5'), false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an older settings file still pushes a new grade as a data message', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-alerts-legacy-'))
+  const key = randomBytes(32)
+  const sent = []
+  const runtime = createSchulnetzRuntime({
+    root,
+    key,
+    fetch: gradePollFetch(),
+    autostart: false,
+    fcmSend: async (message) => { sent.push(message); return { status: 200 } },
+  })
+  const accountId = 'f'.repeat(32)
+  try {
+    await runtime.linkAccount(accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'super-secret-refresh-token-value',
+    })
+    await runtime.addFcmToken(accountId, 'phone:APA91b-example-token-value')
+    await runtime.pollAccount(accountId)
+    const file = join(root, 'accounts', accountId, 'link.json')
+    const link = JSON.parse(await readFile(file, 'utf8'))
+    link.settings = { grades: true, timetable: true, exams: true, absences: true, events: true, deadlines: true }
+    await writeFile(file, JSON.stringify(link))
+    await runtime.pollAccount(accountId)
+    const snapshot = JSON.parse(await readFile(join(root, 'accounts', accountId, 'snapshot.json'), 'utf8'))
+    assert.equal(snapshot.grades.some((row) => row.id === 'g2'), true)
+    const changes = await readFile(join(root, 'accounts', accountId, 'changes.jsonl'), 'utf8')
+    assert.match(changes, /g2/)
+    assert.equal(sent.length, 1)
+    assert.equal(sent[0].message.data.event, 'sync')
+    assert.equal(sent[0].message.notification, undefined)
+    assert.equal(JSON.stringify(sent[0]).includes('4.5'), false)
+    assert.equal(JSON.stringify(sent[0]).includes('5.5'), false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

@@ -155,6 +155,7 @@
     <string name="delivery_times">Zustellzeiten</string>
     <string name="details">Details</string>
     <string name="diagnostics">Diagnose</string>
+    <string name="diagnostic_alerts">Meldungen</string>
     <string name="diagnostic_export">Diagnosebericht prüfen</string>
     <string name="diagnostic_export_share">Teilen</string>
     <string name="diagnostic_failures">Letzte Fehler</string>
@@ -171,6 +172,7 @@
     <string name="diagnostic_preview">Simulation</string>
     <string name="diagnostic_remote_duplicate">Doppeltes Ereignis</string>
     <string name="diagnostic_remote_hint">Echte Zustellung über den Server an dieses Gerät. Das ist keine lokale Meldung. Firebase kann die Meldung nicht absichtlich zurückhalten.</string>
+    <string name="diagnostic_remote_prefs">Zustelltests ignorieren die Schulschalter. Echte Schulhinweise folgen ihnen. Die Android-Berechtigung bleibt nötig.</string>
     <string name="diagnostic_remote_reorder">Falsche Reihenfolge</string>
     <string name="diagnostic_remote_standard">Standard-Zustellung</string>
     <string name="diagnostic_reset_done">Der Diagnosemodus ist aus. Lokaler Teststand und die Testzeilen auf dem Server wurden entfernt.</string>

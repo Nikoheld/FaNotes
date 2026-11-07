@@ -18,6 +18,7 @@ import ch.fasrv.fanotes.desk.HomeworkTask
 import ch.fasrv.fanotes.desk.emptyCalendar
 import ch.fasrv.fanotes.ink.InkDocument
 import ch.fasrv.fanotes.schulnetz.DiagnosticTrace
+import ch.fasrv.fanotes.schulnetz.diagnosticAlertStatus
 import ch.fasrv.fanotes.schulnetz.AgendaEvent
 import ch.fasrv.fanotes.schulnetz.CollectiveGrade
 import ch.fasrv.fanotes.schulnetz.DeskPrefs
@@ -808,6 +809,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             "Konflikte: ${state.conflicts.size}",
             "Modus: ${if (diagnosticOn) "an" else "aus"}",
             "Szenario: ${diagnosticScenario.id()}",
+            diagnosticAlertStatus(settings),
         )
         return ch.fasrv.fanotes.schulnetz.diagnosticReport(
             "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",

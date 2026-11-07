@@ -155,6 +155,7 @@
     <string name="delivery_times">Delivery times</string>
     <string name="details">Details</string>
     <string name="diagnostics">Diagnostics</string>
+    <string name="diagnostic_alerts">Alert switches</string>
     <string name="diagnostic_export">Review diagnostic report</string>
     <string name="diagnostic_export_share">Share</string>
     <string name="diagnostic_failures">Recent failures</string>
@@ -171,6 +172,7 @@
     <string name="diagnostic_preview">Simulation</string>
     <string name="diagnostic_remote_duplicate">Duplicate event</string>
     <string name="diagnostic_remote_hint">Real delivery through the server to this device. This is not a local notification. Firebase cannot be asked to hold the message.</string>
+    <string name="diagnostic_remote_prefs">Delivery tests ignore the school-alert switches. Real school alerts follow them. The Android notification permission is still required.</string>
     <string name="diagnostic_remote_reorder">Out of order</string>
     <string name="diagnostic_remote_standard">Standard delivery</string>
     <string name="diagnostic_reset_done">Diagnostic mode is off. Local test state and the server test rows were removed.</string>

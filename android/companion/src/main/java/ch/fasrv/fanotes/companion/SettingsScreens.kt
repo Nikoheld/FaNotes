@@ -201,9 +201,10 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                     DiagnosticChoice(t(R.string.diagnostic_school), model.diagnosticScenario == DiagnosticScenario.SCHOOL) { model.selectDiagnosticScenario("school") }
                     DiagnosticChoice(t(R.string.diagnostic_states), model.diagnosticScenario == DiagnosticScenario.STATES) { model.selectDiagnosticScenario("states") }
                     DiagnosticChoice(t(R.string.diagnostic_malformed), model.diagnosticScenario == DiagnosticScenario.MALFORMED) { model.selectDiagnosticScenario("malformed") }
+                    DiagnosticChoice(t(R.string.diagnostic_alerts), model.diagnosticScenario == DiagnosticScenario.ALERTS) { model.selectDiagnosticScenario("alerts") }
                 }
                 if (model.diagnosticScenario != DiagnosticScenario.OFF) {
-                    val lines = diagnosticPreview(model.diagnosticScenario, ZoneId.of("Europe/Zurich"), LocalDate.now(ZoneId.of("Europe/Zurich")))
+                    val lines = diagnosticPreview(model.diagnosticScenario, ZoneId.of("Europe/Zurich"), LocalDate.now(ZoneId.of("Europe/Zurich")), model.settings)
                     items(lines, key = { "sim:${it.title}:${it.detail}" }) { line ->
                         Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                             Text(line.title, style = MaterialTheme.typography.titleSmall)
@@ -214,6 +215,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                 item { SectionLabel(t(R.string.delivery)) }
                 item {
                     Text(t(R.string.diagnostic_remote_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
+                    Text(t(R.string.diagnostic_remote_prefs), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
                     OutlinedButton(onClick = { model.probeDelivery(context, "standard") }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.diagnostic_remote_standard)) }
                     OutlinedButton(onClick = { model.probeDelivery(context, "duplicate") }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.diagnostic_remote_duplicate)) }
                     OutlinedButton(onClick = { model.probeDelivery(context, "reorder") }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.diagnostic_remote_reorder)) }

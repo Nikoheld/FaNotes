@@ -5,6 +5,7 @@ import ch.fasrv.fanotes.json.escapeJson
 import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.schulnetz.AKSA_SCHULNETZ_BASE
 import ch.fasrv.fanotes.schulnetz.NotifySettings
+import ch.fasrv.fanotes.schulnetz.notifySettingsFromStored
 import ch.fasrv.fanotes.schulnetz.SCHULNETZ_API_PATH
 import ch.fasrv.fanotes.schulnetz.SCHULNETZ_CLIENT_ID
 import ch.fasrv.fanotes.schulnetz.SCHULNETZ_REFERER
@@ -787,6 +788,16 @@ class SchulnetzClient(
         return parsed?.takeIf { it.isNotBlank() && it.length < 240 } ?: "Anfrage fehlgeschlagen ($status)."
     }
 
+    private fun storedAlertFlags(settings: JsonValue.Obj?): Map<String, Boolean> {
+        if (settings == null) return emptyMap()
+        return buildMap {
+            for (name in ALERT_SETTING_NAMES) {
+                val value = settings.bool(name) ?: continue
+                put(name, value)
+            }
+        }
+    }
+
     private fun parseStatus(body: String): SchulnetzLinkState {
         val obj = parseJson(body) as? JsonValue.Obj ?: return SchulnetzLinkState()
         val settings = obj.obj("settings")
@@ -802,36 +813,16 @@ class SchulnetzClient(
             topic = push?.string("topic").orEmpty(),
             pushServer = push?.string("server").orEmpty(),
             pushUrl = push?.string("url").orEmpty(),
-            settings = run {
-                val grades = settings?.bool("grades") != false
-                val timetable = settings?.bool("timetable") != false
-                val exams = settings?.bool("exams") != false
-                val events = settings?.bool("events") != false
-                NotifySettings(
-                    grades = grades,
-                    timetable = timetable,
-                    exams = exams,
-                    absences = settings?.bool("absences") != false,
-                    events = events,
-                    deadlines = settings?.bool("deadlines") != false,
-                    guessGrades = settings?.bool("guessGrades") == true,
-                    enabled = settings?.bool("enabled") != false,
-                    gradeNew = settings?.bool("gradeNew") ?: grades,
-                    gradeChanged = settings?.bool("gradeChanged") ?: grades,
-                    lessonCancelled = settings?.bool("lessonCancelled") ?: timetable,
-                    lessonChanged = settings?.bool("lessonChanged") ?: timetable,
-                    examNew = settings?.bool("examNew") ?: exams,
-                    examMoved = settings?.bool("examMoved") ?: exams,
-                    examCancelled = settings?.bool("examCancelled") ?: exams,
-                    examRoom = settings?.bool("examRoom") ?: exams,
-                    appointmentNew = settings?.bool("appointmentNew") ?: events,
-                    messageNew = settings?.bool("messageNew") ?: events,
-                )
-            },
+            settings = notifySettingsFromStored(storedAlertFlags(settings)),
         )
     }
 
     companion object {
         const val CLIENT_ID = SCHULNETZ_CLIENT_ID
+        private val ALERT_SETTING_NAMES = listOf(
+            "enabled", "grades", "gradeNew", "gradeChanged", "timetable", "lessonCancelled", "lessonChanged",
+            "exams", "examNew", "examMoved", "examCancelled", "examRoom", "absences", "events",
+            "appointmentNew", "messageNew", "deadlines", "guessGrades",
+        )
     }
 }
