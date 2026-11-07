@@ -227,8 +227,10 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                     Text(t(R.string.diagnostic_no_failures), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     failures.forEach { entry ->
+                        val parts = listOf(entry.category, entry.name, "${entry.durationMs}ms", entry.result)
+                        val label = if (entry.detail.isBlank()) parts.joinToString(" ") else (parts + entry.detail).joinToString(" ")
                         Text(
-                            "${entry.category} ${entry.name} ${entry.durationMs}ms ${entry.result}${if (entry.detail.isBlank()) "" else " ${entry.detail}"}",
+                            label,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(bottom = 6.dp),
