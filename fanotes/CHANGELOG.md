@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.13
+
+- Load every offered timetable week and keep an unread week from looking free.
+
 ## 2026.11.2-beta.12
 
 - Keep school-alert choices across updates and filter before display.
