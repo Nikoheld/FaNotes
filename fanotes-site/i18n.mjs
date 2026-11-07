@@ -69,6 +69,7 @@ const SCHULNETZ_EXACT = new Map([
   ['Der Schnappschuss ist ungültig.', 'The snapshot is invalid.'],
   ['Das Push-Token ist ungültig.', 'The push token is invalid.'],
   ['Dieses Gerät ist für Push nicht registriert.', 'This device is not registered for push.'],
+  ['Dieses Testszenario gibt es nicht.', 'This test scenario does not exist.'],
   ['Firebase ist auf dem Server nicht eingerichtet.', 'Firebase is not set up on the server.'],
   ['Firebase hat die Testmeldung nicht angenommen.', 'Firebase did not accept the test notice.'],
   ['Dieses Gerät ist bei Firebase nicht mehr registriert.', 'This device is no longer registered with Firebase.'],

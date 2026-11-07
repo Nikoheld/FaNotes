@@ -25,7 +25,7 @@ import {
   prepareGradeNotifications,
   settleGradeNotifications,
   isNotificationProbe,
-  notificationProbeChanges,
+  notificationProbeBatch,
   stampWeeks,
   unseenChanges,
   normalizeSchoolBase,
@@ -599,6 +599,31 @@ export const createSchulnetzRuntime = (options = {}) => {
     }
   }
 
+  /** Drops probe rows only. Revision, snapshot, ledger and baseline stay. */
+  const clearProbeChanges = async (accountId) => {
+    const file = resolve(accountDir(accountId), 'changes.jsonl')
+    const text = await fs.readFile(file, 'utf8').catch(() => null)
+    if (text == null) return { removed: 0 }
+    const kept = []
+    let removed = 0
+    for (const line of text.split('\n')) {
+      if (!line) continue
+      try {
+        const row = JSON.parse(line)
+        if (isNotificationProbe(row?.id)) {
+          removed += 1
+          continue
+        }
+      } catch {
+        /* unreadable lines are not probe rows */
+      }
+      kept.push(line)
+    }
+    if (kept.length) await fs.writeFile(file, `${kept.join('\n')}\n`, { mode: 0o600 })
+    else await fs.rm(file, { force: true })
+    return { removed }
+  }
+
   const appendChanges = async (accountId, changes, revision) => {
     if (!changes.length) return
     const file = resolve(accountDir(accountId), 'changes.jsonl')
@@ -1087,12 +1112,15 @@ export const createSchulnetzRuntime = (options = {}) => {
           fail(400, 'Dieses Gerät ist für Push nicht registriert.')
         }
         const serverAt = now().toISOString()
-        const changes = notificationProbeChanges({ serverAt, day: zurichToday(now()) })
+        const scenario = typeof body?.scenario === 'string' ? body.scenario : 'standard'
+        const changes = notificationProbeBatch({ serverAt, day: zurichToday(now()), scenario })
+        if (!changes) fail(400, 'Dieses Testszenario gibt es nicht.')
+        const correlation = changes[0]?.correlation || ''
         const revision = (Number(link.revision) || 0) + 1
         await appendChanges(accountId, changes, revision)
         link.revision = revision
         await saveLink(accountId, link)
-        const result = await pingDevice(accountId, link, token, 'sync', 'HIGH', { probe: true, serverAt })
+        const result = await pingDevice(accountId, link, token, 'sync', 'HIGH', { probe: true, serverAt, correlation })
         const accepted = result?.status === 200 && !result.drop && !result.skipped && !result.failed && !result.rejected
         if (!accepted) {
           await rollbackProbe(accountId, link, revision)
@@ -1100,7 +1128,19 @@ export const createSchulnetzRuntime = (options = {}) => {
           if (result?.drop) fail(409, 'Dieses Gerät ist bei Firebase nicht mehr registriert.')
           fail(502, 'Firebase hat die Testmeldung nicht angenommen.')
         }
-        send(response, 200, { ok: true, serverAt, count: changes.length })
+        send(response, 200, { ok: true, serverAt, count: changes.length, correlation, scenario: String(scenario || 'standard').trim().toLowerCase() || 'standard' })
+        return true
+      }
+      if (route === '/push/probe/clear' && method === 'POST') {
+        accountRate(accountId, 'push-probe-clear', PUSH_TEST_LIMIT)
+        const link = await readLink(accountId)
+        if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
+        const body = await readBody(request)
+        const token = typeof body?.token === 'string' ? body.token.trim() : ''
+        if (!isValidFcmToken(token) || !(link.fcmTokens || []).includes(token)) {
+          fail(400, 'Dieses Gerät ist für Push nicht registriert.')
+        }
+        send(response, 200, { ok: true, ...(await clearProbeChanges(accountId)) })
         return true
       }
       send(response, 404, { error: 'Diesen Schulnetz-Endpunkt gibt es nicht.' })

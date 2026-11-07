@@ -153,6 +153,8 @@ fun changeFromObj(obj: ch.fasrv.fanotes.json.JsonValue.Obj): SchulnetzChange? {
         targetIds = ids,
         gradeKeys = gradeKeys,
         serverAt = if (isNotificationProbe(id)) (source.string("serverAt") ?: source.string("at").orEmpty()) else "",
+        correlation = if (isNotificationProbe(id)) source.string("correlation").orEmpty().take(40) else "",
+        sequence = if (isNotificationProbe(id)) source.double("sequence")?.toInt()?.coerceIn(0, 99) ?: 0 else 0,
     )
 }
 

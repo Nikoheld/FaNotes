@@ -8,6 +8,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -31,6 +33,7 @@ import ch.fasrv.fanotes.desk.THEME_CHOICES
 import ch.fasrv.fanotes.schulnetz.*
 import ch.fasrv.fanotes.sync.SyncStatus
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 
 @Composable
@@ -38,6 +41,19 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
     val context = LocalContext.current
     val sync by model.graph.engine.state.collectAsStateWithLifecycle()
     var confirm by remember { mutableStateOf("") }
+    if (page == Page.Diagnostics) {
+        val owner = LocalLifecycleOwner.current
+        DisposableEffect(owner) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) model.bumpDiagnostics()
+            }
+            owner.lifecycle.addObserver(observer)
+            onDispose { owner.lifecycle.removeObserver(observer) }
+        }
+        LaunchedEffect(model.diagnosticOn) {
+            if (model.diagnosticOn) model.noteDiagnosticMemory()
+        }
+    }
     when (page) {
         Page.Settings -> ScreenList {
             item {
@@ -168,6 +184,63 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
         Page.Diagnostics -> ScreenList {
             item { Text(t(R.string.connection_checks), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(vertical = 16.dp)) }
             item {
+                Text(t(R.string.diagnostic_mode), style = MaterialTheme.typography.titleMedium)
+                Text(t(R.string.diagnostic_mode_help), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
+                ToggleRow(t(R.string.diagnostic_mode), "", model.diagnosticOn) { model.setDiagnosticMode(it) }
+            }
+            item {
+                DiagnosticLine(t(R.string.diagnostic_label_school), if (model.link.linked) t(R.string.diagnostic_value_linked) else t(R.string.diagnostic_value_separated))
+                DiagnosticLine(t(R.string.diagnostic_label_push), if (model.graph.fcmToken().isNullOrBlank()) t(R.string.diagnostic_value_unregistered) else t(R.string.diagnostic_value_registered))
+                DiagnosticLine(t(R.string.diagnostic_label_sync), t(diagnosticSyncRes(sync.status)))
+                DiagnosticLine(t(R.string.diagnostic_label_build), "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            }
+            if (model.diagnosticOn) {
+                item { SectionLabel(t(R.string.diagnostic_preview)) }
+                item {
+                    Text(t(R.string.diagnostic_local_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
+                    DiagnosticChoice(t(R.string.diagnostic_school), model.diagnosticScenario == DiagnosticScenario.SCHOOL) { model.selectDiagnosticScenario("school") }
+                    DiagnosticChoice(t(R.string.diagnostic_states), model.diagnosticScenario == DiagnosticScenario.STATES) { model.selectDiagnosticScenario("states") }
+                    DiagnosticChoice(t(R.string.diagnostic_malformed), model.diagnosticScenario == DiagnosticScenario.MALFORMED) { model.selectDiagnosticScenario("malformed") }
+                }
+                if (model.diagnosticScenario != DiagnosticScenario.OFF) {
+                    val lines = diagnosticPreview(model.diagnosticScenario, ZoneId.of("Europe/Zurich"), LocalDate.now(ZoneId.of("Europe/Zurich")))
+                    items(lines, key = { "sim:${it.title}:${it.detail}" }) { line ->
+                        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                            Text(line.title, style = MaterialTheme.typography.titleSmall)
+                            Text(line.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+                item { SectionLabel(t(R.string.delivery)) }
+                item {
+                    Text(t(R.string.diagnostic_remote_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
+                    OutlinedButton(onClick = { model.probeDelivery(context, "standard") }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.diagnostic_remote_standard)) }
+                    OutlinedButton(onClick = { model.probeDelivery(context, "duplicate") }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.diagnostic_remote_duplicate)) }
+                    OutlinedButton(onClick = { model.probeDelivery(context, "reorder") }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.diagnostic_remote_reorder)) }
+                }
+            }
+            item {
+                val tick = model.diagnosticTick
+                val failures = if (tick >= 0) DiagnosticTrace.failures().takeLast(6) else emptyList()
+                SectionLabel(t(R.string.diagnostic_failures))
+                if (failures.isEmpty()) {
+                    Text(t(R.string.diagnostic_no_failures), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    failures.forEach { entry ->
+                        val parts = listOf(entry.category, entry.name, "${entry.durationMs}ms", entry.result)
+                        val label = if (entry.detail.isBlank()) parts.joinToString(" ") else (parts + entry.detail).joinToString(" ")
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 6.dp),
+                        )
+                    }
+                }
+                OutlinedButton(onClick = { model.diagnosticExport = model.prepareDiagnosticExport() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text(t(R.string.diagnostic_export)) }
+                OutlinedButton(onClick = { confirm = "diagnostic-reset" }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.diagnostic_stop)) }
+            }
+            item {
                 fun at(ms: Long) = if (ms <= 0L) t(R.string.not_yet) else formatSchoolStamp(Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()), "d MMM yyyy · HH:mm")
                 val delivery = deliveryModeLabel(firebaseConfigured(context), model.graph.lastPushAt(), System.currentTimeMillis())
                 DiagnosticLine(t(R.string.delivery), if (delivery == "Instant via push") t(R.string.instant_via_push) else t(R.string.fallback_mode))
@@ -220,18 +293,21 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                 "logout" -> t(R.string.sign_out_of_fanotes)
                 "delete-kanti" -> t(R.string.delete_my_kanti_data_2)
                 "logs-captures" -> t(R.string.include_saved_school_pages_2)
+                "diagnostic-reset" -> t(R.string.diagnostic_stop)
                 else -> t(R.string.disconnect_schulnetz)
             },
             when (confirm) {
                 "logout" -> t(R.string.your_local_notes_stay_on_this_device_school_upda)
                 "delete-kanti" -> t(R.string.school_data_stored_for_this_device_is_removed_fr)
                 "logs-captures" -> t(R.string.these_pages_contain_grades_absences_and_names)
+                "diagnostic-reset" -> t(R.string.diagnostic_stop_body)
                 else -> t(R.string.your_last_school_snapshot_stays_available_you_ca)
             },
             when (confirm) {
                 "logout" -> t(R.string.sign_out)
                 "delete-kanti" -> t(R.string.delete)
                 "logs-captures" -> t(R.string.include_pages)
+                "diagnostic-reset" -> t(R.string.diagnostic_stop)
                 else -> t(R.string.disconnect)
             },
             { confirm = "" },
@@ -240,10 +316,30 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                 confirm == "logout" -> model.logout()
                 deleteKanti -> model.deleteKantiData()
                 confirm == "logs-captures" -> model.shareLogs(context, includeCaptures = true)
+                confirm == "diagnostic-reset" -> model.resetDiagnostics(context)
                 else -> model.unlink()
             }
             confirm = ""
         }
+    }
+    val export = model.diagnosticExport
+    if (export != null) {
+        AlertDialog(
+            onDismissRequest = { model.diagnosticExport = null },
+            title = { Text(t(R.string.diagnostic_export)) },
+            text = {
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                    Text(export, style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    model.diagnosticExport = null
+                    model.shareDiagnosticReport(context, export)
+                }) { Text(t(R.string.diagnostic_export_share)) }
+            },
+            dismissButton = { TextButton(onClick = { model.diagnosticExport = null }) { Text(t(R.string.cancel)) } },
+        )
     }
 }
 
@@ -364,6 +460,22 @@ private fun NotificationSettings(model: CompanionModel) {
             }
         }
     }
+}
+
+@Composable
+private fun DiagnosticChoice(label: String, selected: Boolean, onClick: () -> Unit) {
+    if (selected) Button(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) { Text(label) }
+    else OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) { Text(label) }
+}
+
+private fun diagnosticSyncRes(status: SyncStatus): Int = when (status) {
+    SyncStatus.UNAVAILABLE -> R.string.diagnostic_sync_unavailable
+    SyncStatus.SIGNED_OUT -> R.string.diagnostic_sync_signed_out
+    SyncStatus.IDLE -> R.string.diagnostic_sync_idle
+    SyncStatus.SYNCING -> R.string.diagnostic_sync_syncing
+    SyncStatus.OFFLINE -> R.string.diagnostic_sync_offline
+    SyncStatus.ERROR -> R.string.diagnostic_sync_error
+    SyncStatus.PAUSED -> R.string.diagnostic_sync_paused
 }
 
 @Composable

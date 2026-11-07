@@ -20,6 +20,7 @@ class CompanionApplication : Application() {
         }
         android.webkit.CookieManager.getInstance().setAcceptCookie(true)
         graph = CompanionGraph(this)
+        graph.restoreDiagnosticTrace()
         installCrashLog()
         graph.notePreviousExit()
         CompanionAlerts.ensureChannels(this)

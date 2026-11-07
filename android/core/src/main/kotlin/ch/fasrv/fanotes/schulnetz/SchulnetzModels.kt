@@ -254,6 +254,10 @@ data class SchulnetzChange(
     val gradeKeys: List<String> = emptyList(),
     /** ISO time the server created a delivery-test row. Blank for school changes. */
     val serverAt: String = "",
+    /** `probe:` plus the server clock digits. Blank for school changes. */
+    val correlation: String = "",
+    /** Position in one delivery batch. Zero for school changes. */
+    val sequence: Int = 0,
 ) {
     fun linkIds(): List<String> = targetIds.ifEmpty { listOf(targetId).filter { it.isNotBlank() } }
 }

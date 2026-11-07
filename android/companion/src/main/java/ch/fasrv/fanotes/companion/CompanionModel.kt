@@ -17,6 +17,7 @@ import ch.fasrv.fanotes.desk.CalendarDocument
 import ch.fasrv.fanotes.desk.HomeworkTask
 import ch.fasrv.fanotes.desk.emptyCalendar
 import ch.fasrv.fanotes.ink.InkDocument
+import ch.fasrv.fanotes.schulnetz.DiagnosticTrace
 import ch.fasrv.fanotes.schulnetz.AgendaEvent
 import ch.fasrv.fanotes.schulnetz.CollectiveGrade
 import ch.fasrv.fanotes.schulnetz.DeskPrefs
@@ -197,6 +198,10 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var focusCourseId by mutableStateOf("")
     var unrevealedIds by mutableStateOf(graph.unrevealedGradeIds())
     var revealQueue by mutableStateOf<List<String>>(emptyList())
+    var diagnosticOn by mutableStateOf(graph.diagnosticMode())
+    var diagnosticScenario by mutableStateOf(ch.fasrv.fanotes.schulnetz.DiagnosticScenario.fromId(graph.diagnosticScenario()))
+    var diagnosticTick by mutableStateOf(0)
+    var diagnosticExport by mutableStateOf<String?>(null)
 
     fun hiddenGradeIds(): Set<String> = if (settings.guessGrades) unrevealedIds else emptySet()
     fun isUnrevealed(targetId: String): Boolean = targetId.isNotBlank() && targetId in hiddenGradeIds()
@@ -217,7 +222,26 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     init {
         viewModelScope.launch { graph.snapshot.collect { snapshot = it; refreshUnrevealed() } }
         viewModelScope.launch { graph.link.collect { link = it } }
-        viewModelScope.launch { graph.engine.state.collect { notesAccount = it.account != null } }
+        viewModelScope.launch {
+            var previous = ""
+            graph.engine.state.collect { state ->
+                notesAccount = state.account != null
+                val name = state.status.name.lowercase()
+                val conflicts = state.conflicts.size
+                val key = "$name:$conflicts"
+                if (key == previous) return@collect
+                previous = key
+                val result = when {
+                    conflicts > 0 -> "conflict"
+                    name == "error" -> "error"
+                    name == "offline" -> "offline"
+                    name == "paused" -> "paused"
+                    name == "syncing" -> "ok"
+                    else -> ""
+                }
+                if (result.isNotEmpty()) DiagnosticTrace.record("sync", "status", 0, result, "conflicts:$conflicts")
+            }
+        }
         if (graph.plannerHold() && notesAccount) offerUpload = true
         viewModelScope.launch { graph.vaultChanges.collectLatest { kotlinx.coroutines.delay(200); reload() } }
         reload()
@@ -699,6 +723,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         }
     }
     private fun applyNotificationRoute(link: ch.fasrv.fanotes.schulnetz.NotifyLink) {
+        val probeRef = link.ids.firstOrNull { it.startsWith("probe") }.orEmpty()
+        if (probeRef.isNotEmpty()) DiagnosticTrace.record("push", "tap", 0, "ok", probeRef)
         val route = ch.fasrv.fanotes.schulnetz.routeNotify(link, snapshot)
         history = emptyList()
         this.route = companionRoute(route)
@@ -730,8 +756,85 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         }
     }
 
+    fun setDiagnosticMode(enabled: Boolean) {
+        graph.setDiagnosticMode(enabled)
+        diagnosticOn = enabled
+        diagnosticTick += 1
+    }
+
+    fun selectDiagnosticScenario(id: String) {
+        if (!diagnosticOn) return
+        val next = if (diagnosticScenario.id() == id) ch.fasrv.fanotes.schulnetz.DiagnosticScenario.OFF else ch.fasrv.fanotes.schulnetz.DiagnosticScenario.fromId(id)
+        diagnosticScenario = next
+        graph.setDiagnosticScenario(next.id())
+    }
+
+    fun bumpDiagnostics() { diagnosticTick += 1 }
+
+    /** One heap sample. The trace stores a megabyte count, not a dump. */
+    fun noteDiagnosticMemory() {
+        if (!DiagnosticTrace.enabled) return
+        val runtime = Runtime.getRuntime()
+        val usedMb = ((runtime.totalMemory() - runtime.freeMemory()) / (1024L * 1024L)).coerceAtLeast(0L)
+        DiagnosticTrace.record("memory", "heap", 0, "ok", "usedMb:$usedMb")
+        diagnosticTick += 1
+    }
+
+    fun prepareDiagnosticExport(): String {
+        val state = graph.engine.state.value
+        val status = listOf(
+            if (link.linked) "Schule: verbunden" else "Schule: getrennt",
+            if (graph.fcmToken().isNullOrBlank()) "Push: nicht registriert" else "Push: registriert",
+            "Sync: ${diagnosticSyncWord(state.status.name)}",
+            "Konflikte: ${state.conflicts.size}",
+            "Modus: ${if (diagnosticOn) "an" else "aus"}",
+            "Szenario: ${diagnosticScenario.id()}",
+        )
+        return ch.fasrv.fanotes.schulnetz.diagnosticReport(
+            "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+            status,
+            DiagnosticTrace.recent(),
+        )
+    }
+
+    fun shareDiagnosticReport(context: Context, report: String) {
+        val app = context.applicationContext
+        val safe = report.take(12_000)
+        val file = java.io.File(app.cacheDir, "share").apply { mkdirs() }.resolve("kanti-diagnose.txt")
+        file.writeText(safe)
+        shareFile(app, t(R.string.diagnostic_export), file, "text/plain", safe.take(4_000))
+    }
+
+    /**
+     * Local cleanup first. The server delete is best-effort and never touches
+     * the school cache, the session, or ordinary change rows.
+     */
+    fun resetDiagnostics(context: Context) {
+        graph.clearDiagnosticLocal()
+        CompanionAlerts.clearProbeState(context)
+        diagnosticOn = false
+        diagnosticScenario = ch.fasrv.fanotes.schulnetz.DiagnosticScenario.OFF
+        diagnosticExport = null
+        diagnosticTick += 1
+        viewModelScope.launch {
+            val auth = runCatching { graph.schoolAuth() }.getOrNull()
+            val token = graph.fcmToken()
+            if (auth == null || !link.linked || token.isNullOrBlank()) {
+                message = t(R.string.diagnostic_reset_local)
+                return@launch
+            }
+            runCatching { graph.client.clearProbe(auth, token) }
+                .onSuccess { message = t(R.string.diagnostic_reset_done) }
+                .onFailure { message = t(R.string.diagnostic_reset_server_failed) }
+        }
+    }
+
     /** Server → Firebase → this device. Does not post a local notification and does not touch school records. */
-    fun probeDelivery(context: Context) {
+    fun probeDelivery(context: Context, scenario: String = "standard") {
+        if (!diagnosticOn) {
+            message = t(R.string.diagnostic_mode_required)
+            return
+        }
         viewModelScope.launch {
             val auth = runCatching { graph.schoolAuth() }.getOrNull()
             if (auth == null || !link.linked) {
@@ -743,9 +846,16 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 message = t(R.string.delivery_probe_needs_token)
                 return@launch
             }
-            runCatching { graph.client.probePush(auth, token) }
-                .onSuccess { message = t(R.string.delivery_probe_sent) }
+            runCatching { graph.client.probePush(auth, token, scenario) }
+                .onSuccess { ack ->
+                    val detail = ack.correlation.takeIf { it.matches(Regex("^probe:[0-9]{1,20}$")) }.orEmpty()
+                    DiagnosticTrace.record("push", "sent", 0, "ok", detail)
+                    diagnosticTick += 1
+                    message = t(R.string.delivery_probe_sent)
+                }
                 .onFailure { error ->
+                    DiagnosticTrace.record("push", "sent", 0, "error", error.javaClass.simpleName)
+                    diagnosticTick += 1
                     message = shownText(error.message).ifBlank { t(R.string.delivery_probe_failed) }
                 }
         }
@@ -757,6 +867,17 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             override fun <T : ViewModel> create(modelClass: Class<T>): T = CompanionModel(graph) as T
         }
     }
+}
+
+private fun diagnosticSyncWord(name: String): String = when (name) {
+    "UNAVAILABLE" -> "nicht verfügbar"
+    "SIGNED_OUT" -> "abgemeldet"
+    "IDLE" -> "bereit"
+    "SYNCING" -> "synchronisiert"
+    "OFFLINE" -> "offline"
+    "ERROR" -> "Fehler"
+    "PAUSED" -> "pausiert"
+    else -> "unbekannt"
 }
 
 internal fun exportSsoCookies(): Map<String, String> {

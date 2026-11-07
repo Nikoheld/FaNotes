@@ -74,6 +74,7 @@ export const fcmDataMessage = (token, event, options = {}) => {
   const data = { event: String(event) }
   if (options.probe === true) data.probe = '1'
   if (typeof options.serverAt === 'string' && options.serverAt) data.serverAt = options.serverAt
+  if (typeof options.correlation === 'string' && /^probe:[0-9]{1,20}$/u.test(options.correlation)) data.correlation = options.correlation
   return {
     message: {
       token,

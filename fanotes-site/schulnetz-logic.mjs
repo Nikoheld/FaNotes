@@ -750,7 +750,7 @@ export const linkedChange = (id, category, title, body, extra = {}) => {
   const targetId = extra.targetId || ''
   const targetIds = extra.targetIds || (targetId ? [targetId] : [])
   const gradeKeys = Array.isArray(extra.gradeKeys) ? extra.gradeKeys.filter((key) => typeof key === 'string' && key) : []
-  return {
+  const change = {
     id,
     category,
     title,
@@ -763,6 +763,9 @@ export const linkedChange = (id, category, title, body, extra = {}) => {
     gradeKeys,
     serverAt: extra.serverAt || '',
   }
+  if (typeof extra.correlation === 'string' && extra.correlation) change.correlation = extra.correlation
+  if (Number.isInteger(extra.sequence) && extra.sequence > 0) change.sequence = extra.sequence
+  return change
 }
 
 /** `2026-11-07` becomes `07.11.2026`. Anything else stays blank. */
@@ -815,6 +818,23 @@ export const notificationProbeChanges = ({ serverAt, day } = {}) => {
       targetId: `probe-target:${stamp}:appointment-changed`,
     }),
   ]
+}
+
+/** Remote delivery variants. `reorder` keeps one server clock so receipt matching still works. */
+export const PROBE_SCENARIOS = new Set(['standard', 'duplicate', 'reorder'])
+
+export const notificationProbeBatch = ({ serverAt, day, scenario } = {}) => {
+  const name = String(scenario || 'standard').trim().toLowerCase()
+  if (!PROBE_SCENARIOS.has(name)) return null
+  const stamp = String(serverAt || '').replace(/[^0-9]/gu, '').slice(0, 17) || '0'
+  const correlation = `probe:${stamp}`
+  const changes = notificationProbeChanges({ serverAt, day }).map((change, index) => {
+    const sequence = index + 1
+    return { ...change, correlation, sequence, body: `${change.body} · Folge ${sequence}` }
+  })
+  if (name === 'duplicate') return [...changes, { ...changes[0] }]
+  if (name === 'reorder') return [...changes].reverse()
+  return changes
 }
 
 export const notifyKindOf = (category, id = '', title = '') => {

@@ -50,6 +50,8 @@ import ch.fasrv.fanotes.schulnetz.parseRawSnapshot
 import ch.fasrv.fanotes.schulnetz.schulnetzDeviceId
 import ch.fasrv.fanotes.schulnetz.toNormalizedJson
 import ch.fasrv.fanotes.schulnetz.usesWebsiteSession
+import ch.fasrv.fanotes.schulnetz.DiagnosticScenario
+import ch.fasrv.fanotes.schulnetz.DiagnosticTrace
 import ch.fasrv.fanotes.schulnetz.DeskPrefs
 import ch.fasrv.fanotes.schulnetz.GradeBook
 import ch.fasrv.fanotes.schulnetz.HiddenLesson
@@ -121,6 +123,28 @@ class CompanionGraph(private val context: Context) {
     private val pushLock = Mutex()
     private val booted = CompletableDeferred<Unit>()
     private val guestFile: File get() = File(context.filesDir, "kanti-guest.json")
+    fun diagnosticMode(): Boolean = prefs.getBoolean(DIAGNOSTIC_MODE_PREF, false)
+    fun setDiagnosticMode(enabled: Boolean) {
+        prefs.edit().putBoolean(DIAGNOSTIC_MODE_PREF, enabled).apply()
+        if (enabled) DiagnosticTrace.noteEnabled() else DiagnosticTrace.enabled = false
+    }
+    fun diagnosticScenario(): String = prefs.getString(DIAGNOSTIC_SCENARIO_PREF, DiagnosticScenario.OFF.id()).orEmpty()
+    fun setDiagnosticScenario(id: String) {
+        prefs.edit().putString(DIAGNOSTIC_SCENARIO_PREF, DiagnosticScenario.fromId(id).id()).apply()
+    }
+    /** Restores recording after process start. Does nothing while the mode is off. */
+    fun restoreDiagnosticTrace() {
+        if (diagnosticMode()) DiagnosticTrace.noteEnabled()
+    }
+    /** Stops recording and forgets the chosen scenario. Does not touch the school cache. */
+    fun clearDiagnosticLocal() {
+        DiagnosticTrace.clear()
+        DiagnosticTrace.enabled = false
+        prefs.edit()
+            .putBoolean(DIAGNOSTIC_MODE_PREF, false)
+            .putString(DIAGNOSTIC_SCENARIO_PREF, DiagnosticScenario.OFF.id())
+            .apply()
+    }
     fun plannerHold(): Boolean = prefs.getBoolean(PLANNER_HOLD_PREF, false)
     fun setPlannerHold(hold: Boolean) {
         prefs.edit().putBoolean(PLANNER_HOLD_PREF, hold).apply()
@@ -1271,6 +1295,8 @@ class CompanionGraph(private val context: Context) {
         const val GUESS_GRADES_PREF = "notify-guess-grades"
         const val UNREVEALED_PREF = "unrevealed-grades"
         const val PLANNER_HOLD_PREF = "hold-planner-upload"
+        const val DIAGNOSTIC_MODE_PREF = "diagnostic-mode"
+        const val DIAGNOSTIC_SCENARIO_PREF = "diagnostic-scenario"
         val PLANNER_HOLD_PATHS = setOf(HOMEWORK_NOTE_PATH, CALENDAR_NOTE_PATH, DESK_PATH)
         const val SERVER_POLL_MS = 60_000L
         private const val SILENT_AT = "schulnetz-silent-at"

@@ -43,6 +43,8 @@ import {
   settleGradeNotifications,
   isNotificationProbe,
   formatProbeDay,
+  linkedChange,
+  notificationProbeBatch,
   notificationProbeChanges,
   keepLoadedGrades,
   normalizeGradeDate,
@@ -639,6 +641,11 @@ test('firebase data messages name an event and never a grade', () => {
   assert.equal(probeMessage.message.data.event, 'sync')
   assert.equal(probeMessage.message.data.probe, '1')
   assert.equal(probeMessage.message.data.serverAt, '2026-11-07T12:00:00.000Z')
+  assert.equal(probeMessage.message.data.correlation, undefined)
+  const correlated = fcmDataMessage('phone:APA91b-example-token-value', 'sync', { probe: true, serverAt: '2026-11-07T12:00:00.000Z', correlation: 'probe:20261107120000000' })
+  assert.equal(correlated.message.data.correlation, 'probe:20261107120000000')
+  assert.equal(fcmDataMessage('phone:APA91b-example-token-value', 'sync', { probe: true, correlation: 'user@example.com' }).message.data.correlation, undefined)
+  assert.equal(fcmDataMessage('phone:APA91b-example-token-value', 'sync', { probe: true, correlation: 'probe:123;drop' }).message.data.correlation, undefined)
   assert.equal(probeMessage.message.android.collapse_key, 'kanti-probe')
   assert.equal(probeMessage.message.android.priority, 'HIGH')
   assert.equal(probeMessage.message.notification, undefined)
@@ -1684,7 +1691,7 @@ test('delivery probe rows stay marked, dated, and out of the grade ledger', () =
   assert.equal(grouped[0].gradeKeys.includes(probes[0].gradeKeys[0]), false)
 })
 
-const probeCall = async (runtime, guest, body, headers = {}) => {
+const probeCall = async (runtime, guest, body, headers = {}, path = '/api/v1/schulnetz/push/probe') => {
   const request = {
     method: 'POST',
     headers: guest
@@ -1701,7 +1708,7 @@ const probeCall = async (runtime, guest, body, headers = {}) => {
     writeHead(code) { status = code },
     end(text) { payload = String(text || '') },
   }
-  await runtime.handle(request, response, new URL('http://127.0.0.1/api/v1/schulnetz/push/probe'))
+  await runtime.handle(request, response, new URL(`http://127.0.0.1${path}`))
   return { status, body: payload ? JSON.parse(payload) : {} }
 }
 
@@ -1759,6 +1766,8 @@ test('delivery probe reaches only the registered device and leaves school record
     assert.equal(ok.body.ok, true)
     assert.equal(ok.body.serverAt, serverAt)
     assert.equal(ok.body.count, 6)
+    assert.equal(ok.body.scenario, 'standard')
+    assert.equal(ok.body.correlation, 'probe:20261107120000000')
     assert.equal(JSON.stringify(ok.body).includes(mine), false)
     assert.equal(JSON.stringify(ok.body).includes('5.5'), false)
     assert.equal(JSON.stringify(ok.body).includes('Neue Note'), false)
@@ -1768,6 +1777,7 @@ test('delivery probe reaches only the registered device and leaves school record
     assert.equal(message.message.data.event, 'sync')
     assert.equal(message.message.data.probe, '1')
     assert.equal(message.message.data.serverAt, serverAt)
+    assert.equal(message.message.data.correlation, 'probe:20261107120000000')
     assert.equal(message.message.android.collapse_key, 'kanti-probe')
     assert.equal(message.message.android.priority, 'HIGH')
     assert.equal(message.message.android.ttl, '21600s')
@@ -1780,7 +1790,7 @@ test('delivery probe reaches only the registered device and leaves school record
     const lines = (await readFile(join(dir, 'changes.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
     assert.equal(lines.length, 6)
     assert.equal(lines.every((row) => row.revision === 1 && String(row.id).startsWith('probe:')), true)
-    assert.equal(lines.every((row) => String(row.title).startsWith('Test: ') && String(row.body).includes('Datum 07.11.2026')), true)
+    assert.equal(lines.every((row) => String(row.title).startsWith('Test: ') && String(row.body).includes('Datum 07.11.2026') && row.correlation === 'probe:20261107120000000' && String(row.body).includes(`Folge ${row.sequence}`)), true)
     assert.deepEqual(lines.map((row) => row.category), ['grade', 'grade', 'exam', 'exam', 'timetable', 'event'])
     assert.equal(JSON.stringify(lines).includes('5.5'), false)
     const link = JSON.parse(await readFile(join(dir, 'link.json'), 'utf8'))
@@ -1873,5 +1883,130 @@ test('a delivery probe rolls back when Firebase does not accept it', async () =>
     assert.deepEqual(link.fcmTokens, [])
   } finally {
     await rm(droppedRoot, { recursive: true, force: true })
+  }
+})
+
+test('probe batches reject unknown scenarios and keep one clock on every row', () => {
+  const serverAt = '2026-11-07T12:00:00.000Z'
+  const day = '2026-11-07'
+  assert.equal(notificationProbeBatch({ serverAt, day, scenario: 'held' }), null)
+  assert.equal(notificationProbeBatch({ serverAt, day, scenario: 'delay' }), null)
+  const standard = notificationProbeBatch({ serverAt, day, scenario: 'standard' })
+  const duplicate = notificationProbeBatch({ serverAt, day, scenario: 'duplicate' })
+  const reorder = notificationProbeBatch({ serverAt, day, scenario: 'reorder' })
+  assert.equal(standard.length, 6)
+  assert.equal(duplicate.length, 7)
+  assert.equal(duplicate[0].id, duplicate[6].id)
+  assert.equal(duplicate[0].serverAt, serverAt)
+  assert.equal(duplicate.every((row) => row.serverAt === serverAt && row.correlation === 'probe:20261107120000000'), true)
+  assert.deepEqual(reorder.map((row) => row.id), [...standard.map((row) => row.id)].reverse())
+  assert.deepEqual(reorder.map((row) => row.sequence), [6, 5, 4, 3, 2, 1])
+  assert.equal(reorder.every((row) => row.serverAt === serverAt), true)
+  assert.equal(standard[0].body.split(' · ')[0], 'Test')
+  assert.equal(standard[0].body.split(' · ')[1], 'Testfach')
+  assert.equal(standard[0].body.includes('Datum 07.11.2026 · Folge 1'), true)
+  assert.equal(JSON.stringify(duplicate).includes('5.5'), false)
+  assert.equal(JSON.stringify(duplicate).includes('Neue Note in'), false)
+  const ordinary = linkedChange('grade:1', 'grade', 'Neue Note', 'Fach', {})
+  assert.equal(Object.hasOwn(ordinary, 'correlation'), false)
+  assert.equal(Object.hasOwn(ordinary, 'sequence'), false)
+  const copied = linkedChange('probe:1:grade-new', 'grade', 'Test: Neue Note', 'Test · Testfach', { correlation: 'probe:1', sequence: 2, serverAt })
+  assert.equal(copied.correlation, 'probe:1')
+  assert.equal(copied.sequence, 2)
+})
+
+test('diagnostic probe scenarios stay on this device and clear only probe rows', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-probe-diagnostic-'))
+  const key = randomBytes(32)
+  const sent = []
+  let fetches = 0
+  const serverAt = '2026-11-07T12:00:00.000Z'
+  const runtime = createSchulnetzRuntime({
+    root,
+    key,
+    autostart: false,
+    now: () => new Date(serverAt),
+    fetch: async () => { fetches += 1; throw new Error('probe must not call Schulnetz') },
+    fcmSend: async (message) => { sent.push(message); return { status: 200 } },
+  })
+  const mine = 'phone:APA91b-probe-device-token'
+  const otherToken = 'phone:APA91b-other-device-tokenx'
+  const clearPath = '/api/v1/schulnetz/push/probe/clear'
+  try {
+    const caller = await runtime.createGuest('203.0.113.90')
+    await runtime.linkAccount(caller.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    await runtime.addFcmToken(caller.accountId, mine)
+    const dir = join(root, 'accounts', caller.accountId)
+    const snapshot = '{"grades":[{"id":"keep","mark":"5.5"}],"events":[]}\n'
+    const ledger = '{"version":1,"keys":["c:kept"]}\n'
+    const baseline = '{"version":1,"weeks":{}}\n'
+    await writeFile(join(dir, 'snapshot.json'), snapshot)
+    await writeFile(join(dir, 'notified-grades.json'), ledger)
+    await writeFile(join(dir, 'notification-baseline.json'), baseline)
+    const anonymous = await probeCall(runtime, null, `{"token":${JSON.stringify(mine)},"scenario":"duplicate"}`, {}, clearPath)
+    assert.equal(anonymous.status, 401)
+    const unknown = await probeCall(runtime, caller, `{"token":${JSON.stringify(mine)},"scenario":"delay"}`)
+    assert.equal(unknown.status, 400)
+    assert.equal(unknown.body.error, 'Dieses Testszenario gibt es nicht.')
+    assert.equal(sent.length, 0)
+    assert.equal(fetches, 0)
+    await assert.rejects(stat(join(dir, 'changes.jsonl')))
+    const duplicate = await probeCall(runtime, caller, `{"token":${JSON.stringify(mine)},"scenario":"duplicate"}`)
+    assert.equal(duplicate.status, 200)
+    assert.equal(duplicate.body.count, 7)
+    assert.equal(duplicate.body.scenario, 'duplicate')
+    assert.equal(duplicate.body.correlation, 'probe:20261107120000000')
+    assert.equal(JSON.stringify(duplicate.body).includes(mine), false)
+    assert.equal(JSON.stringify(duplicate.body).includes('5.5'), false)
+    assert.equal(JSON.stringify(sent[0].message.data).includes('Testfach'), false)
+    assert.equal(sent[0].message.data.correlation, 'probe:20261107120000000')
+    assert.equal(sent[0].message.token, mine)
+    const duplicateLines = (await readFile(join(dir, 'changes.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
+    assert.equal(duplicateLines.length, 7)
+    assert.equal(duplicateLines[0].id, duplicateLines[6].id)
+    assert.equal(duplicateLines.every((row) => row.serverAt === serverAt), true)
+    const reorder = await probeCall(runtime, caller, `{"token":${JSON.stringify(mine)},"scenario":"reorder"}`)
+    assert.equal(reorder.status, 200)
+    assert.equal(reorder.body.count, 6)
+    const standardIds = notificationProbeBatch({ serverAt, day: '2026-11-07', scenario: 'standard' }).map((row) => row.id)
+    const all = (await readFile(join(dir, 'changes.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
+    const reorderLines = all.filter((row) => row.revision === 2)
+    assert.deepEqual(reorderLines.map((row) => row.id), [...standardIds].reverse())
+    assert.deepEqual(reorderLines.map((row) => row.sequence), [6, 5, 4, 3, 2, 1])
+    assert.equal(reorderLines.every((row) => row.serverAt === serverAt), true)
+    assert.equal((await probeCall(runtime, caller, `{"token":${JSON.stringify(mine)}}`)).status, 200)
+    assert.equal((await probeCall(runtime, caller, `{"token":${JSON.stringify(mine)}}`)).status, 200)
+    const blocked = await probeCall(runtime, caller, `{"token":${JSON.stringify(mine)}}`)
+    assert.equal(blocked.status, 429)
+    const linkBefore = JSON.parse(await readFile(join(dir, 'link.json'), 'utf8'))
+    assert.equal(linkBefore.revision, 4)
+    const keeper = '{"id":"grade:keep","category":"grade","revision":9}\n'
+    await writeFile(join(dir, 'changes.jsonl'), `${await readFile(join(dir, 'changes.jsonl'), 'utf8')}not-json\n${keeper}`)
+    const foreign = await probeCall(runtime, caller, `{"token":${JSON.stringify(otherToken)}}`, {}, clearPath)
+    assert.equal(foreign.status, 400)
+    assert.equal(foreign.body.error, 'Dieses Gerät ist für Push nicht registriert.')
+    const cleared = await probeCall(runtime, caller, `{"token":${JSON.stringify(mine)}}`, {}, clearPath)
+    assert.equal(cleared.status, 200)
+    assert.equal(cleared.body.ok, true)
+    assert.equal(cleared.body.removed, 25)
+    const left = (await readFile(join(dir, 'changes.jsonl'), 'utf8')).trim().split('\n')
+    assert.deepEqual(left, ['not-json', keeper.trim()])
+    const linkAfter = JSON.parse(await readFile(join(dir, 'link.json'), 'utf8'))
+    assert.equal(linkAfter.revision, 4)
+    assert.deepEqual(linkAfter.fcmTokens, [mine])
+    assert.equal(await readFile(join(dir, 'snapshot.json'), 'utf8'), snapshot)
+    assert.equal(await readFile(join(dir, 'notified-grades.json'), 'utf8'), ledger)
+    assert.equal(await readFile(join(dir, 'notification-baseline.json'), 'utf8'), baseline)
+    assert.equal(fetches, 0)
+    const again = await probeCall(runtime, caller, `{"token":${JSON.stringify(mine)}}`, {}, clearPath)
+    assert.equal(again.status, 200)
+    assert.equal(again.body.removed, 0)
+    assert.equal((await probeCall(runtime, caller, `{"token":${JSON.stringify(mine)}}`)).status, 429)
+  } finally {
+    await rm(root, { recursive: true, force: true })
   }
 })

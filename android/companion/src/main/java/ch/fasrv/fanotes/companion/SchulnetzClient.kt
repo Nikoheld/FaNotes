@@ -37,6 +37,8 @@ import ch.fasrv.fanotes.schulnetz.spanOfEvents
 import ch.fasrv.fanotes.schulnetz.weekMonday
 import ch.fasrv.fanotes.schulnetz.classifySchulnetzPage
 import ch.fasrv.fanotes.schulnetz.isForcedLogoutUrl
+import ch.fasrv.fanotes.schulnetz.DiagnosticTrace
+import ch.fasrv.fanotes.schulnetz.httpResultCategory
 import ch.fasrv.fanotes.schulnetz.linkedPageUrl
 import ch.fasrv.fanotes.schulnetz.pageUrl
 import ch.fasrv.fanotes.schulnetz.redactSchulnetzSecrets
@@ -91,6 +93,14 @@ data class SchoolAuth(
 )
 
 fun SyncSession.asSchoolAuth() = SchoolAuth(accountId, token, guest = false)
+
+/** Result of one authenticated delivery probe. The correlation joins the server clock to the device. */
+data class ProbeAck(
+    val serverAt: String,
+    val correlation: String,
+    val scenario: String,
+    val count: Int,
+)
 
 data class WebBundle(
     val snapshot: SchulnetzSnapshot,
@@ -602,11 +612,28 @@ class SchulnetzClient(
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
 
-    /** Asks the server to deliver six marked test changes to this device only. Returns the server clock. */
-    fun probePush(session: SchoolAuth, token: String): String {
-        val (code, body) = fanotes("POST", "/push/probe", session, "{\"token\":${escapeJson(token)}}")
+    /** Asks the server to deliver marked test changes to this device only. */
+    fun probePush(session: SchoolAuth, token: String, scenario: String = "standard"): ProbeAck {
+        val name = when (scenario) {
+            "duplicate", "reorder" -> scenario
+            else -> "standard"
+        }
+        val (code, body) = fanotes("POST", "/push/probe", session, "{\"token\":${escapeJson(token)},\"scenario\":${escapeJson(name)}}")
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
-        return (parseJson(body) as? JsonValue.Obj)?.string("serverAt").orEmpty()
+        val obj = parseJson(body) as? JsonValue.Obj
+        return ProbeAck(
+            serverAt = obj?.string("serverAt").orEmpty(),
+            correlation = obj?.string("correlation").orEmpty(),
+            scenario = obj?.string("scenario").orEmpty().ifBlank { name },
+            count = obj?.double("count")?.toInt() ?: 0,
+        )
+    }
+
+    /** Deletes this account's probe rows. School records and the revision stay. */
+    fun clearProbe(session: SchoolAuth, token: String): Int {
+        val (code, body) = fanotes("POST", "/push/probe/clear", session, "{\"token\":${escapeJson(token)}}")
+        if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
+        return (parseJson(body) as? JsonValue.Obj)?.double("removed")?.toInt() ?: 0
     }
 
     fun createGuest(): SchoolAuth {
@@ -699,9 +726,33 @@ class SchulnetzClient(
         }
         val builder = Request.Builder().url(url).method(method, requestBody)
         headers.forEach { (name, value) -> builder.header(name, value) }
-        client.newCall(builder.build()).execute().use { response ->
-            return response.code to (response.body?.string().orEmpty())
+        val watch = DiagnosticTrace.enabled
+        val started = if (watch) System.nanoTime() else 0L
+        try {
+            client.newCall(builder.build()).execute().use { response ->
+                val result = response.code to (response.body?.string().orEmpty())
+                if (watch) noteDiagnosticHttp(method, url, started, result.first)
+                return result
+            }
+        } catch (error: java.io.IOException) {
+            if (watch) noteDiagnosticHttp(method, url, started, 0)
+            throw error
         }
+    }
+
+    /** Method and path only. Slow calls and failures are kept; bodies and tokens are not. */
+    private fun noteDiagnosticHttp(method: String, url: String, startedNs: Long, status: Int) {
+        val elapsed = ((System.nanoTime() - startedNs) / 1_000_000L).coerceAtLeast(0)
+        if (status in 200..299 && elapsed < 500L) return
+        DiagnosticTrace.record("network", diagnosticRequestName(method, url), elapsed, httpResultCategory(status))
+    }
+
+    private fun diagnosticRequestName(method: String, url: String): String {
+        val bare = url.substringBefore('#').substringBefore('?')
+        val scheme = bare.indexOf("://")
+        val pathAt = if (scheme >= 0) bare.indexOf('/', scheme + 3) else bare.indexOf('/')
+        val path = if (pathAt >= 0) bare.substring(pathAt) else "/"
+        return "$method ${path.take(64).ifBlank { "/" }}"
     }
 
     private fun schoolHeaders(access: String, html: Boolean) = mapOf(
