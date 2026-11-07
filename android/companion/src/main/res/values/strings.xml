@@ -345,7 +345,7 @@
     <string name="notifications">Notifications</string>
     <string name="notifications_are_allowed">Notifications are allowed</string>
     <string name="of">%1$s of %2$s</string>
-    <string name="offline_changes_stay_on_this_device">Offline · changes stay on this device</string>
+    <string name="offline_changes_stay_on_this_device">FaNotes offline · changes stay on this device</string>
     <string name="on_today">On Today</string>
     <string name="on_your_list">On your list</string>
     <string name="only_used_for_your_scenario">Only used for your scenario.</string>
@@ -690,6 +690,9 @@
     <string name="you_can_restore_it_from_this_device_s_library_me">You can restore it from this device\'s library menu.</string>
     <string name="you_got_it">You got it</string>
     <string name="you_re_all_caught_up">You\'re all caught up.</string>
+    <string name="fanotes_offline">FaNotes is offline</string>
+    <string name="fanotes_offline_body">FaNotes changes stay on this device. School data is separate.</string>
+    <string name="fanotes_sync_needs_attention">FaNotes sync needs attention</string>
     <string name="you_re_offline">You\'re offline</string>
     <string name="your_age_guess">Your age guess: %1$d</string>
     <string name="your_activity">Your activity</string>

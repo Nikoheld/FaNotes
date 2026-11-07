@@ -75,11 +75,11 @@ fun CompanionSearchScreen(model: CompanionModel) {
                     items(courses, key = { "search-course:${it.courseId}" }) { course -> SettingRow(Icons.Outlined.Insights, courseAlias(course.label, model.desk.courseAliases), tp(R.plurals.marks_count, course.marks.size, course.marks.size)) { model.focusCourseId = course.courseId; model.navigate(Page.Course) } }
                     if (events.isNotEmpty()) item { SectionLabel(t(R.string.school_schedule)) }
                     items(events, key = { "search-event:${lessonTargetId(it)}" }) { event ->
-                        val entry = AgendaEntry("school:${lessonTargetId(event)}", event.label, if (event.isExamLike()) AgendaKind.Exam else if (event.isLesson()) AgendaKind.Lesson else AgendaKind.Event, parseDisplayDate(event.start) ?: LocalDate.now(), eventClock(event), detail = dueLabel(event.start), school = event)
+                        val entry = AgendaEntry("school:${lessonTargetId(event)}", preferredEventTitle(event), if (event.isExamLike()) AgendaKind.Exam else if (event.isLesson()) AgendaKind.Lesson else AgendaKind.Event, parseDisplayDate(event.start) ?: LocalDate.now(), eventClock(event), detail = dueLabel(event.start), school = event)
                         AgendaRow(model, entry) { selected = entry }
                     }
                     if (messages.isNotEmpty()) item { SectionLabel(t(R.string.school_messages)) }
-                    items(messages, key = { "search-message:${messageTargetId(it)}" }) { message -> SettingRow(Icons.Outlined.Forum, shownText(message.title).ifBlank { t(R.string.school_message) }, plainPreview(message.body).take(100)) { model.highlightIds = setOf(messageTargetId(message)); model.navigate(Page.Updates) } }
+                    items(messages, key = { "search-message:${messageTargetId(it)}" }) { message -> SettingRow(Icons.Outlined.Forum, shownText(messageHeadline(message.title, message.body)).ifBlank { t(R.string.school_message) }, plainPreview(message.body).take(100)) { model.highlightIds = setOf(messageTargetId(message)); model.navigate(Page.Updates) } }
                 }
                 val empty = when (scope) {
                     "notes" -> !model.notesAccount || notes.isEmpty()

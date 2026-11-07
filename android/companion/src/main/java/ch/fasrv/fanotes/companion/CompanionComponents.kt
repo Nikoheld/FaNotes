@@ -8,6 +8,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
@@ -61,8 +63,8 @@ val LocalPageBottomPadding = staticCompositionLocalOf { 24.dp }
 fun Modifier.sheetKeyboardPadding(): Modifier = windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
 
 @Composable
-fun ScreenList(modifier: Modifier = Modifier, content: LazyListScope.() -> Unit) {
-    LazyColumn(modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(start = Space.page, end = Space.page, top = 8.dp, bottom = LocalPageBottomPadding.current), content = content)
+fun ScreenList(modifier: Modifier = Modifier, state: LazyListState = rememberLazyListState(), content: LazyListScope.() -> Unit) {
+    LazyColumn(state = state, modifier = modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(start = Space.page, end = Space.page, top = 8.dp, bottom = LocalPageBottomPadding.current), content = content)
 }
 @Composable
 fun SectionLabel(title: String, action: String? = null, onAction: () -> Unit = {}) {

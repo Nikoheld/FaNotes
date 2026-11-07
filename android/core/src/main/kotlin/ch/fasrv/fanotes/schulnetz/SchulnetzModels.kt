@@ -1,11 +1,13 @@
 package ch.fasrv.fanotes.schulnetz
 
+import java.time.DateTimeException
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.temporal.TemporalAdjusters
 
 /** Public mobile client id of the official Schulnetz PWA. Not a secret. */
@@ -55,6 +57,14 @@ data class SchoolGrade(
     val courseLabel: String get() = course.ifBlank { subject }.ifBlank { courseId }
 }
 
+/** Readable subject, with the course code kept when it distinguishes two courses of one subject. */
+fun SchoolGrade.displayCourseLabel(): String {
+    val token = cleanSchulnetzText(course.ifBlank { courseId })
+    val name = cleanSchulnetzText(subject)
+    if (name.isBlank() || name.equals(token, ignoreCase = true)) return courseLabel
+    return preferredSubjectTitle(token, name).ifBlank { courseLabel }
+}
+
 /** Course-average cells from page 21311, never a real Einzelprüfung. */
 fun isSummaryGradeTitle(title: String): Boolean {
     val raw = title.trim()
@@ -94,6 +104,61 @@ data class AgendaEvent(
 ) {
     val label: String get() = listOf(courseName, text, timetableText).map(::cleanSchulnetzText).firstOrNull { it.isNotBlank() } ?: "Lektion"
 }
+
+/**
+ * Title for Planer, Noten and Prüfungen. [AgendaEvent.label] stays the identity string
+ * (notification hashes and colours). A technical course code yields to a readable subject.
+ */
+fun preferredEventTitle(event: AgendaEvent): String {
+    val code = cleanSchulnetzText(event.courseName)
+    val readable = listOf(event.text, event.timetableText).map(::cleanSchulnetzText).firstOrNull { it.isNotBlank() }.orEmpty()
+    return preferredSubjectTitle(code, readable).ifBlank { event.label }
+}
+
+/** Short Schulnetz course tokens such as `PHY` or `M4a`. Ordinary subject names are not codes. */
+fun looksLikeCourseCode(raw: String): Boolean {
+    val text = raw.trim()
+    if (text.length !in 2..12 || text.any { it.isWhitespace() }) return false
+    if (!text.all { it.isLetterOrDigit() || it == '_' || it == '.' || it == '-' || it == '/' }) return false
+    val letters = text.filter { it.isLetter() }
+    if (letters.isEmpty()) return false
+    if (text.any { it.isDigit() || it == '_' || it == '/' }) return true
+    if (text.any { it == '.' } && letters.length <= 6) return true
+    return letters.length <= 6 && letters.all { it.isUpperCase() }
+}
+
+fun preferredSubjectTitle(code: String, readable: String): String {
+    val token = cleanSchulnetzText(code)
+    val name = cleanSchulnetzText(readable)
+    if (name.isBlank()) return token
+    if (token.isBlank() || token.equals(name, ignoreCase = true)) return name
+    if (looksLikeCourseCode(token) && !looksLikeCourseCode(name)) {
+        val words = name.split(Regex("""[\s,/]+""")).map { it.trim('(', ')') }
+        if (words.any { it.equals(token, ignoreCase = true) }) return name
+        return "$name ($token)"
+    }
+    return token
+}
+
+fun genericAppointmentTitle(title: String): Boolean {
+    val folded = cleanSchulnetzText(title).lowercase()
+    return folded == "termin" || folded == "appointment"
+}
+
+/** Aktuelles stores appointments under the generic title "Termin". The body is the real title. */
+fun messageHeadline(title: String, body: String): String {
+    val cleanTitle = cleanSchulnetzText(title)
+    val cleanBody = cleanSchulnetzText(body)
+    if (!genericAppointmentTitle(cleanTitle)) return cleanTitle.ifBlank { cleanBody }
+    val line = cleanBody.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }.orEmpty()
+    return line.ifBlank { cleanTitle }
+}
+
+/** A blank clock is not a date. Swiss and ISO days count; nothing is invented. */
+fun examHasDate(start: String): Boolean = eventDayKey(start).isNotBlank()
+
+/** Dated exams stay chronological. Undated ones follow them instead of sorting as an empty string. */
+fun examAlleKey(start: String): String = if (examHasDate(start)) eventDayKey(start) + " " + start else "~"
 
 data class SchoolAbsence(
     val id: String,
@@ -214,11 +279,83 @@ data class SchulnetzRaw(
 fun parseSchulnetzInstant(raw: String, zone: ZoneId = ZoneId.of("Europe/Zurich")): Instant? {
     val text = raw.trim()
     if (text.isEmpty()) return null
+    // Schulnetz local timestamps have no offset. Instant.parse and OffsetDateTime.parse throw
+    // on that shape, and those throws on the main thread are the tab-entry freeze.
+    parseLocalSchulnetzInstant(text, zone)?.let { return it }
     runCatching { return Instant.parse(text) }
     runCatching { return OffsetDateTime.parse(text).toInstant() }
     runCatching { return LocalDateTime.parse(text).atZone(zone).toInstant() }
     runCatching { return LocalDate.parse(text.take(10)).atStartOfDay(zone).toInstant() }
     return null
+}
+
+private fun parseLocalSchulnetzInstant(text: String, zone: ZoneId): Instant? {
+    if (text.length < 10 || text[4] != '-' || text[7] != '-') return null
+    val year = text.substring(0, 4).toIntOrNull() ?: return null
+    val month = text.substring(5, 7).toIntOrNull() ?: return null
+    val day = text.substring(8, 10).toIntOrNull() ?: return null
+    if (month !in 1..12 || day !in 1..31) return null
+    if (text.length == 10) return zonedStart(year, month, day, zone)
+    if (text.length < 19 || text[10] != 'T' || text[13] != ':' || text[16] != ':') return null
+    val hour = text.substring(11, 13).toIntOrNull() ?: return null
+    val minute = text.substring(14, 16).toIntOrNull() ?: return null
+    val second = text.substring(17, 19).toIntOrNull() ?: return null
+    if (hour !in 0..23 || minute !in 0..59 || second !in 0..59) return null
+    var index = 19
+    var nano = 0
+    if (index < text.length && text[index] == '.') {
+        val start = ++index
+        while (index < text.length && text[index].isDigit()) index++
+        val digits = text.substring(start, index)
+        if (digits.isEmpty()) return null
+        nano = digits.padEnd(9, '0').take(9).toIntOrNull() ?: return null
+    }
+    val local = try {
+        LocalDateTime.of(year, month, day, hour, minute, second, nano)
+    } catch (_: DateTimeException) {
+        return null
+    }
+    if (index >= text.length) return local.atZone(zone).toInstant()
+    val offset = zoneOffsetAt(text, index) ?: return null
+    return local.toInstant(offset)
+}
+
+private fun zonedStart(year: Int, month: Int, day: Int, zone: ZoneId): Instant? = try {
+    LocalDate.of(year, month, day).atStartOfDay(zone).toInstant()
+} catch (_: DateTimeException) {
+    null
+}
+
+private fun zoneOffsetAt(text: String, index: Int): ZoneOffset? {
+    if (index >= text.length) return null
+    if (text[index] == 'Z') return if (index == text.length - 1) ZoneOffset.UTC else null
+    val sign = when (text[index]) {
+        '+' -> 1
+        '-' -> -1
+        else -> return null
+    }
+    val rest = text.substring(index + 1)
+    val hours: Int
+    val minutes: Int
+    val seconds: Int
+    if (rest.length == 5 && rest[2] == ':') {
+        hours = rest.substring(0, 2).toIntOrNull() ?: return null
+        minutes = rest.substring(3, 5).toIntOrNull() ?: return null
+        seconds = 0
+    } else if (rest.length == 8 && rest[2] == ':' && rest[5] == ':') {
+        hours = rest.substring(0, 2).toIntOrNull() ?: return null
+        minutes = rest.substring(3, 5).toIntOrNull() ?: return null
+        seconds = rest.substring(6, 8).toIntOrNull() ?: return null
+    } else if (rest.length == 4 && rest.all { it.isDigit() }) {
+        hours = rest.substring(0, 2).toIntOrNull() ?: return null
+        minutes = rest.substring(2, 4).toIntOrNull() ?: return null
+        seconds = 0
+    } else {
+        return null
+    }
+    if (hours > 18 || minutes > 59 || seconds > 59) return null
+    val total = sign * (hours * 3600 + minutes * 60 + seconds)
+    return if (total in -18 * 3600..18 * 3600) ZoneOffset.ofTotalSeconds(total) else null
 }
 
 fun AgendaEvent.startsAt(zone: ZoneId = ZoneId.of("Europe/Zurich")): Instant? = parseSchulnetzInstant(start, zone)
@@ -377,6 +514,20 @@ fun eventsOn(events: List<AgendaEvent>, day: LocalDate, zone: ZoneId = ZoneId.of
         val start = event.startsAt(zone) ?: return@filter false
         start.atZone(zone).toLocalDate() == day
     }.sortedBy { it.startsAt(zone) ?: Instant.EPOCH }
+
+/** One pass over the timetable. Heute and Planer used to repeat this for every day on the main thread. */
+fun eventsByLocalDay(events: List<AgendaEvent>, zone: ZoneId = ZoneId.of("Europe/Zurich")): Map<LocalDate, List<AgendaEvent>> {
+    if (events.isEmpty()) return emptyMap()
+    val buckets = LinkedHashMap<LocalDate, MutableList<Pair<AgendaEvent, Instant>>>()
+    for (event in events) {
+        val start = event.startsAt(zone) ?: continue
+        buckets.getOrPut(start.atZone(zone).toLocalDate()) { ArrayList() }.add(event to start)
+    }
+    return buckets.mapValues { (_, rows) ->
+        rows.sortBy { it.second }
+        rows.map { it.first }
+    }
+}
 
 /** Next lesson start or end after [now]. Widget alarms use this once, then stop. */
 fun nextLessonBoundary(events: List<AgendaEvent>, now: Instant, zone: ZoneId = ZoneId.of("Europe/Zurich")): Instant? {

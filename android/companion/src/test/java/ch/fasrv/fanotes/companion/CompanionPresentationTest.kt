@@ -2,12 +2,15 @@ package ch.fasrv.fanotes.companion
 
 import ch.fasrv.fanotes.desk.*
 import ch.fasrv.fanotes.schulnetz.*
+import ch.fasrv.fanotes.sync.SyncStatus
 import androidx.core.app.NotificationCompat
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 class CompanionPresentationTest {
     private val zone = ZoneId.of("Europe/Zurich")
@@ -95,9 +98,15 @@ class CompanionPresentationTest {
         assertEquals(AgendaKind.Lesson, shown.single().kind)
         assertEquals("08:15", shown.single().start)
         assertTrue(eventInHours(shown.single().school!!, 7, 18, zone))
-        val window = (0L..14L).flatMap { offset -> agendaForDay(today.plusDays(offset), snapshot, emptyCalendar(), emptyList(), emptyList(), zone) }
+        val days = (0L..14L).map { today.plusDays(it) }
+        val window = agendaForDays(days, snapshot, emptyCalendar(), emptyList(), emptyList(), zone).values.flatten()
+        assertEquals(window.map { it.key }, days.flatMap { day -> agendaForDay(day, snapshot, emptyCalendar(), emptyList(), emptyList(), zone).map { it.key } })
         assertTrue(window.any { it.school?.id == "next" })
         assertTrue(window.any { it.school?.id == "lesson" })
+        val coded = AgendaEvent("phy", "2026-11-09T08:15:00", "2026-11-09T09:00:00", "Mathematik", "", "", emptyList(), "phy", "M4a", "", "lesson", "", "Mathematik")
+        val titled = agendaForDay(LocalDate.parse("2026-11-09"), SchulnetzSnapshot(events = listOf(coded)), emptyCalendar(), emptyList(), emptyList(), zone)
+        assertEquals("Mathematik (M4a)", titled.single().title)
+        assertEquals("M4a", coded.label)
         val quiet = planWeekFetches(emptyList(), plan.fetch.associate { it.toString() to now.toString() }, "", now, today, icalAvailable = false)
         assertEquals(listOf(weekMonday(today)), quiet.fetch)
     }
@@ -145,6 +154,24 @@ class CompanionPresentationTest {
         assertEquals("Some text", noteExcerpt("# Essay\n\nSome text", "Essay"))
         assertEquals(LocalDate.of(2026, 11, 2), parseDisplayDate("2.11.2026"))
     }
+    @Test fun `german dates keep the day period and fa notes offline stays off the school banner`() {
+        val day = LocalDate.of(2026, 11, 6)
+        val german = day.format(DateTimeFormatter.ofPattern(schoolDatePattern("EEEE, d MMMM", "de"), Locale.GERMAN))
+        val english = day.format(DateTimeFormatter.ofPattern(schoolDatePattern("EEEE, d MMMM", "en"), Locale.ENGLISH))
+        assertEquals("Freitag, 6. November", german)
+        assertEquals("Friday, 6 November", english)
+        assertEquals("d. MMM yyyy", schoolDatePattern("d MMM yyyy", "de"))
+        assertEquals("d MMM yyyy", schoolDatePattern("d MMM yyyy", "en"))
+        assertEquals("MMMM yyyy", schoolDatePattern("MMMM yyyy", "de"))
+        assertNull(faNotesSyncCopy(SyncStatus.OFFLINE, notesAccount = false))
+        assertNull(faNotesSyncCopy(SyncStatus.IDLE, notesAccount = true))
+        val offline = faNotesSyncCopy(SyncStatus.OFFLINE, notesAccount = true)
+        assertEquals(R.string.fanotes_offline, offline?.first)
+        assertEquals(R.string.fanotes_offline_body, offline?.second)
+        assertEquals(false, offline?.third)
+        assertEquals(R.string.fanotes_sync_needs_attention, faNotesSyncCopy(SyncStatus.ERROR, notesAccount = true)?.first)
+    }
+
     @Test fun `school fallback waits hours and stays off while push is healthy`() {
         assertEquals(6 * 60 * 60_000L, schoolFallbackIntervalMs())
         val now = 1_700_000_000_000L
