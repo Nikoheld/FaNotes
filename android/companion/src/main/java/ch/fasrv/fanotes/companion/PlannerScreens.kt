@@ -36,7 +36,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.*
 import kotlinx.coroutines.delay
 
-@Composable
 /** Times Heute and Planer on the main thread. Recording stays off until diagnostic mode is on. */
 private inline fun <T> traceAgenda(name: String, block: () -> T): T {
     if (!DiagnosticTrace.enabled) return block()
@@ -55,6 +54,7 @@ private inline fun <T> traceAgenda(name: String, block: () -> T): T {
     }
 }
 
+@Composable
 fun rememberNow(): Instant {
     val now by produceState(Instant.now()) { while (true) { delay(30_000); value = Instant.now() } }
     return now
