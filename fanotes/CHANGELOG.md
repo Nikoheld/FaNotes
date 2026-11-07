@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.12
+
+- Keep school-alert choices across updates and filter before display.
+- Let each school alert be chosen separately.
+
 ## 2026.11.2-beta.11
 
 - Restore the composable clock and keep agenda timing plain.
