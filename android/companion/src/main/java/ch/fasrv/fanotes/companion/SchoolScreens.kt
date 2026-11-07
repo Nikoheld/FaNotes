@@ -247,11 +247,11 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
         when (page) {
             Page.Exams -> {
                 item { ChoiceRow(listOf("all" to t(R.string.all), "upcoming" to t(R.string.upcoming)), filter, { filter = it }) }
-                val events = (model.snapshot.exams + model.snapshot.events.filter { it.isExamLike() }).distinctBy(::lessonTargetId).filter { "${it.label} ${it.comment}".contains(query, true) && (filter == "all" || (parseDisplayDate(it.start) ?: today) >= today) }.sortedWith(compareBy<AgendaEvent> { if (lessonTargetId(it) in model.highlightIds) 0 else 1 }.thenBy { it.start })
+                val events = (model.snapshot.exams + model.snapshot.events.filter { it.isExamLike() }).distinctBy(::lessonTargetId).filter { "${it.label} ${preferredEventTitle(it)} ${it.comment}".contains(query, true) && (filter == "all" || examHasDate(it.start).not() || (parseDisplayDate(it.start) ?: today) >= today) }.sortedWith(compareBy<AgendaEvent> { if (lessonTargetId(it) in model.highlightIds) 0 else 1 }.thenBy { examAlleKey(it.start) })
                 if (events.isEmpty() && query.isBlank() && model.busy && model.snapshot.fetchedAt.isBlank()) item { SchoolLoading(t(R.string.loading_exams)) }
                 else if (events.isEmpty()) item { EmptyState(Icons.AutoMirrored.Outlined.Assignment, t(R.string.no_exams_to_show), t(R.string.available_exam_dates_appear_after_your_school_is)) }
                 items(events, key = { lessonTargetId(it) }) { event ->
-                    val entry = AgendaEntry("exam:${lessonTargetId(event)}", event.label, AgendaKind.Exam, parseDisplayDate(event.start) ?: today, eventClock(event), detail = listOf(dueLabel(event.start), cleanSchulnetzText(event.room)).filter { it.isNotBlank() }.joinToString(" · "), school = event)
+                    val entry = AgendaEntry("exam:${lessonTargetId(event)}", preferredEventTitle(event), AgendaKind.Exam, parseDisplayDate(event.start) ?: today, eventClock(event), detail = listOf(dueLabel(event.start), cleanSchulnetzText(event.room)).filter { it.isNotBlank() }.joinToString(" · "), school = event)
                     AgendaRow(model, entry) { selected = entry }
                 }
                 schoolError(model, "Prüfungen:")
@@ -277,14 +277,18 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
             Page.Updates -> {
                 val messages = model.snapshot.messages.filter { "${it.title} ${it.body}".contains(query, true) }.sortedBy { if (messageTargetId(it) in model.highlightIds) 0 else 1 }
                 if (messages.isNotEmpty()) item { SectionLabel(t(R.string.messages)) }
-                items(messages, key = { messageTargetId(it) }) { message -> ExpandableRecord(shownText(message.title).ifBlank { t(R.string.school_message) }, message.body, message.at, messageTargetId(message) in model.highlightIds) }
+                items(messages, key = { messageTargetId(it) }) { message ->
+                    val headline = messageHeadline(message.title, message.body)
+                    val body = if (genericAppointmentTitle(message.title) && cleanSchulnetzText(message.body) == headline) "" else message.body
+                    ExpandableRecord(shownText(headline).ifBlank { t(R.string.school_message) }, body, message.at, messageTargetId(message) in model.highlightIds)
+                }
                 val announcements = model.snapshot.startMessages.filter { it.contains(query, true) }
                 if (announcements.isNotEmpty()) item { SectionLabel(t(R.string.announcements)) }
                 itemsIndexed(announcements, key = { index, body -> "announcement:$index:${body.take(48)}" }) { _, body -> ExpandableRecord(t(R.string.announcement_item), body) }
                 val events = model.snapshot.events.filter { !it.isLesson() && "${it.label} ${it.comment}".contains(query, true) }.sortedBy { it.start }
                 if (events.isNotEmpty()) item { SectionLabel(t(R.string.school_events)) }
                 items(events, key = { "update:${lessonTargetId(it)}" }) { event ->
-                    val entry = AgendaEntry("school:${lessonTargetId(event)}", event.label, if (event.isExamLike()) AgendaKind.Exam else AgendaKind.Event, parseDisplayDate(event.start) ?: today, eventClock(event), detail = dueLabel(event.start), school = event)
+                    val entry = AgendaEntry("school:${lessonTargetId(event)}", preferredEventTitle(event), if (event.isExamLike()) AgendaKind.Exam else AgendaKind.Event, parseDisplayDate(event.start) ?: today, eventClock(event), detail = dueLabel(event.start), school = event)
                     AgendaRow(model, entry) { selected = entry }
                 }
                 val vacations = model.snapshot.vacations.filter { it.name.contains(query, true) }

@@ -154,7 +154,9 @@ fun eventInHours(event: AgendaEvent, startHour: Int, endHour: Int, zone: java.ti
 }
 
 fun courseAlias(name: String, aliases: Map<String, String>): String {
-    val keys = colorKeys(name)
+    val keys = colorKeys(name).toMutableList()
+    val code = Regex("""\(([^)]+)\)\s*$""").find(name.trim())?.groupValues?.get(1).orEmpty()
+    if (code.isNotEmpty()) keys += colorKeys(code)
     for (key in keys) aliases[key]?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
     return name
 }

@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -31,10 +32,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ch.fasrv.fanotes.desk.*
 import ch.fasrv.fanotes.schulnetz.*
-import ch.fasrv.fanotes.sync.SyncStatus
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.*
-import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
 
 @Composable
@@ -51,7 +50,7 @@ fun TodayScreen(model: CompanionModel) {
     val sync by model.graph.engine.state.collectAsStateWithLifecycle()
     val cards = shownTodayCards(model.desk)
     val agenda = remember(model.snapshot, model.calendar, model.tasks, model.hidden, today) {
-        (0L..14L).flatMap { agendaForDay(today.plusDays(it), model.snapshot, model.calendar, model.tasks, model.hidden) }
+        agendaForDays((0L..14L).map { today.plusDays(it) }, model.snapshot, model.calendar, model.tasks, model.hidden, zone).values.flatten()
     }
     val next = if ("lessons" in cards) nextCommitment(agenda, now, zone) else null
     val urgent = sortHomeworkTasks(model.tasks.filter { !it.done }).sortedBy { when (taskBucket(it, today)) { "Overdue" -> 0; "Today" -> 1; "Upcoming" -> 2; else -> 3 } }
@@ -73,9 +72,10 @@ fun TodayScreen(model: CompanionModel) {
                 }
             }
         }
+        val syncCopy = faNotesSyncCopy(sync.status, model.notesAccount)
         if (model.link.needsReauth) item { InfoBanner(t(R.string.reconnect_your_school), t(R.string.your_last_school_data_is_still_here), t(R.string.sign_in), onAction = { model.navigate(Page.Connections) }) }
-        else if (sync.status == SyncStatus.OFFLINE || sync.status == SyncStatus.ERROR) item {
-            InfoBanner(if (sync.status == SyncStatus.OFFLINE) t(R.string.you_re_offline) else if (model.notesAccount) t(R.string.sync_needs_attention) else t(R.string.connection_needs_attention), t(R.string.keep_working_changes_are_saved_on_this_device), if (model.notesAccount) t(R.string.account_sync) else t(R.string.school), onAction = { model.navigate(Page.Connections) })
+        else if (syncCopy != null) item {
+            InfoBanner(t(syncCopy.first), t(syncCopy.second), t(R.string.account_sync), error = syncCopy.third, onAction = { model.navigate(Page.Connections) })
         }
         if ("lessons" in cards) item {
             if (next != null) {
@@ -151,7 +151,9 @@ fun PlannerScreen(model: CompanionModel) {
                 SegmentedButton(selected = model.plannerTasks == (index == 1), onClick = { model.plannerTasks = index == 1 }, shape = SegmentedButtonDefaults.itemShape(index, 2)) { Text(title) }
             }
         }
-        if (model.plannerTasks) TasksScreen(model) else ScheduleScreen(model)
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (model.plannerTasks) TasksScreen(model) else ScheduleScreen(model)
+        }
     }
 }
 
@@ -165,7 +167,18 @@ private fun ScheduleScreen(model: CompanionModel) {
     val today = rememberNow().atZone(zone).toLocalDate()
     val days = schoolWeek(model.day, true)
     val agenda = remember(model.day, model.snapshot, model.calendar, model.tasks, model.hidden) {
-        days.associateWith { agendaForDay(it, model.snapshot, model.calendar, model.tasks, model.hidden, zone) }
+        agendaForDays(days, model.snapshot, model.calendar, model.tasks, model.hidden, zone)
+    }
+    val listState = rememberLazyListState()
+    val dayKey = model.day.toString()
+    // The last selected day and its scroll position are restored on purpose.
+    // Changing the day must not keep the previous day's offset, which clips the new top row.
+    var scrolledDay by rememberSaveable { mutableStateOf(dayKey) }
+    LaunchedEffect(dayKey) {
+        if (scrolledDay != dayKey) {
+            scrolledDay = dayKey
+            listState.scrollToItem(0)
+        }
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
     val compact = maxHeight < 350.dp
@@ -173,7 +186,7 @@ private fun ScheduleScreen(model: CompanionModel) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             ActionIcon(Icons.Outlined.ChevronLeft, if (compact) t(R.string.previous_day) else t(R.string.previous_week)) { model.day = if (compact) model.day.minusDays(1) else model.day.minusWeeks(1) }
             TextButton(onClick = { picker = true }, modifier = Modifier.weight(1f)) {
-                Text(model.day.format(DateTimeFormatter.ofPattern(if (compact) "EEE, d MMM" else "MMMM yyyy", AppLanguage.formatLocale())), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(formatSchoolDate(model.day, if (compact) "EEE, d MMM" else "MMMM yyyy"), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Icon(Icons.Outlined.ExpandMore, null, Modifier.size(18.dp))
             }
             if (compact) Box {
@@ -205,7 +218,9 @@ private fun ScheduleScreen(model: CompanionModel) {
         ChoiceRow(listOf("all" to t(R.string.all), "school" to t(R.string.school), "personal" to t(R.string.personal), "due" to t(R.string.deadlines)), source, { source = it }, Modifier.padding(horizontal = Space.page, vertical = 4.dp))
         }
         FineDivider()
-        ScreenList(Modifier.pointerInput(compact, model.day) {
+        // weight keeps the list in the space under the week header. fillMaxSize alone
+        // extends past the screen, so the bottom padding never clears "Neuer Termin".
+        ScreenList(Modifier.weight(1f).pointerInput(compact, model.day) {
             var drag = 0f
             detectHorizontalDragGestures(
                 onHorizontalDrag = { _, amount -> drag += amount },
@@ -217,7 +232,7 @@ private fun ScheduleScreen(model: CompanionModel) {
                 },
                 onDragCancel = { drag = 0f },
             )
-        }) {
+        }, listState) {
             item { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(if (model.planWeek) t(R.string.this_week) else dateLabel(model.day), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 TextButton(onClick = { model.planWeek = !model.planWeek }) { Text(if (model.planWeek) t(R.string.day_view) else t(R.string.week_view)) }
@@ -300,10 +315,10 @@ private fun TasksScreen(model: CompanionModel) {
     var task by remember { mutableStateOf<HomeworkTask?>(null) }
     var schoolTask by remember { mutableStateOf<SchoolHomework?>(null) }
     val today = rememberNow().atZone(ZoneId.systemDefault()).toLocalDate()
-    Column {
+    Column(Modifier.fillMaxSize()) {
         SearchField(query, { query = it }, t(R.string.find_an_assignment), Modifier.padding(horizontal = Space.page, vertical = 8.dp))
         ChoiceRow(listOf("open" to t(R.string.open), "done" to t(R.string.completed), "school" to t(R.string.from_school)), model.taskSource, { model.taskSource = it }, Modifier.padding(horizontal = Space.page))
-        ScreenList {
+        ScreenList(Modifier.weight(1f)) {
             if (model.taskSource == "school") {
                 item { Text(t(R.string.school_assignments_are_read_only_add_one_to_your), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 12.dp)) }
                 val tasks = model.snapshot.homework.filter { "${it.title} ${it.courseName} ${it.description}".contains(query, true) }.sortedBy { it.dueDate }
@@ -353,7 +368,8 @@ fun AgendaDetails(model: CompanionModel, entry: AgendaEntry, onDismiss: () -> Un
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).sheetKeyboardPadding().padding(horizontal = Space.page).padding(bottom = Space.xl)) {
             SheetTitle(courseAlias(entry.title, model.desk.courseAliases), onDismiss)
             Tag(if (entry.school != null) t(R.string.schulnetz_kind, entry.kind.uiLabel()) else t(R.string.app_name))
-            Text(dateLabel(entry.day), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp))
+            val schoolStart = entry.school?.start.orEmpty()
+            Text(if (entry.school != null && !examHasDate(schoolStart)) t(R.string.no_due_date) else dateLabel(entry.day), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 20.dp))
             Text(entry.time, style = MaterialTheme.typography.bodyLarge)
             if (entry.detail.isNotBlank()) Text(entry.detail, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp))
             val description = entry.school?.comment ?: entry.local?.notes.orEmpty()

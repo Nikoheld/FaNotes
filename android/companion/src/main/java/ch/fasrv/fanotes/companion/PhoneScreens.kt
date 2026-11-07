@@ -106,7 +106,7 @@ fun CompanionRoot(model: CompanionModel) {
             !model.notesAccount && route.page == Page.Connections -> t(R.string.school)
             else -> selectedId?.let(::navBarLabel) ?: route.page?.uiTitle() ?: route.destination.uiLabel()
         }
-        CompositionLocalProvider(LocalPageBottomPadding provides if (hasCreation && !dockCreation && !imeVisible) 100.dp else 24.dp) {
+        CompositionLocalProvider(LocalPageBottomPadding provides if (hasCreation && !dockCreation && !imeVisible) 120.dp else 24.dp) {
         Scaffold(
             snackbarHost = { SnackbarHost(snackbar) },
             contentWindowInsets = WindowInsets.safeDrawing,
@@ -165,14 +165,10 @@ fun CompanionRoot(model: CompanionModel) {
                 Box(Modifier.weight(1f), contentAlignment = Alignment.TopCenter) {
                     Column(Modifier.fillMaxHeight().widthIn(max = 840.dp).fillMaxWidth()) {
                         if (model.busy || sync.status == SyncStatus.SYNCING) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp))
-                        if ((sync.status == SyncStatus.OFFLINE || sync.status == SyncStatus.ERROR) && route.destination != Destination.Today) {
+                        val syncCopy = if (route.destination == Destination.Today) null else faNotesSyncCopy(sync.status, model.notesAccount)
+                        if (syncCopy != null) {
                             Box(Modifier.padding(horizontal = Space.page, vertical = 8.dp)) {
-                                InfoBanner(
-                                    if (sync.status == SyncStatus.OFFLINE) t(R.string.you_re_offline) else if (model.notesAccount) t(R.string.sync_needs_attention) else t(R.string.connection_needs_attention),
-                                    t(R.string.keep_working_changes_are_saved_on_this_device),
-                                    if (model.notesAccount) t(R.string.account_sync) else t(R.string.school),
-                                    error = sync.status == SyncStatus.ERROR,
-                                ) { model.navigate(Page.Connections) }
+                                InfoBanner(t(syncCopy.first), t(syncCopy.second), t(R.string.account_sync), error = syncCopy.third) { model.navigate(Page.Connections) }
                             }
                         }
                         model.loadError?.let { error ->

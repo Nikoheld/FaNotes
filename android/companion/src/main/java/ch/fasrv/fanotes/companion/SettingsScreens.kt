@@ -32,7 +32,6 @@ import ch.fasrv.fanotes.schulnetz.*
 import ch.fasrv.fanotes.sync.SyncStatus
 import java.time.Instant
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 @Composable
 fun SettingsScreen(model: CompanionModel, page: Page) {
@@ -169,7 +168,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
         Page.Diagnostics -> ScreenList {
             item { Text(t(R.string.connection_checks), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(vertical = 16.dp)) }
             item {
-                fun at(ms: Long) = if (ms <= 0L) t(R.string.not_yet) else Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm", AppLanguage.formatLocale()))
+                fun at(ms: Long) = if (ms <= 0L) t(R.string.not_yet) else formatSchoolStamp(Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()), "d MMM yyyy · HH:mm")
                 val delivery = deliveryModeLabel(firebaseConfigured(context), model.graph.lastPushAt(), System.currentTimeMillis())
                 DiagnosticLine(t(R.string.delivery), if (delivery == "Instant via push") t(R.string.instant_via_push) else t(R.string.fallback_mode))
                 DiagnosticLine(t(R.string.last_push), at(model.graph.lastPushAt()))

@@ -44,7 +44,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 @Composable
 fun NoteRow(model: CompanionModel, node: VaultNode, onMore: (() -> Unit)? = null, onClick: () -> Unit) {
@@ -60,7 +59,7 @@ fun NoteRow(model: CompanionModel, node: VaultNode, onMore: (() -> Unit)? = null
                 Text(node.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 val excerpt = preview?.text.orEmpty()
                 if (excerpt.isNotBlank()) Text(excerpt, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(listOf(node.path.substringBeforeLast('/', "").ifBlank { t(R.string.my_notes) }, Instant.ofEpochMilli(node.modifiedAt).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("d MMM", AppLanguage.formatLocale()))).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 3.dp))
+                Text(listOf(node.path.substringBeforeLast('/', "").ifBlank { t(R.string.my_notes) }, formatSchoolStamp(Instant.ofEpochMilli(node.modifiedAt).atZone(ZoneId.systemDefault()), "d MMM")).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 3.dp))
             }
             if (onMore != null) ActionIcon(Icons.Outlined.MoreVert, t(R.string.actions_for, node.name), onClick = onMore)
         }

@@ -2,6 +2,7 @@ package ch.fasrv.fanotes.companion
 
 import ch.fasrv.fanotes.desk.*
 import ch.fasrv.fanotes.schulnetz.*
+import ch.fasrv.fanotes.sync.SyncStatus
 import ch.fasrv.fanotes.vault.NoteKind
 import ch.fasrv.fanotes.vault.VaultNode
 import java.time.*
@@ -169,13 +170,39 @@ fun dueLabel(raw: String?, today: LocalDate = LocalDate.now()): String {
         today -> t(R.string.today)
         today.plusDays(1) -> t(R.string.tomorrow)
         today.minusDays(1) -> t(R.string.yesterday)
-        else -> day.format(DateTimeFormatter.ofPattern(if (day.year == today.year) "EEE, d MMM" else "d MMM yyyy", AppLanguage.formatLocale()))
+        else -> formatSchoolDate(day, if (day.year == today.year) "EEE, d MMM" else "d MMM yyyy")
     }
 }
+
+/** German day-of-month keeps the ordinal period (`6.`). English stays `6`. */
+fun schoolDatePattern(pattern: String, language: String = AppLanguage.formatLocale().language): String {
+    if (!language.equals("de", ignoreCase = true)) return pattern
+    return pattern.replace(Regex("""(?<![A-Za-z])d(?![A-Za-z.])"""), "d.")
+}
+
+fun formatSchoolDate(day: LocalDate, pattern: String): String =
+    day.format(DateTimeFormatter.ofPattern(schoolDatePattern(pattern), AppLanguage.formatLocale()))
+
+fun formatSchoolStamp(value: java.time.temporal.TemporalAccessor, pattern: String): String =
+    DateTimeFormatter.ofPattern(schoolDatePattern(pattern), AppLanguage.formatLocale()).format(value)
+
+/**
+ * FaNotes sync only. A school-only session does not get this banner, and the action never
+ * points at the school connection. School reconnect stays on its own banner.
+ */
+fun faNotesSyncCopy(status: SyncStatus, notesAccount: Boolean): Triple<Int, Int, Boolean>? {
+    if (!notesAccount) return null
+    return when (status) {
+        SyncStatus.OFFLINE -> Triple(R.string.fanotes_offline, R.string.fanotes_offline_body, false)
+        SyncStatus.ERROR -> Triple(R.string.fanotes_sync_needs_attention, R.string.fanotes_offline_body, true)
+        else -> null
+    }
+}
+
 fun parseDisplayDate(raw: String): LocalDate? = runCatching { LocalDate.parse(raw.take(10)) }.getOrNull() ?: parseSchoolDate(raw)
-fun dateLabel(day: LocalDate): String = day.format(DateTimeFormatter.ofPattern("EEEE, d MMMM", AppLanguage.formatLocale()))
+fun dateLabel(day: LocalDate): String = formatSchoolDate(day, "EEEE, d MMMM")
 fun updatedLabel(raw: String): String = parseSchulnetzInstant(raw, ZoneId.systemDefault())?.atZone(ZoneId.systemDefault())
-    ?.format(DateTimeFormatter.ofPattern("d MMM · HH:mm", AppLanguage.formatLocale())) ?: t(R.string.not_fetched_yet)
+    ?.let { formatSchoolStamp(it, "d MMM · HH:mm") } ?: t(R.string.not_fetched_yet)
 fun plainPreview(markdown: String): String = markdown.replace(Regex("<!--[\\s\\S]*?-->"), "")
     .replace(Regex("[#*`>_\\[\\]]"), "").trim().replace(Regex("\\s+"), " ").take(180)
 
@@ -251,6 +278,18 @@ fun calendarSpanOn(event: CalendarEvent, day: LocalDate, zone: ZoneId): Pair<Loc
     return null
 }
 
+fun agendaForDays(
+    days: List<LocalDate>,
+    snapshot: SchulnetzSnapshot,
+    calendar: CalendarDocument,
+    tasks: List<HomeworkTask>,
+    hidden: List<HiddenLesson>,
+    zone: ZoneId = ZoneId.systemDefault(),
+): Map<LocalDate, List<AgendaEntry>> {
+    val schoolByDay = eventsByLocalDay(visibleEvents(snapshot.events + snapshot.exams, hidden, zone), zone)
+    return days.associateWith { day -> agendaForDay(day, snapshot, calendar, tasks, hidden, zone, schoolByDay) }
+}
+
 fun agendaForDay(
     day: LocalDate,
     snapshot: SchulnetzSnapshot,
@@ -258,10 +297,11 @@ fun agendaForDay(
     tasks: List<HomeworkTask>,
     hidden: List<HiddenLesson>,
     zone: ZoneId = ZoneId.systemDefault(),
+    schoolByDay: Map<LocalDate, List<AgendaEvent>>? = null,
 ): List<AgendaEntry> {
     val clock = DateTimeFormatter.ofPattern("HH:mm")
     val imported = calendar.events.map { it.id }.toSet()
-    val school = eventsOn(visibleEvents(snapshot.events + snapshot.exams, hidden, zone), day, zone)
+    val school = (if (schoolByDay != null) schoolByDay[day].orEmpty() else eventsOn(visibleEvents(snapshot.events + snapshot.exams, hidden, zone), day, zone))
         .distinctBy(::lessonTargetId)
         .filterNot { "schulnetz-${it.id}" in imported }
         .map { event ->
@@ -269,7 +309,7 @@ fun agendaForDay(
             val endClock = if (event.end.contains('T')) event.endsAt(zone)?.atZone(zone)?.format(clock).orEmpty() else ""
             val shownEnd = if (endClock == "00:00" && startClock.isBlank()) "" else endClock
             val room = cleanSchulnetzText(event.room)
-            AgendaEntry("school:${lessonTargetId(event)}", event.label, if (event.isExamLike() || event in snapshot.exams) AgendaKind.Exam else if (event.isLesson()) AgendaKind.Lesson else AgendaKind.Event, day,
+            AgendaEntry("school:${lessonTargetId(event)}", preferredEventTitle(event), if (event.isExamLike() || event in snapshot.exams) AgendaKind.Exam else if (event.isLesson()) AgendaKind.Lesson else AgendaKind.Event, day,
                 startClock, shownEnd,
                 listOf(room.takeIf { it.isNotBlank() }?.let { t(R.string.room_named, it) }.orEmpty(), event.teachers.joinToString(", ") { cleanSchulnetzText(it) }).filter { it.isNotBlank() }.joinToString(" · "), school = event)
         }

@@ -128,7 +128,7 @@ fun courseSummaries(
         val mark = grade.mark ?: continue
         val key = grade.courseKey
         if (key.isBlank()) continue
-        labels.putIfAbsent(key, grade.courseLabel)
+        labels.putIfAbsent(key, grade.displayCourseLabel())
         val target = gradeTargetId(grade)
         val adjustment = adjustments[target]
         val hidden = target.isNotBlank() && target in hiddenTargetIds
