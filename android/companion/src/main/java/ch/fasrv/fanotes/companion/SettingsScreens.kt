@@ -417,14 +417,25 @@ private fun NotificationSettings(model: CompanionModel) {
             if (!allowed && Build.VERSION.SDK_INT >= 33) TextButton(onClick = { open(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)) }) { Text(t(R.string.open_android_settings)) }
         }
         item { SectionLabel(t(R.string.school_updates)) }
-        item { ToggleRow(t(R.string.grades), t(R.string.new_or_changed_marks), model.settings.grades) { model.toggleSetting("grades") } }
+        item { ToggleRow(t(R.string.notify_master), t(R.string.notify_master_body), model.settings.enabled) { model.toggleSetting("enabled") } }
+        item { SectionLabel(t(R.string.grades)) }
+        item { ToggleRow(t(R.string.notify_grade_new), t(R.string.notify_grade_new_body), model.settings.gradeNew, model.settings.enabled) { model.toggleSetting("gradeNew") } }
+        item { ToggleRow(t(R.string.notify_grade_changed), t(R.string.notify_grade_changed_body), model.settings.gradeChanged, model.settings.enabled) { model.toggleSetting("gradeChanged") } }
         item { ToggleRow(t(R.string.guess_the_grade), t(R.string.hide_new_marks_until_you_reveal_them_notificatio), model.settings.guessGrades) { model.toggleSetting("guessGrades") } }
         item { ToggleRow(t(R.string.hold_to_reveal), t(R.string.with_guess_the_grade_a_long_press_opens_a_hidden), model.desk.revealLongPress) { model.updateDesk(model.desk.copy(revealLongPress = it)) } }
-        item { ToggleRow(t(R.string.timetable_changes), t(R.string.room_changes_substitutions_and_cancellations), model.settings.timetable) { model.toggleSetting("timetable") } }
-        item { ToggleRow(t(R.string.exams), checked = model.settings.exams) { model.toggleSetting("exams") } }
-        item { ToggleRow(t(R.string.absences), checked = model.settings.absences) { model.toggleSetting("absences") } }
-        item { ToggleRow(t(R.string.excuse_deadlines), checked = model.settings.deadlines) { model.toggleSetting("deadlines") } }
-        item { ToggleRow(t(R.string.events_messages), checked = model.settings.events) { model.toggleSetting("events") } }
+        item { SectionLabel(t(R.string.exams)) }
+        item { ToggleRow(t(R.string.notify_exam_new), t(R.string.notify_exam_new_body), model.settings.examNew, model.settings.enabled) { model.toggleSetting("examNew") } }
+        item { ToggleRow(t(R.string.notify_exam_moved), t(R.string.notify_exam_moved_body), model.settings.examMoved, model.settings.enabled) { model.toggleSetting("examMoved") } }
+        item { ToggleRow(t(R.string.notify_exam_cancelled), t(R.string.notify_exam_cancelled_body), model.settings.examCancelled, model.settings.enabled) { model.toggleSetting("examCancelled") } }
+        item { ToggleRow(t(R.string.notify_exam_room), t(R.string.notify_exam_room_body), model.settings.examRoom, model.settings.enabled) { model.toggleSetting("examRoom") } }
+        item { SectionLabel(t(R.string.notify_section_lessons)) }
+        item { ToggleRow(t(R.string.notify_lesson_cancelled), t(R.string.notify_lesson_cancelled_body), model.settings.lessonCancelled, model.settings.enabled) { model.toggleSetting("lessonCancelled") } }
+        item { ToggleRow(t(R.string.notify_lesson_changed), t(R.string.notify_lesson_changed_body), model.settings.lessonChanged, model.settings.enabled) { model.toggleSetting("lessonChanged") } }
+        item { SectionLabel(t(R.string.notify_section_appointments)) }
+        item { ToggleRow(t(R.string.notify_appointment_new), t(R.string.notify_appointment_new_body), model.settings.appointmentNew, model.settings.enabled) { model.toggleSetting("appointmentNew") } }
+        item { ToggleRow(t(R.string.notify_message_new), t(R.string.notify_message_new_body), model.settings.messageNew, model.settings.enabled) { model.toggleSetting("messageNew") } }
+        item { ToggleRow(t(R.string.absences), checked = model.settings.absences, enabled = model.settings.enabled) { model.toggleSetting("absences") } }
+        item { ToggleRow(t(R.string.excuse_deadlines), checked = model.settings.deadlines, enabled = model.settings.enabled) { model.toggleSetting("deadlines") } }
         item { SectionLabel(t(R.string.delivery)) }
         item {
             Text(

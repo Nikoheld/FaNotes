@@ -238,6 +238,26 @@ data class NotifySettings(
     val deadlines: Boolean = true,
     /** When true, new-grade pushes and lists hide the mark until it is revealed. Default off. */
     val guessGrades: Boolean = false,
+    /** Master switch. Off suppresses every school alert and leaves the subtype choices stored. */
+    val enabled: Boolean = true,
+    val gradeNew: Boolean = true,
+    val gradeChanged: Boolean = true,
+    val lessonCancelled: Boolean = true,
+    val lessonChanged: Boolean = true,
+    val examNew: Boolean = true,
+    val examMoved: Boolean = true,
+    val examCancelled: Boolean = true,
+    val examRoom: Boolean = true,
+    val appointmentNew: Boolean = true,
+    val messageNew: Boolean = true,
+)
+
+/** Category flags follow the subtypes so an older server still receives a coherent switch. */
+fun NotifySettings.aligned(): NotifySettings = copy(
+    grades = gradeNew || gradeChanged,
+    timetable = lessonCancelled || lessonChanged,
+    exams = examNew || examMoved || examCancelled || examRoom,
+    events = appointmentNew || messageNew,
 )
 
 data class SchulnetzChange(

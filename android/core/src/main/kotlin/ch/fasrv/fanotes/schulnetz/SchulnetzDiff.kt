@@ -3,6 +3,76 @@ package ch.fasrv.fanotes.schulnetz
 import java.time.LocalDate
 import kotlin.math.round
 
+private val alertParent = mapOf(
+    "grade-new" to "grades",
+    "grade-changed" to "grades",
+    "lesson-cancelled" to "timetable",
+    "lesson-changed" to "timetable",
+    "exam-new" to "exams",
+    "exam-moved" to "exams",
+    "exam-cancelled" to "exams",
+    "exam-room" to "exams",
+    "exam-other" to "exams",
+    "appointment-new" to "events",
+    "message-new" to "events",
+    "absence-new" to "absences",
+    "deadline" to "deadlines",
+)
+
+/** Real school-alert kind. Blank for probes, tests, and categories this diff does not emit. */
+fun notifyAlertKind(change: SchulnetzChange): String {
+    val title = change.title
+    return when (change.category) {
+        "grade" -> if (Regex("änderung|aenderung", RegexOption.IGNORE_CASE).containsMatchIn(title)) "grade-changed" else "grade-new"
+        "exam" -> when (title) {
+            "Neue Prüfung" -> "exam-new"
+            "Prüfung verschoben" -> "exam-moved"
+            "Prüfung fällt aus", "Prüfung entfällt" -> "exam-cancelled"
+            "Raum geändert" -> "exam-room"
+            else -> "exam-other"
+        }
+        "timetable" -> if (title == "Lektion fällt aus" || title == "Lektion entfernt") "lesson-cancelled" else "lesson-changed"
+        "event" -> if (title == "Neuer Termin") "appointment-new" else "message-new"
+        "absence" -> "absence-new"
+        "deadline" -> "deadline"
+        else -> ""
+    }
+}
+
+/**
+ * A missing caller that leaves a fine flag at its default still follows the
+ * category switch. The master switch blocks every school alert. Probes stay.
+ */
+fun alertAllowed(settings: NotifySettings, change: SchulnetzChange): Boolean {
+    if (isNotificationProbe(change.id)) return true
+    if (!settings.enabled) return false
+    val kind = notifyAlertKind(change)
+    if (kind.isEmpty()) return true
+    val parentOn = when (alertParent[kind]) {
+        "grades" -> settings.grades
+        "timetable" -> settings.timetable
+        "exams" -> settings.exams
+        "events" -> settings.events
+        "absences" -> settings.absences
+        "deadlines" -> settings.deadlines
+        else -> true
+    }
+    if (!parentOn) return false
+    return when (kind) {
+        "grade-new" -> settings.gradeNew
+        "grade-changed" -> settings.gradeChanged
+        "lesson-cancelled" -> settings.lessonCancelled
+        "lesson-changed" -> settings.lessonChanged
+        "exam-new" -> settings.examNew
+        "exam-moved" -> settings.examMoved
+        "exam-cancelled" -> settings.examCancelled
+        "exam-room" -> settings.examRoom
+        "appointment-new" -> settings.appointmentNew
+        "message-new" -> settings.messageNew
+        else -> true
+    }
+}
+
 /**
  * Difference between two normalised snapshots.
  * The first snapshot after linking produces no notifications, so a fresh login
@@ -89,7 +159,7 @@ fun diffSnapshots(
             )
         }
     }
-    return deduped(changes)
+    return deduped(changes).filter { alertAllowed(settings, it) }
 }
 
 private fun diffGrades(previous: List<SchoolGrade>, next: List<SchoolGrade>, changes: MutableList<SchulnetzChange>) {

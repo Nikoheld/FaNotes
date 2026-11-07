@@ -54,7 +54,26 @@ const SCHOOL_FILES = ['link.json', 'snapshot.json', 'notified-grades.json', 'cha
 const GUEST_LIMIT = 30
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 const REFERER = 'https://schulnetz.web.app/'
-const DEFAULT_SETTINGS = Object.freeze({ grades: true, timetable: true, exams: true, absences: true, events: true, deadlines: true, guessGrades: false })
+const DEFAULT_SETTINGS = Object.freeze({
+  enabled: true,
+  grades: true,
+  gradeNew: true,
+  gradeChanged: true,
+  timetable: true,
+  lessonCancelled: true,
+  lessonChanged: true,
+  exams: true,
+  examNew: true,
+  examMoved: true,
+  examCancelled: true,
+  examRoom: true,
+  absences: true,
+  events: true,
+  appointmentNew: true,
+  messageNew: true,
+  deadlines: true,
+  guessGrades: false,
+})
 const COOKIE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000
 const SSO_HOSTS = new Set(['login.microsoftonline.com', 'login.microsoft.com', 'login.live.com', 'login.windows.net'])
 const SSO_COOKIE_NAMES = new Set(['ESTSAUTH', 'ESTSAUTHPERSISTENT', 'ESTSAUTHLIGHT', 'SignInStateCookie', 'x-ms-RefreshTokenCredential'])

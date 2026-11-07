@@ -585,7 +585,27 @@ class SchulnetzClient(
     }
 
     fun saveSettings(session: SchoolAuth, settings: NotifySettings) {
-        val payload = """{"grades":${settings.grades},"timetable":${settings.timetable},"exams":${settings.exams},"absences":${settings.absences},"events":${settings.events},"deadlines":${settings.deadlines},"guessGrades":${settings.guessGrades}}"""
+        val payload = buildString {
+            append("{\"enabled\":").append(settings.enabled)
+            append(",\"grades\":").append(settings.grades)
+            append(",\"gradeNew\":").append(settings.gradeNew)
+            append(",\"gradeChanged\":").append(settings.gradeChanged)
+            append(",\"timetable\":").append(settings.timetable)
+            append(",\"lessonCancelled\":").append(settings.lessonCancelled)
+            append(",\"lessonChanged\":").append(settings.lessonChanged)
+            append(",\"exams\":").append(settings.exams)
+            append(",\"examNew\":").append(settings.examNew)
+            append(",\"examMoved\":").append(settings.examMoved)
+            append(",\"examCancelled\":").append(settings.examCancelled)
+            append(",\"examRoom\":").append(settings.examRoom)
+            append(",\"absences\":").append(settings.absences)
+            append(",\"events\":").append(settings.events)
+            append(",\"appointmentNew\":").append(settings.appointmentNew)
+            append(",\"messageNew\":").append(settings.messageNew)
+            append(",\"deadlines\":").append(settings.deadlines)
+            append(",\"guessGrades\":").append(settings.guessGrades)
+            append('}')
+        }
         val (code, body) = fanotes("PUT", "/settings", session, payload)
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
@@ -782,15 +802,32 @@ class SchulnetzClient(
             topic = push?.string("topic").orEmpty(),
             pushServer = push?.string("server").orEmpty(),
             pushUrl = push?.string("url").orEmpty(),
-            settings = NotifySettings(
-                grades = settings?.bool("grades") != false,
-                timetable = settings?.bool("timetable") != false,
-                exams = settings?.bool("exams") != false,
-                absences = settings?.bool("absences") != false,
-                events = settings?.bool("events") != false,
-                deadlines = settings?.bool("deadlines") != false,
-                guessGrades = settings?.bool("guessGrades") == true,
-            ),
+            settings = run {
+                val grades = settings?.bool("grades") != false
+                val timetable = settings?.bool("timetable") != false
+                val exams = settings?.bool("exams") != false
+                val events = settings?.bool("events") != false
+                NotifySettings(
+                    grades = grades,
+                    timetable = timetable,
+                    exams = exams,
+                    absences = settings?.bool("absences") != false,
+                    events = events,
+                    deadlines = settings?.bool("deadlines") != false,
+                    guessGrades = settings?.bool("guessGrades") == true,
+                    enabled = settings?.bool("enabled") != false,
+                    gradeNew = settings?.bool("gradeNew") ?: grades,
+                    gradeChanged = settings?.bool("gradeChanged") ?: grades,
+                    lessonCancelled = settings?.bool("lessonCancelled") ?: timetable,
+                    lessonChanged = settings?.bool("lessonChanged") ?: timetable,
+                    examNew = settings?.bool("examNew") ?: exams,
+                    examMoved = settings?.bool("examMoved") ?: exams,
+                    examCancelled = settings?.bool("examCancelled") ?: exams,
+                    examRoom = settings?.bool("examRoom") ?: exams,
+                    appointmentNew = settings?.bool("appointmentNew") ?: events,
+                    messageNew = settings?.bool("messageNew") ?: events,
+                )
+            },
         )
     }
 

@@ -25,6 +25,7 @@ import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.schulnetz.AgendaEvent
 import ch.fasrv.fanotes.schulnetz.HypotheticalGrade
 import ch.fasrv.fanotes.schulnetz.NotifySettings
+import ch.fasrv.fanotes.schulnetz.alertAllowed
 import ch.fasrv.fanotes.schulnetz.RefreshLease
 import ch.fasrv.fanotes.schulnetz.SchulnetzGate
 import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
@@ -219,23 +220,51 @@ class CompanionGraph(private val context: Context) {
         prefs.edit().putString("schulnetz-base", normal).apply()
     }
 
-    fun notifySettings(): NotifySettings = NotifySettings(
-        grades = prefs.getBoolean("notify-grades", true),
-        timetable = prefs.getBoolean("notify-timetable", true),
-        exams = prefs.getBoolean("notify-exams", true),
-        absences = prefs.getBoolean("notify-absences", true),
-        events = prefs.getBoolean("notify-events", true),
-        deadlines = prefs.getBoolean("notify-deadlines", true),
-        guessGrades = prefs.getBoolean(GUESS_GRADES_PREF, false),
-    )
+    fun notifySettings(): NotifySettings {
+        val grades = prefs.getBoolean("notify-grades", true)
+        val timetable = prefs.getBoolean("notify-timetable", true)
+        val exams = prefs.getBoolean("notify-exams", true)
+        val events = prefs.getBoolean("notify-events", true)
+        return NotifySettings(
+            grades = grades,
+            timetable = timetable,
+            exams = exams,
+            absences = prefs.getBoolean("notify-absences", true),
+            events = events,
+            deadlines = prefs.getBoolean("notify-deadlines", true),
+            guessGrades = prefs.getBoolean(GUESS_GRADES_PREF, false),
+            enabled = prefs.getBoolean("notify-enabled", true),
+            gradeNew = prefs.getBoolean("notify-grade-new", grades),
+            gradeChanged = prefs.getBoolean("notify-grade-changed", grades),
+            lessonCancelled = prefs.getBoolean("notify-lesson-cancelled", timetable),
+            lessonChanged = prefs.getBoolean("notify-lesson-changed", timetable),
+            examNew = prefs.getBoolean("notify-exam-new", exams),
+            examMoved = prefs.getBoolean("notify-exam-moved", exams),
+            examCancelled = prefs.getBoolean("notify-exam-cancelled", exams),
+            examRoom = prefs.getBoolean("notify-exam-room", exams),
+            appointmentNew = prefs.getBoolean("notify-appointment-new", events),
+            messageNew = prefs.getBoolean("notify-message-new", events),
+        )
+    }
 
     fun setNotifySettings(settings: NotifySettings) {
         prefs.edit()
+            .putBoolean("notify-enabled", settings.enabled)
             .putBoolean("notify-grades", settings.grades)
+            .putBoolean("notify-grade-new", settings.gradeNew)
+            .putBoolean("notify-grade-changed", settings.gradeChanged)
             .putBoolean("notify-timetable", settings.timetable)
+            .putBoolean("notify-lesson-cancelled", settings.lessonCancelled)
+            .putBoolean("notify-lesson-changed", settings.lessonChanged)
             .putBoolean("notify-exams", settings.exams)
+            .putBoolean("notify-exam-new", settings.examNew)
+            .putBoolean("notify-exam-moved", settings.examMoved)
+            .putBoolean("notify-exam-cancelled", settings.examCancelled)
+            .putBoolean("notify-exam-room", settings.examRoom)
             .putBoolean("notify-absences", settings.absences)
             .putBoolean("notify-events", settings.events)
+            .putBoolean("notify-appointment-new", settings.appointmentNew)
+            .putBoolean("notify-message-new", settings.messageNew)
             .putBoolean("notify-deadlines", settings.deadlines)
             .putBoolean(GUESS_GRADES_PREF, settings.guessGrades)
             .apply()
@@ -327,7 +356,7 @@ class CompanionGraph(private val context: Context) {
             } else if (remote.linked && !link.value.needsReauth) {
                 val body = runCatching { client.snapshot(session) }.getOrNull()
                 val next = body?.let { parseNormalizedSnapshot(it) }
-                if (next != null) publishSnapshot(previous, next, remote.settings)
+                if (next != null) publishSnapshot(previous, next, notifySettings())
             }
             if (remote.linked) prefs.edit().putBoolean("school-linked", true).remove("push-topic").remove("push-server").apply()
             configurePushDelivery(context)
@@ -339,7 +368,7 @@ class CompanionGraph(private val context: Context) {
             prefs.edit().putBoolean("school-linked", true).remove("push-topic").remove("push-server").apply()
             val body = client.snapshot(session)
             val next = parseNormalizedSnapshot(body) ?: previous
-            publishSnapshot(previous, next, remote.settings)
+            publishSnapshot(previous, next, notifySettings())
             val changes = runCatching { client.changes(session, prefs.getLong("change-cursor", 0L)) }.getOrNull()
             if (changes != null) applyServerChanges(changes)
             configurePushDelivery(context)
@@ -1080,7 +1109,7 @@ class CompanionGraph(private val context: Context) {
         val guess = notifySettings().guessGrades
         val visible = CompanionAlerts.settledChanges(
             context,
-            items.filterNot { changeIsHidden(it, hiddenLessons()) },
+            items.filter { alertAllowed(notifySettings(), it) }.filterNot { changeIsHidden(it, hiddenLessons()) },
             snapshot.value.grades,
         )
         if (guess) addUnrevealedGrades(newGradeTargetIds(visible))

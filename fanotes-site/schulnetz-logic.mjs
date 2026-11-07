@@ -1013,6 +1013,73 @@ export const isSummaryGrade = (grade) => isSummaryGradeTitle(grade?.title)
 
 export const withoutSummaryGrades = (grades) => (grades || []).filter((grade) => !isSummaryGrade(grade))
 
+const ALERT_PARENT = {
+  'grade-new': 'grades',
+  'grade-changed': 'grades',
+  'lesson-cancelled': 'timetable',
+  'lesson-changed': 'timetable',
+  'exam-new': 'exams',
+  'exam-moved': 'exams',
+  'exam-cancelled': 'exams',
+  'exam-room': 'exams',
+  'exam-other': 'exams',
+  'appointment-new': 'events',
+  'message-new': 'events',
+  'absence-new': 'absences',
+  deadline: 'deadlines',
+}
+
+const ALERT_FINE = {
+  'grade-new': 'gradeNew',
+  'grade-changed': 'gradeChanged',
+  'lesson-cancelled': 'lessonCancelled',
+  'lesson-changed': 'lessonChanged',
+  'exam-new': 'examNew',
+  'exam-moved': 'examMoved',
+  'exam-cancelled': 'examCancelled',
+  'exam-room': 'examRoom',
+  'appointment-new': 'appointmentNew',
+  'message-new': 'messageNew',
+}
+
+/** Real school-alert kind. Blank for probes, tests, and categories this diff does not emit. */
+export const notifyAlertKind = (change) => {
+  const category = String(change?.category || '')
+  const title = String(change?.title || '')
+  if (category === 'grade') return /änderung|aenderung/iu.test(title) ? 'grade-changed' : 'grade-new'
+  if (category === 'exam') {
+    if (title === 'Neue Prüfung') return 'exam-new'
+    if (title === 'Prüfung verschoben') return 'exam-moved'
+    if (title === 'Prüfung fällt aus' || title === 'Prüfung entfällt') return 'exam-cancelled'
+    if (title === 'Raum geändert') return 'exam-room'
+    return 'exam-other'
+  }
+  if (category === 'timetable') {
+    if (title === 'Lektion fällt aus' || title === 'Lektion entfernt') return 'lesson-cancelled'
+    return 'lesson-changed'
+  }
+  if (category === 'event') return title === 'Neuer Termin' ? 'appointment-new' : 'message-new'
+  if (category === 'absence') return 'absence-new'
+  if (category === 'deadline') return 'deadline'
+  return ''
+}
+
+/**
+ * A missing fine flag follows the older category switch. `enabled: false` blocks
+ * every school alert. Delivery probes stay visible because the user asked for them.
+ */
+export const alertAllowed = (settings = {}, change) => {
+  if (isNotificationProbe(change?.id)) return true
+  if (settings?.enabled === false) return false
+  const kind = notifyAlertKind(change)
+  if (!kind) return true
+  const parent = ALERT_PARENT[kind]
+  if (parent && settings?.[parent] === false) return false
+  const fine = ALERT_FINE[kind]
+  if (fine && settings?.[fine] === false) return false
+  return true
+}
+
 export const diffSnapshots = (previous, next, settings = {}, today = zurichToday()) => {
   if (!previous) return []
   const freshWeeks = introducedWeeks(previous, next)
@@ -1071,7 +1138,7 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
       }))
     }
   }
-  return deduped(changes)
+  return deduped(changes).filter((change) => alertAllowed(settings, change))
 }
 
 /**

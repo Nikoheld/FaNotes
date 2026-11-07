@@ -46,6 +46,8 @@ import {
   linkedChange,
   notificationProbeBatch,
   notificationProbeChanges,
+  alertAllowed,
+  notifyAlertKind,
   keepLoadedGrades,
   normalizeGradeDate,
   parseWeekSpan,
@@ -2009,4 +2011,58 @@ test('diagnostic probe scenarios stay on this device and clear only probe rows',
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('notification preferences keep only the school events the diff actually emits', () => {
+  const blank = { grades: [], events: [], exams: [], absences: [], messages: [] }
+  const grade = { id: 'g1', course: 'Mathematik', title: 'Probe', date: '2026-10-20', mark: 5.5, weight: 1 }
+  const changed = { ...grade, mark: 4.5 }
+  const lesson = { id: 'e1', start: '2026-11-02T08:15:00', end: '2026-11-02T09:00:00', text: 'Mathematik', room: 'R201', teachers: [], courseName: 'Mathematik', status: 'confirmed', eventType: 'lesson' }
+  const exam = { id: 'ex1', start: '2026-11-10T10:00:00', end: '2026-11-10T10:45:00', text: 'Mathematik', room: 'R1', teachers: [], courseName: 'Mathematik', status: 'confirmed', eventType: '1_pru' }
+  const otherExam = { ...exam, id: 'ex2', text: 'Chemie', courseName: 'Chemie' }
+  const appointment = { id: 't1', start: '2026-11-04T15:00:00', end: '2026-11-04T16:00:00', text: 'Elternabend', room: 'Aula', teachers: [], courseName: '', status: '', eventType: 'event' }
+  const titles = (previous, next, settings = {}) => diffSnapshots(previous, next, settings).map((change) => change.title)
+
+  assert.deepEqual(titles(blank, { ...blank, grades: [grade] }), ['Neue Note'])
+  assert.deepEqual(titles(blank, { ...blank, grades: [grade] }, { gradeNew: false }), [])
+  assert.deepEqual(titles(blank, { ...blank, grades: [grade] }, { grades: false, gradeNew: true }), [])
+  assert.deepEqual(titles({ ...blank, grades: [grade] }, { ...blank, grades: [changed] }), ['Notenänderung'])
+  assert.deepEqual(titles({ ...blank, grades: [grade] }, { ...blank, grades: [changed] }, { gradeChanged: false }), [])
+
+  assert.deepEqual(titles(blank, { ...blank, exams: [exam] }), ['Neue Prüfung'])
+  assert.deepEqual(titles(blank, { ...blank, exams: [exam] }, { examNew: false }), [])
+  const movedExam = { ...exam, start: '2026-11-10T12:00:00', end: '2026-11-10T12:45:00' }
+  assert.deepEqual(titles({ ...blank, exams: [exam] }, { ...blank, exams: [movedExam] }), ['Prüfung verschoben'])
+  assert.deepEqual(titles({ ...blank, exams: [exam] }, { ...blank, exams: [movedExam] }, { examMoved: false }), [])
+  const cancelledExam = { ...exam, status: 'cancelled' }
+  assert.deepEqual(titles({ ...blank, exams: [exam] }, { ...blank, exams: [cancelledExam] }), ['Prüfung fällt aus'])
+  assert.ok(titles({ ...blank, exams: [exam] }, { ...blank, exams: [otherExam] }).includes('Prüfung entfällt'))
+  assert.equal(titles({ ...blank, exams: [exam] }, { ...blank, exams: [cancelledExam] }, { examCancelled: false }).includes('Prüfung fällt aus'), false)
+  assert.equal(titles({ ...blank, exams: [exam] }, { ...blank, exams: [otherExam] }, { examCancelled: false }).includes('Prüfung entfällt'), false)
+  const movedRoom = { ...exam, room: 'R9' }
+  assert.deepEqual(titles({ ...blank, exams: [exam] }, { ...blank, exams: [movedRoom] }), ['Raum geändert'])
+  assert.deepEqual(titles({ ...blank, exams: [exam] }, { ...blank, exams: [movedRoom] }, { examRoom: false }), [])
+
+  assert.deepEqual(titles({ ...blank, events: [lesson] }, { ...blank, events: [{ ...lesson, room: 'R202' }] }), ['Raum geändert'])
+  assert.deepEqual(titles({ ...blank, events: [lesson] }, { ...blank, events: [{ ...lesson, room: 'R202' }] }, { lessonChanged: false }), [])
+  assert.deepEqual(titles({ ...blank, events: [lesson] }, { ...blank, events: [{ ...lesson, status: 'cancelled' }] }), ['Lektion fällt aus'])
+  assert.deepEqual(titles({ ...blank, events: [lesson] }, blank), ['Lektion entfernt'])
+  assert.deepEqual(titles({ ...blank, events: [lesson] }, { ...blank, events: [{ ...lesson, status: 'cancelled' }] }, { lessonCancelled: false }), [])
+  assert.equal(titles({ ...blank, events: [lesson] }, blank, { lessonCancelled: false }).includes('Lektion entfernt'), false)
+  assert.deepEqual(titles({ ...blank, events: [lesson] }, { ...blank, events: [{ ...lesson, status: 'cancelled' }] }, { lessonChanged: false }), ['Lektion fällt aus'])
+
+  assert.deepEqual(titles(blank, { ...blank, events: [appointment] }), ['Neuer Termin'])
+  assert.deepEqual(titles(blank, { ...blank, events: [appointment] }, { appointmentNew: false }), [])
+  assert.deepEqual(titles({ ...blank, events: [appointment] }, { ...blank, events: [{ ...appointment, start: '2026-11-05T15:00:00', end: '2026-11-05T16:00:00' }] }), [])
+  assert.equal(notifyAlertKind({ category: 'event', title: 'Termin geändert' }), 'message-new')
+
+  const message = { id: 'm1', title: 'Elternabend', body: 'Freitag 19 Uhr' }
+  assert.deepEqual(titles(blank, { ...blank, messages: [message] }), ['Elternabend'])
+  assert.deepEqual(titles(blank, { ...blank, messages: [message] }, { messageNew: false }), [])
+  assert.deepEqual(titles(blank, { ...blank, messages: [message] }, { appointmentNew: false }), ['Elternabend'])
+
+  const absence = { id: 'a1', dateFrom: '2026-11-01', hourFrom: '08:00', subject: 'Deutsch', reason: 'Arzt', excused: false }
+  assert.deepEqual(titles(blank, { ...blank, absences: [absence] }, { enabled: false }), [])
+  assert.equal(alertAllowed({ enabled: false, gradeNew: false }, { id: 'probe:1', category: 'grade', title: 'Test: Neue Note' }), true)
+  assert.equal(alertAllowed({}, { id: 'grade:g1', category: 'grade', title: 'Neue Note' }), true)
 })
