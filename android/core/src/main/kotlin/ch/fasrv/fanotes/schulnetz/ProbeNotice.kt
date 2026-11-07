@@ -9,6 +9,19 @@ import java.time.format.DateTimeFormatter
 
 fun isNotificationProbe(id: String): Boolean = id.startsWith("probe:")
 
+/** Stable device id for probe rows. The raw push token is not stored. */
+fun probeDeviceKey(token: String): String {
+    if (token.isBlank()) return ""
+    val digest = java.security.MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.UTF_8))
+    return digest.joinToString("") { "%02x".format(it) }.take(32)
+}
+
+/** School rows stay account-wide. A probe row is visible only to the addressed device. */
+fun changeVisibleToDevice(id: String, device: String, deviceHash: String): Boolean {
+    if (!isNotificationProbe(id)) return true
+    return deviceHash.matches(Regex("^[a-f0-9]{32}$")) && device == deviceHash
+}
+
 /** `2026-11-07` becomes `07.11.2026`. */
 fun formatProbeDay(isoDate: String): String {
     val match = Regex("""^(\d{4})-(\d{2})-(\d{2})""").find(isoDate.trim()) ?: return ""

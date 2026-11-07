@@ -2,6 +2,7 @@
 // The phone app has the same rules in android/core/.../schulnetz. Keep the
 // change-id formula identical: category:entityId:key.
 
+import { createHash } from 'node:crypto'
 import { isIP } from 'node:net'
 
 const PASS = 4
@@ -662,6 +663,21 @@ export const gradeLedgerEntries = (grades) => {
 /** Delivery-test rows. They are not school records and must not enter the grade ledger. */
 export const isNotificationProbe = (id) => String(id || '').startsWith('probe:')
 
+/** Stable device id for probe rows. The raw push token is not stored. */
+export const probeDeviceKey = (token) => {
+  const value = String(token || '')
+  if (!value) return ''
+  return createHash('sha256').update(value).digest('hex').slice(0, 32)
+}
+
+/** School rows stay account-wide. A probe row is visible only to the device that was addressed. */
+export const changeVisibleToDevice = (change, deviceHash) => {
+  if (!change || typeof change !== 'object') return false
+  if (!isNotificationProbe(change.id)) return true
+  const hash = String(deviceHash || '')
+  return /^[a-f0-9]{32}$/u.test(hash) && change.device === hash
+}
+
 /**
  * Decide which changes may be announced and which identity keys to store.
  * `ledger === null` means the account has no notified-grades file yet: every
@@ -1119,7 +1135,7 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
   if (!previous) return []
   // Master off: do not build rows. The caller still stores the snapshot.
   if (settings?.enabled === false) return []
-  const freshWeeks = introducedWeeks(previous, next)
+  const freshWeeks = new Set([...introducedWeeks(previous, next), ...legacyBackfillWeeks(previous, next)])
   previous = { ...previous, grades: withoutSummaryGrades(previous.grades) }
   next = { ...next, grades: withoutSummaryGrades(next.grades) }
   const prefs = {
@@ -1579,6 +1595,18 @@ const schedulerTime = (raw) => {
   return text.length === 16 ? `${text}:00` : text
 }
 
+/** Short Schulnetz tokens such as `PHY` or `M4a`. Ordinary subject names are not codes. */
+export const looksLikeCourseCode = (raw) => {
+  const text = String(raw || '').trim()
+  if (text.length < 2 || text.length > 12 || /\s/u.test(text)) return false
+  if (![...text].every((char) => /[0-9A-Za-z_./-]/u.test(char))) return false
+  const letters = [...text].filter((char) => /[A-Za-z]/u.test(char)).join('')
+  if (!letters) return false
+  if (/[0-9_/]/u.test(text)) return true
+  if (text.includes('.') && letters.length <= 6) return true
+  return letters.length <= 6 && letters === letters.toUpperCase()
+}
+
 export const parseSchedulerXml = (xml) => {
   const events = []
   for (const block of String(xml).matchAll(/<event\b([^>]*)>([\s\S]*?)<\/event>/giu)) {
@@ -1589,14 +1617,17 @@ export const parseSchedulerXml = (xml) => {
     if (!start) continue
     const end = schedulerStamp(field('end_date'), field('bdatum'), field('bzeit')) || start
     const comment = field('kommentar')
-    const course = field('kurskuerzel') || field('fachkuerzel') || field('text')
+    const named = ['fachbezeichnung', 'kursbezeichnung', 'bezeichnung', 'fach'].map((name) => field(name)).find((value) => value && !looksLikeCourseCode(value)) || ''
+    const rawText = field('text')
+    const text = named && (!rawText || looksLikeCourseCode(rawText)) ? named : rawText
+    const course = field('kurskuerzel') || field('fachkuerzel') || text
     const startIso = schedulerTime(start)
     const endIso = schedulerTime(end)
     events.push({
       id: id || field('identity') || `sched:${startIso}:${course}`,
       start: startIso,
       end: endIso,
-      text: field('text'),
+      text,
       comment,
       room: field('zimmerkuerzel') || field('zimmer'),
       teachers: field('lehrerkuerzelname') ? [field('lehrerkuerzelname')] : [],
@@ -1605,7 +1636,7 @@ export const parseSchedulerXml = (xml) => {
       status: /fällt|faellt/iu.test(comment) ? 'cancelled' : '',
       eventType: canonicalEventType(field('event_type')),
       color: field('color'),
-      timetableText: field('text'),
+      timetableText: text,
     })
   }
   return events
@@ -1641,8 +1672,10 @@ export const extractWebIds = (url, html) => {
 export const WEEK_ADJACENT_MS = 30 * 60 * 1000
 export const WEEK_FAR_MS = 24 * 60 * 60 * 1000
 export const WEEK_CAP = 48
-/** Future Mondays tried when the page has no start or end. Current week plus this many. */
+/** Mondays tried on each side when the page has no start or end. Not a school year. */
 export const WEEK_PROBE = 4
+/** Far weeks beyond that horizon loaded on one sync. */
+export const WEEK_BATCH = 4
 
 export const weekMonday = (iso) => {
   const [year, month, day] = String(iso || '').split('-').map(Number)
@@ -1718,11 +1751,30 @@ const dataDate = (html, which) => {
 export const probeMondays = (today) => {
   const current = weekMonday(today)
   const out = []
-  for (let step = 0; step <= WEEK_PROBE; step += 1) {
+  for (let step = -WEEK_PROBE; step <= WEEK_PROBE; step += 1) {
     const monday = addDays(current, step * 7)
     if (monday) out.push(monday)
   }
   return out
+}
+
+/** Legacy stamps count only when that week already has a lesson. An iCal coverage mark does not. */
+export const confirmedLessonStamps = (events = [], weekFetched = {}, weekRead = {}) => {
+  if (Object.keys(weekRead || {}).length) return { ...weekRead }
+  const taught = new Set((events || []).filter(isLesson).map((event) => weekMondayKey(event.start)).filter(Boolean))
+  const out = {}
+  for (const [monday, stamp] of Object.entries(weekFetched || {})) {
+    if (taught.has(monday)) out[monday] = stamp
+  }
+  return out
+}
+
+export const legacyBackfillWeeks = (previous = {}, next = {}) => {
+  const read = Object.keys(next?.weekRead || {})
+  if (!read.length) return new Set()
+  const prior = new Set(Object.keys(previous?.weekRead || {}))
+  const fetched = new Set(Object.keys(previous?.weekFetched || {}))
+  return new Set(read.filter((week) => !prior.has(week) && fetched.has(week)))
 }
 
 /** A missing limit stays null. Callers then probe a few future weeks. */
@@ -1755,24 +1807,24 @@ export const planWeekFetches = ({ mondays = [], fetchedAt = {}, icalFetchedAt = 
   const current = weekMonday(today)
   const probing = !mondays.length
   const universe = capMondays(probing ? probeMondays(today) : mondays, today)
-  const near = universe.filter((monday) => Math.abs(weekDistance(monday, current)) <= 1)
-  const far = universe.filter((monday) => Math.abs(weekDistance(monday, current)) > 1)
-  const first = Object.keys(fetchedAt || {}).length === 0 && !icalFetchedAt
-  if (first && icalAvailable) return { fetch: near, fetchIcal: true }
-  if (first) return { fetch: universe, fetchIcal: false }
   const due = []
-  for (const monday of near) {
-    if (monday === current || stampAge(fetchedAt[monday], now) >= WEEK_ADJACENT_MS) due.push(monday)
+  const beyond = []
+  for (const monday of universe) {
+    const distance = Math.abs(weekDistance(monday, current))
+    const stamp = fetchedAt?.[monday]
+    const wanted = monday === current || !stamp || (distance <= 1 ? stampAge(stamp, now) >= WEEK_ADJACENT_MS : stampAge(stamp, now) >= WEEK_FAR_MS)
+    if (!wanted) continue
+    if (distance <= WEEK_PROBE) due.push(monday)
+    else beyond.push(monday)
   }
-  if (icalAvailable && stampAge(icalFetchedAt, now) >= WEEK_FAR_MS) return { fetch: due, fetchIcal: true }
-  const farDue = far.filter((monday) => stampAge(fetchedAt[monday], now) >= WEEK_FAR_MS)
-    .sort((left, right) => String(fetchedAt[left] || '').localeCompare(String(fetchedAt[right] || '')))
-  if (probing) {
-    const missing = far.filter((monday) => !fetchedAt[monday])
-    if (missing.length) due.push(...missing)
-    else if (farDue.length) due.push(farDue[0])
-  } else if (farDue.length) due.push(farDue[0])
-  return { fetch: due, fetchIcal: false }
+  beyond.sort((left, right) => {
+    const stamp = String(fetchedAt?.[left] || '').localeCompare(String(fetchedAt?.[right] || ''))
+    if (stamp) return stamp
+    return Math.abs(weekDistance(left, current)) - Math.abs(weekDistance(right, current))
+  }).slice(0, WEEK_BATCH).forEach((monday) => due.push(monday))
+  const first = Object.keys(fetchedAt || {}).length === 0 && !icalFetchedAt
+  const icalDue = Boolean(icalAvailable && (first || stampAge(icalFetchedAt, now) >= WEEK_FAR_MS))
+  return { fetch: due, fetchIcal: icalDue }
 }
 
 export const eventQueryWindow = ({ spanStart = '', spanEnd = '', weekFetched = {}, icalFetchedAt = '', today, now } = {}) => {

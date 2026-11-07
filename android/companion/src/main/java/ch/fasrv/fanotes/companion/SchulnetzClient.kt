@@ -31,6 +31,7 @@ import ch.fasrv.fanotes.schulnetz.mondaysBetween
 import ch.fasrv.fanotes.schulnetz.overlayDated
 import ch.fasrv.fanotes.schulnetz.overlayLessons
 import ch.fasrv.fanotes.schulnetz.parseWeekSpan
+import ch.fasrv.fanotes.schulnetz.confirmedLessonStamps
 import ch.fasrv.fanotes.schulnetz.planWeekFetches
 import ch.fasrv.fanotes.schulnetz.schedulerBodyUsable
 import ch.fasrv.fanotes.schulnetz.schedulerWeekLoaded
@@ -101,7 +102,12 @@ data class ProbeAck(
     val correlation: String,
     val scenario: String,
     val count: Int,
+    val probeRemaining: Int = -1,
+    val clearRemaining: Int = -1,
 )
+
+/** Result of a device-scoped probe cleanup. [failed] means the file could not be updated. */
+data class ProbeClear(val removed: Int, val failed: Boolean)
 
 data class WebBundle(
     val snapshot: SchulnetzSnapshot,
@@ -362,7 +368,7 @@ class SchulnetzClient(
         val knownSpan = htmlSpan ?: previous.storedSpan()
         val plan = planWeekFetches(
             if (knownSpan != null) mondaysBetween(knownSpan.start, knownSpan.end) else emptyList(),
-            previous?.weekFetched.orEmpty(),
+            confirmedLessonStamps(previous?.events.orEmpty(), previous?.weekFetched.orEmpty(), previous?.weekRead.orEmpty()),
             previous?.icalFetchedAt.orEmpty(),
             java.time.Instant.parse(fetchedNow),
             today,
@@ -400,6 +406,7 @@ class SchulnetzClient(
         val lessonWeeks = linkedMapOf<java.time.LocalDate, List<ch.fasrv.fanotes.schulnetz.AgendaEvent>>()
         val examWeeks = linkedMapOf<java.time.LocalDate, List<ch.fasrv.fanotes.schulnetz.AgendaEvent>>()
         val checkedEmpty = mutableSetOf<java.time.LocalDate>()
+        var currentEmptyUsable = false
         val examStamps = previous?.examWeekFetched.orEmpty().toMutableMap()
         if (canFetch && !callerMain) {
             for (monday in plan.fetch) {
@@ -410,7 +417,9 @@ class SchulnetzClient(
                 val lessonParsed = if (schedulerWeekLoaded(lessonBody)) offMain("scheduler-xml") { parseSchedulerXml(lessonBody) } else emptyList()
                 if (lessonParsed == null) break
                 if (lessonParsed.isNotEmpty()) lessonWeeks[monday] = lessonParsed
-                else if (monday != weekMonday(today) && schedulerBodyUsable(lessonBody) && !schedulerWeekLoaded(lessonBody)) checkedEmpty += monday
+                else if (schedulerBodyUsable(lessonBody) && !schedulerWeekLoaded(lessonBody)) {
+                    if (monday != weekMonday(today)) checkedEmpty += monday else currentEmptyUsable = true
+                }
                 if (oauthPage != null || sawSessionProblem || parseFailed) break
                 val examBody = get(examSchedulerUrl(root, id, transid, curr, monday.toString(), max.toString()), "pruefungen-xml", "21312")
                 val examParsed = if (schedulerWeekLoaded(examBody)) {
@@ -462,9 +471,20 @@ class SchulnetzClient(
         var span = knownSpan
         var icalAt = previous?.icalFetchedAt.orEmpty()
         val stamps = previous?.weekFetched.orEmpty().toMutableMap()
+        val reads = previous?.weekRead.orEmpty().toMutableMap()
+        if (reads.isEmpty()) {
+            for ((week, stamp) in confirmedLessonStamps(previous?.events.orEmpty(), stamps, emptyMap())) reads[week] = stamp
+        }
         if (canFetch && !timetableFailed) {
-            for (monday in refreshedLessons) stamps[monday] = fetchedNow
-            for (monday in checkedEmpty) stamps[monday.toString()] = fetchedNow
+            for (monday in refreshedLessons) {
+                stamps[monday] = fetchedNow
+                reads[monday] = fetchedNow
+            }
+            for (monday in checkedEmpty) {
+                stamps[monday.toString()] = fetchedNow
+                reads[monday.toString()] = fetchedNow
+            }
+            if (currentMonday !in lessonWeeks && currentEmptyUsable) reads[currentMonday.toString()] = fetchedNow
         }
         var icalExams = emptyList<ch.fasrv.fanotes.schulnetz.AgendaEvent>()
         if (canFetch && !timetableFailed && plan.fetchIcal && icalAvailable) {
@@ -477,7 +497,6 @@ class SchulnetzClient(
                     val covered = if (span != null) mondaysBetween(span.start, span.end).map { it.toString() }.toSet() else parsed.mapNotNull { weekMondayKey(it.start) }.toSet()
                     events = overlayLessons(events, parsed, covered - refreshedLessons)
                     icalExams = parsed.filter { it.isExamLike() && weekMondayKey(it.start) !in examWeeks.keys.map { week -> week.toString() }.toSet() }
-                    for (monday in covered - refreshedLessons) stamps[monday] = fetchedNow
                     for (monday in covered) if (icalExams.any { weekMondayKey(it.start) == monday } ||
                         previous?.exams.orEmpty().none { weekMondayKey(it.start) == monday }) examStamps[monday] = fetchedNow
                 }
@@ -510,6 +529,7 @@ class SchulnetzClient(
                 readErrors = errors,
                 weekFetched = stamps,
                 examWeekFetched = examStamps,
+                weekRead = reads,
                 weekSpanStart = span?.start?.toString().orEmpty(),
                 weekSpanEnd = span?.end?.toString().orEmpty(),
                 icalFetchedAt = icalAt,
@@ -617,8 +637,9 @@ class SchulnetzClient(
         return body
     }
 
-    fun changes(session: SchoolAuth, since: Long, quick: Boolean = false): String {
-        val (code, body) = fanotes("GET", "/changes?since=$since", session, null, if (quick) quickHttp else http)
+    fun changes(session: SchoolAuth, since: Long, deviceKey: String = "", quick: Boolean = false): String {
+        val device = if (deviceKey.matches(Regex("^[a-f0-9]{32}$"))) "&device=$deviceKey" else ""
+        val (code, body) = fanotes("GET", "/changes?since=$since$device", session, null, if (quick) quickHttp else http)
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
         return body
     }
@@ -647,14 +668,20 @@ class SchulnetzClient(
             correlation = obj?.string("correlation").orEmpty(),
             scenario = obj?.string("scenario").orEmpty().ifBlank { name },
             count = obj?.double("count")?.toInt() ?: 0,
+            probeRemaining = obj?.double("probeRemaining")?.toInt() ?: -1,
+            clearRemaining = obj?.double("clearRemaining")?.toInt() ?: -1,
         )
     }
 
-    /** Deletes this account's probe rows. School records and the revision stay. */
-    fun clearProbe(session: SchoolAuth, token: String): Int {
+    /** Deletes this device's probe rows. School records and the revision stay. */
+    fun clearProbe(session: SchoolAuth, token: String): ProbeClear {
         val (code, body) = fanotes("POST", "/push/probe/clear", session, "{\"token\":${escapeJson(token)}}")
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
-        return (parseJson(body) as? JsonValue.Obj)?.double("removed")?.toInt() ?: 0
+        val obj = parseJson(body) as? JsonValue.Obj
+        return ProbeClear(
+            removed = obj?.double("removed")?.toInt() ?: 0,
+            failed = obj?.bool("failed") == true,
+        )
     }
 
     fun createGuest(): SchoolAuth {

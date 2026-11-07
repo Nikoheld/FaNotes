@@ -278,6 +278,31 @@ fun calendarSpanOn(event: CalendarEvent, day: LocalDate, zone: ZoneId): Pair<Loc
     return null
 }
 
+/** True when closing the task sheet would throw away something the user typed. */
+fun taskDraftDirty(
+    existing: Boolean,
+    title: String,
+    subject: String,
+    date: String,
+    time: String,
+    notes: String,
+    important: Boolean,
+    appointment: Boolean,
+    originalTitle: String = "",
+    originalSubject: String = "",
+    originalDate: String = "",
+    originalTime: String = "",
+    originalNotes: String = "",
+    originalImportant: Boolean = false,
+    originalAppointment: Boolean = false,
+): Boolean {
+    if (!existing) {
+        return title.isNotBlank() || subject.isNotBlank() || date.isNotBlank() || time.isNotBlank() || notes.isNotBlank() || important || appointment
+    }
+    return title != originalTitle || subject != originalSubject || date != originalDate || time != originalTime ||
+        notes != originalNotes || important != originalImportant || appointment != originalAppointment
+}
+
 fun agendaForDays(
     days: List<LocalDate>,
     snapshot: SchulnetzSnapshot,

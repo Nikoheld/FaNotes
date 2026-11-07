@@ -174,6 +174,12 @@
     <string name="diagnostic_remote_hint">Echte Zustellung über den Server an dieses Gerät. Das ist keine lokale Meldung. Firebase kann die Meldung nicht absichtlich zurückhalten.</string>
     <string name="diagnostic_remote_prefs">Zustelltests ignorieren die Schulschalter. Echte Schulhinweise folgen ihnen. Die Android-Berechtigung bleibt nötig.</string>
     <string name="diagnostic_remote_reorder">Falsche Reihenfolge</string>
+    <string name="diagnostic_remote_delayed">In 25 Sekunden senden</string>
+    <string name="diagnostic_remote_delayed_body">Der Test geht in 25 Sekunden raus. Kanti+ kann offen bleiben, in den Hintergrund wechseln oder aus Zuletzt verwendet entfernt werden.</string>
+    <string name="delivery_probe_remaining">Zustelltests diese Stunde: noch %1$d. Leeren: noch %2$d.</string>
+    <string name="discard_task_title">Diese Aufgabe verwerfen?</string>
+    <string name="discard_task_body">Der eingegebene Text geht verloren.</string>
+    <string name="discard">Verwerfen</string>
     <string name="diagnostic_remote_standard">Standard-Zustellung</string>
     <string name="diagnostic_reset_done">Der Diagnosemodus ist aus. Lokaler Teststand und die Testzeilen auf dem Server wurden entfernt.</string>
     <string name="diagnostic_reset_local">Der Diagnosemodus ist aus. Der lokale Teststand wurde entfernt.</string>
@@ -362,6 +368,8 @@
     <string name="no_statement_available">Kein Kontoauszug vorhanden</string>
     <string name="no_upcoming_commitments_in_your_planner">Keine anstehenden Termine in deinem Planer.</string>
     <string name="no_upcoming_lesson">Keine anstehende Lektion</string>
+    <string name="timetable_not_loaded">Stundenplan noch nicht geladen</string>
+    <string name="timetable_not_loaded_body">Diese Woche wurde noch nicht von Schulnetz gelesen. Ein Tag gilt erst danach als frei.</string>
     <string name="none">Keine</string>
     <string name="not_connected">Nicht verbunden</string>
     <string name="not_fetched_yet">Noch nicht geladen</string>
@@ -844,6 +852,7 @@
     <string name="time_label">Zeit</string>
     <string name="ui_thread_load">Schulnetz-Seiten werden ausserhalb des UI-Threads geladen.</string>
     <string name="untitled">Ohne Titel</string>
+    <string name="untitled_note">Unbenannte Notiz</string>
     <string name="web_signin_unavailable">Die Webanmeldung ist für diese Schule nicht verfügbar.</string>
     <string name="worksheet">Arbeitsblatt</string>
     <string name="notify_master">Schulmeldungen</string>

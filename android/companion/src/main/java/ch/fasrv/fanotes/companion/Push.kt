@@ -64,6 +64,8 @@ import ch.fasrv.fanotes.schulnetz.displayClock
 import ch.fasrv.fanotes.schulnetz.startsAt
 import ch.fasrv.fanotes.schulnetz.WidgetSpan
 import ch.fasrv.fanotes.schulnetz.upcomingLessons
+import ch.fasrv.fanotes.schulnetz.upcomingTimetableUnread
+import androidx.work.workDataOf
 import java.time.LocalDate
 import java.util.concurrent.Executors
 import ch.fasrv.fanotes.schulnetz.visibleEvents
@@ -526,6 +528,38 @@ fun notePushReceived(context: Context) {
     armSchoolDelivery(context)
 }
 
+/** Sends the authenticated probe after a short wait, including if the app left Recents. */
+class ProbeDeliveryWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result {
+        val app = applicationContext as? CompanionApplication ?: return Result.success()
+        if (!app.graph.diagnosticMode()) return Result.success()
+        val scenario = inputData.getString("scenario") ?: "standard"
+        val auth = runCatching { app.graph.schoolAuth() }.getOrNull() ?: return Result.success()
+        val token = app.graph.fcmToken().orEmpty()
+        if (token.isBlank()) return Result.success()
+        return try {
+            val ack = app.graph.client.probePush(auth, token, scenario)
+            DiagnosticTrace.record("push", "delayed", 0, "ok", ack.correlation.take(40))
+            Result.success()
+        } catch (error: Exception) {
+            DiagnosticTrace.record("push", "delayed", 0, "error", error.javaClass.simpleName)
+            Result.success()
+        }
+    }
+}
+
+fun scheduleDelayedProbe(context: Context, scenario: String) {
+    val name = when (scenario) {
+        "duplicate", "reorder" -> scenario
+        else -> "standard"
+    }
+    val request = OneTimeWorkRequestBuilder<ProbeDeliveryWorker>()
+        .setInitialDelay(25, TimeUnit.SECONDS)
+        .setInputData(workDataOf("scenario" to name))
+        .build()
+    WorkManager.getInstance(context).enqueueUniqueWork("kanti-probe-delay", ExistingWorkPolicy.REPLACE, request)
+}
+
 class SchulnetzWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val app = applicationContext as? CompanionApplication ?: return Result.success()
@@ -619,6 +653,7 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
             val zone = ZoneId.systemDefault()
             val events = snapshot?.let { visibleEvents(it.events, hidden, zone) }.orEmpty()
             val lessons = upcomingLessons(events, java.time.Instant.now(), zone, 4)
+            val unread = snapshot != null && lessons.isEmpty() && upcomingTimetableUnread(snapshot, java.time.LocalDate.now(zone))
             val portrait = context.resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
             ids.forEach { id ->
                 val options = runCatching { manager.getAppWidgetOptions(id) }.getOrNull()
@@ -630,12 +665,12 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
                     portrait,
                 )
                 val span = if (compact) WidgetSpan.SMALL else widgetSpan(width, height)
-                manager.updateAppWidget(id, widgetViews(context, span, lessons, zone))
+                manager.updateAppWidget(id, widgetViews(context, span, lessons, zone, unread))
             }
             scheduleWidgetTick(context, snapshot, hidden, zone)
         }
 
-        private fun widgetViews(context: Context, span: WidgetSpan, lessons: List<ch.fasrv.fanotes.schulnetz.AgendaEvent>, zone: ZoneId): RemoteViews {
+        private fun widgetViews(context: Context, span: WidgetSpan, lessons: List<ch.fasrv.fanotes.schulnetz.AgendaEvent>, zone: ZoneId, unread: Boolean = false): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.widget_next_lesson)
             val next = lessons.firstOrNull()
             val small = span == WidgetSpan.SMALL
@@ -645,7 +680,7 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
             views.setTextViewTextSize(R.id.widget_title, TypedValue.COMPLEX_UNIT_SP, if (small) 16f else 18f)
             views.setInt(R.id.widget_title, "setMaxLines", if (small) 1 else 2)
             if (next == null) {
-                views.setTextViewText(R.id.widget_title, t(R.string.no_upcoming_lesson))
+                views.setTextViewText(R.id.widget_title, t(if (unread) R.string.timetable_not_loaded else R.string.no_upcoming_lesson))
                 views.setTextViewText(R.id.widget_detail, t(R.string.open_kanti))
                 views.setViewVisibility(R.id.widget_more, android.view.View.GONE)
             } else {

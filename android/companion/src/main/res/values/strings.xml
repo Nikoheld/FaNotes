@@ -174,6 +174,12 @@
     <string name="diagnostic_remote_hint">Real delivery through the server to this device. This is not a local notification. Firebase cannot be asked to hold the message.</string>
     <string name="diagnostic_remote_prefs">Delivery tests ignore the school-alert switches. Real school alerts follow them. The Android notification permission is still required.</string>
     <string name="diagnostic_remote_reorder">Out of order</string>
+    <string name="diagnostic_remote_delayed">Send in 25 seconds</string>
+    <string name="diagnostic_remote_delayed_body">The test is sent in 25 seconds. Kanti+ can stay open, move to the background, or be removed from Recents.</string>
+    <string name="delivery_probe_remaining">Delivery tests left this hour: %1$d. Clears left: %2$d.</string>
+    <string name="discard_task_title">Discard this task?</string>
+    <string name="discard_task_body">The text you entered will be lost.</string>
+    <string name="discard">Discard</string>
     <string name="diagnostic_remote_standard">Standard delivery</string>
     <string name="diagnostic_reset_done">Diagnostic mode is off. Local test state and the server test rows were removed.</string>
     <string name="diagnostic_reset_local">Diagnostic mode is off. Local test state was removed.</string>
@@ -362,6 +368,8 @@
     <string name="no_statement_available">No statement available</string>
     <string name="no_upcoming_commitments_in_your_planner">No upcoming commitments in your planner.</string>
     <string name="no_upcoming_lesson">No upcoming lesson</string>
+    <string name="timetable_not_loaded">Timetable not loaded yet</string>
+    <string name="timetable_not_loaded_body">This week has not been read from Schulnetz yet. A day stays empty only after that read.</string>
     <string name="none">None</string>
     <string name="not_connected">Not connected</string>
     <string name="not_fetched_yet">Not fetched yet</string>
@@ -844,6 +852,7 @@
     <string name="time_label">Time</string>
     <string name="ui_thread_load">Schulnetz pages are loaded off the UI thread.</string>
     <string name="untitled">Untitled</string>
+    <string name="untitled_note">Untitled note</string>
     <string name="web_signin_unavailable">Web sign-in is not available for this school.</string>
     <string name="worksheet">Worksheet</string>
     <string name="notify_master">School alerts</string>

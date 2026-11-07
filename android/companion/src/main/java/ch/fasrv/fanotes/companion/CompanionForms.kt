@@ -141,11 +141,32 @@ fun TaskForm(model: CompanionModel, task: HomeworkTask? = null, onDismiss: () ->
     var important by rememberSaveable(id) { mutableStateOf(task?.priority == "high") }
     var appointment by rememberSaveable(id) { mutableStateOf(task?.kind == "appointment") }
     var confirm by remember { mutableStateOf(false) }
+    var discard by remember { mutableStateOf(false) }
     var formError by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    val dirty = taskDraftDirty(
+        task != null,
+        title,
+        subject,
+        date,
+        time,
+        notes,
+        important,
+        appointment,
+        task?.title.orEmpty(),
+        task?.subject.orEmpty(),
+        task?.dueDate.orEmpty(),
+        task?.dueTime.orEmpty(),
+        task?.notes.orEmpty(),
+        task?.priority == "high",
+        task?.kind == "appointment",
+    )
+    fun requestClose() {
+        if (dirty) discard = true else onDismiss()
+    }
+    ModalBottomSheet(onDismissRequest = { requestClose() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).sheetKeyboardPadding().padding(horizontal = Space.page)) {
-            SheetTitle(if (task == null) t(R.string.new_task) else t(R.string.task_details), onDismiss)
+            SheetTitle(if (task == null) t(R.string.new_task) else t(R.string.task_details)) { requestClose() }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(title, { title = it.take(240) }, label = { Text(t(R.string.what_needs_doing)) }, modifier = Modifier.fillMaxWidth(), minLines = 2)
                 OutlinedTextField(subject, { subject = it.take(80) }, label = { Text(t(R.string.subject)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
@@ -163,6 +184,7 @@ fun TaskForm(model: CompanionModel, task: HomeworkTask? = null, onDismiss: () ->
         }
     }
     if (confirm && task != null) ConfirmDialog(t(R.string.delete_this_task), t(R.string.this_removes_it_from_your_kanti_task_list), t(R.string.delete), { confirm = false }) { model.deleteTask(task); onDismiss() }
+    if (discard) ConfirmDialog(t(R.string.discard_task_title), t(R.string.discard_task_body), t(R.string.discard), { discard = false }) { discard = false; onDismiss() }
 }
 
 @Composable

@@ -55,13 +55,14 @@ fun NoteRow(model: CompanionModel, node: VaultNode, onMore: (() -> Unit)? = null
                 if (ink != null && ink.strokes.isNotEmpty()) InkThumbnail(ink, Modifier.fillMaxSize().padding(5.dp), cacheKey = "${node.path}:${node.modifiedAt}")
                 else Icon(if (node.kind == NoteKind.PDF) Icons.Outlined.PictureAsPdf else Icons.AutoMirrored.Outlined.Article, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
             }
+            val shownName = displayNoteTitle(node.name, t(R.string.untitled_note))
             Column(Modifier.weight(1f)) {
-                Text(node.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(shownName, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 val excerpt = preview?.text.orEmpty()
                 if (excerpt.isNotBlank()) Text(excerpt, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(listOf(node.path.substringBeforeLast('/', "").ifBlank { t(R.string.my_notes) }, formatSchoolStamp(Instant.ofEpochMilli(node.modifiedAt).atZone(ZoneId.systemDefault()), "d MMM")).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 3.dp))
             }
-            if (onMore != null) ActionIcon(Icons.Outlined.MoreVert, t(R.string.actions_for, node.name), onClick = onMore)
+            if (onMore != null) ActionIcon(Icons.Outlined.MoreVert, t(R.string.actions_for, shownName), onClick = onMore)
         }
         FineDivider()
     }

@@ -56,4 +56,19 @@ class ProbeNoticeTest {
         assertTrue(summary.contains("Server 07.11.2026 13:00:00.000"))
         assertTrue(summary.contains("Empfangen 07.11.2026 13:00:01.250"))
     }
+
+    @Test
+    fun probeRowsStayOnTheAddressedDevice() {
+        val mine = probeDeviceKey("phone:APA91b-probe-device-token")
+        val other = probeDeviceKey("phone:APA91b-other-device-tokenx")
+        assertEquals(32, mine.length)
+        assertTrue(mine.matches(Regex("^[a-f0-9]{32}$")))
+        assertTrue(mine != other)
+        assertFalse(mine.contains("APA91"))
+        assertTrue(changeVisibleToDevice("grade:real", "", ""))
+        assertFalse(changeVisibleToDevice("probe:1", "", mine))
+        assertFalse(changeVisibleToDevice("probe:1", mine, ""))
+        assertFalse(changeVisibleToDevice("probe:1", mine, other))
+        assertTrue(changeVisibleToDevice("probe:1", mine, mine))
+    }
 }

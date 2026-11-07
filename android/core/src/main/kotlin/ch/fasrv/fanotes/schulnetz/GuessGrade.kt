@@ -215,7 +215,7 @@ fun gradesForAverages(grades: List<SchoolGrade>, hiddenTargetIds: Set<String>, g
 }
 
 fun highestVisibleMark(grades: List<SchoolGrade>, hiddenTargetIds: Set<String>, guessGrades: Boolean): Double? =
-    gradesForAverages(grades, hiddenTargetIds, guessGrades).mapNotNull { it.mark }.maxOrNull()
+    gradesForAverages(grades, hiddenTargetIds, guessGrades).filterNot { it.isSummaryGrade() }.mapNotNull { it.mark }.maxOrNull()
 
 /** One frame of the reveal count-up. [delayBeforeMs] is how long to wait after the previous frame. */
 data class GradeRevealStep(val value: Double, val delayBeforeMs: Long)

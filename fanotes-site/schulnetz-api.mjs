@@ -27,6 +27,9 @@ import {
   settleGradeNotifications,
   isNotificationProbe,
   notificationProbeBatch,
+  confirmedLessonStamps,
+  probeDeviceKey,
+  changeVisibleToDevice,
   stampWeeks,
   unseenChanges,
   normalizeSchoolBase,
@@ -619,18 +622,24 @@ export const createSchulnetzRuntime = (options = {}) => {
     }
   }
 
-  /** Drops probe rows only. Revision, snapshot, ledger and baseline stay. */
-  const clearProbeChanges = async (accountId) => {
+  /** Drops this device's probe rows only. Revision, snapshot, ledger and baseline stay. */
+  const clearProbeChanges = async (accountId, deviceHash) => {
+    if (!/^[a-f0-9]{32}$/u.test(String(deviceHash || ''))) return { removed: 0, failed: true }
     const file = resolve(accountDir(accountId), 'changes.jsonl')
-    const text = await fs.readFile(file, 'utf8').catch(() => null)
-    if (text == null) return { removed: 0 }
+    let text = ''
+    try {
+      text = await fs.readFile(file, 'utf8')
+    } catch (error) {
+      if (error?.code === 'ENOENT') return { removed: 0, failed: false }
+      return { removed: 0, failed: true }
+    }
     const kept = []
     let removed = 0
     for (const line of text.split('\n')) {
       if (!line) continue
       try {
         const row = JSON.parse(line)
-        if (isNotificationProbe(row?.id)) {
+        if (isNotificationProbe(row?.id) && row?.device === deviceHash) {
           removed += 1
           continue
         }
@@ -639,9 +648,13 @@ export const createSchulnetzRuntime = (options = {}) => {
       }
       kept.push(line)
     }
-    if (kept.length) await fs.writeFile(file, `${kept.join('\n')}\n`, { mode: 0o600 })
-    else await fs.rm(file, { force: true })
-    return { removed }
+    try {
+      if (kept.length) await fs.writeFile(file, `${kept.join('\n')}\n`, { mode: 0o600 })
+      else await fs.rm(file, { force: true })
+    } catch {
+      return { removed: 0, failed: true }
+    }
+    return { removed, failed: false }
   }
 
   const appendChanges = async (accountId, changes, revision) => {
@@ -829,12 +842,17 @@ export const createSchulnetzRuntime = (options = {}) => {
     const snapshot = parseRawSnapshot(raw, now().toISOString())
     snapshot.grades = keepLoadedGrades(previous?.grades, snapshot.grades, trustedGradeRead(snapshot))
     const eventsOk = typeof raw.events === 'string' && raw.events.trim() !== ''
+    const seededRead = Object.keys(previous?.weekRead || {}).length
+      ? { ...(previous.weekRead) }
+      : confirmedLessonStamps(previous?.events || [], previous?.weekFetched || {}, {})
     if (eventsOk && eventMin && eventMax) {
       snapshot.events = applyEventWindow(previous?.events || [], snapshot.events, eventMin, eventMax)
       snapshot.weekFetched = stampWeeks(previous?.weekFetched || {}, eventMin, eventMax, snapshot.fetchedAt)
+      snapshot.weekRead = stampWeeks(seededRead, eventMin, eventMax, snapshot.fetchedAt)
     } else {
       snapshot.events = previous?.events || []
       snapshot.weekFetched = previous?.weekFetched || {}
+      snapshot.weekRead = seededRead
     }
     snapshot.examWeekFetched = previous?.examWeekFetched || {}
     if (typeof raw.exams === 'string' && (snapshot.exams.length || raw.exams.trim() === '[]')) {
@@ -870,6 +888,7 @@ export const createSchulnetzRuntime = (options = {}) => {
         previousEvents: stored?.events || [],
         previousExams: stored?.exams || [],
         weekFetched: stored?.weekFetched || {},
+        weekRead: stored?.weekRead || {},
         examWeekFetched: stored?.examWeekFetched || {},
         weekSpanStart: stored?.weekSpanStart || '',
         weekSpanEnd: stored?.weekSpanEnd || '',
@@ -927,6 +946,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       startMessages: keepMessages ? (previous?.startMessages || []) : parseStartMessages(scraped.startHtml || ''),
       readErrors: scraped.problem ? [`Schulnetz: ${scraped.problem}`] : [],
       weekFetched: failed ? (previous?.weekFetched || {}) : (scraped.weekFetched || {}),
+      weekRead: failed ? (previous?.weekRead || {}) : (scraped.weekRead || {}),
       examWeekFetched: failed ? (previous?.examWeekFetched || {}) : (scraped.examWeekFetched || {}),
       weekSpanStart: scraped.weekSpanStart || previous?.weekSpanStart || '',
       weekSpanEnd: scraped.weekSpanEnd || previous?.weekSpanEnd || '',
@@ -995,13 +1015,20 @@ export const createSchulnetzRuntime = (options = {}) => {
     }
   }
 
-  const changesSince = async (accountId, since) => {
+  const changesSince = async (accountId, since, deviceHash = '') => {
     const file = resolve(accountDir(accountId), 'changes.jsonl')
     const text = await fs.readFile(file, 'utf8').catch(() => '')
     const changes = text.split('\n').filter(Boolean).map((line) => {
       try { return JSON.parse(line) } catch { return null }
-    }).filter((change) => change && Number(change.revision) > since)
+    }).filter((change) => change && Number(change.revision) > since && changeVisibleToDevice(change, deviceHash))
     return { changes }
+  }
+
+  const rateRemaining = (accountId, bucket, maximum) => {
+    const current = rateHits.get(`${accountId}:${bucket}`)
+    const nowMs = now().getTime()
+    if (!current || current.until <= nowMs) return maximum
+    return Math.max(0, maximum - current.count)
   }
 
   const readBody = async (request) => {
@@ -1106,7 +1133,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       }
       if (route === '/changes' && method === 'GET') {
         const since = Number(url.searchParams.get('since') || 0)
-        send(response, 200, await changesSince(accountId, Number.isFinite(since) ? since : 0))
+        const device = String(url.searchParams.get('device') || '')
+        send(response, 200, await changesSince(accountId, Number.isFinite(since) ? since : 0, device))
         return true
       }
       if (route === '/settings' && method === 'PUT') { send(response, 200, await updateSettings(accountId, await readBody(request))); return true }
@@ -1134,8 +1162,10 @@ export const createSchulnetzRuntime = (options = {}) => {
         }
         const serverAt = now().toISOString()
         const scenario = typeof body?.scenario === 'string' ? body.scenario : 'standard'
-        const changes = notificationProbeBatch({ serverAt, day: zurichToday(now()), scenario })
-        if (!changes) fail(400, 'Dieses Testszenario gibt es nicht.')
+        const batch = notificationProbeBatch({ serverAt, day: zurichToday(now()), scenario })
+        if (!batch) fail(400, 'Dieses Testszenario gibt es nicht.')
+        const device = probeDeviceKey(token)
+        const changes = batch.map((change) => ({ ...change, device }))
         const correlation = changes[0]?.correlation || ''
         const revision = (Number(link.revision) || 0) + 1
         await appendChanges(accountId, changes, revision)
@@ -1149,7 +1179,15 @@ export const createSchulnetzRuntime = (options = {}) => {
           if (result?.drop) fail(409, 'Dieses Gerät ist bei Firebase nicht mehr registriert.')
           fail(502, 'Firebase hat die Testmeldung nicht angenommen.')
         }
-        send(response, 200, { ok: true, serverAt, count: changes.length, correlation, scenario: String(scenario || 'standard').trim().toLowerCase() || 'standard' })
+        send(response, 200, {
+          ok: true,
+          serverAt,
+          count: changes.length,
+          correlation,
+          scenario: String(scenario || 'standard').trim().toLowerCase() || 'standard',
+          probeRemaining: rateRemaining(accountId, 'push-probe', PUSH_TEST_LIMIT),
+          clearRemaining: rateRemaining(accountId, 'push-probe-clear', PUSH_TEST_LIMIT),
+        })
         return true
       }
       if (route === '/push/probe/clear' && method === 'POST') {
@@ -1161,7 +1199,13 @@ export const createSchulnetzRuntime = (options = {}) => {
         if (!isValidFcmToken(token) || !(link.fcmTokens || []).includes(token)) {
           fail(400, 'Dieses Gerät ist für Push nicht registriert.')
         }
-        send(response, 200, { ok: true, ...(await clearProbeChanges(accountId)) })
+        const cleared = await clearProbeChanges(accountId, probeDeviceKey(token))
+        send(response, 200, {
+          ok: !cleared.failed,
+          ...cleared,
+          probeRemaining: rateRemaining(accountId, 'push-probe', PUSH_TEST_LIMIT),
+          clearRemaining: rateRemaining(accountId, 'push-probe-clear', PUSH_TEST_LIMIT),
+        })
         return true
       }
       send(response, 404, { error: 'Diesen Schulnetz-Endpunkt gibt es nicht.' })

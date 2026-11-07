@@ -10,8 +10,11 @@ const val WEEK_ADJACENT_MS = 30L * 60L * 1000L
 const val WEEK_FAR_MS = 24L * 60L * 60L * 1000L
 const val WEEK_CAP = 48
 
-/** Future Mondays tried when the page has no start or end. Current week plus this many. */
+/** Mondays tried on each side when the page has no start or end. Not a school year. */
 const val WEEK_PROBE = 4
+
+/** Far weeks beyond that horizon loaded on one sync, so a refresh is not one week per day. */
+const val WEEK_BATCH = 4
 
 data class WeekSpan(val start: LocalDate, val end: LocalDate)
 
@@ -52,10 +55,75 @@ fun capMondays(mondays: List<LocalDate>, today: LocalDate): List<LocalDate> {
     return unique.sortedWith(compareBy<LocalDate> { abs(ChronoUnit.DAYS.between(anchor, it)) }.thenBy { it }).take(WEEK_CAP).sorted()
 }
 
-/** Current Monday through [WEEK_PROBE] future Mondays. Not a school year. */
+/** [WEEK_PROBE] past Mondays, the current Monday, and [WEEK_PROBE] future Mondays. */
 fun probeMondays(today: LocalDate): List<LocalDate> {
     val current = weekMonday(today)
-    return (0..WEEK_PROBE).map { current.plusWeeks(it.toLong()) }
+    return (-WEEK_PROBE..WEEK_PROBE).map { current.plusWeeks(it.toLong()) }
+}
+
+/**
+ * Stamps that prove a scheduler read.
+ * A legacy file has [weekFetched] without [weekRead]. Those stamps count only
+ * for weeks that already contain a lesson, so an iCal coverage mark is not
+ * treated as a loaded timetable.
+ */
+fun confirmedLessonStamps(
+    events: List<AgendaEvent>,
+    weekFetched: Map<String, String>,
+    weekRead: Map<String, String>,
+): Map<String, String> {
+    if (weekRead.isNotEmpty()) return weekRead
+    if (weekFetched.isEmpty()) return emptyMap()
+    val taught = events.asSequence().filter { it.isLesson() }.mapNotNull { weekMondayKey(it.start) }.toSet()
+    return weekFetched.filterKeys { it in taught }
+}
+
+enum class WeekCoverage { LOADED, UNREAD }
+
+/**
+ * [LOADED] means this week's lessons were read, including a genuinely empty week.
+ * [UNREAD] means the day must not be shown as free. Days outside a known school
+ * span are [LOADED]: the source does not offer them.
+ */
+fun lessonWeekCoverage(snapshot: SchulnetzSnapshot, day: LocalDate, today: LocalDate): WeekCoverage {
+    val monday = weekMonday(day)
+    val key = monday.toString()
+    if (key in snapshot.weekRead) return WeekCoverage.LOADED
+    if (snapshot.events.any { it.isLesson() && weekMondayKey(it.start) == key }) return WeekCoverage.LOADED
+    val spanStart = runCatching { LocalDate.parse(snapshot.weekSpanStart) }.getOrNull()
+    val spanEnd = runCatching { LocalDate.parse(snapshot.weekSpanEnd) }.getOrNull()
+    if (spanStart != null && spanEnd != null && !spanEnd.isBefore(spanStart)) {
+        val first = weekMonday(spanStart)
+        val last = weekMonday(spanEnd)
+        if (monday.isBefore(first) || monday.isAfter(last)) return WeekCoverage.LOADED
+        return WeekCoverage.UNREAD
+    }
+    val distance = abs(ChronoUnit.DAYS.between(weekMonday(today), monday)) / 7
+    return if (distance <= WEEK_PROBE.toLong()) WeekCoverage.UNREAD else WeekCoverage.LOADED
+}
+
+/** True when the planner week title should say “this week”. A later week keeps its own dates. */
+fun plannerWeekIsCurrent(day: LocalDate, today: LocalDate): Boolean = weekMonday(day) == weekMonday(today)
+
+/**
+ * The next school days have no scheduler read yet.
+ * A snapshot that has never been fetched stays false, so the widget keeps its ordinary empty line.
+ */
+fun upcomingTimetableUnread(snapshot: SchulnetzSnapshot, today: LocalDate, horizonDays: Int = 14): Boolean {
+    if (snapshot.fetchedAt.isBlank() && snapshot.events.isEmpty() && snapshot.weekRead.isEmpty() && snapshot.weekSpanStart.isBlank()) return false
+    val limit = horizonDays.coerceIn(0, 21)
+    for (offset in 0 until limit) {
+        val day = today.plusDays(offset.toLong())
+        if (day.dayOfWeek.value >= 6) continue
+        if (lessonWeekCoverage(snapshot, day, today) == WeekCoverage.UNREAD) return true
+    }
+    return false
+}
+
+/** Weeks whose lessons are appearing after a legacy stamp that never read the scheduler. Notifications for those rows stay quiet. */
+fun legacyBackfillWeeks(previous: SchulnetzSnapshot, next: SchulnetzSnapshot): Set<String> {
+    if (next.weekRead.isEmpty()) return emptySet()
+    return next.weekRead.keys.filter { week -> week !in previous.weekRead && week in previous.weekFetched }.toSet()
 }
 
 /**
@@ -89,26 +157,27 @@ fun planWeekFetches(
     val current = weekMonday(today)
     val probing = mondays.isEmpty()
     val universe = capMondays(if (probing) probeMondays(today) else mondays, today)
-    val near = universe.filter { abs(ChronoUnit.DAYS.between(current, it)) / 7 <= 1 }
-    val far = universe.filter { abs(ChronoUnit.DAYS.between(current, it)) / 7 > 1 }
-    val first = fetchedAt.isEmpty() && icalFetchedAt.isBlank()
-    if (first && icalAvailable) return WeekPlan(near, fetchIcal = true)
-    if (first) return WeekPlan(universe, fetchIcal = false)
     val due = mutableListOf<LocalDate>()
-    for (monday in near) {
-        if (monday == current || stampAge(fetchedAt[monday.toString()], now) >= WEEK_ADJACENT_MS) due += monday
+    val beyond = mutableListOf<LocalDate>()
+    for (monday in universe) {
+        val distance = abs(ChronoUnit.DAYS.between(current, monday)) / 7
+        val stamp = fetchedAt[monday.toString()]
+        val wanted = when {
+            monday == current -> true
+            stamp.isNullOrBlank() -> true
+            distance <= 1 -> stampAge(stamp, now) >= WEEK_ADJACENT_MS
+            else -> stampAge(stamp, now) >= WEEK_FAR_MS
+        }
+        if (!wanted) continue
+        if (distance <= WEEK_PROBE.toLong()) due += monday else beyond += monday
     }
-    val icalDue = icalAvailable && stampAge(icalFetchedAt, now) >= WEEK_FAR_MS
-    if (icalDue) return WeekPlan(due, fetchIcal = true)
-    val farDue = far.filter { stampAge(fetchedAt[it.toString()], now) >= WEEK_FAR_MS }
-        .sortedBy { fetchedAt[it.toString()].orEmpty() }
-    if (probing) {
-        val missing = far.filter { fetchedAt[it.toString()].isNullOrBlank() }
-        if (missing.isNotEmpty()) due += missing else if (farDue.isNotEmpty()) due += farDue.first()
-    } else if (farDue.isNotEmpty()) {
-        due += farDue.first()
-    }
-    return WeekPlan(due, fetchIcal = false)
+    beyond.sortedWith(
+        compareBy<LocalDate> { fetchedAt[it.toString()].orEmpty() }
+            .thenBy { abs(ChronoUnit.DAYS.between(current, it)) },
+    ).take(WEEK_BATCH).forEach { due += it }
+    val first = fetchedAt.isEmpty() && icalFetchedAt.isBlank()
+    val icalDue = icalAvailable && (first || stampAge(icalFetchedAt, now) >= WEEK_FAR_MS)
+    return WeekPlan(due, fetchIcal = icalDue)
 }
 
 fun eventQueryWindow(

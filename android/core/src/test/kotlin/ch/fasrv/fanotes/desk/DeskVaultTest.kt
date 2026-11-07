@@ -16,6 +16,15 @@ class DeskVaultTest {
         assertEquals("Lesen", parsed.tasks.single().title)
         assertEquals("Deutsch", parsed.tasks.single().subject)
         assertEquals("2026-10-20", parsed.tasks.single().dueDate)
+        val copied = appendSchoolAssignment(parsed, "Seite 12", "Mathematik", "2026-11-06", "Aufgaben 1–3", "schulnetz-synthetic", "2026-11-04T12:00:00Z")
+        assertEquals("schulnetz-synthetic", copied!!.tasks.last().id)
+        assertEquals("Seite 12", copied.tasks.last().title)
+        assertEquals(1, parsed.tasks.size)
+        val again = appendSchoolAssignment(copied, "Seite 12", "Mathematik", "2026-11-06", "Aufgaben 1–3", "schulnetz-other", "2026-11-04T12:00:00Z")
+        assertEquals(null, again)
+        val stored = parseHomeworkMarkdown(serializeHomeworkMarkdown(copied))
+        assertEquals("schulnetz-synthetic", stored.tasks.last().id)
+        assertEquals("Lesen", stored.tasks.first().title)
     }
 
     @Test

@@ -54,6 +54,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             if (model.diagnosticOn) model.noteDiagnosticMemory()
         }
     }
+    androidx.compose.runtime.key(page) {
     when (page) {
         Page.Settings -> ScreenList {
             item {
@@ -81,7 +82,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                             AppLanguage.choose(tag)
                             CompanionAlerts.ensureChannels(context)
                             NextLessonWidget.update(context)
-                            if (Build.VERSION.SDK_INT < 33) context.hostActivity()?.recreate()
+                            context.hostActivity()?.recreate()
                         }
                     },
                 )
@@ -219,6 +220,8 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                     OutlinedButton(onClick = { model.probeDelivery(context, "standard") }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.diagnostic_remote_standard)) }
                     OutlinedButton(onClick = { model.probeDelivery(context, "duplicate") }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.diagnostic_remote_duplicate)) }
                     OutlinedButton(onClick = { model.probeDelivery(context, "reorder") }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.diagnostic_remote_reorder)) }
+                    OutlinedButton(onClick = { model.scheduleProbe(context, "standard") }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.diagnostic_remote_delayed)) }
+                    Text(t(R.string.diagnostic_remote_delayed_body), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp, bottom = 8.dp))
                 }
             }
             item {
@@ -287,6 +290,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             }
         }
         else -> Unit
+    }
     }
     if (confirm.isNotBlank()) {
         val deleteKanti = confirm == "delete-kanti"

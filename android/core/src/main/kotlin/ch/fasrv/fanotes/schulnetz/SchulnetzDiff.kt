@@ -125,7 +125,7 @@ fun diffSnapshots(
     if (previous == null) return emptyList()
     // The master switch drops the diff before any row is built. Callers still store the snapshot.
     if (!settings.enabled) return emptyList()
-    val freshWeeks = introducedWeeks(previous, next)
+    val freshWeeks = introducedWeeks(previous, next) + legacyBackfillWeeks(previous, next)
     val changes = mutableListOf<SchulnetzChange>()
     if (settings.grades) diffGrades(previous.grades.withoutSummaryGrades(), next.grades.withoutSummaryGrades(), changes)
     if (settings.timetable) {

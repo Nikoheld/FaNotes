@@ -11,7 +11,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.graphics.luminance
 import androidx.core.view.WindowCompat
@@ -50,6 +55,40 @@ class MainActivity : ComponentActivity() {
         window.isNavigationBarContrastEnforced = false
         model.openNotify(intent)
         setContent {
+            var startupNoted by remember { mutableStateOf(false) }
+            SideEffect {
+                if (!startupNoted) {
+                    startupNoted = true
+                    val elapsed = android.os.SystemClock.elapsedRealtime() - android.os.Process.getStartElapsedRealtime()
+                    ch.fasrv.fanotes.schulnetz.DiagnosticTrace.noteStartup(elapsed)
+                }
+            }
+            val diagnosticOn = model.diagnosticOn
+            DisposableEffect(diagnosticOn) {
+                if (!diagnosticOn) return@DisposableEffect onDispose { }
+                val choreographer = android.view.Choreographer.getInstance()
+                var lastFrame = 0L
+                var lastRecord = 0L
+                val callback = object : android.view.Choreographer.FrameCallback {
+                    override fun doFrame(frameTimeNanos: Long) {
+                        if (!ch.fasrv.fanotes.schulnetz.DiagnosticTrace.enabled) return
+                        if (lastFrame != 0L) {
+                            val frameMs = (frameTimeNanos - lastFrame) / 1_000_000L
+                            val nowMs = android.os.SystemClock.elapsedRealtime()
+                            if (frameMs >= 100L && nowMs - lastRecord >= 2_000L) {
+                                ch.fasrv.fanotes.schulnetz.DiagnosticTrace.record("frame", "main", frameMs, "slow")
+                                model.noteDiagnosticMemory()
+                                lastRecord = nowMs
+                                model.bumpDiagnostics()
+                            }
+                        }
+                        lastFrame = frameTimeNanos
+                        choreographer.postFrameCallback(this)
+                    }
+                }
+                choreographer.postFrameCallback(callback)
+                onDispose { choreographer.removeFrameCallback(callback) }
+            }
             val palette = themePalette(model.desk.theme.ifBlank { model.theme }, isSystemInDarkTheme())
             CompanionTheme(palette, accent = model.desk.accent, amoled = model.desk.amoled) {
                 val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f

@@ -37,7 +37,7 @@ class WeekRangeTest {
     fun anUnmarkedPageProbesTheNextWeeksOnceAndThenWaits() {
         val first = planWeekFetches(emptyList(), emptyMap(), "", now, today, icalAvailable = false)
         assertEquals(
-            listOf("2026-11-02", "2026-11-09", "2026-11-16", "2026-11-23", "2026-11-30").map(LocalDate::parse),
+            listOf("2026-10-05", "2026-10-12", "2026-10-19", "2026-10-26", "2026-11-02", "2026-11-09", "2026-11-16", "2026-11-23", "2026-11-30").map(LocalDate::parse),
             first.fetch,
         )
         val held = planWeekFetches(emptyList(), mapOf("2026-11-02" to now.toString()), "", now, today, icalAvailable = false)
@@ -50,7 +50,10 @@ class WeekRangeTest {
         stale["2026-11-23"] = "2026-11-03T11:00:00Z"
         stale["2026-11-30"] = "2026-11-03T10:00:00Z"
         val one = planWeekFetches(emptyList(), stale, "", now, today, icalAvailable = false)
-        assertEquals(listOf(LocalDate.parse("2026-11-02"), LocalDate.parse("2026-11-30")), one.fetch)
+        assertEquals(
+            listOf("2026-11-02", "2026-11-16", "2026-11-23", "2026-11-30").map(LocalDate::parse),
+            one.fetch,
+        )
         val next = LocalDate.parse("2026-11-09")
         val url = schedulerUrl(AKSA_SCHULNETZ_BASE, "abc", "def", next.toString(), next.toString(), next.plusDays(7).toString())
         assertTrue(url.contains("min_date=2026-11-09"))
@@ -69,20 +72,22 @@ class WeekRangeTest {
         val mondays = mondaysBetween(LocalDate.parse("2026-01-05"), LocalDate.parse("2027-06-28"))
         assertTrue(mondays.size > WEEK_CAP)
         val withCalendar = planWeekFetches(mondays, emptyMap(), "", now, today, icalAvailable = true)
-        assertEquals(
-            listOf(LocalDate.parse("2026-10-26"), LocalDate.parse("2026-11-02"), LocalDate.parse("2026-11-09")),
-            withCalendar.fetch,
-        )
+        assertEquals(WEEK_PROBE * 2 + 1 + WEEK_BATCH, withCalendar.fetch.size)
+        assertTrue(withCalendar.fetch.contains(LocalDate.parse("2026-10-26")))
+        assertTrue(withCalendar.fetch.contains(LocalDate.parse("2026-11-02")))
+        assertTrue(withCalendar.fetch.contains(LocalDate.parse("2026-11-09")))
+        assertTrue(withCalendar.fetch.contains(LocalDate.parse("2026-11-16")))
         assertTrue(withCalendar.fetchIcal)
         val withoutCalendar = planWeekFetches(mondays, emptyMap(), "", now, today, icalAvailable = false)
-        assertEquals(WEEK_CAP, withoutCalendar.fetch.size)
+        assertEquals(WEEK_PROBE * 2 + 1 + WEEK_BATCH, withoutCalendar.fetch.size)
+        assertTrue(withoutCalendar.fetch.size < WEEK_CAP)
         assertFalse(withoutCalendar.fetchIcal)
         val probed = planWeekFetches(emptyList(), emptyMap(), "", now, today, icalAvailable = false)
         assertEquals(probeMondays(today), probed.fetch)
-        assertEquals(WEEK_PROBE + 1, probed.fetch.size)
+        assertEquals(WEEK_PROBE * 2 + 1, probed.fetch.size)
         assertFalse(probed.fetchIcal)
         val withCalendarProbe = planWeekFetches(emptyList(), emptyMap(), "", now, today, icalAvailable = true)
-        assertEquals(listOf(LocalDate.parse("2026-11-02"), LocalDate.parse("2026-11-09")), withCalendarProbe.fetch)
+        assertEquals(probeMondays(today), withCalendarProbe.fetch)
         assertTrue(withCalendarProbe.fetchIcal)
 
         val fresh = mondays.associate { it.toString() to now.toString() }
@@ -101,10 +106,14 @@ class WeekRangeTest {
         dayOld["2026-11-09"] = now.toString()
         dayOld["2026-08-17"] = "2026-10-01T00:00:00Z"
         val far = planWeekFetches(mondays, dayOld, "", now, today, icalAvailable = false)
-        assertEquals(listOf(LocalDate.parse("2026-11-02"), LocalDate.parse("2026-08-17")), far.fetch)
+        assertEquals(7 + WEEK_BATCH, far.fetch.size)
+        assertTrue(far.fetch.contains(LocalDate.parse("2026-11-02")))
+        assertTrue(far.fetch.contains(LocalDate.parse("2026-08-17")))
+        assertFalse(far.fetch.contains(LocalDate.parse("2026-10-26")))
+        assertFalse(far.fetch.contains(LocalDate.parse("2026-11-09")))
         val calendarInstead = planWeekFetches(mondays, dayOld, "2026-11-03T11:00:00Z", now, today, icalAvailable = true)
         assertTrue(calendarInstead.fetchIcal)
-        assertFalse(calendarInstead.fetch.contains(LocalDate.parse("2026-08-17")))
+        assertTrue(calendarInstead.fetch.contains(LocalDate.parse("2026-08-17")))
     }
 
     @Test
@@ -155,12 +164,14 @@ class WeekRangeTest {
         val snap = SchulnetzSnapshot(
             fetchedAt = now.toString(),
             weekFetched = mapOf("2026-11-02" to now.toString()),
+            weekRead = mapOf("2026-11-02" to now.toString(), "2026-10-26" to now.toString()),
             weekSpanStart = "2026-08-17",
             weekSpanEnd = "2027-07-04",
             icalFetchedAt = now.toString(),
         )
         val parsed = parseNormalizedSnapshot(snap.toNormalizedJson())
         assertEquals(snap.weekFetched, parsed!!.weekFetched)
+        assertEquals(snap.weekRead, parsed.weekRead)
         assertEquals("2026-08-17", parsed.weekSpanStart)
         assertEquals("2027-07-04", parsed.weekSpanEnd)
         assertEquals(now.toString(), parsed.icalFetchedAt)
@@ -200,5 +211,56 @@ class WeekRangeTest {
         val again = eventQueryWindow("2026-08-17", "2027-07-04", stamps, "", today, now)
         assertFalse(again.wide)
         assertEquals(today.minusDays(7), again.min)
+    }
+
+    @Test
+    fun anUnreadWeekIsNotCalledFreeAndAnIcalStampIsNotALoadedTimetable() {
+        val lesson = lesson("e1", "2026-11-04T08:15:00")
+        val stampedOnly = confirmedLessonStamps(emptyList(), mapOf("2026-11-02" to now.toString(), "2026-11-09" to now.toString()), emptyMap())
+        assertTrue(stampedOnly.isEmpty())
+        val taught = confirmedLessonStamps(listOf(lesson), mapOf("2026-11-02" to "a", "2026-11-09" to "a"), emptyMap())
+        assertEquals(setOf("2026-11-02"), taught.keys)
+        val explicit = confirmedLessonStamps(emptyList(), mapOf("2026-11-09" to "a"), mapOf("2026-11-16" to "b"))
+        assertEquals(mapOf("2026-11-16" to "b"), explicit)
+        val unread = SchulnetzSnapshot(fetchedAt = now.toString())
+        assertEquals(WeekCoverage.UNREAD, lessonWeekCoverage(unread, today, today))
+        assertEquals(WeekCoverage.UNREAD, lessonWeekCoverage(unread, LocalDate.parse("2026-10-29"), today))
+        assertEquals(WeekCoverage.UNREAD, lessonWeekCoverage(unread, LocalDate.parse("2026-11-16"), today))
+        assertEquals(WeekCoverage.LOADED, lessonWeekCoverage(unread, LocalDate.parse("2026-12-07"), today))
+        val read = unread.copy(weekRead = mapOf("2026-11-09" to now.toString()))
+        assertEquals(WeekCoverage.LOADED, lessonWeekCoverage(read, LocalDate.parse("2026-11-09"), today))
+        val taughtWeek = unread.copy(events = listOf(lesson))
+        assertEquals(WeekCoverage.LOADED, lessonWeekCoverage(taughtWeek, today, today))
+        val spanned = unread.copy(weekSpanStart = "2026-08-17", weekSpanEnd = "2027-07-04")
+        assertEquals(WeekCoverage.UNREAD, lessonWeekCoverage(spanned, LocalDate.parse("2026-11-23"), today))
+        assertEquals(WeekCoverage.LOADED, lessonWeekCoverage(spanned, LocalDate.parse("2026-08-01"), today))
+        assertFalse(upcomingTimetableUnread(SchulnetzSnapshot(), today))
+        assertTrue(upcomingTimetableUnread(unread, today))
+        assertFalse(upcomingTimetableUnread(read.copy(weekRead = probeMondays(today).associate { it.toString() to now.toString() }), today))
+        assertTrue(plannerWeekIsCurrent(today, today))
+        assertTrue(plannerWeekIsCurrent(LocalDate.parse("2026-11-02"), today))
+        assertFalse(plannerWeekIsCurrent(LocalDate.parse("2026-11-09"), today))
+        val previous = SchulnetzSnapshot(weekFetched = mapOf("2026-11-16" to "2026-11-01T00:00:00Z"))
+        val backfill = previous.copy(
+            events = listOf(lesson("e2", "2026-11-16T08:15:00")),
+            weekFetched = mapOf("2026-11-16" to now.toString()),
+            weekRead = mapOf("2026-11-16" to now.toString()),
+        )
+        assertEquals(setOf("2026-11-16"), legacyBackfillWeeks(previous, backfill))
+        assertTrue(diffSnapshots(previous, backfill).none { it.category == "timetable" })
+        val seen = backfill
+        val changed = seen.copy(events = listOf(lesson("e2", "2026-11-16T08:15:00", room = "B2")))
+        assertEquals(listOf("Raum geändert"), diffSnapshots(seen, changed).map { it.title })
+        val xml = """<data>
+            <event id="m"><start_date>2026-11-04 08:15</start_date><end_date>2026-11-04 09:00</end_date><text>M4a</text><fachbezeichnung>Mathematik</fachbezeichnung><fachkuerzel>M4a</fachkuerzel><event_type>0_stp</event_type></event>
+            <event id="d"><start_date>2026-11-04 09:05</start_date><end_date>2026-11-04 09:50</end_date><text>Deutsch</text><fachbezeichnung>Mathematik</fachbezeichnung><event_type>0_stp</event_type></event>
+            <event id="c"><start_date>2026-11-04 10:00</start_date><end_date>2026-11-04 10:45</end_date><text>PHY</text><event_type>0_stp</event_type></event>
+        </data>"""
+        val named = parseSchedulerXml(xml).associateBy { it.id }
+        assertEquals("Mathematik", named.getValue("m").text)
+        assertEquals("M4a", named.getValue("m").courseName)
+        assertEquals("Mathematik (M4a)", preferredEventTitle(named.getValue("m")))
+        assertEquals("Deutsch", named.getValue("d").text)
+        assertEquals("PHY", named.getValue("c").text)
     }
 }

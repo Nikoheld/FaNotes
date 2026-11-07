@@ -154,6 +154,7 @@ fun keepStoredRead(
     var startMessages = next.startMessages
     var konto = next.konto
     var weekFetched = next.weekFetched
+    var weekRead = next.weekRead
     var weekSpanStart = next.weekSpanStart
     var weekSpanEnd = next.weekSpanEnd
     if (blocked || okPages == 0) {
@@ -165,6 +166,7 @@ fun keepStoredRead(
         if (events.isEmpty()) events = prior.events
         else if (events.none { it.isLesson() }) events = prior.events.filter { it.isLesson() } + events
         if (weekFetched.isEmpty()) weekFetched = prior.weekFetched
+        if (weekRead.isEmpty()) weekRead = prior.weekRead
         if (weekSpanStart.isBlank()) weekSpanStart = prior.weekSpanStart
         if (weekSpanEnd.isBlank()) weekSpanEnd = prior.weekSpanEnd
     }
@@ -174,6 +176,7 @@ fun keepStoredRead(
         events = lessons + carried
         if (exams.isEmpty()) exams = prior.exams
         weekFetched = prior.weekFetched
+        weekRead = prior.weekRead
         if (weekSpanStart.isBlank()) weekSpanStart = prior.weekSpanStart
         if (weekSpanEnd.isBlank()) weekSpanEnd = prior.weekSpanEnd
     }
@@ -187,6 +190,7 @@ fun keepStoredRead(
         startMessages = startMessages,
         konto = konto,
         weekFetched = weekFetched,
+        weekRead = weekRead,
         weekSpanStart = weekSpanStart,
         weekSpanEnd = weekSpanEnd,
     )

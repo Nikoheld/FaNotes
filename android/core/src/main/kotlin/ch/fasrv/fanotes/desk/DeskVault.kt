@@ -62,6 +62,32 @@ fun parseHomeworkMarkdown(markdown: String): HomeworkDocument = when (val loaded
     NoteMarkdownLoad.Unreadable -> HomeworkDocument(emptyList())
 }
 
+/**
+ * Local copy of one school assignment. Returns null when that title, subject
+ * and due date are already in the task list. The caller writes only the homework note.
+ */
+fun appendSchoolAssignment(
+    document: HomeworkDocument,
+    title: String,
+    subject: String,
+    dueDate: String?,
+    notes: String,
+    id: String,
+    now: String,
+): HomeworkDocument? {
+    if (document.tasks.any { it.title == title && it.subject == subject && it.dueDate == dueDate }) return null
+    val task = HomeworkTask(
+        id = id,
+        title = title,
+        notes = notes.take(4000),
+        subject = subject,
+        dueDate = dueDate,
+        createdAt = now,
+        updatedAt = now,
+    )
+    return document.copy(tasks = document.tasks + task)
+}
+
 /** A missing file can be created. A present file that does not parse is left alone. */
 fun managedNoteAllowsReplace(existing: String?, load: (String) -> NoteMarkdownLoad<*>): Boolean =
     existing == null || load(existing) is NoteMarkdownLoad.Ready

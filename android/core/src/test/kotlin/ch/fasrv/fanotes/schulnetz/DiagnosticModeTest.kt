@@ -143,6 +143,29 @@ class DiagnosticModeTest {
     }
 
     @Test
+    fun startupRecordsTheFirstFrameAndARepeatedConflictIsOneKey() {
+        val trace = DiagnosticTrace
+        val was = trace.enabled
+        try {
+            trace.enabled = false
+            trace.clear()
+            trace.noteStartup(140)
+            trace.noteStartup(-5)
+            trace.noteEnabled()
+            val startup = trace.recent().single { it.category == "startup" }
+            assertEquals("enabled", startup.name)
+            assertEquals(140L, startup.durationMs)
+            assertEquals("ok", startup.result)
+            assertEquals("conflict:Notes/a.md,Notes/b.md", diagnosticSyncKey("SYNCING", listOf("Notes/b.md", "Notes/a.md", "Notes/a.md")))
+            assertEquals("conflict:Notes/a.md,Notes/b.md", diagnosticSyncKey("ERROR", listOf("Notes/a.md", "Notes/b.md")))
+            assertEquals("idle", diagnosticSyncKey("IDLE", emptyList()))
+        } finally {
+            trace.clear()
+            trace.enabled = was
+        }
+    }
+
+    @Test
     fun statePreviewDoesNotClaimARealSessionChange() {
         val lines = diagnosticPreview(DiagnosticScenario.STATES, zone, day).joinToString("\n") { it.detail }
         assertTrue(lines.contains("nicht abgemeldet"))
