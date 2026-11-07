@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.9
+
+- Use kotlin.test for the tab-entry regression.
+- Stop the Heute and Planer tab-entry freeze on a full timetable.
+
 ## 2026.11.2-beta.8
 
 - Fix Schulnetz WebView thread ownership
