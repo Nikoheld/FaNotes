@@ -47,6 +47,7 @@ Schulnetz-Daten hängen an einer Kanti+-Identität. Ein FaNotes-Konto benutzt `A
 | PUT | `/settings` | `{ grades, timetable, exams, absences, events, deadlines, guessGrades }` als Booleans. `guessGrades` ist standardmässig aus. |
 | PUT | `/push-token` | `{ token }` FCM-Registrierung, höchstens 8. Kein Notentext. |
 | POST | `/push/test` | Schickt `{ event: "test" }`. Die App zeigt die Testmeldung selbst. Höchstens 5 pro Konto und Stunde. |
+| POST | `/push/probe` | Zustelltest für das bereits registrierte Gerät. Body `{ token }`. Dasselbe Bearer-Token wie die übrigen Routen. Der Token muss schon in `fcmTokens` dieses Kontos stehen, sonst 400. Schreibt sechs Teständerungen (`probe:`) und schickt eine Data-Message `{ event: "sync", probe: "1", serverAt }` nur an dieses Gerät. Der Schnappschuss, die Noten-Ledger und Schulnetz bleiben unberührt. Höchstens 5 pro Konto und Stunde. |
 
 `baseUrl` muss HTTPS sein. Erlaubt sind genau `www.schulnetz-ag.ch`, `schulnetz-ag.ch` und `schulnetz.web.app`, plus Hosts die auf `.schulnetz-ag.ch`, `.schulnetz.ch` oder `.schulnetz.com` enden. `schulnetz.evil.tld` und `evilschulnetz-ag.ch` sind nicht erlaubt. Weiterleitungen auf IP-Adressen werden verworfen. AKSA ist `https://www.schulnetz-ag.ch/aksa`.
 

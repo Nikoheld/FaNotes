@@ -71,13 +71,16 @@ export const fcmPriorityForChanges = (changes) => {
 
 export const fcmDataMessage = (token, event, options = {}) => {
   const priority = options.priority === 'NORMAL' ? 'NORMAL' : 'HIGH'
+  const data = { event: String(event) }
+  if (options.probe === true) data.probe = '1'
+  if (typeof options.serverAt === 'string' && options.serverAt) data.serverAt = options.serverAt
   return {
     message: {
       token,
-      data: { event: String(event) },
+      data,
       android: {
         priority,
-        collapse_key: COLLAPSE_KEY[event] || 'kanti-sync',
+        collapse_key: options.probe === true ? 'kanti-probe' : (COLLAPSE_KEY[event] || 'kanti-sync'),
         ttl: priority === 'HIGH' ? '21600s' : '3600s',
       },
     },

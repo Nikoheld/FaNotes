@@ -252,6 +252,8 @@ data class SchulnetzChange(
     val targetIds: List<String> = emptyList(),
     /** Opaque identity hashes. Dedup uses these, never the row id. */
     val gradeKeys: List<String> = emptyList(),
+    /** ISO time the server created a delivery-test row. Blank for school changes. */
+    val serverAt: String = "",
 ) {
     fun linkIds(): List<String> = targetIds.ifEmpty { listOf(targetId).filter { it.isNotBlank() } }
 }

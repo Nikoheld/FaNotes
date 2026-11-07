@@ -730,6 +730,27 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         }
     }
 
+    /** Server → Firebase → this device. Does not post a local notification and does not touch school records. */
+    fun probeDelivery(context: Context) {
+        viewModelScope.launch {
+            val auth = runCatching { graph.schoolAuth() }.getOrNull()
+            if (auth == null || !link.linked) {
+                message = t(R.string.delivery_probe_needs_link)
+                return@launch
+            }
+            val token = graph.fcmToken()
+            if (token.isNullOrBlank()) {
+                message = t(R.string.delivery_probe_needs_token)
+                return@launch
+            }
+            runCatching { graph.client.probePush(auth, token) }
+                .onSuccess { message = t(R.string.delivery_probe_sent) }
+                .onFailure { error ->
+                    message = shownText(error.message).ifBlank { t(R.string.delivery_probe_failed) }
+                }
+        }
+    }
+
     companion object {
         fun factory(graph: CompanionGraph) = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")

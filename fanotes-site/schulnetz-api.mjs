@@ -24,6 +24,8 @@ import {
   parseWeekSpan,
   prepareGradeNotifications,
   settleGradeNotifications,
+  isNotificationProbe,
+  notificationProbeChanges,
   stampWeeks,
   unseenChanges,
   normalizeSchoolBase,
@@ -520,8 +522,8 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 
   let fcmCache = null
-  const sendFcm = async (token, event, priority = 'HIGH') => {
-    const message = fcmDataMessage(token, event, { priority })
+  const sendFcm = async (token, event, priority = 'HIGH', extra = {}) => {
+    const message = fcmDataMessage(token, event, { priority, ...extra })
     if (typeof options.fcmSend === 'function') return options.fcmSend(message)
     const nowMs = now().getTime()
     if (!fcmCache || fcmCache.exp - 60 <= Math.floor(nowMs / 1000)) {
@@ -559,6 +561,42 @@ export const createSchulnetzRuntime = (options = {}) => {
       }
     }
     if (dropped) await saveLink(accountId, link)
+  }
+
+  const pingDevice = async (accountId, link, token, event, priority = 'HIGH', extra = {}) => {
+    if (event !== 'sync' && event !== 'reauth' && event !== 'test') return { rejected: true }
+    if (!isValidFcmToken(token) || !(link.fcmTokens || []).includes(token)) return { rejected: true }
+    try {
+      const result = await sendFcm(token, event, priority, extra)
+      if (result?.drop) {
+        link.fcmTokens = (link.fcmTokens || []).filter((item) => item !== token)
+        await saveLink(accountId, link)
+      }
+      return result || { skipped: true }
+    } catch (error) {
+      log('warn', `FCM fehlgeschlagen (${error?.name || 'error'})`)
+      return { failed: true }
+    }
+  }
+
+  const rollbackProbe = async (accountId, link, revision) => {
+    const file = resolve(accountDir(accountId), 'changes.jsonl')
+    const text = await fs.readFile(file, 'utf8').catch(() => '')
+    const kept = text.split('\n').filter((line) => {
+      if (!line) return false
+      try {
+        const row = JSON.parse(line)
+        return !(row.revision === revision && isNotificationProbe(row.id))
+      } catch {
+        return true
+      }
+    })
+    if (kept.length) await fs.writeFile(file, `${kept.join('\n')}\n`, { mode: 0o600 })
+    else await fs.rm(file, { force: true })
+    if (link.revision === revision) {
+      link.revision = revision - 1
+      await saveLink(accountId, link)
+    }
   }
 
   const appendChanges = async (accountId, changes, revision) => {
@@ -1037,6 +1075,32 @@ export const createSchulnetzRuntime = (options = {}) => {
         if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
         await ping(accountId, link, 'test')
         send(response, 200, { ok: true })
+        return true
+      }
+      if (route === '/push/probe' && method === 'POST') {
+        accountRate(accountId, 'push-probe', PUSH_TEST_LIMIT)
+        const link = await readLink(accountId)
+        if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
+        const body = await readBody(request)
+        const token = typeof body?.token === 'string' ? body.token.trim() : ''
+        if (!isValidFcmToken(token) || !(link.fcmTokens || []).includes(token)) {
+          fail(400, 'Dieses Gerät ist für Push nicht registriert.')
+        }
+        const serverAt = now().toISOString()
+        const changes = notificationProbeChanges({ serverAt, day: zurichToday(now()) })
+        const revision = (Number(link.revision) || 0) + 1
+        await appendChanges(accountId, changes, revision)
+        link.revision = revision
+        await saveLink(accountId, link)
+        const result = await pingDevice(accountId, link, token, 'sync', 'HIGH', { probe: true, serverAt })
+        const accepted = result?.status === 200 && !result.drop && !result.skipped && !result.failed && !result.rejected
+        if (!accepted) {
+          await rollbackProbe(accountId, link, revision)
+          if (result?.skipped) fail(503, 'Firebase ist auf dem Server nicht eingerichtet.')
+          if (result?.drop) fail(409, 'Dieses Gerät ist bei Firebase nicht mehr registriert.')
+          fail(502, 'Firebase hat die Testmeldung nicht angenommen.')
+        }
+        send(response, 200, { ok: true, serverAt, count: changes.length })
         return true
       }
       send(response, 404, { error: 'Diesen Schulnetz-Endpunkt gibt es nicht.' })

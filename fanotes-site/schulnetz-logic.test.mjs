@@ -41,6 +41,9 @@ import {
   gradeContentHash,
   gradeLooseHash,
   settleGradeNotifications,
+  isNotificationProbe,
+  formatProbeDay,
+  notificationProbeChanges,
   keepLoadedGrades,
   normalizeGradeDate,
   parseWeekSpan,
@@ -630,7 +633,17 @@ test('firebase data messages name an event and never a grade', () => {
     assert.equal(message.message.notification, undefined)
     assert.equal(JSON.stringify(message).includes('5.5'), false)
     assert.equal(JSON.stringify(message).includes('Neue Note'), false)
+    assert.equal(message.message.data.probe, undefined)
   }
+  const probeMessage = fcmDataMessage('phone:APA91b-example-token-value', 'sync', { probe: true, serverAt: '2026-11-07T12:00:00.000Z' })
+  assert.equal(probeMessage.message.data.event, 'sync')
+  assert.equal(probeMessage.message.data.probe, '1')
+  assert.equal(probeMessage.message.data.serverAt, '2026-11-07T12:00:00.000Z')
+  assert.equal(probeMessage.message.android.collapse_key, 'kanti-probe')
+  assert.equal(probeMessage.message.android.priority, 'HIGH')
+  assert.equal(probeMessage.message.notification, undefined)
+  assert.equal(JSON.stringify(probeMessage.message.data).includes('Neue Note'), false)
+  assert.equal(JSON.stringify(probeMessage.message.data).includes('5.5'), false)
   assert.equal(fcmPriorityForChanges([{ category: 'grade' }, { category: 'timetable' }]), 'HIGH')
   assert.equal(fcmPriorityForChanges([{ category: 'exam' }]), 'HIGH')
   assert.equal(fcmPriorityForChanges([{ category: 'absence' }]), 'HIGH')
@@ -1638,4 +1651,227 @@ test('a known exam really moving into a new week alerts once while equivalent ti
   assert.equal(moved.changes[0].body.startsWith('30.11.2026 · '), true)
   assert.deepEqual(moved.weeks[baselineWeek].exams, [])
   assert.deepEqual(baselineDiff(next, agendaRead([later], '12', [baselineWeek, '2026-11-30']), moved.weeks).changes, [])
+})
+
+test('delivery probe rows stay marked, dated, and out of the grade ledger', () => {
+  assert.equal(formatProbeDay('2026-11-07'), '07.11.2026')
+  assert.equal(formatProbeDay('2026-11-07T00:00:00'), '')
+  const probes = notificationProbeChanges({ serverAt: '2026-11-07T12:00:00.000Z', day: '2026-11-07' })
+  assert.equal(probes.length, 6)
+  assert.deepEqual(probes.map((change) => change.category), ['grade', 'grade', 'exam', 'exam', 'timetable', 'event'])
+  assert.equal(probes.every((change) => change.title.startsWith('Test: ') && change.body.includes('Datum 07.11.2026')), true)
+  assert.equal(probes.every((change) => change.serverAt === '2026-11-07T12:00:00.000Z' && change.date === '2026-11-07'), true)
+  assert.equal(JSON.stringify(probes).includes('5.5'), false)
+  assert.equal(JSON.stringify(probes).includes('Neue Note in'), false)
+  const real = { id: 'grade:real', category: 'grade', gradeKeys: ['c:real'], targetId: 'real-target' }
+  const seeded = settleGradeNotifications([...probes, real], [], null)
+  assert.deepEqual(seeded.changes.map((change) => change.id), probes.map((change) => change.id))
+  assert.equal(seeded.keys.some((key) => String(key).startsWith('probe:')), false)
+  const kept = settleGradeNotifications([probes[0]], [], ['c:kept'])
+  assert.equal(kept.changes.length, 1)
+  assert.equal(kept.keys.includes('c:kept'), true)
+  assert.equal(kept.keys.some((key) => String(key).startsWith('probe:')), false)
+  assert.equal(groupGradeChanges([probes[0], probes[1]]).length, 2)
+  const grouped = groupGradeChanges([
+    { id: 'grade:a', category: 'grade', title: 'Neue Note', body: 'A', targetIds: ['a'], gradeKeys: ['c:a'], courseId: 'math' },
+    { id: 'grade:b', category: 'grade', title: 'Neue Note', body: 'B', targetIds: ['b'], gradeKeys: ['c:b'], courseId: 'eng' },
+    probes[0],
+    probes[1],
+  ])
+  assert.equal(grouped.length, 3)
+  assert.equal(grouped[0].title, '2 neue Noten')
+  assert.equal(isNotificationProbe(grouped[1].id) && isNotificationProbe(grouped[2].id), true)
+  assert.equal(grouped[0].gradeKeys.includes(probes[0].gradeKeys[0]), false)
+})
+
+const probeCall = async (runtime, guest, body, headers = {}) => {
+  const request = {
+    method: 'POST',
+    headers: guest
+      ? { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}`, ...headers }
+      : headers,
+    socket: { remoteAddress: '203.0.113.77' },
+    async *[Symbol.asyncIterator]() {
+      if (body != null) yield Buffer.from(body)
+    },
+  }
+  let status = 0
+  let payload = ''
+  const response = {
+    writeHead(code) { status = code },
+    end(text) { payload = String(text || '') },
+  }
+  await runtime.handle(request, response, new URL('http://127.0.0.1/api/v1/schulnetz/push/probe'))
+  return { status, body: payload ? JSON.parse(payload) : {} }
+}
+
+test('delivery probe reaches only the registered device and leaves school records alone', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-probe-'))
+  const key = randomBytes(32)
+  const sent = []
+  let fetches = 0
+  const serverAt = '2026-11-07T12:00:00.000Z'
+  const runtime = createSchulnetzRuntime({
+    root,
+    key,
+    autostart: false,
+    now: () => new Date(serverAt),
+    fetch: async () => { fetches += 1; throw new Error('probe must not call Schulnetz') },
+    fcmSend: async (message) => { sent.push(message); return { status: 200 } },
+  })
+  const mine = 'phone:APA91b-probe-device-token'
+  const otherToken = 'phone:APA91b-other-device-tokenx'
+  try {
+    assert.equal(isValidFcmToken(mine), true)
+    assert.equal(isValidFcmToken(otherToken), true)
+    const caller = await runtime.createGuest('203.0.113.77')
+    const other = await runtime.createGuest('203.0.113.78')
+    const stranger = await runtime.createGuest('203.0.113.79')
+    const linkBody = {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    }
+    await runtime.linkAccount(caller.accountId, linkBody)
+    await runtime.linkAccount(other.accountId, linkBody)
+    await runtime.linkAccount(stranger.accountId, linkBody)
+    await runtime.addFcmToken(caller.accountId, mine)
+    await runtime.addFcmToken(other.accountId, otherToken)
+    await runtime.addFcmToken(stranger.accountId, 'phone:APA91b-stranger-device-token')
+    const dir = join(root, 'accounts', caller.accountId)
+    const snapshot = '{"grades":[{"id":"keep","mark":"5.5"}],"events":[]}\n'
+    const ledger = '{"version":1,"keys":["c:kept"]}\n'
+    const baseline = '{"version":1,"weeks":{}}\n'
+    await writeFile(join(dir, 'snapshot.json'), snapshot)
+    await writeFile(join(dir, 'notified-grades.json'), ledger)
+    await writeFile(join(dir, 'notification-baseline.json'), baseline)
+    const settings = await guestCall(runtime, caller, 'PUT', '/api/v1/schulnetz/settings', '{"guessGrades":true}')
+    assert.equal(settings.status, 200)
+    const anonymous = await probeCall(runtime, null, `{"token":${JSON.stringify(mine)}}`)
+    assert.equal(anonymous.status, 401)
+    assert.equal(fetches, 0)
+    const missing = await probeCall(runtime, stranger, `{"token":${JSON.stringify(otherToken)}}`)
+    assert.equal(missing.status, 400)
+    assert.equal(missing.body.error, 'Dieses Gerät ist für Push nicht registriert.')
+    assert.equal(sent.length, 0)
+    const ok = await probeCall(runtime, caller, `{"token":${JSON.stringify(mine)}}`)
+    assert.equal(ok.status, 200)
+    assert.equal(ok.body.ok, true)
+    assert.equal(ok.body.serverAt, serverAt)
+    assert.equal(ok.body.count, 6)
+    assert.equal(JSON.stringify(ok.body).includes(mine), false)
+    assert.equal(JSON.stringify(ok.body).includes('5.5'), false)
+    assert.equal(JSON.stringify(ok.body).includes('Neue Note'), false)
+    assert.equal(sent.length, 1)
+    const message = sent[0]
+    assert.equal(message.message.token, mine)
+    assert.equal(message.message.data.event, 'sync')
+    assert.equal(message.message.data.probe, '1')
+    assert.equal(message.message.data.serverAt, serverAt)
+    assert.equal(message.message.android.collapse_key, 'kanti-probe')
+    assert.equal(message.message.android.priority, 'HIGH')
+    assert.equal(message.message.android.ttl, '21600s')
+    assert.equal(message.message.notification, undefined)
+    const data = JSON.stringify(message.message.data)
+    assert.equal(data.includes('5.5'), false)
+    assert.equal(data.includes('Neue Note'), false)
+    assert.equal(data.includes('Testfach'), false)
+    assert.equal(data.includes(mine), false)
+    const lines = (await readFile(join(dir, 'changes.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
+    assert.equal(lines.length, 6)
+    assert.equal(lines.every((row) => row.revision === 1 && String(row.id).startsWith('probe:')), true)
+    assert.equal(lines.every((row) => String(row.title).startsWith('Test: ') && String(row.body).includes('Datum 07.11.2026')), true)
+    assert.deepEqual(lines.map((row) => row.category), ['grade', 'grade', 'exam', 'exam', 'timetable', 'event'])
+    assert.equal(JSON.stringify(lines).includes('5.5'), false)
+    const link = JSON.parse(await readFile(join(dir, 'link.json'), 'utf8'))
+    assert.equal(link.revision, 1)
+    assert.deepEqual(link.fcmTokens, [mine])
+    const otherLink = JSON.parse(await readFile(join(root, 'accounts', other.accountId, 'link.json'), 'utf8'))
+    assert.deepEqual(otherLink.fcmTokens, [otherToken])
+    assert.equal(await readFile(join(dir, 'snapshot.json'), 'utf8'), snapshot)
+    assert.equal(await readFile(join(dir, 'notified-grades.json'), 'utf8'), ledger)
+    assert.equal(await readFile(join(dir, 'notification-baseline.json'), 'utf8'), baseline)
+    assert.equal(fetches, 0)
+    const listed = await guestCall(runtime, caller, 'GET', '/api/v1/schulnetz/changes?since=0', null)
+    assert.equal(listed.status, 200)
+    assert.equal(listed.body.changes.length, 6)
+    assert.equal(listed.body.changes.every((row) => row.serverAt === serverAt), true)
+    for (let index = 0; index < 4; index += 1) {
+      const again = await probeCall(runtime, caller, `{"token":${JSON.stringify(mine)}}`)
+      assert.equal(again.status, 200)
+    }
+    const blocked = await probeCall(runtime, caller, `{"token":${JSON.stringify(mine)}}`)
+    assert.equal(blocked.status, 429)
+    assert.equal(blocked.body.error, 'Zu viele Anfragen. Bitte später erneut versuchen.')
+    const after = JSON.parse(await readFile(join(dir, 'link.json'), 'utf8'))
+    assert.equal(after.revision, 5)
+    assert.equal((await readFile(join(dir, 'changes.jsonl'), 'utf8')).trim().split('\n').length, 30)
+    assert.equal(sent.length, 5)
+    assert.equal(sent.every((item) => item.message.token === mine), true)
+    assert.equal(await readFile(join(dir, 'snapshot.json'), 'utf8'), snapshot)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a delivery probe rolls back when Firebase does not accept it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-probe-rollback-'))
+  const key = randomBytes(32)
+  let fetches = 0
+  const skipped = createSchulnetzRuntime({
+    root,
+    key,
+    autostart: false,
+    now: () => new Date('2026-11-07T12:00:00.000Z'),
+    fcmAccountFile: join(root, 'missing-fcm.json'),
+    fetch: async () => { fetches += 1; throw new Error('probe must not call Schulnetz') },
+  })
+  const token = 'phone:APA91b-probe-device-token'
+  try {
+    const guest = await skipped.createGuest('203.0.113.80')
+    await skipped.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    await skipped.addFcmToken(guest.accountId, token)
+    const missing = await probeCall(skipped, guest, `{"token":${JSON.stringify(token)}}`)
+    assert.equal(missing.status, 503)
+    assert.equal(missing.body.error, 'Firebase ist auf dem Server nicht eingerichtet.')
+    await assert.rejects(stat(join(root, 'accounts', guest.accountId, 'changes.jsonl')))
+    const quiet = JSON.parse(await readFile(join(root, 'accounts', guest.accountId, 'link.json'), 'utf8'))
+    assert.equal(quiet.revision, 0)
+    assert.deepEqual(quiet.fcmTokens, [token])
+    assert.equal(fetches, 0)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+
+  const droppedRoot = await mkdtemp(join(tmpdir(), 'schulnetz-probe-drop-'))
+  const dropped = createSchulnetzRuntime({
+    root: droppedRoot,
+    key: randomBytes(32),
+    autostart: false,
+    now: () => new Date('2026-11-07T12:00:00.000Z'),
+    fetch: async () => { throw new Error('probe must not call Schulnetz') },
+    fcmSend: async () => ({ status: 404, drop: true }),
+  })
+  try {
+    const guest = await dropped.createGuest('203.0.113.81')
+    await dropped.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    await dropped.addFcmToken(guest.accountId, token)
+    const gone = await probeCall(dropped, guest, `{"token":${JSON.stringify(token)}}`)
+    assert.equal(gone.status, 409)
+    assert.equal(gone.body.error, 'Dieses Gerät ist bei Firebase nicht mehr registriert.')
+    await assert.rejects(stat(join(droppedRoot, 'accounts', guest.accountId, 'changes.jsonl')))
+    const link = JSON.parse(await readFile(join(droppedRoot, 'accounts', guest.accountId, 'link.json'), 'utf8'))
+    assert.equal(link.revision, 0)
+    assert.deepEqual(link.fcmTokens, [])
+  } finally {
+    await rm(droppedRoot, { recursive: true, force: true })
+  }
 })
