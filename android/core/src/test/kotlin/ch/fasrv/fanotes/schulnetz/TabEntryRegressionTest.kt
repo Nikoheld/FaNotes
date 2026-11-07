@@ -1,10 +1,10 @@
 package ch.fasrv.fanotes.schulnetz
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -44,7 +44,7 @@ class TabEntryRegressionTest {
         val started = System.nanoTime()
         val indexed = eventsByLocalDay(events, zone)
         val elapsedMs = (System.nanoTime() - started) / 1_000_000
-        assertTrue("indexing 400 local lessons took ${elapsedMs}ms", elapsedMs < 1_500)
+        assertTrue(elapsedMs < 1_500, "indexing 400 local lessons took ${elapsedMs}ms")
         val day = LocalDate.of(2026, 11, 2)
         assertEquals(eventsOn(events, day, zone).map { it.id }, indexed.getValue(day).map { it.id })
         assertEquals(20, indexed.getValue(day).size)
