@@ -1,5 +1,11 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.11
+
+- Restore the composable clock and keep agenda timing plain.
+- Keep diagnostic failure lines out of the string checker.
+- Add an opt-in diagnostic mode around the delivery probe.
+
 ## 2026.11.2-beta.10
 
 - Add a device-scoped delivery test for school notifications.
