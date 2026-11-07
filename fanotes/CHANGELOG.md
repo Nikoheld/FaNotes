@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.10
+
+- Add a device-scoped delivery test for school notifications.
+
 ## 2026.11.2-beta.9
 
 - Use kotlin.test for the tab-entry regression.
