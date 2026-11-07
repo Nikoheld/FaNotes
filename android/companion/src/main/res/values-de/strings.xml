@@ -147,6 +147,12 @@
     <string name="delete_this_task">Diese Aufgabe löschen?</string>
     <string name="deleted_notes_stay_on_this_device_restoring_adds">Gelöschte Notizen bleiben auf diesem Gerät. Beim Wiederherstellen kommen sie in die Bibliothek zurück.</string>
     <string name="delivery">Zustellung</string>
+    <string name="delivery_probe_failed">Der Zustelltest konnte nicht gesendet werden.</string>
+    <string name="delivery_probe_help">Sendet sechs Testmeldungen: eine neue Note, eine Notenänderung, eine verschobene Prüfung, eine abgesagte Prüfung, eine abgesagte Lektion und einen geänderten Termin. Schuldaten bleiben unverändert. Jede Meldung beginnt mit Test und enthält das Datum. Nach dem Tippen kann Kanti+ geöffnet bleiben, in den Hintergrund gehen oder aus den Zuletzt verwendeten entfernt werden.</string>
+    <string name="delivery_probe_needs_link">Verbinde Kanti+ zuerst mit der Schule.</string>
+    <string name="delivery_probe_needs_token">Dieses Gerät ist für Push noch nicht registriert. Öffne Kanti+ einmal im Netz und versuche es erneut.</string>
+    <string name="delivery_probe_sent">Zustelltest an Firebase übergeben. Die Meldungen kommen über den normalen Push-Weg.</string>
+    <string name="delivery_times">Zustellzeiten</string>
     <string name="details">Details</string>
     <string name="diagnostics">Diagnose</string>
     <string name="disconnect">Trennen</string>
@@ -559,6 +565,7 @@
     <string name="see_someone_who_is_that_old_then_reveal">Schätze das Alter anhand des Fotos</string>
     <string name="selected_suffix">, ausgewählt</string>
     <string name="send_a_test_notification">Testbenachrichtigung senden</string>
+    <string name="send_delivery_probe">Zustelltest senden</string>
     <string name="series_noun">Serie</string>
     <string name="settings">Einstellungen</string>
     <string name="share_an_export_when_troubleshooting_a_school_co">Teile einen Export, wenn du eine Schulverbindung prüfst. Exporte können Schulinhalt enthalten. Schau, mit wem du sie teilst.</string>

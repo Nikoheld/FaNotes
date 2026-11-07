@@ -207,7 +207,7 @@ fun prepareGradeNotifications(
 }
 
 fun newGradeTargetIds(changes: List<SchulnetzChange>): List<String> =
-    changes.filter { it.category == "grade" }.flatMap { it.linkIds() }.filter { it.isNotBlank() }.distinct()
+    changes.filter { it.category == "grade" && !isNotificationProbe(it.id) }.flatMap { it.linkIds() }.filter { it.isNotBlank() }.distinct()
 
 fun gradesForAverages(grades: List<SchoolGrade>, hiddenTargetIds: Set<String>, guessGrades: Boolean): List<SchoolGrade> {
     if (!guessGrades || hiddenTargetIds.isEmpty()) return grades

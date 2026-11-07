@@ -659,17 +659,21 @@ export const gradeLedgerEntries = (grades) => {
   return [...new Set(keys)]
 }
 
+/** Delivery-test rows. They are not school records and must not enter the grade ledger. */
+export const isNotificationProbe = (id) => String(id || '').startsWith('probe:')
+
 /**
  * Decide which changes may be announced and which identity keys to store.
  * `ledger === null` means the account has no notified-grades file yet: every
  * grade currently on file is marked seen and none of them are announced.
  * A later mark or weight is a new key and is announced once.
+ * Probe rows stay visible and do not add keys.
  */
 export const settleGradeNotifications = (changes, grades, ledger) => {
   const pool = gradeLedgerEntries(grades)
   if (ledger == null) {
     return {
-      changes: (changes || []).filter((change) => change?.category !== 'grade'),
+      changes: (changes || []).filter((change) => change?.category !== 'grade' || isNotificationProbe(change?.id)),
       keys: pool,
       migrated: true,
     }
@@ -677,6 +681,10 @@ export const settleGradeNotifications = (changes, grades, ledger) => {
   const known = new Set(ledger)
   const fresh = []
   for (const change of changes || []) {
+    if (isNotificationProbe(change?.id)) {
+      fresh.push(change)
+      continue
+    }
     if (change?.category !== 'grade') {
       fresh.push(change)
       continue
@@ -753,7 +761,60 @@ export const linkedChange = (id, category, title, body, extra = {}) => {
     date: extra.date || '',
     targetIds,
     gradeKeys,
+    serverAt: extra.serverAt || '',
   }
+}
+
+/** `2026-11-07` becomes `07.11.2026`. Anything else stays blank. */
+export const formatProbeDay = (isoDate) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(String(isoDate || ''))
+  if (!match) return ''
+  return `${match[3]}.${match[2]}.${match[1]}`
+}
+
+/**
+ * Six synthetic notices for one delivery test. Titles start with "Test:",
+ * the day is DD.MM.YYYY, and no numeric mark is included.
+ */
+export const notificationProbeChanges = ({ serverAt, day } = {}) => {
+  const stamp = String(serverAt || '').replace(/[^0-9]/gu, '').slice(0, 17) || '0'
+  const label = formatProbeDay(day)
+  const dated = (detail) => `Test · ${detail} · Datum ${label}`
+  const one = (kind, category, title, detail, extra = {}) => linkedChange(
+    `probe:${stamp}:${kind}`,
+    category,
+    `Test: ${title}`,
+    dated(detail),
+    { ...extra, date: day || '', serverAt: serverAt || '' },
+  )
+  return [
+    one('grade-new', 'grade', 'Neue Note', 'Testfach · Testprobe', {
+      targetId: `probe-target:${stamp}:grade-new`,
+      courseId: 'probe-course',
+      gradeKeys: [`probe:key:${stamp}:grade-new`],
+      courseLabel: 'Testfach',
+      examTitle: 'Testprobe',
+    }),
+    one('grade-changed', 'grade', 'Notenänderung', 'Testfach · Testprobe', {
+      targetId: `probe-target:${stamp}:grade-changed`,
+      courseId: 'probe-course',
+      gradeKeys: [`probe:key:${stamp}:grade-changed`],
+      courseLabel: 'Testfach',
+      examTitle: 'Testprobe',
+    }),
+    one('exam-moved', 'exam', 'Prüfung verschoben', 'Testprüfung verschoben', {
+      targetId: `probe-target:${stamp}:exam-moved`,
+    }),
+    one('exam-cancelled', 'exam', 'Prüfung abgesagt', 'Testprüfung abgesagt', {
+      targetId: `probe-target:${stamp}:exam-cancelled`,
+    }),
+    one('lesson-cancelled', 'timetable', 'Lektion abgesagt', 'Testlektion abgesagt', {
+      targetId: `probe-target:${stamp}:lesson-cancelled`,
+    }),
+    one('appointment-changed', 'event', 'Termin geändert', 'Testtermin geändert', {
+      targetId: `probe-target:${stamp}:appointment-changed`,
+    }),
+  ]
 }
 
 export const notifyKindOf = (category, id = '', title = '') => {
@@ -833,9 +894,12 @@ export const prepareGradeNotifications = (changes, guessGrades) => {
 }
 
 export const groupGradeChanges = (changes) => {
-  const grades = (changes || []).filter((change) => change.category === 'grade')
-  if (grades.length <= 1) return changes || []
-  const rest = (changes || []).filter((change) => change.category !== 'grade')
+  const list = changes || []
+  const probes = list.filter((change) => isNotificationProbe(change?.id))
+  const ordinary = list.filter((change) => !isNotificationProbe(change?.id))
+  const grades = ordinary.filter((change) => change.category === 'grade')
+  if (grades.length <= 1) return list
+  const rest = ordinary.filter((change) => change.category !== 'grade')
   const ids = [...new Set(grades.flatMap((change) => change.targetIds || String(change.targetId || '').split(',').filter(Boolean)))]
   const courses = [...new Set(grades.map((change) => change.courseId).filter(Boolean))]
   const gradeKeys = [...new Set(grades.flatMap((change) => change.gradeKeys || []))]
@@ -845,7 +909,7 @@ export const groupGradeChanges = (changes) => {
     courseId: courses.length === 1 ? courses[0] : '',
     targetIds: ids,
     gradeKeys,
-  }), ...rest]
+  }), ...rest, ...probes]
 }
 
 export const routeNotify = (link, snapshot = {}) => {

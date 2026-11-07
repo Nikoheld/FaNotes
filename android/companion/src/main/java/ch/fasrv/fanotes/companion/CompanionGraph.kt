@@ -580,6 +580,8 @@ class CompanionGraph(private val context: Context) {
         }
     }
 
+    fun fcmToken(): String? = prefs.getString("fcm-token", null)?.trim()?.takeIf { it.isNotEmpty() }
+
     suspend fun registerFcmToken(token: String) {
         val trimmed = token.trim()
         if (trimmed.isBlank()) return

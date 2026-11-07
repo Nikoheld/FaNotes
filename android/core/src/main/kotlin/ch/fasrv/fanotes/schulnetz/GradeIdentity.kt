@@ -80,7 +80,7 @@ fun settleGradeNotifications(
     val pool = gradeLedgerEntries(grades)
     if (ledger == null) {
         return GradeSettlement(
-            changes = changes.filter { it.category != "grade" },
+            changes = changes.filter { it.category != "grade" || isNotificationProbe(it.id) },
             keys = pool,
             migrated = true,
         )
@@ -88,6 +88,10 @@ fun settleGradeNotifications(
     val known = ledger.toMutableSet()
     val fresh = mutableListOf<SchulnetzChange>()
     for (change in changes) {
+        if (isNotificationProbe(change.id)) {
+            fresh += change
+            continue
+        }
         if (change.category != "grade") {
             fresh += change
             continue

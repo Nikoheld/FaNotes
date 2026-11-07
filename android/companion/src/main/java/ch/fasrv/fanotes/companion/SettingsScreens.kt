@@ -302,10 +302,12 @@ private fun NotificationSettings(model: CompanionModel) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
     var allowed by remember { mutableStateOf(CompanionAlerts.notificationsAllowed(context)) }
+    var probeTick by remember { mutableIntStateOf(0) }
     val request = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed = CompanionAlerts.notificationsAllowed(context) }
     DisposableEffect(owner) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) {
             allowed = CompanionAlerts.notificationsAllowed(context)
+            probeTick += 1
         } }
         owner.lifecycle.addObserver(observer); onDispose { owner.lifecycle.removeObserver(observer) }
     }
@@ -341,6 +343,26 @@ private fun NotificationSettings(model: CompanionModel) {
             )
         }
         item { OutlinedButton(onClick = { model.testPush(context) }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.send_a_test_notification)) } }
+        item { OutlinedButton(onClick = { model.probeDelivery(context) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text(t(R.string.send_delivery_probe)) } }
+        item {
+            Text(
+                t(R.string.delivery_probe_help),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+            )
+        }
+        val probeLines = probeTick.let { CompanionAlerts.probeSummaries(context) }
+        if (probeLines.isNotEmpty()) {
+            item { SectionLabel(t(R.string.delivery_times)) }
+            item {
+                Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                    probeLines.forEach { line ->
+                        Text(line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 6.dp))
+                    }
+                }
+            }
+        }
     }
 }
 

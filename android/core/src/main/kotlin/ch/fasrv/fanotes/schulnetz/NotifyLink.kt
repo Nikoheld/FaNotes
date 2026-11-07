@@ -152,13 +152,16 @@ fun changeFromObj(obj: ch.fasrv.fanotes.json.JsonValue.Obj): SchulnetzChange? {
         date = source.string("date").orEmpty(),
         targetIds = ids,
         gradeKeys = gradeKeys,
+        serverAt = if (isNotificationProbe(id)) (source.string("serverAt") ?: source.string("at").orEmpty()) else "",
     )
 }
 
 fun groupGradeChanges(changes: List<SchulnetzChange>): List<SchulnetzChange> {
-    val grades = changes.filter { it.category == "grade" }
+    val probes = changes.filter { isNotificationProbe(it.id) }
+    val ordinary = changes.filter { !isNotificationProbe(it.id) }
+    val grades = ordinary.filter { it.category == "grade" }
     if (grades.size <= 1) return changes
-    val rest = changes.filter { it.category != "grade" }
+    val rest = ordinary.filter { it.category != "grade" }
     val ids = grades.flatMap { it.linkIds() }.filter { it.isNotBlank() }.distinct()
     val grouped = SchulnetzChange(
         id = "grades:${ids.sorted().joinToString(",")}",
@@ -172,7 +175,7 @@ fun groupGradeChanges(changes: List<SchulnetzChange>): List<SchulnetzChange> {
         targetIds = ids,
         gradeKeys = grades.flatMap { it.gradeKeys }.filter { it.isNotBlank() }.distinct(),
     )
-    return listOf(grouped) + rest
+    return listOf(grouped) + rest + probes
 }
 
 fun routeNotify(link: NotifyLink, snapshot: SchulnetzSnapshot, zone: ZoneId = ZoneId.of("Europe/Zurich")): NotifyRoute {

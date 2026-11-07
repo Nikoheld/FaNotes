@@ -40,7 +40,11 @@ import ch.fasrv.fanotes.schulnetz.settleGradeNotifications
 import ch.fasrv.fanotes.schulnetz.changeIsHidden
 import ch.fasrv.fanotes.schulnetz.hiddenGradeBody
 import ch.fasrv.fanotes.schulnetz.hiddenGradeTitle
+import ch.fasrv.fanotes.schulnetz.isNotificationProbe
 import ch.fasrv.fanotes.schulnetz.newGradeTargetIds
+import ch.fasrv.fanotes.schulnetz.probeLogLine
+import ch.fasrv.fanotes.schulnetz.probeLogSummary
+import ch.fasrv.fanotes.schulnetz.stampProbeChange
 import ch.fasrv.fanotes.schulnetz.notifyPayload
 import ch.fasrv.fanotes.schulnetz.parseNormalizedSnapshot
 import ch.fasrv.fanotes.schulnetz.prepareGradeNotifications
@@ -136,6 +140,25 @@ object CompanionAlerts {
         return ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     }
 
+    /** Newest delivery-test lines, for the settings screen. Empty when none have been shown. */
+    fun probeSummaries(context: Context, limit: Int = 8): List<String> {
+        val file = java.io.File(context.filesDir, PROBE_LOG)
+        if (!file.isFile) return emptyList()
+        val zone = ZoneId.systemDefault()
+        return runCatching {
+            file.readLines().filter { it.isNotBlank() }.takeLast(limit).reversed().mapNotNull { line ->
+                probeLogSummary(line, zone).ifBlank { null }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun appendProbeLog(context: Context, line: String) {
+        val file = java.io.File(context.filesDir, PROBE_LOG)
+        val kept = runCatching { if (file.isFile) file.readLines() else emptyList() }.getOrDefault(emptyList())
+            .filter { it.isNotBlank() }
+        file.writeText((kept + line).takeLast(40).joinToString("\n") + "\n")
+    }
+
     fun showAll(context: Context, changes: List<SchulnetzChange>, gradeKeysSettled: Boolean = false) {
         val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
         val guess = prefs.getBoolean(CompanionGraph.GUESS_GRADES_PREF, false)
@@ -160,7 +183,7 @@ object CompanionAlerts {
         if (change.category != "settings" && context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE).getBoolean("school-disconnected", false)) return
         if (change.id.isBlank()) return
         if (!notificationsAllowed(context)) return
-        if (!gradeKeysSettled && change.category == "grade") {
+        if (!gradeKeysSettled && change.category == "grade" && !isNotificationProbe(change.id)) {
             val keys = change.gradeKeys.filter { it.isNotBlank() }
             if (keys.isNotEmpty()) {
                 val known = readGradeLedger(context) ?: emptySet()
@@ -178,7 +201,7 @@ object CompanionAlerts {
         val guess = prefs.getBoolean(CompanionGraph.GUESS_GRADES_PREF, false)
         val snapshot = CompanionGraph.snapshotFile(context).takeIf { it.isFile }?.readText()?.let { parseNormalizedSnapshot(it) }
         var shown = change
-        if (guess && change.category == "grade") {
+        if (guess && change.category == "grade" && !isNotificationProbe(change.id)) {
             rememberUnrevealed(context, change.linkIds())
             shown = if (snapshot != null) redactGradeChange(change, snapshot) else change.copy(
                 title = hiddenGradeTitle(change, change.courseId.ifBlank { "einem Fach" }),
@@ -187,6 +210,18 @@ object CompanionAlerts {
             if (shown.linkIds().size > 1) {
                 shown = shown.copy(title = "${shown.linkIds().size} neue Noten – tippen zum Aufdecken", body = "Tippen zum Aufdecken")
             }
+        } else if (guess && change.category == "grade") {
+            shown = if (snapshot != null) redactGradeChange(change, snapshot) else change.copy(
+                title = hiddenGradeTitle(change, change.body.substringBefore(" · ").ifBlank { "einem Fach" }),
+                body = hiddenGradeBody(change.body.substringAfter(" · ").substringBefore(" · ").ifBlank { "Tippen zum Aufdecken" }),
+            )
+        }
+        if (isNotificationProbe(shown.id)) {
+            val storedServer = prefs.getString(PROBE_SERVER_AT, "").orEmpty()
+            val receivedAt = if (storedServer.isNotBlank() && storedServer == shown.serverAt) prefs.getLong(PROBE_RECEIVED_AT, 0L) else 0L
+            val displayedAt = System.currentTimeMillis()
+            shown = stampProbeChange(shown, receivedAt, displayedAt, ZoneId.systemDefault())
+            appendProbeLog(context, probeLogLine(shown, receivedAt, displayedAt))
         }
         val channel = when (shown.category) {
             "grade" -> "schulnetz-grade"
@@ -351,6 +386,9 @@ internal const val SCHOOL_WORK_FAST = "schulnetz-fast"
 internal const val SCHOOL_FALLBACK = "schulnetz-fallback"
 internal const val SCHOOL_WATCH = "schulnetz-fcm-watch"
 internal const val LAST_PUSH_PREF = "last-push-at"
+internal const val PROBE_SERVER_AT = "probe-server-at"
+internal const val PROBE_RECEIVED_AT = "probe-received-at"
+private const val PROBE_LOG = "notification-probe-log.jsonl"
 internal const val SCHOOL_FALLBACK_MS = 6 * 60 * 60_000L
 internal const val FCM_HEALTHY_MS = 12 * 60 * 60_000L
 internal const val WIDGET_WINDOW_MS = 10 * 60_000L
@@ -490,6 +528,16 @@ class CompanionFcmService : FirebaseMessagingService() {
         val app = applicationContext as? CompanionApplication ?: return
         notePushReceived(applicationContext)
         CompanionAlerts.ensureChannels(applicationContext)
+        if (message.data["probe"] == "1") {
+            val serverAt = message.data["serverAt"].orEmpty()
+            if (serverAt.isNotBlank()) {
+                applicationContext.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(PROBE_SERVER_AT, serverAt)
+                    .putLong(PROBE_RECEIVED_AT, System.currentTimeMillis())
+                    .apply()
+            }
+        }
         when (message.data["event"].orEmpty()) {
             "sync" -> runBlocking { withTimeoutOrNull(8_000) { app.graph.pullChangeDelta() } }
             "reauth" -> CompanionAlerts.showReauth(applicationContext)

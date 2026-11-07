@@ -147,6 +147,12 @@
     <string name="delete_this_task">Delete this task?</string>
     <string name="deleted_notes_stay_on_this_device_restoring_adds">Deleted notes stay on this device. Restoring adds them back to your library.</string>
     <string name="delivery">Delivery</string>
+    <string name="delivery_probe_failed">The delivery test could not be sent.</string>
+    <string name="delivery_probe_help">Sends six test notices: a new grade, a changed grade, a moved exam, a cancelled exam, a cancelled lesson and a changed appointment. School records stay unchanged. Each notice starts with Test and includes the date. After you tap, Kanti+ can stay open, move to the background, or be removed from Recents.</string>
+    <string name="delivery_probe_needs_link">Link Kanti+ to the school before a delivery test.</string>
+    <string name="delivery_probe_needs_token">This device is not registered for push yet. Open Kanti+ once on the network, then try again.</string>
+    <string name="delivery_probe_sent">Delivery test handed to Firebase. The notices arrive on the normal push path.</string>
+    <string name="delivery_times">Delivery times</string>
     <string name="details">Details</string>
     <string name="diagnostics">Diagnostics</string>
     <string name="disconnect">Disconnect</string>
@@ -559,6 +565,7 @@
     <string name="see_someone_who_is_that_old_then_reveal">Guess their age from the photo</string>
     <string name="selected_suffix">, selected</string>
     <string name="send_a_test_notification">Send a test notification</string>
+    <string name="send_delivery_probe">Send a delivery test</string>
     <string name="series_noun">series</string>
     <string name="settings">Settings</string>
     <string name="share_an_export_when_troubleshooting_a_school_co">Share an export when troubleshooting a school connection. Exports can contain school content; review who you share them with.</string>

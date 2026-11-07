@@ -602,6 +602,13 @@ class SchulnetzClient(
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
 
+    /** Asks the server to deliver six marked test changes to this device only. Returns the server clock. */
+    fun probePush(session: SchoolAuth, token: String): String {
+        val (code, body) = fanotes("POST", "/push/probe", session, "{\"token\":${escapeJson(token)}}")
+        if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
+        return (parseJson(body) as? JsonValue.Obj)?.string("serverAt").orEmpty()
+    }
+
     fun createGuest(): SchoolAuth {
         val (code, body) = call(
             "POST",
