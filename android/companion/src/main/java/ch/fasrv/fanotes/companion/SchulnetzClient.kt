@@ -5,6 +5,7 @@ import ch.fasrv.fanotes.json.escapeJson
 import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.schulnetz.AKSA_SCHULNETZ_BASE
 import ch.fasrv.fanotes.schulnetz.NotifySettings
+import ch.fasrv.fanotes.schulnetz.notifySettingsFromStored
 import ch.fasrv.fanotes.schulnetz.SCHULNETZ_API_PATH
 import ch.fasrv.fanotes.schulnetz.SCHULNETZ_CLIENT_ID
 import ch.fasrv.fanotes.schulnetz.SCHULNETZ_REFERER
@@ -585,7 +586,27 @@ class SchulnetzClient(
     }
 
     fun saveSettings(session: SchoolAuth, settings: NotifySettings) {
-        val payload = """{"grades":${settings.grades},"timetable":${settings.timetable},"exams":${settings.exams},"absences":${settings.absences},"events":${settings.events},"deadlines":${settings.deadlines},"guessGrades":${settings.guessGrades}}"""
+        val payload = buildString {
+            append("{\"enabled\":").append(settings.enabled)
+            append(",\"grades\":").append(settings.grades)
+            append(",\"gradeNew\":").append(settings.gradeNew)
+            append(",\"gradeChanged\":").append(settings.gradeChanged)
+            append(",\"timetable\":").append(settings.timetable)
+            append(",\"lessonCancelled\":").append(settings.lessonCancelled)
+            append(",\"lessonChanged\":").append(settings.lessonChanged)
+            append(",\"exams\":").append(settings.exams)
+            append(",\"examNew\":").append(settings.examNew)
+            append(",\"examMoved\":").append(settings.examMoved)
+            append(",\"examCancelled\":").append(settings.examCancelled)
+            append(",\"examRoom\":").append(settings.examRoom)
+            append(",\"absences\":").append(settings.absences)
+            append(",\"events\":").append(settings.events)
+            append(",\"appointmentNew\":").append(settings.appointmentNew)
+            append(",\"messageNew\":").append(settings.messageNew)
+            append(",\"deadlines\":").append(settings.deadlines)
+            append(",\"guessGrades\":").append(settings.guessGrades)
+            append('}')
+        }
         val (code, body) = fanotes("PUT", "/settings", session, payload)
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
@@ -767,6 +788,16 @@ class SchulnetzClient(
         return parsed?.takeIf { it.isNotBlank() && it.length < 240 } ?: "Anfrage fehlgeschlagen ($status)."
     }
 
+    private fun storedAlertFlags(settings: JsonValue.Obj?): Map<String, Boolean> {
+        if (settings == null) return emptyMap()
+        return buildMap {
+            for (name in ALERT_SETTING_NAMES) {
+                val value = settings.bool(name) ?: continue
+                put(name, value)
+            }
+        }
+    }
+
     private fun parseStatus(body: String): SchulnetzLinkState {
         val obj = parseJson(body) as? JsonValue.Obj ?: return SchulnetzLinkState()
         val settings = obj.obj("settings")
@@ -782,19 +813,16 @@ class SchulnetzClient(
             topic = push?.string("topic").orEmpty(),
             pushServer = push?.string("server").orEmpty(),
             pushUrl = push?.string("url").orEmpty(),
-            settings = NotifySettings(
-                grades = settings?.bool("grades") != false,
-                timetable = settings?.bool("timetable") != false,
-                exams = settings?.bool("exams") != false,
-                absences = settings?.bool("absences") != false,
-                events = settings?.bool("events") != false,
-                deadlines = settings?.bool("deadlines") != false,
-                guessGrades = settings?.bool("guessGrades") == true,
-            ),
+            settings = notifySettingsFromStored(storedAlertFlags(settings)),
         )
     }
 
     companion object {
         const val CLIENT_ID = SCHULNETZ_CLIENT_ID
+        private val ALERT_SETTING_NAMES = listOf(
+            "enabled", "grades", "gradeNew", "gradeChanged", "timetable", "lessonCancelled", "lessonChanged",
+            "exams", "examNew", "examMoved", "examCancelled", "examRoom", "absences", "events",
+            "appointmentNew", "messageNew", "deadlines", "guessGrades",
+        )
     }
 }

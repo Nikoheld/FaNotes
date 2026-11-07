@@ -18,6 +18,7 @@ import ch.fasrv.fanotes.desk.HomeworkTask
 import ch.fasrv.fanotes.desk.emptyCalendar
 import ch.fasrv.fanotes.ink.InkDocument
 import ch.fasrv.fanotes.schulnetz.DiagnosticTrace
+import ch.fasrv.fanotes.schulnetz.diagnosticAlertStatus
 import ch.fasrv.fanotes.schulnetz.AgendaEvent
 import ch.fasrv.fanotes.schulnetz.CollectiveGrade
 import ch.fasrv.fanotes.schulnetz.DeskPrefs
@@ -29,6 +30,7 @@ import ch.fasrv.fanotes.schulnetz.HiddenLesson
 import ch.fasrv.fanotes.schulnetz.HypotheticalGrade
 import ch.fasrv.fanotes.schulnetz.OwnGrade
 import ch.fasrv.fanotes.schulnetz.NotifySettings
+import ch.fasrv.fanotes.schulnetz.aligned
 import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
 import ch.fasrv.fanotes.schulnetz.hideOnce
 import ch.fasrv.fanotes.schulnetz.hideSeries
@@ -545,15 +547,33 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
 
     fun toggleSetting(name: String) {
-        val next = when (name) {
-            "grades" -> settings.copy(grades = !settings.grades)
-            "timetable" -> settings.copy(timetable = !settings.timetable)
-            "exams" -> settings.copy(exams = !settings.exams)
+        val flipped = when (name) {
+            "enabled" -> settings.copy(enabled = !settings.enabled)
+            "gradeNew" -> settings.copy(gradeNew = !settings.gradeNew)
+            "gradeChanged" -> settings.copy(gradeChanged = !settings.gradeChanged)
+            "lessonCancelled" -> settings.copy(lessonCancelled = !settings.lessonCancelled)
+            "lessonChanged" -> settings.copy(lessonChanged = !settings.lessonChanged)
+            "examNew" -> settings.copy(examNew = !settings.examNew)
+            "examMoved" -> settings.copy(examMoved = !settings.examMoved)
+            "examCancelled" -> settings.copy(examCancelled = !settings.examCancelled)
+            "examRoom" -> settings.copy(examRoom = !settings.examRoom)
+            "appointmentNew" -> settings.copy(appointmentNew = !settings.appointmentNew)
+            "messageNew" -> settings.copy(messageNew = !settings.messageNew)
             "absences" -> settings.copy(absences = !settings.absences)
             "deadlines" -> settings.copy(deadlines = !settings.deadlines)
             "guessGrades" -> settings.copy(guessGrades = !settings.guessGrades)
-            else -> settings.copy(events = !settings.events)
+            "grades" -> settings.copy(gradeNew = !settings.grades, gradeChanged = !settings.grades)
+            "timetable" -> settings.copy(lessonCancelled = !settings.timetable, lessonChanged = !settings.timetable)
+            "exams" -> settings.copy(
+                examNew = !settings.exams,
+                examMoved = !settings.exams,
+                examCancelled = !settings.exams,
+                examRoom = !settings.exams,
+            )
+            "events" -> settings.copy(appointmentNew = !settings.events, messageNew = !settings.events)
+            else -> return
         }
+        val next = flipped.aligned()
         settings = next
         graph.setNotifySettings(next)
         if (next.guessGrades) refreshUnrevealed() else revealQueue = emptyList()
@@ -789,6 +809,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             "Konflikte: ${state.conflicts.size}",
             "Modus: ${if (diagnosticOn) "an" else "aus"}",
             "Szenario: ${diagnosticScenario.id()}",
+            diagnosticAlertStatus(settings),
         )
         return ch.fasrv.fanotes.schulnetz.diagnosticReport(
             "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",

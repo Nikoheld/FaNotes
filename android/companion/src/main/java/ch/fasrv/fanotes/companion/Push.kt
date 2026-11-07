@@ -30,7 +30,11 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
+import ch.fasrv.fanotes.schulnetz.AlertGate
 import ch.fasrv.fanotes.schulnetz.DiagnosticTrace
+import ch.fasrv.fanotes.schulnetz.NotifyPrefs
+import ch.fasrv.fanotes.schulnetz.notifySettingsFromPrefs
+import ch.fasrv.fanotes.schulnetz.schoolAlertGate
 import ch.fasrv.fanotes.schulnetz.SchoolGrade
 import ch.fasrv.fanotes.schulnetz.SchulnetzChange
 import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
@@ -197,6 +201,14 @@ object CompanionAlerts {
         if (change.category != "settings" && context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE).getBoolean("school-disconnected", false)) return
         if (change.id.isBlank()) return
         if (!notificationsAllowed(context)) return
+        // Preference filter before the notice is posted. A disabled alert is not shown and then cancelled.
+        val stored = context.getSharedPreferences(NotifyPrefs.FILE, Context.MODE_PRIVATE)
+        val gate = schoolAlertGate(
+            notifySettingsFromPrefs(present = { stored.contains(it) }, read = { stored.getBoolean(it, false) }),
+            change,
+            notificationsPermitted = true,
+        )
+        if (gate != AlertGate.DELIVER) return
         if (!gradeKeysSettled && change.category == "grade" && !isNotificationProbe(change.id)) {
             val keys = change.gradeKeys.filter { it.isNotBlank() }
             if (keys.isNotEmpty()) {
@@ -566,6 +578,7 @@ class CompanionFcmService : FirebaseMessagingService() {
             DiagnosticTrace.record("push", "receipt", 0, "ok", detail)
         }
         when (message.data["event"].orEmpty()) {
+            // Data-only message. Foreground and background both reach pullChangeDelta, which filters before display.
             "sync" -> runBlocking { withTimeoutOrNull(8_000) { app.graph.pullChangeDelta() } }
             "reauth" -> CompanionAlerts.showReauth(applicationContext)
             "test" -> CompanionAlerts.showTest(applicationContext)

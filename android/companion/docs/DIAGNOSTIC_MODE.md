@@ -16,10 +16,15 @@ Remote scenarios use `POST /api/v1/schulnetz/push/probe`. The app does not post 
 | Standard delivery | The six remote notices: new grade, changed grade, moved exam, cancelled exam, cancelled lesson, changed appointment. |
 | Duplicate event | Appends the first notice again with the same id. The app drops the second one and can record `duplicate dropped`. |
 | Out of order | Reverses the list. `serverAt` stays the same on every row, so the receipt clock still matches. |
+| Alert switches | Local preview of the saved school-alert switches. Each real kind is marked on or off. It does not post a notice and does not write the snapshot. Changed and cancelled appointments are not listed, because the diff does not emit them. |
+
+The alert preview reads the same switches as Settings → Notifications. Remote push, an open app, and the six-hour fallback use that decision before a notice is posted. A disabled kind is not shown and then cancelled. Delivery probes stay available when a school switch is off, so a delivery measurement is still possible. The Android notification permission is separate: a denied permission posts nothing and does not clear the switches. Hidden grades follow their own switch.
 
 ## Limits
 
-- Firebase is not asked to hold a message. Delivery latency is the existing Server, Empfangen, and Angezeigt clocks.
+- Firebase is not asked to hold a message. Delivery latency is the existing Server, Empfangen, and Angezeigt clocks. Foreground and background delivery use the same data message and the same filter. This repository cannot measure that path on a phone.
+- Until `schulnetz-logic.mjs` and `schulnetz-api.mjs` from this change are deployed, the live poller does not know `enabled` or the fine switches. It still honours the older category booleans. A master switch that is off while those categories stay on does not stop server push until that deploy. The phone still filters before display. An older server that drops unknown settings keys behaves the same way.
+- Turning alerts off does not stop the school snapshot. The poller and the phone still save it. The change list and the push are what get skipped.
 - The local preview is not the live Heute, Planer, or Noten screen.
 - Reset on the phone clears the local trace, the chosen scenario, the delivery-time list, and probe ids in the seen set. It then asks `POST /push/probe/clear` to delete `probe:` rows for this account. That server step can fail; the message says so. Revision, snapshot, grade ledger, and notification baseline stay.
 - Probe and clear each allow 5 calls per account per hour. An unknown scenario uses a probe slot and returns 400.

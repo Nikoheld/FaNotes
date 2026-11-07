@@ -1013,8 +1013,112 @@ export const isSummaryGrade = (grade) => isSummaryGradeTitle(grade?.title)
 
 export const withoutSummaryGrades = (grades) => (grades || []).filter((grade) => !isSummaryGrade(grade))
 
+const ALERT_PARENT = {
+  'grade-new': 'grades',
+  'grade-changed': 'grades',
+  'lesson-cancelled': 'timetable',
+  'lesson-changed': 'timetable',
+  'exam-new': 'exams',
+  'exam-moved': 'exams',
+  'exam-cancelled': 'exams',
+  'exam-room': 'exams',
+  'exam-other': 'exams',
+  'appointment-new': 'events',
+  'message-new': 'events',
+  'absence-new': 'absences',
+  deadline: 'deadlines',
+}
+
+const ALERT_FINE = {
+  'grade-new': 'gradeNew',
+  'grade-changed': 'gradeChanged',
+  'lesson-cancelled': 'lessonCancelled',
+  'lesson-changed': 'lessonChanged',
+  'exam-new': 'examNew',
+  'exam-moved': 'examMoved',
+  'exam-cancelled': 'examCancelled',
+  'exam-room': 'examRoom',
+  'appointment-new': 'appointmentNew',
+  'message-new': 'messageNew',
+}
+
+/** Real school-alert kind. Blank for probes, tests, and categories this diff does not emit. */
+export const notifyAlertKind = (change) => {
+  const category = String(change?.category || '')
+  const title = String(change?.title || '')
+  if (category === 'grade') return /änderung|aenderung/iu.test(title) ? 'grade-changed' : 'grade-new'
+  if (category === 'exam') {
+    if (title === 'Neue Prüfung') return 'exam-new'
+    if (title === 'Prüfung verschoben') return 'exam-moved'
+    if (title === 'Prüfung fällt aus' || title === 'Prüfung entfällt') return 'exam-cancelled'
+    if (title === 'Raum geändert') return 'exam-room'
+    return 'exam-other'
+  }
+  if (category === 'timetable') {
+    if (title === 'Lektion fällt aus' || title === 'Lektion entfernt') return 'lesson-cancelled'
+    return 'lesson-changed'
+  }
+  if (category === 'event') return title === 'Neuer Termin' ? 'appointment-new' : 'message-new'
+  if (category === 'absence') return 'absence-new'
+  if (category === 'deadline') return 'deadline'
+  return ''
+}
+
+/**
+ * Fills an older stored settings object. A missing fine switch follows its
+ * category. A missing master switch stays on. Hidden grades stay off.
+ * An older server that ignores unknown keys never sees `enabled`.
+ */
+export const resolvedAlertSettings = (stored = {}) => {
+  const source = stored && typeof stored === 'object' ? stored : {}
+  const parent = (name) => source[name] !== false
+  const grades = parent('grades')
+  const timetable = parent('timetable')
+  const exams = parent('exams')
+  const events = parent('events')
+  const fine = (name, fallback) => (typeof source[name] === 'boolean' ? source[name] : fallback)
+  return {
+    enabled: source.enabled !== false,
+    grades,
+    gradeNew: fine('gradeNew', grades),
+    gradeChanged: fine('gradeChanged', grades),
+    timetable,
+    lessonCancelled: fine('lessonCancelled', timetable),
+    lessonChanged: fine('lessonChanged', timetable),
+    exams,
+    examNew: fine('examNew', exams),
+    examMoved: fine('examMoved', exams),
+    examCancelled: fine('examCancelled', exams),
+    examRoom: fine('examRoom', exams),
+    absences: parent('absences'),
+    events,
+    appointmentNew: fine('appointmentNew', events),
+    messageNew: fine('messageNew', events),
+    deadlines: parent('deadlines'),
+    guessGrades: source.guessGrades === true,
+  }
+}
+
+/**
+ * A missing fine flag follows the older category switch. `enabled: false` blocks
+ * every school alert. Delivery probes stay visible because the user asked for them.
+ */
+export const alertAllowed = (settings = {}, change) => {
+  if (isNotificationProbe(change?.id)) return true
+  if (settings?.enabled === false) return false
+  const kind = notifyAlertKind(change)
+  if (!kind) return true
+  const parent = ALERT_PARENT[kind]
+  if (parent && settings?.[parent] === false) return false
+  const fine = ALERT_FINE[kind]
+  if (fine && settings?.[fine] === false) return false
+  return true
+}
+
 export const diffSnapshots = (previous, next, settings = {}, today = zurichToday()) => {
   if (!previous) return []
+  // Master off: do not build rows. The caller still stores the snapshot.
+  if (settings?.enabled === false) return []
   const freshWeeks = introducedWeeks(previous, next)
   previous = { ...previous, grades: withoutSummaryGrades(previous.grades) }
   next = { ...next, grades: withoutSummaryGrades(next.grades) }
@@ -1071,7 +1175,7 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
       }))
     }
   }
-  return deduped(changes)
+  return deduped(changes).filter((change) => alertAllowed(settings, change))
 }
 
 /**

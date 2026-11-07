@@ -110,6 +110,39 @@ class DiagnosticModeTest {
     }
 
     @Test
+    fun alertPreviewFollowsEachSwitchAndDoesNotInventAChangedAppointment() {
+        val grade = SchoolGrade("real", "Mathematik", "m1", "Mathematik", "Probe", "2026-11-01", 5.5, 1.0, true, null, "")
+        val stored = SchulnetzSnapshot(grades = listOf(grade), fetchedAt = "2026-11-07T12:00:00Z")
+        val settings = NotifySettings(gradeNew = false, examRoom = false, guessGrades = true, enabled = true)
+        val lines = diagnosticPreview(DiagnosticScenario.ALERTS, zone, day, settings)
+        assertEquals(DiagnosticScenario.ALERTS, DiagnosticScenario.fromId("alerts"))
+        assertTrue(lines.all { it.title.startsWith("Simulation:") })
+        assertEquals("aus", lines.first { it.title.contains("Neue Noten") }.detail)
+        assertEquals("an", lines.first { it.title.contains("Notenänderungen") }.detail)
+        assertEquals("aus", lines.first { it.title.contains("Raumänderung bei Prüfungen") }.detail)
+        assertEquals("an", lines.first { it.title.contains("Neue Termine") }.detail)
+        assertTrue(lines.none { it.title.contains("Termin geändert") || it.title.contains("Termin abgesagt") })
+        assertTrue(lines.first { it.title.contains("Zustelltest") }.detail.contains("ignoriert"))
+        assertTrue(lines.first { it.title.contains("Vordergrund") }.detail.contains("gleiche Prüfung"))
+        assertTrue(lines.first { it.title.contains("Noten verstecken") }.detail.startsWith("an"))
+        assertTrue(lines.first { it.title.contains("Hauptschalter") }.detail.startsWith("an"))
+        val joined = lines.joinToString("\n") { "${it.title} ${it.detail}" }
+        assertFalse(joined.contains("5.5"))
+        assertEquals(1, stored.grades.size)
+        assertEquals(5.5, stored.grades[0].mark)
+        val masterOff = diagnosticPreview(DiagnosticScenario.ALERTS, zone, day, NotifySettings(enabled = false, guessGrades = true))
+        assertTrue(masterOff.first { it.title.contains("Hauptschalter") }.detail.startsWith("aus"))
+        assertTrue(masterOff.filter { it.title.contains("Neue Noten") || it.title.contains("Neue Termine") }.all { it.detail == "aus" })
+        assertTrue(masterOff.first { it.title.contains("Zustelltest") }.detail.contains("an"))
+        assertTrue(masterOff.first { it.title.contains("Noten verstecken") }.detail.startsWith("an"))
+        val status = diagnosticAlertStatus(settings)
+        assertTrue(status.contains("Schulmeldungen: an"))
+        assertTrue(status.contains("neue Noten"))
+        assertTrue(status.contains("Noten verstecken: an"))
+        assertFalse(status.contains("5.5"))
+    }
+
+    @Test
     fun statePreviewDoesNotClaimARealSessionChange() {
         val lines = diagnosticPreview(DiagnosticScenario.STATES, zone, day).joinToString("\n") { it.detail }
         assertTrue(lines.contains("nicht abgemeldet"))

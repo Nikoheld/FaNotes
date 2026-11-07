@@ -3,6 +3,113 @@ package ch.fasrv.fanotes.schulnetz
 import java.time.LocalDate
 import kotlin.math.round
 
+private val alertParent = mapOf(
+    "grade-new" to "grades",
+    "grade-changed" to "grades",
+    "lesson-cancelled" to "timetable",
+    "lesson-changed" to "timetable",
+    "exam-new" to "exams",
+    "exam-moved" to "exams",
+    "exam-cancelled" to "exams",
+    "exam-room" to "exams",
+    "exam-other" to "exams",
+    "appointment-new" to "events",
+    "message-new" to "events",
+    "absence-new" to "absences",
+    "deadline" to "deadlines",
+)
+
+/** Real school-alert kind. Blank for probes, tests, and categories this diff does not emit. */
+fun notifyAlertKind(change: SchulnetzChange): String {
+    val title = change.title
+    return when (change.category) {
+        "grade" -> if (Regex("änderung|aenderung", RegexOption.IGNORE_CASE).containsMatchIn(title)) "grade-changed" else "grade-new"
+        "exam" -> when (title) {
+            "Neue Prüfung" -> "exam-new"
+            "Prüfung verschoben" -> "exam-moved"
+            "Prüfung fällt aus", "Prüfung entfällt" -> "exam-cancelled"
+            "Raum geändert" -> "exam-room"
+            else -> "exam-other"
+        }
+        "timetable" -> if (title == "Lektion fällt aus" || title == "Lektion entfernt") "lesson-cancelled" else "lesson-changed"
+        "event" -> if (title == "Neuer Termin") "appointment-new" else "message-new"
+        "absence" -> "absence-new"
+        "deadline" -> "deadline"
+        else -> ""
+    }
+}
+
+/**
+ * A missing caller that leaves a fine flag at its default still follows the
+ * category switch. The master switch blocks every school alert. Probes stay.
+ */
+fun alertAllowed(settings: NotifySettings, change: SchulnetzChange): Boolean {
+    if (isNotificationProbe(change.id)) return true
+    if (!settings.enabled) return false
+    val kind = notifyAlertKind(change)
+    if (kind.isEmpty()) return true
+    val parentOn = when (alertParent[kind]) {
+        "grades" -> settings.grades
+        "timetable" -> settings.timetable
+        "exams" -> settings.exams
+        "events" -> settings.events
+        "absences" -> settings.absences
+        "deadlines" -> settings.deadlines
+        else -> true
+    }
+    if (!parentOn) return false
+    return when (kind) {
+        "grade-new" -> settings.gradeNew
+        "grade-changed" -> settings.gradeChanged
+        "lesson-cancelled" -> settings.lessonCancelled
+        "lesson-changed" -> settings.lessonChanged
+        "exam-new" -> settings.examNew
+        "exam-moved" -> settings.examMoved
+        "exam-cancelled" -> settings.examCancelled
+        "exam-room" -> settings.examRoom
+        "appointment-new" -> settings.appointmentNew
+        "message-new" -> settings.messageNew
+        else -> true
+    }
+}
+
+/** Login and the local test button are not school-event switches. */
+fun keepsAlertDespiteSwitches(change: SchulnetzChange): Boolean {
+    if (change.id == "schulnetz-login-required" || change.id == "push-test") return true
+    return change.category == "settings"
+}
+
+/**
+ * Decision used before a notice is posted. Remote push, an open app, and the
+ * fallback check all use it. A disabled switch is not a notice that is shown
+ * and then cancelled. Android permission is a separate gate and does not
+ * rewrite the stored switches.
+ */
+enum class AlertGate { DELIVER, PREFERENCE, PERMISSION }
+
+fun schoolAlertGate(settings: NotifySettings, change: SchulnetzChange, notificationsPermitted: Boolean): AlertGate {
+    if (!keepsAlertDespiteSwitches(change) && !alertAllowed(settings, change)) return AlertGate.PREFERENCE
+    if (!notificationsPermitted) return AlertGate.PERMISSION
+    return AlertGate.DELIVER
+}
+
+/** One representative school change for each kind the diff can emit. */
+fun sampleSchoolAlert(kind: String): SchulnetzChange = when (kind) {
+    "grade-new" -> SchulnetzChange("grade:g1", "grade", "Neue Note", "Mathematik")
+    "grade-changed" -> SchulnetzChange("grade:g1", "grade", "Notenänderung", "Mathematik")
+    "lesson-cancelled" -> SchulnetzChange("lesson:e1", "timetable", "Lektion fällt aus", "Mathematik")
+    "lesson-changed" -> SchulnetzChange("lesson:e1", "timetable", "Stundenplan geändert", "Mathematik")
+    "exam-new" -> SchulnetzChange("exam:x", "exam", "Neue Prüfung", "Mathematik")
+    "exam-moved" -> SchulnetzChange("exam:x", "exam", "Prüfung verschoben", "Mathematik")
+    "exam-cancelled" -> SchulnetzChange("exam:x", "exam", "Prüfung fällt aus", "Mathematik")
+    "exam-room" -> SchulnetzChange("exam:x", "exam", "Raum geändert", "Mathematik")
+    "appointment-new" -> SchulnetzChange("event:t1", "event", "Neuer Termin", "Elternabend")
+    "message-new" -> SchulnetzChange("event:m1", "event", "Neue Mitteilung", "Hinweis")
+    "absence-new" -> SchulnetzChange("absence:a1", "absence", "Neue Absenz", "Deutsch")
+    "deadline" -> SchulnetzChange("deadline:a1:2026-11-08", "deadline", "Entschuldigung läuft ab", "Deutsch")
+    else -> SchulnetzChange("other", "home", "Hinweis", "")
+}
+
 /**
  * Difference between two normalised snapshots.
  * The first snapshot after linking produces no notifications, so a fresh login
@@ -16,6 +123,8 @@ fun diffSnapshots(
     today: LocalDate = LocalDate.now(),
 ): List<SchulnetzChange> {
     if (previous == null) return emptyList()
+    // The master switch drops the diff before any row is built. Callers still store the snapshot.
+    if (!settings.enabled) return emptyList()
     val freshWeeks = introducedWeeks(previous, next)
     val changes = mutableListOf<SchulnetzChange>()
     if (settings.grades) diffGrades(previous.grades.withoutSummaryGrades(), next.grades.withoutSummaryGrades(), changes)
@@ -89,7 +198,7 @@ fun diffSnapshots(
             )
         }
     }
-    return deduped(changes)
+    return deduped(changes).filter { alertAllowed(settings, it) }
 }
 
 private fun diffGrades(previous: List<SchoolGrade>, next: List<SchoolGrade>, changes: MutableList<SchulnetzChange>) {

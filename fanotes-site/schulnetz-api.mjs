@@ -13,6 +13,7 @@ import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
 import {
   applyEventWindow,
   diffSnapshots,
+  resolvedAlertSettings,
   prepareAgendaRead,
   isLesson,
   isExamLike,
@@ -54,7 +55,26 @@ const SCHOOL_FILES = ['link.json', 'snapshot.json', 'notified-grades.json', 'cha
 const GUEST_LIMIT = 30
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 const REFERER = 'https://schulnetz.web.app/'
-const DEFAULT_SETTINGS = Object.freeze({ grades: true, timetable: true, exams: true, absences: true, events: true, deadlines: true, guessGrades: false })
+const DEFAULT_SETTINGS = Object.freeze({
+  enabled: true,
+  grades: true,
+  gradeNew: true,
+  gradeChanged: true,
+  timetable: true,
+  lessonCancelled: true,
+  lessonChanged: true,
+  exams: true,
+  examNew: true,
+  examMoved: true,
+  examCancelled: true,
+  examRoom: true,
+  absences: true,
+  events: true,
+  appointmentNew: true,
+  messageNew: true,
+  deadlines: true,
+  guessGrades: false,
+})
 const COOKIE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000
 const SSO_HOSTS = new Set(['login.microsoftonline.com', 'login.microsoft.com', 'login.live.com', 'login.windows.net'])
 const SSO_COOKIE_NAMES = new Set(['ESTSAUTH', 'ESTSAUTHPERSISTENT', 'ESTSAUTHLIGHT', 'SignInStateCookie', 'x-ms-RefreshTokenCredential'])
@@ -660,6 +680,7 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 
   const publishChanges = async (accountId, link, changes, revision, grades = []) => {
+    // No allowed school alert means no row and no push. Callers still save the snapshot.
     const ledger = await readGradeLedger(accountId)
     const settled = settleGradeNotifications(changes, grades, ledger)
     await writeGradeLedger(accountId, settled.keys)
@@ -677,7 +698,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     const read = prepareAgendaRead(stored?.version === 1 ? stored.weeks || {} : {}, snapshot)
     // Durable before any diff/push; a crash cannot turn an imported week into a second first read.
     await writeJson(path, { version: 1, weeks: read.weeks })
-    return diffSnapshots(previous ? { ...previous, events: read.before.events.filter(isLesson).concat((previous.events || []).filter((event) => !isLesson(event) && !isExamLike(event))), exams: read.before.exams } : null, snapshot, settings)
+    return diffSnapshots(previous ? { ...previous, events: read.before.events.filter(isLesson).concat((previous.events || []).filter((event) => !isLesson(event) && !isExamLike(event))), exams: read.before.exams } : null, snapshot, resolvedAlertSettings(settings))
   }
 
   const accountStillExists = options.syncAccountExists || syncAccountExists
