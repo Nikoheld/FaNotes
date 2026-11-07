@@ -30,6 +30,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
+import ch.fasrv.fanotes.schulnetz.DiagnosticTrace
 import ch.fasrv.fanotes.schulnetz.SchoolGrade
 import ch.fasrv.fanotes.schulnetz.SchulnetzChange
 import ch.fasrv.fanotes.schulnetz.SchulnetzSnapshot
@@ -152,6 +153,19 @@ object CompanionAlerts {
         }.getOrDefault(emptyList())
     }
 
+    /** Removes local probe receipts. School cache, sessions and ordinary notification ids stay. */
+    fun clearProbeState(context: Context) {
+        java.io.File(context.filesDir, PROBE_LOG).delete()
+        val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
+        val seen = prefs.getStringSet(SEEN, emptySet()).orEmpty()
+        val kept = seen.filterNot { it.startsWith("probe:") }.toSet()
+        prefs.edit()
+            .remove(PROBE_SERVER_AT)
+            .remove(PROBE_RECEIVED_AT)
+            .putStringSet(SEEN, kept)
+            .apply()
+    }
+
     private fun appendProbeLog(context: Context, line: String) {
         val file = java.io.File(context.filesDir, PROBE_LOG)
         val kept = runCatching { if (file.isFile) file.readLines() else emptyList() }.getOrDefault(emptyList())
@@ -191,7 +205,12 @@ object CompanionAlerts {
                 writeGradeLedger(context, known + keys)
             }
         }
-        if (!remember(context, change.id)) return
+        if (!remember(context, change.id)) {
+            if (isNotificationProbe(change.id)) {
+                DiagnosticTrace.record("push", "duplicate", 0, "dropped", change.correlation.ifBlank { "probe" })
+            }
+            return
+        }
         val hidden = runCatching {
             val file = java.io.File(context.filesDir, "vault/${CompanionGraph.HIDDEN_PATH}")
             if (!file.isFile) emptyList() else parseHiddenLessons(file.readText())
@@ -222,6 +241,11 @@ object CompanionAlerts {
             val displayedAt = System.currentTimeMillis()
             shown = stampProbeChange(shown, receivedAt, displayedAt, ZoneId.systemDefault())
             appendProbeLog(context, probeLogLine(shown, receivedAt, displayedAt))
+            val mark = buildString {
+                append(shown.correlation.ifBlank { "probe" })
+                if (shown.sequence > 0) append(" #").append(shown.sequence)
+            }
+            DiagnosticTrace.record("push", "display", 0, "ok", mark)
         }
         val channel = when (shown.category) {
             "grade" -> "schulnetz-grade"
@@ -537,6 +561,9 @@ class CompanionFcmService : FirebaseMessagingService() {
                     .putLong(PROBE_RECEIVED_AT, System.currentTimeMillis())
                     .apply()
             }
+            val correlation = message.data["correlation"].orEmpty()
+            val detail = if (correlation.matches(Regex("^probe:[0-9]{1,20}$"))) correlation else "probe"
+            DiagnosticTrace.record("push", "receipt", 0, "ok", detail)
         }
         when (message.data["event"].orEmpty()) {
             "sync" -> runBlocking { withTimeoutOrNull(8_000) { app.graph.pullChangeDelta() } }

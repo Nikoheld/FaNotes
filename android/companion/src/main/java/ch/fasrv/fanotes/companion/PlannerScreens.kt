@@ -37,6 +37,24 @@ import java.time.*
 import kotlinx.coroutines.delay
 
 @Composable
+/** Times Heute and Planer on the main thread. Recording stays off until diagnostic mode is on. */
+private inline fun <T> traceAgenda(name: String, block: () -> T): T {
+    if (!DiagnosticTrace.enabled) return block()
+    val main = android.os.Looper.myLooper() == android.os.Looper.getMainLooper()
+    val started = System.nanoTime()
+    return try {
+        val value = DiagnosticTrace.span("tab", name, block)
+        if (main) {
+            val elapsed = (System.nanoTime() - started) / 1_000_000L
+            if (elapsed >= DiagnosticTrace.STALL_MS) DiagnosticTrace.record("main", name, elapsed, "slow")
+        }
+        value
+    } catch (error: Throwable) {
+        if (main) DiagnosticTrace.record("main", name, (System.nanoTime() - started) / 1_000_000L, "error", error.javaClass.simpleName)
+        throw error
+    }
+}
+
 fun rememberNow(): Instant {
     val now by produceState(Instant.now()) { while (true) { delay(30_000); value = Instant.now() } }
     return now
@@ -50,7 +68,9 @@ fun TodayScreen(model: CompanionModel) {
     val sync by model.graph.engine.state.collectAsStateWithLifecycle()
     val cards = shownTodayCards(model.desk)
     val agenda = remember(model.snapshot, model.calendar, model.tasks, model.hidden, today) {
-        agendaForDays((0L..14L).map { today.plusDays(it) }, model.snapshot, model.calendar, model.tasks, model.hidden, zone).values.flatten()
+        traceAgenda("today") {
+            agendaForDays((0L..14L).map { today.plusDays(it) }, model.snapshot, model.calendar, model.tasks, model.hidden, zone).values.flatten()
+        }
     }
     val next = if ("lessons" in cards) nextCommitment(agenda, now, zone) else null
     val urgent = sortHomeworkTasks(model.tasks.filter { !it.done }).sortedBy { when (taskBucket(it, today)) { "Overdue" -> 0; "Today" -> 1; "Upcoming" -> 2; else -> 3 } }
@@ -167,7 +187,9 @@ private fun ScheduleScreen(model: CompanionModel) {
     val today = rememberNow().atZone(zone).toLocalDate()
     val days = schoolWeek(model.day, true)
     val agenda = remember(model.day, model.snapshot, model.calendar, model.tasks, model.hidden) {
-        agendaForDays(days, model.snapshot, model.calendar, model.tasks, model.hidden, zone)
+        traceAgenda("schedule") {
+            agendaForDays(days, model.snapshot, model.calendar, model.tasks, model.hidden, zone)
+        }
     }
     val listState = rememberLazyListState()
     val dayKey = model.day.toString()

@@ -60,6 +60,8 @@ fun probeLogLine(change: SchulnetzChange, receivedAtMillis: Long, displayedAtMil
     append(",\"serverAt\":").append(escapeJson(change.serverAt))
     append(",\"receivedAt\":").append(receivedAtMillis)
     append(",\"displayedAt\":").append(displayedAtMillis)
+    append(",\"correlation\":").append(escapeJson(change.correlation))
+    append(",\"sequence\":").append(change.sequence)
     append('}')
 }
 
@@ -67,9 +69,13 @@ fun probeLogSummary(line: String, zone: ZoneId): String {
     val obj = runCatching { parseJson(line) as? JsonValue.Obj }.getOrNull() ?: return ""
     val title = obj.string("title").orEmpty().ifBlank { obj.string("id").orEmpty().substringAfterLast(':') }
     val date = formatProbeDay(obj.string("date").orEmpty())
+    val sequence = obj.double("sequence")?.toInt() ?: 0
+    val correlation = obj.string("correlation").orEmpty().takeIf { it.startsWith("probe:") }.orEmpty()
     val parts = listOf(
         title,
         date,
+        if (sequence > 0) "Folge $sequence" else "",
+        correlation,
         probeClockLabel(obj.string("serverAt").orEmpty(), zone).let { if (it.isBlank()) "" else "Server $it" },
         obj.double("receivedAt")?.toLong()?.let { probeClockLabel(it, zone) }?.let { if (it.isBlank()) "" else "Empfangen $it" }.orEmpty(),
         obj.double("displayedAt")?.toLong()?.let { probeClockLabel(it, zone) }?.let { if (it.isBlank()) "" else "Angezeigt $it" }.orEmpty(),

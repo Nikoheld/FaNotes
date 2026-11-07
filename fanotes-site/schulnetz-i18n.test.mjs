@@ -15,6 +15,7 @@ test('missing or German Accept-Language keeps Schulnetz copy in German', () => {
 test('English Accept-Language translates Schulnetz errors and change text', () => {
   assert.equal(schulnetzLanguage({ headers: { 'accept-language': 'en-US,en;q=0.8' } }), 'en')
   assert.equal(localizeSchulnetzText('Neue Prüfung', 'en'), 'New exam')
+  assert.equal(localizeSchulnetzText('Dieses Testszenario gibt es nicht.', 'en'), 'This test scenario does not exist.')
   assert.equal(localizeSchulnetzText('3 neue Noten – tippen zum Aufdecken', 'en'), '3 new grades – tap to reveal')
   const payload = localizeSchulnetzPayload({
     error: 'Schulnetz ist noch nicht verbunden.',
