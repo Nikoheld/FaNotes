@@ -18,6 +18,7 @@ import ch.fasrv.fanotes.desk.HomeworkTask
 import ch.fasrv.fanotes.desk.emptyCalendar
 import ch.fasrv.fanotes.ink.InkDocument
 import ch.fasrv.fanotes.schulnetz.DiagnosticTrace
+import ch.fasrv.fanotes.schulnetz.diagnosticSyncKey
 import ch.fasrv.fanotes.schulnetz.diagnosticAlertStatus
 import ch.fasrv.fanotes.schulnetz.AgendaEvent
 import ch.fasrv.fanotes.schulnetz.CollectiveGrade
@@ -222,17 +223,33 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     fun dismissReveal() { revealQueue = emptyList() }
 
     init {
-        viewModelScope.launch { graph.snapshot.collect { snapshot = it; refreshUnrevealed() } }
+        viewModelScope.launch {
+            graph.snapshot.collect { incoming ->
+                val zone = java.time.ZoneId.systemDefault()
+                val today = java.time.LocalDate.now(zone)
+                val selected = day
+                val cal = calendar
+                val taskList = tasks
+                val hiddenList = hidden
+                val built = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    val days = ((0L..14L).map { today.plusDays(it) } + ch.fasrv.fanotes.schulnetz.schoolWeek(selected, true)).distinct()
+                    agendaForDays(days, incoming, cal, taskList, hiddenList, zone)
+                }
+                snapshot = incoming
+                rememberAgenda(incoming, cal, taskList, hiddenList, built)
+                refreshUnrevealed()
+            }
+        }
         viewModelScope.launch { graph.link.collect { link = it } }
         viewModelScope.launch {
             var previous = ""
             graph.engine.state.collect { state ->
                 notesAccount = state.account != null
-                val name = state.status.name.lowercase()
                 val conflicts = state.conflicts.size
-                val key = "$name:$conflicts"
+                val key = diagnosticSyncKey(state.status.name, state.conflicts.map { it.copyPath })
                 if (key == previous) return@collect
                 previous = key
+                val name = state.status.name.lowercase()
                 val result = when {
                     conflicts > 0 -> "conflict"
                     name == "error" -> "error"
@@ -275,6 +292,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                     }
                 }
                 loadError = listOfNotNull(data.tasks.exceptionOrNull()?.message?.let(::shownText), data.calendar.exceptionOrNull()?.message?.let(::shownText)).joinToString("\n").ifBlank { null }
+                warmAgenda()
                 val paths = flattenNotes(tree).map { it.path }.toSet()
                 searchCache.snapshot().keys.filterNot { it in paths }.forEach { searchCache.remove(it) }
                 previewCache.snapshot().keys.filterNot { it in paths }.forEach { previewCache.remove(it) }
@@ -700,7 +718,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         viewModelScope.launch {
             try {
                 val folder = if (route.destination == Destination.Notes) noteFolder else ""
-                val path = withContext(Dispatchers.IO) { graph.store.createUniqueMarkdown(folder, title.ifBlank { t(R.string.untitled) }).also { graph.engine.notifyLocalChange() } }
+                val path = withContext(Dispatchers.IO) { graph.store.createUniqueMarkdown(folder, title.ifBlank { t(R.string.untitled_note) }).also { graph.engine.notifyLocalChange() } }
                 openNote(path); reload()
             } catch (error: Exception) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
@@ -791,12 +809,60 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
 
     fun bumpDiagnostics() { diagnosticTick += 1 }
 
-    /** One heap sample. The trace stores a megabyte count, not a dump. */
+    private var lastHeapMb = -1L
+    private var agendaCacheId = ""
+    private var agendaCacheDays: Map<java.time.LocalDate, List<AgendaEntry>> = emptyMap()
+
+    private fun agendaIdentity(snap: SchulnetzSnapshot, cal: ch.fasrv.fanotes.desk.CalendarDocument, taskList: List<ch.fasrv.fanotes.desk.HomeworkTask>, hiddenList: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>): String {
+        val tasks = taskList.fold(1) { acc, task -> 31 * acc + task.updatedAt.hashCode() + task.title.hashCode() + task.done.hashCode() + task.dueDate.hashCode() }
+        val local = cal.events.fold(1) { acc, event -> 31 * acc + event.id.hashCode() + event.start.hashCode() + event.title.hashCode() }
+        val hiddenHash = hiddenList.fold(1) { acc, item -> 31 * acc + item.hashCode() }
+        return "${snap.fetchedAt}|${snap.revision}|${snap.events.size}|${snap.exams.size}|$hiddenHash|$local|$tasks"
+    }
+
+    private fun rememberAgenda(snap: SchulnetzSnapshot, cal: ch.fasrv.fanotes.desk.CalendarDocument, taskList: List<ch.fasrv.fanotes.desk.HomeworkTask>, hiddenList: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, built: Map<java.time.LocalDate, List<AgendaEntry>>) {
+        val id = agendaIdentity(snap, cal, taskList, hiddenList)
+        val merged = if (agendaCacheId == id) agendaCacheDays + built else built
+        agendaCacheDays = if (merged.size <= 42) merged else built
+        agendaCacheId = id
+    }
+
+    /** Reuses a timetable built off the main thread. A miss still builds the requested days. */
+    fun cachedAgenda(days: List<java.time.LocalDate>, zone: java.time.ZoneId): Map<java.time.LocalDate, List<AgendaEntry>> {
+        val id = agendaIdentity(snapshot, calendar, tasks, hidden)
+        if (agendaCacheId == id && days.all { it in agendaCacheDays }) return days.associateWith { agendaCacheDays[it].orEmpty() }
+        val built = agendaForDays(days, snapshot, calendar, tasks, hidden, zone)
+        rememberAgenda(snapshot, calendar, tasks, hidden, built)
+        return days.associateWith { agendaCacheDays[it].orEmpty() }
+    }
+
+    private fun warmAgenda() {
+        val snap = snapshot
+        val cal = calendar
+        val taskList = tasks
+        val hiddenList = hidden
+        val selected = day
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            val zone = java.time.ZoneId.systemDefault()
+            val today = java.time.LocalDate.now(zone)
+            val days = ((0L..14L).map { today.plusDays(it) } + ch.fasrv.fanotes.schulnetz.schoolWeek(selected, true)).distinct()
+            val built = agendaForDays(days, snap, cal, taskList, hiddenList, zone)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                if (agendaIdentity(snapshot, calendar, tasks, hidden) == agendaIdentity(snap, cal, taskList, hiddenList)) {
+                    rememberAgenda(snap, cal, taskList, hiddenList, built)
+                }
+            }
+        }
+    }
+
+    /** One heap sample. The duration is the change since the previous sample, not proof of a leak. */
     fun noteDiagnosticMemory() {
         if (!DiagnosticTrace.enabled) return
         val runtime = Runtime.getRuntime()
         val usedMb = ((runtime.totalMemory() - runtime.freeMemory()) / (1024L * 1024L)).coerceAtLeast(0L)
-        DiagnosticTrace.record("memory", "heap", 0, "ok", "usedMb:$usedMb")
+        val delta = if (lastHeapMb >= 0L) (usedMb - lastHeapMb).coerceAtLeast(0L) else 0L
+        lastHeapMb = usedMb
+        DiagnosticTrace.record("memory", "heap", delta, "ok", "usedMb:$usedMb")
         diagnosticTick += 1
     }
 
@@ -845,9 +911,27 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 return@launch
             }
             runCatching { graph.client.clearProbe(auth, token) }
-                .onSuccess { message = t(R.string.diagnostic_reset_done) }
+                .onSuccess { cleared -> message = if (cleared.failed) t(R.string.diagnostic_reset_server_failed) else t(R.string.diagnostic_reset_done) }
                 .onFailure { message = t(R.string.diagnostic_reset_server_failed) }
         }
+    }
+
+    /** Waits 25 seconds, then uses the same authenticated probe. The wait survives leaving Recents. */
+    fun scheduleProbe(context: Context, scenario: String = "standard") {
+        if (!diagnosticOn) {
+            message = t(R.string.diagnostic_mode_required)
+            return
+        }
+        if (!link.linked) {
+            message = t(R.string.delivery_probe_needs_link)
+            return
+        }
+        if (graph.fcmToken().isNullOrBlank()) {
+            message = t(R.string.delivery_probe_needs_token)
+            return
+        }
+        scheduleDelayedProbe(context, scenario)
+        message = t(R.string.diagnostic_remote_delayed_body)
     }
 
     /** Server → Firebase → this device. Does not post a local notification and does not touch school records. */
@@ -872,7 +956,11 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                     val detail = ack.correlation.takeIf { it.matches(Regex("^probe:[0-9]{1,20}$")) }.orEmpty()
                     DiagnosticTrace.record("push", "sent", 0, "ok", detail)
                     diagnosticTick += 1
-                    message = t(R.string.delivery_probe_sent)
+                    message = if (ack.probeRemaining >= 0 && ack.clearRemaining >= 0) {
+                        t(R.string.delivery_probe_remaining, ack.probeRemaining, ack.clearRemaining)
+                    } else {
+                        t(R.string.delivery_probe_sent)
+                    }
                 }
                 .onFailure { error ->
                     DiagnosticTrace.record("push", "sent", 0, "error", error.javaClass.simpleName)

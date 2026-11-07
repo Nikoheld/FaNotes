@@ -84,7 +84,8 @@ class CompanionPresentationTest {
         val plan = planWeekFetches(emptyList(), mapOf("2026-11-02" to now.toString()), "", now, today, icalAvailable = false)
         val nextMonday = LocalDate.parse("2026-11-09")
         assertTrue(plan.fetch.contains(nextMonday))
-        assertEquals(WEEK_PROBE + 1, plan.fetch.size)
+        assertTrue(plan.fetch.contains(LocalDate.parse("2026-10-26")))
+        assertEquals(WEEK_PROBE * 2 + 1, plan.fetch.size)
         val url = schedulerUrl("https://www.schulnetz-ag.ch/aksa", "abc", "def", nextMonday.toString(), nextMonday.toString(), nextMonday.plusDays(7).toString())
         assertTrue(url.contains("scheduler_processor.php?view=week"))
         assertTrue(url.contains("min_date=2026-11-09"))
@@ -170,6 +171,25 @@ class CompanionPresentationTest {
         assertEquals(R.string.fanotes_offline_body, offline?.second)
         assertEquals(false, offline?.third)
         assertEquals(R.string.fanotes_sync_needs_attention, faNotesSyncCopy(SyncStatus.ERROR, notesAccount = true)?.first)
+    }
+
+    @Test fun `a task draft asks before discarding typed text`() {
+        assertFalse(taskDraftDirty(false, "", "", "", "", "", false, false))
+        assertTrue(taskDraftDirty(false, "Lesen", "", "", "", "", false, false))
+        assertTrue(taskDraftDirty(false, "", "", "", "", "", true, false))
+        assertFalse(taskDraftDirty(true, "Lesen", "Deutsch", "2026-11-04", "08:00", "", false, false, "Lesen", "Deutsch", "2026-11-04", "08:00", "", false, false))
+        assertTrue(taskDraftDirty(true, "Lesen!", "Deutsch", "2026-11-04", "08:00", "", false, false, "Lesen", "Deutsch", "2026-11-04", "08:00", "", false, false))
+    }
+
+    @Test fun `a future planner week is not labelled as this week`() {
+        val today = LocalDate.of(2026, 11, 4)
+        assertTrue(plannerWeekIsCurrent(today, today))
+        assertTrue(plannerWeekIsCurrent(LocalDate.of(2026, 11, 2), today))
+        assertFalse(plannerWeekIsCurrent(LocalDate.of(2026, 11, 9), today))
+        assertFalse(plannerWeekIsCurrent(LocalDate.of(2026, 11, 16), today))
+        val unread = SchulnetzSnapshot(fetchedAt = "2026-11-04T12:00:00Z")
+        assertEquals(WeekCoverage.UNREAD, lessonWeekCoverage(unread, LocalDate.of(2026, 11, 16), today))
+        assertEquals(WeekCoverage.LOADED, lessonWeekCoverage(unread.copy(weekRead = mapOf("2026-11-16" to "2026-11-04T12:00:00Z")), LocalDate.of(2026, 11, 16), today))
     }
 
     @Test fun `school fallback waits hours and stays off while push is healthy`() {

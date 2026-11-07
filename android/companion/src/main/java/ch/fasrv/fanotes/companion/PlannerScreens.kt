@@ -69,7 +69,7 @@ fun TodayScreen(model: CompanionModel) {
     val cards = shownTodayCards(model.desk)
     val agenda = remember(model.snapshot, model.calendar, model.tasks, model.hidden, today) {
         traceAgenda("today") {
-            agendaForDays((0L..14L).map { today.plusDays(it) }, model.snapshot, model.calendar, model.tasks, model.hidden, zone).values.flatten()
+            model.cachedAgenda((0L..14L).map { today.plusDays(it) }, zone).values.flatten()
         }
     }
     val next = if ("lessons" in cards) nextCommitment(agenda, now, zone) else null
@@ -188,7 +188,7 @@ private fun ScheduleScreen(model: CompanionModel) {
     val days = schoolWeek(model.day, true)
     val agenda = remember(model.day, model.snapshot, model.calendar, model.tasks, model.hidden) {
         traceAgenda("schedule") {
-            agendaForDays(days, model.snapshot, model.calendar, model.tasks, model.hidden, zone)
+            model.cachedAgenda(days, zone)
         }
     }
     val listState = rememberLazyListState()
@@ -255,17 +255,26 @@ private fun ScheduleScreen(model: CompanionModel) {
                 onDragCancel = { drag = 0f },
             )
         }, listState) {
+            val weekDays = schoolWeek(model.day, true)
+            val weekRange = formatSchoolDate(weekDays.first(), "d MMM") + " – " + formatSchoolDate(weekDays.last(), "d MMM")
+            val heading = when {
+                !model.planWeek -> dateLabel(model.day)
+                plannerWeekIsCurrent(model.day, today) -> t(R.string.this_week)
+                else -> weekRange
+            }
             item { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(if (model.planWeek) t(R.string.this_week) else dateLabel(model.day), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                Text(heading, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 TextButton(onClick = { model.planWeek = !model.planWeek }) { Text(if (model.planWeek) t(R.string.day_view) else t(R.string.week_view)) }
             } }
             val shownDays = if (model.planWeek) days.filter { model.desk.showWeekend || it.dayOfWeek.value < 6 || agenda[it].orEmpty().isNotEmpty() } else listOf(model.day)
             shownDays.forEach { day ->
                 val entries = agenda[day].orEmpty().filter { entry -> when (source) { "school" -> entry.school != null; "personal" -> entry.local != null; "due" -> entry.kind == AgendaKind.Task || entry.kind == AgendaKind.Exam; else -> true } }
                     .filter { it.school == null || !it.school.isLesson() || eventInHours(it.school, model.desk.dayStartHour, model.desk.dayEndHour, zone) }
+                val unread = (source == "all" || source == "school") && lessonWeekCoverage(model.snapshot, day, today) == WeekCoverage.UNREAD
                 if (model.planWeek) item(key = "date:$day") { SectionLabel(dateLabel(day)) }
                 if (entries.isEmpty()) item(key = "empty:$day") {
-                    if (model.planWeek) Text(t(R.string.no_commitments), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
+                    if (model.planWeek) Text(if (unread) t(R.string.timetable_not_loaded) else t(R.string.no_commitments), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
+                    else if (unread) EmptyState(Icons.Outlined.EventAvailable, t(R.string.timetable_not_loaded), t(R.string.timetable_not_loaded_body))
                     else EmptyState(Icons.Outlined.EventAvailable, t(R.string.a_clear_day), if (source == "school" && model.snapshot.fetchedAt.isBlank()) t(R.string.connect_schulnetz_in_settings_to_see_your_lesson) else when (source) { "school" -> t(R.string.no_school_entries_for_date); "personal" -> t(R.string.no_personal_entries_for_date); "due" -> t(R.string.no_deadline_entries_for_date); else -> t(R.string.no_entries_for_date) })
                 }
                 items(entries, key = { it.key }) { entry -> AgendaRow(model, entry) { selected = entry } }

@@ -227,6 +227,11 @@ data class SchulnetzSnapshot(
     val gradesReadComplete: Boolean = true,
     /** Only successfully read exam weeks; lesson coverage must not stand in for exam coverage. */
     val examWeekFetched: Map<String, String> = emptyMap(),
+    /**
+     * Monday to the instant the lesson scheduler actually answered.
+     * An empty readable body is included. An iCal range is not.
+     */
+    val weekRead: Map<String, String> = emptyMap(),
 )
 
 data class NotifySettings(

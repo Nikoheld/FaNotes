@@ -2,6 +2,7 @@ package ch.fasrv.fanotes.companion
 
 import android.content.Intent
 import android.content.Context
+import ch.fasrv.fanotes.desk.appendSchoolAssignment
 import ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH
 import ch.fasrv.fanotes.desk.CalendarDef
 import ch.fasrv.fanotes.desk.CalendarDocument
@@ -61,6 +62,8 @@ import ch.fasrv.fanotes.schulnetz.DeskPrefs
 import ch.fasrv.fanotes.schulnetz.GradeBook
 import ch.fasrv.fanotes.schulnetz.HiddenLesson
 import ch.fasrv.fanotes.schulnetz.changeFromObj
+import ch.fasrv.fanotes.schulnetz.isNotificationProbe
+import ch.fasrv.fanotes.schulnetz.probeDeviceKey
 import ch.fasrv.fanotes.schulnetz.changeIsHidden
 import ch.fasrv.fanotes.schulnetz.parseDeskPrefs
 import ch.fasrv.fanotes.schulnetz.parseGradeBook
@@ -337,7 +340,7 @@ class CompanionGraph(private val context: Context) {
             val body = client.snapshot(session)
             val next = parseNormalizedSnapshot(body) ?: previous
             publishSnapshot(previous, next, notifySettings())
-            val changes = runCatching { client.changes(session, prefs.getLong("change-cursor", 0L)) }.getOrNull()
+            val changes = runCatching { client.changes(session, prefs.getLong("change-cursor", 0L), probeDeviceKey(fcmToken().orEmpty())) }.getOrNull()
             if (changes != null) applyServerChanges(changes)
             configurePushDelivery(context)
             NextLessonWidget.update(context)
@@ -396,18 +399,17 @@ class CompanionGraph(private val context: Context) {
         if (existing != null && loadHomeworkMarkdown(existing) is NoteMarkdownLoad.Unreadable) error("${t(R.string.task_file_unreadable)}")
         val document = existing?.let(::parseHomeworkMarkdown) ?: HomeworkDocument(emptyList())
         val dueDate = parseDisplayDate(due)?.toString()
-        if (document.tasks.any { it.title == title && it.subject == subject && it.dueDate == dueDate }) return
         val now = isoNow()
-        val task = HomeworkTask(
-            id = "schulnetz-${java.util.UUID.randomUUID()}",
-            title = title,
-            notes = notes,
-            subject = subject,
-            dueDate = dueDate,
-            createdAt = now,
-            updatedAt = now,
-        )
-        vault.write(HOMEWORK_NOTE_PATH, serializeHomeworkMarkdown(document.copy(tasks = document.tasks + task)).encodeToByteArray())
+        val next = appendSchoolAssignment(
+            document,
+            title,
+            subject,
+            dueDate,
+            notes,
+            "schulnetz-${java.util.UUID.randomUUID()}",
+            now,
+        ) ?: return
+        vault.write(HOMEWORK_NOTE_PATH, serializeHomeworkMarkdown(next).encodeToByteArray())
         engine.notifyLocalChange()
     }
 
@@ -584,7 +586,7 @@ class CompanionGraph(private val context: Context) {
                 }
                 val session = runCatching { schoolAuth() }.getOrNull()
                 if (session != null) {
-                    val changes = runCatching { client.changes(session, prefs.getLong("change-cursor", 0L), quick = true) }.getOrNull()
+                    val changes = runCatching { client.changes(session, prefs.getLong("change-cursor", 0L), probeDeviceKey(fcmToken().orEmpty()), quick = true) }.getOrNull()
                     if (changes != null) {
                         applyServerChanges(changes)
                         prefs.edit().putLong("last-check", System.currentTimeMillis()).putString("last-check-error", "").apply()
@@ -946,6 +948,7 @@ class CompanionGraph(private val context: Context) {
         konto = next.konto.ifEmpty { previous.konto },
         startMessages = next.startMessages.ifEmpty { previous.startMessages },
         weekFetched = next.weekFetched.ifEmpty { previous.weekFetched },
+        weekRead = next.weekRead.ifEmpty { previous.weekRead },
         weekSpanStart = next.weekSpanStart.ifBlank { previous.weekSpanStart },
         weekSpanEnd = next.weekSpanEnd.ifBlank { previous.weekSpanEnd },
         icalFetchedAt = next.icalFetchedAt.ifBlank { previous.icalFetchedAt },
@@ -1004,10 +1007,19 @@ class CompanionGraph(private val context: Context) {
         } else {
             previous.events.ifEmpty { parsed.events }
         }
-        val weekFetched = if (raw.eventsFetched && raw.eventMin.isNotBlank() && raw.eventMax.isNotBlank()) {
+        val windowRead = raw.eventsFetched && raw.eventMin.isNotBlank() && raw.eventMax.isNotBlank()
+        val weekFetched = if (windowRead) {
             ch.fasrv.fanotes.schulnetz.stampWeeks(previous.weekFetched, raw.eventMin, raw.eventMax, parsed.fetchedAt)
         } else {
             previous.weekFetched
+        }
+        val seededRead = previous.weekRead.ifEmpty {
+            ch.fasrv.fanotes.schulnetz.confirmedLessonStamps(previous.events, previous.weekFetched, emptyMap())
+        }
+        val weekRead = if (windowRead) {
+            ch.fasrv.fanotes.schulnetz.stampWeeks(seededRead, raw.eventMin, raw.eventMax, parsed.fetchedAt)
+        } else {
+            seededRead
         }
         val next = parsed.copy(
             revision = previous.revision + 1,
@@ -1021,6 +1033,7 @@ class CompanionGraph(private val context: Context) {
             } else previous.examWeekFetched,
             events = events,
             weekFetched = weekFetched,
+            weekRead = weekRead,
             weekSpanStart = raw.weekSpanStart.ifBlank { previous.weekSpanStart },
             weekSpanEnd = raw.weekSpanEnd.ifBlank { previous.weekSpanEnd },
             icalFetchedAt = previous.icalFetchedAt,
@@ -1069,8 +1082,14 @@ class CompanionGraph(private val context: Context) {
 
     private fun applyServerChanges(json: String) {
         val obj = parseJson(json) as? JsonValue.Obj ?: return
+        val mine = probeDeviceKey(fcmToken().orEmpty())
         val items = obj.array("changes")?.items.orEmpty().mapNotNull { item ->
             val change = item as? JsonValue.Obj ?: return@mapNotNull null
+            val id = change.string("id").orEmpty()
+            if (isNotificationProbe(id)) {
+                val device = change.string("device").orEmpty()
+                if (mine.isBlank() || device != mine) return@mapNotNull null
+            }
             changeFromObj(change)
         }
         if (!CompanionAlerts.notificationsAllowed(context)) {

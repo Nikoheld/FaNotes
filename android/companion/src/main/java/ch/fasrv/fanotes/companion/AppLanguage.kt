@@ -9,26 +9,37 @@ import android.os.LocaleList
 import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.os.LocaleListCompat
 import ch.fasrv.fanotes.schulnetz.formatMark
 import ch.fasrv.fanotes.schulnetz.formatPluspunkte
 import java.util.Locale
 
 /**
- * Per-app language. An empty locale list follows the system.
- * Deutsch and English are applied with AppCompatDelegate.setApplicationLocales.
+ * Per-app language. The choice is stored beside the other app preferences.
+ * ComponentActivity does not apply an AppCompat locale list on its own, so
+ * [wrap] reads the stored tag and the settings screen recreates the activity.
  */
 object AppLanguage {
+    private const val PREF = "kanti_language"
+    private const val KEY = "tag"
     private lateinit var app: Context
+    var currentTag by mutableStateOf("system")
+        private set
 
     fun install(context: Context) {
         app = context.applicationContext
+        val tag = storedTag(app)
+        currentTag = tag
+        AppCompatDelegate.setApplicationLocales(localesFor(tag))
         applyDefaultLocale()
     }
 
     fun locale(): Locale {
-        val selected = AppCompatDelegate.getApplicationLocales()
-        if (!selected.isEmpty) return selected[0] ?: Locale.getDefault()
+        val tag = if (::app.isInitialized) storedTag(app) else currentTag
+        if (tag == "de" || tag == "en") return Locale.forLanguageTag(tag)
         val system = Resources.getSystem().configuration.locales
         return if (system.isEmpty) Locale.getDefault() else system[0]
     }
@@ -40,38 +51,42 @@ object AppLanguage {
     fun acceptLanguage(): String =
         if (locale().language.equals("de", ignoreCase = true)) "de" else "en"
 
-    fun selectedTag(): String {
-        val selected = AppCompatDelegate.getApplicationLocales()
-        if (selected.isEmpty) return "system"
-        return if (selected[0]?.language.equals("de", ignoreCase = true) == true) "de" else "en"
-    }
+    fun selectedTag(): String = currentTag
 
     fun choose(tag: String) {
-        val locales = if (tag.isBlank() || tag == "system") {
-            LocaleListCompat.getEmptyLocaleList()
-        } else {
-            LocaleListCompat.forLanguageTags(tag)
-        }
-        AppCompatDelegate.setApplicationLocales(locales)
+        val next = if (tag == "de" || tag == "en") tag else "system"
+        if (::app.isInitialized) app.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putString(KEY, next).commit()
+        currentTag = next
+        AppCompatDelegate.setApplicationLocales(localesFor(next))
         applyDefaultLocale()
     }
 
     fun applyDefaultLocale() {
-        val selected = AppCompatDelegate.getApplicationLocales()
-        if (selected.isEmpty) {
+        val tag = if (::app.isInitialized) storedTag(app) else currentTag
+        if (tag == "de" || tag == "en") Locale.setDefault(Locale.forLanguageTag(tag))
+        else {
             val system = Resources.getSystem().configuration.locales
             if (!system.isEmpty) Locale.setDefault(system[0])
-        } else {
-            selected[0]?.let(Locale::setDefault)
         }
     }
 
     fun wrap(base: Context): Context {
-        val selected = AppCompatDelegate.getApplicationLocales()
-        if (selected.isEmpty) return base
+        val tag = storedTag(base)
+        if (tag != "de" && tag != "en") return base
         val config = Configuration(base.resources.configuration)
-        config.setLocales(LocaleList.forLanguageTags(selected.toLanguageTags()))
+        config.setLocales(LocaleList.forLanguageTags(tag))
         return base.createConfigurationContext(config)
+    }
+
+    private fun storedTag(context: Context): String = when (context.getSharedPreferences(PREF, Context.MODE_PRIVATE).getString(KEY, "system")) {
+        "de" -> "de"
+        "en" -> "en"
+        else -> "system"
+    }
+
+    private fun localesFor(tag: String): LocaleListCompat = when (tag) {
+        "de", "en" -> LocaleListCompat.forLanguageTags(tag)
+        else -> LocaleListCompat.getEmptyLocaleList()
     }
 
     private fun resources(): Resources = wrap(app).resources

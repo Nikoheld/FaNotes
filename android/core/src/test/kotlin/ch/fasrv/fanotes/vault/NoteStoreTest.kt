@@ -3,7 +3,10 @@ package ch.fasrv.fanotes.vault
 import ch.fasrv.fanotes.famd.noteInkId
 import ch.fasrv.fanotes.famd.parseFamd
 import ch.fasrv.fanotes.ink.StrokePoint
+import ch.fasrv.fanotes.sync.conflictCopyPath
 import java.nio.file.Files
+import java.time.Instant
+import java.time.ZoneId
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -25,6 +28,13 @@ class NoteStoreTest {
         assertEquals(listOf("Neuer Ordner", "Neuer Ordner 2", "Unbenannte Notiz", "Unbenannte Notiz 2"), names.sorted())
         assertEquals("Schule/Buch.pdf", store.importUniquePdf("Schule", "Buch.pdf", byteArrayOf(0x25, 0x50, 0x44, 0x46)))
         assertEquals("Schule/Buch 2.pdf", store.importUniquePdf("Schule", "Buch.pdf", byteArrayOf(0x25, 0x50, 0x44, 0x46)))
+        assertEquals("Unbenannte Notiz", displayNoteTitle("Untitled note", "Unbenannte Notiz"))
+        assertEquals("Unbenannte Notiz 2", displayNoteTitle("Untitled note 2", "Unbenannte Notiz"))
+        assertEquals("Mathematik", displayNoteTitle("Mathematik", "Unbenannte Notiz"))
+        val stored = conflictCopyPath("Schule/Untitled note.md", "Pixel", Instant.parse("2026-11-07T11:05:00Z"), ZoneId.of("Europe/Zurich"))
+        assertTrue(stored.contains("2026-11-07 12-05"))
+        assertEquals("Unbenannte Notiz (Konflikt Pixel 7.11.2026 12:05)", displayNoteTitle(titleOf(stored), "Unbenannte Notiz"))
+        assertTrue(stored.contains("2026-11-07 12-05"))
     }
 
     @Test

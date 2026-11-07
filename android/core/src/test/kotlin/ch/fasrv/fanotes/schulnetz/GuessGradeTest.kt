@@ -99,6 +99,15 @@ class GuessGradeTest {
         assertEquals(5.5, highestVisibleMark(listOf(older, grade), emptySet(), guessGrades = false))
         assertEquals(4.0, highestVisibleMark(listOf(older, grade), setOf(id), guessGrades = true))
         assertEquals(listOf(id), newGradeTargetIds(listOf(change)))
+        val hiddenSix = SchoolGrade("g6", "Mathematik", "math", "Mathematik", "Probe", "2026-11-02", 6.0, 1.0, true, null, "")
+        val summarySix = SchoolGrade("avg", "Mathematik", "math", "Mathematik", "Durchschnitt", "2026-11-02", 6.0, 1.0, true, null, "")
+        val visibleFour = SchoolGrade("g4", "Deutsch", "de", "Deutsch", "Aufsatz", "2026-09-01", 4.0, 1.0, true, null, "")
+        val hiddenId = gradeTargetId(hiddenSix)
+        val maskedMark = highestVisibleMark(listOf(hiddenSix, summarySix, visibleFour), setOf(hiddenId), guessGrades = true)
+        assertEquals(4.0, maskedMark)
+        assertFalse(companionBadges(0, 0, maskedMark).first { it.id == "first-six" }.earned)
+        assertEquals(null, highestVisibleMark(listOf(summarySix), emptySet(), guessGrades = false))
+        assertTrue(companionBadges(0, 0, highestVisibleMark(listOf(hiddenSix), emptySet(), guessGrades = false)).first { it.id == "first-six" }.earned)
     }
 
     @Test

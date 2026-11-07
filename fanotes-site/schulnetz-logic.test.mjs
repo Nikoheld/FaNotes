@@ -53,6 +53,11 @@ import {
   normalizeGradeDate,
   parseWeekSpan,
   planWeekFetches,
+  confirmedLessonStamps,
+  probeDeviceKey,
+  changeVisibleToDevice,
+  WEEK_PROBE,
+  WEEK_BATCH,
   introducedWeeks,
   eventQueryWindow,
   overlayLessons,
@@ -1161,13 +1166,17 @@ test('week range follows the page span and stays quiet for a new week', () => {
   const mondays = []
   for (let day = '2026-01-05'; day <= '2027-06-28'; day = new Date(Date.parse(`${day}T00:00:00Z`) + 7 * 86400000).toISOString().slice(0, 10)) mondays.push(day)
   const first = planWeekFetches({ mondays, fetchedAt: {}, icalFetchedAt: '', now: '2026-11-04T12:00:00Z', today: '2026-11-04', icalAvailable: true })
-  assert.deepEqual(first.fetch, ['2026-10-26', '2026-11-02', '2026-11-09'])
+  assert.equal(first.fetch.length, WEEK_PROBE * 2 + 1 + WEEK_BATCH)
+  assert.equal(first.fetch.includes('2026-10-26'), true)
+  assert.equal(first.fetch.includes('2026-11-16'), true)
+  assert.equal(first.fetch.includes('2026-11-23'), true)
   assert.equal(first.fetchIcal, true)
   const walked = planWeekFetches({ mondays, fetchedAt: {}, icalFetchedAt: '', now: '2026-11-04T12:00:00Z', today: '2026-11-04', icalAvailable: false })
-  assert.equal(walked.fetch.length, WEEK_CAP)
+  assert.equal(walked.fetch.length, WEEK_PROBE * 2 + 1 + WEEK_BATCH)
+  assert.equal(walked.fetch.length < WEEK_CAP, true)
   assert.equal(walked.fetchIcal, false)
   const currentOnly = planWeekFetches({ mondays: [], fetchedAt: {}, icalFetchedAt: '', now: '2026-11-04T12:00:00Z', today: '2026-11-04', icalAvailable: false })
-  assert.deepEqual(currentOnly.fetch, ['2026-11-02', '2026-11-09', '2026-11-16', '2026-11-23', '2026-11-30'])
+  assert.deepEqual(currentOnly.fetch, ['2026-10-05', '2026-10-12', '2026-10-19', '2026-10-26', '2026-11-02', '2026-11-09', '2026-11-16', '2026-11-23', '2026-11-30'])
   assert.equal(currentOnly.fetchIcal, false)
   const held = planWeekFetches({ mondays: [], fetchedAt: { '2026-11-02': '2026-11-04T12:00:00Z' }, icalFetchedAt: '', now: '2026-11-04T12:00:00Z', today: '2026-11-04', icalAvailable: false })
   assert.deepEqual(held.fetch, currentOnly.fetch)
@@ -1182,15 +1191,22 @@ test('week range follows the page span and stays quiet for a new week', () => {
     today: '2026-11-04',
     icalAvailable: false,
   })
-  assert.deepEqual(oneFar.fetch, ['2026-11-02', '2026-11-30'])
+  assert.deepEqual(oneFar.fetch, ['2026-11-02', '2026-11-16', '2026-11-23', '2026-11-30'])
   const spanStamps = Object.fromEntries(mondays.map((day) => [day, '2026-11-03T11:00:00Z']))
   spanStamps['2026-11-02'] = '2026-11-04T12:00:00Z'
   spanStamps['2026-10-26'] = '2026-11-04T12:00:00Z'
   spanStamps['2026-11-09'] = '2026-11-04T12:00:00Z'
   spanStamps['2026-08-17'] = '2026-10-01T00:00:00Z'
   const spanFar = planWeekFetches({ mondays, fetchedAt: spanStamps, icalFetchedAt: '', now: '2026-11-04T12:00:00Z', today: '2026-11-04', icalAvailable: false })
-  assert.deepEqual(spanFar.fetch, ['2026-11-02', '2026-08-17'])
+  assert.equal(spanFar.fetch.includes('2026-11-02'), true)
+  assert.equal(spanFar.fetch.includes('2026-10-26'), false)
+  assert.equal(spanFar.fetch.includes('2026-11-09'), false)
+  assert.equal(spanFar.fetch.includes('2026-08-17'), true)
+  assert.equal(spanFar.fetch.length, 7 + WEEK_BATCH)
   const lesson = (id, start, room = 'A1') => ({ id, start, end: start, room, text: 'Mathematik', courseName: 'Mathematik', teachers: ['Nord'], status: '', eventType: 'lesson' })
+  const taught = confirmedLessonStamps([lesson('e1', '2026-11-02T08:15:00')], { '2026-11-02': 'a', '2026-11-09': 'a', '2026-11-16': 'a' }, {})
+  assert.deepEqual(Object.keys(taught), ['2026-11-02'])
+  assert.deepEqual(confirmedLessonStamps([], { '2026-11-09': 'a' }, { '2026-11-16': 'b' }), { '2026-11-16': 'b' })
   const previous = { events: [lesson('e1', '2026-11-02T08:15:00')], exams: [], weekFetched: {} }
   const next = {
     events: [lesson('e1', '2026-11-02T08:15:00', 'B2'), lesson('e2', '2026-11-16T08:15:00')],
@@ -1198,6 +1214,11 @@ test('week range follows the page span and stays quiet for a new week', () => {
     weekFetched: { '2026-11-02': '2026-11-04T12:00:00Z', '2026-11-16': '2026-11-04T12:00:00Z' },
   }
   assert.deepEqual(diffSnapshots(previous, next).map((change) => change.title), ['Raum geändert'])
+  const quietLegacy = diffSnapshots(
+    { events: [], exams: [], weekFetched: { '2026-11-16': '2026-11-01T00:00:00Z' }, weekRead: {} },
+    { events: [lesson('e2', '2026-11-16T08:15:00')], exams: [], weekFetched: { '2026-11-16': '2026-11-04T12:00:00Z' }, weekRead: { '2026-11-16': '2026-11-04T12:00:00Z' } },
+  )
+  assert.equal(quietLegacy.some((change) => change.category === 'timetable'), false)
   assert.equal(introducedWeeks({ events: [], exams: [] }, { events: [lesson('e1', '2026-11-02T08:15:00')], exams: [] }).size, 0)
   const legacy = diffSnapshots({ grades: [], events: [], exams: [], absences: [], messages: [] }, { events: [lesson('e1', '2026-11-02T08:15:00')], exams: [] })
   assert.equal(legacy.some((change) => change.category === 'timetable'), true)
@@ -1231,6 +1252,15 @@ test('week range follows the page span and stays quiet for a new week', () => {
   assert.equal(isLesson({ eventType: 'lesson', text: 'Lesetest', timetableText: 'Lesetest' }), true)
   assert.equal(isExamLike({ eventType: '<![CDATA[1_pru]]>', text: 'Mathematik' }), true)
   assert.equal(isLesson({ eventType: '<![CDATA[1_pru]]>', text: 'Mathematik' }), false)
+  const named = Object.fromEntries(parseSchedulerXml(`<data>
+    <event id="m"><start_date>2026-11-04 08:15</start_date><end_date>2026-11-04 09:00</end_date><text>M4a</text><fachbezeichnung>Mathematik</fachbezeichnung><fachkuerzel>M4a</fachkuerzel><event_type>0_stp</event_type></event>
+    <event id="d"><start_date>2026-11-04 09:05</start_date><end_date>2026-11-04 09:50</end_date><text>Deutsch</text><fachbezeichnung>Mathematik</fachbezeichnung><event_type>0_stp</event_type></event>
+    <event id="c"><start_date>2026-11-04 10:00</start_date><end_date>2026-11-04 10:45</end_date><text>PHY</text><event_type>0_stp</event_type></event>
+  </data>`).map((event) => [event.id, event]))
+  assert.equal(named.m.text, 'Mathematik')
+  assert.equal(named.m.courseName, 'M4a')
+  assert.equal(named.d.text, 'Deutsch')
+  assert.equal(named.c.text, 'PHY')
   const carried = carryTimetableExams([byId.s1, byId.w1], [byId.p1])
   assert.deepEqual(carried.map((event) => event.id), ['p1', 'w1'])
   const icsTest = parseIcs('BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:u-test\nDTSTART:20261112T100000\nDTEND:20261112T104500\nSUMMARY:Test Chemie\nEND:VEVENT\nEND:VCALENDAR')
@@ -1278,10 +1308,13 @@ test('a web scrape reads the whole current week and keeps a far lesson', async (
   assert.equal(schedulers.some((url) => url.includes('pageid=22202') && url.includes('min_date=2026-11-02') && url.includes('max_date=2026-11-09') && !url.includes('action=')), true)
   assert.equal(schedulers.some((url) => url.includes('pageid=21312') && !url.includes('action=')), true)
   assert.equal(first.weekFetched['2026-11-02'], undefined)
+  assert.equal(first.weekRead['2026-11-02'], '2026-11-04T12:00:00Z')
   assert.equal(first.weekFetched['2026-11-09'], '2026-11-04T12:00:00Z')
+  assert.equal(first.weekFetched['2026-10-26'], '2026-11-04T12:00:00Z')
   assert.equal(schedulers.filter((url) => url.includes('min_date=2026-11-09') && url.includes('pageid=22202') && !url.includes('action=')).length, 1)
+  assert.equal(schedulers.some((url) => url.includes('min_date=2026-10-26') && url.includes('pageid=22202')), true)
   assert.equal(schedulers.some((url) => url.includes('min_date=2026-08-17')), false)
-  assert.equal(schedulers.length, 10)
+  assert.equal(schedulers.length, 18)
   assert.equal(schedulerWeekLoaded('<data></data>'), false)
   assert.equal(schedulerWeekLoaded('<data><event id="e"></event></data>'), true)
   urls.length = 0
@@ -1304,7 +1337,7 @@ test('a web scrape reads the whole current week and keeps a far lesson', async (
   assert.equal(second.weekFetched['2026-11-09'], '2026-11-04T12:30:00Z')
   assert.equal(second.weekFetched['2026-12-07'], '2026-11-04T12:00:00Z')
   const secondSchedulers = urls.filter((url) => url.includes('scheduler_processor'))
-  assert.equal(secondSchedulers.length, 10)
+  assert.equal(secondSchedulers.length, 18)
   assert.equal(secondSchedulers.some((url) => url.includes('min_date=2026-11-02') && url.includes('pageid=22202')), true)
   assert.equal(secondSchedulers.some((url) => url.includes('min_date=2026-11-09') && url.includes('pageid=22202')), true)
   assert.equal(secondSchedulers.some((url) => url.includes('min_date=2026-12-07')), false)
@@ -1400,7 +1433,7 @@ test('an unmarked timetable still loads next week into the schedule', async () =
   const schedulers = urls.filter((url) => url.includes('scheduler_processor'))
   assert.equal(schedulers.some((url) => url.includes('pageid=22202') && url.includes('min_date=2026-11-09') && url.includes('max_date=2026-11-16') && !url.includes('action=')), true)
   assert.equal(schedulers.some((url) => url.includes('min_date=2026-08-17') || url.includes('min_date=2027-')), false)
-  assert.equal(schedulers.length, 10)
+  assert.equal(schedulers.length, 18)
   assert.equal(read.events.some((event) => event.id === 'next' && event.start === '2026-11-09T08:15:00'), true)
   assert.equal(read.events.some((event) => event.id === 'now'), true)
   assert.equal(read.events.some((event) => event.id === 'e1'), false)
@@ -1414,6 +1447,7 @@ test('an unmarked timetable still loads next week into the schedule', async () =
     previousEvents: read.events,
     previousExams: read.exams,
     weekFetched: read.weekFetched,
+    weekRead: read.weekRead,
   })
   const againSchedulers = urls.filter((url) => url.includes('scheduler_processor'))
   assert.equal(againSchedulers.length, 2)
@@ -1805,10 +1839,14 @@ test('delivery probe reaches only the registered device and leaves school record
     assert.equal(await readFile(join(dir, 'notified-grades.json'), 'utf8'), ledger)
     assert.equal(await readFile(join(dir, 'notification-baseline.json'), 'utf8'), baseline)
     assert.equal(fetches, 0)
-    const listed = await guestCall(runtime, caller, 'GET', '/api/v1/schulnetz/changes?since=0', null)
+    const listed = await guestCall(runtime, caller, 'GET', `/api/v1/schulnetz/changes?since=0&device=${probeDeviceKey(mine)}`, null)
     assert.equal(listed.status, 200)
     assert.equal(listed.body.changes.length, 6)
-    assert.equal(listed.body.changes.every((row) => row.serverAt === serverAt), true)
+    assert.equal(listed.body.changes.every((row) => row.serverAt === serverAt && row.device === probeDeviceKey(mine)), true)
+    const accountWide = await guestCall(runtime, caller, 'GET', '/api/v1/schulnetz/changes?since=0', null)
+    assert.equal(accountWide.body.changes.length, 0)
+    const otherDevice = await guestCall(runtime, caller, 'GET', `/api/v1/schulnetz/changes?since=0&device=${probeDeviceKey(otherToken)}`, null)
+    assert.equal(otherDevice.body.changes.length, 0)
     for (let index = 0; index < 4; index += 1) {
       const again = await probeCall(runtime, caller, `{"token":${JSON.stringify(mine)}}`)
       assert.equal(again.status, 200)
@@ -1972,6 +2010,21 @@ test('diagnostic probe scenarios stay on this device and clear only probe rows',
     assert.equal(duplicateLines.length, 7)
     assert.equal(duplicateLines[0].id, duplicateLines[6].id)
     assert.equal(duplicateLines.every((row) => row.serverAt === serverAt), true)
+    assert.equal(duplicateLines.every((row) => row.device === probeDeviceKey(mine)), true)
+    assert.equal(JSON.stringify(duplicateLines).includes(mine), false)
+    assert.equal(duplicate.body.probeRemaining, 3)
+    assert.equal(duplicate.body.clearRemaining, 5)
+    assert.equal(changeVisibleToDevice({ id: 'probe:legacy' }, probeDeviceKey(mine)), false)
+    assert.equal(changeVisibleToDevice({ id: 'probe:legacy', device: '' }, probeDeviceKey(mine)), false)
+    assert.equal(changeVisibleToDevice({ id: 'grade:real' }, ''), true)
+    const listed = await guestCall(runtime, caller, 'GET', `/api/v1/schulnetz/changes?since=0&device=${probeDeviceKey(mine)}`, null)
+    assert.equal(listed.status, 200)
+    assert.equal(listed.body.changes.length, 7)
+    const hiddenFromOther = await guestCall(runtime, caller, 'GET', `/api/v1/schulnetz/changes?since=0&device=${probeDeviceKey(otherToken)}`, null)
+    assert.equal(hiddenFromOther.status, 200)
+    assert.equal(hiddenFromOther.body.changes.length, 0)
+    const unmarked = await guestCall(runtime, caller, 'GET', '/api/v1/schulnetz/changes?since=0', null)
+    assert.equal(unmarked.body.changes.length, 0)
     const reorder = await probeCall(runtime, caller, `{"token":${JSON.stringify(mine)},"scenario":"reorder"}`)
     assert.equal(reorder.status, 200)
     assert.equal(reorder.body.count, 6)
@@ -1995,7 +2048,10 @@ test('diagnostic probe scenarios stay on this device and clear only probe rows',
     const cleared = await probeCall(runtime, caller, `{"token":${JSON.stringify(mine)}}`, {}, clearPath)
     assert.equal(cleared.status, 200)
     assert.equal(cleared.body.ok, true)
+    assert.equal(cleared.body.failed, false)
     assert.equal(cleared.body.removed, 25)
+    assert.equal(cleared.body.probeRemaining, 0)
+    assert.equal(cleared.body.clearRemaining, 3)
     const left = (await readFile(join(dir, 'changes.jsonl'), 'utf8')).trim().split('\n')
     assert.deepEqual(left, ['not-json', keeper.trim()])
     const linkAfter = JSON.parse(await readFile(join(dir, 'link.json'), 'utf8'))
@@ -2007,7 +2063,10 @@ test('diagnostic probe scenarios stay on this device and clear only probe rows',
     assert.equal(fetches, 0)
     const again = await probeCall(runtime, caller, `{"token":${JSON.stringify(mine)}}`, {}, clearPath)
     assert.equal(again.status, 200)
+    assert.equal(again.body.ok, true)
+    assert.equal(again.body.failed, false)
     assert.equal(again.body.removed, 0)
+    assert.equal(again.body.clearRemaining, 2)
     assert.equal((await probeCall(runtime, caller, `{"token":${JSON.stringify(mine)}}`)).status, 429)
   } finally {
     await rm(root, { recursive: true, force: true })

@@ -537,7 +537,10 @@ fun parseSchedulerXml(xml: String): List<AgendaEvent> {
         val start = schedulerStamp(field("start_date"), field("vdatum"), field("vzeit"))
         if (start.isBlank()) return@mapNotNull null
         val end = schedulerStamp(field("end_date"), field("bdatum"), field("bzeit")).ifBlank { start }
-        val text = field("text")
+        val named = listOf("fachbezeichnung", "kursbezeichnung", "bezeichnung", "fach").map { field(it) }
+            .firstOrNull { it.isNotBlank() && !looksLikeCourseCode(it) }.orEmpty()
+        val rawText = field("text")
+        val text = if (named.isNotBlank() && (rawText.isBlank() || looksLikeCourseCode(rawText))) named else rawText
         val course = field("kurskuerzel").ifBlank { field("fachkuerzel") }.ifBlank { text }
         val room = field("zimmerkuerzel").ifBlank { field("zimmer") }
         val teacher = field("lehrerkuerzelname")

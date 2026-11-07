@@ -723,6 +723,34 @@ fun extensionOf(path: String): String {
 
 fun titleOf(path: String): String = path.substringAfterLast('/').replace(Regex("""\.(md|markdown|famd|pdf)$""", RegexOption.IGNORE_CASE), "")
 
+private val untitledNoteTitle = Regex("""^Untitled(?: note)?(?: (\d+))?$""")
+private val conflictNoteTitle = Regex("""^(.*?) \(Konflikt (.+) (\d{4})-(\d{2})-(\d{2}) (\d{2})-(\d{2})\)$""")
+
+/**
+ * Display title only. The stored file name stays unchanged.
+ * Desktop names such as "Untitled note" use [untitled]. A conflict copy shows a normal clock.
+ */
+fun displayNoteTitle(title: String, untitled: String): String {
+    val conflict = conflictNoteTitle.matchEntire(title)
+    if (conflict != null) {
+        val stem = localizedUntitled(conflict.groupValues[1], untitled)
+        val device = conflict.groupValues[2]
+        val year = conflict.groupValues[3]
+        val month = conflict.groupValues[4].toIntOrNull() ?: return title
+        val day = conflict.groupValues[5].toIntOrNull() ?: return title
+        val hour = conflict.groupValues[6]
+        val minute = conflict.groupValues[7]
+        return "$stem (Konflikt $device $day.$month.$year $hour:$minute)"
+    }
+    return localizedUntitled(title, untitled)
+}
+
+private fun localizedUntitled(title: String, untitled: String): String {
+    val match = untitledNoteTitle.matchEntire(title) ?: return title
+    val number = match.groupValues[1]
+    return if (number.isBlank()) untitled else "$untitled $number"
+}
+
 fun normalize(path: String): String {
     val cleaned = path.replace('\\', '/').trim().trim('/')
     if (cleaned.isEmpty() || cleaned.length > 1024 || cleaned.contains('\u0000') || cleaned.contains("//")) {

@@ -2,7 +2,7 @@
 // A PHPSESSID is bound to the client IP, so this module always opens its own
 // session with the stored Microsoft SSO cookies and never replays a phone cookie.
 
-import { addDays, carryTimetableExams, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
+import { addDays, carryTimetableExams, confirmedLessonStamps, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
 
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 
@@ -134,6 +134,8 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
   const previousEvents = Array.isArray(options.previousEvents) ? options.previousEvents : []
   const previousExams = Array.isArray(options.previousExams) ? options.previousExams : []
   const weekFetched = { ...(options.weekFetched || {}) }
+  const weekRead = { ...(options.weekRead || {}) }
+  if (!Object.keys(weekRead).length) Object.assign(weekRead, confirmedLessonStamps(previousEvents, weekFetched, {}))
   const examWeekFetched = { ...(options.examWeekFetched || {}) }
   let weekSpanStart = options.weekSpanStart || ''
   let weekSpanEnd = options.weekSpanEnd || ''
@@ -151,7 +153,7 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
     const icalAvailable = Boolean(icalUrl && schulnetzCallAllowed('GET', icalUrl))
     const plan = planWeekFetches({
       mondays: span ? mondaysBetween(span.start, span.end) : [],
-      fetchedAt: weekFetched,
+      fetchedAt: confirmedLessonStamps(previousEvents, weekFetched, weekRead),
       icalFetchedAt,
       now: nowIso,
       today,
@@ -160,6 +162,7 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
     const lessonWeeks = {}
     const examWeeks = {}
     const current = weekMonday(today)
+    let currentEmptyUsable = false
     for (const monday of plan.fetch) {
       if (pages.problem) break
       const max = addDays(monday, 7)
@@ -171,9 +174,15 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
         if (parsed.length) {
           lessonWeeks[monday] = parsed
           weekFetched[monday] = nowIso
+          weekRead[monday] = nowIso
         }
-      } else if (monday !== current && schedulerBodyUsable(lessonBody)) {
-        weekFetched[monday] = nowIso
+      } else if (schedulerBodyUsable(lessonBody)) {
+        if (monday !== current) {
+          weekFetched[monday] = nowIso
+          weekRead[monday] = nowIso
+        } else {
+          currentEmptyUsable = true
+        }
       }
       if (pages.problem) break
       const examUrl = schedulerFetchUrl({ root, pageId: '21312', ansicht: 'klassenuebersicht', id: session.id, transid, today: curr, min: monday, max, extra: 'showOnlyThisClass=-1' })
@@ -194,6 +203,7 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
     const lessonEvents = Object.values(lessonWeeks).flat()
     events = overlayLessons(previousEvents, lessonEvents, new Set(Object.keys(lessonWeeks)))
     exams = carryTimetableExams(lessonEvents, overlayDated(previousExams, Object.values(examWeeks).flat(), new Set(Object.keys(examWeeks))))
+    if (currentEmptyUsable && !Object.hasOwn(lessonWeeks, current)) weekRead[current] = nowIso
     if (plan.fetchIcal && icalAvailable && !pages.problem) {
       const body = await get(icalUrl)
       if (icalBodyUsable(body)) {
@@ -208,9 +218,6 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
         }
         const refreshed = new Set(Object.keys(lessonWeeks))
         const covered = new Set(weekSpanStart && weekSpanEnd ? mondaysBetween(weekSpanStart, weekSpanEnd) : icalEvents.map((event) => weekMonday(String(event.start || '').slice(0, 10))).filter(Boolean))
-        for (const monday of covered) {
-          if (!refreshed.has(monday)) weekFetched[monday] = nowIso
-        }
         const uncovered = new Set([...covered].filter((monday) => !refreshed.has(monday)))
         events = overlayLessons(events, icalEvents, uncovered)
         exams = carryTimetableExams(icalEvents.filter((event) => !Object.hasOwn(examWeeks, weekMonday(String(event.start || '').slice(0, 10)))), exams)
@@ -233,6 +240,7 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
     termineHtml: pages['22108'] || '',
     transid,
     weekFetched,
+    weekRead,
     examWeekFetched,
     weekSpanStart,
     weekSpanEnd,

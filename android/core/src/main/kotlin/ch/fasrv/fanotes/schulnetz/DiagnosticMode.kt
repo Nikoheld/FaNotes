@@ -90,6 +90,14 @@ private val privateDiagnosticText = Regex(
     """(?i)bearer\s+\S+|eyJ[A-Za-z0-9_-]{10,}|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|\b[1-6][.,]\d{1,2}\b(?:\s+\p{L}{2,24})?|password\s*[:=]\s*\S+|token\s*[:=]\s*\S+""",
 )
 
+/** One row per conflict set. A later sync with the same copies does not record again. */
+fun diagnosticSyncKey(statusName: String, conflictPaths: List<String>): String {
+    if (conflictPaths.isNotEmpty()) {
+        return "conflict:" + conflictPaths.map { it.trim() }.filter { it.isNotEmpty() }.distinct().sorted().joinToString(",")
+    }
+    return statusName.lowercase()
+}
+
 /** Removes marks, addresses, and credentials. Dates such as 07.11.2026 stay. */
 fun sanitizeDiagnosticField(raw: String): String =
     privateDiagnosticText.replace(raw.take(180), "•").replace(Regex("""\s+"""), " ").trim()
@@ -276,7 +284,9 @@ object DiagnosticTrace {
     @Volatile
     var enabled: Boolean = false
 
-    private val processStartNs = System.nanoTime()
+    @Volatile
+    private var startupDurationMs: Long = -1L
+
     private val lock = Any()
     private val entries = ArrayDeque<DiagnosticEntry>()
 
@@ -305,9 +315,16 @@ object DiagnosticTrace {
         }
     }
 
+    /** First-frame time from process start. Stored even while recording is off. */
+    fun noteStartup(durationMs: Long) {
+        if (durationMs < 0L) return
+        startupDurationMs = durationMs
+    }
+
     fun noteEnabled() {
         enabled = true
-        record("startup", "enabled", (System.nanoTime() - processStartNs) / 1_000_000L, "ok")
+        val duration = startupDurationMs
+        record("startup", "enabled", if (duration >= 0L) duration else 0L, if (duration >= 0L) "ok" else "unknown")
     }
 
     inline fun <T> span(category: String, name: String, block: () -> T): T {
