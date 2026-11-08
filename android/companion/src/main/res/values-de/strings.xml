@@ -593,7 +593,7 @@
     <string name="school_records">Schuldaten</string>
     <string name="school_schedule">Stundenplan</string>
     <string name="school_session">Schul-Sitzung</string>
-    <string name="school_updates">Schulaktualisierungen</string>
+    <string name="school_updates">Mitteilungen</string>
     <string name="school_updates_are_checked_about_every_6_hours">Schulaktualisierungen werden etwa alle 6 Stunden geprüft.</string>
     <string name="schulnetz">Schulnetz</string>
     <string name="schulnetz_connection">Schulnetz-Verbindung</string>
@@ -706,7 +706,7 @@
     <string name="unknown">unbekannt</string>
     <string name="unsaved_changes">Ungespeicherte Änderungen</string>
     <string name="until">Bis</string>
-    <string name="up_next">ALS NÄCHSTES</string>
+    <string name="up_next">Als Nächstes</string>
     <string name="up_to_date">Aktuell</string>
     <string name="upcoming">Anstehend</string>
     <string name="upcoming_exam">Nächste Prüfung</string>
@@ -926,5 +926,69 @@
     <plurals name="profile_notes">
         <item quantity="one">Notiz</item>
         <item quantity="other">Notizen</item>
+    </plurals>
+    <string name="date_and_week">%1$s · KW %2$d</string>
+    <string name="create_sheet_body">Was möchtest du festhalten?</string>
+    <string name="onboarding_skip">Überspringen</string>
+    <string name="onboarding_day_title">Dein Schultag auf einen Blick</string>
+    <string name="onboarding_day_body">Kanti+ zeigt dir, was als Nächstes ansteht: Lektionen, Prüfungen, Aufgaben und Noten an einem Ort, auch offline.</string>
+    <string name="onboarding_school_title">Mit Schulnetz verbinden</string>
+    <string name="onboarding_school_body">Du meldest dich direkt bei deiner Schule an. Kanti+ liest Stundenplan, Prüfungen, Noten und Absenzen und ändert nichts in Schulnetz.</string>
+    <string name="onboarding_privacy_title">Deine Noten bleiben privat</string>
+    <string name="onboarding_privacy_body">Neue Noten kannst du verdeckt lassen, bis du sie selbst aufdeckst. Das Widget auf dem Startbildschirm zeigt nie Noten.</string>
+    <string name="onboarding_hide_marks">Neue Noten verdecken</string>
+    <string name="onboarding_alerts_title">Nur was zählt</string>
+    <string name="onboarding_alerts_body">Neue Noten, verschobene Prüfungen und ausfallende Lektionen. In den Einstellungen wählst du jede Meldung einzeln.</string>
+    <string name="onboarding_alerts_off">Benachrichtigungen sind noch aus.</string>
+    <string name="onboarding_later">Später</string>
+    <string name="onboarding_next">Weiter</string>
+    <string name="onboarding_start">Los geht\'s</string>
+    <string name="onboarding_notes_optional">Notizen mit FaNotes synchronisieren (optional)</string>
+    <string name="onboarding_step">Schritt %1$d von %2$d</string>
+    <string name="offline_last_updated">Offline · Stand %1$s</string>
+    <string name="unread_before_next">Ein Teil des Stundenplans bis dahin ist noch nicht geladen.</string>
+    <string name="offline_waiting">Du bist offline. Kanti+ lädt den Stundenplan, sobald du wieder online bist.</string>
+    <string name="now_label">Jetzt</string>
+    <string name="starts_in_minutes">in %1$d Min.</string>
+    <string name="starts_in_hours">in %1$d Std.</string>
+    <string name="ends_in_minutes">noch %1$d Min.</string>
+    <string name="until_time">bis %1$s</string>
+    <string name="notify_tip_title">Benachrichtigungen erlauben?</string>
+    <string name="notify_tip_body">Kanti+ meldet neue Noten, verschobene Prüfungen und ausfallende Lektionen. Du kannst jede Meldung einzeln abschalten.</string>
+    <string name="calendar_week_short">KW %1$d</string>
+    <string name="seg_day">Tag</string>
+    <string name="seg_week">Woche</string>
+    <string name="free_period">Frei · %1$s</string>
+    <string name="minutes_short">%1$d Min.</string>
+    <string name="now_marker">Jetzt, %1$s</string>
+    <plurals name="day_band">
+        <item quantity="one">%1$d Lektion, %2$d vorbei</item>
+        <item quantity="other">%1$d Lektionen, %2$d vorbei</item>
+    </plurals>
+    <plurals name="entries_count">
+        <item quantity="one">%1$d Eintrag</item>
+        <item quantity="other">%1$d Einträge</item>
+    </plurals>
+    <string name="connected_last_updated">Verbunden · Stand %1$s</string>
+    <string name="cached_last_updated">Auf diesem Gerät · Stand %1$s</string>
+    <string name="read_only_last_updated">Aus Schulnetz, nur lesen · Stand %1$s</string>
+    <string name="adjusted_short">angepasst</string>
+    <string name="new_mark_hidden">Neue Note verdeckt</string>
+    <string name="subject_options">Fachoptionen</string>
+    <string name="no_school_marks_yet">Noch keine Schulnoten.</string>
+    <string name="local_only">Nur auf diesem Handy</string>
+    <string name="snow_theme">Schnee</string>
+    <string name="settings_school_account">Schule und Konto</string>
+    <string name="replay_onboarding">Einführung erneut ansehen</string>
+    <string name="replay_onboarding_body">Ein kurzer Rundgang. Verbindungen und Einstellungen bleiben, wie sie sind.</string>
+    <string name="from_label">Von</string>
+    <string name="snowfall">Schneefall</string>
+    <string name="snowfall_body">Ein paar Sekunden Schnee auf Heute beim Öffnen. Aus bei reduzierten Animationen oder im Energiesparmodus.</string>
+    <string name="snowfall_reduced">Aus, weil Animationen auf diesem Gerät reduziert sind.</string>
+    <string name="snow_accent_note">Schnee verwendet sein eigenes Gletscherblau.</string>
+    <string name="end_to_end_title">Ende-zu-Ende-verschlüsselt</string>
+    <plurals name="hidden_marks_waiting">
+        <item quantity="one">%1$d neue Note wartet aufs Aufdecken</item>
+        <item quantity="other">%1$d neue Noten warten aufs Aufdecken</item>
     </plurals>
 </resources>

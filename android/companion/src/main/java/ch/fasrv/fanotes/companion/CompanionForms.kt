@@ -1,7 +1,9 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package ch.fasrv.fanotes.companion
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
@@ -27,49 +29,28 @@ import java.time.*
 import java.util.UUID
 
 @Composable
-fun WelcomeScreen(model: CompanionModel, modifier: Modifier = Modifier) {
-    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Space.xl).widthIn(max = 480.dp), verticalArrangement = Arrangement.Center) {
-        Surface(color = MaterialTheme.colorScheme.primary, shape = MaterialTheme.shapes.large, modifier = Modifier.size(52.dp)) {
-            Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.School, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(30.dp)) }
-        }
-        Spacer(Modifier.height(24.dp))
-        Text(t(R.string.kanti), style = MaterialTheme.typography.headlineLarge)
-        Text(t(R.string.grades_timetable_exams_and_absences_ready_on_thi),
-            style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp, bottom = 28.dp))
-        Button(onClick = { model.finishWelcome(connectSchool = true, openNotes = false) }, enabled = !model.busy, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) { Text(t(R.string.connect_schulnetz)) }
-        OutlinedButton(onClick = { model.finishWelcome(connectSchool = false, openNotes = true) }, enabled = !model.busy, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).heightIn(min = 50.dp)) { Text(t(R.string.sync_notes_with_fanotes)) }
-        TextButton(onClick = { model.finishWelcome(connectSchool = false, openNotes = false) }, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.continue_action)) }
-        Text(t(R.string.school_features_work_without_an_account_notes_sy),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
-    }
-}
-
-@Composable
 fun AccountScreen(model: CompanionModel, onboarding: Boolean = false, modifier: Modifier = Modifier) {
     var register by rememberSaveable { mutableStateOf(false) }
     var visible by rememberSaveable { mutableStateOf(false) }
     val focus = LocalFocusManager.current
     Column(modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(Space.xl).widthIn(max = 480.dp), verticalArrangement = Arrangement.Center) {
-        Surface(color = MaterialTheme.colorScheme.primary, shape = MaterialTheme.shapes.large, modifier = Modifier.size(52.dp)) {
-            Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.EditNote, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(30.dp)) }
-        }
+        IconTile(Icons.Outlined.EditNote, StateTone.Accent, 56.dp)
         Spacer(Modifier.height(24.dp))
         Text(if (register) t(R.string.a_place_for_your_work) else t(R.string.your_day_your_notes), style = MaterialTheme.typography.headlineLarge)
         Text(if (register) t(R.string.create_your_fanotes_account) else t(R.string.a_calmer_school_day_with_everything_you_need_clo),
             style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp, bottom = 28.dp))
         OutlinedTextField(model.email, { model.email = it }, Modifier.fillMaxWidth(), label = { Text(t(R.string.email)) }, singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next), shape = MaterialTheme.shapes.small)
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next), shape = MaterialTheme.shapes.medium)
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(model.password, { model.password = it }, Modifier.fillMaxWidth(), label = { Text(t(R.string.password)) }, singleLine = true,
             visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = { ActionIcon(if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (visible) t(R.string.hide_password) else t(R.string.show_password)) { visible = !visible } },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { focus.clearFocus(); if (!model.busy) model.login(register) }), shape = MaterialTheme.shapes.small)
-        if (register) {
-            Text(t(R.string.your_notes_are_end_to_end_encrypted_keep_your_pa),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp))
+            keyboardActions = KeyboardActions(onDone = { focus.clearFocus(); if (!model.busy) model.login(register) }), shape = MaterialTheme.shapes.medium)
+        if (register) Box(Modifier.padding(top = 14.dp)) {
+            InfoBanner(t(R.string.end_to_end_title), t(R.string.your_notes_are_end_to_end_encrypted_keep_your_pa), tone = StateTone.Accent)
         }
-        Button(onClick = { focus.clearFocus(); model.login(register) }, enabled = !model.busy && model.email.isNotBlank() && model.password.isNotBlank(), modifier = Modifier.fillMaxWidth().padding(top = 24.dp).heightIn(min = 50.dp)) {
+        Button(onClick = { focus.clearFocus(); model.login(register) }, enabled = !model.busy && model.email.isNotBlank() && model.password.isNotBlank(), shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth().padding(top = 24.dp).heightIn(min = Space.button)) {
             if (model.busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
             else Text(if (register) t(R.string.create_account) else t(R.string.sign_in))
         }
@@ -87,8 +68,8 @@ fun AccountScreen(model: CompanionModel, onboarding: Boolean = false, modifier: 
 @Composable
 fun NameDialog(title: String, label: String, confirm: String, initial: String = "", onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var value by rememberSaveable { mutableStateOf(initial) }
-    AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), title = { Text(title) }, text = {
-        OutlinedTextField(value, { value = it.take(120) }, label = { Text(label) }, singleLine = true,
+    AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), shape = MaterialTheme.shapes.extraLarge, title = { Text(title, style = MaterialTheme.typography.headlineSmall) }, text = {
+        OutlinedTextField(value, { value = it.take(120) }, label = { Text(label) }, singleLine = true, shape = MaterialTheme.shapes.medium,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { if (value.isNotBlank()) onConfirm(value.trim()) }))
     }, confirmButton = { TextButton(onClick = { onConfirm(value.trim()) }, enabled = value.isNotBlank()) { Text(confirm) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(t(R.string.cancel)) } })
@@ -98,10 +79,7 @@ fun NameDialog(title: String, label: String, confirm: String, initial: String = 
 fun DateControl(label: String, value: LocalDate?, allowClear: Boolean = false, onDate: (LocalDate?) -> Unit) {
     var picking by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        OutlinedButton(onClick = { picking = true }, modifier = Modifier.weight(1f).heightIn(min = 52.dp), shape = MaterialTheme.shapes.small, contentPadding = PaddingValues(horizontal = 12.dp)) {
-            Icon(Icons.Outlined.CalendarToday, null, Modifier.size(18.dp)); Spacer(Modifier.width(10.dp))
-            Text(t(R.string.text_4, label, value?.let { dueLabel(it.toString()) } ?: t(R.string.none)), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+        FieldButton(Icons.Outlined.CalendarToday, label, value?.let { dueLabel(it.toString()) } ?: t(R.string.none), Modifier.weight(1f)) { picking = true }
         if (allowClear && value != null) ActionIcon(Icons.Outlined.Close, t(R.string.clear, label)) { onDate(null) }
     }
     if (picking) {
@@ -116,15 +94,13 @@ fun DateControl(label: String, value: LocalDate?, allowClear: Boolean = false, o
 fun TimeControl(label: String, value: String, allowClear: Boolean = false, onTime: (String) -> Unit) {
     var picking by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        OutlinedButton(onClick = { picking = true }, modifier = Modifier.weight(1f).heightIn(min = 52.dp), shape = MaterialTheme.shapes.small) {
-            Icon(Icons.Outlined.Schedule, null, Modifier.size(18.dp)); Spacer(Modifier.width(10.dp)); Text(t(R.string.text_4, label, value.ifBlank { t(R.string.none) }), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+        FieldButton(Icons.Outlined.Schedule, label, value.ifBlank { t(R.string.none) }, Modifier.weight(1f)) { picking = true }
         if (allowClear && value.isNotBlank()) ActionIcon(Icons.Outlined.Close, t(R.string.clear, label)) { onTime("") }
     }
     if (picking) {
         val initial = runCatching { LocalTime.parse(value) }.getOrDefault(LocalTime.of(9, 0))
         val state = rememberTimePickerState(initialHour = initial.hour, initialMinute = initial.minute, is24Hour = true)
-        AlertDialog(onDismissRequest = { picking = false }, modifier = Modifier.imePadding(), title = { Text(label) }, text = { TimeInput(state) },
+        AlertDialog(onDismissRequest = { picking = false }, modifier = Modifier.imePadding(), shape = MaterialTheme.shapes.extraLarge, title = { Text(label, style = MaterialTheme.typography.headlineSmall) }, text = { TimeInput(state) },
             confirmButton = { TextButton(onClick = { onTime("%02d:%02d".format(state.hour, state.minute)); picking = false }) { Text(t(R.string.choose)) } },
             dismissButton = { TextButton(onClick = { picking = false }) { Text(t(R.string.cancel)) } })
     }
@@ -164,24 +140,25 @@ fun TaskForm(model: CompanionModel, task: HomeworkTask? = null, onDismiss: () ->
     fun requestClose() {
         if (dirty) discard = true else onDismiss()
     }
-    ModalBottomSheet(onDismissRequest = { requestClose() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).sheetKeyboardPadding().padding(horizontal = Space.page)) {
-            SheetTitle(if (task == null) t(R.string.new_task) else t(R.string.task_details)) { requestClose() }
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(title, { title = it.take(240) }, label = { Text(t(R.string.what_needs_doing)) }, modifier = Modifier.fillMaxWidth(), minLines = 2)
-                OutlinedTextField(subject, { subject = it.take(80) }, label = { Text(t(R.string.subject)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                DateControl(t(R.string.due), parseDisplayDate(date), true) { date = it?.toString().orEmpty() }
-                if (date.isNotBlank()) TimeControl(t(R.string.time_label), time, true) { time = it }
+    KantiSheet(onDismiss = { requestClose() }, full = true) {
+        SheetTitle(if (task == null) t(R.string.new_task) else t(R.string.task_details)) { requestClose() }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedTextField(title, { title = it.take(240) }, label = { Text(t(R.string.what_needs_doing)) }, modifier = Modifier.fillMaxWidth(), minLines = 2, shape = MaterialTheme.shapes.medium, textStyle = MaterialTheme.typography.titleMedium)
+            OutlinedTextField(subject, { subject = it.take(80) }, label = { Text(t(R.string.subject)) }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = MaterialTheme.shapes.medium)
+            DateControl(t(R.string.due), parseDisplayDate(date), true) { date = it?.toString().orEmpty() }
+            if (date.isNotBlank()) TimeControl(t(R.string.time_label), time, true) { time = it }
+            Group(color = LocalCompanionSemantics.current.sunken.copy(alpha = 0.55f)) {
                 ToggleRow(t(R.string.important), t(R.string.keep_this_task_easy_to_spot), important) { important = it }
+                FineDivider()
                 ToggleRow(t(R.string.appointment), t(R.string.an_appointment_rather_than_homework), appointment) { appointment = it }
-                OutlinedTextField(notes, { notes = it.take(4000) }, label = { Text(t(R.string.details)) }, modifier = Modifier.fillMaxWidth(), minLines = 4)
-                if (task != null) TextButton(onClick = { confirm = true }) { Icon(Icons.Outlined.DeleteOutline, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(t(R.string.delete_task), color = MaterialTheme.colorScheme.error) }
-                Spacer(Modifier.height(16.dp))
             }
-            formError?.let { Text(shownText(it), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            Button(onClick = { saving = true; model.saveTask((task ?: HomeworkTask(id, title)).copy(title = title.trim(), subject = subject.trim(), dueDate = date.ifBlank { null }, dueTime = time.takeIf { date.isNotBlank() && it.isNotBlank() }, notes = notes, priority = if (important) "high" else "normal", kind = if (appointment) "appointment" else "homework"), onDismiss, { formError = it; saving = false }) },
-                enabled = title.isNotBlank() && !saving, modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp).heightIn(min = 50.dp)) { Text(if (saving) t(R.string.saving) else t(R.string.save_task)) }
+            OutlinedTextField(notes, { notes = it.take(4000) }, label = { Text(t(R.string.details)) }, modifier = Modifier.fillMaxWidth(), minLines = 4, shape = MaterialTheme.shapes.medium)
+            if (task != null) TextButton(onClick = { confirm = true }) { Icon(Icons.Outlined.DeleteOutline, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error); Spacer(Modifier.width(8.dp)); Text(t(R.string.delete_task), color = MaterialTheme.colorScheme.error) }
+            Spacer(Modifier.height(16.dp))
         }
+        formError?.let { Text(shownText(it), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        PrimaryButton(if (saving) t(R.string.saving) else t(R.string.save_task), { saving = true; model.saveTask((task ?: HomeworkTask(id, title)).copy(title = title.trim(), subject = subject.trim(), dueDate = date.ifBlank { null }, dueTime = time.takeIf { date.isNotBlank() && it.isNotBlank() }, notes = notes, priority = if (important) "high" else "normal", kind = if (appointment) "appointment" else "homework"), onDismiss, { formError = it; saving = false }) },
+            Modifier.fillMaxWidth().padding(vertical = 16.dp), enabled = title.isNotBlank() && !saving)
     }
     if (confirm && task != null) ConfirmDialog(t(R.string.delete_this_task), t(R.string.this_removes_it_from_your_kanti_task_list), t(R.string.delete), { confirm = false }) { model.deleteTask(task); onDismiss() }
     if (discard) ConfirmDialog(t(R.string.discard_task_title), t(R.string.discard_task_body), t(R.string.discard), { discard = false }) { discard = false; onDismiss() }
@@ -205,28 +182,39 @@ fun EventForm(model: CompanionModel, event: CalendarEvent? = null, onDismiss: ()
     val startValue = if (allDay) start else "${start}T$startTime"
     val endValue = if (allDay) end else "${end}T$endTime"
     val valid = title.isNotBlank() && endValue >= startValue
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).sheetKeyboardPadding().padding(horizontal = Space.page)) {
+    KantiSheet(onDismiss = onDismiss, full = true) {
             SheetTitle(if (event == null) t(R.string.new_event) else t(R.string.edit_event), onDismiss)
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(title, { title = it.take(240) }, label = { Text(t(R.string.event_title)) }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(title, { title = it.take(240) }, label = { Text(t(R.string.event_title)) }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, textStyle = MaterialTheme.typography.titleMedium)
                 ChoiceRow(model.calendar.calendars.map { it.id to it.name }, calendar, { calendar = it })
-                ToggleRow(t(R.string.all_day), checked = allDay) { allDay = it }
+                Group(color = LocalCompanionSemantics.current.sunken.copy(alpha = 0.55f)) { ToggleRow(t(R.string.all_day), checked = allDay) { allDay = it } }
                 DateControl(t(R.string.starts), parseDisplayDate(start)) { it?.let { day -> start = day.toString(); if (end < start) end = start } }
                 if (!allDay) TimeControl(t(R.string.starts_at), startTime) { startTime = it }
                 DateControl(t(R.string.ends), parseDisplayDate(end)) { it?.let { day -> end = day.toString() } }
                 if (!allDay) TimeControl(t(R.string.ends_at), endTime) { endTime = it }
                 if (endValue < startValue) Text(t(R.string.end_must_be_after_the_start), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(location, { location = it }, label = { Text(t(R.string.location)) }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(notes, { notes = it }, label = { Text(t(R.string.details)) }, modifier = Modifier.fillMaxWidth(), minLines = 3)
+                OutlinedTextField(location, { location = it }, label = { Text(t(R.string.location)) }, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, leadingIcon = { Icon(Icons.Outlined.Place, null) })
+                OutlinedTextField(notes, { notes = it }, label = { Text(t(R.string.details)) }, modifier = Modifier.fillMaxWidth(), minLines = 3, shape = MaterialTheme.shapes.medium)
                 if (event != null && event.recurrence != "none") Text(t(R.string.repeats_changes_apply_to_the_series, recurrenceLabel(event.recurrence)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (event != null) TextButton(onClick = { confirm = true }) { Text(t(R.string.delete_2, if (event.recurrence != "none") t(R.string.series_noun) else t(R.string.event_noun)), color = MaterialTheme.colorScheme.error) }
                 Spacer(Modifier.height(16.dp))
             }
             formError?.let { Text(shownText(it), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            Button(onClick = { saving = true; model.saveEvent((event ?: CalendarEvent(id, calendar, title, startValue, endValue)).copy(title = title.trim(), calendarId = calendar, start = startValue, end = endValue, allDay = allDay, location = location, notes = notes), onDismiss, { formError = it; saving = false }) },
-                enabled = valid && !saving, modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp).heightIn(min = 50.dp)) { Text(if (saving) t(R.string.saving) else t(R.string.save_event)) }
-        }
+            PrimaryButton(if (saving) t(R.string.saving) else t(R.string.save_event), { saving = true; model.saveEvent((event ?: CalendarEvent(id, calendar, title, startValue, endValue)).copy(title = title.trim(), calendarId = calendar, start = startValue, end = endValue, allDay = allDay, location = location, notes = notes), onDismiss, { formError = it; saving = false }) },
+                Modifier.fillMaxWidth().padding(vertical = 16.dp), enabled = valid && !saving)
     }
     if (confirm && event != null) ConfirmDialog(t(R.string.delete_3, if (event.recurrence != "none") t(R.string.this_series) else t(R.string.this_event)), t(R.string.this_removes_it_from_your_kanti_calendar), t(R.string.delete), { confirm = false }) { model.deleteEvent(event); onDismiss() }
+}
+
+/** A tappable value that looks like a form field: date and time pickers. */
+@Composable
+fun FieldButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Row(modifier.heightIn(min = 56.dp).clip(MaterialTheme.shapes.medium).border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.medium)
+        .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(Modifier.padding(start = 12.dp).weight(1f)) {
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
 }

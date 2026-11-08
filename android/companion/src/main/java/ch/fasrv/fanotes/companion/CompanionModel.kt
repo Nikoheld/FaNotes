@@ -73,6 +73,13 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var pendingSchoolConnect by mutableStateOf(false)
     fun shownBar(): List<String> = presentedNavBar(desk.navBar, notesAccount)
     var plannerTasks by mutableStateOf(false)
+    /** Direction of the last route change. Read by the screen transition only. */
+    var navMove: NavMove = NavMove.Tab
+    /** First run only. Users who already used Kanti+ (local access or an account) never see it. */
+    var onboardingActive by mutableStateOf(needsOnboarding(graph.onboardingVersion(), graph.localAccess(), graph.engine.state.value.account != null))
+    var onboardingReplay by mutableStateOf(false)
+    var snowfall by mutableStateOf(graph.snowfall())
+    var notifyTipDismissed by mutableStateOf(graph.notifyTipDismissed())
     var taskSource by mutableStateOf("open")
     var tree by mutableStateOf<List<VaultNode>>(emptyList())
     var loading by mutableStateOf(true)
@@ -100,12 +107,14 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         val safe = if (!notesAccount && startTabId(id) == "notes") "today" else id
         val placement = navPlacement(safe)
         history = emptyList()
+        navMove = NavMove.Tab
         plannerTasks = placement.plannerTasks
         route = placement.route
         highlightIds = emptySet()
         focusCourseId = ""
     }
     fun navigate(page: Page) {
+        navMove = NavMove.Forward
         history = history + route
         route = route.copy(page = page)
     }
@@ -116,6 +125,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     fun atNavRoot(): Boolean = isAtNavRoot(route, plannerTasks, desk.startTab, shownBar(), noteFolder, history.isNotEmpty())
     fun back() {
         graph.trail.action("back")
+        navMove = NavMove.Back
         if (history.isNotEmpty()) {
             route = history.last()
             history = history.dropLast(1)
@@ -143,6 +153,22 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         if (chrome != home) selectNav(home)
     }
     fun continueLocally() { localAccess = true; graph.setLocalAccess(true); message = null }
+    /** Ends the first-run or replayed onboarding. A replay never changes accounts or connections. */
+    fun finishOnboarding(openNotes: Boolean = false) {
+        val replay = onboardingReplay
+        graph.markOnboardingSeen()
+        onboardingActive = false
+        onboardingReplay = false
+        if (!replay) continueLocally()
+        if (openNotes && !notesAccount) {
+            history = emptyList()
+            route = CompanionRoute(page = Page.Auth)
+        }
+    }
+    fun replayOnboarding() { onboardingReplay = true }
+    fun chooseSnowfall(enabled: Boolean) { snowfall = enabled; graph.setSnowfall(enabled) }
+    fun dismissNotifyTip() { notifyTipDismissed = true; graph.setNotifyTipDismissed() }
+    fun onNotificationsAllowed() { graph.scope.launch { runCatching { graph.pullChangeDelta() } } }
     fun finishWelcome(connectSchool: Boolean, openNotes: Boolean) {
         continueLocally()
         pendingSchoolConnect = connectSchool

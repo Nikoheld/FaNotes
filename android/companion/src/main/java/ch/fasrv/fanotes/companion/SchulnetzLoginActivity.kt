@@ -26,7 +26,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
-import ch.fasrv.fanotes.desk.themePalette
+import androidx.compose.foundation.background
+import androidx.compose.ui.Alignment
 import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.schulnetz.*
@@ -55,7 +56,7 @@ class SchulnetzLoginActivity : ComponentActivity() {
         setContent {
             var loading by remember { mutableStateOf(true) }
             var pageError by remember { mutableStateOf<String?>(null) }
-            CompanionTheme(themePalette(prefs.theme, isSystemInDarkTheme()), prefs.accent, prefs.amoled) {
+            CompanionTheme(themeId = prefs.theme, systemDark = isSystemInDarkTheme(), accent = prefs.accent, amoled = prefs.amoled, reducedMotion = systemReducesMotion(contentResolver)) {
                 val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
                 SideEffect {
                     WindowCompat.getInsetsController(window, window.decorView).apply {
@@ -64,19 +65,27 @@ class SchulnetzLoginActivity : ComponentActivity() {
                     }
                 }
                 BackHandler { val web = webView; if (web?.canGoBack() == true) web.goBack() else finish() }
-                Scaffold(topBar = {
-                    TopAppBar(title = { Text(if (viewOnly) t(R.string.school_session) else t(R.string.connect_schulnetz), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        navigationIcon = { ActionIcon(Icons.Outlined.Close, t(R.string.close_school_sign_in)) { finish() } })
+                Scaffold(containerColor = MaterialTheme.colorScheme.background, topBar = {
+                    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
+                        Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            ActionIcon(Icons.Outlined.Close, t(R.string.close_school_sign_in)) { finish() }
+                            Column(Modifier.weight(1f).padding(start = 4.dp)) {
+                                Text(if (viewOnly) t(R.string.school_session) else t(R.string.connect_schulnetz), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                StatusLine(t(R.string.schulnetz_read_only), StateTone.Accent)
+                            }
+                        }
+                        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp), trackColor = LocalCompanionSemantics.current.sunken)
+                        else HorizontalDivider(color = LocalCompanionSemantics.current.hairline)
+                    }
                 }) { padding ->
                     Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
-                        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                         pageError?.let { message ->
                             Box(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                                InfoBanner(t(R.string.could_not_open_schulnetz), message, t(R.string.try_again), true) {
+                                InfoBanner(t(R.string.could_not_open_schulnetz), message, t(R.string.try_again), true, onAction = {
                                     pageError = null
                                     loading = true
                                     webView?.reload()
-                                }
+                                })
                             }
                         }
                         AndroidView(factory = { context -> WebView(context).also { web ->

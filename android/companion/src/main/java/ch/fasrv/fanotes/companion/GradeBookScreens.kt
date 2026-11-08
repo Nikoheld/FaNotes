@@ -7,7 +7,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Archive
@@ -54,7 +54,7 @@ fun SchoolMarkRow(
     }
     val spoken = "${mark.label.ifBlank { t(R.string.school_mark) }}. ${if (longPressReveal) t(R.string.hidden_hold) else t(R.string.hidden_tap)}"
     Row(
-        Modifier.fillMaxWidth().background(if (highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.background, MaterialTheme.shapes.small).then(gesture).then(if (hidden) Modifier.semantics { contentDescription = spoken } else Modifier).padding(vertical = 14.dp, horizontal = if (highlighted) 12.dp else 0.dp),
+        Modifier.fillMaxWidth().heightIn(min = 60.dp).background(if (highlighted) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent).then(gesture).then(if (hidden) Modifier.semantics { contentDescription = spoken } else Modifier).padding(vertical = 12.dp, horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -71,14 +71,15 @@ fun SchoolMarkRow(
             )
         }
         if ((mark.adjusted || mark.excluded) && !hidden) TextButton(onClick = onRestore) { Text(t(R.string.restore)) }
-        Text(if (hidden) "?" else uiMark(mark.mark, decimals), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        if (hidden) Box(Modifier.size(40.dp).background(LocalCompanionSemantics.current.sunken, MaterialTheme.shapes.small), contentAlignment = Alignment.Center) {
+            Text("?", style = TimeStyle.copy(fontSize = MaterialTheme.typography.titleLarge.fontSize), color = MaterialTheme.colorScheme.onSurface)
+        } else Text(uiMark(mark.mark, decimals), style = TimeStyle.copy(fontSize = MaterialTheme.typography.headlineSmall.fontSize), color = if (mark.mark < 4.0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
     }
-    FineDivider()
 }
 
 @Composable
 fun OwnMarkRow(grade: OwnGrade, decimals: Int, onEdit: () -> Unit, onDelete: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onEdit).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).clickable(onClick = onEdit).padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(grade.title.ifBlank { t(R.string.own_mark) }, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
@@ -86,16 +87,15 @@ fun OwnMarkRow(grade: OwnGrade, decimals: Int, onEdit: () -> Unit, onDelete: () 
             }
             Text(t(R.string.weight_tap_to_edit, formatGradeDate(grade.date), uiMark(grade.weight)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Text(uiMark(grade.mark, decimals), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp))
+        Text(uiMark(grade.mark, decimals), style = TimeStyle.copy(fontSize = MaterialTheme.typography.headlineSmall.fontSize), modifier = Modifier.padding(horizontal = 8.dp))
         ActionIcon(Icons.Outlined.Close, t(R.string.delete_own_mark, grade.title), onClick = onDelete)
     }
-    FineDivider()
 }
 
 @Composable
 fun CollectiveMarkRow(grade: CollectiveGrade, decimals: Int, onEdit: () -> Unit, onDelete: () -> Unit) {
     val value = collectiveValue(grade.parts)
-    Column(Modifier.fillMaxWidth().clickable(onClick = onEdit).padding(vertical = 12.dp)) {
+    Column(Modifier.fillMaxWidth().clickable(onClick = onEdit).padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -110,14 +110,13 @@ fun CollectiveMarkRow(grade: CollectiveGrade, decimals: Int, onEdit: () -> Unit,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text(uiMark(value, decimals), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp))
+            Text(uiMark(value, decimals), style = TimeStyle.copy(fontSize = MaterialTheme.typography.headlineSmall.fontSize), modifier = Modifier.padding(horizontal = 8.dp))
             ActionIcon(Icons.Outlined.Close, t(R.string.delete_collective_grade, grade.title), onClick = onDelete)
         }
         grade.parts.forEach { part ->
             Text(t(R.string.weight_2, part.title.ifBlank { t(R.string.partial_test_name) }, uiMark(part.mark, decimals), uiMark(part.weight)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp, start = 8.dp))
         }
     }
-    FineDivider()
 }
 
 @Composable
@@ -126,22 +125,18 @@ fun ArchivedSubjectsScreen(model: CompanionModel) {
         courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds(), book = model.gradeBook).filter { it.archived }
     }
     ScreenList {
-        item {
-            Text(t(R.string.archived_subjects), style = MaterialTheme.typography.headlineMedium)
-            Text(t(R.string.hidden_from_your_list_overall_average_and_promot), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp, bottom = 12.dp))
-        }
+        item { Text(t(R.string.hidden_from_your_list_overall_average_and_promot), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)) }
         if (courses.isEmpty()) item { EmptyState(Icons.Outlined.Archive, t(R.string.nothing_archived), t(R.string.archive_a_finished_subject_from_its_page_you_can)) }
-        items(courses, key = { it.courseId }) { course ->
-            Row(Modifier.fillMaxWidth().clickable(role = Role.Button) { model.focusCourseId = course.courseId; model.navigate(Page.Course) }.padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        itemsIndexed(courses, key = { _, it -> it.courseId }) { index, course -> GroupItem(index, courses.size) {
+            Row(Modifier.fillMaxWidth().clickable(role = Role.Button) { model.focusCourseId = course.courseId; model.navigate(Page.Course) }.padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(courseAlias(course.label, model.desk.courseAliases), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(uiMark(course.average, model.desk.gradeDecimals), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 TextButton(onClick = { model.restoreCourse(course.courseId) }) { Text(t(R.string.restore)) }
-                Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(Icons.Outlined.ChevronRight, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            FineDivider()
-        }
+        } }
     }
 }
 
@@ -155,10 +150,10 @@ fun OwnGradeDialog(courseId: String, existing: OwnGrade?, onDismiss: () -> Unit,
     val factor = weight.replace(',', '.').toDoubleOrNull()
     val iso = parseGradeDate(date)
     val ready = number != null && number.isFinite() && number in 1.0..6.0 && factor != null && factor.isFinite() && factor > 0.0 && iso != null
-    AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), title = { Text(if (existing == null) t(R.string.add_your_mark) else t(R.string.edit_your_mark)) }, text = {
+    AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), shape = MaterialTheme.shapes.extraLarge, title = { Text(if (existing == null) t(R.string.add_your_mark) else t(R.string.edit_your_mark)) }, text = {
         Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(t(R.string.counted_in_this_subject_your_promotion_points_an), style = MaterialTheme.typography.bodySmall)
-            OutlinedTextField(title, { title = it }, label = { Text(t(R.string.name)) }, singleLine = true)
+            OutlinedTextField(title, { title = it }, label = { Text(t(R.string.name)) }, singleLine = true, shape = MaterialTheme.shapes.small)
             OutlinedTextField(mark, { mark = it }, label = { Text(t(R.string.mark_1_to_6)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
             OutlinedTextField(weight, { weight = it }, label = { Text(t(R.string.weight_3)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
             OutlinedTextField(date, { date = it }, label = { Text(t(R.string.date)) }, singleLine = true, supportingText = { Text(t(R.string.s_4_11_2026_or_2026_11_04)) })
@@ -196,15 +191,15 @@ fun CollectiveGradeDialog(courseId: String, existing: CollectiveGrade?, onDismis
     val factor = weight.replace(',', '.').toDoubleOrNull()
     val iso = parseGradeDate(date)
     val ready = title.isNotBlank() && parts.size >= 2 && parts.size == drafts.size && factor != null && factor > 0.0 && iso != null
-    AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), title = { Text(if (existing == null) t(R.string.collective_grade) else t(R.string.edit_collective_grade)) }, text = {
+    AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), shape = MaterialTheme.shapes.extraLarge, title = { Text(if (existing == null) t(R.string.collective_grade) else t(R.string.edit_collective_grade)) }, text = {
         Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(t(R.string.partial_tests_combine_into_one_sammelnote_only_t), style = MaterialTheme.typography.bodySmall)
-            OutlinedTextField(title, { title = it }, label = { Text(t(R.string.name)) }, singleLine = true)
-            OutlinedTextField(date, { date = it }, label = { Text(t(R.string.date)) }, singleLine = true)
+            OutlinedTextField(title, { title = it }, label = { Text(t(R.string.name)) }, singleLine = true, shape = MaterialTheme.shapes.small)
+            OutlinedTextField(date, { date = it }, label = { Text(t(R.string.date)) }, singleLine = true, shape = MaterialTheme.shapes.small)
             OutlinedTextField(weight, { weight = it }, label = { Text(t(R.string.weight_in_the_subject)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
             drafts.forEachIndexed { index, draft ->
                 Text(t(R.string.partial_test, index + 1), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedTextField(draft.title, { drafts[index] = draft.copy(title = it) }, label = { Text(t(R.string.name)) }, singleLine = true)
+                OutlinedTextField(draft.title, { drafts[index] = draft.copy(title = it) }, label = { Text(t(R.string.name)) }, singleLine = true, shape = MaterialTheme.shapes.small)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedTextField(draft.mark, { drafts[index] = draft.copy(mark = it) }, label = { Text(t(R.string.mark)) }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
                     OutlinedTextField(draft.weight, { drafts[index] = draft.copy(weight = it) }, label = { Text(t(R.string.weight_3)) }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
@@ -231,7 +226,7 @@ fun GradeAdjustmentDialog(mark: WeightedMark, decimals: Int, existing: GradeAdju
     val parsedWeight = overrideWeight.replace(',', '.').toDoubleOrNull()
     val markOk = overrideMark.isBlank() || (parsedMark != null && parsedMark in 1.0..6.0)
     val weightOk = overrideWeight.isBlank() || (parsedWeight != null && parsedWeight > 0.0)
-    AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), title = { Text(mark.label.ifBlank { t(R.string.school_mark) }, maxLines = 2, overflow = TextOverflow.Ellipsis) }, text = {
+    AlertDialog(onDismissRequest = onDismiss, modifier = Modifier.imePadding(), shape = MaterialTheme.shapes.extraLarge, title = { Text(mark.label.ifBlank { t(R.string.school_mark) }, maxLines = 2, overflow = TextOverflow.Ellipsis) }, text = {
         Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(t(R.string.school_mark_weight_the_original_stays_visible_th, uiMark(mark.displayMark, decimals), uiMark(mark.displayWeight)), style = MaterialTheme.typography.bodySmall)
             OutlinedTextField(overrideMark, { overrideMark = it }, label = { Text(t(R.string.your_mark)) }, placeholder = { Text(uiMark(mark.displayMark, decimals)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))

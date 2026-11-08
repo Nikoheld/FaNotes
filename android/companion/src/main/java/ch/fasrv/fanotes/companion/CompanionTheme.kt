@@ -1,78 +1,171 @@
 package ch.fasrv.fanotes.companion
 
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import ch.fasrv.fanotes.desk.ThemePalette
 
-private val Inter = FontFamily(Font(R.font.inter_regular))
+/*
+ * Kanti+ design system ("Stundentakt").
+ *
+ * The school day is a measured line: times are set in condensed tabular figures, lessons hang
+ * on a thin time rail, and the day band on Heute is the one memorable element. Everything else
+ * stays quiet: paper surfaces, ink text, one accent, hairlines instead of boxes.
+ */
+
+private fun instrument(weight: Int, width: Float = 100f) = Font(
+    R.font.instrument_sans,
+    FontWeight(weight),
+    variationSettings = FontVariation.Settings(FontVariation.weight(weight), FontVariation.width(width)),
+)
+
+/** Text face: Instrument Sans with real 400–700 weights (no synthetic bold). */
+val KantiSans = FontFamily(instrument(400), instrument(500), instrument(600), instrument(700))
+
+/** Condensed cut for clock times, marks and counts. Always used with tabular figures. */
+val KantiCondensed = FontFamily(instrument(500, 80f), instrument(600, 80f), instrument(700, 80f))
+
 val CompanionMono = FontFamily(Font(R.font.jetbrains_mono_regular))
-fun paletteColor(hex: String): Color = runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrDefault(Color(0xFF2A6F97))
-data class CompanionSemantics(val success: Color, val warning: Color, val paper: Color = Color(0xFFFCFBF7), val paperInk: Color = Color(0xFF26343B))
-val LocalCompanionSemantics = staticCompositionLocalOf { CompanionSemantics(Color(0xFF246A4B), Color(0xFF875715)) }
+
+fun paletteColor(hex: String): Color = Color(parseHexColor(hex) ?: parseHexColor(DEFAULT_ACCENT)!!)
+
+/** Extended tokens Material does not model. Read through [LocalCompanionSemantics]. */
+@Immutable
+data class CompanionSemantics(
+    val success: Color = Color(0xFF1D6A46),
+    val warning: Color = Color(0xFF875100),
+    val paper: Color = Color(0xFFFCFCFA),
+    val paperInk: Color = Color(0xFF26343B),
+    val successSoft: Color = Color(0xFFE3F0E8),
+    val warningSoft: Color = Color(0xFFF6EBDA),
+    val dangerSoft: Color = Color(0xFFF8E3E3),
+    val sunken: Color = Color(0xFFE8EBE6),
+    val raised: Color = Color.White,
+    val hairline: Color = Color(0xFFDCE0DA),
+    val dark: Boolean = false,
+    val snow: Boolean = false,
+    val fixedAccent: Boolean = false,
+)
+
+val LocalCompanionSemantics = staticCompositionLocalOf { CompanionSemantics() }
+
 object Space {
-    val xs = 4.dp; val sm = 8.dp; val md = 12.dp; val lg = 16.dp; val page = 20.dp; val xl = 24.dp; val xxl = 32.dp
+    val xs = 4.dp; val sm = 8.dp; val md = 12.dp; val lg = 16.dp; val page = 20.dp; val xl = 24.dp; val xxl = 32.dp; val xxxl = 40.dp
+    /** Minimum height of a tappable row. */
+    val row = 56.dp
+    /** Height of primary buttons. */
+    val button = 52.dp
+}
+
+/** Emphasised decelerate, used for everything that enters. */
+val KantiEase = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+
+@Immutable
+data class KantiMotion(val reduced: Boolean = false) {
+    val short: Int get() = if (reduced) 0 else 140
+    val medium: Int get() = if (reduced) 0 else 220
+    fun <T> spec(durationMs: Int = 220): FiniteAnimationSpec<T> = if (reduced) snap() else tween(durationMs, easing = KantiEase)
+}
+
+val LocalKantiMotion = staticCompositionLocalOf { KantiMotion() }
+
+/** False while the device reports no validated network. School data then shows its last stand. */
+val LocalOnline = staticCompositionLocalOf { true }
+
+private fun type(size: Int, line: Int, weight: Int, tracking: Float = 0f, family: FontFamily = KantiSans) = TextStyle(
+    fontFamily = family, fontSize = size.sp, lineHeight = line.sp, fontWeight = FontWeight(weight), letterSpacing = tracking.sp,
+)
+
+val KantiTypography = Typography(
+    displayLarge = type(56, 60, 600, -1.2f, KantiCondensed).copy(fontFeatureSettings = "tnum"),
+    displayMedium = type(44, 48, 600, -0.8f, KantiCondensed).copy(fontFeatureSettings = "tnum"),
+    displaySmall = type(34, 40, 600, -0.6f, KantiCondensed).copy(fontFeatureSettings = "tnum"),
+    headlineLarge = type(30, 36, 600, -0.7f),
+    headlineMedium = type(25, 31, 600, -0.5f),
+    headlineSmall = type(21, 27, 600, -0.3f),
+    titleLarge = type(19, 25, 600, -0.2f),
+    titleMedium = type(16, 22, 600, -0.1f),
+    titleSmall = type(14, 20, 600),
+    bodyLarge = type(16, 24, 400),
+    bodyMedium = type(15, 22, 400),
+    bodySmall = type(13, 18, 400, 0.1f),
+    labelLarge = type(15, 20, 600),
+    labelMedium = type(13, 16, 500, 0.1f),
+    labelSmall = type(12, 16, 600, 0.2f),
+)
+
+/** Clock times and marks: condensed, tabular, so columns of times line up. */
+val TimeStyle = type(17, 22, 600, 0f, KantiCondensed).copy(fontFeatureSettings = "tnum")
+val TimeSmallStyle = type(13, 16, 500, 0.1f, KantiCondensed).copy(fontFeatureSettings = "tnum")
+
+val KantiShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(22.dp),
+    extraLarge = RoundedCornerShape(28.dp),
+)
+
+fun kantiColorScheme(p: KantiPalette): ColorScheme {
+    fun c(value: Int) = Color(value)
+    val base = if (p.dark) darkColorScheme() else lightColorScheme()
+    return base.copy(
+        primary = c(p.accent), onPrimary = c(p.onAccent), primaryContainer = c(p.accentSoft), onPrimaryContainer = c(p.text),
+        inversePrimary = c(p.accent),
+        secondary = c(p.muted), onSecondary = c(p.surface), secondaryContainer = c(p.sunken), onSecondaryContainer = c(p.text),
+        tertiary = c(p.accent), onTertiary = c(p.onAccent), tertiaryContainer = c(p.accentSoft), onTertiaryContainer = c(p.text),
+        background = c(p.background), onBackground = c(p.text),
+        surface = c(p.surface), onSurface = c(p.text), surfaceVariant = c(p.sunken), onSurfaceVariant = c(p.muted),
+        surfaceTint = c(p.accent), inverseSurface = c(p.text), inverseOnSurface = c(p.background),
+        error = c(p.danger), onError = c(p.onDanger), errorContainer = c(p.dangerSoft), onErrorContainer = c(p.text),
+        outline = c(p.outline), outlineVariant = c(p.hairline), scrim = Color.Black,
+        surfaceBright = c(p.raised), surfaceDim = c(p.background),
+        surfaceContainerLowest = c(p.surface), surfaceContainerLow = c(p.raised), surfaceContainer = c(p.raised),
+        surfaceContainerHigh = c(p.raised), surfaceContainerHighest = c(p.sunken),
+    )
 }
 
 @Composable
-fun CompanionTheme(palette: ThemePalette, accent: String = "#2a6f97", amoled: Boolean = false, content: @Composable () -> Unit) {
-    val dark = palette.dark
-    val standard = palette.id == "light" || palette.id == "dark"
-    val background = if (amoled && dark) Color.Black else if (standard) Color(if (dark) 0xFF11191F else 0xFFF7F8FA) else paletteColor(palette.background)
-    val surface = if (amoled && dark) Color(0xFF0B1014) else if (standard) Color(if (dark) 0xFF1A242C else 0xFFFFFFFF) else paletteColor(palette.surface)
-    val text = if (standard) Color(if (dark) 0xFFE7EDF1 else 0xFF202F38) else paletteColor(palette.text)
-    val muted = if (standard) Color(if (dark) 0xFFAFBEC8 else 0xFF586B77) else paletteColor(palette.muted)
-    val rawAccent = paletteColor(accent)
-    val primary = when {
-        dark && rawAccent.luminance() < 0.45f -> lerp(rawAccent, Color.White, 0.45f)
-        !dark && rawAccent.luminance() > 0.18f -> lerp(rawAccent, Color.Black, 0.32f)
-        else -> rawAccent
+fun CompanionTheme(
+    themeId: String?,
+    systemDark: Boolean,
+    accent: String = DEFAULT_ACCENT,
+    amoled: Boolean = false,
+    reducedMotion: Boolean = false,
+    online: Boolean = true,
+    content: @Composable () -> Unit,
+) {
+    val palette = remember(themeId, systemDark, accent, amoled) { kantiPalette(themeId, systemDark, accent, amoled) }
+    val scheme = remember(palette) { kantiColorScheme(palette) }
+    val semantics = remember(palette) {
+        CompanionSemantics(
+            success = Color(palette.success), warning = Color(palette.warning),
+            paper = Color(palette.paper), paperInk = Color(palette.paperInk),
+            successSoft = Color(palette.successSoft), warningSoft = Color(palette.warningSoft), dangerSoft = Color(palette.dangerSoft),
+            sunken = Color(palette.sunken), raised = Color(palette.raised), hairline = Color(palette.hairline),
+            dark = palette.dark, snow = palette.id == SNOW_THEME_ID, fixedAccent = palette.fixedAccent,
+        )
     }
-    val container = lerp(surface, primary, if (dark) 0.20f else 0.10f)
-    val soft = lerp(surface, text, if (dark) 0.07f else 0.045f)
-    val outline = lerp(surface, text, if (dark) 0.40f else 0.34f)
-    val line = lerp(surface, text, if (dark) 0.14f else 0.12f)
-    val base = if (dark) darkColorScheme() else lightColorScheme()
-    val scheme = base.copy(
-        primary = primary, onPrimary = if (primary.luminance() > 0.36f) Color(0xFF10232C) else Color.White,
-        primaryContainer = container, onPrimaryContainer = text,
-        secondary = muted, onSecondary = surface, secondaryContainer = soft, onSecondaryContainer = text,
-        tertiary = primary, onTertiary = surface, tertiaryContainer = container, onTertiaryContainer = text,
-        background = background, onBackground = text, surface = surface, onSurface = text,
-        surfaceVariant = soft, onSurfaceVariant = muted, outline = outline, outlineVariant = line,
-        surfaceTint = primary, inverseSurface = text, inverseOnSurface = surface,
-        inversePrimary = rawAccent, scrim = Color.Black,
-        error = Color(if (dark) 0xFFFFB4AB else 0xFFB33435), onError = Color(if (dark) 0xFF5D1014 else 0xFFFFFFFF),
-        errorContainer = Color(if (dark) 0xFF432125 else 0xFFFFEDEC), onErrorContainer = Color(if (dark) 0xFFFFDAD6 else 0xFF8C262A),
-        surfaceBright = surface, surfaceDim = background, surfaceContainerLowest = background,
-        surfaceContainerLow = surface, surfaceContainer = soft, surfaceContainerHigh = soft,
-        surfaceContainerHighest = lerp(surface, text, if (dark) 0.12f else 0.075f),
-    )
-    fun type(size: Int, line: Int, weight: FontWeight = FontWeight.Normal, tracking: Float = 0f) = TextStyle(
-        fontFamily = Inter, fontSize = size.sp, lineHeight = line.sp, fontWeight = weight, letterSpacing = tracking.sp,
-    )
-    val typography = Typography(
-        displayLarge = type(36, 44, FontWeight.SemiBold, -1f), displayMedium = type(32, 40, FontWeight.SemiBold, -0.8f), displaySmall = type(28, 36, FontWeight.SemiBold, -0.6f),
-        headlineLarge = type(28, 36, FontWeight.SemiBold, -0.6f), headlineMedium = type(24, 32, FontWeight.SemiBold, -0.5f), headlineSmall = type(22, 30, FontWeight.SemiBold, -0.4f),
-        titleLarge = type(20, 28, FontWeight.SemiBold, -0.3f), titleMedium = type(16, 24, FontWeight.SemiBold, -0.15f), titleSmall = type(14, 20, FontWeight.SemiBold),
-        bodyLarge = type(16, 25), bodyMedium = type(14, 22), bodySmall = type(12, 18),
-        labelLarge = type(14, 20, FontWeight.SemiBold), labelMedium = type(12, 18, FontWeight.Medium), labelSmall = type(11, 16, FontWeight.Medium, 0.3f),
-    )
-    CompositionLocalProvider(LocalCompanionSemantics provides CompanionSemantics(paletteColor(palette.success), paletteColor(palette.warning))) {
-        MaterialTheme(colorScheme = scheme, typography = typography, shapes = Shapes(
-            extraSmall = RoundedCornerShape(6.dp), small = RoundedCornerShape(10.dp), medium = RoundedCornerShape(14.dp),
-            large = RoundedCornerShape(18.dp), extraLarge = RoundedCornerShape(24.dp),
-        ), content = content)
+    CompositionLocalProvider(
+        LocalCompanionSemantics provides semantics,
+        LocalKantiMotion provides KantiMotion(reducedMotion),
+        LocalOnline provides online,
+    ) {
+        MaterialTheme(colorScheme = scheme, typography = KantiTypography, shapes = KantiShapes, content = content)
     }
 }

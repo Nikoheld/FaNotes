@@ -1,7 +1,9 @@
 package ch.fasrv.fanotes.companion
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -39,47 +41,49 @@ fun CompanionSearchScreen(model: CompanionModel) {
     val courses = remember(needle, model.snapshot.grades, model.gradeBook, model.desk.courseAliases, model.unrevealedIds, model.settings.guessGrades) { if (needle.length < 2) emptyList() else activeCourses(courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds(), book = model.gradeBook)).filter { courseAlias(it.label, model.desk.courseAliases).contains(needle, true) } }
     val local = remember(needle, model.calendar.events) { if (needle.length < 2) emptyList() else model.calendar.events.filter { "${it.title} ${it.location} ${it.notes}".contains(needle, true) } }
     val recentNotes = remember(model.tree) { flattenNotes(model.tree).sortedByDescending { it.modifiedAt }.take(3) }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { if (query.isEmpty()) runCatching { focus.requestFocus() } }
     Column {
-        SearchField(query, { query = it }, if (model.notesAccount) t(R.string.notes_tasks_subjects_events) else t(R.string.tasks_subjects_events), Modifier.padding(horizontal = Space.page, vertical = 8.dp))
+        SearchField(query, { query = it }, if (model.notesAccount) t(R.string.notes_tasks_subjects_events) else t(R.string.tasks_subjects_events), Modifier.padding(horizontal = Space.page, vertical = 6.dp).focusRequester(focus))
         ChoiceRow(listOf("all" to t(R.string.all), "tasks" to t(R.string.tasks), "school" to t(R.string.school)) + if (model.notesAccount) listOf("notes" to t(R.string.notes)) else emptyList(), scope, { scope = it }, Modifier.padding(horizontal = Space.page))
         ScreenList {
             if (needle.length < 2) {
-                item {
+                item(key = "hint") {
                     if (model.notesAccount) EmptyState(Icons.Outlined.Search, t(R.string.find_your_next_thought), t(R.string.search_note_text_existing_handwriting_transcript))
                     else EmptyState(Icons.Outlined.Search, t(R.string.find_a_class_task_or_grade), t(R.string.search_tasks_subjects_events_and_school_records))
                 }
-                if (model.notesAccount) {
-                    item { SectionLabel(t(R.string.jump_back_in)) }
-                    items(recentNotes, key = { it.path }) { note -> NoteRow(model, note) { model.openNote(note.path) } }
+                if (model.notesAccount && recentNotes.isNotEmpty()) {
+                    item(key = "recent-head") { SectionLabel(t(R.string.jump_back_in)) }
+                    itemsIndexed(recentNotes, key = { _, it -> it.path }) { index, note -> GroupItem(index, recentNotes.size) { NoteRow(model, note) { model.openNote(note.path) } } }
                 }
             } else {
-                if (loading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 12.dp)) }
-                if (model.notesAccount && failed) item { InfoBanner(t(R.string.note_search_needs_attention), t(R.string.some_notes_could_not_be_read_your_files_have_bee)) }
+                if (loading) item(key = "loading") { LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 12.dp), trackColor = LocalCompanionSemantics.current.sunken) }
+                if (model.notesAccount && failed) item(key = "failed") { InfoBanner(t(R.string.note_search_needs_attention), t(R.string.some_notes_could_not_be_read_your_files_have_bee), error = true) }
                 if (model.notesAccount && scope in listOf("all", "notes") && notes.isNotEmpty()) {
-                    item { SectionLabel(t(R.string.notes_2, notes.size, if (notes.size == 200) "+" else "")) }
-                    items(notes, key = { "search-note:${it.node.path}" }) { result -> NoteRow(model, result.node) { model.openNote(result.node.path) } }
+                    item(key = "notes-head") { SectionLabel(t(R.string.notes_2, notes.size, if (notes.size == 200) "+" else "")) }
+                    itemsIndexed(notes, key = { _, it -> "search-note:${it.node.path}" }) { index, result -> GroupItem(index, notes.size) { NoteRow(model, result.node) { model.openNote(result.node.path) } } }
                 }
                 if (scope in listOf("all", "tasks") && tasks.isNotEmpty()) {
-                    item { SectionLabel(t(R.string.tasks_2, tasks.size)) }
-                    items(tasks, key = { "search-task:${it.id}" }) { item -> TaskRow(item, LocalDate.now(), { model.toggleTask(item) }) { task = item } }
+                    item(key = "tasks-head") { SectionLabel(t(R.string.tasks), count = tasks.size) }
+                    itemsIndexed(tasks, key = { _, it -> "search-task:${it.id}" }) { index, item -> GroupItem(index, tasks.size) { TaskRow(item, LocalDate.now(), { model.toggleTask(item) }, colors = model.colors) { task = item } } }
                 }
                 if (scope == "all" && local.isNotEmpty()) {
-                    item { SectionLabel(t(R.string.calendar)) }
-                    items(local, key = { "search-local:${it.id}" }) { event ->
+                    item(key = "calendar-head") { SectionLabel(t(R.string.calendar), count = local.size) }
+                    itemsIndexed(local, key = { _, it -> "search-local:${it.id}" }) { index, event ->
                         val entry = AgendaEntry("local:${event.id}", event.title, AgendaKind.Event, parseDisplayDate(event.start) ?: LocalDate.now(), detail = dueLabel(event.start), local = event)
-                        AgendaRow(model, entry) { selected = entry }
+                        AgendaRow(model, entry, railPosition(index, local.size), showDay = true) { selected = entry }
                     }
                 }
                 if (scope in listOf("all", "school")) {
-                    if (courses.isNotEmpty()) item { SectionLabel(t(R.string.subjects)) }
-                    items(courses, key = { "search-course:${it.courseId}" }) { course -> SettingRow(Icons.Outlined.Insights, courseAlias(course.label, model.desk.courseAliases), tp(R.plurals.marks_count, course.marks.size, course.marks.size)) { model.focusCourseId = course.courseId; model.navigate(Page.Course) } }
-                    if (events.isNotEmpty()) item { SectionLabel(t(R.string.school_schedule)) }
-                    items(events, key = { "search-event:${lessonTargetId(it)}" }) { event ->
+                    if (courses.isNotEmpty()) item(key = "courses-head") { SectionLabel(t(R.string.subjects), count = courses.size) }
+                    itemsIndexed(courses, key = { _, it -> "search-course:${it.courseId}" }) { index, course -> GroupItem(index, courses.size) { SettingRow(Icons.Outlined.Insights, courseAlias(course.label, model.desk.courseAliases), tp(R.plurals.marks_count, course.marks.size, course.marks.size)) { model.focusCourseId = course.courseId; model.navigate(Page.Course) } } }
+                    if (events.isNotEmpty()) item(key = "events-head") { SectionLabel(t(R.string.school_schedule), count = events.size) }
+                    itemsIndexed(events, key = { _, it -> "search-event:${lessonTargetId(it)}" }) { index, event ->
                         val entry = AgendaEntry("school:${lessonTargetId(event)}", preferredEventTitle(event), if (event.isExamLike()) AgendaKind.Exam else if (event.isLesson()) AgendaKind.Lesson else AgendaKind.Event, parseDisplayDate(event.start) ?: LocalDate.now(), eventClock(event), detail = dueLabel(event.start), school = event)
-                        AgendaRow(model, entry) { selected = entry }
+                        AgendaRow(model, entry, railPosition(index, events.size), showDay = true) { selected = entry }
                     }
-                    if (messages.isNotEmpty()) item { SectionLabel(t(R.string.school_messages)) }
-                    items(messages, key = { "search-message:${messageTargetId(it)}" }) { message -> SettingRow(Icons.Outlined.Forum, shownText(messageHeadline(message.title, message.body)).ifBlank { t(R.string.school_message) }, plainPreview(message.body).take(100)) { model.highlightIds = setOf(messageTargetId(message)); model.navigate(Page.Updates) } }
+                    if (messages.isNotEmpty()) item(key = "messages-head") { SectionLabel(t(R.string.school_messages), count = messages.size) }
+                    itemsIndexed(messages, key = { _, it -> "search-message:${messageTargetId(it)}" }) { index, message -> GroupItem(index, messages.size) { SettingRow(Icons.Outlined.Forum, shownText(messageHeadline(message.title, message.body)).ifBlank { t(R.string.school_message) }, plainPreview(message.body).take(100)) { model.highlightIds = setOf(messageTargetId(message)); model.navigate(Page.Updates) } } }
                 }
                 val empty = when (scope) {
                     "notes" -> !model.notesAccount || notes.isEmpty()
@@ -87,7 +91,7 @@ fun CompanionSearchScreen(model: CompanionModel) {
                     "school" -> events.isEmpty() && messages.isEmpty() && courses.isEmpty()
                     else -> (!model.notesAccount || notes.isEmpty()) && tasks.isEmpty() && events.isEmpty() && messages.isEmpty() && courses.isEmpty() && local.isEmpty()
                 }
-                if (!loading && empty) item { EmptyState(Icons.Outlined.SearchOff, t(R.string.nothing_matches, needle), if (model.notesAccount) t(R.string.try_fewer_words_a_subject_or_a_note_title) else t(R.string.try_fewer_words_a_subject_or_a_task)) }
+                if (!loading && empty) item(key = "empty") { EmptyState(Icons.Outlined.SearchOff, t(R.string.nothing_matches, needle), if (model.notesAccount) t(R.string.try_fewer_words_a_subject_or_a_note_title) else t(R.string.try_fewer_words_a_subject_or_a_task)) }
             }
         }
     }

@@ -7,34 +7,48 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import ch.fasrv.fanotes.desk.THEME_CHOICES
 import ch.fasrv.fanotes.schulnetz.*
 import ch.fasrv.fanotes.sync.SyncStatus
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+
+fun themeLabel(id: String): String = when (id) {
+    "light" -> t(R.string.paper); "dark" -> t(R.string.graphite); "midnight" -> t(R.string.midnight); "forest" -> t(R.string.forest)
+    "aurora" -> t(R.string.aurora); "sepia" -> t(R.string.warm_paper); SNOW_THEME_ID -> t(R.string.snow_theme); else -> t(R.string.system)
+}
 
 @Composable
 fun SettingsScreen(model: CompanionModel, page: Page) {
@@ -57,236 +71,297 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
     androidx.compose.runtime.key(page) {
     when (page) {
         Page.Settings -> ScreenList {
-            item {
-                Row(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Box(Modifier.size(48.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape), contentAlignment = Alignment.Center) { Icon(if (model.notesAccount) Icons.Outlined.PersonOutline else Icons.Outlined.School, null, tint = MaterialTheme.colorScheme.primary) }
-                    Column(Modifier.weight(1f)) {
-                        Text(sync.account?.email ?: if (model.notesAccount) t(R.string.your_fanotes) else t(R.string.kanti), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(if (model.notesAccount) syncDescription(sync.status) else t(R.string.grades_timetable_and_school_updates), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            item(key = "identity") {
+                Group(Modifier.padding(top = 4.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        IconTile(if (model.notesAccount) Icons.Outlined.PersonOutline else Icons.Outlined.School, StateTone.Accent, 48.dp)
+                        Column(Modifier.weight(1f)) {
+                            Text(sync.account?.email ?: if (model.notesAccount) t(R.string.your_fanotes) else t(R.string.kanti), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(if (model.notesAccount) syncDescription(sync.status) else t(R.string.grades_timetable_and_school_updates), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
-                FineDivider()
             }
-            item { SectionLabel(if (model.notesAccount) t(R.string.make_it_yours) else t(R.string.school)) }
-            if (model.notesAccount) item { SettingRow(Icons.Outlined.ManageAccounts, t(R.string.account_sync), t(R.string.fanotes_schulnetz_and_offline_status)) { model.navigate(Page.Connections) } }
-            else item { SettingRow(Icons.Outlined.School, t(R.string.schulnetz), t(R.string.connection_notifications_and_this_device)) { model.navigate(Page.Connections) } }
-            if (!model.notesAccount) item { SectionLabel(t(R.string.make_it_yours)) }
-            item { SettingRow(Icons.Outlined.Palette, t(R.string.appearance), t(R.string.theme_accent_and_app_icon)) { model.navigate(Page.Appearance) } }
-            item {
-                Text(t(R.string.language), style = MaterialTheme.typography.titleMedium)
-                ChoiceRow(
-                    listOf("system" to t(R.string.system), "de" to t(R.string.language_german), "en" to t(R.string.language_english)),
-                    AppLanguage.selectedTag(),
-                    onSelect = { tag ->
-                        if (tag != AppLanguage.selectedTag()) {
-                            AppLanguage.choose(tag)
-                            CompanionAlerts.ensureChannels(context)
-                            NextLessonWidget.update(context)
-                            context.hostActivity()?.recreate()
+            item(key = "school-head") { SectionLabel(t(R.string.settings_school_account)) }
+            item(key = "school") {
+                Group {
+                    if (model.notesAccount) SettingRow(Icons.Outlined.ManageAccounts, t(R.string.account_sync), t(R.string.fanotes_schulnetz_and_offline_status)) { model.navigate(Page.Connections) }
+                    else SettingRow(Icons.Outlined.School, t(R.string.schulnetz), t(R.string.connection_notifications_and_this_device)) { model.navigate(Page.Connections) }
+                    FineDivider()
+                    SettingRow(Icons.Outlined.NotificationsNone, t(R.string.notifications), t(R.string.what_reaches_you_and_when)) { model.navigate(Page.Notifications) }
+                    if (!model.notesAccount) { FineDivider(); SettingRow(Icons.Outlined.EditNote, t(R.string.sync_notes_with_fanotes), t(R.string.optional_school_stays_available_either_way)) { model.navigate(Page.Auth) } }
+                }
+            }
+            item(key = "look-head") { SectionLabel(t(R.string.make_it_yours)) }
+            item(key = "look") {
+                Group {
+                    SettingRow(Icons.Outlined.Palette, t(R.string.appearance), themeLabel(model.desk.theme.ifBlank { "system" })) { model.navigate(Page.Appearance) }
+                    FineDivider()
+                    SettingRow(Icons.Outlined.ViewWeek, t(R.string.navigation_bar), t(R.string.choose_tabs_and_their_order)) { model.navigate(Page.Navigation) }
+                    FineDivider()
+                    SettingRow(Icons.Outlined.Tune, t(R.string.planning_grades), t(R.string.today_timetable_and_grade_display)) { model.navigate(Page.Planning) }
+                    FineDivider()
+                    Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconTile(Icons.Outlined.Translate)
+                            Text(t(R.string.language), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 14.dp))
                         }
-                    },
-                )
+                        ChoiceRow(
+                            listOf("system" to t(R.string.system), "de" to t(R.string.language_german), "en" to t(R.string.language_english)),
+                            AppLanguage.selectedTag(),
+                            onSelect = { tag ->
+                                if (tag != AppLanguage.selectedTag()) {
+                                    AppLanguage.choose(tag)
+                                    CompanionAlerts.ensureChannels(context)
+                                    NextLessonWidget.update(context)
+                                    context.hostActivity()?.recreate()
+                                }
+                            },
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                }
             }
-            item { SettingRow(Icons.Outlined.ViewWeek, t(R.string.navigation_bar), t(R.string.choose_tabs_and_their_order)) { model.navigate(Page.Navigation) } }
-            item { SettingRow(Icons.Outlined.Tune, t(R.string.planning_grades), t(R.string.today_timetable_and_grade_display)) { model.navigate(Page.Planning) } }
-            item { SettingRow(Icons.Outlined.NotificationsNone, t(R.string.notifications), t(R.string.what_reaches_you_and_when)) { model.navigate(Page.Notifications) } }
-            item { SectionLabel(if (model.notesAccount) t(R.string.about_kanti) else t(R.string.optional)) }
-            if (model.notesAccount) item { SettingRow(Icons.Outlined.AutoGraph, t(R.string.your_activity), t(R.string.notes_habits_and_milestones)) { model.navigate(Page.Profile) } }
-            else item { SettingRow(Icons.Outlined.EditNote, t(R.string.sync_notes_with_fanotes), t(R.string.optional_school_stays_available_either_way)) { model.navigate(Page.Auth) } }
-            if (!model.notesAccount) item { SectionLabel(t(R.string.about_kanti)) }
-            item { SettingRow(Icons.Outlined.BugReport, t(R.string.diagnostics), t(R.string.connection_checks_and_support_exports)) { model.navigate(Page.Diagnostics) } }
-            item { Text(t(R.string.version_line, BuildConfig.VERSION_NAME), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 28.dp)) }
+            item(key = "about-head") { SectionLabel(t(R.string.about_kanti)) }
+            item(key = "about") {
+                Group {
+                    if (model.notesAccount) { SettingRow(Icons.Outlined.AutoGraph, t(R.string.your_activity), t(R.string.notes_habits_and_milestones)) { model.navigate(Page.Profile) }; FineDivider() }
+                    SettingRow(Icons.Outlined.AutoAwesome, t(R.string.replay_onboarding), t(R.string.replay_onboarding_body)) { model.replayOnboarding() }
+                    FineDivider()
+                    SettingRow(Icons.Outlined.BugReport, t(R.string.diagnostics), t(R.string.connection_checks_and_support_exports)) { model.navigate(Page.Diagnostics) }
+                }
+            }
+            item(key = "version") { Text(t(R.string.version_line, BuildConfig.VERSION_NAME), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 28.dp)) }
         }
         Page.Connections -> ScreenList {
-            if (model.notesAccount) item { SectionLabel(t(R.string.fanotes_account)) }
-            if (model.notesAccount) item {
-                Text(sync.account?.email ?: t(R.string.work_on_this_device), style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(syncDescription(sync.status), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
-                Text(t(R.string.your_notes_stay_available_offline_a_connected_ac), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
-                if (sync.account == null) Button(onClick = { model.navigate(Page.Auth) }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.connect_an_account)) }
-                else {
-                    Text(t(R.string.last_sync, sync.lastSyncAt?.let(::updatedLabel) ?: t(R.string.not_yet)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(onClick = model::sync, enabled = !model.busy && sync.status != SyncStatus.SYNCING, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) { Icon(Icons.Outlined.Sync, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(t(R.string.sync_now)) }
-                    TextButton(onClick = { confirm = "logout" }) { Text(t(R.string.sign_out)) }
-                    if (model.graph.plannerHold()) TextButton(onClick = model::acceptUpload) { Text(t(R.string.upload_tasks_and_calendar)) }
+            if (model.notesAccount) {
+                item(key = "fanotes-head") { SectionLabel(t(R.string.fanotes_account)) }
+                item(key = "fanotes") {
+                    Group {
+                        Column(Modifier.padding(16.dp)) {
+                            Text(sync.account?.email ?: t(R.string.work_on_this_device), style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            StatusLine(syncDescription(sync.status), when (sync.status) { SyncStatus.ERROR -> StateTone.Error; SyncStatus.OFFLINE -> StateTone.Offline; SyncStatus.IDLE -> StateTone.Accent; else -> StateTone.Neutral }, Modifier.padding(top = 6.dp))
+                            Text(t(R.string.your_notes_stay_available_offline_a_connected_ac), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 14.dp))
+                            if (sync.account == null) PrimaryButton(t(R.string.connect_an_account), { model.navigate(Page.Auth) }, Modifier.fillMaxWidth())
+                            else {
+                                Text(t(R.string.last_sync, sync.lastSyncAt?.let(::updatedLabel) ?: t(R.string.not_yet)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                PrimaryButton(t(R.string.sync_now), model::sync, Modifier.fillMaxWidth().padding(top = 14.dp), enabled = !model.busy && sync.status != SyncStatus.SYNCING, icon = Icons.Outlined.Sync)
+                                if (model.graph.plannerHold()) SecondaryButton(t(R.string.upload_tasks_and_calendar), model::acceptUpload, Modifier.fillMaxWidth().padding(top = 10.dp))
+                                TextButton(onClick = { confirm = "logout" }, modifier = Modifier.padding(top = 4.dp)) { Text(t(R.string.sign_out), color = MaterialTheme.colorScheme.error) }
+                            }
+                        }
+                    }
                 }
-                sync.error?.let { error -> InfoBanner(t(R.string.sync_needs_attention), shownText(error), t(R.string.try_again), true, model::sync) }
-                if (sync.conflicts.isNotEmpty()) InfoBanner(t(R.string.conflict_copies_kept), tp(R.plurals.conflict_copies, sync.conflicts.size, sync.conflicts.size))
+                sync.error?.let { error -> item(key = "sync-error") { Spacer(Modifier.height(12.dp)); InfoBanner(t(R.string.sync_needs_attention), shownText(error), t(R.string.try_again), true, onAction = model::sync) } }
+                if (sync.conflicts.isNotEmpty()) item(key = "conflicts") { Spacer(Modifier.height(12.dp)); InfoBanner(t(R.string.conflict_copies_kept), tp(R.plurals.conflict_copies, sync.conflicts.size, sync.conflicts.size), tone = StateTone.Warning) }
             }
-            item { SectionLabel(t(R.string.school_connection)) }
-            item {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Icon(Icons.Outlined.School, null, tint = MaterialTheme.colorScheme.primary)
-                    Text(t(R.string.schulnetz), style = MaterialTheme.typography.titleLarge)
+            item(key = "school-head") { SectionLabel(t(R.string.school_connection)) }
+            item(key = "school") {
+                Group {
+                    Column(Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            IconTile(Icons.Outlined.School, StateTone.Accent, 44.dp)
+                            Column {
+                                Text(t(R.string.schulnetz), style = MaterialTheme.typography.titleLarge)
+                                StatusLine(when { model.link.needsReauth -> t(R.string.sign_in_again_to_refresh); model.link.linked -> t(R.string.connected); else -> t(R.string.not_connected) },
+                                    when { model.link.needsReauth -> StateTone.Warning; model.link.linked -> StateTone.Accent; else -> StateTone.Neutral })
+                            }
+                        }
+                        Text(t(R.string.read_your_school_information_here_manage_officia), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 14.dp))
+                        OutlinedTextField(model.baseUrl, { model.baseUrl = it }, Modifier.fillMaxWidth(), label = { Text(t(R.string.school_address)) }, singleLine = true, shape = MaterialTheme.shapes.small, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
+                        PrimaryButton(if (model.link.needsReauth) t(R.string.sign_in_to_schulnetz_again) else if (model.link.linked) t(R.string.open_school_session) else t(R.string.connect_with_microsoft), { model.requestVisibleLogin("connections") },
+                            Modifier.fillMaxWidth().padding(top = 14.dp), enabled = !model.busy)
+                        Text(t(R.string.school_data_updated, updatedLabel(model.snapshot.fetchedAt)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp))
+                    }
+                    if (model.link.linked || !model.notesAccount) FineDivider()
+                    if (model.link.linked) SettingRow(Icons.Outlined.LinkOff, t(R.string.disconnect_school), "", chevron = false) { confirm = "unlink" }
+                    if (!model.notesAccount) {
+                        if (model.link.linked) FineDivider()
+                        SettingRow(Icons.Outlined.EditNote, t(R.string.sync_notes_with_fanotes), "") { model.navigate(Page.Auth) }
+                        FineDivider()
+                        SettingRow(Icons.Outlined.DeleteOutline, t(R.string.delete_my_kanti_data), "", tone = StateTone.Error, chevron = false) { confirm = "delete-kanti" }
+                    }
                 }
-                Text(when { model.link.needsReauth -> t(R.string.sign_in_again_to_refresh); model.link.linked -> t(R.string.connected); else -> t(R.string.not_connected) }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
-                Text(t(R.string.read_your_school_information_here_manage_officia), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
-                OutlinedTextField(model.baseUrl, { model.baseUrl = it }, Modifier.fillMaxWidth(), label = { Text(t(R.string.school_address)) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
-                Button(onClick = { model.requestVisibleLogin("connections") }, enabled = !model.busy, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) { Text(if (model.link.needsReauth) t(R.string.sign_in_to_schulnetz_again) else if (model.link.linked) t(R.string.open_school_session) else t(R.string.connect_with_microsoft)) }
-                if (model.link.linked) TextButton(onClick = { confirm = "unlink" }) { Text(t(R.string.disconnect_school)) }
-                if (!model.notesAccount) {
-                    TextButton(onClick = { model.navigate(Page.Auth) }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.sync_notes_with_fanotes)) }
-                    TextButton(onClick = { confirm = "delete-kanti" }) { Text(t(R.string.delete_my_kanti_data)) }
-                }
-                Text(t(R.string.school_data_updated, updatedLabel(model.snapshot.fetchedAt)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp))
-                if (model.link.lastError.isNotBlank()) InfoBanner(t(R.string.school_connection_needs_attention), shownText(model.link.lastError), t(R.string.diagnostics), true) { model.navigate(Page.Diagnostics) }
+                if (model.link.lastError.isNotBlank()) Box(Modifier.padding(top = 12.dp)) { InfoBanner(t(R.string.school_connection_needs_attention), shownText(model.link.lastError), t(R.string.diagnostics), true, onAction = { model.navigate(Page.Diagnostics) }) }
             }
         }
-        Page.Appearance -> ScreenList {
-            item { SectionLabel(t(R.string.color_light)) }
-            item {
-                Text(t(R.string.theme), style = MaterialTheme.typography.titleMedium)
-                ChoiceRow(THEME_CHOICES.map { it.id to when (it.id) { "light" -> t(R.string.paper); "dark" -> t(R.string.graphite); "midnight" -> t(R.string.midnight); "forest" -> t(R.string.forest); "aurora" -> t(R.string.aurora); "sepia" -> t(R.string.warm_paper); else -> t(R.string.system) } }, model.desk.theme, model::chooseTheme)
-                ToggleRow(t(R.string.pure_black), t(R.string.use_a_black_background_in_dark_themes), model.desk.amoled) { model.updateDesk(model.desk.copy(amoled = it)) }
-                SectionLabel(if (model.notesAccount) t(R.string.ink_accent) else t(R.string.accent))
-                ColorChoices(listOf("#2a6f97", "#7f6df2", "#3d8bfd", "#2f9e6b", "#e15b64"), model.desk.accent) { model.updateDesk(model.desk.copy(accent = it)) }
-                Text(t(R.string.accent_contrast_adjusts_to_your_theme), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            item { SectionLabel(t(R.string.home_screen_icon)) }
-            item { ChoiceRow(listOf("standard" to t(R.string.kanti), "schule" to t(R.string.school), "notiz" to t(R.string.notebook)), model.iconChoice, { model.chooseIcon(context, it) }) }
-            item { SectionLabel(t(R.string.navigation)) }
-            item { SettingRow(Icons.Outlined.ViewWeek, t(R.string.navigation_bar), t(R.string.choose_tabs_and_their_order)) { model.navigate(Page.Navigation) } }
-        }
+        Page.Appearance -> AppearanceSettings(model)
         Page.Navigation -> NavigationBarSettings(model)
         Page.Planning -> ScreenList {
-            item { SectionLabel(t(R.string.when_you_open_kanti)) }
-            item { ChoiceRow((if (model.notesAccount) NAV_BAR_IDS else NAV_BAR_IDS.filter { it != "notes" }).map { it to navBarLabel(it) }, startTabId(model.desk.startTab).let { if (!model.notesAccount && it == "notes") "today" else it }, { model.updateDesk(model.desk.copy(startTab = it)) }) }
-            item { SectionLabel(t(R.string.on_today)) }
-            items(TODAY_CARD_IDS, key = { it }) { id ->
-                ToggleRow(when (id) { "lessons" -> t(R.string.next_commitment); "exam" -> t(R.string.upcoming_exam); "grades" -> t(R.string.grade_overview); "pluspunkte" -> t(R.string.promotion_points_2); "events" -> t(R.string.school_updates); else -> t(R.string.tasks) }, checked = id !in model.desk.hiddenCards) { show ->
-                    model.updateDesk(model.desk.copy(hiddenCards = if (show) model.desk.hiddenCards - id else (model.desk.hiddenCards + id).distinct()))
-                }
-            }
-            item { SectionLabel(t(R.string.timetable)) }
-            item { ToggleRow(t(R.string.compact_rows), t(R.string.show_more_lessons_at_a_glance), model.desk.planCompact) { model.updateDesk(model.desk.copy(planCompact = it)) } }
-            item { ToggleRow(t(R.string.include_weekends), t(R.string.show_empty_weekend_days_in_week_view), model.desk.showWeekend) { model.updateDesk(model.desk.copy(showWeekend = it)) } }
-            item {
-                Text(t(R.string.visible_school_hours), style = MaterialTheme.typography.titleMedium)
-                ChoiceRow((0..23).map { it.toString() to "%02d:00".format(it) }, model.desk.dayStartHour.toString(), { model.updateDesk(model.desk.copy(dayStartHour = it.toInt(), dayEndHour = maxOf(model.desk.dayEndHour, it.toInt() + 1))) })
-                Text(t(R.string.until), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                ChoiceRow(((model.desk.dayStartHour + 1)..24).map { it.toString() to "%02d:00".format(it) }, model.desk.dayEndHour.toString(), { model.updateDesk(model.desk.copy(dayEndHour = it.toInt())) })
-            }
-            if (model.hidden.isNotEmpty()) {
-                item { SectionLabel(t(R.string.hidden_lessons)) }
-                items(model.hidden, key = { it.id }) { rule ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) { Text(rule.subject, style = MaterialTheme.typography.bodyLarge); Text(if (rule.mode == "once") rule.date else t(R.string.text_2, runCatching { java.time.DayOfWeek.of(rule.weekday).getDisplayName(java.time.format.TextStyle.SHORT, AppLanguage.formatLocale()) }.getOrDefault(t(R.string.weekly)), rule.start), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        TextButton(onClick = { model.restoreLesson(rule.id) }) { Text(t(R.string.restore)) }
+            item(key = "start-head") { SectionLabel(t(R.string.when_you_open_kanti)) }
+            item(key = "start") { ChoiceRow((if (model.notesAccount) NAV_BAR_IDS else NAV_BAR_IDS.filter { it != "notes" }).map { it to navBarLabel(it) }, startTabId(model.desk.startTab).let { if (!model.notesAccount && it == "notes") "today" else it }, { model.updateDesk(model.desk.copy(startTab = it)) }) }
+            item(key = "today-head") { SectionLabel(t(R.string.on_today)) }
+            itemsIndexed(TODAY_CARD_IDS, key = { _, it -> it }) { index, id ->
+                GroupItem(index, TODAY_CARD_IDS.size) {
+                    ToggleRow(when (id) { "lessons" -> t(R.string.next_commitment); "exam" -> t(R.string.upcoming_exam); "grades" -> t(R.string.grade_overview); "pluspunkte" -> t(R.string.promotion_points_2); "events" -> t(R.string.school_updates); else -> t(R.string.tasks) }, checked = id !in model.desk.hiddenCards) { show ->
+                        model.updateDesk(model.desk.copy(hiddenCards = if (show) model.desk.hiddenCards - id else (model.desk.hiddenCards + id).distinct()))
                     }
                 }
             }
-            item { SectionLabel(t(R.string.grades_widget)) }
-            item { ToggleRow(t(R.string.promotion_points_2), t(R.string.show_the_calculated_points_balance), model.desk.showPluspunkte) { model.updateDesk(model.desk.copy(showPluspunkte = it)) } }
-            item { Text(t(R.string.grade_precision), style = MaterialTheme.typography.titleMedium); ChoiceRow((0..3).map { it.toString() to tp(R.plurals.decimals_count, it, it) }, model.desk.gradeDecimals.toString(), { model.updateDesk(model.desk.copy(gradeDecimals = it.toInt())) }) }
-            item { Text(t(R.string.subject_order), style = MaterialTheme.typography.titleMedium); ChoiceRow(listOf("name" to t(R.string.name), "average" to t(R.string.average), "pluspunkte" to t(R.string.points)), model.desk.gradeSort, { model.updateDesk(model.desk.copy(gradeSort = it)) }) }
-            item { ToggleRow(t(R.string.compact_home_widget), t(R.string.use_a_smaller_next_lesson_summary), model.desk.widgetCompact) { model.updateDesk(model.desk.copy(widgetCompact = it)) } }
+            item(key = "timetable-head") { SectionLabel(t(R.string.timetable)) }
+            item(key = "timetable") {
+                Group {
+                    ToggleRow(t(R.string.compact_rows), t(R.string.show_more_lessons_at_a_glance), model.desk.planCompact) { model.updateDesk(model.desk.copy(planCompact = it)) }
+                    FineDivider()
+                    ToggleRow(t(R.string.include_weekends), t(R.string.show_empty_weekend_days_in_week_view), model.desk.showWeekend) { model.updateDesk(model.desk.copy(showWeekend = it)) }
+                    FineDivider()
+                    Column(Modifier.padding(16.dp)) {
+                        Text(t(R.string.visible_school_hours), style = MaterialTheme.typography.bodyLarge)
+                        Text(t(R.string.from_label), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+                        ChoiceRow((0..23).map { it.toString() to "%02d:00".format(it) }, model.desk.dayStartHour.toString(), { model.updateDesk(model.desk.copy(dayStartHour = it.toInt(), dayEndHour = maxOf(model.desk.dayEndHour, it.toInt() + 1))) })
+                        Text(t(R.string.until), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+                        ChoiceRow(((model.desk.dayStartHour + 1)..24).map { it.toString() to "%02d:00".format(it) }, model.desk.dayEndHour.toString(), { model.updateDesk(model.desk.copy(dayEndHour = it.toInt())) })
+                    }
+                }
+            }
+            if (model.hidden.isNotEmpty()) {
+                item(key = "hidden-head") { SectionLabel(t(R.string.hidden_lessons), count = model.hidden.size) }
+                itemsIndexed(model.hidden, key = { _, it -> it.id }) { index, rule ->
+                    GroupItem(index, model.hidden.size) {
+                        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) { Text(rule.subject, style = MaterialTheme.typography.bodyLarge); Text(if (rule.mode == "once") rule.date else t(R.string.text_2, runCatching { java.time.DayOfWeek.of(rule.weekday).getDisplayName(java.time.format.TextStyle.SHORT, AppLanguage.formatLocale()) }.getOrDefault(t(R.string.weekly)), rule.start), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            TextButton(onClick = { model.restoreLesson(rule.id) }) { Text(t(R.string.restore)) }
+                        }
+                    }
+                }
+            }
+            item(key = "grades-head") { SectionLabel(t(R.string.grades_widget)) }
+            item(key = "grades") {
+                Group {
+                    ToggleRow(t(R.string.promotion_points_2), t(R.string.show_the_calculated_points_balance), model.desk.showPluspunkte) { model.updateDesk(model.desk.copy(showPluspunkte = it)) }
+                    FineDivider()
+                    Column(Modifier.padding(16.dp)) {
+                        Text(t(R.string.grade_precision), style = MaterialTheme.typography.bodyLarge)
+                        ChoiceRow((0..3).map { it.toString() to tp(R.plurals.decimals_count, it, it) }, model.desk.gradeDecimals.toString(), { model.updateDesk(model.desk.copy(gradeDecimals = it.toInt())) })
+                        Text(t(R.string.subject_order), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp))
+                        ChoiceRow(listOf("name" to t(R.string.name), "average" to t(R.string.average), "pluspunkte" to t(R.string.points)), model.desk.gradeSort, { model.updateDesk(model.desk.copy(gradeSort = it)) })
+                    }
+                    FineDivider()
+                    ToggleRow(t(R.string.compact_home_widget), t(R.string.use_a_smaller_next_lesson_summary), model.desk.widgetCompact) { model.updateDesk(model.desk.copy(widgetCompact = it)) }
+                }
+            }
         }
         Page.Notifications -> NotificationSettings(model)
         Page.Diagnostics -> ScreenList {
-            item { Text(t(R.string.connection_checks), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(vertical = 16.dp)) }
-            item {
-                Text(t(R.string.diagnostic_mode), style = MaterialTheme.typography.titleMedium)
-                Text(t(R.string.diagnostic_mode_help), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
-                ToggleRow(t(R.string.diagnostic_mode), "", model.diagnosticOn) { model.setDiagnosticMode(it) }
+            item(key = "mode") {
+                Text(t(R.string.diagnostic_mode_help), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
+                Group { ToggleRow(t(R.string.diagnostic_mode), "", model.diagnosticOn) { model.setDiagnosticMode(it) } }
             }
-            item {
-                DiagnosticLine(t(R.string.diagnostic_label_school), if (model.link.linked) t(R.string.diagnostic_value_linked) else t(R.string.diagnostic_value_separated))
-                DiagnosticLine(t(R.string.diagnostic_label_push), if (model.graph.fcmToken().isNullOrBlank()) t(R.string.diagnostic_value_unregistered) else t(R.string.diagnostic_value_registered))
-                DiagnosticLine(t(R.string.diagnostic_label_sync), t(diagnosticSyncRes(sync.status)))
-                DiagnosticLine(t(R.string.diagnostic_label_build), "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            item(key = "state-head") { SectionLabel(t(R.string.connection_checks)) }
+            item(key = "state") {
+                Group {
+                    DiagnosticLine(t(R.string.diagnostic_label_school), if (model.link.linked) t(R.string.diagnostic_value_linked) else t(R.string.diagnostic_value_separated))
+                    DiagnosticLine(t(R.string.diagnostic_label_push), if (model.graph.fcmToken().isNullOrBlank()) t(R.string.diagnostic_value_unregistered) else t(R.string.diagnostic_value_registered))
+                    DiagnosticLine(t(R.string.diagnostic_label_sync), t(diagnosticSyncRes(sync.status)))
+                    DiagnosticLine(t(R.string.diagnostic_label_build), "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", last = true)
+                }
             }
             if (model.diagnosticOn) {
-                item { SectionLabel(t(R.string.diagnostic_preview)) }
-                item {
+                item(key = "preview-head") { SectionLabel(t(R.string.diagnostic_preview)) }
+                item(key = "preview") {
                     Text(t(R.string.diagnostic_local_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
-                    DiagnosticChoice(t(R.string.diagnostic_school), model.diagnosticScenario == DiagnosticScenario.SCHOOL) { model.selectDiagnosticScenario("school") }
-                    DiagnosticChoice(t(R.string.diagnostic_states), model.diagnosticScenario == DiagnosticScenario.STATES) { model.selectDiagnosticScenario("states") }
-                    DiagnosticChoice(t(R.string.diagnostic_malformed), model.diagnosticScenario == DiagnosticScenario.MALFORMED) { model.selectDiagnosticScenario("malformed") }
-                    DiagnosticChoice(t(R.string.diagnostic_alerts), model.diagnosticScenario == DiagnosticScenario.ALERTS) { model.selectDiagnosticScenario("alerts") }
+                    ChoiceRow(listOf("school" to t(R.string.diagnostic_school), "states" to t(R.string.diagnostic_states), "malformed" to t(R.string.diagnostic_malformed), "alerts" to t(R.string.diagnostic_alerts)),
+                        when (model.diagnosticScenario) { DiagnosticScenario.SCHOOL -> "school"; DiagnosticScenario.STATES -> "states"; DiagnosticScenario.MALFORMED -> "malformed"; DiagnosticScenario.ALERTS -> "alerts"; else -> "" },
+                        { model.selectDiagnosticScenario(it) })
                 }
                 if (model.diagnosticScenario != DiagnosticScenario.OFF) {
                     val lines = diagnosticPreview(model.diagnosticScenario, ZoneId.of("Europe/Zurich"), LocalDate.now(ZoneId.of("Europe/Zurich")), model.settings)
-                    items(lines, key = { "sim:${it.title}:${it.detail}" }) { line ->
-                        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                            Text(line.title, style = MaterialTheme.typography.titleSmall)
-                            Text(line.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    itemsIndexed(lines, key = { _, it -> "sim:${it.title}:${it.detail}" }) { index, line ->
+                        GroupItem(index, lines.size) {
+                            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+                                Text(line.title, style = MaterialTheme.typography.titleSmall)
+                                Text(line.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                     }
                 }
-                item { SectionLabel(t(R.string.delivery)) }
-                item {
-                    Text(t(R.string.diagnostic_remote_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
-                    Text(t(R.string.diagnostic_remote_prefs), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
-                    OutlinedButton(onClick = { model.probeDelivery(context, "standard") }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.diagnostic_remote_standard)) }
-                    OutlinedButton(onClick = { model.probeDelivery(context, "duplicate") }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.diagnostic_remote_duplicate)) }
-                    OutlinedButton(onClick = { model.probeDelivery(context, "reorder") }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.diagnostic_remote_reorder)) }
-                    OutlinedButton(onClick = { model.scheduleProbe(context, "standard") }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.diagnostic_remote_delayed)) }
-                    Text(t(R.string.diagnostic_remote_delayed_body), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp, bottom = 8.dp))
+                item(key = "delivery-head") { SectionLabel(t(R.string.delivery)) }
+                item(key = "delivery") {
+                    Text(t(R.string.diagnostic_remote_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 6.dp))
+                    Text(t(R.string.diagnostic_remote_prefs), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 10.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SecondaryButton(t(R.string.diagnostic_remote_standard), { model.probeDelivery(context, "standard") }, Modifier.fillMaxWidth())
+                        SecondaryButton(t(R.string.diagnostic_remote_duplicate), { model.probeDelivery(context, "duplicate") }, Modifier.fillMaxWidth())
+                        SecondaryButton(t(R.string.diagnostic_remote_reorder), { model.probeDelivery(context, "reorder") }, Modifier.fillMaxWidth())
+                        SecondaryButton(t(R.string.diagnostic_remote_delayed), { model.scheduleProbe(context, "standard") }, Modifier.fillMaxWidth())
+                    }
+                    Text(t(R.string.diagnostic_remote_delayed_body), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
                 }
             }
-            item {
+            item(key = "failures") {
                 val tick = model.diagnosticTick
                 val failures = if (tick >= 0) DiagnosticTrace.failures().takeLast(6) else emptyList()
                 SectionLabel(t(R.string.diagnostic_failures))
                 if (failures.isEmpty()) {
-                    Text(t(R.string.diagnostic_no_failures), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else {
-                    failures.forEach { entry ->
-                        val parts = listOf(entry.category, entry.name, "${entry.durationMs}ms", entry.result)
-                        val label = if (entry.detail.isBlank()) parts.joinToString(" ") else (parts + entry.detail).joinToString(" ")
-                        Text(
-                            label,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(bottom = 6.dp),
-                        )
+                    StatusLine(t(R.string.diagnostic_no_failures), StateTone.Accent)
+                } else Group {
+                    Column(Modifier.padding(16.dp)) {
+                        failures.forEach { entry ->
+                            val parts = listOf(entry.category, entry.name, "${entry.durationMs}ms", entry.result)
+                            val label = if (entry.detail.isBlank()) parts.joinToString(" ") else (parts + entry.detail).joinToString(" ")
+                            Text(label, style = TimeSmallStyle, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 6.dp))
+                        }
                     }
                 }
-                OutlinedButton(onClick = { model.diagnosticExport = model.prepareDiagnosticExport() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text(t(R.string.diagnostic_export)) }
-                OutlinedButton(onClick = { confirm = "diagnostic-reset" }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.diagnostic_stop)) }
+                Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SecondaryButton(t(R.string.diagnostic_export), { model.diagnosticExport = model.prepareDiagnosticExport() }, Modifier.fillMaxWidth())
+                    SecondaryButton(t(R.string.diagnostic_stop), { confirm = "diagnostic-reset" }, Modifier.fillMaxWidth())
+                }
             }
-            item {
+            item(key = "timing-head") { SectionLabel(t(R.string.delivery)) }
+            item(key = "timing") {
                 fun at(ms: Long) = if (ms <= 0L) t(R.string.not_yet) else formatSchoolStamp(Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()), "d MMM yyyy · HH:mm")
                 val delivery = deliveryModeLabel(firebaseConfigured(context), model.graph.lastPushAt(), System.currentTimeMillis())
-                DiagnosticLine(t(R.string.delivery), if (delivery == "Instant via push") t(R.string.instant_via_push) else t(R.string.fallback_mode))
-                DiagnosticLine(t(R.string.last_push), at(model.graph.lastPushAt()))
-                DiagnosticLine(t(R.string.last_school_check), at(model.graph.lastCheckAt()))
-                DiagnosticLine(t(R.string.next_scheduled_check), if (delivery == "Instant via push") t(R.string.not_scheduled_while_push_is_healthy) else at(model.graph.nextCheckAt()))
-                DiagnosticLine(t(R.string.cached_school_data), updatedLabel(model.snapshot.fetchedAt))
+                Group {
+                    DiagnosticLine(t(R.string.delivery), if (delivery == "Instant via push") t(R.string.instant_via_push) else t(R.string.fallback_mode))
+                    DiagnosticLine(t(R.string.last_push), at(model.graph.lastPushAt()))
+                    DiagnosticLine(t(R.string.last_school_check), at(model.graph.lastCheckAt()))
+                    DiagnosticLine(t(R.string.next_scheduled_check), if (delivery == "Instant via push") t(R.string.not_scheduled_while_push_is_healthy) else at(model.graph.nextCheckAt()))
+                    DiagnosticLine(t(R.string.cached_school_data), updatedLabel(model.snapshot.fetchedAt), last = true)
+                }
                 val error = model.graph.lastCheckError().ifBlank { model.link.lastError }
-                if (error.isNotBlank()) InfoBanner(t(R.string.last_check), shownText(error), error = true)
+                if (error.isNotBlank()) Box(Modifier.padding(top = 12.dp)) { InfoBanner(t(R.string.last_check), shownText(error), error = true) }
             }
             if (model.snapshot.readErrors.isNotEmpty()) {
-                item { SectionLabel(t(R.string.source_reports)) }
-                itemsIndexed(model.snapshot.readErrors, key = { index, error -> "err:$index:$error" }) { _, error -> Text(shownText(error), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 8.dp)) }
+                item(key = "reports-head") { SectionLabel(t(R.string.source_reports), count = model.snapshot.readErrors.size) }
+                itemsIndexed(model.snapshot.readErrors, key = { index, error -> "err:$index:$error" }) { index, error ->
+                    GroupItem(index, model.snapshot.readErrors.size) { Text(shownText(error), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) }
+                }
             }
-            item { SectionLabel(t(R.string.support_exports)) }
-            item {
+            item(key = "export-head") { SectionLabel(t(R.string.support_exports)) }
+            item(key = "export") {
                 Text(t(R.string.share_an_export_when_troubleshooting_a_school_co), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedButton(onClick = { model.shareDebug(context) }, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) { Text(t(R.string.share_school_page)) }
-                OutlinedButton(onClick = { model.shareLogs(context) }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.share_diagnostic_archive)) }
-                TextButton(onClick = { confirm = "logs-captures" }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.include_saved_school_pages)) }
-                if (model.notesAccount) OutlinedButton(onClick = model::sync, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.refresh_connections)) }
-                else OutlinedButton(onClick = model::refreshSchool, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.refresh_school_data)) }
+                Column(Modifier.padding(top = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SecondaryButton(t(R.string.share_school_page), { model.shareDebug(context) }, Modifier.fillMaxWidth())
+                    SecondaryButton(t(R.string.share_diagnostic_archive), { model.shareLogs(context) }, Modifier.fillMaxWidth())
+                    TextButton(onClick = { confirm = "logs-captures" }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.include_saved_school_pages)) }
+                    if (model.notesAccount) SecondaryButton(t(R.string.refresh_connections), model::sync, Modifier.fillMaxWidth(), enabled = !model.busy)
+                    else SecondaryButton(t(R.string.refresh_school_data), model::refreshSchool, Modifier.fillMaxWidth(), enabled = !model.busy)
+                }
             }
         }
         Page.Profile -> ScreenList {
-            item {
-                Text(t(R.string.a_little_progress_every_day), style = MaterialTheme.typography.headlineMedium)
-                Row(Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
-                    if (model.notesAccount) Column { Text(model.writtenNotes.toString(), style = MaterialTheme.typography.headlineLarge); Text(tp(R.plurals.profile_notes, model.writtenNotes), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    Column { Text(model.graph.streakDays().toString(), style = MaterialTheme.typography.headlineLarge); Text(t(R.string.days_in_a_row), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            item(key = "head") {
+                Text(t(R.string.a_little_progress_every_day), style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 4.dp))
+                Group(Modifier.padding(top = 16.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                        if (model.notesAccount) MetricBlock(tp(R.plurals.profile_notes, model.writtenNotes), model.writtenNotes.toString(), Modifier.weight(1f))
+                        MetricBlock(t(R.string.days_in_a_row), model.graph.streakDays().toString(), Modifier.weight(1f))
+                    }
                 }
                 SectionLabel(t(R.string.milestones))
             }
-            items(companionBadges(model.writtenNotes, model.graph.streakDays(), highestVisibleMark(model.snapshot.grades, model.hiddenGradeIds(), model.settings.guessGrades)).filter { model.notesAccount || !it.id.startsWith("notes") }, key = { it.id }) { badge ->
+            val badges = companionBadges(model.writtenNotes, model.graph.streakDays(), highestVisibleMark(model.snapshot.grades, model.hiddenGradeIds(), model.settings.guessGrades)).filter { model.notesAccount || !it.id.startsWith("notes") }
+            itemsIndexed(badges, key = { _, it -> it.id }) { index, badge ->
                 val title = when (badge.id) { "notes-1" -> t(R.string.badge_first_thought); "notes-10" -> t(R.string.badge_growing_notebook); "streak-3" -> t(R.string.badge_finding_rhythm); else -> t(R.string.badge_top_marks) }
                 val body = when (badge.id) { "notes-1" -> t(R.string.badge_write_first); "notes-10" -> t(R.string.badge_keep_ten); "streak-3" -> t(R.string.badge_open_three); else -> t(R.string.badge_grade_six) }
-                Row(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Icon(if (badge.earned) Icons.Outlined.Verified else Icons.Outlined.RadioButtonUnchecked, if (badge.earned) t(R.string.achieved) else t(R.string.not_yet_achieved), tint = if (badge.earned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                    Column { Text(title, style = MaterialTheme.typography.titleMedium); Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                GroupItem(index, badges.size) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        IconTile(if (badge.earned) Icons.Outlined.Verified else Icons.Outlined.RadioButtonUnchecked, if (badge.earned) StateTone.Accent else StateTone.Neutral)
+                        Column(Modifier.weight(1f)) { Text(title, style = MaterialTheme.typography.titleMedium); Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        Text(if (badge.earned) t(R.string.achieved) else t(R.string.not_yet_achieved), style = MaterialTheme.typography.labelMedium, color = if (badge.earned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
-                FineDivider()
             }
         }
         else -> Unit
@@ -332,10 +407,11 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
     if (export != null) {
         AlertDialog(
             onDismissRequest = { model.diagnosticExport = null },
-            title = { Text(t(R.string.diagnostic_export)) },
+            shape = MaterialTheme.shapes.extraLarge,
+            title = { Text(t(R.string.diagnostic_export), style = MaterialTheme.typography.headlineSmall) },
             text = {
                 Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-                    Text(export, style = MaterialTheme.typography.bodySmall)
+                    Text(export, style = TimeSmallStyle)
                 }
             },
             confirmButton = {
@@ -349,47 +425,124 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
     }
 }
 
+/** A miniature of a theme: background, a card, the accent and two text lines. */
+@Composable
+private fun ThemeTile(id: String, selected: Boolean, accent: String, amoled: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val systemDark = isSystemInDarkTheme()
+    val previews = remember(id, accent, amoled, systemDark) {
+        if (id == "system") listOf(kantiPalette("light", false, accent, amoled), kantiPalette("dark", true, accent, amoled)) else listOf(kantiPalette(id, systemDark, accent, amoled))
+    }
+    val label = themeLabel(id)
+    val scheme = MaterialTheme.colorScheme
+    Column(modifier.clip(MaterialTheme.shapes.large).selectable(selected, onClick = onClick, role = Role.RadioButton)
+        .clearAndSetSemantics { contentDescription = label; this.selected = selected }
+        .border(if (selected) 2.dp else 1.dp, if (selected) scheme.onSurface else LocalCompanionSemantics.current.hairline, MaterialTheme.shapes.large).padding(8.dp)) {
+        Row(Modifier.fillMaxWidth().height(72.dp).clip(MaterialTheme.shapes.medium)) {
+            previews.forEach { p ->
+                Box(Modifier.weight(1f).fillMaxHeight().background(Color(p.background)).padding(8.dp)) {
+                    Column(Modifier.fillMaxSize().background(Color(p.surface), RoundedCornerShape(8.dp)).padding(7.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Box(Modifier.size(width = 22.dp, height = 6.dp).background(Color(p.accent), CircleShape))
+                        Box(Modifier.fillMaxWidth(0.8f).height(5.dp).background(Color(p.text).copy(alpha = 0.8f), CircleShape))
+                        Box(Modifier.fillMaxWidth(0.55f).height(5.dp).background(Color(p.muted).copy(alpha = 0.6f), CircleShape))
+                    }
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp, start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            if (selected) Icon(Icons.Outlined.CheckCircle, null, Modifier.size(18.dp), tint = scheme.onSurface)
+            else if (id == SNOW_THEME_ID) Icon(Icons.Outlined.AcUnit, null, Modifier.size(16.dp), tint = scheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun AppearanceSettings(model: CompanionModel) {
+    val context = LocalContext.current
+    val current = model.desk.theme.ifBlank { "system" }.let { if (it in KANTI_THEME_IDS) it else "system" }
+    val semantics = LocalCompanionSemantics.current
+    val reduced = LocalKantiMotion.current.reduced
+    ScreenList {
+        item(key = "theme-head") { SectionLabel(t(R.string.theme)) }
+        item(key = "themes") {
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val columns = if (maxWidth >= 560.dp) 4 else 2
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    KANTI_THEME_IDS.chunked(columns).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            row.forEach { id -> ThemeTile(id, id == current, model.desk.accent, model.desk.amoled, Modifier.weight(1f)) { model.chooseTheme(id) } }
+                            repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
+                }
+            }
+        }
+        item(key = "theme-options") {
+            Spacer(Modifier.height(12.dp))
+            Group {
+                ToggleRow(t(R.string.pure_black), t(R.string.use_a_black_background_in_dark_themes), model.desk.amoled) { model.updateDesk(model.desk.copy(amoled = it)) }
+                if (current == SNOW_THEME_ID) {
+                    FineDivider()
+                    ToggleRow(t(R.string.snowfall), if (reduced) t(R.string.snowfall_reduced) else t(R.string.snowfall_body), model.snowfall && !reduced, enabled = !reduced) { model.chooseSnowfall(it) }
+                }
+            }
+        }
+        item(key = "accent-head") { SectionLabel(if (model.notesAccount) t(R.string.ink_accent) else t(R.string.accent)) }
+        item(key = "accent") {
+            Group {
+                Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                    ColorChoices(listOf("#2a6f97", "#7f6df2", "#3d8bfd", "#2f9e6b", "#e15b64"), model.desk.accent, enabled = !semantics.fixedAccent) { model.updateDesk(model.desk.copy(accent = it)) }
+                    Text(if (semantics.fixedAccent) t(R.string.snow_accent_note) else t(R.string.accent_contrast_adjusts_to_your_theme), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 6.dp, top = 4.dp, bottom = 4.dp))
+                }
+            }
+        }
+        item(key = "icon-head") { SectionLabel(t(R.string.home_screen_icon)) }
+        item(key = "icon") { ChoiceRow(listOf("standard" to t(R.string.kanti), "schule" to t(R.string.school), "notiz" to t(R.string.notebook)), model.iconChoice, { model.chooseIcon(context, it) }) }
+        item(key = "nav-head") { SectionLabel(t(R.string.navigation)) }
+        item(key = "nav") { Group { SettingRow(Icons.Outlined.ViewWeek, t(R.string.navigation_bar), t(R.string.choose_tabs_and_their_order)) { model.navigate(Page.Navigation) } } }
+    }
+}
+
 @Composable
 private fun NavigationBarSettings(model: CompanionModel) {
     val bar = presentedNavBar(model.desk.navBar, model.notesAccount)
     val fallback = if (model.notesAccount) DEFAULT_NAV_BAR else SCHOOL_NAV_BAR
     val available = remainingNavBar(bar).filter { model.notesAccount || it != "notes" }
     ScreenList {
-        item {
-            Text(t(R.string.shown_in_the_bar), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = Space.xl, bottom = Space.sm))
-            Text(t(R.string.choose_2_to_5_destinations_settings_stays_availa), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        item(key = "help") {
+            SectionLabel(t(R.string.shown_in_the_bar), count = bar.size)
+            Text(t(R.string.choose_2_to_5_destinations_settings_stays_availa), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 10.dp))
         }
         itemsIndexed(bar, key = { _, id -> "bar:$id" }) { index, id ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(navBarIcon(id), null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(navBarLabel(id), style = MaterialTheme.typography.titleMedium)
-                    Text(t(R.string.of, index + 1, bar.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                ActionIcon(Icons.Outlined.KeyboardArrowUp, t(R.string.move_up, navBarLabel(id)), enabled = index > 0) {
-                    model.updateDesk(model.desk.copy(navBar = moveNavBarItem(bar, index, -1)))
-                }
-                ActionIcon(Icons.Outlined.KeyboardArrowDown, t(R.string.move_down, navBarLabel(id)), enabled = index < bar.lastIndex) {
-                    model.updateDesk(model.desk.copy(navBar = moveNavBarItem(bar, index, 1)))
-                }
-                ActionIcon(Icons.Outlined.Close, t(R.string.remove, navBarLabel(id)), enabled = bar.size > NAV_BAR_MIN) {
-                    model.updateDesk(model.desk.copy(navBar = removeNavBarItem(bar, id)))
+            GroupItem(index, bar.size) {
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    IconTile(navBarIcon(id))
+                    Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                        Text(navBarLabel(id), style = MaterialTheme.typography.bodyLarge)
+                        Text(t(R.string.of, index + 1, bar.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    ActionIcon(Icons.Outlined.KeyboardArrowUp, t(R.string.move_up, navBarLabel(id)), enabled = index > 0) {
+                        model.updateDesk(model.desk.copy(navBar = moveNavBarItem(bar, index, -1)))
+                    }
+                    ActionIcon(Icons.Outlined.KeyboardArrowDown, t(R.string.move_down, navBarLabel(id)), enabled = index < bar.lastIndex) {
+                        model.updateDesk(model.desk.copy(navBar = moveNavBarItem(bar, index, 1)))
+                    }
+                    ActionIcon(Icons.Outlined.RemoveCircleOutline, t(R.string.remove, navBarLabel(id)), enabled = bar.size > NAV_BAR_MIN) {
+                        model.updateDesk(model.desk.copy(navBar = removeNavBarItem(bar, id)))
+                    }
                 }
             }
-            FineDivider()
         }
         if (available.isNotEmpty()) {
-            item { SectionLabel(if (bar.size >= NAV_BAR_MAX) t(R.string.remove_a_tab_to_add_another) else t(R.string.add_a_destination)) }
-            items(available, key = { "add:$it" }) { id ->
+            item(key = "add-head") { SectionLabel(if (bar.size >= NAV_BAR_MAX) t(R.string.remove_a_tab_to_add_another) else t(R.string.add_a_destination)) }
+            itemsIndexed(available, key = { _, it -> "add:$it" }) { index, id ->
                 val enabled = bar.size < NAV_BAR_MAX
-                SettingRow(
-                    navBarIcon(id),
-                    navBarLabel(id),
-                    if (enabled) t(R.string.add_to_the_navigation_bar) else t(R.string.maximum_of_5_tabs),
-                ) { if (enabled) model.updateDesk(model.desk.copy(navBar = addNavBarItem(bar, id))) }
+                GroupItem(index, available.size) {
+                    SettingRow(navBarIcon(id), navBarLabel(id), if (enabled) t(R.string.add_to_the_navigation_bar) else t(R.string.maximum_of_5_tabs), chevron = false) { if (enabled) model.updateDesk(model.desk.copy(navBar = addNavBarItem(bar, id))) }
+                }
             }
         }
-        item {
+        item(key = "reset") {
             TextButton(
                 onClick = { model.updateDesk(model.desk.copy(navBar = fallback)) },
                 enabled = bar != fallback,
@@ -405,7 +558,10 @@ private fun NotificationSettings(model: CompanionModel) {
     val owner = LocalLifecycleOwner.current
     var allowed by remember { mutableStateOf(CompanionAlerts.notificationsAllowed(context)) }
     var probeTick by remember { mutableIntStateOf(0) }
-    val request = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed = CompanionAlerts.notificationsAllowed(context) }
+    val request = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        allowed = CompanionAlerts.notificationsAllowed(context)
+        if (granted) model.onNotificationsAllowed()
+    }
     DisposableEffect(owner) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) {
             allowed = CompanionAlerts.notificationsAllowed(context)
@@ -414,75 +570,103 @@ private fun NotificationSettings(model: CompanionModel) {
         owner.lifecycle.addObserver(observer); onDispose { owner.lifecycle.removeObserver(observer) }
     }
     fun open(intent: Intent) { runCatching { context.startActivity(intent) }.onFailure { model.message = t(R.string.android_could_not_open_setting) } }
+    val on = model.settings.enabled
     ScreenList {
-        item {
-            SectionLabel(t(R.string.android_permission))
-            Text(if (allowed) t(R.string.notifications_are_allowed) else t(R.string.choose_what_reaches_you), style = MaterialTheme.typography.titleMedium)
-            Text(t(R.string.get_relevant_school_changes_and_excuse_deadlines), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedButton(onClick = { if (!allowed && Build.VERSION.SDK_INT >= 33) request.launch(Manifest.permission.POST_NOTIFICATIONS) else open(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)) }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) { Text(if (allowed) t(R.string.android_notification_settings) else t(R.string.allow_notifications)) }
-            if (!allowed && Build.VERSION.SDK_INT >= 33) TextButton(onClick = { open(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)) }) { Text(t(R.string.open_android_settings)) }
+        item(key = "permission") {
+            Group(Modifier.padding(top = 4.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconTile(if (allowed) Icons.Outlined.NotificationsActive else Icons.Outlined.NotificationsOff, if (allowed) StateTone.Accent else StateTone.Warning, 44.dp)
+                        Column(Modifier.padding(start = 14.dp)) {
+                            Text(if (allowed) t(R.string.notifications_are_allowed) else t(R.string.choose_what_reaches_you), style = MaterialTheme.typography.titleMedium)
+                            Text(t(R.string.android_permission), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Text(t(R.string.get_relevant_school_changes_and_excuse_deadlines), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp))
+                    if (!allowed && Build.VERSION.SDK_INT >= 33) {
+                        PrimaryButton(t(R.string.allow_notifications), { request.launch(Manifest.permission.POST_NOTIFICATIONS) }, Modifier.fillMaxWidth().padding(top = 14.dp))
+                        TextButton(onClick = { open(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)) }) { Text(t(R.string.open_android_settings)) }
+                    } else SecondaryButton(t(R.string.android_notification_settings), { open(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)) }, Modifier.fillMaxWidth().padding(top = 14.dp))
+                }
+            }
         }
-        item { SectionLabel(t(R.string.school_updates)) }
-        item { ToggleRow(t(R.string.notify_master), t(R.string.notify_master_body), model.settings.enabled) { model.toggleSetting("enabled") } }
-        item { SectionLabel(t(R.string.grades)) }
-        item { ToggleRow(t(R.string.notify_grade_new), t(R.string.notify_grade_new_body), model.settings.gradeNew, model.settings.enabled) { model.toggleSetting("gradeNew") } }
-        item { ToggleRow(t(R.string.notify_grade_changed), t(R.string.notify_grade_changed_body), model.settings.gradeChanged, model.settings.enabled) { model.toggleSetting("gradeChanged") } }
-        item { ToggleRow(t(R.string.guess_the_grade), t(R.string.hide_new_marks_until_you_reveal_them_notificatio), model.settings.guessGrades) { model.toggleSetting("guessGrades") } }
-        item { ToggleRow(t(R.string.hold_to_reveal), t(R.string.with_guess_the_grade_a_long_press_opens_a_hidden), model.desk.revealLongPress) { model.updateDesk(model.desk.copy(revealLongPress = it)) } }
-        item { SectionLabel(t(R.string.exams)) }
-        item { ToggleRow(t(R.string.notify_exam_new), t(R.string.notify_exam_new_body), model.settings.examNew, model.settings.enabled) { model.toggleSetting("examNew") } }
-        item { ToggleRow(t(R.string.notify_exam_moved), t(R.string.notify_exam_moved_body), model.settings.examMoved, model.settings.enabled) { model.toggleSetting("examMoved") } }
-        item { ToggleRow(t(R.string.notify_exam_cancelled), t(R.string.notify_exam_cancelled_body), model.settings.examCancelled, model.settings.enabled) { model.toggleSetting("examCancelled") } }
-        item { ToggleRow(t(R.string.notify_exam_room), t(R.string.notify_exam_room_body), model.settings.examRoom, model.settings.enabled) { model.toggleSetting("examRoom") } }
-        item { SectionLabel(t(R.string.notify_section_lessons)) }
-        item { ToggleRow(t(R.string.notify_lesson_cancelled), t(R.string.notify_lesson_cancelled_body), model.settings.lessonCancelled, model.settings.enabled) { model.toggleSetting("lessonCancelled") } }
-        item { ToggleRow(t(R.string.notify_lesson_changed), t(R.string.notify_lesson_changed_body), model.settings.lessonChanged, model.settings.enabled) { model.toggleSetting("lessonChanged") } }
-        item { SectionLabel(t(R.string.notify_section_appointments)) }
-        item { ToggleRow(t(R.string.notify_appointment_new), t(R.string.notify_appointment_new_body), model.settings.appointmentNew, model.settings.enabled) { model.toggleSetting("appointmentNew") } }
-        item { ToggleRow(t(R.string.notify_message_new), t(R.string.notify_message_new_body), model.settings.messageNew, model.settings.enabled) { model.toggleSetting("messageNew") } }
-        item { ToggleRow(t(R.string.absences), checked = model.settings.absences, enabled = model.settings.enabled) { model.toggleSetting("absences") } }
-        item { ToggleRow(t(R.string.excuse_deadlines), checked = model.settings.deadlines, enabled = model.settings.enabled) { model.toggleSetting("deadlines") } }
-        item { SectionLabel(t(R.string.delivery)) }
-        item {
-            Text(
+        item(key = "master-head") { SectionLabel(t(R.string.school_updates)) }
+        item(key = "master") { Group { ToggleRow(t(R.string.notify_master), t(R.string.notify_master_body), on) { model.toggleSetting("enabled") } } }
+        item(key = "grades-head") { SectionLabel(t(R.string.grades)) }
+        item(key = "grades") {
+            Group {
+                ToggleRow(t(R.string.notify_grade_new), t(R.string.notify_grade_new_body), model.settings.gradeNew, on) { model.toggleSetting("gradeNew") }
+                FineDivider()
+                ToggleRow(t(R.string.notify_grade_changed), t(R.string.notify_grade_changed_body), model.settings.gradeChanged, on) { model.toggleSetting("gradeChanged") }
+                FineDivider()
+                ToggleRow(t(R.string.guess_the_grade), t(R.string.hide_new_marks_until_you_reveal_them_notificatio), model.settings.guessGrades) { model.toggleSetting("guessGrades") }
+                FineDivider()
+                ToggleRow(t(R.string.hold_to_reveal), t(R.string.with_guess_the_grade_a_long_press_opens_a_hidden), model.desk.revealLongPress) { model.updateDesk(model.desk.copy(revealLongPress = it)) }
+            }
+        }
+        item(key = "exams-head") { SectionLabel(t(R.string.exams)) }
+        item(key = "exams") {
+            Group {
+                ToggleRow(t(R.string.notify_exam_new), t(R.string.notify_exam_new_body), model.settings.examNew, on) { model.toggleSetting("examNew") }
+                FineDivider()
+                ToggleRow(t(R.string.notify_exam_moved), t(R.string.notify_exam_moved_body), model.settings.examMoved, on) { model.toggleSetting("examMoved") }
+                FineDivider()
+                ToggleRow(t(R.string.notify_exam_cancelled), t(R.string.notify_exam_cancelled_body), model.settings.examCancelled, on) { model.toggleSetting("examCancelled") }
+                FineDivider()
+                ToggleRow(t(R.string.notify_exam_room), t(R.string.notify_exam_room_body), model.settings.examRoom, on) { model.toggleSetting("examRoom") }
+            }
+        }
+        item(key = "lessons-head") { SectionLabel(t(R.string.notify_section_lessons)) }
+        item(key = "lessons") {
+            Group {
+                ToggleRow(t(R.string.notify_lesson_cancelled), t(R.string.notify_lesson_cancelled_body), model.settings.lessonCancelled, on) { model.toggleSetting("lessonCancelled") }
+                FineDivider()
+                ToggleRow(t(R.string.notify_lesson_changed), t(R.string.notify_lesson_changed_body), model.settings.lessonChanged, on) { model.toggleSetting("lessonChanged") }
+            }
+        }
+        item(key = "appointments-head") { SectionLabel(t(R.string.notify_section_appointments)) }
+        item(key = "appointments") {
+            Group {
+                ToggleRow(t(R.string.notify_appointment_new), t(R.string.notify_appointment_new_body), model.settings.appointmentNew, on) { model.toggleSetting("appointmentNew") }
+                FineDivider()
+                ToggleRow(t(R.string.notify_message_new), t(R.string.notify_message_new_body), model.settings.messageNew, on) { model.toggleSetting("messageNew") }
+                FineDivider()
+                ToggleRow(t(R.string.absences), checked = model.settings.absences, enabled = on) { model.toggleSetting("absences") }
+                FineDivider()
+                ToggleRow(t(R.string.excuse_deadlines), checked = model.settings.deadlines, enabled = on) { model.toggleSetting("deadlines") }
+            }
+        }
+        item(key = "delivery-head") { SectionLabel(t(R.string.delivery)) }
+        item(key = "delivery") {
+            StatusLine(
                 when (deliveryModeLabel(firebaseConfigured(context), model.graph.lastPushAt(), System.currentTimeMillis())) {
                     "Instant via push" -> t(R.string.new_grades_arrive_instantly_no_background_check)
                     else -> if (firebaseConfigured(context)) t(R.string.push_has_been_quiet_kanti_checks_about_every_6_h)
                     else t(R.string.school_updates_are_checked_about_every_6_hours)
                 },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 12.dp),
+                StateTone.Neutral,
+                Modifier.padding(bottom = 12.dp),
             )
-        }
-        item { OutlinedButton(onClick = { model.testPush(context) }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.send_a_test_notification)) } }
-        item { OutlinedButton(onClick = { model.probeDelivery(context) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text(t(R.string.send_delivery_probe)) } }
-        item {
-            Text(
-                t(R.string.delivery_probe_help),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SecondaryButton(t(R.string.send_a_test_notification), { model.testPush(context) }, Modifier.fillMaxWidth())
+                SecondaryButton(t(R.string.send_delivery_probe), { model.probeDelivery(context) }, Modifier.fillMaxWidth())
+            }
+            Text(t(R.string.delivery_probe_help), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
         }
         val probeLines = probeTick.let { CompanionAlerts.probeSummaries(context) }
         if (probeLines.isNotEmpty()) {
-            item { SectionLabel(t(R.string.delivery_times)) }
-            item {
-                Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                    probeLines.forEach { line ->
-                        Text(line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 6.dp))
+            item(key = "times-head") { SectionLabel(t(R.string.delivery_times)) }
+            item(key = "times") {
+                Group {
+                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                        probeLines.forEach { line ->
+                            Text(line, style = TimeSmallStyle, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 6.dp))
+                        }
                     }
                 }
             }
         }
     }
-}
-
-@Composable
-private fun DiagnosticChoice(label: String, selected: Boolean, onClick: () -> Unit) {
-    if (selected) Button(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) { Text(label) }
-    else OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) { Text(label) }
 }
 
 private fun diagnosticSyncRes(status: SyncStatus): Int = when (status) {
@@ -496,10 +680,10 @@ private fun diagnosticSyncRes(status: SyncStatus): Int = when (status) {
 }
 
 @Composable
-private fun DiagnosticLine(label: String, value: String) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.bodyLarge)
+private fun DiagnosticLine(label: String, value: String, last: Boolean = false) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+        Text(value, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.End, modifier = Modifier.padding(start = 12.dp).weight(1f))
     }
-    FineDivider()
+    if (!last) FineDivider()
 }

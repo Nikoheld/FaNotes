@@ -5,7 +5,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.border
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.BasicTextField
@@ -48,23 +50,22 @@ import java.time.ZoneId
 @Composable
 fun NoteRow(model: CompanionModel, node: VaultNode, onMore: (() -> Unit)? = null, onClick: () -> Unit) {
     val preview by produceState<NotePreview?>(null, node.path, node.modifiedAt) { value = runCatching { model.loadPreview(node) }.getOrNull() }
-    Column {
-        Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).clickable(role = Role.Button, onClick = onClick).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Box(Modifier.size(58.dp, 68.dp).clip(MaterialTheme.shapes.small).background(LocalCompanionSemantics.current.paper), contentAlignment = Alignment.Center) {
-                val ink = preview?.ink
-                if (ink != null && ink.strokes.isNotEmpty()) InkThumbnail(ink, Modifier.fillMaxSize().padding(5.dp), cacheKey = "${node.path}:${node.modifiedAt}")
-                else Icon(if (node.kind == NoteKind.PDF) Icons.Outlined.PictureAsPdf else Icons.AutoMirrored.Outlined.Article, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
-            }
-            val shownName = displayNoteTitle(node.name, t(R.string.untitled_note))
-            Column(Modifier.weight(1f)) {
-                Text(shownName, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                val excerpt = preview?.text.orEmpty()
-                if (excerpt.isNotBlank()) Text(excerpt, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(listOf(node.path.substringBeforeLast('/', "").ifBlank { t(R.string.my_notes) }, formatSchoolStamp(Instant.ofEpochMilli(node.modifiedAt).atZone(ZoneId.systemDefault()), "d MMM")).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 3.dp))
-            }
-            if (onMore != null) ActionIcon(Icons.Outlined.MoreVert, t(R.string.actions_for, shownName), onClick = onMore)
+    val inset = if (LocalInGroup.current) 16.dp else 0.dp
+    Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).padding(start = inset, end = if (onMore != null) 4.dp else inset, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Box(Modifier.size(52.dp, 64.dp).clip(MaterialTheme.shapes.small).background(LocalCompanionSemantics.current.paper)
+            .border(1.dp, LocalCompanionSemantics.current.hairline, MaterialTheme.shapes.small), contentAlignment = Alignment.Center) {
+            val ink = preview?.ink
+            if (ink != null && ink.strokes.isNotEmpty()) InkThumbnail(ink, Modifier.fillMaxSize().padding(5.dp), cacheKey = "${node.path}:${node.modifiedAt}")
+            else Icon(if (node.kind == NoteKind.PDF) Icons.Outlined.PictureAsPdf else Icons.AutoMirrored.Outlined.Article, null, Modifier.size(24.dp), tint = LocalCompanionSemantics.current.paperInk.copy(alpha = 0.55f))
         }
-        FineDivider()
+        val shownName = displayNoteTitle(node.name, t(R.string.untitled_note))
+        Column(Modifier.weight(1f)) {
+            Text(shownName, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            val excerpt = preview?.text.orEmpty()
+            if (excerpt.isNotBlank()) Text(excerpt, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+            Text(listOf(node.path.substringBeforeLast('/', "").ifBlank { t(R.string.my_notes) }, formatSchoolStamp(Instant.ofEpochMilli(node.modifiedAt).atZone(ZoneId.systemDefault()), "d MMM")).joinToString("  ·  "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+        }
+        if (onMore != null) ActionIcon(Icons.Outlined.MoreVert, t(R.string.actions_for, shownName), onClick = onMore)
     }
 }
 
@@ -111,7 +112,7 @@ fun NotesScreen(model: CompanionModel) {
         searching = false
     }
     Column {
-        Row(Modifier.fillMaxWidth().padding(horizontal = Space.page, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(start = Space.page, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             SearchField(query, { query = it }, t(R.string.search_all_notes), Modifier.weight(1f))
             Box {
                 ActionIcon(Icons.Outlined.MoreVert, t(R.string.library_options)) { menu = true }
@@ -121,39 +122,41 @@ fun NotesScreen(model: CompanionModel) {
                 }
             }
         }
-        ChoiceRow(listOf("browse" to t(R.string.library), "recent" to t(R.string.recently_edited)), mode, { mode = it }, Modifier.padding(horizontal = Space.page))
-        if (model.loading) { LoadingState(t(R.string.opening_your_library)); return }
+        if (query.isBlank()) ChoiceRow(listOf("browse" to t(R.string.library), "recent" to t(R.string.recently_edited)), mode, { mode = it }, Modifier.padding(horizontal = Space.page))
+        if (model.loading) { Box(Modifier.padding(horizontal = Space.page)) { SkeletonRows(4, t(R.string.opening_your_library)) }; return }
         val nodes = remember(mode, model.notes, model.tree) { if (mode == "browse") model.notes else flattenNotes(model.tree).sortedByDescending { it.modifiedAt } }
         ScreenList {
             if (query.isNotBlank()) {
-                if (searching) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 12.dp)) }
-                if (searchError != null) item { InfoBanner(t(R.string.search_unavailable), shownText(searchError)) }
-                if (!searching && results.isEmpty() && searchError == null) item { EmptyState(Icons.Outlined.SearchOff, t(R.string.no_matching_notes), t(R.string.search_by_title_note_text_or_an_existing_handwri)) }
-                items(results, key = { it.node.path }) { result -> NoteRow(model, result.node, { selected = result.node }) { model.openNote(result.node.path) } }
+                if (searching) item(key = "searching") { LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 12.dp), trackColor = LocalCompanionSemantics.current.sunken) }
+                if (searchError != null) item(key = "search-error") { InfoBanner(t(R.string.search_unavailable), shownText(searchError), error = true) }
+                if (!searching && results.isEmpty() && searchError == null) item(key = "search-empty") { EmptyState(Icons.Outlined.SearchOff, t(R.string.no_matching_notes), t(R.string.search_by_title_note_text_or_an_existing_handwri)) }
+                itemsIndexed(results, key = { _, it -> it.node.path }) { index, result -> GroupItem(index, results.size) { NoteRow(model, result.node, { selected = result.node }) { model.openNote(result.node.path) } } }
             } else {
-                if (mode == "browse" && model.noteFolder.isNotBlank()) item {
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { model.openFolder("") }) { Text(t(R.string.my_notes)) }
+                if (mode == "browse" && model.noteFolder.isNotBlank()) item(key = "crumbs") {
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { model.openFolder("") }) { Icon(Icons.Outlined.Home, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text(t(R.string.my_notes)) }
                         val crumbs = model.noteFolder.split('/')
                         crumbs.forEachIndexed { index, crumb ->
-                            Icon(Icons.Outlined.ChevronRight, null, Modifier.size(14.dp))
-                            TextButton(onClick = { model.openFolder(crumbs.take(index + 1).joinToString("/")) }) { Text(crumb) }
+                            Icon(Icons.Outlined.ChevronRight, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            TextButton(onClick = { model.openFolder(crumbs.take(index + 1).joinToString("/")) }) { Text(crumb, fontWeight = if (index == crumbs.lastIndex) FontWeight.SemiBold else FontWeight.Normal) }
                         }
                     }
                 }
-                if (nodes.isEmpty()) item { EmptyState(Icons.Outlined.AutoStories, if (model.noteFolder.isBlank()) t(R.string.a_home_for_your_notes) else t(R.string.this_folder_is_ready), t(R.string.create_a_note_to_start_writing_everything_saves)) }
-                items(nodes, key = { it.path }) { node ->
-                    if (node.kind == NoteKind.FOLDER) {
-                        Row(Modifier.fillMaxWidth().clickable(role = Role.Button) { model.openFolder(node.path) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                            Icon(Icons.Outlined.Folder, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(8.dp).size(24.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(node.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                Text(flattenNotes(node.children).size.let { tp(R.plurals.note_count, it, it) }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (nodes.isEmpty()) item(key = "empty") { EmptyState(Icons.Outlined.AutoStories, if (model.noteFolder.isBlank()) t(R.string.a_home_for_your_notes) else t(R.string.this_folder_is_ready), t(R.string.create_a_note_to_start_writing_everything_saves)) }
+                item(key = "top-gap") { Spacer(Modifier.height(8.dp)) }
+                itemsIndexed(nodes, key = { _, it -> it.path }) { index, node ->
+                    GroupItem(index, nodes.size) {
+                        if (node.kind == NoteKind.FOLDER) {
+                            Row(Modifier.fillMaxWidth().heightIn(min = Space.row).clickable(role = Role.Button) { model.openFolder(node.path) }.padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                IconTile(Icons.Outlined.Folder, StateTone.Accent, 44.dp)
+                                Column(Modifier.weight(1f)) {
+                                    Text(node.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text(flattenNotes(node.children).size.let { tp(R.plurals.note_count, it, it) }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                ActionIcon(Icons.Outlined.MoreVert, t(R.string.actions_for, node.name)) { selected = node }
                             }
-                            ActionIcon(Icons.Outlined.MoreVert, t(R.string.actions_for, node.name)) { selected = node }
-                        }
-                        FineDivider()
-                    } else NoteRow(model, node, { selected = node }) { model.openNote(node.path) }
+                        } else NoteRow(model, node, { selected = node }) { model.openNote(node.path) }
+                    }
                 }
             }
         }
@@ -171,20 +174,24 @@ private fun NoteActions(model: CompanionModel, node: VaultNode, onDismiss: () ->
     if (action == "trash") {
         ConfirmDialog(t(R.string.move_to_recently_deleted, if (node.kind == NoteKind.FOLDER) t(R.string.folder_noun) else t(R.string.note_noun)), t(R.string.you_can_restore_it_from_this_device_s_library_me), t(R.string.move), onDismiss) { model.trashNote(node); onDismiss() }; return
     }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().sheetKeyboardPadding().padding(horizontal = Space.page).padding(bottom = 24.dp)) {
-            SheetTitle(if (action == "move") t(R.string.move_to_folder) else node.name, onDismiss)
-            if (action == "move") {
-                val folders = flattenFolders(model.tree).filterNot { it.path == node.path || it.path.startsWith("${node.path}/") }
-                Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
-                    SettingRow(Icons.Outlined.FolderOpen, t(R.string.my_notes)) { model.moveNote(node, ""); onDismiss() }
-                    folders.forEach { folder -> SettingRow(Icons.Outlined.Folder, folder.name, folder.path) { model.moveNote(node, folder.path); onDismiss() } }
+    KantiSheet(onDismiss = onDismiss) {
+        SheetTitle(if (action == "move") t(R.string.move_to_folder) else node.name, onDismiss)
+        if (action == "move") {
+            val folders = flattenFolders(model.tree).filterNot { it.path == node.path || it.path.startsWith("${node.path}/") }
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                Group(color = LocalCompanionSemantics.current.sunken.copy(alpha = 0.55f)) {
+                    SettingRow(Icons.Outlined.FolderOpen, t(R.string.my_notes), chevron = false) { model.moveNote(node, ""); onDismiss() }
+                    folders.forEach { folder -> FineDivider(); SettingRow(Icons.Outlined.Folder, folder.name, folder.path, chevron = false) { model.moveNote(node, folder.path); onDismiss() } }
                 }
-            } else {
-                SettingRow(Icons.Outlined.DriveFileRenameOutline, t(R.string.rename)) { action = "rename" }
-                SettingRow(Icons.AutoMirrored.Outlined.DriveFileMove, t(R.string.move_to_folder)) { action = "move" }
-                if (node.kind == NoteKind.MARKDOWN) SettingRow(Icons.Outlined.ContentCopy, t(R.string.duplicate)) { model.duplicateNote(node); onDismiss() }
-                SettingRow(Icons.Outlined.DeleteOutline, t(R.string.move_to_recently_deleted_2)) { action = "trash" }
+            }
+        } else {
+            Group(color = LocalCompanionSemantics.current.sunken.copy(alpha = 0.55f)) {
+                SettingRow(Icons.Outlined.DriveFileRenameOutline, t(R.string.rename), chevron = false) { action = "rename" }
+                FineDivider()
+                SettingRow(Icons.AutoMirrored.Outlined.DriveFileMove, t(R.string.move_to_folder), chevron = false) { action = "move" }
+                if (node.kind == NoteKind.MARKDOWN) { FineDivider(); SettingRow(Icons.Outlined.ContentCopy, t(R.string.duplicate), chevron = false) { model.duplicateNote(node); onDismiss() } }
+                FineDivider()
+                SettingRow(Icons.Outlined.DeleteOutline, t(R.string.move_to_recently_deleted_2), tone = StateTone.Error, chevron = false) { action = "trash" }
             }
         }
     }
@@ -197,17 +204,19 @@ fun TrashScreen(model: CompanionModel) {
     LaunchedEffect(model.tree) {
         try { trash = withContext(Dispatchers.IO) { model.graph.store.listTrash() } } catch (failure: Exception) { error = t(R.string.could_not_read_trash) }
     }
-    if (trash == null && error == null) { LoadingState(); return }
+    if (trash == null && error == null) { Box(Modifier.padding(horizontal = Space.page)) { SkeletonRows(3) }; return }
+    val items = trash.orEmpty()
     ScreenList {
-        item { Text(t(R.string.deleted_notes_stay_on_this_device_restoring_adds), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 12.dp)) }
-        if (error != null) item { InfoBanner(t(R.string.recently_deleted_unavailable), shownText(error)) }
-        if (trash?.isEmpty() == true) item { EmptyState(Icons.Outlined.DeleteOutline, t(R.string.nothing_here), t(R.string.notes_you_remove_from_the_library_will_appear_he)) }
-        items(trash.orEmpty(), key = { it.id }) { item ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Text(item.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis); Text(item.path, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                TextButton(onClick = { model.restoreNote(item.id) { trash = trash.orEmpty().filterNot { it.id == item.id } } }) { Text(t(R.string.restore)) }
+        item(key = "help") { StatusLine(t(R.string.deleted_notes_stay_on_this_device_restoring_adds), StateTone.Neutral, Modifier.padding(vertical = 12.dp)) }
+        if (error != null) item(key = "error") { InfoBanner(t(R.string.recently_deleted_unavailable), shownText(error), error = true) }
+        if (trash?.isEmpty() == true) item(key = "empty") { EmptyState(Icons.Outlined.DeleteOutline, t(R.string.nothing_here), t(R.string.notes_you_remove_from_the_library_will_appear_he)) }
+        itemsIndexed(items, key = { _, it -> it.id }) { index, item ->
+            GroupItem(index, items.size) {
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) { Text(item.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis); Text(item.path, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    TextButton(onClick = { model.restoreNote(item.id) { trash = trash.orEmpty().filterNot { it.id == item.id } } }) { Text(t(R.string.restore)) }
+                }
             }
-            FineDivider()
         }
     }
 }
@@ -225,34 +234,32 @@ fun NoteEditorScreen(model: CompanionModel) {
         owner.lifecycle.addObserver(observer)
         onDispose { owner.lifecycle.removeObserver(observer); editor.flush() }
     }
+    val scheme = MaterialTheme.colorScheme
     Column(Modifier.fillMaxSize().imePadding()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             ActionIcon(Icons.AutoMirrored.Outlined.ArrowBack, t(R.string.save_and_go_back)) { model.closeEditor() }
-            Column(Modifier.weight(1f)) {
-                Text(editor.note?.title ?: t(R.string.opening_note), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(when { editor.error != null -> t(R.string.save_needs_attention); editor.saving -> t(R.string.saving); editor.dirty -> t(R.string.unsaved_changes); else -> t(R.string.saved_on_this_device) },
-                    style = MaterialTheme.typography.bodySmall, color = if (editor.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(Modifier.weight(1f).padding(start = 4.dp)) {
+                Text(editor.note?.title ?: t(R.string.opening_note), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                StatusLine(when { editor.error != null -> t(R.string.save_needs_attention); editor.saving -> t(R.string.saving); editor.dirty -> t(R.string.unsaved_changes); else -> t(R.string.saved_on_this_device) },
+                    when { editor.error != null -> StateTone.Error; editor.dirty || editor.saving -> StateTone.Warning; else -> StateTone.Accent })
             }
             ActionIcon(Icons.Outlined.Done, t(R.string.save_note), enabled = editor.note != null) { editor.flush() }
         }
         if (editor.loading) { LoadingState(t(R.string.opening_note)); return }
         if (editor.error != null) {
-            Box(Modifier.padding(Space.md)) { InfoBanner(t(R.string.note_needs_attention), shownText(editor.error), if (editor.note == null) t(R.string.try_again) else t(R.string.save_again), true) { if (editor.note == null) editor.load() else editor.flush() } }
+            Box(Modifier.padding(Space.md)) { InfoBanner(t(R.string.note_needs_attention), shownText(editor.error), if (editor.note == null) t(R.string.try_again) else t(R.string.save_again), true, onAction = { if (editor.note == null) editor.load() else editor.flush() }) }
         }
         if (editor.note == null) return
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = Space.page, vertical = 8.dp)) {
-            listOf("read" to t(R.string.editor_read), "text" to t(R.string.editor_text), "ink" to t(R.string.editor_ink)).forEachIndexed { index, (id, title) ->
-                SegmentedButton(selected = mode == id, onClick = { focus.clearFocus(); mode = id }, shape = SegmentedButtonDefaults.itemShape(index, 3)) { Text(title) }
-            }
-        }
-        FineDivider()
+        SegmentedTabs(listOf("read" to t(R.string.editor_read), "text" to t(R.string.editor_text), "ink" to t(R.string.editor_ink)), mode, { focus.clearFocus(); mode = it },
+            Modifier.padding(horizontal = Space.page, vertical = 6.dp))
+        HorizontalDivider(color = LocalCompanionSemantics.current.hairline)
         when (mode) {
             "text" -> {
-                Box(Modifier.weight(1f).fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(Space.page)) {
-                    if (editor.markdown.isEmpty()) Text(t(R.string.start_writing), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Box(Modifier.weight(1f).fillMaxWidth().background(scheme.surface).padding(Space.page)) {
+                    if (editor.markdown.isEmpty()) Text(t(R.string.start_writing), style = MaterialTheme.typography.bodyLarge, color = scheme.onSurfaceVariant)
                     BasicTextField(editor.markdown, editor::editText, Modifier.fillMaxSize(),
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface, fontFamily = CompanionMono),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary))
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = scheme.onSurface, fontFamily = CompanionMono),
+                        cursorBrush = SolidColor(scheme.primary))
                 }
             }
             "ink" -> {
@@ -269,15 +276,15 @@ fun NoteEditorScreen(model: CompanionModel) {
                             modifier = Modifier.fillMaxSize())
                     }
                 }
-                Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 1.dp) {
-                    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                Surface(color = LocalCompanionSemantics.current.raised, shadowElevation = 2.dp, shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp, top = 6.dp)) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             ChoiceRow(listOf("pen" to t(R.string.pen), "eraser" to t(R.string.eraser), "pan" to t(R.string.move)), tool, { tool = it }, Modifier.weight(1f))
                             ActionIcon(Icons.AutoMirrored.Outlined.Undo, t(R.string.undo_stroke), editor.canUndo, editor::undo)
                             ActionIcon(Icons.AutoMirrored.Outlined.Redo, t(R.string.redo_stroke), editor.canRedo, editor::redo)
                         }
-                        if (tool == "pen") ColorChoices(listOf("#202333", "#2a6f97", "#c4554d", "#0f7b6c"), color, { color = it })
-                        Text(t(R.string.two_fingers_move_and_zoom_the_page), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 12.dp, bottom = 8.dp))
+                        if (tool == "pen") ColorChoices(listOf("#202333", "#2a6f97", "#c4554d", "#0f7b6c"), color) { color = it }
+                        Text(t(R.string.two_fingers_move_and_zoom_the_page), style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
                     }
                 }
             }

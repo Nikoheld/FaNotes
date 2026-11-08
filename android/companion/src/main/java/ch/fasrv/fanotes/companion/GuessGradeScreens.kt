@@ -76,6 +76,8 @@ fun GradeRevealSheet(model: CompanionModel) {
             model.dismissReveal()
         },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = LocalCompanionSemantics.current.raised,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
     ) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).sheetKeyboardPadding().padding(horizontal = Space.page)) {
             SheetTitle(
@@ -91,9 +93,13 @@ fun GradeRevealSheet(model: CompanionModel) {
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 when (step) {
                     "menu" -> {
-                        SettingRow(Icons.Outlined.Visibility, t(R.string.show_now), t(R.string.reveal_the_mark_immediately)) { showNow() }
-                        SettingRow(Icons.Outlined.Tune, t(R.string.guess), t(R.string.enter_marks_until_you_find_it_higher_is_better)) { step = "guess" }
-                        SettingRow(Icons.Outlined.Cake, t(R.string.celebrity_age), t(R.string.see_someone_who_is_that_old_then_reveal)) { step = "age" }
+                        Group(color = LocalCompanionSemantics.current.sunken.copy(alpha = 0.55f)) {
+                            SettingRow(Icons.Outlined.Visibility, t(R.string.show_now), t(R.string.reveal_the_mark_immediately), tone = StateTone.Accent) { showNow() }
+                            FineDivider()
+                            SettingRow(Icons.Outlined.Tune, t(R.string.guess), t(R.string.enter_marks_until_you_find_it_higher_is_better), tone = StateTone.Accent) { step = "guess" }
+                            FineDivider()
+                            SettingRow(Icons.Outlined.Cake, t(R.string.celebrity_age), t(R.string.see_someone_who_is_that_old_then_reveal), tone = StateTone.Accent) { step = "age" }
+                        }
                     }
                     "guess" -> {
                         Text(t(R.string.swiss_marks_are_1_to_6_higher_is_better), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -130,7 +136,7 @@ fun GradeRevealSheet(model: CompanionModel) {
                                 guess = ""
                             },
                             enabled = parsed != null,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
+                            modifier = Modifier.fillMaxWidth().heightIn(min = Space.button),
                         ) { Text(t(R.string.check_guess)) }
                         if (last.isNotBlank()) Text(last, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
                         if (tries > 0) Text(tp(R.plurals.tries_count, tries, tries), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -171,7 +177,7 @@ fun GradeRevealSheet(model: CompanionModel) {
                                     unveil()
                                 },
                                 enabled = parsedAge != null,
-                                modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
+                                modifier = Modifier.fillMaxWidth().heightIn(min = Space.button),
                             ) { Text(t(R.string.check_guess)) }
                         }
                         TextButton(onClick = { fromAge = true; ageImage = imageUrl.orEmpty(); unveil() }, modifier = Modifier.fillMaxWidth()) { Text(t(R.string.reveal)) }
@@ -199,13 +205,13 @@ fun GradeRevealSheet(model: CompanionModel) {
                             Button(
                                 onClick = { commitReveal(); model.finishReveal(); step = "menu"; guess = ""; tries = 0; last = ""; guessed = false; countUp = false; settled = false; fromAge = false; ageGuess = 0; ageImage = ""; ageAttempt = 0 },
                                 enabled = settled,
-                                modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 50.dp),
+                                modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = Space.button),
                             ) { Text(t(R.string.next_hidden_mark)) }
                         } else {
                             Button(
                                 onClick = { commitReveal(); model.finishReveal(); model.dismissReveal() },
                                 enabled = settled,
-                                modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 50.dp),
+                                modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = Space.button),
                             ) { Text(t(R.string.done)) }
                         }
                     }
