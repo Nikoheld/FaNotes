@@ -131,6 +131,12 @@ class CompanionGraph(private val context: Context) {
     private val pushLock = Mutex()
     private val booted = CompletableDeferred<Unit>()
     private val guestFile: File get() = File(context.filesDir, "kanti-guest.json")
+    fun onboardingVersion(): Int = prefs.getInt(ONBOARDING_PREF, 0)
+    fun markOnboardingSeen() { prefs.edit().putInt(ONBOARDING_PREF, ONBOARDING_VERSION).apply() }
+    fun snowfall(): Boolean = prefs.getBoolean(SNOWFALL_PREF, false)
+    fun setSnowfall(enabled: Boolean) { prefs.edit().putBoolean(SNOWFALL_PREF, enabled).apply() }
+    fun notifyTipDismissed(): Boolean = prefs.getBoolean(NOTIFY_TIP_PREF, false)
+    fun setNotifyTipDismissed() { prefs.edit().putBoolean(NOTIFY_TIP_PREF, true).apply() }
     fun diagnosticMode(): Boolean = prefs.getBoolean(DIAGNOSTIC_MODE_PREF, false)
     fun setDiagnosticMode(enabled: Boolean) {
         prefs.edit().putBoolean(DIAGNOSTIC_MODE_PREF, enabled).apply()
@@ -189,13 +195,20 @@ class CompanionGraph(private val context: Context) {
         ),
     )
 
+    /** True once the cached snapshot was read (or found missing). Until then screens show placeholders. */
+    val snapshotReady = MutableStateFlow(false)
+
     init {
         if (plannerHold()) busyPaths = PLANNER_HOLD_PATHS
         engine.attach(host())
         scope.launch {
-            val cached = readCachedSnapshot()
-            if (cached.fetchedAt.isNotBlank() || cached.grades.isNotEmpty() || cached.events.isNotEmpty()) {
-                snapshot.value = cached
+            try {
+                val cached = readCachedSnapshot()
+                if (cached.fetchedAt.isNotBlank() || cached.grades.isNotEmpty() || cached.events.isNotEmpty()) {
+                    snapshot.value = cached
+                }
+            } finally {
+                snapshotReady.value = true
             }
         }
     }

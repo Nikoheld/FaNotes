@@ -19,8 +19,9 @@ class OfflineEditorTest {
         val graph = (compose.activity.application as CompanionApplication).graph
         assertNull("Use a signed-out test device", graph.engine.state.value.account)
         compose.waitForIdle()
-        if (compose.onAllNodesWithText("Continue on this device").fetchSemanticsNodes().isNotEmpty()) {
-            compose.onNodeWithText("Continue on this device").performClick()
+        // First run shows the onboarding; skipping it is the same as the old "continue on this device".
+        if (compose.onAllNodesWithText(t(R.string.onboarding_skip)).fetchSemanticsNodes().isNotEmpty()) {
+            compose.onNodeWithText(t(R.string.onboarding_skip)).performClick()
         }
         compose.onNodeWithText("Notes", useUnmergedTree = false).performClick()
         val name = "Editor test ${UUID.randomUUID().toString().take(8)}"

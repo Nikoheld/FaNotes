@@ -1,16 +1,11 @@
 package ch.fasrv.fanotes.companion
 
-import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -25,23 +20,31 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import ch.fasrv.fanotes.desk.themePalette
 import kotlinx.coroutines.launch
+
+/** True when the user removed animations or set the animator scale to zero. */
+fun systemReducesMotion(resolver: android.content.ContentResolver): Boolean {
+    val scale = runCatching { android.provider.Settings.Global.getFloat(resolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) }.getOrDefault(1f)
+    return scale == 0f || !android.animation.ValueAnimator.areAnimatorsEnabled()
+}
 
 class MainActivity : ComponentActivity() {
     private val model: CompanionModel by viewModels {
         CompanionModel.factory((application as CompanionApplication).graph)
     }
-    private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (!granted) return@registerForActivityResult
-        val graph = (application as CompanionApplication).graph
-        graph.scope.launch { graph.pullChangeDelta() }
+    /** Mirrors the system "remove animations" / animator scale. Read by every transition. */
+    private val reducedMotion = mutableStateOf(false)
+    private val online = mutableStateOf(true)
+    private val motionObserver = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) { reducedMotion.value = systemReducesMotion(contentResolver) }
     }
-
-    private fun askForNotifications() {
-        if (Build.VERSION.SDK_INT < 33) return
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
-        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+    private val networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
+        override fun onCapabilitiesChanged(network: android.net.Network, caps: android.net.NetworkCapabilities) {
+            // Validation is not required: some school networks block the connectivity check.
+            val now = caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            runOnUiThread { online.value = now }
+        }
+        override fun onLost(network: android.net.Network) { runOnUiThread { online.value = false } }
     }
 
     override fun attachBaseContext(newBase: Context) {
@@ -50,8 +53,16 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        askForNotifications()
+        // Notification permission is asked in context: onboarding, Heute or Mitteilungen settings.
         enableEdgeToEdge()
+        reducedMotion.value = systemReducesMotion(contentResolver)
+        listOf(android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, android.provider.Settings.Global.TRANSITION_ANIMATION_SCALE).forEach {
+            contentResolver.registerContentObserver(android.provider.Settings.Global.getUriFor(it), false, motionObserver)
+        }
+        getSystemService(android.net.ConnectivityManager::class.java)?.let { manager ->
+            online.value = manager.getNetworkCapabilities(manager.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+            runCatching { manager.registerDefaultNetworkCallback(networkCallback) }
+        }
         window.isNavigationBarContrastEnforced = false
         model.openNotify(intent)
         setContent {
@@ -89,8 +100,14 @@ class MainActivity : ComponentActivity() {
                 choreographer.postFrameCallback(callback)
                 onDispose { choreographer.removeFrameCallback(callback) }
             }
-            val palette = themePalette(model.desk.theme.ifBlank { model.theme }, isSystemInDarkTheme())
-            CompanionTheme(palette, accent = model.desk.accent, amoled = model.desk.amoled) {
+            CompanionTheme(
+                themeId = model.desk.theme.ifBlank { model.theme },
+                systemDark = isSystemInDarkTheme(),
+                accent = model.desk.accent,
+                amoled = model.desk.amoled,
+                reducedMotion = reducedMotion.value,
+                online = online.value,
+            ) {
                 val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
                 SideEffect {
                     WindowCompat.getInsetsController(window, window.decorView).apply {
@@ -127,5 +144,11 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         model.graph.engine.pauseAutomaticSync()
         super.onStop()
+    }
+
+    override fun onDestroy() {
+        contentResolver.unregisterContentObserver(motionObserver)
+        runCatching { getSystemService(android.net.ConnectivityManager::class.java)?.unregisterNetworkCallback(networkCallback) }
+        super.onDestroy()
     }
 }

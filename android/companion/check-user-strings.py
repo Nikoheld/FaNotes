@@ -26,6 +26,9 @@ UI_FUNCS = {
     "setTextViewText", "DiagnosticLine", "NameDialog", "DateControl", "TimeControl",
     "Icon", "Image", "SchoolLoading", "ExpandableRecord", "shareFile", "makeText",
     "perform", "contentDescription", "stateDescription",
+    "PageIntro", "StatusLine", "PrimaryButton", "SecondaryButton", "MetricBlock", "Pill",
+    "SegmentedTabs", "FieldButton", "LeadCard", "DetailLine", "CreateRow", "SkeletonRows",
+    "RoomPill", "KantiTopBar",
 }
 
 # Stored Schulnetz, sync, and route text. Display goes through shownText or a code mapper.

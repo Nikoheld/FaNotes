@@ -1,4 +1,65 @@
-# Companion redesign verification
+# Kanti+ verification
+
+## November 2026 redesign ("Stundentakt")
+
+Branch `kanti-redesign`, 8 November 2026. Not merged, not released, not installed on any phone.
+The November 3 record below is kept unchanged as history.
+
+### Automated (host JVM, Gradle)
+
+| Check | Result |
+| --- | --- |
+| `:companion:assembleDebug`, `:companion:assembleDebugAndroidTest` | Build successful |
+| `:companion:testDebugUnitTest` | 27 tests, 0 failures (16 existing presentation tests, 11 new design-system tests) |
+| `:companion:lintDebug` | 0 errors; warnings are dependency versions, `UseKtx`, unused resources and intentional Swiss "ss" spellings |
+| `check-user-strings.py` (runs on every preBuild) | 932 strings and 15 plurals; German and English catalogs match; no hard-coded UI copy |
+
+`DesignSystemTest` checks WCAG contrast for every theme × offered accent × extreme and invalid
+accents × pure black, that stored theme ids resolve to themselves, Snow's fixed accent and light
+mode, onboarding only on a true first run, that an unread timetable leads Heute instead of a
+free-day message, unread-day detection before the next commitment, rail positions, and that
+snowflakes stay inside the card, and that a connected school without a first fetch is not a free day.
+
+An independent read-only code review of the branch found a LazyColumn duplicate-key crash in
+Planung und Noten, a free-day case right after connecting, and several smaller issues (dates
+without month on exam rows, cancelled exams in "Kommt in Sicht", week-strip cells under 48 dp,
+rail gaps, clipping at 200 % font, one animation ignoring reduced motion). All were fixed in
+commit "Fix redesign regressions found in device checks and review."
+
+### Emulator (isolated AVD, API 35, synthetic data only)
+
+All screens use invented data seeded through `run-as` (`Alex Muster`, class `G3b`); the school
+link was marked disconnected so the emulator never contacted Schulnetz or the FaNotes server.
+Device clock set to Monday 9 November 2026, 10:05, Europe/Zurich, to show a school day in progress.
+
+Checked on the emulator: German light theme on Heute, Planer (day and week), Aufgaben, lesson
+sheet, Noten, Fach with a hidden mark ("?", excluded from the average), Schule, Prüfungen,
+Absenzen, Mitteilungen, Einstellungen, Darstellung, Benachrichtigungen, Suche, creation sheet
+and task form; dark theme on Heute, Noten, Planer and Darstellung; Snow theme with snowfall on
+Heute, Noten, Planer and Darstellung. Device checks led to the fixes listed above (clipped hero
+time, rail shift under the highlight, duplicate "Fällig", a status line inserted off-screen,
+a loading flash, truncated sheet buttons, "Ganztägig" breaking in the time column).
+
+Captures from the final build: `screenshots/2026-11-redesign/b0*` (dark) and `e0*` (Snow). The
+`a*` light captures are from the build just before the final review fixes; the fixes do not change
+those screens except the week strip, exam dates and the hero layout at large font sizes.
+
+### Not verified
+
+The emulator was repeatedly aborted by its own hang detector while other workloads drove the
+shared host to a load average of 50–150, and emulator use was then stopped on request. Therefore:
+
+- No frame-time or transition profiling was recorded. `tools`-style `dumpsys gfxinfo` runs were
+  prepared but not executed; nothing here claims smoothness. Design-level measures: snowfall only
+  invalidates drawing, timetable coverage is memoised per snapshot and week, skeletons are static,
+  transitions are 90–240 ms and collapse to instant with reduced motion.
+- Not inspected on a device: large text (1.6×) at 320 dp, landscape rail, onboarding pages,
+  unread-timetable state, English UI, the widget and the Notes area (needs a FaNotes account).
+- Instrumentation tests (`OnboardingPersistenceTest`, updated `OfflineEditorTest`) compile but were
+  not run. `OfflineEditorTest` also needs a signed-in FaNotes account since guest mode hides Notes.
+- No real phone, real Schulnetz login, push delivery or TalkBack session was used.
+
+## November 3 redesign verification (history)
 
 Implementation verified on 3 November 2026. Screenshots use synthetic school and
 vault data on an isolated Android emulator; no live student account was used.
