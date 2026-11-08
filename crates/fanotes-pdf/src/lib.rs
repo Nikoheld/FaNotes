@@ -1,7 +1,7 @@
 //! PDFium page rasters for the paper camera.
 //!
-//! A window paints only its own pixels. The full page is rendered only when the
-//! window is the page, or when a viewer rotation still needs the upright bitmap.
+//! A window paints only its own pixels, at every viewer rotation: PDFium turns
+//! the page itself on top of the page's own `/Rotate`.
 //! pdf.js keeps the selectable text layer; this crate only supplies pixels.
 
 mod protocol;
@@ -10,7 +10,8 @@ use std::sync::{Mutex, OnceLock};
 
 use base64::Engine;
 use pdfium_bundled::pdfium_render::prelude::{
-    PdfBitmap, PdfBitmapFormat, PdfDocument, PdfPage, PdfRenderConfig, Pdfium,
+    PdfBitmap, PdfBitmapFormat, PdfColor, PdfDocument, PdfPageRenderRotation, PdfRenderConfig,
+    Pdfium,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -145,9 +146,8 @@ pub fn render_opened(opened: &OpenedPdf, request: &RenderRequest) -> Result<Page
     render_document(&opened.document, request)
 }
 
-/// Rasterize one page to `request`'s bitmap size. PDFium paints the upright
-/// page; a 90/180/270 viewer rotation is applied to those pixels so the crop
-/// window matches the paper camera. Pixels outside the page are white.
+/// Rasterize one page to `request`'s bitmap size: the window at `origin` in a
+/// page that is `page_pixel_*` large once turned. Pixels outside the page are white.
 pub fn render_pdf_page(pdf: &[u8], request: &RenderRequest) -> Result<PageBitmap, Error> {
     validate_request(request)?;
     if pdf.is_empty() || pdf.len() > MAX_PDF_BYTES {
@@ -169,6 +169,9 @@ pub fn render_pdf_page(pdf: &[u8], request: &RenderRequest) -> Result<PageBitmap
     render_document(&document, request)
 }
 
+/// The window is drawn straight into a bitmap of its own size, at every turn.
+/// Painting the whole page first, turning it in software, and copying the
+/// window out held up to three page-sized buffers per paint.
 fn render_document(
     document: &PdfDocument<'_>,
     request: &RenderRequest,
@@ -180,81 +183,46 @@ fn render_document(
     let page = pages
         .get(request.page_index)
         .map_err(|error| Error::Render(error.to_string()))?;
-    let rotation = normalized_rotation(request.rotation)?;
-    // A crop at rotation 0 is painted straight into the window bitmap. Rendering
-    // the whole page first (tens of megapixels on a zoomed sheet) is what made
-    // a large PDF stall on every scroll.
-    if rotation == 0 && !window_is_full_page(request) {
-        return render_window(&page, request);
-    }
-    let (src_w, src_h) = match rotation {
-        90 | 270 => (request.page_pixel_height, request.page_pixel_width),
-        _ => (request.page_pixel_width, request.page_pixel_height),
+    let rotation = match normalized_rotation(request.rotation)? {
+        90 => Some(PdfPageRenderRotation::Degrees90),
+        180 => Some(PdfPageRenderRotation::Degrees180),
+        270 => Some(PdfPageRenderRotation::Degrees270),
+        _ => None,
     };
-    let rendered = page
-        .render(src_w, src_h, None)
+    let bytes = checked_pixels(request.pixel_width, request.pixel_height)?
+        .checked_mul(4)
+        .ok_or(Error::Size)?;
+    // White first, so a window past the page edge stays paper.
+    let mut rgba = vec![255u8; bytes];
+    {
+        let mut bitmap = PdfBitmap::from_bytes(
+            request.pixel_width,
+            request.pixel_height,
+            PdfBitmapFormat::BGRA,
+            &mut rgba,
+        )
         .map_err(|error| Error::Render(error.to_string()))?;
-    if rendered.width() != src_w || rendered.height() != src_h {
-        return Err(Error::Render(
-            "PDFium hat nicht die angeforderte Seitengröße geliefert.".to_owned(),
-        ));
+        let mut config = PdfRenderConfig::new()
+            .set_fixed_size(request.page_pixel_width, request.page_pixel_height)
+            .set_origin(
+                request.origin_x.saturating_neg(),
+                request.origin_y.saturating_neg(),
+            )
+            .set_clear_color(PdfColor::WHITE)
+            .set_reverse_byte_order(true);
+        if let Some(rotation) = rotation {
+            config = config.rotate(rotation, false);
+        }
+        page.render_into_bitmap_with_config(&mut bitmap, &config)
+            .map_err(|error| Error::Render(error.to_string()))?;
     }
-    let upright = tight_rgba(&rendered)?;
-    let oriented = if rotation == 0 {
-        upright
-    } else {
-        rotate_rgba(&upright, src_w, src_h, rotation)?
-    };
-    let rgba = window_rgba(
-        &oriented,
-        request.page_pixel_width,
-        request.page_pixel_height,
-        request.origin_x,
-        request.origin_y,
-        request.pixel_width,
-        request.pixel_height,
-    );
+    for pixel in rgba.chunks_exact_mut(4) {
+        pixel[3] = 255;
+    }
     Ok(PageBitmap {
         width: request.pixel_width as u32,
         height: request.pixel_height as u32,
         rgba,
-    })
-}
-
-fn window_is_full_page(request: &RenderRequest) -> bool {
-    request.origin_x <= 0
-        && request.origin_y <= 0
-        && request.origin_x.saturating_add(request.pixel_width) >= request.page_pixel_width
-        && request.origin_y.saturating_add(request.pixel_height) >= request.page_pixel_height
-}
-
-/// Paint `page` at the full page pixel size, shifted so `origin` lands on the
-/// window bitmap. PDFium clips to that bitmap, so the rest of the page is not
-/// allocated.
-fn render_window(page: &PdfPage<'_>, request: &RenderRequest) -> Result<PageBitmap, Error> {
-    let mut bitmap = PdfBitmap::empty(
-        request.pixel_width,
-        request.pixel_height,
-        PdfBitmapFormat::default(),
-    )
-    .map_err(|error| Error::Render(error.to_string()))?;
-    let config = PdfRenderConfig::new()
-        .set_target_size(request.page_pixel_width, request.page_pixel_height)
-        .set_origin(
-            request.origin_x.saturating_neg(),
-            request.origin_y.saturating_neg(),
-        );
-    page.render_into_bitmap_with_config(&mut bitmap, &config)
-        .map_err(|error| Error::Render(error.to_string()))?;
-    if bitmap.width() != request.pixel_width || bitmap.height() != request.pixel_height {
-        return Err(Error::Render(
-            "PDFium hat nicht die angeforderte Fenstergröße geliefert.".to_owned(),
-        ));
-    }
-    Ok(PageBitmap {
-        width: request.pixel_width as u32,
-        height: request.pixel_height as u32,
-        rgba: tight_rgba(&bitmap)?,
     })
 }
 
@@ -312,50 +280,6 @@ fn normalized_rotation(degrees: i32) -> Result<i32, Error> {
     }
 }
 
-fn rotate_rgba(src: &[u8], width: i32, height: i32, rotation: i32) -> Result<Vec<u8>, Error> {
-    let width_us = width as usize;
-    let height_us = height as usize;
-    match rotation {
-        180 => {
-            let mut out = vec![255u8; src.len()];
-            let pixels = width_us * height_us;
-            for index in 0..pixels {
-                let from = index * 4;
-                let to = (pixels - 1 - index) * 4;
-                out[to..to + 4].copy_from_slice(&src[from..from + 4]);
-            }
-            Ok(out)
-        }
-        90 => Ok(rotate_clockwise(src, width_us, height_us)),
-        270 => Ok(rotate_counter_clockwise(src, width_us, height_us)),
-        _ => Err(Error::Rotation),
-    }
-}
-
-fn rotate_clockwise(src: &[u8], width: usize, height: usize) -> Vec<u8> {
-    let mut out = vec![255u8; src.len()];
-    for y in 0..height {
-        for x in 0..width {
-            let from = (y * width + x) * 4;
-            let to = (x * height + (height - 1 - y)) * 4;
-            out[to..to + 4].copy_from_slice(&src[from..from + 4]);
-        }
-    }
-    out
-}
-
-fn rotate_counter_clockwise(src: &[u8], width: usize, height: usize) -> Vec<u8> {
-    let mut out = vec![255u8; src.len()];
-    for y in 0..height {
-        for x in 0..width {
-            let from = (y * width + x) * 4;
-            let to = ((width - 1 - x) * height + y) * 4;
-            out[to..to + 4].copy_from_slice(&src[from..from + 4]);
-        }
-    }
-    out
-}
-
 fn library() -> Result<&'static Pdfium, Error> {
     static LIBRARY: OnceLock<Pdfium> = OnceLock::new();
     if let Some(existing) = LIBRARY.get() {
@@ -367,72 +291,6 @@ fn library() -> Result<&'static Pdfium, Error> {
     LIBRARY
         .get()
         .ok_or_else(|| Error::Bind("PDFium wurde nicht gespeichert.".to_owned()))
-}
-
-fn tight_rgba(bitmap: &PdfBitmap) -> Result<Vec<u8>, Error> {
-    let width = bitmap.width();
-    let height = bitmap.height();
-    if width <= 0 || height <= 0 {
-        return Err(Error::Render(
-            "PDFium lieferte eine leere Bitmap.".to_owned(),
-        ));
-    }
-    let raw = bitmap.as_rgba_bytes();
-    let row = (width as usize).checked_mul(4).ok_or(Error::Size)?;
-    let height_us = height as usize;
-    if height_us == 0 || raw.len() < row.saturating_mul(height_us) || raw.len() % height_us != 0 {
-        return Err(Error::Render(
-            "Die Bitmap-Zeilenlänge passt nicht.".to_owned(),
-        ));
-    }
-    let stride = raw.len() / height_us;
-    if stride < row {
-        return Err(Error::Render(
-            "Die Bitmap-Zeilenlänge passt nicht.".to_owned(),
-        ));
-    }
-    let mut out = Vec::with_capacity(row * height_us);
-    for y in 0..height_us {
-        let start = y * stride;
-        out.extend_from_slice(&raw[start..start + row]);
-    }
-    for pixel in out.chunks_exact_mut(4) {
-        pixel[3] = 255;
-    }
-    Ok(out)
-}
-
-fn window_rgba(
-    src: &[u8],
-    src_w: i32,
-    src_h: i32,
-    origin_x: i32,
-    origin_y: i32,
-    width: i32,
-    height: i32,
-) -> Vec<u8> {
-    if origin_x == 0 && origin_y == 0 && width == src_w && height == src_h {
-        return src.to_vec();
-    }
-    let dest_row = width as usize * 4;
-    let mut out = vec![255u8; dest_row * height as usize];
-    let src_row = src_w as usize * 4;
-    for y in 0..height {
-        let sy = origin_y + y;
-        if sy < 0 || sy >= src_h {
-            continue;
-        }
-        let x_start = origin_x.max(0);
-        let x_end = (origin_x + width).min(src_w);
-        if x_end <= x_start {
-            continue;
-        }
-        let src_off = sy as usize * src_row + x_start as usize * 4;
-        let dst_off = y as usize * dest_row + (x_start - origin_x) as usize * 4;
-        let len = (x_end - x_start) as usize * 4;
-        out[dst_off..dst_off + len].copy_from_slice(&src[src_off..src_off + len]);
-    }
-    out
 }
 
 static RENDER: Mutex<()> = Mutex::new(());
