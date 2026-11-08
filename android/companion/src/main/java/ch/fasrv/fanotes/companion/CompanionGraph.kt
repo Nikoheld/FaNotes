@@ -195,13 +195,20 @@ class CompanionGraph(private val context: Context) {
         ),
     )
 
+    /** True once the cached snapshot was read (or found missing). Until then screens show placeholders. */
+    val snapshotReady = MutableStateFlow(false)
+
     init {
         if (plannerHold()) busyPaths = PLANNER_HOLD_PATHS
         engine.attach(host())
         scope.launch {
-            val cached = readCachedSnapshot()
-            if (cached.fetchedAt.isNotBlank() || cached.grades.isNotEmpty() || cached.events.isNotEmpty()) {
-                snapshot.value = cached
+            try {
+                val cached = readCachedSnapshot()
+                if (cached.fetchedAt.isNotBlank() || cached.grades.isNotEmpty() || cached.events.isNotEmpty()) {
+                    snapshot.value = cached
+                }
+            } finally {
+                snapshotReady.value = true
             }
         }
     }

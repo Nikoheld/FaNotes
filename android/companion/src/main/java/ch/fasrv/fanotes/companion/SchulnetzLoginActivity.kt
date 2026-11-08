@@ -53,10 +53,11 @@ class SchulnetzLoginActivity : ComponentActivity() {
             finish(); return
         }
         val prefs = graph.deskPrefs()
+        val reduced = systemReducesMotion(contentResolver)
         setContent {
             var loading by remember { mutableStateOf(true) }
             var pageError by remember { mutableStateOf<String?>(null) }
-            CompanionTheme(themeId = prefs.theme, systemDark = isSystemInDarkTheme(), accent = prefs.accent, amoled = prefs.amoled, reducedMotion = systemReducesMotion(contentResolver)) {
+            CompanionTheme(themeId = prefs.theme, systemDark = isSystemInDarkTheme(), accent = prefs.accent, amoled = prefs.amoled, reducedMotion = reduced) {
                 val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
                 SideEffect {
                     WindowCompat.getInsetsController(window, window.decorView).apply {

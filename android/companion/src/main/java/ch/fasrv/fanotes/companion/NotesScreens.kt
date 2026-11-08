@@ -130,7 +130,7 @@ fun NotesScreen(model: CompanionModel) {
                 if (searching) item(key = "searching") { LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 12.dp), trackColor = LocalCompanionSemantics.current.sunken) }
                 if (searchError != null) item(key = "search-error") { InfoBanner(t(R.string.search_unavailable), shownText(searchError), error = true) }
                 if (!searching && results.isEmpty() && searchError == null) item(key = "search-empty") { EmptyState(Icons.Outlined.SearchOff, t(R.string.no_matching_notes), t(R.string.search_by_title_note_text_or_an_existing_handwri)) }
-                itemsIndexed(results, key = { _, it -> it.node.path }) { index, result -> GroupItem(index, results.size) { NoteRow(model, result.node, { selected = result.node }) { model.openNote(result.node.path) } } }
+                itemsIndexed(results, key = { _, it -> "result:${it.node.path}" }) { index, result -> GroupItem(index, results.size) { NoteRow(model, result.node, { selected = result.node }) { model.openNote(result.node.path) } } }
             } else {
                 if (mode == "browse" && model.noteFolder.isNotBlank()) item(key = "crumbs") {
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -144,7 +144,7 @@ fun NotesScreen(model: CompanionModel) {
                 }
                 if (nodes.isEmpty()) item(key = "empty") { EmptyState(Icons.Outlined.AutoStories, if (model.noteFolder.isBlank()) t(R.string.a_home_for_your_notes) else t(R.string.this_folder_is_ready), t(R.string.create_a_note_to_start_writing_everything_saves)) }
                 item(key = "top-gap") { Spacer(Modifier.height(8.dp)) }
-                itemsIndexed(nodes, key = { _, it -> it.path }) { index, node ->
+                itemsIndexed(nodes, key = { _, it -> "node:${it.path}" }) { index, node ->
                     GroupItem(index, nodes.size) {
                         if (node.kind == NoteKind.FOLDER) {
                             Row(Modifier.fillMaxWidth().heightIn(min = Space.row).clickable(role = Role.Button) { model.openFolder(node.path) }.padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {

@@ -137,11 +137,12 @@ fun GroupItem(index: Int, count: Int, content: @Composable ColumnScope.() -> Uni
 
 @Composable
 fun SectionLabel(title: String, action: String? = null, count: Int? = null, tone: Color? = null, onAction: () -> Unit = {}) {
-    Row(Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 8.dp).heightIn(min = 32.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, style = MaterialTheme.typography.titleMedium, color = tone ?: MaterialTheme.colorScheme.onBackground,
-            maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).semantics { heading() })
-        if (count != null) Text(count.toString(), style = TimeSmallStyle, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
-        Spacer(Modifier.weight(1f))
+    Row(Modifier.fillMaxWidth().padding(top = 22.dp, bottom = 6.dp).heightIn(min = 32.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            Text(title, style = MaterialTheme.typography.titleMedium, color = tone ?: MaterialTheme.colorScheme.onBackground,
+                maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).semantics { heading() })
+            if (count != null) Text(count.toString(), style = TimeSmallStyle, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
+        }
         if (action != null) TextButton(onClick = onAction, contentPadding = PaddingValues(horizontal = 10.dp)) {
             Text(action, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }

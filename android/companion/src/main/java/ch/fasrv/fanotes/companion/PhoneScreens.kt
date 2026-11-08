@@ -62,6 +62,11 @@ fun CompanionRoot(model: CompanionModel) {
         snackbar.showSnackbar(shownText(message))
         if (model.message == message) model.message = null
     }
+    if (model.onboardingActive && !model.onboardingReplay && sync.account == null && !model.accountChecked) {
+        // First run only: a brief blank page until any saved account is known.
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
+        return
+    }
     if (model.onboardingReplay || (model.onboardingActive && sync.account == null)) {
         Scaffold(snackbarHost = { SnackbarHost(snackbar) }, containerColor = MaterialTheme.colorScheme.background) { padding ->
             OnboardingScreen(model, Modifier.padding(padding).consumeWindowInsets(padding).imePadding())

@@ -99,6 +99,10 @@ fun unreadSchoolDayBefore(snapshot: SchulnetzSnapshot, from: LocalDate, until: L
     return false
 }
 
+/** No usable timetable yet: weeks ahead unread, or connected but never fetched. Never a free day. */
+fun timetableMissing(snapshot: SchulnetzSnapshot, linked: Boolean, today: LocalDate): Boolean =
+    upcomingTimetableUnread(snapshot, today) || (linked && snapshot.fetchedAt.isBlank())
+
 private fun clockMinutes(raw: String): Int? = runCatching { LocalTime.parse(raw.take(5)).let { it.hour * 60 + it.minute } }.getOrNull()
 
 @Composable
@@ -117,7 +121,7 @@ fun TodayScreen(model: CompanionModel) {
     }
     val next = if ("lessons" in cards) nextCommitment(agenda, now, zone) else null
     val schoolKnown = model.snapshot.fetchedAt.isNotBlank() || model.link.linked
-    val unreadAhead = remember(model.snapshot, today) { upcomingTimetableUnread(model.snapshot, today) }
+    val unreadAhead = remember(model.snapshot, model.link.linked, today) { timetableMissing(model.snapshot, model.link.linked, today) }
     val lead = todayLead(next, schoolKnown, unreadAhead)
     val urgent = sortHomeworkTasks(model.tasks.filter { !it.done }).sortedBy { when (taskBucket(it, today)) { "Overdue" -> 0; "Today" -> 1; "Upcoming" -> 2; else -> 3 } }
     var selected by remember { mutableStateOf<AgendaEntry?>(null) }
@@ -130,27 +134,34 @@ fun TodayScreen(model: CompanionModel) {
         model.dismissNotifyTip()
     }
     ScreenList {
-        if (schoolKnown) item(key = "status") {
-            val stamp = updatedLabel(model.snapshot.fetchedAt)
-            StatusLine(if (online) t(R.string.last_updated, stamp) else t(R.string.offline_last_updated, stamp), if (online) StateTone.Neutral else StateTone.Offline, Modifier.padding(bottom = 12.dp))
-        }
-        val syncCopy = faNotesSyncCopy(sync.status, model.notesAccount)
-        if (model.link.needsReauth) item(key = "reauth") {
-            Box(Modifier.padding(bottom = 12.dp)) { InfoBanner(t(R.string.reconnect_your_school), t(R.string.your_last_school_data_is_still_here), t(R.string.sign_in), tone = StateTone.Warning, onAction = { model.navigate(Page.Connections) }) }
-        } else if (syncCopy != null) item(key = "sync") {
-            Box(Modifier.padding(bottom = 12.dp)) { InfoBanner(t(syncCopy.first), t(syncCopy.second), t(R.string.account_sync), error = syncCopy.third, tone = if (syncCopy.third) StateTone.Error else StateTone.Offline, onAction = { model.navigate(Page.Connections) }) }
-        }
-        if (model.link.linked && !allowed && !model.notifyTipDismissed && Build.VERSION.SDK_INT >= 33) item(key = "notify-tip") {
-            Box(Modifier.padding(bottom = 12.dp)) {
-                InfoBanner(t(R.string.notify_tip_title), t(R.string.notify_tip_body), t(R.string.allow_notifications), onAction = { permission.launch(Manifest.permission.POST_NOTIFICATIONS) })
+        // One item that is always first, so a status or banner that appears after the snapshot
+        // loads is shown above the card instead of being inserted off-screen.
+        item(key = "top") {
+            Column(Modifier.fillMaxWidth()) {
+                if (schoolKnown) {
+                    val stamp = updatedLabel(model.snapshot.fetchedAt)
+                    StatusLine(if (online) t(R.string.last_updated, stamp) else t(R.string.offline_last_updated, stamp), if (online) StateTone.Neutral else StateTone.Offline, Modifier.padding(bottom = 12.dp))
+                }
+                val syncCopy = faNotesSyncCopy(sync.status, model.notesAccount)
+                if (model.link.needsReauth) Box(Modifier.padding(bottom = 12.dp)) { InfoBanner(t(R.string.reconnect_your_school), t(R.string.your_last_school_data_is_still_here), t(R.string.sign_in), tone = StateTone.Warning, onAction = { model.navigate(Page.Connections) }) }
+                else if (syncCopy != null) Box(Modifier.padding(bottom = 12.dp)) { InfoBanner(t(syncCopy.first), t(syncCopy.second), t(R.string.account_sync), error = syncCopy.third, tone = if (syncCopy.third) StateTone.Error else StateTone.Offline, onAction = { model.navigate(Page.Connections) }) }
+                if (model.schoolReady && lead == TodayLead.Next && !model.notesAccount && !model.link.linked && model.snapshot.fetchedAt.isBlank() && !model.link.needsReauth) Box(Modifier.padding(bottom = 12.dp)) {
+                    InfoBanner(t(R.string.your_school_day), t(R.string.connect_schulnetz_to_see_grades_the_timetable_ex), if (model.busy) null else t(R.string.connect_schulnetz), onAction = { model.requestVisibleLogin("today") })
+                }
+                if (model.link.linked && !allowed && !model.notifyTipDismissed && Build.VERSION.SDK_INT >= 33) Box(Modifier.padding(bottom = 12.dp)) {
+                    InfoBanner(t(R.string.notify_tip_title), t(R.string.notify_tip_body), t(R.string.allow_notifications), onAction = { permission.launch(Manifest.permission.POST_NOTIFICATIONS) })
+                }
             }
         }
+        val ready = model.schoolReady && !model.loading
         if ("lessons" in cards) item(key = "lead") {
-            when (lead) {
+            if (!ready) Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.fillMaxWidth()) {
+                Box(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) { SkeletonRows(2) }
+            } else when (lead) {
                 TodayLead.Next -> {
                     val entry = next!!
                     val dayLessons = agenda.filter { it.day == entry.day && it.kind == AgendaKind.Lesson && it.start.isNotBlank() }
-                    val gapUnread = unreadSchoolDayBefore(model.snapshot, today, entry.day, today)
+                    val gapUnread = remember(model.snapshot, today, entry.day) { unreadSchoolDayBefore(model.snapshot, today, entry.day, today) }
                     Box {
                         NextHero(model, entry, now, zone, dayLessons) { selected = entry }
                         if (LocalCompanionSemantics.current.snow && model.snowfall && !LocalKantiMotion.current.reduced) Snowfall(Modifier.matchParentSize().clip(MaterialTheme.shapes.extraLarge))
@@ -158,7 +169,7 @@ fun TodayScreen(model: CompanionModel) {
                     if (gapUnread) StatusLine(t(R.string.unread_before_next), StateTone.Warning, Modifier.padding(top = 10.dp, start = 4.dp))
                 }
                 TodayLead.Unread -> LeadCard(Icons.Outlined.EventBusy, StateTone.Warning, t(R.string.timetable_not_loaded), if (online) t(R.string.timetable_not_loaded_body) else t(R.string.offline_waiting),
-                    if (online && !model.busy) t(R.string.refresh_school_data) else null) { model.refreshSchool() }
+                    if (!model.busy) t(R.string.refresh_school_data) else null) { model.refreshSchool() }
                 TodayLead.Connect -> LeadCard(Icons.Outlined.School, StateTone.Accent, t(R.string.your_school_day), t(R.string.connect_schulnetz_to_see_grades_the_timetable_ex),
                     if (!model.busy) t(R.string.connect_schulnetz) else null) { model.requestVisibleLogin("today") }
                 TodayLead.Clear -> LeadCard(Icons.Outlined.WbSunny, StateTone.Neutral, t(R.string.room_to_breathe), t(R.string.no_upcoming_commitments_in_your_planner), null) {}
@@ -171,8 +182,9 @@ fun TodayScreen(model: CompanionModel) {
             }
         }
         if ("tasks" in cards) {
-            item(key = "tasks-head") { SectionLabel(t(R.string.on_your_list), if (urgent.isEmpty()) t(R.string.tasks) else t(R.string.all_2, urgent.size), count = urgent.size.takeIf { it > 0 }) { model.openPlanner(true) } }
-            if (urgent.isEmpty()) item(key = "tasks-empty") {
+            item(key = "tasks-head") { SectionLabel(t(R.string.on_your_list), if (urgent.isEmpty()) t(R.string.tasks) else t(R.string.all_2, urgent.size)) { model.openPlanner(true) } }
+            if (!ready) item(key = "tasks-loading") { SkeletonRows(2) }
+            else if (urgent.isEmpty()) item(key = "tasks-empty") {
                 Group { Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.CheckCircleOutline, null, tint = LocalCompanionSemantics.current.success)
                     Text(t(R.string.you_re_all_caught_up), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
@@ -190,7 +202,10 @@ fun TodayScreen(model: CompanionModel) {
             }
         }
         if ("exam" in cards) {
-            val exams = agenda.filter { it.kind == AgendaKind.Exam && it.key != next?.key && it.day >= today }.sortedWith(compareBy<AgendaEntry> { it.day }.thenBy { it.start }).take(2)
+            val clockNow = now.atZone(zone).toLocalTime().let { "%02d:%02d".format(it.hour, it.minute) }
+            val exams = agenda.filter { it.kind == AgendaKind.Exam && it.key != next?.key && it.school?.isCancelled() != true &&
+                (it.day > today || (it.day == today && it.end.ifBlank { it.start.ifBlank { "23:59" } } >= clockNow)) }
+                .sortedWith(compareBy<AgendaEntry> { it.day }.thenBy { it.start }).take(2)
             if (exams.isNotEmpty()) {
                 item(key = "exam-head") { SectionLabel(t(R.string.coming_into_view)) }
                 itemsIndexed(exams, key = { _, it -> "today-exam:${it.key}" }) { index, exam ->
@@ -276,10 +291,9 @@ private fun NextHero(model: CompanionModel, entry: AgendaEntry, now: Instant, zo
                 Text(label, style = MaterialTheme.typography.labelLarge, color = scheme.primary, modifier = Modifier.padding(start = if (running) 8.dp else 0.dp).weight(1f))
                 if (countdown.isNotBlank()) Text(countdown, style = MaterialTheme.typography.labelLarge, color = scheme.onSurface)
             }
-            Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.Bottom) {
+            FlowRow(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceBetween, itemVerticalAlignment = Alignment.Bottom) {
                 Text(entry.start.ifBlank { t(R.string.all_day) }, style = if (entry.start.isBlank()) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.displayLarge,
-                    color = scheme.onSurface, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
-                Spacer(Modifier.weight(1f))
+                    color = scheme.onSurface, maxLines = 1, softWrap = false, modifier = Modifier.padding(end = 12.dp))
                 if (room.isNotBlank()) RoomPill(room, Modifier.padding(bottom = 8.dp))
             }
             Text(courseAlias(entry.title, model.desk.courseAliases), style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
@@ -362,7 +376,9 @@ private sealed interface DayItem {
 /** Adds free periods of 30 minutes or more and a now marker on today. Only between known lessons. */
 private fun dayItems(entries: List<AgendaEntry>, today: Boolean, clock: Int): List<DayItem> {
     val out = mutableListOf<DayItem>()
-    var nowPlaced = !today
+    // A running lesson is already marked "Jetzt"; a second now line would repeat it.
+    val running = today && entries.any { e -> val s = clockMinutes(e.start); val f = clockMinutes(e.end); s != null && f != null && clock in s until f }
+    var nowPlaced = !today || running
     var lastEnd: Int? = null
     entries.forEachIndexed { index, entry ->
         val start = clockMinutes(entry.start)
@@ -392,6 +408,8 @@ private fun ScheduleScreen(model: CompanionModel) {
             model.cachedAgenda(days, zone)
         }
     }
+    // Coverage scans every event; compute it once per snapshot and week, not on each clock tick.
+    val coverage = remember(model.snapshot, days, today) { days.associateWith { lessonWeekCoverage(model.snapshot, it, today) } }
     val listState = rememberLazyListState()
     val dayKey = model.day.toString()
     // The last selected day and its scroll position are restored on purpose.
@@ -428,7 +446,7 @@ private fun ScheduleScreen(model: CompanionModel) {
             ActionIcon(Icons.Outlined.ChevronRight, if (compact) t(R.string.next_day) else t(R.string.next_week)) { model.day = if (compact) model.day.plusDays(1) else model.day.plusWeeks(1) }
         }
         if (!compact) {
-            WeekStrip(days, model.day, today, agenda, model.snapshot) { model.day = it; model.planWeek = false }
+            WeekStrip(days, model.day, today, agenda, coverage) { model.day = it; model.planWeek = false }
             ChoiceRow(sources, source, { source = it }, Modifier.padding(horizontal = Space.page))
         }
         HorizontalDivider(color = LocalCompanionSemantics.current.hairline)
@@ -455,14 +473,15 @@ private fun ScheduleScreen(model: CompanionModel) {
                 else -> weekRange
             }
             item(key = "heading") { Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(heading, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).semantics { heading() }, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                SegmentedTabs(listOf("day" to t(R.string.seg_day), "week" to t(R.string.seg_week)), if (model.planWeek) "week" else "day", { model.planWeek = it == "week" }, Modifier.width(168.dp))
+                Text(heading, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f).padding(end = 8.dp).semantics { heading() }, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                SegmentedTabs(listOf("day" to t(R.string.seg_day), "week" to t(R.string.seg_week)), if (model.planWeek) "week" else "day", { model.planWeek = it == "week" }, Modifier.widthIn(min = 132.dp, max = 156.dp))
             } }
+            if (!model.schoolReady) { item(key = "loading") { SkeletonRows(4) }; return@ScreenList }
             val shownDays = if (model.planWeek) days.filter { model.desk.showWeekend || it.dayOfWeek.value < 6 || agenda[it].orEmpty().isNotEmpty() } else listOf(model.day)
             shownDays.forEach { day ->
                 val entries = agenda[day].orEmpty().filter { entry -> when (source) { "school" -> entry.school != null; "personal" -> entry.local != null; "due" -> entry.kind == AgendaKind.Task || entry.kind == AgendaKind.Exam; else -> true } }
                     .filter { it.school == null || !it.school.isLesson() || eventInHours(it.school, model.desk.dayStartHour, model.desk.dayEndHour, zone) }
-                val unread = (source == "all" || source == "school") && lessonWeekCoverage(model.snapshot, day, today) == WeekCoverage.UNREAD
+                val unread = (source == "all" || source == "school") && (coverage[day] ?: lessonWeekCoverage(model.snapshot, day, today)) == WeekCoverage.UNREAD
                 if (model.planWeek) item(key = "date:$day") {
                     Row(Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(dateLabel(day), style = MaterialTheme.typography.titleMedium, color = if (day == today) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground, modifier = Modifier.weight(1f).semantics { heading() })
@@ -474,7 +493,7 @@ private fun ScheduleScreen(model: CompanionModel) {
                         if (unread) StatusLine(t(R.string.timetable_not_loaded), StateTone.Warning, Modifier.padding(vertical = 12.dp))
                         else Text(t(R.string.no_commitments), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 12.dp))
                     }
-                    else if (unread) EmptyState(Icons.Outlined.EventBusy, t(R.string.timetable_not_loaded), t(R.string.timetable_not_loaded_body), if (!model.busy && LocalOnline.current) t(R.string.refresh_school_data) else null, StateTone.Warning) { model.refreshSchool() }
+                    else if (unread) EmptyState(Icons.Outlined.EventBusy, t(R.string.timetable_not_loaded), t(R.string.timetable_not_loaded_body), if (!model.busy) t(R.string.refresh_school_data) else null, StateTone.Warning) { model.refreshSchool() }
                     else EmptyState(Icons.Outlined.EventAvailable, t(R.string.a_clear_day), if (source == "school" && model.snapshot.fetchedAt.isBlank()) t(R.string.connect_schulnetz_in_settings_to_see_your_lesson) else when (source) { "school" -> t(R.string.no_school_entries_for_date); "personal" -> t(R.string.no_personal_entries_for_date); "due" -> t(R.string.no_deadline_entries_for_date); else -> t(R.string.no_entries_for_date) })
                 } else {
                     if (unread && model.planWeek.not()) item(key = "partial:$day") { StatusLine(t(R.string.timetable_not_loaded), StateTone.Warning, Modifier.padding(vertical = 8.dp)) }
@@ -500,23 +519,26 @@ private fun ScheduleScreen(model: CompanionModel) {
 }
 
 @Composable
-private fun WeekStrip(days: List<LocalDate>, chosenDay: LocalDate, today: LocalDate, agenda: Map<LocalDate, List<AgendaEntry>>, snapshot: SchulnetzSnapshot, onPick: (LocalDate) -> Unit) {
+private fun WeekStrip(days: List<LocalDate>, chosenDay: LocalDate, today: LocalDate, agenda: Map<LocalDate, List<AgendaEntry>>, coverage: Map<LocalDate, WeekCoverage>, onPick: (LocalDate) -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val warning = LocalCompanionSemantics.current.warning
-    Row(Modifier.fillMaxWidth().padding(horizontal = Space.page - 4.dp, vertical = 4.dp).selectableGroup(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).selectableGroup()) {
         days.forEach { day ->
             val chosen = day == chosenDay
             val count = agenda[day].orEmpty().size
-            val unread = day.dayOfWeek.value < 6 && lessonWeekCoverage(snapshot, day, today) == WeekCoverage.UNREAD
+            val unread = day.dayOfWeek.value < 6 && coverage[day] == WeekCoverage.UNREAD
             val label = buildString {
                 append(dateLabel(day))
+                if (day == today) append(", ").append(t(R.string.today))
                 if (unread) append(", ").append(t(R.string.timetable_not_loaded))
                 else if (count > 0) append(", ").append(tp(R.plurals.entries_count, count, count))
             }
-            Column(Modifier.weight(1f).heightIn(min = 64.dp).clip(MaterialTheme.shapes.medium)
-                .background(if (chosen) scheme.onSurface else Color.Transparent)
+            Column(Modifier.weight(1f).heightIn(min = 64.dp)
                 .selectable(chosen, onClick = { onPick(day) }, role = Role.Tab)
                 .clearAndSetSemantics { contentDescription = label; this.selected = chosen }
+                .padding(horizontal = 2.dp).clip(MaterialTheme.shapes.medium)
+                .background(if (chosen) scheme.onSurface else Color.Transparent)
+                .then(if (day == today && !chosen) Modifier.border(1.5.dp, scheme.primary, MaterialTheme.shapes.medium) else Modifier)
                 .padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(day.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, AppLanguage.formatLocale()).take(2), style = MaterialTheme.typography.labelMedium,
                     color = if (chosen) scheme.surface else if (day == today) scheme.primary else scheme.onSurfaceVariant)
@@ -572,19 +594,14 @@ fun AgendaRow(model: CompanionModel, entry: AgendaEntry, position: RailPosition 
     val line = s.hairline
     val room = entryRoom(entry)
     val people = entryPeople(entry)
-    Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
-        .background(if (highlighted || running) scheme.primaryContainer else Color.Transparent)
-        .clickable(onClick = onClick).padding(horizontal = if (highlighted || running) 8.dp else 0.dp).heightIn(min = Space.row),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Column(Modifier.width(52.dp).padding(top = if (model.desk.planCompact) 10.dp else 14.dp), horizontalAlignment = Alignment.End) {
-            if (showDay) Text(formatSchoolDate(entry.day, "EEE d"), style = TimeSmallStyle, color = scheme.onSurfaceVariant, maxLines = 1)
-            Text(entry.start.ifBlank { if (entry.kind == AgendaKind.Task) t(R.string.due) else t(R.string.all_day) },
-                style = if (entry.start.isBlank()) MaterialTheme.typography.labelMedium else TimeStyle, color = if (running) scheme.primary else scheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            if (entry.end.isNotBlank() && entry.end != entry.start) Text(entry.end, style = TimeSmallStyle, color = scheme.onSurfaceVariant)
-        }
-        Box(Modifier.width(14.dp).fillMaxHeight().heightIn(min = Space.row).drawBehind {
-            val x = size.width / 2
-            val nodeY = (if (model.desk.planCompact) 10.dp else 14.dp).toPx() + 11.dp.toPx()
+    val highlight = if (highlighted || running) scheme.primaryContainer else Color.Transparent
+    // The highlight bleeds 10 dp into the page gutter so the time rail never shifts sideways.
+    val compactRows = model.desk.planCompact
+    Row(Modifier.fillMaxWidth()
+        .drawBehind {
+            if (highlight != Color.Transparent) drawRoundRect(highlight, Offset(-10.dp.toPx(), 0f), Size(size.width + 20.dp.toPx(), size.height), androidx.compose.ui.geometry.CornerRadius(16.dp.toPx()))
+            val x = (52 + 12 + 7).dp.toPx()
+            val nodeY = (if (compactRows) 10.dp else 14.dp).toPx() + 11.dp.toPx()
             val stroke = 2.dp.toPx()
             if (position == RailPosition.Middle || position == RailPosition.Last) drawLine(line, Offset(x, 0f), Offset(x, nodeY), stroke)
             if (position == RailPosition.Middle || position == RailPosition.First) drawLine(line, Offset(x, nodeY), Offset(x, size.height), stroke)
@@ -599,7 +616,19 @@ fun AgendaRow(model: CompanionModel, entry: AgendaEntry, position: RailPosition 
                 entry.kind == AgendaKind.Task -> drawRect(accent, Offset(x - r + 1f, nodeY - r + 1f), Size((r - 1f) * 2, (r - 1f) * 2))
                 else -> drawCircle(accent, r, Offset(x, nodeY))
             }
-        })
+        }
+        .clickable(onClick = onClick).heightIn(min = Space.row),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.width(52.dp).padding(top = if (model.desk.planCompact) 10.dp else 14.dp), horizontalAlignment = Alignment.End) {
+            if (showDay) {
+                val dated = entry.school == null || examHasDate(entry.school.start)
+                Text(if (!dated) "–" else formatSchoolDate(entry.day, if (entry.day.year == LocalDate.now().year) "d MMM" else "d.M.yy"), style = TimeSmallStyle, color = scheme.onSurfaceVariant, maxLines = 1)
+            }
+            Text(entry.start.ifBlank { if (entry.kind == AgendaKind.Task) t(R.string.due) else t(R.string.all_day_short) },
+                style = if (entry.start.isBlank()) MaterialTheme.typography.labelMedium else TimeStyle, softWrap = entry.start.isNotBlank(), color = if (running) scheme.primary else scheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (entry.end.isNotBlank() && entry.end != entry.start) Text(entry.end, style = TimeSmallStyle, color = scheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f).padding(vertical = if (model.desk.planCompact) 10.dp else 14.dp)) {
             Text(courseAlias(entry.title, model.desk.courseAliases), style = MaterialTheme.typography.titleMedium,
                 textDecoration = if (cancelled) TextDecoration.LineThrough else TextDecoration.None, color = if (cancelled) scheme.onSurfaceVariant else scheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -613,7 +642,7 @@ fun AgendaRow(model: CompanionModel, entry: AgendaEntry, position: RailPosition 
                 if (running) add(t(R.string.now_label) to scheme.primary)
                 if (cancelled) add(t(R.string.cancelled) to scheme.error)
                 else if (entry.school?.isSubstitution() == true) add(t(R.string.substitution) to s.warning)
-                else if (entry.kind != AgendaKind.Lesson) add(entry.kind.uiLabel() to accent)
+                else if (entry.kind != AgendaKind.Lesson && (entry.kind != AgendaKind.Task || entry.start.isNotBlank())) add(entry.kind.uiLabel() to accent)
             }
             if (tags.isNotEmpty()) Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) { tags.forEach { (label, color) -> Tag(label, color) } }
         }
@@ -744,9 +773,9 @@ fun AgendaDetails(model: CompanionModel, entry: AgendaEntry, onDismiss: () -> Un
             if (entry.school?.isLesson() == true && entry.kind == AgendaKind.Lesson) {
                 SectionLabel(t(R.string.personal_timetable))
                 Text(t(R.string.hidden_lessons_can_be_restored_in_planning_setti), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
-                Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SecondaryButton(t(R.string.hide_this_lesson), { model.hideLesson(entry.school, false); onDismiss() }, Modifier.weight(1f))
-                    SecondaryButton(t(R.string.hide_this_weekly_lesson), { model.hideLesson(entry.school, true); onDismiss() }, Modifier.weight(1f))
+                Column(Modifier.fillMaxWidth().padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SecondaryButton(t(R.string.hide_this_lesson), { model.hideLesson(entry.school, false); onDismiss() }, Modifier.fillMaxWidth(), icon = Icons.Outlined.VisibilityOff)
+                    SecondaryButton(t(R.string.hide_this_weekly_lesson), { model.hideLesson(entry.school, true); onDismiss() }, Modifier.fillMaxWidth(), icon = Icons.Outlined.EventRepeat)
                 }
             }
         }

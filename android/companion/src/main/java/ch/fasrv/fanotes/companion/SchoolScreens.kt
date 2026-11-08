@@ -272,7 +272,7 @@ fun CourseScreen(model: CompanionModel) {
             Spacer(Modifier.height(16.dp))
             Group {
                 SettingRow(Icons.Outlined.Calculate, t(R.string.target_grade_calculator), if (calculator) t(R.string.tap_to_collapse) else t(R.string.what_mark_would_reach_your_target), chevron = false) { calculator = !calculator }
-                if (calculator) Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp).animateContentSize()) {
+                if (calculator) Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp).animateContentSize(LocalKantiMotion.current.spec(LocalKantiMotion.current.medium))) {
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         OutlinedTextField(target, { target = it }, label = { Text(t(R.string.target_average)) }, modifier = Modifier.weight(1f), singleLine = true, shape = MaterialTheme.shapes.small, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
                         OutlinedTextField(weight, { weight = it }, label = { Text(t(R.string.next_weight)) }, modifier = Modifier.weight(1f), singleLine = true, shape = MaterialTheme.shapes.small, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
@@ -346,7 +346,7 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
             }
             Page.Absences -> {
                 item(key = "filter") { ChoiceRow(listOf("all" to t(R.string.all), "open" to t(R.string.open), "excused" to t(R.string.excused)), filter, { filter = it }, Modifier.padding(vertical = 6.dp)) }
-                val absences = model.snapshot.absences.filter { "${it.subject} ${it.reason} ${it.dateFrom}".contains(query, true) && when (filter) { "open" -> !it.excused; "excused" -> it.excused; else -> true } }.sortedWith(compareBy<SchoolAbsence> { if (absenceTargetId(it) in model.highlightIds) 0 else 1 }.thenByDescending { it.dateFrom })
+                val absences = model.snapshot.absences.filter { "${it.subject} ${it.reason} ${it.dateFrom}".contains(query, true) && when (filter) { "open" -> !it.excused; "excused" -> it.excused; else -> true } }.sortedWith(compareBy<SchoolAbsence> { if (absenceTargetId(it) in model.highlightIds) 0 else 1 }.thenByDescending { parseDisplayDate(it.dateFrom) ?: java.time.LocalDate.MIN })
                 if (absences.isEmpty() && query.isBlank() && model.busy && model.snapshot.fetchedAt.isBlank()) item(key = "loading") { SkeletonRows(3, t(R.string.loading_absences)) }
                 else if (absences.isEmpty()) item(key = "empty") { EmptyState(Icons.Outlined.EventAvailable, t(R.string.no_absences_to_show), t(R.string.your_available_absence_records_and_deadlines_wil)) }
                 itemsIndexed(absences, key = { _, it -> absenceTargetId(it) }) { index, absence ->

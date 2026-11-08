@@ -191,7 +191,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             item(key = "start-head") { SectionLabel(t(R.string.when_you_open_kanti)) }
             item(key = "start") { ChoiceRow((if (model.notesAccount) NAV_BAR_IDS else NAV_BAR_IDS.filter { it != "notes" }).map { it to navBarLabel(it) }, startTabId(model.desk.startTab).let { if (!model.notesAccount && it == "notes") "today" else it }, { model.updateDesk(model.desk.copy(startTab = it)) }) }
             item(key = "today-head") { SectionLabel(t(R.string.on_today)) }
-            itemsIndexed(TODAY_CARD_IDS, key = { _, it -> it }) { index, id ->
+            itemsIndexed(TODAY_CARD_IDS, key = { _, it -> "card:$it" }) { index, id ->
                 GroupItem(index, TODAY_CARD_IDS.size) {
                     ToggleRow(when (id) { "lessons" -> t(R.string.next_commitment); "exam" -> t(R.string.upcoming_exam); "grades" -> t(R.string.grade_overview); "pluspunkte" -> t(R.string.promotion_points_2); "events" -> t(R.string.school_updates); else -> t(R.string.tasks) }, checked = id !in model.desk.hiddenCards) { show ->
                         model.updateDesk(model.desk.copy(hiddenCards = if (show) model.desk.hiddenCards - id else (model.desk.hiddenCards + id).distinct()))

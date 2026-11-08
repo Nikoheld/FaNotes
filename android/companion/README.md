@@ -19,16 +19,20 @@ Instant school updates use Firebase Cloud Messaging when `google-services.json` 
 Settings are divided into account/sync, appearance, planning/grades, notifications,
 activity and diagnostics. School page/log sharing lives exclusively in diagnostics.
 
-The [audit and design specification](docs/REDESIGN.md) records the placement decisions,
-compatibility boundaries, screen hierarchy and design tokens.
+The [design system](docs/DESIGN_SYSTEM.md) describes the current visual language ("Stundentakt"),
+tokens, themes including Snow, states, motion, onboarding and grade privacy. The earlier
+[audit and specification](docs/REDESIGN.md) still records the placement decisions and compatibility
+boundaries.
 
 ## Code map
 
 | File | Responsibility |
 | --- | --- |
 | `CompanionPresentation.kt` | Routes, legacy push/preference adapter, agenda projection, dates and note excerpts |
-| `PhoneScreens.kt` | Adaptive bottom bar/rail, back hierarchy, screen state, creation and transient feedback |
-| `CompanionTheme.kt`, `CompanionComponents.kt` | Complete light/dark schemes, type/spacing/shapes, reusable rows, forms and states |
+| `PhoneScreens.kt` | Top bars, adaptive bottom bar/rail, direction-aware transitions, back hierarchy, creation and feedback |
+| `KantiPalette.kt` | Pure, unit-tested colour resolution for every theme (including Snow) with WCAG contrast rules |
+| `CompanionTheme.kt`, `CompanionComponents.kt` | Material mapping, Instrument Sans type scale, spacing/shapes, motion, grouped rows, pills, states |
+| `Onboarding.kt`, `Snowfall.kt` | First-run onboarding with in-context permission, optional Snow-theme snowfall |
 | `PlannerScreens.kt` | Today, day/week schedule, source filters, task buckets and contextual details |
 | `NotesScreens.kt`, `NoteReading.kt`, `PdfReader.kt` | Library, note actions, lazy Markdown reading, local images/PDF and editor modes |
 | `NoteEditorController.kt`, `InkEditor.kt` | Retained drafts, serialized autosave, lifecycle flush, shared normalized ink session |

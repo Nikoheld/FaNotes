@@ -89,6 +89,15 @@ class DesignSystemTest {
         assertEquals(TodayLead.Clear, todayLead(null, schoolKnown = true, unreadAhead = false))
     }
 
+    @Test fun aConnectedSchoolWithoutAFirstFetchIsNotAFreeDay() {
+        val monday = LocalDate.of(2026, 11, 9)
+        assertTrue("linked, never fetched", timetableMissing(SchulnetzSnapshot(), linked = true, today = monday))
+        assertFalse("not linked, never fetched: connect instead", timetableMissing(SchulnetzSnapshot(), linked = false, today = monday))
+        val read = SchulnetzSnapshot(fetchedAt = "2026-11-08T18:00:00Z", weekRead = mapOf("2026-11-09" to "x", "2026-11-16" to "x"), weekSpanStart = "2026-11-09", weekSpanEnd = "2026-11-22")
+        assertFalse("both weeks read", timetableMissing(read, linked = true, today = monday))
+        assertEquals(TodayLead.Unread, todayLead(null, schoolKnown = true, unreadAhead = timetableMissing(SchulnetzSnapshot(), true, monday)))
+    }
+
     @Test fun unreadDaysBeforeTheNextCommitmentAreFound() {
         val monday = LocalDate.of(2026, 11, 9)
         val read = SchulnetzSnapshot(fetchedAt = "2026-11-08T18:00:00Z", weekRead = mapOf("2026-11-09" to "2026-11-08T18:00:00Z"), weekSpanStart = "2026-11-09", weekSpanEnd = "2026-11-22")

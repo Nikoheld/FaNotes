@@ -40,8 +40,8 @@ class MainActivity : ComponentActivity() {
     }
     private val networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
         override fun onCapabilitiesChanged(network: android.net.Network, caps: android.net.NetworkCapabilities) {
-            val now = caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            // Validation is not required: some school networks block the connectivity check.
+            val now = caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
             runOnUiThread { online.value = now }
         }
         override fun onLost(network: android.net.Network) { runOnUiThread { online.value = false } }
@@ -60,7 +60,7 @@ class MainActivity : ComponentActivity() {
             contentResolver.registerContentObserver(android.provider.Settings.Global.getUriFor(it), false, motionObserver)
         }
         getSystemService(android.net.ConnectivityManager::class.java)?.let { manager ->
-            online.value = manager.getNetworkCapabilities(manager.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+            online.value = manager.getNetworkCapabilities(manager.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
             runCatching { manager.registerDefaultNetworkCallback(networkCallback) }
         }
         window.isNavigationBarContrastEnforced = false

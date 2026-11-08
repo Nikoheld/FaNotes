@@ -1,4 +1,25 @@
-# Companion redesign verification
+# Kanti+ verification
+
+## November 2026 redesign ("Stundentakt")
+
+Status: in progress on branch `kanti-redesign`. This section is completed at the end of the
+verification run; the November 3 record below is kept unchanged as history.
+
+### Automated (host JVM, Gradle)
+
+| Check | Result |
+| --- | --- |
+| `:companion:assembleDebug`, `:companion:assembleDebugAndroidTest` | Build successful |
+| `:companion:testDebugUnitTest` | 26 tests, 0 failures (16 existing presentation tests, 10 new design-system tests) |
+| `check-user-strings.py` (runs on every preBuild) | 932 strings and 15 plurals; German and English catalogs match; no hard-coded UI copy |
+
+`DesignSystemTest` checks WCAG contrast for every theme × offered accent × extreme and invalid
+accents × pure black, that stored theme ids resolve to themselves, Snow's fixed accent and light
+mode, onboarding only on a true first run, that an unread timetable leads Heute instead of a
+free-day message, unread-day detection before the next commitment, rail positions, and that
+snowflakes stay inside the card.
+
+## November 3 redesign verification (history)
 
 Implementation verified on 3 November 2026. Screenshots use synthetic school and
 vault data on an isolated Android emulator; no live student account was used.

@@ -991,4 +991,5 @@
         <item quantity="one">%1$d new mark is waiting to be revealed</item>
         <item quantity="other">%1$d new marks are waiting to be revealed</item>
     </plurals>
+    <string name="all_day_short">All day</string>
 </resources>
