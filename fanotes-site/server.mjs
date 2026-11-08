@@ -556,6 +556,24 @@ const serveStatic = async (request, response, pathname) => {
   return true
 }
 
+// Browsers get a readable 404 page; API clients and scripts keep the JSON error.
+const serveNotFoundPage = async (request, response) => {
+  if (!/\btext\/html\b/u.test(String(request.headers.accept || ''))) return false
+  let body
+  try {
+    body = await fs.readFile(join(PUBLIC_DIR, '404.html'))
+  } catch {
+    return false
+  }
+  response.writeHead(404, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Content-Length': body.length,
+    'Cache-Control': 'no-cache',
+  })
+  response.end(request.method === 'HEAD' ? undefined : body)
+  return true
+}
+
 const server = createServer(async (request, response) => {
   try {
     response.fanotesLanguage = languageForRequest(request)
@@ -654,6 +672,7 @@ const server = createServer(async (request, response) => {
       return
     }
     if (await serveStatic(request, response, url.pathname)) return
+    if (await serveNotFoundPage(request, response)) return
     json(response, 404, { error: 'Nicht gefunden.' })
   } catch (error) {
     console.error(new Date().toISOString(), request.method, request.url, error)
