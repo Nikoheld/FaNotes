@@ -1,0 +1,82 @@
+{
+ "clean-300dpi": {
+  "cer": 0.0,
+  "confidence": 0.95,
+  "umlaut_words": "7/7",
+  "seconds": 0.38,
+  "size": "2100x570"
+ },
+ "clean-150dpi": {
+  "cer": 0.0,
+  "confidence": 0.96,
+  "umlaut_words": "7/7",
+  "seconds": 0.29,
+  "size": "1050x282"
+ },
+ "small-8pt-200dpi": {
+  "cer": 0.0,
+  "confidence": 0.96,
+  "umlaut_words": "7/7",
+  "seconds": 0.29,
+  "size": "1400x299"
+ },
+ "sans-300dpi": {
+  "cer": 0.0,
+  "confidence": 0.96,
+  "umlaut_words": "7/7",
+  "seconds": 0.33,
+  "size": "2100x570"
+ },
+ "skew-3deg": {
+  "cer": 0.0,
+  "confidence": 0.95,
+  "umlaut_words": "7/7",
+  "seconds": 0.36,
+  "size": "2128x680"
+ },
+ "salt-pepper-4pct": {
+  "cer": 0.079,
+  "confidence": 0.82,
+  "umlaut_words": "6/7",
+  "seconds": 0.37,
+  "size": "2100x570"
+ },
+ "low-contrast-blur": {
+  "cer": 0.0,
+  "confidence": 0.96,
+  "umlaut_words": "7/7",
+  "seconds": 0.35,
+  "size": "2100x570"
+ },
+ "rotated-90": {
+  "cer": 0.89,
+  "confidence": 0.16,
+  "umlaut_words": "0/7",
+  "seconds": 0.4,
+  "size": "570x2100"
+ },
+ "rotated-180": {
+  "cer": 0.89,
+  "confidence": 0.16,
+  "umlaut_words": "0/7",
+  "seconds": 0.4,
+  "size": "2100x570"
+ },
+ "english-text": {
+  "cer": 0.0,
+  "confidence": 0.94,
+  "umlaut_words": "-",
+  "seconds": 0.24,
+  "size": "2100x435"
+ },
+ "rotated-90+retry": {
+  "cer": 0.0,
+  "confidence": 0.95,
+  "chosen_turn": 90
+ },
+ "rotated-180+retry": {
+  "cer": 0.0,
+  "confidence": 0.95,
+  "chosen_turn": 270
+ }
+}

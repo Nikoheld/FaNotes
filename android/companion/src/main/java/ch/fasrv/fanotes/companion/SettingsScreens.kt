@@ -126,6 +126,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             item(key = "about") {
                 Group {
                     if (model.notesAccount) { SettingRow(Icons.Outlined.AutoGraph, t(R.string.your_activity), t(R.string.notes_habits_and_milestones)) { model.navigate(Page.Profile) }; FineDivider() }
+                    if (model.notesAccount) { SettingRow(Icons.Outlined.ManageSearch, t(R.string.doc_search_title), t(R.string.doc_search_row), if (model.docStatus.running) "${model.docStatus.progress.done}/${model.docStatus.progress.total}" else "") { model.navigate(Page.DocSearch) }; FineDivider() }
                     SettingRow(Icons.Outlined.AutoAwesome, t(R.string.replay_onboarding), t(R.string.replay_onboarding_body)) { model.replayOnboarding() }
                     FineDivider()
                     SettingRow(Icons.Outlined.BugReport, t(R.string.diagnostics), t(R.string.connection_checks_and_support_exports)) { model.navigate(Page.Diagnostics) }
