@@ -32,6 +32,8 @@ boundaries.
 | `PhoneScreens.kt` | Top bars, adaptive bottom bar/rail, direction-aware transitions, back hierarchy, creation and feedback |
 | `KantiPalette.kt` | Pure, unit-tested colour resolution for every theme (including Snow) with WCAG contrast rules |
 | `CompanionTheme.kt`, `CompanionComponents.kt` | Material mapping, Instrument Sans type scale, spacing/shapes, motion, grouped rows, pills, states |
+| `DocSearchText.kt`, `DocIndex.kt`, `DocIndexer.kt`, `DocSearchFormats.kt` | Pure document search: German folding, FTS4 index, planner/runner, desktop OCR sidecar reader ([details](docs/DOCUMENT_SEARCH.md)) |
+| `DocSearchAndroid.kt`, `DocSearchScreens.kt` | PDF/OCR extraction, per-account index service, background worker, results and settings UI |
 | `Onboarding.kt`, `Snowfall.kt` | First-run onboarding with in-context permission, optional Snow-theme snowfall |
 | `PlannerScreens.kt` | Today, day/week schedule, source filters, task buckets and contextual details |
 | `NotesScreens.kt`, `NoteReading.kt`, `PdfReader.kt` | Library, note actions, lazy Markdown reading, local images/PDF and editor modes |

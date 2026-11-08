@@ -257,6 +257,9 @@ class DocSearchService(private val context: Context, private val graph: Companio
     }.asCoroutineDispatcher()
     private val lock = Mutex()
     private var open: Pair<String, DocIndex>? = null
+    private var openDb: AndroidIndexDb? = null
+    /** Set while a sign-out wipe is pending, so a running pass stops at the next page. */
+    @Volatile private var forgetting = false
     private var ocrEngine: OcrEngine? = null
     private var ocrTried = false
     private var job: Job? = null
@@ -269,27 +272,40 @@ class DocSearchService(private val context: Context, private val graph: Companio
     /** The index for the signed-in account, or null without one. Other accounts' indexes are deleted. */
     private fun indexForAccount(): DocIndex? {
         val account = graph.engine.state.value.account?.accountId
-        if (account.isNullOrBlank()) { forgetAll(); return null }
+        if (account.isNullOrBlank()) { if (open != null || directory().listFiles()?.isNotEmpty() == true) wipeLocked(); return null }
         val key = keyFor(account)
         open?.let { (k, index) -> if (k == key) return index }
         closeIndex()
         directory().listFiles()?.filter { !it.name.startsWith(key) }?.forEach { it.delete() }
         val file = File(directory(), "$key.db")
-        val index = try { DocIndex(AndroidIndexDb(file)) } catch (error: Exception) {
+        val (db, index) = try { AndroidIndexDb(file).let { it to DocIndex(it) } } catch (error: Exception) {
             // A damaged index is rebuilt; it only holds text derived from the vault.
-            file.delete(); DocIndex(AndroidIndexDb(file))
+            runCatching { openDb?.close() }
+            file.delete(); AndroidIndexDb(file).let { it to DocIndex(it) }
         }
         open = key to index
+        openDb = db
         return index
     }
 
-    private fun closeIndex() { open = null }
+    private fun closeIndex() { open = null; runCatching { openDb?.close() }; openDb = null }
 
-    /** Removes all indexed text from the device (sign-out, account switch, rebuild). */
-    fun forgetAll() {
-        job?.cancel(); closeIndex()
+    /** Caller holds [lock]: closes the database and deletes every index file. */
+    private fun wipeLocked() {
+        closeIndex()
         directory().listFiles()?.forEach { it.delete() }
         status.value = status.value.copy(enabled = false, ready = false, running = false, stats = DocIndexStats(0, 0, 0, 0, 0, 0))
+    }
+
+    /**
+     * Removes all indexed text from the device (sign-out, no account). A running pass is stopped
+     * first and the files go once it has released the database, so nothing writes to a closed one.
+     */
+    fun forgetAll() {
+        forgetting = true
+        job?.cancel()
+        status.value = status.value.copy(enabled = false, ready = false, running = false)
+        scope.launch(dispatcher) { lock.withLock { wipeLocked(); forgetting = false } }
     }
 
     private fun ocr(): OcrEngine? {
@@ -339,8 +355,13 @@ class DocSearchService(private val context: Context, private val graph: Companio
             val extractor = KantiDocExtractor(graph) { ocr() }
             val result = try {
                 DocIndexRunner(index, extractor).run(sources(), keepGoing = {
-                    !status.value.paused && (deadline == null || android.os.SystemClock.elapsedRealtime() < deadline) && open?.second === index
+                    !forgetting && !status.value.paused && (deadline == null || android.os.SystemClock.elapsedRealtime() < deadline) && open?.second === index
                 }) { progress -> status.value = status.value.copy(progress = progress) }
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                // A broken pass must never take the app down; the next pass starts over.
+                ch.fasrv.fanotes.schulnetz.DiagnosticTrace.record("docsearch", "pass", 0, "error", error.javaClass.simpleName)
+                DocRunResult(0, 1, 0, true)
             } finally {
                 status.value = status.value.copy(running = false, stats = runCatching { index.stats() }.getOrDefault(status.value.stats))
             }
@@ -352,8 +373,8 @@ class DocSearchService(private val context: Context, private val graph: Companio
     suspend fun search(query: String, limit: Int = 50): List<DocHit> = withContext(kotlinx.coroutines.Dispatchers.IO) {
         val parsed = parseDocQuery(query)
         if (parsed.isEmpty) return@withContext emptyList()
-        val index = lock.withLock { indexForAccount() } ?: return@withContext emptyList()
-        index.search(parsed, limit)
+        // Searching under the lock keeps a sign-out wipe from closing the database mid-query.
+        lock.withLock { indexForAccount()?.search(parsed, limit) }.orEmpty()
     }
 
     suspend fun problems(): List<Pair<DocRecord, List<PageEntry>>> = withContext(dispatcher) { lock.withLock { indexForAccount()?.problems().orEmpty() } }
@@ -374,7 +395,7 @@ class DocSearchService(private val context: Context, private val graph: Companio
         request()
     }
 
-    fun rebuild() = scope.launch(dispatcher) { lock.withLock { forgetAll() }; request() }
+    fun rebuild() = scope.launch(dispatcher) { lock.withLock { wipeLocked() }; request() }
 
     /** The app left the foreground: stop in-process work and let WorkManager continue within its limits. */
     fun handOff() {
