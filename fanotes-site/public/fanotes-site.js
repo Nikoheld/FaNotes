@@ -1,25 +1,16 @@
+// FaNotes homepage. Everything here is progressive enhancement: navigation,
+// downloads and all content work without JavaScript.
 const root = document.documentElement
-root.classList.add('js')
-
 const header = document.querySelector('[data-header]')
 const nav = document.querySelector('[data-nav]')
 const menuToggle = document.querySelector('[data-menu-toggle]')
 const themeToggle = document.querySelector('[data-theme-toggle]')
-const toast = document.querySelector('[data-toast]')
-const scrollProgress = document.querySelector('[data-scroll-progress]')
-const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
-const systemTheme = window.matchMedia('(prefers-color-scheme: light)')
-const finePointer = window.matchMedia('(hover: hover) and (pointer: fine)')
-const prefersWindows = /Windows NT/u.test(navigator.userAgent)
-const uiLocale = root.dataset.uiLanguage === 'en' ? 'en-US' : 'de-CH'
+const uiLocale = () => (root.dataset.uiLanguage === 'en' ? 'en-US' : 'de-CH')
+const systemDark = window.matchMedia('(prefers-color-scheme: dark)')
 
-let latestRelease = null
-let activePlatform = prefersWindows ? 'windows' : 'linux'
-let scrollFrame = null
-let themeTimer = null
-let toastTimer = null
+// ---------- Anonymous daily counter (disclosed in the privacy section) ----------
 
-const reportAnonymousSessionEvent = (type, storageKey, details = {}) => {
+const reportAnonymousSessionEvent = (type, storageKey) => {
   try {
     if (sessionStorage.getItem(storageKey) === '1') return
     sessionStorage.setItem(storageKey, '1')
@@ -30,7 +21,7 @@ const reportAnonymousSessionEvent = (type, storageKey, details = {}) => {
   void fetch('/api/v1/analytics/event', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type, ...details }),
+    body: JSON.stringify({ type }),
     credentials: 'omit',
     cache: 'no-store',
     keepalive: true,
@@ -39,439 +30,262 @@ const reportAnonymousSessionEvent = (type, storageKey, details = {}) => {
 
 window.setTimeout(() => reportAnonymousSessionEvent('website_view', 'fanotes-analytics-website-session-v1'), 1200)
 
-const safelyReadTheme = () => {
-  try {
-    return localStorage.getItem('fanotes-site-theme')
-  } catch {
-    return null
-  }
-}
+// ---------- Colour scheme ----------
 
-const safelyStoreTheme = (theme) => {
-  try {
-    localStorage.setItem('fanotes-site-theme', theme)
-  } catch {
-    // Private browser modes may disable storage. The current session still works.
-  }
-}
+const currentTheme = () => root.dataset.theme || (systemDark.matches ? 'dark' : 'light')
 
-const syncThemeControls = () => {
-  const isLight = root.dataset.theme === 'light'
-  themeToggle?.setAttribute('aria-label', isLight ? 'Dunkles Farbschema verwenden' : 'Helles Farbschema verwenden')
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', isLight ? '#f5f3f8' : '#0b0b12')
+const syncThemeControl = () => {
+  const dark = currentTheme() === 'dark'
+  themeToggle?.setAttribute('aria-label', dark ? 'Helles Farbschema verwenden' : 'Dunkles Farbschema verwenden')
+  themeToggle?.setAttribute('aria-pressed', String(dark))
 }
-
-const applyTheme = (theme, persist = false) => {
-  root.dataset.theme = theme
-  syncThemeControls()
-  if (persist) safelyStoreTheme(theme)
-}
-
-const savedTheme = safelyReadTheme()
-applyTheme(savedTheme === 'light' || savedTheme === 'dark' ? savedTheme : systemTheme.matches ? 'light' : 'dark')
 
 themeToggle?.addEventListener('click', () => {
-  root.classList.add('is-switching-theme')
-  window.clearTimeout(themeTimer)
-  applyTheme(root.dataset.theme === 'light' ? 'dark' : 'light', true)
-  themeTimer = window.setTimeout(() => root.classList.remove('is-switching-theme'), 420)
+  const next = currentTheme() === 'dark' ? 'light' : 'dark'
+  root.dataset.theme = next
+  try {
+    localStorage.setItem('fanotes-site-theme', next)
+  } catch {
+    // The choice still applies to this page view.
+  }
+  syncThemeControl()
 })
+systemDark.addEventListener('change', syncThemeControl)
+syncThemeControl()
 
-systemTheme.addEventListener('change', (event) => {
-  if (!safelyReadTheme()) applyTheme(event.matches ? 'light' : 'dark')
-})
+// ---------- Header and mobile navigation ----------
 
-const showToast = (message) => {
-  if (!toast) return
-  toast.textContent = message
-  toast.classList.add('is-visible')
-  window.clearTimeout(toastTimer)
-  toastTimer = window.setTimeout(() => toast.classList.remove('is-visible'), 2400)
+const compactNav = window.matchMedia('(max-width: 860px)')
+
+const setMenu = (open, { restoreFocus = false, focusFirst = false } = {}) => {
+  if (!nav || !menuToggle) return
+  nav.classList.toggle('is-open', open)
+  menuToggle.setAttribute('aria-expanded', String(open))
+  menuToggle.setAttribute('aria-label', open ? 'Menü schließen' : 'Menü öffnen')
+  // The links come before the toggle in the DOM, so keyboard users are moved
+  // into the opened menu. A tap leaves focus where it is.
+  if (open && focusFirst) nav.querySelector('a')?.focus()
+  else if (!open && restoreFocus) menuToggle.focus()
 }
+
+menuToggle?.addEventListener('click', (event) => setMenu(!nav?.classList.contains('is-open'), { focusFirst: event.detail === 0 }))
+nav?.querySelectorAll('a').forEach((link) => link.addEventListener('click', () => setMenu(false)))
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && nav?.classList.contains('is-open')) setMenu(false, { restoreFocus: true })
+})
+document.addEventListener('pointerdown', (event) => {
+  if (nav?.classList.contains('is-open') && header && !header.contains(event.target)) setMenu(false)
+})
+nav?.addEventListener('focusout', (event) => {
+  if (compactNav.matches && nav.classList.contains('is-open') && !header?.contains(event.relatedTarget)) setMenu(false)
+})
+compactNav.addEventListener('change', () => setMenu(false))
+
+let scrollFrame = null
+const updateHeader = () => {
+  scrollFrame = null
+  header?.classList.toggle('is-scrolled', window.scrollY > 8)
+}
+window.addEventListener('scroll', () => {
+  if (scrollFrame === null) scrollFrame = window.requestAnimationFrame(updateHeader)
+}, { passive: true })
+updateHeader()
+
+// Mark the section currently in view in the navigation.
+const navLinks = [...(nav?.querySelectorAll('a[href^="#"]') || [])]
+if ('IntersectionObserver' in window && navLinks.length) {
+  const linkFor = new Map(navLinks.map((link) => [link.getAttribute('href').slice(1), link]))
+  const visible = new Set()
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.isIntersecting) visible.add(entry.target.id)
+      else visible.delete(entry.target.id)
+    }
+    const current = [...linkFor.keys()].find((id) => visible.has(id))
+    for (const [id, link] of linkFor) {
+      if (id === current) link.setAttribute('aria-current', 'location')
+      else link.removeAttribute('aria-current')
+    }
+  }, { rootMargin: '-35% 0px -55% 0px' })
+  for (const id of linkFor.keys()) {
+    const section = document.getElementById(id)
+    if (section) observer.observe(section)
+  }
+}
+
+// ---------- Platform tabs (WAI-ARIA tabs pattern) ----------
+
+const tablist = document.querySelector('[data-platform-tabs]')
+const tabs = [...document.querySelectorAll('[data-platform-tab]')]
+const panels = new Map([...document.querySelectorAll('[data-platform-panel]')].map((panel) => [panel.dataset.platformPanel, panel]))
+
+const selectPlatform = (platform, { focus = false } = {}) => {
+  for (const tab of tabs) {
+    const selected = tab.dataset.platformTab === platform
+    tab.setAttribute('aria-selected', String(selected))
+    tab.tabIndex = selected ? 0 : -1
+    if (selected && focus) tab.focus()
+  }
+  for (const [name, panel] of panels) panel.hidden = name !== platform
+}
+
+if (tablist && tabs.length && panels.size) {
+  for (const tab of tabs) {
+    const panel = panels.get(tab.dataset.platformTab)
+    if (!panel) continue
+    panel.setAttribute('role', 'tabpanel')
+    panel.setAttribute('aria-labelledby', tab.id)
+    panel.tabIndex = -1
+    tab.addEventListener('click', () => selectPlatform(tab.dataset.platformTab))
+    tab.addEventListener('keydown', (event) => {
+      const index = tabs.indexOf(tab)
+      const target = event.key === 'ArrowRight' ? tabs[(index + 1) % tabs.length]
+        : event.key === 'ArrowLeft' ? tabs[(index - 1 + tabs.length) % tabs.length]
+          : event.key === 'Home' ? tabs[0]
+            : event.key === 'End' ? tabs.at(-1)
+              : null
+      if (!target) return
+      event.preventDefault()
+      selectPlatform(target.dataset.platformTab, { focus: true })
+    })
+  }
+  tablist.hidden = false
+  const prefersLinux = /Linux|X11/u.test(navigator.userAgent) && !/Android/u.test(navigator.userAgent)
+  selectPlatform(prefersLinux ? 'linux' : 'windows')
+}
+
+// ---------- Copy buttons ----------
+
+const copyStatus = document.querySelector('[data-copy-status]')
+document.querySelectorAll('[data-copy]').forEach((button) => {
+  button.addEventListener('click', async () => {
+    const source = document.getElementById(button.dataset.copy)
+    if (!source) return
+    let copied = false
+    try {
+      await navigator.clipboard.writeText(source.textContent.trim())
+      copied = true
+    } catch {
+      // Clipboard can be blocked (permissions, insecure context): select the
+      // text so the visitor can copy it by hand.
+      const range = document.createRange()
+      range.selectNodeContents(source)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+    }
+    const label = copied ? 'Kopiert' : 'Markiert – mit Strg+C kopieren'
+    button.textContent = label
+    button.classList.toggle('is-done', copied)
+    if (copyStatus) copyStatus.textContent = copied ? 'Befehl in die Zwischenablage kopiert.' : 'Befehl markiert. Mit Strg+C kopieren.'
+    window.setTimeout(() => {
+      button.textContent = 'Kopieren'
+      button.classList.remove('is-done')
+    }, 2200)
+  })
+})
+
+// ---------- Release information ----------
 
 const formatBytes = (bytes) => {
   if (!Number.isFinite(bytes) || bytes <= 0) return '–'
   const units = ['B', 'KB', 'MB', 'GB']
   const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
-  return `${new Intl.NumberFormat(uiLocale, { maximumFractionDigits: exponent > 1 ? 1 : 0 }).format(bytes / 1024 ** exponent)} ${units[exponent]}`
+  return `${new Intl.NumberFormat(uiLocale(), { maximumFractionDigits: exponent > 1 ? 1 : 0 }).format(bytes / 1024 ** exponent)} ${units[exponent]}`
 }
 
 const setText = (selector, value) => {
   document.querySelectorAll(selector).forEach((element) => { element.textContent = value })
 }
 
-const setHref = (selector, value) => {
-  if (!value) return
-  document.querySelectorAll(selector).forEach((element) => { element.href = value })
-}
+const germanText = /[ÄÖÜäöüß]|\b(?:der|die|das|und|nicht|wird|werden|mit|für|auf)\b/u
 
 const renderChangelog = (changes) => {
   const list = document.querySelector('[data-changelog]')
-  if (!list || !Array.isArray(changes) || changes.length === 0) return
-  list.replaceChildren(...changes.slice(0, 6).map((change, index) => {
+  if (!list) return
+  const items = Array.isArray(changes) ? changes.filter((change) => typeof change === 'string' && change.trim()) : []
+  if (!items.length) {
+    list.replaceChildren(Object.assign(document.createElement('li'), { textContent: 'Für diese Version liegen keine Release-Notizen vor.' }))
+    return
+  }
+  list.replaceChildren(...items.slice(0, 6).map((change) => {
     const item = document.createElement('li')
-    const number = document.createElement('span')
-    const copy = document.createElement('p')
-    number.textContent = String(index + 1).padStart(2, '0')
-    copy.textContent = String(change).replaceAll('**', '').replaceAll('`', '')
-    item.append(number, copy)
+    // The server already localises release notes. Untranslated German notes keep
+    // their language for screen readers and are not word-swapped by the catalogue.
+    item.dataset.i18nIgnore = ''
+    if (root.dataset.uiLanguage === 'en' && germanText.test(change)) item.lang = 'de'
+    // "**Lead.** Rest" → bold lead sentence, plain rest. No HTML is interpreted.
+    const match = /^\*\*(.+?)\*\*\s*(.*)$/su.exec(change.trim())
+    if (match) {
+      const strong = document.createElement('strong')
+      strong.textContent = match[1].replaceAll('`', '')
+      item.append(strong, ` ${match[2].replaceAll('**', '').replaceAll('`', '')}`)
+    } else {
+      item.textContent = change.replaceAll('**', '').replaceAll('`', '')
+    }
     return item
   }))
 }
 
-document.querySelectorAll('[data-command]').forEach((element) => {
-  element.dataset.template = element.textContent
-})
-
-const updatePrimaryDownload = () => {
-  if (!latestRelease) return
-  const windowsRelease = latestRelease.windows
-  const useWindows = activePlatform === 'windows' && windowsRelease?.packages?.installer
-  const target = useWindows ? windowsRelease.packages.installer : latestRelease.appimage
-  setHref('[data-primary-download]', target.url)
-  setText('[data-primary-label]', useWindows ? 'Für Windows herunterladen' : 'Für Linux herunterladen')
-  setText('[data-primary-detail]', `${useWindows ? 'Installer' : 'AppImage'} · ${formatBytes(target.sizeBytes)}`)
-}
-
-const activatePlatform = (platform) => {
-  if (platform !== 'windows' && platform !== 'linux') return
-  activePlatform = platform
-  document.querySelectorAll('[data-platform-tab]').forEach((button) => {
-    button.setAttribute('aria-selected', String(button.dataset.platformTab === platform))
-  })
-  document.querySelectorAll('[data-platform-panel]').forEach((panel) => {
-    panel.hidden = panel.dataset.platformPanel !== platform
-  })
-  document.querySelectorAll('[data-platform-install-guide]').forEach((guide) => {
-    guide.hidden = guide.dataset.platformInstallGuide !== platform
-  })
-  updatePrimaryDownload()
-}
-
-document.querySelectorAll('[data-platform-tab]').forEach((button) => {
-  button.addEventListener('click', () => activatePlatform(button.dataset.platformTab))
-})
-activatePlatform(activePlatform)
+const releaseStatus = document.querySelector('[data-release-status]')
 
 const applyRelease = (release) => {
   if (!release?.version || !release?.appimage || !release?.portable || !release?.windows?.packages?.installer || !release?.windows?.packages?.portable) {
     throw new Error('Release API: unvollständige Antwort')
   }
-  latestRelease = release
   setText('[data-version]', release.version)
-  setText('[data-windows-version]', release.windows.version)
+  setText('[data-windows-version]', release.windows.version || release.version)
   setText('[data-appimage-size]', formatBytes(release.appimage.sizeBytes))
   setText('[data-portable-size]', formatBytes(release.portable.sizeBytes))
   setText('[data-windows-installer-size]', formatBytes(release.windows.packages.installer.sizeBytes))
   setText('[data-windows-portable-size]', formatBytes(release.windows.packages.portable.sizeBytes))
-  setHref('[data-download-appimage]', release.appimage.url)
-  setHref('[data-download-portable]', release.portable.url)
-  setHref('[data-download-windows-installer]', release.windows.packages.installer.url)
-  setHref('[data-download-windows-portable]', release.windows.packages.portable.url)
-  setHref('[data-checksums]', release.checksumsUrl)
-  updatePrimaryDownload()
-
   const releaseDate = document.querySelector('[data-release-date]')
   const parsedDate = new Date(release.releasedAt)
-  if (releaseDate && !Number.isNaN(parsedDate.getTime())) {
-    releaseDate.textContent = `Veröffentlicht am ${new Intl.DateTimeFormat(uiLocale, { day: '2-digit', month: 'long', year: 'numeric' }).format(parsedDate)}`
+  if (releaseDate) {
+    releaseDate.textContent = Number.isNaN(parsedDate.getTime())
+      ? ''
+      : `${root.dataset.uiLanguage === 'en' ? 'Released on' : 'Veröffentlicht am'} ${new Intl.DateTimeFormat(uiLocale(), { day: 'numeric', month: 'long', year: 'numeric' }).format(parsedDate)}`
   }
-
-  document.querySelectorAll('[data-command]').forEach((element) => {
-    const version = element.dataset.command?.startsWith('windows') ? release.windows.version : release.version
-    element.textContent = (element.dataset.template || element.textContent).replaceAll('VERSION', version)
-  })
   renderChangelog(release.changes)
+  releaseStatus?.classList.add('is-ready')
+}
+
+const showReleaseError = () => {
+  setText('[data-version]', 'neueste Version')
+  setText('[data-windows-version]', 'neueste Version')
+  for (const selector of ['[data-appimage-size]', '[data-portable-size]', '[data-windows-installer-size]', '[data-windows-portable-size]']) setText(selector, '–')
+  const releaseDate = document.querySelector('[data-release-date]')
+  if (releaseDate) releaseDate.textContent = 'Release-Informationen sind momentan nicht erreichbar.'
+  const list = document.querySelector('[data-changelog]')
+  list?.replaceChildren(Object.assign(document.createElement('li'), { textContent: 'Die Downloads funktionieren trotzdem. Details stehen auch auf GitHub.' }))
+  if (releaseStatus) {
+    releaseStatus.classList.add('is-error')
+    const dot = document.createElement('span')
+    dot.className = 'status-dot'
+    dot.setAttribute('aria-hidden', 'true')
+    const message = document.createElement('span')
+    message.textContent = 'Versionsangaben gerade nicht verfügbar. Die Download-Links funktionieren weiterhin.'
+    releaseStatus.replaceChildren(dot, message)
+  }
 }
 
 const loadRelease = async () => {
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 10_000)
   try {
-    const response = await fetch('/api/release', { cache: 'no-store', headers: { Accept: 'application/json' } })
+    const response = await fetch('/api/release', { cache: 'no-store', headers: { Accept: 'application/json' }, signal: controller.signal })
     if (!response.ok) throw new Error(`Release API: ${response.status}`)
     applyRelease(await response.json())
   } catch (error) {
-    console.error(error)
-    setText('[data-version]', 'neueste Version')
-    const releaseDate = document.querySelector('[data-release-date]')
-    if (releaseDate) releaseDate.textContent = 'Release-Informationen sind momentan nicht erreichbar.'
+    console.warn(error)
+    showReleaseError()
+  } finally {
+    window.clearTimeout(timeout)
   }
 }
 
-const setMenuState = (open, restoreFocus = false) => {
-  nav?.classList.toggle('is-open', open)
-  menuToggle?.classList.toggle('is-open', open)
-  menuToggle?.setAttribute('aria-expanded', String(open))
-  menuToggle?.setAttribute('aria-label', open ? 'Navigation schließen' : 'Navigation öffnen')
-  if (!open && restoreFocus) menuToggle?.focus()
-}
-
-menuToggle?.addEventListener('click', () => setMenuState(!nav?.classList.contains('is-open')))
-nav?.querySelectorAll('a').forEach((link) => link.addEventListener('click', () => setMenuState(false)))
-
-document.addEventListener('pointerdown', (event) => {
-  if (nav?.classList.contains('is-open') && header && !header.contains(event.target)) setMenuState(false)
-})
-
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && nav?.classList.contains('is-open')) setMenuState(false, true)
-})
-
-const navLinks = [...(nav?.querySelectorAll('a[href^="#"]') || [])]
-const navSections = navLinks
-  .map((link) => ({ link, section: document.querySelector(link.getAttribute('href')) }))
-  .filter(({ section }) => section)
-
-const updateScrollState = () => {
-  scrollFrame = null
-  const scrollTop = window.scrollY
-  const scrollable = Math.max(document.documentElement.scrollHeight - window.innerHeight, 1)
-  header?.classList.toggle('is-scrolled', scrollTop > 24)
-  scrollProgress?.style.setProperty('--scroll-progress', Math.min(scrollTop / scrollable, 1))
-
-  if (!reducedMotion.matches && window.innerWidth > 820) {
-    const heroShift = Math.min(scrollTop * 0.09, 50)
-    const paperShift = Math.min(scrollTop * -0.025, 0)
-    root.style.setProperty('--hero-shift', `${heroShift}px`)
-    root.style.setProperty('--paper-shift', `${paperShift}px`)
-  } else {
-    root.style.removeProperty('--hero-shift')
-    root.style.removeProperty('--paper-shift')
-  }
-
-  const marker = scrollTop + window.innerHeight * 0.34
-  let active = null
-  navSections.forEach((entry) => {
-    if (entry.section.offsetTop <= marker) active = entry
-  })
-  navSections.forEach(({ link }) => {
-    const selected = link === active?.link
-    link.classList.toggle('is-active', selected)
-    if (selected) link.setAttribute('aria-current', 'location')
-    else link.removeAttribute('aria-current')
-  })
-}
-
-const requestScrollUpdate = () => {
-  if (scrollFrame === null) scrollFrame = window.requestAnimationFrame(updateScrollState)
-}
-
-window.addEventListener('scroll', requestScrollUpdate, { passive: true })
-window.addEventListener('resize', () => {
-  if (window.innerWidth > 820) setMenuState(false)
-  requestScrollUpdate()
-}, { passive: true })
-updateScrollState()
-
-const revealObserver = 'IntersectionObserver' in window && !reducedMotion.matches
-  ? new IntersectionObserver((entries, observer) => {
-    entries.forEach((entry) => {
-      if (!entry.isIntersecting) return
-      entry.target.classList.add('is-visible')
-      observer.unobserve(entry.target)
-    })
-  }, { threshold: 0.08, rootMargin: '0px 0px -28px' })
-  : null
-
-document.querySelectorAll('.reveal').forEach((element) => {
-  if (revealObserver) revealObserver.observe(element)
-  else element.classList.add('is-visible')
-})
-
-document.querySelectorAll('[data-install-tabs]').forEach((tablist) => {
-  const tabs = [...tablist.querySelectorAll('[data-install-tab]')]
-  const panelRoot = tablist.closest('.install-panel')
-  const activateTab = (button, focus = false) => {
-    const target = button.dataset.installTab
-    tabs.forEach((candidate) => {
-      const selected = candidate === button
-      candidate.setAttribute('aria-selected', String(selected))
-      candidate.tabIndex = selected ? 0 : -1
-    })
-    panelRoot?.querySelectorAll('[data-install-panel]').forEach((panel) => {
-      panel.hidden = panel.dataset.installPanel !== target
-    })
-    if (focus) button.focus()
-  }
-  tabs.forEach((button, index) => {
-    button.addEventListener('click', () => activateTab(button))
-    button.addEventListener('keydown', (event) => {
-      let nextIndex = null
-      if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length
-      if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length
-      if (event.key === 'Home') nextIndex = 0
-      if (event.key === 'End') nextIndex = tabs.length - 1
-      if (nextIndex === null) return
-      event.preventDefault()
-      activateTab(tabs[nextIndex], true)
-    })
-  })
-})
-
-const copyText = async (text) => {
-  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text)
-  const helper = document.createElement('textarea')
-  helper.value = text
-  helper.setAttribute('readonly', '')
-  helper.style.position = 'fixed'
-  helper.style.opacity = '0'
-  document.body.append(helper)
-  helper.select()
-  const copied = document.execCommand('copy')
-  helper.remove()
-  if (!copied) throw new Error('copy failed')
-}
-
-document.querySelectorAll('[data-copy-target]').forEach((button) => {
-  const defaultLabel = button.textContent
-  button.addEventListener('click', async () => {
-    const target = document.getElementById(button.dataset.copyTarget)
-    if (!target) return
-    try {
-      await copyText(target.textContent)
-      button.textContent = 'Kopiert ✓'
-      showToast('Terminalbefehl kopiert.')
-      window.setTimeout(() => { button.textContent = defaultLabel }, 1700)
-    } catch {
-      showToast('Kopieren wurde vom Browser blockiert.')
-    }
-  })
-})
-
-document.querySelectorAll('.faq-list details').forEach((details) => details.addEventListener('toggle', () => {
-  if (!details.open) return
-  document.querySelectorAll('.faq-list details').forEach((candidate) => {
-    if (candidate !== details) candidate.open = false
-  })
-}))
-
-const setPressedChoice = (buttons, activeButton) => {
-  buttons.forEach((button) => {
-    const active = button === activeButton
-    button.classList.toggle('is-active', active)
-    button.setAttribute('aria-pressed', String(active))
-  })
-}
-
-const inkReplay = document.querySelector('[data-ink-replay]')
-const inkCard = inkReplay?.closest('.ink-card')
-inkReplay?.addEventListener('click', () => {
-  if (!inkCard || reducedMotion.matches) return
-  inkCard.classList.remove('is-replaying')
-  void inkCard.offsetWidth
-  inkCard.classList.add('is-replaying')
-  window.setTimeout(() => inkCard.classList.remove('is-replaying'), 1300)
-})
-
-const vaultButtons = [...document.querySelectorAll('[data-vault-folder]')]
-vaultButtons.forEach((button) => button.addEventListener('click', () => {
-  setPressedChoice(vaultButtons, button)
-}))
-
-const recognitionExamples = {
-  math: { sample: '∫₀⁵ f(x) dx', mode: 'Mathematik', confidence: '94%' },
-  text: { sample: 'Gedanken verbinden.', mode: 'Text', confidence: '97%' }
-}
-const recognitionStage = document.querySelector('.recognition-stage')
-const recognitionSample = document.querySelector('[data-recognition-sample]')
-const recognitionMode = document.querySelector('[data-recognition-mode]')
-const recognitionConfidence = document.querySelector('[data-recognition-confidence]')
-const recognitionButtons = [...document.querySelectorAll('[data-recognition-choice]')]
-let recognitionTimer = null
-recognitionButtons.forEach((button) => button.addEventListener('click', () => {
-  const example = recognitionExamples[button.dataset.recognitionChoice]
-  if (!example) return
-  setPressedChoice(recognitionButtons, button)
-  recognitionStage?.classList.add('is-changing')
-  window.clearTimeout(recognitionTimer)
-  recognitionTimer = window.setTimeout(() => {
-    if (recognitionSample) recognitionSample.textContent = example.sample
-    if (recognitionMode) recognitionMode.textContent = example.mode
-    if (recognitionConfidence) recognitionConfidence.textContent = example.confidence
-    recognitionStage?.classList.remove('is-changing')
-  }, reducedMotion.matches ? 0 : 150)
-}))
-
-const worksheetButtons = [...document.querySelectorAll('[data-worksheet-mode]')]
-const worksheetPreview = document.querySelector('.worksheet-mini')
-const worksheetAnswer = worksheetPreview?.querySelector('b')
-worksheetButtons.forEach((button) => button.addEventListener('click', () => {
-  setPressedChoice(worksheetButtons, button)
-  const keyboard = button.dataset.worksheetMode === 'keyboard'
-  worksheetPreview?.classList.toggle('is-keyboard', keyboard)
-  worksheetPreview?.classList.toggle('is-pen', !keyboard)
-  if (worksheetAnswer) worksheetAnswer.textContent = keyboard ? '42 N' : 'Antwort'
-}))
-
-const aiMessages = {
-  correct: 'Rechtschreibung wird mit deiner AI geprüft',
-  link: 'Passende Wikilinks werden gefunden',
-  summary: 'Die Kernaussagen werden verdichtet'
-}
-const aiButtons = [...document.querySelectorAll('[data-ai-action]')]
-const aiStatus = document.querySelector('.ai-status')
-const aiStatusText = document.querySelector('[data-ai-status]')
-let aiTimer = null
-aiButtons.forEach((button) => button.addEventListener('click', () => {
-  setPressedChoice(aiButtons, button)
-  aiStatus?.classList.add('is-changing')
-  window.clearTimeout(aiTimer)
-  aiTimer = window.setTimeout(() => {
-    if (aiStatusText) aiStatusText.textContent = aiMessages[button.dataset.aiAction] || ''
-    aiStatus?.classList.remove('is-changing')
-  }, reducedMotion.matches ? 0 : 130)
-}))
-
-const markdownButtons = [...document.querySelectorAll('[data-markdown-mode]')]
-const activateMarkdownMode = (button, focus = false) => {
-  const mode = button.dataset.markdownMode
-  markdownButtons.forEach((candidate) => {
-    const active = candidate === button
-    candidate.classList.toggle('is-active', active)
-    candidate.setAttribute('aria-selected', String(active))
-    candidate.tabIndex = active ? 0 : -1
-  })
-  document.querySelectorAll('[data-markdown-panel]').forEach((panel) => {
-    panel.hidden = panel.dataset.markdownPanel !== mode
-  })
-  if (focus) button.focus()
-}
-markdownButtons.forEach((button, index) => {
-  button.addEventListener('click', () => activateMarkdownMode(button))
-  button.addEventListener('keydown', (event) => {
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-    event.preventDefault()
-    const direction = event.key === 'ArrowRight' ? 1 : -1
-    activateMarkdownMode(markdownButtons[(index + direction + markdownButtons.length) % markdownButtons.length], true)
-  })
-})
-
-const setupPointerEffects = () => {
-  if (!finePointer.matches || reducedMotion.matches) return
-  document.querySelectorAll('.hero-card, .feature-card, .download-card').forEach((surface) => {
-    surface.classList.add('interactive-surface')
-    surface.addEventListener('pointermove', (event) => {
-      const bounds = surface.getBoundingClientRect()
-      const relativeX = (event.clientX - bounds.left) / bounds.width
-      const relativeY = (event.clientY - bounds.top) / bounds.height
-      const strength = surface.classList.contains('hero-card') ? 2.1 : 3.2
-      surface.style.setProperty('--pointer-x', `${relativeX * 100}%`)
-      surface.style.setProperty('--pointer-y', `${relativeY * 100}%`)
-      surface.style.setProperty('--tilt-x', `${(0.5 - relativeY) * strength}deg`)
-      surface.style.setProperty('--tilt-y', `${(relativeX - 0.5) * strength}deg`)
-    })
-    surface.addEventListener('pointerleave', () => {
-      surface.style.removeProperty('--tilt-x')
-      surface.style.removeProperty('--tilt-y')
-    })
-  })
-}
-
-setupPointerEffects()
-
-document.querySelectorAll('[data-download-appimage], [data-download-portable], [data-download-windows-installer], [data-download-windows-portable], [data-primary-download]').forEach((link) => link.addEventListener('click', () => {
-  if (latestRelease) showToast(`FaNotes ${latestRelease.version} wird vorbereitet …`)
-}))
-
-setText('[data-year]', new Date().getFullYear())
-window.requestAnimationFrame(() => root.classList.add('is-ready'))
 void loadRelease()
+
+// ---------- Footer year ----------
+
+setText('[data-year]', String(new Date().getFullYear()))
