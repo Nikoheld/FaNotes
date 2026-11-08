@@ -32,6 +32,7 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 import ch.fasrv.fanotes.schulnetz.AlertGate
 import ch.fasrv.fanotes.schulnetz.DiagnosticTrace
+import ch.fasrv.fanotes.schulnetz.changeIsOver
 import ch.fasrv.fanotes.schulnetz.NotifyPrefs
 import ch.fasrv.fanotes.schulnetz.notifySettingsFromPrefs
 import ch.fasrv.fanotes.schulnetz.schoolAlertGate
@@ -203,6 +204,8 @@ object CompanionAlerts {
         if (change.category != "settings" && context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE).getBoolean("school-disconnected", false)) return
         if (change.id.isBlank()) return
         if (!notificationsAllowed(context)) return
+        // Also guards pushes from a server that has not been updated yet.
+        if (changeIsOver(change)) { DiagnosticTrace.record("push", "stale", 0, "dropped", change.category); return }
         // Preference filter before the notice is posted. A disabled alert is not shown and then cancelled.
         val stored = context.getSharedPreferences(NotifyPrefs.FILE, Context.MODE_PRIVATE)
         val gate = schoolAlertGate(

@@ -149,10 +149,10 @@ class WeekRangeTest {
             events = listOf(current.copy(room = "B2"), future),
             weekFetched = mapOf("2026-11-02" to now.toString(), "2026-11-16" to now.toString()),
         )
-        assertEquals(listOf("Raum geändert"), diffSnapshots(previous, next).map { it.title })
-        val legacy = diffSnapshots(SchulnetzSnapshot(), SchulnetzSnapshot(events = listOf(current)))
+        assertEquals(listOf("Raum geändert"), fixtureDiff(previous, next).map { it.title })
+        val legacy = fixtureDiff(SchulnetzSnapshot(), SchulnetzSnapshot(events = listOf(current)))
         assertEquals(setOf("timetable"), legacy.map { it.category }.toSet())
-        val hiddenRemoval = diffSnapshots(
+        val hiddenRemoval = fixtureDiff(
             SchulnetzSnapshot(events = listOf(current, future), weekFetched = mapOf("2026-11-02" to now.toString())),
             SchulnetzSnapshot(events = listOf(current), weekFetched = mapOf("2026-11-02" to now.toString(), "2026-11-16" to now.toString())),
         )
@@ -247,10 +247,10 @@ class WeekRangeTest {
             weekRead = mapOf("2026-11-16" to now.toString()),
         )
         assertEquals(setOf("2026-11-16"), legacyBackfillWeeks(previous, backfill))
-        assertTrue(diffSnapshots(previous, backfill).none { it.category == "timetable" })
+        assertTrue(fixtureDiff(previous, backfill).none { it.category == "timetable" })
         val seen = backfill
         val changed = seen.copy(events = listOf(lesson("e2", "2026-11-16T08:15:00", room = "B2")))
-        assertEquals(listOf("Raum geändert"), diffSnapshots(seen, changed).map { it.title })
+        assertEquals(listOf("Raum geändert"), fixtureDiff(seen, changed).map { it.title })
         val xml = """<data>
             <event id="m"><start_date>2026-11-04 08:15</start_date><end_date>2026-11-04 09:00</end_date><text>M4a</text><fachbezeichnung>Mathematik</fachbezeichnung><fachkuerzel>M4a</fachkuerzel><event_type>0_stp</event_type></event>
             <event id="d"><start_date>2026-11-04 09:05</start_date><end_date>2026-11-04 09:50</end_date><text>Deutsch</text><fachbezeichnung>Mathematik</fachbezeichnung><event_type>0_stp</event_type></event>

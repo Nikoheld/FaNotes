@@ -2,7 +2,7 @@
 // A PHPSESSID is bound to the client IP, so this module always opens its own
 // session with the stored Microsoft SSO cookies and never replays a phone cookie.
 
-import { addDays, carryTimetableExams, confirmedLessonStamps, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
+import { addDays, carryTimetableExams, confirmedLessonStamps, emptyWeekCountsAsRead, fallbackSchoolSpan, withoutUnprovenEmptyReads, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
 
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 
@@ -88,6 +88,8 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
   const root = baseUrl.replace(/\/+$/u, '')
   const pages = {}
   let transid = session.transid
+  // A browser sends the open page as referer when its scheduler loads a week.
+  let openPage = `${root}/`
   const get = async (path) => {
     const url = path.startsWith('http') ? path : `${root}${path}`
     if (!redirectTargetAllowed(url) || (!schulnetzCallAllowed('GET', url) && !schoolLanding(url))) {
@@ -100,7 +102,7 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
         Accept: url.includes('scheduler_processor') ? 'text/xml' : 'text/html',
         Cookie: `PHPSESSID=${session.php}`,
         'User-Agent': session.userAgent,
-        Referer: `${root}/`,
+        Referer: url.includes('scheduler_processor') ? openPage : `${root}/`,
       },
       redirect: 'manual',
     })
@@ -121,6 +123,7 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
     }
     const fresh = extractWebIds(url, body)
     if (fresh?.transid) transid = fresh.transid
+    if (!url.includes('scheduler_processor')) openPage = url
     return body
   }
   const order = ['1', '21311', '21111', '21411', '21200', '22202', '22108', '21312']
@@ -148,12 +151,16 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
       weekSpanStart = htmlSpan.start
       weekSpanEnd = htmlSpan.end
     }
-    const span = weekSpanStart && weekSpanEnd ? { start: weekSpanStart, end: weekSpanEnd } : null
+    const vacations = Array.isArray(options.vacations) ? options.vacations : []
+    // Without a range on the page, plan the school year from appointments and holidays,
+    // not only the four weeks around today.
+    const span = weekSpanStart && weekSpanEnd ? { start: weekSpanStart, end: weekSpanEnd } : fallbackSchoolSpan(previousEvents, vacations, today)
     const icalUrl = findIcalUrl(pages['22202'], root)
     const icalAvailable = Boolean(icalUrl && schulnetzCallAllowed('GET', icalUrl))
     const plan = planWeekFetches({
       mondays: span ? mondaysBetween(span.start, span.end) : [],
-      fetchedAt: confirmedLessonStamps(previousEvents, weekFetched, weekRead),
+      // Retry timing follows every attempt, so an unread week is not requested on every sync.
+      fetchedAt: { ...weekFetched, ...confirmedLessonStamps(previousEvents, weekFetched, weekRead) },
       icalFetchedAt,
       now: nowIso,
       today,
@@ -163,6 +170,13 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
     const examWeeks = {}
     const current = weekMonday(today)
     let currentEmptyUsable = false
+    const emptyWeeks = []
+    let schedulerGaveLessons = false
+    // Schulnetz hands out a new transid with every page, and the scheduler only answers with the
+    // transid of its own page. After Terminliste and Prüfungen the timetable's transid is stale and
+    // every week came back empty, so open each page again right before its weeks.
+    const reopen = async (pageId) => { await get(`/index.php?pageid=${pageId}&id=${session.id}&transid=${transid}`) }
+    if (plan.fetch.length && !pages.problem) await reopen('22202')
     for (const monday of plan.fetch) {
       if (pages.problem) break
       const max = addDays(monday, 7)
@@ -175,16 +189,22 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
           lessonWeeks[monday] = parsed
           weekFetched[monday] = nowIso
           weekRead[monday] = nowIso
+          schedulerGaveLessons = true
         }
       } else if (schedulerBodyUsable(lessonBody)) {
         if (monday !== current) {
           weekFetched[monday] = nowIso
-          weekRead[monday] = nowIso
+          emptyWeeks.push(monday)
         } else {
           currentEmptyUsable = true
         }
       }
+    }
+    if (plan.fetch.length && !pages.problem) await reopen('21312')
+    for (const monday of plan.fetch) {
       if (pages.problem) break
+      const max = addDays(monday, 7)
+      const curr = monday === current ? today : monday
       const examUrl = schedulerFetchUrl({ root, pageId: '21312', ansicht: 'klassenuebersicht', id: session.id, transid, today: curr, min: monday, max, extra: 'showOnlyThisClass=-1' })
       const examBody = await get(examUrl)
       if (schedulerWeekLoaded(examBody)) {
@@ -203,7 +223,14 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
     const lessonEvents = Object.values(lessonWeeks).flat()
     events = overlayLessons(previousEvents, lessonEvents, new Set(Object.keys(lessonWeeks)))
     exams = carryTimetableExams(lessonEvents, overlayDated(previousExams, Object.values(examWeeks).flat(), new Set(Object.keys(examWeeks))))
-    if (currentEmptyUsable && !Object.hasOwn(lessonWeeks, current)) weekRead[current] = nowIso
+    // An empty answer proves a free week only when the scheduler returned lessons for some week
+    // in this read, or the week is a holiday. Otherwise the week stays "not loaded".
+    for (const monday of emptyWeeks) if (emptyWeekCountsAsRead(monday, schedulerGaveLessons, vacations)) weekRead[monday] = nowIso
+    if (currentEmptyUsable && !Object.hasOwn(lessonWeeks, current) && emptyWeekCountsAsRead(current, schedulerGaveLessons, vacations)) weekRead[current] = nowIso
+    if (!schedulerGaveLessons && plan.fetch.length) {
+      const kept = withoutUnprovenEmptyReads(weekRead, events, vacations)
+      for (const key of Object.keys(weekRead)) if (!Object.hasOwn(kept, key)) delete weekRead[key]
+    }
     if (plan.fetchIcal && icalAvailable && !pages.problem) {
       const body = await get(icalUrl)
       if (icalBodyUsable(body)) {

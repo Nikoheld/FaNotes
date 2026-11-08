@@ -20,7 +20,7 @@ class NotifyAlertTest {
     ) = AgendaEvent(id, start, end, text, "", room, emptyList(), "", text, status, eventType, "", "")
 
     private fun titles(previous: SchulnetzSnapshot, next: SchulnetzSnapshot, settings: NotifySettings = NotifySettings()) =
-        diffSnapshots(previous, next, settings).map { it.title }
+        fixtureDiff(previous, next, settings).map { it.title }
 
     @Test
     fun preferencesKeepOnlyEventsTheDiffEmits() {
@@ -184,16 +184,16 @@ class NotifyAlertTest {
     fun disabledAlertsOmitTheMarkAndAbsenceAndDeadlineStayIndependent() {
         val blank = SchulnetzSnapshot()
         val next = blank.copy(grades = listOf(grade))
-        val quiet = diffSnapshots(blank, next, NotifySettings(enabled = false, guessGrades = true))
+        val quiet = fixtureDiff(blank, next, NotifySettings(enabled = false, guessGrades = true))
         assertTrue(quiet.isEmpty())
         assertEquals(5.5, next.grades[0].mark)
         assertFalse(quiet.joinToString { it.body + it.title }.contains("5.5"))
         val today = LocalDate.of(2026, 11, 7)
         val absence = SchoolAbsence("a1", "2026-11-01", "2026-11-01", "08:00", "08:45", "Deutsch", "Arzt", false, false, "", excuseUntil = "08.11.2026")
         val withAbsence = blank.copy(absences = listOf(absence))
-        assertEquals(listOf("Neue Absenz", "Entschuldigung läuft ab"), diffSnapshots(blank, withAbsence, NotifySettings(), today).map { it.title })
-        assertEquals(listOf("Entschuldigung läuft ab"), diffSnapshots(blank, withAbsence, NotifySettings(absences = false), today).map { it.title })
-        assertEquals(listOf("Neue Absenz"), diffSnapshots(blank, withAbsence, NotifySettings(deadlines = false), today).map { it.title })
-        assertEquals(emptyList(), diffSnapshots(blank, withAbsence, NotifySettings(enabled = false), today).map { it.title })
+        assertEquals(listOf("Neue Absenz", "Entschuldigung läuft ab"), fixtureDiff(blank, withAbsence, NotifySettings(), today).map { it.title })
+        assertEquals(listOf("Entschuldigung läuft ab"), fixtureDiff(blank, withAbsence, NotifySettings(absences = false), today).map { it.title })
+        assertEquals(listOf("Neue Absenz"), fixtureDiff(blank, withAbsence, NotifySettings(deadlines = false), today).map { it.title })
+        assertEquals(emptyList(), fixtureDiff(blank, withAbsence, NotifySettings(enabled = false), today).map { it.title })
     }
 }

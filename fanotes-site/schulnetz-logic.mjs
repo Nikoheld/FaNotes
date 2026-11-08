@@ -1131,7 +1131,7 @@ export const alertAllowed = (settings = {}, change) => {
   return true
 }
 
-export const diffSnapshots = (previous, next, settings = {}, today = zurichToday()) => {
+export const diffSnapshots = (previous, next, settings = {}, today = zurichToday(), now = today === zurichToday() ? new Date() : new Date(`${today}T00:00:00Z`)) => {
   if (!previous) return []
   // Master off: do not build rows. The caller still stores the snapshot.
   if (settings?.enabled === false) return []
@@ -1178,12 +1178,14 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
     }
     const beforeEvents = new Set((previous.events || []).map((item) => item.id))
     const knownEvents = [...(previous.events || []), ...(previous.exams || []), ...(next.exams || [])]
-    for (const event of next.events || []) {
-      if (freshWeeks.has(weekMondayKey(event.start))) continue
-      if (isLesson(event) || isExamLike(event) || beforeEvents.has(event.id)) continue
-      if (knownEvents.some((known) => sameSchoolSlot(event, known))) continue
+    // Only the range the previous appointment list already covered can hold news; later
+    // appointments are the list reaching further. A large batch is the list growing too.
+    const horizon = appointmentHorizon(previous)
+    const appointments = (next.events || []).filter((event) => !freshWeeks.has(weekMondayKey(event.start)) && !isLesson(event) && !isExamLike(event) &&
+      !beforeEvents.has(event.id) && !knownEvents.some((known) => sameSchoolSlot(event, known)) && eventBody(event) &&
+      (!horizon || (eventDay(event) && eventDay(event) <= horizon)))
+    for (const event of appointments.length > APPOINTMENT_BURST ? [] : appointments) {
       const body = eventBody(event)
-      if (!body) continue
       changes.push(linkedChange(`event:${event.id}:${eventKey(event)}`, 'event', 'Neuer Termin', body, {
         targetId: lessonTargetId(event),
         courseId: event.courseId || eventLabel(event),
@@ -1191,7 +1193,8 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
       }))
     }
   }
-  return deduped(changes).filter((change) => alertAllowed(settings, change))
+  // A notice about a lesson, exam or appointment that has already ended is never sent.
+  return deduped(changes).filter((change) => alertAllowed(settings, change) && !changeIsOver(change, now))
 }
 
 /**
@@ -1675,7 +1678,7 @@ export const WEEK_CAP = 48
 /** Mondays tried on each side when the page has no start or end. Not a school year. */
 export const WEEK_PROBE = 4
 /** Far weeks beyond that horizon loaded on one sync. */
-export const WEEK_BATCH = 4
+export const WEEK_BATCH = 8
 
 export const weekMonday = (iso) => {
   const [year, month, day] = String(iso || '').split('-').map(Number)
@@ -2068,4 +2071,60 @@ const distinctExams = (events) => {
     else if (!completeExamTime(out[index]) && completeExamTime(event)) out[index] = event
   }
   return out
+}
+
+// When a school notice is still worth sending, and when a timetable week really counts as read.
+// Mirrors android/core/.../schulnetz/SchoolTiming.kt; keep both in step.
+const DATED_CATEGORIES = new Set(['exam', 'timetable', 'event'])
+const CLOCK_RANGE = /\b(\d{1,2}):(\d{2})\s*[–-]\s*(\d{1,2}):(\d{2})\b/u
+export const zurichClock = (now = new Date()) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Zurich', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(now)
+export const changeDay = (change) => eventDate(change?.date) ||
+  ((change?.category === 'exam' || change?.category === 'timetable') ? eventDate(String(change?.body || '').slice(0, 12)) : '')
+/** A notice about a lesson, exam or appointment that has already ended. Grades, absences, messages and probes never are. */
+export const changeIsOver = (change, now = new Date()) => {
+  if (!DATED_CATEGORIES.has(change?.category) || isNotificationProbe(change?.id)) return false
+  const day = changeDay(change)
+  if (!day) return false
+  const today = zurichToday(now)
+  if (day < today) return true
+  if (day > today) return false
+  const range = String(change.body || '').match(CLOCK_RANGE)
+  if (!range) return false
+  return zurichClock(now) > `${range[3].padStart(2, '0')}:${range[4]}`
+}
+/** More new appointments than this in one read is the list growing, not news. */
+export const APPOINTMENT_BURST = 8
+/** Last day the previous appointment list reached. Appointments after it are newly visible, not new. */
+export const appointmentHorizon = (previous) => {
+  const days = (previous?.events || []).filter((event) => !isLesson(event) && !isExamLike(event)).map((event) => eventDay(event)).filter(Boolean)
+  return days.length ? days.sort().at(-1) : ''
+}
+const vacationRanges = (vacations = []) => vacations.map((v) => {
+  const start = eventDate(v?.start)
+  const end = eventDate(v?.end) || start
+  return start && end >= start ? [start, end] : null
+}).filter(Boolean)
+export const weekIsHoliday = (monday, vacations = []) => {
+  const ranges = vacationRanges(vacations)
+  return [0, 1, 2, 3, 4].every((offset) => { const day = addDays(monday, offset); return ranges.some(([a, b]) => day >= a && day <= b) })
+}
+/** An empty scheduler answer proves a free week only if the scheduler returned lessons in the same read, or it is a holiday. */
+export const emptyWeekCountsAsRead = (monday, schedulerProven, vacations = []) => Boolean(schedulerProven) || weekIsHoliday(monday, vacations)
+export const withoutUnprovenEmptyReads = (reads = {}, events = [], vacations = []) => {
+  const taught = new Set(events.filter(isLesson).map((event) => weekMondayKey(event.start)).filter(Boolean))
+  return Object.fromEntries(Object.entries(reads).filter(([week]) => taught.has(week) || weekIsHoliday(week, vacations)))
+}
+/** School year from appointments and holidays when the page shows no range: four weeks back, at least four and at most forty ahead. */
+export const fallbackSchoolSpan = (events = [], vacations = [], today = zurichToday()) => {
+  const days = [
+    ...events.filter((event) => !isLesson(event)).map((event) => eventDay(event)),
+    ...vacationRanges(vacations).flat(),
+  ].filter(Boolean).sort()
+  if (!days.length) return null
+  // Never narrower than the four-week probe around today.
+  const start = addDays(today, -28)
+  const probeEnd = addDays(today, 28)
+  const high = addDays(today, 280)
+  const reach = days.at(-1) < high ? days.at(-1) : high
+  return { start, end: reach > probeEnd ? reach : probeEnd }
 }

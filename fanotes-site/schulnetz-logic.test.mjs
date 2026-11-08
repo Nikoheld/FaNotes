@@ -9,7 +9,14 @@ import { createSchulnetzRuntime, openToken, sealToken } from './schulnetz-api.mj
 import { notifyAccountDeleted, setAccountDeletedHook } from './sync-api.mjs'
 import { fcmDataMessage, fcmDropToken, fcmPriorityForChanges, isValidFcmToken, serviceAccountJwt } from './fcm.mjs'
 import {
-  diffSnapshots,
+  diffSnapshots as diffSnapshotsAt,
+  changeIsOver,
+  appointmentHorizon,
+  APPOINTMENT_BURST,
+  emptyWeekCountsAsRead,
+  weekIsHoliday,
+  withoutUnprovenEmptyReads,
+  fallbackSchoolSpan,
   prepareAgendaRead,
   normalizeSchoolBase,
   parseGradesHtml,
@@ -72,6 +79,11 @@ import {
   zurichTimeshift,
   WEEK_CAP,
 } from './schulnetz-logic.mjs'
+
+// Fixtures are dated around early November 2026. Pin "today" so already-ended events are judged
+// against that week, not the machine clock. Calls that pass their own day keep it.
+const FIXTURE_TODAY = '2026-11-01'
+const diffSnapshots = (previous, next, settings = {}, today = FIXTURE_TODAY, now) => diffSnapshotsAt(previous, next, settings, today, now)
 import { scrapeWithSession } from './schulnetz-web.mjs'
 
 const marks = [
@@ -1308,7 +1320,9 @@ test('a web scrape reads the whole current week and keeps a far lesson', async (
   assert.equal(schedulers.some((url) => url.includes('pageid=22202') && url.includes('min_date=2026-11-02') && url.includes('max_date=2026-11-09') && !url.includes('action=')), true)
   assert.equal(schedulers.some((url) => url.includes('pageid=21312') && !url.includes('action=')), true)
   assert.equal(first.weekFetched['2026-11-02'], undefined)
-  assert.equal(first.weekRead['2026-11-02'], '2026-11-04T12:00:00Z')
+  // Every week answered empty and none had lessons: that proves nothing, so no week looks free.
+  assert.equal(first.weekRead['2026-11-02'], undefined)
+  assert.equal(first.weekRead['2026-11-09'], undefined)
   assert.equal(first.weekFetched['2026-11-09'], '2026-11-04T12:00:00Z')
   assert.equal(first.weekFetched['2026-10-26'], '2026-11-04T12:00:00Z')
   assert.equal(schedulers.filter((url) => url.includes('min_date=2026-11-09') && url.includes('pageid=22202') && !url.includes('action=')).length, 1)
@@ -2256,4 +2270,88 @@ test('an older settings file still pushes a new grade as a data message', async 
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('notices about lessons, exams and appointments that already ended are dropped', () => {
+  const at = new Date('2026-11-09T12:30:00Z') // 13:30 in Zurich
+  assert.equal(changeIsOver({ id: 'exam:a', category: 'exam', title: 'Neue Prüfung', body: '15.10.2026 · Mathematik · 14:55–15:40', date: '' }, at), true)
+  assert.equal(changeIsOver({ id: 'exam:b', category: 'exam', title: 'Prüfung verschoben', body: '09.11.2026 · Chemie · 08:15–09:00' }, at), true)
+  assert.equal(changeIsOver({ id: 'exam:c', category: 'exam', title: 'Neue Prüfung', body: '09.11.2026 · Chemie · 14:00–14:45' }, at), false)
+  assert.equal(changeIsOver({ id: 'tt:a', category: 'timetable', title: 'Lektion fällt aus', body: 'x', date: '2026-11-06' }, at), true)
+  assert.equal(changeIsOver({ id: 'ev:a', category: 'event', title: 'Neuer Termin', body: 'Sporttag', date: '2026-11-20' }, at), false)
+  // Grades, absences, messages without a date and delivery tests never expire.
+  assert.equal(changeIsOver({ id: 'grade:a', category: 'grade', title: 'Neue Note', body: 'Mathematik 5.5', date: '2026-10-01' }, at), false)
+  assert.equal(changeIsOver({ id: 'absence:a', category: 'absence', title: 'Neue Absenz', body: 'x', date: '2026-10-01' }, at), false)
+  assert.equal(changeIsOver({ id: 'event:m1', category: 'event', title: 'Elternabend', body: 'Freitag 19 Uhr' }, at), false)
+  assert.equal(changeIsOver({ id: 'probe:1', category: 'exam', title: 'Test', body: '01.01.2026' }, at), false)
+
+  const blank = { grades: [], events: [], exams: [], absences: [], messages: [] }
+  const past = { id: 'p1', start: '2026-10-29T10:00:00', end: '2026-10-29T10:45:00', text: 'Biologie', room: 'R1', teachers: [], courseName: 'Biologie', status: '', eventType: '1_pru' }
+  const future = { ...past, id: 'p2', start: '2026-11-19T10:00:00', end: '2026-11-19T10:45:00' }
+  const titles = diffSnapshotsAt(blank, { ...blank, exams: [past, future] }, {}, '2026-11-09', at).map((c) => c.date)
+  assert.deepEqual(titles, ['2026-11-19'])
+  const moved = diffSnapshotsAt({ ...blank, exams: [past] }, { ...blank, exams: [{ ...past, start: '2026-10-29T12:00:00', end: '2026-10-29T12:45:00' }] }, {}, '2026-11-09', at)
+  assert.deepEqual(moved, [])
+})
+
+test('appointments the list newly reaches are not announced as new', () => {
+  const blank = { grades: [], events: [], exams: [], absences: [], messages: [] }
+  const appointment = (id, day) => ({ id, start: `${day}T15:00:00`, end: `${day}T16:00:00`, text: `Anlass ${id}`, room: 'Aula', teachers: [], courseName: '', status: '', eventType: 'event' })
+  const before = { ...blank, events: [appointment('a', '2026-11-12'), appointment('b', '2026-12-03')] }
+  assert.equal(appointmentHorizon(before), '2026-12-03')
+  const at = new Date('2026-11-09T08:00:00Z')
+  // Inside the range already shown: news. Beyond it: the list grew further, quiet.
+  const inside = diffSnapshotsAt(before, { ...before, events: [...before.events, appointment('c', '2026-11-26')] }, {}, '2026-11-09', at)
+  assert.deepEqual(inside.map((c) => c.title), ['Neuer Termin'])
+  const beyond = diffSnapshotsAt(before, { ...before, events: [...before.events, appointment('d', '2027-03-01')] }, {}, '2026-11-09', at)
+  assert.deepEqual(beyond, [])
+  // A large batch at once is the list loading more rows, not news.
+  const many = Array.from({ length: APPOINTMENT_BURST + 1 }, (_, i) => appointment(`n${i}`, '2026-11-20'))
+  assert.deepEqual(diffSnapshotsAt(before, { ...before, events: [...before.events, ...many] }, {}, '2026-11-09', at), [])
+})
+
+test('an empty scheduler only proves a free week next to real lessons or in holidays', () => {
+  const holidays = [{ id: 'v', name: 'Weihnachtsferien', start: '2026-12-21', end: '2027-01-03' }]
+  assert.equal(weekIsHoliday('2026-12-28', holidays), true)
+  assert.equal(weekIsHoliday('2026-11-16', holidays), false)
+  assert.equal(emptyWeekCountsAsRead('2026-11-16', false, holidays), false)
+  assert.equal(emptyWeekCountsAsRead('2026-11-16', true, holidays), true)
+  assert.equal(emptyWeekCountsAsRead('2026-12-28', false, holidays), true)
+  const lesson = { id: 'l', start: '2026-11-10T08:15:00', end: '2026-11-10T09:00:00', text: 'Deutsch', eventType: 'lesson' }
+  assert.deepEqual(Object.keys(withoutUnprovenEmptyReads({ '2026-11-09': 'x', '2026-11-16': 'x', '2026-12-28': 'x' }, [lesson], holidays)).sort(), ['2026-11-09', '2026-12-28'])
+  const appointment = { id: 'a', start: '2027-06-30T08:00:00', end: '2027-06-30T09:00:00', text: 'Schlussfeier', eventType: 'event' }
+  assert.deepEqual(fallbackSchoolSpan([appointment], holidays, '2026-11-09'), { start: '2026-10-12', end: '2027-06-30' })
+  assert.equal(fallbackSchoolSpan([], [], '2026-11-09'), null)
+})
+
+test('a scrape reopens the timetable before its weeks and plans the school year without a page range', async () => {
+  const calls = []
+  const lessonXml = (monday) => `<data><event id="l${monday}"><start_date>${monday} 08:15</start_date><end_date>${monday} 09:00</end_date><text>Deutsch</text><event_type>0_stp</event_type></event></data>`
+  let page = 0
+  const fetchImpl = async (url, init) => {
+    const text = String(url)
+    calls.push({ url: text, referer: init?.headers?.Referer || '' })
+    if (!text.includes('scheduler_processor')) {
+      page += 1
+      return { status: 200, headers: { get: () => '' }, text: async () => `<html><body><a href="index.php?pageid=1&id=abc&transid=t${page}">x</a></body></html>` }
+    }
+    const monday = text.match(/min_date=(\d{4}-\d{2}-\d{2})/)[1]
+    const body = text.includes('pageid=22202') && monday <= '2026-12-14' ? lessonXml(monday) : '<data></data>'
+    return { status: 200, headers: { get: () => '' }, text: async () => body }
+  }
+  const session = { php: 'php', id: 'abc', transid: 't0', userAgent: 'test' }
+  const year = { id: 'y', start: '2027-06-30T08:00:00', end: '2027-06-30T09:00:00', text: 'Schlussfeier', courseName: '', teachers: [], status: '', eventType: 'event', room: '' }
+  const result = await scrapeWithSession('https://www.schulnetz-ag.ch/aksa', session, fetchImpl, { today: '2026-11-09', now: '2026-11-09T07:00:00Z', previousEvents: [year] })
+  const firstLesson = calls.findIndex((c) => c.url.includes('scheduler_processor') && c.url.includes('pageid=22202'))
+  const firstExam = calls.findIndex((c) => c.url.includes('scheduler_processor') && c.url.includes('pageid=21312'))
+  assert.match(calls[firstLesson - 1].url, /pageid=22202/u)
+  assert.match(calls[firstExam - 1].url, /pageid=21312/u)
+  assert.match(calls[firstLesson].referer, /pageid=22202/u)
+  // The appointment list reaches into 2027, so weeks well beyond the old four-week probe are asked for.
+  const asked = calls.filter((c) => c.url.includes('scheduler_processor') && c.url.includes('pageid=22202')).map((c) => c.url.match(/min_date=([\d-]+)/)[1])
+  assert.ok(asked.some((monday) => monday > '2026-12-07'))
+  assert.ok(result.events.some((event) => event.id === 'l2026-11-16'))
+  // The scheduler gave lessons, so an empty later week is a real free week.
+  const empty = asked.find((monday) => monday > '2026-12-14')
+  if (empty) assert.equal(typeof result.weekRead[empty], 'string')
 })
