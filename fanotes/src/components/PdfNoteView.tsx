@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -28,8 +29,11 @@ import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy } from 'pdf
 import { TextLayer } from 'pdfjs-dist'
 import {
   DEFAULT_PDF_PAGE_RATIO,
+  PDF_THUMBNAIL_CSS_WIDTH,
+  PDF_THUMBNAIL_ROOT_MARGIN,
   applyPdfTextOverlayScale,
   enqueuePdfRender,
+  pdfThumbnailRailScrollTop,
   loadVaultPdfBytes,
   openPdfDocument,
   pdfStartPageForLoad,
@@ -412,22 +416,89 @@ function PdfPage({
   )
 }
 
-function Thumbnail({
+type PdfThumbWatch = (node: Element, onNear: (near: boolean) => void) => () => void
+
+/** One observer for the whole rail instead of one per thumbnail. */
+const createPdfThumbWatch = (root: HTMLElement): { watch: PdfThumbWatch; disconnect: () => void } => {
+  const listeners = new Map<Element, (near: boolean) => void>()
+  if (typeof IntersectionObserver === 'undefined') {
+    return { watch: (_node, onNear) => { onNear(true); return () => {} }, disconnect: () => {} }
+  }
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) listeners.get(entry.target)?.(entry.isIntersecting)
+  }, { root, rootMargin: PDF_THUMBNAIL_ROOT_MARGIN })
+  return {
+    watch: (node, onNear) => {
+      listeners.set(node, onNear)
+      observer.observe(node)
+      return () => {
+        observer.unobserve(node)
+        listeners.delete(node)
+      }
+    },
+    disconnect: () => {
+      observer.disconnect()
+      listeners.clear()
+    },
+  }
+}
+
+const thumbnailCssHeight = (width: number, height: number) => (
+  Math.max(48, Math.round(PDF_THUMBNAIL_CSS_WIDTH * (height / Math.max(1, width))))
+)
+
+const Thumbnail = memo(function Thumbnail({
   pdf,
   number,
   rotation,
   active,
+  ratio,
+  watch,
   onOpen,
 }: {
   pdf: PDFDocumentProxy
   number: number
   rotation: number
   active: boolean
+  ratio: number
+  watch: PdfThumbWatch | null
   onOpen: (page: number) => void
 }) {
+  const buttonRef = useRef<HTMLButtonElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  // Rotation of the bitmap on the canvas; empty while there is none.
+  const paintedRef = useRef('')
+  const [near, setNear] = useState(false)
 
   useEffect(() => {
+    const node = buttonRef.current
+    if (!node || !watch) return
+    return watch(node, setNear)
+  }, [watch])
+
+  // An empty canvas is 0px tall. Every thumbnail would then sit in the rail's
+  // view and paint at once, so the box keeps the shared page shape until its
+  // own bitmap lands.
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || paintedRef.current) return
+    canvas.style.width = `${PDF_THUMBNAIL_CSS_WIDTH}px`
+    canvas.style.height = `${thumbnailCssHeight(1, ratio)}px`
+  }, [ratio])
+
+  useEffect(() => {
+    if (!near) {
+      // Far from the rail's view: the bitmap goes, the box stays.
+      const canvas = canvasRef.current
+      if (canvas && canvas.width > 0) {
+        canvas.width = 0
+        canvas.height = 0
+      }
+      paintedRef.current = ''
+      return
+    }
+    const key = String(rotation)
+    if (paintedRef.current === key) return
     let alive = true
     let page: PDFPageProxy | null = null
     void enqueuePdfRender(async () => {
@@ -438,10 +509,11 @@ function Thumbnail({
         return
       }
       const base = page.getViewport({ scale: 1, rotation })
-      const cssWidth = 76
-      const cssHeight = Math.max(48, Math.round(cssWidth * (base.height / Math.max(1, base.width))))
+      const cssWidth = PDF_THUMBNAIL_CSS_WIDTH
+      const cssHeight = thumbnailCssHeight(base.width, base.height)
       const viewport = page.getViewport({ scale: cssWidth / Math.max(1, base.width), rotation })
       const canvas = canvasRef.current
+      if (!canvas) return
       canvas.width = Math.round(viewport.width)
       canvas.height = Math.round(viewport.height)
       canvas.style.width = `${cssWidth}px`
@@ -451,25 +523,29 @@ function Thumbnail({
       context.fillStyle = '#fff'
       context.fillRect(0, 0, canvas.width, canvas.height)
       await page.render({ canvas, canvasContext: context, viewport, intent: 'display' }).promise
-    }).catch(() => undefined)
+      if (alive) paintedRef.current = key
+    }, 'thumbnail').catch(() => undefined)
     return () => {
       alive = false
       try { page?.cleanup() } catch { /* ignore */ }
     }
-  }, [number, pdf, rotation])
+  }, [near, number, pdf, rotation])
 
   return (
     <button
       type="button"
+      ref={buttonRef}
       className={`pdf-note-thumb ${active ? 'is-active' : ''}`}
+      data-pdf-thumb={number}
       onClick={() => onOpen(number)}
       aria-current={active ? 'page' : undefined}
+      aria-label={`Seite ${number}`}
     >
       <canvas ref={canvasRef} />
       <small>{number}</small>
     </button>
   )
-}
+})
 
 async function outlineFromPdf(pdf: PDFDocumentProxy): Promise<OutlineItem[]> {
   const raw = await pdf.getOutline()
@@ -1047,7 +1123,21 @@ export function PdfNoteView({
     }
     setZoomMode('fit-page')
   }
-  const thumbs = useMemo(() => (pdf ? Array.from({ length: Math.min(pdf.numPages, 80) }, (_, index) => index + 1) : []), [pdf])
+  // Every page has a thumbnail. Only the first 80 used to, so pages 81 and on
+  // of a longer PDF could not be reached from the rail.
+  const thumbs = useMemo(() => (pdf ? Array.from({ length: pdf.numPages }, (_, index) => index + 1) : []), [pdf])
+  const [thumbRail, setThumbRail] = useState<HTMLElement | null>(null)
+  const thumbWatch = useMemo(() => (thumbRail ? createPdfThumbWatch(thumbRail) : null), [thumbRail])
+  useEffect(() => () => thumbWatch?.disconnect(), [thumbWatch])
+  // The current page's thumbnail follows the reader. The rail is scrolled
+  // itself: scrollIntoView would also move the page column around it.
+  useLayoutEffect(() => {
+    if (!thumbRail || sidebar !== 'thumbs') return
+    const node = thumbRail.querySelector<HTMLElement>(`.pdf-note-thumb[data-pdf-thumb="${currentPage}"]`)
+    if (!node) return
+    const next = pdfThumbnailRailScrollTop(thumbRail.scrollTop, thumbRail.clientHeight, node.offsetTop, node.offsetHeight)
+    if (next != null) thumbRail.scrollTop = next
+  }, [currentPage, sidebar, thumbRail])
 
   const chrome = (
     <>
@@ -1150,11 +1240,19 @@ export function PdfNoteView({
       {!error && pdf && (
         <div className="pdf-note-body">
           {sidebar === 'thumbs' && (
-            <aside className="pdf-note-sidebar" aria-label="Miniaturseiten">
+            <aside className="pdf-note-sidebar" ref={setThumbRail} aria-label="Miniaturseiten">
               {thumbs.map((page) => (
-                <Thumbnail key={page} pdf={pdf} number={page} rotation={rotation} active={page === currentPage} onOpen={scrollToPage} />
+                <Thumbnail
+                  key={page}
+                  pdf={pdf}
+                  number={page}
+                  rotation={rotation}
+                  active={page === currentPage}
+                  ratio={pageRatio}
+                  watch={thumbWatch?.watch ?? null}
+                  onOpen={scrollToPage}
+                />
               ))}
-              {pdf.numPages > thumbs.length && <small>Erste {thumbs.length} Seiten</small>}
             </aside>
           )}
           {sidebar === 'outline' && (

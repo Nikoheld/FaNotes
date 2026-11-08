@@ -164,11 +164,76 @@ export const loadVaultPdfBytes = async (relativePath: string): Promise<Uint8Arra
   return loadPdfBytes(await api.readAssetDataUrl(relativePath))
 }
 
-let pdfRenderTail: Promise<void> = Promise.resolve()
-export const enqueuePdfRender = <T,>(job: () => Promise<T>): Promise<T> => {
-  const run = pdfRenderTail.then(job, job)
-  pdfRenderTail = run.then(() => undefined, () => undefined)
-  return run
+/**
+ * `page` is a sheet the reader is looking at. `thumbnail` waits until no page
+ * is queued: opening the rail queued every thumbnail ahead of the next page,
+ * so a jump right after it waited 2–3 s for 40–80 thumbnails first.
+ */
+export type PdfRenderLane = 'page' | 'thumbnail'
+
+const pdfRenderLanes: Record<PdfRenderLane, Array<() => Promise<void>>> = { page: [], thumbnail: [] }
+let pdfRenderDraining = false
+
+const drainPdfRenders = async () => {
+  if (pdfRenderDraining) return
+  pdfRenderDraining = true
+  try {
+    for (;;) {
+      const next = pdfRenderLanes.page.shift() ?? pdfRenderLanes.thumbnail.shift()
+      if (!next) return
+      await next()
+    }
+  } finally {
+    pdfRenderDraining = false
+  }
+}
+
+/** One render at a time; a queued page runs before any queued thumbnail. */
+export const enqueuePdfRender = <T,>(job: () => Promise<T>, lane: PdfRenderLane = 'page'): Promise<T> => (
+  new Promise<T>((resolve, reject) => {
+    pdfRenderLanes[lane].push(async () => {
+      try {
+        resolve(await job())
+      } catch (error: unknown) {
+        reject(error)
+      }
+    })
+    // Start after this call returns, like the promise chain it replaces, so a
+    // job never runs inside the statement that queued it.
+    void Promise.resolve().then(drainPdfRenders)
+  })
+)
+
+/** CSS width of a sidebar thumbnail canvas. */
+export const PDF_THUMBNAIL_CSS_WIDTH = 76
+
+/**
+ * A thumbnail paints once it is this close to the rail's view and lets its
+ * bitmap go once it is farther. Every page has a thumbnail; at DPR 2 one is
+ * about 130 kB, so 2,000 painted at once would hold about 260 MB.
+ */
+export const PDF_THUMBNAIL_ROOT_MARGIN = '480px 0px'
+
+/**
+ * Rail scroll that shows the whole thumbnail of the current page, moving as
+ * little as possible. Null when it is already in view. The rail is set
+ * directly: `scrollIntoView` would also scroll the page column around it.
+ */
+export const pdfThumbnailRailScrollTop = (
+  railScrollTop: number,
+  railHeight: number,
+  thumbTop: number,
+  thumbHeight: number,
+): number | null => {
+  const scroll = Number(railScrollTop) || 0
+  const height = Number(railHeight)
+  const top = Number(thumbTop)
+  const size = Math.max(0, Number(thumbHeight) || 0)
+  if (!(height > 0) || !Number.isFinite(top)) return null
+  if (top >= scroll && top + size <= scroll + height) return null
+  // Taller than the rail, or above it: its top edge goes to the top.
+  if (top < scroll || size >= height) return Math.max(0, Math.round(top))
+  return Math.max(0, Math.round(top + size - height))
 }
 
 /** CSS max width of a PDF page column — the write-column, not the grown plane. */
