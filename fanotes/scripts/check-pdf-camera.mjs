@@ -192,5 +192,39 @@ assert.match(css, /\.unified-note-view\.is-pdf-note \.paper-sheet-plane \{\s*bac
   assert.ok(elapsed < 3_000, `a 73 MB frame read 64 KiB at a time is copied once, not per read (took ${elapsed.toFixed(0)} ms)`)
 }
 
+// PDFium bytes that own their buffer reach ImageData without another copy.
+// A view into a larger buffer, or a shared one, is still copied, because
+// ImageData takes only a whole plain ArrayBuffer.
+{
+  const { rasterizePdfPage } = await server.ssrLoadModule('/src/lib/pdfiumRaster.ts')
+  const previousWindow = globalThis.window
+  let reply = null
+  globalThis.window = { fanotes: { renderPdfPage: async () => reply } }
+  const request = { path: 'a.pdf', pageIndex: 0, pixelWidth: 2, pixelHeight: 1, pagePixelWidth: 2, pagePixelHeight: 1, originX: 0, originY: 0, rotation: 0 }
+  try {
+    const owned = new Uint8Array([1, 2, 3, 255, 4, 5, 6, 255])
+    reply = { width: 2, height: 1, rgba: owned }
+    const viewed = await rasterizePdfPage(request)
+    assert.ok(viewed instanceof Uint8ClampedArray)
+    assert.equal(viewed.buffer, owned.buffer, 'bytes that own their buffer are not copied again')
+    assert.deepEqual([...viewed], [1, 2, 3, 255, 4, 5, 6, 255])
+    const backing = new Uint8Array(16)
+    backing.set([9, 9, 9, 255, 8, 8, 8, 255], 4)
+    reply = { width: 2, height: 1, rgba: backing.subarray(4, 12) }
+    const copied = await rasterizePdfPage(request)
+    assert.notEqual(copied.buffer, backing.buffer, 'a view into a larger buffer is copied out')
+    assert.deepEqual([...copied], [9, 9, 9, 255, 8, 8, 8, 255])
+    const shared = new Uint8Array(new SharedArrayBuffer(8))
+    shared.set([7, 7, 7, 255, 6, 6, 6, 255])
+    reply = { width: 2, height: 1, rgba: shared }
+    const unshared = await rasterizePdfPage(request)
+    assert.ok(unshared.buffer instanceof ArrayBuffer, 'a shared buffer is copied into a plain one')
+    reply = { width: 3, height: 1, rgba: owned }
+    assert.equal(await rasterizePdfPage(request), null, 'a size that does not match the bytes is refused')
+  } finally {
+    globalThis.window = previousWindow
+  }
+}
+
 await server.close()
 console.log('pdf-camera ok')

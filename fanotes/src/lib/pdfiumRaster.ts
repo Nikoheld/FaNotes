@@ -22,12 +22,14 @@ const asBytes = (result: PdfiumRasterResult): Uint8ClampedArray<ArrayBuffer> | n
   if (result.rgba instanceof Uint8Array) bytes = result.rgba
   else if (typeof result.rgbaBase64 === 'string' && result.rgbaBase64.length > 0) bytes = decodeBase64(result.rgbaBase64)
   if (!bytes || bytes.byteLength !== width * height * 4) return null
-  const tight = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
-    ? bytes
-    : bytes.slice()
   // ImageData accepts only a Uint8ClampedArray backed by a plain ArrayBuffer.
-  const pixels = new Uint8ClampedArray(tight.byteLength)
-  pixels.set(tight)
+  // Bytes that already own one are viewed in place: copying them again cost
+  // the page's thread one more pass over up to 73 MB per zoom window.
+  if (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength && bytes.buffer instanceof ArrayBuffer) {
+    return new Uint8ClampedArray(bytes.buffer, 0, bytes.byteLength)
+  }
+  const pixels = new Uint8ClampedArray(bytes.byteLength)
+  pixels.set(bytes)
   return pixels
 }
 
