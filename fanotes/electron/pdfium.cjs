@@ -31,39 +31,91 @@ function encodeFrame(header, payload = Buffer.alloc(0)) {
   return frame
 }
 
+// Pipe chunks are queued and each frame is copied out of them once.
+// Concatenating every 64 KiB chunk onto the bytes already buffered copied a
+// 73 MB zoom window about 1,100 times: 20 s per window, with the main process
+// blocked for each copy.
 function createFrameReader(onFrame, onError) {
-  let buffered = Buffer.alloc(0)
+  const chunks = []
+  let head = 0
+  let queued = 0
   let failed = false
+  let stage = 'length'
+  let headerLength = 0
+  let header = null
+  let payloadLength = 0
+
+  const take = (count) => {
+    const first = chunks[0]
+    if (first.length - head >= count) {
+      const out = first.subarray(head, head + count)
+      head += count
+      queued -= count
+      if (head === first.length) {
+        chunks.shift()
+        head = 0
+      }
+      return out
+    }
+    const out = Buffer.allocUnsafe(count)
+    let filled = 0
+    while (filled < count) {
+      const chunk = chunks[0]
+      const copied = chunk.copy(out, filled, head, Math.min(chunk.length, head + count - filled))
+      filled += copied
+      head += copied
+      if (head === chunk.length) {
+        chunks.shift()
+        head = 0
+      }
+    }
+    queued -= count
+    return out
+  }
+
+  const fail = () => {
+    failed = true
+    chunks.length = 0
+    queued = 0
+    onError(new Error('Die PDFium-Antwort ist ungültig.'))
+  }
+
   return (chunk) => {
-    if (failed) return
-    buffered = buffered.length ? Buffer.concat([buffered, chunk]) : chunk
-    while (buffered.length >= 4) {
-      const headerLength = buffered.readUInt32LE(0)
-      if (headerLength === 0 || headerLength > MAX_HEADER_BYTES) {
-        failed = true
-        onError(new Error('Die PDFium-Antwort ist ungültig.'))
-        return
+    if (failed || !chunk.length) return
+    chunks.push(chunk)
+    queued += chunk.length
+    for (;;) {
+      if (stage === 'length') {
+        if (queued < 4) return
+        headerLength = take(4).readUInt32LE(0)
+        if (headerLength === 0 || headerLength > MAX_HEADER_BYTES) {
+          fail()
+          return
+        }
+        stage = 'header'
       }
-      if (buffered.length < 8 + headerLength) return
-      const payloadLength = buffered.readUInt32LE(4 + headerLength)
-      if (payloadLength > MAX_PAYLOAD_BYTES) {
-        failed = true
-        onError(new Error('Die PDFium-Antwort ist ungültig.'))
-        return
+      if (stage === 'header') {
+        if (queued < headerLength + 4) return
+        const json = take(headerLength).toString('utf8')
+        payloadLength = take(4).readUInt32LE(0)
+        if (payloadLength > MAX_PAYLOAD_BYTES) {
+          fail()
+          return
+        }
+        try {
+          header = JSON.parse(json)
+        } catch {
+          fail()
+          return
+        }
+        stage = 'payload'
       }
-      const end = 8 + headerLength + payloadLength
-      if (buffered.length < end) return
-      let header = null
-      try {
-        header = JSON.parse(buffered.toString('utf8', 4, 4 + headerLength))
-      } catch {
-        failed = true
-        onError(new Error('Die PDFium-Antwort ist ungültig.'))
-        return
-      }
-      const payload = buffered.subarray(8 + headerLength, end)
-      buffered = buffered.subarray(end)
-      onFrame(header, payload)
+      if (queued < payloadLength) return
+      const payload = payloadLength > 0 ? take(payloadLength) : Buffer.alloc(0)
+      const done = header
+      stage = 'length'
+      header = null
+      onFrame(done, payload)
     }
   }
 }
@@ -134,8 +186,14 @@ function createPdfiumHost(spawnImpl = spawn) {
     if (!request) return
     pending.delete(header.id)
     clearTimeout(request.timeout)
-    if (header.ok === false) request.reject(new Error(String(header.error || 'PDFium konnte die Seite nicht rasterisieren.').slice(0, 500)))
-    else request.resolve({ header, payload: Buffer.from(payload) })
+    if (header.ok === false) {
+      request.reject(new Error(String(header.error || 'PDFium konnte die Seite nicht rasterisieren.').slice(0, 500)))
+      return
+    }
+    // A payload that spans chunks already has its own buffer. A slice of one
+    // pipe chunk is copied so it does not keep that chunk alive.
+    const owned = payload.byteOffset === 0 && payload.byteLength === payload.buffer.byteLength
+    request.resolve({ header, payload: owned ? payload : Buffer.from(payload) })
   }
 
   const start = () => {

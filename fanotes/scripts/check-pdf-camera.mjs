@@ -3,6 +3,11 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createServer } from 'vite'
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { EventEmitter } from 'node:events'
+import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
+import { PassThrough } from 'node:stream'
 
 // PDF toolbar zoom is the sheet camera: "Breite" fills the viewport width on
 // first open (no empty stage beside a 900px column), "Seite" shows one whole
@@ -104,6 +109,122 @@ assert.match(paperView, /zoomTo: \(zoom: number, originClient\?: \{ x: number; y
 assert.match(paperView, /setRecalled\(remembered !== null\)/u, 'camera reports whether a memory came back')
 const css = readFileSync(join(here, '../src/styles.css'), 'utf8')
 assert.match(css, /\.unified-note-view\.is-pdf-note \.paper-sheet-plane \{\s*background: #edeff3;/u, 'one stage colour around PDF pages')
+
+// A PDFium frame read from the pipe 64 KiB at a time used to be concatenated
+// onto everything already buffered, once per read: a 73 MB zoom window took
+// about 20 s. Frames cut at odd offsets must still arrive byte for byte.
+{
+  const { createPdfiumHost } = createRequire(import.meta.url)('../electron/pdfium.cjs')
+  const encodeFrame = (header, payload = Buffer.alloc(0)) => {
+    const json = Buffer.from(JSON.stringify(header))
+    const frame = Buffer.alloc(8 + json.length + payload.length)
+    frame.writeUInt32LE(json.length, 0)
+    json.copy(frame, 4)
+    frame.writeUInt32LE(payload.length, 4 + json.length)
+    if (payload.length) payload.copy(frame, 8 + json.length)
+    return frame
+  }
+  const readFrames = (buffer) => {
+    const frames = []
+    let offset = 0
+    while (buffer.length >= offset + 4) {
+      const headerLength = buffer.readUInt32LE(offset)
+      if (buffer.length < offset + 8 + headerLength) break
+      const payloadLength = buffer.readUInt32LE(offset + 4 + headerLength)
+      const end = offset + 8 + headerLength + payloadLength
+      if (buffer.length < end) break
+      frames.push(JSON.parse(buffer.toString('utf8', offset + 4, offset + 4 + headerLength)))
+      offset = end
+    }
+    return { frames, rest: buffer.subarray(offset) }
+  }
+  const chunkedSidecar = (payload, cut) => {
+    const child = new EventEmitter()
+    child.stdin = new PassThrough()
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    child.kill = () => {}
+    let buffered = Buffer.alloc(0)
+    child.stdin.on('data', (chunk) => {
+      buffered = Buffer.concat([buffered, chunk])
+      const parsed = readFrames(buffered)
+      buffered = Buffer.from(parsed.rest)
+      for (const header of parsed.frames) {
+        const reply = header.op === 'render'
+          ? encodeFrame({ id: header.id, ok: true, width: payload.length / 4, height: 1 }, payload)
+          : encodeFrame({ id: header.id, ok: true })
+        for (let offset = 0, index = 0; offset < reply.length; index += 1) {
+          const size = Math.max(1, Math.min(reply.length - offset, cut(index)))
+          child.stdout.write(reply.subarray(offset, offset + size))
+          offset += size
+        }
+      }
+    })
+    return child
+  }
+  const patterned = (bytes) => {
+    const out = Buffer.allocUnsafe(bytes)
+    for (let index = 0; index < bytes; index += 1) out[index] = (index * 31 + (index >>> 12)) & 255
+    return out
+  }
+  const stub = join(mkdtempSync(join(tmpdir(), 'fanotes-pdfium-')), 'fanotes-pdfium')
+  writeFileSync(stub, '#!/bin/sh\nexit 0\n')
+  chmodSync(stub, 0o755)
+  process.env.FANOTES_PDFIUM_BIN = stub
+  const request = (key) => ({
+    key, pageIndex: 0, pixelWidth: 1, pixelHeight: 1, pagePixelWidth: 1, pagePixelHeight: 1,
+    originX: 0, originY: 0, rotation: 0, password: '', readBytes: async () => Buffer.from('%PDF'),
+  })
+  const small = patterned(4 * 4099)
+  const sizes = [1, 2, 3, 5, 7, 11, 13, 4096, 1, 9000]
+  const oddHost = createPdfiumHost(() => chunkedSidecar(small, (index) => sizes[index % sizes.length]))
+  for (let pass = 0; pass < 3; pass += 1) {
+    const result = await oddHost.renderPdfPage(request('odd.pdf'))
+    assert.equal(Buffer.compare(result.rgba, small), 0, 'a frame cut at odd offsets keeps every byte')
+  }
+  // 5400 × 3400 RGBA: the window a zoom-3 page asks for at DPR 2.
+  const window = patterned(5400 * 3400 * 4)
+  const pipeHost = createPdfiumHost(() => chunkedSidecar(window, () => 64 * 1024))
+  const started = performance.now()
+  const result = await pipeHost.renderPdfPage(request('zoom.pdf'))
+  const elapsed = performance.now() - started
+  assert.equal(Buffer.compare(result.rgba, window), 0, 'a 73 MB window keeps every byte')
+  assert.ok(elapsed < 3_000, `a 73 MB frame read 64 KiB at a time is copied once, not per read (took ${elapsed.toFixed(0)} ms)`)
+}
+
+// PDFium bytes that own their buffer reach ImageData without another copy.
+// A view into a larger buffer, or a shared one, is still copied, because
+// ImageData takes only a whole plain ArrayBuffer.
+{
+  const { rasterizePdfPage } = await server.ssrLoadModule('/src/lib/pdfiumRaster.ts')
+  const previousWindow = globalThis.window
+  let reply = null
+  globalThis.window = { fanotes: { renderPdfPage: async () => reply } }
+  const request = { path: 'a.pdf', pageIndex: 0, pixelWidth: 2, pixelHeight: 1, pagePixelWidth: 2, pagePixelHeight: 1, originX: 0, originY: 0, rotation: 0 }
+  try {
+    const owned = new Uint8Array([1, 2, 3, 255, 4, 5, 6, 255])
+    reply = { width: 2, height: 1, rgba: owned }
+    const viewed = await rasterizePdfPage(request)
+    assert.ok(viewed instanceof Uint8ClampedArray)
+    assert.equal(viewed.buffer, owned.buffer, 'bytes that own their buffer are not copied again')
+    assert.deepEqual([...viewed], [1, 2, 3, 255, 4, 5, 6, 255])
+    const backing = new Uint8Array(16)
+    backing.set([9, 9, 9, 255, 8, 8, 8, 255], 4)
+    reply = { width: 2, height: 1, rgba: backing.subarray(4, 12) }
+    const copied = await rasterizePdfPage(request)
+    assert.notEqual(copied.buffer, backing.buffer, 'a view into a larger buffer is copied out')
+    assert.deepEqual([...copied], [9, 9, 9, 255, 8, 8, 8, 255])
+    const shared = new Uint8Array(new SharedArrayBuffer(8))
+    shared.set([7, 7, 7, 255, 6, 6, 6, 255])
+    reply = { width: 2, height: 1, rgba: shared }
+    const unshared = await rasterizePdfPage(request)
+    assert.ok(unshared.buffer instanceof ArrayBuffer, 'a shared buffer is copied into a plain one')
+    reply = { width: 3, height: 1, rgba: owned }
+    assert.equal(await rasterizePdfPage(request), null, 'a size that does not match the bytes is refused')
+  } finally {
+    globalThis.window = previousWindow
+  }
+}
 
 await server.close()
 console.log('pdf-camera ok')
