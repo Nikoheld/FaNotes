@@ -128,7 +128,7 @@ html.i18n-loading .site-footer {
   aspect-ratio: 1680 / 1167;
 }
 
-@media (max-width: 699px) {
+@media (max-width: 43.6875em) {
   .screen img {
     aspect-ratio: 960 / 940;
   }
@@ -222,14 +222,14 @@ figcaption {
   line-height: 1.45;
 }
 
-@media (max-width: 899px) {
+@media (max-width: 56.1875em) {
   .hero-top {
     grid-template-columns: minmax(0, 1fr);
     align-items: start;
   }
 }
 
-@media (max-width: 999px) {
+@media (max-width: 62.4375em) {
   .annotations {
     display: none;
   }
@@ -304,20 +304,20 @@ figcaption {
   width: 100%;
 }
 
-@media (min-width: 900px) and (prefers-reduced-motion: no-preference) {
+@media (min-width: 56.25em) and (prefers-reduced-motion: no-preference) {
   .slip-tilt {
     transform: rotate(-1deg);
   }
 }
 
-@media (max-width: 899px) {
+@media (max-width: 56.1875em) {
   .story-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
 /* On phones the hero already shows this close-up of the same note. */
-@media (max-width: 699px) {
+@media (max-width: 43.6875em) {
   .story-figure {
     display: none;
   }
@@ -412,7 +412,7 @@ figcaption {
   margin-top: 2rem;
 }
 
-@media (max-width: 899px) {
+@media (max-width: 56.1875em) {
   .split {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -539,7 +539,7 @@ figcaption {
   font-size: 0.95rem;
 }
 
-@media (max-width: 899px) {
+@media (max-width: 56.1875em) {
   .kanti-grid,
   .kanti-foot {
     grid-template-columns: minmax(0, 1fr);
@@ -934,7 +934,7 @@ figcaption {
   color: var(--ink);
 }
 
-@media (max-width: 899px) {
+@media (max-width: 56.1875em) {
   .download-head {
     grid-template-columns: minmax(0, 1fr);
     align-items: start;
@@ -945,7 +945,7 @@ figcaption {
   }
 }
 
-@media (max-width: 719px) {
+@media (max-width: 44.9375em) {
   .package-grid,
   .download-extras {
     grid-template-columns: minmax(0, 1fr);
@@ -1027,7 +1027,7 @@ figcaption {
   color: var(--ink-soft);
 }
 
-@media (max-width: 899px) {
+@media (max-width: 56.1875em) {
   .faq-grid {
     grid-template-columns: minmax(0, 1fr);
   }

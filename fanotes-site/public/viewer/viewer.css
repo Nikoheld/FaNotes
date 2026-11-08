@@ -112,7 +112,7 @@
   align-self: start;
 }
 
-.meta h2 {
+.meta-title {
   margin-bottom: 1rem;
   font-size: 1.5rem;
   overflow-wrap: anywhere;
@@ -223,7 +223,7 @@
   margin-top: 2.25rem;
 }
 
-.ink-wrap h3 {
+.ink-wrap h2 {
   margin-bottom: 0.75rem;
   color: var(--ink-muted);
   font-family: var(--font-sans);
@@ -277,7 +277,7 @@
   background-size: 18px 18px;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 53.75em) {
   .note {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -291,7 +291,7 @@
   }
 }
 
-@media (max-width: 520px) {
+@media (max-width: 32.5em) {
   .viewer-home {
     display: none;
   }

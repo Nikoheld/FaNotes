@@ -189,6 +189,13 @@ p {
   text-wrap: pretty;
 }
 
+/* Long German compounds must never push the page sideways on narrow screens
+   or with very large text. */
+:where(p, li, dd, dt, h1, h2, h3, h4, summary, figcaption) {
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
+
 a {
   color: var(--accent);
   text-decoration-thickness: 0.08em;
@@ -541,7 +548,7 @@ pre {
   display: none;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 53.75em) {
   :root.js .menu-toggle {
     display: inline-grid;
   }
@@ -601,7 +608,7 @@ pre {
 
 /* Small phones: the hero and the menu already offer the download, so the
    header keeps only the brand, colour scheme and menu. */
-@media (max-width: 420px) {
+@media (max-width: 26.25em) {
   .site-header-inner {
     gap: 0.75rem;
   }
@@ -613,6 +620,30 @@ pre {
   .brand {
     font-size: 1.25rem;
   }
+}
+
+/* Very narrow in em terms (tiny screens or very large text): let the header wrap
+   and drop the colour-scheme switch, which follows the system setting anyway. */
+@media (max-width: 22em) {
+  .site-header-inner {
+    flex-wrap: wrap;
+    row-gap: 0.25rem;
+    padding-block: 0.4rem;
+  }
+
+  .theme-toggle {
+    display: none !important;
+  }
+
+  .brand span {
+    overflow-wrap: anywhere;
+  }
+}
+
+.hero-facts li,
+.site-nav li {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* ---------- Footer ---------- */
@@ -678,7 +709,7 @@ pre {
   font-size: 0.9rem;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 53.75em) {
   .footer-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -688,7 +719,7 @@ pre {
   }
 }
 
-@media (max-width: 400px) {
+@media (max-width: 25em) {
   .footer-grid {
     grid-template-columns: minmax(0, 1fr);
   }

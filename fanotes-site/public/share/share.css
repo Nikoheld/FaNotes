@@ -2,7 +2,7 @@
    app's paper rendering so a shared page looks like it does in FaNotes. */
 body { background: var(--paper); color: #1c1c1c; }
 #share-view { max-width: 920px; min-height: calc(100vh - var(--header-h) - 6rem); margin: 0 auto; padding: 2.5rem 1.25rem 4rem; font: 17px/1.55 "Iowan Old Style", Palatino, Georgia, serif; }
-#share-view:focus { outline: none; }
+#share-main:focus { outline: none; }
 #share-view h1 { font-size: 1.8rem; line-height: 1.25; margin: 0 0 1.25rem; }
 #share-view article { margin: 0 0 2rem; }
 #share-view h2 { font-size: 1.15rem; margin: 0 0 0.4rem; }

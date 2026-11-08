@@ -373,7 +373,7 @@ html[data-appearance="sepia"] {
   outline-color: var(--violet);
 }
 
-@media (max-width: 800px) {
+@media (max-width: 50em) {
   .profile-stats {
     grid-template-columns: minmax(0, 1fr);
   }

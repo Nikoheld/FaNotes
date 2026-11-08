@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="share.css?v=7">
 </head>
 <body>
-  <a class="skip-link" href="#share-view">Zum Inhalt springen</a>
+  <a class="skip-link" href="#share-main">Zum Inhalt springen</a>
   <header class="site-header is-solid share-header">
     <div class="wrap site-header-inner">
       <a class="brand" href="/" aria-label="FaNotes Startseite">
@@ -21,7 +21,10 @@
       <span class="share-badge">Geteilte Notiz</span>
     </div>
   </header>
-  <main id="share-view" tabindex="-1"><p class="share-loading">Freigabe wird geladen …</p></main>
+  <main id="share-main" tabindex="-1">
+    <h1 class="sr-only">Geteilte Notiz</h1>
+    <div id="share-view"><p class="share-loading">Freigabe wird geladen …</p></div>
+  </main>
   <footer class="share-footer">
     <p>Diese Notiz wurde mit FaNotes geteilt. <a href="/">Was ist FaNotes?</a></p>
   </footer>
