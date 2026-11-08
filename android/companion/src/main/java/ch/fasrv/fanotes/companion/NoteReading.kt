@@ -34,13 +34,18 @@ import java.io.File
 
 /** Uses the shared desktop reading parser rather than a second Markdown dialect. */
 @Composable
-fun NoteReading(model: CompanionModel, editor: NoteEditorController, onInk: () -> Unit) {
+fun NoteReading(model: CompanionModel, editor: NoteEditorController, target: DocTarget? = null, onInk: () -> Unit) {
+    val terms = remember(target?.query) { parseDocQuery(target?.query.orEmpty()).terms }
     val lines by produceState<List<DetailsReadingLine>>(emptyList(), editor.markdown) {
         value = withContext(Dispatchers.Default) { aiPreviewReading(editor.markdown) }
     }
     SelectionContainer {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(Space.page), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (editor.note?.kind == ch.fasrv.fanotes.vault.NoteKind.PDF) item { PdfReader(model.graph.root.resolve(editor.path)) }
+        if (target != null) item(key = "hit") {
+            StatusLine(if (target.label.isNotBlank()) t(R.string.doc_hit_banner_label, docHitPlace(DocHit(editor.path, "", if (editor.note?.kind == ch.fasrv.fanotes.vault.NoteKind.PDF) DOC_KIND_PDF else DOC_KIND_NOTE, target.page, target.label, Snippet("", emptyList()), PageSource.Markdown, 1.0, 0.0)))
+                else if (editor.note?.kind == ch.fasrv.fanotes.vault.NoteKind.PDF) t(R.string.doc_hit_banner, target.page) else t(R.string.doc_hit_banner_label, t(R.string.doc_note_text)), StateTone.Accent)
+        }
+        if (editor.note?.kind == ch.fasrv.fanotes.vault.NoteKind.PDF) item { PdfReader(model.graph.root.resolve(editor.path), if (target?.label.isNullOrBlank()) target?.page ?: 0 else 0, target?.query.orEmpty()) }
         if (plainPreview(editor.markdown).isBlank() && editor.document?.strokes?.isEmpty() == true && editor.note?.kind != ch.fasrv.fanotes.vault.NoteKind.PDF) item {
             EmptyState(androidx.compose.material.icons.Icons.Outlined.EditNote, t(R.string.a_blank_page_a_fresh_thought), t(R.string.switch_to_text_to_write_or_ink_to_draw))
         }
@@ -53,7 +58,7 @@ fun NoteReading(model: CompanionModel, editor: NoteEditorController, onInk: () -
                     }
                     LocalNoteImage(file, line.text.ifBlank { t(R.string.note_image) })
                 }
-                else -> ReadingLine(line)
+                else -> ReadingLine(line, terms)
             }
         }
         items(editor.note?.worksheets.orEmpty(), key = { "worksheet:$it" }) { id ->
@@ -76,11 +81,15 @@ fun NoteReading(model: CompanionModel, editor: NoteEditorController, onInk: () -
 }
 
 @Composable
-private fun ReadingLine(line: DetailsReadingLine) {
+private fun ReadingLine(line: DetailsReadingLine, terms: List<String> = emptyList()) {
     val colors = MaterialTheme.colorScheme
-    val annotated = remember(line, colors) {
+    val annotated = remember(line, colors, terms) {
         buildAnnotatedString {
             append(line.text.replace('\u001f', '│'))
+            highlightRanges(line.text, terms).forEach { r ->
+                val a = r.first.coerceIn(0, length); val b = (r.last + 1).coerceIn(a, length)
+                if (b > a) addStyle(SpanStyle(background = colors.primaryContainer, fontWeight = FontWeight.SemiBold), a, b)
+            }
             line.inlines.forEach { mark ->
                 val start = mark.start.coerceIn(0, length); val end = mark.end.coerceIn(start, length)
                 if (end <= start) return@forEach

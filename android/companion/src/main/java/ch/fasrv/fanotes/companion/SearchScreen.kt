@@ -22,16 +22,21 @@ fun CompanionSearchScreen(model: CompanionModel) {
     var query by rememberSaveable { mutableStateOf("") }
     var scope by rememberSaveable { mutableStateOf("all") }
     var notes by remember { mutableStateOf<List<NoteResult>>(emptyList()) }
+    var docs by remember { mutableStateOf<List<DocHit>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<AgendaEntry?>(null) }
     var task by remember { mutableStateOf<HomeworkTask?>(null) }
     LaunchedEffect(model.notesAccount) { if (!model.notesAccount && scope == "notes") scope = "all" }
     LaunchedEffect(query, model.tree, model.notesAccount) {
-        if (!model.notesAccount || query.trim().length < 2) { notes = emptyList(); loading = false; return@LaunchedEffect }
+        if (!model.notesAccount || query.trim().length < 2) { notes = emptyList(); docs = emptyList(); loading = false; return@LaunchedEffect }
         loading = true; failed = false
         delay(250)
-        try { notes = model.findNotes(query.trim()) } catch (error: Exception) { if (error is CancellationException) throw error; failed = true }
+        try {
+            docs = model.searchDocuments(query.trim())
+            // Until the index has read everything once, the plain note scan fills the gap.
+            notes = if (model.docStatus.ready) emptyList() else model.findNotes(query.trim()).filter { result -> docs.none { it.path == result.node.path } }
+        } catch (error: Exception) { if (error is CancellationException) throw error; failed = true }
         loading = false
     }
     val needle = query.trim()
@@ -45,7 +50,8 @@ fun CompanionSearchScreen(model: CompanionModel) {
     LaunchedEffect(Unit) { if (query.isEmpty()) runCatching { focus.requestFocus() } }
     Column {
         SearchField(query, { query = it }, if (model.notesAccount) t(R.string.notes_tasks_subjects_events) else t(R.string.tasks_subjects_events), Modifier.padding(horizontal = Space.page, vertical = 6.dp).focusRequester(focus))
-        ChoiceRow(listOf("all" to t(R.string.all), "tasks" to t(R.string.tasks), "school" to t(R.string.school)) + if (model.notesAccount) listOf("notes" to t(R.string.notes)) else emptyList(), scope, { scope = it }, Modifier.padding(horizontal = Space.page))
+        ChoiceRow(listOf("all" to t(R.string.all), "tasks" to t(R.string.tasks), "school" to t(R.string.school)) + if (model.notesAccount) listOf("notes" to t(R.string.documents)) else emptyList(), scope, { scope = it }, Modifier.padding(horizontal = Space.page))
+        if (model.notesAccount) DocIndexStatusLine(model.docStatus, Modifier.padding(horizontal = Space.page, vertical = 4.dp))
         ScreenList {
             if (needle.length < 2) {
                 item(key = "hint") {
@@ -59,6 +65,12 @@ fun CompanionSearchScreen(model: CompanionModel) {
             } else {
                 if (loading) item(key = "loading") { LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 12.dp), trackColor = LocalCompanionSemantics.current.sunken) }
                 if (model.notesAccount && failed) item(key = "failed") { InfoBanner(t(R.string.note_search_needs_attention), t(R.string.some_notes_could_not_be_read_your_files_have_bee), error = true) }
+                if (model.notesAccount && scope in listOf("all", "notes") && docs.isNotEmpty()) {
+                    item(key = "docs-head") { SectionLabel(t(R.string.documents), count = docs.size) }
+                    itemsIndexed(docs, key = { _, it -> "search-doc:${it.path}:${it.page}:${it.label}" }) { index, hit ->
+                        GroupItem(index, docs.size) { DocHitRow(hit) { model.openNote(hit.path, DocTarget(hit.page, hit.label, query.trim())) } }
+                    }
+                }
                 if (model.notesAccount && scope in listOf("all", "notes") && notes.isNotEmpty()) {
                     item(key = "notes-head") { SectionLabel(t(R.string.notes_2, notes.size, if (notes.size == 200) "+" else "")) }
                     itemsIndexed(notes, key = { _, it -> "search-note:${it.node.path}" }) { index, result -> GroupItem(index, notes.size) { NoteRow(model, result.node) { model.openNote(result.node.path) } } }
@@ -86,10 +98,10 @@ fun CompanionSearchScreen(model: CompanionModel) {
                     itemsIndexed(messages, key = { _, it -> "search-message:${messageTargetId(it)}" }) { index, message -> GroupItem(index, messages.size) { SettingRow(Icons.Outlined.Forum, shownText(messageHeadline(message.title, message.body)).ifBlank { t(R.string.school_message) }, plainPreview(message.body).take(100)) { model.highlightIds = setOf(messageTargetId(message)); model.navigate(Page.Updates) } } }
                 }
                 val empty = when (scope) {
-                    "notes" -> !model.notesAccount || notes.isEmpty()
+                    "notes" -> !model.notesAccount || (notes.isEmpty() && docs.isEmpty())
                     "tasks" -> tasks.isEmpty()
                     "school" -> events.isEmpty() && messages.isEmpty() && courses.isEmpty()
-                    else -> (!model.notesAccount || notes.isEmpty()) && tasks.isEmpty() && events.isEmpty() && messages.isEmpty() && courses.isEmpty() && local.isEmpty()
+                    else -> (!model.notesAccount || (notes.isEmpty() && docs.isEmpty())) && tasks.isEmpty() && events.isEmpty() && messages.isEmpty() && courses.isEmpty() && local.isEmpty()
                 }
                 if (!loading && empty) item(key = "empty") { EmptyState(Icons.Outlined.SearchOff, t(R.string.nothing_matches, needle), if (model.notesAccount) t(R.string.try_fewer_words_a_subject_or_a_note_title) else t(R.string.try_fewer_words_a_subject_or_a_task)) }
             }

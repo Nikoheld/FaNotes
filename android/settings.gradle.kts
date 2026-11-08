@@ -11,6 +11,11 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Only the offline Tesseract OCR build for Kanti+ comes from JitPack; nothing else may.
+        exclusiveContent {
+            forRepository { maven("https://jitpack.io") }
+            filter { includeGroup("com.github.adaptech-cz.Tesseract4Android") }
+        }
     }
 }
 

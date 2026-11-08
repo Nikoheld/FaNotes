@@ -99,6 +99,11 @@ fun NotesScreen(model: CompanionModel) {
     var query by rememberSaveable { mutableStateOf("") }
     var mode by rememberSaveable { mutableStateOf("browse") }
     var results by remember { mutableStateOf<List<NoteResult>>(emptyList()) }
+    var docs by remember { mutableStateOf<List<DocHit>>(emptyList()) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val importer = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) model.importDocument(context, uri)
+    }
     var searching by remember { mutableStateOf(false) }
     var searchError by remember { mutableStateOf<String?>(null) }
     var folderDialog by remember { mutableStateOf(false) }
@@ -108,7 +113,10 @@ fun NotesScreen(model: CompanionModel) {
         if (query.isBlank()) { searching = false; results = emptyList(); return@LaunchedEffect }
         searching = true; searchError = null
         delay(250)
-        try { results = model.findNotes(query.trim()) } catch (error: Exception) { if (error is kotlinx.coroutines.CancellationException) throw error; searchError = t(R.string.could_not_search_notes) }
+        try {
+            docs = model.searchDocuments(query.trim())
+            results = if (model.docStatus.ready) emptyList() else model.findNotes(query.trim()).filter { r -> docs.none { it.path == r.node.path } }
+        } catch (error: Exception) { if (error is kotlinx.coroutines.CancellationException) throw error; searchError = t(R.string.could_not_search_notes) }
         searching = false
     }
     Column {
@@ -117,6 +125,7 @@ fun NotesScreen(model: CompanionModel) {
             Box {
                 ActionIcon(Icons.Outlined.MoreVert, t(R.string.library_options)) { menu = true }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(text = { Text(t(R.string.import_document)) }, leadingIcon = { Icon(Icons.Outlined.UploadFile, null) }, onClick = { menu = false; importer.launch(arrayOf("application/pdf", "image/*")) })
                     DropdownMenuItem(text = { Text(t(R.string.new_folder)) }, leadingIcon = { Icon(Icons.Outlined.CreateNewFolder, null) }, onClick = { menu = false; folderDialog = true })
                     DropdownMenuItem(text = { Text(t(R.string.recently_deleted)) }, leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null) }, onClick = { menu = false; model.navigate(Page.Trash) })
                 }
@@ -129,7 +138,12 @@ fun NotesScreen(model: CompanionModel) {
             if (query.isNotBlank()) {
                 if (searching) item(key = "searching") { LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 12.dp), trackColor = LocalCompanionSemantics.current.sunken) }
                 if (searchError != null) item(key = "search-error") { InfoBanner(t(R.string.search_unavailable), shownText(searchError), error = true) }
-                if (!searching && results.isEmpty() && searchError == null) item(key = "search-empty") { EmptyState(Icons.Outlined.SearchOff, t(R.string.no_matching_notes), t(R.string.search_by_title_note_text_or_an_existing_handwri)) }
+                if (!searching && results.isEmpty() && docs.isEmpty() && searchError == null) item(key = "search-empty") { EmptyState(Icons.Outlined.SearchOff, t(R.string.no_matching_notes), t(R.string.search_by_title_note_text_or_an_existing_handwri)) }
+                item(key = "doc-status") { DocIndexStatusLine(model.docStatus, Modifier.padding(vertical = 4.dp)) }
+                itemsIndexed(docs, key = { _, it -> "doc:${it.path}:${it.page}:${it.label}" }) { index, hit ->
+                    GroupItem(index, docs.size) { DocHitRow(hit) { model.openNote(hit.path, DocTarget(hit.page, hit.label, query.trim())) } }
+                }
+                if (docs.isNotEmpty() && results.isNotEmpty()) item(key = "doc-gap") { Spacer(Modifier.height(12.dp)) }
                 itemsIndexed(results, key = { _, it -> "result:${it.node.path}" }) { index, result -> GroupItem(index, results.size) { NoteRow(model, result.node, { selected = result.node }) { model.openNote(result.node.path) } } }
             } else {
                 if (mode == "browse" && model.noteFolder.isNotBlank()) item(key = "crumbs") {
@@ -288,7 +302,7 @@ fun NoteEditorScreen(model: CompanionModel) {
                     }
                 }
             }
-            else -> Box(Modifier.weight(1f).fillMaxWidth()) { NoteReading(model, editor) { mode = "ink" } }
+            else -> Box(Modifier.weight(1f).fillMaxWidth()) { NoteReading(model, editor, model.editorTarget) { mode = "ink" } }
         }
     }
 }

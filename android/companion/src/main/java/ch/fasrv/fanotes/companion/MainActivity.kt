@@ -131,6 +131,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         model.graph.engine.resumeAutomaticSync()
+        if (model.notesAccount) model.graph.docSearch.request()
     }
 
     override fun onResume() {
@@ -143,6 +144,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         model.graph.engine.pauseAutomaticSync()
+        // Long OCR continues in WorkManager, within Android's background limits.
+        model.graph.docSearch.handOff()
         super.onStop()
     }
 

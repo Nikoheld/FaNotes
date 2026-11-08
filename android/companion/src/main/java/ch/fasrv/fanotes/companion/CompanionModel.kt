@@ -180,7 +180,11 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         selectNav(if (tasks) "tasks" else "planner"); day = date
     }
     fun openFolder(path: String) { noteFolder = path; reload() }
-    fun openNote(path: String) {
+    /** Where a search hit should open: a 1-based page and the words to highlight. */
+    var editorTarget by mutableStateOf<DocTarget?>(null)
+    var docStatus by mutableStateOf(DocSearchStatus())
+    fun openNote(path: String, target: DocTarget? = null) {
+        editorTarget = target
         editorPath = path
         editor = NoteEditorController(graph, viewModelScope, path)
         navigate(Page.Editor)
@@ -272,6 +276,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             }
         }
         viewModelScope.launch { graph.link.collect { link = it } }
+        viewModelScope.launch { graph.docSearch.status.collect { docStatus = it } }
         viewModelScope.launch { graph.snapshotReady.collect { ready -> if (ready && snapshot === graph.snapshot.value) schoolReady = true } }
         viewModelScope.launch {
             var previous = ""
@@ -327,6 +332,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 }
                 loadError = listOfNotNull(data.tasks.exceptionOrNull()?.message?.let(::shownText), data.calendar.exceptionOrNull()?.message?.let(::shownText)).joinToString("\n").ifBlank { null }
                 warmAgenda()
+                if (notesAccount) graph.docSearch.request()
                 val paths = flattenNotes(tree).map { it.path }.toSet()
                 searchCache.snapshot().keys.filterNot { it in paths }.forEach { searchCache.remove(it) }
                 previewCache.snapshot().keys.filterNot { it in paths }.forEach { previewCache.remove(it) }
@@ -410,8 +416,10 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         viewModelScope.launch {
             runCatching { graph.detachKeepingSchool() }
             runCatching { graph.engine.logout() }
+            // Indexed text belongs to the account that could read it.
+            runCatching { graph.docSearch.forgetAll() }
             runCatching { graph.refreshSchulnetz("fa-notes-logout") }
-            if (route.destination == Destination.Notes || route.page == Page.Editor || route.page == Page.Trash || route.page == Page.Profile) {
+            if (route.destination == Destination.Notes || route.page == Page.Editor || route.page == Page.Trash || route.page == Page.Profile || route.page == Page.DocSearch) {
                 history = emptyList()
                 route = CompanionRoute(Destination.Today)
             }
@@ -759,6 +767,33 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 message = error.message?.takeIf { it.isNotBlank() }?.let(::shownText) ?: t(R.string.could_not_create_note) }
         }
     }
+    suspend fun searchDocuments(query: String): List<DocHit> = graph.docSearch.search(query)
+
+    /** Copies a picked PDF or image into the current folder as a note; the original file is untouched. */
+    fun importDocument(context: Context, uri: android.net.Uri) = perform(t(R.string.imported_for_search)) {
+        val resolver = context.contentResolver
+        val mime = resolver.getType(uri).orEmpty()
+        val name = resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        } ?: "Import"
+        val bytes = resolver.openInputStream(uri)?.use { input ->
+            val out = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(64 * 1024)
+            var total = 0L
+            while (true) {
+                val read = input.read(buffer); if (read < 0) break
+                total += read
+                if (total > 96L * 1024 * 1024) throw IllegalStateException(t(R.string.import_too_large))
+                out.write(buffer, 0, read)
+            }
+            out.toByteArray()
+        } ?: throw IllegalStateException(t(R.string.import_unreadable))
+        if (mime == "application/pdf" || name.endsWith(".pdf", true)) graph.store.importUniquePdf(noteFolder, name, bytes)
+        else if (mime.startsWith("image/")) graph.store.importImageWorksheet(noteFolder, name, bytes, mime)
+        else throw IllegalStateException(t(R.string.import_unsupported))
+        graph.engine.notifyLocalChange()
+    }
+
     fun createFolder(title: String) = perform(t(R.string.folder_created)) { graph.store.createFolder(noteFolder, title); graph.engine.notifyLocalChange() }
     fun renameNote(node: VaultNode, title: String) = perform(t(R.string.renamed)) { graph.store.rename(node.path, title); graph.engine.notifyLocalChange() }
     fun moveNote(node: VaultNode, folder: String) = perform(t(R.string.moved)) { graph.store.moveEntry(node.path, folder); graph.engine.notifyLocalChange() }

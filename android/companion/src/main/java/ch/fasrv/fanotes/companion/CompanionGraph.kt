@@ -125,6 +125,8 @@ class CompanionGraph(private val context: Context) {
     val loginRequests = MutableSharedFlow<Intent>(extraBufferCapacity = 1)
     val notices = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val vaultChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    /** Local document search over the Notes library (PDF text, OCR, transcripts). See docs/DOCUMENT_SEARCH.md. */
+    val docSearch by lazy { DocSearchService(context, this, scope) }
     fun localAccess(): Boolean = prefs.getBoolean("local-access", false)
     fun setLocalAccess(enabled: Boolean) { prefs.edit().putBoolean("local-access", enabled).apply() }
     private val guestLock = Mutex()
