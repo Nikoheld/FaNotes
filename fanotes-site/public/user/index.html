@@ -1,24 +1,30 @@
 <!DOCTYPE html>
-<html lang="de" data-theme="dark">
+<html lang="de">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0b0b12">
+  <meta name="theme-color" content="#f7f5f0">
+  <meta name="robots" content="noindex">
   <title>FaNotes</title>
   <link rel="icon" href="/assets/fanotes.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/user/profile.css">
+  <link rel="preload" href="/assets/fonts/newsreader-latin-wght.v5-3-0.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/fanotes-base.css?v=20261108.1">
+  <link rel="stylesheet" href="/user/profile.css?v=20261108.1">
 </head>
 <body>
-  <div class="profile-glow" aria-hidden="true"></div>
-  <header class="profile-bar">
-    <a class="profile-brand" href="/">
-      <img src="/assets/fanotes.svg" alt="" width="28" height="28">
-      <span>FaNotes</span>
-    </a>
+  <a class="skip-link" href="#profile-view">Zum Inhalt springen</a>
+  <header class="site-header is-solid profile-header">
+    <div class="wrap site-header-inner">
+      <a class="brand" href="/" aria-label="FaNotes Startseite">
+        <img src="/assets/fanotes.svg" alt="" width="32" height="32">
+        <span>FaNotes</span>
+      </a>
+      <a class="profile-about" href="/">Was ist FaNotes?</a>
+    </div>
   </header>
-  <main id="profile-view" class="profile-main">
+  <main id="profile-view" class="profile-main wrap" tabindex="-1">
     <p class="profile-loading">Übersicht wird geladen …</p>
   </main>
-  <script src="/user/profile.js"></script>
+  <script src="/user/profile.js?v=20261108.1"></script>
 </body>
 </html>
